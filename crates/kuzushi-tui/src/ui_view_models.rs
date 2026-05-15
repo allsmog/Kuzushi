@@ -24,7 +24,9 @@ mod run_status;
 mod run_timeline;
 mod run_trace;
 mod status_footer;
+mod threat_impact;
 mod threat_model;
+mod threat_scope;
 mod threat_stride;
 mod tools;
 mod view_status;
@@ -54,6 +56,9 @@ pub(crate) use run_trace::{
 };
 pub(crate) use status_footer::status_footer_model;
 pub(crate) use threat_model::{threat_model_doc, threat_summary_review, ThreatSummaryReview};
+pub(crate) use threat_scope::threat_scope_buckets;
+#[cfg(test)]
+pub(crate) use threat_scope::threat_scope_buckets_from_doc;
 pub(crate) use threat_stride::threat_stride_rollup;
 #[cfg(test)]
 pub(crate) use threat_stride::threat_stride_rollup_from_doc;

@@ -6,7 +6,9 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::Terminal;
 
-use crate::ui_view_models::{threat_stride_rollup_from_doc, view_status_segment, RoutingMode};
+use crate::ui_view_models::{
+    threat_scope_buckets_from_doc, threat_stride_rollup_from_doc, view_status_segment, RoutingMode,
+};
 
 use super::*;
 
@@ -931,7 +933,7 @@ fn stories_from_doc_sorts_threats_by_impact_severity() {
 }
 
 #[test]
-fn scope_buckets_from_doc_groups_by_impact() {
+fn threat_scope_buckets_from_doc_groups_by_impact() {
     let doc = serde_json::json!({
         "threats": [
             {"title": "a", "impact": "critical"},
@@ -940,15 +942,15 @@ fn scope_buckets_from_doc_groups_by_impact() {
             {"title": "d", "impact": "medium"}
         ]
     });
-    let buckets = scope_buckets_from_doc(&doc).expect("non-empty");
-    assert_eq!(buckets[0].0, Severity::Critical);
-    assert_eq!(buckets[0].2.len(), 1);
-    assert_eq!(buckets[1].0, Severity::High);
-    assert_eq!(buckets[1].2.len(), 2);
-    assert_eq!(buckets[2].0, Severity::Medium);
-    assert_eq!(buckets[2].2.len(), 1);
-    assert_eq!(buckets[3].0, Severity::Low);
-    assert!(buckets[3].2.is_empty());
+    let buckets = threat_scope_buckets_from_doc(&doc).expect("non-empty");
+    assert_eq!(buckets[0].severity, Severity::Critical);
+    assert_eq!(buckets[0].items.len(), 1);
+    assert_eq!(buckets[1].severity, Severity::High);
+    assert_eq!(buckets[1].items.len(), 2);
+    assert_eq!(buckets[2].severity, Severity::Medium);
+    assert_eq!(buckets[2].items.len(), 1);
+    assert_eq!(buckets[3].severity, Severity::Low);
+    assert!(buckets[3].items.is_empty());
 }
 
 #[test]

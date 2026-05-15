@@ -1,18 +1,14 @@
 use super::*;
 
 pub(super) fn append_scope_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'static>>) {
-    let doc = current_threat_model_doc(app);
-    let buckets = doc
-        .as_ref()
-        .and_then(scope_buckets_from_doc)
-        .unwrap_or_else(canonical_scope_buckets);
-    let total: usize = buckets.iter().map(|(_, _, items)| items.len()).sum();
+    let buckets = crate::ui_view_models::threat_scope_buckets(app);
+    let total: usize = buckets.iter().map(|bucket| bucket.items.len()).sum();
     lines.push(section_header_line(
         &format!("SCOPE · {total} issues"),
         area.width,
     ));
-    for (severity, label, items) in &buckets {
-        append_scope_bucket(*severity, label, items, lines);
+    for bucket in &buckets {
+        append_scope_bucket(bucket.severity, bucket.label, &bucket.items, lines);
     }
     lines.push(blank());
     lines.push(Line::from(vec![
