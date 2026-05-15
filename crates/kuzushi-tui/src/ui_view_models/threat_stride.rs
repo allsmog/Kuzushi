@@ -136,33 +136,15 @@ fn max_severity(threats: &[&serde_json::Value]) -> Severity {
     threats
         .iter()
         .filter_map(|threat| threat_impact(threat))
-        .max_by_key(|severity| severity_rank(*severity))
+        .max_by_key(|severity| super::threat_impact::severity_rank(*severity))
         .unwrap_or(Severity::Low)
 }
 
 fn threat_impact(threat: &serde_json::Value) -> Option<Severity> {
-    threat.get("impact")?.as_str().map(impact_to_severity)
-}
-
-fn impact_to_severity(value: &str) -> Severity {
-    match value.to_lowercase().as_str() {
-        "critical" => Severity::Critical,
-        "high" => Severity::High,
-        "low" => Severity::Low,
-        "info" => Severity::Info,
-        _ => Severity::Medium,
-    }
-}
-
-fn severity_rank(severity: Severity) -> u8 {
-    match severity {
-        Severity::Critical => 5,
-        Severity::High => 4,
-        Severity::Medium => 3,
-        Severity::Low => 2,
-        Severity::Info => 1,
-        Severity::Unknown => 0,
-    }
+    threat
+        .get("impact")?
+        .as_str()
+        .map(super::threat_impact::impact_to_severity)
 }
 
 fn threat_titles(threats: &[&serde_json::Value]) -> Vec<String> {
