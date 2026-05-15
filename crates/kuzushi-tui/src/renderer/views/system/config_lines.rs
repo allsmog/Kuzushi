@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui_view_models::model_auth_status;
 
 pub(crate) fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);

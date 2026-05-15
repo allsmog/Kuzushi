@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui_view_models::auth_provider_rows;
 
 pub(crate) fn auth_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
@@ -109,17 +110,4 @@ fn push_auth_commands(lines: &mut Vec<Line<'static>>, area: Rect) {
         ],
         area.width as usize,
     ));
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AuthProviderState {
-    Connected,
-    Missing,
-    Inactive,
-}
-
-pub(crate) struct AuthProviderRow {
-    pub(in crate::renderer::views) name: &'static str,
-    pub(in crate::renderer::views) state: AuthProviderState,
-    pub(in crate::renderer::views) detail: String,
 }
