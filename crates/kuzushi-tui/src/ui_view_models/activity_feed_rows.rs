@@ -1,3 +1,5 @@
+use super::activity_feed_pause::activity_feed_pause_model;
+use super::activity_feed_placeholder::activity_feed_placeholder_model;
 use crate::{ActivitySession, RecordedTraceEvent};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -26,7 +28,7 @@ pub(crate) fn activity_feed_pane_rows(
         .iter()
         .filter_map(|event| feed_event_row(event, session.verbose_subsystems, width))
         .collect::<Vec<_>>();
-    if let Some(model) = super::activity_feed_pause_model(session) {
+    if let Some(model) = activity_feed_pause_model(session) {
         rows.insert(
             0,
             ActivityFeedPaneRow {
@@ -35,10 +37,7 @@ pub(crate) fn activity_feed_pane_rows(
             },
         );
     }
-    if let (true, Some(model)) = (
-        rows.is_empty(),
-        super::activity_feed_placeholder_model(session),
-    ) {
+    if let (true, Some(model)) = (rows.is_empty(), activity_feed_placeholder_model(session)) {
         rows.push(ActivityFeedPaneRow {
             text: model.text,
             tone: ActivityFeedRowTone::Muted,
