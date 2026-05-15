@@ -74,7 +74,7 @@ pub(crate) fn display_model_selector(model: &str) -> String {
 
 pub(crate) fn display_model_provider(provider: &str) -> &str {
     match provider {
-        "openai-codex" | "codex" => "openai",
+        "openai-codex" => "openai",
         _ => provider,
     }
 }
