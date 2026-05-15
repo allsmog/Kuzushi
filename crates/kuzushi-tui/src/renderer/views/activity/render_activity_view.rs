@@ -1,12 +1,9 @@
 use super::dag_pane::dag_row_style;
 use super::feed_pane::feed_row_style;
 use super::*;
-use crate::app::ActivitySession;
 use crate::ui_view_models::{
-    activity_dag_pane_rows, activity_empty_state_model, activity_feed_pane_rows,
-    activity_feed_scroll_offset, activity_footer_model, activity_frame_layout,
-    activity_header_model, activity_pane_chrome_model, activity_task_scroll_offset,
-    ActivityFooterHint, ActivityPaneTitle,
+    activity_view_model, ActiveActivityViewModel, ActivityFooterHint, ActivityPaneTitle,
+    ActivityViewModel,
 };
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
@@ -33,15 +30,22 @@ use std::time::Instant;
 /// └──────────────────────────────────────────────────────────┘
 /// ```
 pub(crate) fn render_activity_view(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
-    let Some(session) = app.activity.as_ref() else {
-        let empty = activity_empty_state_model();
-        let body = Paragraph::new(Line::from(vec![Span::styled(empty.body, theme::muted())]))
-            .alignment(Alignment::Left);
-        frame.render_widget(body, area);
-        return;
-    };
+    match activity_view_model(app) {
+        ActivityViewModel::Active(activity) => render_active_activity_view(frame, area, &activity),
+        ActivityViewModel::Inactive(empty) => {
+            let body = Paragraph::new(Line::from(vec![Span::styled(empty.body, theme::muted())]))
+                .alignment(Alignment::Left);
+            frame.render_widget(body, area);
+        }
+    }
+}
 
-    let layout = activity_frame_layout();
+fn render_active_activity_view(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    activity: &ActiveActivityViewModel<'_>,
+) {
+    let layout = activity.frame_layout();
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -51,7 +55,7 @@ pub(crate) fn render_activity_view(frame: &mut Frame<'_>, area: Rect, app: &Shel
         ])
         .split(area);
 
-    render_header(frame, outer[0], session);
+    render_header(frame, outer[0], activity);
 
     let panes = Layout::default()
         .direction(Direction::Horizontal)
@@ -61,20 +65,20 @@ pub(crate) fn render_activity_view(frame: &mut Frame<'_>, area: Rect, app: &Shel
         ])
         .split(outer[1]);
 
-    let pane_chrome = activity_pane_chrome_model(session);
-    render_dag_pane_widget(frame, panes[0], session, &pane_chrome.dag);
-    render_feed_pane_widget(frame, panes[1], session, &pane_chrome.feed);
+    let pane_chrome = activity.pane_chrome();
+    render_dag_pane_widget(frame, panes[0], activity, &pane_chrome.dag);
+    render_feed_pane_widget(frame, panes[1], activity, &pane_chrome.feed);
 
-    render_focus_footer(frame, outer[2], session);
+    render_focus_footer(frame, outer[2], activity);
 }
 
-fn render_header(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
-    let para = Paragraph::new(activity_header_lines(session));
+fn render_header(frame: &mut Frame<'_>, area: Rect, activity: &ActiveActivityViewModel<'_>) {
+    let para = Paragraph::new(activity_header_lines(activity));
     frame.render_widget(para, area);
 }
 
-fn activity_header_lines(session: &ActivitySession) -> Vec<Line<'static>> {
-    let model = activity_header_model(session);
+fn activity_header_lines(activity: &ActiveActivityViewModel<'_>) -> Vec<Line<'static>> {
+    let model = activity.header();
     vec![
         Line::from(vec![Span::styled(model.detailed_title, theme::heading())]),
         Line::from(vec![Span::styled(
@@ -87,12 +91,12 @@ fn activity_header_lines(session: &ActivitySession) -> Vec<Line<'static>> {
 fn render_dag_pane_widget(
     frame: &mut Frame<'_>,
     area: Rect,
-    session: &ActivitySession,
+    activity: &ActiveActivityViewModel<'_>,
     title: &ActivityPaneTitle,
 ) {
     let now = Instant::now();
     let inner_width = area.width.saturating_sub(2) as usize;
-    let lines = dag_pane_lines(session, inner_width, now);
+    let lines = dag_pane_lines(activity, inner_width, now);
     // `── DAG ──...` divider style mirrors design/mockups/_shared.jsx
     // `sectionHeader` (lines 94-100): leading "── ", labelled segment in
     // c-label, trailing fill in c-subtle.
@@ -106,7 +110,7 @@ fn render_dag_pane_widget(
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    let scroll = activity_task_scroll_offset(session, lines.len(), inner_area.height as usize);
+    let scroll = activity.task_scroll_offset(lines.len(), inner_area.height as usize);
     let para = Paragraph::new(lines)
         .scroll((scroll as u16, 0))
         .wrap(Wrap { trim: false });
@@ -114,11 +118,12 @@ fn render_dag_pane_widget(
 }
 
 fn dag_pane_lines(
-    session: &ActivitySession,
+    activity: &ActiveActivityViewModel<'_>,
     inner_width: usize,
     now: Instant,
 ) -> Vec<Line<'static>> {
-    activity_dag_pane_rows(session, inner_width, now)
+    activity
+        .dag_pane_rows(inner_width, now)
         .into_iter()
         .map(|row| Line::from(vec![Span::styled(row.text, dag_row_style(row.tone))]))
         .collect()
@@ -127,11 +132,11 @@ fn dag_pane_lines(
 fn render_feed_pane_widget(
     frame: &mut Frame<'_>,
     area: Rect,
-    session: &ActivitySession,
+    activity: &ActiveActivityViewModel<'_>,
     title: &ActivityPaneTitle,
 ) {
     let inner_width = area.width.saturating_sub(2) as usize;
-    let lines = feed_pane_lines(session, inner_width);
+    let lines = feed_pane_lines(activity, inner_width);
     let block = Block::default().borders(Borders::NONE).title(Span::styled(
         title.block_title.clone(),
         pane_title_style(title),
@@ -139,7 +144,7 @@ fn render_feed_pane_widget(
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    let scroll = activity_feed_scroll_offset(session, lines.len(), inner_area.height as usize);
+    let scroll = activity.feed_scroll_offset(lines.len(), inner_area.height as usize);
     let para = Paragraph::new(lines)
         .scroll((scroll as u16, 0))
         .wrap(Wrap { trim: false });
@@ -153,21 +158,25 @@ fn pane_title_style(title: &ActivityPaneTitle) -> ratatui::style::Style {
     theme::label()
 }
 
-fn feed_pane_lines(session: &ActivitySession, inner_width: usize) -> Vec<Line<'static>> {
-    activity_feed_pane_rows(session, inner_width)
+fn feed_pane_lines(
+    activity: &ActiveActivityViewModel<'_>,
+    inner_width: usize,
+) -> Vec<Line<'static>> {
+    activity
+        .feed_pane_rows(inner_width)
         .into_iter()
         .map(|row| Line::from(vec![Span::styled(row.text, feed_row_style(row.tone))]))
         .collect()
 }
 
-fn render_focus_footer(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
-    let lines = focus_footer_lines(area.width, session);
+fn render_focus_footer(frame: &mut Frame<'_>, area: Rect, activity: &ActiveActivityViewModel<'_>) {
+    let lines = focus_footer_lines(area.width, activity);
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
     frame.render_widget(para, area);
 }
 
-fn focus_footer_lines(width: u16, session: &ActivitySession) -> Vec<Line<'static>> {
-    let footer = activity_footer_model(session, width);
+fn focus_footer_lines(width: u16, activity: &ActiveActivityViewModel<'_>) -> Vec<Line<'static>> {
+    let footer = activity.footer(width);
     vec![
         Line::from(vec![Span::styled(footer.body_line, theme::label())]),
         Line::from(key_hint_spans(footer.hints)),

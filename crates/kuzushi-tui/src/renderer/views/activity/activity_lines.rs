@@ -2,9 +2,8 @@ use super::dag_pane::dag_row_style;
 use super::feed_pane::feed_row_style;
 use super::*;
 use crate::ui_view_models::{
-    activity_empty_state_model, activity_footer_model, activity_header_model,
-    activity_plain_pane_header_model, activity_plain_pane_rows, activity_plain_pane_widths,
-    ActivityPlainDagCell, ActivityPlainFeedCell, ActivityPlainPaneHeaderCell, ActivityPlainPaneRow,
+    activity_view_model, ActivityPlainDagCell, ActivityPlainFeedCell, ActivityPlainPaneHeaderCell,
+    ActivityPlainPaneRow, ActivityViewModel,
 };
 use std::time::Instant;
 
@@ -16,29 +15,33 @@ pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
 
-    let Some(session) = app.activity.as_ref() else {
-        push_inactive_activity_lines(&mut lines, area.width);
-        return lines;
+    let activity = match activity_view_model(app) {
+        ActivityViewModel::Active(activity) => activity,
+        ActivityViewModel::Inactive(empty) => {
+            push_inactive_activity_lines(&mut lines, area.width, empty.title, empty.body);
+            return lines;
+        }
     };
 
-    let header = activity_header_model(session);
+    let header = activity.header();
     lines.push(divider(&header.summary_title, area.width));
 
-    let widths = activity_plain_pane_widths(area.width);
-    let pane_header = activity_plain_pane_header_model(session, widths.dag, widths.feed);
+    let widths = activity.plain_pane_widths(area.width);
+    let pane_header = activity.plain_pane_header(widths);
     lines.push(Line::from(vec![
         pane_header_cell_span(&pane_header.dag),
         Span::styled(pane_header.separator.to_string(), theme::subtle()),
         pane_header_cell_span(&pane_header.feed),
     ]));
     lines.extend(
-        activity_plain_pane_rows(session, widths.dag, widths.feed, Instant::now())
+        activity
+            .plain_pane_rows(widths, Instant::now())
             .into_iter()
             .map(activity_pane_line),
     );
 
     lines.push(blank());
-    let footer = activity_footer_model(session, area.width);
+    let footer = activity.footer(area.width);
     lines.push(Line::from(vec![Span::styled(
         footer.body_line,
         theme::label(),
@@ -47,10 +50,14 @@ pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines
 }
 
-fn push_inactive_activity_lines(lines: &mut Vec<Line<'static>>, width: u16) {
-    let empty = activity_empty_state_model();
-    lines.push(divider(empty.title, width));
-    lines.push(muted(empty.body));
+fn push_inactive_activity_lines(
+    lines: &mut Vec<Line<'static>>,
+    width: u16,
+    title: &'static str,
+    body: &'static str,
+) {
+    lines.push(divider(title, width));
+    lines.push(muted(body));
 }
 
 fn activity_pane_line(row: ActivityPlainPaneRow) -> Line<'static> {

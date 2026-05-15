@@ -1,5 +1,6 @@
-use super::{
-    activity_dag_pane_rows, activity_feed_pane_rows, ActivityDagRowTone, ActivityFeedRowTone,
+use super::activity_dag_rows::{activity_dag_pane_rows, ActivityDagPaneRow, ActivityDagRowTone};
+use super::activity_feed_rows::{
+    activity_feed_pane_rows, ActivityFeedPaneRow, ActivityFeedRowTone,
 };
 use crate::ActivitySession;
 use std::time::Instant;
@@ -41,10 +42,7 @@ pub(crate) fn activity_plain_pane_rows(
         .collect()
 }
 
-fn dag_cell(
-    row: Option<&super::activity_dag_rows::ActivityDagPaneRow>,
-    width: usize,
-) -> ActivityPlainDagCell {
+fn dag_cell(row: Option<&ActivityDagPaneRow>, width: usize) -> ActivityPlainDagCell {
     match row {
         Some(row) => ActivityPlainDagCell {
             text: fit_or_pad(&row.text, width),
@@ -57,10 +55,7 @@ fn dag_cell(
     }
 }
 
-fn feed_cell(
-    row: Option<&super::activity_feed_rows::ActivityFeedPaneRow>,
-    width: usize,
-) -> ActivityPlainFeedCell {
+fn feed_cell(row: Option<&ActivityFeedPaneRow>, width: usize) -> ActivityPlainFeedCell {
     match row {
         Some(row) => ActivityPlainFeedCell {
             text: fit_or_pad(&row.text, width),

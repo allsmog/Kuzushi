@@ -18,6 +18,7 @@ mod activity_layout;
 mod activity_pane_chrome;
 mod activity_plain_rows;
 mod activity_scroll;
+mod activity_view;
 mod actor_detail;
 mod advisory_chrome;
 mod agent_chat;
@@ -70,22 +71,14 @@ mod transcript;
 mod view_status;
 mod workspace;
 pub(crate) use active_stage::active_stage_label;
-pub(crate) use activity_dag_rows::{activity_dag_pane_rows, ActivityDagRowTone};
-pub(crate) use activity_empty_state::activity_empty_state_model;
-pub(crate) use activity_feed_pause::activity_feed_pause_model;
-pub(crate) use activity_feed_placeholder::activity_feed_placeholder_model;
-pub(crate) use activity_feed_rows::{activity_feed_pane_rows, ActivityFeedRowTone};
-pub(crate) use activity_footer::{activity_footer_model, ActivityFooterHint};
-pub(crate) use activity_header::activity_header_model;
-pub(crate) use activity_layout::{activity_frame_layout, activity_plain_pane_widths};
-pub(crate) use activity_pane_chrome::{
-    activity_pane_chrome_model, activity_plain_pane_header_model, ActivityPaneTitle,
-    ActivityPlainPaneHeaderCell,
-};
+pub(crate) use activity_dag_rows::ActivityDagRowTone;
+pub(crate) use activity_feed_rows::ActivityFeedRowTone;
+pub(crate) use activity_footer::ActivityFooterHint;
+pub(crate) use activity_pane_chrome::{ActivityPaneTitle, ActivityPlainPaneHeaderCell};
 pub(crate) use activity_plain_rows::{
-    activity_plain_pane_rows, ActivityPlainDagCell, ActivityPlainFeedCell, ActivityPlainPaneRow,
+    ActivityPlainDagCell, ActivityPlainFeedCell, ActivityPlainPaneRow,
 };
-pub(crate) use activity_scroll::{activity_feed_scroll_offset, activity_task_scroll_offset};
+pub(crate) use activity_view::{activity_view_model, ActiveActivityViewModel, ActivityViewModel};
 pub(crate) use actor_detail::{actor_detail_model, ActorDetailModel, ActorTranscriptRow};
 pub(crate) use advisory_chrome::{cost_cap_halt_model, throttle_banner_model, CostCapHaltModel};
 pub(crate) use agent_chat::{agent_chat_model, AgentChatModel, AgentChatSession, AgentChatTurn};
