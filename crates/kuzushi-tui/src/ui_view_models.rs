@@ -128,7 +128,10 @@ pub(crate) use help::{
 pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use knowledge_base::{
-    knowledge_base_model, KnowledgeBaseArtifactRow, KnowledgeBaseAttachmentRow, KnowledgeBaseModel,
+    knowledge_base_model, plain_knowledge_base_model, KnowledgeBaseArtifactRow,
+    KnowledgeBaseAttachmentRow, KnowledgeBaseModel, PlainKnowledgeBaseArtifactRow,
+    PlainKnowledgeBaseArtifacts, PlainKnowledgeBaseAttachmentRow, PlainKnowledgeBaseAttachments,
+    PlainKnowledgeBaseModel,
 };
 pub(crate) use live_activity::{plain_live_activity_rows, PlainLiveActivityRow};
 pub(crate) use module_detail::{
