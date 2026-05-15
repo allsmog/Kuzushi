@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui_view_models::uses_activity_frame;
 
 pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     let area = frame.area();
@@ -15,17 +16,9 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     };
     // Activity view uses a true Ratatui split-pane (frame-level), not the
     // shared line-based path. Skip the line computation entirely.
-    let activity_mode = matches!(app.shell_view, ShellView::Activity);
-    let view_lines = if activity_mode {
-        Vec::new()
-    } else {
-        shell_view_lines(app, view_area)
-    };
-    let view_height = if activity_mode {
-        max_view_height
-    } else {
-        (view_lines.len() as u16).clamp(1, max_view_height)
-    };
+    let activity_mode = uses_activity_frame(app);
+    let (view_height, view_lines) =
+        main_view_layout(app, activity_mode, max_view_height, view_area);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -33,11 +26,7 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         .split(area);
 
     let mut index = 0;
-    if activity_mode {
-        render_activity_view(frame, chunks[index], app);
-    } else {
-        render_lines(frame, chunks[index], view_lines);
-    }
+    render_primary_view(frame, chunks[index], app, activity_mode, view_lines);
     index += 1;
     index += 1;
     for section in sections {
@@ -45,6 +34,35 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         index += 1;
     }
     render_prompt(frame, chunks[index], app);
+}
+
+fn main_view_layout(
+    app: &ShellApp,
+    activity_mode: bool,
+    max_view_height: u16,
+    view_area: Rect,
+) -> (u16, Vec<Line<'static>>) {
+    if activity_mode {
+        return (max_view_height, Vec::new());
+    }
+
+    let view_lines = shell_view_lines(app, view_area);
+    let view_height = (view_lines.len() as u16).clamp(1, max_view_height);
+    (view_height, view_lines)
+}
+
+fn render_primary_view(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    activity_mode: bool,
+    view_lines: Vec<Line<'static>>,
+) {
+    if activity_mode {
+        render_activity_view(frame, area, app);
+    } else {
+        render_lines(frame, area, view_lines);
+    }
 }
 
 pub(crate) const PROMPT_HEIGHT: u16 = 1;

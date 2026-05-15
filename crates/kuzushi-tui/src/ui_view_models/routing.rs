@@ -30,6 +30,10 @@ pub(crate) fn routing_mode_segment(app: &ShellApp) -> String {
     .to_string()
 }
 
+pub(crate) fn uses_activity_frame(app: &ShellApp) -> bool {
+    matches!(app.shell_view, ShellView::Activity)
+}
+
 fn routing_state(app: &ShellApp) -> (bool, bool, bool, bool) {
     (
         has_run_activity(app),

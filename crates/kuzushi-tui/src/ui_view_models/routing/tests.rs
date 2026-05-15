@@ -35,3 +35,15 @@ fn routing_mode_prioritizes_agent_over_plan() {
 
     assert_eq!(routing_mode(&app), RoutingMode::Agent);
 }
+
+#[test]
+fn uses_activity_frame_only_for_activity_view() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    assert!(!uses_activity_frame(&app));
+
+    app.shell_view = ShellView::Activity;
+    assert!(uses_activity_frame(&app));
+
+    app.shell_view = ShellView::ModuleRun;
+    assert!(!uses_activity_frame(&app));
+}

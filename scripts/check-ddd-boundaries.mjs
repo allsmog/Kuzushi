@@ -241,6 +241,7 @@ const rules = [
     roots: ["crates/kuzushi-tui/src/renderer/views/viewport_lines.rs"],
     forbidden: /\bRoutingMode\b|routing_mode\(/,
   },
+  { name: "TUI app renderer reads routing view model", roots: ["crates/kuzushi-tui/src/renderer/render_app.rs"], forbidden: /\bShellView::|app\.shell_view\b/ },
   {
     name: "TUI status helpers read view-status view model",
     roots: ["crates/kuzushi-tui/src/renderer/shared/status/mod.rs"],
