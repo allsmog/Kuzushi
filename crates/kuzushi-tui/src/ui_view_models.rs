@@ -95,7 +95,7 @@ pub(crate) use auth::{
     AuthProviderTone,
 };
 pub(crate) use catalog::{
-    catalog_model, catalog_uses_collapsed_layout, CatalogActionModule, CatalogModel,
+    catalog_default_action_hint, catalog_model, catalog_uses_collapsed_layout, CatalogModel,
     CatalogModuleGroup,
 };
 pub(crate) use chrome_layout::transcript_chrome_height;

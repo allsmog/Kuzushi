@@ -16,8 +16,8 @@ pub(crate) struct CatalogModel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CatalogActionModule {
-    pub(crate) id: String,
-    pub(crate) description: String,
+    id: String,
+    description: String,
     category: &'static str,
 }
 
@@ -30,7 +30,7 @@ pub(crate) struct CatalogModuleGroup {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CatalogModuleRow {
     pub(crate) id: String,
-    pub(crate) description: String,
+    pub(crate) cells: [String; 2],
     pub(crate) focused: bool,
 }
 
@@ -59,6 +59,44 @@ pub(crate) fn catalog_model(app: &ShellApp) -> CatalogModel {
 
 pub(crate) fn catalog_uses_collapsed_layout(model: &CatalogModel, width: u16) -> bool {
     !model.expanded && compact_catalog_width(width)
+}
+
+pub(crate) fn catalog_default_action_hint(module: &CatalogActionModule, width: u16) -> String {
+    let prefix = format!("Run {} against the active target — ", module.id);
+    let budget = default_action_description_budget(width, &prefix);
+    format!(
+        "{prefix}{}",
+        short_catalog_sentence(&module.description, budget)
+    )
+}
+
+fn default_action_description_budget(width: u16, prefix: &str) -> usize {
+    (width as usize)
+        .saturating_sub(prefix.chars().count() + 8)
+        .max(40)
+}
+
+fn short_catalog_sentence(value: &str, max_chars: usize) -> String {
+    let first = value.split('.').next().unwrap_or(value).trim();
+    fit_catalog_text(first, max_chars)
+}
+
+fn fit_catalog_text(value: &str, max_chars: usize) -> String {
+    if max_chars == 0 {
+        return String::new();
+    }
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    if max_chars <= 3 {
+        return value.chars().take(max_chars).collect();
+    }
+    let mut truncated = value
+        .chars()
+        .take(max_chars.saturating_sub(3))
+        .collect::<String>();
+    truncated.push_str("...");
+    truncated
 }
 
 fn compact_catalog_width(width: u16) -> bool {
@@ -180,7 +218,7 @@ fn module_row(
 ) -> CatalogModuleRow {
     CatalogModuleRow {
         id: module.id.clone(),
-        description: module.description.clone(),
+        cells: [module.id.clone(), module.description.clone()],
         focused: focused_id == Some(module.id.as_str()) || cursor_id == Some(module.id.as_str()),
     }
 }

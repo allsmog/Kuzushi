@@ -59,3 +59,30 @@ fn catalog_collapsed_layout_uses_width_and_expand_toggle() {
     let model = catalog_model(&app);
     assert!(!catalog_uses_collapsed_layout(&model, 80));
 }
+
+#[test]
+fn catalog_default_action_hint_is_display_ready() {
+    let app = ShellApp::new(V2Config::default(), None);
+    let model = catalog_model(&app);
+    let module = model.default_action.as_ref().expect("default action");
+
+    let hint = catalog_default_action_hint(module, 80);
+
+    assert!(hint.starts_with("Run sast against the active target"));
+    assert!(hint.len() <= 80);
+}
+
+#[test]
+fn catalog_module_rows_shape_display_cells() {
+    let app = ShellApp::new(V2Config::default(), None);
+    let model = catalog_model(&app);
+    let row = model
+        .groups
+        .iter()
+        .flat_map(|group| group.rows.iter())
+        .find(|row| row.id == "sast")
+        .expect("sast row");
+
+    assert_eq!(row.cells[0], "sast");
+    assert!(!row.cells[1].is_empty());
+}
