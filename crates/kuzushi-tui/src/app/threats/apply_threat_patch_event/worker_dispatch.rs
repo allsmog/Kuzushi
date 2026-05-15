@@ -81,10 +81,10 @@ impl ShellApp {
             );
             return None;
         };
-        self.validated_threat_model(model)
+        self.checked_threat_model(model)
     }
 
-    fn validated_threat_model(&mut self, model: String) -> Option<String> {
+    fn checked_threat_model(&mut self, model: String) -> Option<String> {
         if let Err(message) = validate_shell_model_id(&model) {
             self.log("error", message);
             return None;
