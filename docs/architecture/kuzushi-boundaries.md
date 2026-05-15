@@ -1,8 +1,8 @@
 # Kuzushi Boundaries
 
-Kuzushi is a Rust-first security-agent app. Upstream Codex is substrate only.
-The product boundary is Kuzushi's cybersecurity harness, module cockpit,
-artifacts, proof workflow, and TUI.
+Kuzushi is a Rust-first security-agent app. The upstream agent-shell substrate
+is not the product boundary. The product boundary is Kuzushi's cybersecurity
+harness, module cockpit, artifacts, proof workflow, and TUI.
 
 ## Required Contexts
 
@@ -13,14 +13,14 @@ artifacts, proof workflow, and TUI.
 | `threat_model` | `crates/kuzushi-core/src/threat_model.rs` | STRIDE, PASTA/DREAD artifacts, DFD data, threat stories, deterministic degradation. |
 | `modules` | `crates/kuzushi-core/src/modules` | Tool descriptors, input preparation, dispatch, output envelope normalization. |
 | `recommender` | `crates/kuzushi-core/src/capabilities/module_recommender` | Read context, threat, attack surface, capabilities, and findings to suggest next tools. No execution. |
-| `scanners` | `crates/kuzushi-core/src/scanners.rs` and `src/scan` | Normalize deterministic scanner output into findings. No triage. |
+| `scanners` | Rust scanner facade and `crates/kuzushi-core/src/scan` | Normalize deterministic scanner output into findings. No triage. |
 | `findings` | `crates/kuzushi-core/src/findings` | Finding identity, aliases, severities, evidence, suppressions, persistence. No scanner/LLM/subprocess/render calls. |
 | `proof` | `crates/kuzushi-core/src/proof` | Static proof policy, citation validation, proof state transitions. |
 | `triage` | `crates/kuzushi-core/src/triage.rs` and module triage code | Attach verdicts to existing findings. |
-| `verify` | `crates/kuzushi-core/src/verify.rs` and `src/verification` | Attach proof outcomes and empirical verification records. |
+| `verify` | `crates/kuzushi-core/src/verify.rs` and `crates/kuzushi-core/src/verification` | Attach proof outcomes and empirical verification records. |
 | `patch` | `crates/kuzushi-core/src/patch` and remediation code | Suggest diffs and validate only when approved/configured. |
-| `report` | `crates/kuzushi-core/src/report.rs` and `src/report` | Read artifacts/findings and produce report output. No execution. |
-| `run_trace` | `crates/kuzushi-core/src/run_trace.rs` and `src/run_artifacts` | Run IDs, events, trace, summaries, failure handoff, artifact manifest. |
+| `report` | `crates/kuzushi-core/src/report.rs` and `crates/kuzushi-core/src/report` | Read artifacts/findings and produce report output. No execution. |
+| `run_trace` | `crates/kuzushi-core/src/run_trace.rs` and `crates/kuzushi-core/src/run_artifacts` | Run IDs, events, trace, summaries, failure handoff, artifact manifest. |
 | `failure` | `crates/kuzushi-core/src/run_artifacts/run_failures.rs` | Bounded fallback context for partial/failed runs. |
 | `ui_*` | `crates/kuzushi-tui/src/ui_view_models.rs`, `ui_theme.rs`, `ui_views.rs` | View models, semantic styles, and rendering over already-shaped state. |
 
