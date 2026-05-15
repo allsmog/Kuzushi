@@ -18,7 +18,7 @@ pub(crate) fn spawn_auth_login_process(
     ProcessCommand::new(program)
         .args(args)
         .arg("--oauth-login")
-        .arg(provider)
+        .arg(auth_login_process_provider_arg(provider))
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
@@ -63,6 +63,10 @@ pub(in crate::app) fn auth_provider_display_name(provider: &str) -> &str {
         "openai-codex" => "openai",
         _ => provider,
     }
+}
+
+pub(in crate::app) fn auth_login_process_provider_arg(provider: &str) -> &str {
+    auth_provider_display_name(provider)
 }
 
 pub(crate) fn normalize_auth_provider(provider: &str) -> std::result::Result<&'static str, String> {
