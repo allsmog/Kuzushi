@@ -35,3 +35,26 @@ fn config_model_preserves_explicit_reasoning_override() {
     assert_eq!(model.reasoning, "xhigh");
     assert_eq!(model.reasoning_override, Some("xhigh".to_string()));
 }
+
+#[test]
+fn plain_config_model_projects_plain_summary_and_model_table() {
+    let app = ShellApp::new(V2Config::default(), None);
+
+    let model = plain_config_model(&app);
+
+    assert_eq!(model.summary_title, "CONFIG");
+    assert!(model
+        .summary_rows
+        .contains(&"model: unconfigured".to_string()));
+    assert!(model
+        .summary_rows
+        .iter()
+        .any(|row| row.starts_with("onboarding: model <n>")));
+    assert_eq!(model.model_table.title, "MODELS");
+    assert_eq!(model.model_table.headers, ["#", "model", "effort", "auth"]);
+    assert!(!model.model_table.rows.is_empty());
+    assert_eq!(
+        model.next_hint,
+        "Next: model <n> [xhigh], auth login openai, auth login anthropic, cost"
+    );
+}

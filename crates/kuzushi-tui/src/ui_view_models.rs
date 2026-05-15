@@ -98,7 +98,10 @@ pub(crate) use catalog::{
     CatalogModuleGroup,
 };
 pub(crate) use chrome_layout::transcript_chrome_height;
-pub(crate) use config::{config_model, ConfigModel, ConfigModelRow};
+pub(crate) use config::{
+    config_model, plain_config_model, ConfigModel, ConfigModelRow, PlainConfigModel,
+    PlainConfigModelRow,
+};
 pub(crate) use confirm_card::{confirm_card_model, ConfirmCardModel};
 pub(crate) use context_snapshot::{
     context_snapshot_model, ContextSnapshotDetails, ContextSnapshotModel,

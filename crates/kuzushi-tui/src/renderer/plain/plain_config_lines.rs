@@ -1,46 +1,39 @@
 use super::*;
 use crate::ui_view_models::{
-    config_model, plain_context_strip_model, ConfigModel, ConfigModelRow, PlainContextStripModel,
+    plain_config_model, plain_context_strip_model, PlainConfigModel, PlainConfigModelRow,
+    PlainContextStripModel,
 };
 
 pub(crate) fn plain_config_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
-    let model = config_model(app);
+    let model = plain_config_model(app);
     push_plain_config_summary(&mut lines, &model, width);
     push_plain_model_table(&mut lines, &model, width);
     lines.push(String::new());
-    lines
-        .push("Next: model <n> [xhigh], auth login openai, auth login anthropic, cost".to_string());
+    lines.push(model.next_hint.to_string());
     lines
 }
 
-fn push_plain_config_summary(lines: &mut Vec<String>, model: &ConfigModel, width: usize) {
+fn push_plain_config_summary(lines: &mut Vec<String>, model: &PlainConfigModel, width: usize) {
     lines.push(String::new());
-    lines.push(plain_section_divider("CONFIG", width));
-    lines.push(format!("runtime: {}", model.backend));
-    lines.push(format!("provider: {}", model.provider));
-    lines.push(format!("model: {}", model.model));
-    lines.push(format!("reasoning: {}", model.reasoning));
-    lines.push(format!("cost: {}", model.cost));
-    if model.onboarding.is_some() {
-        lines.push("onboarding: model <n> selects an explicit provider:model; no fallback model is selected.".to_string());
-    }
+    lines.push(plain_section_divider(model.summary_title, width));
+    lines.extend(model.summary_rows.iter().cloned());
 }
 
-fn push_plain_model_table(lines: &mut Vec<String>, model: &ConfigModel, width: usize) {
+fn push_plain_model_table(lines: &mut Vec<String>, model: &PlainConfigModel, width: usize) {
     lines.push(String::new());
-    lines.push(plain_section_divider("MODELS", width));
+    lines.push(plain_section_divider(model.model_table.title, width));
     lines.push(table_text(
-        &["#", "model", "effort", "auth"],
+        &model.model_table.headers,
         &plain_model_widths(width),
     ));
     let widths = plain_model_widths(width);
-    for row in &model.model_rows {
+    for row in &model.model_table.rows {
         lines.push(plain_model_row(row, &widths));
     }
 }
 
-fn plain_model_row(row: &ConfigModelRow, widths: &[usize]) -> String {
+fn plain_model_row(row: &PlainConfigModelRow, widths: &[usize]) -> String {
     table_text(
         &[
             &row.index,
