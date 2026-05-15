@@ -4,7 +4,7 @@ pub(in crate::renderer) use super::*;
 use self::chrome::*;
 use self::shared::*;
 use self::views::*;
-use crate::app::{ScanPanelState, ShellApp, ShellView, ThreatView};
+use crate::app::{ShellApp, ThreatView};
 use crate::theme;
 pub(in crate::renderer) use chrome::*;
 use kuzushi_core::Severity;

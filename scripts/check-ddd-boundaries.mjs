@@ -249,7 +249,7 @@ const rules = [
     roots: ["crates/kuzushi-tui/src/renderer/views/viewport_lines.rs"],
     forbidden: /\bRoutingMode\b|routing_mode\(/,
   },
-  { name: "TUI app renderer reads routing view model", roots: ["crates/kuzushi-tui/src/renderer/render_app.rs"], forbidden: /\bShellView::|app\.shell_view\b/ },
+  { name: "TUI app and shell view renderers read routing view model", roots: ["crates/kuzushi-tui/src/renderer/render_app.rs", "crates/kuzushi-tui/src/renderer/views/shell_view_lines.rs"], forbidden: /\bShellView::|app\.(?:shell_view|catalog_expanded|modules_scroll|scroll_offset|help_scroll|tools_scroll|kb_scroll|history_scroll)\b/ },
   { name: "TUI status helpers read view-status view model", roots: ["crates/kuzushi-tui/src/renderer/shared/status/mod.rs"], forbidden: /\bShellView::|ThreatView::|view_status_segment\(/ },
   {
     name: "TUI threat renderers read threat-model view models",
