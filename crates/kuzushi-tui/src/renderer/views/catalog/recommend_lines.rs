@@ -16,7 +16,7 @@ pub(crate) fn recommend_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> 
     }
     lines.push(blank());
 
-    if model.recommendations.is_empty() {
+    if model.rows.is_empty() {
         append_empty_recommendations(lines, area)
     } else {
         append_report(lines, &model, area)
@@ -37,7 +37,7 @@ fn append_report(
         &[6, 26, 8, value_width(area, 48)],
     ));
     let take = (area.height.saturating_sub(10) as usize).max(4);
-    for recommendation in model.recommendations.iter().take(take) {
+    for recommendation in model.rows.iter().take(take) {
         lines.push(recommendation_row(recommendation, area.width));
     }
     lines.push(blank());
@@ -71,25 +71,12 @@ fn append_empty_recommendations(mut lines: Vec<Line<'static>>, area: Rect) -> Ve
 }
 
 fn recommendation_row(recommendation: &RecommendationRow, width: u16) -> Line<'static> {
-    let priority = recommendation.priority.as_deref().unwrap_or("low");
-    let runtime = if recommendation.requires_runtime {
-        "yes"
-    } else {
-        "no"
-    };
+    let [priority, tool, runtime, reason] = &recommendation.cells;
     let reason_width = (width as usize).saturating_sub(44).max(24);
     row(&[
-        pad(priority_glyph(priority), 6),
-        pad(&recommendation.tool, 26),
+        pad(priority, 6),
+        pad(tool, 26),
         pad(runtime, 8),
-        fit(&recommendation.reason, reason_width),
+        fit(reason, reason_width),
     ])
-}
-
-fn priority_glyph(priority: &str) -> &'static str {
-    match priority {
-        "high" => "⚠ high",
-        "medium" => "◆ med",
-        _ => "○ low",
-    }
 }
