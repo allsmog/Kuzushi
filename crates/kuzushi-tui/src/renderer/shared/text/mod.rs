@@ -1,4 +1,5 @@
 pub(in crate::renderer) use super::*;
+pub(crate) use crate::ui_view_models::{compact_target_path, format_session_cost};
 
 pub(crate) fn join_or_dash(values: &[String]) -> String {
     if values.is_empty() {
@@ -17,19 +18,6 @@ pub(crate) fn join_segments(values: &[String]) -> String {
         .join(theme::STATUS_SEPARATOR)
 }
 
-pub(crate) fn compact_target_path(value: &str) -> String {
-    let trimmed = value.trim_end_matches('/');
-    let name = trimmed
-        .rsplit('/')
-        .find(|part| !part.is_empty())
-        .unwrap_or(trimmed);
-    if name.is_empty() {
-        "target:/".to_string()
-    } else {
-        format!("./{name}")
-    }
-}
-
 pub(crate) fn short(value: &str) -> String {
     value.chars().take(8).collect()
 }
@@ -37,19 +25,6 @@ pub(crate) fn short(value: &str) -> String {
 pub(crate) fn short_sentence(value: &str, max_chars: usize) -> String {
     let first = value.split('.').next().unwrap_or(value).trim();
     fit(first, max_chars)
-}
-
-/// Compact dollar-amount format for the header. Sub-cent values keep four
-/// decimals (e.g. "$0.0042"); larger values drop to two so a long-running
-/// session doesn't read "$12.4567" and waste header cells.
-pub(crate) fn format_session_cost(usd: f64) -> String {
-    if usd < 0.01 {
-        format!("${usd:.4}")
-    } else if usd < 100.0 {
-        format!("${usd:.2}")
-    } else {
-        format!("${usd:.0}")
-    }
 }
 
 pub(crate) fn fit(value: &str, max_chars: usize) -> String {
@@ -75,43 +50,91 @@ pub(crate) fn wrap_text(value: &str, width: usize) -> Vec<String> {
         return vec![String::new()];
     }
 
-    let mut lines = Vec::new();
-    for raw_line in value.lines() {
-        let mut current = String::new();
-        for word in raw_line.split_whitespace() {
-            let mut pending = word.to_string();
-            while !pending.is_empty() {
-                let pending_len = pending.chars().count();
-                let current_len = current.chars().count();
-                if current_len == 0 {
-                    if pending_len <= width {
-                        current = pending;
-                        break;
-                    }
-                    let (head, tail) = split_at_char_count(&pending, width);
-                    lines.push(head);
-                    pending = tail;
-                } else if current_len + 1 + pending_len <= width {
-                    current.push(' ');
-                    current.push_str(&pending);
-                    break;
-                } else {
-                    lines.push(current);
-                    current = String::new();
-                }
-            }
-        }
-        if !current.is_empty() {
-            lines.push(current);
-        } else if raw_line.is_empty() {
-            lines.push(String::new());
-        }
-    }
-
+    let mut lines = wrap_text_lines(value, width);
     if lines.is_empty() {
         lines.push(String::new());
     }
     lines
+}
+
+fn wrap_text_lines(value: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    for raw_line in value.lines() {
+        lines.extend(wrap_line(raw_line, width));
+    }
+    lines
+}
+
+fn wrap_line(raw_line: &str, width: usize) -> Vec<String> {
+    if raw_line.is_empty() {
+        return vec![String::new()];
+    }
+    let mut state = WrapLineState::new(width);
+    for word in raw_line.split_whitespace() {
+        state.push_word(word);
+    }
+    state.finish()
+}
+
+struct WrapLineState {
+    lines: Vec<String>,
+    current: String,
+    width: usize,
+}
+
+impl WrapLineState {
+    fn new(width: usize) -> Self {
+        Self {
+            lines: Vec::new(),
+            current: String::new(),
+            width,
+        }
+    }
+
+    fn push_word(&mut self, word: &str) {
+        let mut pending = word.to_string();
+        while !pending.is_empty() {
+            pending = self.push_pending(pending);
+        }
+    }
+
+    fn push_pending(&mut self, pending: String) -> String {
+        if self.current.is_empty() {
+            return self.start_or_split(pending);
+        }
+        if fits_with_space(&self.current, &pending, self.width) {
+            self.current.push(' ');
+            self.current.push_str(&pending);
+            return String::new();
+        }
+        self.flush_current();
+        pending
+    }
+
+    fn start_or_split(&mut self, pending: String) -> String {
+        if pending.chars().count() <= self.width {
+            self.current = pending;
+            return String::new();
+        }
+        let (head, tail) = split_at_char_count(&pending, self.width);
+        self.lines.push(head);
+        tail
+    }
+
+    fn flush_current(&mut self) {
+        self.lines.push(std::mem::take(&mut self.current));
+    }
+
+    fn finish(mut self) -> Vec<String> {
+        if !self.current.is_empty() {
+            self.lines.push(self.current);
+        }
+        self.lines
+    }
+}
+
+fn fits_with_space(current: &str, pending: &str, width: usize) -> bool {
+    current.chars().count() + 1 + pending.chars().count() <= width
 }
 
 pub(crate) fn split_at_char_count(value: &str, count: usize) -> (String, String) {

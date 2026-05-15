@@ -10,7 +10,10 @@ mod active_stage;
 mod attack_surface;
 mod auth;
 mod catalog;
+mod context_strip;
+mod display_text;
 mod failure_handoff;
+mod finding_summary;
 mod home_cockpit;
 mod module_detail;
 mod options;
@@ -30,7 +33,12 @@ pub(crate) use auth::{
     AuthProviderState,
 };
 pub(crate) use catalog::{catalog_model, CatalogActionModule, CatalogModel, CatalogModuleGroup};
+pub(crate) use context_strip::{context_strip_model, ContextStripModel, ContextStripSegment};
+pub(crate) use display_text::{compact_target_path, format_session_cost};
 pub(crate) use failure_handoff::failure_handoff_context;
+pub(crate) use finding_summary::{
+    findings_count_summary, status_footer_findings_summary, SeverityCounts,
+};
 pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
 pub(crate) use module_detail::{module_detail_model, ModuleDetailModel};
 pub(crate) use options::{options_model, OptionRow, OptionsModelStatus};
