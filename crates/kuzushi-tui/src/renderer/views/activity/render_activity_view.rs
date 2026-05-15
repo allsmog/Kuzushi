@@ -4,8 +4,9 @@ use super::*;
 use crate::app::ActivitySession;
 use crate::ui_view_models::{
     activity_dag_pane_rows, activity_empty_state_model, activity_feed_pane_rows,
-    activity_feed_scroll_offset, activity_footer_model, activity_header_model,
-    activity_pane_chrome_model, activity_task_scroll_offset, ActivityFooterHint, ActivityPaneTitle,
+    activity_feed_scroll_offset, activity_footer_model, activity_frame_layout,
+    activity_header_model, activity_pane_chrome_model, activity_task_scroll_offset,
+    ActivityFooterHint, ActivityPaneTitle,
 };
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
@@ -22,7 +23,7 @@ use std::time::Instant;
 /// ┌─ header (1 row) ──────────────────────────────────────────┐
 /// │ ACTIVITY  run r-... · 11/14 done · 2 running              │
 /// ├──────────────────────────────────────────────────────────┤
-/// │ ┌─ DAG (46%) ──────┬─ FEED (54%) ─────────────────────┐  │
+/// │ ┌─ DAG ────────────┬─ FEED ───────────────────────────┐  │
 /// │ │ ✓ context:build  │ 15:09:39 [triage:run]            │  │
 /// │ │ ▸ patch:finding  │ 15:09:42 [verify:fnd]            │  │
 /// │ │ ⤳ subsystems     │ 15:09:48 [patch:fnd]             │  │
@@ -40,12 +41,13 @@ pub(crate) fn render_activity_view(frame: &mut Frame<'_>, area: Rect, app: &Shel
         return;
     };
 
+    let layout = activity_frame_layout();
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(2),
+            Constraint::Length(layout.header_rows),
             Constraint::Min(0),
-            Constraint::Length(2),
+            Constraint::Length(layout.footer_rows),
         ])
         .split(area);
 
@@ -53,7 +55,10 @@ pub(crate) fn render_activity_view(frame: &mut Frame<'_>, area: Rect, app: &Shel
 
     let panes = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([Constraint::Percentage(46), Constraint::Percentage(54)])
+        .constraints([
+            Constraint::Percentage(layout.dag_percent),
+            Constraint::Percentage(layout.feed_percent),
+        ])
         .split(outer[1]);
 
     let pane_chrome = activity_pane_chrome_model(session);

@@ -3,8 +3,8 @@ use super::feed_pane::feed_row_style;
 use super::*;
 use crate::ui_view_models::{
     activity_dag_pane_rows, activity_empty_state_model, activity_feed_pane_rows,
-    activity_footer_model, activity_header_model, activity_pane_chrome_model, ActivityFooterHint,
-    ActivityPaneTitle,
+    activity_footer_model, activity_header_model, activity_pane_chrome_model,
+    activity_plain_pane_widths, ActivityFooterHint, ActivityPaneTitle,
 };
 use std::time::Instant;
 
@@ -24,15 +24,15 @@ pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let header = activity_header_model(session);
     lines.push(divider(&header.summary_title, area.width));
 
-    let (left_w, right_w) = activity_pane_widths(area.width);
+    let widths = activity_plain_pane_widths(area.width);
     let pane_chrome = activity_pane_chrome_model(session);
     lines.push(pane_header_line(
         &pane_chrome.dag,
         &pane_chrome.feed,
-        left_w,
-        right_w,
+        widths.dag,
+        widths.feed,
     ));
-    lines.extend(activity_pane_lines(session, left_w, right_w));
+    lines.extend(activity_pane_lines(session, widths.dag, widths.feed));
 
     lines.push(blank());
     let footer = activity_footer_model(session, area.width);
@@ -47,12 +47,6 @@ fn push_inactive_activity_lines(lines: &mut Vec<Line<'static>>, width: u16) {
     let empty = activity_empty_state_model();
     lines.push(divider(empty.title, width));
     lines.push(muted(empty.body));
-}
-
-fn activity_pane_widths(width: u16) -> (usize, usize) {
-    let usable = (width as usize).saturating_sub(1);
-    let left_w = (usable * 46 / 100).max(20);
-    (left_w, usable.saturating_sub(left_w).max(20))
 }
 
 fn activity_pane_lines(
