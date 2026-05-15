@@ -2144,6 +2144,24 @@ function approximateOpenAiCostUsd(modelId, usage) {
   return ((Number(input) || 0) * inRate) / 1000 + ((Number(output) || 0) * outRate) / 1000;
 }
 
+/// `process.stdout.write(big_string)` returns `false` under backpressure and
+/// Node defers the actual delivery to a later tick. If main() then returns
+/// and the `.finally()` calls `process.exit()`, the stream is torn down
+/// before the data drains, and the parent reads truncated JSON
+/// (manifested as `could not parse pi-agent-core bridge JSON: …`). The
+/// fix is to await the write-callback, which only fires once the data is
+/// flushed to the underlying fd. systems-hunt:hunt and any agent run that
+/// emits a large structured payload (~tens of KB) needs this.
+function writeStdoutResponseAndDrain(payload) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify(payload);
+    process.stdout.write(data, (err) => {
+      if (err) reject(err);
+      else resolve();
+    });
+  });
+}
+
 async function main() {
   if (process.argv[2] === "--oauth-login") {
     await runOAuthLogin(process.argv[3] ?? "openai-codex");
@@ -2156,7 +2174,7 @@ async function main() {
   // Route on envelope type. Default = legacy single-shot via pi-agent-core.
   if (request.type === "next-step") {
     const result = await handleNextStep(request);
-    process.stdout.write(JSON.stringify(result));
+    await writeStdoutResponseAndDrain(result);
     return;
   }
   if (request.type === "next-step-preflight") {
@@ -2165,12 +2183,12 @@ async function main() {
       provider === "openai" || provider === "openai-codex"
         ? await handleOpenAiNextStepPreflight(provider, modelId, request)
         : { ok: true, step: "final", text: "ok", cost_usd: 0 };
-    process.stdout.write(JSON.stringify(result));
+    await writeStdoutResponseAndDrain(result);
     return;
   }
   if (request.type === "ping") {
     const result = await handlePing(request);
-    process.stdout.write(JSON.stringify(result));
+    await writeStdoutResponseAndDrain(result);
     return;
   }
 
@@ -2194,22 +2212,20 @@ async function main() {
 
   if (!text && (errorMessage || (!usage?.inputTokens && !usage?.outputTokens))) {
     const reason = errorMessage ?? "agent produced no assistant turn and no token usage";
-    process.stdout.write(JSON.stringify({ ok: false, error: reason }));
+    await writeStdoutResponseAndDrain({ ok: false, error: reason });
     return;
   }
 
-  process.stdout.write(
-    JSON.stringify({
-      ok: true,
-      text,
-      structured: maybeParseJson(text),
-      cost_usd: usage?.costUsd ?? 0,
-      input_tokens: usage?.inputTokens ?? 0,
-      output_tokens: usage?.outputTokens ?? 0,
-      truncated,
-      stopReason,
-    }),
-  );
+  await writeStdoutResponseAndDrain({
+    ok: true,
+    text,
+    structured: maybeParseJson(text),
+    cost_usd: usage?.costUsd ?? 0,
+    input_tokens: usage?.inputTokens ?? 0,
+    output_tokens: usage?.outputTokens ?? 0,
+    truncated,
+    stopReason,
+  });
 }
 
 function shutdownMcpServers() {
@@ -2233,13 +2249,11 @@ function shutdownMcpServers() {
 }
 
 main()
-  .catch((error) => {
-    process.stdout.write(
-      JSON.stringify({
-        ok: false,
-        error: error instanceof Error ? error.message : String(error),
-      }),
-    );
+  .catch(async (error) => {
+    await writeStdoutResponseAndDrain({
+      ok: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
     process.exitCode = 1;
   })
   .finally(() => {
