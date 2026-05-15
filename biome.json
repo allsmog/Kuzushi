@@ -118,6 +118,12 @@
           }
         }
       }
+    },
+    {
+      "includes": ["scripts/pi-agent-core-bridge.mjs"],
+      "formatter": {
+        "enabled": false
+      }
     }
   ]
 }

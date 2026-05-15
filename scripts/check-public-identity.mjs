@@ -71,11 +71,7 @@ function scanFile(file) {
 function identityFailures() {
   const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
   const bin = pkg.bin ?? {};
-  return [
-    ...binEntryFailures(bin),
-    ...legacyBinFailures(bin),
-    ...binShimAliasFailures(),
-  ];
+  return [...binEntryFailures(bin), ...legacyBinFailures(bin), ...binShimAliasFailures()];
 }
 
 function binEntryFailures(bin) {

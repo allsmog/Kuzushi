@@ -42,7 +42,10 @@ const rules = [
   },
   {
     name: "attack surface ranks repository entrypoints without scanner runtime or tool execution",
-    roots: ["crates/kuzushi-core/src/attack_surface.rs", "crates/kuzushi-core/src/workspace/attack_surface"],
+    roots: [
+      "crates/kuzushi-core/src/attack_surface.rs",
+      "crates/kuzushi-core/src/workspace/attack_surface",
+    ],
     forbidden:
       /\b(crate::(?:scan|scanners|runtime|modules|verification|verify|triage|remediation|patch|report)|AgentRuntime|AgentQueryRequest|TracedRuntime|Command::new|std::process::Command|execute_tool|execute_tool_with_runtime|ratatui|crossterm)\b/,
   },
