@@ -43,7 +43,7 @@ fn append_module_header(lines: &mut Vec<Line<'static>>, module: &ModuleDetailMod
     ]));
     lines.push(indent(
         muted(&short_sentence(
-            &module.description,
+            &module.summary,
             area.width.saturating_sub(2) as usize,
         )),
         2,
@@ -60,9 +60,9 @@ fn append_tools_section(lines: &mut Vec<Line<'static>>, module: &ModuleDetailMod
     lines.push(divider("TOOLS", area.width));
     for tool in &module.visible_tools {
         lines.push(tool_console_row(
-            &tool.name,
-            &tool.description,
-            tool.headless,
+            &tool.cells[0],
+            &tool.cells[1],
+            &tool.cells[2],
             area.width,
         ));
     }
