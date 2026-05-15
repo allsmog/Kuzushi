@@ -55,6 +55,7 @@ highest-risk dependency violations:
 - scanners calling triage or verification;
 - triage calling scanners, verification, patch, report, tool dispatch, or
   subprocesses;
+- verify calling scanners, triage, patch, report, or tool dispatch;
 - report code dispatching scanners/runtimes/subprocesses;
 - recommender executing modules;
 - failure handoff dispatching tools, runtimes, scanners, verification, or
