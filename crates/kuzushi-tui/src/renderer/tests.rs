@@ -970,18 +970,23 @@ fn threat_scope_buckets_from_doc_groups_by_impact() {
             {"title": "a", "impact": "critical"},
             {"title": "b", "impact": "high"},
             {"title": "c", "impact": "high"},
+            {"title": "e", "impact": "high"},
+            {"title": "f", "impact": "high"},
+            {"title": "g", "impact": "high"},
             {"title": "d", "impact": "medium"}
         ]
     });
     let buckets = threat_scope_buckets_from_doc(&doc).expect("non-empty");
-    assert_eq!(buckets[0].severity, Severity::Critical);
-    assert_eq!(buckets[0].items.len(), 1);
-    assert_eq!(buckets[1].severity, Severity::High);
-    assert_eq!(buckets[1].items.len(), 2);
-    assert_eq!(buckets[2].severity, Severity::Medium);
-    assert_eq!(buckets[2].items.len(), 1);
-    assert_eq!(buckets[3].severity, Severity::Low);
-    assert!(buckets[3].items.is_empty());
+    assert_eq!(buckets[0].header, "CRITICAL · 1");
+    assert_eq!(buckets[0].item_count, 1);
+    assert_eq!(buckets[1].header, "HIGH · 5");
+    assert_eq!(buckets[1].item_count, 5);
+    assert_eq!(buckets[1].visible_items.len(), 4);
+    assert_eq!(buckets[1].overflow_label.as_deref(), Some("… 1 more"));
+    assert_eq!(buckets[2].header, "MEDIUM · 1");
+    assert_eq!(buckets[2].item_count, 1);
+    assert_eq!(buckets[3].header, "LOW · 0");
+    assert!(buckets[3].visible_items.is_empty());
 }
 
 #[test]

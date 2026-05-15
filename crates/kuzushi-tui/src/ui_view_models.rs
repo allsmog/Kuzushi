@@ -188,9 +188,9 @@ pub(crate) use threat_dfd::threat_dfd_nodes_from_doc;
 pub(crate) use threat_model::{threat_model_doc, threat_summary_review, ThreatSummaryReview};
 pub(crate) use threat_navigation::{threat_nav_model, threat_panel_model, ThreatPanel};
 pub(crate) use threat_patch::threat_patch_card_model;
-pub(crate) use threat_scope::threat_scope_buckets;
 #[cfg(test)]
 pub(crate) use threat_scope::threat_scope_buckets_from_doc;
+pub(crate) use threat_scope::{threat_scope_buckets, ThreatScopeBucket, ThreatScopeTone};
 #[cfg(test)]
 pub(crate) use threat_stories::threat_story_rows_from_doc;
 pub(crate) use threat_stories::{threat_story_rows, ThreatStoryTone};

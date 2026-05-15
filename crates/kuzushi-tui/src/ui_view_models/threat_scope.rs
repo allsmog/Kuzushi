@@ -1,6 +1,8 @@
 use crate::ShellApp;
 use kuzushi_core::Severity;
 
+const SCOPE_ITEM_LIMIT: usize = 4;
+
 type ScopeSpec = (Severity, &'static str, &'static [&'static str]);
 
 const CANONICAL_SCOPE_BUCKETS: [ScopeSpec; 4] = [
@@ -43,9 +45,34 @@ const CANONICAL_SCOPE_BUCKETS: [ScopeSpec; 4] = [
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ThreatScopeBucket {
-    pub(crate) severity: Severity,
-    pub(crate) label: &'static str,
-    pub(crate) items: Vec<String>,
+    pub(crate) tone: ThreatScopeTone,
+    pub(crate) header: String,
+    pub(crate) visible_items: Vec<String>,
+    pub(crate) overflow_label: Option<String>,
+    pub(crate) item_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ThreatScopeTone {
+    Critical,
+    High,
+    Medium,
+    Low,
+    Info,
+    Unknown,
+}
+
+impl ThreatScopeTone {
+    pub(crate) fn from_severity(severity: Severity) -> Self {
+        match severity {
+            Severity::Critical => Self::Critical,
+            Severity::High => Self::High,
+            Severity::Medium => Self::Medium,
+            Severity::Low => Self::Low,
+            Severity::Info => Self::Info,
+            Severity::Unknown => Self::Unknown,
+        }
+    }
 }
 
 pub(crate) fn threat_scope_buckets(app: &ShellApp) -> Vec<ThreatScopeBucket> {
@@ -77,22 +104,15 @@ fn non_empty_threats(doc: &serde_json::Value) -> Option<&[serde_json::Value]> {
 fn empty_scope_buckets() -> Vec<ThreatScopeBucket> {
     CANONICAL_SCOPE_BUCKETS
         .iter()
-        .map(|(severity, label, _)| ThreatScopeBucket {
-            severity: *severity,
-            label,
-            items: Vec::new(),
-        })
+        .map(|(severity, label, _)| threat_scope_bucket(*severity, label, Vec::new()))
         .collect()
 }
 
 fn push_threat_into_bucket(buckets: &mut [ThreatScopeBucket], threat: &serde_json::Value) {
-    let severity = threat_severity(threat);
+    let tone = ThreatScopeTone::from_severity(threat_severity(threat));
     let title = threat_title(threat);
-    if let Some(bucket) = buckets
-        .iter_mut()
-        .find(|bucket| bucket.severity == severity)
-    {
-        bucket.items.push(title);
+    if let Some(bucket) = buckets.iter_mut().find(|bucket| bucket.tone == tone) {
+        push_scope_item(bucket, title);
     }
 }
 
@@ -115,12 +135,45 @@ fn threat_title(threat: &serde_json::Value) -> String {
 fn canonical_scope_buckets() -> Vec<ThreatScopeBucket> {
     CANONICAL_SCOPE_BUCKETS
         .iter()
-        .map(|(severity, label, items)| ThreatScopeBucket {
-            severity: *severity,
-            label,
-            items: items.iter().map(ToString::to_string).collect(),
+        .map(|(severity, label, items)| {
+            threat_scope_bucket(
+                *severity,
+                label,
+                items.iter().map(ToString::to_string).collect(),
+            )
         })
         .collect()
+}
+
+fn threat_scope_bucket(severity: Severity, label: &str, items: Vec<String>) -> ThreatScopeBucket {
+    let item_count = items.len();
+    ThreatScopeBucket {
+        tone: ThreatScopeTone::from_severity(severity),
+        header: format!("{} · {}", label.to_uppercase(), item_count),
+        visible_items: items.iter().take(SCOPE_ITEM_LIMIT).cloned().collect(),
+        overflow_label: overflow_label(item_count),
+        item_count,
+    }
+}
+
+fn push_scope_item(bucket: &mut ThreatScopeBucket, title: String) {
+    bucket.item_count += 1;
+    bucket.header = replace_count(&bucket.header, bucket.item_count);
+    if bucket.visible_items.len() < SCOPE_ITEM_LIMIT {
+        bucket.visible_items.push(title);
+    }
+    bucket.overflow_label = overflow_label(bucket.item_count);
+}
+
+fn replace_count(header: &str, count: usize) -> String {
+    let Some((label, _)) = header.rsplit_once(" · ") else {
+        return header.to_string();
+    };
+    format!("{label} · {count}")
+}
+
+fn overflow_label(item_count: usize) -> Option<String> {
+    (item_count > SCOPE_ITEM_LIMIT).then(|| format!("… {} more", item_count - SCOPE_ITEM_LIMIT))
 }
 
 #[cfg(test)]
@@ -135,20 +188,25 @@ mod tests {
                 {"title": "a", "impact": "critical"},
                 {"title": "b", "impact": "high"},
                 {"title": "c", "impact": "high"},
+                {"title": "e", "impact": "high"},
+                {"title": "f", "impact": "high"},
+                {"title": "g", "impact": "high"},
                 {"title": "d", "impact": "medium"}
             ]
         });
 
         let buckets = threat_scope_buckets_from_doc(&doc).expect("non-empty");
 
-        assert_eq!(buckets[0].severity, Severity::Critical);
-        assert_eq!(buckets[0].items.len(), 1);
-        assert_eq!(buckets[1].severity, Severity::High);
-        assert_eq!(buckets[1].items.len(), 2);
-        assert_eq!(buckets[2].severity, Severity::Medium);
-        assert_eq!(buckets[2].items.len(), 1);
-        assert_eq!(buckets[3].severity, Severity::Low);
-        assert!(buckets[3].items.is_empty());
+        assert_eq!(buckets[0].tone, ThreatScopeTone::Critical);
+        assert_eq!(buckets[0].item_count, 1);
+        assert_eq!(buckets[1].tone, ThreatScopeTone::High);
+        assert_eq!(buckets[1].item_count, 5);
+        assert_eq!(buckets[1].visible_items.len(), 4);
+        assert_eq!(buckets[1].overflow_label.as_deref(), Some("… 1 more"));
+        assert_eq!(buckets[2].tone, ThreatScopeTone::Medium);
+        assert_eq!(buckets[2].item_count, 1);
+        assert_eq!(buckets[3].tone, ThreatScopeTone::Low);
+        assert!(buckets[3].visible_items.is_empty());
     }
 
     #[test]

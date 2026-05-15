@@ -204,6 +204,7 @@ const rules = [
   { name: "TUI auth and cost renderers read auth/config/cost view models", roots: ["crates/kuzushi-tui/src/renderer/views/system/auth_lines.rs", "crates/kuzushi-tui/src/renderer/views/system/cost_lines.rs"], forbidden: /\b(runtime_backend_label|display_model_selector|format_session_cost|\.config\b|session_thinking_level|session_cost_usd|last_tool_cost_usd|session_budget_usd)\b|\.label\b|\.used\b|\.cap\b|\.percent\b|\.budget_text\b|\.session_text\b|\.last_tool_text\b/ },
   { name: "TUI run timeline renderer reads run timeline view model", roots: ["crates/kuzushi-tui/src/renderer/views/runs/runs_lines.rs"], forbidden: /\b(past_runs_model|scan_status|ScanPanelState|\.scan\b|\.run_id\b|\.status\b|\.status_kind\b|\.findings\b|\.target\b)\b/ },
   { name: "TUI threat story renderer reads threat story view model", roots: ["crates/kuzushi-tui/src/renderer/views/threat/threat_lines/stories.rs"], forbidden: /story\.(?:id|severity|title|attack|location)\b|ThreatStoryRow\b/ },
+  { name: "TUI threat scope renderer reads threat scope view model", roots: ["crates/kuzushi-tui/src/renderer/views/threat/threat_lines/scope.rs"], forbidden: /bucket\.(?:severity|label|items)\b|items\.(?:is_empty|iter|len)\b/ },
   { name: "TUI activity renderers read activity chrome view models", roots: ["crates/kuzushi-tui/src/renderer/views/activity/activity_lines.rs", "crates/kuzushi-tui/src/renderer/views/activity/render_activity_view.rs"], forbidden: /\b(DagTaskState|PaneFocus|pane_focus|activity_header_text|compact_activity_run_id|pane_focus_label|paused_header_segment|verbose_header_segment|focus_task|steps_done|last_label|focus_footer_body|focused_task_row|focus_footer_empty_body|key_hints_for_width|append_narrow_cancel_hint|feed_placeholder_text|hidden_subsystem_event_count|hidden_event_module|plural_suffix|paused_feed_line|push_pause_feed_row|session\.paused|task_scroll|feed_scroll|feed_auto_tail|clamp_scroll|session\.tasks|session\.events|session\.verbose_subsystems|dag_row_text|dag_subsystems_row_text|dag_state_style|feed_event_text|feed_event_style|activity_pane_widths|pane_title_text|pane_header_line|activity_keybind_hint_line|focus_footer_line|combined_activity_pane_line|combined_pane_line|ActivityPaneRow|pad_to)\b|footer\.body\b|plain_header|fit\(body|hint\.(?:key|hint)\b|title\.label|format!\("──|format!\(" ──|press p to resume|no run active|Constraint::Length\(2\)|Constraint::Percentage\(46\)|Constraint::Percentage\(54\)/ },
   { name: "TUI prompt-tuning renderer reads prompt-tuning view models", roots: ["crates/kuzushi-tui/src/renderer/views/editor/tune_lines.rs"], forbidden: /\b(read_house_rules|TuneAction|tune_cursor_clamped|prompts_cursor_clamped|focused_module|PROMPT_VERB_NAMES|crate::app::ShellApp)\b/ },
   { name: "TUI catalog renderer reads catalog view model", roots: ["crates/kuzushi-tui/src/renderer/views/catalog/catalog_lines", "crates/kuzushi-tui/src/renderer/views/catalog/recommend_lines.rs"], forbidden: /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\bModuleKind\b|\.registry\.modules\(|\.tools\(\)|\.metadata\(\)|catalog_expanded|compact_catalog_width|priority_glyph|\.priority\b|\.requires_runtime\b|\.tool\b|\.reason\b|\.recommendations\b/ },
@@ -276,9 +277,7 @@ function hasBoundary(candidates) {
 
 function ruleFailures(rule) {
   const files = ruleFiles(rule);
-  if (files.length === 0) {
-    return [`${rule.name}: no production Rust files matched roots ${rule.roots.join(", ")}`];
-  }
+  if (files.length === 0) return [`${rule.name}: no production Rust files matched roots ${rule.roots.join(", ")}`];
   return files
     .filter((file) => rule.forbidden.test(sourceWithoutTestModule(file)))
     .map((file) => `${rule.name}: ${file}`);
