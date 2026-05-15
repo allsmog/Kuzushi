@@ -99,8 +99,8 @@ pub(crate) use catalog::{
 };
 pub(crate) use chrome_layout::transcript_chrome_height;
 pub(crate) use config::{
-    config_model, plain_config_model, ConfigModel, ConfigModelRow, PlainConfigModel,
-    PlainConfigModelRow,
+    config_model, plain_config_model, ConfigModel, ConfigModelRow, ConfigSummaryRow,
+    PlainConfigModel, PlainConfigModelRow,
 };
 pub(crate) use confirm_card::{confirm_card_model, ConfirmCardModel};
 pub(crate) use context_snapshot::{

@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::{config_model, ConfigModel, ConfigModelRow};
+use crate::ui_view_models::{config_model, ConfigModel, ConfigModelRow, ConfigSummaryRow};
 
 pub(crate) fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
@@ -12,19 +12,14 @@ pub(crate) fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
 fn push_config_summary(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area: Rect) {
     lines.push(blank());
-    lines.push(divider("CONFIG", area.width));
-    lines.push(detail("backend", &model.backend));
-    lines.push(detail("provider", &model.provider));
-    lines.push(detail("model", &model.model));
-    lines.push(detail("reasoning", &model.reasoning));
-    lines.push(detail("auth envs", &model.auth_envs));
-    lines.push(detail("oauth", &model.oauth));
-    lines.push(detail("base url", &model.base_url));
-    lines.push(detail("bridge", &model.bridge));
-    lines.push(detail("cost", &model.cost));
-    if let Some(onboarding) = &model.onboarding {
-        lines.push(detail("onboarding", onboarding));
+    lines.push(divider(model.summary_title, area.width));
+    for row in &model.summary_rows {
+        lines.push(config_summary_row(row));
     }
+}
+
+fn config_summary_row(row: &ConfigSummaryRow) -> Line<'static> {
+    detail(row.label, &row.value)
 }
 
 fn push_config_model_table(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area: Rect) {
