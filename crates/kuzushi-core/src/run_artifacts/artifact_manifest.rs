@@ -11,6 +11,17 @@ pub fn load_run_artifacts(target: impl AsRef<Path>, run_id: &str) -> Result<Vec<
     Ok(load_manifest(target, run_id)?.artifacts)
 }
 
+pub(crate) fn record_canonical_run_artifacts(
+    target: impl AsRef<Path>,
+    run_id: &str,
+) -> Result<()> {
+    let target = target.as_ref();
+    for artifact in canonical_run_artifacts(target, run_id) {
+        record_run_artifact(target, run_id, &artifact)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn record_run_artifact(
     target: impl AsRef<Path>,
     run_id: &str,
@@ -52,6 +63,92 @@ fn upsert_artifact(artifacts: &mut Vec<RunArtifact>, artifact: RunArtifact) {
         artifacts.push(artifact);
     }
 }
+
+fn canonical_run_artifacts(target: &Path, run_id: &str) -> Vec<RunArtifact> {
+    CANONICAL_RUN_ARTIFACTS
+        .iter()
+        .map(|spec| spec.artifact(target, run_id))
+        .collect()
+}
+
+struct CanonicalRunArtifactSpec {
+    leaf: &'static str,
+    label: &'static str,
+    kind: &'static str,
+}
+
+impl CanonicalRunArtifactSpec {
+    fn artifact(&self, target: &Path, run_id: &str) -> RunArtifact {
+        RunArtifact {
+            label: self.label.to_string(),
+            path: run_dir(target, run_id).join(self.leaf).display().to_string(),
+            kind: self.kind.to_string(),
+        }
+    }
+}
+
+const CANONICAL_RUN_ARTIFACTS: &[CanonicalRunArtifactSpec] = &[
+    CanonicalRunArtifactSpec {
+        leaf: "run.json",
+        label: "run metadata",
+        kind: "json",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "events.jsonl",
+        label: "run events",
+        kind: "jsonl",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "trace.jsonl",
+        label: "runtime trace",
+        kind: "jsonl",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "context.json",
+        label: "context snapshot",
+        kind: "json",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "attack-surface.json",
+        label: "attack surface",
+        kind: "json",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "threat-model.json",
+        label: "threat model",
+        kind: "json",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "recommendations.json",
+        label: "recommendations",
+        kind: "json",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "findings.json",
+        label: "findings",
+        kind: "json",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "proof.json",
+        label: "proof",
+        kind: "json",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "failures.json",
+        label: "failure handoff",
+        kind: "json",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "report.md",
+        label: "report",
+        kind: "markdown",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "artifacts.json",
+        label: "artifact manifest",
+        kind: "json",
+    },
+];
 
 fn manifest_path(target: impl AsRef<Path>, run_id: &str) -> PathBuf {
     run_dir(target, run_id).join("artifacts.json")

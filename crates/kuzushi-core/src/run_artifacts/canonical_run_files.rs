@@ -1,5 +1,6 @@
-use super::canonical_recommendations::recommendations_snapshot_value;
+use super::artifact_manifest::record_canonical_run_artifacts;
 use super::canonical_proof::proof_snapshot_value;
+use super::canonical_recommendations::recommendations_snapshot_value;
 use super::run_dir;
 use super::write_run_artifact_json;
 use super::write_run_artifact_text;
@@ -42,6 +43,7 @@ pub(crate) fn ensure_canonical_run_files(
     write_text_if_missing(dir.join("events.jsonl"), "")?;
     write_text_if_missing(dir.join("trace.jsonl"), "")?;
     write_text_if_missing(dir.join("report.md"), missing_report(run_id, status))?;
+    record_canonical_run_artifacts(target, run_id)?;
     Ok(())
 }
 
