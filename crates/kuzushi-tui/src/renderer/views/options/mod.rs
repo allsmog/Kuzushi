@@ -17,7 +17,14 @@ pub(crate) fn options_lines(
     for row in &model.summary_rows {
         lines.push(options_summary_row(row));
     }
-    push_options_body(&mut lines, area.width, &model.status, &model.rows);
+    push_options_body(
+        &mut lines,
+        area.width,
+        &model.status,
+        &model.rows,
+        model.table_hint,
+        &model.table_headers,
+    );
     lines
 }
 
@@ -30,10 +37,14 @@ fn push_options_body(
     width: u16,
     status: &OptionsModelStatus,
     rows: &[OptionRow],
+    table_hint: &str,
+    table_headers: &[&'static str; 7],
 ) {
     lines.push(blank());
     match status {
-        OptionsModelStatus::Ready => push_options_table(lines, width, rows),
+        OptionsModelStatus::Ready => {
+            push_options_table(lines, width, rows, table_hint, table_headers)
+        }
         OptionsModelStatus::UnknownTool => lines.push(muted(
             "Unknown tool. Run tools to inspect the native registry.",
         )),
@@ -41,25 +52,17 @@ fn push_options_body(
     }
 }
 
-fn push_options_table(lines: &mut Vec<Line<'static>>, width: u16, rows: &[OptionRow]) {
-    lines.push(muted(&fit(
-        "set <key> <value> writes session state; setg writes global state. Option names are canonical; aliases work.",
-        width as usize,
-    )));
+fn push_options_table(
+    lines: &mut Vec<Line<'static>>,
+    width: u16,
+    rows: &[OptionRow],
+    table_hint: &str,
+    table_headers: &[&'static str; 7],
+) {
+    lines.push(muted(&fit(table_hint, width as usize)));
     lines.push(blank());
     let widths = option_table_widths(width);
-    lines.push(table_header(
-        &[
-            "option",
-            "value",
-            "default",
-            "req",
-            "type",
-            "aliases",
-            "description",
-        ],
-        &widths,
-    ));
+    lines.push(table_header(table_headers, &widths));
     for row in rows {
         lines.push(option_row_line(row, &widths));
     }
