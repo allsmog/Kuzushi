@@ -7,6 +7,7 @@ pub(crate) struct ConfigModel {
     pub(crate) provider: String,
     pub(crate) model: String,
     pub(crate) reasoning: String,
+    pub(crate) reasoning_override: Option<String>,
     pub(crate) auth_envs: String,
     pub(crate) oauth: String,
     pub(crate) base_url: String,
@@ -35,6 +36,7 @@ pub(crate) fn config_model(app: &ShellApp) -> ConfigModel {
             .as_deref()
             .unwrap_or("default")
             .to_string(),
+        reasoning_override: app.session_thinking_level.clone(),
         auth_envs: auth_env_summary(app),
         oauth: oauth_summary(),
         base_url: base_url_detail(app),
