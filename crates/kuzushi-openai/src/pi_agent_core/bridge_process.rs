@@ -38,11 +38,15 @@ where
     T: Serialize,
     R: DeserializeOwned,
 {
-    let mut child = Command::new(&command[0])
-        .args(&command[1..])
+    let mut cmd = Command::new(&command[0]);
+    cmd.args(&command[1..])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (env, path) in mcp_binary_env_defaults() {
+        cmd.env(env, path);
+    }
+    let mut child = cmd
         .spawn()
         .with_context(|| format!("could not start {label} {}", command[0]))?;
 
@@ -133,6 +137,42 @@ fn bridge_next_to_executable() -> Option<PathBuf> {
     bridge_near_executable(&exe)
 }
 
+/// When kuzushi is invoked from `target/debug` or an installed layout, its
+/// sibling `kuzushi-mcp-*` binaries are not on `PATH`, so the bridge's
+/// `spawn("kuzushi-mcp-treesitter", …)` fails with ENOENT and any tool
+/// requesting `toolPolicy.mcps=true` (e.g. `taint-iris-next:hunt`) silently
+/// degrades to a no-MCP run before the LLM is ever called. Pre-populate the
+/// per-binary `KUZUSHI_MCP_*_BIN` overrides with absolute sibling paths
+/// when an operator hasn't already set them, so the bridge picks the
+/// matching binary by default.
+fn mcp_binary_env_defaults() -> Vec<(&'static str, PathBuf)> {
+    let exe = match std::env::current_exe() {
+        Ok(exe) => exe,
+        Err(_) => return Vec::new(),
+    };
+    let Some(dir) = exe.parent() else {
+        return Vec::new();
+    };
+    const CANDIDATES: &[(&str, &str)] = &[
+        ("KUZUSHI_MCP_TREESITTER_BIN", "kuzushi-mcp-treesitter"),
+        ("KUZUSHI_MCP_JOERN_BIN", "kuzushi-mcp-joern"),
+        ("KUZUSHI_MCP_CODEQL_BIN", "kuzushi-mcp-codeql"),
+        ("KUZUSHI_MCP_CLANG_BIN", "kuzushi-mcp-clang"),
+        ("KUZUSHI_MCP_GTAGS_BIN", "kuzushi-mcp-gtags"),
+        ("KUZUSHI_MCP_REVNG_BIN", "kuzushi-mcp-revng"),
+    ];
+    CANDIDATES
+        .iter()
+        .filter_map(|(env_var, binary_name)| {
+            if std::env::var_os(env_var).is_some() {
+                return None;
+            }
+            let candidate = dir.join(binary_name);
+            candidate.is_file().then_some((*env_var, candidate))
+        })
+        .collect()
+}
+
 fn bridge_near_executable(exe: &Path) -> Option<PathBuf> {
     // Walk up to 6 ancestors so we cover the layouts kuzushi ships in:
     //   target/release/kuzushi          -> ../../scripts/...   (2 hops)
@@ -194,6 +234,62 @@ mod tests {
         let exe = tmp.path().join("kuzushi");
         fs::write(&exe, b"#!/bin/sh\n").unwrap();
         assert!(bridge_near_executable(&exe).is_none());
+    }
+
+    #[test]
+    fn mcp_binary_env_defaults_finds_sibling_mcp_binaries() {
+        use super::mcp_binary_env_defaults;
+        // Sanity-check against the real test-runner's executable directory:
+        // since both kuzushi-mcp-* and the test binary live under
+        // target/<profile>/, mcp_binary_env_defaults() should return paths
+        // for whichever sibling binaries are present.
+        let exe = std::env::current_exe().expect("test exe");
+        let dir = exe.parent().expect("test exe has parent");
+        // Materialise a fake sibling so the test asserts the path-shape
+        // logic even on machines that haven't built every MCP server.
+        let fake = dir.join("kuzushi-mcp-treesitter-test-fake");
+        std::fs::write(&fake, b"#!/bin/sh\n").ok();
+
+        // Override env to remove any inherited setting so the helper's
+        // skip-if-already-set logic is exercised.
+        // SAFETY: tests are single-threaded for this var; we restore after.
+        let prior = std::env::var_os("KUZUSHI_MCP_TREESITTER_BIN");
+        // SAFETY: the helper only reads env, and we restore after the assertion.
+        unsafe {
+            std::env::remove_var("KUZUSHI_MCP_TREESITTER_BIN");
+        }
+
+        let defaults = mcp_binary_env_defaults();
+
+        // Find at least one entry pointing into the executable directory
+        // (we don't pin a specific name because which sibling MCPs are
+        // built varies by machine; the fake one we materialised guarantees
+        // at least the "shape" test passes).
+        assert!(
+            defaults.iter().all(|(_, path)| path.parent() == Some(dir)),
+            "every default path must be a sibling of the test exe: {defaults:?}"
+        );
+
+        // Skip-if-set: set the env var and confirm the entry disappears.
+        unsafe {
+            std::env::set_var("KUZUSHI_MCP_TREESITTER_BIN", "/operator/override");
+        }
+        let with_override = mcp_binary_env_defaults();
+        assert!(
+            with_override
+                .iter()
+                .all(|(env_var, _)| *env_var != "KUZUSHI_MCP_TREESITTER_BIN"),
+            "operator override should win: {with_override:?}"
+        );
+
+        // Restore prior env so we don't leak state.
+        unsafe {
+            match prior {
+                Some(v) => std::env::set_var("KUZUSHI_MCP_TREESITTER_BIN", v),
+                None => std::env::remove_var("KUZUSHI_MCP_TREESITTER_BIN"),
+            }
+        }
+        let _ = std::fs::remove_file(&fake);
     }
 
     #[test]
