@@ -27,6 +27,7 @@ mod home_cockpit;
 mod keybindings;
 mod knowledge_base;
 mod module_detail;
+mod module_run;
 mod options;
 mod patch_review;
 mod plan_card;
@@ -82,6 +83,9 @@ pub(crate) use knowledge_base::{
     knowledge_base_model, KnowledgeBaseArtifactRow, KnowledgeBaseAttachmentRow, KnowledgeBaseModel,
 };
 pub(crate) use module_detail::{module_detail_model, ModuleDetailModel};
+pub(crate) use module_run::{
+    module_run_live_activity, module_run_summary, ModuleRunLiveActivity, ModuleRunSummary,
+};
 pub(crate) use options::{options_model, OptionRow, OptionsModelStatus};
 pub(crate) use patch_review::{patch_review_model, PatchReviewModel, PatchReviewTestRow};
 pub(crate) use plan_card::{plan_card_model, PlanCardModel, PlanChangeRow};

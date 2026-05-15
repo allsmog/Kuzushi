@@ -1,5 +1,5 @@
 pub(in crate::renderer) use super::*;
-pub(crate) use crate::ui_view_models::{compact_target_path, format_session_cost};
+pub(crate) use crate::ui_view_models::format_session_cost;
 
 pub(crate) fn join_segments(values: &[String]) -> String {
     values
@@ -8,10 +8,6 @@ pub(crate) fn join_segments(values: &[String]) -> String {
         .cloned()
         .collect::<Vec<_>>()
         .join(theme::STATUS_SEPARATOR)
-}
-
-pub(crate) fn short(value: &str) -> String {
-    value.chars().take(8).collect()
 }
 
 pub(crate) fn short_sentence(value: &str, max_chars: usize) -> String {

@@ -41,7 +41,10 @@ pub(in crate::renderer) use super::*;
 /// One-row streaming cursor block — a single styled cell at the end of the
 /// transcript that mirrors the design's `<span className="cursor">` from the
 /// running mockups (sast-running.jsx, carlini-running.jsx, agentic-sast-running.jsx).
-use crate::ui_view_models::{sast_tasks_model, SastTasksModel};
+use crate::ui_view_models::{
+    module_run_live_activity, module_run_summary, sast_tasks_model, ModuleRunLiveActivity,
+    ModuleRunSummary, SastTasksModel,
+};
 pub(in crate::renderer) use append_findings_preview::*;
 pub(in crate::renderer) use append_progress_section::*;
 pub(in crate::renderer) use append_sast_pipeline_progress::*;
