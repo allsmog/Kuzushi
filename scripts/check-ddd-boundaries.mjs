@@ -35,7 +35,13 @@ const rules = [
   },
   {
     name: "scanners normalize findings without triage or verification",
-    roots: ["crates/kuzushi-core/src/scan"],
+    roots: [
+      "crates/kuzushi-core/src/scanners.rs",
+      "crates/kuzushi-core/src/scan",
+      "crates/kuzushi-core/src/dep_hygiene.rs",
+      "crates/kuzushi-core/src/secret_scan.rs",
+      "crates/kuzushi-core/src/iac_scan.rs",
+    ],
     forbidden:
       /\b(TriageOutcome|TriageVerdict|triage:run|crate::(?:modules::triage|verification|verify))\b/,
   },
@@ -137,9 +143,16 @@ function hasBoundary(candidates) {
 }
 
 function ruleFailures(rule) {
-  return ruleFiles(rule)
-    .filter((file) => rule.forbidden.test(sourceWithoutTestModule(file)))
-    .map((file) => `${rule.name}: ${file}`);
+  const files = ruleFiles(rule);
+  const missingRoots =
+    files.length === 0
+      ? [`${rule.name}: no production Rust files matched roots ${rule.roots.join(", ")}`]
+      : [];
+  return missingRoots.concat(
+    files
+      .filter((file) => rule.forbidden.test(sourceWithoutTestModule(file)))
+      .map((file) => `${rule.name}: ${file}`),
+  );
 }
 
 function ruleFiles(rule) {
