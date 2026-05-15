@@ -1,14 +1,6 @@
 pub(in crate::renderer) use super::*;
 pub(crate) use crate::ui_view_models::{compact_target_path, format_session_cost};
 
-pub(crate) fn join_or_dash(values: &[String]) -> String {
-    if values.is_empty() {
-        "-".to_string()
-    } else {
-        values.join(", ")
-    }
-}
-
 pub(crate) fn join_segments(values: &[String]) -> String {
     values
         .iter()

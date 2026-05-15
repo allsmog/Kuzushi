@@ -15,6 +15,7 @@ mod auth;
 mod catalog;
 mod config;
 mod confirm_card;
+mod context_snapshot;
 mod context_strip;
 mod cost;
 mod display_text;
@@ -59,6 +60,7 @@ pub(crate) use auth::{
 pub(crate) use catalog::{catalog_model, CatalogActionModule, CatalogModel, CatalogModuleGroup};
 pub(crate) use config::{config_model, ConfigModel, ConfigModelRow};
 pub(crate) use confirm_card::{confirm_card_model, ConfirmCardModel};
+pub(crate) use context_snapshot::{context_snapshot_model, ContextSnapshotDetails};
 pub(crate) use context_strip::{context_strip_model, ContextStripModel, ContextStripSegment};
 pub(crate) use cost::{cost_model, CostBudgetRow, CostBudgetStatus, CostModel};
 pub(crate) use display_text::{compact_target_path, format_session_cost};
