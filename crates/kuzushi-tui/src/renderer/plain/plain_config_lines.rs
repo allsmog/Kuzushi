@@ -36,10 +36,10 @@ fn push_plain_model_table(lines: &mut Vec<String>, model: &PlainConfigModel, wid
 fn plain_model_row(row: &PlainConfigModelRow, widths: &[usize]) -> String {
     table_text(
         &[
-            &row.index,
-            &fit(&row.model, widths.get(1).copied().unwrap_or(28)),
-            &row.effort,
-            &fit(&row.auth, widths.get(3).copied().unwrap_or(18)),
+            &row.cells[0],
+            &fit(&row.cells[1], widths.get(1).copied().unwrap_or(28)),
+            &row.cells[2],
+            &fit(&row.cells[3], widths.get(3).copied().unwrap_or(18)),
         ],
         widths,
     )

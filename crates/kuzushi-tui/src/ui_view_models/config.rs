@@ -14,17 +14,12 @@ pub(crate) struct ConfigModel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConfigSummaryRow {
-    pub(crate) label: &'static str,
-    pub(crate) value: String,
+    pub(crate) cells: [String; 2],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ConfigModelRow {
-    pub(crate) selected: bool,
-    pub(crate) index: String,
-    pub(crate) model: String,
-    pub(crate) effort: String,
-    pub(crate) auth: String,
+    pub(crate) cells: [String; 5],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,10 +46,7 @@ pub(crate) struct PlainConfigModelTable {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlainConfigModelRow {
-    pub(crate) index: String,
-    pub(crate) model: String,
-    pub(crate) effort: String,
-    pub(crate) auth: String,
+    pub(crate) cells: [String; 4],
 }
 
 pub(crate) fn config_model(app: &ShellApp) -> ConfigModel {
@@ -138,17 +130,17 @@ fn push_plain_config_summary_row(
 fn summary_value<'a>(summary_rows: &'a [ConfigSummaryRow], label: &str) -> Option<&'a str> {
     summary_rows
         .iter()
-        .find(|row| row.label == label)
-        .map(|row| row.value.as_str())
+        .find(|row| row.cells[0] == label)
+        .map(|row| row.cells[1].as_str())
 }
 
 fn plain_config_model_rows(rows: Vec<ConfigModelRow>) -> Vec<PlainConfigModelRow> {
     rows.into_iter()
-        .map(|row| PlainConfigModelRow {
-            index: row.index,
-            model: row.model,
-            effort: row.effort,
-            auth: row.auth,
+        .map(|row| {
+            let [_marker, index, model, effort, auth] = row.cells;
+            PlainConfigModelRow {
+                cells: [index, model, effort, auth],
+            }
         })
         .collect()
 }
@@ -182,8 +174,7 @@ fn config_summary_rows(
 
 fn config_summary_row(label: &'static str, value: impl Into<String>) -> ConfigSummaryRow {
     ConfigSummaryRow {
-        label,
-        value: value.into(),
+        cells: [label.to_string(), value.into()],
     }
 }
 
@@ -227,13 +218,23 @@ fn config_model_rows(app: &ShellApp) -> Vec<ConfigModelRow> {
         .iter()
         .enumerate()
         .map(|(index, choice)| ConfigModelRow {
-            selected: index == app.selected_model_index,
-            index: choice.index.to_string(),
-            model: crate::app::model_choice_display_selector(choice),
-            effort: choice.thinking_level.to_string(),
-            auth: model_auth_status(choice),
+            cells: [
+                selected_marker(index == app.selected_model_index).to_string(),
+                choice.index.to_string(),
+                crate::app::model_choice_display_selector(choice),
+                choice.thinking_level.to_string(),
+                model_auth_status(choice),
+            ],
         })
         .collect()
+}
+
+fn selected_marker(selected: bool) -> &'static str {
+    if selected {
+        ">"
+    } else {
+        " "
+    }
 }
 
 #[cfg(test)]

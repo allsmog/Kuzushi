@@ -21,7 +21,7 @@ fn push_config_summary(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area
 }
 
 fn config_summary_row(row: &ConfigSummaryRow) -> Line<'static> {
-    detail(row.label, &row.value)
+    detail(&row.cells[0], &row.cells[1])
 }
 
 fn push_config_model_table(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area: Rect) {
@@ -43,17 +43,7 @@ fn config_model_widths(area: Rect) -> [usize; 5] {
 }
 
 fn config_model_row(row: &ConfigModelRow, widths: &[usize]) -> Line<'static> {
-    let marker = if row.selected { ">" } else { " " };
-    aligned_row(
-        &[
-            marker.to_string(),
-            row.index.clone(),
-            row.model.clone(),
-            row.effort.clone(),
-            row.auth.clone(),
-        ],
-        widths,
-    )
+    aligned_row(&row.cells, widths)
 }
 
 fn push_config_commands(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area: Rect) {
