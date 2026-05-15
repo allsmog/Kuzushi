@@ -24,12 +24,13 @@ fn append_run_timeline_rows(
     widths: &[usize; 4],
 ) {
     for row in rows {
+        let [run_id, status, findings, target] = &row.cells;
         lines.push(runs_row(
-            &row.run_id,
-            &row.status,
-            run_timeline_status_style(row.status_kind),
-            &row.findings,
-            &row.target,
+            run_id,
+            status,
+            run_timeline_status_style(row.tone),
+            findings,
+            target,
             widths,
         ));
     }
