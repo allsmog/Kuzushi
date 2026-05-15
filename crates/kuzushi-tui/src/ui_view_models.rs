@@ -120,7 +120,7 @@ pub(crate) use keybindings::footer_keybindings;
 pub(crate) use knowledge_base::{
     knowledge_base_model, KnowledgeBaseArtifactRow, KnowledgeBaseAttachmentRow, KnowledgeBaseModel,
 };
-pub(crate) use live_activity::{live_activity_model, LiveActivityModel};
+pub(crate) use live_activity::{plain_live_activity_rows, PlainLiveActivityRow};
 pub(crate) use module_detail::{
     focused_module_detail_model, module_detail_model, ModuleDetailModel,
 };
