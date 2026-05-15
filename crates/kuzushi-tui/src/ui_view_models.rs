@@ -16,6 +16,7 @@ mod activity_footer;
 mod activity_header;
 mod activity_layout;
 mod activity_pane_chrome;
+mod activity_plain_rows;
 mod activity_scroll;
 mod actor_detail;
 mod advisory_chrome;
@@ -79,6 +80,9 @@ pub(crate) use activity_layout::{activity_frame_layout, activity_plain_pane_widt
 pub(crate) use activity_pane_chrome::{
     activity_pane_chrome_model, activity_plain_pane_header_model, ActivityPaneTitle,
     ActivityPlainPaneHeaderCell,
+};
+pub(crate) use activity_plain_rows::{
+    activity_plain_pane_rows, ActivityPlainDagCell, ActivityPlainFeedCell, ActivityPlainPaneRow,
 };
 pub(crate) use activity_scroll::{activity_feed_scroll_offset, activity_task_scroll_offset};
 pub(crate) use actor_detail::{actor_detail_model, ActorDetailModel, ActorTranscriptRow};
