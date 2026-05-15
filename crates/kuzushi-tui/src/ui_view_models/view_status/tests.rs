@@ -1,0 +1,36 @@
+use super::*;
+use kuzushi_core::V2Config;
+
+#[test]
+fn view_status_defaults_to_modules_catalog() {
+    let app = ShellApp::new(V2Config::default(), None);
+
+    assert_eq!(view_status_segment(&app), "modules");
+}
+
+#[test]
+fn view_status_uses_focused_module_for_module_views() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.focused_module = Some("semgrep".to_string());
+
+    app.shell_view = ShellView::Module;
+    assert_eq!(view_status_segment(&app), "semgrep");
+
+    app.shell_view = ShellView::ModuleRun;
+    assert_eq!(view_status_segment(&app), "semgrep/run");
+}
+
+#[test]
+fn view_status_reflects_actual_view_before_focused_module() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.focused_module = Some("semgrep".to_string());
+
+    app.shell_view = ShellView::Tools;
+    assert_eq!(view_status_segment(&app), "tools");
+
+    app.shell_view = ShellView::Threat(ThreatView::Stride);
+    assert_eq!(view_status_segment(&app), "threats:stride");
+
+    app.shell_view = ShellView::FailureHandoff;
+    assert_eq!(view_status_segment(&app), "failure-handoff");
+}

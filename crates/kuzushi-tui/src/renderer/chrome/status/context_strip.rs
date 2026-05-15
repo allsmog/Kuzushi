@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::routing_mode_segment;
+use crate::ui_view_models::{routing_mode_segment, view_status_segment};
 
 pub(crate) fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let target = app

@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::routing_mode_segment;
+use crate::ui_view_models::{routing_mode_segment, view_status_segment};
 
 pub(crate) fn render_status_footer(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if area.height == 0 {

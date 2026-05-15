@@ -10,7 +10,7 @@ use crate::app::{LogLine, ShellApp, ShellView};
 use crate::commands::{
     shell_command_specs, shell_help_examples, ShellCommandCategory, ShellCommandSpec,
 };
-use crate::ui_view_models::routing_mode_segment;
+use crate::ui_view_models::{routing_mode_segment, view_status_segment};
 pub(in crate::renderer) use finalize_width_safe_plain_lines::*;
 use kuzushi_core::{AttachmentKind, SUPPORTED_ATTACHMENT_MODULES};
 pub(in crate::renderer) use plain_config_lines::*;
