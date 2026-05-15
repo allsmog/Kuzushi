@@ -5,6 +5,8 @@ use kuzushi_core::modules::{OptionSpec, OptionType};
 pub(crate) struct OptionsModel {
     pub(crate) title: &'static str,
     pub(crate) summary_rows: Vec<OptionsSummaryRow>,
+    pub(crate) table_hint: &'static str,
+    pub(crate) table_headers: [&'static str; 7],
     pub(crate) status: OptionsModelStatus,
     pub(crate) rows: Vec<OptionRow>,
 }
@@ -97,13 +99,15 @@ impl PlainOptionsModel {
         let OptionsModel {
             title,
             summary_rows,
+            table_headers,
             status,
             rows,
+            ..
         } = model;
         PlainOptionsModel {
             title,
             summary_rows: summary_rows.into_iter().map(plain_summary_row).collect(),
-            body: plain_options_body(status, rows),
+            body: plain_options_body(status, rows, table_headers),
         }
     }
 }
@@ -112,9 +116,13 @@ fn plain_summary_row(row: OptionsSummaryRow) -> String {
     format!("{}: {}", row.label, row.value)
 }
 
-fn plain_options_body(status: OptionsModelStatus, rows: Vec<OptionRow>) -> PlainOptionsBody {
+fn plain_options_body(
+    status: OptionsModelStatus,
+    rows: Vec<OptionRow>,
+    headers: [&'static str; 7],
+) -> PlainOptionsBody {
     match status {
-        OptionsModelStatus::Ready => PlainOptionsBody::Table(plain_options_table(rows)),
+        OptionsModelStatus::Ready => PlainOptionsBody::Table(plain_options_table(headers, rows)),
         OptionsModelStatus::UnknownTool => {
             PlainOptionsBody::Message(vec!["Unknown tool. Next: tools".to_string()])
         }
@@ -124,17 +132,9 @@ fn plain_options_body(status: OptionsModelStatus, rows: Vec<OptionRow>) -> Plain
     }
 }
 
-fn plain_options_table(rows: Vec<OptionRow>) -> PlainOptionsTable {
+fn plain_options_table(headers: [&'static str; 7], rows: Vec<OptionRow>) -> PlainOptionsTable {
     PlainOptionsTable {
-        headers: [
-            "option",
-            "value",
-            "default",
-            "req",
-            "type",
-            "aliases",
-            "description",
-        ],
+        headers,
         rows: rows.into_iter().map(plain_option_row).collect(),
         note: "Canonical keys are in the option column; aliases are compatibility names.",
         next_hint: "Next: set <key> <value>, setg <key> <value>, show advanced, show missing",
@@ -162,6 +162,17 @@ fn options_model_status(
     OptionsModel {
         title: "OPTIONS",
         summary_rows: options_summary_rows(&view.tool_name, filter_label),
+        table_hint:
+            "set <key> <value> writes session state; setg writes global state. Option names are canonical; aliases work.",
+        table_headers: [
+            "option",
+            "value",
+            "default",
+            "req",
+            "type",
+            "aliases",
+            "description",
+        ],
         status,
         rows,
     }

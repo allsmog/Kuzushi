@@ -23,6 +23,19 @@ fn options_model_formats_stored_option_rows() {
 
     assert_eq!(model.title, "OPTIONS");
     assert_eq!(model.status, OptionsModelStatus::Ready);
+    assert!(model.table_hint.contains("session state"));
+    assert_eq!(
+        model.table_headers,
+        [
+            "option",
+            "value",
+            "default",
+            "req",
+            "type",
+            "aliases",
+            "description"
+        ]
+    );
     assert!(model.summary_rows.contains(&OptionsSummaryRow {
         label: "view",
         value: "options".to_string(),
