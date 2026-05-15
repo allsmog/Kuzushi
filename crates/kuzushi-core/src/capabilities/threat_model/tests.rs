@@ -441,6 +441,9 @@ mod tests {
         assert!(document_has_dfd_node(&degraded, "external-service"));
         assert!(document_has_dfd_flow(&degraded, "flow-external-service"));
         assert!(document_has_threat_target(&degraded, "external-service"));
+        assert!(document_has_dfd_node(&degraded, "http-route"));
+        assert!(document_has_dfd_flow(&degraded, "flow-http-route"));
+        assert!(document_has_threat_target(&degraded, "http-route"));
         assert!(document_has_dfd_node(&degraded, "auth-control"));
         assert!(document_has_dfd_flow(&degraded, "flow-auth-control"));
         assert!(document_has_dfd_trust_boundary(&degraded, "tb-auth-boundary"));
