@@ -13,6 +13,13 @@ pub(crate) struct TranscriptRow {
     pub(crate) time_secs: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlainCommandResultModel {
+    pub(crate) result_title: &'static str,
+    pub(crate) rows: Vec<String>,
+    pub(crate) view_title: &'static str,
+}
+
 pub(crate) fn transcript_model(app: &ShellApp, visible_count: usize) -> TranscriptModel {
     TranscriptModel {
         rows: transcript_rows(&app.log, visible_count),
@@ -51,6 +58,36 @@ impl TranscriptRow {
                 time_secs: line.time_secs,
             })
             .collect()
+    }
+}
+
+pub(crate) fn plain_command_result_model(
+    app: &ShellApp,
+    command: &str,
+    log_start: usize,
+) -> PlainCommandResultModel {
+    let mut rows = vec![format!("command: {command}"), "logs:".to_string()];
+    rows.extend(
+        transcript_model_from_log_index(app, log_start)
+            .rows
+            .into_iter()
+            .map(plain_transcript_row),
+    );
+    PlainCommandResultModel {
+        result_title: "COMMAND RESULT",
+        rows,
+        view_title: "VIEW",
+    }
+}
+
+fn plain_transcript_row(row: TranscriptRow) -> String {
+    if row.continuation {
+        return format!("  {}", row.body);
+    }
+    if row.prefix == ">" {
+        format!("> {}", row.body)
+    } else {
+        format!("{}: {}", row.prefix, row.body)
     }
 }
 

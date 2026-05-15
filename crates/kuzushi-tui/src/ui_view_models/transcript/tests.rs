@@ -85,6 +85,31 @@ fn transcript_model_from_log_index_expands_entries_after_start() {
 }
 
 #[test]
+fn plain_command_result_model_formats_command_and_log_rows() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.log = vec![
+        log_line("old", "ignore", 1),
+        log_line(">", "show me", 2),
+        log_line("run", "first\nsecond", 3),
+    ];
+
+    let model = plain_command_result_model(&app, "/run demo", 1);
+
+    assert_eq!(model.result_title, "COMMAND RESULT");
+    assert_eq!(model.view_title, "VIEW");
+    assert_eq!(
+        model.rows,
+        vec![
+            "command: /run demo".to_string(),
+            "logs:".to_string(),
+            "> show me".to_string(),
+            "run: first".to_string(),
+            "  second".to_string(),
+        ]
+    );
+}
+
+#[test]
 fn transcript_model_keeps_empty_log_body_as_one_row() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     app.log = vec![log_line("system", "", 0)];
