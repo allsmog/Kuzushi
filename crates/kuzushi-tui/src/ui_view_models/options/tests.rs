@@ -51,7 +51,13 @@ fn options_model_marks_unknown_tools() {
 
     let model = options_model(&app, &options_view("missing:tool", OptionsFilter::Standard));
 
-    assert_eq!(model.status, OptionsModelStatus::UnknownTool);
+    assert_eq!(
+        model.status,
+        OptionsModelStatus::UnknownTool {
+            message: "Unknown tool. Run tools to inspect the native registry.",
+            plain_message: "Unknown tool. Next: tools",
+        }
+    );
     assert!(model.summary_rows.contains(&OptionsSummaryRow {
         label: "tool",
         value: "missing:tool".to_string(),

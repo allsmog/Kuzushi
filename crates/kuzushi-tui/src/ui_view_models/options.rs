@@ -20,7 +20,10 @@ pub(crate) struct OptionsSummaryRow {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum OptionsModelStatus {
     Ready,
-    UnknownTool,
+    UnknownTool {
+        message: &'static str,
+        plain_message: &'static str,
+    },
     Empty {
         message: &'static str,
         plain_message: &'static str,
@@ -73,7 +76,7 @@ pub(crate) struct PlainOptionRow {
 
 pub(crate) fn options_model(app: &ShellApp, view: &OptionsView) -> OptionsModel {
     let Some(tool) = app.registry.resolve_tool(&view.tool_name) else {
-        return options_model_status(view, OptionsModelStatus::UnknownTool, Vec::new());
+        return options_model_status(view, unknown_tool_status(), Vec::new());
     };
     let stored = app.option_store.effective_stored_values(&tool.name);
     let mut rows = tool
@@ -123,8 +126,8 @@ fn plain_options_body(
 ) -> PlainOptionsBody {
     match status {
         OptionsModelStatus::Ready => PlainOptionsBody::Table(plain_options_table(headers, rows)),
-        OptionsModelStatus::UnknownTool => {
-            PlainOptionsBody::Message(vec!["Unknown tool. Next: tools".to_string()])
+        OptionsModelStatus::UnknownTool { plain_message, .. } => {
+            PlainOptionsBody::Message(vec![plain_message.to_string()])
         }
         OptionsModelStatus::Empty { plain_message, .. } => {
             PlainOptionsBody::Message(vec![plain_message.to_string()])
@@ -222,6 +225,13 @@ fn options_filter_label(filter: OptionsFilter) -> &'static str {
         OptionsFilter::Standard => "options",
         OptionsFilter::Advanced => "advanced options",
         OptionsFilter::Missing => "missing options",
+    }
+}
+
+fn unknown_tool_status() -> OptionsModelStatus {
+    OptionsModelStatus::UnknownTool {
+        message: "Unknown tool. Run tools to inspect the native registry.",
+        plain_message: "Unknown tool. Next: tools",
     }
 }
 
