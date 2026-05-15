@@ -88,7 +88,9 @@ pub(crate) use knowledge_base::{
     knowledge_base_model, KnowledgeBaseArtifactRow, KnowledgeBaseAttachmentRow, KnowledgeBaseModel,
 };
 pub(crate) use live_activity::{live_activity_model, LiveActivityModel};
-pub(crate) use module_detail::{module_detail_model, ModuleDetailModel};
+pub(crate) use module_detail::{
+    focused_module_detail_model, module_detail_model, ModuleDetailModel,
+};
 pub(crate) use module_progress::{
     module_progress_model, ModuleProgressKind, ModuleProgressModel, ModuleProgressRow,
     ModuleProgressSection,

@@ -1,11 +1,8 @@
 use super::*;
-use crate::ui_view_models::{module_detail_model, ModuleDetailModel};
+use crate::ui_view_models::{focused_module_detail_model, ModuleDetailModel};
 
 pub(crate) fn module_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    let Some(module_id) = &app.focused_module else {
-        return catalog_lines(app, area);
-    };
-    let Some(module) = module_detail_model(app, module_id) else {
+    let Some(module) = focused_module_detail_model(app) else {
         return catalog_lines(app, area);
     };
 
