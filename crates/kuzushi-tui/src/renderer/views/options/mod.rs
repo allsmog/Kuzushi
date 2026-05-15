@@ -1,52 +1,45 @@
 use super::*;
 pub(in crate::renderer) use super::*;
+use crate::ui_view_models::{options_model, OptionRow, OptionsModelStatus};
 
 pub(crate) fn options_lines(
     app: &ShellApp,
     area: Rect,
     view: &crate::app::OptionsView,
 ) -> Vec<Line<'static>> {
+    let model = options_model(app, view);
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("OPTIONS", area.width));
-    lines.push(detail("tool", &view.tool_name));
-    lines.push(detail("view", options_filter_label(view.filter)));
+    lines.push(detail("tool", &model.tool_name));
+    lines.push(detail("view", model.filter_label));
+    push_options_body(&mut lines, area.width, &model.status, &model.rows);
+    lines
+}
 
-    let Some(tool) = app.registry.resolve_tool(&view.tool_name) else {
-        lines.push(blank());
-        lines.push(muted(
-            "Unknown tool. Run tools to inspect the native registry.",
-        ));
-        return lines;
-    };
-
-    let stored = app.option_store.effective_stored_values(&tool.name);
-    let mut specs = tool
-        .options
-        .iter()
-        .filter(|spec| option_visible(spec, view.filter, stored.get(&spec.name).is_some()))
-        .collect::<Vec<_>>();
-    specs.sort_by_key(|spec| !stored.contains_key(&spec.name));
-
-    if specs.is_empty() {
-        lines.push(blank());
-        let message = match view.filter {
-            crate::app::OptionsFilter::Standard => {
-                "No standard options. Run show advanced for hidden controls."
-            }
-            crate::app::OptionsFilter::Advanced => "No advanced options for this tool.",
-            crate::app::OptionsFilter::Missing => "No missing required options for this tool.",
-        };
-        lines.push(muted(message));
-        return lines;
-    }
-
+fn push_options_body(
+    lines: &mut Vec<Line<'static>>,
+    width: u16,
+    status: &OptionsModelStatus,
+    rows: &[OptionRow],
+) {
     lines.push(blank());
+    match status {
+        OptionsModelStatus::Ready => push_options_table(lines, width, rows),
+        OptionsModelStatus::UnknownTool => lines.push(muted(
+            "Unknown tool. Run tools to inspect the native registry.",
+        )),
+        OptionsModelStatus::Empty { message, .. } => lines.push(muted(message)),
+    }
+}
+
+fn push_options_table(lines: &mut Vec<Line<'static>>, width: u16, rows: &[OptionRow]) {
     lines.push(muted(&fit(
         "set <key> <value> writes session state; setg writes global state. Option names are canonical; aliases work.",
-        area.width as usize,
+        width as usize,
     )));
     lines.push(blank());
+    let widths = option_table_widths(width);
     lines.push(table_header(
         &[
             "option",
@@ -57,42 +50,28 @@ pub(crate) fn options_lines(
             "aliases",
             "description",
         ],
-        &option_table_widths(area.width),
+        &widths,
     ));
-    for spec in specs {
-        let current = stored.get(&spec.name);
-        let required = if spec.required && current.is_none() && spec.default.is_none() {
-            "missing"
-        } else if spec.required {
-            "yes"
-        } else {
-            "no"
-        };
-        let description = option_description(spec);
-        let widths = option_table_widths(area.width);
-        lines.push(table_row(
-            &[
-                &spec.name,
-                &current
-                    .map(format_json_value)
-                    .unwrap_or_else(|| "-".to_string()),
-                &spec
-                    .default
-                    .as_ref()
-                    .map(format_json_value)
-                    .unwrap_or_else(|| "-".to_string()),
-                required,
-                option_type_label(spec.option_type),
-                &fit(
-                    &option_alias_label(spec),
-                    widths.get(5).copied().unwrap_or(10),
-                ),
-                &fit(&description, widths.get(6).copied().unwrap_or(16)),
-            ],
-            &widths,
-        ));
+    for row in rows {
+        lines.push(option_row_line(row, &widths));
     }
-    lines
+}
+
+fn option_row_line(row: &OptionRow, widths: &[usize]) -> Line<'static> {
+    let aliases = fit(&row.aliases, widths.get(5).copied().unwrap_or(10));
+    let description = fit(&row.description, widths.get(6).copied().unwrap_or(16));
+    table_row(
+        &[
+            &row.name,
+            &row.value,
+            &row.default_value,
+            row.required,
+            row.option_type,
+            &aliases,
+            &description,
+        ],
+        widths,
+    )
 }
 
 pub(crate) fn sast_tasks_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -114,7 +93,7 @@ pub(crate) fn sast_tasks_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
     lines.push(detail("mode", mode));
     lines.push(detail(
         "selected",
-        &format!("{enabled}/{} enabled, {blocked} blocked", rows.len()),
+        &sast_task_summary(rows.len(), enabled, blocked),
     ));
     lines.push(blank());
     lines.push(muted(&fit(
@@ -122,23 +101,7 @@ pub(crate) fn sast_tasks_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
         area.width as usize,
     )));
     lines.push(blank());
-    lines.push(table_header(
-        &["state", "id", "cost", "scan", "notes"],
-        &sast_task_table_widths(area.width),
-    ));
-    let widths = sast_task_table_widths(area.width);
-    for row in rows {
-        lines.push(table_row(
-            &[
-                row.state,
-                row.id,
-                row.cost,
-                row.scan_task,
-                &fit(row.notes, widths.get(4).copied().unwrap_or(20)),
-            ],
-            &widths,
-        ));
-    }
+    push_sast_task_table(&mut lines, area.width, &rows);
     lines.push(blank());
     lines.push(command_list_line(
         &[
@@ -151,4 +114,32 @@ pub(crate) fn sast_tasks_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
         area.width as usize,
     ));
     lines
+}
+
+fn sast_task_summary(total: usize, enabled: usize, blocked: usize) -> String {
+    format!("{enabled}/{total} enabled, {blocked} blocked")
+}
+
+fn push_sast_task_table(
+    lines: &mut Vec<Line<'static>>,
+    width: u16,
+    rows: &[crate::app::SastTaskRow],
+) {
+    lines.push(table_header(
+        &["state", "id", "cost", "scan", "notes"],
+        &sast_task_table_widths(width),
+    ));
+    let widths = sast_task_table_widths(width);
+    for row in rows {
+        lines.push(table_row(
+            &[
+                row.state,
+                row.id,
+                row.cost,
+                row.scan_task,
+                &fit(row.notes, widths.get(4).copied().unwrap_or(20)),
+            ],
+            &widths,
+        ));
+    }
 }
