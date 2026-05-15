@@ -261,7 +261,7 @@ fn execute_carlini_threat_hunt_run(
     // threading the per-actor parent_step into run_carlini_actor_hunts;
     // for now the scope means every LLM call surfaces under the run.
     let _actor_scope = begin_carlini_actor_scope(ctx, run.parent_step);
-    let mut findings = run_carlini_actor_hunts(
+    let outcome = run_carlini_actor_hunts(
         run.runtime,
         input,
         &run.target,
@@ -272,6 +272,7 @@ fn execute_carlini_threat_hunt_run(
         run.debug_artifacts.as_ref(),
     )?;
     drop(_actor_scope);
+    let mut findings = outcome.findings;
     finalize_carlini_findings(input, &mut findings, run.options.max_findings)?;
     emit_carlini_completion(ctx, findings.len());
     carlini_threat_hunt_report(
@@ -283,6 +284,7 @@ fn execute_carlini_threat_hunt_run(
         run.inventory.len(),
         threat_focused_inventory_count(&run.inventory, &run.capped),
         findings,
+        outcome.cost_usd,
     )
 }
 
