@@ -15,6 +15,7 @@ mod options;
 mod run_timeline;
 mod run_trace;
 mod threat_model;
+mod tools;
 pub(crate) use attack_surface::{attack_surface_risk_model, AttackSurfaceRiskModel};
 pub(crate) use catalog::{catalog_model, CatalogActionModule, CatalogModel, CatalogModuleGroup};
 pub(crate) use failure_handoff::failure_handoff_context;
@@ -26,6 +27,7 @@ pub(crate) use run_trace::{
     replay_model, trace_model, ReplayModel, RunArtifactDetail, TraceModel, TraceStep,
 };
 pub(crate) use threat_model::threat_model_doc;
+pub(crate) use tools::{tools_model, ToolRow};
 
 pub use crate::{
     ActivitySession, OptionsFilter, OptionsView, PaneFocus, ReconSnapshot, ScanPanelState,

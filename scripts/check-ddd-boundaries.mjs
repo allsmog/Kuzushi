@@ -208,6 +208,11 @@ const rules = [
       /kuzushi_core::(?:OptionSpec|OptionType|ToolDescriptor)|\.registry\.resolve_tool\(|\.options\b/,
   },
   {
+    name: "TUI tools renderer reads tools view model",
+    roots: ["crates/kuzushi-tui/src/renderer/views/system/tools_lines.rs"],
+    forbidden: /kuzushi_core::ToolDescriptor|\.registry\.tools\(|\.tools\(\)/,
+  },
+  {
     name: "TUI threat renderers read threat-model view models",
     roots: ["crates/kuzushi-tui/src/renderer/shared/threat_model/current_threat_model_doc.rs"],
     forbidden: /\b(load_persistent_threat_model|std::env|std::path|PathBuf|read_to_string)\b/,
