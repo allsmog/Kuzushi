@@ -1,5 +1,7 @@
 use super::*;
-use crate::ui_view_models::{focused_module_detail_model, ModuleDetailModel};
+use crate::ui_view_models::{
+    focused_module_detail_model, ModuleDetailModel, ModuleKeyValueSection,
+};
 
 pub(crate) fn module_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let Some(module) = focused_module_detail_model(app) else {
@@ -52,13 +54,14 @@ fn append_module_header(lines: &mut Vec<Line<'static>>, module: &ModuleDetailMod
 }
 
 fn append_tools_section(lines: &mut Vec<Line<'static>>, module: &ModuleDetailModel, area: Rect) {
-    if module.visible_tools.is_empty() {
-        lines.push(muted("No shell tools are exposed by this module."));
+    let section = &module.tools_section;
+    if let Some(message) = section.empty_message {
+        lines.push(muted(message));
         lines.push(blank());
         return;
     }
-    lines.push(divider("TOOLS", area.width));
-    for tool in &module.visible_tools {
+    lines.push(divider(section.header, area.width));
+    for tool in &section.rows {
         lines.push(tool_console_row(
             &tool.cells[0],
             &tool.cells[1],
@@ -70,46 +73,30 @@ fn append_tools_section(lines: &mut Vec<Line<'static>>, module: &ModuleDetailMod
 }
 
 fn append_stored_options(lines: &mut Vec<Line<'static>>, module: &ModuleDetailModel, area: Rect) {
-    if module.stored_options.is_empty() {
-        return;
-    }
-    lines.push(divider(
-        &format!("OPTIONS · {}", module.stored_options.len()),
-        area.width,
-    ));
-    for (name, value) in &module.stored_options {
-        lines.push(detail(name, value));
-    }
-    lines.push(blank());
+    append_key_value_section(lines, module.options_section.as_ref(), area);
 }
 
 fn append_prompt_overrides(lines: &mut Vec<Line<'static>>, module: &ModuleDetailModel, area: Rect) {
-    if module.prompts.is_empty() {
-        return;
-    }
-    lines.push(divider(
-        &format!("PROMPTS · {}", module.prompts.len()),
-        area.width,
-    ));
-    for prompt in &module.prompts {
-        lines.push(detail(&prompt.verb, &prompt.path));
-    }
-    lines.push(blank());
+    append_key_value_section(lines, module.prompts_section.as_ref(), area);
 }
 
 fn append_session_stats(lines: &mut Vec<Line<'static>>, module: &ModuleDetailModel, area: Rect) {
-    if module.log_count > 0 {
-        lines.push(divider("STATS · this session", area.width));
-        lines.push(detail(
-            "log entries",
-            &format!("{} from `{}`", module.log_count, module.id),
-        ));
-        lines.push(detail(
-            "tools bound",
-            &module.visible_tools.len().to_string(),
-        ));
-        lines.push(blank());
+    append_key_value_section(lines, module.stats_section.as_ref(), area);
+}
+
+fn append_key_value_section(
+    lines: &mut Vec<Line<'static>>,
+    section: Option<&ModuleKeyValueSection>,
+    area: Rect,
+) {
+    let Some(section) = section else {
+        return;
+    };
+    lines.push(divider(&section.header, area.width));
+    for (name, value) in &section.rows {
+        lines.push(detail(name, value));
     }
+    lines.push(blank());
 }
 
 fn append_recent_activity(
