@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::catalog_model;
+use crate::ui_view_models::{catalog_model, model_auth_status};
 
 pub(crate) fn plain_config_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);

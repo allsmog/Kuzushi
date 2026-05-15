@@ -7,6 +7,7 @@ use crate::ShellApp;
 use std::path::{Path, PathBuf};
 
 mod attack_surface;
+mod auth;
 mod catalog;
 mod failure_handoff;
 mod home_cockpit;
@@ -17,6 +18,7 @@ mod run_trace;
 mod threat_model;
 mod tools;
 pub(crate) use attack_surface::{attack_surface_risk_model, AttackSurfaceRiskModel};
+pub(crate) use auth::{auth_provider_rows, model_auth_status, AuthProviderRow, AuthProviderState};
 pub(crate) use catalog::{catalog_model, CatalogActionModule, CatalogModel, CatalogModuleGroup};
 pub(crate) use failure_handoff::failure_handoff_context;
 pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};

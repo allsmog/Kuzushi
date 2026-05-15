@@ -213,6 +213,14 @@ const rules = [
     forbidden: /kuzushi_core::ToolDescriptor|\.registry\.tools\(|\.tools\(\)/,
   },
   {
+    name: "TUI auth renderer reads auth view model",
+    roots: [
+      "crates/kuzushi-tui/src/renderer/views/system/auth_lines.rs",
+      "crates/kuzushi-tui/src/renderer/views/system/auth_provider_rows.rs",
+    ],
+    forbidden: /\bstd::env|oauth_provider_status|\.config\.runtime\.api_key_env/,
+  },
+  {
     name: "TUI threat renderers read threat-model view models",
     roots: ["crates/kuzushi-tui/src/renderer/shared/threat_model/current_threat_model_doc.rs"],
     forbidden: /\b(load_persistent_threat_model|std::env|std::path|PathBuf|read_to_string)\b/,
