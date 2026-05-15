@@ -113,6 +113,7 @@ pub(in crate::modules) fn run_iac_scan(
     let persisted = persist_iac_findings(&target, &findings, ctx)?;
     emit_scan_done(ctx, "iac-scan", findings.len());
     let mut output = report.to_tool_json();
+    output["data"]["coreFindings"] = json!(findings);
     if let Some(persisted) = persisted {
         output["data"]["persisted"] = json!(persisted);
     }

@@ -27,6 +27,49 @@ fn latest_run_json(repo: &std::path::Path, leaf: &str) -> Value {
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
+fn assert_latest_static_artifacts(repo: &std::path::Path, expected_tool: &str) {
+    let findings = latest_run_json(repo, "findings.json");
+    assert_eq!(
+        findings.pointer("/0/tool").and_then(Value::as_str),
+        Some(expected_tool)
+    );
+    assert_eq!(
+        findings
+            .pointer("/0/staticProofState")
+            .and_then(Value::as_str),
+        Some("signal_only")
+    );
+
+    let proof = latest_run_json(repo, "proof.json");
+    assert_eq!(
+        proof.pointer("/source").and_then(Value::as_str),
+        Some("normalized-findings")
+    );
+    assert_eq!(
+        proof
+            .pointer("/countsByState/signal_only")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        proof
+            .pointer("/runtimeVerification")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+
+    let artifacts = latest_run_json(repo, "artifacts.json");
+    let artifact_labels = artifacts
+        .pointer("/artifacts")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .filter_map(|artifact| artifact.pointer("/label").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert!(artifact_labels.contains(&"findings"));
+    assert!(artifact_labels.contains(&"proof"));
+}
+
 fn write_systems_hunt_fixture(repo: &std::path::Path) {
     std::fs::create_dir_all(repo.join("src")).unwrap();
     std::fs::write(
@@ -652,6 +695,7 @@ fn run_dep_hygiene_check_reaches_native_executor() {
         .get("output")
         .and_then(Value::as_str)
         .is_some_and(|output| output.contains("dep-hygiene: 1 risky specifier")));
+    assert_latest_static_artifacts(&repo, "dep-hygiene");
 }
 
 #[test]
@@ -782,46 +826,7 @@ fn run_secret_scan_reaches_native_executor_and_writes_canonical_findings() {
         .and_then(Value::as_str)
         .is_some_and(|evidence| evidence.contains("sk-p********")));
 
-    let findings = latest_run_json(&repo, "findings.json");
-    assert_eq!(
-        findings.pointer("/0/tool").and_then(Value::as_str),
-        Some("secret-scan")
-    );
-    assert_eq!(
-        findings
-            .pointer("/0/staticProofState")
-            .and_then(Value::as_str),
-        Some("signal_only")
-    );
-
-    let proof = latest_run_json(&repo, "proof.json");
-    assert_eq!(
-        proof.pointer("/source").and_then(Value::as_str),
-        Some("normalized-findings")
-    );
-    assert_eq!(
-        proof
-            .pointer("/countsByState/signal_only")
-            .and_then(Value::as_u64),
-        Some(1)
-    );
-    assert_eq!(
-        proof
-            .pointer("/runtimeVerification")
-            .and_then(Value::as_bool),
-        Some(false)
-    );
-
-    let artifacts = latest_run_json(&repo, "artifacts.json");
-    let artifact_labels = artifacts
-        .pointer("/artifacts")
-        .and_then(Value::as_array)
-        .unwrap()
-        .iter()
-        .filter_map(|artifact| artifact.pointer("/label").and_then(Value::as_str))
-        .collect::<Vec<_>>();
-    assert!(artifact_labels.contains(&"findings"));
-    assert!(artifact_labels.contains(&"proof"));
+    assert_latest_static_artifacts(&repo, "secret-scan");
 }
 
 #[test]
@@ -890,6 +895,7 @@ fn run_iac_scan_reaches_native_executor_and_persists() {
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     assert_eq!(store.list_findings(10).unwrap().len(), 1);
+    assert_latest_static_artifacts(&repo, "iac-scan");
 }
 
 #[test]
@@ -1979,6 +1985,7 @@ fn run_semgrep_scan_reaches_subprocess_executor_and_persists() {
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     assert_eq!(store.list_findings(10).unwrap().len(), 1);
+    assert_latest_static_artifacts(&repo, "semgrep");
 }
 
 #[test]
@@ -2066,6 +2073,7 @@ fn run_codeql_scan_reaches_subprocess_executor_and_persists() {
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     assert_eq!(store.list_findings(10).unwrap().len(), 1);
+    assert_latest_static_artifacts(&repo, "codeql");
 }
 
 #[cfg(unix)]
