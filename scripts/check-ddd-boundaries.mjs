@@ -186,6 +186,7 @@ const rules = [
   { name: "TUI actor detail renderer reads actor-detail view model", roots: ["crates/kuzushi-tui/src/renderer/views/editor/actor_detail_lines.rs"], forbidden: /\b(actor_detail_filter|crate::app::LogLine|scan_status|\.log\b|\.scan\b)\b/ },
   { name: "TUI session history renderer reads session story view models", roots: ["crates/kuzushi-tui/src/renderer/views/chat/history_lines.rs"], forbidden: /\b(command_history|is_scan_paused)\b|\.scan\b|\.log\b/ },
   { name: "TUI agent chat renderer reads agent chat view model", roots: ["crates/kuzushi-tui/src/renderer/views/chat/agent_chat_lines"], forbidden: /\b(AgentChatView|ChatTurn|display_model_selector)\b|app\.agent_chat|\.config\b/ },
+  { name: "TUI findings renderers read findings view models", roots: ["crates/kuzushi-tui/src/renderer/views/findings"], forbidden: /\bFinding\b|sorted_finding_aliases|stable_finding_alias|project_finding|proof_state_label|runtime_validation_label|finding_(?:location|verdict_label|confidence_label|cwe_label|source_label|evidence_preview)|app\.findings|app\.selected_finding|findings_cursor|context_view/ },
   { name: "TUI transcript chrome reads transcript view model", roots: ["crates/kuzushi-tui/src/renderer/chrome/transcript/mod.rs"], forbidden: /\.log\b/ },
   { name: "TUI config renderers read config view model", roots: ["crates/kuzushi-tui/src/renderer/views/system/config_lines.rs", "crates/kuzushi-tui/src/renderer/plain/plain_config_lines.rs"], forbidden: /\b(runtime_backend_label|display_model_selector|model_choices|model_choice_display_selector|bridge_command_status|model_auth_status|auth_env_summary|oauth_summary|\.config\b|session_thinking_level|session_cost_usd|last_tool_cost_usd|selected_model_index)\b/ },
   { name: "TUI auth and cost renderers read auth/config/cost view models", roots: ["crates/kuzushi-tui/src/renderer/views/system/auth_lines.rs", "crates/kuzushi-tui/src/renderer/views/system/cost_lines.rs"], forbidden: /\b(runtime_backend_label|display_model_selector|format_session_cost|\.config\b|session_thinking_level|session_cost_usd|last_tool_cost_usd|session_budget_usd)\b/ },
@@ -303,12 +304,7 @@ function sourceWithoutTestModule(file) {
 }
 
 function isProductionRust(file) {
-  return (
-    file.endsWith(".rs") &&
-    !file.endsWith("/tests.rs") &&
-    !file.endsWith("_tests.rs") &&
-    !file.includes("/tests/")
-  );
+  return file.endsWith(".rs") && !file.endsWith("/tests.rs") && !file.endsWith("_tests.rs") && !file.includes("/tests/");
 }
 
 function isUnder(file, candidate) {
