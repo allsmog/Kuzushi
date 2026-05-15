@@ -782,6 +782,68 @@ fn run_report_build_promotes_markdown_for_report_run() {
 }
 
 #[test]
+fn run_report_build_surfaces_failed_source_handoff() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+
+    let failed_scan = kuzushi_command(&home)
+        .arg("--target")
+        .arg(&repo)
+        .arg("run")
+        .arg("semgrep:scan")
+        .arg("--input")
+        .arg(format!(
+            r#"{{"binary":"{}"}}"#,
+            temp.path().join("missing-semgrep").display()
+        ))
+        .output()
+        .unwrap();
+    assert!(!failed_scan.status.success());
+    let source_run = latest_run_id(&repo);
+
+    let report = kuzushi_command(&home)
+        .arg("--target")
+        .arg(&repo)
+        .arg("run")
+        .arg("report:build")
+        .output()
+        .unwrap();
+    assert!(
+        report.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&report.stderr)
+    );
+    let body: Value = serde_json::from_slice(&report.stdout).unwrap();
+    let markdown = body
+        .pointer("/reportMarkdown")
+        .and_then(Value::as_str)
+        .unwrap();
+    assert_eq!(
+        body.pointer("/data/sourceRunId").and_then(Value::as_str),
+        Some(source_run.as_str())
+    );
+    assert!(markdown.contains("## Failure Handoff"));
+    assert!(markdown.contains("Failed Stage: semgrep:scan"));
+    assert!(markdown.contains("artifact-review-only"));
+    assert!(markdown.contains("Fallback Prompt"));
+    assert!(!markdown.contains("validated"));
+
+    let report_run = latest_run_id(&repo);
+    let report_markdown = std::fs::read_to_string(
+        repo.join(".kuzushi/runs")
+            .join(&report_run)
+            .join("report.md"),
+    )
+    .unwrap();
+    assert!(report_markdown.contains("## Failure Handoff"));
+    assert!(report_markdown.contains(source_run.as_str()));
+    assert!(!report_markdown.contains("validated"));
+}
+
+#[test]
 fn run_dep_hygiene_check_missing_target_is_actionable() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
