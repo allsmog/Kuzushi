@@ -13,6 +13,7 @@ use std::path::PathBuf;
 mod adapters;
 mod application;
 mod domain;
+mod rule_catalog;
 #[cfg(test)]
 mod tests;
 
