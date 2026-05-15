@@ -7,10 +7,23 @@ pub(crate) struct ModuleDetailModel {
     pub(crate) name: String,
     pub(crate) summary: String,
     pub(crate) primary_tool: String,
-    pub(crate) visible_tools: Vec<ModuleToolRow>,
-    pub(crate) stored_options: Vec<(String, String)>,
-    pub(crate) prompts: Vec<ModulePromptOnDisk>,
-    pub(crate) log_count: usize,
+    pub(crate) tools_section: ModuleToolsSection,
+    pub(crate) options_section: Option<ModuleKeyValueSection>,
+    pub(crate) prompts_section: Option<ModuleKeyValueSection>,
+    pub(crate) stats_section: Option<ModuleKeyValueSection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModuleToolsSection {
+    pub(crate) header: &'static str,
+    pub(crate) rows: Vec<ModuleToolRow>,
+    pub(crate) empty_message: Option<&'static str>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModuleKeyValueSection {
+    pub(crate) header: String,
+    pub(crate) rows: Vec<(String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,15 +52,18 @@ pub(crate) fn module_detail_model(app: &ShellApp, module_id: &str) -> Option<Mod
         .first()
         .map(|tool| tool.cells[0].clone())
         .unwrap_or_else(|| "no-tool".to_string());
+    let stored_options = module_stored_options(app, &visible_tools);
+    let prompts = module_prompts_model(app, module_id);
+    let log_count = module_log_count(app, module_id);
     Some(ModuleDetailModel {
         id: module.metadata().id.clone(),
         name: module.metadata().name.clone(),
         summary: module.metadata().description.clone(),
         primary_tool,
-        stored_options: module_stored_options(app, &visible_tools),
-        prompts: module_prompts_model(app, module_id),
-        log_count: module_log_count(app, module_id),
-        visible_tools,
+        tools_section: module_tools_section(&visible_tools),
+        options_section: module_options_section(&stored_options),
+        prompts_section: module_prompts_section(&prompts),
+        stats_section: module_stats_section(module_id, log_count, visible_tools.len()),
     })
 }
 
@@ -118,6 +134,50 @@ fn tool_status_label(headless: bool) -> &'static str {
     }
 }
 
+fn module_tools_section(tools: &[ModuleToolRow]) -> ModuleToolsSection {
+    ModuleToolsSection {
+        header: "TOOLS",
+        rows: tools.to_vec(),
+        empty_message: tools
+            .is_empty()
+            .then_some("No shell tools are exposed by this module."),
+    }
+}
+
+fn module_options_section(options: &[(String, String)]) -> Option<ModuleKeyValueSection> {
+    (!options.is_empty()).then(|| ModuleKeyValueSection {
+        header: format!("OPTIONS · {}", options.len()),
+        rows: options.to_vec(),
+    })
+}
+
+fn module_prompts_section(prompts: &[ModulePromptOnDisk]) -> Option<ModuleKeyValueSection> {
+    (!prompts.is_empty()).then(|| ModuleKeyValueSection {
+        header: format!("PROMPTS · {}", prompts.len()),
+        rows: prompts
+            .iter()
+            .map(|prompt| (prompt.verb.clone(), prompt.path.clone()))
+            .collect(),
+    })
+}
+
+fn module_stats_section(
+    module_id: &str,
+    log_count: usize,
+    tool_count: usize,
+) -> Option<ModuleKeyValueSection> {
+    (log_count > 0).then(|| ModuleKeyValueSection {
+        header: "STATS · this session".to_string(),
+        rows: vec![
+            (
+                "log entries".to_string(),
+                format!("{log_count} from `{module_id}`"),
+            ),
+            ("tools bound".to_string(), tool_count.to_string()),
+        ],
+    })
+}
+
 fn module_stored_options(app: &ShellApp, tools: &[ModuleToolRow]) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for tool in tools {
@@ -165,9 +225,12 @@ mod tests {
         let model = focused_module_detail_model(&app).expect("focused module detail");
 
         assert_eq!(model.id, "sast");
-        assert!(!model.visible_tools.is_empty());
+        assert!(!model.tools_section.rows.is_empty());
+        assert_eq!(model.tools_section.header, "TOOLS");
+        assert!(model.tools_section.empty_message.is_none());
         assert!(model
-            .visible_tools
+            .tools_section
+            .rows
             .iter()
             .all(|tool| tool.cells[1] == "headless" || tool.cells[1] == "interactive"));
     }
@@ -177,5 +240,45 @@ mod tests {
         let app = ShellApp::new(V2Config::default(), None);
 
         assert!(focused_module_detail_model(&app).is_none());
+    }
+
+    #[test]
+    fn module_detail_model_shapes_options_section() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.focused_module = Some("sast".to_string());
+        app.option_store.set_value(
+            kuzushi_core::OptionScope::Session,
+            kuzushi_core::OptionTarget::Tool("sast:scan".to_string()),
+            "triage",
+            serde_json::json!(true),
+        );
+
+        let model = focused_module_detail_model(&app).expect("focused module detail");
+        let options = model.options_section.expect("options section");
+
+        assert_eq!(options.header, "OPTIONS · 1");
+        assert_eq!(
+            options.rows,
+            vec![("sast:scan::triage".to_string(), "true".to_string())]
+        );
+    }
+
+    #[test]
+    fn module_detail_model_shapes_prompt_section() {
+        let temp = tempfile::tempdir().unwrap();
+        let prompt_root = temp.path().join(".kuzushi/prompts/sast");
+        std::fs::create_dir_all(&prompt_root).unwrap();
+        std::fs::write(prompt_root.join("triage.md"), "triage").unwrap();
+        std::fs::write(prompt_root.join("system.md"), "system").unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.target = Some(temp.path().to_path_buf());
+        app.focused_module = Some("sast".to_string());
+
+        let model = focused_module_detail_model(&app).expect("focused module detail");
+        let prompts = model.prompts_section.expect("prompts section");
+
+        assert_eq!(prompts.header, "PROMPTS · 2");
+        assert_eq!(prompts.rows[0].0, "system");
+        assert_eq!(prompts.rows[1].0, "triage");
     }
 }

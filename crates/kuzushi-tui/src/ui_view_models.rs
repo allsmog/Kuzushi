@@ -136,7 +136,7 @@ pub(crate) use knowledge_base::{
 };
 pub(crate) use live_activity::{plain_live_activity_model, PlainLiveActivityModel};
 pub(crate) use module_detail::{
-    focused_module_detail_model, module_detail_model, ModuleDetailModel,
+    focused_module_detail_model, module_detail_model, ModuleDetailModel, ModuleKeyValueSection,
 };
 pub(crate) use module_progress::{
     module_progress_model, ModuleProgressKind, ModuleProgressModel, ModuleProgressRow,
