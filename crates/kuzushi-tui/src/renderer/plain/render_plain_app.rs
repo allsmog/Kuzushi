@@ -1,7 +1,7 @@
 use super::*;
 use crate::ui_view_models::{
-    prereq_prompt_model, transcript_model_from_log_index, PrereqPromptModel, PrereqPromptStepModel,
-    TranscriptRow,
+    live_activity_model, prereq_prompt_model, transcript_model_from_log_index, LiveActivityModel,
+    PrereqPromptModel, PrereqPromptStepModel, TranscriptRow,
 };
 
 pub fn render_plain_app(app: &ShellApp, width: usize) -> String {
@@ -110,8 +110,8 @@ fn plain_prereq_plan_lines(plan: &PrereqPromptModel, width: usize) -> Vec<String
 
 fn prepend_plain_activity_lines(app: &ShellApp, width: usize, lines: Vec<String>) -> Vec<String> {
     let mut prefix = Vec::new();
-    if let Some(activity) = app.live_activity.as_ref() {
-        prefix.extend(plain_live_activity_lines(activity, width));
+    if let Some(activity) = live_activity_model(app) {
+        prefix.extend(plain_live_activity_lines(&activity, width));
         prefix.push(String::new());
     }
     if let Some(plan) = prereq_prompt_model(app) {
@@ -124,10 +124,10 @@ fn prepend_plain_activity_lines(app: &ShellApp, width: usize, lines: Vec<String>
     prefix.into_iter().chain(lines).collect()
 }
 
-fn plain_live_activity_lines(activity: &LiveActivity, width: usize) -> Vec<String> {
+fn plain_live_activity_lines(activity: &LiveActivityModel, width: usize) -> Vec<String> {
     vec![
         plain_section_divider("LIVE ACTIVITY", width),
-        format!("phase: {}", activity.phase.label()),
+        format!("phase: {}", activity.phase_label),
         format!("subject: {}", activity.subject),
         format!("detail: {}", activity.detail),
     ]

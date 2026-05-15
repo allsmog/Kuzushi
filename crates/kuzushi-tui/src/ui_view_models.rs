@@ -26,6 +26,7 @@ mod help;
 mod home_cockpit;
 mod keybindings;
 mod knowledge_base;
+mod live_activity;
 mod module_detail;
 mod module_run;
 mod options;
@@ -84,6 +85,7 @@ pub(crate) use keybindings::footer_keybindings;
 pub(crate) use knowledge_base::{
     knowledge_base_model, KnowledgeBaseArtifactRow, KnowledgeBaseAttachmentRow, KnowledgeBaseModel,
 };
+pub(crate) use live_activity::{live_activity_model, LiveActivityModel};
 pub(crate) use module_detail::{module_detail_model, ModuleDetailModel};
 pub(crate) use module_run::{
     module_run_live_activity, module_run_summary, ModuleRunLiveActivity, ModuleRunSummary,
