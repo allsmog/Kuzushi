@@ -48,6 +48,7 @@ mod threat_stride;
 mod tools;
 mod transcript;
 mod view_status;
+mod workspace;
 pub(crate) use active_stage::active_stage_label;
 pub(crate) use actor_detail::{actor_detail_model, ActorDetailModel, ActorTranscriptRow};
 pub(crate) use advisory_chrome::{cost_cap_halt_model, throttle_banner_model, CostCapHaltModel};
@@ -111,6 +112,7 @@ pub(crate) use threat_stride::threat_stride_rollup_from_doc;
 pub(crate) use tools::{tools_model, ToolRow};
 pub(crate) use transcript::transcript_model;
 pub(crate) use view_status::view_status_segment;
+pub(crate) use workspace::{workspace_model, WorkspaceModel, WorkspaceRollupRow};
 
 pub use crate::{
     ActivitySession, OptionsFilter, OptionsView, PaneFocus, ReconSnapshot, ScanPanelState,

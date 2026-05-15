@@ -1,5 +1,7 @@
 use super::*;
-use crate::ui_view_models::{context_snapshot_model, ContextSnapshotDetails};
+use crate::ui_view_models::{
+    context_snapshot_model, workspace_model, ContextSnapshotDetails, WorkspaceModel,
+};
 
 pub(crate) fn plain_context_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
@@ -38,11 +40,12 @@ fn push_plain_context_details(lines: &mut Vec<String>, details: &ContextSnapshot
 
 pub(crate) fn plain_workspace_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
+    let model = workspace_model(app);
 
     lines.push(String::new());
     lines.push(plain_section_divider("WORKSPACE", width));
-    push_plain_workspace_summary(&mut lines, &app.workspace_view);
-    push_plain_workspace_empty_state(&mut lines, &app.workspace_view);
+    push_plain_workspace_summary(&mut lines, &model);
+    push_plain_workspace_empty_state(&mut lines, &model);
     lines.push(String::new());
     lines.push(
         "Next: workspace status, workspace export findings <path>.json, kuzushi pr-comment"
@@ -51,39 +54,17 @@ pub(crate) fn plain_workspace_lines(app: &ShellApp, width: usize) -> Vec<String>
     lines
 }
 
-fn push_plain_workspace_summary(lines: &mut Vec<String>, view: &crate::app::WorkspaceView) {
-    lines.push(format!("status: {}", view.status));
-    lines.push(format!(
-        "target: {}",
-        compact_path_or(view.root.as_deref(), "none")
-    ));
-    lines.push(format!(
-        "state: {}",
-        compact_path_or(view.state_dir.as_deref(), ".kuzushi/v2")
-    ));
-    lines.push(format!(
-        "findings db: {}",
-        compact_path_or(view.findings_db.as_deref(), ".kuzushi/v2/findings.sqlite3")
-    ));
-    lines.push(format!(
-        "findings: {}",
-        view.findings_count
-            .map(|count| count.to_string())
-            .unwrap_or_else(|| "unknown".to_string())
-    ));
-    lines.push(format!(
-        "last export: {}",
-        compact_path_or(view.last_export.as_deref(), "none")
-    ));
+fn push_plain_workspace_summary(lines: &mut Vec<String>, model: &WorkspaceModel) {
+    lines.push(format!("status: {}", model.status));
+    lines.push(format!("target: {}", model.target_label));
+    lines.push(format!("state: {}", model.state_label));
+    lines.push(format!("findings db: {}", model.findings_db_label));
+    lines.push(format!("findings: {}", model.findings_label));
+    lines.push(format!("last export: {}", model.last_export_label));
 }
 
-fn compact_path_or(path: Option<&std::path::Path>, fallback: &str) -> String {
-    path.map(|path| compact_target_path(&path.display().to_string()))
-        .unwrap_or_else(|| fallback.to_string())
-}
-
-fn push_plain_workspace_empty_state(lines: &mut Vec<String>, view: &crate::app::WorkspaceView) {
-    if view.root.is_none() {
+fn push_plain_workspace_empty_state(lines: &mut Vec<String>, model: &WorkspaceModel) {
+    if model.empty {
         lines.push(String::new());
         lines.push(
             "No active workspace. Next: scan <target> or kuzushi shell --target .".to_string(),
