@@ -192,7 +192,7 @@ const rules = [
     name: "TUI module run renderer reads module-run view model",
     roots: ["crates/kuzushi-tui/src/renderer/views/module/from_app.rs"],
     forbidden:
-      /app\.(?:target|live_activity|findings)\b|running_tool_name|module_run_target|module_run_stage|module_run_findings|run_label_without_id|ModuleRunSummary::from_app/,
+      /app\.(?:target|live_activity|findings|scan|spinner_phase)\b|ScanPanelState|running_tool_name|module_run_target|module_run_stage|module_run_findings|run_label_without_id|ModuleRunSummary::from_app/,
   },
   { name: "TUI chrome cards read chrome-card view models", roots: ["crates/kuzushi-tui/src/renderer/chrome/cards/render_threat_patch_card.rs", "crates/kuzushi-tui/src/renderer/chrome/cards/confirm_card_height.rs", "crates/kuzushi-tui/src/renderer/chrome/cards/render_plan_card.rs", "crates/kuzushi-tui/src/renderer/section_slot.rs"], forbidden: /\b(pending_threat_patch|serde_json|crate::app::ThreatPatch|pending_confirm|ConfirmKind|PendingConfirm|advisory\.pending_confirm|advisory\.throttle|advisory\.budget_halt|is_budget_halted|ThrottleAdvisory|crate::app::BudgetHalt)\b/ },
   { name: "TUI plan prereq and patch renderers read review view models", roots: ["crates/kuzushi-tui/src/renderer/chrome/cards/render_plan_card.rs", "crates/kuzushi-tui/src/renderer/chrome/cards/render_prereq_prompt_card.rs", "crates/kuzushi-tui/src/renderer/chrome/cards/render_threat_patch_card.rs", "crates/kuzushi-tui/src/renderer/plain/render_plain_app.rs", "crates/kuzushi-tui/src/renderer/views/patch/patch_lines.rs"], forbidden: /\b(pending_plan|PlanProposal|PlanChange|plan_change_skipped|plan_cursor_clamped|pending_prereq_prompt|PendingPrereqPrompt|PrereqPlanStep|pending_patch|PendingPatch)\b/ },

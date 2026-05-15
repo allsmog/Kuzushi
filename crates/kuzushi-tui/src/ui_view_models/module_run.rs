@@ -8,6 +8,8 @@ pub(crate) struct ModuleRunSummary {
     pub(crate) findings: usize,
     pub(crate) run: String,
     pub(crate) active_stage: String,
+    pub(crate) status: ModuleRunStatusKind,
+    pub(crate) spinner_phase: usize,
     pub(crate) scan_running: bool,
     pub(crate) scan_done: bool,
     pub(crate) has_scan: bool,
@@ -28,6 +30,15 @@ pub(crate) struct ModuleRunLiveActivity {
     pub(crate) detail: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModuleRunStatusKind {
+    Idle,
+    Running,
+    Aborting,
+    Failed,
+    Done,
+}
+
 pub(crate) fn module_run_summary(app: &ShellApp) -> ModuleRunSummary {
     let scan = app.scan.as_ref();
     let running_tool = app.running_tool_name().map(str::to_string);
@@ -39,6 +50,8 @@ pub(crate) fn module_run_summary(app: &ShellApp) -> ModuleRunSummary {
         findings: module_run_findings(app, scan),
         run: module_run_label(scan, running_tool.as_deref()),
         active_stage: module_run_active_stage(scan),
+        status: module_run_status(scan, running_tool.as_deref()),
+        spinner_phase: app.spinner_phase as usize,
         scan_running,
         scan_done: module_run_done(scan, scan_running),
         has_scan: scan.is_some(),
@@ -101,6 +114,20 @@ fn module_run_done(scan: Option<&ScanPanelState>, scan_running: bool) -> bool {
     scan.is_some() && !scan_running && scan.and_then(|scan| scan.error.as_ref()).is_none()
 }
 
+fn module_run_status(
+    scan: Option<&ScanPanelState>,
+    running_tool: Option<&str>,
+) -> ModuleRunStatusKind {
+    match scan {
+        Some(scan) if scan.running && scan.abort_requested => ModuleRunStatusKind::Aborting,
+        Some(scan) if scan.running => ModuleRunStatusKind::Running,
+        Some(scan) if scan.error.is_some() => ModuleRunStatusKind::Failed,
+        Some(_) => ModuleRunStatusKind::Done,
+        None if running_tool.is_some() => ModuleRunStatusKind::Running,
+        None => ModuleRunStatusKind::Idle,
+    }
+}
+
 fn run_label_without_id(has_scan: bool, running_tool: Option<&str>) -> String {
     if has_scan {
         "run pending".to_string()
@@ -132,6 +159,7 @@ mod tests {
         assert_eq!(summary.stage, "idle");
         assert_eq!(summary.findings, 0);
         assert_eq!(summary.run, "tool run");
+        assert_eq!(summary.status, ModuleRunStatusKind::Idle);
         assert!(!summary.has_scan);
         assert!(!summary.tool_is_running());
     }
@@ -163,8 +191,36 @@ mod tests {
         assert_eq!(summary.stage, "running: scanning");
         assert_eq!(summary.findings, 3);
         assert_eq!(summary.run, "run run-abcd");
+        assert_eq!(summary.status, ModuleRunStatusKind::Running);
         assert!(summary.scan_running);
         assert!(summary.has_scan);
+    }
+
+    #[test]
+    fn module_run_summary_reports_abort_and_failed_status() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.scan = Some(ScanPanelState {
+            run_id: None,
+            target: PathBuf::from("./demo"),
+            stage: "scanning".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: true,
+            error: None,
+        });
+
+        assert_eq!(
+            module_run_summary(&app).status,
+            ModuleRunStatusKind::Aborting
+        );
+
+        if let Some(scan) = &mut app.scan {
+            scan.running = false;
+            scan.abort_requested = false;
+            scan.error = Some("boom".to_string());
+        }
+
+        assert_eq!(module_run_summary(&app).status, ModuleRunStatusKind::Failed);
     }
 
     #[test]

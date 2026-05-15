@@ -9,7 +9,8 @@ use ratatui::Terminal;
 use crate::commands::{shell_command_specs, shell_help_examples, ShellCommandCategory};
 use crate::ui_view_models::{
     catalog_model, prompt_text, threat_dfd_nodes_from_doc, threat_scope_buckets_from_doc,
-    threat_story_rows_from_doc, threat_stride_rollup_from_doc, view_status_segment, RoutingMode,
+    threat_story_rows_from_doc, threat_stride_rollup_from_doc, view_status_segment,
+    ModuleRunStatusKind, RoutingMode,
 };
 
 use super::*;
@@ -687,17 +688,8 @@ fn module_playbooks_name_supported_run_and_scan_commands() {
 
 #[test]
 fn spinner_cycles_through_six_frames_by_log_length() {
-    let scan = crate::app::ScanPanelState {
-        run_id: None,
-        target: std::path::PathBuf::from("./demo"),
-        stage: "scanning".to_string(),
-        findings_count: 0,
-        running: true,
-        abort_requested: false,
-        error: None,
-    };
     let frames: Vec<&str> = (0..12)
-        .map(|tick| run_state_glyph(Some(&scan), false, tick))
+        .map(|tick| run_state_glyph(ModuleRunStatusKind::Running, tick))
         .collect();
     // First 6 ticks cover all 6 frames
     let unique: std::collections::BTreeSet<&&str> = frames.iter().take(6).collect();
@@ -718,21 +710,13 @@ fn spinner_cycles_through_six_frames_by_log_length() {
 
 #[test]
 fn spinner_shows_static_glyph_when_scan_idle_or_done() {
-    // Idle: no scan -> ●
-    assert_eq!(run_state_glyph(None, false, 0), "●");
-    assert_eq!(run_state_glyph(None, false, 99), "●");
-    assert_eq!(run_state_glyph(None, true, 0), SPINNER_FRAMES[0]);
-    // Done: scan present, not running, no error -> ✓
-    let done = crate::app::ScanPanelState {
-        run_id: None,
-        target: std::path::PathBuf::from("."),
-        stage: String::new(),
-        findings_count: 0,
-        running: false,
-        abort_requested: false,
-        error: None,
-    };
-    assert_eq!(run_state_glyph(Some(&done), false, 4), "✓");
+    assert_eq!(run_state_glyph(ModuleRunStatusKind::Idle, 0), "●");
+    assert_eq!(run_state_glyph(ModuleRunStatusKind::Idle, 99), "●");
+    assert_eq!(
+        run_state_glyph(ModuleRunStatusKind::Running, 0),
+        SPINNER_FRAMES[0]
+    );
+    assert_eq!(run_state_glyph(ModuleRunStatusKind::Done, 4), "✓");
 }
 
 #[test]
