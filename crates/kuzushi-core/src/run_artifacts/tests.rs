@@ -564,6 +564,30 @@ mod tests {
     }
 
     #[test]
+    fn tool_run_complete_records_contract_complete_result_envelope() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-result-envelope";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "context:build");
+
+        record_tool_run_started(record, &serde_json::json!({}));
+        record_tool_run_complete(record, &serde_json::json!({"ok": true}));
+
+        let result =
+            fs::read_to_string(run_dir(tmp.path(), run_id).join("result.json")).unwrap();
+        let output = serde_json::from_str::<serde_json::Value>(&result).unwrap();
+
+        assert_eq!(output["ok"], serde_json::json!(true));
+        assert_eq!(output["status"], serde_json::json!("completed"));
+        assert_eq!(
+            output["summary"],
+            serde_json::json!("context:build completed")
+        );
+        assert!(output["artifacts"].as_array().is_some());
+        assert!(output["warnings"].as_array().unwrap().is_empty());
+        assert!(output["errors"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
     fn skipped_tool_result_preserves_skipped_status_without_failure_handoff() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-skipped";
@@ -653,6 +677,11 @@ mod tests {
 
         let summary = load_run_summary(tmp.path(), run_id).unwrap();
         assert_eq!(summary.status, "failed");
+        let result =
+            fs::read_to_string(run_dir(tmp.path(), run_id).join("result.json")).unwrap();
+        let output = serde_json::from_str::<serde_json::Value>(&result).unwrap();
+        assert_eq!(output["status"], serde_json::json!("failed"));
+        assert_eq!(output["errors"][0], serde_json::json!("scanner failed"));
         let failures = load_run_failures(tmp.path(), run_id).unwrap();
         assert_eq!(failures.status, "failed");
         assert_eq!(

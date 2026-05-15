@@ -149,9 +149,13 @@ fn result_output_for_status(
 ) -> Value {
     if failure_like_status(status) {
         attach_failure_artifact(record, status, output, artifacts);
-        return output_with_run_fallback_context(record.target, record.run_id, output.clone());
+        return normalized_module_result(
+            record.tool,
+            status,
+            output_with_run_fallback_context(record.target, record.run_id, output.clone()),
+        );
     }
-    output.clone()
+    normalized_module_result(record.tool, status, output.clone())
 }
 
 fn apply_output_status(status: &str, mut summary: RunSummary) -> RunSummary {
