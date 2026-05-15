@@ -31,11 +31,16 @@ fn is_catalog_metadata_tool(name: &str) -> bool {
 
 fn ensure_contract_fields(object: &mut Map<String, Value>) {
     let original_status = object.get("status").cloned();
+    let original_summary = object.get("summary").cloned();
     let status = inferred_status(object);
     preserve_domain_status(object, original_status.as_ref());
+    preserve_domain_summary(object, original_summary.as_ref());
     object.insert("ok".to_string(), json!(inferred_ok(object, &status)));
     object.insert("status".to_string(), json!(status));
-    insert_missing(object, "summary", inferred_summary(object, &status));
+    object.insert(
+        "summary".to_string(),
+        inferred_summary(object, &status, original_summary.as_ref()),
+    );
     let artifacts = inferred_artifacts(object);
     object.insert("artifacts".to_string(), artifacts);
     object.insert(
@@ -90,13 +95,16 @@ fn canonical_status(status: &str) -> Option<&'static str> {
     }
 }
 
-fn inferred_summary(object: &Map<String, Value>, status: &str) -> Value {
-    object
-        .get("data")
-        .and_then(|data| data.get("summary"))
-        .cloned()
+fn inferred_summary(object: &Map<String, Value>, status: &str, summary: Option<&Value>) -> Value {
+    string_summary(summary)
+        .or_else(|| object.get("data").and_then(|data| string_summary(data.get("summary"))))
         .or_else(|| output_summary(object))
         .unwrap_or_else(|| json!(format!("tool {status}")))
+}
+
+fn string_summary(value: Option<&Value>) -> Option<Value> {
+    let summary = value?.as_str()?.trim();
+    (!summary.is_empty()).then(|| json!(summary))
 }
 
 fn output_summary(object: &Map<String, Value>) -> Option<Value> {
@@ -194,9 +202,24 @@ fn preserve_domain_status(object: &mut Map<String, Value>, status: Option<&Value
     }
 }
 
+fn preserve_domain_summary(object: &mut Map<String, Value>, summary: Option<&Value>) {
+    let Some(summary) = structured_summary_value(summary) else {
+        return;
+    };
+    let data = object.entry("data".to_string()).or_insert_with(|| json!({}));
+    if let Value::Object(data) = data {
+        data.entry("summary".to_string()).or_insert(summary);
+    }
+}
+
 fn unknown_status_value(status: Option<&Value>) -> Option<Value> {
     let status = status?.as_str()?;
     canonical_status(status).is_none().then(|| json!(status))
+}
+
+fn structured_summary_value(summary: Option<&Value>) -> Option<Value> {
+    let summary = summary?;
+    (!summary.is_string()).then(|| summary.clone())
 }
 
 fn message_array_field(object: &Map<String, Value>, primary: &str, alias: &str) -> Value {
@@ -219,10 +242,6 @@ fn message_value(value: &Value) -> Option<Value> {
         Value::Object(_) => Some(value.clone()),
         _ => None,
     }
-}
-
-fn insert_missing(object: &mut Map<String, Value>, key: &str, value: Value) {
-    object.entry(key.to_string()).or_insert(value);
 }
 
 const ARTIFACT_PATH_KEYS: [&str; 9] = [

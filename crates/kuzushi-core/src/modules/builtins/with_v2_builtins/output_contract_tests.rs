@@ -83,6 +83,27 @@ fn infers_summary_from_first_output_line() {
 }
 
 #[test]
+fn preserves_structured_domain_summary_under_data() {
+    let output = normalize_output_value(json!({
+        "summary": {"count": 2},
+        "data": {"target": "/repo"}
+    }));
+
+    assert_eq!(output["summary"], "tool completed");
+    assert_eq!(output["data"]["summary"], json!({"count": 2}));
+    assert_eq!(output["data"]["target"], "/repo");
+}
+
+#[test]
+fn uses_nested_string_summary_for_contract_summary() {
+    let output = normalize_output_value(json!({
+        "data": {"summary": "threat intel applied"}
+    }));
+
+    assert_eq!(output["summary"], "threat intel applied");
+}
+
+#[test]
 fn lifts_nested_artifact_map_to_contract_artifacts() {
     let output = normalize_output_value(json!({
         "data": {
