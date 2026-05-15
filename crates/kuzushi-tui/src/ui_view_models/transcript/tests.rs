@@ -1,0 +1,82 @@
+use super::*;
+
+#[test]
+fn transcript_model_splits_multiline_log_entries() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.log = vec![log_line("tool", "first\nsecond", 42)];
+
+    let model = transcript_model(&app, 10);
+
+    assert_eq!(
+        model.rows,
+        vec![
+            TranscriptRow {
+                prefix: "tool".to_string(),
+                body: "first".to_string(),
+                continuation: false,
+                time_secs: 42
+            },
+            TranscriptRow {
+                prefix: "tool".to_string(),
+                body: "second".to_string(),
+                continuation: true,
+                time_secs: 42
+            }
+        ]
+    );
+}
+
+#[test]
+fn transcript_model_tails_visible_rows_after_expansion() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.log = vec![
+        log_line("scan", "one", 1),
+        log_line("agent", "two\nthree", 2),
+    ];
+
+    let model = transcript_model(&app, 2);
+
+    assert_eq!(
+        model.rows,
+        vec![
+            TranscriptRow {
+                prefix: "agent".to_string(),
+                body: "two".to_string(),
+                continuation: false,
+                time_secs: 2
+            },
+            TranscriptRow {
+                prefix: "agent".to_string(),
+                body: "three".to_string(),
+                continuation: true,
+                time_secs: 2
+            }
+        ]
+    );
+}
+
+#[test]
+fn transcript_model_keeps_empty_log_body_as_one_row() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.log = vec![log_line("system", "", 0)];
+
+    let model = transcript_model(&app, 10);
+
+    assert_eq!(
+        model.rows,
+        vec![TranscriptRow {
+            prefix: "system".to_string(),
+            body: String::new(),
+            continuation: false,
+            time_secs: 0
+        }]
+    );
+}
+
+fn log_line(prefix: &str, body: &str, time_secs: u64) -> LogLine {
+    LogLine {
+        prefix: prefix.to_string(),
+        body: body.to_string(),
+        time_secs,
+    }
+}
