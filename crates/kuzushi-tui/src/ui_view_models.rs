@@ -13,6 +13,7 @@ mod failure_handoff;
 mod home_cockpit;
 mod module_detail;
 mod options;
+mod prompt;
 mod run_timeline;
 mod run_trace;
 mod threat_model;
@@ -27,6 +28,7 @@ pub(crate) use failure_handoff::failure_handoff_context;
 pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
 pub(crate) use module_detail::{module_detail_model, ModuleDetailModel};
 pub(crate) use options::{options_model, OptionRow, OptionsModelStatus};
+pub(crate) use prompt::prompt_brand;
 pub(crate) use run_timeline::{past_runs_model, PastRun, PastRunStatus};
 pub(crate) use run_trace::{
     replay_model, trace_model, ReplayModel, RunArtifactDetail, TraceModel, TraceStep,

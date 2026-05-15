@@ -222,6 +222,11 @@ const rules = [
     forbidden: /\bstd::env|oauth_provider_status|\.config\.runtime\.api_key_env/,
   },
   {
+    name: "TUI prompt renderer reads prompt view model",
+    roots: ["crates/kuzushi-tui/src/renderer/chrome/prompt/mod.rs"],
+    forbidden: /\bstd::env|KUZUSHI_CLI_NAME|binary_stem/,
+  },
+  {
     name: "TUI threat renderers read threat-model view models",
     roots: ["crates/kuzushi-tui/src/renderer/shared/threat_model/current_threat_model_doc.rs"],
     forbidden: /\b(load_persistent_threat_model|std::env|std::path|PathBuf|read_to_string)\b/,
