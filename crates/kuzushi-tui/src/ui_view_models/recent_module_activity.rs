@@ -1,32 +1,50 @@
 use crate::{LogLine, ReconSnapshot, ShellApp};
 use kuzushi_core::{AgenticSastReport, CarliniThreatHuntReport, ReconService, Severity};
 
-#[derive(Debug, Clone, PartialEq)]
+pub(crate) const MODULE_ACTIVITY_COLUMN_COUNT: usize = 4;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ModuleActivityModel {
     pub(crate) rows: Vec<ModuleActivityRow>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ModuleActivityRow {
-    Transcript {
-        prefix: String,
-        body: String,
-    },
-    ReconService {
-        host: String,
-        port: u16,
-        service: String,
-        banner: String,
-    },
-    ReconHost {
-        label: String,
-        state: String,
-    },
-    Finding {
-        severity: Severity,
-        rule_id: String,
-        location: String,
-    },
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModuleActivityKind {
+    Transcript,
+    ReconService,
+    ReconHost,
+    Finding,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ModuleActivityTone {
+    Default,
+    Critical,
+    High,
+    Medium,
+    Low,
+    Info,
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModuleActivityRow {
+    pub(crate) kind: ModuleActivityKind,
+    pub(crate) tone: ModuleActivityTone,
+    pub(crate) cells: [String; MODULE_ACTIVITY_COLUMN_COUNT],
+}
+
+impl ModuleActivityTone {
+    pub(crate) fn from_severity(severity: Severity) -> Self {
+        match severity {
+            Severity::Critical => Self::Critical,
+            Severity::High => Self::High,
+            Severity::Medium => Self::Medium,
+            Severity::Low => Self::Low,
+            Severity::Info => Self::Info,
+            Severity::Unknown => Self::Unknown,
+        }
+    }
 }
 
 pub(crate) fn recent_module_activity_model(
@@ -62,14 +80,12 @@ fn recon_activity_rows(
     let rows = recon_snapshot_rows(snapshot, take);
     (!rows.is_empty()).then_some(rows)
 }
-
 fn threat_hunt_activity_rows(app: &ShellApp, module_id: &str) -> Option<Vec<ModuleActivityRow>> {
     if module_id != "carlini-threat-hunt" && module_id != "offense-review" {
         return None;
     }
     app.carlini_snapshot.as_ref().map(carlini_snapshot_rows)
 }
-
 fn agentic_activity_rows(app: &ShellApp, module_id: &str) -> Option<Vec<ModuleActivityRow>> {
     if module_id != "agentic-sast" {
         return None;
@@ -78,49 +94,48 @@ fn agentic_activity_rows(app: &ShellApp, module_id: &str) -> Option<Vec<ModuleAc
         .as_ref()
         .map(agentic_sast_snapshot_rows)
 }
-
 fn recon_snapshot_rows(snapshot: &ReconSnapshot, take: usize) -> Vec<ModuleActivityRow> {
     if !snapshot.services.is_empty() {
         return recon_service_rows(snapshot, take);
     }
     recon_host_rows(snapshot, take)
 }
-
 fn recon_service_rows(snapshot: &ReconSnapshot, take: usize) -> Vec<ModuleActivityRow> {
     snapshot
         .services
         .iter()
         .take(take)
-        .map(|service| ModuleActivityRow::ReconService {
-            host: recon_service_host_label(snapshot, service),
-            port: service.port,
-            service: service
-                .name
-                .clone()
-                .unwrap_or_else(|| service.proto.clone()),
-            banner: service
-                .banner
-                .clone()
-                .unwrap_or_else(|| service.state.clone()),
+        .map(|service| {
+            recon_service_row(
+                recon_service_host_label(snapshot, service),
+                service.port,
+                service
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| service.proto.clone()),
+                service
+                    .banner
+                    .clone()
+                    .unwrap_or_else(|| service.state.clone()),
+            )
         })
         .collect()
 }
-
 fn recon_host_rows(snapshot: &ReconSnapshot, take: usize) -> Vec<ModuleActivityRow> {
     snapshot
         .hosts
         .iter()
         .take(take)
-        .map(|host| ModuleActivityRow::ReconHost {
-            label: host
-                .hostname
-                .clone()
-                .unwrap_or_else(|| host.address.clone()),
-            state: host.state.clone(),
+        .map(|host| {
+            recon_host_row(
+                host.hostname
+                    .clone()
+                    .unwrap_or_else(|| host.address.clone()),
+                host.state.clone(),
+            )
         })
         .collect()
 }
-
 fn recon_service_host_label(snapshot: &ReconSnapshot, service: &ReconService) -> String {
     snapshot
         .hosts
@@ -175,10 +190,12 @@ fn finding_rows(findings: &[kuzushi_core::Finding]) -> Vec<ModuleActivityRow> {
     findings
         .iter()
         .take(5)
-        .map(|finding| ModuleActivityRow::Finding {
-            severity: finding.severity,
-            rule_id: finding.rule_id.clone(),
-            location: format!("{}:{}", finding.file_path, finding.start_line),
+        .map(|finding| {
+            finding_row(
+                finding.severity,
+                finding.rule_id.clone(),
+                format!("{}:{}", finding.file_path, finding.start_line),
+            )
         })
         .collect()
 }
@@ -229,9 +246,44 @@ fn split_transcript_body(prefix: String, body: String) -> Vec<ModuleActivityRow>
 }
 
 fn transcript_row(prefix: &str, body: String) -> ModuleActivityRow {
-    ModuleActivityRow::Transcript {
-        prefix: prefix.to_string(),
-        body,
+    ModuleActivityRow {
+        kind: ModuleActivityKind::Transcript,
+        tone: ModuleActivityTone::Default,
+        cells: [prefix.to_string(), body, String::new(), String::new()],
+    }
+}
+
+fn recon_service_row(
+    host: String,
+    port: u16,
+    service: String,
+    banner: String,
+) -> ModuleActivityRow {
+    ModuleActivityRow {
+        kind: ModuleActivityKind::ReconService,
+        tone: ModuleActivityTone::Default,
+        cells: [host, port.to_string(), service, banner],
+    }
+}
+
+fn recon_host_row(label: String, state: String) -> ModuleActivityRow {
+    ModuleActivityRow {
+        kind: ModuleActivityKind::ReconHost,
+        tone: ModuleActivityTone::Default,
+        cells: [label, state, String::new(), String::new()],
+    }
+}
+
+fn finding_row(severity: Severity, rule_id: String, location: String) -> ModuleActivityRow {
+    ModuleActivityRow {
+        kind: ModuleActivityKind::Finding,
+        tone: ModuleActivityTone::from_severity(severity),
+        cells: [
+            severity.as_str().to_uppercase(),
+            rule_id,
+            location,
+            String::new(),
+        ],
     }
 }
 

@@ -11,11 +11,15 @@ fn recent_module_activity_model_prefers_recon_snapshot() {
 
     assert_eq!(
         model.rows.first(),
-        Some(&ModuleActivityRow::ReconService {
-            host: "acme-checkout.com".to_string(),
-            port: 443,
-            service: "https".to_string(),
-            banner: "nginx/1.24".to_string(),
+        Some(&ModuleActivityRow {
+            kind: ModuleActivityKind::ReconService,
+            tone: ModuleActivityTone::Default,
+            cells: [
+                "acme-checkout.com".to_string(),
+                "443".to_string(),
+                "https".to_string(),
+                "nginx/1.24".to_string()
+            ],
         })
     );
 }
@@ -33,9 +37,15 @@ fn recent_module_activity_model_falls_back_to_log() {
     assert_eq!(model.rows.len(), 2);
     assert_eq!(
         model.rows.first(),
-        Some(&ModuleActivityRow::Transcript {
-            prefix: "result".to_string(),
-            body: "recon:nmap discovered 1 host".to_string(),
+        Some(&ModuleActivityRow {
+            kind: ModuleActivityKind::Transcript,
+            tone: ModuleActivityTone::Default,
+            cells: [
+                "result".to_string(),
+                "recon:nmap discovered 1 host".to_string(),
+                String::new(),
+                String::new()
+            ],
         })
     );
 }
