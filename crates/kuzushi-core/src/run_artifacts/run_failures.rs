@@ -40,6 +40,7 @@ pub struct FailureToLlmContext {
 const CANONICAL_FAILURE_ARTIFACTS: &[&str] = &[
     "run.json",
     "events.jsonl",
+    "trace.jsonl",
     "context.json",
     "attack-surface.json",
     "threat-model.json",
@@ -47,6 +48,7 @@ const CANONICAL_FAILURE_ARTIFACTS: &[&str] = &[
     "findings.json",
     "proof.json",
     "report.md",
+    "artifacts.json",
 ];
 
 const FOLLOW_UP_RUN_FILES: &[&str] = &[

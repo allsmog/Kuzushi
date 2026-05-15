@@ -235,7 +235,11 @@ mod tests {
         );
         assert_eq!(context.failed_stage, "context:build");
         assert_eq!(context.cause, "LLM enrichment is unsupported");
+        assert!(context.missing_artifacts.contains(&"trace.jsonl".to_string()));
         assert!(context.missing_artifacts.contains(&"context.json".to_string()));
+        assert!(!context
+            .missing_artifacts
+            .contains(&"artifacts.json".to_string()));
         assert!(context
             .recovery_options
             .iter()
