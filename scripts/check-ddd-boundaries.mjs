@@ -136,6 +136,7 @@ const rules = [
     name: "TUI view models and views do not execute modules",
     roots: [
       "crates/kuzushi-tui/src/ui_view_models.rs",
+      "crates/kuzushi-tui/src/ui_view_models",
       "crates/kuzushi-tui/src/ui_views.rs",
       "crates/kuzushi-tui/src/ui_theme.rs",
     ],
@@ -178,6 +179,12 @@ const rules = [
     roots: ["crates/kuzushi-tui/src/renderer/views/module/module_lines.rs"],
     forbidden:
       /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\.registry\.modules\(|\.tools\(\)|\.metadata\(\)/,
+  },
+  {
+    name: "TUI catalog renderer reads catalog view model",
+    roots: ["crates/kuzushi-tui/src/renderer/views/catalog/catalog_lines"],
+    forbidden:
+      /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\bModuleKind\b|\.registry\.modules\(|\.tools\(\)|\.metadata\(\)/,
   },
   {
     name: "TUI threat renderers read threat-model view models",

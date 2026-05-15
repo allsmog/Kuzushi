@@ -1875,13 +1875,14 @@ fn viewport_tools_remain_navigable_at_24_rows() {
 #[test]
 fn viewport_expanded_modules_remain_navigable_at_24_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    let last_defense_module = app
-        .registry
-        .modules()
-        .filter(|module| module_category(module.metadata().kind).0 == "DEFENSE")
+    let last_defense_module = crate::ui_view_models::catalog_model(&app)
+        .groups
+        .iter()
+        .find(|group| group.category == "DEFENSE")
+        .unwrap()
+        .rows
         .last()
         .unwrap()
-        .metadata()
         .id
         .clone();
     app.shell_view = ShellView::Catalog;

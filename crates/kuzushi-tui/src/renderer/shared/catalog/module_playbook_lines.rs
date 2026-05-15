@@ -1,72 +1,135 @@
 use super::*;
 
+const MODULE_PLAYBOOKS: &[(&str, ModulePlaybook)] = &[
+    (
+        "context",
+        ModulePlaybook {
+            run: "context build or run . writes .kuzushi/context-snapshot.json",
+            needs: "target workspace",
+            output: ".kuzushi/context-snapshot.json",
+            inspect: "context status · context regen repo",
+        },
+    ),
+    (
+        "recon",
+        ModulePlaybook {
+            run: "run nmap, subdomain, or http-fingerprint with a target",
+            needs: "target host or active workspace",
+            output: "recon notes and optional findings",
+            inspect: "workspace · findings · use threat-model",
+        },
+    ),
+    (
+        "threat-model",
+        ModulePlaybook {
+            run: "threats regen proposes a STRIDE / DFD patch; run . dispatches threat-model:build",
+            needs: "target, context, explicit model",
+            output: ".kuzushi/threat-model.json",
+            inspect: "threats summary · threats edit · threats regen",
+        },
+    ),
+    (
+        "sast",
+        ModulePlaybook {
+            run: "scan runs configured scanners; run . dispatches sast:scan",
+            needs: "target, scanner/task config",
+            output: ".kuzushi/v2/findings.sqlite3",
+            inspect: "tasks · findings · use triage",
+        },
+    ),
+    (
+        "carlini-threat-hunt",
+        ModulePlaybook {
+            run: "run . after threat-model:build to start adversarial actor hunts",
+            needs: "target, threat model, explicit model",
+            output: "threat-hunt runs and promoted findings",
+            inspect: "show trace · findings · use verify",
+        },
+    ),
+    (
+        "agentic-sast",
+        ModulePlaybook {
+            run: "run . or run agentic-sast:scan starts dataflow and variant hunting agents",
+            needs: "target, context, explicit model",
+            output: "agentic traces and promoted findings",
+            inspect: "findings · show trace · use verify",
+        },
+    ),
+];
+
+const DEFAULT_PLAYBOOK: ModulePlaybook = ModulePlaybook {
+    run: "run . to dispatch the primary tool for this module",
+    needs: "tool-specific options; inspect options .",
+    output: "structured result or artifact when emitted",
+    inspect: "options . · prompts · tune · back",
+};
+
+#[derive(Clone, Copy)]
+struct ModulePlaybook {
+    run: &'static str,
+    needs: &'static str,
+    output: &'static str,
+    inspect: &'static str,
+}
+
 pub(crate) fn module_playbook_lines(
     module_id: &str,
     primary_tool: &str,
     width: u16,
 ) -> Vec<Line<'static>> {
     let mut lines = vec![divider("NEXT", width)];
-    let (run, needs, output, inspect) = match module_id {
-        "context" => (
-            "context build or run . writes .kuzushi/context-snapshot.json",
-            "target workspace",
-            ".kuzushi/context-snapshot.json",
-            "context status · context regen repo",
-        ),
-        "recon" => (
-            "run nmap, subdomain, or http-fingerprint with a target",
-            "target host or active workspace",
-            "recon notes and optional findings",
-            "workspace · findings · use threat-model",
-        ),
-        "threat-model" => (
-            "threats regen proposes a STRIDE / DFD patch; run . dispatches threat-model:build",
-            "target, context, explicit model",
-            ".kuzushi/threat-model.json",
-            "threats summary · threats edit · threats regen",
-        ),
-        "sast" => (
-            "scan runs configured scanners; run . dispatches sast:scan",
-            "target, scanner/task config",
-            ".kuzushi/v2/findings.sqlite3",
-            "tasks · findings · use triage",
-        ),
-        "carlini-threat-hunt" => (
-            "run . after threat-model:build to start adversarial actor hunts",
-            "target, threat model, explicit model",
-            "threat-hunt runs and promoted findings",
-            "show trace · findings · use verify",
-        ),
-        "agentic-sast" => (
-            "run . or run agentic-sast:scan starts dataflow and variant hunting agents",
-            "target, context, explicit model",
-            "agentic traces and promoted findings",
-            "findings · show trace · use verify",
-        ),
-        _ => (
-            "run . to dispatch the primary tool for this module",
-            "tool-specific options; inspect options .",
-            "structured result or artifact when emitted",
-            "options . · prompts · tune · back",
-        ),
-    };
-    let resolution = if primary_tool == "no-tool" {
-        "run . has no target because this module exposes no shell tool".to_string()
-    } else {
-        format!("run . -> {primary_tool} (shell); terminal: kuzushi --target . run {primary_tool} --input '{{}}'")
-    };
+    let playbook = module_playbook(module_id);
+    append_run_rows(&mut lines, primary_tool, playbook, width);
+    append_help_row(&mut lines, playbook.inspect);
+    lines
+}
+
+fn module_playbook(module_id: &str) -> ModulePlaybook {
+    MODULE_PLAYBOOKS
+        .iter()
+        .find_map(|(id, playbook)| (*id == module_id).then_some(*playbook))
+        .unwrap_or(DEFAULT_PLAYBOOK)
+}
+
+fn append_run_rows(
+    lines: &mut Vec<Line<'static>>,
+    primary_tool: &str,
+    playbook: ModulePlaybook,
+    width: u16,
+) {
+    let resolution = run_resolution(primary_tool);
     lines.push(transcript_line(
         "run .",
         &fit(&resolution, width as usize),
         false,
     ));
-    lines.push(transcript_line("tool", &fit(run, width as usize), false));
-    lines.push(transcript_line("needs", &fit(needs, width as usize), false));
     lines.push(transcript_line(
-        "output",
-        &fit(output, width as usize),
+        "tool",
+        &fit(playbook.run, width as usize),
         false,
     ));
+    lines.push(transcript_line(
+        "needs",
+        &fit(playbook.needs, width as usize),
+        false,
+    ));
+    lines.push(transcript_line(
+        "output",
+        &fit(playbook.output, width as usize),
+        false,
+    ));
+}
+
+fn run_resolution(primary_tool: &str) -> String {
+    if primary_tool == "no-tool" {
+        return "run . has no target because this module exposes no shell tool".to_string();
+    }
+    format!(
+        "run . -> {primary_tool} (shell); terminal: kuzushi --target . run {primary_tool} --input '{{}}'"
+    )
+}
+
+fn append_help_row(lines: &mut Vec<Line<'static>>, inspect: &str) {
     // The `help` line is a `cmd · cmd · cmd` list — accent each command
     // and tint separators subtle, matching `command_list_line`.  Keep
     // the leading ` · ` glyph + `help ` label so the prefix still scans
@@ -84,29 +147,4 @@ pub(crate) fn module_playbook_lines(
         spans.push(Span::styled((*cmd).to_string(), theme::accent()));
     }
     lines.push(Line::from(spans));
-    lines
-}
-
-pub(crate) fn catalog_module_category(id: &str, kind: ModuleKind) -> &'static str {
-    match id {
-        "semgrep"
-        | "sast"
-        | "codeql"
-        | "agentic-sast"
-        | "carlini-threat-hunt"
-        | "secret-scan"
-        | "iac-scan"
-        | "dep-hygiene"
-        | "taint-iris"
-        | "taint-iris-next"
-        | "systems-hunt"
-        | "chrome-rce"
-        | "prompt-armor"
-        | "vuln-scout"
-        | "tob" => "OFFENSE",
-        "context" | "context-lite" | "recon" | "threat-model" | "randori" | "x-ray" | "ndiff"
-        | "workspace" => "INTEL",
-        "triage" | "verify" | "patch" | "findings" => "DEFENSE",
-        _ => module_category(kind).0,
-    }
 }

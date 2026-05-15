@@ -7,6 +7,7 @@ use crate::ShellApp;
 use std::path::{Path, PathBuf};
 
 mod attack_surface;
+mod catalog;
 mod failure_handoff;
 mod home_cockpit;
 mod module_detail;
@@ -14,6 +15,7 @@ mod run_timeline;
 mod run_trace;
 mod threat_model;
 pub(crate) use attack_surface::{attack_surface_risk_model, AttackSurfaceRiskModel};
+pub(crate) use catalog::{catalog_model, CatalogActionModule, CatalogModel, CatalogModuleGroup};
 pub(crate) use failure_handoff::failure_handoff_context;
 pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
 pub(crate) use module_detail::{module_detail_model, ModuleDetailModel};
