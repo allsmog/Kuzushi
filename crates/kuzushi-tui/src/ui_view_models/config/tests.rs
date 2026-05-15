@@ -24,3 +24,14 @@ fn config_model_reports_session_cost_when_available() {
 
     assert_eq!(model.cost, "session $0.0456; last tool $0.0123");
 }
+
+#[test]
+fn config_model_preserves_explicit_reasoning_override() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.session_thinking_level = Some("xhigh".to_string());
+
+    let model = config_model(&app);
+
+    assert_eq!(model.reasoning, "xhigh");
+    assert_eq!(model.reasoning_override, Some("xhigh".to_string()));
+}

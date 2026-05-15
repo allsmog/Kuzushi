@@ -1,12 +1,16 @@
 use super::*;
-use crate::ui_view_models::auth_provider_rows;
+use crate::ui_view_models::{
+    auth_provider_rows, config_model, cost_model, ConfigModel, CostBudgetStatus, CostModel,
+};
 
 pub(crate) fn auth_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
+    let config = config_model(app);
+    let cost = cost_model(app);
     lines.push(blank());
     push_auth_provider_section(&mut lines, app, area);
-    push_auth_model_section(&mut lines, app, area);
-    push_auth_spend_section(&mut lines, app, area);
+    push_auth_model_section(&mut lines, &config, area);
+    push_auth_spend_section(&mut lines, &cost, area);
     push_auth_commands(&mut lines, area);
     lines
 }
@@ -20,17 +24,10 @@ fn push_auth_provider_section(lines: &mut Vec<Line<'static>>, app: &ShellApp, ar
     lines.push(blank());
 }
 
-fn push_auth_model_section(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) {
+fn push_auth_model_section(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area: Rect) {
     lines.push(divider("MODEL · effective", area.width));
-    let model = app
-        .config
-        .model
-        .as_deref()
-        .map(crate::app::display_model_selector)
-        .unwrap_or_else(|| "unconfigured".to_string());
-    let backend = crate::app::runtime_backend_label(&app.config);
-    lines.push(auth_current_model_line(&model, backend));
-    if let Some(reasoning) = app.session_thinking_level.as_deref() {
+    lines.push(auth_current_model_line(&model.model, &model.backend));
+    if let Some(reasoning) = model.reasoning_override.as_deref() {
         lines.push(Line::from(vec![
             Span::raw(" "),
             Span::styled("reasoning ", theme::muted()),
@@ -54,16 +51,14 @@ fn auth_current_model_line(model: &str, backend: &str) -> Line<'static> {
     ])
 }
 
-fn push_auth_spend_section(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) {
+fn push_auth_spend_section(lines: &mut Vec<Line<'static>>, model: &CostModel, area: Rect) {
     lines.push(divider("SPEND · this session", area.width));
-    let session_cost = format_session_cost(app.session_cost_usd);
-    let last_tool = app
-        .last_tool_cost_usd
-        .map(|c| format!("${c:.4}"))
-        .unwrap_or_else(|| "—".to_string());
-    lines.push(auth_spend_line(session_cost, last_tool));
-    if let Some(budget) = app.session_budget_usd {
-        lines.push(auth_budget_line(app.session_cost_usd, budget));
+    lines.push(auth_spend_line(
+        model.session_text.clone(),
+        model.last_tool_text.clone(),
+    ));
+    if let Some(budget) = &model.budget_status {
+        lines.push(auth_budget_line(budget));
     }
     lines.push(blank());
 }
@@ -79,13 +74,8 @@ fn auth_spend_line(session_cost: String, last_tool: String) -> Line<'static> {
     ])
 }
 
-fn auth_budget_line(session_cost_usd: f64, budget: f64) -> Line<'static> {
-    let pct = if budget > 0.0 {
-        (session_cost_usd / budget * 100.0).round() as usize
-    } else {
-        0
-    };
-    let pct_style = if pct >= 85 {
+fn auth_budget_line(budget: &CostBudgetStatus) -> Line<'static> {
+    let pct_style = if budget.percent >= 85 {
         theme::warn()
     } else {
         theme::muted()
@@ -93,9 +83,9 @@ fn auth_budget_line(session_cost_usd: f64, budget: f64) -> Line<'static> {
     Line::from(vec![
         Span::raw(" "),
         Span::styled("budget    ", theme::muted()),
-        Span::styled(format!("${budget:.2}"), theme::primary()),
+        Span::styled(budget.budget_text.clone(), theme::primary()),
         Span::styled("   · ", theme::subtle()),
-        Span::styled(format!("{pct}%"), pct_style),
+        Span::styled(format!("{}%", budget.percent), pct_style),
     ])
 }
 
