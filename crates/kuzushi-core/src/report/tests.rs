@@ -33,6 +33,22 @@ fn builds_markdown_report_from_latest_completed_non_report_run() {
     write_run_artifact_json(
         temp.path(),
         "run-source",
+        "threat-model.json",
+        "threat model",
+        &json!({
+            "methodology": "stride",
+            "dfd": {
+                "nodes": [{"id": "app"}, {"id": "data-store"}],
+                "flows": [{"id": "flow-data-store"}],
+                "trustBoundaries": [{"id": "tb-public-http"}]
+            },
+            "threats": [{"id": "T-001"}, {"id": "T-002"}]
+        }),
+    )
+    .unwrap();
+    write_run_artifact_json(
+        temp.path(),
+        "run-source",
         "attack-surface.json",
         "attack surface",
         &json!({
@@ -68,6 +84,9 @@ fn builds_markdown_report_from_latest_completed_non_report_run() {
     assert!(report.report_markdown.contains("artifacts.json: present"));
     assert!(report.report_markdown.contains(
         "attack-surface.json: present - 4 surface(s), 2 high risk, max 98, tiers critical=1, high=1, medium=2"
+    ));
+    assert!(report.report_markdown.contains(
+        "threat-model.json: present - methodology stride, 2 threat(s), DFD nodes=2, flows=1, boundaries=1"
     ));
     assert!(report.report_markdown.contains("findings.json: present"));
     assert!(report.report_markdown.contains("events.jsonl: present - 1 line(s)"));

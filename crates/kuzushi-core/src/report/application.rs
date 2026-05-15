@@ -193,7 +193,47 @@ fn text_summary(value: &Value) -> Option<String> {
         .get("summary")
         .and_then(Value::as_str)
         .map(str::to_string)
+        .or_else(|| threat_model_summary(value))
         .or_else(|| attack_surface_summary(value))
+}
+
+fn threat_model_summary(value: &Value) -> Option<String> {
+    let document = value.get("document").unwrap_or(value);
+    let threats = array_len(document.get("threats"));
+    let dfd = document.get("dfd");
+    let nodes = array_len(dfd.and_then(|value| value.get("nodes")));
+    let flows = array_len(dfd.and_then(|value| value.get("flows")));
+    let boundaries = array_len(dfd.and_then(|value| value.get("trustBoundaries")));
+    if threats.is_none() && nodes.is_none() {
+        return None;
+    }
+    let mut parts = methodology_segment(document).into_iter().collect::<Vec<_>>();
+    parts.push(format!("{} threat(s)", threats.unwrap_or_default()));
+    parts.extend(dfd_segments(nodes, flows, boundaries));
+    Some(parts.join(", "))
+}
+
+fn methodology_segment(document: &Value) -> Option<String> {
+    document
+        .get("methodology")
+        .and_then(Value::as_str)
+        .map(|methodology| format!("methodology {methodology}"))
+}
+
+fn dfd_segments(
+    nodes: Option<usize>,
+    flows: Option<usize>,
+    boundaries: Option<usize>,
+) -> Vec<String> {
+    vec![
+        format!("DFD nodes={}", nodes.unwrap_or_default()),
+        format!("flows={}", flows.unwrap_or_default()),
+        format!("boundaries={}", boundaries.unwrap_or_default()),
+    ]
+}
+
+fn array_len(value: Option<&Value>) -> Option<usize> {
+    value.and_then(Value::as_array).map(Vec::len)
 }
 
 fn attack_surface_summary(value: &Value) -> Option<String> {
