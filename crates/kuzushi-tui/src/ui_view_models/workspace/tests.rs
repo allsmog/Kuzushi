@@ -52,6 +52,52 @@ fn workspace_model_projects_workspace_summary_and_rollup() {
     assert_eq!(model.rollup_rows[3].count, 1);
 }
 
+#[test]
+fn plain_workspace_model_projects_missing_workspace_rows() {
+    let app = ShellApp::new(V2Config::default(), None);
+
+    let model = plain_workspace_model(&app);
+
+    assert_eq!(model.title, "WORKSPACE");
+    assert!(model.summary_rows.contains(&"target: none".to_string()));
+    assert!(model
+        .summary_rows
+        .contains(&"findings db: .kuzushi/v2/findings.sqlite3".to_string()));
+    assert!(model.empty_rows.contains(
+        &"No active workspace. Next: scan <target> or kuzushi shell --target .".to_string()
+    ));
+    assert_eq!(
+        model.next_hint,
+        "Next: workspace status, workspace export findings <path>.json, kuzushi pr-comment"
+    );
+}
+
+#[test]
+fn plain_workspace_model_projects_active_workspace_rows() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.workspace_view = crate::app::WorkspaceView {
+        root: Some(PathBuf::from("/tmp/kuzushi-demo")),
+        state_dir: Some(PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v2")),
+        findings_db: Some(PathBuf::from(
+            "/tmp/kuzushi-demo/.kuzushi/v2/findings.sqlite3",
+        )),
+        findings_count: Some(3),
+        last_export: Some(PathBuf::from("/tmp/findings.json")),
+        status: "workspace ready".to_string(),
+    };
+
+    let model = plain_workspace_model(&app);
+
+    assert!(model
+        .summary_rows
+        .contains(&"status: workspace ready".to_string()));
+    assert!(model
+        .summary_rows
+        .contains(&"target: ./kuzushi-demo".to_string()));
+    assert!(model.summary_rows.contains(&"findings: 3".to_string()));
+    assert!(model.empty_rows.is_empty());
+}
+
 fn finding_with_severity(severity: Severity) -> Finding {
     Finding::new_semgrep("rule.demo", "src/lib.rs", 1, None, severity, "demo")
 }
