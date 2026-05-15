@@ -1,7 +1,7 @@
 use crate::ShellApp;
 use kuzushi_core::Severity;
 
-pub(crate) const THREAT_STORY_COLUMN_COUNT: usize = 5;
+const THREAT_STORY_VISIBLE_LIMIT: usize = 8;
 
 type StorySpec = (
     &'static str,
@@ -43,9 +43,22 @@ const CANONICAL_STORIES: [StorySpec; 4] = [
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ThreatStoryModel {
+    pub(crate) header: String,
+    pub(crate) rows: Vec<ThreatStoryRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ThreatStoryRow {
     pub(crate) tone: ThreatStoryTone,
-    pub(crate) cells: [String; THREAT_STORY_COLUMN_COUNT],
+    pub(crate) cells: [String; 3],
+    pub(crate) details: Vec<ThreatStoryDetail>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ThreatStoryDetail {
+    pub(crate) label: &'static str,
+    pub(crate) value: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -82,18 +95,18 @@ impl ThreatStoryTone {
     }
 }
 
-pub(crate) fn threat_story_rows(app: &ShellApp) -> Vec<ThreatStoryRow> {
+pub(crate) fn threat_story_model(app: &ShellApp) -> ThreatStoryModel {
     super::threat_model_doc(app)
         .as_ref()
-        .and_then(threat_story_rows_from_doc)
-        .unwrap_or_else(canonical_story_rows)
+        .and_then(threat_story_model_from_doc)
+        .unwrap_or_else(canonical_story_model)
 }
 
-pub(crate) fn threat_story_rows_from_doc(doc: &serde_json::Value) -> Option<Vec<ThreatStoryRow>> {
+pub(crate) fn threat_story_model_from_doc(doc: &serde_json::Value) -> Option<ThreatStoryModel> {
     let threats = non_empty_threats(doc)?;
     let mut rows: Vec<ThreatStoryRow> = threats.iter().filter_map(story_from_threat).collect();
     rows.sort_by_key(|story| std::cmp::Reverse(story.tone.rank()));
-    Some(rows)
+    Some(threat_story_model_from_rows(rows))
 }
 
 fn non_empty_threats(doc: &serde_json::Value) -> Option<&[serde_json::Value]> {
@@ -151,8 +164,8 @@ fn format_affected_file(file: &serde_json::Value) -> String {
     }
 }
 
-fn canonical_story_rows() -> Vec<ThreatStoryRow> {
-    CANONICAL_STORIES
+fn canonical_story_model() -> ThreatStoryModel {
+    let rows = CANONICAL_STORIES
         .into_iter()
         .map(|(id, severity, title, attack, location)| {
             threat_story_row(
@@ -163,7 +176,16 @@ fn canonical_story_rows() -> Vec<ThreatStoryRow> {
                 location.to_string(),
             )
         })
-        .collect()
+        .collect();
+    threat_story_model_from_rows(rows)
+}
+
+fn threat_story_model_from_rows(rows: Vec<ThreatStoryRow>) -> ThreatStoryModel {
+    let story_count = rows.len();
+    ThreatStoryModel {
+        header: format!("ATTACKER STORIES · {story_count}"),
+        rows: rows.into_iter().take(THREAT_STORY_VISIBLE_LIMIT).collect(),
+    }
 }
 
 fn threat_story_row(
@@ -175,14 +197,23 @@ fn threat_story_row(
 ) -> ThreatStoryRow {
     ThreatStoryRow {
         tone: ThreatStoryTone::from_severity(severity),
-        cells: [
-            id,
-            severity.as_str().to_uppercase(),
-            title,
-            attack,
-            location,
-        ],
+        cells: [id, severity.as_str().to_uppercase(), title],
+        details: story_details(attack, location),
     }
+}
+
+fn story_details(attack: String, location: String) -> Vec<ThreatStoryDetail> {
+    [
+        story_detail("attack ", attack),
+        story_detail("loc    ", location),
+    ]
+    .into_iter()
+    .flatten()
+    .collect()
+}
+
+fn story_detail(label: &'static str, value: String) -> Option<ThreatStoryDetail> {
+    (!value.is_empty()).then_some(ThreatStoryDetail { label, value })
 }
 
 #[cfg(test)]
@@ -191,7 +222,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn threat_story_rows_from_doc_sorts_by_impact_severity() {
+    fn threat_story_model_from_doc_sorts_by_impact_severity() {
         let doc = json!({
             "threats": [
                 {"id": "T-001", "title": "low risk", "impact": "low", "category": "spoofing", "attackVector": "vec1"},
@@ -201,21 +232,45 @@ mod tests {
             ]
         });
 
-        let stories = threat_story_rows_from_doc(&doc).expect("non-empty stories");
+        let model = threat_story_model_from_doc(&doc).expect("non-empty stories");
 
-        assert_eq!(stories.len(), 3);
-        assert_eq!(stories[0].cells[0], "T-002");
-        assert_eq!(stories[0].tone, ThreatStoryTone::Critical);
-        assert_eq!(stories[0].cells[4], "src/api.rs:42");
-        assert_eq!(stories[1].cells[0], "T-003");
-        assert_eq!(stories[1].tone, ThreatStoryTone::High);
-        assert_eq!(stories[2].cells[0], "T-001");
+        assert_eq!(model.header, "ATTACKER STORIES · 3");
+        assert_eq!(model.rows.len(), 3);
+        assert_eq!(model.rows[0].cells[0], "T-002");
+        assert_eq!(model.rows[0].tone, ThreatStoryTone::Critical);
+        assert_eq!(model.rows[0].details[1].value, "src/api.rs:42");
+        assert_eq!(model.rows[1].cells[0], "T-003");
+        assert_eq!(model.rows[1].tone, ThreatStoryTone::High);
+        assert_eq!(model.rows[2].cells[0], "T-001");
     }
 
     #[test]
-    fn threat_story_rows_from_doc_returns_none_without_threats() {
-        assert!(threat_story_rows_from_doc(&json!({})).is_none());
-        assert!(threat_story_rows_from_doc(&json!({"threats": []})).is_none());
-        assert!(threat_story_rows_from_doc(&json!({"threats": null})).is_none());
+    fn threat_story_model_from_doc_caps_visible_rows() {
+        let doc = json!({
+            "threats": [
+                {"id": "T-001", "title": "one", "impact": "high"},
+                {"id": "T-002", "title": "two", "impact": "high"},
+                {"id": "T-003", "title": "three", "impact": "high"},
+                {"id": "T-004", "title": "four", "impact": "high"},
+                {"id": "T-005", "title": "five", "impact": "high"},
+                {"id": "T-006", "title": "six", "impact": "high"},
+                {"id": "T-007", "title": "seven", "impact": "high"},
+                {"id": "T-008", "title": "eight", "impact": "high"},
+                {"id": "T-009", "title": "nine", "impact": "high"}
+            ]
+        });
+
+        let model = threat_story_model_from_doc(&doc).expect("non-empty stories");
+
+        assert_eq!(model.header, "ATTACKER STORIES · 9");
+        assert_eq!(model.rows.len(), 8);
+        assert_eq!(model.rows[7].cells[0], "T-008");
+    }
+
+    #[test]
+    fn threat_story_model_from_doc_returns_none_without_threats() {
+        assert!(threat_story_model_from_doc(&json!({})).is_none());
+        assert!(threat_story_model_from_doc(&json!({"threats": []})).is_none());
+        assert!(threat_story_model_from_doc(&json!({"threats": null})).is_none());
     }
 }
