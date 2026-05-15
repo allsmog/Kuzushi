@@ -5,8 +5,8 @@ use kuzushi_core::{
     LoopHistoryEntry, TriageOutcome, TriageRequest, TriageVerdict,
 };
 
-use super::bridge_payloads::BridgeRequest;
-use super::bridge_process::run_bridge;
+use super::bridge_payloads::{BridgeRequest, BridgeResponse};
+use super::bridge_process::{public_bridge_error, run_bridge};
 use super::next_step_bridge::next_step_blocking as run_next_step_blocking;
 use super::next_step_bridge::preflight_tool_loop_blocking as run_preflight_tool_loop_blocking;
 use super::runtime_config::PiAgentCoreRuntime;
@@ -89,32 +89,60 @@ impl AgentRuntime for PiAgentCoreRuntime {
 fn run_bridge_with_transport_retries(
     command: &[String],
     request: BridgeRequest,
-) -> Result<super::bridge_payloads::BridgeResponse> {
+) -> Result<BridgeResponse> {
     const ATTEMPTS: usize = 3;
     let mut last_error: Option<anyhow::Error> = None;
     for attempt in 1..=ATTEMPTS {
-        match run_bridge(command, &request) {
-            Ok(response) if response.ok => return Ok(response),
-            Ok(response) => {
-                let message = response
-                    .error
-                    .unwrap_or_else(|| "unknown error".to_string());
-                if !is_transient_bridge_error(&message) || attempt == ATTEMPTS {
-                    anyhow::bail!("pi-agent-core bridge failed: {message}");
-                }
-                last_error = Some(anyhow::anyhow!("pi-agent-core bridge failed: {message}"));
-            }
-            Err(error) => {
-                let message = error.to_string();
-                if !is_transient_bridge_error(&message) || attempt == ATTEMPTS {
-                    return Err(error);
-                }
-                last_error = Some(error);
-            }
+        match bridge_attempt_outcome(run_bridge(command, &request), attempt == ATTEMPTS)? {
+            BridgeAttempt::Success(response) => return Ok(response),
+            BridgeAttempt::Retry(error) => last_error = Some(error),
         }
         thread::sleep(Duration::from_millis(retry_delay_ms(attempt)));
     }
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("pi-agent-core bridge failed")))
+}
+
+enum BridgeAttempt {
+    Success(BridgeResponse),
+    Retry(anyhow::Error),
+}
+
+fn bridge_attempt_outcome(
+    result: Result<BridgeResponse>,
+    final_attempt: bool,
+) -> Result<BridgeAttempt> {
+    match result {
+        Ok(response) if response.ok => Ok(BridgeAttempt::Success(response)),
+        Ok(response) => bridge_response_error(response, final_attempt),
+        Err(error) => bridge_transport_error(error, final_attempt),
+    }
+}
+
+fn bridge_response_error(response: BridgeResponse, final_attempt: bool) -> Result<BridgeAttempt> {
+    let message = response
+        .error
+        .unwrap_or_else(|| "unknown error".to_string());
+    if final_attempt || !is_transient_bridge_error(&message) {
+        anyhow::bail!(
+            "pi-agent-core bridge failed: {}",
+            public_bridge_error(&message)
+        );
+    }
+    Ok(BridgeAttempt::Retry(anyhow::anyhow!(
+        "pi-agent-core bridge failed: {}",
+        public_bridge_error(&message)
+    )))
+}
+
+fn bridge_transport_error(error: anyhow::Error, final_attempt: bool) -> Result<BridgeAttempt> {
+    let message = error.to_string();
+    if final_attempt || !is_transient_bridge_error(&message) {
+        anyhow::bail!("{}", public_bridge_error(&message));
+    }
+    Ok(BridgeAttempt::Retry(anyhow::anyhow!(
+        "{}",
+        public_bridge_error(&message)
+    )))
 }
 
 fn retry_delay_ms(attempt: usize) -> u64 {

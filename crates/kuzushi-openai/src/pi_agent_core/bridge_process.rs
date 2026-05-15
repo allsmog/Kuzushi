@@ -27,6 +27,12 @@ pub(crate) fn run_bridge(command: &[String], request: &BridgeRequest) -> Result<
     run_json_bridge(command, request, "pi-agent-core bridge")
 }
 
+pub(crate) fn public_bridge_error(message: &str) -> String {
+    message
+        .replace("auth login openai-codex", "auth login openai")
+        .replace("openai-codex", "OpenAI OAuth")
+}
+
 fn run_json_bridge<T, R>(command: &[String], request: &T, label: &str) -> Result<R>
 where
     T: Serialize,
@@ -149,7 +155,7 @@ fn bridge_near_executable(exe: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{bridge_near_executable, default_bridge_command};
+    use super::{bridge_near_executable, default_bridge_command, public_bridge_error};
     use std::fs;
     use tempfile::tempdir;
 
@@ -188,5 +194,16 @@ mod tests {
         let exe = tmp.path().join("kuzushi");
         fs::write(&exe, b"#!/bin/sh\n").unwrap();
         assert!(bridge_near_executable(&exe).is_none());
+    }
+
+    #[test]
+    fn public_bridge_error_rewrites_internal_provider_tokens() {
+        let error = "next-step: no OpenAI credentials for openai-codex. Set up kuzushi auth login openai-codex";
+
+        let public = public_bridge_error(error);
+
+        assert!(public.contains("OpenAI OAuth"));
+        assert!(public.contains("kuzushi auth login openai"));
+        assert!(!public.contains("openai-codex"));
     }
 }
