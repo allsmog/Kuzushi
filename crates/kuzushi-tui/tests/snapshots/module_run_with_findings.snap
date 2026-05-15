@@ -16,5 +16,5 @@ KUZUSHI mode:run | target none | ctx missing | model unconfigured | 1 findings (
 
  -- TRANSCRIPT ---------------------------------------------------------------------------------------------------------
  15:21:17 | system kuzushi shell
- 15:21:17 | startup ready: 32 module(s), 46 tool(s), target none
+ 15:21:17 | startup ready: 33 module(s), 48 tool(s), target none
  15:21:17 | help type help for commands | ? <text> to ask | scan to start

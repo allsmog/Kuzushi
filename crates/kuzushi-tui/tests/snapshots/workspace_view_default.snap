@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 253
 ---
-mode:shell | target:none | workspace | 0 findings | 32 mods
+mode:shell | target:none | workspace | 0 findings | 33 mods
 
  -- WORKSPACE ----------------------------------------------------------------------------------------------------------
 status: no active workspace. Next: scan <target> or start shell with --target .
