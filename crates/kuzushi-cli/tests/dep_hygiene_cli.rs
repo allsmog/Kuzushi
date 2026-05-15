@@ -177,6 +177,7 @@ if [ "$1" = "database" ] && [ "$2" = "analyze" ]; then
   done
   cat > "$out" <<'JSON'
 {
+  "version": "2.1.0",
   "runs": [
     {
       "tool": {
@@ -2219,6 +2220,20 @@ fn run_codeql_scan_reaches_subprocess_executor_and_persists() {
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     assert_eq!(store.list_findings(10).unwrap().len(), 1);
     assert_latest_static_artifacts(&repo, "codeql");
+    let run_id = latest_run_id(&repo);
+    let sarif_path = repo
+        .join(".kuzushi/runs")
+        .join(&run_id)
+        .join("report.sarif");
+    let sarif = std::fs::read_to_string(sarif_path).unwrap();
+    assert!(sarif.contains("2.1.0"), "sarif: {sarif}");
+    assert!(sarif.contains("js/sql-injection"), "sarif: {sarif}");
+    assert!(run_json(&repo, &run_id, "artifacts.json")
+        .pointer("/artifacts")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .any(|artifact| artifact.pointer("/kind").and_then(Value::as_str) == Some("sarif")));
 }
 
 #[cfg(unix)]
