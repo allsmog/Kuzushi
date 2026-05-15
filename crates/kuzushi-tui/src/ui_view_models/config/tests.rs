@@ -10,24 +10,25 @@ fn config_model_summarizes_default_runtime_state() {
     assert_eq!(model.summary_title, "CONFIG");
     assert_eq!(model.model, "unconfigured");
     assert!(model.summary_rows.contains(&ConfigSummaryRow {
-        label: "model",
-        value: "unconfigured".to_string(),
+        cells: ["model".to_string(), "unconfigured".to_string()],
     }));
     assert!(model.summary_rows.contains(&ConfigSummaryRow {
-        label: "reasoning",
-        value: "default".to_string(),
+        cells: ["reasoning".to_string(), "default".to_string()],
     }));
     assert!(model
         .summary_rows
         .iter()
-        .any(|row| row.label == "onboarding"));
+        .any(|row| row.cells[0] == "onboarding"));
     assert_eq!(model.model_table.title, "MODELS");
     assert_eq!(
         model.model_table.headers,
         ["", "#", "model", "effort", "auth"]
     );
     assert!(!model.model_table.rows.is_empty());
-    assert!(model.model_table.rows[app.selected_model_index].selected);
+    assert_eq!(
+        model.model_table.rows[app.selected_model_index].cells[0],
+        ">"
+    );
     assert_eq!(
         model.commands,
         [
@@ -48,8 +49,10 @@ fn config_model_reports_session_cost_when_available() {
     let model = config_model(&app);
 
     assert!(model.summary_rows.contains(&ConfigSummaryRow {
-        label: "cost",
-        value: "session $0.0456; last tool $0.0123".to_string(),
+        cells: [
+            "cost".to_string(),
+            "session $0.0456; last tool $0.0123".to_string(),
+        ],
     }));
 }
 
@@ -62,8 +65,7 @@ fn config_model_preserves_explicit_reasoning_override() {
 
     assert_eq!(model.reasoning_override, Some("xhigh".to_string()));
     assert!(model.summary_rows.contains(&ConfigSummaryRow {
-        label: "reasoning",
-        value: "xhigh".to_string(),
+        cells: ["reasoning".to_string(), "xhigh".to_string()],
     }));
 }
 
