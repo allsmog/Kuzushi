@@ -13,17 +13,29 @@ const HOME_ARTIFACTS: &[HomeArtifactSpec] = &[
     HomeArtifactSpec::new("report", "report.md"),
 ];
 const HOME_ARTIFACT_COLUMN_COUNT: usize = 4;
+const HOME_COMMANDS: [&str; 6] = [
+    "modules",
+    "recommend",
+    "quickstart",
+    "scan .",
+    "findings",
+    "runs",
+];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HomeCockpitModel {
-    pub target: String,
-    pub latest_run: String,
-    pub run_status: String,
+    pub title: &'static str,
+    pub summary_rows: Vec<HomeSummaryRow>,
     pub attack_surface: Option<AttackSurfaceRiskModel>,
-    pub module_count: usize,
-    pub finding_count: usize,
     pub next_action: String,
+    pub rail_legend: &'static str,
+    pub command_labels: [&'static str; 6],
     pub artifacts: Vec<HomeArtifactRow>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct HomeSummaryRow {
+    pub cells: [String; 2],
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -33,15 +45,47 @@ pub struct HomeArtifactRow {
 
 pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
     let run = HomeRunModel::from_app(app);
+    let target = target_label(app);
+    let latest_run = run.run_id.clone().unwrap_or_else(|| "none".to_string());
+    let run_status = run_status_label(&run.run_dir);
+    let module_count = app.registry.modules().count();
+    let finding_count = app.findings.len();
     HomeCockpitModel {
-        target: target_label(app),
-        latest_run: run.run_id.clone().unwrap_or_else(|| "none".to_string()),
-        run_status: run_status_label(&run.run_dir),
+        title: "HOME",
+        summary_rows: home_summary_rows(
+            target,
+            latest_run,
+            run_status,
+            module_count,
+            finding_count,
+        ),
         attack_surface: attack_surface_risk_model(&run.run_dir),
-        module_count: app.registry.modules().count(),
-        finding_count: app.findings.len(),
         next_action: home_next_action(app),
+        rail_legend: "rails: ✓ recorded → ○ placeholder ⚠ failed ■ missing ◆ partial",
+        command_labels: HOME_COMMANDS,
         artifacts: home_artifact_rows(&run.run_dir),
+    }
+}
+
+fn home_summary_rows(
+    target: String,
+    latest_run: String,
+    run_status: String,
+    module_count: usize,
+    finding_count: usize,
+) -> Vec<HomeSummaryRow> {
+    vec![
+        home_summary_row("target", target),
+        home_summary_row("latest run", latest_run),
+        home_summary_row("run status", run_status),
+        home_summary_row("modules", module_count.to_string()),
+        home_summary_row("findings", finding_count.to_string()),
+    ]
+}
+
+fn home_summary_row(label: &str, value: String) -> HomeSummaryRow {
+    HomeSummaryRow {
+        cells: [label.to_string(), value],
     }
 }
 
@@ -203,49 +247,4 @@ impl HomeArtifactState {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn artifact_state_maps_home_rail_glyphs() {
-        assert_eq!(
-            artifact_state_from_text(r#"{"status":"completed"}"#).label,
-            "recorded"
-        );
-        assert_eq!(
-            artifact_state_from_text(r#"{"status":"skipped"}"#).label,
-            "placeholder"
-        );
-        assert_eq!(
-            artifact_state_from_text(r#"{"status":"failed"}"#).label,
-            "failed"
-        );
-        assert_eq!(
-            artifact_state_from_text(r#"{"status":"partial"}"#).label,
-            "partial"
-        );
-        assert_eq!(
-            artifact_state_from_text("No report was recorded for this run.").label,
-            "placeholder"
-        );
-    }
-
-    #[test]
-    fn home_artifact_row_shapes_display_cells() {
-        let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path();
-        std::fs::write(run_dir.join("context.json"), r#"{"status":"partial"}"#).unwrap();
-
-        let row = home_artifact_row(run_dir, &HomeArtifactSpec::new("ctx", "context.json"));
-
-        assert_eq!(
-            row.cells,
-            [
-                "◆".to_string(),
-                "ctx".to_string(),
-                "partial".to_string(),
-                run_dir.join("context.json").display().to_string(),
-            ]
-        );
-    }
-}
+mod tests;
