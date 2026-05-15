@@ -25,6 +25,20 @@ pub(crate) struct HelpCommandRow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlainHelpModel {
+    pub(crate) title: &'static str,
+    pub(crate) intro: &'static str,
+    pub(crate) examples_line: Option<String>,
+    pub(crate) categories: Vec<PlainHelpCategoryModel>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlainHelpCategoryModel {
+    pub(crate) heading: String,
+    pub(crate) rows: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QuickstartModel {
     pub(crate) steps: Vec<QuickstartStep>,
     pub(crate) first_finding_tip: String,
@@ -45,6 +59,48 @@ pub(crate) fn help_model() -> HelpModel {
             .map(|category| help_category_model(*category))
             .collect(),
     }
+}
+
+pub(crate) fn plain_help_model() -> PlainHelpModel {
+    PlainHelpModel::from_help_model(help_model())
+}
+
+impl PlainHelpModel {
+    fn from_help_model(model: HelpModel) -> Self {
+        PlainHelpModel {
+            title: "HELP",
+            intro: model.intro,
+            examples_line: plain_examples_line(&model.examples),
+            categories: model
+                .categories
+                .into_iter()
+                .map(plain_help_category)
+                .collect(),
+        }
+    }
+}
+
+fn plain_examples_line(examples: &[&'static str]) -> Option<String> {
+    (!examples.is_empty()).then(|| format!("Examples: {}", examples.join(" | ")))
+}
+
+fn plain_help_category(category: HelpCategoryModel) -> PlainHelpCategoryModel {
+    PlainHelpCategoryModel {
+        heading: format!("{} — {}", category.label, category.blurb),
+        rows: category
+            .commands
+            .into_iter()
+            .flat_map(plain_help_command_rows)
+            .collect(),
+    }
+}
+
+fn plain_help_command_rows(row: HelpCommandRow) -> Vec<String> {
+    let mut rows = vec![format!("{} - {}", row.command, row.description)];
+    if row.aliases != "-" {
+        rows.push(format!("  aliases / examples: {}", row.aliases));
+    }
+    rows
 }
 
 pub(crate) fn quickstart_model(app: &ShellApp) -> QuickstartModel {

@@ -120,7 +120,10 @@ pub(crate) use findings::{
     findings_model, selected_finding_detail_model, FindingDetailModel, FindingEvidenceRow,
     FindingListRow, FindingsModel, TriageSummaryModel,
 };
-pub(crate) use help::{help_model, quickstart_model, HelpCategoryModel, HelpCommandRow};
+pub(crate) use help::{
+    help_model, plain_help_model, quickstart_model, HelpCommandRow, PlainHelpCategoryModel,
+    PlainHelpModel,
+};
 pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use knowledge_base::{
