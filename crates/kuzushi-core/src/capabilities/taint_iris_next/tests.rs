@@ -338,6 +338,7 @@ mod tests {
             anyhow::anyhow!("bad json"),
             1,
             0.25,
+            None,
         );
 
         assert!(result.findings.is_empty());
@@ -360,6 +361,7 @@ mod tests {
             anyhow::anyhow!("bad json"),
             1,
             0.25,
+            None,
         );
 
         assert_eq!(result.findings.len(), 1);
