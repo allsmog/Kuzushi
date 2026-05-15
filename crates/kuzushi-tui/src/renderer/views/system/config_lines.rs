@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::model_auth_status;
+use crate::ui_view_models::{auth_env_summary, model_auth_status, oauth_summary};
 
 pub(crate) fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
@@ -29,8 +29,8 @@ fn push_config_summary(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rec
         "reasoning",
         app.session_thinking_level.as_deref().unwrap_or("default"),
     ));
-    lines.push(detail("auth envs", &auth_env_detail(app)));
-    lines.push(detail("oauth", &oauth_detail()));
+    lines.push(detail("auth envs", &auth_env_summary(app)));
+    lines.push(detail("oauth", &oauth_summary()));
     lines.push(detail("base url", base_url_detail(app)));
     lines.push(detail(
         "bridge",
@@ -43,31 +43,6 @@ fn push_config_summary(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rec
             "Up/Down selects a model; Enter activates it. OAuth availability is shown below.",
         ));
     }
-}
-
-fn auth_env_detail(app: &ShellApp) -> String {
-    let auth_status = env_status(&app.config.runtime.api_key_env);
-    let anthropic_status = env_status("ANTHROPIC_API_KEY");
-    format!(
-        "{} ({auth_status}); ANTHROPIC_API_KEY ({anthropic_status})",
-        app.config.runtime.api_key_env
-    )
-}
-
-fn env_status(name: &str) -> &'static str {
-    if std::env::var_os(name).is_some() {
-        "set; value hidden"
-    } else {
-        "missing"
-    }
-}
-
-fn oauth_detail() -> String {
-    format!(
-        "openai {}; anthropic {}",
-        crate::app::oauth_provider_status("openai-codex"),
-        crate::app::oauth_provider_status("anthropic")
-    )
 }
 
 fn base_url_detail(app: &ShellApp) -> &str {

@@ -217,6 +217,7 @@ const rules = [
     roots: [
       "crates/kuzushi-tui/src/renderer/views/system/auth_lines.rs",
       "crates/kuzushi-tui/src/renderer/views/system/auth_provider_rows.rs",
+      "crates/kuzushi-tui/src/renderer/views/system/config_lines.rs",
     ],
     forbidden: /\bstd::env|oauth_provider_status|\.config\.runtime\.api_key_env/,
   },

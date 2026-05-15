@@ -13,6 +13,25 @@ fn auth_provider_rows_hide_secret_values() {
 }
 
 #[test]
+fn auth_env_summary_names_keys_without_secret_values() {
+    let app = ShellApp::new(V2Config::default(), None);
+
+    let summary = auth_env_summary(&app);
+
+    assert!(summary.contains(&app.config.runtime.api_key_env));
+    assert!(summary.contains("ANTHROPIC_API_KEY"));
+    assert!(!summary.contains("sk-"));
+}
+
+#[test]
+fn oauth_summary_reports_both_provider_slots() {
+    let summary = oauth_summary();
+
+    assert!(summary.contains("openai"));
+    assert!(summary.contains("anthropic"));
+}
+
+#[test]
 fn model_auth_status_reports_choice_auth_for_unknown_provider() {
     let choice = crate::app::ModelChoice {
         index: 99,

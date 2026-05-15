@@ -41,6 +41,21 @@ pub(crate) fn model_auth_status(choice: &crate::app::ModelChoice) -> String {
     }
 }
 
+pub(crate) fn auth_env_summary(app: &ShellApp) -> String {
+    let api_key_env = app.config.runtime.api_key_env.as_str();
+    let auth_status = hidden_env_status(api_key_env);
+    let anthropic_status = hidden_env_status("ANTHROPIC_API_KEY");
+    format!("{api_key_env} ({auth_status}); ANTHROPIC_API_KEY ({anthropic_status})")
+}
+
+pub(crate) fn oauth_summary() -> String {
+    format!(
+        "openai {}; anthropic {}",
+        crate::app::oauth_provider_status("openai-codex"),
+        crate::app::oauth_provider_status("anthropic")
+    )
+}
+
 fn runtime_env_row(app: &ShellApp) -> AuthProviderRow {
     let api_key_env = app.config.runtime.api_key_env.as_str();
     let env_set = std::env::var_os(api_key_env).is_some();
@@ -98,6 +113,14 @@ fn env_key_status(key: &str) -> String {
         format!("{key} set")
     } else {
         format!("{key} missing")
+    }
+}
+
+fn hidden_env_status(name: &str) -> &'static str {
+    if std::env::var_os(name).is_some() {
+        "set; value hidden"
+    } else {
+        "missing"
     }
 }
 
