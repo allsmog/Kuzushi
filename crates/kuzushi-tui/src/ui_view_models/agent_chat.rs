@@ -1,5 +1,5 @@
+use super::failure_handoff::{failure_handoff_model_from_context, FailureHandoffModel};
 use crate::{AgentChatView, ShellApp};
-use kuzushi_core::run_artifacts::FailureToLlmContext;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct AgentChatModel {
@@ -16,7 +16,7 @@ pub(crate) struct AgentChatSession {
     pub(crate) abort_requested: bool,
     pub(crate) error: Option<String>,
     pub(crate) history: Vec<AgentChatTurn>,
-    pub(crate) failure_context: Option<FailureToLlmContext>,
+    pub(crate) failure_context: Option<FailureHandoffModel>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +51,10 @@ impl AgentChatSession {
             abort_requested: agent.abort_requested,
             error: agent.error.clone(),
             history: agent.history.iter().map(AgentChatTurn::from).collect(),
-            failure_context: agent.failure_context.clone(),
+            failure_context: agent
+                .failure_context
+                .as_ref()
+                .map(failure_handoff_model_from_context),
         }
     }
 }
