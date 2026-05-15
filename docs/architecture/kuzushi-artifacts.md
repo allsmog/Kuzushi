@@ -131,6 +131,6 @@ is allowed to infer:
 - recovery options;
 - fallback prompt for the inherited agent/session mechanism.
 
-The fallback context must forbid claims such as "validated", "verified",
-"exploited", "fixed", "false positive", and "no vulnerability" unless the
-corresponding proof or verification artifact exists.
+The fallback context must forbid unsupported success claims, "verified",
+"exploited", "fixed", "false positive", and "no vulnerability" claims unless
+the corresponding proof or verification artifact exists.

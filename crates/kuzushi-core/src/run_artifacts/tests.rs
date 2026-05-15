@@ -704,7 +704,7 @@ mod tests {
 
     fn assert_forbidden_success_claims(claims: &[String]) {
         for claim in [
-            "validated claim",
+            "success claim without explicit verification",
             "verified claim",
             "exploited claim",
             "fixed claim",

@@ -250,7 +250,7 @@ fn compact_failure_list(values: &[String]) -> String {
 
 fn forbidden_failure_claims() -> Vec<String> {
     [
-        "validated claim",
+        "success claim without explicit verification",
         "verified claim",
         "exploited claim",
         "fixed claim",
