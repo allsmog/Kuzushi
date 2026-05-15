@@ -3081,7 +3081,7 @@ fn runs_view_lists_past_runs_from_run_json_with_summary_fallback() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("RUN TIMELINE"));
-    // Both past runs reach the buffer (short() takes the leading 8 chars).
+    // Both past runs reach the buffer with leading 8-char labels.
     assert!(rendered.contains("r-2026-0"));
     assert!(rendered.contains("completed"));
     assert!(rendered.contains("failed"));

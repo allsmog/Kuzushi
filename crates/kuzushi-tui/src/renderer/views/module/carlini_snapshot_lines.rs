@@ -9,11 +9,11 @@ pub(crate) fn carlini_snapshot_lines(
         &format!(
             "carlini-threat-hunt: {} finding{} from {} actor{} ({} run{})",
             report.count,
-            if report.count == 1 { "" } else { "s" },
+            plural_suffix(report.count),
             report.actors,
-            if report.actors == 1 { "" } else { "s" },
+            plural_suffix(report.actors),
             report.actor_runs,
-            if report.actor_runs == 1 { "" } else { "s" },
+            plural_suffix(report.actor_runs),
         ),
         false,
     ));
@@ -42,7 +42,7 @@ pub(crate) fn agentic_sast_snapshot_lines(
         &format!(
             "agentic-sast: {} finding{} under {}",
             report.count,
-            if report.count == 1 { "" } else { "s" },
+            plural_suffix(report.count),
             report.target,
         ),
         false,
@@ -63,15 +63,10 @@ pub(crate) fn agentic_sast_snapshot_lines(
     lines
 }
 
-pub(in crate::renderer::views) struct ModuleRunSummary {
-    pub(in crate::renderer::views) target: String,
-    pub(in crate::renderer::views) stage: String,
-    pub(in crate::renderer::views) findings: usize,
-    pub(in crate::renderer::views) run: String,
-    pub(in crate::renderer::views) active_stage: String,
-    pub(in crate::renderer::views) scan_running: bool,
-    pub(in crate::renderer::views) scan_done: bool,
-    pub(in crate::renderer::views) has_scan: bool,
-    pub(in crate::renderer::views) running_tool: Option<String>,
-    pub(in crate::renderer::views) scan_error: Option<String>,
+fn plural_suffix(count: usize) -> &'static str {
+    if count == 1 {
+        ""
+    } else {
+        "s"
+    }
 }
