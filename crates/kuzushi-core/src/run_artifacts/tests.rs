@@ -662,6 +662,36 @@ mod tests {
     }
 
     #[test]
+    fn ok_false_tool_result_writes_failure_handoff_without_explicit_status() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-ok-false";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "semgrep:scan");
+
+        record_tool_run_started(record, &serde_json::json!({}));
+        record_tool_run_complete(
+            record,
+            &serde_json::json!({
+                "ok": false,
+                "summary": "scanner failed",
+                "errors": ["scanner missing"],
+            }),
+        );
+
+        let summary = load_run_summary(tmp.path(), run_id).unwrap();
+        assert_eq!(summary.status, "failed");
+        let failures = load_run_failures(tmp.path(), run_id).unwrap();
+        assert_eq!(failures.status, "failed");
+        assert_eq!(failures.failures[0].error, "scanner missing");
+        let result =
+            fs::read_to_string(run_dir(tmp.path(), run_id).join("result.json")).unwrap();
+        let output = serde_json::from_str::<serde_json::Value>(&result).unwrap();
+        assert_eq!(
+            output["fallback_context"]["failedStage"],
+            serde_json::json!("semgrep:scan")
+        );
+    }
+
+    #[test]
     fn lists_run_summaries_sorted_and_ignores_incomplete_entries() {
         let tmp = tempfile::tempdir().unwrap();
 

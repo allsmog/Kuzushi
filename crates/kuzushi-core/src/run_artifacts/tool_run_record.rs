@@ -178,6 +178,9 @@ fn failed_summary(record: ToolRunRecord<'_>, error: &str, artifacts: &[RunArtifa
 }
 
 fn tool_run_output_status(output: &Value) -> &'static str {
+    if output.get("ok").and_then(Value::as_bool) == Some(false) {
+        return "failed";
+    }
     output
         .get("status")
         .and_then(Value::as_str)
