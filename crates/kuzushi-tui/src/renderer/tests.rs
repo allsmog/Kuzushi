@@ -3020,7 +3020,7 @@ fn transcript_finding_line_tints_severity_per_mockup() {
     // in c-muted.  Verify `transcript_finding_line` builds the same
     // four-color split (warn glyph, severity tint, accent rule-id,
     // muted location).
-    let line = transcript_finding_line(Severity::Critical, "demo.rule", "src/x.rs", 142);
+    let line = transcript_finding_line(Severity::Critical, "demo.rule", "src/x.rs:142");
     let mut roles: Vec<&str> = Vec::new();
     for span in &line.spans {
         roles.push(if span.style == theme::warn() {
