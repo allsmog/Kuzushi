@@ -1,12 +1,11 @@
 use super::*;
-use crate::app::{ConfirmKind, PendingConfirm};
-use crate::ui_view_models::threat_patch_card_model;
+use crate::ui_view_models::{confirm_card_model, threat_patch_card_model, ConfirmCardModel};
 
 pub(crate) fn confirm_card_height(app: &ShellApp, area: Rect) -> u16 {
     if area.height < 6 {
         return 0;
     }
-    if app.advisory.pending_confirm.is_none() {
+    if confirm_card_model(app).is_none() {
         return 0;
     }
     // Header + 3 detail rows (tool, target, rationale/allowlist) + key
@@ -19,13 +18,13 @@ pub(crate) fn render_confirm_card(frame: &mut Frame<'_>, area: Rect, app: &Shell
     if area.height == 0 {
         return;
     }
-    let Some(confirm) = app.advisory.pending_confirm.as_ref() else {
+    let Some(confirm) = confirm_card_model(app) else {
         return;
     };
     let width = area.width as usize;
     let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(confirm_header_line(confirm));
-    lines.push(confirm_tool_target_line(confirm, width));
+    lines.push(confirm_header_line(&confirm));
+    lines.push(confirm_tool_target_line(&confirm, width));
     push_optional_confirm_row(
         &mut lines,
         "actor     ",
@@ -47,27 +46,27 @@ pub(crate) fn render_confirm_card(frame: &mut Frame<'_>, area: Rect, app: &Shell
         width,
         theme::muted(),
     );
-    lines.push(confirm_action_line(confirm));
+    lines.push(confirm_action_line(&confirm));
     render_lines(frame, area, lines);
 }
 
-fn confirm_header_line(confirm: &PendingConfirm) -> Line<'static> {
-    let (header_glyph, header_style) = confirm_header(confirm.kind);
+fn confirm_header_line(confirm: &ConfirmCardModel) -> Line<'static> {
+    let header_style = confirm_header_style(confirm);
     Line::from(vec![
         Span::raw(" "),
-        Span::styled(format!("{header_glyph} "), header_style),
-        Span::styled(confirm.kind.label().to_string(), header_style),
+        Span::styled(format!("{} ", confirm.header_glyph), header_style),
+        Span::styled(confirm.header_label.to_string(), header_style),
     ])
 }
 
-fn confirm_header(kind: ConfirmKind) -> (&'static str, Style) {
-    match kind {
-        ConfirmKind::DestructiveVerb => ("✗", theme::danger()),
-        _ => ("⚠", theme::warn()),
+fn confirm_header_style(confirm: &ConfirmCardModel) -> Style {
+    if confirm.header_danger {
+        return theme::danger();
     }
+    theme::warn()
 }
 
-fn confirm_tool_target_line(confirm: &PendingConfirm, width: usize) -> Line<'static> {
+fn confirm_tool_target_line(confirm: &ConfirmCardModel, width: usize) -> Line<'static> {
     Line::from(vec![
         Span::raw("  "),
         Span::styled("tool      ", theme::muted()),
@@ -105,8 +104,8 @@ fn confirm_detail_line(label: &'static str, value: String, style: Style) -> Line
     ])
 }
 
-fn confirm_action_line(confirm: &PendingConfirm) -> Line<'static> {
-    if confirm.kind.allows_yes() {
+fn confirm_action_line(confirm: &ConfirmCardModel) -> Line<'static> {
+    if confirm.allows_decision {
         return Line::from(vec![
             Span::raw("  "),
             Span::styled("y", theme::success()),

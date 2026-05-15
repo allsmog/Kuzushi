@@ -182,6 +182,7 @@ const rules = [
   },
   { name: "TUI module progress renderer reads SAST task view model", roots: ["crates/kuzushi-tui/src/renderer/views/module/append_progress_section.rs"], forbidden: /\b(option_store|sast_task_rows|serde_json|crate::app::SastTaskRow)\b/ },
   { name: "TUI threat patch chrome reads threat patch view model", roots: ["crates/kuzushi-tui/src/renderer/chrome/cards/render_threat_patch_card.rs", "crates/kuzushi-tui/src/renderer/chrome/cards/confirm_card_height.rs"], forbidden: /\b(pending_threat_patch|serde_json|crate::app::ThreatPatch)\b/ },
+  { name: "TUI confirm chrome reads confirm-card view model", roots: ["crates/kuzushi-tui/src/renderer/chrome/cards/confirm_card_height.rs"], forbidden: /\b(pending_confirm|ConfirmKind|PendingConfirm|advisory\.pending_confirm)\b/ },
   { name: "TUI prompt-tuning renderer reads prompt-tuning view models", roots: ["crates/kuzushi-tui/src/renderer/views/editor/tune_lines.rs"], forbidden: /\b(read_house_rules|TuneAction|tune_cursor_clamped|prompts_cursor_clamped|focused_module|PROMPT_VERB_NAMES|crate::app::ShellApp)\b/ },
   {
     name: "TUI catalog renderer reads catalog view model",
