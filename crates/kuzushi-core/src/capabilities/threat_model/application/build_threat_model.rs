@@ -6,9 +6,10 @@ pub(crate) fn build_threat_model(
     runtime: Option<&dyn AgentRuntime>,
     flavor: BuildFlavor,
 ) -> Result<Value> {
-    let Some(runtime) = runtime else {
+    if should_build_deterministically(&input, ctx, runtime) {
         return build_deterministic_threat_model(input, ctx, flavor);
-    };
+    }
+    let runtime = runtime.expect("deterministic path handles missing runtime");
     let input = parse_build_input(&input, ctx, flavor)?;
     let verb = threat_model_build_verb(flavor);
     emit_threat_model_start(ctx, verb, flavor, &input);
@@ -31,6 +32,14 @@ pub(crate) fn build_threat_model(
     Ok(threat_model_response(
         input, flavor, generated, artifacts, findings, summary, lines,
     ))
+}
+
+fn should_build_deterministically(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> bool {
+    runtime.is_none() || (read_string(input, &["model"]).is_none() && ctx.config.model.is_none())
 }
 
 fn require_threat_model_runtime<'a>(

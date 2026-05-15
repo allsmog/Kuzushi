@@ -382,7 +382,7 @@ mod tests {
     }
 
     #[test]
-    fn threat_model_build_degrades_without_runtime_and_requires_explicit_model_for_runtime() {
+    fn threat_model_build_degrades_without_runtime_or_explicit_model() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("src")).unwrap();
         fs::write(
@@ -488,12 +488,16 @@ mod tests {
         assert!(!degraded.to_string().contains("validated"));
 
         let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
-        let err = registry
+        let degraded_with_runtime = registry
             .execute_tool_with_runtime("threat-model:build", json!({}), &ctx, Some(&runtime))
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("requires an explicit model"));
-        assert!(err.contains("will not choose a fallback model"));
+            .unwrap();
+        assert_eq!(
+            degraded_with_runtime
+                .pointer("/data/provider")
+                .and_then(Value::as_str),
+            Some("deterministic")
+        );
+        assert!(runtime.requests().is_empty());
     }
 
     #[test]

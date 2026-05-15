@@ -2691,7 +2691,7 @@ fn run_threat_model_read_loads_pasta_artifacts_without_runtime() {
 }
 
 #[test]
-fn run_threat_model_build_without_model_fails_without_silent_fallback() {
+fn run_threat_model_build_without_model_degrades_deterministically() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -2706,11 +2706,12 @@ fn run_threat_model_build_without_model_fails_without_silent_fallback() {
         .output()
         .unwrap();
 
-    assert!(!output.status.success());
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("requires an explicit model") && stderr.contains("fallback model"),
-        "stderr: {stderr}"
+    assert!(output.status.success());
+    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(body.get("status").and_then(Value::as_str), Some("partial"));
+    assert_eq!(
+        body.pointer("/data/provider").and_then(Value::as_str),
+        Some("deterministic")
     );
 }
 
