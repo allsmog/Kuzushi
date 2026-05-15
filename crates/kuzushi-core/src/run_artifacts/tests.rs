@@ -150,6 +150,7 @@ mod tests {
         );
         let manifest_artifacts = load_run_artifacts(tmp.path(), &run_id).unwrap();
         assert_manifest_has(&manifest_artifacts, "run.json");
+        assert_manifest_has_canonical_run_artifacts(&manifest_artifacts);
         assert_manifest_has(&manifest_artifacts, "context.json");
         assert_manifest_has(&manifest_artifacts, "result.json");
         let trace = fs::read_to_string(run_dir(tmp.path(), &run_id).join("trace.jsonl")).unwrap();
@@ -182,6 +183,25 @@ mod tests {
             artifacts.iter().any(|artifact| artifact.path.ends_with(leaf)),
             "manifest missing artifact {leaf}"
         );
+    }
+
+    fn assert_manifest_has_canonical_run_artifacts(artifacts: &[RunArtifact]) {
+        for leaf in [
+            "run.json",
+            "events.jsonl",
+            "trace.jsonl",
+            "context.json",
+            "attack-surface.json",
+            "threat-model.json",
+            "recommendations.json",
+            "findings.json",
+            "proof.json",
+            "failures.json",
+            "report.md",
+            "artifacts.json",
+        ] {
+            assert_manifest_has(artifacts, leaf);
+        }
     }
 
     #[test]
