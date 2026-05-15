@@ -2,8 +2,9 @@ use super::dag_pane::dag_row_style;
 use super::feed_pane::feed_row_style;
 use super::*;
 use crate::ui_view_models::{
-    activity_dag_pane_rows, activity_feed_pane_rows, activity_footer_model, activity_header_model,
-    activity_pane_chrome_model, ActivityFooterHint, ActivityPaneTitle,
+    activity_dag_pane_rows, activity_empty_state_model, activity_feed_pane_rows,
+    activity_footer_model, activity_header_model, activity_pane_chrome_model, ActivityFooterHint,
+    ActivityPaneTitle,
 };
 use std::time::Instant;
 
@@ -43,10 +44,9 @@ pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 type ActivityPaneRow = (String, ratatui::style::Style);
 
 fn push_inactive_activity_lines(lines: &mut Vec<Line<'static>>, width: u16) {
-    lines.push(divider("ACTIVITY", width));
-    lines.push(muted(
-        "(no run active; start one with `scan` or `run <tool>` and the feed will appear here)",
-    ));
+    let empty = activity_empty_state_model();
+    lines.push(divider(empty.title, width));
+    lines.push(muted(empty.body));
 }
 
 fn activity_pane_widths(width: u16) -> (usize, usize) {

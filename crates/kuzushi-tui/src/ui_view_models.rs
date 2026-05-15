@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 mod active_stage;
 mod activity_dag_rows;
+mod activity_empty_state;
 mod activity_feed_pause;
 mod activity_feed_placeholder;
 mod activity_feed_rows;
@@ -67,6 +68,7 @@ mod view_status;
 mod workspace;
 pub(crate) use active_stage::active_stage_label;
 pub(crate) use activity_dag_rows::{activity_dag_pane_rows, ActivityDagRowTone};
+pub(crate) use activity_empty_state::activity_empty_state_model;
 pub(crate) use activity_feed_pause::activity_feed_pause_model;
 pub(crate) use activity_feed_placeholder::activity_feed_placeholder_model;
 pub(crate) use activity_feed_rows::{activity_feed_pane_rows, ActivityFeedRowTone};

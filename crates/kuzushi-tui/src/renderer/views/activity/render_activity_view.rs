@@ -3,9 +3,9 @@ use super::feed_pane::feed_row_style;
 use super::*;
 use crate::app::ActivitySession;
 use crate::ui_view_models::{
-    activity_dag_pane_rows, activity_feed_pane_rows, activity_feed_scroll_offset,
-    activity_footer_model, activity_header_model, activity_pane_chrome_model,
-    activity_task_scroll_offset, ActivityFooterHint, ActivityPaneTitle,
+    activity_dag_pane_rows, activity_empty_state_model, activity_feed_pane_rows,
+    activity_feed_scroll_offset, activity_footer_model, activity_header_model,
+    activity_pane_chrome_model, activity_task_scroll_offset, ActivityFooterHint, ActivityPaneTitle,
 };
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
@@ -33,12 +33,9 @@ use std::time::Instant;
 /// ```
 pub(crate) fn render_activity_view(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     let Some(session) = app.activity.as_ref() else {
-        let body = Paragraph::new(Line::from(vec![Span::styled(
-            "(no run active; start one with `scan` or `run <tool>` and the feed will appear here)"
-                .to_string(),
-            theme::muted(),
-        )]))
-        .alignment(Alignment::Left);
+        let empty = activity_empty_state_model();
+        let body = Paragraph::new(Line::from(vec![Span::styled(empty.body, theme::muted())]))
+            .alignment(Alignment::Left);
         frame.render_widget(body, area);
         return;
     };
