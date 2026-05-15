@@ -100,7 +100,7 @@ pub(crate) use options::{options_model, OptionRow, OptionsModelStatus};
 pub(crate) use patch_review::{patch_review_model, PatchReviewModel, PatchReviewTestRow};
 pub(crate) use plan_card::{plan_card_model, PlanCardModel, PlanChangeRow};
 pub(crate) use prereq_prompt::{prereq_prompt_model, PrereqPromptModel, PrereqPromptStepModel};
-pub(crate) use prompt::prompt_brand;
+pub(crate) use prompt::{prompt_model, prompt_text};
 pub(crate) use prompt_tuning::{
     prompts_model, tune_model, PromptRow, TuneActionRow, TuneHouseRules, TuneModel,
 };

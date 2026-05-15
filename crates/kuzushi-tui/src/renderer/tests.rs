@@ -8,7 +8,7 @@ use ratatui::Terminal;
 
 use crate::commands::{shell_command_specs, shell_help_examples, ShellCommandCategory};
 use crate::ui_view_models::{
-    catalog_model, threat_dfd_nodes_from_doc, threat_scope_buckets_from_doc,
+    catalog_model, prompt_text, threat_dfd_nodes_from_doc, threat_scope_buckets_from_doc,
     threat_story_rows_from_doc, threat_stride_rollup_from_doc, view_status_segment, RoutingMode,
 };
 

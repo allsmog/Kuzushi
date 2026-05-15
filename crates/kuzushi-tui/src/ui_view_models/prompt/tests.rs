@@ -1,4 +1,6 @@
 use super::*;
+use crate::{ShellApp, ShellView};
+use kuzushi_core::V2Config;
 
 #[test]
 fn prompt_brand_uses_kz_when_cli_name_requests_alias() {
@@ -24,4 +26,19 @@ fn prompt_brand_defaults_to_kuzushi() {
         "kuzushi"
     );
     assert_eq!(prompt_brand_from_sources(None, None), "kuzushi");
+}
+
+#[test]
+fn prompt_model_projects_prompt_and_editor_state() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.focused_module = Some("sast".to_string());
+    app.shell_view = ShellView::ModuleRun;
+    app.input = "scan ./demo".to_string();
+    app.cursor = 4;
+
+    let model = prompt_model(&app);
+
+    assert!(model.prefix.ends_with("/sast/run> "));
+    assert_eq!(model.input, "scan ./demo");
+    assert_eq!(model.cursor, 4);
 }

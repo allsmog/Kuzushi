@@ -233,7 +233,8 @@ const rules = [
   {
     name: "TUI prompt renderer reads prompt view model",
     roots: ["crates/kuzushi-tui/src/renderer/chrome/prompt/mod.rs"],
-    forbidden: /\bstd::env|KUZUSHI_CLI_NAME|binary_stem/,
+    forbidden:
+      /\bstd::env|KUZUSHI_CLI_NAME|binary_stem|prompt_brand|routing_mode|RoutingMode|prompt_text|app\.(?:focused_module|input|cursor)\b/,
   },
   {
     name: "TUI viewport helpers do not own routing view model",
