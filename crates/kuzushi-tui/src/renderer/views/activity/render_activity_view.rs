@@ -2,7 +2,7 @@ use super::dag_pane::{dag_row_text, dag_state_style, dag_subsystems_row_text};
 use super::feed_pane::{feed_event_style, feed_event_text};
 use super::*;
 use crate::app::{ActivitySession, PaneFocus};
-use crate::ui_view_models::activity_header_model;
+use crate::ui_view_models::{activity_footer_model, activity_header_model, ActivityFooterHint};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
@@ -241,65 +241,19 @@ fn render_focus_footer(frame: &mut Frame<'_>, area: Rect, session: &ActivitySess
 }
 
 fn focus_footer_lines(width: u16, session: &ActivitySession) -> Vec<Line<'static>> {
-    let lines = vec![
-        Line::from(vec![Span::styled(
-            focus_footer_body(session),
-            theme::label(),
-        )]),
-        Line::from(key_hint_spans(width)),
-    ];
-    lines
+    let footer = activity_footer_model(session, width);
+    vec![
+        Line::from(vec![Span::styled(footer.body, theme::label())]),
+        Line::from(key_hint_spans(footer.hints)),
+    ]
 }
 
-fn focus_footer_body(session: &ActivitySession) -> String {
-    match focused_task_row(session) {
-        Some((_, row)) => format!(
-            " ▸ FOCUS  {task}  {state:?}  steps {n}  {label}",
-            task = row.task_id,
-            state = row.state,
-            n = row.steps_done,
-            label = row.last_label,
-        ),
-        None => focus_footer_empty_body(session),
-    }
-}
-
-fn focused_task_row(session: &ActivitySession) -> Option<(&String, &crate::app::DagTaskRow)> {
-    let task_id = session.focus_task.as_ref()?;
-    session.tasks.get_key_value(task_id)
-}
-
-fn focus_footer_empty_body(session: &ActivitySession) -> String {
-    session
-        .focus_task
-        .as_ref()
-        .map(|task_id| format!(" ▸ FOCUS  {task_id}  (not yet recorded)"))
-        .unwrap_or_else(|| " ▸ FOCUS  hover [j/k] to inspect a task".to_string())
-}
-
-fn key_hint_spans(width: u16) -> Vec<Span<'static>> {
+fn key_hint_spans(hints: &[ActivityFooterHint]) -> Vec<Span<'static>> {
     let mut spans = vec![Span::raw(" ")];
-    for (i, (key, hint)) in key_hints_for_width(width).iter().enumerate() {
-        append_key_hint(&mut spans, i, key, hint);
+    for (index, hint) in hints.iter().enumerate() {
+        append_key_hint(&mut spans, index, hint.key, hint.hint);
     }
-    append_narrow_cancel_hint(&mut spans, width);
     spans
-}
-
-fn key_hints_for_width(width: u16) -> &'static [(&'static str, &'static str)] {
-    const FULL_HINTS: &[(&str, &str)] = &[
-        ("j/k", "scroll"),
-        ("Tab", "pane"),
-        ("V", "verbose"),
-        ("p", "pause"),
-        ("R", "reset"),
-        ("Enter", "focus"),
-        ("c", "cancel"),
-    ];
-    if width < 100 {
-        return &FULL_HINTS[..5];
-    }
-    FULL_HINTS
 }
 
 fn append_key_hint(spans: &mut Vec<Span<'static>>, index: usize, key: &str, hint: &str) {
@@ -309,16 +263,6 @@ fn append_key_hint(spans: &mut Vec<Span<'static>>, index: usize, key: &str, hint
     spans.push(Span::styled(format!("[{key}"), theme::accent()));
     spans.push(Span::raw(" "));
     spans.push(Span::styled(format!("{hint}]"), theme::muted()));
-}
-
-fn append_narrow_cancel_hint(spans: &mut Vec<Span<'static>>, width: u16) {
-    if width >= 100 {
-        return;
-    }
-    spans.push(Span::raw(" "));
-    spans.push(Span::styled("[c".to_string(), theme::accent()));
-    spans.push(Span::raw(" "));
-    spans.push(Span::styled("cancel]".to_string(), theme::muted()));
 }
 
 fn clamp_scroll(requested: usize, total: usize, viewport: usize) -> usize {
