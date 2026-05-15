@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::threat_patch_card_model;
+use crate::ui_view_models::{plan_card_model, threat_patch_card_model};
 
 pub(crate) fn render_threat_patch_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if area.height == 0 {
@@ -48,7 +48,7 @@ pub(crate) fn plan_card_height(app: &ShellApp, area: Rect) -> u16 {
     if area.height < 6 {
         return 0;
     }
-    let Some(plan) = &app.pending_plan else {
+    let Some(plan) = plan_card_model(app) else {
         return 0;
     };
     let body = (plan.changes.len() + plan.unsupported.len()) as u16;

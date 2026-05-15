@@ -1,50 +1,21 @@
 use super::*;
+use crate::ui_view_models::{plan_card_model, PlanCardModel, PlanChangeRow};
 
 pub(crate) fn render_plan_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if area.height == 0 {
         return;
     }
-    let Some(plan) = app.pending_plan.as_ref() else {
+    let Some(plan) = plan_card_model(app) else {
         return;
     };
-    let active = plan
-        .changes
-        .iter()
-        .enumerate()
-        .filter(|(idx, _)| !app.plan_change_skipped(*idx))
-        .count();
-    let total = plan.changes.len();
-    let cursor = app.plan_cursor_clamped();
     let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::styled(
-        fit(
-            &format!("◆ PLAN · goal: {} · {active}/{total} active", plan.goal),
-            area.width as usize,
-        ),
-        theme::accent(),
-    ));
+    lines.push(plan_header_line(&plan, area.width as usize));
     lines.push(Line::styled(
         fit(&format!("  summary: {}", plan.summary), area.width as usize),
         theme::primary(),
     ));
-    for (idx, change) in plan.changes.iter().enumerate() {
-        let skipped = app.plan_change_skipped(idx);
-        let marker = if idx == cursor { ">" } else { " " };
-        let toggle = if skipped { "[ ]" } else { "[x]" };
-        let style = if skipped {
-            theme::muted().add_modifier(Modifier::DIM)
-        } else if idx == cursor {
-            theme::success().add_modifier(Modifier::BOLD)
-        } else {
-            theme::success()
-        };
-        lines.push(Line::styled(
-            fit(
-                &format!("  {marker} {toggle} {}", change.label()),
-                area.width as usize,
-            ),
-            style,
-        ));
+    for change in &plan.changes {
+        lines.push(plan_change_line(change, area.width as usize));
     }
     for note in &plan.unsupported {
         lines.push(Line::styled(
@@ -52,11 +23,16 @@ pub(crate) fn render_plan_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp
             theme::warn(),
         ));
     }
+    lines.push(plan_action_line());
+    render_lines(frame, area, lines);
+}
+
+fn plan_action_line() -> Line<'static> {
     // Mirror the keybind footer's accent-key + muted-hint shape rather
     // than `[k]` chrome.  Per `design/mockups/plan.jsx` and the rest of
     // the shell.  Slash verbs (/yes, /no) are kept as muted hints since
     // they aren't single keys.
-    lines.push(Line::from(vec![
+    Line::from(vec![
         Span::raw("  "),
         Span::styled("j/k", theme::accent()),
         Span::raw(" "),
@@ -77,8 +53,39 @@ pub(crate) fn render_plan_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp
         Span::styled("/yes", theme::muted()),
         Span::raw("   "),
         Span::styled("/no", theme::muted()),
-    ]));
-    render_lines(frame, area, lines);
+    ])
+}
+
+fn plan_header_line(plan: &PlanCardModel, width: usize) -> Line<'static> {
+    Line::styled(
+        fit(
+            &format!(
+                "◆ PLAN · goal: {} · {}/{} active",
+                plan.goal, plan.active_count, plan.total_count
+            ),
+            width,
+        ),
+        theme::accent(),
+    )
+}
+
+fn plan_change_line(change: &PlanChangeRow, width: usize) -> Line<'static> {
+    let marker = if change.selected { ">" } else { " " };
+    let toggle = if change.skipped { "[ ]" } else { "[x]" };
+    Line::styled(
+        fit(&format!("  {marker} {toggle} {}", change.label), width),
+        plan_change_style(change),
+    )
+}
+
+fn plan_change_style(change: &PlanChangeRow) -> Style {
+    if change.skipped {
+        return theme::muted().add_modifier(Modifier::DIM);
+    }
+    if change.selected {
+        return theme::success().add_modifier(Modifier::BOLD);
+    }
+    theme::success()
 }
 
 pub(crate) fn render_cost_cap_halt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
