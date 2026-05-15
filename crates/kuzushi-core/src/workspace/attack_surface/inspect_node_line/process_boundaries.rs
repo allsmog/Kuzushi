@@ -14,12 +14,13 @@ pub(super) fn inspect_command_execution(
     ]) {
         return;
     }
+    let route = inspection.route();
     inspection.add_surface(
         builder,
         AttackSurfaceKind::CommandExecutionBoundary,
         "Command execution boundary",
-        None,
-        None,
+        route.method.as_deref(),
+        route.path.as_deref(),
         Some("process_execution"),
         "node.command-exec",
     );

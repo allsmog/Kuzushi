@@ -188,6 +188,43 @@ mod tests {
     }
 
     #[test]
+    fn node_sink_boundaries_keep_inline_route_context() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"^4.18.0"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/routes.ts"),
+            r#"
+              import express from 'express';
+              import { exec } from 'child_process';
+              const app = express();
+              app.post('/admin/query', (req, res) => db.query(req.body.sql));
+              app.post('/admin/import', (req, res) => JSON.parse(req.body.payload));
+              app.post('/admin/run', (req, res) => exec(req.body.cmd));
+            "#,
+        )
+        .unwrap();
+
+        let map = build_attack_surface_map(temp.path()).unwrap();
+
+        assert_surface_route(&map, AttackSurfaceKind::DbQueryBoundary, "/admin/query");
+        assert_surface_route(
+            &map,
+            AttackSurfaceKind::DeserializationPoint,
+            "/admin/import",
+        );
+        assert_surface_route(
+            &map,
+            AttackSurfaceKind::CommandExecutionBoundary,
+            "/admin/run",
+        );
+    }
+
+    #[test]
     fn attack_surface_detects_rust_external_clients() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("src")).unwrap();
@@ -318,5 +355,18 @@ mod tests {
                 map.surfaces
             );
         }
+    }
+
+    fn assert_surface_route(map: &AttackSurfaceMap, kind: AttackSurfaceKind, route: &str) {
+        let surface = map
+            .surfaces
+            .iter()
+            .find(|surface| surface.kind == kind && surface.route.as_deref() == Some(route))
+            .unwrap_or_else(|| panic!("missing {kind:?} for {route} in {:#?}", map.surfaces));
+        assert_eq!(surface.method.as_deref(), Some("POST"));
+        assert!(surface
+            .risk
+            .reasons
+            .contains(&"route touches auth or admin workflow".to_string()));
     }
 }
