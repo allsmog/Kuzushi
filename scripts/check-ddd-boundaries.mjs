@@ -34,6 +34,12 @@ const rules = [
       /\b(crate::(?:scan|scanners|runtime|modules|verification)|std::process|Command::new|ratatui|crossterm)\b/,
   },
   {
+    name: "proof validates claims without scanner runtime dispatch or presentation dependencies",
+    roots: ["crates/kuzushi-core/src/proof"],
+    forbidden:
+      /\b(crate::(?:scan|scanners|modules|verification|verify|triage|remediation|patch|report)|AgentRuntime|AgentQueryRequest|TracedRuntime|Command::new|std::process::Command|execute_tool|execute_tool_with_runtime|ratatui|crossterm)\b/,
+  },
+  {
     name: "scanners normalize findings without triage or verification",
     roots: [
       "crates/kuzushi-core/src/scanners.rs",
@@ -85,6 +91,12 @@ const rules = [
     roots: ["crates/kuzushi-core/src/run_artifacts/run_failures.rs"],
     forbidden:
       /\b(AgentRuntime|TracedRuntime|execute_tool|execute_tool_with_runtime|Command::new|std::process|crate::(?:scan|scanners|verification|modules::registry))\b/,
+  },
+  {
+    name: "run trace records artifacts without scanner runtime or tool execution",
+    roots: ["crates/kuzushi-core/src/run_trace.rs", "crates/kuzushi-core/src/run_artifacts"],
+    forbidden:
+      /\b(crate::(?:scan|scanners|verification|verify|triage|remediation|patch|report|modules::registry|capabilities::module_recommender)|AgentRuntime|AgentQueryRequest|TracedRuntime|Command::new|std::process::Command|execute_tool|execute_tool_with_runtime)\b/,
   },
   {
     name: "TUI renderers consume view models without stores or runtime dispatch",
