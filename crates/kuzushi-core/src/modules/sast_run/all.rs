@@ -13,39 +13,34 @@ pub(in crate::modules) struct SastRunIds {
 
 impl SastRunIds {
     pub(in crate::modules) fn all(&self) -> Vec<&str> {
-        let mut ids = Vec::new();
-        if let Some(native) = self.native.as_deref() {
-            ids.push(native);
-        }
-        if let Some(agentic) = self.agentic.as_deref() {
-            ids.push(agentic);
-        }
-        if let Some(carlini) = self.carlini.as_deref() {
-            ids.push(carlini);
-        }
-        if let Some(taint_iris) = self.taint_iris.as_deref() {
-            ids.push(taint_iris);
-        }
-        if let Some(taint_iris_next) = self.taint_iris_next.as_deref() {
-            ids.push(taint_iris_next);
-        }
-        if let Some(systems_hunt) = self.systems_hunt.as_deref() {
-            ids.push(systems_hunt);
-        }
+        let ids: Vec<&str> = [
+            self.native.as_deref(),
+            self.agentic.as_deref(),
+            self.carlini.as_deref(),
+            self.taint_iris.as_deref(),
+            self.taint_iris_next.as_deref(),
+            self.systems_hunt.as_deref(),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
         if ids.is_empty() {
-            ids.push(&self.primary);
+            vec![&self.primary]
+        } else {
+            ids
         }
-        ids
     }
 }
 
 #[derive(Debug, Clone)]
 pub(in crate::modules) struct SastRunArtifacts {
     pub(in crate::modules) dir: PathBuf,
-    pub(in crate::modules) summary: PathBuf,
+    pub(in crate::modules) sast_summary: PathBuf,
     pub(in crate::modules) triage_jsonl: PathBuf,
     pub(in crate::modules) verify_jsonl: PathBuf,
 }
+
+pub(in crate::modules) const SAST_SUMMARY_FILE: &str = "sast-summary.json";
 
 impl SastRunArtifacts {
     pub(in crate::modules) fn create(workspace: &WorkspaceTarget, run_id: &str) -> Result<Self> {
@@ -58,7 +53,7 @@ impl SastRunArtifacts {
         fs::write(&verify_jsonl, "")
             .with_context(|| format!("Could not write {}", verify_jsonl.display()))?;
         Ok(Self {
-            summary: dir.join("summary.json"),
+            sast_summary: dir.join(SAST_SUMMARY_FILE),
             triage_jsonl,
             verify_jsonl,
             dir,

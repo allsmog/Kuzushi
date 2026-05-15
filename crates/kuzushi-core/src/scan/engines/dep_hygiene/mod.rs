@@ -2,15 +2,15 @@
 ///
 /// Mirrors the security-scanner design instinct of preferring deterministic scanner
 /// output over LLM-rediscovered manifest patterns. Runs only when the target
-/// has a `Cargo.lock` and the `cargo-audit` binary is on PATH; otherwise
-/// returns no findings (the legacy text-parse path in `DepHygieneScanner`
-/// remains the fallback).
+/// has a `Cargo.lock` and the `cargo-audit` binary is available. Missing
+/// Cargo.lock files return no findings; missing cargo-audit binaries fail
+/// explicitly so advisory coverage is never reported as clean by accident.
 
 /// Parse a `cargo audit --json` document into core `Finding`s.
 ///
 /// Public for testing and for any future direct-pipe callers (e.g. CI feeding
 /// pre-captured advisories into the findings store without re-running cargo).
-use crate::findings::{Finding, Severity};
+use crate::findings::{Finding, Severity, StaticProofState};
 use crate::scan::{ScanCancellation, ScanEngine};
 pub(crate) use analyze_package_json::*;
 pub(crate) use analyze_pyproject_toml::*;

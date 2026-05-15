@@ -36,3 +36,27 @@ pub(crate) fn config_module() -> BuiltinModule {
         vec![],
     )
 }
+
+pub(crate) fn module_recommender_module() -> BuiltinModule {
+    builtin_module(
+        "module-recommender",
+        "Module Recommender",
+        ModuleKind::Catalog,
+        "Recommend next Kuzushi module tools from local repository, attack-surface, threat-model, capability, and finding signals.",
+        vec![tool_with_options(
+            "module-recommender:recommend",
+            "Rank installed module tools for the active workspace without executing them.",
+            vec![
+                target_option(),
+                opt(
+                    "maxRecommendations",
+                    OptionType::Int,
+                    "Maximum recommendations to return.",
+                )
+                .aliases(&["max_recommendations", "limit"])
+                .default(json!(8)),
+            ],
+        )],
+        vec![],
+    )
+}

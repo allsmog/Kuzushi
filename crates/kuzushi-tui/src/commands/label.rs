@@ -2,9 +2,11 @@ use super::*;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellCommand {
+    Home,
     Help,
     Back,
     Modules,
+    Recommend,
     Tools,
     Findings,
     Open(String),
@@ -34,6 +36,7 @@ pub enum ShellCommand {
     Replay(String),
     Trace(String),
     Activity,
+    FailureHandoff,
     Plan(String),
     PlanApply,
     PlanDiscard,

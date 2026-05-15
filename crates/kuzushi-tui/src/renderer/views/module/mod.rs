@@ -6,11 +6,6 @@ pub(in crate::renderer) use super::*;
 /// option store.  Used by `module_lines` OPTIONS section to mirror
 /// `design/mockups/modules-detail.jsx::s2`.
 
-/// Walk `<target>/.kuzushi/prompts/<module>/` and return every `*.md`
-/// file as (verb, relative-path).  Per the agent guide in `CLAUDE.md`
-/// this is exactly the directory `executeTool` reads from for prompt
-/// overrides.  Empty when the dir doesn't exist.
-
 /// Pull the most recent N log lines that look like they came from the given
 /// module (by prefix or body match). Returns oldest-first.
 

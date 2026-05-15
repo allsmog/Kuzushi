@@ -39,6 +39,24 @@ pub(crate) fn handle_activity_command(app: &mut ShellApp, command: &ShellCommand
     true
 }
 
+pub(crate) fn handle_failure_handoff_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::FailureHandoff = command else {
+        return false;
+    };
+    app.shell_view = ShellView::FailureHandoff;
+    if app
+        .agent_chat
+        .as_ref()
+        .and_then(|agent| agent.failure_context.as_ref())
+        .is_some()
+    {
+        app.log("handoff", "latest bounded failure handoff");
+    } else {
+        app.log("handoff", "no failure handoff is loaded");
+    }
+    true
+}
+
 pub(crate) fn handle_plan_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
     let ShellCommand::Plan(goal) = command else {
         return false;

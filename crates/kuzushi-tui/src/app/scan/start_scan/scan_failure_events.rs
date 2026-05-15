@@ -6,19 +6,28 @@ impl ShellApp {
             error,
             "tasks, task block semgrep, or run semgrep:scan {\"binary\":\"/path/to/semgrep\"}",
         );
-        let run_id = self.scan.as_ref().and_then(|scan| scan.run_id.clone());
-        if let Some(scan) = &mut self.scan {
-            scan.stage = "failed".to_string();
-            scan.running = false;
-            scan.abort_requested = false;
-            scan.error = Some(actionable.clone());
+        let run_id = self.mark_scan_failed(&actionable);
+        self.mark_scan_activity_failed(&actionable);
+        if let Some(run_id) = &run_id {
+            self.write_scan_failure_artifacts(run_id, &actionable);
         }
-        // Mark every Active row as Failing so the dashboard reflects the
-        // scan-wide failure visually. We do NOT emit a synthetic
-        // `scan:run` row here because the per-scanner rows already show
-        // the failure; an extra row would just clutter the DAG pane.
-        // Push one feed event with no module_id so it lands without
-        // creating a new task entry.
+        self.log("error", actionable);
+        self.set_refused_activity("sast:scan", "scan failed");
+    }
+
+    fn mark_scan_failed(&mut self, error: &str) -> Option<String> {
+        let run_id = self.scan.as_ref().and_then(|scan| scan.run_id.clone());
+        let Some(scan) = &mut self.scan else {
+            return run_id;
+        };
+        scan.stage = "failed".to_string();
+        scan.running = false;
+        scan.abort_requested = false;
+        scan.error = Some(error.to_string());
+        run_id
+    }
+
+    fn mark_scan_activity_failed(&mut self, error: &str) {
         if let Some(session) = self.activity.as_mut() {
             let now = std::time::Instant::now();
             for row in session.tasks.values_mut() {
@@ -29,39 +38,32 @@ impl ShellApp {
                     row.last_label = "scan failed".to_string();
                 }
             }
-            // No verb -> apply_step's `else if let Some(verb)` branch is
-            // skipped, so no task row is minted; the event still lands
-            // in the feed. `module_id = "scan"` swaps the bare
-            // `[refused]` tag for the more semantic `[scan]`. The label
-            // surfaces a short version of the actionable error so the
-            // operator can glance at the feed and see *why* the scan
-            // failed without scrolling to the transcript.
             session.apply_step(
-                kuzushi_core::RunTraceStep::new(0, "refused", short_label(&actionable, 80))
+                kuzushi_core::RunTraceStep::new(0, "refused", short_label(error, 80))
                     .with_module_id("scan")
                     .with_severity("danger"),
             );
         }
-        if let Some(run_id) = &run_id {
-            append_trace_step(
-                self.target.as_deref(),
-                run_id,
-                1_000,
-                "refused",
-                &short_label(&actionable, 80),
-                None,
-                None,
-            );
-            write_run_summary(
-                self.target.as_deref(),
-                run_id,
-                "failed",
-                None,
-                &self.scan_target_label(),
-            );
-        }
-        self.log("error", actionable);
-        self.set_refused_activity("sast:scan", "scan failed");
+    }
+
+    fn write_scan_failure_artifacts(&self, run_id: &str, error: &str) {
+        append_trace_step(
+            self.target.as_deref(),
+            run_id,
+            1_000,
+            "refused",
+            &short_label(error, 80),
+            None,
+            None,
+        );
+        write_run_summary(
+            self.target.as_deref(),
+            run_id,
+            "failed",
+            None,
+            &self.scan_target_label(),
+        );
+        write_run_failure_handoff(self.target.as_deref(), run_id, "sast:scan", "failed", error);
     }
 
     pub(crate) fn apply_scan_cancelled(&mut self, run_id: String) {

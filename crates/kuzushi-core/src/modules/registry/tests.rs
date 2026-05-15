@@ -66,7 +66,7 @@ mod tests {
     }
 
     #[test]
-    fn exposes_option_specs_for_visible_tool_descriptors() {
+    fn exposes_option_specs_for_registered_tool_descriptors() {
         let registry = ModuleRegistry::with_v2_builtins();
 
         let sast = registry.resolve_tool("sast:scan").unwrap();
@@ -185,11 +185,36 @@ mod tests {
             .find(|tool| tool["name"] == "semgrep:scan")
             .unwrap();
         assert_eq!(semgrep["headless"], json!(true));
+        assert!(semgrep.get("hidden").is_none());
         assert!(semgrep["options"]
             .as_array()
             .unwrap()
             .iter()
             .any(|option| option["name"] == "config"));
+        assert!(tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["name"] != "prompt-armor:attack"));
+        assert!(tools
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["name"] != "recon:nmap"));
+        for hidden_tool in [
+            "taint-iris-next:hunt",
+            "taint-iris-next:catalog",
+            "taint-iris-next:codeql-db",
+        ] {
+            assert!(
+                tools
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|tool| tool["name"] != hidden_tool),
+                "hidden compatibility tool {hidden_tool} should not serialize in catalog:tools"
+            );
+        }
     }
 
     #[test]
@@ -198,32 +223,26 @@ mod tests {
 
         for expected in [
             "agentic-sast",
-            "carlini-threat-hunt",
-            "chrome-rce",
             "codeql",
             "context",
             "dep-hygiene",
             "findings",
             "iac-scan",
+            "module-recommender",
             "ndiff",
+            "offense-review",
             "patch",
-            "prompt-armor",
-            "pwn",
             "randori",
-            "recon",
+            "report",
             "sast",
             "secret-scan",
             "semgrep",
-            "shinsa",
             "taint-iris",
             "taint-iris-next",
             "threat-model",
-            "tob",
             "triage",
             "variant",
-            "vendor-assessment",
             "verify",
-            "vuln-scout",
             "workspace",
             "x-ray",
         ] {
@@ -235,7 +254,21 @@ mod tests {
             );
         }
 
-        for expected in ["context-lite", "pipeline", "systems-hunt"] {
+        for expected in [
+            "carlini-threat-hunt",
+            "chrome-rce",
+            "context-lite",
+            "pipeline",
+            "prompt-armor",
+            "pwn",
+            "recon",
+            "shinsa",
+            "systems-hunt",
+            "tob",
+            "uaf-hunt",
+            "vendor-assessment",
+            "vuln-scout",
+        ] {
             assert!(
                 registry
                     .all_modules()
@@ -250,6 +283,32 @@ mod tests {
                     .modules()
                     .any(|registered_module| registered_module.metadata().id == expected),
                 "hidden module {expected} should not be user-visible"
+            );
+        }
+
+        let visible_tools = registry.tools().map(|tool| tool.name.as_str()).collect::<Vec<_>>();
+        for hidden_tool in [
+            "carlini-threat-hunt:run",
+            "chrome-rce:scan",
+            "prompt-armor:attack",
+            "pwn:auto-solve",
+            "recon:nmap",
+            "shinsa:scan",
+            "taint-iris-next:hunt",
+            "taint-iris-next:catalog",
+            "taint-iris-next:codeql-db",
+            "tob:audit",
+            "uaf-hunt:hunt",
+            "vendor-assessment:assess",
+            "vuln-scout:audit",
+        ] {
+            assert!(
+                !visible_tools.contains(&hidden_tool),
+                "deferred tool {hidden_tool} should not be user-visible"
+            );
+            assert!(
+                registry.resolve_tool(hidden_tool).is_some(),
+                "deferred tool {hidden_tool} should remain directly executable"
             );
         }
 
@@ -268,12 +327,8 @@ mod tests {
             .all_modules()
             .find(|registered_module| registered_module.metadata().id == "recon")
             .unwrap();
-        assert!(recon
-            .dag_nodes()
-            .iter()
-            .any(|node| node.id == "recon:http-fingerprint"
-                && node.output_kind == "context"
-                && node.depends_on == vec!["context:build".to_string()]));
+        assert!(recon.is_hidden());
+        assert!(recon.dag_nodes().is_empty());
     }
 
     #[test]
@@ -283,6 +338,7 @@ mod tests {
             "context:build",
             "sast:scan",
             "x-ray:run",
+            "offense-review:threat-hunt",
             "carlini-threat-hunt:run",
             "threat-model:build",
             "variant:hunt",
@@ -291,6 +347,8 @@ mod tests {
             "prompt-armor:attack",
             "recon:http-fingerprint",
             "iac-scan:scan",
+            "module-recommender:recommend",
+            "report:build",
             "dep-hygiene:check",
             "secret-scan:scan",
             "semgrep:scan",
@@ -298,7 +356,12 @@ mod tests {
             "triage:run",
             "verify:finding",
             "patch:finding",
+            "taint-iris-next:dataflow-plan",
+            "taint-iris-next:source-sink-trace",
+            "taint-iris-next:finding-review",
             "taint-iris-next:hunt",
+            "taint-iris-next:catalog",
+            "taint-iris-next:codeql-db",
             "pwn:auto-solve",
         ] {
             assert!(

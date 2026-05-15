@@ -185,7 +185,10 @@ impl ShellApp {
 }
 
 fn threat_dependent_tool(tool_name: &str) -> bool {
-    matches!(tool_name, "carlini-threat-hunt:run")
+    matches!(
+        tool_name,
+        "carlini-threat-hunt:run" | "offense-review:threat-hunt"
+    )
 }
 
 struct RunToolRequest {

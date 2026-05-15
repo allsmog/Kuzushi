@@ -62,6 +62,9 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
+      - run: pnpm quality:crap-risk
+      - run: pnpm quality:identity
+      - run: pnpm quality:architecture
       - run: pnpm check
 
   # ── Codegen drift check (parallel after install) ──────────────────────────

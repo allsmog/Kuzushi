@@ -14,6 +14,12 @@ pub struct AttackSurfaceSummary {
     pub total: usize,
     pub by_kind: BTreeMap<String, usize>,
     pub by_file: BTreeMap<String, usize>,
+    #[serde(default)]
+    pub high_risk: usize,
+    #[serde(default)]
+    pub max_risk_score: u16,
+    #[serde(default)]
+    pub by_risk_tier: BTreeMap<String, usize>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
@@ -25,7 +31,11 @@ pub enum AttackSurfaceKind {
     BackgroundJob,
     DeserializationPoint,
     FileUploadParsePath,
+    ExternalServiceClient,
     AuthBoundary,
+    SessionStateBoundary,
+    RequestTrustBoundary,
+    TenantIsolationBoundary,
     DbQueryBoundary,
     CommandExecutionBoundary,
 }
@@ -39,7 +49,11 @@ impl AttackSurfaceKind {
             Self::BackgroundJob => "background_job",
             Self::DeserializationPoint => "deserialization_point",
             Self::FileUploadParsePath => "file_upload_parse_path",
+            Self::ExternalServiceClient => "external_service_client",
             Self::AuthBoundary => "auth_boundary",
+            Self::SessionStateBoundary => "session_state_boundary",
+            Self::RequestTrustBoundary => "request_trust_boundary",
+            Self::TenantIsolationBoundary => "tenant_isolation_boundary",
             Self::DbQueryBoundary => "db_query_boundary",
             Self::CommandExecutionBoundary => "command_execution_boundary",
         }
@@ -66,7 +80,29 @@ pub struct AttackSurface {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub boundary: Option<String>,
     #[serde(default)]
+    pub risk: AttackSurfaceRisk,
+    #[serde(default)]
     pub metadata: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AttackSurfaceRisk {
+    pub rank: usize,
+    pub score: u16,
+    pub tier: String,
+    pub reasons: Vec<String>,
+}
+
+impl Default for AttackSurfaceRisk {
+    fn default() -> Self {
+        Self {
+            rank: 0,
+            score: 0,
+            tier: "low".to_string(),
+            reasons: Vec::new(),
+        }
+    }
 }
 
 impl AttackSurface {
@@ -83,6 +119,7 @@ impl AttackSurface {
             method: draft.method,
             route: draft.route,
             boundary: draft.boundary,
+            risk: AttackSurfaceRisk::default(),
             metadata: draft.metadata,
         };
         surface.id = attack_surface_id(&surface);

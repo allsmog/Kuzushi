@@ -2,7 +2,12 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn go_back(&mut self) {
-        self.shell_view = back_target_view(self.shell_view.clone(), self.focused_module.is_some());
+        let target = back_target_view(self.shell_view.clone(), self.focused_module.is_some());
+        if matches!(target, ShellView::Home) {
+            self.focused_module = None;
+            self.catalog_expanded = false;
+        }
+        self.shell_view = target;
     }
 }
 
@@ -20,7 +25,7 @@ fn back_target_after_finding(view: ShellView, has_focused_module: bool) -> Shell
     if matches!(view, ShellView::ActorDetail(_)) {
         return ShellView::ModuleRun;
     }
-    ShellView::Catalog
+    ShellView::Home
 }
 
 fn returns_to_module(view: &ShellView) -> bool {
@@ -41,7 +46,7 @@ fn module_or_catalog(has_focused_module: bool) -> ShellView {
     if has_focused_module {
         ShellView::Module
     } else {
-        ShellView::Catalog
+        ShellView::Home
     }
 }
 
@@ -67,6 +72,7 @@ fn returns_to_catalog(view: &ShellView) -> bool {
             | ShellView::ThreatEditor
             | ShellView::ModuleRun
             | ShellView::Module
+            | ShellView::Home
             | ShellView::Catalog
     )
 }

@@ -103,7 +103,7 @@ pub(crate) fn render_x_ray_run_summary(data: &XRayReportData) -> String {
 
 pub(crate) fn render_x_ray_read_summary(data: &XRayReportData) -> String {
     format!(
-        "x-ray:read validated artifacts for {} ({})\n  Verdict:      {}{}\n  Entry points: {}\n  Invariants:   {}",
+        "x-ray:read loaded artifacts for {} ({})\n  Verdict:      {}{}\n  Entry points: {}\n  Invariants:   {}",
         data.repo_name,
         data.target,
         data.verdict.tier.as_deref().unwrap_or("unknown"),
@@ -125,7 +125,30 @@ pub fn read_x_ray_report_artifacts(
 ) -> Result<XRayReportData> {
     let repo_root = canonicalize_report_root(repo_root)?;
     let artifact_dir = repo_root.join("x-ray");
-    let paths = XRayArtifactPaths {
+    let paths = x_ray_artifact_paths(&artifact_dir);
+    ensure_required_artifacts_exist(&paths)?;
+    let markdown = read_x_ray_markdown(&paths)?;
+
+    Ok(XRayReportData {
+        target: repo_root.display().to_string(),
+        repo_name: report_repo_name(repo_name, &repo_root),
+        runtime_mode: runtime_mode.to_string(),
+        artifact_paths: paths,
+        verdict: parse_verdict(&markdown.x_ray),
+        entry_point_counts: parse_entry_point_counts(&markdown.entry_points),
+        invariant_counts: parse_invariant_counts(&markdown.invariants),
+        cost_usd,
+    })
+}
+
+struct XRayMarkdown {
+    x_ray: String,
+    entry_points: String,
+    invariants: String,
+}
+
+fn x_ray_artifact_paths(artifact_dir: &Path) -> XRayArtifactPaths {
+    XRayArtifactPaths {
         x_ray: artifact_dir.join(REQUIRED_X_RAY_MD).display().to_string(),
         entry_points: artifact_dir
             .join(REQUIRED_ENTRY_POINTS_MD)
@@ -139,29 +162,25 @@ pub fn read_x_ray_report_artifacts(
             .join(REQUIRED_ARCHITECTURE_SVG)
             .display()
             .to_string(),
-    };
+    }
+}
 
-    ensure_required_artifacts_exist(&paths)?;
-
-    let x_ray_markdown = fs::read_to_string(&paths.x_ray)
-        .with_context(|| format!("Unable to read {}", paths.x_ray))?;
-    let entry_points_markdown = fs::read_to_string(&paths.entry_points)
-        .with_context(|| format!("Unable to read {}", paths.entry_points))?;
-    let invariants_markdown = fs::read_to_string(&paths.invariants)
-        .with_context(|| format!("Unable to read {}", paths.invariants))?;
-
-    Ok(XRayReportData {
-        target: repo_root.display().to_string(),
-        repo_name: repo_name
-            .map(ToString::to_string)
-            .unwrap_or_else(|| crate::capabilities::x_ray::domain::repo_name(&repo_root)),
-        runtime_mode: runtime_mode.to_string(),
-        artifact_paths: paths,
-        verdict: parse_verdict(&x_ray_markdown),
-        entry_point_counts: parse_entry_point_counts(&entry_points_markdown),
-        invariant_counts: parse_invariant_counts(&invariants_markdown),
-        cost_usd,
+fn read_x_ray_markdown(paths: &XRayArtifactPaths) -> Result<XRayMarkdown> {
+    Ok(XRayMarkdown {
+        x_ray: read_artifact_markdown(&paths.x_ray)?,
+        entry_points: read_artifact_markdown(&paths.entry_points)?,
+        invariants: read_artifact_markdown(&paths.invariants)?,
     })
+}
+
+fn read_artifact_markdown(path: &str) -> Result<String> {
+    fs::read_to_string(path).with_context(|| format!("Unable to read {path}"))
+}
+
+fn report_repo_name(repo_name: Option<&str>, repo_root: &Path) -> String {
+    repo_name
+        .map(ToString::to_string)
+        .unwrap_or_else(|| crate::capabilities::x_ray::domain::repo_name(repo_root))
 }
 
 fn canonicalize_report_root(path: &Path) -> Result<PathBuf> {

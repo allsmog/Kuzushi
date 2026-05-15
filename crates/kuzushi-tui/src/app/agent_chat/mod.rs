@@ -1,6 +1,7 @@
 pub(crate) use super::*;
+use kuzushi_core::run_artifacts::FailureToLlmContext;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AgentChatView {
     pub question: String,
     pub answer: Option<String>,
@@ -12,6 +13,8 @@ pub struct AgentChatView {
     pub run_id: Option<String>,
     /// Wall-clock seconds since epoch when the active turn was dispatched.
     pub started_secs: u64,
+    pub(crate) failure_context: Option<FailureToLlmContext>,
+    pub(crate) pending_failure_context: Option<FailureToLlmContext>,
 }
 
 impl Default for AgentChatView {
@@ -25,6 +28,8 @@ impl Default for AgentChatView {
             history: Vec::new(),
             run_id: None,
             started_secs: 0,
+            failure_context: None,
+            pending_failure_context: None,
         }
     }
 }
@@ -54,6 +59,8 @@ impl AgentChatView {
             history,
             run_id: None,
             started_secs: 0,
+            failure_context: None,
+            pending_failure_context: None,
         }
     }
 }

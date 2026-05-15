@@ -145,10 +145,11 @@ standing review gate, not an optional cleanup phase.
 - Keep tests close to the behavior being protected. When extracting code from a
   large file, move or add focused tests for the extracted helper and keep the
   existing integration/snapshot tests passing.
-- New production Rust code should target CRAP <= 15, measured with
-  `cargo-llvm-cov` plus `cargo-crap`. If you must touch an existing offender,
-  avoid increasing its CRAP score and prefer reducing it with focused extraction
-  or meaningful branch-covering tests.
+- New or modified Kuzushi-owned production code must pass the repo CRAP-risk
+  proxy gate with risk < 7. Keep functions at complexity <= 4 and under 40
+  logical lines, isolate side effects behind adapters, and add focused tests for
+  branchy behavior. If true CRAP tooling is available, use it as additional
+  evidence, not as a substitute for the shipped gate.
 - Before committing, scan the touched files for long functions, mixed
   responsibilities, unclear names, duplicated branches, stale comments, and
   needless public API expansion. Fix the local problem while the context is
@@ -189,8 +190,8 @@ logic is duplicated across CLI, TUI, reports, persistence, and tool execution.
   paths, scan/shell/run parity, module/tool contracts, and model/runtime
   no-silent-fallback semantics.
 - Every DDD migration should be phased, test-backed, and CRAP-aware: changed or
-  newly introduced Rust functions must stay under CRAP 15, or the commit must
-  document a narrow blocker and avoid making the score worse.
+  newly introduced Rust functions must pass `pnpm quality:crap-risk`, or the
+  commit must document a narrow blocker and avoid making the score worse.
 
 ### Model & runtime safety (no silent fallback)
 
@@ -367,7 +368,7 @@ any TypeScript/React/Ink path.
 - `crates/kuzushi-tui/src/renderer.rs` - Ratatui renderer and view-specific
   layout tests.
 - `crates/kuzushi-tui/src/renderer/plain.rs` - non-TTY/scripted plain output.
-- `crates/kuzushi-tui/src/theme.rs` - semantic terminal styles.
+- `crates/kuzushi-tui/src/theme/mod.rs` - semantic terminal styles.
 
 ### Shell Views
 

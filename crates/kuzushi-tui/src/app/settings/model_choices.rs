@@ -21,8 +21,8 @@ pub(crate) const MODEL_CHOICES: &[ModelChoice] = &[
     },
     ModelChoice {
         index: 2,
-        id: "openai:gpt-5.4-mini",
-        label: "GPT-5.4 mini",
+        id: "openai:gpt-5.5-mini",
+        label: "GPT-5.5 mini",
         provider: "openai",
         auth: "OPENAI_API_KEY",
         thinking_level: "high",
@@ -30,15 +30,15 @@ pub(crate) const MODEL_CHOICES: &[ModelChoice] = &[
     ModelChoice {
         index: 3,
         id: "openai-codex:gpt-5.5",
-        label: "Codex GPT-5.5",
+        label: "OpenAI OAuth GPT-5.5",
         provider: "openai-codex",
         auth: "OAuth",
         thinking_level: "xhigh",
     },
     ModelChoice {
         index: 4,
-        id: "openai-codex:gpt-5.4-mini",
-        label: "Codex GPT-5.4 mini",
+        id: "openai-codex:gpt-5.5-mini",
+        label: "OpenAI OAuth GPT-5.5 mini",
         provider: "openai-codex",
         auth: "OAuth",
         thinking_level: "high",
@@ -63,6 +63,24 @@ pub(crate) const MODEL_CHOICES: &[ModelChoice] = &[
 
 pub(crate) fn model_choices() -> &'static [ModelChoice] {
     MODEL_CHOICES
+}
+
+pub(crate) fn display_model_selector(model: &str) -> String {
+    model
+        .strip_prefix("openai-codex:")
+        .map(|name| format!("openai-oauth:{name}"))
+        .unwrap_or_else(|| model.to_string())
+}
+
+pub(crate) fn display_model_provider(provider: &str) -> &str {
+    match provider {
+        "openai-codex" | "codex" => "openai",
+        _ => provider,
+    }
+}
+
+pub(crate) fn model_choice_display_selector(choice: &ModelChoice) -> String {
+    display_model_selector(choice.id)
 }
 
 pub(crate) fn preferred_model_choice_index(config: &V2Config) -> usize {

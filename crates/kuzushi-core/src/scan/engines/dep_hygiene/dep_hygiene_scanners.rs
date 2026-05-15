@@ -44,6 +44,7 @@ impl DepHygieneFinding {
             self.severity.to_core_severity(),
             message,
         )
+        .with_static_proof_state(StaticProofState::SignalOnly)
     }
 }
 

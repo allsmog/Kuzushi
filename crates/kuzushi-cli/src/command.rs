@@ -111,7 +111,7 @@ pub(crate) enum Command {
         command: ConfigCommand,
     },
     /// Diagnostic credential subcommands. For interactive OAuth login,
-    /// use `kuzushi shell` then `auth login openai-codex` or
+    /// use `kuzushi shell` then `auth login openai` or
     /// `auth login anthropic`.
     Auth {
         #[command(subcommand)]

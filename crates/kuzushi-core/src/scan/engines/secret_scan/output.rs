@@ -2,48 +2,8 @@ use super::*;
 
 impl SecretScanReport {
     pub fn output(&self) -> String {
-        let severity_summary = if self.findings.is_empty() {
-            "no secrets detected".to_string()
-        } else {
-            let mut counts = BTreeMap::<&'static str, usize>::new();
-            for finding in &self.findings {
-                *counts.entry(finding.severity.as_str()).or_default() += 1;
-            }
-            counts
-                .into_iter()
-                .map(|(severity, count)| format!("{count} {}", severity.to_ascii_lowercase()))
-                .collect::<Vec<_>>()
-                .join(", ")
-        };
-
-        let mut lines = vec![
-            format!(
-                "secret-scan: {} finding{} ({severity_summary})",
-                self.findings.len(),
-                if self.findings.len() == 1 { "" } else { "s" }
-            ),
-            format!("  Files scanned: {}", self.files_scanned),
-            format!("  Files skipped: {}", self.files_skipped),
-            format!("  Target:        {}", self.target),
-        ];
-
-        if !self.findings.is_empty() {
-            lines.push(String::new());
-            lines.push("Top findings:".to_string());
-            for finding in self.findings.iter().take(10) {
-                lines.push(format!(
-                    "  - {} - {} - {}:{}",
-                    finding.severity.as_str(),
-                    finding.rule_id,
-                    finding.file_path,
-                    finding.start_line
-                ));
-            }
-            if self.findings.len() > 10 {
-                lines.push(format!("  ... and {} more", self.findings.len() - 10));
-            }
-        }
-
+        let mut lines = secret_scan_header_lines(self);
+        append_secret_top_findings(&mut lines, &self.findings);
         lines.join("\n")
     }
 
@@ -59,6 +19,69 @@ impl SecretScanReport {
             }
         })
     }
+}
+
+fn secret_scan_header_lines(report: &SecretScanReport) -> Vec<String> {
+    vec![
+        format!(
+            "secret-scan: {} finding{} ({})",
+            report.findings.len(),
+            plural_suffix(report.findings.len()),
+            severity_summary(&report.findings)
+        ),
+        format!("  Files scanned: {}", report.files_scanned),
+        format!("  Files skipped: {}", report.files_skipped),
+        format!("  Target:        {}", report.target),
+    ]
+}
+
+fn severity_summary(findings: &[SecretScanFinding]) -> String {
+    if findings.is_empty() {
+        return "no secrets detected".to_string();
+    }
+    severity_counts(findings)
+        .into_iter()
+        .map(|(severity, count)| format!("{count} {}", severity.to_ascii_lowercase()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn severity_counts(findings: &[SecretScanFinding]) -> BTreeMap<&'static str, usize> {
+    let mut counts = BTreeMap::new();
+    for finding in findings {
+        *counts.entry(finding.severity.as_str()).or_default() += 1;
+    }
+    counts
+}
+
+fn append_secret_top_findings(lines: &mut Vec<String>, findings: &[SecretScanFinding]) {
+    if findings.is_empty() {
+        return;
+    }
+    lines.push(String::new());
+    lines.push("Top findings:".to_string());
+    lines.extend(findings.iter().take(10).map(secret_finding_line));
+    append_remaining_count(lines, findings.len());
+}
+
+fn secret_finding_line(finding: &SecretScanFinding) -> String {
+    format!(
+        "  - {} - {} - {}:{}",
+        finding.severity.as_str(),
+        finding.rule_id,
+        finding.file_path,
+        finding.start_line
+    )
+}
+
+fn append_remaining_count(lines: &mut Vec<String>, finding_count: usize) {
+    if finding_count > 10 {
+        lines.push(format!("  ... and {} more", finding_count - 10));
+    }
+}
+
+fn plural_suffix(count: usize) -> &'static str {
+    (count != 1).then_some("s").unwrap_or("")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -93,6 +116,7 @@ impl SecretScanFinding {
         );
         finding.fingerprint = self.fingerprint.clone();
         finding.title = self.message.clone();
+        finding.set_static_proof_state(StaticProofState::SignalOnly);
         finding
     }
 }

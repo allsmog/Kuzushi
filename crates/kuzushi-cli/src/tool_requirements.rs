@@ -24,6 +24,7 @@ pub(crate) fn run_tool_workspace(
 
 pub(crate) const WORKSPACE_TOOL_PREFIXES: &[&str] = &[
     "findings:",
+    "module-recommender:",
     "context:",
     "recon:",
     "vendor-assessment:",
@@ -44,8 +45,12 @@ pub(crate) const WORKSPACE_TOOL_PREFIXES: &[&str] = &[
 
 pub(crate) const WORKSPACE_TOOL_NAMES: &[&str] = &[
     "carlini-threat-hunt:run",
+    "offense-review:threat-hunt",
     "agentic-sast:scan",
     "taint-iris:hunt",
+    "taint-iris-next:dataflow-plan",
+    "taint-iris-next:source-sink-trace",
+    "taint-iris-next:finding-review",
     "taint-iris-next:hunt",
     "taint-iris-next:catalog",
     "taint-iris-next:codeql-db",
@@ -65,6 +70,7 @@ pub(crate) const WORKSPACE_TOOL_NAMES: &[&str] = &[
 
 pub(crate) const FINDING_STORE_TOOL_PREFIXES: &[&str] = &[
     "findings:",
+    "module-recommender:",
     "chrome-rce:",
     "variant:",
     "systems-hunt:",
@@ -78,6 +84,7 @@ pub(crate) const FINDING_STORE_TOOL_NAMES: &[&str] = &[
     "patch:finding",
     "agentic-sast:scan",
     "carlini-threat-hunt:run",
+    "offense-review:threat-hunt",
     "vuln-scout:audit",
     "tob:audit",
     "shinsa:scan",
@@ -89,6 +96,7 @@ pub(crate) const FINDING_STORE_TOOL_NAMES: &[&str] = &[
     "prompt-armor:attack",
     "ndiff:hunt-variants",
     "taint-iris:hunt",
+    "taint-iris-next:finding-review",
     "taint-iris-next:hunt",
     "sast:scan",
     "semgrep:scan",

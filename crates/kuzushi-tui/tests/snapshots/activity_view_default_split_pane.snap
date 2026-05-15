@@ -1,4 +1,4 @@
- KUZUSHI  mode shell  target none  findings 0 findings  ctx missing  view activity  model unconfigured
+ KUZUSHI mode:shell | target none | ctx missing | model unconfigured | findings 0 findings | view activity
 
  -- ACTIVITY  run r-snapshot  |  2/3 done  |  1 running ----------------------------------------------------------------
  -- DAG                                               - -- FEED

@@ -40,22 +40,9 @@ impl Finding {
         let file_path = file_path.into();
         let message = message.into();
         let fingerprint = fingerprint_parts(&rule_id, &file_path, start_line, &message);
-        let title = message
-            .lines()
-            .next()
-            .unwrap_or(&rule_id)
-            .trim()
-            .to_string();
-
+        let title = finding_title(&message, &rule_id);
         let cwe = extract_cwe(&rule_id, &title, &message);
-        // Only auto-populate dedup_key when we extracted a real CWE.
-        // Without CWE the bucket would collide too aggressively across
-        // unrelated findings — fingerprint dedup is the right level
-        // there, and callers that want stronger collisions can attach a
-        // dedup_key explicitly with `with_dedup_key`.
-        let dedup_key = cwe
-            .as_deref()
-            .map(|c| compute_dedup_key(&file_path, start_line, Some(c)));
+        let dedup_key = finding_dedup_key(&file_path, start_line, cwe.as_deref());
         let vuln_source = Some(VulnSource::from_tool(&tool));
 
         Self {
@@ -111,6 +98,7 @@ impl Finding {
         Self::new_tool(
             "semgrep", rule_id, file_path, start_line, end_line, severity, message,
         )
+        .with_static_proof_state(StaticProofState::SignalOnly)
     }
 
     pub fn with_static_proof_state(mut self, state: StaticProofState) -> Self {
@@ -126,4 +114,17 @@ impl Finding {
         self.static_proof_state = Some(StaticProofState::try_from(state)?);
         Ok(())
     }
+}
+
+fn finding_title(message: &str, rule_id: &str) -> String {
+    message
+        .lines()
+        .next()
+        .unwrap_or(rule_id)
+        .trim()
+        .to_string()
+}
+
+fn finding_dedup_key(file_path: &str, start_line: u32, cwe: Option<&str>) -> Option<String> {
+    cwe.map(|cwe| compute_dedup_key(file_path, start_line, Some(cwe)))
 }

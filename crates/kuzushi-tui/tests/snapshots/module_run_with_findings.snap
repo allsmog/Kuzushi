@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 239
 ---
-KUZUSHI  mode:run | target none | 1 findings (1 critical) | ctx missing | view run | stage ⠿ searching | model unconf...
+KUZUSHI mode:run | target none | ctx missing | model unconfigured | 1 findings (1 critical) | view run | stage ⠿ sea...
 
 ⠿ ./acme-checkout | running: agentic-sast tracing | 1 finding(s) | run run-abc1
 
@@ -16,5 +16,5 @@ KUZUSHI  mode:run | target none | 1 findings (1 critical) | ctx missing | view r
 
  -- TRANSCRIPT ---------------------------------------------------------------------------------------------------------
  15:21:17 | system kuzushi shell
- 15:21:17 | startup ready: 39 module(s), 74 tool(s), target none
+ 15:21:17 | startup ready: 32 module(s), 46 tool(s), target none
  15:21:17 | help type help for commands | ? <text> to ask | scan to start

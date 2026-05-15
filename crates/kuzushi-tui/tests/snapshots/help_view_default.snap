@@ -2,17 +2,21 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 162
 ---
-mode:shell | target:none | catalog | 0 findings | 39 mods
+mode:shell | target:none | help | 0 findings | 32 mods
 
  -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
 Examples: scan . | use semgrep | run . | findings | open F-0001 | model 1
 
 NAVIGATION — browse modules and tools
+home - open Kuzushi cockpit home
+  aliases / examples: /home, /
 help - show grouped shell help
   aliases / examples: /help, /h, h, ?
 modules - browse native Rust modules
   aliases / examples: /modules, /m, m, show modules
+recommend - open latest module recommendations
+  aliases / examples: /recommend, rec, /rec
 tools - list routed Rust tools
   aliases / examples: /tools, show tools
 use <module> - focus a module
@@ -29,8 +33,6 @@ run <tool> [json] - dispatch a tool; run . is shell-only focused-module shorthan
   aliases / examples: run ., /run <tool> [json], run . [json]
 ask <question> - explicit agent question
   aliases / examples: /ask <question>, ?text
-pwn [verb] - open the pwn dashboard or launch pwn workflow tools
-  aliases / examples: /pwn, /pwn target <path>, /pwn auto
 
 OPTIONS / TASKS — options + sast task control
 options [tool] - show tool options
@@ -99,6 +101,8 @@ trace <run> - stream run events
   aliases / examples: /trace <run>
 activity - live module-progress dashboard
   aliases / examples: /activity, progress, /progress, /a
+handoff - latest bounded failure handoff
+  aliases / examples: /handoff, failure, /failure
 since <ref> - scope findings to a git ref
   aliases / examples: /since <ref>
 threats [1-5] - threat model views
@@ -118,7 +122,7 @@ AUTH / CONFIG / MODEL — auth, model, runtime config
 auth - show env/OAuth status without secrets
   aliases / examples: /auth, auth status
 auth login <provider> - start supported OAuth login
-  aliases / examples: auth codex, auth anthropic, /auth login <provider>
+  aliases / examples: auth openai, auth anthropic, /auth login <provider>
 provider - show pi-agent-core provider choices
   aliases / examples: /provider
 backend - show Rust runtime backend

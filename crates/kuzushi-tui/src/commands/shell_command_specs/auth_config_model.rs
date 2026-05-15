@@ -9,7 +9,7 @@ pub(crate) const AUTH_CONFIG_MODEL_COMMANDS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "auth login <provider>",
-        aliases: &["auth codex", "auth anthropic", "/auth login <provider>"],
+        aliases: &["auth openai", "auth anthropic", "/auth login <provider>"],
         category: ShellCommandCategory::AuthConfigModel,
         description: "start supported OAuth login",
     },

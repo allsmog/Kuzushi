@@ -464,7 +464,7 @@ mod tests {
     }
 
     #[test]
-    fn finding_detail_report_surfaces_proof_state_validation_and_next_action() {
+    fn finding_detail_report_surfaces_proof_state_verification_and_next_action() {
         let mut finding = Finding::new_semgrep(
             "demo.xss",
             "src/app.ts",
@@ -498,12 +498,12 @@ mod tests {
 
         assert!(output.contains("Finding F-0001"));
         assert!(output.contains("Proof state: source_sink_linked"));
-        assert!(output.contains("Runtime validation: execution_confirmed"));
-        assert!(output.contains("Proof ladder: validated"));
+        assert!(output.contains("Runtime verification: execution_confirmed"));
+        assert!(output.contains("Proof ladder: verified"));
         assert!(output.contains("Next action: patch"));
         assert_eq!(report.next_action, FindingNextAction::Patch);
         let json = serde_json::to_value(&report).unwrap();
-        assert_eq!(json["proofState"], "source_sink_linked - Source and sink are linked in static evidence, not empirically validated");
+        assert_eq!(json["proofState"], "source_sink_linked - Source and sink are linked in static evidence; runtime proof not recorded");
         assert_eq!(json["nextAction"], "patch");
     }
 

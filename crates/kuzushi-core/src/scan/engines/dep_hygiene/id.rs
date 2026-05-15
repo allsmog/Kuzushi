@@ -14,9 +14,7 @@ impl ScanEngine for CargoAuditScanner {
         if !lockfile.exists() {
             return Ok(Vec::new());
         }
-        if !Self::binary_available() {
-            return Ok(Vec::new());
-        }
+        ensure_cargo_audit_available()?;
 
         let output = Command::new("cargo")
             .args(["audit", "--json"])
@@ -36,61 +34,74 @@ impl ScanEngine for CargoAuditScanner {
 }
 
 pub fn parse_cargo_audit_output(json: &str) -> Vec<Finding> {
-    let value: Value = match serde_json::from_str(json) {
-        Ok(v) => v,
-        Err(_) => return Vec::new(),
+    let Some(value) = parse_cargo_audit_json(json) else {
+        return Vec::new();
     };
+    cargo_audit_entries(&value).map_or_else(Vec::new, cargo_audit_findings)
+}
 
-    let mut findings = Vec::new();
-    let list = value
+fn parse_cargo_audit_json(json: &str) -> Option<Value> {
+    serde_json::from_str(json).ok()
+}
+
+fn cargo_audit_entries(value: &Value) -> Option<&[Value]> {
+    value
         .get("vulnerabilities")
         .and_then(|v| v.get("list"))
-        .and_then(Value::as_array);
-    let Some(list) = list else {
-        return findings;
-    };
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+}
 
-    for entry in list {
-        let advisory = match entry.get("advisory") {
-            Some(a) => a,
-            None => continue,
-        };
-        let id = advisory
-            .get("id")
-            .and_then(Value::as_str)
-            .unwrap_or("RUSTSEC-UNKNOWN")
-            .to_string();
-        let title = advisory
-            .get("title")
-            .and_then(Value::as_str)
-            .unwrap_or("(no title)")
-            .to_string();
-        let package = entry
-            .get("package")
-            .and_then(|p| p.get("name"))
-            .and_then(Value::as_str)
-            .unwrap_or("?");
-        let version = entry
-            .get("package")
-            .and_then(|p| p.get("version"))
-            .and_then(Value::as_str)
-            .unwrap_or("?");
-        let cvss = advisory.get("cvss").and_then(Value::as_str);
-        let severity = severity_from_cvss(cvss);
-        let message = format!("{id}: {package}@{version} — {title}");
+fn cargo_audit_findings(entries: &[Value]) -> Vec<Finding> {
+    entries.iter().filter_map(cargo_audit_finding).collect()
+}
 
-        findings.push(Finding::new_tool(
-            "cargo-audit",
-            id,
-            "Cargo.lock",
-            1,
-            None,
-            severity,
-            message,
-        ));
+fn cargo_audit_finding(entry: &Value) -> Option<Finding> {
+    let advisory = entry.get("advisory")?;
+    let id = cargo_audit_advisory_field(advisory, "id", "RUSTSEC-UNKNOWN").to_string();
+    let title = cargo_audit_advisory_field(advisory, "title", "(no title)");
+    let package = cargo_audit_package_field(entry, "name");
+    let version = cargo_audit_package_field(entry, "version");
+    let severity = severity_from_cvss(advisory.get("cvss").and_then(Value::as_str));
+    let message = format!("{id}: {package}@{version} — {title}");
+
+    Some(Finding::new_tool(
+        "cargo-audit",
+        id,
+        "Cargo.lock",
+        1,
+        None,
+        severity,
+        message,
+    ))
+}
+
+fn cargo_audit_advisory_field<'a>(
+    advisory: &'a Value,
+    field: &str,
+    fallback: &'static str,
+) -> &'a str {
+    advisory
+        .get(field)
+        .and_then(Value::as_str)
+        .unwrap_or(fallback)
+}
+
+fn cargo_audit_package_field<'a>(entry: &'a Value, field: &str) -> &'a str {
+    entry
+        .get("package")
+        .and_then(|package| package.get(field))
+        .and_then(Value::as_str)
+        .unwrap_or("?")
+}
+
+fn ensure_cargo_audit_available() -> Result<()> {
+    if CargoAuditScanner::binary_available() {
+        return Ok(());
     }
-
-    findings
+    anyhow::bail!(
+        "cargo-audit: `cargo audit` was not found. Install cargo-audit with `cargo install cargo-audit`, then rerun `kuzushi scan --tasks cargo-audit` or `kuzushi run sast:scan --input '{{\"tasks\":[\"cargo-audit\"]}}'`."
+    )
 }
 
 pub(crate) fn severity_from_cvss(cvss: Option<&str>) -> Severity {

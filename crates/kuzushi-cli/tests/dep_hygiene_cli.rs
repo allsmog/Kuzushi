@@ -1956,6 +1956,12 @@ fn run_semgrep_scan_missing_binary_is_actionable() {
         .unwrap();
 
     assert!(!output.status.success());
+    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let error = body["errors"][0].as_str().unwrap();
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["status"], "failed");
+    assert!(error.contains("semgrep: could not find scanner binary"));
+    assert!(error.contains("Install Semgrep"));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("semgrep: could not find scanner binary")
@@ -2078,6 +2084,15 @@ fn run_codeql_scan_missing_binary_is_actionable() {
         .unwrap();
 
     assert!(!output.status.success());
+    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let error = body["errors"][0].as_str().unwrap();
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["status"], "failed");
+    assert_eq!(body["fallback_context"]["failedStage"], "codeql:scan");
+    assert!(body["fallback_context"]["missingArtifacts"].is_array());
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("validated"));
+    assert!(error.contains("codeql: could not find CodeQL CLI"));
+    assert!(error.contains("github/codeql-cli-binaries"));
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("codeql: could not find CodeQL CLI")

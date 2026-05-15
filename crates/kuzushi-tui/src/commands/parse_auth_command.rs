@@ -4,7 +4,7 @@ pub(crate) fn parse_auth_command(args: &[&str]) -> ShellCommand {
     match args.first().copied() {
         None | Some("status") => ShellCommand::Auth,
         Some("login") => ShellCommand::AuthLogin(args.get(1).map(|value| (*value).to_string())),
-        Some("openai-codex") | Some("codex") => {
+        Some("openai") | Some("openai-codex") | Some("codex") => {
             ShellCommand::AuthLogin(Some("openai-codex".to_string()))
         }
         Some("anthropic") | Some("claude") => {

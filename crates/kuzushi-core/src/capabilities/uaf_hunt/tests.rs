@@ -211,6 +211,54 @@ fn default_max_agent_steps_is_120_with_a_400_cap() {
 }
 
 #[test]
+fn run_uaf_hunt_rejects_bare_model_before_clang_spawn() {
+    let _guard = env_lock().lock().unwrap();
+    let dir = tempdir().unwrap();
+    std::fs::write(dir.path().join("compile_commands.json"), "[]").unwrap();
+
+    let previous = std::env::var_os("KUZUSHI_MCP_CLANG_BIN");
+    std::env::set_var(
+        "KUZUSHI_MCP_CLANG_BIN",
+        dir.path().join("missing-kuzushi-mcp-clang"),
+    );
+
+    let runtime = ScriptedUafRuntime::new(vec![]);
+    let config = V2Config::default();
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: None,
+        findings_store: None,
+        trace: None,
+    };
+
+    let err = run_uaf_hunt_report(
+        &json!({"target": dir.path(), "model": "gpt-5.5"}),
+        &ctx,
+        Some(&runtime),
+    )
+    .unwrap_err();
+
+    match previous {
+        Some(value) => std::env::set_var("KUZUSHI_MCP_CLANG_BIN", value),
+        None => std::env::remove_var("KUZUSHI_MCP_CLANG_BIN"),
+    }
+
+    let message = format!("{err:#}");
+    assert!(
+        message.contains("provider:model"),
+        "bare model must fail shared model validation: {message}"
+    );
+    assert!(
+        message.contains("uaf-hunt:hunt"),
+        "error should name the tool policy boundary: {message}"
+    );
+    assert!(
+        !message.contains("mcp-clang"),
+        "model validation should happen before clang subprocess spawn: {message}"
+    );
+}
+
+#[test]
 fn method_not_found_for_callees_becomes_workaround_advisory() {
     let error = anyhow::anyhow!(
         "uaf-hunt: mcp-clang returned JSON-RPC error code -32601: method not found"

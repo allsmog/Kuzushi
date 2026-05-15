@@ -2,6 +2,12 @@ use super::*;
 
 pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
     ShellCommandSpec {
+        command: "home",
+        aliases: &["/home", "/", "home"],
+        category: ShellCommandCategory::Navigation,
+        description: "open Kuzushi cockpit home",
+    },
+    ShellCommandSpec {
         command: "help",
         aliases: &["/help", "/h", "h", "?"],
         category: ShellCommandCategory::Navigation,
@@ -12,6 +18,12 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         aliases: &["/modules", "/m", "m", "show modules"],
         category: ShellCommandCategory::Navigation,
         description: "browse native Rust modules",
+    },
+    ShellCommandSpec {
+        command: "recommend",
+        aliases: &["recommend", "/recommend", "rec", "/rec"],
+        category: ShellCommandCategory::Navigation,
+        description: "open latest module recommendations",
     },
     ShellCommandSpec {
         command: "tools",

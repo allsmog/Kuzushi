@@ -25,6 +25,7 @@ pub(crate) fn inspect_node_line(
     data_boundaries::inspect_deserialization(&inspection, builder);
     uploads::inspect(&inspection, builder);
     data_boundaries::inspect_database(&inspection, builder);
+    data_boundaries::inspect_external_client(&inspection, builder);
     process_boundaries::inspect_command_execution(&inspection, builder);
     process_boundaries::inspect_cli_entrypoint(&inspection, builder);
 }

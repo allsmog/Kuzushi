@@ -50,6 +50,9 @@ pub(in crate::modules) fn attack_surface_service_boundaries(
             matches!(
                 surface.kind,
                 crate::attack_surface::AttackSurfaceKind::AuthBoundary
+                    | crate::attack_surface::AttackSurfaceKind::SessionStateBoundary
+                    | crate::attack_surface::AttackSurfaceKind::RequestTrustBoundary
+                    | crate::attack_surface::AttackSurfaceKind::TenantIsolationBoundary
                     | crate::attack_surface::AttackSurfaceKind::CommandExecutionBoundary
                     | crate::attack_surface::AttackSurfaceKind::FileUploadParsePath
                     | crate::attack_surface::AttackSurfaceKind::RpcHandler

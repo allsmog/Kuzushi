@@ -11,7 +11,19 @@ const credsPath = path.join(homedir(), ".kuzushi", "oauth-credentials.json");
 const creds = JSON.parse(readFileSync(credsPath, "utf8"));
 const token = creds.anthropic.access;
 
-const modelId = process.argv[2] || "claude-haiku-4-5";
+const requestedModel = process.argv[2] ?? process.env.KUZUSHI_MODEL;
+if (!requestedModel) {
+  console.error(
+    "Usage: node scripts/oauth-mcp-probe.mjs <anthropic-model-id> [reasoning] [structured]",
+  );
+  console.error("Set an explicit model argument or KUZUSHI_MODEL; no fallback is chosen.");
+  process.exit(1);
+}
+if (requestedModel.includes(":") && !requestedModel.startsWith("anthropic:")) {
+  console.error(`Expected an Anthropic model for this probe, got ${requestedModel}`);
+  process.exit(1);
+}
+const modelId = requestedModel.replace(/^anthropic:/, "");
 const reasoning = (process.argv[3] || "off") === "off" ? undefined : process.argv[3];
 console.error(`[probe] model=${modelId} reasoning=${reasoning ?? "off"}`);
 
@@ -23,45 +35,71 @@ const servers = {
 
 const handles = {};
 async function spawnHandle(label, bin) {
-  const child = spawn(bin, [], { stdio: ["pipe", "pipe", "pipe"], cwd: "/tmp/targets/demo-repo" });
-  child.stderr.on("data", () => {}); // drain
-  const handle = { child, buf: "", pending: new Map(), nextId: 1, tools: [] };
-  child.stdout.setEncoding("utf8");
-  child.stdout.on("data", (chunk) => {
-    handle.buf += chunk;
-    while (handle.buf.indexOf("\n") >= 0) {
-      const idx = handle.buf.indexOf("\n");
-      const line = handle.buf.slice(0, idx).trim();
-      handle.buf = handle.buf.slice(idx + 1);
-      if (!line) continue;
-      try {
-        const d = JSON.parse(line);
-        const r = handle.pending.get(d.id);
-        if (!r) continue;
-        handle.pending.delete(d.id);
-        if (d.error) r.reject(new Error(JSON.stringify(d.error)));
-        else r.resolve(d.result);
-      } catch {}
-    }
-  });
-  function send(method, params) {
-    return new Promise((resolve, reject) => {
-      const id = handle.nextId++;
-      handle.pending.set(id, { resolve, reject });
-      const body = { jsonrpc: "2.0", id, method };
-      if (params !== undefined) body.params = params;
-      child.stdin.write(`${JSON.stringify(body)}\n`);
-    });
-  }
-  await send("initialize", {
+  const child = spawnProbeServer(bin);
+  const handle = createHandle(child);
+  child.stdout.on("data", (chunk) => handleStdoutChunk(handle, chunk));
+  await mcpRequest(handle, "initialize", {
     protocolVersion: "2024-11-05",
     capabilities: {},
     clientInfo: { name: "p", version: "0" },
   });
-  const list = await send("tools/list");
+  const list = await mcpRequest(handle, "tools/list");
   handle.tools = list.tools;
-  handle.send = send;
+  handle.send = (method, params) => mcpRequest(handle, method, params);
   return handle;
+}
+
+function spawnProbeServer(bin) {
+  const child = spawn(bin, [], {
+    stdio: ["pipe", "pipe", "pipe"],
+    cwd: "/tmp/targets/demo-repo",
+  });
+  child.stderr.on("data", () => {}); // drain
+  return child;
+}
+
+function createHandle(child) {
+  child.stdout.setEncoding("utf8");
+  return { child, buf: "", pending: new Map(), nextId: 1, tools: [] };
+}
+
+function handleStdoutChunk(handle, chunk) {
+  handle.buf += chunk;
+  while (handle.buf.indexOf("\n") >= 0) {
+    const idx = handle.buf.indexOf("\n");
+    const line = handle.buf.slice(0, idx).trim();
+    handle.buf = handle.buf.slice(idx + 1);
+    handleStdoutLine(handle, line);
+  }
+}
+
+function handleStdoutLine(handle, line) {
+  if (!line) return;
+  try {
+    const data = JSON.parse(line);
+    const pending = handle.pending.get(data.id);
+    if (!pending) return;
+    handle.pending.delete(data.id);
+    settleMcpResponse(pending, data);
+  } catch {}
+}
+
+function settleMcpResponse(pending, data) {
+  if (data.error) {
+    pending.reject(new Error(JSON.stringify(data.error)));
+    return;
+  }
+  pending.resolve(data.result);
+}
+
+function mcpRequest(handle, method, params) {
+  return new Promise((resolve, reject) => {
+    const id = handle.nextId++;
+    handle.pending.set(id, { resolve, reject });
+    const body = { jsonrpc: "2.0", id, method };
+    if (params !== undefined) body.params = params;
+    handle.child.stdin.write(`${JSON.stringify(body)}\n`);
+  });
 }
 
 for (const [label, bin] of Object.entries(servers)) {

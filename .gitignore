@@ -29,6 +29,7 @@ vendor/
 .worktrees
 perf/results.json
 *.txt
+!LICENSES/Apache-2.0.txt
 !experiments/recall-eval/scope/*.txt
 .kuzushi/credentials.json
 .ralph/

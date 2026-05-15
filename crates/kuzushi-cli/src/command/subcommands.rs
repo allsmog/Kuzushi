@@ -107,7 +107,7 @@ pub(crate) enum AuthCommand {
         /// Provider to ping. Default: anthropic.
         #[arg(default_value = "anthropic")]
         provider: String,
-        /// Model spec to use for the ping. Default: ctx.config.model or anthropic:claude-haiku-4-5.
+        /// Model spec to use for the ping. Default: ctx.config.model; no fallback is chosen.
         #[arg(long)]
         model: Option<String>,
     },

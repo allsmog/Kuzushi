@@ -57,6 +57,10 @@ mod tests {
         assert_eq!(findings[0].severity, Severity::High);
         assert_eq!(findings[0].start_line, 42);
         assert_eq!(findings[0].end_line, Some(44));
+        assert_eq!(
+            findings[0].static_proof_state,
+            Some(StaticProofState::SignalOnly)
+        );
     }
 
     #[test]
@@ -352,6 +356,10 @@ printf '{"results":[]}'
         assert_eq!(findings[0].severity, Severity::High);
         assert_eq!(findings[0].file_path, "src/db.ts");
         assert_eq!(findings[0].start_line, 42);
+        assert_eq!(
+            findings[0].static_proof_state,
+            Some(StaticProofState::SignalOnly)
+        );
         assert!(findings[0].message.contains("Code flow: src/routes.ts:5"));
     }
 

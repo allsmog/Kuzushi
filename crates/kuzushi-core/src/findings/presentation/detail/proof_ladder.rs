@@ -12,7 +12,7 @@ pub fn proof_ladder_state(
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(in crate::findings) enum ProofLadderKind {
     Patched,
-    Validated,
+    RuntimeVerified,
     PathLinked,
     SourceGrounded,
     Rejected,
@@ -22,7 +22,7 @@ pub(in crate::findings) enum ProofLadderKind {
 fn proof_ladder_kind(finding: &Finding, latest_patch: Option<&PatchResult>) -> ProofLadderKind {
     [
         patched_ladder_kind(latest_patch),
-        validated_ladder_kind(finding),
+        runtime_verified_ladder_kind(finding),
         path_linked_ladder_kind(finding),
         source_grounded_ladder_kind(finding),
         rejected_ladder_kind(finding),
@@ -41,12 +41,12 @@ fn patched_ladder_kind(latest_patch: Option<&PatchResult>) -> Option<ProofLadder
     .then_some(ProofLadderKind::Patched)
 }
 
-fn validated_ladder_kind(finding: &Finding) -> Option<ProofLadderKind> {
+fn runtime_verified_ladder_kind(finding: &Finding) -> Option<ProofLadderKind> {
     matches!(
         finding.verification.as_ref().map(|v| v.proof_verdict),
         Some(PersistedProofVerdict::Exploited)
     )
-    .then_some(ProofLadderKind::Validated)
+    .then_some(ProofLadderKind::RuntimeVerified)
 }
 
 fn path_linked_ladder_kind(finding: &Finding) -> Option<ProofLadderKind> {

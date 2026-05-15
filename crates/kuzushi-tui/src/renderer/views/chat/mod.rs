@@ -12,6 +12,7 @@ mod agent_chat_lines;
 mod chat_bubble_header;
 mod history_lines;
 pub(crate) use agent_chat_lines::agent_chat_lines;
+pub(crate) use agent_chat_lines::failure_handoff_lines;
 pub(crate) use chat_bubble_header::chat_bubble_header;
 pub(crate) use history_lines::history_lines;
 pub(crate) use history_lines::story_lines;

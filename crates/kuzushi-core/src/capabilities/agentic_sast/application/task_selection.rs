@@ -8,25 +8,14 @@ pub(crate) fn split_agentic_sast_tasks(
     let mut taint_iris_next = false;
     let mut systems_hunt = false;
     for task in tasks {
-        match task.trim() {
-            "agentic" | "agentic-sast" | "agentic-sast:scan" => agentic = true,
-            "carlini" | "threat-hunt" | "carlini-threat-hunt" | "carlini-threat-hunt:run" => {
-                carlini = true
-            }
-            "taint" | "iris" | "taint-iris" | "taint-iris:hunt" => taint_iris = true,
-            "taint-iris-next" | "iris-next" | "taint-next" | "taint-iris-next:hunt" => {
-                taint_iris_next = true
-            }
-            "systems"
-            | "systems-hunt"
-            | "systems-hunt:systems-hunt"
-            | "systems-hunt:systems-context-gatherer"
-            | "systems-hunt:systems-invariant-extract"
-            | "systems-hunt:systems-trigger-synth"
-            | "deep-semantic"
-            | "deep-semantic-hunt"
-            | "systems-hunt:deep-semantic-hunt" => systems_hunt = true,
-            _ => native.push(task),
+        if let Some(flags) = agentic_task_flags(task.trim()) {
+            agentic |= flags.agentic;
+            carlini |= flags.carlini;
+            taint_iris |= flags.taint_iris;
+            taint_iris_next |= flags.taint_iris_next;
+            systems_hunt |= flags.systems_hunt;
+        } else {
+            native.push(task);
         }
     }
     (
@@ -37,4 +26,100 @@ pub(crate) fn split_agentic_sast_tasks(
         taint_iris_next,
         systems_hunt,
     )
+}
+
+#[derive(Clone, Copy)]
+struct AgenticTaskFlags {
+    agentic: bool,
+    carlini: bool,
+    taint_iris: bool,
+    taint_iris_next: bool,
+    systems_hunt: bool,
+}
+
+const fn task_flags(
+    agentic: bool,
+    carlini: bool,
+    taint_iris: bool,
+    taint_iris_next: bool,
+    systems_hunt: bool,
+) -> AgenticTaskFlags {
+    AgenticTaskFlags {
+        agentic,
+        carlini,
+        taint_iris,
+        taint_iris_next,
+        systems_hunt,
+    }
+}
+
+const AGENTIC_TASK_ALIASES: &[(&str, AgenticTaskFlags)] = &[
+    ("agentic", task_flags(true, false, false, false, false)),
+    ("agentic-sast", task_flags(true, false, false, false, false)),
+    ("agentic-sast:scan", task_flags(true, false, false, false, false)),
+    ("carlini", task_flags(false, true, false, false, false)),
+    ("threat-hunt", task_flags(false, true, false, false, false)),
+    ("carlini-threat-hunt", task_flags(false, true, false, false, false)),
+    (
+        "carlini-threat-hunt:run",
+        task_flags(false, true, false, false, false),
+    ),
+    ("offense-review", task_flags(false, true, false, false, false)),
+    (
+        "offense-review:threat-hunt",
+        task_flags(false, true, false, false, false),
+    ),
+    ("taint", task_flags(false, false, true, false, false)),
+    ("iris", task_flags(false, false, true, false, false)),
+    ("taint-iris", task_flags(false, false, true, false, false)),
+    ("taint-iris:hunt", task_flags(false, false, true, false, false)),
+    (
+        "taint-iris-next",
+        task_flags(false, false, false, true, false),
+    ),
+    ("iris-next", task_flags(false, false, false, true, false)),
+    ("taint-next", task_flags(false, false, false, true, false)),
+    (
+        "taint-iris-next:hunt",
+        task_flags(false, false, false, true, false),
+    ),
+    ("systems", task_flags(false, false, false, false, true)),
+    (
+        "systems-hunt",
+        task_flags(false, false, false, false, true),
+    ),
+    (
+        "systems-hunt:systems-hunt",
+        task_flags(false, false, false, false, true),
+    ),
+    (
+        "systems-hunt:systems-context-gatherer",
+        task_flags(false, false, false, false, true),
+    ),
+    (
+        "systems-hunt:systems-invariant-extract",
+        task_flags(false, false, false, false, true),
+    ),
+    (
+        "systems-hunt:systems-trigger-synth",
+        task_flags(false, false, false, false, true),
+    ),
+    (
+        "deep-semantic",
+        task_flags(false, false, false, false, true),
+    ),
+    (
+        "deep-semantic-hunt",
+        task_flags(false, false, false, false, true),
+    ),
+    (
+        "systems-hunt:deep-semantic-hunt",
+        task_flags(false, false, false, false, true),
+    ),
+];
+
+fn agentic_task_flags(task: &str) -> Option<AgenticTaskFlags> {
+    AGENTIC_TASK_ALIASES
+        .iter()
+        .find_map(|(alias, flags)| (*alias == task).then_some(*flags))
 }

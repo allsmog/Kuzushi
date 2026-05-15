@@ -1310,6 +1310,57 @@ OUT
     }
 
     #[test]
+    fn context_build_projects_app_model_security_boundaries() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/server.ts"),
+            "import express from 'express';\nconst app = express();\napp.use(csurf());\nconst tenantId = req.user.tenantId;\napp.post('/session', (req, res) => { req.session.user = req.body.user; res.cookie('sid', req.session.id); });\napp.post('/proxy', async (req, res) => fetch(req.body.url));\n",
+        )
+        .unwrap();
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool("context:build", json!({"sampleLimit": 10}), &ctx)
+            .unwrap();
+        let service_boundaries = result
+            .pointer("/data/snapshot/appModel/serviceBoundaries")
+            .and_then(Value::as_array)
+            .unwrap();
+        let outbound_clients = result
+            .pointer("/data/snapshot/appModel/outboundClients")
+            .and_then(Value::as_array)
+            .unwrap();
+
+        assert!(service_boundaries.iter().any(|boundary| {
+            boundary.get("kind").and_then(Value::as_str) == Some("session_state_boundary")
+        }));
+        assert!(service_boundaries.iter().any(|boundary| {
+            boundary.get("kind").and_then(Value::as_str) == Some("request_trust_boundary")
+        }));
+        assert!(service_boundaries.iter().any(|boundary| {
+            boundary.get("kind").and_then(Value::as_str) == Some("tenant_isolation_boundary")
+        }));
+        assert!(outbound_clients.iter().any(|client| {
+            client.get("kind").and_then(Value::as_str) == Some("external_service_client")
+        }));
+    }
+
+    #[test]
     fn dispatches_hidden_context_lite_index_without_listing_it_as_visible_tool() {
         let temp = tempdir().unwrap();
         fs::write(temp.path().join("server.ts"), "export const ok = true;\n").unwrap();
@@ -1410,12 +1461,13 @@ OUT
         .unwrap();
 
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let config = V2Config::default();
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
-            findings_store: None,
+            findings_store: Some(&store),
             trace: None,
         };
 
@@ -1438,6 +1490,21 @@ OUT
             .get("output")
             .and_then(Value::as_str)
             .is_some_and(|output| output.contains("dep-hygiene: 1 risky specifier")));
+        assert!(result
+            .pointer("/data/persisted/runId")
+            .and_then(Value::as_str)
+            .is_some());
+        assert_eq!(
+            result
+                .pointer("/data/coreFindings/0/tool")
+                .and_then(Value::as_str),
+            Some("dep-hygiene")
+        );
+        assert!(result
+            .pointer("/data/coreFindings/0/fingerprint")
+            .and_then(Value::as_str)
+            .is_some());
+        assert_eq!(store.list_findings(10).unwrap().len(), 1);
     }
 
     #[test]
@@ -1452,16 +1519,23 @@ OUT
             trace: None,
         };
 
-        let err = registry
+        let result = registry
             .execute_tool(
                 "dep-hygiene:check",
                 json!({"target": temp.path().join("missing").display().to_string()}),
                 &ctx,
             )
-            .unwrap_err()
-            .to_string();
+            .unwrap();
 
-        assert!(err.contains("dep-hygiene: target does not exist"));
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(result.get("status").and_then(Value::as_str), Some("failed"));
+        assert_eq!(
+            result.pointer("/data/tool").and_then(Value::as_str),
+            Some("dep-hygiene:check")
+        );
+        assert!(result["errors"][0]
+            .as_str()
+            .is_some_and(|error| error.contains("dep-hygiene: target does not exist")));
     }
 
     #[test]
@@ -1480,12 +1554,13 @@ OUT
         .unwrap();
 
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let config = V2Config::default();
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
-            findings_store: None,
+            findings_store: Some(&store),
             trace: None,
         };
 
@@ -1504,6 +1579,21 @@ OUT
             .get("output")
             .and_then(Value::as_str)
             .is_some_and(|output| output.contains("secret-scan: 1 finding")));
+        assert!(result
+            .pointer("/data/persisted/runId")
+            .and_then(Value::as_str)
+            .is_some());
+        assert_eq!(
+            result
+                .pointer("/data/coreFindings/0/tool")
+                .and_then(Value::as_str),
+            Some("secret-scan")
+        );
+        assert!(result
+            .pointer("/data/coreFindings/0/fingerprint")
+            .and_then(Value::as_str)
+            .is_some());
+        assert_eq!(store.list_findings(10).unwrap().len(), 1);
     }
 
     #[test]
@@ -1518,16 +1608,23 @@ OUT
             trace: None,
         };
 
-        let err = registry
+        let result = registry
             .execute_tool(
                 "secret-scan:scan",
                 json!({"target": temp.path().join("missing").display().to_string()}),
                 &ctx,
             )
-            .unwrap_err()
-            .to_string();
+            .unwrap();
 
-        assert!(err.contains("secret-scan: target is not a directory"));
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(result.get("status").and_then(Value::as_str), Some("failed"));
+        assert_eq!(
+            result.pointer("/data/tool").and_then(Value::as_str),
+            Some("secret-scan:scan")
+        );
+        assert!(result["errors"][0]
+            .as_str()
+            .is_some_and(|error| error.contains("secret-scan: target is not a directory")));
     }
 
     #[test]
@@ -1584,16 +1681,23 @@ OUT
             trace: None,
         };
 
-        let err = registry
+        let result = registry
             .execute_tool(
                 "iac-scan:scan",
                 json!({"target": temp.path().join("missing").display().to_string()}),
                 &ctx,
             )
-            .unwrap_err()
-            .to_string();
+            .unwrap();
 
-        assert!(err.contains("iac-scan: target does not exist"));
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(result.get("status").and_then(Value::as_str), Some("failed"));
+        assert_eq!(
+            result.pointer("/data/tool").and_then(Value::as_str),
+            Some("iac-scan:scan")
+        );
+        assert!(result["errors"][0]
+            .as_str()
+            .is_some_and(|error| error.contains("iac-scan: target does not exist")));
     }
 
     #[test]
@@ -2109,6 +2213,39 @@ OUT
     }
 
     #[test]
+    fn dispatches_offense_review_threat_hunt_alias_through_runtime() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/app.ts"), "res.send(req.query.name)\n").unwrap();
+        write_carlini_threat_model_fixture(temp.path());
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "offense-review:threat-hunt",
+                json!({"maxActors": 1, "runsPerActor": 1}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(runtime.queries().len(), 1);
+        assert_eq!(store.list_findings(10).unwrap().len(), 1);
+    }
+
+    #[test]
     fn carlini_threat_hunt_requires_threat_model_runtime_and_explicit_model() {
         let temp = tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
@@ -2194,7 +2331,7 @@ OUT
     }
 
     #[test]
-    fn sast_scan_routes_carlini_task_through_runtime_and_persists() {
+    fn sast_scan_routes_offense_review_task_through_runtime_and_persists() {
         let temp = tempdir().unwrap();
         fs::create_dir(temp.path().join("src")).unwrap();
         fs::write(
@@ -2221,7 +2358,7 @@ OUT
                 "sast:scan",
                 json!({
                     "taskMode": "manual",
-                    "tasks": ["carlini-threat-hunt"],
+                    "tasks": ["offense-review"],
                     "maxFindings": 5
                 }),
                 &ctx,
@@ -2238,7 +2375,7 @@ OUT
         );
         assert_eq!(
             result.pointer("/data/engines/0").and_then(Value::as_str),
-            Some("carlini-threat-hunt")
+            Some("offense-review")
         );
         assert!(result
             .pointer("/data/carliniThreatHunt/count")
@@ -2567,7 +2704,27 @@ OUT
             .and_then(Value::as_str)
             .unwrap();
         assert!(Path::new(summary).exists());
+        assert!(summary.ends_with("sast-summary.json"));
         assert!(fs::read_to_string(summary)
+            .unwrap()
+            .contains("\"verification\""));
+        let run_id = result.pointer("/data/runId").and_then(Value::as_str).unwrap();
+        let run_summary = crate::run_artifacts::load_run_summary(temp.path(), run_id).unwrap();
+        assert_eq!(run_summary.status, "completed");
+        assert_eq!(run_summary.tool.as_deref(), Some("sast:scan"));
+        assert_eq!(run_summary.findings, Some(1));
+        assert!(run_summary.artifacts.iter().any(|artifact| {
+            artifact.label == "sast summary" && artifact.path == summary
+        }));
+        let canonical_summary = temp
+            .path()
+            .join(".kuzushi")
+            .join("runs")
+            .join(run_id)
+            .join("summary.json");
+        assert!(canonical_summary.exists());
+        assert!(canonical_summary.with_file_name("run.json").exists());
+        assert!(!fs::read_to_string(canonical_summary)
             .unwrap()
             .contains("\"verification\""));
         assert!(fs::read_to_string(triage_log)
@@ -2578,6 +2735,12 @@ OUT
         assert!(verify_log.contains("patch:complete"));
 
         let finding = store.list_findings(10).unwrap().pop().unwrap();
+        assert_eq!(
+            result
+                .pointer("/data/coreFindings/0/fingerprint")
+                .and_then(Value::as_str),
+            Some(finding.fingerprint.as_str())
+        );
         let patch_results = store
             .get_patch_results_for_finding(&finding.fingerprint)
             .unwrap();
@@ -2931,15 +3094,17 @@ OUT
             trace: None,
         };
 
-        let err = registry
+        let result = registry
             .execute_tool(
                 "semgrep:scan",
                 json!({"binary": temp.path().join("missing-semgrep").display().to_string()}),
                 &ctx,
             )
-            .unwrap_err()
-            .to_string();
+            .unwrap();
+        let err = result["errors"][0].as_str().unwrap();
 
+        assert_eq!(result["ok"], false);
+        assert_eq!(result["status"], "failed");
         assert!(err.contains("semgrep: could not find scanner binary"));
         assert!(err.contains("Install Semgrep"));
         assert!(err.contains(r#""binary":"/path/to/semgrep""#));
@@ -2981,6 +3146,12 @@ OUT
         assert_eq!(
             result
                 .pointer("/data/findings/0/rule_id")
+                .and_then(Value::as_str),
+            Some("js/sql-injection")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/reportSarif/runs/0/results/0/ruleId")
                 .and_then(Value::as_str),
             Some("js/sql-injection")
         );
@@ -3081,7 +3252,7 @@ OUT
             trace: None,
         };
 
-        let err = registry
+        let result = registry
             .execute_tool(
                 "codeql:scan",
                 json!({
@@ -3090,9 +3261,11 @@ OUT
                 }),
                 &ctx,
             )
-            .unwrap_err()
-            .to_string();
+            .unwrap();
+        let err = result["errors"][0].as_str().unwrap();
 
+        assert_eq!(result["ok"], false);
+        assert_eq!(result["status"], "failed");
         assert!(err.contains("codeql: could not find CodeQL CLI"));
         assert!(err.contains("github/codeql-cli-binaries"));
         assert!(err.contains(r#""binary":"/path/to/codeql""#));
@@ -3315,7 +3488,8 @@ OUT
             )
             .unwrap();
 
-        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(result.get("status").and_then(Value::as_str), Some("skipped"));
         assert_eq!(
             result.pointer("/data/triaged").and_then(Value::as_u64),
             Some(0)

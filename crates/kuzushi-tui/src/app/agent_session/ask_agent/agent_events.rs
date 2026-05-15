@@ -4,12 +4,12 @@ impl ShellApp {
     pub(crate) fn apply_agent_event(&mut self, event: AgentEvent) {
         let state = AgentEventState::from_chat(self.agent_chat.as_ref());
         match event {
-            AgentEvent::Answered { text } => self.apply_agent_answer(text, state),
-            AgentEvent::Failed { error } => self.apply_agent_failure(error, state),
+            AgentEvent::Answered { text, audit } => self.apply_agent_answer(text, audit, state),
+            AgentEvent::Failed { error, audit } => self.apply_agent_failure(error, audit, state),
         }
     }
 
-    fn apply_agent_answer(&mut self, text: String, state: AgentEventState) {
+    fn apply_agent_answer(&mut self, text: String, audit: AgentCallAudit, state: AgentEventState) {
         if let Some(agent) = &mut self.agent_chat {
             agent.running = false;
             agent.abort_requested = false;
@@ -31,10 +31,15 @@ impl ShellApp {
         }
         self.log("answer", text.clone());
         self.set_completed_activity("agent", "answer received");
-        self.write_agent_trace_success(&text, &state);
+        self.write_agent_trace_success(&text, &audit, &state);
     }
 
-    fn apply_agent_failure(&mut self, error: String, state: AgentEventState) {
+    fn apply_agent_failure(
+        &mut self,
+        error: String,
+        audit: AgentCallAudit,
+        state: AgentEventState,
+    ) {
         if let Some(agent) = &mut self.agent_chat {
             agent.running = false;
             agent.abort_requested = false;
@@ -51,39 +56,50 @@ impl ShellApp {
         }
         self.log("error", error.clone());
         self.set_refused_activity("agent", "model request failed");
-        self.write_agent_trace_failure(&error, &state);
+        self.write_agent_trace_failure(&error, &audit, &state);
     }
 
-    fn write_agent_trace_success(&self, text: &str, state: &AgentEventState) {
+    fn write_agent_trace_success(
+        &self,
+        text: &str,
+        audit: &AgentCallAudit,
+        state: &AgentEventState,
+    ) {
         let Some(rid) = &state.run_id else {
             return;
         };
-        append_trace_step(
+        append_llm_trace_step(
             self.target.as_deref(),
             rid,
             2,
             "llm",
             &format!("answer ({} chars)", text.chars().count()),
             state.latency_ms,
-            None,
+            audit,
         );
         self.write_agent_run_summary(rid, "complete");
     }
 
-    fn write_agent_trace_failure(&self, error: &str, state: &AgentEventState) {
+    fn write_agent_trace_failure(
+        &self,
+        error: &str,
+        audit: &AgentCallAudit,
+        state: &AgentEventState,
+    ) {
         let Some(rid) = &state.run_id else {
             return;
         };
-        append_trace_step(
+        append_llm_trace_step(
             self.target.as_deref(),
             rid,
             2,
             "refused",
             &short_label(error, 80),
             state.latency_ms,
-            None,
+            audit,
         );
         self.write_agent_run_summary(rid, "failed");
+        write_run_failure_handoff(self.target.as_deref(), rid, "agent:ask", "failed", error);
     }
 
     fn write_agent_run_summary(&self, run_id: &str, status: &str) {

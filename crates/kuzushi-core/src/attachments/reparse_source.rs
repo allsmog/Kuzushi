@@ -25,7 +25,7 @@ pub fn known_artifacts(workspace: &WorkspaceTarget, module_id: &str) -> Result<V
                 "normalized threat model",
             ),
         ],
-        "carlini-threat-hunt" => vec![
+        "carlini-threat-hunt" | "offense-review" => vec![
             (".kuzushi/threat-model.json", "required threat-model input"),
             (".kuzushi/v2/findings.sqlite3", "hunt findings database"),
         ],
@@ -52,7 +52,7 @@ pub fn known_artifacts(workspace: &WorkspaceTarget, module_id: &str) -> Result<V
 pub(crate) fn ensure_supported_module(module_id: &str) -> Result<()> {
     if !is_supported_attachment_module(module_id) {
         anyhow::bail!(
-            "KB attachments support context, threat-model, carlini-threat-hunt, and x-ray; got {module_id:?}. Next: kb context"
+            "KB attachments support context, threat-model, offense-review, and x-ray; got {module_id:?}. Next: kb context"
         );
     }
     Ok(())

@@ -49,10 +49,10 @@ pub(crate) fn record_anthropic_env_presence(log: &mut AuthPingLog) {
     record_env_presence(log, &["ANTHROPIC_API_KEY"], "ANTHROPIC_API_KEY env present");
 }
 
-pub(crate) fn record_codex_runtime_auth_presence(log: &mut AuthPingLog) {
+pub(crate) fn record_openai_runtime_auth_presence(log: &mut AuthPingLog) {
     record_env_presence(log, &["OPENAI_API_KEY"], "OPENAI_API_KEY env present");
     record_openai_base_url_presence(log);
-    record_codex_ci_presence(log);
+    record_hosted_openai_presence(log);
 }
 
 fn record_openai_base_url_presence(log: &mut AuthPingLog) {
@@ -74,11 +74,11 @@ fn masked_openai_base_url(base_url: String) -> String {
     format!("{}…", &base_url[..96])
 }
 
-fn record_codex_ci_presence(log: &mut AuthPingLog) {
+fn record_hosted_openai_presence(log: &mut AuthPingLog) {
     if std::env::var("CODEX_CI").is_ok() {
         log.record(
             true,
-            "CODEX_CI env present; hosted runtime may authenticate Codex without local oauth-credentials.json",
+            "hosted runtime flag present; OpenAI may authenticate without local oauth-credentials.json",
         );
     }
 }
@@ -92,10 +92,12 @@ pub(crate) fn record_env_presence(log: &mut AuthPingLog, names: &[&str], label: 
 pub(crate) fn auth_ping_model(
     model_override: Option<String>,
     config: &kuzushi_core::V2Config,
-) -> String {
-    model_override
-        .or_else(|| config.model.clone())
-        .unwrap_or_else(|| "anthropic:claude-haiku-4-5".to_string())
+) -> anyhow::Result<String> {
+    kuzushi_core::runtime::resolve_explicit_model(
+        "auth ping",
+        model_override,
+        config.model.as_deref(),
+    )
 }
 
 pub(crate) fn format_unix_ms(ms: u64) -> String {

@@ -3,9 +3,11 @@ use super::*;
 pub(crate) type CommandHandler = fn(&mut ShellApp, &ShellCommand) -> bool;
 
 pub(crate) const COMMAND_HANDLERS: &[CommandHandler] = &[
+    handle_home_command,
     handle_help_command,
     handle_back_command,
     handle_modules_command,
+    handle_recommend_command,
     handle_tools_command,
     handle_findings_command,
     handle_open_command,
@@ -35,6 +37,7 @@ pub(crate) const COMMAND_HANDLERS: &[CommandHandler] = &[
     handle_replay_command,
     handle_trace_command,
     handle_activity_command,
+    handle_failure_handoff_command,
     handle_plan_command,
     handle_plan_apply_command,
     handle_plan_discard_command,

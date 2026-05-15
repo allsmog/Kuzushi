@@ -2,34 +2,8 @@ use super::*;
 
 impl IacScanReport {
     pub fn output(&self) -> String {
-        let mut lines = vec![
-            format!(
-                "iac-scan: {} finding{} under {}",
-                self.findings.len(),
-                if self.findings.len() == 1 { "" } else { "s" },
-                self.target
-            ),
-            format!("  Files scanned: {}", self.files_scanned),
-            format!("  Files skipped: {}", self.files_skipped),
-        ];
-
-        if !self.findings.is_empty() {
-            lines.push(String::new());
-            lines.push("Top findings:".to_string());
-            for finding in self.findings.iter().take(10) {
-                lines.push(format!(
-                    "  - {} - {} - {}:{}",
-                    finding.severity.as_str(),
-                    finding.rule_id,
-                    finding.file_path,
-                    finding.start_line
-                ));
-            }
-            if self.findings.len() > 10 {
-                lines.push(format!("  ... and {} more", self.findings.len() - 10));
-            }
-        }
-
+        let mut lines = iac_header_lines(self);
+        append_iac_top_findings(&mut lines, &self.findings);
         lines.join("\n")
     }
 
@@ -47,6 +21,49 @@ impl IacScanReport {
             }
         })
     }
+}
+
+fn iac_header_lines(report: &IacScanReport) -> Vec<String> {
+    vec![
+        format!(
+            "iac-scan: {} finding{} under {}",
+            report.findings.len(),
+            plural_suffix(report.findings.len()),
+            report.target
+        ),
+        format!("  Files scanned: {}", report.files_scanned),
+        format!("  Files skipped: {}", report.files_skipped),
+    ]
+}
+
+fn append_iac_top_findings(lines: &mut Vec<String>, findings: &[IacScanFinding]) {
+    if findings.is_empty() {
+        return;
+    }
+    lines.push(String::new());
+    lines.push("Top findings:".to_string());
+    lines.extend(findings.iter().take(10).map(iac_finding_line));
+    append_remaining_count(lines, findings.len());
+}
+
+fn iac_finding_line(finding: &IacScanFinding) -> String {
+    format!(
+        "  - {} - {} - {}:{}",
+        finding.severity.as_str(),
+        finding.rule_id,
+        finding.file_path,
+        finding.start_line
+    )
+}
+
+fn append_remaining_count(lines: &mut Vec<String>, finding_count: usize) {
+    if finding_count > 10 {
+        lines.push(format!("  ... and {} more", finding_count - 10));
+    }
+}
+
+fn plural_suffix(count: usize) -> &'static str {
+    (count != 1).then_some("s").unwrap_or("")
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -111,6 +128,7 @@ impl IacScanFinding {
         );
         finding.fingerprint = self.fingerprint.clone();
         finding.title = self.message.clone();
+        finding.set_static_proof_state(StaticProofState::SignalOnly);
         finding
     }
 }

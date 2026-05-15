@@ -27,7 +27,7 @@ impl AttackSurfaceBuilder {
     }
 
     pub(crate) fn finish(self, root_name: String) -> AttackSurfaceMap {
-        let surfaces = self.surfaces.into_values().collect::<Vec<_>>();
+        let surfaces = rank_attack_surfaces(self.surfaces.into_values().collect());
         AttackSurfaceMap {
             root_name,
             summary: summarize_surfaces(&surfaces),

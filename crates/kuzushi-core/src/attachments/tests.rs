@@ -74,6 +74,12 @@ mod tests {
             let artifacts = known_artifacts(&workspace, module_id).unwrap();
             assert!(!artifacts.is_empty(), "missing artifacts for {module_id}");
         }
+        assert!(SUPPORTED_ATTACHMENT_MODULES.contains(&"offense-review"));
+        assert!(!SUPPORTED_ATTACHMENT_MODULES.contains(&"carlini-threat-hunt"));
+        assert!(is_supported_attachment_module("carlini-threat-hunt"));
+        assert!(!known_artifacts(&workspace, "carlini-threat-hunt")
+            .unwrap()
+            .is_empty());
         let x_ray = known_artifacts(&workspace, "x-ray").unwrap();
         assert!(x_ray.iter().any(|artifact| {
             artifact.path == "x-ray/x-ray.md" && artifact.description == "x-ray report"

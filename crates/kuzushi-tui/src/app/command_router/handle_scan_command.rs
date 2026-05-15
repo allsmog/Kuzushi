@@ -68,7 +68,11 @@ pub(crate) fn handle_config_command(app: &mut ShellApp, command: &ShellCommand) 
             "runtime={} provider={} model={}",
             runtime_backend_label(&app.config),
             app.provider_label(),
-            app.config.model.as_deref().unwrap_or("unconfigured")
+            app.config
+                .model
+                .as_deref()
+                .map(display_model_selector)
+                .unwrap_or_else(|| "unconfigured".to_string())
         ),
     );
     true

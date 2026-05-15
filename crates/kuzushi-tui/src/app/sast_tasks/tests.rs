@@ -22,4 +22,21 @@ mod tests {
         let error = app.toggle_sast_task("made-up").unwrap_err().to_string();
         assert!(error.contains("unknown SAST task"));
     }
+
+    #[test]
+    fn legacy_carlini_task_aliases_resolve_to_offense_review() {
+        for alias in [
+            "carlini",
+            "threat-hunt",
+            "carlini-threat-hunt",
+            "carlini-threat-hunt:run",
+            "offense-review:threat-hunt",
+        ] {
+            let task = resolve_sast_task(alias).unwrap();
+            assert_eq!(task.id, "offense-review");
+            assert_eq!(task.scan_task, "offense-review");
+        }
+
+        assert!(!valid_sast_task_ids().contains(&"carlini-threat-hunt"));
+    }
 }

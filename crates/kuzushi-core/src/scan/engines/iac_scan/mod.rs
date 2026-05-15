@@ -1,4 +1,4 @@
-use crate::findings::{Finding, Severity};
+use crate::findings::{Finding, Severity, StaticProofState};
 use crate::scan::{ScanCancellation, ScanEngine};
 pub(crate) use analyze_dockerfile::*;
 pub(crate) use analyze_github_actions::*;

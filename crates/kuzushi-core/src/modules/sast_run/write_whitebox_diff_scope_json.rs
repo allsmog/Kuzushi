@@ -66,17 +66,6 @@ pub(in crate::modules) fn sast_patch_input(sast_input: &Value, fingerprint: &str
     Value::Object(patch_input)
 }
 
-pub(in crate::modules) fn write_sast_summary(
-    artifacts: &SastRunArtifacts,
-    result: &Value,
-) -> Result<()> {
-    fs::write(
-        &artifacts.summary,
-        format!("{}\n", serde_json::to_string_pretty(result)?),
-    )
-    .with_context(|| format!("Could not write {}", artifacts.summary.display()))
-}
-
 pub(in crate::modules) fn write_triage_jsonl(
     artifacts: &SastRunArtifacts,
     triage_output: &Value,

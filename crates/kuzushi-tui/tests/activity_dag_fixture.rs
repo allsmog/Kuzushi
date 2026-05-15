@@ -133,8 +133,9 @@ fn parent_step_indents_child_event_in_feed() {
 fn auto_open_flips_view_on_tool_start() {
     use kuzushi_tui::{ShellApp, ShellCommand, ShellView};
     let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Home;
     assert!(app.auto_open_activity, "default should be on");
-    assert!(matches!(app.shell_view, ShellView::Catalog));
+    assert!(matches!(app.shell_view, ShellView::Home));
 
     // Issue a /run command for a tool whose dispatcher we know — the
     // background_tool_worker will fail without a real workspace, but we only

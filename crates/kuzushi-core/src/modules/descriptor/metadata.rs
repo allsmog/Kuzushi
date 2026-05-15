@@ -24,28 +24,12 @@ impl BuiltinModule {
     pub fn is_hidden(&self) -> bool {
         self.hidden
     }
-}
 
-pub(in crate::modules) fn builtin_module(
-    id: &str,
-    name: &str,
-    kind: ModuleKind,
-    description: &str,
-    tools: Vec<ToolDescriptor>,
-    dag_nodes: Vec<DagNodeDescriptor>,
-) -> BuiltinModule {
-    module(id, name, kind, description, tools, dag_nodes, false)
-}
-
-pub(in crate::modules) fn hidden_module(
-    id: &str,
-    name: &str,
-    kind: ModuleKind,
-    description: &str,
-    tools: Vec<ToolDescriptor>,
-    dag_nodes: Vec<DagNodeDescriptor>,
-) -> BuiltinModule {
-    module(id, name, kind, description, tools, dag_nodes, true)
+    pub(in crate::modules) fn deferred(mut self) -> Self {
+        self.hidden = true;
+        self.dag_nodes.clear();
+        self
+    }
 }
 
 pub(in crate::modules) fn module(
@@ -70,6 +54,28 @@ pub(in crate::modules) fn module(
     }
 }
 
+pub(in crate::modules) fn builtin_module(
+    id: &str,
+    name: &str,
+    kind: ModuleKind,
+    description: &str,
+    tools: Vec<ToolDescriptor>,
+    dag_nodes: Vec<DagNodeDescriptor>,
+) -> BuiltinModule {
+    module(id, name, kind, description, tools, dag_nodes, false)
+}
+
+pub(in crate::modules) fn hidden_module(
+    id: &str,
+    name: &str,
+    kind: ModuleKind,
+    description: &str,
+    tools: Vec<ToolDescriptor>,
+    dag_nodes: Vec<DagNodeDescriptor>,
+) -> BuiltinModule {
+    module(id, name, kind, description, tools, dag_nodes, true)
+}
+
 pub(in crate::modules) fn tool(name: &str, description: &str) -> ToolDescriptor {
     tool_with_options(name, description, vec![])
 }
@@ -83,8 +89,19 @@ pub(in crate::modules) fn tool_with_options(
         name: name.to_string(),
         description: description.to_string(),
         headless: true,
+        hidden: false,
         options,
     }
+}
+
+pub(in crate::modules) fn hidden_tool_with_options(
+    name: &str,
+    description: &str,
+    options: Vec<OptionSpec>,
+) -> ToolDescriptor {
+    let mut descriptor = tool_with_options(name, description, options);
+    descriptor.hidden = true;
+    descriptor
 }
 
 pub(in crate::modules) fn opt(

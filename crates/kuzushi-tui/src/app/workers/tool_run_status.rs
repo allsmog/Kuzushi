@@ -25,14 +25,24 @@ pub(crate) fn agent_worker(
     question: String,
     tx: Sender<AgentEvent>,
 ) {
+    let audit = AgentCallAudit::for_prompt(&model, ASK_SYSTEM_PROMPT, &question);
     let result = run_agent_worker(config, model, thinking_level, cwd, question);
     let event = match result {
-        Ok(text) => AgentEvent::Answered { text },
+        Ok(answer) => AgentEvent::Answered {
+            text: answer.text,
+            audit: audit.with_cost_usd(answer.cost_usd),
+        },
         Err(error) => AgentEvent::Failed {
             error: error.to_string(),
+            audit,
         },
     };
     let _ = tx.send(event);
+}
+
+pub(crate) struct AgentWorkerAnswer {
+    pub(crate) text: String,
+    pub(crate) cost_usd: f64,
 }
 
 pub(crate) fn run_agent_worker(
@@ -41,7 +51,7 @@ pub(crate) fn run_agent_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     question: String,
-) -> Result<String> {
+) -> Result<AgentWorkerAnswer> {
     let runtime =
         PiAgentCoreRuntime::from_config(&config, &cwd)?.with_thinking_level(thinking_level);
     let response = runtime.query_blocking(AgentQueryRequest::new(
@@ -56,7 +66,10 @@ pub(crate) fn run_agent_worker(
             "agent returned an empty answer. The bridge accepted the request but produced no text — usually a credential issue (missing OAuth / API key) or a model that filtered the response. Next: `auth` to check credentials, then re-run."
         );
     }
-    Ok(answer.to_string())
+    Ok(AgentWorkerAnswer {
+        text: answer.to_string(),
+        cost_usd: response.cost_usd,
+    })
 }
 
 pub(crate) const PLAN_SYSTEM_PROMPT: &str = r#"You are Kuzushi's planning assistant.

@@ -12,14 +12,15 @@ use super::prereq_chain::{
 };
 pub(crate) use extract_cost_usd::*;
 use kuzushi_core::{
-    append_run_trace_step, load_run_summary, new_run_id, next_run_trace_step_number,
-    write_run_artifact_json, write_run_summary, AgenticSastReport, BroadcastSink,
-    CarliniThreatHuntReport, JsonlSink, ReconHost, ReconNote, ReconService, RunSummary,
-    RunTraceStep, TraceHandle, TraceSink, WorkspaceTarget,
+    new_run_id, next_run_trace_step_number, AgenticSastReport, BroadcastSink,
+    CarliniThreatHuntReport, JsonlSink, ReconHost, ReconNote, ReconService, RunTraceStep,
+    TraceHandle, TraceSink, WorkspaceTarget,
 };
 pub(crate) use run_tool::*;
 use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread;
+pub(crate) use tool_run_records::*;
 mod extract_cost_usd;
 mod run_tool;
+mod tool_run_records;

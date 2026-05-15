@@ -1,23 +1,31 @@
 use super::*;
 
 pub(crate) fn auth_provider_rows(app: &ShellApp) -> Vec<AuthProviderRow> {
+    vec![
+        runtime_env_row(app),
+        anthropic_auth_row(),
+        openai_oauth_row(),
+    ]
+}
+
+fn runtime_env_row(app: &ShellApp) -> AuthProviderRow {
     let api_key_env = app.config.runtime.api_key_env.clone();
     let env_set = std::env::var_os(api_key_env.as_str()).is_some();
-    let anthropic_set = std::env::var_os("ANTHROPIC_API_KEY").is_some();
-    let codex_oauth = crate::app::oauth_provider_status("openai-codex");
-    let anthropic_oauth = crate::app::oauth_provider_status("anthropic");
-
-    let env_state = if env_set {
-        AuthProviderState::Connected
-    } else {
-        AuthProviderState::Missing
-    };
     let env_detail = if env_set {
         format!("{api_key_env}=set; value hidden")
     } else {
         format!("{api_key_env}=missing")
     };
+    AuthProviderRow {
+        name: "pi-agent-core",
+        state: connected_or_missing(env_set),
+        detail: env_detail,
+    }
+}
 
+fn anthropic_auth_row() -> AuthProviderRow {
+    let anthropic_set = std::env::var_os("ANTHROPIC_API_KEY").is_some();
+    let anthropic_oauth = crate::app::oauth_provider_status("anthropic");
     let anthropic_state = if anthropic_set || anthropic_oauth == "ok" {
         AuthProviderState::Connected
     } else {
@@ -28,31 +36,34 @@ pub(crate) fn auth_provider_rows(app: &ShellApp) -> Vec<AuthProviderRow> {
         if anthropic_set { "set" } else { "missing" },
         anthropic_oauth
     );
+    AuthProviderRow {
+        name: "anthropic",
+        state: anthropic_state,
+        detail: anthropic_detail,
+    }
+}
 
-    let codex_state = if codex_oauth == "ok" {
+fn openai_oauth_row() -> AuthProviderRow {
+    let openai_oauth = crate::app::oauth_provider_status("openai-codex");
+    let openai_state = if openai_oauth == "ok" {
         AuthProviderState::Connected
     } else {
         AuthProviderState::Inactive
     };
-    let codex_detail = format!("oauth {codex_oauth}");
+    let openai_detail = format!("oauth {openai_oauth}");
+    AuthProviderRow {
+        name: "openai",
+        state: openai_state,
+        detail: openai_detail,
+    }
+}
 
-    vec![
-        AuthProviderRow {
-            name: "pi-agent-core",
-            state: env_state,
-            detail: env_detail,
-        },
-        AuthProviderRow {
-            name: "anthropic",
-            state: anthropic_state,
-            detail: anthropic_detail,
-        },
-        AuthProviderRow {
-            name: "openai-codex",
-            state: codex_state,
-            detail: codex_detail,
-        },
-    ]
+fn connected_or_missing(connected: bool) -> AuthProviderState {
+    if connected {
+        AuthProviderState::Connected
+    } else {
+        AuthProviderState::Missing
+    }
 }
 
 pub(crate) fn auth_provider_line(row: &AuthProviderRow) -> Line<'static> {

@@ -51,11 +51,13 @@ pub(crate) fn view_status_segment(app: &ShellApp) -> String {
 
 pub(super) fn primary_view_status(app: &ShellApp) -> Option<String> {
     match &app.shell_view {
+        ShellView::Home => Some("home".to_string()),
         ShellView::Catalog => Some(
             app.focused_module
                 .clone()
-                .unwrap_or_else(|| "catalog".to_string()),
+                .unwrap_or_else(|| "modules".to_string()),
         ),
+        ShellView::Recommend => Some("recommend".to_string()),
         ShellView::Module => Some(
             app.focused_module
                 .clone()
@@ -89,7 +91,7 @@ pub(super) fn threat_view_status(app: &ShellApp) -> Option<String> {
         ShellView::ThreatEditor => Some("threats:edit".to_string()),
         ShellView::PromptsEditor => Some("prompts".to_string()),
         ShellView::ActorDetail(index) => Some(format!("actor:{}", index + 1)),
-        ShellView::Runs => Some("runs".to_string()),
+        ShellView::Runs => Some("run-timeline".to_string()),
         ShellView::Replay(_) => Some("replay".to_string()),
         ShellView::Trace(_) => Some("trace".to_string()),
         ShellView::Activity => Some("activity".to_string()),
@@ -114,6 +116,7 @@ pub(super) fn workspace_view_status(app: &ShellApp) -> String {
         ShellView::Context => "context".to_string(),
         ShellView::Workspace => "workspace".to_string(),
         ShellView::KnowledgeBase => "kb".to_string(),
+        ShellView::FailureHandoff => "failure-handoff".to_string(),
         ShellView::AgentChat => "agent".to_string(),
         ShellView::History => "history".to_string(),
         ShellView::Story => "story".to_string(),
@@ -121,6 +124,6 @@ pub(super) fn workspace_view_status(app: &ShellApp) -> String {
         ShellView::Cost => "cost".to_string(),
         ShellView::Patch(alias) => format!("patch:{alias}"),
         ShellView::Pwn => "pwn".to_string(),
-        _ => "catalog".to_string(),
+        _ => "modules".to_string(),
     }
 }

@@ -124,6 +124,10 @@ mod tests {
         assert_eq!(findings[0].tool, "dep-hygiene");
         assert_eq!(findings[0].severity, Severity::High);
         assert_eq!(findings[0].file_path, "package.json");
+        assert_eq!(
+            findings[0].static_proof_state,
+            Some(StaticProofState::SignalOnly)
+        );
         assert!(findings[0].message.contains("lodash@latest"));
     }
 

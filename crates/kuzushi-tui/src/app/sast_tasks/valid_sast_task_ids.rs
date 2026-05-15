@@ -67,10 +67,10 @@ pub(crate) const SAST_TASK_CAPABILITIES: &[SastTaskCapability] = &[
         toggleable: true,
     },
     SastTaskCapability {
-        id: "carlini-threat-hunt",
-        scan_task: "carlini-threat-hunt",
+        id: "offense-review",
+        scan_task: "offense-review",
         cost: "high",
-        notes: "actor-driven hunt; run via sast:scan",
+        notes: "threat-model-guided review; run via sast:scan",
         default_enabled: false,
         native_scan: false,
         toggleable: true,

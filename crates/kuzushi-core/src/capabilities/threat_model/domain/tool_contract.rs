@@ -41,6 +41,13 @@ impl BuildFlavor {
     pub(crate) fn persists_document(self) -> bool {
         matches!(self, Self::ThreatModel)
     }
+
+    pub(crate) fn default_methodology(self) -> &'static str {
+        match self {
+            Self::ThreatModel => "stride",
+            Self::RandoriPasta => "pasta",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]

@@ -35,11 +35,12 @@ pub(in crate::app) fn auth_login_status_message(
     provider: &str,
     status: io::Result<std::process::ExitStatus>,
 ) -> (&'static str, String) {
+    let display_provider = auth_provider_display_name(provider);
     match status {
         Ok(status) if status.success() => (
             "auth",
             format!(
-                "{provider} OAuth stored at {}. Next: model {}",
+                "{display_provider} OAuth stored at {}. Next: model {}",
                 oauth_credentials_path()
                     .map(|path| path.display().to_string())
                     .unwrap_or_else(|| "~/.kuzushi/oauth-credentials.json".to_string()),
@@ -48,21 +49,28 @@ pub(in crate::app) fn auth_login_status_message(
         ),
         Ok(status) => (
             "error",
-            format!("{provider} OAuth login exited with {status}. Next: auth status"),
+            format!("{display_provider} OAuth login exited with {status}. Next: auth status"),
         ),
         Err(error) => (
             "error",
-            format!("could not start {provider} OAuth login: {error}. Next: auth status"),
+            format!("could not start {display_provider} OAuth login: {error}. Next: auth status"),
         ),
+    }
+}
+
+pub(in crate::app) fn auth_provider_display_name(provider: &str) -> &str {
+    match provider {
+        "openai-codex" => "openai",
+        _ => provider,
     }
 }
 
 pub(crate) fn normalize_auth_provider(provider: &str) -> std::result::Result<&'static str, String> {
     match provider.trim().to_ascii_lowercase().as_str() {
-        "" | "openai-codex" | "codex" => Ok("openai-codex"),
+        "" | "openai" | "openai-codex" | "codex" => Ok("openai-codex"),
         "anthropic" | "claude" => Ok("anthropic"),
         other => Err(format!(
-            "unsupported auth login provider {other:?}. Supported: openai-codex, anthropic. Next: auth login openai-codex"
+            "unsupported auth login provider {other:?}. Supported: openai, anthropic. Next: auth login openai"
         )),
     }
 }

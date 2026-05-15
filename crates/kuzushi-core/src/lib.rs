@@ -1,55 +1,24 @@
 /// Code-index facade and routing primitives, re-exported so other
 /// modules don't need to take a separate dep on `kuzushi-codeindex`.
-pub mod agent_router;
-pub mod artifact_kb;
-pub mod attachments;
-pub mod attack_surface;
-pub mod capabilities;
-pub mod carlini_threat_hunt;
-pub mod classifier_gate;
-pub mod code_nav;
-pub mod concurrency;
-pub mod config;
-pub mod deep_auditor;
-pub mod dep_hygiene;
-pub mod diff_scope;
-pub mod events;
-pub mod evidence;
-pub mod findings;
-pub mod full_mode_multi;
-pub mod iac_scan;
-pub mod modules;
-pub mod options;
-pub mod patch;
-pub mod pr_comment;
-pub mod proof;
-pub mod recon;
-pub mod remediation;
-pub mod repository_inventory;
-pub mod run_artifacts;
-pub mod runtime;
-pub mod scan;
-pub mod secret_scan;
-pub mod semgrep_rule_synthesis;
-pub mod source_span;
-pub mod spend;
-pub mod static_context;
-pub mod static_evidence;
-pub mod static_narrative;
-pub mod static_proof_validator;
-pub mod static_ranking;
-pub mod static_registry;
+macro_rules! public_modules {
+    ($($module:ident),+ $(,)?) => {
+        $(pub mod $module;)+
+    };
+}
+
+#[rustfmt::skip]
+public_modules!(
+    agent_router, artifact_kb, attachments, attack_surface, capabilities, carlini_threat_hunt,
+    classifier_gate, code_nav, concurrency, config, context, deep_auditor, dep_hygiene, diff_scope,
+    events, evidence, findings, full_mode_multi, iac_scan, modules, options, patch, pr_comment,
+    proof, recon, remediation, report, repository_inventory, run_artifacts, run_trace, runtime,
+    scan, scanners, secret_scan, semgrep_rule_synthesis, source_span, spend, static_context,
+    static_evidence, static_narrative, static_proof_validator, static_ranking, static_registry,
+    systems_hunt, threat_leads, threat_model, triage, variant_ndiff, verification, verify,
+    whitebox_static, whitebox_suppressions, workspace, x_ray,
+);
+
 pub(crate) mod structured_output;
-pub mod systems_hunt;
-pub mod threat_leads;
-pub mod threat_model;
-pub mod variant_ndiff;
-pub mod verification;
-pub mod verify;
-pub mod whitebox_static;
-pub mod whitebox_suppressions;
-pub mod workspace;
-pub mod x_ray;
 
 mod code_index;
 mod public_exports;

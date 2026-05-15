@@ -1,22 +1,20 @@
-use crate::capabilities::uaf_hunt::adapters::clang_subprocess::{
-    rewrite_unsupported_method_error, ClangMcpClient,
-};
+use crate::capabilities::uaf_hunt::adapters::clang_subprocess::ClangMcpClient;
 use crate::capabilities::uaf_hunt::adapters::parse_uaf_hunt_input;
 use crate::capabilities::uaf_hunt::application::{
-    build_uaf_hunt_user_prompt, normalize_uaf_hunt_findings, persist_uaf_hunt_findings,
-    uaf_hunt_agent_tools, UAF_HUNT_SYSTEM_PROMPT,
+    build_uaf_hunt_user_prompt, persist_uaf_hunt_findings, uaf_hunt_agent_tools,
+    UAF_HUNT_SYSTEM_PROMPT,
 };
 use crate::capabilities::uaf_hunt::domain::{UafHuntInput, UafHuntReport};
-use crate::findings::Finding;
 use crate::modules::ToolExecutionContext;
-use crate::runtime::{
-    run_tool_loop, AgentLoopOutcome, AgentRuntime, AgentToolLoopRequest, LoopHistoryEntry,
-    ToolCall, ToolCallHandler, ToolResult,
-};
+use crate::runtime::{run_tool_loop, AgentRuntime, AgentToolLoopRequest};
 use anyhow::{Context, Result};
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+
+use super::extract_findings::extract_findings;
+use super::toolbox::{
+    build_uaf_hunt_toolbox, new_clang_call_stats, snapshot_clang_call_stats,
+};
 
 pub fn run_uaf_hunt_report(
     input: &Value,
@@ -39,13 +37,13 @@ pub fn run_uaf_hunt_report(
         .context("uaf-hunt: agent tool-loop preflight failed")?;
 
     let mut clang = ClangMcpClient::spawn(&target, &options.compile_commands_path)?;
-    let clang_stats = Arc::new(Mutex::new(ClangCallStats::default()));
-    let toolbox = build_uaf_hunt_toolbox(&target, &options, &mut clang, Arc::clone(&clang_stats));
+    let clang_stats = new_clang_call_stats();
+    let toolbox = build_uaf_hunt_toolbox(&target, &options, &mut clang, clang_stats.clone());
     let mut handler = toolbox;
     let outcome = run_tool_loop(runtime, &request, &mut handler)
         .context("uaf-hunt: agent tool-loop failed")?;
 
-    let stats = clang_stats.lock().expect("clang stats lock").clone();
+    let stats = snapshot_clang_call_stats(&clang_stats);
     let findings = extract_findings(&outcome, &options)?;
     let persisted = persist_uaf_hunt_findings(&target, &findings, &outcome.transcript, ctx)?;
 
@@ -128,16 +126,11 @@ fn build_loop_request(
     options: &UafHuntInput,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<AgentToolLoopRequest> {
-    let model = options
-        .model
-        .clone()
-        .or_else(|| ctx.config.model.clone())
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "uaf-hunt:hunt: no model configured. Pass `model` in the input or set \
-                 ctx.config.model via `KUZUSHI_MODEL=anthropic:claude-haiku-4-5`."
-            )
-        })?;
+    let model = crate::runtime::resolve_explicit_model(
+        "uaf-hunt:hunt",
+        options.model.clone(),
+        ctx.config.model.as_deref(),
+    )?;
     Ok(AgentToolLoopRequest {
         model,
         cwd: target.to_path_buf(),
@@ -148,434 +141,4 @@ fn build_loop_request(
         runtime_options: None,
         temperature: None,
     })
-}
-
-fn extract_findings(outcome: &AgentLoopOutcome, options: &UafHuntInput) -> Result<Vec<Finding>> {
-    if let Some(structured) = outcome.structured.as_ref() {
-        return normalize_uaf_hunt_findings(structured, options.max_findings);
-    }
-    // The Anthropic next-step path also surfaces a `Final.text` payload
-    // when the model wrapped its JSON in prose; try to recover.
-    if !outcome.text.is_empty() {
-        if let Ok(parsed) = serde_json::from_str::<Value>(outcome.text.trim()) {
-            return normalize_uaf_hunt_findings(&parsed, options.max_findings);
-        }
-        if let Some(parsed) = extract_first_json_object(&outcome.text) {
-            return normalize_uaf_hunt_findings(&parsed, options.max_findings);
-        }
-    }
-    // Truncation OR the model surrendered with no structured output:
-    // honest empty result.
-    Ok(Vec::new())
-}
-
-fn extract_first_json_object(text: &str) -> Option<Value> {
-    let start = text.find('{')?;
-    let end = text.rfind('}')?;
-    if end <= start {
-        return None;
-    }
-    serde_json::from_str(&text[start..=end]).ok()
-}
-
-/// Build the toolbox that handles each agent tool call. The clang
-/// tools forward to the long-lived mcp-clang subprocess; the repo
-/// tools are handled inline so we don't need to round-trip to a
-/// second MCP server.
-fn build_uaf_hunt_toolbox<'a>(
-    target: &Path,
-    options: &UafHuntInput,
-    clang: &'a mut ClangMcpClient,
-    stats: Arc<Mutex<ClangCallStats>>,
-) -> UafHuntHandler<'a> {
-    UafHuntHandler {
-        target: target.to_path_buf(),
-        include_non_production: options.include_non_production,
-        clang: clang as *mut ClangMcpClient,
-        stats,
-        _marker: std::marker::PhantomData,
-    }
-}
-
-/// A `ToolCallHandler` that owns a raw pointer to the `ClangMcpClient`
-/// living on the stack of `run_uaf_hunt_report`. Safety: the client's
-/// lifetime strictly outlives the handler — both are dropped at the
-/// end of `run_uaf_hunt_report`, and the tool-loop is single-threaded
-/// (one call at a time) so there's no aliasing. We don't use a
-/// reference because `ToolCallHandler::run` needs `&mut self` and the
-/// client also wants `&mut self`, which would otherwise create nested
-/// borrows; the raw pointer is the simplest way to thread the
-/// long-lived subprocess through the trait.
-struct UafHuntHandler<'a> {
-    target: PathBuf,
-    include_non_production: bool,
-    clang: *mut ClangMcpClient,
-    stats: Arc<Mutex<ClangCallStats>>,
-    _marker: std::marker::PhantomData<&'a mut ClangMcpClient>,
-}
-
-unsafe impl<'a> Send for UafHuntHandler<'a> {}
-
-#[derive(Debug, Default, Clone)]
-struct ClangCallStats {
-    calls: u32,
-    first_error: Option<String>,
-}
-
-impl<'a> ToolCallHandler for UafHuntHandler<'a> {
-    fn run(&mut self, call: &ToolCall) -> Result<ToolResult> {
-        let name = call.name.as_str();
-        if let Some(clang_method) = clang_tool_method(name) {
-            return self.run_clang_tool(call, clang_method);
-        }
-        Ok(run_uaf_repo_tool(
-            &self.target,
-            self.include_non_production,
-            call,
-        ))
-    }
-}
-
-impl<'a> UafHuntHandler<'a> {
-    fn run_clang_tool(&mut self, call: &ToolCall, clang_method: &str) -> Result<ToolResult> {
-        // Safety: see comment on `UafHuntHandler`.
-        let clang = unsafe { &mut *self.clang };
-        self.stats.lock().expect("clang stats lock").calls += 1;
-        let arguments = clang_tool_arguments(&self.target, call);
-        clang
-            .call_tool(clang_method, arguments)
-            .map(|value| successful_tool_result(call, value))
-            .or_else(|error| Ok(self.clang_tool_error_result(call, clang_method, error)))
-    }
-
-    fn clang_tool_error_result(
-        &self,
-        call: &ToolCall,
-        clang_method: &str,
-        error: anyhow::Error,
-    ) -> ToolResult {
-        let formatted = format!("{error:#}");
-        self.record_first_clang_error(&formatted);
-        rewrite_unsupported_method_error(clang_method, &error).map_or_else(
-            || failed_tool_result(call, json!({"error": formatted})),
-            |advisory| successful_tool_result(call, advisory.to_tool_result()),
-        )
-    }
-
-    fn record_first_clang_error(&self, formatted: &str) {
-        let mut stats = self.stats.lock().expect("clang stats lock");
-        if stats.first_error.is_none() {
-            stats.first_error = Some(formatted.to_string());
-        }
-    }
-}
-
-fn clang_tool_arguments(target: &Path, call: &ToolCall) -> Value {
-    let mut arguments = call.input.clone();
-    if let Some(map) = arguments.as_object_mut() {
-        map.entry("repoPath".to_string())
-            .or_insert_with(|| Value::String(target.display().to_string()));
-    }
-    arguments
-}
-
-fn run_uaf_repo_tool(target: &Path, include_non_production: bool, call: &ToolCall) -> ToolResult {
-    match call.name.as_str() {
-        "grep" => handle_grep(target, include_non_production, call),
-        "read_file" => handle_read_file(target, call),
-        "list_dir" => handle_list_dir(target, call),
-        other => failed_tool_result(
-            call,
-            json!({"error": format!("uaf-hunt: unknown tool {other:?}")}),
-        ),
-    }
-}
-
-fn successful_tool_result(call: &ToolCall, output: Value) -> ToolResult {
-    ToolResult {
-        call_id: call.call_id.clone(),
-        output,
-        is_error: false,
-    }
-}
-
-fn failed_tool_result(call: &ToolCall, output: Value) -> ToolResult {
-    ToolResult {
-        call_id: call.call_id.clone(),
-        output,
-        is_error: true,
-    }
-}
-
-fn clang_tool_method(name: &str) -> Option<&'static str> {
-    match name {
-        "clang_callers" => Some("clang.callers"),
-        "clang_callees" => Some("clang.callees"),
-        "clang_references" => Some("clang.references"),
-        "clang_definition" => Some("clang.definition"),
-        "clang_type_at" => Some("clang.type_at"),
-        _ => None,
-    }
-}
-
-fn handle_grep(target: &Path, include_non_production: bool, call: &ToolCall) -> ToolResult {
-    let pattern = match call.input.get("pattern").and_then(Value::as_str) {
-        Some(value) if !value.is_empty() => value.to_string(),
-        _ => {
-            return ToolResult {
-                call_id: call.call_id.clone(),
-                output: json!({"error": "grep: missing or empty `pattern`"}),
-                is_error: true,
-            }
-        }
-    };
-    let globs: Vec<String> = call
-        .input
-        .get("globs")
-        .and_then(Value::as_array)
-        .map(|items| {
-            items
-                .iter()
-                .filter_map(|item| item.as_str().map(str::to_string))
-                .collect()
-        })
-        .unwrap_or_else(|| default_c_globs(include_non_production));
-    let max_results = call
-        .input
-        .get("maxResults")
-        .and_then(Value::as_u64)
-        .map(|n| n as usize)
-        .unwrap_or(60)
-        .clamp(1, 200);
-    match run_ripgrep(target, &pattern, &globs, max_results) {
-        Ok(value) => ToolResult {
-            call_id: call.call_id.clone(),
-            output: value,
-            is_error: false,
-        },
-        Err(err) => ToolResult {
-            call_id: call.call_id.clone(),
-            output: json!({"error": format!("grep: {err:#}")}),
-            is_error: true,
-        },
-    }
-}
-
-fn default_c_globs(include_non_production: bool) -> Vec<String> {
-    let mut globs = vec![
-        "**/*.c".to_string(),
-        "**/*.h".to_string(),
-        "**/*.cc".to_string(),
-        "**/*.cpp".to_string(),
-        "**/*.hpp".to_string(),
-    ];
-    if !include_non_production {
-        globs.extend(non_production_exclude_globs());
-    }
-    globs
-}
-
-fn non_production_exclude_globs() -> Vec<String> {
-    [
-        "!docs/**",
-        "!doc/**",
-        "!examples/**",
-        "!example/**",
-        "!tests/**",
-        "!test/**",
-        "!fixtures/**",
-        "!__tests__/**",
-    ]
-    .iter()
-    .map(|glob| glob.to_string())
-    .collect()
-}
-
-fn run_ripgrep(
-    target: &Path,
-    pattern: &str,
-    globs: &[String],
-    max_results: usize,
-) -> Result<Value> {
-    let mut cmd = std::process::Command::new("rg");
-    cmd.arg("--line-number")
-        .arg("--no-heading")
-        .arg("--color=never")
-        .arg("--max-count")
-        .arg(max_results.to_string())
-        .arg("--with-filename");
-    for glob in globs {
-        cmd.arg("--glob").arg(glob);
-    }
-    cmd.arg("--").arg(pattern).current_dir(target);
-    let output = cmd
-        .output()
-        .context("grep: failed to invoke rg (is ripgrep installed?)")?;
-    // ripgrep exits 1 when no matches found — treat as a successful
-    // empty result, not an error.
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let matches: Vec<Value> = stdout
-        .lines()
-        .take(max_results)
-        .map(|line| Value::String(line.to_string()))
-        .collect();
-    Ok(json!({
-        "pattern": pattern,
-        "matches": matches,
-        "count": matches.len(),
-    }))
-}
-
-fn handle_read_file(target: &Path, call: &ToolCall) -> ToolResult {
-    let file = match call.input.get("file").and_then(Value::as_str) {
-        Some(s) if !s.is_empty() => s.to_string(),
-        _ => {
-            return ToolResult {
-                call_id: call.call_id.clone(),
-                output: json!({"error": "read_file: missing `file`"}),
-                is_error: true,
-            }
-        }
-    };
-    let resolved = match resolve_repo_path(target, &file) {
-        Ok(path) => path,
-        Err(err) => {
-            return ToolResult {
-                call_id: call.call_id.clone(),
-                output: json!({"error": format!("read_file: {err}")}),
-                is_error: true,
-            }
-        }
-    };
-    let raw = match std::fs::read_to_string(&resolved) {
-        Ok(text) => text,
-        Err(err) => {
-            return ToolResult {
-                call_id: call.call_id.clone(),
-                output: json!({"error": format!("read_file: {err}")}),
-                is_error: true,
-            }
-        }
-    };
-    let start = call
-        .input
-        .get("startLine")
-        .and_then(Value::as_u64)
-        .map(|n| n as usize)
-        .unwrap_or(1)
-        .max(1);
-    let end = call
-        .input
-        .get("endLine")
-        .and_then(Value::as_u64)
-        .map(|n| n as usize);
-    let lines: Vec<String> = raw
-        .lines()
-        .enumerate()
-        .map(|(idx, line)| (idx + 1, line))
-        .filter(|(line_no, _)| *line_no >= start && end.map_or(true, |limit| *line_no <= limit))
-        .take(800) // hard cap so a 100k-line file doesn't pin the context.
-        .map(|(line_no, line)| format!("{line_no:>5}: {line}"))
-        .collect();
-    ToolResult {
-        call_id: call.call_id.clone(),
-        output: json!({
-            "file": file,
-            "startLine": start,
-            "endLine": end,
-            "content": lines.join("\n"),
-        }),
-        is_error: false,
-    }
-}
-
-fn handle_list_dir(target: &Path, call: &ToolCall) -> ToolResult {
-    let path = call
-        .input
-        .get("path")
-        .and_then(Value::as_str)
-        .unwrap_or(".");
-    let resolved = match resolve_repo_path(target, path) {
-        Ok(value) => value,
-        Err(err) => {
-            return ToolResult {
-                call_id: call.call_id.clone(),
-                output: json!({"error": format!("list_dir: {err}")}),
-                is_error: true,
-            }
-        }
-    };
-    let entries = match std::fs::read_dir(&resolved) {
-        Ok(iter) => iter
-            .filter_map(|entry| entry.ok())
-            .map(|entry| {
-                let kind = if entry.path().is_dir() { "dir" } else { "file" };
-                format!("{kind} {}", entry.file_name().to_string_lossy())
-            })
-            .take(200)
-            .collect::<Vec<_>>(),
-        Err(err) => {
-            return ToolResult {
-                call_id: call.call_id.clone(),
-                output: json!({"error": format!("list_dir: {err}")}),
-                is_error: true,
-            }
-        }
-    };
-    ToolResult {
-        call_id: call.call_id.clone(),
-        output: json!({
-            "path": path,
-            "entries": entries,
-        }),
-        is_error: false,
-    }
-}
-
-fn resolve_repo_path(target: &Path, raw: &str) -> Result<PathBuf> {
-    let resolved = if Path::new(raw).is_absolute() {
-        PathBuf::from(raw)
-    } else {
-        target.join(raw)
-    };
-    let canonical_target = std::fs::canonicalize(target)
-        .with_context(|| format!("could not canonicalise target {}", target.display()))?;
-    let canonical_resolved = std::fs::canonicalize(&resolved)
-        .with_context(|| format!("could not canonicalise path {}", resolved.display()))?;
-    if !canonical_resolved.starts_with(&canonical_target) {
-        anyhow::bail!(
-            "path {} escapes workspace root {}",
-            canonical_resolved.display(),
-            canonical_target.display()
-        );
-    }
-    Ok(canonical_resolved)
-}
-
-// PHANTOM USE: keep `LoopHistoryEntry` in scope so the rustdoc reference
-// in the AgentToolLoopRequest comment doesn't break. (Compile no-op.)
-#[allow(dead_code)]
-fn _unused_history_marker(_entry: LoopHistoryEntry) {}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn first_json_object_parser_recovers_balanced_object_from_prose() {
-        let parsed = extract_first_json_object("before {\"findings\":[]} after").unwrap();
-        assert_eq!(parsed["findings"], json!([]));
-        assert!(extract_first_json_object("no object").is_none());
-        assert!(extract_first_json_object("} before {").is_none());
-    }
-
-    #[test]
-    fn default_grep_scope_excludes_non_production_dirs() {
-        let production = default_c_globs(false);
-        assert!(production.iter().any(|glob| glob == "!tests/**"));
-        assert!(production.iter().any(|glob| glob == "!examples/**"));
-
-        let broad = default_c_globs(true);
-        assert!(broad.iter().all(|glob| !glob.starts_with('!')));
-    }
 }

@@ -15,8 +15,8 @@ use crate::config::ConfigPaths;
 use crate::findings::TriageOutcome;
 use crate::options::{OptionScope, OptionTarget, ToolOptionStore};
 use crate::runtime::{
-    AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolLoopRequest,
-    LoopHistoryEntry, TriageRequest,
+    validate_model_spec, AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime,
+    AgentToolLoopRequest, LoopHistoryEntry, TriageRequest,
 };
 use anyhow::{Context, Result};
 use async_trait::async_trait;

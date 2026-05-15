@@ -10,26 +10,8 @@ pub(crate) fn run_background_tool(
     thinking_level: Option<String>,
     trace_handle: Option<TraceHandle>,
 ) -> Result<serde_json::Value> {
-    let store = if tool_requires_findings_store(tool_name) {
-        Some(FindingStore::open(workspace.findings_db_path())?)
-    } else {
-        None
-    };
-    // Input-aware check: `sast:scan` skips the runtime in
-    // scanner-only mode (whitebox-static, no triage/verify/agentic
-    // sub-tasks). Name-only tools fall through to the allowlist. See
-    // `kuzushi_core::tool_needs_runtime`.
-    let runtime = if tool_needs_runtime(tool_name, &input) {
-        Some(
-            PiAgentCoreRuntime::from_config(
-                &config,
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-            )?
-            .with_thinking_level(thinking_level),
-        )
-    } else {
-        None
-    };
+    let store = background_findings_store(tool_name, workspace)?;
+    let runtime = background_agent_runtime(&config, tool_name, &input, thinking_level)?;
     let trace = trace_handle
         .unwrap_or_else(|| TraceHandle::jsonl(workspace.root(), run_id))
         .for_tool(tool_name)
@@ -44,8 +26,38 @@ pub(crate) fn run_background_tool(
     registry.execute_tool_with_runtime(tool_name, input, &ctx, runtime_ref)
 }
 
+fn background_findings_store(
+    tool_name: &str,
+    workspace: &WorkspaceTarget,
+) -> Result<Option<FindingStore>> {
+    if tool_requires_findings_store(tool_name) {
+        return Ok(Some(FindingStore::open(workspace.findings_db_path())?));
+    }
+    Ok(None)
+}
+
+fn background_agent_runtime(
+    config: &V2Config,
+    tool_name: &str,
+    input: &serde_json::Value,
+    thinking_level: Option<String>,
+) -> Result<Option<PiAgentCoreRuntime>> {
+    if !tool_needs_runtime(tool_name, input) {
+        return Ok(None);
+    }
+    Ok(Some(
+        PiAgentCoreRuntime::from_config(config, background_current_dir())?
+            .with_thinking_level(thinking_level),
+    ))
+}
+
+fn background_current_dir() -> PathBuf {
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+}
+
 pub(crate) fn tool_requires_findings_store(tool_name: &str) -> bool {
     tool_name.starts_with("findings:")
+        || tool_name.starts_with("module-recommender:")
         || tool_name.starts_with("systems-hunt:")
         || tool_name.starts_with("chrome-rce:")
         || tool_name.starts_with("uaf-hunt:")
@@ -57,6 +69,7 @@ pub(crate) fn tool_requires_findings_store(tool_name: &str) -> bool {
                 | "patch:finding"
                 | "agentic-sast:scan"
                 | "carlini-threat-hunt:run"
+                | "offense-review:threat-hunt"
                 | "vuln-scout:audit"
                 | "tob:audit"
                 | "shinsa:scan"
@@ -70,6 +83,7 @@ pub(crate) fn tool_requires_findings_store(tool_name: &str) -> bool {
                 | "variant:hunt"
                 | "ndiff:hunt-variants"
                 | "taint-iris:hunt"
+                | "taint-iris-next:finding-review"
                 | "taint-iris-next:hunt"
                 | "sast:scan"
                 | "semgrep:scan"
@@ -101,14 +115,45 @@ mod tests {
     }
 
     #[test]
+    fn taint_iris_next_review_requires_agent_runtime() {
+        assert!(tool_uses_agent_runtime("taint-iris-next:finding-review"));
+    }
+
+    #[test]
+    fn offense_review_threat_hunt_requires_agent_runtime() {
+        assert!(tool_uses_agent_runtime("offense-review:threat-hunt"));
+    }
+
+    #[test]
     fn deterministic_tools_skip_runtime() {
         assert!(!tool_uses_agent_runtime("semgrep:scan"));
         assert!(!tool_uses_agent_runtime("secret-scan:scan"));
         assert!(!tool_uses_agent_runtime("context:build"));
+        assert!(!tool_uses_agent_runtime("module-recommender:recommend"));
         assert!(!tool_uses_agent_runtime("findings:list"));
+        assert!(!tool_uses_agent_runtime("taint-iris-next:dataflow-plan"));
+        assert!(!tool_uses_agent_runtime(
+            "taint-iris-next:source-sink-trace"
+        ));
         // Hidden DAG node that's purely deterministic surface gathering.
         assert!(!tool_uses_agent_runtime(
             "systems-hunt:systems-context-gatherer"
+        ));
+    }
+
+    #[test]
+    fn recommender_has_finding_store_access() {
+        assert!(super::tool_requires_findings_store(
+            "module-recommender:recommend"
+        ));
+        assert!(super::tool_requires_findings_store(
+            "taint-iris-next:finding-review"
+        ));
+        assert!(super::tool_requires_findings_store(
+            "offense-review:threat-hunt"
+        ));
+        assert!(!super::tool_requires_findings_store(
+            "taint-iris-next:dataflow-plan"
         ));
     }
 }

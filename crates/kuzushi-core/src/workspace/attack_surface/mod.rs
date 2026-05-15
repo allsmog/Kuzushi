@@ -33,4 +33,5 @@ pub use add::build_attack_surface_map_from_inventory;
 pub use attack_surface_model::AttackSurface;
 pub use attack_surface_model::AttackSurfaceKind;
 pub use attack_surface_model::AttackSurfaceMap;
+pub use attack_surface_model::AttackSurfaceRisk;
 pub use attack_surface_model::AttackSurfaceSummary;

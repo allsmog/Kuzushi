@@ -10,9 +10,9 @@ pub(in crate::findings) struct ProofLadderText {
 
 const SUSPECTED_PROOF_LADDER: ProofLadderText = ProofLadderText {
     stage: "suspected",
-    label: "suspected - needs source grounding or validation",
+    label: "suspected - needs source grounding or verification",
     reason: "scanner signal has not been promoted with inspectable proof",
-    next_step: "open the finding, collect code evidence, then validate if warranted",
+    next_step: "open the finding, collect code evidence, then verify if warranted",
 };
 
 const PROOF_LADDER_TEXTS: &[(ProofLadderKind, ProofLadderText)] = &[
@@ -22,16 +22,16 @@ const PROOF_LADDER_TEXTS: &[(ProofLadderKind, ProofLadderText)] = &[
             stage: "patched",
             label: "patched - remediation evidence recorded",
             reason: "latest patch result is sound or verified",
-            next_step: "review the PR comment and keep post-patch validation attached",
+            next_step: "review the PR comment and keep post-patch verification attached",
         },
     ),
     (
-        ProofLadderKind::Validated,
+        ProofLadderKind::RuntimeVerified,
         ProofLadderText {
-            stage: "validated",
-            label: "validated - empirical runtime evidence recorded",
-            reason: "runtime validation reproduced exploitability",
-            next_step: "patch the finding and re-run validation",
+            stage: "verified",
+            label: "verified - empirical runtime evidence recorded",
+            reason: "runtime verification reproduced exploitability",
+            next_step: "patch the finding and re-run verification",
         },
     ),
     (
@@ -48,8 +48,8 @@ const PROOF_LADDER_TEXTS: &[(ProofLadderKind, ProofLadderText)] = &[
         ProofLadderText {
             stage: "source_grounded",
             label: "source-grounded - code evidence recorded",
-            reason: "the finding cites source evidence but not a validated path",
-            next_step: "collect source/sink path evidence or validate runtime behavior",
+            reason: "the finding cites source evidence but not a verified path",
+            next_step: "collect source/sink path evidence or verify runtime behavior",
         },
     ),
     (

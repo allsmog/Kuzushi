@@ -1,7 +1,9 @@
 use super::*;
 pub(crate) use super::*;
 
-use self::artifacts::{append_trace_step, short_label, write_run_summary};
+use self::artifacts::{
+    append_trace_step, short_label, write_run_failure_handoff, write_run_summary,
+};
 use self::findings::short_fingerprint;
 use self::sast_tasks::parse_native_scan_tasks;
 use self::workers::scan_worker;

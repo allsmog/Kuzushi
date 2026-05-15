@@ -131,14 +131,14 @@ primary = "anthropic:claude-opus-4-7"
             &home,
             r#"
 [roles.deep_auditor]
-primary = "home-model"
+primary = "anthropic:home-model"
 "#,
         );
         write_models_toml(
             &target,
             r#"
 [roles.deep_auditor]
-primary = "project-model"
+primary = "openai:project-model"
 "#,
         );
         let r = AgentRouter::load(&ConfigPaths {
@@ -146,7 +146,7 @@ primary = "project-model"
             target_dir: Some(target),
         })
         .unwrap();
-        assert_eq!(r.pick(AgentRole::DeepAuditor, 0), Some("project-model"));
+        assert_eq!(r.pick(AgentRole::DeepAuditor, 0), Some("openai:project-model"));
     }
 
     #[test]
@@ -190,6 +190,47 @@ fallbacks = ["openai:o3"]
     }
 
     #[test]
+    fn rejects_invalid_default_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        write_models_toml(
+            &home,
+            r#"
+default_model = "gpt-5.5"
+"#,
+        );
+        let err = AgentRouter::load(&ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap_err();
+        let message = format!("{err:#}");
+        assert!(message.contains("default_model"), "{message}");
+        assert!(message.contains("provider:model"), "{message}");
+    }
+
+    #[test]
+    fn rejects_invalid_role_model() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        write_models_toml(
+            &home,
+            r#"
+[roles.deep_auditor]
+primary = "gpt-5.5"
+"#,
+        );
+        let err = AgentRouter::load(&ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap_err();
+        let message = format!("{err:#}");
+        assert!(message.contains("roles.deep_auditor.primary"), "{message}");
+        assert!(message.contains("provider:model"), "{message}");
+    }
+
+    #[test]
     fn routed_runtime_substitutes_model_for_role() {
         let inner = RecorderRuntime::new();
         let mut router = AgentRouter::empty();
@@ -230,11 +271,11 @@ fallbacks = ["openai:o3"]
         let mut router = AgentRouter::empty();
         router
             .routes
-            .insert(AgentRole::DeepAuditor, ModelRoute::new("role-model"));
+            .insert(AgentRole::DeepAuditor, ModelRoute::new("openai:role-model"));
         let routed = RoutedRuntime::new(
             inner.clone(),
             Arc::new(router),
-            Some("operator-default".to_string()),
+            Some("openai:operator-default".to_string()),
         );
 
         // Caller passed an explicit per-task model that's NOT the operator default.
@@ -242,12 +283,17 @@ fallbacks = ["openai:o3"]
         routed
             .query_for_role(
                 AgentRole::DeepAuditor,
-                AgentQueryRequest::new("per-task-override", PathBuf::from("/tmp"), "sys", "user"),
+                AgentQueryRequest::new(
+                    "anthropic:per-task-override",
+                    PathBuf::from("/tmp"),
+                    "sys",
+                    "user",
+                ),
             )
             .unwrap();
         assert_eq!(
             inner.last_query_model.lock().unwrap().as_deref(),
-            Some("per-task-override")
+            Some("anthropic:per-task-override")
         );
     }
 
@@ -277,12 +323,12 @@ fallbacks = ["openai:o3"]
         let routed = RoutedRuntime::new(
             inner.clone(),
             Arc::new(AgentRouter::empty()),
-            Some("operator-default".to_string()),
+            Some("openai:operator-default".to_string()),
         );
         // No role — calls the AgentRuntime trait method directly.
         routed
             .query_blocking(AgentQueryRequest::new(
-                "explicit-legacy",
+                "openai:explicit-legacy",
                 PathBuf::from("/tmp"),
                 "sys",
                 "user",
@@ -290,7 +336,7 @@ fallbacks = ["openai:o3"]
             .unwrap();
         assert_eq!(
             inner.last_query_model.lock().unwrap().as_deref(),
-            Some("explicit-legacy"),
+            Some("openai:explicit-legacy"),
             "legacy path must not rewrite the model"
         );
     }
@@ -301,33 +347,72 @@ fallbacks = ["openai:o3"]
         let mut router = AgentRouter::empty();
         router
             .routes
-            .insert(AgentRole::DeepAuditor, ModelRoute::new("toml-model"));
+            .insert(AgentRole::DeepAuditor, ModelRoute::new("anthropic:toml-model"));
 
         let mut store = ToolOptionStore::new();
         store.set_value(
             OptionScope::Global,
             OptionTarget::All,
             "MODEL_DEEP_AUDITOR",
-            serde_json::Value::String("setg-model".to_string()),
+            serde_json::Value::String("openai:setg-model".to_string()),
         );
 
         let routed = RoutedRuntime::new(
             inner.clone(),
             Arc::new(router),
-            Some("operator-default".to_string()),
+            Some("openai:operator-default".to_string()),
         )
         .with_option_store(&store);
 
         routed
             .query_for_role(
                 AgentRole::DeepAuditor,
-                AgentQueryRequest::new("operator-default", PathBuf::from("/tmp"), "sys", "user"),
+                AgentQueryRequest::new("openai:operator-default", PathBuf::from("/tmp"), "sys", "user"),
             )
             .unwrap();
         assert_eq!(
             inner.last_query_model.lock().unwrap().as_deref(),
-            Some("setg-model"),
+            Some("openai:setg-model"),
             "operator-set MODEL_DEEP_AUDITOR must beat models.toml"
+        );
+    }
+
+    #[test]
+    fn invalid_option_store_override_errors_without_falling_back() {
+        let inner = RecorderRuntime::new();
+        let mut router = AgentRouter::empty();
+        router.routes.insert(
+            AgentRole::DeepAuditor,
+            ModelRoute::new("anthropic:toml-model"),
+        );
+
+        let mut store = ToolOptionStore::new();
+        store.set_value(
+            OptionScope::Global,
+            OptionTarget::All,
+            "MODEL_DEEP_AUDITOR",
+            serde_json::Value::String("gpt-5.5".to_string()),
+        );
+
+        let routed = RoutedRuntime::new(
+            inner.clone(),
+            Arc::new(router),
+            Some("openai:operator-default".to_string()),
+        )
+        .with_option_store(&store);
+
+        let err = routed
+            .query_for_role(
+                AgentRole::DeepAuditor,
+                AgentQueryRequest::new("openai:operator-default", PathBuf::from("/tmp"), "sys", "user"),
+            )
+            .unwrap_err();
+        let message = format!("{err:#}");
+        assert!(message.contains("deep_auditor"), "{message}");
+        assert!(message.contains("provider:model"), "{message}");
+        assert!(
+            inner.last_query_model.lock().unwrap().is_none(),
+            "invalid override must not fall back to the valid TOML route"
         );
     }
 
@@ -350,17 +435,17 @@ fallbacks = ["openai:o3"]
         let mut router = AgentRouter::empty();
         router
             .routes
-            .insert(AgentRole::Triage, ModelRoute::new("triage-model"));
+            .insert(AgentRole::Triage, ModelRoute::new("openai:triage-model"));
         let routed = RoutedRuntime::new(
             inner.clone(),
             Arc::new(router),
-            Some("operator-default".to_string()),
+            Some("openai:operator-default".to_string()),
         );
         routed
             .triage_for_role(
                 AgentRole::Triage,
                 TriageRequest {
-                    model: "operator-default".to_string(),
+                    model: "openai:operator-default".to_string(),
                     cwd: PathBuf::from("/tmp"),
                     finding: synthetic_finding(),
                     prompt_template: None,
@@ -369,7 +454,7 @@ fallbacks = ["openai:o3"]
             .unwrap();
         assert_eq!(
             inner.last_triage_model.lock().unwrap().as_deref(),
-            Some("triage-model")
+            Some("openai:triage-model")
         );
     }
 }

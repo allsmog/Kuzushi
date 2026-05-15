@@ -18,13 +18,17 @@ so new callers should use the canonical names:
 - `patch:finding`
 - `findings:list`
 - `context:build`
-- `carlini-threat-hunt:run`
+- `offense-review:threat-hunt`
 - `taint-iris:hunt`
 
 Legacy `sast:<action>` aliases remain registered for backward compatibility,
 but they are compatibility redirects rather than the preferred API surface.
 Do not add new docs or tests that introduce `sast:<action>` names unless the
 test is explicitly covering alias behavior.
+
+`carlini-threat-hunt:run` remains registered as a compatibility alias for the
+same threat-model-scoped offensive review executor. New product-facing scripts
+and docs should use `offense-review:threat-hunt`.
 
 ## Streaming SSE routes
 

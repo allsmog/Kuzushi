@@ -40,61 +40,21 @@ impl ShellApp {
 
         let registry = self.registry.clone();
         let config = self.config.clone();
-        let target = workspace.root().to_path_buf();
-        let run_id = new_run_id("tool");
-        let target_label = target.display().to_string();
-        let summary = RunSummary::running(
-            run_id.clone(),
-            "tool",
-            Some(tool_name.clone()),
-            target_label.clone(),
-        )
-        .with_process_id(std::process::id());
-        let _ = write_run_summary(&target, &summary);
-        let _ = append_run_trace_step(
-            &target,
-            &run_id,
-            &RunTraceStep::new(1, "tool", format!("{tool_name} started"))
-                .with_tool_name(&tool_name),
-        );
         let (tx, rx) = mpsc::channel();
         let (trace_tx, trace_rx) = mpsc::channel::<RunTraceStep>();
-        let inner_sink: Arc<dyn TraceSink> =
-            Arc::new(JsonlSink::new(target.clone(), run_id.clone()));
-        let broadcast_sink: Arc<dyn TraceSink> = Arc::new(BroadcastSink::new(inner_sink, trace_tx));
-        let initial_step_number = next_run_trace_step_number(&target, &run_id).saturating_sub(1);
-        let trace_handle =
-            TraceHandle::with_initial_step_number(broadcast_sink, initial_step_number);
-        self.target = Some(target.clone());
-        self.tool_rx = Some(rx);
-        self.trace_rx = Some(trace_rx);
-        self.activity = Some(ActivitySession::new(run_id.clone()));
-        self.tool_running = Some(tool_name.clone());
-        self.tool_run_id = Some(run_id.clone());
-        self.tool_abort_requested = false;
-        self.log(
-            "tool",
-            format!(
-                "running {tool_name} in background; {status} under {target_label} · run {run_id}"
-            ),
+        let run = prepare_background_tool_run(&workspace, &tool_name, &input, trace_tx);
+        self.attach_background_tool_run(&run, rx, trace_rx, &tool_name, status, activity);
+        spawn_background_tool_worker(
+            registry,
+            config,
+            workspace,
+            tool_name,
+            input,
+            run.run_id,
+            thinking_level,
+            tx,
+            run.trace_handle,
         );
-        self.set_live_activity(
-            activity.unwrap_or_else(|| live_activity_for_tool(&tool_name, status)),
-        );
-
-        thread::spawn(move || {
-            background_tool_worker(
-                registry,
-                config,
-                workspace,
-                tool_name,
-                input,
-                run_id,
-                thinking_level,
-                tx,
-                Some(trace_handle),
-            )
-        });
 
         // Auto-open AFTER the worker thread spawns. Earlier, the flip happened
         // before the worker existed, so a fast dispatch error could strand the
@@ -104,4 +64,97 @@ impl ShellApp {
             self.shell_view = ShellView::Activity;
         }
     }
+
+    fn attach_background_tool_run(
+        &mut self,
+        run: &BackgroundToolRun,
+        rx: Receiver<ToolEvent>,
+        trace_rx: Receiver<RunTraceStep>,
+        tool_name: &str,
+        status: &str,
+        activity: Option<LiveActivity>,
+    ) {
+        self.target = Some(run.target.clone());
+        self.tool_rx = Some(rx);
+        self.trace_rx = Some(trace_rx);
+        self.activity = Some(ActivitySession::new(run.run_id.clone()));
+        self.tool_running = Some(tool_name.to_string());
+        self.tool_run_id = Some(run.run_id.clone());
+        self.tool_abort_requested = false;
+        self.log(
+            "tool",
+            format!(
+                "running {tool_name} in background; {status} under {} · run {}",
+                run.target_label, run.run_id
+            ),
+        );
+        self.set_live_activity(
+            activity.unwrap_or_else(|| live_activity_for_tool(tool_name, status)),
+        );
+    }
+}
+
+struct BackgroundToolRun {
+    target: PathBuf,
+    run_id: String,
+    target_label: String,
+    trace_handle: TraceHandle,
+}
+
+fn prepare_background_tool_run(
+    workspace: &WorkspaceTarget,
+    tool_name: &str,
+    input: &serde_json::Value,
+    trace_tx: std::sync::mpsc::Sender<RunTraceStep>,
+) -> BackgroundToolRun {
+    let target = workspace.root().to_path_buf();
+    let run_id = new_run_id("tool");
+    let target_label = target.display().to_string();
+    let record =
+        kuzushi_core::run_artifacts::ToolRunRecord::new(&target, &run_id, "tool", tool_name);
+    kuzushi_core::run_artifacts::record_tool_run_started(record, input);
+    let trace_handle = background_tool_trace_handle(&target, &run_id, trace_tx);
+    BackgroundToolRun {
+        target,
+        run_id,
+        target_label,
+        trace_handle,
+    }
+}
+
+fn background_tool_trace_handle(
+    target: &std::path::Path,
+    run_id: &str,
+    trace_tx: std::sync::mpsc::Sender<RunTraceStep>,
+) -> TraceHandle {
+    let inner_sink: Arc<dyn TraceSink> = Arc::new(JsonlSink::new(target.to_path_buf(), run_id));
+    let broadcast_sink: Arc<dyn TraceSink> = Arc::new(BroadcastSink::new(inner_sink, trace_tx));
+    let initial_step_number = next_run_trace_step_number(target, run_id).saturating_sub(1);
+    TraceHandle::with_initial_step_number(broadcast_sink, initial_step_number)
+}
+
+fn spawn_background_tool_worker(
+    registry: ModuleRegistry,
+    config: V2Config,
+    workspace: WorkspaceTarget,
+    tool_name: String,
+    input: serde_json::Value,
+    run_id: String,
+    thinking_level: Option<String>,
+    tx: std::sync::mpsc::Sender<ToolEvent>,
+    trace_handle: TraceHandle,
+) {
+    thread::spawn(move || {
+        background_tool_worker(
+            registry,
+            config,
+            workspace,
+            tool_name,
+            input,
+            run_id,
+            thinking_level,
+            tx,
+            Some(trace_handle),
+        )
+    });
 }

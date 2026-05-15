@@ -1,0 +1,12 @@
+Kuzushi
+Copyright (c) 2026 Shayaun Nejad.
+
+Kuzushi is distributed under the MIT License. See LICENSE.
+
+This product tracks OpenAI Codex as an upstream agent-shell substrate:
+https://github.com/openai/codex
+
+OpenAI Codex is licensed under the Apache License, Version 2.0. Kuzushi keeps
+the Apache-2.0 license text in LICENSES/Apache-2.0.txt and records upstream
+sync policy in UPSTREAM_CODEX.md. Public product identity, package names,
+binary names, prompts, artifacts, and cybersecurity modules are Kuzushi-owned.

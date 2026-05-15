@@ -5,11 +5,15 @@ mod tests {
 
     #[test]
     fn parses_kept_commands() {
+        assert_eq!(parse_command("/"), ShellCommand::Home);
+        assert_eq!(parse_command("home"), ShellCommand::Home);
         assert_eq!(parse_command("/help"), ShellCommand::Help);
         assert_eq!(parse_command("/h"), ShellCommand::Help);
         assert_eq!(parse_command("?"), ShellCommand::Help);
         assert_eq!(parse_command("/modules"), ShellCommand::Modules);
         assert_eq!(parse_command("/show modules"), ShellCommand::Modules);
+        assert_eq!(parse_command("/recommend"), ShellCommand::Recommend);
+        assert_eq!(parse_command("rec"), ShellCommand::Recommend);
         assert_eq!(parse_command("/tools"), ShellCommand::Tools);
         assert_eq!(parse_command("/show tools"), ShellCommand::Tools);
         assert_eq!(parse_command("/findings"), ShellCommand::Findings);
@@ -84,7 +88,7 @@ mod tests {
             ShellCommand::AuthLogin(Some("anthropic".to_string()))
         );
         assert_eq!(
-            parse_command("auth codex"),
+            parse_command("auth openai"),
             ShellCommand::AuthLogin(Some("openai-codex".to_string()))
         );
         assert_eq!(
@@ -289,6 +293,8 @@ mod tests {
         assert_eq!(parse_command("activity"), ShellCommand::Activity);
         assert_eq!(parse_command("/progress"), ShellCommand::Activity);
         assert_eq!(parse_command("/a"), ShellCommand::Activity);
+        assert_eq!(parse_command("/handoff"), ShellCommand::FailureHandoff);
+        assert_eq!(parse_command("failure"), ShellCommand::FailureHandoff);
         assert_eq!(
             parse_command("/plan only admin routes"),
             ShellCommand::Plan("only admin routes".to_string())
@@ -411,8 +417,10 @@ mod tests {
             "context",
             "cost",
             "detach",
+            "failure-handoff",
             "findings",
             "help",
+            "home",
             "history",
             "kb",
             "load",
@@ -428,8 +436,8 @@ mod tests {
             "prompts",
             "prompt",
             "provider",
-            "pwn",
             "quickstart",
+            "recommend",
             "quit",
             "reparse",
             "replay",
@@ -491,8 +499,10 @@ mod tests {
     fn route_kind(command: &ShellCommand) -> &'static str {
         match command {
             ShellCommand::Help => "help",
+            ShellCommand::Home => "home",
             ShellCommand::Back => "back",
             ShellCommand::Modules => "modules",
+            ShellCommand::Recommend => "recommend",
             ShellCommand::Tools => "tools",
             ShellCommand::Findings => "findings",
             ShellCommand::Open(_) => "open",
@@ -522,6 +532,7 @@ mod tests {
             ShellCommand::Replay(_) => "replay",
             ShellCommand::Trace(_) => "trace",
             ShellCommand::Activity => "activity",
+            ShellCommand::FailureHandoff => "failure-handoff",
             ShellCommand::Plan(_) => "plan",
             ShellCommand::PlanApply => "plan-apply",
             ShellCommand::PlanDiscard => "plan-discard",
@@ -566,7 +577,7 @@ mod tests {
                 "<path-or-url>" => "README.md".to_string(),
                 "<run>" | "<runId>" => "run-123".to_string(),
                 "<ref>" => "main".to_string(),
-                "<provider>" => "openai-codex".to_string(),
+                "<provider>" => "openai".to_string(),
                 "<choice>" => "1".to_string(),
                 "<question>" => "what now".to_string(),
                 "<specifier>" => "builtin:sast".to_string(),

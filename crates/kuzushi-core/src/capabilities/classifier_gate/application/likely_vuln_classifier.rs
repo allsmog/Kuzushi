@@ -17,13 +17,7 @@ impl<'a> LikelyVulnClassifier<'a> {
     pub fn score(&self, finding: &Finding, cwd: &Path) -> Result<Score> {
         let model = self
             .runtime
-            .resolve_model(AgentRole::ClassifierGate, 0, None)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "no model configured for classifier_gate role: \
-                     set models.toml [roles.classifier_gate] or `setg MODEL_CLASSIFIER_GATE`"
-                )
-            })?;
+            .resolve_model_for_role(AgentRole::ClassifierGate, 0, None)?;
         let request = AgentQueryRequest::new(
             model,
             cwd.to_path_buf(),
