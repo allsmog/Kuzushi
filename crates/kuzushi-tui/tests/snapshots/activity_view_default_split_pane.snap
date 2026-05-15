@@ -10,5 +10,5 @@
                                                       -22:13:20   ↳ … [triage:run] evidence-collect | stage1 kept 14/14
                                                       -22:13:20   ↳ … [triage:run] verdict=likely-tp severity=high
 
- ▸ FOCUS  hover j/k to inspect a task | Tab pane | V verbose | p pause | R reset
- j/k scroll   Tab switch pane   V verbose   p pause   R reset   Enter focus task
+ ▸ FOCUS  hover [j/k] to inspect a task
+ j/k scroll   Tab pane   V verbose   p pause   R reset   Enter focus   c cancel

@@ -1,9 +1,9 @@
-use super::dag_pane::{dag_row_text, dag_state_style, dag_subsystems_row_text};
-use super::feed_pane::{feed_event_style, feed_event_text};
+use super::dag_pane::dag_row_style;
+use super::feed_pane::feed_row_style;
 use super::*;
 use crate::app::ActivitySession;
 use crate::ui_view_models::{
-    activity_feed_pause_model, activity_feed_placeholder_model, activity_feed_scroll_offset,
+    activity_dag_pane_rows, activity_feed_pane_rows, activity_feed_scroll_offset,
     activity_footer_model, activity_header_model, activity_pane_chrome_model,
     activity_task_scroll_offset, ActivityFooterHint, ActivityPaneTitle,
 };
@@ -116,36 +116,10 @@ fn dag_pane_lines(
     inner_width: usize,
     now: Instant,
 ) -> Vec<Line<'static>> {
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    for row in session.tasks.values() {
-        let text = dag_row_text(row, inner_width, now);
-        lines.push(Line::from(vec![Span::styled(
-            text,
-            dag_state_style(row.state),
-        )]));
-    }
-    push_subsystems_line(&mut lines, session, inner_width);
-    ensure_dag_placeholder(&mut lines);
-    lines
-}
-
-fn push_subsystems_line(
-    lines: &mut Vec<Line<'static>>,
-    session: &ActivitySession,
-    inner_width: usize,
-) {
-    if let Some(text) = dag_subsystems_row_text(session, inner_width) {
-        lines.push(Line::from(vec![Span::styled(text, theme::muted())]));
-    }
-}
-
-fn ensure_dag_placeholder(lines: &mut Vec<Line<'static>>) {
-    if lines.is_empty() {
-        lines.push(Line::from(vec![Span::styled(
-            " (no DAG tasks yet)".to_string(),
-            theme::muted(),
-        )]));
-    }
+    activity_dag_pane_rows(session, inner_width, now)
+        .into_iter()
+        .map(|row| Line::from(vec![Span::styled(row.text, dag_row_style(row.tone))]))
+        .collect()
 }
 
 fn render_feed_pane_widget(
@@ -182,36 +156,10 @@ fn pane_title_style(title: &ActivityPaneTitle) -> ratatui::style::Style {
 }
 
 fn feed_pane_lines(session: &ActivitySession, inner_width: usize) -> Vec<Line<'static>> {
-    let mut lines = feed_pause_line(session).into_iter().collect::<Vec<_>>();
-    lines.extend(visible_feed_event_lines(session, inner_width));
-    ensure_feed_placeholder(&mut lines, session);
-    lines
-}
-
-fn feed_pause_line(session: &ActivitySession) -> Option<Line<'static>> {
-    activity_feed_pause_model(session).map(|model| {
-        Line::from(vec![Span::styled(
-            format!(" {}", model.text),
-            theme::warn(),
-        )])
-    })
-}
-
-fn visible_feed_event_lines(session: &ActivitySession, inner_width: usize) -> Vec<Line<'static>> {
-    session
-        .events
-        .iter()
-        .filter_map(|event| {
-            feed_event_text(event, session.verbose_subsystems, inner_width)
-                .map(|text| Line::from(vec![Span::styled(text, feed_event_style(event))]))
-        })
+    activity_feed_pane_rows(session, inner_width)
+        .into_iter()
+        .map(|row| Line::from(vec![Span::styled(row.text, feed_row_style(row.tone))]))
         .collect()
-}
-
-fn ensure_feed_placeholder(lines: &mut Vec<Line<'static>>, session: &ActivitySession) {
-    if let (true, Some(model)) = (lines.is_empty(), activity_feed_placeholder_model(session)) {
-        lines.push(Line::from(vec![Span::styled(model.text, theme::muted())]));
-    }
 }
 
 fn render_focus_footer(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
