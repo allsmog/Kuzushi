@@ -1,7 +1,7 @@
 use super::*;
 use crate::ui_view_models::{
-    plain_live_activity_rows, plain_prereq_plan_model, plain_render_mode,
-    transcript_model_from_log_index, PlainPrereqPlanModel, PlainRenderMode, TranscriptRow,
+    plain_command_result_model, plain_live_activity_rows, plain_prereq_plan_model,
+    plain_render_mode, PlainCommandResultModel, PlainPrereqPlanModel, PlainRenderMode,
 };
 
 pub fn render_plain_app(app: &ShellApp, width: usize) -> String {
@@ -61,31 +61,21 @@ pub(crate) fn render_plain_command_result_lines(
     log_start: usize,
 ) -> Vec<String> {
     let width = width.max(40);
-    let mut lines = vec![
-        plain_section_divider("COMMAND RESULT", width),
-        format!("command: {command}"),
-        "logs:".to_string(),
-    ];
-    for row in transcript_model_from_log_index(app, log_start).rows {
-        lines.push(plain_log_line(&row));
-    }
+    let model = plain_command_result_model(app, command, log_start);
+    let mut lines = plain_command_result_lines(model, width);
     lines.push(String::new());
-    lines.push(plain_section_divider("VIEW", width));
     lines.extend(render_plain_lines(app, width));
 
     let lines = finalize_width_safe_plain_lines(lines, width);
     trim_plain_lines(lines)
 }
 
-fn plain_log_line(row: &TranscriptRow) -> String {
-    if row.continuation {
-        return format!("  {}", row.body);
-    }
-    if row.prefix == ">" {
-        format!("> {}", row.body)
-    } else {
-        format!("{}: {}", row.prefix, row.body)
-    }
+fn plain_command_result_lines(model: PlainCommandResultModel, width: usize) -> Vec<String> {
+    let mut lines = vec![plain_section_divider(model.result_title, width)];
+    lines.extend(model.rows);
+    lines.push(String::new());
+    lines.push(plain_section_divider(model.view_title, width));
+    lines
 }
 
 fn plain_prereq_plan_lines(plan: PlainPrereqPlanModel, width: usize) -> Vec<String> {
