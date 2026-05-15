@@ -955,12 +955,12 @@ fn threat_story_rows_from_doc_sorts_by_impact_severity() {
     });
     let stories = threat_story_rows_from_doc(&doc).expect("non-empty stories");
     assert_eq!(stories.len(), 3);
-    assert_eq!(stories[0].id, "T-002");
-    assert_eq!(stories[0].severity, Severity::Critical);
-    assert_eq!(stories[0].location, "src/api.rs:42");
-    assert_eq!(stories[1].id, "T-003");
-    assert_eq!(stories[1].severity, Severity::High);
-    assert_eq!(stories[2].id, "T-001");
+    assert_eq!(stories[0].cells[0], "T-002");
+    assert_eq!(stories[0].cells[1], "CRITICAL");
+    assert_eq!(stories[0].cells[4], "src/api.rs:42");
+    assert_eq!(stories[1].cells[0], "T-003");
+    assert_eq!(stories[1].cells[1], "HIGH");
+    assert_eq!(stories[2].cells[0], "T-001");
 }
 
 #[test]
