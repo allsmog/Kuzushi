@@ -56,6 +56,35 @@ fn transcript_model_tails_visible_rows_after_expansion() {
 }
 
 #[test]
+fn transcript_model_from_log_index_expands_entries_after_start() {
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.log = vec![
+        log_line("system", "before", 1),
+        log_line("tool", "first\nsecond", 2),
+    ];
+
+    let model = transcript_model_from_log_index(&app, 1);
+
+    assert_eq!(
+        model.rows,
+        vec![
+            TranscriptRow {
+                prefix: "tool".to_string(),
+                body: "first".to_string(),
+                continuation: false,
+                time_secs: 2
+            },
+            TranscriptRow {
+                prefix: "tool".to_string(),
+                body: "second".to_string(),
+                continuation: true,
+                time_secs: 2
+            }
+        ]
+    );
+}
+
+#[test]
 fn transcript_model_keeps_empty_log_body_as_one_row() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     app.log = vec![log_line("system", "", 0)];
