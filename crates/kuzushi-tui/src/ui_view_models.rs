@@ -6,6 +6,7 @@
 use crate::ShellApp;
 use std::path::{Path, PathBuf};
 
+mod active_stage;
 mod attack_surface;
 mod auth;
 mod catalog;
@@ -20,6 +21,7 @@ mod run_trace;
 mod threat_model;
 mod tools;
 mod view_status;
+pub(crate) use active_stage::active_stage_label;
 pub(crate) use attack_surface::{attack_surface_risk_model, AttackSurfaceRiskModel};
 pub(crate) use auth::{
     auth_env_summary, auth_provider_rows, model_auth_status, oauth_summary, AuthProviderRow,
