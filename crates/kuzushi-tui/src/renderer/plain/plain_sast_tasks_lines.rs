@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui_view_models::{help_model, HelpCategoryModel, HelpCommandRow};
 
 pub(crate) fn plain_sast_tasks_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
@@ -36,55 +37,32 @@ pub(crate) fn plain_sast_tasks_lines(app: &ShellApp, width: usize) -> Vec<String
 
 pub(crate) fn plain_help_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
+    let model = help_model();
     lines.push(String::new());
     lines.push(plain_section_divider("HELP", width));
-    lines.push(
-        "Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode."
-            .to_string(),
-    );
-    let examples = shell_help_examples();
-    if !examples.is_empty() {
-        lines.push(format!("Examples: {}", examples.join(" | ")));
+    lines.push(model.intro.to_string());
+    if !model.examples.is_empty() {
+        lines.push(format!("Examples: {}", model.examples.join(" | ")));
     }
 
-    for category in ShellCommandCategory::ORDER {
+    for category in &model.categories {
         append_plain_help_category(&mut lines, category);
     }
 
     lines
 }
 
-fn append_plain_help_category(lines: &mut Vec<String>, category: ShellCommandCategory) {
+fn append_plain_help_category(lines: &mut Vec<String>, category: &HelpCategoryModel) {
     lines.push(String::new());
-    lines.push(format!(
-        "{} — {}",
-        category.label(),
-        help_category_blurb(category)
-    ));
-    for spec in shell_command_specs().filter(|spec| spec.category == category) {
-        append_plain_help_spec(lines, spec);
+    lines.push(format!("{} — {}", category.label, category.blurb));
+    for row in &category.commands {
+        append_plain_help_spec(lines, row);
     }
 }
 
-fn append_plain_help_spec(lines: &mut Vec<String>, spec: &ShellCommandSpec) {
-    lines.push(format!("{} - {}", spec.command, spec.description));
-    let aliases = plain_help_alias_text(spec);
-    if aliases != "-" {
-        lines.push(format!("  aliases / examples: {aliases}"));
-    }
-}
-
-pub(crate) fn plain_help_alias_text(spec: &ShellCommandSpec) -> String {
-    let mut aliases = Vec::new();
-    for alias in spec.aliases {
-        if *alias == spec.command || aliases.contains(alias) {
-            continue;
-        }
-        aliases.push(*alias);
-    }
-    if aliases.is_empty() {
-        "-".to_string()
-    } else {
-        aliases.join(", ")
+fn append_plain_help_spec(lines: &mut Vec<String>, row: &HelpCommandRow) {
+    lines.push(format!("{} - {}", row.command, row.description));
+    if row.aliases != "-" {
+        lines.push(format!("  aliases / examples: {}", row.aliases));
     }
 }
