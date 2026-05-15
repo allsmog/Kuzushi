@@ -37,7 +37,47 @@ fn latest_run_json(repo: &std::path::Path, leaf: &str) -> Value {
     run_json(repo, &latest_run_id(repo), leaf)
 }
 
+fn assert_latest_canonical_run_bundle(repo: &std::path::Path) {
+    let run_id = latest_run_id(repo);
+    let run_dir = repo.join(".kuzushi/runs").join(&run_id);
+    for leaf in [
+        "run.json",
+        "summary.json",
+        "events.jsonl",
+        "trace.jsonl",
+        "context.json",
+        "attack-surface.json",
+        "threat-model.json",
+        "recommendations.json",
+        "findings.json",
+        "proof.json",
+        "failures.json",
+        "report.md",
+        "artifacts.json",
+    ] {
+        assert!(
+            run_dir.join(leaf).exists(),
+            "latest run {run_id} missing canonical artifact {leaf}"
+        );
+    }
+
+    let run = run_json(repo, &run_id, "run.json");
+    assert_eq!(run.get("status").and_then(Value::as_str), Some("completed"));
+
+    let failures = run_json(repo, &run_id, "failures.json");
+    assert_eq!(
+        failures.get("status").and_then(Value::as_str),
+        Some("completed")
+    );
+    assert!(failures
+        .get("failures")
+        .and_then(Value::as_array)
+        .is_some_and(Vec::is_empty));
+}
+
 fn assert_latest_static_artifacts(repo: &std::path::Path, expected_tool: &str) {
+    assert_latest_canonical_run_bundle(repo);
+
     let findings = latest_run_json(repo, "findings.json");
     assert_eq!(
         findings.pointer("/0/tool").and_then(Value::as_str),
