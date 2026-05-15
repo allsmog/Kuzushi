@@ -36,7 +36,10 @@ pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
     lines.push(blank());
     let footer = activity_footer_model(session, area.width);
-    lines.push(focus_footer_line(&footer.body, area.width));
+    lines.push(Line::from(vec![Span::styled(
+        footer.body_line,
+        theme::label(),
+    )]));
     lines.push(keybind_hint_line(&footer.plain_hints));
     lines
 }
@@ -137,13 +140,6 @@ fn combined_pane_line(
         Span::styled("│".to_string(), theme::subtle()),
         Span::styled(pad_to(&right_text, right_w), right_style),
     ])
-}
-
-fn focus_footer_line(body: &str, width: u16) -> Line<'static> {
-    Line::from(vec![Span::styled(
-        fit(body, width as usize),
-        theme::label(),
-    )])
 }
 
 fn pad_to(s: &str, width: usize) -> String {
