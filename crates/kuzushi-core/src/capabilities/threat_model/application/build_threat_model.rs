@@ -85,6 +85,7 @@ fn emit_threat_model_start(
 struct GeneratedThreatModel {
     document: Value,
     bridge_findings: Option<Vec<Value>>,
+    cost_usd: f64,
 }
 
 fn generate_threat_model_document(
@@ -95,8 +96,10 @@ fn generate_threat_model_document(
     input: &BuildInput,
 ) -> Result<GeneratedThreatModel> {
     let prompt = threat_model_prompt(input)?;
-    let raw = query_threat_model_document(runtime, ctx, flavor, verb, input, prompt)?;
-    normalize_threat_model_raw(raw, &input.methodology)
+    let costed = query_threat_model_document(runtime, ctx, flavor, verb, input, prompt)?;
+    let mut generated = normalize_threat_model_raw(costed.value, &input.methodology)?;
+    generated.cost_usd = costed.cost_usd;
+    Ok(generated)
 }
 
 fn threat_model_prompt(input: &BuildInput) -> Result<String> {
@@ -111,9 +114,9 @@ fn query_threat_model_document(
     verb: &str,
     input: &BuildInput,
     prompt: String,
-) -> Result<Value> {
+) -> Result<crate::structured_output::CostedStructuredJson<Value>> {
     let _llm_scope = begin_threat_model_llm_scope(ctx, verb);
-    let raw = query_required_structured_json(
+    let costed = crate::structured_output::query_required_structured_json_with_cost(
         runtime,
         AgentQueryRequest::new(
             input.model.clone(),
@@ -129,7 +132,7 @@ fn query_threat_model_document(
         |raw| validate_threat_model_raw(raw, &input.methodology),
     )?;
     drop(_llm_scope);
-    Ok(raw)
+    Ok(costed)
 }
 
 fn begin_threat_model_llm_scope(
@@ -164,6 +167,7 @@ fn normalize_threat_model_raw(raw: Value, methodology: &str) -> Result<Generated
     Ok(GeneratedThreatModel {
         document,
         bridge_findings,
+        cost_usd: 0.0,
     })
 }
 
@@ -243,6 +247,6 @@ fn threat_model_response(
             "findings": findings,
             "persisted": artifacts.persisted,
         },
-        "costUsd": 0.0,
+        "costUsd": generated.cost_usd,
     })
 }
