@@ -1,20 +1,25 @@
 use crate::ShellApp;
 
+const DFD_NODE_LIMIT: usize = 8;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ThreatDfdNode {
-    pub(crate) id: String,
-    pub(crate) node_type: String,
-    pub(crate) trust_zone: String,
+pub(crate) struct ThreatDfdModel {
+    pub(crate) header: String,
+    pub(crate) rows: Vec<ThreatDfdRow>,
 }
 
-pub(crate) fn threat_dfd_nodes(app: &ShellApp) -> Vec<ThreatDfdNode> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ThreatDfdRow {
+    pub(crate) cells: [String; 3],
+}
+
+pub(crate) fn threat_dfd_model(app: &ShellApp) -> Option<ThreatDfdModel> {
     super::threat_model_doc(app)
         .as_ref()
-        .and_then(threat_dfd_nodes_from_doc)
-        .unwrap_or_default()
+        .and_then(threat_dfd_model_from_doc)
 }
 
-pub(crate) fn threat_dfd_nodes_from_doc(doc: &serde_json::Value) -> Option<Vec<ThreatDfdNode>> {
+pub(crate) fn threat_dfd_model_from_doc(doc: &serde_json::Value) -> Option<ThreatDfdModel> {
     let nodes = doc.pointer("/dfd/nodes")?.as_array()?;
     if nodes.is_empty() {
         return None;
@@ -26,15 +31,29 @@ pub(crate) fn threat_dfd_nodes_from_doc(doc: &serde_json::Value) -> Option<Vec<T
     if rows.is_empty() {
         return None;
     }
-    Some(rows)
+    Some(threat_dfd_model_from_rows(rows))
 }
 
-fn threat_dfd_node_from_value(value: &serde_json::Value) -> Option<ThreatDfdNode> {
-    Some(ThreatDfdNode {
-        id: string_field(value, "id")?,
-        node_type: string_field(value, "type").unwrap_or_else(|| "node".to_string()),
-        trust_zone: string_field(value, "trustZone").unwrap_or_default(),
-    })
+fn threat_dfd_node_from_value(value: &serde_json::Value) -> Option<ThreatDfdRow> {
+    Some(threat_dfd_row(
+        string_field(value, "id")?,
+        string_field(value, "type").unwrap_or_else(|| "node".to_string()),
+        string_field(value, "trustZone").unwrap_or_default(),
+    ))
+}
+
+fn threat_dfd_row(id: String, node_type: String, trust_zone: String) -> ThreatDfdRow {
+    ThreatDfdRow {
+        cells: [id, node_type, trust_zone],
+    }
+}
+
+fn threat_dfd_model_from_rows(rows: Vec<ThreatDfdRow>) -> ThreatDfdModel {
+    let node_count = rows.len();
+    ThreatDfdModel {
+        header: format!("NODES FROM threat-model.json · {node_count}"),
+        rows: rows.into_iter().take(DFD_NODE_LIMIT).collect(),
+    }
 }
 
 fn string_field(value: &serde_json::Value, key: &str) -> Option<String> {
@@ -47,7 +66,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn threat_dfd_nodes_from_doc_returns_id_type_zone_triples() {
+    fn threat_dfd_model_from_doc_returns_id_type_zone_triples() {
         let doc = json!({
             "dfd": {
                 "nodes": [
@@ -59,20 +78,40 @@ mod tests {
             }
         });
 
-        let nodes = threat_dfd_nodes_from_doc(&doc).expect("expected non-empty nodes");
+        let model = threat_dfd_model_from_doc(&doc).expect("expected non-empty nodes");
 
-        assert_eq!(nodes.len(), 2);
-        assert_eq!(nodes[0].id, "actor-user");
-        assert_eq!(nodes[0].node_type, "external-entity");
-        assert_eq!(nodes[0].trust_zone, "external");
-        assert_eq!(nodes[1].id, "web");
-        assert_eq!(nodes[1].trust_zone, "internal");
+        assert_eq!(model.header, "NODES FROM threat-model.json · 2");
+        assert_eq!(model.rows.len(), 2);
+        assert_eq!(model.rows[0].cells[0], "actor-user");
+        assert_eq!(model.rows[0].cells[1], "external-entity");
+        assert_eq!(model.rows[0].cells[2], "external");
+        assert_eq!(model.rows[1].cells[0], "web");
+        assert_eq!(model.rows[1].cells[2], "internal");
     }
 
     #[test]
-    fn threat_dfd_nodes_from_doc_returns_none_when_missing() {
-        assert!(threat_dfd_nodes_from_doc(&json!({})).is_none());
-        assert!(threat_dfd_nodes_from_doc(&json!({"dfd": {}})).is_none());
-        assert!(threat_dfd_nodes_from_doc(&json!({"dfd": {"nodes": []}})).is_none());
+    fn threat_dfd_model_from_doc_caps_visible_rows() {
+        let doc = json!({
+            "dfd": {
+                "nodes": [
+                    {"id": "n1"}, {"id": "n2"}, {"id": "n3"},
+                    {"id": "n4"}, {"id": "n5"}, {"id": "n6"},
+                    {"id": "n7"}, {"id": "n8"}, {"id": "n9"}
+                ]
+            }
+        });
+
+        let model = threat_dfd_model_from_doc(&doc).expect("expected non-empty nodes");
+
+        assert_eq!(model.header, "NODES FROM threat-model.json · 9");
+        assert_eq!(model.rows.len(), 8);
+        assert_eq!(model.rows[7].cells[0], "n8");
+    }
+
+    #[test]
+    fn threat_dfd_model_from_doc_returns_none_when_missing() {
+        assert!(threat_dfd_model_from_doc(&json!({})).is_none());
+        assert!(threat_dfd_model_from_doc(&json!({"dfd": {}})).is_none());
+        assert!(threat_dfd_model_from_doc(&json!({"dfd": {"nodes": []}})).is_none());
     }
 }

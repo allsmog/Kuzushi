@@ -182,9 +182,9 @@ pub(crate) use session_story::{
     session_history_model, session_story_model, CommandHistoryModel, SessionStoryModel,
 };
 pub(crate) use status_footer::status_footer_model;
-pub(crate) use threat_dfd::threat_dfd_nodes;
+pub(crate) use threat_dfd::threat_dfd_model;
 #[cfg(test)]
-pub(crate) use threat_dfd::threat_dfd_nodes_from_doc;
+pub(crate) use threat_dfd::threat_dfd_model_from_doc;
 pub(crate) use threat_model::{threat_model_doc, threat_summary_review, ThreatSummaryReview};
 pub(crate) use threat_navigation::{threat_nav_model, threat_panel_model, ThreatPanel};
 pub(crate) use threat_patch::threat_patch_card_model;
