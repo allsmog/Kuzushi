@@ -10,6 +10,7 @@ mod active_stage;
 mod attack_surface;
 mod auth;
 mod catalog;
+mod confirm_card;
 mod context_strip;
 mod display_text;
 mod failure_handoff;
@@ -42,6 +43,7 @@ pub(crate) use auth::{
     AuthProviderState,
 };
 pub(crate) use catalog::{catalog_model, CatalogActionModule, CatalogModel, CatalogModuleGroup};
+pub(crate) use confirm_card::{confirm_card_model, ConfirmCardModel};
 pub(crate) use context_strip::{context_strip_model, ContextStripModel, ContextStripSegment};
 pub(crate) use display_text::{compact_target_path, format_session_cost};
 pub(crate) use failure_handoff::failure_handoff_context;
