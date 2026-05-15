@@ -45,9 +45,7 @@ fn push_options_body(
         OptionsModelStatus::Ready => {
             push_options_table(lines, width, rows, table_hint, table_headers)
         }
-        OptionsModelStatus::UnknownTool => lines.push(muted(
-            "Unknown tool. Run tools to inspect the native registry.",
-        )),
+        OptionsModelStatus::UnknownTool { message, .. } => lines.push(muted(message)),
         OptionsModelStatus::Empty { message, .. } => lines.push(muted(message)),
     }
 }
