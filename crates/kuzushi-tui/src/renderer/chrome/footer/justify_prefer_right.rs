@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui_view_models::footer_keybindings;
 
 pub(crate) fn justify_prefer_right(left: String, right: String, width: usize) -> String {
     if width == 0 {
@@ -37,51 +38,109 @@ pub(crate) fn render_keybind_footer(frame: &mut Frame<'_>, area: Rect, app: &She
 }
 
 pub(crate) fn keybindings_line(app: &ShellApp, width: usize) -> Line<'static> {
+    let bindings = footer_keybindings(app)
+        .into_iter()
+        .map(|binding| (binding.key, binding.label))
+        .collect();
+    Line::from(keybinding_spans(bindings, width))
+}
+
+fn keybinding_spans(
+    bindings: Vec<(&'static str, &'static str)>,
+    width: usize,
+) -> Vec<Span<'static>> {
     const TAIL: &str = "help more";
-    // Reserve enough headroom so the `help more` overflow chip always fits
-    // (`   ` separator + the chip itself).
     let reserve = 3 + TAIL.chars().count();
-    let bindings = keybindings(app);
     let bindings_len = bindings.len();
+    let mut layout = KeybindingLineLayout::new(width, reserve);
+    let mut spans = vec![Span::raw(" ")];
 
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    spans.push(Span::raw(" "));
-    let mut used = 1usize;
-    let mut overflow = false;
-    let mut placed = 0usize;
-
-    for (i, (key, hint)) in bindings.into_iter().enumerate() {
-        let pair = format!("{key} {hint}");
-        let sep = if placed == 0 { 0 } else { 3 };
-        let need = sep + pair.chars().count();
-        // Last binding doesn't need to leave room for the tail chip — there
-        // is nothing left to point at.
-        let cap = if i + 1 == bindings_len {
-            width.saturating_sub(1)
-        } else {
-            width.saturating_sub(reserve + 1)
-        };
-        if used + need > cap && placed > 0 {
-            overflow = true;
+    for (i, binding) in bindings.into_iter().enumerate() {
+        if !layout.try_push(&mut spans, binding, i + 1 == bindings_len) {
             break;
         }
-        if placed > 0 {
-            spans.push(Span::raw("   "));
-            used += 3;
-        }
-        spans.push(Span::styled(key.to_string(), theme::accent()));
-        spans.push(Span::raw(" "));
-        spans.push(Span::styled(hint.to_string(), theme::muted()));
-        used += pair.chars().count();
-        placed += 1;
     }
+    append_overflow_hint(&mut spans, layout.overflow);
+    spans
+}
 
+fn append_overflow_hint(spans: &mut Vec<Span<'static>>, overflow: bool) {
     if overflow {
         spans.push(Span::raw("   "));
         spans.push(Span::styled("help".to_string(), theme::accent()));
         spans.push(Span::raw(" "));
         spans.push(Span::styled("more".to_string(), theme::muted()));
     }
+}
 
-    Line::from(spans)
+struct KeybindingLineLayout {
+    overflow: bool,
+    placed: usize,
+    reserve: usize,
+    used: usize,
+    width: usize,
+}
+
+impl KeybindingLineLayout {
+    fn new(width: usize, reserve: usize) -> Self {
+        Self {
+            overflow: false,
+            placed: 0,
+            reserve,
+            used: 1,
+            width,
+        }
+    }
+
+    fn try_push(
+        &mut self,
+        spans: &mut Vec<Span<'static>>,
+        binding: (&'static str, &'static str),
+        is_last: bool,
+    ) -> bool {
+        let pair_len = pair_len(binding);
+        let need = self.separator_len() + pair_len;
+        if self.used + need > self.capacity(is_last) && self.placed > 0 {
+            self.overflow = true;
+            return false;
+        }
+        self.push_separator(spans);
+        push_binding_pair(spans, binding);
+        self.used += pair_len;
+        self.placed += 1;
+        true
+    }
+
+    fn separator_len(&self) -> usize {
+        if self.placed == 0 {
+            0
+        } else {
+            3
+        }
+    }
+
+    fn capacity(&self, is_last: bool) -> usize {
+        if is_last {
+            self.width.saturating_sub(1)
+        } else {
+            self.width.saturating_sub(self.reserve + 1)
+        }
+    }
+
+    fn push_separator(&mut self, spans: &mut Vec<Span<'static>>) {
+        if self.placed > 0 {
+            spans.push(Span::raw("   "));
+            self.used += 3;
+        }
+    }
+}
+
+fn pair_len((key, label): (&str, &str)) -> usize {
+    key.chars().count() + 1 + label.chars().count()
+}
+
+fn push_binding_pair(spans: &mut Vec<Span<'static>>, (key, label): (&'static str, &'static str)) {
+    spans.push(Span::styled(key.to_string(), theme::accent()));
+    spans.push(Span::raw(" "));
+    spans.push(Span::styled(label.to_string(), theme::muted()));
 }
