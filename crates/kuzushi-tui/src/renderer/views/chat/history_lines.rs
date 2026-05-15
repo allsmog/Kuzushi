@@ -35,9 +35,10 @@ fn append_history_rows(lines: &mut Vec<Line<'static>>, model: &CommandHistoryMod
         ));
     } else {
         for row_model in &model.rows {
+            let [number, command] = &row_model.cells;
             lines.push(row(&[
-                format!("{:>width$}", row_model.number, width = model.number_width),
-                fit(&row_model.command, area.width.saturating_sub(8) as usize),
+                format!("{number:>width$}", width = model.number_width),
+                fit(command, area.width.saturating_sub(8) as usize),
             ]));
         }
     }
@@ -73,9 +74,10 @@ fn story_event_limit(area: Rect) -> usize {
 
 fn append_story_scan_row(lines: &mut Vec<Line<'static>>, model: &SessionStoryModel, area: Rect) {
     if let Some(scan) = &model.scan_row {
+        let [label, body] = &scan.cells;
         lines.push(row(&[
-            pad(&scan.label, 10),
-            fit(&scan.body, area.width.saturating_sub(14) as usize),
+            pad(label, 10),
+            fit(body, area.width.saturating_sub(14) as usize),
         ]));
     }
 }
@@ -97,7 +99,8 @@ fn append_story_events(lines: &mut Vec<Line<'static>>, model: &SessionStoryModel
     } else {
         for event in &model.events {
             let body_width = area.width.saturating_sub(14) as usize;
-            lines.push(row(&[pad(&event.label, 10), fit(&event.body, body_width)]));
+            let [label, body] = &event.cells;
+            lines.push(row(&[pad(label, 10), fit(body, body_width)]));
         }
     }
 }

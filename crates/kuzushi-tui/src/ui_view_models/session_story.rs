@@ -1,5 +1,8 @@
 use crate::{LogLine, ScanPanelState, ShellApp};
 
+pub(crate) const COMMAND_HISTORY_COLUMN_COUNT: usize = 2;
+pub(crate) const SESSION_STORY_COLUMN_COUNT: usize = 2;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CommandHistoryModel {
     pub(crate) rows: Vec<CommandHistoryRow>,
@@ -8,8 +11,7 @@ pub(crate) struct CommandHistoryModel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CommandHistoryRow {
-    pub(crate) number: usize,
-    pub(crate) command: String,
+    pub(crate) cells: [String; COMMAND_HISTORY_COLUMN_COUNT],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,8 +22,7 @@ pub(crate) struct SessionStoryModel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SessionStoryRow {
-    pub(crate) label: String,
-    pub(crate) body: String,
+    pub(crate) cells: [String; SESSION_STORY_COLUMN_COUNT],
 }
 
 pub(crate) fn session_history_model(app: &ShellApp, visible_count: usize) -> CommandHistoryModel {
@@ -45,8 +46,7 @@ fn history_model_from_commands(commands: &[String], visible_count: usize) -> Com
         .skip(start)
         .enumerate()
         .map(|(offset, command)| CommandHistoryRow {
-            number: start + offset + 1,
-            command: command.clone(),
+            cells: [(start + offset + 1).to_string(), command.clone()],
         })
         .collect::<Vec<_>>();
     CommandHistoryModel {
@@ -66,11 +66,13 @@ fn scan_story_row(scan: &ScanPanelState, paused: bool) -> SessionStoryRow {
         "idle"
     };
     SessionStoryRow {
-        label: "scan".to_string(),
-        body: format!(
-            "{label} · stage={} · findings={}",
-            scan.stage, scan.findings_count
-        ),
+        cells: [
+            "scan".to_string(),
+            format!(
+                "{label} · stage={} · findings={}",
+                scan.stage, scan.findings_count
+            ),
+        ],
     }
 }
 
@@ -97,8 +99,7 @@ fn story_event_rows(log: &[LogLine], visible_count: usize) -> Vec<SessionStoryRo
 impl SessionStoryRow {
     fn from_log_line(line: &LogLine) -> Self {
         Self {
-            label: line.prefix.clone(),
-            body: line.body.clone(),
+            cells: [line.prefix.clone(), line.body.clone()],
         }
     }
 }

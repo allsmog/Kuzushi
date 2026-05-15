@@ -13,15 +13,13 @@ fn session_history_model_tails_commands_with_original_numbers() {
     assert_eq!(
         model.rows.first(),
         Some(&CommandHistoryRow {
-            number: 11,
-            command: "cmd-11".to_string()
+            cells: ["11".to_string(), "cmd-11".to_string()]
         })
     );
     assert_eq!(
         model.rows.last(),
         Some(&CommandHistoryRow {
-            number: 60,
-            command: "cmd-60".to_string()
+            cells: ["60".to_string(), "cmd-60".to_string()]
         })
     );
 }
@@ -42,12 +40,10 @@ fn session_story_model_filters_prompt_echoes_and_tails_events() {
         model.events,
         vec![
             SessionStoryRow {
-                label: "tool".to_string(),
-                body: "semgrep".to_string()
+                cells: ["tool".to_string(), "semgrep".to_string()]
             },
             SessionStoryRow {
-                label: "finding".to_string(),
-                body: "sql injection".to_string()
+                cells: ["finding".to_string(), "sql injection".to_string()]
             }
         ]
     );
@@ -68,8 +64,10 @@ fn scan_story_row_describes_running_scan_state() {
     assert_eq!(
         scan_story_row(&scan, true),
         SessionStoryRow {
-            label: "scan".to_string(),
-            body: "paused · stage=verify · findings=3".to_string()
+            cells: [
+                "scan".to_string(),
+                "paused · stage=verify · findings=3".to_string()
+            ]
         }
     );
 }
