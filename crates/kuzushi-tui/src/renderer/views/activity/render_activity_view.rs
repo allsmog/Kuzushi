@@ -1,7 +1,8 @@
 use super::dag_pane::{dag_row_text, dag_state_style, dag_subsystems_row_text};
 use super::feed_pane::{feed_event_style, feed_event_text};
 use super::*;
-use crate::app::{ActivitySession, DagTaskState, PaneFocus};
+use crate::app::{ActivitySession, PaneFocus};
+use crate::ui_view_models::activity_header_model;
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
@@ -66,72 +67,14 @@ fn render_header(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
 }
 
 fn activity_header_lines(session: &ActivitySession) -> Vec<Line<'static>> {
+    let model = activity_header_model(session);
     vec![
+        Line::from(vec![Span::styled(model.detailed_title, theme::heading())]),
         Line::from(vec![Span::styled(
-            activity_header_text(session),
-            theme::heading(),
-        )]),
-        Line::from(vec![Span::styled(
-            pane_focus_label(session).to_string(),
+            model.focus_label.to_string(),
             theme::accent(),
         )]),
     ]
-}
-
-fn activity_header_text(session: &ActivitySession) -> String {
-    let total = session.tasks.len();
-    let done = session
-        .tasks
-        .values()
-        .filter(|row| matches!(row.state, DagTaskState::Done))
-        .count();
-    let running = session
-        .tasks
-        .values()
-        .filter(|row| matches!(row.state, DagTaskState::Active))
-        .count();
-    // Aggregate cost across all DAG rows. Mirrors the
-    // `cost: $X.XX` segment in design/mockups/_shared.jsx::statusStrip.
-    let cost: f64 = session.tasks.values().map(|row| row.cost_usd).sum();
-    format!(
-        "ACTIVITY  run {run}  ·  {done}/{total} done  ·  {running} running  ·  cost ${cost:.4}{paused}{verbose}",
-        run = compact_activity_run_id(&session.run_id),
-        done = done,
-        total = total,
-        running = running,
-        cost = cost,
-        paused = paused_header_segment(session),
-        verbose = verbose_header_segment(session),
-    )
-}
-
-// Trim long synthetic run ids ("tool-1778354160-e1b1d602a576") to
-// the trailing 8 chars. Shipped run ids are typically short (`r-...`)
-// so this only kicks in for auto-minted single-tool ids.
-fn compact_activity_run_id(run_id: &str) -> String {
-    if run_id.len() <= 12 {
-        return run_id.to_string();
-    }
-    let tail: String = run_id.chars().rev().take(8).collect();
-    format!("…{}", tail.chars().rev().collect::<String>())
-}
-
-fn paused_header_segment(session: &ActivitySession) -> &'static str {
-    session.paused.then_some("  ·  ⏸ paused").unwrap_or("")
-}
-
-fn verbose_header_segment(session: &ActivitySession) -> &'static str {
-    session
-        .verbose_subsystems
-        .then_some("  ·  V verbose")
-        .unwrap_or("")
-}
-
-fn pane_focus_label(session: &ActivitySession) -> &'static str {
-    match session.pane_focus {
-        PaneFocus::Left => "[DAG focused]",
-        PaneFocus::Right => "[FEED focused]",
-    }
 }
 
 fn render_dag_pane_widget(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
