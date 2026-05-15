@@ -5,6 +5,8 @@ use kuzushi_core::{
     Severity,
 };
 
+const FINDINGS_PREVIEW_LIMIT: usize = 8;
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FindingsModel {
     pub(crate) total: usize,
@@ -15,12 +17,27 @@ pub(crate) struct FindingsModel {
     pub(crate) cursor: usize,
     pub(crate) empty: FindingsEmptyState,
     pub(crate) rows: Vec<FindingListRow>,
+    pub(crate) preview: FindingsPreviewModel,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FindingsEmptyState {
     pub(crate) hint: &'static str,
     pub(crate) context_cta: Option<(&'static str, &'static str)>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct FindingsPreviewModel {
+    pub(crate) header: String,
+    pub(crate) rows: Vec<FindingListRow>,
+    pub(crate) overflow: Option<FindingsPreviewOverflow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FindingsPreviewOverflow {
+    pub(crate) label: String,
+    pub(crate) command: &'static str,
+    pub(crate) suffix: &'static str,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -87,6 +104,7 @@ pub(crate) fn findings_model(app: &ShellApp) -> FindingsModel {
         header: format!("FINDINGS · {total} · {triaged} triaged · {pending} pending"),
         cursor: app.findings_cursor.min(total.saturating_sub(1)),
         empty: empty_state(app.context_view.exists),
+        preview: findings_preview(total, triaged, pending, &rows),
         rows,
     }
 }
@@ -122,6 +140,27 @@ fn empty_state(context_exists: bool) -> FindingsEmptyState {
         hint: "scan dispatches the umbrella scanner once context-snapshot exists.",
         context_cta: Some(("context build", "build the snapshot first if you have time")),
     }
+}
+
+fn findings_preview(
+    total: usize,
+    triaged: usize,
+    pending: usize,
+    rows: &[FindingListRow],
+) -> FindingsPreviewModel {
+    FindingsPreviewModel {
+        header: format!("FINDINGS · {triaged} triaged · {pending} pending"),
+        rows: rows.iter().take(FINDINGS_PREVIEW_LIMIT).cloned().collect(),
+        overflow: findings_preview_overflow(total),
+    }
+}
+
+fn findings_preview_overflow(total: usize) -> Option<FindingsPreviewOverflow> {
+    (total > FINDINGS_PREVIEW_LIMIT).then(|| FindingsPreviewOverflow {
+        label: format!("… {} more · ", total - FINDINGS_PREVIEW_LIMIT),
+        command: "/findings",
+        suffix: " to drill in",
+    })
 }
 
 impl FindingListRow {

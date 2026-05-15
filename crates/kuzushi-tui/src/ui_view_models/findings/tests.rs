@@ -45,6 +45,9 @@ fn findings_model_projects_counts_rows_and_selection() {
     assert_eq!(model.rows[0].confidence, "91%");
     assert_eq!(model.rows[0].source, "semgrep:demo.sql");
     assert!(model.rows[0].selected);
+    assert_eq!(model.preview.header, "FINDINGS · 1 triaged · 1 pending");
+    assert_eq!(model.preview.rows.len(), 2);
+    assert!(model.preview.overflow.is_none());
 }
 
 #[test]
@@ -58,6 +61,37 @@ fn findings_model_describes_context_prereq_when_empty() {
     assert_eq!(
         model.empty.context_cta,
         Some(("context build", "build the snapshot first if you have time"))
+    );
+}
+
+#[test]
+fn findings_model_caps_module_preview_rows() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.findings = (0..10)
+        .map(|index| {
+            Finding::new_tool(
+                "semgrep",
+                &format!("rule-{index}"),
+                &format!("src/file_{index}.rs"),
+                index + 1,
+                None,
+                Severity::Low,
+                "preview finding",
+            )
+        })
+        .collect();
+
+    let model = findings_model(&app);
+
+    assert_eq!(model.preview.header, "FINDINGS · 0 triaged · 10 pending");
+    assert_eq!(model.preview.rows.len(), 8);
+    assert_eq!(
+        model.preview.overflow,
+        Some(FindingsPreviewOverflow {
+            label: "… 2 more · ".to_string(),
+            command: "/findings",
+            suffix: " to drill in",
+        })
     );
 }
 
