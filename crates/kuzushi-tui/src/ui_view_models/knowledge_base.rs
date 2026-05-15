@@ -4,11 +4,17 @@ use kuzushi_core::{AttachmentKind, AttachmentRecord, KnownArtifact, SUPPORTED_AT
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct KnowledgeBaseModel {
-    pub(crate) module_id_label: String,
-    pub(crate) store_label: String,
-    pub(crate) supported_label: String,
+    pub(crate) title: &'static str,
+    pub(crate) summary_rows: Vec<KnowledgeBaseSummaryRow>,
     pub(crate) artifact_rows: Vec<KnowledgeBaseArtifactRow>,
     pub(crate) attachment_rows: Vec<KnowledgeBaseAttachmentRow>,
+    pub(crate) commands: [&'static str; 4],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct KnowledgeBaseSummaryRow {
+    pub(crate) label: &'static str,
+    pub(crate) value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -32,7 +38,7 @@ pub(crate) struct PlainKnowledgeBaseModel {
     pub(crate) summary_rows: Vec<String>,
     pub(crate) artifact_section: PlainKnowledgeBaseArtifacts,
     pub(crate) attachment_section: PlainKnowledgeBaseAttachments,
-    pub(crate) next_hint: &'static str,
+    pub(crate) next_hint: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,12 +74,20 @@ pub(crate) struct PlainKnowledgeBaseAttachmentRow {
 
 pub(crate) fn knowledge_base_model(app: &ShellApp) -> KnowledgeBaseModel {
     let view = &app.kb_view;
+    let module_id_label = view.module_id.clone();
+    let store_label = store_label(view.store_path.as_ref());
+    let supported_label = SUPPORTED_ATTACHMENT_MODULES.join(", ");
     KnowledgeBaseModel {
-        module_id_label: view.module_id.clone(),
-        store_label: store_label(view.store_path.as_ref()),
-        supported_label: SUPPORTED_ATTACHMENT_MODULES.join(", "),
+        title: "KB ATTACHMENTS",
+        summary_rows: summary_rows(&module_id_label, &store_label, &supported_label),
         artifact_rows: artifact_rows(&view.artifacts),
         attachment_rows: attachment_rows(&view.attachments, &view.module_id),
+        commands: [
+            "kb [module]",
+            "attach <path-or-url>",
+            "detach <id>",
+            "reparse <id>",
+        ],
     }
 }
 
@@ -83,18 +97,44 @@ pub(crate) fn plain_knowledge_base_model(app: &ShellApp) -> PlainKnowledgeBaseMo
 
 impl PlainKnowledgeBaseModel {
     fn from_knowledge_base_model(model: KnowledgeBaseModel) -> Self {
+        let KnowledgeBaseModel {
+            title,
+            summary_rows,
+            artifact_rows,
+            attachment_rows,
+            commands,
+        } = model;
         PlainKnowledgeBaseModel {
-            title: "KB ATTACHMENTS",
-            summary_rows: vec![
-                format!("module: {}", model.module_id_label),
-                format!("store: {}", model.store_label),
-                format!("supported: {}", model.supported_label),
-            ],
-            artifact_section: plain_artifacts(model.artifact_rows),
-            attachment_section: plain_attachments(model.attachment_rows),
-            next_hint: "Next: kb [module], attach <path-or-url>, detach <id>, reparse <id>",
+            title,
+            summary_rows: summary_rows.into_iter().map(plain_summary_row).collect(),
+            artifact_section: plain_artifacts(artifact_rows),
+            attachment_section: plain_attachments(attachment_rows),
+            next_hint: format!("Next: {}", commands.join(", ")),
         }
     }
+}
+
+fn summary_rows(
+    module_id_label: &str,
+    store_label: &str,
+    supported_label: &str,
+) -> Vec<KnowledgeBaseSummaryRow> {
+    vec![
+        summary_row("module", module_id_label),
+        summary_row("store", store_label),
+        summary_row("supported", supported_label),
+    ]
+}
+
+fn summary_row(label: &'static str, value: &str) -> KnowledgeBaseSummaryRow {
+    KnowledgeBaseSummaryRow {
+        label,
+        value: value.to_string(),
+    }
+}
+
+fn plain_summary_row(row: KnowledgeBaseSummaryRow) -> String {
+    format!("{}: {}", row.label, row.value)
 }
 
 fn plain_artifacts(rows: Vec<KnowledgeBaseArtifactRow>) -> PlainKnowledgeBaseArtifacts {
