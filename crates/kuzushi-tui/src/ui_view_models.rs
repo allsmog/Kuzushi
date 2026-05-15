@@ -94,7 +94,8 @@ pub(crate) use module_progress::{
     ModuleProgressSection,
 };
 pub(crate) use module_run::{
-    module_run_live_activity, module_run_summary, ModuleRunLiveActivity, ModuleRunSummary,
+    module_run_live_activity, module_run_summary, ModuleRunLiveActivity, ModuleRunStatusKind,
+    ModuleRunSummary,
 };
 pub(crate) use options::{options_model, OptionRow, OptionsModelStatus};
 pub(crate) use patch_review::{patch_review_model, PatchReviewModel, PatchReviewTestRow};

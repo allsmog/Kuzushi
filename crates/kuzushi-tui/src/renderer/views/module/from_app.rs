@@ -5,12 +5,7 @@ pub(crate) fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
     let summary = module_run_summary(app);
     let findings = crate::ui_view_models::findings_model(app);
 
-    append_run_status(
-        &mut lines,
-        app.scan.as_ref(),
-        &summary,
-        app.spinner_phase as usize,
-    );
+    append_run_status(&mut lines, &summary);
     append_live_activity(&mut lines, module_run_live_activity(app).as_ref(), area);
     append_progress_section(&mut lines, app, area, &summary);
     append_scan_error(&mut lines, area, &summary);
@@ -46,16 +41,13 @@ fn append_live_activity(
 
 pub(in crate::renderer::views) fn append_run_status(
     lines: &mut Vec<Line<'static>>,
-    scan: Option<&ScanPanelState>,
     summary: &ModuleRunSummary,
-    spinner_phase: usize,
 ) {
-    let tool_running = summary.tool_is_running();
     lines.push(blank());
     lines.push(Line::from(vec![
         Span::styled(
-            run_state_glyph(scan, tool_running, spinner_phase),
-            run_state_style(scan, tool_running),
+            run_state_glyph(summary.status, summary.spinner_phase),
+            run_state_style(summary.status),
         ),
         Span::raw(" "),
         Span::styled(summary.target.clone(), theme::label()),
