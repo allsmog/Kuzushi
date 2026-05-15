@@ -19,13 +19,15 @@ fn options_model_formats_stored_option_rows() {
     );
 
     let model = options_model(&app, &options_view("sast:scan", OptionsFilter::Standard));
-    let triage = model.rows.iter().find(|row| row.name == "triage").unwrap();
+    let OptionsBody::Table(table) = &model.body else {
+        panic!("expected ready options table");
+    };
+    let triage = table.rows.iter().find(|row| row.name == "triage").unwrap();
 
     assert_eq!(model.title, "OPTIONS");
-    assert_eq!(model.status, OptionsModelStatus::Ready);
-    assert!(model.table_hint.contains("session state"));
+    assert!(table.hint.contains("session state"));
     assert_eq!(
-        model.table_headers,
+        table.headers,
         [
             "option",
             "value",
@@ -52,8 +54,8 @@ fn options_model_marks_unknown_tools() {
     let model = options_model(&app, &options_view("missing:tool", OptionsFilter::Standard));
 
     assert_eq!(
-        model.status,
-        OptionsModelStatus::UnknownTool {
+        model.body,
+        OptionsBody::Message {
             message: "Unknown tool. Run tools to inspect the native registry.",
             plain_message: "Unknown tool. Next: tools",
         }
@@ -62,7 +64,6 @@ fn options_model_marks_unknown_tools() {
         label: "tool",
         value: "missing:tool".to_string(),
     }));
-    assert!(model.rows.is_empty());
 }
 
 #[test]

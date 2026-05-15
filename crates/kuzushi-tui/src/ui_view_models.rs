@@ -146,7 +146,7 @@ pub(crate) use module_run::{
     ModuleRunSummary,
 };
 pub(crate) use options::{
-    options_model, plain_options_model, OptionRow, OptionsModelStatus, OptionsSummaryRow,
+    options_model, plain_options_model, OptionRow, OptionsBody, OptionsSummaryRow, OptionsTable,
     PlainOptionRow, PlainOptionsBody, PlainOptionsModel, PlainOptionsTable,
 };
 pub(crate) use patch_review::{patch_review_model, PatchReviewModel, PatchReviewTestRow};
