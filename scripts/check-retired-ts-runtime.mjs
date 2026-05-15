@@ -34,6 +34,16 @@ const retiredUiPaths = [
   "src/ui/setup.ts",
 ];
 const retiredUiDependencies = ["ink", "react", "react-dom", "@types/react", "@types/react-dom"];
+const retiredUiRuntimePackages = new Set(["ink", "react", "react-dom"]);
+const retiredShellRouterPatterns = [
+  { label: "ShellCommand type", regex: /\bShellCommand\b/ },
+  { label: "SHELL_COMMAND_SPECS constant", regex: /\bSHELL_COMMAND_SPECS\b/ },
+  { label: "shellCommandSpecs helper", regex: /\bshellCommandSpecs\b/ },
+  { label: "parseShellCommand helper", regex: /\bparseShellCommand\b/ },
+  { label: "handleShellCommand helper", regex: /\bhandleShellCommand\b/ },
+  { label: "parse_command helper", regex: /\bparse_command\b/ },
+  { label: "handle_command helper", regex: /\bhandle_command\b/ },
+];
 const deletedReferenceRoot = "reference/ts-runtime-island";
 const sourceRoots = ["src", "scripts/pi-agent-core-bridge.mjs"];
 const docRoots = [
@@ -92,6 +102,8 @@ if (existsSync(path.join(repo, deletedReferenceRoot))) {
 failures.push(...tsxSourceFailures(), ...retiredUiDependencyFailures());
 
 const sourceFiles = sourceRoots.flatMap((root) => walk(root, sourceExtensions));
+failures.push(...retiredShellRouterFailures(sourceFiles), ...retiredUiImportFailures(sourceFiles));
+
 for (const file of sourceFiles) {
   const rel = relative(file);
   const text = readFileSync(file, "utf8");
@@ -181,6 +193,30 @@ function retiredUiDependencyFailures() {
   );
 }
 
+function retiredShellRouterFailures(files) {
+  return files.flatMap((file) => {
+    const rel = relative(file);
+    if (!rel.startsWith("src/")) return [];
+    const text = readFileSync(file, "utf8");
+    return retiredShellRouterPatterns
+      .filter(({ regex }) => regex.test(text))
+      .map(
+        ({ label }) =>
+          `${rel} contains ${label}; shell command routing belongs in crates/kuzushi-tui.`,
+      );
+  });
+}
+
+function retiredUiImportFailures(files) {
+  return files.flatMap((file) => {
+    const rel = relative(file);
+    const text = readFileSync(file, "utf8");
+    return importSpecifiers(text)
+      .filter((specifier) => retiredUiRuntimePackages.has(packageName(specifier)))
+      .map((specifier) => `${rel} imports ${specifier}; shell UI belongs in Rust Ratatui.`);
+  });
+}
+
 function importSpecifiers(text) {
   const specifiers = [];
   const patterns = [
@@ -196,6 +232,11 @@ function importSpecifiers(text) {
     }
   }
   return specifiers;
+}
+
+function packageName(specifier) {
+  if (specifier.startsWith("@")) return specifier.split("/").slice(0, 2).join("/");
+  return specifier.split("/")[0] ?? specifier;
 }
 
 function resolveImport(from, specifier, sourceFiles) {
