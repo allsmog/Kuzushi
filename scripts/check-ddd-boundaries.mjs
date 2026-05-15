@@ -46,6 +46,12 @@ const rules = [
       /\b(TriageOutcome|TriageVerdict|triage:run|crate::(?:modules::triage|verification|verify))\b/,
   },
   {
+    name: "triage attaches verdicts without scanner verification patch or report dispatch",
+    roots: ["crates/kuzushi-core/src/triage.rs", "crates/kuzushi-core/src/modules/triage"],
+    forbidden:
+      /\b(crate::(?:scan|scanners|verification|verify|patch|remediation|report)|verify:finding|patch:finding|report:build|Command::new|std::process|execute_tool|execute_tool_with_runtime)\b/,
+  },
+  {
     name: "report boundary reads artifacts and findings without execution",
     roots: [
       "crates/kuzushi-core/src/report.rs",
