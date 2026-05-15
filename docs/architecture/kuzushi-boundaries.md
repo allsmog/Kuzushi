@@ -51,6 +51,11 @@ pnpm quality:architecture
 It currently verifies that the required boundary files exist and blocks the
 highest-risk dependency violations:
 
+- context code dispatching scanners, runtimes, tools, reports, or UI renderers;
+- attack-surface code dispatching scanners, runtimes, tools, reports, or UI
+  renderers;
+- threat-model domain code dispatching runtimes, tools, scanners, reports, or
+  UI renderers;
 - findings calling scanners, runtimes, renderers, or subprocesses;
 - proof calling scanners, runtime dispatch, subprocesses, or presentation
   renderers;
