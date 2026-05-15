@@ -2,6 +2,9 @@ use super::scan_status;
 use crate::{ScanPanelState, ShellApp};
 use std::path::{Path, PathBuf};
 
+const RUN_TIMELINE_COLUMN_COUNT: usize = 4;
+const RUN_ID_CELL: usize = 0;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PastRunStatus {
     Complete,
@@ -27,11 +30,8 @@ pub(crate) struct RunTimelineModel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RunTimelineRow {
-    pub(crate) run_id: String,
-    pub(crate) status: String,
-    pub(crate) status_kind: PastRunStatus,
-    pub(crate) findings: String,
-    pub(crate) target: String,
+    pub(crate) cells: [String; RUN_TIMELINE_COLUMN_COUNT],
+    pub(crate) tone: PastRunStatus,
 }
 
 impl PastRun {
@@ -49,7 +49,7 @@ impl PastRun {
 
 pub(crate) fn run_timeline_model(app: &ShellApp, past_limit: usize) -> RunTimelineModel {
     let active = app.scan.as_ref().map(active_scan_row);
-    let active_run_id = active.as_ref().map(|row| row.run_id.clone());
+    let active_run_id = active.as_ref().map(|row| row.cells[RUN_ID_CELL].clone());
     let mut rows = active.into_iter().collect::<Vec<_>>();
     rows.extend(past_run_rows(app, past_limit, active_run_id.as_deref()));
     RunTimelineModel { rows }
@@ -61,15 +61,16 @@ fn past_runs_model(app: &ShellApp) -> Vec<PastRun> {
 
 fn active_scan_row(scan: &ScanPanelState) -> RunTimelineRow {
     RunTimelineRow {
-        run_id: scan
-            .run_id
-            .as_deref()
-            .map(short_id)
-            .unwrap_or_else(pending_id),
-        status: scan_status(scan),
-        status_kind: active_scan_status(scan),
-        findings: scan.findings_count.to_string(),
-        target: scan.target.display().to_string(),
+        cells: [
+            scan.run_id
+                .as_deref()
+                .map(short_id)
+                .unwrap_or_else(pending_id),
+            scan_status(scan),
+            scan.findings_count.to_string(),
+            scan.target.display().to_string(),
+        ],
+        tone: active_scan_status(scan),
     }
 }
 
@@ -94,17 +95,19 @@ fn past_run_rows(
         .iter()
         .take(past_limit)
         .map(past_run_row)
-        .filter(|row| Some(row.run_id.as_str()) != active_run_id)
+        .filter(|row| Some(row.cells[RUN_ID_CELL].as_str()) != active_run_id)
         .collect()
 }
 
 fn past_run_row(past: &PastRun) -> RunTimelineRow {
     RunTimelineRow {
-        run_id: short_id(&past.run_id),
-        status: past.status_label().to_string(),
-        status_kind: past.status_kind,
-        findings: finding_count_label(past.findings),
-        target: past.target.clone(),
+        cells: [
+            short_id(&past.run_id),
+            past.status_label().to_string(),
+            finding_count_label(past.findings),
+            past.target.clone(),
+        ],
+        tone: past.status_kind,
     }
 }
 
