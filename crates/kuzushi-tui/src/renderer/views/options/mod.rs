@@ -1,6 +1,8 @@
 use super::*;
 pub(in crate::renderer) use super::*;
-use crate::ui_view_models::{options_model, OptionRow, OptionsModelStatus};
+use crate::ui_view_models::{
+    options_model, sast_tasks_model, OptionRow, OptionsModelStatus, SastTasksModel,
+};
 
 pub(crate) fn options_lines(
     app: &ShellApp,
@@ -76,32 +78,19 @@ fn option_row_line(row: &OptionRow, widths: &[usize]) -> Line<'static> {
 
 pub(crate) fn sast_tasks_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
-    let rows = app.sast_task_rows();
-    let enabled = rows.iter().filter(|row| row.selected).count();
-    let blocked = rows.iter().filter(|row| row.source == "blocked").count();
-    let mode = app
-        .option_store
-        .effective_stored_values("sast:scan")
-        .get("taskMode")
-        .and_then(serde_json::Value::as_str)
-        .filter(|mode| *mode == "manual")
-        .map(|_| "manual allowlist")
-        .unwrap_or("auto + denylist");
+    let model = sast_tasks_model(app);
 
     lines.push(blank());
     lines.push(divider("SAST TASKS", area.width));
-    lines.push(detail("mode", mode));
-    lines.push(detail(
-        "selected",
-        &sast_task_summary(rows.len(), enabled, blocked),
-    ));
+    lines.push(detail("mode", model.mode_label));
+    lines.push(detail("selected", &model.selected_summary));
     lines.push(blank());
     lines.push(muted(&fit(
         "legend: [x] enabled · [ ] disabled · [A] advanced (off by default; allow with /task allow <id>) · [B] blocked",
         area.width as usize,
     )));
     lines.push(blank());
-    push_sast_task_table(&mut lines, area.width, &rows);
+    push_sast_task_table(&mut lines, area.width, &model);
     lines.push(blank());
     lines.push(command_list_line(
         &[
@@ -116,21 +105,13 @@ pub(crate) fn sast_tasks_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
     lines
 }
 
-fn sast_task_summary(total: usize, enabled: usize, blocked: usize) -> String {
-    format!("{enabled}/{total} enabled, {blocked} blocked")
-}
-
-fn push_sast_task_table(
-    lines: &mut Vec<Line<'static>>,
-    width: u16,
-    rows: &[crate::app::SastTaskRow],
-) {
+fn push_sast_task_table(lines: &mut Vec<Line<'static>>, width: u16, model: &SastTasksModel) {
     lines.push(table_header(
         &["state", "id", "cost", "scan", "notes"],
         &sast_task_table_widths(width),
     ));
     let widths = sast_task_table_widths(width);
-    for row in rows {
+    for row in &model.rows {
         lines.push(table_row(
             &[
                 row.state,

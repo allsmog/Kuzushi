@@ -200,12 +200,9 @@ const rules = [
   },
   {
     name: "TUI options renderers read options view model",
-    roots: [
-      "crates/kuzushi-tui/src/renderer/views/options/mod.rs",
-      "crates/kuzushi-tui/src/renderer/plain/plain_options_lines.rs",
-    ],
+    roots: ["crates/kuzushi-tui/src/renderer/views/options/mod.rs", "crates/kuzushi-tui/src/renderer/plain/plain_options_lines.rs", "crates/kuzushi-tui/src/renderer/plain/plain_sast_tasks_lines.rs"],
     forbidden:
-      /kuzushi_core::(?:OptionSpec|OptionType|ToolDescriptor)|\.registry\.resolve_tool\(|\.options\b/,
+      /kuzushi_core::(?:OptionSpec|OptionType|ToolDescriptor)|\.registry\.resolve_tool\(|\.options\b|option_store|sast_task_rows|serde_json/,
   },
   {
     name: "TUI tools renderer reads tools view model",
