@@ -18,6 +18,7 @@ public_modules!(
     whitebox_static, whitebox_suppressions, workspace, x_ray,
 );
 
+pub(crate) mod module_result;
 pub(crate) mod structured_output;
 
 mod code_index;

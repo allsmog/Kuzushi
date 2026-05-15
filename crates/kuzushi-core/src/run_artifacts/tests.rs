@@ -578,10 +578,7 @@ mod tests {
 
         assert_eq!(output["ok"], serde_json::json!(true));
         assert_eq!(output["status"], serde_json::json!("completed"));
-        assert_eq!(
-            output["summary"],
-            serde_json::json!("context:build completed")
-        );
+        assert_eq!(output["summary"], serde_json::json!("tool completed"));
         assert!(output["artifacts"].as_array().is_some());
         assert!(output["warnings"].as_array().unwrap().is_empty());
         assert!(output["errors"].as_array().unwrap().is_empty());

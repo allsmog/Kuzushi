@@ -6,6 +6,7 @@ use super::tool_run_record_events::{
     append_done_trace, append_failed_trace, append_started_event, append_started_trace,
     append_tool_event,
 };
+use crate::module_result::normalize_module_result;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ToolRunRecord<'a> {
@@ -149,13 +150,13 @@ fn result_output_for_status(
 ) -> Value {
     if failure_like_status(status) {
         attach_failure_artifact(record, status, output, artifacts);
-        return normalized_module_result(
-            record.tool,
-            status,
-            output_with_run_fallback_context(record.target, record.run_id, output.clone()),
-        );
+        return normalize_module_result(output_with_run_fallback_context(
+            record.target,
+            record.run_id,
+            output.clone(),
+        ));
     }
-    normalized_module_result(record.tool, status, output.clone())
+    normalize_module_result(output.clone())
 }
 
 fn apply_output_status(status: &str, mut summary: RunSummary) -> RunSummary {

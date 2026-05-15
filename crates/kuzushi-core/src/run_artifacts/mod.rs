@@ -11,7 +11,6 @@ mod canonical_proof;
 mod canonical_run_files;
 mod canonical_recommendations;
 mod llm_audit;
-mod module_result_envelope;
 mod output_declared_artifacts;
 mod run_events;
 mod run_failures;
@@ -29,7 +28,6 @@ mod write_run_artifact_json;
 mod write_run_artifact_text;
 
 pub(crate) use canonical_run_files::record_canonical_snapshot_artifacts;
-pub(crate) use module_result_envelope::normalized_module_result;
 pub use artifact_manifest::{load_run_artifacts, RunArtifactManifest};
 pub use run_events::{append_run_event, next_run_event_number, RunEvent};
 pub use run_failures::{
