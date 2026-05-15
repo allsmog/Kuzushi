@@ -149,8 +149,9 @@ mod tests {
             "completed"
         );
         let manifest_artifacts = load_run_artifacts(tmp.path(), &run_id).unwrap();
-        assert_eq!(manifest_artifacts.len(), 1);
-        assert!(manifest_artifacts[0].path.ends_with("result.json"));
+        assert_manifest_has(&manifest_artifacts, "run.json");
+        assert_manifest_has(&manifest_artifacts, "context.json");
+        assert_manifest_has(&manifest_artifacts, "result.json");
         let trace = fs::read_to_string(run_dir(tmp.path(), &run_id).join("trace.jsonl")).unwrap();
         assert!(trace.contains("context:build started"));
     }
@@ -174,6 +175,13 @@ mod tests {
         ] {
             assert!(dir.join(leaf).exists(), "missing canonical artifact {leaf}");
         }
+    }
+
+    fn assert_manifest_has(artifacts: &[RunArtifact], leaf: &str) {
+        assert!(
+            artifacts.iter().any(|artifact| artifact.path.ends_with(leaf)),
+            "manifest missing artifact {leaf}"
+        );
     }
 
     #[test]
@@ -208,10 +216,8 @@ mod tests {
 
         assert!(failure.path.ends_with("failures.json"));
         let manifest_artifacts = load_run_artifacts(tmp.path(), run_id).unwrap();
-        assert_eq!(manifest_artifacts.len(), 2);
-        assert!(manifest_artifacts
-            .iter()
-            .any(|artifact| artifact.path.ends_with("failures.json")));
+        assert_manifest_has(&manifest_artifacts, "input.json");
+        assert_manifest_has(&manifest_artifacts, "failures.json");
         let events = fs::read_to_string(run_dir(tmp.path(), run_id).join("events.jsonl")).unwrap();
         assert!(events.contains("\"status\":\"started\""));
 
@@ -307,8 +313,8 @@ mod tests {
             .iter()
             .any(|artifact| artifact.path.ends_with("input.json")));
         let manifest_artifacts = load_run_artifacts(tmp.path(), run_id).unwrap();
-        assert_eq!(manifest_artifacts.len(), 1);
-        assert!(manifest_artifacts[0].path.ends_with("input.json"));
+        assert_manifest_has(&manifest_artifacts, "run.json");
+        assert_manifest_has(&manifest_artifacts, "input.json");
         let events = fs::read_to_string(run_dir(tmp.path(), run_id).join("events.jsonl")).unwrap();
         assert!(events.contains("\"status\":\"started\""));
         assert!(events.contains("\"artifact\""));
