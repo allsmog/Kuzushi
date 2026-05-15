@@ -7,7 +7,8 @@ use ratatui::buffer::Buffer;
 use ratatui::Terminal;
 
 use crate::ui_view_models::{
-    threat_scope_buckets_from_doc, threat_stride_rollup_from_doc, view_status_segment, RoutingMode,
+    threat_scope_buckets_from_doc, threat_story_rows_from_doc, threat_stride_rollup_from_doc,
+    view_status_segment, RoutingMode,
 };
 
 use super::*;
@@ -913,7 +914,7 @@ fn sast_progress_bars_use_scan_progress_per_task_when_present() {
 }
 
 #[test]
-fn stories_from_doc_sorts_threats_by_impact_severity() {
+fn threat_story_rows_from_doc_sorts_by_impact_severity() {
     let doc = serde_json::json!({
         "threats": [
             {"id": "T-001", "title": "low risk",  "impact": "low",      "category": "spoofing",  "attackVector": "vec1"},
@@ -922,14 +923,14 @@ fn stories_from_doc_sorts_threats_by_impact_severity() {
             {"id": "T-003", "title": "high issue", "impact": "high",     "category": "elevation_of_privilege"}
         ]
     });
-    let stories = stories_from_doc(&doc).expect("non-empty stories");
+    let stories = threat_story_rows_from_doc(&doc).expect("non-empty stories");
     assert_eq!(stories.len(), 3);
-    assert_eq!(stories[0].0, "T-002");
-    assert_eq!(stories[0].1, Severity::Critical);
-    assert_eq!(stories[0].4, "src/api.rs:42");
-    assert_eq!(stories[1].0, "T-003");
-    assert_eq!(stories[1].1, Severity::High);
-    assert_eq!(stories[2].0, "T-001");
+    assert_eq!(stories[0].id, "T-002");
+    assert_eq!(stories[0].severity, Severity::Critical);
+    assert_eq!(stories[0].location, "src/api.rs:42");
+    assert_eq!(stories[1].id, "T-003");
+    assert_eq!(stories[1].severity, Severity::High);
+    assert_eq!(stories[2].id, "T-001");
 }
 
 #[test]

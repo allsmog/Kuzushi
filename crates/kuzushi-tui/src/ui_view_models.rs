@@ -27,6 +27,7 @@ mod status_footer;
 mod threat_impact;
 mod threat_model;
 mod threat_scope;
+mod threat_stories;
 mod threat_stride;
 mod tools;
 mod view_status;
@@ -59,6 +60,9 @@ pub(crate) use threat_model::{threat_model_doc, threat_summary_review, ThreatSum
 pub(crate) use threat_scope::threat_scope_buckets;
 #[cfg(test)]
 pub(crate) use threat_scope::threat_scope_buckets_from_doc;
+pub(crate) use threat_stories::threat_story_rows;
+#[cfg(test)]
+pub(crate) use threat_stories::threat_story_rows_from_doc;
 pub(crate) use threat_stride::threat_stride_rollup;
 #[cfg(test)]
 pub(crate) use threat_stride::threat_stride_rollup_from_doc;
