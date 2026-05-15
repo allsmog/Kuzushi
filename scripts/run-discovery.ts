@@ -2,15 +2,17 @@
 
 /**
  * Quick script to run the discovery pipeline against a repo and print results.
- * Usage: npx tsx scripts/run-discovery.ts <repo-path>
+ * Usage: npx tsx scripts/run-discovery.ts <repo-path> <model>
  */
 
 import { ClaudeAgentRuntime } from "../src/agent-runtime/claude.js";
 import { discoverRepoStructure } from "../src/discovery/repo-discovery.js";
 
 const repoPath = process.argv[2];
-if (!repoPath) {
-  console.error("Usage: npx tsx scripts/run-discovery.ts <repo-path>");
+const model = process.argv[3] ?? process.env.KUZUSHI_MODEL;
+if (!repoPath || !model) {
+  console.error("Usage: npx tsx scripts/run-discovery.ts <repo-path> <model>");
+  console.error("Set an explicit model argument or KUZUSHI_MODEL; no fallback is chosen.");
   process.exit(1);
 }
 
@@ -21,7 +23,7 @@ console.log(`\nRunning discovery on: ${repoPath}\n`);
 const result = await discoverRepoStructure(repoPath, {
   maxModules: 30,
   runtime,
-  model: "claude-sonnet-4-20250514",
+  model,
 });
 
 console.log(`\n${"=".repeat(70)}`);

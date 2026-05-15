@@ -1,7 +1,7 @@
 use super::*;
 
 pub const SUPPORTED_ATTACHMENT_MODULES: &[&str] =
-    &["context", "threat-model", "carlini-threat-hunt", "x-ray"];
+    &["context", "threat-model", "offense-review", "x-ray"];
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
@@ -52,7 +52,7 @@ impl Default for AttachmentStoreFile {
 }
 
 pub fn is_supported_attachment_module(module_id: &str) -> bool {
-    SUPPORTED_ATTACHMENT_MODULES.contains(&module_id)
+    SUPPORTED_ATTACHMENT_MODULES.contains(&module_id) || module_id == "carlini-threat-hunt"
 }
 
 pub fn attachment_store_path(workspace: &WorkspaceTarget) -> PathBuf {

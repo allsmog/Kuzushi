@@ -48,20 +48,22 @@ pub fn shell_help_examples() -> Vec<&'static str> {
 
 pub fn parse_command(input: &str) -> ShellCommand {
     let trimmed = input.trim();
+    parse_prompt_command(trimmed).unwrap_or_else(|| parse_routed_command(trimmed))
+}
+
+fn parse_prompt_command(trimmed: &str) -> Option<ShellCommand> {
     if trimmed.is_empty() {
-        return ShellCommand::Empty;
+        return Some(ShellCommand::Empty);
     }
+    let question = trimmed.strip_prefix('?')?.trim();
+    Some(if question.is_empty() {
+        ShellCommand::Help
+    } else {
+        ShellCommand::Ask(question.to_string())
+    })
+}
 
-    if trimmed == "?" {
-        return ShellCommand::Help;
-    }
-    if let Some(question) = trimmed.strip_prefix('?') {
-        let question = question.trim();
-        if !question.is_empty() {
-            return ShellCommand::Ask(question.to_string());
-        }
-    }
-
+fn parse_routed_command(trimmed: &str) -> ShellCommand {
     let normalized = trimmed.strip_prefix('/').unwrap_or(trimmed);
     let tokens = normalized.split_whitespace().collect::<Vec<_>>();
     let verb = tokens.first().copied().unwrap_or_default();
@@ -83,6 +85,7 @@ pub(crate) fn parse_static_command(verb: &str) -> Option<ShellCommand> {
 
 fn parse_navigation_command(verb: &str) -> Option<ShellCommand> {
     match verb {
+        "" | "home" => Some(ShellCommand::Home),
         "help" | "h" | "?" => Some(ShellCommand::Help),
         "back" | "b" => Some(ShellCommand::Back),
         "quit" | "exit" | "q" | "exitj" => Some(ShellCommand::Quit),
@@ -93,6 +96,7 @@ fn parse_navigation_command(verb: &str) -> Option<ShellCommand> {
 fn parse_catalog_command(verb: &str) -> Option<ShellCommand> {
     match verb {
         "modules" | "m" => Some(ShellCommand::Modules),
+        "recommend" | "rec" => Some(ShellCommand::Recommend),
         "tools" => Some(ShellCommand::Tools),
         "tune" | "t" => Some(ShellCommand::Tune),
         "prompts" => Some(ShellCommand::Prompts),
@@ -113,6 +117,7 @@ fn parse_session_command(verb: &str) -> Option<ShellCommand> {
         "story" => Some(ShellCommand::Story),
         "quickstart" => Some(ShellCommand::Quickstart),
         "activity" | "progress" | "a" => Some(ShellCommand::Activity),
+        "handoff" | "failure" | "failures" => Some(ShellCommand::FailureHandoff),
         _ => None,
     }
 }

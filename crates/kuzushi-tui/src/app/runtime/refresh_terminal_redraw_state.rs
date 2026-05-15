@@ -84,6 +84,7 @@ pub(crate) fn run_plain_shell(
     stdin_is_terminal: bool,
 ) -> Result<()> {
     let mut app = ShellApp::new(config, target);
+    open_start_view(&mut app);
     let mut script = String::new();
     if !stdin_is_terminal {
         stdin

@@ -1,114 +1,250 @@
 use super::*;
+use kuzushi_core::run_artifacts::FailureToLlmContext;
 
 impl ShellApp {
     pub(crate) fn ask_agent(&mut self, question: &str) {
+        let Some(operator_question) = self.accept_agent_question(question) else {
+            return;
+        };
+        let prior = self.agent_chat.as_ref().cloned().unwrap_or_default();
+        let Some(model) = self.agent_model_for_question(&prior, &operator_question) else {
+            return;
+        };
+        let dispatch = self.start_agent_dispatch(prior, operator_question, model);
+        self.log_agent_dispatch(&dispatch);
+        self.write_agent_dispatch_artifacts(&dispatch);
+        self.log_agent_failure_context_attachment(dispatch.attached_failure_context);
+        spawn_agent_dispatch(dispatch);
+    }
+
+    fn accept_agent_question(&mut self, question: &str) -> Option<String> {
         let question = question.trim();
         if question.is_empty() {
             self.log(
                 "error",
                 "ask requires a question. Next: /ask what should I inspect?",
             );
-            return;
+            return None;
         }
         if self.agent_chat.as_ref().is_some_and(|agent| agent.running) {
             self.log(
                 "agent",
                 "question already active; wait for the current answer",
             );
-            return;
+            return None;
         }
+        Some(question.to_string())
+    }
 
-        // Fold any previous turn into history before we mint the new
-        // turn — gives multi-turn parity with `agent-chat.jsx::bubble`.
-        let prior = self.agent_chat.as_ref().cloned().unwrap_or_default();
+    fn agent_model_for_question(
+        &mut self,
+        prior: &AgentChatView,
+        question: &str,
+    ) -> Option<String> {
         let Some(model) = self.config.model.clone() else {
-            self.shell_view = ShellView::AgentChat;
-            let mut next = prior.fold_for_next_turn(question.to_string());
-            next.error = Some(
-                "ask requires an explicit model. Next: model, then choose a pi-agent-core provider/model".to_string(),
-            );
-            self.agent_chat = Some(next);
-            self.log(
-                "error",
-                "ask requires an explicit model. Next: model, then choose a pi-agent-core provider/model",
-            );
-            return;
+            let message = "ask requires an explicit model. Next: model, then choose a pi-agent-core provider/model";
+            self.show_agent_question_error(prior, question, message.to_string());
+            return None;
         };
         if let Err(message) = validate_shell_model_id(&model) {
-            self.shell_view = ShellView::AgentChat;
-            let mut next = prior.fold_for_next_turn(question.to_string());
-            next.error = Some(message.clone());
-            self.agent_chat = Some(next);
-            self.log("error", message);
-            return;
+            self.show_agent_question_error(prior, question, message);
+            return None;
         }
+        Some(model)
+    }
 
-        let cwd = self
-            .target
-            .clone()
-            .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_else(|| PathBuf::from("."));
-        let config = self.config.clone();
-        let thinking_level = self.session_thinking_level.clone();
-        let question = question.to_string();
+    fn show_agent_question_error(
+        &mut self,
+        prior: &AgentChatView,
+        question: &str,
+        message: String,
+    ) {
+        self.shell_view = ShellView::AgentChat;
+        let mut next = prior.fold_for_next_turn(question.to_string());
+        next.failure_context = prior.failure_context.clone();
+        next.pending_failure_context = prior.pending_failure_context.clone();
+        next.error = Some(message.clone());
+        self.agent_chat = Some(next);
+        self.log("error", message);
+    }
+
+    fn start_agent_dispatch(
+        &mut self,
+        prior: AgentChatView,
+        operator_question: String,
+        model: String,
+    ) -> AgentDispatch {
+        let failure_context = self.take_pending_failure_context();
         let (tx, rx) = mpsc::channel();
-        let mut next = prior.fold_for_next_turn(question.clone());
+        let (run_id, started_secs) = next_agent_run_id();
+        let agent_prompt =
+            agent_question_with_failure_context(&operator_question, failure_context.as_ref());
+        let mut next = prior.fold_for_next_turn(operator_question.clone());
         next.running = true;
-        // Mint a synthetic run id from wall-clock seconds so the
-        // operator can `/trace agent-<n>` and the trace.jsonl is
-        // findable by the runs ledger.  Same shape used by scan runs.
-        let started_secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_secs())
-            .unwrap_or_default();
-        let agent_run_id = format!("agent-{started_secs}");
-        next.run_id = Some(agent_run_id.clone());
+        next.run_id = Some(run_id.clone());
         next.started_secs = started_secs;
+        next.failure_context = failure_context.clone();
         self.agent_chat = Some(next);
         self.agent_rx = Some(rx);
         self.shell_view = ShellView::AgentChat;
+        AgentDispatch {
+            config: self.config.clone(),
+            model,
+            thinking_level: self.session_thinking_level.clone(),
+            cwd: agent_cwd(self.target.as_ref()),
+            operator_question,
+            agent_prompt,
+            run_id,
+            attached_failure_context: failure_context.is_some(),
+            tx,
+        }
+    }
+
+    pub(crate) fn set_pending_failure_context(&mut self, context: FailureToLlmContext) {
+        let agent = self.agent_chat.get_or_insert_with(AgentChatView::default);
+        agent.failure_context = Some(context.clone());
+        agent.pending_failure_context = Some(context);
+    }
+
+    fn take_pending_failure_context(&mut self) -> Option<FailureToLlmContext> {
+        self.agent_chat
+            .as_mut()
+            .and_then(|agent| agent.pending_failure_context.take())
+    }
+
+    fn log_agent_dispatch(&mut self, dispatch: &AgentDispatch) {
         self.log(
             "agent",
             format!(
-                "asking {model}{}",
-                thinking_level
-                    .as_deref()
-                    .map(|level| format!(" / {level}"))
-                    .unwrap_or_default()
+                "asking {}{}",
+                dispatch.model,
+                thinking_level_suffix(dispatch.thinking_level.as_deref())
             ),
         );
         self.set_live_activity(LiveActivity::new(
             LiveActivityPhase::Thinking,
             "agent",
-            format!("asking {model}"),
+            format!("asking {}", dispatch.model),
         ));
+    }
 
-        // Emit a `plan` step capturing the question that just dispatched
-        // — gives the trace view a leading row even before the LLM
-        // answers.
+    fn write_agent_dispatch_artifacts(&self, dispatch: &AgentDispatch) {
         append_trace_step(
             self.target.as_deref(),
-            &agent_run_id,
+            &dispatch.run_id,
             1,
             "plan",
-            &format!("ask {} ({model})", short_label(&question, 80)),
+            &format!(
+                "ask {} ({})",
+                short_label(&dispatch.operator_question, 80),
+                dispatch.model
+            ),
             None,
             None,
         );
-        // Drop a synthetic summary.json so `/runs` lists the agent run
-        // alongside scan runs.  Best-effort write; failures are silent.
+        let target_label = agent_target_label(self.target.as_ref());
         write_run_summary(
             self.target.as_deref(),
-            &agent_run_id,
+            &dispatch.run_id,
             "running",
             None,
-            self.target
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .as_deref()
-                .unwrap_or("."),
+            &target_label,
         );
-
-        thread::spawn(move || agent_worker(config, model, thinking_level, cwd, question, tx));
     }
+
+    fn log_agent_failure_context_attachment(&mut self, attached: bool) {
+        if attached {
+            self.log(
+                "failure-context",
+                "attached bounded failure handoff to agent prompt",
+            );
+        }
+    }
+}
+
+struct AgentDispatch {
+    config: V2Config,
+    model: String,
+    thinking_level: Option<String>,
+    cwd: PathBuf,
+    operator_question: String,
+    agent_prompt: String,
+    run_id: String,
+    attached_failure_context: bool,
+    tx: mpsc::Sender<AgentEvent>,
+}
+
+fn spawn_agent_dispatch(dispatch: AgentDispatch) {
+    thread::spawn(move || {
+        agent_worker(
+            dispatch.config,
+            dispatch.model,
+            dispatch.thinking_level,
+            dispatch.cwd,
+            dispatch.agent_prompt,
+            dispatch.tx,
+        )
+    });
+}
+
+fn next_agent_run_id() -> (String, u64) {
+    let started_secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default();
+    (format!("agent-{started_secs}"), started_secs)
+}
+
+fn agent_cwd(target: Option<&PathBuf>) -> PathBuf {
+    target
+        .cloned()
+        .or_else(|| std::env::current_dir().ok())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn agent_target_label(target: Option<&PathBuf>) -> String {
+    target
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| ".".to_string())
+}
+
+fn thinking_level_suffix(thinking_level: Option<&str>) -> String {
+    thinking_level
+        .map(|level| format!(" / {level}"))
+        .unwrap_or_default()
+}
+
+pub(super) fn agent_question_with_failure_context(
+    question: &str,
+    context: Option<&FailureToLlmContext>,
+) -> String {
+    let Some(context) = context else {
+        return question.to_string();
+    };
+    format!(
+        "{}\n\nFailure handoff context:\n{}\n\nOperator question:\n{}",
+        context.fallback_prompt,
+        failure_context_prompt_block(context),
+        question
+    )
+}
+
+fn failure_context_prompt_block(context: &FailureToLlmContext) -> String {
+    [
+        format!("failed_stage: {}", context.failed_stage),
+        format!("cause: {}", context.cause),
+        format!("allowed_proof_level: {}", context.allowed_proof_level),
+        format!("available_artifacts: {}", context.artifacts_available.len()),
+        format!(
+            "missing_artifacts: {}",
+            context.missing_artifacts.join(", ")
+        ),
+        format!(
+            "next_files_or_artifacts: {}",
+            context.next_files_or_artifacts_to_inspect.join(", ")
+        ),
+        format!("recovery_options: {}", context.recovery_options.join(" | ")),
+        format!("forbidden_claims: {}", context.claims_forbidden.join(", ")),
+    ]
+    .join("\n")
 }

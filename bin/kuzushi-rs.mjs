@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import process from "node:process";
@@ -8,6 +8,8 @@ import process from "node:process";
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, "..");
 const exe = process.platform === "win32" ? "kuzushi.exe" : "kuzushi";
+const invokedName = basename(process.argv[1] || "kuzushi").replace(/\.cmd$/i, "");
+const cliName = invokedName === "kz" ? "kz" : "kuzushi";
 
 const candidates = [
   process.env.KUZUSHI_NATIVE_BIN,
@@ -26,7 +28,7 @@ if (!binary) {
 
 const result = spawnSync(binary, process.argv.slice(2), {
   stdio: "inherit",
-  env: process.env,
+  env: { ...process.env, KUZUSHI_CLI_NAME: process.env.KUZUSHI_CLI_NAME ?? cliName },
 });
 
 if (result.error) {

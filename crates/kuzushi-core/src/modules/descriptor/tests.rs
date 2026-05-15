@@ -15,6 +15,7 @@ mod tests {
         assert_eq!(visible.metadata().id, "demo");
         assert!(!visible.is_hidden());
         assert_eq!(visible.tools()[0].name, "demo:run");
+        assert!(!visible.tools()[0].hidden);
         assert_eq!(visible.dag_nodes()[0].depends_on, vec!["context:build"]);
 
         let hidden = hidden_module(
@@ -26,6 +27,22 @@ mod tests {
             vec![],
         );
         assert!(hidden.is_hidden());
+
+        let deferred = builtin_module(
+            "deferred-demo",
+            "Deferred Demo",
+            ModuleKind::Offense,
+            "Opt-in compatibility module",
+            vec![tool("deferred-demo:run", "Run deferred demo.")],
+            vec![dag("deferred-demo:run", "findings", &["context:build"])],
+        )
+        .deferred();
+        assert!(deferred.is_hidden());
+        assert_eq!(deferred.tools()[0].name, "deferred-demo:run");
+        assert!(deferred.dag_nodes().is_empty());
+
+        let hidden_tool = hidden_tool_with_options("demo:legacy", "Legacy demo.", vec![]);
+        assert!(hidden_tool.hidden);
     }
 
     #[test]

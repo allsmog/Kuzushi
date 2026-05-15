@@ -29,12 +29,13 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "kuzushi": "./bin/kuzushi-rs.mjs"
+    "kuzushi": "./bin/kuzushi-rs.mjs",
+    "kz": "./bin/kuzushi-rs.mjs"
   },
   "scripts": {
     "setup": "bash scripts/bootstrap.sh",
     "doctor": "bash scripts/doctor.sh",
-    "check:docs": "node scripts/check-doc-command-drift.mjs && node scripts/check-retired-ts-runtime.mjs",
+    "check:docs": "node scripts/check-public-identity.mjs && node scripts/check-doc-command-drift.mjs && node scripts/check-retired-ts-runtime.mjs",
     "check:retired-ts-runtime": "node scripts/check-retired-ts-runtime.mjs",
     "export:source": "bash scripts/export-clean-source.sh",
     "setup:benchmarks": "bash scripts/setup-benchmarks.sh",
@@ -57,6 +58,9 @@
     "test:rust": "cargo test --workspace",
     "test:e2e": "bash tests/e2e/run-smoke.sh",
     "test:coverage": "vitest run --coverage",
+    "quality:crap-risk": "node scripts/crap-risk-gate.mjs",
+    "quality:identity": "node scripts/check-public-identity.mjs",
+    "quality:architecture": "node scripts/check-ddd-boundaries.mjs",
     "verify:pack": "node scripts/verify-pack.mjs",
     "publish:npm": "bash scripts/publish-npm.sh",
     "publish:npm:dry": "bash scripts/publish-npm.sh",
@@ -91,6 +95,9 @@
     "assets/ascii",
     "assets/pashov-xray",
     "README.md",
+    "UPSTREAM_CODEX.md",
+    "NOTICE",
+    "LICENSES",
     "LICENSE"
   ],
   "engines": {

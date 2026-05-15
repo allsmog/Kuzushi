@@ -230,6 +230,7 @@ mod tests {
             result.pointer("/data/persisted").and_then(Value::as_bool),
             Some(true)
         );
+        assert!(has_artifact_label(&result, "normalized threat model"));
         assert!(temp.path().join(".kuzushi/threat-model.json").exists());
         assert!(temp
             .path()
@@ -381,8 +382,19 @@ mod tests {
     }
 
     #[test]
-    fn threat_model_build_requires_runtime_and_explicit_model() {
+    fn threat_model_build_degrades_without_runtime_and_requires_explicit_model_for_runtime() {
         let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/app.ts"),
+            "import express from 'express';\nconst app = express();\napp.use('/admin', requireAuth);\napp.use(csurf());\nconst tenantId = req.user.tenantId;\napp.post('/login', (req, res) => { db.query(req.body.name); res.send('ok'); });\napp.post('/session', (req, res) => { req.session.user = req.body.user; res.cookie('sid', req.session.id); });\napp.post('/proxy', async (req, res) => { await fetch(req.body.url); res.send('ok'); });\n",
+        )
+        .unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let config = V2Config::default();
@@ -393,11 +405,87 @@ mod tests {
             trace: None,
         };
 
-        let err = registry
-            .execute_tool("threat-model:build", json!({}), &ctx)
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("requires the pi-agent-core runtime"));
+        let degraded = registry
+            .execute_tool(
+                "threat-model:build",
+                json!({"preserveUserEdits": false}),
+                &ctx,
+            )
+            .unwrap();
+        assert_eq!(degraded.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(degraded.get("status").and_then(Value::as_str), Some("partial"));
+        assert_eq!(
+            degraded.pointer("/data/provider").and_then(Value::as_str),
+            Some("deterministic")
+        );
+        assert_eq!(
+            degraded
+                .pointer("/data/degradation/mode")
+                .and_then(Value::as_str),
+            Some("deterministic-no-runtime")
+        );
+        assert_eq!(
+            degraded
+                .pointer("/data/document/methodology")
+                .and_then(Value::as_str),
+            Some("stride")
+        );
+        assert!(has_artifact_label(&degraded, "normalized threat model"));
+        assert!(
+            degraded
+                .pointer("/data/document/threats")
+                .and_then(Value::as_array)
+                .is_some_and(|threats| !threats.is_empty()),
+            "{degraded:#?}"
+        );
+        assert!(document_has_dfd_node(&degraded, "external-service"));
+        assert!(document_has_dfd_flow(&degraded, "flow-external-service"));
+        assert!(document_has_threat_target(&degraded, "external-service"));
+        assert!(document_has_dfd_node(&degraded, "auth-control"));
+        assert!(document_has_dfd_flow(&degraded, "flow-auth-control"));
+        assert!(document_has_dfd_trust_boundary(&degraded, "tb-auth-boundary"));
+        assert!(document_has_threat_target(&degraded, "auth-control"));
+        assert!(document_has_dfd_node(&degraded, "session-state"));
+        assert!(document_has_dfd_flow(&degraded, "flow-session-state"));
+        assert!(document_has_dfd_trust_boundary(&degraded, "tb-session-state"));
+        assert!(document_has_threat_target(&degraded, "session-state"));
+        assert!(document_has_dfd_node(&degraded, "request-trust-control"));
+        assert!(document_has_dfd_flow(&degraded, "flow-request-trust"));
+        assert!(document_has_dfd_trust_boundary(&degraded, "tb-request-trust"));
+        assert!(document_has_threat_target(&degraded, "request-trust-control"));
+        assert!(document_has_dfd_node(&degraded, "tenant-isolation-control"));
+        assert!(document_has_dfd_flow(&degraded, "flow-tenant-isolation"));
+        assert!(document_has_dfd_trust_boundary(
+            &degraded,
+            "tb-tenant-isolation"
+        ));
+        assert!(document_has_threat_target(
+            &degraded,
+            "tenant-isolation-control"
+        ));
+        assert!(document_has_related_cwe(&degraded, "CWE-918"));
+        assert!(document_has_related_cwe(&degraded, "CWE-287"));
+        assert!(document_has_related_cwe(&degraded, "CWE-384"));
+        assert!(document_has_related_cwe(&degraded, "CWE-352"));
+        assert!(document_has_related_cwe(&degraded, "CWE-639"));
+        assert!(document_has_attacker_story_threat_id(&degraded, "DTM-001"));
+        assert!(document_has_narrative_input(
+            &degraded,
+            "/data/document/narrative/inputCategories/attackerControlled"
+        ));
+        assert!(document_has_narrative_input(
+            &degraded,
+            "/data/document/narrative/inputCategories/externalServices"
+        ));
+        assert!(document_has_narrative_input(
+            &degraded,
+            "/data/document/narrative/criticalityBuckets/critical"
+        ));
+        assert!(document_has_narrative_input(
+            &degraded,
+            "/data/document/narrative/outOfScope"
+        ));
+        assert!(!degraded.to_string().contains("validated"));
 
         let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
         let err = registry
@@ -585,5 +673,75 @@ mod tests {
             .dag_nodes()
             .iter()
             .any(|node| node.id == "randori:threat-model" && node.output_kind == "threat-model"));
+    }
+
+    fn has_artifact_label(value: &Value, label: &str) -> bool {
+        value
+            .get("artifacts")
+            .and_then(Value::as_array)
+            .is_some_and(|artifacts| {
+                artifacts
+                    .iter()
+                    .any(|artifact| artifact.get("label").and_then(Value::as_str) == Some(label))
+            })
+    }
+
+    fn document_has_dfd_node(value: &Value, id: &str) -> bool {
+        document_array(value, "/data/document/dfd/nodes")
+            .iter()
+            .any(|node| node.get("id").and_then(Value::as_str) == Some(id))
+    }
+
+    fn document_has_dfd_flow(value: &Value, id: &str) -> bool {
+        document_array(value, "/data/document/dfd/flows")
+            .iter()
+            .any(|flow| flow.get("id").and_then(Value::as_str) == Some(id))
+    }
+
+    fn document_has_dfd_trust_boundary(value: &Value, id: &str) -> bool {
+        document_array(value, "/data/document/dfd/trustBoundaries")
+            .iter()
+            .any(|boundary| boundary.get("id").and_then(Value::as_str) == Some(id))
+    }
+
+    fn document_has_related_cwe(value: &Value, cwe: &str) -> bool {
+        document_array(value, "/data/document/threats")
+            .iter()
+            .any(|threat| json_array_contains_str(threat.get("relatedCwe"), cwe))
+    }
+
+    fn document_has_threat_target(value: &Value, target_id: &str) -> bool {
+        document_array(value, "/data/document/threats")
+            .iter()
+            .any(|threat| json_array_contains_str(threat.get("targetElementIds"), target_id))
+    }
+
+    fn document_has_attacker_story_threat_id(value: &Value, threat_id: &str) -> bool {
+        document_array(value, "/data/document/narrative/attackerStories")
+            .iter()
+            .any(|story| json_array_contains_str(story.get("threatIds"), threat_id))
+    }
+
+    fn document_has_narrative_input(value: &Value, pointer: &str) -> bool {
+        value
+            .pointer(pointer)
+            .and_then(Value::as_array)
+            .is_some_and(|items| !items.is_empty())
+    }
+
+    fn document_array(value: &Value, pointer: &str) -> Vec<Value> {
+        value
+            .pointer(pointer)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    fn json_array_contains_str(value: Option<&Value>, needle: &str) -> bool {
+        value.and_then(Value::as_array).is_some_and(|items| {
+            items
+                .iter()
+                .any(|item| item.as_str() == Some(needle))
+        })
     }
 }

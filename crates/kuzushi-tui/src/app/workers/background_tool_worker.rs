@@ -38,8 +38,38 @@ pub(crate) enum ToolEvent {
 
 #[derive(Debug)]
 pub(crate) enum AgentEvent {
-    Answered { text: String },
-    Failed { error: String },
+    Answered {
+        text: String,
+        audit: AgentCallAudit,
+    },
+    Failed {
+        error: String,
+        audit: AgentCallAudit,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct AgentCallAudit {
+    pub(crate) model: String,
+    pub(crate) provider: String,
+    pub(crate) prompt_hash: String,
+    pub(crate) cost_usd: Option<f64>,
+}
+
+impl AgentCallAudit {
+    pub(crate) fn for_prompt(model: &str, system_prompt: &str, prompt: &str) -> Self {
+        Self {
+            model: model.to_string(),
+            provider: kuzushi_core::model_provider(model).to_string(),
+            prompt_hash: kuzushi_core::prompt_pair_hash(system_prompt, prompt),
+            cost_usd: None,
+        }
+    }
+
+    pub(crate) fn with_cost_usd(mut self, cost_usd: f64) -> Self {
+        self.cost_usd = (cost_usd > 0.0).then_some(cost_usd);
+        self
+    }
 }
 
 #[derive(Debug)]

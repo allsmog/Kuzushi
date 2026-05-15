@@ -50,3 +50,31 @@ pub(super) fn inspect_database(
         "node.db-query",
     );
 }
+
+pub(super) fn inspect_external_client(
+    inspection: &NodeLineInspection<'_>,
+    builder: &mut AttackSurfaceBuilder,
+) {
+    if !inspection.has_any(&[
+        "fetch(",
+        "axios.",
+        "axios(",
+        "got(",
+        "superagent.",
+        "http.request(",
+        "https.request(",
+    ]) {
+        return;
+    }
+
+    let route = inspection.route();
+    inspection.add_surface(
+        builder,
+        AttackSurfaceKind::ExternalServiceClient,
+        "External service client",
+        route.method.as_deref(),
+        route.path.as_deref(),
+        Some("external_service"),
+        "node.external-client",
+    );
+}

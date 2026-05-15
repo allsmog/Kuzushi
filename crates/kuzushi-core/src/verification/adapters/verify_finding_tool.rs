@@ -86,11 +86,61 @@ fn verify_finding_response(result: Value) -> Value {
         lines.push(format!("      vector: {vector}"));
     }
     lines.push("      cost=$0.0000".to_string());
+    let summary = format!("verify:finding complete ({verdict})");
+    let proof = verification_proof_snapshot(&result);
 
     json!({
         "ok": true,
+        "status": "completed",
+        "summary": summary,
         "output": lines.join("\n"),
-        "data": result,
+        "artifacts": [],
+        "warnings": [],
+        "errors": [],
+        "data": verification_response_data(result, &proof, &summary),
+        "proof": proof,
         "costUsd": 0.0,
     })
+}
+
+fn verification_response_data(result: Value, proof: &Value, summary: &str) -> Value {
+    let mut data = result.as_object().cloned().unwrap_or_default();
+    data.insert("summary".to_string(), json!(summary));
+    data.insert("proof".to_string(), proof.clone());
+    data.insert("verification".to_string(), result);
+    Value::Object(data)
+}
+
+fn verification_proof_snapshot(result: &Value) -> Value {
+    json!({
+        "kind": "llm-exploitability-review",
+        "empirical": false,
+        "fingerprint": result.get("fingerprint").cloned().unwrap_or(Value::Null),
+        "exploitable": result.get("exploitable").cloned().unwrap_or(json!(false)),
+        "proofLevel": result.get("proofLevel").cloned().unwrap_or(json!(1)),
+        "proofVerdict": result.get("proofVerdict").cloned().unwrap_or(json!("not_reproduced")),
+        "confidence": result.get("confidence").cloned().unwrap_or(json!(0.0)),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn verify_response_exposes_non_empirical_proof_snapshot() {
+        let response = verify_finding_response(json!({
+            "fingerprint": "fp-1",
+            "exploitable": true,
+            "confidence": 0.7,
+            "proofLevel": 2,
+            "proofVerdict": "not_reproduced"
+        }));
+
+        assert_eq!(response["status"], json!("completed"));
+        assert_eq!(response["proof"]["empirical"], json!(false));
+        assert_eq!(response["data"]["proof"]["fingerprint"], json!("fp-1"));
+        assert_eq!(response["data"]["exploitable"], json!(true));
+        assert!(response["artifacts"].as_array().unwrap().is_empty());
+    }
 }

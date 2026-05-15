@@ -1,7 +1,7 @@
 # Running Kuzushi TUI in tmux for Linux kernel "Copy Fail" style hunting
 
 This playbook is a reproducible path for running the Rust TUI shell under tmux,
-using OAuth with `openai-codex`, and scanning Linux kernel targets for
+using OpenAI OAuth, and scanning Linux kernel targets for
 AF_ALG/splice/page-cache style privilege-escalation bugs (the class behind
 "Copy Fail").
 
@@ -11,7 +11,8 @@ AF_ALG/splice/page-cache style privilege-escalation bugs (the class behind
 - Rust toolchain + cargo available.
 - Network egress for model/provider calls.
 - OAuth credential file at `~/.kuzushi/oauth-credentials.json` containing an
-  `openai-codex` token bag.
+  OpenAI token bag. The manual migration below writes the runtime
+  compatibility key for older pi-agent-core provider routing.
 
 If you only have `/home/claude/.codex/remote/.oauth_token`, copy it once:
 
@@ -31,7 +32,7 @@ PY
 
 ```bash
 cargo run -p kuzushi-cli -- --help
-cargo run -p kuzushi-cli -- auth ping --model openai-codex:gpt-5.5-mini
+cargo run -p kuzushi-cli -- auth ping --model openai:gpt-5.5-mini
 ```
 
 `auth ping` should report OAuth readiness and a successful round-trip before
@@ -56,7 +57,7 @@ tmux attach -t kz-copyfail
 Inside the TUI, run this sequence:
 
 1. `auth status`
-2. `model openai-codex:gpt-5.5`
+2. `model 3`
 3. `use core:sast` (or `modules` then pick the SAST module shown)
 4. `scan /path/to/linux`
 
@@ -91,8 +92,9 @@ key handling.
 
 ## 6) Quick troubleshooting
 
-- OAuth not detected: verify `~/.kuzushi/oauth-credentials.json` readability and
-  provider key `openai-codex`.
+- OAuth not detected: verify `~/.kuzushi/oauth-credentials.json` readability.
+  For direct file inspection, the OpenAI token bag may live under the
+  compatibility key written by the migration snippet above.
 - Missing module/tool name: run `tools` and use the exact `<module>:<action>`
   name exposed by the build.
 - TUI seems idle: inspect `/tmp/kuzushi-copyfail.log` and run `auth ping`
@@ -129,7 +131,9 @@ first (`roles.full_mode_multi`) or the run will fail with a model-config error.
 
 ## 8) Known runtime caveats
 
-- `kuzushi auth ping --model openai-codex:...` currently errors because auth
-  ping only supports Anthropics's bridge path today.
-- For `openai-codex` runs, configure model routing in `models.toml` (or shell
-  `setg MODEL_*`) before launching non-dry LLM hunts.
+- `kuzushi auth ping --model openai:...` currently errors when the selected
+  provider route is not available through the auth-ping bridge path.
+- For OpenAI OAuth runs, configure model routing in `models.toml` (or shell
+  `setg MODEL_*`) before launching non-dry LLM hunts. The adapter still
+  translates OpenAI OAuth routing to the legacy pi-agent-core selector
+  internally.

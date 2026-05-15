@@ -1,46 +1,60 @@
 use super::*;
+use crate::ui_view_models::TraceStep;
 
 pub(crate) fn trace_step_line(step: &TraceStep, width: u16) -> Line<'static> {
-    let kind_style = match step.severity.as_deref() {
-        Some("danger") => theme::danger(),
-        Some("warn") => theme::warn(),
-        _ => match step.kind.as_str() {
-            "plan" => theme::label(),
-            "tool" | "tool-start" => theme::success(),
-            "done" | "tool-complete" => theme::success(),
-            "llm" | "reasoning" | "tool-progress" => theme::accent(),
-            "refused" | "failing" => theme::danger(),
-            "critic" => theme::warn(),
-            _ => theme::muted(),
-        },
-    };
-    let latency = step
-        .latency_ms
-        .map(|ms| {
-            if ms >= 1000 {
-                format!("{:.1}s", ms as f64 / 1000.0)
-            } else {
-                format!("{ms}ms")
-            }
-        })
-        .unwrap_or_else(|| "—".to_string());
-    let cost = step
-        .cost_usd
-        .map(|c| format!("${c:.4}"))
-        .unwrap_or_else(|| "—".to_string());
     let label = trace_step_label(step);
     let label_budget = (width as usize).saturating_sub(28).max(20);
     Line::from(vec![
         Span::raw(" "),
         Span::styled(format!("{:>3} ", step.n), theme::subtle()),
-        Span::styled(format!("{:8}", step.kind), kind_style),
+        Span::styled(format!("{:8}", step.kind), trace_kind_style(step)),
         Span::raw(" "),
         Span::styled(fit(&label, label_budget), theme::primary()),
         Span::raw("  "),
-        Span::styled(format!("{:>7}", latency), theme::muted()),
+        Span::styled(format!("{:>7}", trace_latency_label(step)), theme::muted()),
         Span::raw("  "),
-        Span::styled(cost, theme::muted()),
+        Span::styled(trace_cost_label(step), theme::muted()),
     ])
+}
+
+fn trace_kind_style(step: &TraceStep) -> Style {
+    match step.severity.as_deref() {
+        Some("danger") => theme::danger(),
+        Some("warn") => theme::warn(),
+        _ => trace_kind_default_style(&step.kind),
+    }
+}
+
+fn trace_kind_default_style(kind: &str) -> Style {
+    match kind {
+        "plan" => theme::label(),
+        "tool" | "tool-start" => theme::success(),
+        "done" | "tool-complete" => theme::success(),
+        "llm" | "reasoning" | "tool-progress" => theme::accent(),
+        "refused" | "failing" => theme::danger(),
+        "critic" => theme::warn(),
+        _ => theme::muted(),
+    }
+}
+
+fn trace_latency_label(step: &TraceStep) -> String {
+    step.latency_ms
+        .map(format_latency)
+        .unwrap_or_else(|| "—".to_string())
+}
+
+fn format_latency(ms: u64) -> String {
+    if ms >= 1000 {
+        format!("{:.1}s", ms as f64 / 1000.0)
+    } else {
+        format!("{ms}ms")
+    }
+}
+
+fn trace_cost_label(step: &TraceStep) -> String {
+    step.cost_usd
+        .map(|cost| format!("${cost:.4}"))
+        .unwrap_or_else(|| "—".to_string())
 }
 
 fn trace_step_label(step: &TraceStep) -> String {
@@ -58,21 +72,6 @@ fn trace_step_label(step: &TraceStep) -> String {
         Some(prefix) => format!("{indent}{prefix} {}", step.label),
         None => format!("{indent}{}", step.label),
     }
-}
-
-pub(crate) fn run_artifact_path(app: &ShellApp, run_id: &str, leaf: &str) -> std::path::PathBuf {
-    let runs_root = app
-        .target
-        .as_deref()
-        .map(|target| target.join(".kuzushi/runs"))
-        .unwrap_or_else(|| std::path::PathBuf::from(".kuzushi/runs"));
-    runs_root.join(run_id).join(leaf)
-}
-
-pub(crate) fn run_artifact_detail(label: &str, path: &std::path::Path) -> Line<'static> {
-    let display = path.display().to_string();
-    let suffix = if path.exists() { "" } else { " (missing)" };
-    detail(label, &format!("{display}{suffix}"))
 }
 
 pub(crate) fn alias_reference_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {

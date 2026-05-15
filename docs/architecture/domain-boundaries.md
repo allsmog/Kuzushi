@@ -151,7 +151,8 @@ Owner files:
 `crates/kuzushi-tui/src/app/state_transitions.rs`,
 `crates/kuzushi-tui/src/commands.rs`,
 `crates/kuzushi-tui/src/renderer.rs`,
-`crates/kuzushi-tui/src/renderer/plain.rs`, and `crates/kuzushi-tui/src/theme.rs`.
+`crates/kuzushi-tui/src/renderer/plain.rs`, and
+`crates/kuzushi-tui/src/theme/mod.rs`.
 
 Vocabulary:
 `ShellView`, `ShellCommand`, `ViewTransition`, `PlainOutput`, hotkey,
@@ -183,7 +184,7 @@ scanner process execution, model enforcement, persisted schema migrations.
 ## Ambiguous Terms To Avoid
 
 - "copilot" when the user-facing meaning is a security-native code agent.
-- "validated" unless runtime validation or an equivalent empirical check ran.
+- "validated" unless runtime verification or an equivalent empirical check ran.
 - "scan output" when the artifact is specifically persisted findings,
   run summary, PR comment markdown, or CI event lines.
 - "module" when the change is only a scan engine or only a shell view.

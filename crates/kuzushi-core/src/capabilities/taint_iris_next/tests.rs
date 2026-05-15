@@ -412,6 +412,37 @@ mod tests {
     }
 
     #[test]
+    fn dataflow_plan_tool_executes_without_runtime_or_findings_store() {
+        use crate::modules::ModuleRegistry;
+
+        let temp = tempdir().unwrap();
+        write_js_taint_fixture(temp.path());
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let result = ModuleRegistry::with_v2_builtins()
+            .execute_tool(
+                "taint-iris-next:dataflow-plan",
+                json!({"maxCatalogEntries": 1}),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            result.pointer("/data/status").and_then(Value::as_str),
+            Some("planned")
+        );
+        assert!(result.pointer("/data/evidence").is_some());
+    }
+
+    #[test]
     fn hunt_uses_runtime_and_persists_findings() {
         let temp = tempdir().unwrap();
         write_js_taint_fixture(temp.path());
@@ -870,6 +901,27 @@ mod tests {
                 "expected option {expected} on taint-iris-next:hunt; got {names:?}"
             );
         }
+    }
+
+    #[test]
+    fn taint_iris_next_decomposed_descriptors_split_planning_from_review() {
+        use crate::modules::ModuleRegistry;
+
+        let registry = ModuleRegistry::with_v2_builtins();
+        let plan = registry
+            .resolve_tool("taint-iris-next:dataflow-plan")
+            .expect("dataflow plan tool should be present");
+        let review = registry
+            .resolve_tool("taint-iris-next:finding-review")
+            .expect("finding review tool should be present");
+        let plan_names: Vec<&str> = plan.options.iter().map(|o| o.name.as_str()).collect();
+        let review_names: Vec<&str> = review.options.iter().map(|o| o.name.as_str()).collect();
+
+        assert!(plan_names.contains(&"backend"));
+        assert!(plan_names.contains(&"minEvidenceLevel"));
+        assert!(!plan_names.contains(&"model"));
+        assert!(review_names.contains(&"model"));
+        assert!(review_names.contains(&"mcps"));
     }
 
     #[test]

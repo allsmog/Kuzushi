@@ -12,6 +12,7 @@ mod tests {
     use crate::application::scan::{scan_scope_body, scan_tool_input, scan_worktree_suffix};
     use crate::application::suppressions::{suppressions_command_output, suppressions_plain_lines};
     use crate::command::{ConfigCommand, McpBackend, ScanModeArg};
+    use crate::doctor::deterministic_capability_checks;
     use crate::mcp::{mcp_health_spawn_error, mcp_spawn_error};
     use crate::presentation::{
         ci_line, format_duration, plain_output_requested, scan_json_output, scan_started_body,
@@ -68,6 +69,19 @@ mod tests {
         assert!(targeted.contains("target ."));
         assert!(targeted.contains("first finding: scan, then findings"));
         assert!(!targeted.contains("scan ."));
+    }
+
+    #[test]
+    fn doctor_lists_deterministic_module_capabilities() {
+        let names = deterministic_capability_checks()
+            .into_iter()
+            .map(|check| check.name)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            names,
+            vec!["secret-scan", "dep-hygiene", "iac-scan", "cargo-audit"]
+        );
     }
 
     #[test]
@@ -151,7 +165,7 @@ mod tests {
         );
 
         let summary = load_run_summary(tmp.path(), &run_id).unwrap();
-        assert_eq!(summary.status, "complete");
+        assert_eq!(summary.status, "completed");
         assert_eq!(summary.started_at_unix, started.started_at_unix);
         assert!(started.process_id.is_some());
         assert!(summary.process_id.is_none());
@@ -160,7 +174,7 @@ mod tests {
             .iter()
             .map(|artifact| artifact.label.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(labels, vec!["input", "result"]);
+        assert_eq!(labels, vec!["input", "findings", "result"]);
         for artifact in &summary.artifacts {
             assert!(
                 std::path::Path::new(&artifact.path).exists(),
@@ -180,9 +194,19 @@ mod tests {
         let failed_summary = load_run_summary(tmp.path(), &failed_run_id).unwrap();
         assert_eq!(failed_summary.status, "failed");
         assert_eq!(failed_summary.error.as_deref(), Some("bridge failed"));
-        assert_eq!(failed_summary.artifacts.len(), 1);
-        assert_eq!(failed_summary.artifacts[0].label, "input");
-        assert!(std::path::Path::new(&failed_summary.artifacts[0].path).exists());
+        let failed_labels = failed_summary
+            .artifacts
+            .iter()
+            .map(|artifact| artifact.label.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(failed_labels, vec!["input", "failure handoff", "result"]);
+        for artifact in &failed_summary.artifacts {
+            assert!(
+                std::path::Path::new(&artifact.path).exists(),
+                "missing artifact {}",
+                artifact.path
+            );
+        }
     }
 
     #[test]
@@ -301,18 +325,19 @@ mod tests {
     }
 
     #[test]
-    fn auth_ping_model_preserves_operator_override_then_config_then_default() {
+    fn auth_ping_model_preserves_operator_override_then_config_without_fallback() {
         let mut config = kuzushi_core::V2Config::default();
         config.model = Some("openai:gpt-5.4".to_string());
 
         assert_eq!(
-            auth_ping_model(Some("anthropic:claude-sonnet-4-5".to_string()), &config),
+            auth_ping_model(Some("anthropic:claude-sonnet-4-5".to_string()), &config).unwrap(),
             "anthropic:claude-sonnet-4-5"
         );
-        assert_eq!(auth_ping_model(None, &config), "openai:gpt-5.4");
+        assert_eq!(auth_ping_model(None, &config).unwrap(), "openai:gpt-5.4");
 
         config.model = None;
-        assert_eq!(auth_ping_model(None, &config), "anthropic:claude-haiku-4-5");
+        let err = auth_ping_model(None, &config).unwrap_err().to_string();
+        assert!(err.contains("auth ping requires an explicit model"));
     }
 
     #[test]
@@ -411,10 +436,24 @@ mod tests {
         assert!(tool_defaults_to_workspace(
             "systems-hunt:deep-semantic-hunt"
         ));
+        assert!(tool_defaults_to_workspace("offense-review:threat-hunt"));
+        assert!(tool_defaults_to_workspace("taint-iris-next:dataflow-plan"));
+        assert!(tool_defaults_to_workspace(
+            "taint-iris-next:source-sink-trace"
+        ));
+        assert!(tool_defaults_to_workspace("taint-iris-next:finding-review"));
+        assert!(tool_defaults_to_workspace("module-recommender:recommend"));
         assert!(tool_defaults_to_workspace("findings:list"));
         assert!(!tool_defaults_to_workspace("clang.health"));
 
         assert!(tool_needs_finding_store("variant:hunt"));
+        assert!(tool_needs_finding_store("offense-review:threat-hunt"));
+        assert!(tool_needs_finding_store("taint-iris-next:finding-review"));
+        assert!(!tool_needs_finding_store("taint-iris-next:dataflow-plan"));
+        assert!(!tool_needs_finding_store(
+            "taint-iris-next:source-sink-trace"
+        ));
+        assert!(tool_needs_finding_store("module-recommender:recommend"));
         assert!(tool_needs_finding_store("prompt-armor:scan"));
         assert!(!tool_needs_finding_store("context-lite:index"));
 

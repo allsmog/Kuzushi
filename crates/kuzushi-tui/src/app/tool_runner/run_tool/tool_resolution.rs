@@ -26,7 +26,7 @@ impl ShellApp {
             .registry
             .modules()
             .find(|entry| entry.metadata().id == *module)
-            .and_then(|entry| entry.tools().first())
+            .and_then(|entry| entry.tools().iter().find(|tool| !tool.hidden))
             .map(|tool| tool.name.clone())
         {
             return Some(tool_name);

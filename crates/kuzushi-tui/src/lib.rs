@@ -5,6 +5,9 @@ mod app;
 mod commands;
 mod renderer;
 mod theme;
+pub mod ui_theme;
+pub mod ui_view_models;
+pub mod ui_views;
 
 pub use app::{
     run_shell, run_shell_with_plain, ActivitySession, ChatTurn, OptionsFilter, OptionsView,

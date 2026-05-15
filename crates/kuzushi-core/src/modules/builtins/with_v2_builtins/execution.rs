@@ -1,3 +1,4 @@
+use super::output_contract::normalize_tool_output_contract;
 use super::*;
 use crate::modules::registry::ToolDispatchResult;
 
@@ -75,7 +76,7 @@ impl ModuleRegistry {
         let runtime = active_tool_runtime(runtime, traced_runtime.as_ref());
 
         if let Some(result) = self.dispatch_prepared_tool_mapping(name, &input, ctx, runtime) {
-            return result;
+            return result.map(|output| normalize_tool_output_contract(name, output));
         }
         anyhow::bail!("registered tool or DAG node {name:?} has no Rust executor mapping")
     }
@@ -88,6 +89,7 @@ impl ModuleRegistry {
         runtime: Option<&dyn AgentRuntime>,
     ) -> ToolDispatchResult {
         self.dispatch_catalog_tool(name)
+            .or_else(|| self.dispatch_module_recommender_tool(name, input, ctx))
             .or_else(|| dispatch_pre_threat_intel_tool(name, input, ctx, runtime))
             .or_else(|| self.dispatch_threat_intel_tool(name, input, ctx, runtime))
             .or_else(|| dispatch_post_threat_intel_tool(name, input, ctx, runtime))

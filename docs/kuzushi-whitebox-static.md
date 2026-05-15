@@ -67,7 +67,7 @@ code shapes. These are review candidates only: generated variants begin as
 ## Candidate Semgrep Rules
 
 Whitebox-static can also synthesize candidate Semgrep rules from
-`statically confirmed` findings. The candidate rules are validated against
+`statically confirmed` findings. The candidate rules are checked against
 positive and negative source fixtures and are written disabled by default; a
 passing fixture check only marks them ready for operator review, not enabled.
 

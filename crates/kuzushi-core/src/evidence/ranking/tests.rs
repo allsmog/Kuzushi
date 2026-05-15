@@ -3,7 +3,7 @@ mod tests {
     use serde_json::json;
 
     use super::super::*;
-    use crate::attack_surface::{AttackSurfaceMap, AttackSurfaceSummary};
+    use crate::attack_surface::{AttackSurfaceMap, AttackSurfaceRisk, AttackSurfaceSummary};
     use crate::findings::{TriageOutcome, TriageVerdict};
     use crate::static_evidence::{StaticEvidenceEdge, StaticEvidenceEdgeKind};
 
@@ -229,6 +229,7 @@ mod tests {
                 method: Some("GET".to_string()),
                 route: Some("/users/:id".to_string()),
                 boundary: Some("public_http".to_string()),
+                risk: AttackSurfaceRisk::default(),
                 metadata: json!({}),
             },
             AttackSurface {
@@ -243,6 +244,7 @@ mod tests {
                 method: None,
                 route: None,
                 boundary: Some("data_store".to_string()),
+                risk: AttackSurfaceRisk::default(),
                 metadata: json!({}),
             },
         ];
@@ -252,6 +254,9 @@ mod tests {
                 total: surfaces.len(),
                 by_kind: Default::default(),
                 by_file: Default::default(),
+                high_risk: 0,
+                max_risk_score: 0,
+                by_risk_tier: Default::default(),
             },
             surfaces,
         }

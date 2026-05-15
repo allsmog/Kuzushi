@@ -374,27 +374,26 @@ TUI command/rendering behavior, and provider adapter behavior where relevant.
 
 ## CRAP Gate
 
-Every phase must run the repo CRAP gate or an equivalent baseline comparison.
-The gate must:
+Every phase must run the repo CRAP-risk gate. The gate must:
 
-- keep changed/new production functions below CRAP 15;
-- prevent touched existing CRAP offenders from increasing;
+- keep changed/new production functions below risk 7;
+- keep function complexity <= 4 and function bodies under 40 logical lines;
+- isolate side effects behind adapters;
+- require focused tests for branchy changed code;
 - report exact blockers if the tooling cannot run;
 - never be claimed as passing without measurement.
 
 The repeatable gate is:
 
 ```bash
-scripts/crap-gate.sh --create-baseline
-scripts/crap-gate.sh
+pnpm quality:crap-risk
 ```
 
-The script requires both `cargo llvm-cov` and `cargo crap`, writes LCOV and
-reports under `target/crap/`, compares against a JSON baseline, fails CRAP
-regressions, and fails new changed production functions at or above CRAP 15.
-When continuing an already-started migration, create a fresh baseline only at
-the start of a clearly documented phase; do not reset the baseline to hide a
-regression inside the same phase.
+The shipped proxy is `scripts/crap-risk-gate.mjs`. It scores
+`complexity + size_weight + side_effect_weight + coverage_gap + centrality_weight`
+for changed Rust/JS/TS production code. True CRAP tooling can provide
+additional evidence when available, but it must not replace the CI-backed proxy
+unless the replacement enforces an equal or stricter threshold.
 
 ## Non-Goals
 

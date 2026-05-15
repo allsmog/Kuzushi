@@ -35,6 +35,7 @@ impl ShellApp {
             .model
             .as_deref()
             .and_then(|model| model.split_once(':').map(|(provider, _)| provider))
+            .map(display_model_provider)
             .filter(|provider| !provider.trim().is_empty())
             .unwrap_or("unconfigured")
             .to_string()
@@ -66,7 +67,8 @@ impl ShellApp {
             "model",
             format!(
                 "{} / {} selected via onboarding (session only; no fallback model will be selected)",
-                choice.id, choice.thinking_level
+                model_choice_display_selector(choice),
+                choice.thinking_level
             ),
         );
     }
@@ -75,14 +77,19 @@ impl ShellApp {
 fn active_model_label(config: &V2Config) -> String {
     config
         .model
-        .clone()
+        .as_deref()
+        .map(display_model_selector)
         .unwrap_or_else(|| "unconfigured".to_string())
 }
 
 fn model_catalog_choice_line(choice: &ModelChoice) -> String {
     format!(
         "{}. {}  {}  {}  auth {}",
-        choice.index, choice.id, choice.thinking_level, choice.label, choice.auth
+        choice.index,
+        model_choice_display_selector(choice),
+        choice.thinking_level,
+        choice.label,
+        choice.auth
     )
 }
 

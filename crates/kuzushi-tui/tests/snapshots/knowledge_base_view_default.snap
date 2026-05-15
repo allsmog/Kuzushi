@@ -2,12 +2,12 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 265
 ---
-mode:shell | target:none | catalog | 0 findings | 39 mods
+mode:shell | target:none | kb | 0 findings | 32 mods
 
  -- KB ATTACHMENTS -----------------------------------------------------------------------------------------------------
 module: context
 store: .kuzushi/v2/attachments.json
-supported: context, threat-model, carlini-threat-hunt, x-ray
+supported: context, threat-model, offense-review, x-ray
 
  -- KNOWN ARTIFACTS ----------------------------------------------------------------------------------------------------
 No known Rust artifacts for this module.

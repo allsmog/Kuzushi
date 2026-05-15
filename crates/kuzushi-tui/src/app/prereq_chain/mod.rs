@@ -184,29 +184,51 @@ fn recommended_action(steps: &[PrereqStep]) -> PrereqPlanAction {
 
 pub fn prereq_steps_for(tool: &str, target: &Path) -> Vec<PrereqStep> {
     let kuzushi_dir = target.join(".kuzushi");
-    if tool == "carlini-threat-hunt:run" {
-        return vec![context_step(&kuzushi_dir), threat_model_step(&kuzushi_dir)];
+    match prereq_chain_kind_for_tool(tool) {
+        PrereqChainKind::ThreatModel => {
+            vec![context_step(&kuzushi_dir), threat_model_step(&kuzushi_dir)]
+        }
+        PrereqChainKind::Context => vec![context_step(&kuzushi_dir)],
+        PrereqChainKind::TaintCatalog => {
+            vec![context_step(&kuzushi_dir), taint_catalog_step(&kuzushi_dir)]
+        }
+        PrereqChainKind::None => Vec::new(),
     }
-    if tool == "threat-model:build" {
-        return vec![context_step(&kuzushi_dir)];
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrereqChainKind {
+    ThreatModel,
+    Context,
+    TaintCatalog,
+    None,
+}
+
+fn prereq_chain_kind_for_tool(tool: &str) -> PrereqChainKind {
+    if matches!(
+        tool,
+        "carlini-threat-hunt:run" | "offense-review:threat-hunt"
+    ) {
+        return PrereqChainKind::ThreatModel;
     }
-    if tool == "taint-iris-next:catalog" {
-        return vec![context_step(&kuzushi_dir)];
+    if context_only_prereq_tool(tool) {
+        return PrereqChainKind::Context;
     }
     if tool == "taint-iris-next:hunt" {
-        // Hunt depends on context, and prefers a target-specific catalog
-        // when available. We surface the catalog as a prereq so the
-        // shell offers `reuse [r] / regenerate [g]` against an existing
-        // <target>/.kuzushi/taint-iris-next-catalog.json. Operators who
-        // want to skip catalog generation can answer "r" (or never run
-        // catalog and just remove the file) — the hunt still runs with
-        // the static built-in catalog as a fallback.
-        return vec![context_step(&kuzushi_dir), taint_catalog_step(&kuzushi_dir)];
+        return PrereqChainKind::TaintCatalog;
     }
-    if matches!(tool, "taint-iris:hunt" | "agentic-sast:scan" | "sast:scan") {
-        return vec![context_step(&kuzushi_dir)];
-    }
-    Vec::new()
+    PrereqChainKind::None
+}
+
+fn context_only_prereq_tool(tool: &str) -> bool {
+    matches!(
+        tool,
+        "threat-model:build"
+            | "taint-iris-next:catalog"
+            | "taint-iris:hunt"
+            | "agentic-sast:scan"
+            | "sast:scan"
+    )
 }
 
 fn context_step(kuzushi_dir: &Path) -> PrereqStep {
@@ -261,6 +283,14 @@ mod tests {
         assert!(steps[1]
             .artifact_path
             .ends_with(".kuzushi/threat-model.json"));
+    }
+
+    #[test]
+    fn offense_review_threat_hunt_uses_threat_model_chain() {
+        let steps = prereq_steps_for("offense-review:threat-hunt", Path::new("/tmp/repo"));
+        assert_eq!(steps.len(), 2);
+        assert_eq!(steps[0].tool, "context:build");
+        assert_eq!(steps[1].tool, "threat-model:build");
     }
 
     #[test]

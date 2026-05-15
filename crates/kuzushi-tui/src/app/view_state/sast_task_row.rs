@@ -70,7 +70,9 @@ pub struct PwnView {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellView {
+    Home,
     Catalog,
+    Recommend,
     Module,
     ModuleRun,
     Findings,
@@ -92,6 +94,7 @@ pub enum ShellView {
     Context,
     Workspace,
     KnowledgeBase,
+    FailureHandoff,
     AgentChat,
     History,
     Story,

@@ -3,7 +3,7 @@ use super::*;
 use self::{
     binary_option, builtin_module, dag, opt, resolve_tool_target, target_option, tool_with_options,
 };
-use crate::findings::{persist_tool_findings, Finding, StaticProofState};
+use crate::findings::{persist_tool_findings, Finding, GenericPersistedRun, StaticProofState};
 use crate::iac_scan::{scan_iac, IacScanOptions};
 use crate::runtime::AgentRuntime;
 use crate::scan::{

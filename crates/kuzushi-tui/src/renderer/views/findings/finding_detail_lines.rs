@@ -6,6 +6,15 @@ pub(crate) fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stat
     };
 
     let mut lines = context_strip(app, area);
+    append_finding_title(finding, &mut lines);
+    append_finding_metadata(app, finding, area, &mut lines);
+    append_finding_evidence(finding, area, &mut lines);
+    append_triage_summary(finding, area, &mut lines);
+    append_finding_commands(area, &mut lines);
+    lines
+}
+
+fn append_finding_title(finding: &Finding, lines: &mut Vec<Line<'static>>) {
     lines.push(blank());
     lines.push(Line::from(vec![
         Span::styled(finding.severity.as_str(), theme::severity(finding.severity)),
@@ -13,6 +22,14 @@ pub(crate) fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stat
         Span::styled(finding.title.clone(), theme::heading()),
     ]));
     lines.push(blank());
+}
+
+fn append_finding_metadata(
+    app: &ShellApp,
+    finding: &Finding,
+    area: Rect,
+    lines: &mut Vec<Line<'static>>,
+) {
     if let Some(alias) = stable_finding_alias(&app.findings, &finding.fingerprint) {
         lines.push(detail("alias", &alias));
     }
@@ -31,16 +48,19 @@ pub(crate) fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stat
         ),
     ));
     lines.push(detail(
-        "runtime validation",
+        "runtime verification",
         &fit(
             &runtime_validation_label(finding.verification.as_ref()),
             value_width(area, 18),
         ),
     ));
+}
+
+fn append_finding_evidence(finding: &Finding, area: Rect, lines: &mut Vec<Line<'static>>) {
     lines.push(blank());
     if !finding.evidence.is_empty() {
         lines.push(divider("STRUCTURED EVIDENCE", area.width));
-        append_structured_evidence_lines(finding, area, &mut lines);
+        append_structured_evidence_lines(finding, area, lines);
         lines.push(blank());
         lines.push(divider("MESSAGE", area.width));
     } else {
@@ -52,7 +72,9 @@ pub(crate) fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stat
             2,
         ));
     }
+}
 
+fn append_triage_summary(finding: &Finding, area: Rect, lines: &mut Vec<Line<'static>>) {
     if let Some(triage) = &finding.triage {
         lines.push(blank());
         lines.push(divider("TRIAGE", area.width));
@@ -60,7 +82,9 @@ pub(crate) fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stat
         lines.push(detail("confidence", &format!("{:.2}", triage.confidence)));
         lines.push(detail("rationale", &triage.rationale));
     }
+}
 
+fn append_finding_commands(area: Rect, lines: &mut Vec<Line<'static>>) {
     lines.push(blank());
     lines.push(command_list_line(
         &[
@@ -71,7 +95,6 @@ pub(crate) fn finding_detail_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stat
         ],
         area.width as usize,
     ));
-    lines
 }
 
 fn append_structured_evidence_lines(finding: &Finding, area: Rect, lines: &mut Vec<Line<'static>>) {

@@ -4,9 +4,11 @@ use crate::tool_requirements::{
 use crate::tool_run_artifacts::{fail_cli_tool_run, finish_cli_tool_run};
 use anyhow::{Context, Result};
 use kuzushi_core::modules::ToolExecutionContext;
+use kuzushi_core::run_artifacts::{
+    load_run_summary, output_with_run_fallback_context, record_tool_run_started, ToolRunRecord,
+};
 use kuzushi_core::{
-    append_run_trace_step, load_config_for_target, new_run_id, write_run_artifact_json,
-    write_run_summary, AgentRuntime, FindingStore, ModuleRegistry, RunSummary, RunTraceStep,
+    load_config_for_target, new_run_id, AgentRuntime, FindingStore, ModuleRegistry,
     ToolOptionStore, TraceHandle, WorkspaceTarget,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
@@ -21,7 +23,7 @@ pub(crate) fn run_tool_command(
     let run = prepare_cli_tool_run(tool, input, options, target)?;
     let output = execute_cli_tool_run(&run)?;
     println!("{}", serde_json::to_string_pretty(&output)?);
-    Ok(())
+    fail_cli_on_failed_tool_output(&output)
 }
 
 struct PreparedCliToolRun {
@@ -31,7 +33,8 @@ struct PreparedCliToolRun {
     store: Option<FindingStore>,
     registry: ModuleRegistry,
     input: serde_json::Value,
-    run_id: Option<String>,
+    artifact_target: PathBuf,
+    run_id: String,
 }
 
 fn prepare_cli_tool_run(
@@ -48,7 +51,8 @@ fn prepare_cli_tool_run(
     let option_store = run_option_store(workspace.as_ref(), &tool, &options)?;
     let input = registry.prepare_tool_input(&tool, input, Some(&option_store))?;
     let store = open_cli_tool_finding_store(workspace.as_ref(), &tool)?;
-    let run_id = start_cli_tool_run_artifacts(workspace.as_ref(), &tool, &input);
+    let (artifact_target, run_id) =
+        start_cli_tool_run_artifacts(workspace.as_ref(), &tool, &input)?;
     Ok(PreparedCliToolRun {
         tool,
         workspace,
@@ -56,6 +60,7 @@ fn prepare_cli_tool_run(
         store,
         registry,
         input,
+        artifact_target,
         run_id,
     })
 }
@@ -74,8 +79,10 @@ fn start_cli_tool_run_artifacts(
     workspace: Option<&WorkspaceTarget>,
     tool: &str,
     input: &serde_json::Value,
-) -> Option<String> {
-    workspace.map(|workspace| start_cli_tool_run(workspace.root(), tool, input))
+) -> Result<(PathBuf, String)> {
+    let target = cli_tool_run_artifact_target(workspace)?;
+    let run_id = start_cli_tool_run(&target, tool, input);
+    Ok((target, run_id))
 }
 
 fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
@@ -105,14 +112,11 @@ fn cli_tool_runtime(run: &PreparedCliToolRun) -> Result<Option<PiAgentCoreRuntim
 }
 
 fn cli_tool_trace(run: &PreparedCliToolRun) -> Option<TraceHandle> {
-    run.workspace
-        .as_ref()
-        .zip(run.run_id.as_ref())
-        .map(|(workspace, run_id)| {
-            TraceHandle::jsonl(workspace.root(), run_id)
-                .for_tool(&run.tool)
-                .child(1)
-        })
+    Some(
+        TraceHandle::jsonl(&run.artifact_target, &run.run_id)
+            .for_tool(&run.tool)
+            .child(1),
+    )
 }
 
 fn active_cli_tool_runtime<'a>(
@@ -128,25 +132,72 @@ fn handle_cli_tool_result(
     match result {
         Ok(output) => {
             finish_cli_tool_run_artifacts(run, &output);
-            Ok(output)
+            Ok(cli_output_with_fallback_context(run, output))
         }
         Err(error) => {
-            fail_cli_tool_run_artifacts(run, &error.to_string());
-            Err(error)
+            let message = error.to_string();
+            fail_cli_tool_run_artifacts(run, &message);
+            Ok(cli_failed_output_with_fallback_context(run, &message))
         }
     }
+}
+
+fn cli_failed_output_with_fallback_context(
+    run: &PreparedCliToolRun,
+    error: &str,
+) -> serde_json::Value {
+    cli_output_with_fallback_context(run, cli_failed_tool_output(run, error))
+}
+
+fn cli_failed_tool_output(run: &PreparedCliToolRun, error: &str) -> serde_json::Value {
+    serde_json::json!({
+        "ok": false,
+        "status": "failed",
+        "summary": format!("{} failed", run.tool),
+        "artifacts": cli_run_artifacts(run),
+        "warnings": [],
+        "errors": [error],
+    })
+}
+
+fn cli_run_artifacts(run: &PreparedCliToolRun) -> serde_json::Value {
+    load_run_summary(&run.artifact_target, &run.run_id)
+        .ok()
+        .and_then(|summary| serde_json::to_value(summary.artifacts).ok())
+        .unwrap_or_else(|| serde_json::json!([]))
+}
+
+fn cli_output_with_fallback_context(
+    run: &PreparedCliToolRun,
+    output: serde_json::Value,
+) -> serde_json::Value {
+    output_with_run_fallback_context(&run.artifact_target, &run.run_id, output)
+}
+
+fn fail_cli_on_failed_tool_output(output: &serde_json::Value) -> Result<()> {
+    if output.get("status").and_then(serde_json::Value::as_str) != Some("failed") {
+        return Ok(());
+    }
+    anyhow::bail!("{}", cli_failed_tool_message(output));
+}
+
+fn cli_failed_tool_message(output: &serde_json::Value) -> String {
+    output
+        .get("errors")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|errors| errors.first())
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| output.get("summary").and_then(serde_json::Value::as_str))
+        .unwrap_or("tool returned status=failed")
+        .to_string()
 }
 
 fn finish_cli_tool_run_artifacts(run: &PreparedCliToolRun, output: &serde_json::Value) {
-    if let (Some(workspace), Some(run_id)) = (run.workspace.as_ref(), run.run_id.as_deref()) {
-        finish_cli_tool_run(workspace.root(), run_id, &run.tool, output);
-    }
+    finish_cli_tool_run(&run.artifact_target, &run.run_id, &run.tool, output);
 }
 
 fn fail_cli_tool_run_artifacts(run: &PreparedCliToolRun, error: &str) {
-    if let (Some(workspace), Some(run_id)) = (run.workspace.as_ref(), run.run_id.as_deref()) {
-        fail_cli_tool_run(workspace.root(), run_id, &run.tool, error);
-    }
+    fail_cli_tool_run(&run.artifact_target, &run.run_id, &run.tool, error);
 }
 
 pub(crate) fn run_option_store(
@@ -191,25 +242,16 @@ pub(crate) fn parse_option_override(raw: &str) -> Result<(String, String)> {
     Ok((name.to_string(), value.trim().to_string()))
 }
 
+fn cli_tool_run_artifact_target(workspace: Option<&WorkspaceTarget>) -> Result<PathBuf> {
+    match workspace {
+        Some(workspace) => Ok(workspace.root().to_path_buf()),
+        None => Ok(std::env::current_dir()?),
+    }
+}
+
 pub(crate) fn start_cli_tool_run(target: &Path, tool: &str, input: &serde_json::Value) -> String {
     let run_id = new_run_id("run");
-    let input_artifact =
-        write_run_artifact_json(target, &run_id, "input.json", "input", input).ok();
-    let mut summary = RunSummary::running(
-        run_id.clone(),
-        "run",
-        Some(tool.to_string()),
-        target.display().to_string(),
-    )
-    .with_process_id(std::process::id());
-    if let Some(artifact) = input_artifact {
-        summary = summary.with_artifact(artifact);
-    }
-    let _ = append_run_trace_step(
-        target,
-        &run_id,
-        &RunTraceStep::new(1, "tool", format!("{tool} started")).with_tool_name(tool),
-    );
-    let _ = write_run_summary(target, &summary);
+    let record = ToolRunRecord::new(target, &run_id, "run", tool);
+    record_tool_run_started(record, input);
     run_id
 }

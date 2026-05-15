@@ -5,52 +5,13 @@ pub(crate) fn module_stored_options(
     module: &kuzushi_core::BuiltinModule,
 ) -> Vec<(String, String)> {
     let mut out = Vec::new();
-    for tool in module.tools() {
+    for tool in visible_module_tools(module) {
         let stored = app.option_store.effective_stored_values(&tool.name);
         for (name, value) in stored.iter() {
             out.push((format!("{}::{}", tool.name, name), format_json_value(value)));
         }
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
-    out
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct ModulePromptOnDisk {
-    pub(in crate::renderer::views) verb: String,
-    pub(in crate::renderer::views) path: String,
-}
-
-pub(crate) fn module_prompts_on_disk(app: &ShellApp, module_id: &str) -> Vec<ModulePromptOnDisk> {
-    let prompts_root = app
-        .target
-        .as_deref()
-        .map(|t| t.join(".kuzushi/prompts").join(module_id))
-        .unwrap_or_else(|| std::path::PathBuf::from(".kuzushi/prompts").join(module_id));
-    let Ok(entries) = std::fs::read_dir(&prompts_root) else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let Ok(meta) = entry.metadata() else { continue };
-        if !meta.is_file() {
-            continue;
-        }
-        let name = entry.file_name().to_string_lossy().to_string();
-        if !name.ends_with(".md") {
-            continue;
-        }
-        let verb = name.trim_end_matches(".md").to_string();
-        out.push(ModulePromptOnDisk {
-            verb,
-            path: entry
-                .path()
-                .strip_prefix(app.target.as_deref().unwrap_or(std::path::Path::new(".")))
-                .map(|p| p.display().to_string())
-                .unwrap_or_else(|_| entry.path().display().to_string()),
-        });
-    }
-    out.sort_by(|a, b| a.verb.cmp(&b.verb));
     out
 }
 

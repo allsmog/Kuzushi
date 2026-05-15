@@ -40,6 +40,7 @@ pub const RUNTIME_TOOL_NAMES: &[&str] = &[
     "full-mode:hunt",
     "ndiff:extract-fix-pattern",
     "ndiff:hunt-variants",
+    "offense-review:threat-hunt",
     "patch:finding",
     "prompt-armor:analyze",
     "prompt-armor:attack",
@@ -57,6 +58,7 @@ pub const RUNTIME_TOOL_NAMES: &[&str] = &[
     "systems-hunt:systems-trigger-synth",
     "taint-iris-next:catalog",
     "taint-iris-next:codeql-db",
+    "taint-iris-next:finding-review",
     "taint-iris-next:hunt",
     "taint-iris:hunt",
     "threat-intel:apply",
@@ -157,6 +159,8 @@ const SAST_RUNTIME_TASK_NAMES: &[&str] = &[
     "deep-semantic-hunt",
     "iris",
     "iris-next",
+    "offense-review",
+    "offense-review:threat-hunt",
     "systems",
     "systems-hunt",
     "systems-hunt:deep-semantic-hunt",
@@ -245,11 +249,35 @@ mod tests {
     }
 
     #[test]
+    fn offense_review_threat_hunt_needs_runtime() {
+        assert!(tool_needs_runtime(
+            "offense-review:threat-hunt",
+            &json!({})
+        ));
+    }
+
+    #[test]
     fn tool_needs_runtime_falls_through_to_allowlist_for_other_tools() {
         assert!(tool_needs_runtime("deep-audit:run", &json!({})));
         assert!(tool_needs_runtime("exploit-chain:scan", &json!({})));
         assert!(tool_needs_runtime("uaf-hunt:hunt", &json!({})));
         assert!(!tool_needs_runtime("findings:list", &json!({})));
+    }
+
+    #[test]
+    fn taint_iris_next_decomposed_tools_split_runtime_boundary() {
+        assert!(!tool_needs_runtime(
+            "taint-iris-next:dataflow-plan",
+            &json!({})
+        ));
+        assert!(!tool_needs_runtime(
+            "taint-iris-next:source-sink-trace",
+            &json!({})
+        ));
+        assert!(tool_needs_runtime(
+            "taint-iris-next:finding-review",
+            &json!({})
+        ));
     }
 
     #[test]

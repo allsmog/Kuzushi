@@ -1,6 +1,6 @@
 pub use crate::attack_surface::{
     build_attack_surface_map, build_attack_surface_map_from_inventory, AttackSurface,
-    AttackSurfaceKind, AttackSurfaceMap, AttackSurfaceSummary,
+    AttackSurfaceKind, AttackSurfaceMap, AttackSurfaceRisk, AttackSurfaceSummary,
 };
 pub use crate::capabilities::classifier_gate::{
     ClassifierConfig, LikelyVulnClassifier, QuantileEstimator, Score,

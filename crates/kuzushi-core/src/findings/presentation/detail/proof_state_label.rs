@@ -19,19 +19,19 @@ const PROOF_STATE_LABELS: &[(StaticProofState, &str)] = &[
     ),
     (
         StaticProofState::CodeCited,
-        "code_cited - Source-grounded code evidence cited, not empirically validated",
+        "code_cited - Source-grounded code evidence cited; runtime proof not recorded",
     ),
     (
         StaticProofState::SourceSinkLinked,
-        "source_sink_linked - Source and sink are linked in static evidence, not empirically validated",
+        "source_sink_linked - Source and sink are linked in static evidence; runtime proof not recorded",
     ),
     (
         StaticProofState::SanitizerChecked,
-        "sanitizer_checked - Static path includes sanitizer checks, not empirically validated",
+        "sanitizer_checked - Static path includes sanitizer checks; runtime proof not recorded",
     ),
     (
         StaticProofState::StaticallyConfirmed,
-        "statically_confirmed - Source-grounded and statically confirmed, not empirically validated",
+        "statically_confirmed - Source-grounded and statically confirmed; runtime proof not recorded",
     ),
     (
         StaticProofState::StaticallyRejected,
@@ -39,7 +39,7 @@ const PROOF_STATE_LABELS: &[(StaticProofState, &str)] = &[
     ),
     (
         StaticProofState::NeedsRuntimeEvidence,
-        "needs_runtime_evidence - Static evidence needs runtime validation",
+        "needs_runtime_evidence - Static evidence needs runtime verification",
     ),
 ];
 
@@ -55,20 +55,20 @@ pub fn runtime_validation_label(verification: Option<&PersistedVerification>) ->
             )
         }
         PersistedProofVerdict::NotReproduced => {
-            "execution_attempted - Runtime validation attempted; exploit was not reproduced"
+            "execution_attempted - Runtime verification attempted; exploit was not reproduced"
                 .to_string()
         }
         PersistedProofVerdict::HarnessFailedToBuild => {
-            "execution_rejected - Validation harness failed to build".to_string()
+            "execution_rejected - Verification harness failed to build".to_string()
         }
         PersistedProofVerdict::InfrastructureError => {
-            "execution_rejected - Runtime validation was blocked by infrastructure".to_string()
+            "execution_rejected - Runtime verification was blocked by infrastructure".to_string()
         }
         PersistedProofVerdict::LanguageUnsupportedYet => {
-            "execution_rejected - Runtime validation does not support this language yet".to_string()
+            "execution_rejected - Runtime verification does not support this language yet".to_string()
         }
         PersistedProofVerdict::InsufficientFindingDetail => {
-            "execution_rejected - Finding lacks enough detail for runtime validation".to_string()
+            "execution_rejected - Finding lacks enough detail for runtime verification".to_string()
         }
     }
 }

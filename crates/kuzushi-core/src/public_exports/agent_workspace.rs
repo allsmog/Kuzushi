@@ -40,11 +40,11 @@ pub use crate::run_artifacts::{
     TraceSink, TraceStepBuilder,
 };
 pub use crate::runtime::{
-    append_structured_output_contract, run_tool_loop, AgentLoopOutcome, AgentLoopStep,
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentRuntimeOptions,
-    AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry,
-    ModelTier, SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult, TracedRuntime,
-    TriageRequest,
+    append_structured_output_contract, model_provider, prompt_pair_hash, run_tool_loop,
+    AgentLoopOutcome, AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime,
+    AgentRuntimeOptions, AgentStructuredOutput, AgentTool, AgentToolLoopRequest, AgentToolPolicy,
+    LoopHistoryEntry, ModelTier, SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult,
+    TracedRuntime, TriageRequest,
 };
 pub use crate::workspace::{
     export_workspace_findings, workspace_status_for_target, WorkspaceExportFormat,

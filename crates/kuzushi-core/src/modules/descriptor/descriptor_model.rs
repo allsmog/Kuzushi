@@ -30,8 +30,14 @@ pub struct ToolDescriptor {
     pub name: String,
     pub description: String,
     pub headless: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub hidden: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<OptionSpec>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

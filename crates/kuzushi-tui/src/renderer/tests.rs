@@ -1,5 +1,3 @@
-use super::*;
-
 use kuzushi_core::{
     Finding, FindingEvidence, OptionScope, OptionTarget, ScanCancellation, Severity,
     StaticProofState, TriageOutcome, TriageVerdict, V2Config,
@@ -11,25 +9,33 @@ use ratatui::Terminal;
 use super::*;
 
 #[test]
+fn kuzushi_theme_uses_blue_cyan_cockpit_accents() {
+    assert_eq!(
+        theme::T_ACCENT,
+        ratatui::prelude::Color::Rgb(0x7f, 0xb8, 0xff)
+    );
+    assert_eq!(
+        theme::T_LABEL,
+        ratatui::prelude::Color::Rgb(0xa6, 0xcd, 0xff)
+    );
+}
+
+#[test]
 fn renders_ink_style_shell_without_box_dashboard() {
     let backend = TestBackend::new(96, 24);
     let mut terminal = Terminal::new(backend).unwrap();
-    let app = ShellApp::new(V2Config::default(), None);
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Home;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    // Catalog title no longer repeats "kuzushi shell" (the prompt + the
-    // top header already identify the shell). Verify the new
-    // "KUZUSHI · CATALOG · N modules" signal is present, and the prompt
-    // sigil + keybind chips still render.
-    assert!(rendered.contains("KUZUSHI · CATALOG"));
+    assert!(rendered.contains("HOME"));
+    assert!(rendered.contains("rails:"));
     assert!(rendered.contains("modules"));
+    assert!(rendered.contains("recommend"));
     assert!(rendered.contains("kuzushi>"));
     assert!(rendered.contains("Tab complete"));
-    // The keybind footer now matches `design/mockups/_shared.jsx::footer`,
-    // which renders unbracketed pairs. The `modules` keybind (Ratatui
-    // catalog default) is still in the row — just without `[ ]` chrome.
     assert!(rendered.contains("modules browse"));
     assert!(!rendered.contains("command log"));
     assert!(!rendered.contains("┌"));
@@ -37,35 +43,108 @@ fn renders_ink_style_shell_without_box_dashboard() {
 }
 
 #[test]
-fn catalog_first_run_state_names_real_first_finding_commands() {
-    let backend = TestBackend::new(80, 16);
+fn compact_alias_uses_kz_prompt_brand() {
+    assert_eq!(prompt_text("kz", RoutingMode::Shell, None), "kz> ");
+    assert_eq!(
+        prompt_text("kz", RoutingMode::Module, Some("sast")),
+        "kz/sast> "
+    );
+    assert_eq!(
+        prompt_text("kz", RoutingMode::Run, Some("sast")),
+        "kz/sast/run> "
+    );
+}
+
+#[test]
+fn home_first_run_state_names_real_artifact_commands() {
+    let backend = TestBackend::new(80, 30);
     let mut terminal = Terminal::new(backend).unwrap();
-    let app = ShellApp::new(V2Config::default(), None);
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Home;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("First finding"));
-    assert!(rendered.contains("Start here"));
-    assert!(rendered.contains("kuzushi doctor --target ."));
+    assert!(rendered.contains("HOME"));
+    assert!(rendered.contains("rails:"));
     assert!(rendered.contains("scan ."));
     assert!(rendered.contains("findings"));
-    assert!(rendered.contains("pr-comment"));
+    assert!(rendered.contains("modules"));
+    assert!(rendered.contains("recommend"));
     assert!(rendered.contains("quickstart"));
     assert!(!rendered.contains("./repo"));
     assert!(!rendered.contains("┌"));
 }
 
 #[test]
-fn catalog_default_is_grouped_at_normal_width() {
-    let backend = TestBackend::new(120, 60);
+fn home_view_renders_latest_run_artifact_rail() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run_dir = tmp.path().join(".kuzushi/runs/run-1");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    std::fs::write(tmp.path().join(".kuzushi/latest"), "run-1\n").unwrap();
+    std::fs::write(run_dir.join("run.json"), r#"{"status":"completed"}"#).unwrap();
+    std::fs::write(run_dir.join("context.json"), r#"{"languages":["rust"]}"#).unwrap();
+    std::fs::write(run_dir.join("findings.json"), r#"{"status": "skipped"}"#).unwrap();
+    std::fs::write(
+        run_dir.join("attack-surface.json"),
+        serde_json::json!({
+            "status": "partial",
+            "summary": {
+                "highRisk": 2,
+                "maxRiskScore": 100,
+                "byRiskTier": {"critical": 1, "high": 1}
+            },
+            "surfaces": [{
+                "title": "Command execution boundary",
+                "risk": {"tier": "critical"}
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(run_dir.join("threat-model.json"), r#"{"status":"failed"}"#).unwrap();
+
+    let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
-    let app = ShellApp::new(V2Config::default(), None);
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
+    app.shell_view = ShellView::Home;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("KUZUSHI · CATALOG"));
+    assert!(rendered.contains("HOME"));
+    assert!(rendered.contains("run-1"));
+    assert!(rendered.contains("completed"));
+    assert!(rendered.contains("surface risk"));
+    assert!(rendered.contains("2 high/critical"));
+    assert!(rendered.contains("critical=1"));
+    assert!(rendered.contains("Command execution"));
+    assert!(rendered.contains("ctx"));
+    assert!(rendered.contains("✓"));
+    assert!(rendered.contains("recorded"));
+    assert!(rendered.contains("findings"));
+    assert!(rendered.contains("○"));
+    assert!(rendered.contains("placeholder"));
+    assert!(rendered.contains("⚠"));
+    assert!(rendered.contains("failed"));
+    assert!(rendered.contains("■"));
+    assert!(rendered.contains("missing"));
+    assert!(rendered.contains("◆"));
+    assert!(rendered.contains("partial"));
+}
+
+#[test]
+fn catalog_default_is_grouped_at_normal_width() {
+    let backend = TestBackend::new(120, 60);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Catalog;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("KUZUSHI · MODULES"));
     assert!(rendered.contains("▸ NEXT"));
     assert!(rendered.contains("OFFENSE"));
     assert!(rendered.contains("INTEL"));
@@ -80,12 +159,13 @@ fn catalog_default_is_grouped_at_normal_width() {
 fn catalog_default_keeps_quickstart_fallback_on_tight_width() {
     let backend = TestBackend::new(80, 16);
     let mut terminal = Terminal::new(backend).unwrap();
-    let app = ShellApp::new(V2Config::default(), None);
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Catalog;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("KUZUSHI · CATALOG"));
+    assert!(rendered.contains("KUZUSHI · MODULES"));
     assert!(rendered.contains("Start here"));
     assert!(rendered.contains("context build"));
     assert!(rendered.contains("scan ."));
@@ -193,7 +273,7 @@ fn finding_detail_surfaces_proof_state_and_report_commands_at_80_columns() {
 
     assert!(rendered.contains("proof state"), "{rendered}");
     assert!(rendered.contains("source_sink_linked"), "{rendered}");
-    assert!(rendered.contains("runtime validation"), "{rendered}");
+    assert!(rendered.contains("runtime verification"), "{rendered}");
     assert!(rendered.contains("Evidence: request parameter reaches query builder"));
     assert!(rendered.contains("workspace export findings"));
     assert!(rendered.contains("kuzushi pr-comment"));
@@ -317,7 +397,7 @@ fn renders_actionable_empty_states_at_80_columns() {
     // + label + indented muted explanation + `▸` CTA rows).
     for (view, expected) in [
         (ShellView::Findings, "no findings yet"),
-        (ShellView::Runs, "no runs persisted"),
+        (ShellView::Runs, "no run timeline entries"),
         (ShellView::Workspace, "no workspace selected"),
     ] {
         let backend = TestBackend::new(80, 18);
@@ -514,7 +594,7 @@ fn expanded_catalog_uses_design_sections_without_dag_column() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("KUZUSHI · CATALOG"));
+    assert!(rendered.contains("KUZUSHI · MODULES"));
     assert!(rendered.contains("▸ NEXT"));
     assert!(rendered.contains("OFFENSE"));
     assert!(rendered.contains("sast"));
@@ -705,8 +785,6 @@ fn recent_module_activity_uses_recon_snapshot_when_present() {
     use kuzushi_core::{ReconHost, ReconService};
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.focused_module = Some("recon".to_string());
-    app.shell_view = ShellView::Module;
     app.recon_snapshot = Some(ReconSnapshot {
         hosts: vec![ReconHost {
             id: "h1".to_string(),
@@ -729,8 +807,7 @@ fn recent_module_activity_uses_recon_snapshot_when_present() {
         last_target: Some("acme-checkout.com".to_string()),
     });
 
-    let area = Rect::new(0, 0, 120, 40);
-    let lines = module_lines(&app, area);
+    let lines = recent_module_activity_lines(&app, "recon", 8);
     let rendered: String = lines
         .iter()
         .flat_map(|line| line.spans.iter().map(|sp| sp.content.as_ref()))
@@ -749,10 +826,6 @@ fn recent_module_activity_uses_recon_snapshot_when_present() {
         rendered.contains("nginx/1.24"),
         "expected snapshot banner in output, got:\n{rendered}"
     );
-    assert!(
-        rendered.contains("RECENT RECON ACTIVITY"),
-        "expected RECENT RECON ACTIVITY header, got:\n{rendered}"
-    );
 }
 
 #[test]
@@ -760,8 +833,6 @@ fn recent_module_activity_falls_back_to_log_when_no_snapshot() {
     // No snapshot is populated → renderer must keep falling back to the
     // legacy `app.log` grep, which is the pre-snapshot behaviour.
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.focused_module = Some("recon".to_string());
-    app.shell_view = ShellView::Module;
     // Inject a recon-shaped log line that would be picked up by
     // `recent_module_log` filter (prefix == "result", body contains "recon").
     app.log(
@@ -769,8 +840,7 @@ fn recent_module_activity_falls_back_to_log_when_no_snapshot() {
         "recon:nmap discovered 1 host and 2 open services for 192.0.2.10",
     );
 
-    let area = Rect::new(0, 0, 120, 40);
-    let lines = module_lines(&app, area);
+    let lines = recent_module_activity_lines(&app, "recon", 8);
     let rendered: String = lines
         .iter()
         .flat_map(|line| line.spans.iter().map(|sp| sp.content.as_ref()))
@@ -780,10 +850,6 @@ fn recent_module_activity_falls_back_to_log_when_no_snapshot() {
     assert!(
         rendered.contains("recon:nmap discovered 1 host"),
         "expected fallback log-grep line in output, got:\n{rendered}"
-    );
-    assert!(
-        rendered.contains("RECENT RECON ACTIVITY"),
-        "expected RECENT RECON ACTIVITY header, got:\n{rendered}"
     );
 }
 
@@ -1154,40 +1220,31 @@ fn threats_stride_view_renders_design_rollup() {
 }
 
 #[test]
-fn focused_recon_module_renders_recent_activity_section() {
+fn deferred_recon_module_is_not_focusable_from_catalog() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.log.clear();
-    app.log(
-        "recon:nmap",
-        "discovered 5 hosts and 18 services for acme-checkout.com",
-    );
-    app.log("recon:subdomain", "discovered 7 subdomains");
-    app.log("recon", "persisted 3 findings");
-    app.handle_command(crate::commands::ShellCommand::Use("recon".to_string()));
+    app.shell_view = ShellView::Catalog;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(
-        rendered.contains("RECENT RECON ACTIVITY"),
-        "expected design section header for recon: {rendered}"
-    );
-    assert!(rendered.contains("discovered 5 hosts"));
-    assert!(rendered.contains("discovered 7 subdomains"));
+    assert!(!app
+        .registry
+        .modules()
+        .any(|module| module.metadata().id == "recon"));
+    assert!(app.registry.resolve_tool("recon:nmap").is_some());
 }
 
 #[test]
-fn focused_carlini_module_renders_recent_threat_hunt_activity() {
+fn focused_offense_review_module_renders_recent_threat_hunt_activity() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.log.clear();
-    app.log("carlini-threat-hunt", "actor 1/4 dispatched");
-    app.log("carlini-threat-hunt", "actor 2/4 found path-traversal sink");
+    app.log("offense-review", "actor 1/4 dispatched");
+    app.log("offense-review", "actor 2/4 found path-traversal sink");
     app.handle_command(crate::commands::ShellCommand::Use(
-        "carlini-threat-hunt".to_string(),
+        "offense-review".to_string(),
     ));
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -1195,7 +1252,7 @@ fn focused_carlini_module_renders_recent_threat_hunt_activity() {
 
     assert!(
         rendered.contains("RECENT THREAT-HUNT ACTIVITY"),
-        "expected design section header for carlini: {rendered}"
+        "expected design section header for offense-review: {rendered}"
     );
     assert!(rendered.contains("actor 1/4 dispatched"));
 }
@@ -1662,7 +1719,7 @@ fn renders_config_onboarding_without_silent_model_selection() {
     assert!(rendered.contains("onboarding"));
     assert!(rendered.contains("Up/Down"));
     assert!(rendered.contains(">"));
-    assert!(rendered.contains("openai-codex:gpt-5.5"));
+    assert!(rendered.contains("openai-oauth:gpt-5.5"));
     assert!(!rendered.contains("┌"));
 }
 
@@ -1959,6 +2016,8 @@ fn renders_agent_chat_mode_while_question_is_active() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        failure_context: None,
+        pending_failure_context: None,
     });
     app.shell_view = ShellView::AgentChat;
 
@@ -1994,6 +2053,8 @@ fn renders_honest_abort_requested_states() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        failure_context: None,
+        pending_failure_context: None,
     });
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -2021,6 +2082,193 @@ fn renders_honest_abort_requested_states() {
     assert!(scan_rendered.contains("abort requested"));
     assert!(scan_rendered.contains("waiting for subprocess"));
     assert!(!scan_rendered.contains("killed"));
+}
+
+#[test]
+fn agent_chat_renders_failure_handoff_panel() {
+    let backend = TestBackend::new(120, 34);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.agent_chat = Some(crate::app::AgentChatView {
+        question: "what next?".to_string(),
+        answer: None,
+        running: false,
+        abort_requested: false,
+        error: None,
+        history: Vec::new(),
+        run_id: None,
+        started_secs: 0,
+        failure_context: Some(kuzushi_core::run_artifacts::FailureToLlmContext {
+            failed_stage: "semgrep:scan".to_string(),
+            cause: "semgrep binary missing".to_string(),
+            what_failed: "semgrep:scan did not complete successfully".to_string(),
+            artifacts_available: vec![kuzushi_core::run_artifacts::RunArtifact {
+                label: "run".to_string(),
+                path: ".kuzushi/runs/r-1/run.json".to_string(),
+                kind: "json".to_string(),
+            }],
+            missing_artifacts: vec!["findings.json".to_string()],
+            allowed_proof_level: "artifact-review-only; runtime verification did not run"
+                .to_string(),
+            next_files_or_artifacts_to_inspect: vec![".kuzushi/runs/r-1/run.json".to_string()],
+            recovery_options: vec!["Install semgrep and rerun semgrep:scan.".to_string()],
+            fallback_prompt: "Continue the failed Kuzushi run for semgrep:scan.".to_string(),
+            claims_forbidden: vec!["validated".to_string(), "verified".to_string()],
+        }),
+        pending_failure_context: None,
+    });
+    app.shell_view = ShellView::AgentChat;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("FAILURE HANDOFF"));
+    assert!(rendered.contains("semgrep:scan"));
+    assert!(rendered.contains("artifact-review-only"));
+    assert!(rendered.contains("findings.json"));
+    assert!(rendered.contains("validated, verified"));
+}
+
+#[test]
+fn failure_handoff_view_renders_current_context() {
+    let backend = TestBackend::new(120, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.agent_chat = Some(crate::app::AgentChatView {
+        question: String::new(),
+        answer: None,
+        running: false,
+        abort_requested: false,
+        error: None,
+        history: Vec::new(),
+        run_id: None,
+        started_secs: 0,
+        failure_context: Some(kuzushi_core::run_artifacts::FailureToLlmContext {
+            failed_stage: "semgrep:scan".to_string(),
+            cause: "semgrep binary missing".to_string(),
+            what_failed: "semgrep:scan did not complete successfully".to_string(),
+            artifacts_available: Vec::new(),
+            missing_artifacts: vec!["findings.json".to_string()],
+            allowed_proof_level: "artifact-review-only; runtime verification did not run"
+                .to_string(),
+            next_files_or_artifacts_to_inspect: vec!["failures.json".to_string()],
+            recovery_options: vec!["Install semgrep.".to_string()],
+            fallback_prompt: "Continue the failed Kuzushi run.".to_string(),
+            claims_forbidden: vec!["verified".to_string()],
+        }),
+        pending_failure_context: None,
+    });
+    app.shell_view = ShellView::FailureHandoff;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("FAILURE HANDOFF"));
+    assert!(rendered.contains("semgrep:scan"));
+    assert!(rendered.contains("findings.json"));
+    assert!(rendered.contains("Continue the failed Kuzushi run."));
+}
+
+#[test]
+fn failure_handoff_view_reads_latest_failures_artifact() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run_dir = tmp.path().join(".kuzushi/runs/run-1");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    std::fs::write(tmp.path().join(".kuzushi/latest"), "run-1\n").unwrap();
+    std::fs::write(
+        run_dir.join("failures.json"),
+        serde_json::json!({
+            "runId": "run-1",
+            "status": "failed",
+            "failures": [{
+                "tool": "semgrep:scan",
+                "status": "failed",
+                "error": "semgrep binary missing",
+                "agentThreadContext": {
+                    "failedStage": "semgrep:scan",
+                    "cause": "semgrep binary missing",
+                    "whatFailed": "semgrep:scan did not complete successfully",
+                    "artifactsAvailable": [],
+                    "missingArtifacts": ["findings.json"],
+                    "allowedProofLevel": "artifact-review-only; runtime verification did not run",
+                    "nextFilesOrArtifactsToInspect": ["failures.json"],
+                    "recoveryOptions": ["Install semgrep."],
+                    "fallbackPrompt": "Continue the failed Kuzushi run.",
+                    "claimsForbidden": ["verified"]
+                }
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let backend = TestBackend::new(120, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
+    app.shell_view = ShellView::FailureHandoff;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("FAILURE HANDOFF"));
+    assert!(rendered.contains("semgrep:scan"));
+    assert!(rendered.contains("findings.json"));
+    assert!(rendered.contains("Continue the failed Kuzushi run."));
+}
+
+#[test]
+fn recommend_view_renders_latest_recommendations_artifact() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run_dir = tmp.path().join(".kuzushi/runs/run-1");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    std::fs::write(tmp.path().join(".kuzushi/latest"), "run-1\n").unwrap();
+    std::fs::write(
+        run_dir.join("recommendations.json"),
+        serde_json::json!([
+            {
+                "tool": "semgrep:scan",
+                "priority": "high",
+                "reason": "Source files match the fast native SAST path.",
+                "requiresRuntime": false
+            }
+        ])
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(
+        run_dir.join("attack-surface.json"),
+        serde_json::json!({
+            "summary": {
+                "highRisk": 1,
+                "maxRiskScore": 90,
+                "byRiskTier": {"critical": 1}
+            },
+            "surfaces": [{
+                "title": "POST /admin",
+                "risk": {"tier": "critical"}
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let backend = TestBackend::new(120, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
+    app.shell_view = ShellView::Recommend;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("RECOMMEND"));
+    assert!(rendered.contains("semgrep:scan"));
+    assert!(rendered.contains("surface risk"));
+    assert!(rendered.contains("1 high/critical"));
+    assert!(rendered.contains("critical=1"));
+    assert!(rendered.contains("⚠ high"));
+    assert!(rendered.contains("Source files match"));
 }
 
 #[test]
@@ -2075,6 +2323,26 @@ fn renders_shell_module_plan_and_run_routing_modes() {
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains(mode), "missing {mode} in {rendered}");
+        assert!(
+            rendered.contains("KUZUSHI mode:"),
+            "missing cockpit strip in {rendered}"
+        );
+        assert!(
+            rendered.contains(" | target "),
+            "missing target separator in {rendered}"
+        );
+        assert!(
+            rendered.contains(" | ctx "),
+            "missing ctx separator in {rendered}"
+        );
+        assert!(
+            rendered.contains(" | model "),
+            "missing model separator in {rendered}"
+        );
+        assert!(
+            !rendered.contains("KUZUSHI  mode "),
+            "old cockpit strip remained in {rendered}"
+        );
         assert!(rendered.contains(prompt), "missing {prompt} in {rendered}");
         assert!(!rendered.contains("┌"));
     }
@@ -2083,8 +2351,10 @@ fn renders_shell_module_plan_and_run_routing_modes() {
 #[test]
 fn renders_all_ink_parity_shell_surfaces() {
     let cases = vec![
-        (ShellView::Catalog, "target:none"),
-        (ShellView::Module, "semgrep"),
+        (ShellView::Home, "HOME"),
+        (ShellView::Catalog, "KUZUSHI · MODULES"),
+        (ShellView::Recommend, "RECOMMEND"),
+        (ShellView::Module, "MODULE DETAIL"),
         (ShellView::ModuleRun, "TRANSCRIPT"),
         (ShellView::Findings, "filters"),
         (ShellView::Tune, "TUNE"),
@@ -2093,7 +2363,7 @@ fn renders_all_ink_parity_shell_surfaces() {
         (ShellView::ThreatEditor, "THREAT MODEL EDIT"),
         (ShellView::PromptsEditor, "PROMPTS"),
         (ShellView::ActorDetail(1), "ACTOR 1"),
-        (ShellView::Runs, "RUNS"),
+        (ShellView::Runs, "RUN TIMELINE"),
         (ShellView::Replay("run-1".to_string()), "REPLAY"),
         (ShellView::Trace("run-1".to_string()), "TRACE"),
         (ShellView::Help, "HELP"),
@@ -2110,6 +2380,7 @@ fn renders_all_ink_parity_shell_surfaces() {
         (ShellView::Context, "CONTEXT"),
         (ShellView::Workspace, "WORKSPACE"),
         (ShellView::KnowledgeBase, "KB ATTACHMENTS"),
+        (ShellView::FailureHandoff, "FAILURE HANDOFF"),
         (ShellView::AgentChat, "AGENT"),
         (ShellView::History, "COMMAND HISTORY"),
         (ShellView::Story, "SESSION STORY"),
@@ -2331,6 +2602,9 @@ fn view_status_segment_reflects_actual_view_not_focused_module() {
     app.shell_view = ShellView::Help;
     assert_eq!(view_status_segment(&app), "help");
 
+    app.shell_view = ShellView::Catalog;
+    assert_eq!(view_status_segment(&app), "modules");
+
     app.shell_view = ShellView::Tools;
     assert_eq!(view_status_segment(&app), "tools");
 
@@ -2339,6 +2613,12 @@ fn view_status_segment_reflects_actual_view_not_focused_module() {
 
     app.shell_view = ShellView::Threat(ThreatView::Stride);
     assert_eq!(view_status_segment(&app), "threats:stride");
+
+    app.shell_view = ShellView::Runs;
+    assert_eq!(view_status_segment(&app), "run-timeline");
+
+    app.shell_view = ShellView::FailureHandoff;
+    assert_eq!(view_status_segment(&app), "failure-handoff");
 
     // Module view still surfaces the focused module so operators can
     // see which module they're driving.
@@ -2638,7 +2918,7 @@ fn runs_view_tints_status_column_per_mockup() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("RUNS"));
+    assert!(rendered.contains("RUN TIMELINE"));
     assert!(rendered.contains("r-08e1aa"));
     assert!(rendered.contains("11"));
     // Verify by inspecting the line spans directly so we know the
@@ -2702,19 +2982,18 @@ fn transcript_finding_line_tints_severity_per_mockup() {
 }
 
 #[test]
-fn runs_view_lists_past_runs_from_disk_with_summary_json() {
+fn runs_view_lists_past_runs_from_run_json_with_summary_fallback() {
     // Mockup parity: `design/mockups/runs.jsx` shows past runs as a
-    // table with status tinting.  Verify `runs_lines` reads
-    // `<target>/.kuzushi/runs/<runId>/summary.json` and renders one
-    // styled row per past run, with status colour driven by the
-    // `status` field.
+    // table with status tinting.  Verify the run view model prefers
+    // canonical `run.json`, keeps `summary.json` fallback, and renders
+    // one styled row per past run.
     let tmp = tempfile::tempdir().unwrap();
     let runs_root = tmp.path().join(".kuzushi/runs");
     std::fs::create_dir_all(runs_root.join("r-2026-05-06T14-31")).unwrap();
     std::fs::create_dir_all(runs_root.join("r-2026-05-06T15-18")).unwrap();
     std::fs::write(
-        runs_root.join("r-2026-05-06T14-31/summary.json"),
-        r#"{"status":"complete","findings":18,"target":"~/work/acme-checkout"}"#,
+        runs_root.join("r-2026-05-06T14-31/run.json"),
+        r#"{"status":"completed","findings":18,"target":"~/work/acme-checkout"}"#,
     )
     .unwrap();
     std::fs::write(
@@ -2732,10 +3011,10 @@ fn runs_view_lists_past_runs_from_disk_with_summary_json() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("RUNS"));
+    assert!(rendered.contains("RUN TIMELINE"));
     // Both past runs reach the buffer (short() takes the leading 8 chars).
     assert!(rendered.contains("r-2026-0"));
-    assert!(rendered.contains("complete"));
+    assert!(rendered.contains("completed"));
     assert!(rendered.contains("failed"));
     assert!(rendered.contains("18"));
     assert!(rendered.contains("replay <runId>"));
@@ -2915,7 +3194,7 @@ fn auth_view_renders_providers_model_and_spend_sections() {
     assert!(rendered.contains("SPEND"));
     assert!(rendered.contains("openai:gpt-4.1"));
     assert!(rendered.contains("$0.42"));
-    assert!(rendered.contains("auth login openai-codex"));
+    assert!(rendered.contains("auth login openai"));
 }
 
 #[test]
@@ -3129,6 +3408,36 @@ fn trace_view_empty_when_no_trace_jsonl_on_disk() {
 }
 
 #[test]
+fn replay_view_prefers_run_json_and_keeps_summary_fallback() {
+    let tmp = tempfile::tempdir().unwrap();
+    let canonical = tmp.path().join(".kuzushi/runs/r-canonical");
+    let legacy = tmp.path().join(".kuzushi/runs/r-legacy");
+    std::fs::create_dir_all(&canonical).unwrap();
+    std::fs::create_dir_all(&legacy).unwrap();
+    std::fs::write(canonical.join("run.json"), r#"{"status":"completed"}"#).unwrap();
+    std::fs::write(legacy.join("summary.json"), r#"{"status":"complete"}"#).unwrap();
+
+    let canonical_rendered = render_replay_for_target(tmp.path(), "r-canonical");
+    assert!(canonical_rendered.contains("run.json"));
+    assert!(!canonical_rendered.contains("summary.json (missing)"));
+
+    let legacy_rendered = render_replay_for_target(tmp.path(), "r-legacy");
+    assert!(legacy_rendered.contains("summary.json"));
+    assert!(!legacy_rendered.contains("run artefacts not on disk"));
+}
+
+fn render_replay_for_target(target: &std::path::Path, run_id: &str) -> String {
+    let backend = TestBackend::new(140, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(target.to_path_buf());
+    app.shell_view = ShellView::Replay(run_id.to_string());
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    format!("{:?}", terminal.backend().buffer())
+}
+
+#[test]
 fn patch_view_renders_rationale_diff_tests_and_guardrail_sections() {
     // `design/mockups/patch.jsx` shows RATIONALE / DIFF / TESTS /
     // GUARDRAIL.  Verify all four reach the buffer with diff lines
@@ -3320,6 +3629,8 @@ fn agent_chat_renders_multi_turn_history_with_bubble_per_turn() {
         ],
         run_id: None,
         started_secs: 0,
+        failure_context: None,
+        pending_failure_context: None,
     });
     app.shell_view = ShellView::AgentChat;
 
@@ -3361,6 +3672,8 @@ fn agent_chat_fold_for_next_turn_pushes_completed_turn_into_history() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        failure_context: None,
+        pending_failure_context: None,
     };
     let next2 = prev.fold_for_next_turn("second question".to_string());
     assert_eq!(next2.history.len(), 1);
@@ -3392,6 +3705,8 @@ fn agent_chat_renders_role_tagged_bubbles() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        failure_context: None,
+        pending_failure_context: None,
     });
     app.shell_view = ShellView::AgentChat;
 

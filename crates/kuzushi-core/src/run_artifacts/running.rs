@@ -10,6 +10,22 @@ pub struct RunArtifact {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
+pub struct RunLlmCallAudit {
+    pub n: usize,
+    pub kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verb: Option<String>,
+    pub model: String,
+    pub provider: String,
+    pub prompt_hash: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub latency_ms: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cost_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
 pub struct RunSummary {
     pub run_id: String,
     pub kind: String,
@@ -28,6 +44,8 @@ pub struct RunSummary {
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub process_id: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub llm_calls: Vec<RunLlmCallAudit>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifacts: Vec<RunArtifact>,
 }
@@ -51,12 +69,13 @@ impl RunSummary {
             cost_usd: None,
             error: None,
             process_id: None,
+            llm_calls: Vec::new(),
             artifacts: Vec::new(),
         }
     }
 
     pub fn complete(mut self) -> Self {
-        self.status = "complete".to_string();
+        self.status = "completed".to_string();
         self.completed_at_unix = Some(now_unix());
         self.process_id = None;
         self
@@ -97,11 +116,15 @@ impl RunSummary {
         self.artifacts.push(artifact);
         self
     }
+
+    pub fn with_llm_calls(mut self, llm_calls: Vec<RunLlmCallAudit>) -> Self {
+        self.llm_calls = llm_calls;
+        self
+    }
 }
 
-// schema v2: adds module_id / verb / parent_step / severity / started_at_ms
-// for the live module-progress view. All new fields are optional so older
-// trace.jsonl files round-trip without rewrites.
+// schema v2: adds module/feed metadata and optional LLM audit fields. All new
+// fields are optional so older trace.jsonl files round-trip without rewrites.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct RunTraceStep {
@@ -122,4 +145,10 @@ pub struct RunTraceStep {
     pub severity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prompt_hash: Option<String>,
 }

@@ -1,8 +1,8 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use anyhow::{Context, Result};
-use serde_json::Value;
+use serde_json::{json, Value};
 
 use super::ToolExecutionContext;
 
@@ -32,6 +32,26 @@ pub(in crate::modules) fn resolve_tool_target(
     }
 
     std::env::current_dir().context("Could not resolve current directory")
+}
+
+pub(in crate::modules) fn failed_tool_output(
+    tool: &str,
+    target: &Path,
+    error: anyhow::Error,
+) -> Value {
+    let error = error.to_string();
+    json!({
+        "ok": false,
+        "status": "failed",
+        "summary": format!("{tool} failed for {}", target.display()),
+        "artifacts": [],
+        "warnings": [],
+        "errors": [error],
+        "data": {
+            "target": target.display().to_string(),
+            "tool": tool,
+        },
+    })
 }
 
 pub(in crate::modules) fn should_skip_path(name: &str) -> bool {

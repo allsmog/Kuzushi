@@ -2,6 +2,15 @@ use super::*;
 
 pub(crate) fn plain_config_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
+    push_plain_config_summary(&mut lines, app, width);
+    push_plain_model_table(&mut lines, width);
+    lines.push(String::new());
+    lines
+        .push("Next: model <n> [xhigh], auth login openai, auth login anthropic, cost".to_string());
+    lines
+}
+
+fn push_plain_config_summary(lines: &mut Vec<String>, app: &ShellApp, width: usize) {
     lines.push(String::new());
     lines.push(plain_section_divider("CONFIG", width));
     lines.push(format!(
@@ -11,7 +20,11 @@ pub(crate) fn plain_config_lines(app: &ShellApp, width: usize) -> Vec<String> {
     lines.push(format!("provider: {}", app.provider_label()));
     lines.push(format!(
         "model: {}",
-        app.config.model.as_deref().unwrap_or("unconfigured")
+        app.config
+            .model
+            .as_deref()
+            .map(crate::app::display_model_selector)
+            .unwrap_or_else(|| "unconfigured".to_string())
     ));
     lines.push(format!(
         "reasoning: {}",
@@ -26,7 +39,9 @@ pub(crate) fn plain_config_lines(app: &ShellApp, width: usize) -> Vec<String> {
     if app.config.model.is_none() {
         lines.push("onboarding: model <n> selects an explicit provider:model; no fallback model is selected.".to_string());
     }
+}
 
+fn push_plain_model_table(lines: &mut Vec<String>, width: usize) {
     lines.push(String::new());
     lines.push(plain_section_divider("MODELS", width));
     lines.push(table_text(
@@ -38,7 +53,10 @@ pub(crate) fn plain_config_lines(app: &ShellApp, width: usize) -> Vec<String> {
         lines.push(table_text(
             &[
                 &choice.index.to_string(),
-                &fit(choice.id, widths.get(1).copied().unwrap_or(28)),
+                &fit(
+                    &crate::app::model_choice_display_selector(choice),
+                    widths.get(1).copied().unwrap_or(28),
+                ),
                 choice.thinking_level,
                 &fit(
                     &model_auth_status(choice),
@@ -48,11 +66,6 @@ pub(crate) fn plain_config_lines(app: &ShellApp, width: usize) -> Vec<String> {
             &widths,
         ));
     }
-    lines.push(String::new());
-    lines.push(
-        "Next: model <n> [xhigh], auth login openai-codex, auth login anthropic, cost".to_string(),
-    );
-    lines
 }
 
 pub(crate) fn plain_context_strip(app: &ShellApp, width: usize) -> Vec<String> {
@@ -66,16 +79,10 @@ pub(crate) fn plain_context_strip(app: &ShellApp, width: usize) -> Vec<String> {
             )
         })
         .unwrap_or_else(|| "target:none".to_string());
-    let module = if matches!(app.shell_view, ShellView::AgentChat) {
-        "agent".to_string()
-    } else {
-        app.focused_module
-            .clone()
-            .unwrap_or_else(|| "catalog".to_string())
-    };
+    let view = view_status_segment(app);
     vec![fit(
         &format!(
-            "{} | {target} | {module} | {} | {} mods",
+            "{} | {target} | {view} | {} | {} mods",
             routing_mode_segment(app),
             findings_count_summary(&app.findings),
             app.registry.modules().count()

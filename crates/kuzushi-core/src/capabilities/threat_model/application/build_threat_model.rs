@@ -6,7 +6,9 @@ pub(crate) fn build_threat_model(
     runtime: Option<&dyn AgentRuntime>,
     flavor: BuildFlavor,
 ) -> Result<Value> {
-    let runtime = require_threat_model_runtime(runtime, flavor)?;
+    let Some(runtime) = runtime else {
+        return build_deterministic_threat_model(input, ctx, flavor);
+    };
     let input = parse_build_input(&input, ctx, flavor)?;
     let verb = threat_model_build_verb(flavor);
     emit_threat_model_start(ctx, verb, flavor, &input);
@@ -198,131 +200,6 @@ fn threat_model_findings(
     }
 }
 
-struct ThreatModelSummary {
-    threat_count: usize,
-    node_count: usize,
-    flow_count: usize,
-    boundary_count: usize,
-}
-
-fn threat_model_summary(document: &Value) -> ThreatModelSummary {
-    ThreatModelSummary {
-        threat_count: array_len(document.pointer("/threats")),
-        node_count: array_len(document.pointer("/dfd/nodes")),
-        flow_count: array_len(document.pointer("/dfd/flows")),
-        boundary_count: array_len(document.pointer("/dfd/trustBoundaries")),
-    }
-}
-
-fn threat_model_output_lines(
-    flavor: BuildFlavor,
-    input: &BuildInput,
-    summary: &ThreatModelSummary,
-    finding_count: usize,
-    persisted: bool,
-) -> Vec<String> {
-    let mut lines = threat_model_header_lines(flavor, input, persisted);
-    lines.extend(threat_model_metric_lines(input, summary, finding_count));
-    lines
-}
-
-fn threat_model_header_lines(
-    flavor: BuildFlavor,
-    input: &BuildInput,
-    persisted: bool,
-) -> Vec<String> {
-    match flavor {
-        BuildFlavor::ThreatModel => threat_model_build_header_lines(input, persisted),
-        BuildFlavor::RandoriPasta => randori_pasta_header_lines(input),
-    }
-}
-
-fn threat_model_build_header_lines(input: &BuildInput, persisted: bool) -> Vec<String> {
-    vec![
-        format!(
-            "threat-model:build complete for {} ({})",
-            input.repo_name,
-            input.target.display()
-        ),
-        format!("  Method:   {}", methodology_label(&input.methodology)),
-        format!("  Slice:    {}", input.slice),
-        format!("  Provider: {}", BuildFlavor::ThreatModel.provider()),
-        format!("  Stages:   {}", input.stages.join(", ")),
-        format!("  Artifact: {}", input.output_dir),
-        format!("  Saved:    {}", saved_threat_model_status(persisted)),
-    ]
-}
-
-fn randori_pasta_header_lines(input: &BuildInput) -> Vec<String> {
-    vec![
-        format!(
-            "randori:pasta complete for {} ({})",
-            input.repo_name,
-            input.target.display()
-        ),
-        format!("  Stages:   {}", input.stages.join(", ")),
-        format!("  Artifact: {}", input.output_dir),
-    ]
-}
-
-fn saved_threat_model_status(persisted: bool) -> &'static str {
-    if persisted {
-        ".kuzushi/threat-model.json"
-    } else {
-        "skipped (operator-edited model preserved)"
-    }
-}
-
-fn threat_model_metric_lines(
-    input: &BuildInput,
-    summary: &ThreatModelSummary,
-    finding_count: usize,
-) -> [String; 4] {
-    [
-        format!("  Threats:  {}", summary.threat_count),
-        format!(
-            "  DFD:      {} nodes · {} flows · {} boundaries",
-            summary.node_count, summary.flow_count, summary.boundary_count
-        ),
-        format!(
-            "  Findings: {}{}",
-            finding_count,
-            findings_suppressed_suffix(input.emit_findings)
-        ),
-        "  Cost:     $0.0000".to_string(),
-    ]
-}
-
-fn findings_suppressed_suffix(emit_findings: bool) -> &'static str {
-    if emit_findings {
-        ""
-    } else {
-        " (emitFindings=false)"
-    }
-}
-
-fn emit_threat_model_done(
-    ctx: &ToolExecutionContext<'_>,
-    verb: &str,
-    flavor: BuildFlavor,
-    summary: &ThreatModelSummary,
-) {
-    if let Some(trace) = ctx.trace {
-        let _ = trace
-            .step(
-                "done",
-                verb,
-                format!(
-                    "{} complete · {threats} threats · {nodes} nodes",
-                    flavor.tool_name(),
-                    threats = summary.threat_count,
-                    nodes = summary.node_count
-                ),
-            )
-            .emit();
-    }
-}
-
 fn threat_model_response(
     input: BuildInput,
     flavor: BuildFlavor,
@@ -333,15 +210,22 @@ fn threat_model_response(
     mut lines: Vec<String>,
 ) -> Value {
     append_top_threats(&mut lines, &generated.document);
+    let persistent_artifact = input.target.join(".kuzushi").join("threat-model.json");
+    let artifact_items = threat_model_artifacts(
+        &artifacts.normalized_artifact,
+        &persistent_artifact,
+        artifacts.persisted,
+    );
     json!({
         "ok": summary.threat_count > 0 || summary.node_count > 0 || summary.flow_count > 0,
         "output": lines.join("\n"),
+        "artifacts": artifact_items,
         "data": {
             "target": input.target.display().to_string(),
             "repoName": input.repo_name,
             "artifactDir": input.output_dir,
             "normalizedArtifact": artifacts.normalized_artifact.display().to_string(),
-            "threatModelPath": input.target.join(".kuzushi").join("threat-model.json").display().to_string(),
+            "threatModelPath": persistent_artifact.display().to_string(),
             "provider": flavor.provider(),
             "methodology": input.methodology,
             "slice": input.slice,

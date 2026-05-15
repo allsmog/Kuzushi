@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 137
 ---
-mode:shell | target:none | catalog | 0 findings | 39 mods
+mode:shell | target:none | tasks | 0 findings | 32 mods
 
  -- SAST TASKS ---------------------------------------------------------------------------------------------------------
 mode: auto + denylist
@@ -15,7 +15,7 @@ state  id                        cost   scan                notes
 [x]    secret-scan               low    secret-scan         local secret patterns
 [x]    iac-scan                  low    iac-scan            IaC misconfiguration scanner
 [A]    agentic                   high   agentic             model-backed detector set; run via sast:scan
-[A]    carlini-threat-hunt       high   carlini-threat-...  actor-driven hunt; run via sast:scan
+[A]    offense-review            high   offense-review      threat-model-guided review; run via sast:scan
 [A]    taint-iris                high   taint-iris          source-to-sink analysis; run via sast:scan
 [A]    taint-iris-next           high   taint-iris-next     next taint workflow; run via sast:scan
 [A]    systems-hunt              high   systems-hunt        systems invariant hunt; run via sast:scan

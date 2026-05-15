@@ -59,7 +59,7 @@ pub fn scan_engines_for_tasks(tasks: &[String]) -> Result<Vec<Box<dyn ScanEngine
             "iac-scan" | "iac-scan:scan" => scanners.push(Box::new(IacScanScanner::default())),
             "" => {}
             other => anyhow::bail!(
-                "unknown scan task {other:?}; supported tasks: semgrep, codeql, dep-hygiene, cargo-audit, secret-scan, iac-scan, agentic, carlini-threat-hunt, taint-iris, taint-iris-next, systems-hunt"
+                "unknown scan task {other:?}; supported tasks: semgrep, codeql, dep-hygiene, cargo-audit, secret-scan, iac-scan, agentic, offense-review, taint-iris, taint-iris-next, systems-hunt"
             ),
         }
     }

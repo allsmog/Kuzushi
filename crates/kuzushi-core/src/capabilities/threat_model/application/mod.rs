@@ -1,8 +1,11 @@
 use super::*;
 
 pub(crate) use build_threat_model::*;
+pub(crate) use build_summary::*;
 pub(crate) use collect_s2::*;
 pub(crate) use collect_s3::*;
+pub(crate) use deterministic_build::*;
+pub(crate) use deterministic_input::*;
 pub(crate) use inventory_files::*;
 pub(crate) use normalize_document::*;
 pub(crate) use read_manifest_summary::*;
@@ -11,8 +14,13 @@ pub(crate) use read_randori_artifacts::*;
 pub(crate) use read_threat_model::*;
 
 mod build_threat_model;
+mod build_summary;
 mod collect_s2;
 mod collect_s3;
+mod deterministic_build;
+mod deterministic_dfd;
+mod deterministic_dfd_specs;
+mod deterministic_input;
 mod inventory_files;
 mod normalize_document;
 mod read_manifest_summary;

@@ -1,4 +1,4 @@
-use crate::findings::{Finding, Severity};
+use crate::findings::{Finding, Severity, StaticProofState};
 use crate::scan::{ScanCancellation, ScanEngine};
 use anyhow::{Context, Result};
 pub(crate) use assignment_detection::*;

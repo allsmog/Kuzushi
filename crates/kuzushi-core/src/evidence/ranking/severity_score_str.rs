@@ -32,28 +32,45 @@ pub(crate) fn attack_surface_score(
     let Some(surface_map) = attack_surface else {
         return 0;
     };
-    let mut best = 0;
-    for surface in &surface_map.surfaces {
-        if surface_matches_finding(surface, finding, evidence_nodes) {
-            let score = match surface.kind {
-                AttackSurfaceKind::HttpRoute | AttackSurfaceKind::RpcHandler => 24,
-                AttackSurfaceKind::CliEntrypoint => 18,
-                AttackSurfaceKind::FileUploadParsePath => 20,
-                AttackSurfaceKind::DeserializationPoint => 18,
-                AttackSurfaceKind::DbQueryBoundary
-                | AttackSurfaceKind::CommandExecutionBoundary => 16,
-                AttackSurfaceKind::AuthBoundary => 14,
-                AttackSurfaceKind::BackgroundJob => 10,
-            };
-            if score > best {
-                best = score;
-            }
-        }
+    let best = best_attack_surface_score(surface_map, finding, evidence_nodes);
+    record_attack_surface_reason(best, reasons);
+    best
+}
+
+fn best_attack_surface_score(
+    surface_map: &AttackSurfaceMap,
+    finding: &Finding,
+    evidence_nodes: &[StaticEvidenceNode],
+) -> i32 {
+    surface_map
+        .surfaces
+        .iter()
+        .filter(|surface| surface_matches_finding(surface, finding, evidence_nodes))
+        .map(surface_reachability_score)
+        .max()
+        .unwrap_or_default()
+}
+
+fn surface_reachability_score(surface: &AttackSurface) -> i32 {
+    match surface.kind {
+        AttackSurfaceKind::HttpRoute | AttackSurfaceKind::RpcHandler => 24,
+        AttackSurfaceKind::FileUploadParsePath => 20,
+        AttackSurfaceKind::CliEntrypoint | AttackSurfaceKind::DeserializationPoint => 18,
+        AttackSurfaceKind::DbQueryBoundary
+        | AttackSurfaceKind::CommandExecutionBoundary
+        | AttackSurfaceKind::ExternalServiceClient
+        | AttackSurfaceKind::TenantIsolationBoundary => 16,
+        AttackSurfaceKind::AuthBoundary
+        | AttackSurfaceKind::SessionStateBoundary
+        | AttackSurfaceKind::RequestTrustBoundary => 14,
+        AttackSurfaceKind::BackgroundJob => 10,
     }
+}
+
+fn record_attack_surface_reason(best: i32, reasons: &mut Vec<String>) {
     if best > 0 {
         reasons.push("attack_surface_reachable".to_string());
     }
-    best
 }
 
 pub(crate) fn surface_matches_finding(

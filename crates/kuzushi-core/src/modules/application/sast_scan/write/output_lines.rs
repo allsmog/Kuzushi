@@ -63,14 +63,14 @@ impl WhiteboxArtifacts {
         let Some(count) = optional_positive_count(&self.candidate_semgrep_rules, "count") else {
             return;
         };
-        let validated = self
+        let fixture_checked = self
             .candidate_semgrep_rules
             .as_ref()
             .and_then(|rules| rules.get("validationPassed"))
             .and_then(Value::as_u64)
             .unwrap_or_default();
         lines.push(format!(
-            "  Candidate Semgrep rules: {count} disabled candidate(s), {validated} fixture-validated"
+            "  Candidate Semgrep rules: {count} disabled candidate(s), {fixture_checked} fixture-checked"
         ));
     }
 

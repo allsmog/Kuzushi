@@ -24,7 +24,7 @@ impl ShellApp {
         self.log(
             "provider",
             format!(
-                "{} via pi-agent-core. Supported selectors: openai, openai-codex, anthropic. Next: model",
+                "{} via pi-agent-core. Supported selectors: openai, anthropic. Next: model",
                 self.provider_label()
             ),
         );

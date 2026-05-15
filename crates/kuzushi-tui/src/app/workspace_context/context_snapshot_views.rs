@@ -43,10 +43,7 @@ pub(crate) fn load_context_snapshot_view(snapshot_path: PathBuf) -> Result<Conte
         return Ok(default_context_snapshot_view(Some(snapshot_path)));
     }
 
-    let body = fs::read_to_string(&snapshot_path)
-        .with_context(|| format!("Could not read {}", snapshot_path.display()))?;
-    let snapshot: serde_json::Value = serde_json::from_str(&body)
-        .with_context(|| format!("Could not parse {}", snapshot_path.display()))?;
+    let snapshot = read_context_snapshot_json(&snapshot_path)?;
     let files_indexed = snapshot
         .get("filesIndexed")
         .and_then(serde_json::Value::as_u64);
@@ -65,10 +62,7 @@ pub(crate) fn load_context_snapshot_view(snapshot_path: PathBuf) -> Result<Conte
         .get("discovery")
         .and_then(serde_json::Value::as_str)
         .map(ToString::to_string);
-    let status = format!(
-        "snapshot present; {} indexed file(s). Next: context regen repo",
-        files_indexed.or(total_files).unwrap_or(0)
-    );
+    let status = context_snapshot_status(files_indexed, total_files);
 
     Ok(ContextSnapshotView {
         snapshot_path: Some(snapshot_path),
@@ -83,6 +77,20 @@ pub(crate) fn load_context_snapshot_view(snapshot_path: PathBuf) -> Result<Conte
         generated_slices,
         stale_slices,
     })
+}
+
+fn read_context_snapshot_json(snapshot_path: &std::path::Path) -> Result<serde_json::Value> {
+    let body = fs::read_to_string(snapshot_path)
+        .with_context(|| format!("Could not read {}", snapshot_path.display()))?;
+    serde_json::from_str(&body)
+        .with_context(|| format!("Could not parse {}", snapshot_path.display()))
+}
+
+fn context_snapshot_status(files_indexed: Option<u64>, total_files: Option<u64>) -> String {
+    format!(
+        "snapshot present; {} indexed file(s). Next: context regen repo",
+        files_indexed.or(total_files).unwrap_or(0)
+    )
 }
 
 pub(crate) fn json_string_array(value: Option<&serde_json::Value>) -> Vec<String> {
@@ -101,7 +109,7 @@ pub(crate) fn json_string_array(value: Option<&serde_json::Value>) -> Vec<String
 pub(crate) fn normalize_kb_module_id(raw_id: &str) -> String {
     match raw_id.trim().to_ascii_lowercase().as_str() {
         "tm" | "threat" | "threats" => "threat-model".to_string(),
-        "carlini" | "threat-hunt" => "carlini-threat-hunt".to_string(),
+        "carlini" | "threat-hunt" | "carlini-threat-hunt" => "offense-review".to_string(),
         "xray" | "x_ray" => "x-ray".to_string(),
         other => other.to_string(),
     }

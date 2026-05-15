@@ -14,11 +14,19 @@ pub fn new_run_id(prefix: &str) -> String {
 }
 
 pub fn runs_root(target: impl AsRef<Path>) -> PathBuf {
-    target.as_ref().join(".kuzushi").join("runs")
+    kuzushi_root(target).join("runs")
 }
 
 pub fn run_dir(target: impl AsRef<Path>, run_id: &str) -> PathBuf {
     runs_root(target).join(run_id)
+}
+
+pub fn kuzushi_root(target: impl AsRef<Path>) -> PathBuf {
+    target.as_ref().join(".kuzushi")
+}
+
+pub fn latest_run_path(target: impl AsRef<Path>) -> PathBuf {
+    kuzushi_root(target).join("latest")
 }
 
 fn sanitize_run_id_prefix(prefix: &str) -> String {

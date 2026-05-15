@@ -301,7 +301,14 @@ mod tests {
         let outcome = VerificationOutcome::unsupported(SandboxBackend::Bwrap, "rs");
         let v = to_tool_json(&finding, &outcome);
         assert_eq!(v["ok"], json!(true));
+        assert_eq!(v["status"], json!("completed"));
+        assert_eq!(v["artifacts"], json!([]));
+        assert_eq!(v["warnings"], json!([]));
+        assert_eq!(v["errors"], json!([]));
+        assert_eq!(v["proof"]["fingerprint"], json!(finding.fingerprint));
+        assert_eq!(v["proof"]["proofLevel"], json!(1));
         assert_eq!(v["data"]["fingerprint"], json!(finding.fingerprint));
+        assert_eq!(v["data"]["proof"]["ruleId"], json!(finding.rule_id));
         assert!(v["data"]["verification"].is_object());
     }
 

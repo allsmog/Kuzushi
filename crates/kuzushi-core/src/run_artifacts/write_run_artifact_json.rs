@@ -1,3 +1,4 @@
+use super::artifact_manifest::record_run_artifact;
 use super::*;
 
 pub fn write_run_artifact_json(
@@ -16,11 +17,13 @@ pub fn write_run_artifact_json(
     }
     fs::write(&path, format!("{}\n", serde_json::to_string_pretty(value)?))
         .with_context(|| format!("Could not write {}", path.display()))?;
-    Ok(RunArtifact {
+    let artifact = RunArtifact {
         label: label.into(),
         path: path.display().to_string(),
         kind: "json".to_string(),
-    })
+    };
+    record_run_artifact(target, run_id, &artifact)?;
+    Ok(artifact)
 }
 
 pub fn append_run_trace_step(

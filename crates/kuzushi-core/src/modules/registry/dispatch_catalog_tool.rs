@@ -11,6 +11,28 @@ impl ModuleRegistry {
             _ => None,
         }
     }
+
+    pub(in crate::modules) fn dispatch_module_recommender_tool(
+        &self,
+        name: &str,
+        input: &Value,
+        ctx: &ToolExecutionContext<'_>,
+    ) -> ToolDispatchResult {
+        match name {
+            "module-recommender:recommend" => Some(
+                crate::capabilities::module_recommender::execute_module_recommender_tool(
+                    input.clone(),
+                    ctx,
+                    visible_tool_names(self),
+                ),
+            ),
+            _ => None,
+        }
+    }
+}
+
+fn visible_tool_names(registry: &ModuleRegistry) -> Vec<String> {
+    registry.tools().map(|tool| tool.name.clone()).collect()
 }
 
 pub(in crate::modules) fn dispatch_context_workspace_tool(
@@ -27,6 +49,7 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "workspace:status" => Some(Ok(workspace_status_json(ctx))),
         "workspace:export-findings" => Some(export_workspace_findings_tool(input.clone(), ctx)),
         "findings:list" => Some(list_findings_tool(input, ctx)),
+        "report:build" => Some(build_report_tool(input, ctx)),
         _ => None,
     }
 }
@@ -52,6 +75,15 @@ pub(in crate::modules) fn list_findings_tool(
         .findings_store
         .context("findings:list requires a findings store")?;
     Ok(store.list_findings_filtered(&filter)?.to_tool_json())
+}
+
+pub(in crate::modules) fn build_report_tool(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    let target = resolve_tool_target(input, ctx)?;
+    let run_id = string_input_any(input, &["runId", "run_id"]);
+    Ok(crate::report::build_run_report(&target, run_id.as_deref())?.to_tool_json())
 }
 
 pub(in crate::modules) fn dispatch_native_security_tool(
@@ -85,11 +117,15 @@ pub(in crate::modules) fn run_dep_hygiene_tool(
             )
             .emit();
     }
-    let report = check_dependency_hygiene(&target)?;
+    let report = match check_dependency_hygiene(&target) {
+        Ok(report) => report,
+        Err(error) => return Ok(failed_tool_output("dep-hygiene:check", &target, error)),
+    };
+    let store_result = store_dep_hygiene_findings(&report, ctx)?;
     if let Some(trace) = ctx.trace {
         let _ = trace.step("done", "check", "dep-hygiene complete").emit();
     }
-    Ok(report.to_tool_json())
+    Ok(output_with_core_findings(report.to_tool_json(), store_result))
 }
 
 pub(in crate::modules) fn run_secret_scan_tool(
@@ -107,11 +143,74 @@ pub(in crate::modules) fn run_secret_scan_tool(
             .emit();
     }
     let options = SecretScanOptions::from_tool_input(input)?;
-    let report = scan_for_secrets(&target, &options, &ScanCancellation::default())?;
+    let report = match scan_for_secrets(&target, &options, &ScanCancellation::default()) {
+        Ok(report) => report,
+        Err(error) => return Ok(failed_tool_output("secret-scan:scan", &target, error)),
+    };
+    let store_result = store_secret_scan_findings(&report, ctx)?;
     if let Some(trace) = ctx.trace {
         let _ = trace.step("done", "scan", "secret-scan complete").emit();
     }
-    Ok(report.to_tool_json())
+    Ok(output_with_core_findings(report.to_tool_json(), store_result))
+}
+
+struct StoredCoreFindings {
+    core_findings: Vec<crate::findings::Finding>,
+    persisted: Option<crate::findings::GenericPersistedRun>,
+}
+
+fn store_dep_hygiene_findings(
+    report: &crate::dep_hygiene::DepHygieneReport,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<StoredCoreFindings> {
+    let target = std::path::Path::new(&report.target);
+    let findings = report
+        .findings
+        .iter()
+        .map(|finding| finding.to_core_finding(target))
+        .collect::<Vec<_>>();
+    let persisted = crate::findings::persist_tool_findings(
+        "dep-hygiene",
+        target,
+        &findings,
+        ctx.workspace,
+        ctx.findings_store,
+    )?;
+    Ok(StoredCoreFindings {
+        core_findings: findings,
+        persisted,
+    })
+}
+
+fn store_secret_scan_findings(
+    report: &crate::secret_scan::SecretScanReport,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<StoredCoreFindings> {
+    let target = std::path::Path::new(&report.target);
+    let findings = report
+        .findings
+        .iter()
+        .map(|finding| finding.to_core_finding())
+        .collect::<Vec<_>>();
+    let persisted = crate::findings::persist_tool_findings(
+        "secret-scan",
+        target,
+        &findings,
+        ctx.workspace,
+        ctx.findings_store,
+    )?;
+    Ok(StoredCoreFindings {
+        core_findings: findings,
+        persisted,
+    })
+}
+
+fn output_with_core_findings(mut output: Value, store_result: StoredCoreFindings) -> Value {
+    output["data"]["coreFindings"] = json!(store_result.core_findings);
+    if let Some(persisted) = store_result.persisted {
+        output["data"]["persisted"] = json!(persisted);
+    }
+    output
 }
 
 pub(in crate::modules) fn dispatch_agentic_security_tool(
@@ -129,10 +228,17 @@ pub(in crate::modules) fn dispatch_agentic_security_tool(
             Some(run_ndiff_extract_fix_pattern(input.clone(), ctx, runtime))
         }
         "ndiff:hunt-variants" => Some(run_ndiff_hunt_variants(input.clone(), ctx, runtime)),
-        "carlini-threat-hunt:run" => Some(run_carlini_threat_hunt(input.clone(), ctx, runtime)),
+        "carlini-threat-hunt:run" | "offense-review:threat-hunt" => {
+            Some(run_carlini_threat_hunt(input.clone(), ctx, runtime))
+        }
         "pipeline:taint-cwe-select" => Some(run_taint_cwe_select(input.clone(), ctx, runtime)),
         "taint-iris:hunt" => Some(run_taint_iris_tool(input, ctx, runtime)),
         "taint-iris-next:hunt" => Some(run_taint_iris_next_tool(input, ctx, runtime)),
+        "taint-iris-next:dataflow-plan" => Some(run_taint_iris_next_plan_tool(input, ctx)),
+        "taint-iris-next:source-sink-trace" => Some(run_taint_iris_next_trace_tool(input, ctx)),
+        "taint-iris-next:finding-review" => {
+            Some(run_taint_iris_next_review_tool(input, ctx, runtime))
+        }
         "taint-iris-next:catalog" => Some(run_taint_iris_next_catalog_tool(input, ctx, runtime)),
         "taint-iris-next:codeql-db" => {
             Some(run_taint_iris_next_codeql_db_tool(input, ctx, runtime))

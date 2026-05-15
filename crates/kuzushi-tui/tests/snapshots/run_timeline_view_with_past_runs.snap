@@ -1,0 +1,12 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+assertion_line: 0
+---
+ KUZUSHI mode:shell | target ./runs | ctx missing | model unconfigured | findings 0 findings | view run-timeline
+
+ -- RUN TIMELINE -------------------------------------------------------------------------------------------------------
+runId         status          findings   target                                                                      ...
+r-2026-0      failed          0          ~/work/acme-checkout                                                        ...
+r-2026-0      complete        18         ~/work/acme-checkout                                                        ...
+
+replay <runId> | trace <runId> | findings | back

@@ -4,6 +4,12 @@ pub(in crate::renderer::chrome::footer::keybindings) fn catalog_keybindings(
     app: &ShellApp,
 ) -> Option<Vec<(&'static str, &'static str)>> {
     let bindings = match app.shell_view {
+        ShellView::Home => vec![
+            ("modules", "browse"),
+            ("recommend", "plan"),
+            ("scan", "scan target"),
+            ("Ctrl+C", "exit"),
+        ],
         ShellView::Catalog if !app.catalog_expanded => vec![
             ("modules", "browse"),
             ("use <id>", "focus module"),
@@ -15,6 +21,12 @@ pub(in crate::renderer::chrome::footer::keybindings) fn catalog_keybindings(
             ("PgUp/PgDn", "scroll"),
             ("use <id>", "focus module"),
             ("findings", "findings"),
+            ("?", "help"),
+        ],
+        ShellView::Recommend => vec![
+            ("run <tool>", "dispatch"),
+            ("runs", "ledger"),
+            ("back", "home"),
             ("?", "help"),
         ],
         _ => return None,

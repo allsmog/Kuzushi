@@ -40,7 +40,7 @@ impl AgentRouter {
         let parsed: ModelsTomlFile =
             toml::from_str(&raw).with_context(|| format!("could not parse {}", path.display()))?;
 
-        self.apply_default_model(parsed.default_model);
+        self.apply_default_model(parsed.default_model, path)?;
         self.merge_model_routes(parsed.roles, path)?;
         self.merge_concurrency_caps(parsed.concurrency);
         Ok(())
@@ -61,10 +61,12 @@ impl AgentRouter {
             .map_or(Ok(()), |path| self.merge_existing_file(&path))
     }
 
-    fn apply_default_model(&mut self, default_model: Option<String>) {
+    fn apply_default_model(&mut self, default_model: Option<String>, path: &Path) -> Result<()> {
         if let Some(default) = default_model {
+            ensure_valid_router_model("default_model", &default, path)?;
             self.default_model = Some(default);
         }
+        Ok(())
     }
 
     fn merge_model_routes(
@@ -101,6 +103,7 @@ fn parse_model_route(
 ) -> Result<(AgentRole, ModelRoute)> {
     let role = AgentRole::from_key(&key).with_context(|| unknown_agent_role_message(&key, path))?;
     ensure_no_model_fallbacks(&key, &route, path)?;
+    ensure_valid_router_model(&format!("roles.{key}.primary"), &route.primary, path)?;
     Ok((role, route))
 }
 
@@ -123,6 +126,11 @@ fn ensure_no_model_fallbacks(key: &str, route: &ModelRoute, path: &Path) -> Resu
         );
     }
     Ok(())
+}
+
+fn ensure_valid_router_model(field: &str, model: &str, path: &Path) -> Result<()> {
+    validate_model_spec(model)
+        .with_context(|| format!("{field} in {} is not a valid provider:model", path.display()))
 }
 
 #[derive(Debug, Default, Deserialize)]

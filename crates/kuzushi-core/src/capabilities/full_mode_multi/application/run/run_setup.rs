@@ -5,7 +5,7 @@ use crate::capabilities::full_mode_multi::application::chunk_prompt::{
 use crate::capabilities::full_mode_multi::domain::{
     FullModeLanguage, FullModePlan, FullModeReport,
 };
-use anyhow::Result;
+use anyhow::{Context, Result};
 
 pub(super) fn dry_run_report(plan: FullModePlan) -> FullModeReport {
     FullModeReport {
@@ -22,12 +22,16 @@ pub(super) fn dry_run_report(plan: FullModePlan) -> FullModeReport {
 
 pub(super) fn resolve_full_mode_model(runtime: &RoutedRuntime) -> Result<String> {
     if let Some(model) = runtime.resolve_model(AgentRole::FullModeMulti, 0, None) {
+        crate::runtime::validate_model_spec(&model)
+            .with_context(|| "full_mode_multi role resolved an invalid model")?;
         return Ok(model);
     }
 
     if let Ok(model) = std::env::var(AgentRole::FullModeMulti.option_store_key()) {
         let trimmed = model.trim();
         if !trimmed.is_empty() {
+            crate::runtime::validate_model_spec(trimmed)
+                .with_context(|| "MODEL_FULL_MODE_MULTI contains an invalid model")?;
             return Ok(trimmed.to_string());
         }
     }

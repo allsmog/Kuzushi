@@ -126,4 +126,76 @@ mod tests {
                 .contains("stage2Tier")
         );
     }
+
+    struct BareTierRuntime;
+
+    impl AgentRuntime for BareTierRuntime {
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            unreachable!("resolve_triage_model should not call triage")
+        }
+
+        fn model_for_tier(&self, _tier: ModelTier, _configured: &str) -> String {
+            "claude-haiku-4-5-20251001".to_string()
+        }
+    }
+
+    #[test]
+    fn resolve_triage_model_rejects_tier_resolution_without_provider() {
+        let config = crate::config::V2Config {
+            model: Some("anthropic:claude-sonnet-4-6".to_string()),
+            ..Default::default()
+        };
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: None,
+            findings_store: None,
+            trace: None,
+        };
+
+        let err = resolve_triage_model(&ctx, &BareTierRuntime, ModelTier::Cheap).unwrap_err();
+        let message = format!("{err:#}");
+        assert!(message.contains("triage:run resolved an invalid stage2 model"));
+        assert!(message.contains("provider:model"));
+    }
+
+    #[test]
+    fn triage_response_exposes_canonical_findings_snapshot() {
+        let input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+        let config = TriageExecutionConfig::new(
+            PathBuf::from("/repo"),
+            "anthropic:claude-sonnet-4-6".to_string(),
+        );
+        let stage1 = PrefilteredTriageFindings {
+            total: 1,
+            kept_count: 1,
+            kept: Vec::new(),
+            dropped: 0,
+        };
+        let mut stats = TriageRunStats::default();
+        stats.record_persisted_outcome(
+            finding_with(Severity::High, "semgrep", "sql injection"),
+            TriageOutcome {
+                verdict: TriageVerdict::TruePositive,
+                confidence: 0.8,
+                rationale: "reachable sink".to_string(),
+                cost_usd: 0.01,
+            },
+        );
+
+        let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
+
+        assert_eq!(response["status"], json!("completed"));
+        assert_eq!(response["data"]["findings"][0]["verdict"], json!("true_positive"));
+        assert!(response["warnings"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn empty_triage_response_is_skipped_not_failed() {
+        let input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+        let response = empty_triage_response(&input, vec!["missing".into()]);
+
+        assert_eq!(response["ok"], json!(true));
+        assert_eq!(response["status"], json!("skipped"));
+        assert_eq!(response["data"]["findings"], json!([]));
+    }
 }

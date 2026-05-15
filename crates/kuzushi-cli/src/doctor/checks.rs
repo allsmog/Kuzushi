@@ -1,6 +1,6 @@
 use super::bridge::{current_dir_for_doctor, resolve_executable};
 use super::DoctorCheck;
-use kuzushi_core::{FindingStore, WorkspaceTarget};
+use kuzushi_core::{CargoAuditScanner, FindingStore, WorkspaceTarget};
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -63,6 +63,30 @@ pub(crate) fn check_scanner_binary(binary: &'static str) -> DoctorCheck {
             DoctorCheck::warn(binary, format!("{binary} was not found on PATH"), next)
         }
     }
+}
+
+pub(crate) fn deterministic_capability_checks() -> Vec<DoctorCheck> {
+    vec![
+        built_in_capability_check("secret-scan", "built-in secret scanner is available"),
+        built_in_capability_check("dep-hygiene", "built-in manifest analyzer is available"),
+        built_in_capability_check("iac-scan", "built-in IaC scanner is available"),
+        cargo_audit_capability_check(),
+    ]
+}
+
+fn built_in_capability_check(name: &'static str, detail: &'static str) -> DoctorCheck {
+    DoctorCheck::ok(name, detail)
+}
+
+fn cargo_audit_capability_check() -> DoctorCheck {
+    if CargoAuditScanner::binary_available() {
+        return DoctorCheck::ok("cargo-audit", "`cargo audit` is available");
+    }
+    DoctorCheck::warn(
+        "cargo-audit",
+        "`cargo audit` was not found; RustSec advisory checks will fail closed when Cargo.lock is present",
+        "Install cargo-audit with `cargo install cargo-audit` before running cargo-audit advisory checks.",
+    )
 }
 
 pub(crate) fn check_container_runtime() -> DoctorCheck {

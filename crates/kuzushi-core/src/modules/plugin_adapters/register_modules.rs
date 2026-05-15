@@ -1,9 +1,9 @@
 use super::*;
 
 pub(in crate::modules) fn register_modules(registry: &mut ModuleRegistry) {
-    registry.register(vuln_scout_module());
-    registry.register(tob_module());
-    registry.register(shinsa_module());
+    registry.register(vuln_scout_module().deferred());
+    registry.register(tob_module().deferred());
+    registry.register(shinsa_module().deferred());
 }
 
 pub(in crate::modules) fn execute_tool(

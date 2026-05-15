@@ -4,7 +4,7 @@ use super::auth_bridge::{
 };
 use super::auth_oauth::{
     auth_ping_model, record_anthropic_env_presence, record_anthropic_oauth_readiness,
-    record_codex_runtime_auth_presence,
+    record_openai_runtime_auth_presence,
 };
 use crate::command::AuthCommand;
 use anyhow::Result;
@@ -47,7 +47,7 @@ pub(crate) fn run_auth_ping_checks(
     eprintln!("[auth ping] provider = {provider}");
     probe_auth_credentials(provider, config, log)?;
 
-    let model = auth_ping_model(model_override, config);
+    let model = auth_ping_model(model_override, config)?;
     log.record(true, format!("ping model = {model}"));
 
     let bridge_command = required_auth_ping_bridge_command(config, log);
@@ -115,29 +115,29 @@ pub(crate) fn probe_auth_credentials(
     if matches!(auth_provider_kind(provider), AuthProviderKind::Anthropic) {
         return probe_anthropic_credentials(config, log);
     }
-    record_codex_auth_if_needed(provider, log);
+    record_openai_auth_if_needed(provider, log);
     Ok(())
 }
 
-fn record_codex_auth_if_needed(provider: &str, log: &mut AuthPingLog) {
-    if matches!(auth_provider_kind(provider), AuthProviderKind::Codex) {
-        record_codex_runtime_auth_presence(log);
+fn record_openai_auth_if_needed(provider: &str, log: &mut AuthPingLog) {
+    if matches!(auth_provider_kind(provider), AuthProviderKind::OpenAiOauth) {
+        record_openai_runtime_auth_presence(log);
     }
 }
 
 #[derive(Clone, Copy)]
 enum AuthProviderKind {
     Anthropic,
-    Codex,
+    OpenAiOauth,
     Other,
 }
 
 fn auth_provider_kind(provider: &str) -> AuthProviderKind {
     const AUTH_PROVIDER_KINDS: &[(&str, AuthProviderKind)] = &[
         ("anthropic", AuthProviderKind::Anthropic),
-        ("openai-codex", AuthProviderKind::Codex),
-        ("codex", AuthProviderKind::Codex),
-        ("openai", AuthProviderKind::Codex),
+        ("openai-codex", AuthProviderKind::OpenAiOauth),
+        ("codex", AuthProviderKind::OpenAiOauth),
+        ("openai", AuthProviderKind::OpenAiOauth),
     ];
     AUTH_PROVIDER_KINDS
         .iter()

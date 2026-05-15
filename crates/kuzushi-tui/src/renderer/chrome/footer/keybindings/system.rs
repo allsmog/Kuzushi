@@ -24,7 +24,7 @@ pub(in crate::renderer::chrome::footer::keybindings) fn system_keybindings(
             ("Tab", "complete"),
             ("Ctrl+R", "search history"),
             ("PgUp/PgDn", "scroll"),
-            ("back", "catalog"),
+            ("back", "modules"),
         ],
         ShellView::Tools => vec![
             ("PgUp/PgDn", "scroll"),

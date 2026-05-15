@@ -213,6 +213,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
         let runtime = FakeRuntime {
             response: AgentQueryResponse {
@@ -340,6 +341,7 @@ mod tests {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
+            trace: None,
         };
         let runtime = FakeRuntime {
             response: AgentQueryResponse {

@@ -10,7 +10,7 @@ For vocabulary and dependency rules, see
 | --- | --- | --- |
 | Rust CLI command, flags, exit behavior | `crates/kuzushi-cli/src/main.rs`, `crates/kuzushi-cli/tests/` | `cargo test -p kuzushi-cli cutover_cli` |
 | Rust TUI command/reducer behavior | `crates/kuzushi-tui/src/app.rs`, `crates/kuzushi-tui/src/app/state_transitions.rs`, `crates/kuzushi-tui/src/commands.rs` | `cargo test -p kuzushi-tui app::tests` |
-| Rust TUI rendering/plain output | `crates/kuzushi-tui/src/renderer.rs`, `crates/kuzushi-tui/src/renderer/plain.rs`, `crates/kuzushi-tui/src/theme.rs` | `cargo test -p kuzushi-tui renderer::tests` |
+| Rust TUI rendering/plain output | `crates/kuzushi-tui/src/renderer.rs`, `crates/kuzushi-tui/src/renderer/plain.rs`, `crates/kuzushi-tui/src/theme/mod.rs` | `cargo test -p kuzushi-tui renderer::tests` |
 | Module/tool registry | `crates/kuzushi-core/src/modules.rs`, `crates/kuzushi-core/src/modules/*`, `src/modules/*` for retained SDK contracts | `cargo test -p kuzushi-core modules` |
 | Findings persistence/reporting | `crates/kuzushi-core/src/findings.rs`, `crates/kuzushi-core/src/findings/reporting.rs`, CLI findings paths | `cargo test -p kuzushi-core findings`; `cargo test -p kuzushi-cli cutover_cli` |
 | Scan orchestration | `crates/kuzushi-core/src/scan.rs`, `crates/kuzushi-core/src/modules/sast_run.rs`, `crates/kuzushi-cli/src/main.rs` | `cargo test -p kuzushi-core scan`; `bash tests/e2e/run-smoke.sh` |
@@ -58,7 +58,7 @@ For vocabulary and dependency rules, see
 - External binaries such as Semgrep, CodeQL, `nmap`, and `curl` are optional
   by tool. Missing binaries should fail actionably.
 - `pnpm build` compiles retained TypeScript exports; Rust builds use Cargo.
-- `.kuzushi`, `.ralph`, `.codex-active`, native binaries, temp prompts, and
+- `.kuzushi`, `.ralph`, `.kuzushi-active`, native binaries, temp prompts, and
   SQLite files are local state, not product assets.
 - The pre-commit hook expects `lint-staged`. If local dependencies are missing,
   run focused checks and record the hook blocker before bypassing hooks.

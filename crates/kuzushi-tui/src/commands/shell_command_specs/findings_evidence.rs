@@ -44,6 +44,12 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "live module-progress dashboard",
     },
     ShellCommandSpec {
+        command: "handoff",
+        aliases: &["handoff", "/handoff", "failure", "/failure"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "latest bounded failure handoff",
+    },
+    ShellCommandSpec {
         command: "since <ref>",
         aliases: &["/since <ref>"],
         category: ShellCommandCategory::FindingsEvidence,

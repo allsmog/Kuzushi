@@ -16,6 +16,40 @@ pub(in crate::modules) fn run_taint_iris_next_tool(
     Ok(run_taint_iris_next_report(input, ctx, runtime)?.to_tool_json())
 }
 
+pub(in crate::modules) fn run_taint_iris_next_plan_tool(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    Ok(run_taint_iris_next_report(&taint_iris_next_mode_input(input, "plan"), ctx, None)?
+        .to_tool_json())
+}
+
+pub(in crate::modules) fn run_taint_iris_next_trace_tool(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    Ok(run_taint_iris_next_report(&taint_iris_next_mode_input(input, "plan"), ctx, None)?
+        .to_tool_json())
+}
+
+pub(in crate::modules) fn run_taint_iris_next_review_tool(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    Ok(run_taint_iris_next_report(&taint_iris_next_mode_input(input, "hunt"), ctx, runtime)?
+        .to_tool_json())
+}
+
+fn taint_iris_next_mode_input(input: &Value, mode: &str) -> Value {
+    let mut normalized = input.clone();
+    if let Value::Object(object) = &mut normalized {
+        object.insert("mode".to_string(), json!(mode));
+        return normalized;
+    }
+    json!({ "mode": mode })
+}
+
 pub(in crate::modules) fn run_taint_iris_next_catalog_tool(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,

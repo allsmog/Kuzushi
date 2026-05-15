@@ -50,9 +50,14 @@ pub(crate) fn plain_shell_env_requested() -> bool {
 pub(crate) fn run_terminal_shell(config: V2Config, target: Option<&WorkspaceTarget>) -> Result<()> {
     let mut terminal = setup_terminal()?;
     let mut app = ShellApp::new(config, target);
+    open_start_view(&mut app);
     let result = terminal_shell_loop(&mut terminal, &mut app);
     let _ = restore_terminal(&mut terminal);
     result
+}
+
+pub(crate) fn open_start_view(app: &mut ShellApp) {
+    app.shell_view = ShellView::Home;
 }
 
 pub(crate) fn terminal_shell_loop(

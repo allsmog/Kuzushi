@@ -11,9 +11,10 @@ This assessment covers the 17 audited TypeScript subsystem directories:
 ## Closure Result
 
 The original audit treated these directories as absent from the packaged Rust
-CLI runtime. That remains true for `bin.kuzushi`, which points at the Rust
-wrapper. It is not true for the TypeScript library build: the directories are
-still transitively reachable from public TypeScript entrypoints.
+CLI runtime. That remains true for `bin.kuzushi` and the `bin.kz` alias, which
+point at the Rust wrapper. It is not true for the TypeScript library build: the
+directories are still transitively reachable from public TypeScript
+entrypoints.
 
 Import graph inputs:
 

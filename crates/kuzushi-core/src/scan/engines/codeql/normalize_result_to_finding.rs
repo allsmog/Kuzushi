@@ -4,43 +4,71 @@ pub(crate) fn normalize_codeql_result_to_finding(
     result: &CodeqlSarifResult,
     rules_by_id: &HashMap<String, CodeqlSarifRule>,
 ) -> Option<Finding> {
-    let rule_id = result
+    let rule_id = codeql_result_rule_id(result);
+    let rule = rules_by_id.get(&rule_id);
+    let (file_path, start_line) = extract_codeql_location(result)?;
+    let message = codeql_result_message(result, rule, &rule_id);
+    let severity = codeql_result_severity(result, rule);
+
+    Some(Finding::new_tool(
+        "codeql", rule_id, file_path, start_line, None, severity, message,
+    )
+    .with_static_proof_state(StaticProofState::SignalOnly))
+}
+
+fn codeql_result_rule_id(result: &CodeqlSarifResult) -> String {
+    result
         .rule_id
         .as_deref()
         .and_then(non_empty_string)
         .unwrap_or("codeql.unknown")
+        .to_string()
+}
+
+fn codeql_result_message(
+    result: &CodeqlSarifResult,
+    rule: Option<&CodeqlSarifRule>,
+    rule_id: &str,
+) -> String {
+    let message = primary_codeql_message(result)
+        .or_else(|| rule.and_then(rule_short_description))
+        .unwrap_or(rule_id)
         .to_string();
-    let rule = rules_by_id.get(&rule_id);
-    let (file_path, start_line) = extract_codeql_location(result)?;
-    let message = result
+    append_codeql_flow_evidence(message, result)
+}
+
+fn primary_codeql_message(result: &CodeqlSarifResult) -> Option<&str> {
+    result
         .message
         .as_ref()
         .and_then(|message| message.text.as_deref().and_then(non_empty_string))
-        .or_else(|| {
-            rule.and_then(|rule| {
-                rule.short_description
-                    .as_ref()
-                    .and_then(|description| description.text.as_deref())
-                    .and_then(non_empty_string)
-            })
-        })
-        .unwrap_or(&rule_id)
-        .to_string();
-    let severity = map_codeql_severity(
-        rule.and_then(|rule| rule.properties.as_ref())
-            .and_then(|properties| properties.problem.as_ref())
-            .and_then(|problem| problem.severity.as_deref()),
-        result.level.as_deref(),
-    );
+}
 
-    let message = match render_codeql_flow_evidence(result) {
+fn rule_short_description(rule: &CodeqlSarifRule) -> Option<&str> {
+    rule.short_description
+        .as_ref()
+        .and_then(|description| description.text.as_deref())
+        .and_then(non_empty_string)
+}
+
+fn append_codeql_flow_evidence(message: String, result: &CodeqlSarifResult) -> String {
+    match render_codeql_flow_evidence(result) {
         Some(evidence) => format!("{message}\n\n{evidence}"),
         None => message,
-    };
+    }
+}
 
-    Some(Finding::new_tool(
-        "codeql", rule_id, file_path, start_line, None, severity, message,
-    ))
+fn codeql_result_severity(
+    result: &CodeqlSarifResult,
+    rule: Option<&CodeqlSarifRule>,
+) -> Severity {
+    map_codeql_severity(rule_problem_severity(rule), result.level.as_deref())
+}
+
+fn rule_problem_severity(rule: Option<&CodeqlSarifRule>) -> Option<&str> {
+    rule.and_then(|rule| rule.properties.as_ref())
+        .and_then(|properties| properties.problem.as_ref())
+        .and_then(|problem| problem.severity.as_deref())
 }
 
 #[derive(Debug, Deserialize)]

@@ -2,6 +2,13 @@ use super::*;
 
 pub(crate) fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
+    push_config_summary(&mut lines, app, area);
+    push_config_model_table(&mut lines, app, area);
+    push_config_commands(&mut lines, area);
+    lines
+}
+
+fn push_config_summary(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) {
     lines.push(blank());
     lines.push(divider("CONFIG", area.width));
     lines.push(detail(
@@ -11,99 +18,130 @@ pub(crate) fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(detail("provider", &app.provider_label()));
     lines.push(detail(
         "model",
-        app.config.model.as_deref().unwrap_or("unconfigured"),
+        &app.config
+            .model
+            .as_deref()
+            .map(crate::app::display_model_selector)
+            .unwrap_or_else(|| "unconfigured".to_string()),
     ));
     lines.push(detail(
         "reasoning",
         app.session_thinking_level.as_deref().unwrap_or("default"),
     ));
-    let auth_status = if std::env::var_os(&app.config.runtime.api_key_env).is_some() {
-        "set; value hidden"
-    } else {
-        "missing"
-    };
-    lines.push(detail(
-        "auth envs",
-        &format!(
-            "{} ({auth_status}); ANTHROPIC_API_KEY ({})",
-            app.config.runtime.api_key_env,
-            if std::env::var_os("ANTHROPIC_API_KEY").is_some() {
-                "set; value hidden"
-            } else {
-                "missing"
-            }
-        ),
-    ));
-    lines.push(detail(
-        "oauth",
-        &format!(
-            "openai-codex {}; anthropic {}",
-            crate::app::oauth_provider_status("openai-codex"),
-            crate::app::oauth_provider_status("anthropic")
-        ),
-    ));
-    lines.push(detail(
-        "base url",
-        app.config
-            .runtime
-            .base_url
-            .as_deref()
-            .unwrap_or("provider default"),
-    ));
+    lines.push(detail("auth envs", &auth_env_detail(app)));
+    lines.push(detail("oauth", &oauth_detail()));
+    lines.push(detail("base url", base_url_detail(app)));
     lines.push(detail(
         "bridge",
         crate::app::bridge_command_status(&app.config),
     ));
-    lines.push(detail(
-        "cost",
-        &if let Some(last) = app.last_tool_cost_usd {
-            format!(
-                "session ${:.4}; last tool ${:.4}",
-                app.session_cost_usd, last
-            )
-        } else {
-            "unavailable until a tool reports costUsd".to_string()
-        },
-    ));
+    lines.push(detail("cost", &cost_detail(app)));
     if app.config.model.is_none() {
         lines.push(detail(
             "onboarding",
             "Up/Down selects a model; Enter activates it. OAuth availability is shown below.",
         ));
     }
+}
+
+fn auth_env_detail(app: &ShellApp) -> String {
+    let auth_status = env_status(&app.config.runtime.api_key_env);
+    let anthropic_status = env_status("ANTHROPIC_API_KEY");
+    format!(
+        "{} ({auth_status}); ANTHROPIC_API_KEY ({anthropic_status})",
+        app.config.runtime.api_key_env
+    )
+}
+
+fn env_status(name: &str) -> &'static str {
+    if std::env::var_os(name).is_some() {
+        "set; value hidden"
+    } else {
+        "missing"
+    }
+}
+
+fn oauth_detail() -> String {
+    format!(
+        "openai {}; anthropic {}",
+        crate::app::oauth_provider_status("openai-codex"),
+        crate::app::oauth_provider_status("anthropic")
+    )
+}
+
+fn base_url_detail(app: &ShellApp) -> &str {
+    app.config
+        .runtime
+        .base_url
+        .as_deref()
+        .unwrap_or("provider default")
+}
+
+fn cost_detail(app: &ShellApp) -> String {
+    if let Some(last) = app.last_tool_cost_usd {
+        format!(
+            "session ${:.4}; last tool ${:.4}",
+            app.session_cost_usd, last
+        )
+    } else {
+        "unavailable until a tool reports costUsd".to_string()
+    }
+}
+
+fn push_config_model_table(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) {
     lines.push(blank());
     lines.push(divider("MODELS", area.width));
-    let widths = [2usize, 2, 28, 6, value_width(area, 28)];
+    let widths = config_model_widths(area);
     lines.push(aligned_header(
         &["", "#", "model", "effort", "auth"],
         &widths,
     ));
     for (index, choice) in crate::app::model_choices().iter().enumerate() {
-        let marker = if index == app.selected_model_index {
-            ">"
-        } else {
-            " "
-        };
-        lines.push(aligned_row(
-            &[
-                marker.to_string(),
-                choice.index.to_string(),
-                choice.id.to_string(),
-                choice.thinking_level.to_string(),
-                model_auth_status(choice),
-            ],
+        lines.push(config_model_row(
+            index,
+            app.selected_model_index,
+            choice,
             &widths,
         ));
     }
+}
+
+fn config_model_widths(area: Rect) -> [usize; 5] {
+    [2usize, 2, 28, 6, value_width(area, 28)]
+}
+
+fn config_model_row(
+    index: usize,
+    selected_model_index: usize,
+    choice: &crate::app::ModelChoice,
+    widths: &[usize],
+) -> Line<'static> {
+    let marker = if index == selected_model_index {
+        ">"
+    } else {
+        " "
+    };
+    aligned_row(
+        &[
+            marker.to_string(),
+            choice.index.to_string(),
+            crate::app::model_choice_display_selector(choice),
+            choice.thinking_level.to_string(),
+            model_auth_status(choice),
+        ],
+        widths,
+    )
+}
+
+fn push_config_commands(lines: &mut Vec<Line<'static>>, area: Rect) {
     lines.push(blank());
     lines.push(command_list_line(
         &[
             "Up/Down select",
             "Enter choose",
             "model <n> [xhigh]",
-            "auth login openai-codex|anthropic",
+            "auth login openai|anthropic",
         ],
         area.width as usize,
     ));
-    lines
 }

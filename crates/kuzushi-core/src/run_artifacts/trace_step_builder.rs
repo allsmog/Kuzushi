@@ -13,6 +13,9 @@ impl RunTraceStep {
             parent_step: None,
             severity: None,
             started_at_ms: None,
+            model: None,
+            provider: None,
+            prompt_hash: None,
         }
     }
 
@@ -58,6 +61,18 @@ impl RunTraceStep {
 
     pub fn with_started_at_ms(mut self, started_at_ms: u64) -> Self {
         self.started_at_ms = Some(started_at_ms);
+        self
+    }
+
+    pub fn with_model_metadata(
+        mut self,
+        model: impl Into<String>,
+        provider: impl Into<String>,
+        prompt_hash: impl Into<String>,
+    ) -> Self {
+        self.model = Some(model.into());
+        self.provider = Some(provider.into());
+        self.prompt_hash = Some(prompt_hash.into());
         self
     }
 }

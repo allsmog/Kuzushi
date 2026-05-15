@@ -62,7 +62,12 @@ pub(crate) fn config_completion_values(_: &ShellApp) -> Vec<String> {
 pub(crate) fn model_completion_values(_: &ShellApp) -> Vec<String> {
     model_choices()
         .iter()
-        .flat_map(|choice| [choice.index.to_string(), choice.id.to_string()])
+        .flat_map(|choice| {
+            [
+                choice.index.to_string(),
+                crate::app::model_choice_display_selector(choice),
+            ]
+        })
         .collect()
 }
 
@@ -98,11 +103,11 @@ pub(crate) fn workspace_export_completion_values(_: &ShellApp) -> Vec<String> {
 }
 
 pub(crate) fn auth_action_completion_values(_: &ShellApp) -> Vec<String> {
-    string_values(&["status", "login", "codex", "anthropic"])
+    string_values(&["status", "login", "openai", "anthropic"])
 }
 
 pub(crate) fn auth_login_completion_values(_: &ShellApp) -> Vec<String> {
-    string_values(&["openai-codex", "anthropic"])
+    string_values(&["openai", "anthropic"])
 }
 
 pub(crate) fn show_action_completion_values(_: &ShellApp) -> Vec<String> {

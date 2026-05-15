@@ -42,6 +42,10 @@ mod tests {
         assert!(rules.contains(&"iac-scan/terraform-public-ingress"));
         assert!(rules.contains(&"iac-scan/terraform-public-s3-acl"));
         assert_eq!(report.files_scanned, 3);
+        assert_eq!(
+            report.findings[0].to_core_finding().static_proof_state,
+            Some(StaticProofState::SignalOnly)
+        );
     }
 
     #[test]

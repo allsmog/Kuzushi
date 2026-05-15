@@ -6,20 +6,22 @@ Kuzushi is a security-native code agent for repositories.
 
 It does not try to be another generic coding assistant. It scans real
 codebases, preserves evidence, ranks likely vulnerabilities, and helps teams
-move from suspicion to validation to remediation.
+move from suspicion to verification to remediation.
 
 Use Kuzushi when you need more than "AI says this looks wrong": you need a
 finding, the code path behind it, the current proof state, and a defensible
 next action.
 
 The primary operator path is the native Rust CLI and Ratatui shell. The npm
-`kuzushi` binary invokes that native CLI through `bin/kuzushi-rs.mjs`.
+`kuzushi` binary, plus the shorter `kz` alias, invokes that native CLI through
+`bin/kuzushi-rs.mjs`.
 
 ## Install
 
 ```bash
 npm install -g kuzushi
 kuzushi --help
+kz --help
 ```
 
 From a source checkout:
@@ -50,7 +52,7 @@ kuzushi scan . --mode standard --ci
 # Inspect persisted findings.
 kuzushi findings --target . --limit 10
 
-# Inspect one finding's evidence, proof state, validation, and next action.
+# Inspect one finding's evidence, proof state, verification, and next action.
 kuzushi finding F-0001 --target .
 
 # Render a markdown PR/security review summary from persisted findings.
@@ -78,9 +80,11 @@ markdown PR comment report path.
 
 ```text
 kuzushi [--target <path>] [--plain] [command]
+kz [--target <path>] [--plain] [command]
 ```
 
 Bare `kuzushi` starts the shell.
+Bare `kz` starts the same shell with the compact `kz>` prompt.
 Use `--plain` or `KUZUSHI_PLAIN=1` to force line-oriented output with no ANSI
 escapes, animation, or box drawing. `KUZUSHI_SCREEN_READER=1` and
 `KUZUSHI_LOW_BANDWIDTH=1` are aliases for the same strict plain shell mode.
@@ -93,7 +97,7 @@ inside the TUI and your terminal still gives you a selection modifier.
 | `kuzushi shell [--target <repo>]` | Start the Ratatui shell. |
 | `kuzushi scan <repo> [--mode standard\|whitebox-static] [--tasks a,b] [--triage] [--json] [--ci]` | Run the Rust SAST umbrella executor and persist findings. |
 | `kuzushi findings --target <repo> [--severity high,critical] [--verdict true_positive] [--name text] [--file-path path] [--limit 50] [--json]` | List persisted findings. |
-| `kuzushi finding <F-0001\|fingerprint-prefix> --target <repo> [--json]` | Inspect one finding's evidence, proof state, validation summary, patch result, and next action. |
+| `kuzushi finding <F-0001\|fingerprint-prefix> --target <repo> [--json]` | Inspect one finding's evidence, proof state, verification summary, patch result, and next action. |
 | `kuzushi runs list\|show <runId>\|trace <runId> --target <repo>` | Inspect replayable summaries, result artifacts, and trace JSONL under `.kuzushi/runs/<runId>/`. |
 | `kuzushi suppress <F-0001> --target <repo> --reason <text> [--days 90]` | Record an expiring, evidence-backed suppression; findings remain visible in audit/report output. |
 | `kuzushi suppressions --target <repo>` | List suppression memory and the audit store path. |
@@ -199,6 +203,7 @@ current built-ins are:
 
 | Module | Primary tools |
 | --- | --- |
+| `module-recommender` | `module-recommender:recommend` |
 | `context` | `context:build` |
 | `sast` | `sast:scan` |
 | `semgrep` | `semgrep:scan` |
@@ -214,30 +219,27 @@ current built-ins are:
 | `threat-model` | `threat-model:build`, `threat-model:read`, `threat-model:methodologies` |
 | `randori` | `randori:pasta`, `randori:threat-model` |
 | `x-ray` | `x-ray:run`, `x-ray:read` |
-| `vendor-assessment` | `vendor-assessment:attach`, `vendor-assessment:scope`, `vendor-assessment:prompts`, `vendor-assessment:assess` |
-| `chrome-rce` | `chrome-rce:scan`, `chrome-rce:review-trigger` |
 | `dep-hygiene` | `dep-hygiene:check` |
 | `secret-scan` | `secret-scan:scan` |
 | `variant` | `variant:lift-pattern`, `variant:hunt` |
 | `ndiff` | `ndiff:fetch-cve`, `ndiff:extract-fix-pattern`, `ndiff:hunt-variants` |
-| `vuln-scout` | `vuln-scout:audit` |
-| `tob` | `tob:audit`, `tob:skills` |
-| `shinsa` | `shinsa:scan`, `shinsa:quick-check`, `shinsa:nist-scan`, `shinsa:nist-quick-check`, `shinsa:frameworks` |
-| `prompt-armor` | `prompt-armor:scan`, `prompt-armor:analyze`, `prompt-armor:attack`, `prompt-armor:diff`, `prompt-armor:report`, `prompt-armor:config` |
-| `recon` | `recon:nmap`, `recon:subdomain`, `recon:http-fingerprint` |
 | `iac-scan` | `iac-scan:scan` |
 | `catalog` | `catalog:modules`, `catalog:tools` |
 | `config` | `config:show` |
 | `workspace` | `workspace:status`, `workspace:export-findings` |
 
 Internal DAG modules such as `context-lite`, `pipeline`, and `systems-hunt`
-stay hidden from `kuzushi modules`.
+stay hidden from `kuzushi modules`. Deferred compatibility modules are also
+hidden from the public catalog and shell completions, but remain executable by
+exact tool name for operators who opt into them: `chrome-rce`,
+`prompt-armor`, `pwn`, `recon`, `shinsa`, `tob`, `uaf-hunt`,
+`vendor-assessment`, and `vuln-scout`.
 
 ## External Dependencies
 
-Native deterministic tools run without an LLM: `context`, `findings`,
-`dep-hygiene`, `secret-scan`, `iac-scan`, Chrome RCE native checks, and local
-artifact readers.
+Native deterministic tools run without an LLM: `module-recommender`,
+`context`, `findings`, `dep-hygiene`, `secret-scan`, `iac-scan`, Chrome RCE
+native checks, and local artifact readers.
 
 Subprocess-backed tools require the operator to install or configure binaries:
 
@@ -245,15 +247,16 @@ Subprocess-backed tools require the operator to install or configure binaries:
 | --- | --- |
 | `semgrep:scan` | `semgrep`, or pass `{"binary":"/path/to/semgrep"}`. |
 | `codeql:scan` | CodeQL CLI, or pass `{"binary":"/path/to/codeql"}`. |
-| `recon:nmap` | `nmap`, or pass a binary override. |
-| `recon:subdomain`, `recon:http-fingerprint`, online `ndiff:fetch-cve` | `curl`, unless using offline/local input. |
+| Deferred `recon:nmap` | `nmap`, or pass a binary override. |
+| Deferred `recon:subdomain`, deferred `recon:http-fingerprint`, online `ndiff:fetch-cve` | `curl`, unless using offline/local input. |
 
 pi-agent-core-backed tools require Node, `@earendil-works/pi-agent-core`,
 `@earendil-works/pi-ai`, a configured model, and provider credentials. A custom
 bridge should be supplied through `runtime.agent_bridge_command` in config;
 `KUZUSHI_AGENT_BRIDGE` is kept as a compatibility/bootstrap override.
 
-Plugin-backed wrappers also require explicit plugin roots:
+Deferred plugin-backed wrappers also require exact tool invocation plus
+explicit plugin roots:
 
 | Module | Preferred option | Compatibility env var |
 | --- | --- | --- |
@@ -310,6 +313,7 @@ Useful package scripts:
 | `pnpm test` | Run retained TypeScript unit/reference tests. |
 | `pnpm test:rust` | Run `cargo test --workspace`. |
 | `pnpm test:e2e` | Run the native smoke test. |
+| `pnpm quality:crap-risk` | Gate changed production Rust/JS/TS code with the CRAP-risk < 7 proxy. |
 | `pnpm doctor` | Run source-checkout development diagnostics; use `kuzushi doctor` for Rust CLI preflight. |
 | `pnpm check:docs` | Guard public docs/workflows against stale Rust CLI command examples and retired TS runtime imports. |
 | `pnpm export:source [path]` | Create a clean source tarball from tracked files with local state excluded. |
@@ -318,7 +322,7 @@ Useful package scripts:
 
 The old TypeScript/Ink CLI is no longer the npm runtime path:
 
-- `bin.kuzushi` points to `bin/kuzushi-rs.mjs`.
+- `bin.kuzushi` and `bin.kz` point to `bin/kuzushi-rs.mjs`.
 - The `kuzushi-ts` npm bin is removed.
 - The `dev:ts` package script and `scripts/kuzushi-dev` source CLI helper are
   removed.

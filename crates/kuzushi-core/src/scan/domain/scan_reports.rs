@@ -25,38 +25,7 @@ impl SemgrepScanReport {
     }
 
     pub fn output(&self) -> String {
-        let mut lines = vec![format!(
-            "semgrep: {} finding{} under {}",
-            self.count,
-            if self.count == 1 { "" } else { "s" },
-            self.target
-        )];
-
-        if let Some(persisted) = &self.persisted {
-            lines.push(format!(
-                "  Persisted run: {} ({})",
-                persisted.run_id, persisted.findings_db
-            ));
-        }
-
-        if !self.findings.is_empty() {
-            lines.push(String::new());
-            lines.push("Top findings:".to_string());
-            for finding in self.findings.iter().take(10) {
-                lines.push(format!(
-                    "  - {} - {} - {}:{}",
-                    finding.severity.as_str(),
-                    finding.rule_id,
-                    finding.file_path,
-                    finding.start_line
-                ));
-            }
-            if self.findings.len() > 10 {
-                lines.push(format!("  ... and {} more", self.findings.len() - 10));
-            }
-        }
-
-        lines.join("\n")
+        semgrep_output_lines(self).join("\n")
     }
 
     pub fn to_tool_json(&self) -> Value {
@@ -65,6 +34,31 @@ impl SemgrepScanReport {
             "output": self.output(),
             "data": self,
         })
+    }
+}
+
+fn semgrep_output_lines(report: &SemgrepScanReport) -> Vec<String> {
+    let mut lines = vec![semgrep_summary_line(report)];
+    append_semgrep_persisted_run(&mut lines, report.persisted.as_ref());
+    append_top_findings(&mut lines, &report.findings);
+    lines
+}
+
+fn semgrep_summary_line(report: &SemgrepScanReport) -> String {
+    format!(
+        "semgrep: {} finding{} under {}",
+        report.count,
+        plural_suffix(report.count),
+        report.target
+    )
+}
+
+fn append_semgrep_persisted_run(
+    lines: &mut Vec<String>,
+    persisted: Option<&SemgrepPersistedRun>,
+) {
+    if let Some(persisted) = persisted {
+        lines.push(persisted_run_line(&persisted.run_id, &persisted.findings_db));
     }
 }
 
@@ -85,6 +79,8 @@ pub struct CodeqlScanReport {
     pub findings: Vec<Finding>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub persisted: Option<CodeqlPersistedRun>,
+    #[serde(rename = "reportSarif", skip_serializing_if = "Option::is_none")]
+    pub report_sarif: Option<Value>,
 }
 
 impl CodeqlScanReport {
@@ -98,7 +94,13 @@ impl CodeqlScanReport {
             count: findings.len(),
             findings,
             persisted,
+            report_sarif: None,
         }
+    }
+
+    pub fn with_sarif_documents(mut self, documents: Vec<String>) -> Self {
+        self.report_sarif = sarif_report_value(documents);
+        self
     }
 
     pub fn output(&self) -> String {
@@ -112,6 +114,41 @@ impl CodeqlScanReport {
             "data": self,
         })
     }
+}
+
+fn sarif_report_value(documents: Vec<String>) -> Option<Value> {
+    let mut values = documents
+        .into_iter()
+        .filter_map(|document| serde_json::from_str::<Value>(&document).ok())
+        .collect::<Vec<_>>();
+    if values.len() == 1 {
+        return values.pop();
+    }
+    merged_sarif_report(values)
+}
+
+fn merged_sarif_report(values: Vec<Value>) -> Option<Value> {
+    let runs = values
+        .iter()
+        .filter_map(|value| value.get("runs").and_then(Value::as_array))
+        .flat_map(|runs| runs.iter().cloned())
+        .collect::<Vec<_>>();
+    if runs.is_empty() {
+        return None;
+    }
+    Some(json!({
+        "version": sarif_version(&values),
+        "runs": runs,
+    }))
+}
+
+fn sarif_version(values: &[Value]) -> String {
+    values
+        .iter()
+        .filter_map(|value| value.get("version").and_then(Value::as_str))
+        .next()
+        .unwrap_or("2.1.0")
+        .to_string()
 }
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -145,24 +182,29 @@ fn plural_suffix(count: usize) -> &'static str {
 
 fn append_codeql_persisted_run(lines: &mut Vec<String>, persisted: Option<&CodeqlPersistedRun>) {
     if let Some(persisted) = persisted {
-        lines.push(format!(
-            "  Persisted run: {} ({})",
-            persisted.run_id, persisted.findings_db
-        ));
+        lines.push(persisted_run_line(&persisted.run_id, &persisted.findings_db));
     }
 }
 
 fn append_codeql_top_findings(lines: &mut Vec<String>, findings: &[Finding]) {
+    append_top_findings(lines, findings);
+}
+
+fn persisted_run_line(run_id: &str, findings_db: &str) -> String {
+    format!("  Persisted run: {run_id} ({findings_db})")
+}
+
+fn append_top_findings(lines: &mut Vec<String>, findings: &[Finding]) {
     if findings.is_empty() {
         return;
     }
     lines.push(String::new());
     lines.push("Top findings:".to_string());
-    lines.extend(findings.iter().take(10).map(codeql_finding_line));
-    append_codeql_remaining_count(lines, findings.len());
+    lines.extend(findings.iter().take(10).map(finding_line));
+    append_remaining_count(lines, findings.len());
 }
 
-fn codeql_finding_line(finding: &Finding) -> String {
+fn finding_line(finding: &Finding) -> String {
     format!(
         "  - {} - {} - {}:{}",
         finding.severity.as_str(),
@@ -172,7 +214,7 @@ fn codeql_finding_line(finding: &Finding) -> String {
     )
 }
 
-fn append_codeql_remaining_count(lines: &mut Vec<String>, finding_count: usize) {
+fn append_remaining_count(lines: &mut Vec<String>, finding_count: usize) {
     if finding_count > 10 {
         lines.push(format!("  ... and {} more", finding_count - 10));
     }

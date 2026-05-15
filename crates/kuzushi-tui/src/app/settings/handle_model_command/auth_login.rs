@@ -1,6 +1,7 @@
 use super::super::{
-    auth_login_status_message, normalize_auth_provider, pause_raw_mode_for_auth_login,
-    repaint_after_auth_login, restore_raw_mode_after_auth_login, spawn_auth_login_process,
+    auth_login_status_message, auth_provider_display_name, normalize_auth_provider,
+    pause_raw_mode_for_auth_login, repaint_after_auth_login, restore_raw_mode_after_auth_login,
+    spawn_auth_login_process,
 };
 use super::*;
 
@@ -23,7 +24,7 @@ impl ShellApp {
         self.log(
             "auth",
             format!(
-                "pi-agent-core auth: {api_key_env}={env_status}; ANTHROPIC_API_KEY={anthropic_env}; openai-codex oauth {}; anthropic oauth {}; secret values hidden. Next: auth login openai-codex or auth login anthropic",
+                "pi-agent-core auth: {api_key_env}={env_status}; ANTHROPIC_API_KEY={anthropic_env}; openai oauth {}; anthropic oauth {}; secret values hidden. Next: auth login openai or auth login anthropic",
                 oauth_provider_status("openai-codex"),
                 oauth_provider_status("anthropic")
             ),
@@ -35,7 +36,13 @@ impl ShellApp {
         let Some(provider) = self.auth_login_provider(provider.as_deref()) else {
             return;
         };
-        self.log("auth", format!("starting {provider} OAuth login"));
+        self.log(
+            "auth",
+            format!(
+                "starting {} OAuth login",
+                auth_provider_display_name(provider)
+            ),
+        );
 
         let Some(command) = self.auth_login_bridge_command() else {
             return;
@@ -44,7 +51,7 @@ impl ShellApp {
     }
 
     pub(crate) fn auth_login_provider(&mut self, provider: Option<&str>) -> Option<&'static str> {
-        match normalize_auth_provider(provider.unwrap_or("openai-codex")) {
+        match normalize_auth_provider(provider.unwrap_or("openai")) {
             Ok(provider) => Some(provider),
             Err(message) => {
                 self.log("error", message);

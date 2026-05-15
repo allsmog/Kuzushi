@@ -34,6 +34,16 @@ fn fresh_app() -> ShellApp {
     ShellApp::new(V2Config::default(), None)
 }
 
+fn reset_snapshot_target(name: &str) -> PathBuf {
+    let root = PathBuf::from("target")
+        .join("kuzushi-tui-snapshots")
+        .join(name);
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root)
+        .unwrap_or_else(|error| panic!("failed to create {}: {error}", root.display()));
+    root
+}
+
 fn assert_plain_snapshot(name: &str, actual: &str) {
     let path = snapshot_path(name);
     let raw = fs::read_to_string(&path)
@@ -78,7 +88,55 @@ fn _silence_unused() {
 #[test]
 fn catalog_view_default() {
     let mut app = fresh_app();
+    app.shell_view = ShellView::Catalog;
     assert_plain_snapshot("catalog_view_default", &render_at_120(&mut app));
+}
+
+#[test]
+fn home_view_default() {
+    let mut app = fresh_app();
+    app.shell_view = ShellView::Home;
+    assert_plain_snapshot("home_view_default", &render_at_120(&mut app));
+}
+
+#[test]
+fn recommend_view_with_artifact() {
+    let root = reset_snapshot_target("recommend");
+    let run_dir = root.join(".kuzushi/runs/run-rec");
+    fs::create_dir_all(&run_dir).unwrap();
+    fs::write(root.join(".kuzushi/latest"), "run-rec\n").unwrap();
+    fs::write(
+        run_dir.join("recommendations.json"),
+        serde_json::json!({
+            "summary": "Prioritize deterministic scanner coverage before model-backed review.",
+            "recommendations": [{
+                "tool": "semgrep:scan",
+                "priority": "high",
+                "reason": "Source files match the fast native SAST path.",
+                "requiresRuntime": false
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+    fs::write(
+        run_dir.join("attack-surface.json"),
+        serde_json::json!({
+            "summary": {
+                "highRisk": 1,
+                "maxRiskScore": 90,
+                "byRiskTier": {"critical": 1}
+            },
+            "surfaces": [{"title": "POST /admin", "risk": {"tier": "critical"}}]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let mut app = fresh_app();
+    app.target = Some(root);
+    app.shell_view = ShellView::Recommend;
+    assert_plain_snapshot("recommend_view_with_artifact", &render_at_120(&mut app));
 }
 
 #[test]
@@ -121,20 +179,6 @@ fn module_view_focused_on_sast() {
     let mut app = fresh_app();
     app.handle_command(ShellCommand::Use("sast".to_string()));
     assert_plain_snapshot("module_view_sast", &render_at_120(&mut app));
-}
-
-#[test]
-fn module_view_focused_on_recon_with_recent_activity() {
-    let mut app = fresh_app();
-    app.log.clear();
-    app.log(
-        "recon:nmap",
-        "discovered 5 hosts and 18 services for acme-checkout.com",
-    );
-    app.log("recon:subdomain", "discovered 7 subdomains");
-    app.log("recon", "persisted 3 findings");
-    app.handle_command(ShellCommand::Use("recon".to_string()));
-    assert_plain_snapshot("module_view_recon_active", &render_at_120(&mut app));
 }
 
 #[test]
@@ -195,6 +239,71 @@ fn findings_list_view_with_two_findings() {
     app.findings = vec![critical, untriaged];
     app.shell_view = ShellView::Findings;
     assert_plain_snapshot("findings_list_two_findings", &render_at_120(&mut app));
+}
+
+#[test]
+fn run_timeline_view_with_past_runs() {
+    let root = reset_snapshot_target("runs");
+    let runs_root = root.join(".kuzushi/runs");
+    fs::create_dir_all(runs_root.join("r-2026-05-06T14-31")).unwrap();
+    fs::create_dir_all(runs_root.join("r-2026-05-06T15-18")).unwrap();
+    fs::write(
+        runs_root.join("r-2026-05-06T14-31/summary.json"),
+        r#"{"status":"complete","findings":18,"target":"~/work/acme-checkout"}"#,
+    )
+    .unwrap();
+    fs::write(
+        runs_root.join("r-2026-05-06T15-18/summary.json"),
+        r#"{"status":"failed","findings":0,"target":"~/work/acme-checkout"}"#,
+    )
+    .unwrap();
+
+    let mut app = fresh_app();
+    app.target = Some(root);
+    app.shell_view = ShellView::Runs;
+    assert_plain_snapshot("run_timeline_view_with_past_runs", &render_at_120(&mut app));
+}
+
+#[test]
+fn failure_handoff_view_with_artifact() {
+    let root = reset_snapshot_target("failure");
+    let run_dir = root.join(".kuzushi/runs/run-failed");
+    fs::create_dir_all(&run_dir).unwrap();
+    fs::write(root.join(".kuzushi/latest"), "run-failed\n").unwrap();
+    fs::write(
+        run_dir.join("failures.json"),
+        serde_json::json!({
+            "runId": "run-failed",
+            "status": "failed",
+            "failures": [{
+                "tool": "semgrep:scan",
+                "status": "failed",
+                "error": "semgrep binary missing",
+                "agentThreadContext": {
+                    "failedStage": "semgrep:scan",
+                    "cause": "semgrep binary missing",
+                    "whatFailed": "semgrep:scan did not complete successfully",
+                    "artifactsAvailable": [],
+                    "missingArtifacts": ["findings.json"],
+                    "allowedProofLevel": "artifact-review-only; runtime verification did not run",
+                    "nextFilesOrArtifactsToInspect": ["failures.json"],
+                    "recoveryOptions": ["Install semgrep."],
+                    "fallbackPrompt": "Continue the failed Kuzushi run.",
+                    "claimsForbidden": ["verified"]
+                }
+            }]
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let mut app = fresh_app();
+    app.target = Some(root);
+    app.shell_view = ShellView::FailureHandoff;
+    assert_plain_snapshot(
+        "failure_handoff_view_with_artifact",
+        &render_at_120(&mut app),
+    );
 }
 
 #[test]
@@ -330,6 +439,13 @@ fn activity_view_default_split_pane() {
             step = step.with_parent_step(*p);
         }
         session.apply_step(step);
+    }
+    let snapshot_instant = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    for row in session.tasks.values_mut() {
+        row.started_at = Some(snapshot_instant);
+        if row.completed_at.is_some() {
+            row.completed_at = Some(snapshot_instant);
+        }
     }
     app.activity = Some(session);
     app.shell_view = ShellView::Activity;

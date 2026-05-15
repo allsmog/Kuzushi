@@ -15,12 +15,14 @@ pub(crate) fn shell_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
 
 pub(crate) fn primary_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
     match &app.shell_view {
+        ShellView::Home => Some(home_lines(app, area)),
         ShellView::Catalog if app.catalog_expanded => Some(viewport_lines(
             catalog_lines(app, area),
             area.height,
             app.modules_scroll,
         )),
         ShellView::Catalog => Some(catalog_lines(app, area)),
+        ShellView::Recommend => Some(recommend_lines(app, area)),
         ShellView::Module => Some(module_lines(app, area)),
         ShellView::ModuleRun => Some(module_run_lines(app, area)),
         ShellView::Findings => Some(findings_lines(app, area)),
@@ -84,6 +86,7 @@ pub(crate) fn workspace_and_session_view_lines(app: &ShellApp, area: Rect) -> Ve
         ShellView::KnowledgeBase => {
             viewport_lines(knowledge_base_lines(app, area), area.height, app.kb_scroll)
         }
+        ShellView::FailureHandoff => failure_handoff_lines(app, area),
         ShellView::AgentChat => agent_chat_lines(app, area),
         ShellView::History => {
             viewport_lines(history_lines(app, area), area.height, app.history_scroll)

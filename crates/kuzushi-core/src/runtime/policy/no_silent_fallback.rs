@@ -14,7 +14,8 @@ pub fn require_configured_model(tool_name: &str, config_model: Option<&str>) -> 
     let model = config_model
         .map(str::to_string)
         .with_context(|| config_model_error(tool_name))?;
-    validate_model_spec(&model)?;
+    validate_model_spec(&model)
+        .with_context(|| format!("{tool_name} received an invalid configured model"))?;
     Ok(model)
 }
 
@@ -26,7 +27,7 @@ pub fn resolve_explicit_model(
     let model = input_model
         .or_else(|| config_model.map(str::to_string))
         .with_context(|| tool_input_model_error(tool_name))?;
-    validate_model_spec(&model)?;
+    validate_model_spec(&model).with_context(|| format!("{tool_name} received an invalid model"))?;
     Ok(model)
 }
 

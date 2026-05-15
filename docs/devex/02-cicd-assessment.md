@@ -67,10 +67,10 @@ handoff: ideally `pnpm test` = `vitest run --coverage`.)
 
 ### H3. E2E uses `pnpm dev` (tsx) instead of published artifact (HIGH)
 
-`tests/e2e/run-smoke.sh` calls `pnpm dev config validate …` and
-`pnpm dev scan …`, which is `tsx src/cli.ts`. The shipped CLI is
-`dist/cli.js` via `bin.kuzushi`. We're smoke-testing source, not artifact —
-a transpile bug in `tsc` could ship silently.
+`tests/e2e/run-smoke.sh` historically called `pnpm dev config validate ...`
+and `pnpm dev scan ...`, which exercised source execution instead of the
+packaged wrapper. The shipped CLI is the native Rust binary through
+`bin/kuzushi-rs.mjs`, exposed as `kuzushi` and `kz`.
 
 **Fix:** parameterize the smoke script with `KUZUSHI_CMD` (default `pnpm dev`)
 and point CI at `node dist/cli.js` after building. E2E job downloads the

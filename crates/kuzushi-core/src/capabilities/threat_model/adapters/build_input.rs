@@ -7,15 +7,8 @@ pub(crate) fn parse_build_input(
 ) -> Result<BuildInput> {
     let target = resolve_target(input, ctx)?;
     let repo_name = repo_name(&target);
-    let methodology = read_methodology(input, "pasta");
-    let slice = read_string(input, &["slice"])
-        .filter(|value| {
-            matches!(
-                value.as_str(),
-                "all" | "dfd" | "stride" | "stories" | "scope" | "scenarios"
-            )
-        })
-        .unwrap_or_else(|| "all".to_string());
+    let methodology = read_methodology(input, flavor.default_methodology());
+    let slice = read_slice(input);
     let stages = read_stages(input, flavor.tool_name())?;
     let run_id = Uuid::new_v4().to_string();
     let output_dir = read_string(input, &["outputDir", "output_dir"])

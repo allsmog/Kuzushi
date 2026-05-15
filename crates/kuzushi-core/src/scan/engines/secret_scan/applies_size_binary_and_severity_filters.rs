@@ -109,4 +109,8 @@ pub(crate) fn scanner_converts_results_to_core_findings() {
     assert_eq!(findings[0].tool, "secret-scan");
     assert_eq!(findings[0].rule_id, "secret-scan/openai-api-key");
     assert_eq!(findings[0].severity, Severity::High);
+    assert_eq!(
+        findings[0].static_proof_state,
+        Some(StaticProofState::SignalOnly)
+    );
 }

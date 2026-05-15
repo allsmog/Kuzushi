@@ -1,22 +1,28 @@
+use super::canonical_run_files::ensure_canonical_run_files;
+use super::llm_audit::load_run_llm_audit;
+use super::run_paths::latest_run_path;
 use super::{now_unix, run_dir, runs_root, RunSummary};
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+const LEGACY_SUMMARY_FILE: &str = "summary.json";
+const RUN_METADATA_FILE: &str = "run.json";
+
 pub fn write_run_summary(target: impl AsRef<Path>, summary: &RunSummary) -> Result<PathBuf> {
+    let target = target.as_ref();
     let dir = run_dir(target, &summary.run_id);
     fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
-    let path = dir.join("summary.json");
-    fs::write(
-        &path,
-        format!("{}\n", serde_json::to_string_pretty(summary)?),
-    )
-    .with_context(|| format!("Could not write {}", path.display()))?;
-    Ok(path)
+    let summary = summary_with_llm_audit(target, summary);
+    let summary_path = write_run_summary_file(&dir.join(LEGACY_SUMMARY_FILE), &summary)?;
+    write_run_summary_file(&dir.join(RUN_METADATA_FILE), &summary)?;
+    ensure_canonical_run_files(target, &summary.run_id, &summary.status)?;
+    write_latest_run_id(target, &summary.run_id)?;
+    Ok(summary_path)
 }
 
 pub fn load_run_summary(target: impl AsRef<Path>, run_id: &str) -> Result<RunSummary> {
-    let path = run_dir(target, run_id).join("summary.json");
+    let path = readable_summary_path(target, run_id);
     let body =
         fs::read_to_string(&path).with_context(|| format!("Could not read {}", path.display()))?;
     let summary: RunSummary = serde_json::from_str(&body)
@@ -49,9 +55,7 @@ pub(crate) fn read_run_summary_entry(entry: &fs::DirEntry) -> Option<RunSummary>
     if !is_directory_entry(entry) {
         return None;
     }
-    let summary_path = entry.path().join("summary.json");
-    read_run_summary_file(&summary_path)
-        .map(|summary| repair_stale_running_summary(&summary_path, summary))
+    read_run_metadata_entry(&entry.path())
 }
 
 fn is_directory_entry(entry: &fs::DirEntry) -> bool {
@@ -61,9 +65,50 @@ fn is_directory_entry(entry: &fs::DirEntry) -> bool {
         .unwrap_or(false)
 }
 
+fn read_run_metadata_entry(dir: &Path) -> Option<RunSummary> {
+    read_repaired_summary(&dir.join(RUN_METADATA_FILE))
+        .or_else(|| read_repaired_summary(&dir.join(LEGACY_SUMMARY_FILE)))
+}
+
+fn read_repaired_summary(path: &Path) -> Option<RunSummary> {
+    read_run_summary_file(path).map(|summary| repair_stale_running_summary(path, summary))
+}
+
 fn read_run_summary_file(summary_path: &Path) -> Option<RunSummary> {
     let body = fs::read_to_string(summary_path).ok()?;
     serde_json::from_str::<RunSummary>(&body).ok()
+}
+
+fn readable_summary_path(target: impl AsRef<Path>, run_id: &str) -> PathBuf {
+    let dir = run_dir(target, run_id);
+    let canonical = dir.join(RUN_METADATA_FILE);
+    canonical
+        .exists()
+        .then_some(canonical)
+        .unwrap_or_else(|| dir.join(LEGACY_SUMMARY_FILE))
+}
+
+fn write_run_summary_file(path: &Path, summary: &RunSummary) -> Result<PathBuf> {
+    let body = format!("{}\n", serde_json::to_string_pretty(summary)?);
+    fs::write(path, body).with_context(|| format!("Could not write {}", path.display()))?;
+    Ok(path.to_path_buf())
+}
+
+fn summary_with_llm_audit(target: &Path, summary: &RunSummary) -> RunSummary {
+    let llm_calls = load_run_llm_audit(target, &summary.run_id);
+    if llm_calls.is_empty() {
+        return summary.clone();
+    }
+    summary.clone().with_llm_calls(llm_calls)
+}
+
+fn write_latest_run_id(target: &Path, run_id: &str) -> Result<()> {
+    let path = latest_run_path(target);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).with_context(|| format!("Could not create {}", parent.display()))?;
+    }
+    fs::write(&path, format!("{run_id}\n"))
+        .with_context(|| format!("Could not write {}", path.display()))
 }
 
 fn sort_run_summaries(summaries: &mut [RunSummary]) {

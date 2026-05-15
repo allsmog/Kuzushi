@@ -57,30 +57,77 @@ pub(in crate::modules) fn triage_response(
     missing_fingerprints: Vec<String>,
 ) -> Value {
     let dropped_high_conf_fp = stats.high_confidence_false_positive_count();
+    let summary = triage_summary(stage1, stats, &missing_fingerprints);
+    let warnings = triage_warnings(stats, &missing_fingerprints);
+    let data = triage_response_data(
+        input,
+        config,
+        stage1,
+        stats,
+        missing_fingerprints,
+        dropped_high_conf_fp,
+        &summary,
+    );
     json!({
         "ok": true,
-        "output": triage_summary(stage1, stats, &missing_fingerprints),
-        "data": {
-            "triaged": stats.triaged(),
-            "total": stage1.total,
-            "tp": stats.tp,
-            "fp": stats.fp,
-            "needsReview": stats.needs_review,
-            "byDesign": stats.by_design,
-            "costUsd": stats.total_cost,
-            "missingFingerprints": missing_fingerprints,
-            "batchSize": input.batch_size,
-            "concurrency": input.concurrency,
-            "stage2Tier": triage_tier_label(input.stage2_tier),
-            "costCapUsd": input.cost_cap_usd,
-            "costCapHit": stats.cost_cap_hit,
-            "pendingAfterCap": stats.pending_after_cap,
-            "highConfidenceFalsePositivesDropped": dropped_high_conf_fp,
-            "stages": triage_stages(input, config, stage1, stats, dropped_high_conf_fp),
-            "results": stats.results,
-        },
+        "status": "completed",
+        "summary": summary,
+        "output": summary,
+        "artifacts": [],
+        "warnings": warnings,
+        "errors": [],
+        "data": data,
         "costUsd": stats.total_cost,
     })
+}
+
+fn triage_response_data(
+    input: &TriageRunInput,
+    config: &TriageExecutionConfig,
+    stage1: &PrefilteredTriageFindings,
+    stats: &TriageRunStats,
+    missing_fingerprints: Vec<String>,
+    dropped_high_conf_fp: usize,
+    summary: &str,
+) -> Value {
+    json!({
+        "summary": summary,
+        "triaged": stats.triaged(),
+        "total": stage1.total,
+        "tp": stats.tp,
+        "fp": stats.fp,
+        "needsReview": stats.needs_review,
+        "byDesign": stats.by_design,
+        "costUsd": stats.total_cost,
+        "missingFingerprints": missing_fingerprints,
+        "batchSize": input.batch_size,
+        "concurrency": input.concurrency,
+        "stage2Tier": triage_tier_label(input.stage2_tier),
+        "costCapUsd": input.cost_cap_usd,
+        "costCapHit": stats.cost_cap_hit,
+        "pendingAfterCap": stats.pending_after_cap,
+        "highConfidenceFalsePositivesDropped": dropped_high_conf_fp,
+        "stages": triage_stages(input, config, stage1, stats, dropped_high_conf_fp),
+        "results": stats.results,
+        "findings": stats.results,
+    })
+}
+
+fn triage_warnings(stats: &TriageRunStats, missing_fingerprints: &[String]) -> Vec<String> {
+    let mut warnings = Vec::new();
+    if stats.cost_cap_hit {
+        warnings.push(format!(
+            "Cost cap hit; {} finding(s) remain unevaluated.",
+            stats.pending_after_cap
+        ));
+    }
+    if !missing_fingerprints.is_empty() {
+        warnings.push(format!(
+            "{} requested finding(s) were not found.",
+            missing_fingerprints.len()
+        ));
+    }
+    warnings
 }
 
 pub(in crate::modules) fn triage_stages(

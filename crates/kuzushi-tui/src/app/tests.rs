@@ -1,7 +1,7 @@
 use super::*;
 
 use super::approval::{confirm_gate_for_tool, parse_pending_patch, ConfirmKind};
-use super::artifacts::{append_trace_step, write_run_summary};
+use super::artifacts::{append_trace_step, write_run_failure_handoff, write_run_summary};
 use super::command_router::unknown_command_message;
 use super::findings::{
     format_alias_table, format_chain_alias, parse_chain_alias, sorted_chain_aliases,
@@ -14,9 +14,10 @@ use crate::commands::{
     parse_command, ContextCommand, SastTaskCommand, SastTaskModeCommand, ShellCommand,
     WorkspaceCommand,
 };
+use kuzushi_core::run_artifacts::load_run_failures;
 use kuzushi_core::{
-    load_persistent_threat_model, save_persistent_threat_model, AttachmentRecord, FindingStore,
-    OptionScope, OptionTarget, RuntimeConfig, RuntimeKind, Severity, ToolOptionStore,
+    load_persistent_threat_model, load_run_summary, save_persistent_threat_model, AttachmentRecord,
+    FindingStore, OptionScope, OptionTarget, RuntimeConfig, RuntimeKind, Severity, ToolOptionStore,
     TriageOutcome, TriageVerdict,
 };
 use std::fs;
@@ -66,7 +67,7 @@ fn missing_model_backed_prereqs_block_without_auto_accept_or_model_fallback() {
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
 
-    app.handle_command(ShellCommand::Use("carlini-threat-hunt".to_string()));
+    app.handle_command(ShellCommand::Use("offense-review".to_string()));
     app.handle_command(ShellCommand::RunTool {
         tool: None,
         input: Some(r#"{"maxActors":1,"runsPerActor":1}"#.to_string()),
@@ -75,7 +76,7 @@ fn missing_model_backed_prereqs_block_without_auto_accept_or_model_fallback() {
     let plan = app.pending_prereq_prompt.as_ref().unwrap();
     assert_eq!(app.tool_running.as_deref(), None);
     assert_eq!(app.config.model, None);
-    assert_eq!(plan.final_tool, "carlini-threat-hunt:run");
+    assert_eq!(plan.final_tool, "offense-review:threat-hunt");
     assert!(plan.steps.iter().any(|step| step.model_backed
         && step.artifact_state == PrereqArtifactState::Missing
         && step.cost_hint.contains("token cost unknown")));
@@ -86,6 +87,23 @@ fn missing_model_backed_prereqs_block_without_auto_accept_or_model_fallback() {
         .log
         .iter()
         .any(|line| line.body.contains("running automatically")));
+}
+
+#[test]
+fn taint_iris_next_run_dot_uses_split_public_default_tool() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+
+    app.handle_command(ShellCommand::Use("taint-iris-next".to_string()));
+
+    assert_eq!(
+        app.default_tool_for_focused_module().as_deref(),
+        Some("taint-iris-next:dataflow-plan")
+    );
+    assert!(app.registry.resolve_tool("taint-iris-next:hunt").is_some());
+    assert!(!app
+        .registry
+        .tools()
+        .any(|tool| tool.name == "taint-iris-next:hunt"));
 }
 
 #[test]
@@ -222,6 +240,30 @@ fn live_activity_phase_labels_cover_long_running_states() {
 }
 
 #[test]
+fn taint_iris_next_activity_phases_match_split_runtime_boundary() {
+    assert_eq!(
+        live_activity_for_tool("taint-iris-next:finding-review", "reviewing").phase,
+        LiveActivityPhase::Thinking
+    );
+    assert_eq!(
+        live_activity_for_tool("taint-iris-next:dataflow-plan", "planning").phase,
+        LiveActivityPhase::RunningTool
+    );
+    assert_eq!(
+        live_activity_for_tool("taint-iris-next:source-sink-trace", "tracing").phase,
+        LiveActivityPhase::RunningTool
+    );
+}
+
+#[test]
+fn offense_review_threat_hunt_activity_is_model_backed() {
+    assert_eq!(
+        live_activity_for_tool("offense-review:threat-hunt", "hunting").phase,
+        LiveActivityPhase::Thinking
+    );
+}
+
+#[test]
 fn background_tool_sets_structured_live_activity_and_transcript_line() {
     let tmp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
@@ -261,9 +303,8 @@ fn threat_dependent_run_waits_for_pending_threat_review_decision() {
         unsupported: Vec::new(),
     });
 
-    app.handle_command(ShellCommand::Use("carlini-threat-hunt".to_string()));
     app.handle_command(ShellCommand::RunTool {
-        tool: None,
+        tool: Some("carlini-threat-hunt:run".to_string()),
         input: Some(r#"{"maxActors":1}"#.to_string()),
     });
 
@@ -280,6 +321,31 @@ fn threat_dependent_run_waits_for_pending_threat_review_decision() {
         .live_activity
         .as_ref()
         .is_some_and(|activity| activity.phase == LiveActivityPhase::Waiting));
+}
+
+#[test]
+fn offense_review_threat_hunt_waits_for_pending_threat_review_decision() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.set_pending_threat_patch(ThreatPatch {
+        goal: "review trust boundary".to_string(),
+        summary: "tighten trust boundary".to_string(),
+        patch: serde_json::json!({"assumptions":["admin flow in scope"]}),
+        unsupported: Vec::new(),
+    });
+
+    app.handle_command(ShellCommand::RunTool {
+        tool: Some("offense-review:threat-hunt".to_string()),
+        input: Some(r#"{"maxActors":1}"#.to_string()),
+    });
+
+    assert_eq!(app.tool_running.as_deref(), None);
+    assert!(app.pending_chain.is_none());
+    assert!(matches!(
+        app.shell_view,
+        ShellView::Threat(ThreatView::Summary)
+    ));
 }
 
 #[cfg(unix)]
@@ -457,7 +523,7 @@ request="$(cat)"
 case "$request" in
   *"What should I run first?"*)
     cat <<'JSON'
-{"ok":true,"text":"Run context build, then scan ."}
+{"ok":true,"text":"Run context build, then scan .","costUsd":0.034}
 JSON
     ;;
   *)
@@ -1554,6 +1620,14 @@ fn ux_empty_and_error_states_name_next_real_commands() {
     assert!(unknown_module.contains("Closest: sast"));
     assert!(unknown_module.contains("Next: modules or use <module-id>"));
 
+    app.handle_command(ShellCommand::Use("recon".to_string()));
+    assert_ne!(app.focused_module.as_deref(), Some("recon"));
+    assert!(app
+        .log
+        .iter()
+        .rev()
+        .any(|line| { line.prefix == "error" && line.body.contains("unknown module \"recon\"") }));
+
     app.handle_command(ShellCommand::RunTool {
         tool: Some("missing:tool".to_string()),
         input: None,
@@ -1822,7 +1896,7 @@ fn auth_provider_backend_model_and_cost_commands_are_explicit_and_secret_safe() 
         .unwrap_or_default();
     assert!(auth.contains("KUZUSHI_BG011_TEST_SECRET"));
     assert!(auth.contains("secret values hidden"));
-    assert!(auth.contains("openai-codex oauth"));
+    assert!(auth.contains("openai oauth"));
     assert!(!auth.contains("sk-"));
 
     app.handle_command(ShellCommand::AuthLogin(Some("not-a-provider".to_string())));
@@ -2211,10 +2285,11 @@ fn config_view_onboards_with_keyboard_model_selection() {
 #[test]
 fn ask_requires_explicit_model_and_unknown_prose_stays_deterministic() {
     let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Home;
 
     app.handle_command(parse_command("summarize this repo"));
 
-    assert_eq!(app.shell_view, ShellView::Catalog);
+    assert_eq!(app.shell_view, ShellView::Home);
     assert!(app.agent_chat.is_none());
     assert!(app.log.iter().any(|line| {
         line.prefix == "error" && line.body.contains("Free-form chat is explicit only")
@@ -2251,6 +2326,7 @@ fn exit_and_unknown_command_feedback_is_actionable() {
     }
 
     let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Home;
     app.submit_line("/definitely-not-real");
     let slash_error = app
         .log
@@ -2273,12 +2349,13 @@ fn exit_and_unknown_command_feedback_is_actionable() {
         .unwrap_or_default();
     assert!(missing_ask_error.contains("Next: /ask <question>"));
     assert!(app.agent_chat.is_none());
-    assert_eq!(app.shell_view, ShellView::Catalog);
+    assert_eq!(app.shell_view, ShellView::Home);
 }
 
 #[test]
 fn plain_scripted_unknown_command_prints_command_and_new_error_log() {
     let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Home;
 
     let output = render_plain_scripted_session(&mut app, &["/nope"], 80);
 
@@ -2286,7 +2363,7 @@ fn plain_scripted_unknown_command_prints_command_and_new_error_log() {
     assert!(output.contains("command: /nope"));
     assert!(output.contains("> /nope"));
     assert!(output.contains("error: unknown command \"/nope\". Next: /help"));
-    assert_eq!(app.shell_view, ShellView::Catalog);
+    assert_eq!(app.shell_view, ShellView::Home);
     assert_plain_output_strict_80(&output);
 }
 
@@ -2321,6 +2398,7 @@ fn plain_scripted_help_then_quit_prints_one_result_block_per_command() {
 #[test]
 fn plain_scripted_unchanged_view_command_still_prints_result_block() {
     let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Home;
     let before = app.shell_view.clone();
 
     let output = render_plain_scripted_session(&mut app, &["/back"], 80);
@@ -2329,10 +2407,7 @@ fn plain_scripted_unchanged_view_command_still_prints_result_block() {
     assert!(output.contains("COMMAND RESULT"));
     assert!(output.contains("command: /back"));
     assert!(output.contains("> /back"));
-    // Catalog body now reads "KUZUSHI · CATALOG · N modules" (plain
-    // renderer rewrites `·` to `|`). Confirm the operator still gets a
-    // clear signal that they're back at the root catalog screen.
-    assert!(output.contains("KUZUSHI | CATALOG"));
+    assert!(output.contains("HOME"));
     assert!(output.contains("modules"));
     assert_plain_output_strict_80(&output);
 }
@@ -2413,6 +2488,7 @@ fn ask_dispatches_agent_question_through_explicit_runtime() {
         anthropic_oauth: None,
     };
     let mut app = ShellApp::new(config, None);
+    app.target = Some(tmp.path().to_path_buf());
 
     app.handle_command(parse_command("?What should I run first?"));
 
@@ -2447,6 +2523,13 @@ fn ask_dispatches_agent_question_through_explicit_runtime() {
         "ask worker completed with wrong UI state; {}",
         app.agent_chat_diagnostics_for_test()
     );
+    let run_id = agent.run_id.as_deref().unwrap();
+    let summary = load_run_summary(tmp.path(), run_id).unwrap();
+    assert_eq!(summary.llm_calls.len(), 1);
+    assert_eq!(summary.llm_calls[0].model, "openai:gpt-4.1");
+    assert_eq!(summary.llm_calls[0].provider, "openai");
+    assert!(summary.llm_calls[0].prompt_hash.starts_with("fnv1a64:"));
+    assert_eq!(summary.llm_calls[0].cost_usd, Some(0.034));
     assert!(app
         .log
         .iter()
@@ -2460,9 +2543,8 @@ fn run_command_dispatches_recon_nmap_through_registry() {
     let binary = fake_nmap_binary(&tmp.path().to_path_buf());
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-    app.handle_command(ShellCommand::Use("recon".to_string()));
     app.handle_command(ShellCommand::RunTool {
-        tool: Some("nmap".to_string()),
+        tool: Some("recon:nmap".to_string()),
         input: Some(format!(
             r#"{{"target":"192.0.2.10","ports":"80,443","binary":"{}"}}"#,
             binary.display()
@@ -2491,9 +2573,8 @@ fn run_command_dispatches_recon_http_fingerprint_through_registry() {
     let binary = fake_curl_binary(&tmp.path().to_path_buf());
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-    app.handle_command(ShellCommand::Use("recon".to_string()));
     app.handle_command(ShellCommand::RunTool {
-        tool: Some("http-fingerprint".to_string()),
+        tool: Some("recon:http-fingerprint".to_string()),
         input: Some(format!(
             r#"{{"target":"https://www.example.com","binary":"{}"}}"#,
             binary.display()
@@ -2880,7 +2961,7 @@ fn run_command_dispatches_taint_iris_through_pi_agent_core_bridge_and_persists()
 
 #[cfg(unix)]
 #[test]
-fn run_command_dispatches_taint_iris_next_through_pi_agent_core_bridge_and_persists() {
+fn run_command_dispatches_legacy_taint_iris_next_hunt_through_pi_agent_core_bridge_and_persists() {
     let tmp = tempfile::tempdir().unwrap();
     fs::create_dir(tmp.path().join("src")).unwrap();
     fs::write(
@@ -2910,7 +2991,7 @@ fn run_command_dispatches_taint_iris_next_through_pi_agent_core_bridge_and_persi
     app.trusted_workflow_auto_accept = true;
     app.handle_command(ShellCommand::Use("taint-iris-next".to_string()));
     app.handle_command(ShellCommand::RunTool {
-        tool: None,
+        tool: Some("taint-iris-next:hunt".to_string()),
         input: Some(
             r#"{"mode":"hunt","maxCatalogEntries":3,"maxAgentFindings":5,"minEvidenceLevel":"candidate"}"#
                 .to_string(),
@@ -2959,9 +3040,8 @@ fn run_command_dispatches_carlini_threat_hunt_through_pi_agent_core_bridge_and_p
     };
 
     let mut app = ShellApp::new(config, Some(&workspace));
-    app.handle_command(ShellCommand::Use("carlini-threat-hunt".to_string()));
     app.handle_command(ShellCommand::RunTool {
-        tool: None,
+        tool: Some("carlini-threat-hunt:run".to_string()),
         input: Some(r#"{"maxActors":1,"runsPerActor":1}"#.to_string()),
     });
     drain_chain_with_auto_reuse(&mut app);
@@ -4471,6 +4551,8 @@ fn ctrl_c_during_agent_chat_requests_abort_without_claiming_kill() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        failure_context: None,
+        pending_failure_context: None,
     });
 
     app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
@@ -4500,10 +4582,13 @@ fn agent_response_after_abort_request_is_ignored() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        failure_context: None,
+        pending_failure_context: None,
     });
 
     app.apply_agent_event(AgentEvent::Answered {
         text: "late answer".to_string(),
+        audit: test_agent_audit(),
     });
 
     let agent = app.agent_chat.as_ref().unwrap();
@@ -4515,6 +4600,102 @@ fn agent_response_after_abort_request_is_ignored() {
         .as_ref()
         .is_some_and(|error| error.contains("ignored")));
     assert!(!app.log.iter().any(|line| line.body == "late answer"));
+}
+
+#[test]
+fn agent_answer_event_records_llm_audit_metadata() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
+    app.agent_chat = Some(AgentChatView {
+        question: "what changed?".to_string(),
+        answer: None,
+        running: true,
+        abort_requested: false,
+        error: None,
+        history: Vec::new(),
+        run_id: Some("agent-answer".to_string()),
+        started_secs: 0,
+        failure_context: None,
+        pending_failure_context: None,
+    });
+
+    app.apply_agent_event(AgentEvent::Answered {
+        text: "inspect report.md".to_string(),
+        audit: test_agent_audit(),
+    });
+
+    let summary = load_run_summary(tmp.path(), "agent-answer").unwrap();
+    assert_eq!(summary.llm_calls.len(), 1);
+    assert_eq!(summary.llm_calls[0].model, "openai:gpt-test");
+    assert_eq!(summary.llm_calls[0].provider, "openai");
+    assert!(summary.llm_calls[0].prompt_hash.starts_with("fnv1a64:"));
+    assert_eq!(summary.llm_calls[0].cost_usd, Some(0.012));
+}
+
+#[test]
+fn agent_failure_event_records_bounded_failure_handoff() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
+    app.agent_chat = Some(AgentChatView {
+        question: "what changed?".to_string(),
+        answer: None,
+        running: true,
+        abort_requested: false,
+        error: None,
+        history: Vec::new(),
+        run_id: Some("agent-failed".to_string()),
+        started_secs: 0,
+        failure_context: None,
+        pending_failure_context: None,
+    });
+
+    app.apply_agent_event(AgentEvent::Failed {
+        error: "bridge denied the model request".to_string(),
+        audit: test_agent_audit(),
+    });
+
+    let failures = load_run_failures(tmp.path(), "agent-failed").unwrap();
+    assert_eq!(failures.status, "failed");
+    let failure = failures.failures.first().unwrap();
+    assert_eq!(failure.tool, "agent:ask");
+    assert!(failure
+        .agent_thread_context
+        .fallback_prompt
+        .contains("bridge denied"));
+}
+
+fn test_agent_audit() -> AgentCallAudit {
+    AgentCallAudit::for_prompt("openai:gpt-test", ASK_SYSTEM_PROMPT, "what changed?")
+        .with_cost_usd(0.012)
+}
+
+#[test]
+fn scan_failure_event_records_bounded_failure_handoff() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
+    app.scan = Some(ScanPanelState {
+        run_id: Some("scan-failed".to_string()),
+        target: tmp.path().to_path_buf(),
+        stage: "running".to_string(),
+        findings_count: 0,
+        running: true,
+        abort_requested: false,
+        error: None,
+    });
+
+    app.apply_scan_failed("semgrep binary missing".to_string());
+
+    let failures = load_run_failures(tmp.path(), "scan-failed").unwrap();
+    assert_eq!(failures.status, "failed");
+    let failure = failures.failures.first().unwrap();
+    assert_eq!(failure.tool, "sast:scan");
+    assert!(failure
+        .agent_thread_context
+        .fallback_prompt
+        .contains("semgrep binary missing"));
 }
 
 #[test]
@@ -4578,6 +4759,114 @@ fn background_tool_failure_clears_running_state() {
                 .contains("randori:pasta ended after abort request")
             && line.body.contains("ThreatModelDocument")
     }));
+}
+
+#[test]
+fn background_tool_failure_logs_failure_handoff_context() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
+    app.tool_run_id = Some("tool-failed".to_string());
+    app.tool_running = Some("semgrep:scan".to_string());
+
+    app.apply_tool_event(ToolEvent::Failed {
+        tool_name: "semgrep:scan".to_string(),
+        error: "semgrep binary missing".to_string(),
+    });
+
+    let result_log = app
+        .log
+        .iter()
+        .find(|line| line.prefix == "result")
+        .map(|line| line.body.clone())
+        .unwrap_or_default();
+    assert!(result_log.contains("\"status\": \"failed\""));
+    assert!(result_log.contains("\"fallback_context\""));
+    assert!(result_log.contains("\"failedStage\": \"semgrep:scan\""));
+    assert!(result_log.contains("semgrep binary missing"));
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "failure-context"
+            && line.body.contains("stage: semgrep:scan")
+            && line.body.contains("cause: semgrep binary missing")
+            && line.body.contains("artifact-review-only")
+            && line.body.contains("missing:")
+            && line.body.contains("recovery:")
+            && line.body.contains("forbidden claims")
+            && line.body.contains("empirical proof claim")
+            && !line.body.contains("validated")
+    }));
+    assert!(app
+        .agent_chat
+        .as_ref()
+        .and_then(|agent| agent.failure_context.as_ref())
+        .is_some_and(|context| context.failed_stage == "semgrep:scan"));
+    assert!(app
+        .agent_chat
+        .as_ref()
+        .and_then(|agent| agent.pending_failure_context.as_ref())
+        .is_some_and(|context| context.failed_stage == "semgrep:scan"));
+}
+
+#[test]
+fn background_tool_partial_result_logs_fallback_context_in_result() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
+    app.tool_run_id = Some("tool-partial".to_string());
+    app.tool_running = Some("codeql:scan".to_string());
+
+    app.apply_tool_event(ToolEvent::Finished {
+        tool_name: "codeql:scan".to_string(),
+        result: serde_json::json!({
+            "ok": false,
+            "status": "partial",
+            "summary": "CodeQL scanner was unavailable",
+            "errors": ["codeql binary missing"],
+            "warnings": [],
+            "artifacts": []
+        }),
+    });
+
+    let result_log = app
+        .log
+        .iter()
+        .rev()
+        .find(|line| line.prefix == "result")
+        .map(|line| line.body.clone())
+        .unwrap_or_default();
+    assert!(result_log.contains("fallback_context"));
+    assert!(result_log.contains("\"failedStage\": \"codeql:scan\""));
+    assert!(app
+        .agent_chat
+        .as_ref()
+        .and_then(|agent| agent.pending_failure_context.as_ref())
+        .is_some_and(|context| context.failed_stage == "codeql:scan"));
+}
+
+#[test]
+fn failure_handoff_command_opens_dedicated_view() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+
+    app.handle_command(ShellCommand::FailureHandoff);
+
+    assert_eq!(app.shell_view, ShellView::FailureHandoff);
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.prefix == "handoff" && line.body.contains("no failure handoff")));
+}
+
+#[test]
+fn recommend_command_opens_artifact_backed_view() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+
+    app.handle_command(ShellCommand::Recommend);
+
+    assert_eq!(app.shell_view, ShellView::Recommend);
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.prefix == "recommend" && line.body.contains("latest")));
 }
 
 #[test]
@@ -4753,15 +5042,45 @@ fn append_trace_step_no_op_when_target_is_none() {
 }
 
 #[test]
-fn write_run_summary_writes_summary_json_under_target() {
+fn write_run_summary_writes_canonical_run_metadata_under_target() {
     let tmp = tempfile::tempdir().unwrap();
     write_run_summary(Some(tmp.path()), "r-1", "complete", Some(11), "/tmp/demo");
-    let body = std::fs::read_to_string(tmp.path().join(".kuzushi/runs/r-1/summary.json"))
-        .expect("summary.json");
-    let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
-    assert_eq!(parsed["status"], "complete");
-    assert_eq!(parsed["findings"], 11);
-    assert_eq!(parsed["target"], "/tmp/demo");
+    for leaf in ["run.json", "summary.json"] {
+        let body = std::fs::read_to_string(tmp.path().join(".kuzushi/runs/r-1").join(leaf))
+            .unwrap_or_else(|_| panic!("{leaf}"));
+        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(parsed["status"], "completed");
+        assert_eq!(parsed["findings"], 11);
+        assert_eq!(parsed["target"], "/tmp/demo");
+    }
+}
+
+#[test]
+fn write_run_failure_handoff_records_bounded_context() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_run_summary(Some(tmp.path()), "r-failed", "failed", None, "/tmp/demo");
+    write_run_failure_handoff(
+        Some(tmp.path()),
+        "r-failed",
+        "sast:scan",
+        "failed",
+        "semgrep binary missing",
+    );
+
+    let failures = load_run_failures(tmp.path(), "r-failed").unwrap();
+    assert_eq!(failures.status, "failed");
+    let failure = failures.failures.first().unwrap();
+    assert_eq!(failure.tool, "sast:scan");
+    assert_eq!(failure.agent_thread_context.failed_stage, "sast:scan");
+    assert!(failure
+        .agent_thread_context
+        .fallback_prompt
+        .contains("semgrep binary missing"));
+    assert!(failure
+        .agent_thread_context
+        .claims_forbidden
+        .iter()
+        .any(|claim| claim.contains("proof claim")));
 }
 
 #[test]
@@ -4893,7 +5212,8 @@ fn plan_cursor_navigation_and_skip_toggle() {
 #[test]
 fn activity_command_opens_view_and_creates_session() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    assert!(matches!(app.shell_view, ShellView::Catalog));
+    app.shell_view = ShellView::Home;
+    assert!(matches!(app.shell_view, ShellView::Home));
     assert!(app.activity.is_none());
 
     app.handle_command(ShellCommand::Activity);

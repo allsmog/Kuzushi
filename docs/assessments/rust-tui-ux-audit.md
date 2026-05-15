@@ -13,25 +13,21 @@ guidance names real first-run commands, abort language is honest, stable finding
 aliases are covered, and strict plain-mode tests already enforce no ANSI or box
 drawing.
 
-The biggest remaining UX risks are operational rather than cosmetic:
-
-1. Plain/scripted mode can hide command feedback, including errors and exit
-   acknowledgements.
-2. Long routed views are clipped with no viewport, so help/tools/findings can be
-   unreachable in a normal terminal.
-3. The keybind footer has drifted from the actual hotkeys.
-4. `/help` hides supported aliases and examples that materially improve
-   discoverability.
-5. One async agent test is timing-sensitive under the full TUI app test suite.
+The biggest risks identified in the original audit were operational rather than
+cosmetic. RTUI-001 through RTUI-006 now have code-backed resolutions recorded
+below; this document remains as the historical audit trail for the shell UX
+hardening work.
 
 ## Findings
 
 ### F1 - High: plain/scripted mode hides command feedback
 
+Status: fixed by RTUI-001.
+
 Plain mode is the accessibility and low-bandwidth surface, but command results
 that live only in the transcript are dropped from rendered output.
 
-Evidence:
+Original evidence:
 
 - `run_plain_shell` submits each command and prints only `render_plain_app`
   after the command; it does not print the command or the new log entries
@@ -41,7 +37,7 @@ Evidence:
 - `render_plain_lines` renders the current `ShellView` and has no transcript/log
   section (`crates/kuzushi-tui/src/renderer.rs:229`).
 
-Validation:
+Original validation:
 
 ```sh
 printf '/nope\n/quit\n' | cargo run -q -p kuzushi-cli -- --plain shell --target /private/tmp/kuzushi-tui-audit
@@ -50,7 +46,7 @@ printf '/nope\n/quit\n' | cargo run -q -p kuzushi-cli -- --plain shell --target 
 Observed output rendered the catalog twice. It did not show the unknown-command
 error or the exit acknowledgement, even though both are logged in app state.
 
-Impact:
+Original impact:
 
 - Screen-reader users cannot reliably tell whether a command succeeded, failed,
   or exited.
@@ -68,6 +64,22 @@ Recommended fix:
 - Add tests for `/nope`, `/quit`, `/set`, and an unchanged-view command from
   `History` or `Help`.
 
+Resolution:
+
+- `run_plain_shell` now routes non-empty scripted input through
+  `render_plain_scripted_session`, which captures the pre-command log length,
+  submits the command, drains background events, and renders one result block
+  per command.
+- `render_plain_command_result` prints the command, new log lines, and the
+  current plain view snapshot. Unknown commands, `/quit`, `/help` followed by
+  `/quit`, and no-op `/back` all have focused TUI and CLI tests.
+- Validation coverage:
+  `plain_scripted_unknown_command_prints_command_and_new_error_log`,
+  `plain_scripted_quit_prints_exit_acknowledgement`,
+  `plain_scripted_help_then_quit_prints_one_result_block_per_command`,
+  `plain_scripted_unchanged_view_command_still_prints_result_block`, and the
+  matching `cutover_cli` plain scripted tests.
+
 ### F2 - High: long views are clipped with no scroll/viewport model
 
 Status: fixed by RTUI-002 on 2026-05-06. Help, Tools, expanded Modules,
@@ -79,7 +91,7 @@ passed: `cargo test -p kuzushi-tui viewport`,
 The renderer clamps the main view to available terminal height, but routed views
 build full line lists and `render_lines` draws from the top with no offset.
 
-Evidence:
+Original evidence:
 
 - `render_app` computes `max_view_height` and clamps `view_height`
   (`crates/kuzushi-tui/src/renderer.rs:53`).
@@ -92,7 +104,7 @@ Evidence:
   (`crates/kuzushi-tui/src/app.rs:3835`), but the renderer does not slice around
   `findings_cursor`.
 
-Impact:
+Original impact:
 
 - In a typical 24-row terminal, `/help`, `/tools`, expanded `/modules`, and
   non-trivial `/findings` lists can be partially unreachable.
@@ -164,7 +176,7 @@ command and description.
 Evidence:
 
 - `ShellCommandSpec` includes aliases such as `/h`, `/m`, `/f`, `q`,
-  `auth codex`, `findings export <path>`, and `?text`
+  `auth openai`, `findings export <path>`, and `?text`
   (`crates/kuzushi-tui/src/commands.rs:122`).
 - `help_lines` renders only `spec.command` and `spec.description`
   (`crates/kuzushi-tui/src/renderer.rs:1379`).
@@ -255,10 +267,12 @@ RTUI-005 resolution:
 
 ### F6 - Low: strict plain output over-truncates important help and guidance
 
+Status: fixed by RTUI-006.
+
 Plain output enforces line width, which is correct for low-bandwidth mode, but
 it truncates instead of wrapping important instructions.
 
-Evidence:
+Original evidence:
 
 - `render_plain_lines` applies `fit` to every line
   (`crates/kuzushi-tui/src/renderer.rs:247`).
@@ -266,7 +280,7 @@ Evidence:
   `workspace export findings <...` and long context instructions ending in
   `context-s...`.
 
-Impact:
+Original impact:
 
 - The mode intended for accessibility can omit the end of command examples,
   paths, and next-step text.
@@ -277,6 +291,14 @@ Recommended fix:
   instead of truncating them.
 - Reserve truncation for table cells where full detail is available in a nearby
   detail command.
+
+Resolution:
+
+- `finalize_width_safe_plain_lines` now wraps long plain guidance text and only
+  truncates table-like rows, headers, and dense status strips.
+- Strict plain tests cover options, KB, context, workspace, help guidance,
+  prerequisite plans, and live activity without ANSI, box drawing, or width
+  overflow.
 
 ## What Is Working Well
 
@@ -290,6 +312,9 @@ Recommended fix:
   has been issued.
 
 ## Implementation Roadmap
+
+Status: completed. The roadmap below is retained to show how the audit findings
+were closed.
 
 ### 1. Repair Plain Mode Feedback
 
@@ -364,4 +389,5 @@ Results:
 - Full `app::tests`: passed twice; latest run on this worktree reported 110
   passed.
 - Rust format check: passed.
-- Scripted plain validation exposed missing error/exit feedback in plain output.
+- Scripted plain validation now prints command result blocks, error feedback,
+  and exit acknowledgement in plain output.

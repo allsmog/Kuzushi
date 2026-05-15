@@ -204,9 +204,15 @@ pub(in crate::modules) fn empty_triage_response(
     missing_fingerprints: Vec<String>,
 ) -> Value {
     json!({
-        "ok": false,
+        "ok": true,
+        "status": "skipped",
+        "summary": "No findings matched triage input.",
         "output": "[-] No findings match. Run a scanner first (`kuzushi scan <repo>`) or pass explicit fingerprints.",
+        "artifacts": [],
+        "warnings": ["No findings matched triage input."],
+        "errors": [],
         "data": {
+            "summary": "No findings matched triage input.",
             "triaged": 0,
             "total": 0,
             "tp": 0,
@@ -216,6 +222,7 @@ pub(in crate::modules) fn empty_triage_response(
             "costUsd": 0.0,
             "missingFingerprints": missing_fingerprints,
             "batchSize": input.batch_size,
+            "findings": [],
         },
         "costUsd": 0.0,
     })
@@ -236,7 +243,10 @@ pub(in crate::modules) fn resolve_triage_model(
 ) -> Result<String> {
     let model_configured =
         crate::runtime::require_configured_model("triage:run", ctx.config.model.as_deref())?;
-    Ok(runtime.model_for_tier(tier, &model_configured))
+    let model = runtime.model_for_tier(tier, &model_configured);
+    crate::runtime::validate_model_spec(&model)
+        .with_context(|| "triage:run resolved an invalid stage2 model")?;
+    Ok(model)
 }
 
 pub(in crate::modules) struct PrefilteredTriageFindings {

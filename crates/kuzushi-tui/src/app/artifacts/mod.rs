@@ -12,9 +12,9 @@ pub(super) fn short_label(text: &str, max: usize) -> String {
     }
 }
 
-/// Write a minimal `summary.json` for `<target>/.kuzushi/runs/<run_id>/`
-/// so the runs ledger can list synthetic agent / scan runs alongside
-/// real artefacts.  Best-effort; silent on failure.
+/// Write minimal run metadata so the runs ledger can list synthetic
+/// agent / scan runs alongside real artefacts. Best-effort; silent on
+/// failure.
 pub fn write_run_summary(
     target: Option<&std::path::Path>,
     run_id: &str,
@@ -33,8 +33,38 @@ pub fn write_run_summary(
         target_label.to_string(),
     )
     .with_findings(findings);
-    summary.status = status.to_string();
+    summary.status = canonical_run_status(status).to_string();
     let _ = kuzushi_core::write_run_summary(target, &summary);
+}
+
+pub fn write_run_failure_handoff(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    tool: &str,
+    status: &str,
+    error: &str,
+) {
+    let Some(target) = target else { return };
+    let _ = kuzushi_core::run_artifacts::write_run_failures(
+        target,
+        run_id,
+        tool,
+        canonical_run_status(status),
+        error,
+        &[],
+    );
+}
+
+fn canonical_run_status(status: &str) -> &'static str {
+    match status.to_ascii_lowercase().as_str() {
+        "complete" | "completed" | "ok" | "success" => "completed",
+        "failed" | "error" => "failed",
+        "partial" => "partial",
+        "skipped" | "skip" => "skipped",
+        "paused" | "cancelled" | "canceled" => "paused",
+        "running" | "started" => "running",
+        _ => "running",
+    }
 }
 
 /// Append a single `TraceStep`-shaped JSON object to the trace.jsonl
@@ -56,5 +86,22 @@ pub fn append_trace_step(
     let step = kuzushi_core::RunTraceStep::new(n, kind.to_string(), label.to_string())
         .with_latency_ms(latency_ms)
         .with_cost_usd(cost_usd);
+    let _ = kuzushi_core::append_run_trace_step(target, run_id, &step);
+}
+
+pub fn append_llm_trace_step(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    n: usize,
+    kind: &str,
+    label: &str,
+    latency_ms: Option<u64>,
+    audit: &AgentCallAudit,
+) {
+    let Some(target) = target else { return };
+    let step = kuzushi_core::RunTraceStep::new(n, kind.to_string(), label.to_string())
+        .with_latency_ms(latency_ms)
+        .with_cost_usd(audit.cost_usd)
+        .with_model_metadata(&audit.model, &audit.provider, &audit.prompt_hash);
     let _ = kuzushi_core::append_run_trace_step(target, run_id, &step);
 }

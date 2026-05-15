@@ -18,28 +18,48 @@ impl ShellApp {
             return;
         }
         self.log(">", raw.to_string());
+        self.remember_command(trimmed);
+        if self.handle_editor_local_command(trimmed) {
+            return;
+        }
+        self.handle_command(parse_command(raw));
+    }
+
+    fn remember_command(&mut self, trimmed: &str) {
         self.command_history.push(trimmed.to_string());
         if self.command_history.len() > 200 {
             let overflow = self.command_history.len() - 200;
             self.command_history.drain(0..overflow);
         }
-        if matches!(self.shell_view, ShellView::PromptsEditor)
-            && !trimmed.is_empty()
-            && !trimmed.starts_with('/')
-            && self.is_bare_prompt_verb(trimmed)
-        {
-            self.handle_prompt_verb(trimmed);
-            return;
+    }
+
+    fn handle_editor_local_command(&mut self, trimmed: &str) -> bool {
+        if self.handle_prompt_editor_local_command(trimmed) {
+            return true;
         }
-        if matches!(self.shell_view, ShellView::Tune)
-            && !trimmed.is_empty()
-            && !trimmed.starts_with('/')
-            && self.is_bare_tune_verb(trimmed)
+        self.handle_tune_local_command(trimmed)
+    }
+
+    fn handle_prompt_editor_local_command(&mut self, trimmed: &str) -> bool {
+        if !matches!(self.shell_view, ShellView::PromptsEditor)
+            || trimmed.starts_with('/')
+            || !self.is_bare_prompt_verb(trimmed)
         {
-            self.handle_tune_verb(trimmed);
-            return;
+            return false;
         }
-        self.handle_command(parse_command(raw));
+        self.handle_prompt_verb(trimmed);
+        true
+    }
+
+    fn handle_tune_local_command(&mut self, trimmed: &str) -> bool {
+        if !matches!(self.shell_view, ShellView::Tune)
+            || trimmed.starts_with('/')
+            || !self.is_bare_tune_verb(trimmed)
+        {
+            return false;
+        }
+        self.handle_tune_verb(trimmed);
+        true
     }
 
     pub(crate) fn is_bare_prompt_verb(&self, raw: &str) -> bool {
@@ -51,6 +71,17 @@ impl ShellApp {
         let head = raw.split_whitespace().next().unwrap_or("");
         matches!(head, "show" | "set" | "reset")
     }
+}
+
+pub(crate) fn handle_home_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Home = command else {
+        return false;
+    };
+    app.focused_module = None;
+    app.catalog_expanded = false;
+    app.shell_view = ShellView::Home;
+    app.log("home", "showing Kuzushi cockpit");
+    true
 }
 
 pub(crate) fn handle_help_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
@@ -82,6 +113,15 @@ pub(crate) fn handle_modules_command(app: &mut ShellApp, command: &ShellCommand)
         "module",
         format!("showing {} module(s)", app.registry.modules().count()),
     );
+    true
+}
+
+pub(crate) fn handle_recommend_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Recommend = command else {
+        return false;
+    };
+    app.shell_view = ShellView::Recommend;
+    app.log("recommend", "latest module recommendations");
     true
 }
 

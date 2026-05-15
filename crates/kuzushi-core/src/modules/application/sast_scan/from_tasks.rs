@@ -81,18 +81,62 @@ pub(in crate::modules) fn fill_agentic_reports(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<()> {
+    fill_agentic_sast_report(reports, selected, input, ctx, runtime)?;
+    fill_offense_review_report(reports, selected, input, ctx, runtime)?;
+    fill_taint_iris_report(reports, selected, input, ctx, runtime)?;
+    fill_taint_iris_next_report(reports, selected, input, ctx, runtime)?;
+    fill_systems_hunt_report(reports, selected, input, ctx, runtime)
+}
+
+fn fill_agentic_sast_report(
+    reports: &mut SastPipelineReports,
+    selected: &SastTaskSelection,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<()> {
     if selected.run_agentic {
         reports.engine_ids.push("agentic");
         reports.agentic = Some(run_agentic_sast_report(input, ctx, runtime)?);
     }
+    Ok(())
+}
+
+fn fill_offense_review_report(
+    reports: &mut SastPipelineReports,
+    selected: &SastTaskSelection,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<()> {
     if selected.run_carlini {
-        reports.engine_ids.push("carlini-threat-hunt");
+        reports.engine_ids.push("offense-review");
         reports.carlini = Some(run_carlini_threat_hunt_report(input, ctx, runtime)?);
     }
+    Ok(())
+}
+
+fn fill_taint_iris_report(
+    reports: &mut SastPipelineReports,
+    selected: &SastTaskSelection,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<()> {
     if selected.run_taint_iris {
         reports.engine_ids.push("taint-iris");
         reports.taint_iris = Some(run_taint_iris_report(input, ctx, runtime)?);
     }
+    Ok(())
+}
+
+fn fill_taint_iris_next_report(
+    reports: &mut SastPipelineReports,
+    selected: &SastTaskSelection,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<()> {
     if selected.run_taint_iris_next {
         reports.engine_ids.push("taint-iris-next");
         reports.taint_iris_next = Some(run_taint_iris_next_report(
@@ -101,6 +145,16 @@ pub(in crate::modules) fn fill_agentic_reports(
             runtime,
         )?);
     }
+    Ok(())
+}
+
+fn fill_systems_hunt_report(
+    reports: &mut SastPipelineReports,
+    selected: &SastTaskSelection,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<()> {
     if selected.run_systems_hunt {
         reports.engine_ids.push("systems-hunt");
         reports.systems_hunt = Some(run_systems_hunt_report(input, ctx, runtime)?);

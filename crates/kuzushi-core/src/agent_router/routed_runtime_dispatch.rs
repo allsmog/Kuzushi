@@ -1,4 +1,5 @@
 use super::*;
+use serde_json::Value;
 
 impl RoutedRuntime {
     pub fn new(
@@ -18,18 +19,7 @@ impl RoutedRuntime {
     /// set these via `setg MODEL_<ROLE>` from the shell; values at the
     /// `(Global, All)` binding apply across every module.
     pub fn with_option_store(mut self, store: &ToolOptionStore) -> Self {
-        if let Some(values) = store.values_for(OptionScope::Global, &OptionTarget::All) {
-            for role in AgentRole::all() {
-                if let Some(value) = values.get(&role.option_store_key()) {
-                    if let Some(s) = value.as_str() {
-                        let trimmed = s.trim();
-                        if !trimmed.is_empty() {
-                            self.option_overrides.insert(*role, trimmed.to_string());
-                        }
-                    }
-                }
-            }
-        }
+        self.option_overrides = role_option_overrides(store);
         self
     }
 
@@ -52,29 +42,25 @@ impl RoutedRuntime {
         attempt: u32,
         explicit: Option<&str>,
     ) -> Option<String> {
-        if let Some(explicit) = explicit {
-            let trimmed = explicit.trim();
-            if !trimmed.is_empty()
-                && Some(trimmed) != self.operator_default.as_deref().map(str::trim)
-            {
-                return Some(trimmed.to_string());
-            }
-        }
-        if attempt == 0 {
-            if let Some(override_) = self.option_overrides.get(&role) {
-                return Some(override_.clone());
-            }
-        }
-        if let Some(picked) = self.router.pick(role, attempt) {
-            return Some(picked.to_string());
-        }
-        if let Some(default) = &self.operator_default {
-            let trimmed = default.trim();
-            if !trimmed.is_empty() {
-                return Some(trimmed.to_string());
-            }
-        }
-        self.router.default_model().map(str::to_string)
+        self.explicit_model_override(explicit)
+            .or_else(|| self.option_override_model(role, attempt))
+            .or_else(|| self.router_pick_model(role, attempt))
+            .or_else(|| self.operator_default_model())
+            .or_else(|| self.router.default_model().map(str::to_string))
+    }
+
+    pub fn resolve_model_for_role(
+        &self,
+        role: AgentRole,
+        attempt: u32,
+        explicit: Option<&str>,
+    ) -> Result<String> {
+        let model = self
+            .resolve_model(role, attempt, explicit)
+            .ok_or_else(|| missing_role_model_error(role))?;
+        validate_model_spec(&model)
+            .with_context(|| format!("role {} resolved an invalid model", role.as_key()))?;
+        Ok(model)
     }
 
     /// Single-attempt query routed by role. The router never changes models
@@ -85,9 +71,7 @@ impl RoutedRuntime {
         role: AgentRole,
         mut request: AgentQueryRequest,
     ) -> Result<AgentQueryResponse> {
-        let model = self
-            .resolve_model(role, 0, Some(&request.model))
-            .ok_or_else(|| missing_role_model_error(role))?;
+        let model = self.resolve_model_for_role(role, 0, Some(&request.model))?;
         request.model = model;
         self.inner.query_blocking(request)
     }
@@ -98,11 +82,51 @@ impl RoutedRuntime {
         role: AgentRole,
         mut request: TriageRequest,
     ) -> Result<TriageOutcome> {
-        let model = self
-            .resolve_model(role, 0, Some(&request.model))
-            .ok_or_else(|| missing_role_model_error(role))?;
+        let model = self.resolve_model_for_role(role, 0, Some(&request.model))?;
         request.model = model;
         self.inner.triage_finding_blocking(request)
+    }
+}
+
+fn role_option_overrides(store: &ToolOptionStore) -> BTreeMap<AgentRole, String> {
+    store
+        .values_for(OptionScope::Global, &OptionTarget::All)
+        .map(collect_role_option_overrides)
+        .unwrap_or_default()
+}
+
+fn collect_role_option_overrides(values: &BTreeMap<String, Value>) -> BTreeMap<AgentRole, String> {
+    AgentRole::all()
+        .iter()
+        .filter_map(|role| role_option_override(values, *role).map(|model| (*role, model)))
+        .collect()
+}
+
+fn role_option_override(values: &BTreeMap<String, Value>, role: AgentRole) -> Option<String> {
+    let trimmed = values.get(&role.option_store_key())?.as_str()?.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
+}
+
+impl RoutedRuntime {
+    fn explicit_model_override(&self, explicit: Option<&str>) -> Option<String> {
+        let trimmed = explicit?.trim();
+        (!trimmed.is_empty() && Some(trimmed) != self.operator_default.as_deref().map(str::trim))
+            .then(|| trimmed.to_string())
+    }
+
+    fn option_override_model(&self, role: AgentRole, attempt: u32) -> Option<String> {
+        (attempt == 0)
+            .then(|| self.option_overrides.get(&role).cloned())
+            .flatten()
+    }
+
+    fn router_pick_model(&self, role: AgentRole, attempt: u32) -> Option<String> {
+        self.router.pick(role, attempt).map(str::to_string)
+    }
+
+    fn operator_default_model(&self) -> Option<String> {
+        let trimmed = self.operator_default.as_deref()?.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_string())
     }
 }
 

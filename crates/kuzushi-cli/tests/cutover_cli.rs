@@ -213,7 +213,8 @@ fn plain_flag_forces_line_oriented_shell_output() {
 
     assert!(out.contains("KUZUSHI"));
     assert!(out.contains("mode:shell"));
-    assert!(out.contains("First finding"));
+    assert!(out.contains("HOME"));
+    assert!(out.contains("rails:"));
     assert_strict_plain("--plain shell", &out);
 }
 
@@ -300,9 +301,7 @@ fn modules_and_tools_list_visible_executable_rust_surfaces() {
         "exploit-chain",
         "dep-hygiene",
         "iac-scan",
-        "recon",
-        "vendor-assessment",
-        "prompt-armor",
+        "module-recommender",
     ] {
         assert!(
             module_ids.contains(&expected),
@@ -331,7 +330,7 @@ fn modules_and_tools_list_visible_executable_rust_surfaces() {
         "exploit-chain:scan",
         "dep-hygiene:check",
         "iac-scan:scan",
-        "recon:http-fingerprint",
+        "module-recommender:recommend",
         "triage:run",
         "verify:finding",
         "patch:finding",
@@ -525,9 +524,13 @@ fn npm_package_runtime_surface_is_rust_only() {
     let package: Value = serde_json::from_str(&package_raw).unwrap();
     let bin = package.get("bin").and_then(Value::as_object).unwrap();
 
-    assert_eq!(bin.len(), 1, "package should expose only the Rust CLI bin");
+    assert_eq!(bin.len(), 2, "package should expose Kuzushi Rust CLI bins");
     assert_eq!(
         bin.get("kuzushi").and_then(Value::as_str),
+        Some("./bin/kuzushi-rs.mjs")
+    );
+    assert_eq!(
+        bin.get("kz").and_then(Value::as_str),
         Some("./bin/kuzushi-rs.mjs")
     );
     assert!(!bin.contains_key("kuzushi-ts"));
@@ -540,6 +543,9 @@ fn npm_package_runtime_surface_is_rust_only() {
         .filter_map(Value::as_str)
         .collect::<Vec<_>>();
     assert!(files.contains(&"native"));
+    assert!(files.contains(&"NOTICE"));
+    assert!(files.contains(&"UPSTREAM_CODEX.md"));
+    assert!(files.contains(&"LICENSES"));
     for removed in [
         "!dist/cli",
         "!dist/cli.d.ts",
@@ -679,4 +685,118 @@ fn doctor_json_reports_named_preflight_checks() {
         );
     }
     assert!(!raw.contains("hidden-json-secret"));
+}
+
+#[test]
+fn failed_run_writes_failure_handoff_context() {
+    let tmp = tempfile::tempdir().unwrap();
+    let output = kuzushi()
+        .args(["--target"])
+        .arg(tmp.path())
+        .args(["run", "context:build", "--input", r#"{"enrichment":true}"#])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "enrichment request should fail explicitly"
+    );
+    let body: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(body["ok"], false);
+    assert_eq!(body["status"], "failed");
+    assert_eq!(body["fallback_context"]["failedStage"], "context:build");
+    assert!(body["fallback_context"]["fallbackPrompt"]
+        .as_str()
+        .is_some_and(|prompt| prompt.contains("context:build")));
+    assert!(!String::from_utf8_lossy(&output.stdout).contains("validated"));
+
+    let runs_root = tmp.path().join(".kuzushi/runs");
+    let run_dir = fs::read_dir(&runs_root)
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let failures = fs::read_to_string(run_dir.join("failures.json")).unwrap();
+    let events = fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
+    let artifacts = fs::read_to_string(run_dir.join("artifacts.json")).unwrap();
+
+    assert!(failures.contains("context:build did not complete successfully"));
+    assert!(failures.contains("artifact-review-only"));
+    assert!(!failures.contains("validated"));
+    assert!(failures.contains("input.json"));
+    assert!(artifacts.contains("input.json"));
+    assert!(artifacts.contains("failures.json"));
+    assert!(events.contains("\"status\":\"failed\""));
+}
+
+#[test]
+fn targetless_run_writes_artifacts_under_current_directory() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = stdout(
+        kuzushi()
+            .current_dir(tmp.path())
+            .args(["run", "config:show", "--input", "{}"])
+            .output()
+            .unwrap(),
+    );
+    let body: Value = serde_json::from_str(&out).unwrap();
+
+    assert_eq!(body["ok"], true);
+    assert_eq!(body["status"], "completed");
+    let latest = fs::read_to_string(tmp.path().join(".kuzushi/latest")).unwrap();
+    let run_id = latest.trim();
+    let run_dir = tmp.path().join(".kuzushi/runs").join(run_id);
+    let run_json = fs::read_to_string(run_dir.join("run.json")).unwrap();
+    let result = fs::read_to_string(run_dir.join("result.json")).unwrap();
+
+    assert!(run_json.contains("\"kind\": \"run\""));
+    assert!(run_json.contains("\"tool\": \"config:show\""));
+    assert!(result.contains("\"status\": \"completed\""));
+}
+
+#[test]
+fn sast_scan_missing_cargo_audit_writes_failure_handoff_context() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("repo");
+    let home = tmp.path().join("home");
+    let fake_path = tmp.path().join("bin");
+    fs::create_dir_all(&repo).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&fake_path).unwrap();
+    fs::write(repo.join("Cargo.lock"), "# lockfile present\n").unwrap();
+
+    let output = kuzushi()
+        .env("HOME", &home)
+        .env("PATH", &fake_path)
+        .args(["--target"])
+        .arg(&repo)
+        .args([
+            "run",
+            "sast:scan",
+            "--input",
+            r#"{"tasks":["cargo-audit"],"triage":false}"#,
+        ])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "cargo-audit should fail closed");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cargo-audit: `cargo audit` was not found"),
+        "stderr: {stderr}"
+    );
+    let run_dir = fs::read_dir(repo.join(".kuzushi/runs"))
+        .unwrap()
+        .next()
+        .unwrap()
+        .unwrap()
+        .path();
+    let failures = fs::read_to_string(run_dir.join("failures.json")).unwrap();
+    let artifacts = fs::read_to_string(run_dir.join("artifacts.json")).unwrap();
+
+    assert!(failures.contains("sast:scan did not complete successfully"));
+    assert!(failures.contains("cargo-audit"));
+    assert!(failures.contains("artifact-review-only"));
+    assert!(artifacts.contains("failures.json"));
 }
