@@ -18,10 +18,20 @@ pub(crate) struct PrereqPromptStepModel {
     pub(crate) cost_hint: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlainPrereqPlanModel {
+    pub(crate) title: &'static str,
+    pub(crate) rows: Vec<String>,
+}
+
 pub(crate) fn prereq_prompt_model(app: &ShellApp) -> Option<PrereqPromptModel> {
     app.pending_prereq_prompt
         .as_ref()
         .map(PrereqPromptModel::from_prompt)
+}
+
+pub(crate) fn plain_prereq_plan_model(app: &ShellApp) -> Option<PlainPrereqPlanModel> {
+    prereq_prompt_model(app).map(PlainPrereqPlanModel::from_prompt_model)
 }
 
 impl PrereqPromptModel {
@@ -34,6 +44,26 @@ impl PrereqPromptModel {
                 .iter()
                 .map(PrereqPromptStepModel::from_step)
                 .collect(),
+        }
+    }
+}
+
+impl PlainPrereqPlanModel {
+    fn from_prompt_model(model: PrereqPromptModel) -> Self {
+        let mut rows = vec![
+            format!("final tool: {}", model.final_tool),
+            "review required before prerequisites or final tool start".to_string(),
+        ];
+        for step in model.steps {
+            rows.extend(plain_prereq_step_rows(step));
+        }
+        rows.push(format!(
+            "actions: approve | reuse cached | regenerate | cancel (recommended: {})",
+            model.recommended_action
+        ));
+        Self {
+            title: "PREREQUISITE PLAN",
+            rows,
         }
     }
 }
@@ -55,6 +85,18 @@ impl PrereqPromptStepModel {
             cost_hint: step.cost_hint.clone(),
         }
     }
+}
+
+fn plain_prereq_step_rows(step: PrereqPromptStepModel) -> Vec<String> {
+    vec![
+        format!(
+            "- {} {} via {}",
+            step.state_label, step.artifact_label, step.tool
+        ),
+        format!("  writes: {}", step.writes),
+        format!("  risk: {}", step.risk),
+        format!("  cost: {}", step.cost_hint),
+    ]
 }
 
 #[cfg(test)]
