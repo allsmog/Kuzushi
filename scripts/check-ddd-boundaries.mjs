@@ -187,6 +187,12 @@ const rules = [
       /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\bModuleKind\b|\.registry\.modules\(|\.tools\(\)|\.metadata\(\)/,
   },
   {
+    name: "TUI catalog navigation reads catalog view model",
+    roots: ["crates/kuzushi-tui/src/app/catalog"],
+    forbidden:
+      /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\bModuleKind\b|\.registry\.modules\(|\.tools\(\)|\.metadata\(\)|catalog_category/,
+  },
+  {
     name: "TUI threat renderers read threat-model view models",
     roots: ["crates/kuzushi-tui/src/renderer/shared/threat_model/current_threat_model_doc.rs"],
     forbidden: /\b(load_persistent_threat_model|std::env|std::path|PathBuf|read_to_string)\b/,
