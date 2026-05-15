@@ -52,6 +52,8 @@ It currently verifies that the required boundary files exist and blocks the
 highest-risk dependency violations:
 
 - findings calling scanners, runtimes, renderers, or subprocesses;
+- proof calling scanners, runtime dispatch, subprocesses, or presentation
+  renderers;
 - scanners calling triage or verification;
 - triage calling scanners, verification, patch, report, tool dispatch, or
   subprocesses;
@@ -62,6 +64,8 @@ highest-risk dependency violations:
 - recommender executing modules;
 - failure handoff dispatching tools, runtimes, scanners, verification, or
   subprocesses;
+- run-trace artifacts dispatching tools, runtimes, scanners, verification,
+  patch, report, or recommender code;
 - TUI renderers dispatching runtime/tool execution;
 - TUI view models and view state dispatching runtime/tool execution;
 - TUI runtime code using "validated" wording for states that are only checked
