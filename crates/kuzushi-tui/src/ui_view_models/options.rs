@@ -1,6 +1,8 @@
 use crate::{OptionsFilter, OptionsView, ShellApp};
 use kuzushi_core::modules::{OptionSpec, OptionType};
 
+const OPTIONS_SUMMARY_COLUMN_COUNT: usize = 2;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OptionsModel {
     pub(crate) title: &'static str,
@@ -10,8 +12,7 @@ pub(crate) struct OptionsModel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OptionsSummaryRow {
-    pub(crate) label: &'static str,
-    pub(crate) value: String,
+    pub(crate) cells: [String; OPTIONS_SUMMARY_COLUMN_COUNT],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,7 +102,8 @@ impl PlainOptionsModel {
 }
 
 fn plain_summary_row(row: OptionsSummaryRow) -> String {
-    format!("{}: {}", row.label, row.value)
+    let [label, value] = row.cells;
+    format!("{label}: {value}")
 }
 
 fn plain_options_body(body: OptionsBody) -> PlainOptionsBody {
@@ -161,8 +163,7 @@ fn options_summary_rows(tool_name: &str, filter_label: &str) -> Vec<OptionsSumma
 
 fn options_summary_row(label: &'static str, value: &str) -> OptionsSummaryRow {
     OptionsSummaryRow {
-        label,
-        value: value.to_string(),
+        cells: [label.to_string(), value.to_string()],
     }
 }
 

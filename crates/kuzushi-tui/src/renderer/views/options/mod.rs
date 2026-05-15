@@ -25,7 +25,7 @@ pub(crate) fn options_lines(
 }
 
 fn options_summary_row(row: &OptionsSummaryRow) -> Line<'static> {
-    detail(row.label, &row.value)
+    detail(&row.cells[0], &row.cells[1])
 }
 
 fn push_options_body(lines: &mut Vec<Line<'static>>, width: u16, body: &OptionsBody) {
@@ -76,7 +76,7 @@ pub(crate) fn sast_tasks_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
     lines.push(blank());
     lines.push(divider(model.title, area.width));
     for row in &model.summary_rows {
-        lines.push(detail(row.label, &row.value));
+        lines.push(detail(&row.cells[0], &row.cells[1]));
     }
     lines.push(blank());
     lines.push(muted(&fit(model.legend, area.width as usize)));

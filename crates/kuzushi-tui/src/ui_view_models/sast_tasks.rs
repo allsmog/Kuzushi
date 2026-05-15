@@ -1,5 +1,7 @@
 use crate::{SastTaskMode, SastTaskRow, ShellApp};
 
+const SAST_TASK_SUMMARY_COLUMN_COUNT: usize = 2;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SastTasksModel {
     pub(crate) title: &'static str,
@@ -12,8 +14,7 @@ pub(crate) struct SastTasksModel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SastTaskSummaryRow {
-    pub(crate) label: &'static str,
-    pub(crate) value: String,
+    pub(crate) cells: [String; SAST_TASK_SUMMARY_COLUMN_COUNT],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -39,14 +40,8 @@ pub(crate) fn sast_tasks_model(app: &ShellApp) -> SastTasksModel {
     SastTasksModel {
         title: "SAST TASKS",
         summary_rows: vec![
-            SastTaskSummaryRow {
-                label: "mode",
-                value: mode_label(app.current_sast_task_mode()).to_string(),
-            },
-            SastTaskSummaryRow {
-                label: "selected",
-                value: selected_summary(&rows),
-            },
+            sast_task_summary_row("mode", mode_label(app.current_sast_task_mode())),
+            sast_task_summary_row("selected", &selected_summary(&rows)),
         ],
         legend:
             "legend: [x] enabled · [ ] disabled · [A] advanced (off by default; allow with /task allow <id>) · [B] blocked",
@@ -59,6 +54,12 @@ pub(crate) fn sast_tasks_model(app: &ShellApp) -> SastTasksModel {
             "/task mode auto|manual|toggle",
             "/task reset",
         ],
+    }
+}
+
+fn sast_task_summary_row(label: &'static str, value: &str) -> SastTaskSummaryRow {
+    SastTaskSummaryRow {
+        cells: [label.to_string(), value.to_string()],
     }
 }
 
@@ -84,7 +85,8 @@ impl PlainSastTasksModel {
 }
 
 fn plain_sast_task_summary_row(row: SastTaskSummaryRow) -> String {
-    format!("{}: {}", row.label, row.value)
+    let [label, value] = row.cells;
+    format!("{label}: {value}")
 }
 
 fn plain_sast_task_row(row: SastTaskRow) -> PlainSastTaskRow {
@@ -128,11 +130,11 @@ mod tests {
         assert!(model
             .summary_rows
             .iter()
-            .any(|row| row.label == "mode" && row.value == "auto + denylist"));
+            .any(|row| row.cells[0] == "mode" && row.cells[1] == "auto + denylist"));
         assert!(model
             .summary_rows
             .iter()
-            .any(|row| row.label == "selected" && row.value.contains("enabled")));
+            .any(|row| row.cells[0] == "selected" && row.cells[1].contains("enabled")));
         assert!(model.rows.iter().any(|row| row.id == "semgrep"));
     }
 
@@ -151,7 +153,7 @@ mod tests {
         assert!(model
             .summary_rows
             .iter()
-            .any(|row| row.label == "mode" && row.value == "manual allowlist"));
+            .any(|row| row.cells[0] == "mode" && row.cells[1] == "manual allowlist"));
         assert!(model.rows.iter().all(|row| row.source != "default"));
     }
 

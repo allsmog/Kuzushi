@@ -43,8 +43,7 @@ fn options_model_formats_stored_option_rows() {
         ]
     );
     assert!(model.summary_rows.contains(&OptionsSummaryRow {
-        label: "view",
-        value: "options".to_string(),
+        cells: ["view".to_string(), "options".to_string()],
     }));
     assert_eq!(triage.cells[1], "true");
     assert_eq!(triage.cells[4], "bool");
@@ -65,8 +64,7 @@ fn options_model_marks_unknown_tools() {
         }
     );
     assert!(model.summary_rows.contains(&OptionsSummaryRow {
-        label: "tool",
-        value: "missing:tool".to_string(),
+        cells: ["tool".to_string(), "missing:tool".to_string()],
     }));
 }
 
