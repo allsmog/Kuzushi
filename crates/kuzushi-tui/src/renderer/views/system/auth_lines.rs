@@ -1,6 +1,7 @@
 use super::*;
 use crate::ui_view_models::{
     auth_provider_rows, config_model, cost_model, ConfigModel, CostBudgetStatus, CostModel,
+    CostTone,
 };
 
 pub(crate) fn auth_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -54,8 +55,8 @@ fn auth_current_model_line(model: &str, backend: &str) -> Line<'static> {
 fn push_auth_spend_section(lines: &mut Vec<Line<'static>>, model: &CostModel, area: Rect) {
     lines.push(divider("SPEND · this session", area.width));
     lines.push(auth_spend_line(
-        model.session_text.clone(),
-        model.last_tool_text.clone(),
+        model.auth_spend_cells[0].clone(),
+        model.auth_spend_cells[1].clone(),
     ));
     if let Some(budget) = &model.budget_status {
         lines.push(auth_budget_line(budget));
@@ -75,18 +76,21 @@ fn auth_spend_line(session_cost: String, last_tool: String) -> Line<'static> {
 }
 
 fn auth_budget_line(budget: &CostBudgetStatus) -> Line<'static> {
-    let pct_style = if budget.percent >= 85 {
-        theme::warn()
-    } else {
-        theme::muted()
-    };
+    let pct_style = auth_budget_tone_style(budget.tone);
     Line::from(vec![
         Span::raw(" "),
         Span::styled("budget    ", theme::muted()),
-        Span::styled(budget.budget_text.clone(), theme::primary()),
+        Span::styled(budget.cells[0].clone(), theme::primary()),
         Span::styled("   · ", theme::subtle()),
-        Span::styled(format!("{}%", budget.percent), pct_style),
+        Span::styled(budget.cells[1].clone(), pct_style),
     ])
+}
+
+fn auth_budget_tone_style(tone: CostTone) -> ratatui::style::Style {
+    match tone {
+        CostTone::Success => theme::muted(),
+        CostTone::Warn | CostTone::Danger => theme::warn(),
+    }
 }
 
 fn push_auth_commands(lines: &mut Vec<Line<'static>>, area: Rect) {

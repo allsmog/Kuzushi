@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::{cost_model, CostBudgetRow, CostModel};
+use crate::ui_view_models::{cost_model, CostBudgetRow, CostModel, CostTone};
 
 pub(crate) fn cost_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
@@ -22,9 +22,9 @@ fn push_cost_budget_section(lines: &mut Vec<Line<'static>>, model: &CostModel, a
 
 fn push_cost_spend_section(lines: &mut Vec<Line<'static>>, model: &CostModel, area: Rect) {
     lines.push(divider("SPEND", area.width));
-    lines.push(detail("session", &model.session_text));
-    lines.push(detail("last tool", &model.last_tool_text));
-    lines.push(detail("budget", &model.budget_text));
+    for row in &model.spend_rows {
+        lines.push(detail(&row.cells[0], &row.cells[1]));
+    }
     lines.push(blank());
 }
 
@@ -39,28 +39,26 @@ fn push_cost_commands(lines: &mut Vec<Line<'static>>, area: Rect) {
 }
 
 pub(crate) fn cost_budget_bar(row: &CostBudgetRow) -> Line<'static> {
-    let bar_w: usize = 30;
-    let pct = row.percent as f64 / 100.0;
-    let fill = ((bar_w as f64 * pct).round() as usize).min(bar_w);
-    let empty = bar_w.saturating_sub(fill);
-    let style = if row.percent >= 100 {
-        theme::danger()
-    } else if row.percent >= 85 {
-        theme::warn()
-    } else {
-        theme::success()
-    };
+    let style = cost_tone_style(row.tone);
     Line::from(vec![
         Span::raw(" "),
-        Span::styled(format!("{:18}", row.label), theme::primary()),
+        Span::styled(format!("{:18}", row.cells[0]), theme::primary()),
         Span::styled(" [", theme::subtle()),
-        Span::styled("█".repeat(fill), style),
-        Span::styled("░".repeat(empty), theme::subtle()),
+        Span::styled("█".repeat(row.fill), style),
+        Span::styled("░".repeat(row.empty), theme::subtle()),
         Span::styled("] ", theme::subtle()),
-        Span::styled(format!("${:>6.2}", row.used), theme::primary()),
+        Span::styled(row.cells[1].clone(), theme::primary()),
         Span::styled(" / ", theme::muted()),
-        Span::styled(format!("${:>6.2}", row.cap), theme::muted()),
+        Span::styled(row.cells[2].clone(), theme::muted()),
         Span::raw(" "),
-        Span::styled(format!("{:>3}%", row.percent), style),
+        Span::styled(row.cells[3].clone(), style),
     ])
+}
+
+fn cost_tone_style(tone: CostTone) -> ratatui::style::Style {
+    match tone {
+        CostTone::Success => theme::success(),
+        CostTone::Warn => theme::warn(),
+        CostTone::Danger => theme::danger(),
+    }
 }

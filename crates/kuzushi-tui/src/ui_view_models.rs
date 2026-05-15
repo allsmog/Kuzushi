@@ -111,7 +111,7 @@ pub(crate) use context_strip::{
     context_strip_model, plain_context_strip_model, ContextStripModel, ContextStripSegment,
     PlainContextStripModel,
 };
-pub(crate) use cost::{cost_model, CostBudgetRow, CostBudgetStatus, CostModel};
+pub(crate) use cost::{cost_model, CostBudgetRow, CostBudgetStatus, CostModel, CostTone};
 pub(crate) use display_text::{compact_target_path, format_session_cost};
 pub(crate) use failure_handoff::failure_handoff_context;
 pub(crate) use finding_summary::{
