@@ -52,6 +52,12 @@ pub(crate) struct ThreatScopeBucket {
     pub(crate) item_count: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ThreatScopeModel {
+    pub(crate) header: String,
+    pub(crate) buckets: Vec<ThreatScopeBucket>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ThreatScopeTone {
     Critical,
@@ -75,16 +81,18 @@ impl ThreatScopeTone {
     }
 }
 
-pub(crate) fn threat_scope_buckets(app: &ShellApp) -> Vec<ThreatScopeBucket> {
+pub(crate) fn threat_scope_model(app: &ShellApp) -> ThreatScopeModel {
     super::threat_model_doc(app)
         .as_ref()
-        .and_then(threat_scope_buckets_from_doc)
-        .unwrap_or_else(canonical_scope_buckets)
+        .and_then(threat_scope_model_from_doc)
+        .unwrap_or_else(canonical_scope_model)
 }
 
-pub(crate) fn threat_scope_buckets_from_doc(
-    doc: &serde_json::Value,
-) -> Option<Vec<ThreatScopeBucket>> {
+pub(crate) fn threat_scope_model_from_doc(doc: &serde_json::Value) -> Option<ThreatScopeModel> {
+    threat_scope_buckets_from_doc(doc).map(threat_scope_model_from_buckets)
+}
+
+fn threat_scope_buckets_from_doc(doc: &serde_json::Value) -> Option<Vec<ThreatScopeBucket>> {
     let threats = non_empty_threats(doc)?;
     let mut buckets = empty_scope_buckets();
     for threat in threats {
@@ -145,6 +153,21 @@ fn canonical_scope_buckets() -> Vec<ThreatScopeBucket> {
         .collect()
 }
 
+fn canonical_scope_model() -> ThreatScopeModel {
+    threat_scope_model_from_buckets(canonical_scope_buckets())
+}
+
+fn threat_scope_model_from_buckets(buckets: Vec<ThreatScopeBucket>) -> ThreatScopeModel {
+    let item_count: usize = buckets.iter().map(|bucket| bucket.item_count).sum();
+    ThreatScopeModel {
+        header: format!("SCOPE · {item_count} issues"),
+        buckets: buckets
+            .into_iter()
+            .filter(|bucket| bucket.item_count > 0)
+            .collect(),
+    }
+}
+
 fn threat_scope_bucket(severity: Severity, label: &str, items: Vec<String>) -> ThreatScopeBucket {
     let item_count = items.len();
     ThreatScopeBucket {
@@ -182,7 +205,7 @@ mod tests {
     use serde_json::json;
 
     #[test]
-    fn threat_scope_buckets_from_doc_groups_by_impact() {
+    fn threat_scope_model_from_doc_groups_by_impact() {
         let doc = json!({
             "threats": [
                 {"title": "a", "impact": "critical"},
@@ -195,8 +218,11 @@ mod tests {
             ]
         });
 
-        let buckets = threat_scope_buckets_from_doc(&doc).expect("non-empty");
+        let model = threat_scope_model_from_doc(&doc).expect("non-empty");
+        let buckets = &model.buckets;
 
+        assert_eq!(model.header, "SCOPE · 7 issues");
+        assert_eq!(buckets.len(), 3);
         assert_eq!(buckets[0].tone, ThreatScopeTone::Critical);
         assert_eq!(buckets[0].item_count, 1);
         assert_eq!(buckets[1].tone, ThreatScopeTone::High);
@@ -205,14 +231,12 @@ mod tests {
         assert_eq!(buckets[1].overflow_label.as_deref(), Some("… 1 more"));
         assert_eq!(buckets[2].tone, ThreatScopeTone::Medium);
         assert_eq!(buckets[2].item_count, 1);
-        assert_eq!(buckets[3].tone, ThreatScopeTone::Low);
-        assert!(buckets[3].visible_items.is_empty());
     }
 
     #[test]
-    fn threat_scope_buckets_from_doc_returns_none_without_threats() {
-        assert!(threat_scope_buckets_from_doc(&json!({})).is_none());
-        assert!(threat_scope_buckets_from_doc(&json!({"threats": []})).is_none());
-        assert!(threat_scope_buckets_from_doc(&json!({"threats": null})).is_none());
+    fn threat_scope_model_from_doc_returns_none_without_threats() {
+        assert!(threat_scope_model_from_doc(&json!({})).is_none());
+        assert!(threat_scope_model_from_doc(&json!({"threats": []})).is_none());
+        assert!(threat_scope_model_from_doc(&json!({"threats": null})).is_none());
     }
 }
