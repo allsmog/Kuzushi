@@ -397,6 +397,7 @@ mod tests {
                 "ok": true,
                 "status": "completed",
                 "data": {
+                    "verification": {"verified": 0, "results": []},
                     "findings": [{"packageName": "lodash"}],
                     "coreFindings": [{
                         "fingerprint": "dep-fp",

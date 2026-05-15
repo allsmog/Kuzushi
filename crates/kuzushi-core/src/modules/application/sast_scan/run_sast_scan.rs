@@ -24,7 +24,13 @@ pub(in crate::modules) fn run_sast_scan(
     let findings_count = executed.findings_count;
     let (artifacts, result) = executed.into_result(workspace, whitebox_static.as_ref());
     let summary_artifact = write_sast_summary(workspace, &primary_run_id, &artifacts, &result)?;
-    write_sast_run_metadata(workspace, &primary_run_id, findings_count, summary_artifact)?;
+    write_sast_run_metadata(
+        workspace,
+        &primary_run_id,
+        findings_count,
+        summary_artifact,
+        &result,
+    )?;
     Ok(result)
 }
 
