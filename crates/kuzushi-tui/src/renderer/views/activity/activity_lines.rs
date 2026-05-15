@@ -2,7 +2,7 @@ use super::dag_pane::{dag_row_text, dag_state_style, dag_subsystems_row_text};
 use super::feed_pane::{feed_event_style, feed_event_text};
 use super::*;
 use crate::app::PaneFocus;
-use crate::ui_view_models::activity_header_model;
+use crate::ui_view_models::{activity_footer_model, activity_header_model, ActivityFooterHint};
 use std::time::Instant;
 
 /// Build the line list for the Activity view. Renders a split-pane layout:
@@ -32,15 +32,9 @@ pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.extend(activity_pane_lines(session, left_w, right_w));
 
     lines.push(blank());
-    lines.push(focus_footer_line(session, area.width));
-    lines.push(keybind_hint_line(&[
-        ("j/k", "scroll"),
-        ("Tab", "switch pane"),
-        ("V", "verbose"),
-        ("p", "pause"),
-        ("R", "reset"),
-        ("Enter", "focus task"),
-    ]));
+    let footer = activity_footer_model(session, area.width);
+    lines.push(focus_footer_line(&footer.body, area.width));
+    lines.push(activity_keybind_hint_line(footer.hints));
     lines
 }
 
@@ -173,27 +167,19 @@ fn combined_pane_line(
     ])
 }
 
-fn focus_footer_line(session: &crate::app::ActivitySession, width: u16) -> Line<'static> {
-    let body = if let Some(task_id) = session.focus_task.as_ref() {
-        if let Some(row) = session.tasks.get(task_id) {
-            format!(
-                " ▸ FOCUS  {task}  {state:?}  steps {n}  {label}",
-                task = row.task_id,
-                state = row.state,
-                n = row.steps_done,
-                label = row.last_label,
-            )
-        } else {
-            format!(" ▸ FOCUS  {task_id}  (not yet recorded)")
-        }
-    } else {
-        " ▸ FOCUS  hover j/k to inspect a task · Tab pane · V verbose · p pause · R reset"
-            .to_string()
-    };
+fn focus_footer_line(body: &str, width: u16) -> Line<'static> {
     Line::from(vec![Span::styled(
-        fit(&body, width as usize),
+        fit(body, width as usize),
         theme::label(),
     )])
+}
+
+fn activity_keybind_hint_line(hints: &[ActivityFooterHint]) -> Line<'static> {
+    let pairs = hints
+        .iter()
+        .map(|hint| (hint.key, hint.hint))
+        .collect::<Vec<_>>();
+    keybind_hint_line(&pairs)
 }
 
 fn pad_to(s: &str, width: usize) -> String {
