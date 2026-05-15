@@ -19,6 +19,7 @@ mod run_timeline;
 mod run_trace;
 mod threat_model;
 mod tools;
+mod view_status;
 pub(crate) use attack_surface::{attack_surface_risk_model, AttackSurfaceRiskModel};
 pub(crate) use auth::{
     auth_env_summary, auth_provider_rows, model_auth_status, oauth_summary, AuthProviderRow,
@@ -37,6 +38,7 @@ pub(crate) use run_trace::{
 };
 pub(crate) use threat_model::threat_model_doc;
 pub(crate) use tools::{tools_model, ToolRow};
+pub(crate) use view_status::view_status_segment;
 
 pub use crate::{
     ActivitySession, OptionsFilter, OptionsView, PaneFocus, ReconSnapshot, ScanPanelState,

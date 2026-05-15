@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 
-const root = repoRoot();
+const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
 const failures = [];
 
 const boundaries = [
@@ -232,6 +232,11 @@ const rules = [
     forbidden: /\bRoutingMode\b|routing_mode\(/,
   },
   {
+    name: "TUI status helpers read view-status view model",
+    roots: ["crates/kuzushi-tui/src/renderer/shared/status/mod.rs"],
+    forbidden: /\bShellView::|ThreatView::|view_status_segment\(/,
+  },
+  {
     name: "TUI threat renderers read threat-model view models",
     roots: ["crates/kuzushi-tui/src/renderer/shared/threat_model/current_threat_model_doc.rs"],
     forbidden: /\b(load_persistent_threat_model|std::env|std::path|PathBuf|read_to_string)\b/,
@@ -255,14 +260,6 @@ if (failures.length > 0) {
 console.log(
   `DDD boundary check passed for ${boundaries.length} boundaries and ${rules.length} rules.`,
 );
-
-function repoRoot() {
-  try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
-  } catch {
-    return process.cwd();
-  }
-}
 
 function hasBoundary(candidates) {
   return candidates.some((candidate) => existsSync(path.join(root, candidate)));
