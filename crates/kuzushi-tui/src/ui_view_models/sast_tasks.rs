@@ -2,9 +2,15 @@ use crate::{SastTaskMode, SastTaskRow, ShellApp};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SastTasksModel {
-    pub(crate) mode_label: &'static str,
-    pub(crate) selected_summary: String,
+    pub(crate) title: &'static str,
+    pub(crate) summary_rows: Vec<SastTaskSummaryRow>,
     pub(crate) rows: Vec<SastTaskRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct SastTaskSummaryRow {
+    pub(crate) label: &'static str,
+    pub(crate) value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -28,8 +34,17 @@ pub(crate) struct PlainSastTaskRow {
 pub(crate) fn sast_tasks_model(app: &ShellApp) -> SastTasksModel {
     let rows = app.sast_task_rows();
     SastTasksModel {
-        mode_label: mode_label(app.current_sast_task_mode()),
-        selected_summary: selected_summary(&rows),
+        title: "SAST TASKS",
+        summary_rows: vec![
+            SastTaskSummaryRow {
+                label: "mode",
+                value: mode_label(app.current_sast_task_mode()).to_string(),
+            },
+            SastTaskSummaryRow {
+                label: "selected",
+                value: selected_summary(&rows),
+            },
+        ],
         rows,
     }
 }
@@ -41,17 +56,22 @@ pub(crate) fn plain_sast_tasks_model(app: &ShellApp) -> PlainSastTasksModel {
 impl PlainSastTasksModel {
     fn from_sast_tasks_model(model: SastTasksModel) -> Self {
         PlainSastTasksModel {
-            title: "SAST TASKS",
-            summary_rows: vec![
-                format!("mode: {}", model.mode_label),
-                format!("selected: {}", model.selected_summary),
-            ],
+            title: model.title,
+            summary_rows: model
+                .summary_rows
+                .into_iter()
+                .map(plain_sast_task_summary_row)
+                .collect(),
             headers: ["state", "id", "cost", "scan", "notes"],
             rows: model.rows.into_iter().map(plain_sast_task_row).collect(),
             next_hint:
                 "Next: task block <id>, task allow <id>, task toggle [id], task mode auto|manual|toggle",
         }
     }
+}
+
+fn plain_sast_task_summary_row(row: SastTaskSummaryRow) -> String {
+    format!("{}: {}", row.label, row.value)
 }
 
 fn plain_sast_task_row(row: SastTaskRow) -> PlainSastTaskRow {
@@ -88,8 +108,15 @@ mod tests {
 
         let model = sast_tasks_model(&app);
 
-        assert_eq!(model.mode_label, "auto + denylist");
-        assert!(model.selected_summary.contains("enabled"));
+        assert_eq!(model.title, "SAST TASKS");
+        assert!(model
+            .summary_rows
+            .iter()
+            .any(|row| row.label == "mode" && row.value == "auto + denylist"));
+        assert!(model
+            .summary_rows
+            .iter()
+            .any(|row| row.label == "selected" && row.value.contains("enabled")));
         assert!(model.rows.iter().any(|row| row.id == "semgrep"));
     }
 
@@ -105,7 +132,10 @@ mod tests {
 
         let model = sast_tasks_model(&app);
 
-        assert_eq!(model.mode_label, "manual allowlist");
+        assert!(model
+            .summary_rows
+            .iter()
+            .any(|row| row.label == "mode" && row.value == "manual allowlist"));
         assert!(model.rows.iter().all(|row| row.source != "default"));
     }
 
