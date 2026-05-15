@@ -31,7 +31,7 @@ fn append_fallback_progress(
         return;
     }
     if app.focused_module.as_deref() == Some("context") {
-        append_context_build_progress(lines, app, area, summary);
+        append_context_build_progress(lines, app, area);
         return;
     }
     append_generic_tool_progress(lines, app, area, summary);

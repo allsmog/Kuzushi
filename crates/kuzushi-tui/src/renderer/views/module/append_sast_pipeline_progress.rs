@@ -49,27 +49,37 @@ pub(in crate::renderer::views) fn append_context_build_progress(
     lines: &mut Vec<Line<'static>>,
     app: &ShellApp,
     area: Rect,
-    summary: &ModuleRunSummary,
 ) {
+    let context = context_snapshot_model(app);
     lines.push(divider("CONTEXT BUILD", area.width));
-    if let Some(tool_name) = summary.running_tool.as_deref() {
-        lines.push(pipeline_row(
-            "⏵",
-            tool_name,
-            "indexing repository context; result will update this view",
-        ));
-    } else if app.context_view.exists {
-        lines.push(pipeline_row("✓", "context:build", &app.context_view.status));
-        if let Some(path) = app.context_view.snapshot_path.as_ref() {
-            lines.push(pipeline_row("◆", "snapshot", &path.display().to_string()));
-        }
-    } else {
-        lines.push(pipeline_row(
-            "○",
-            "context:build",
-            "no snapshot yet; `run .` builds .kuzushi/context-snapshot.json",
-        ));
+    if append_context_running(lines, &context) {
+        return;
     }
+    if append_context_snapshot(lines, &context) {
+        return;
+    }
+    lines.push(pipeline_row(
+        "○",
+        "context:build",
+        "no snapshot yet; `run .` builds .kuzushi/context-snapshot.json",
+    ));
+}
+
+fn append_context_running(lines: &mut Vec<Line<'static>>, context: &ContextSnapshotModel) -> bool {
+    let Some(running) = context.running.as_ref() else {
+        return false;
+    };
+    lines.push(pipeline_row(running.glyph, &running.tool, running.message));
+    true
+}
+
+fn append_context_snapshot(lines: &mut Vec<Line<'static>>, context: &ContextSnapshotModel) -> bool {
+    if !context.snapshot_present {
+        return false;
+    }
+    lines.push(pipeline_row("✓", "context:build", &context.status));
+    lines.push(pipeline_row("◆", "snapshot", &context.snapshot));
+    true
 }
 
 pub(in crate::renderer::views) fn append_generic_tool_progress(
