@@ -3,15 +3,35 @@ use crate::ShellApp;
 use std::path::{Path, PathBuf};
 
 const RECOMMENDATION_COLUMN_COUNT: usize = 4;
+const RECOMMENDATION_REPORT_HEADERS: [&str; 4] = ["pri", "tool", "runtime", "reason"];
+const RECOMMENDATION_REPORT_COMMANDS: [&str; 4] =
+    ["run <tool> [json]", "trace <run>", "runs", "back"];
+const RECOMMENDATION_EMPTY_COMMANDS: [&str; 3] =
+    ["run module-recommender:recommend", "runs", "back"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RecommendationModel {
-    pub(crate) source_path: String,
-    pub(crate) source_detail: String,
-    pub(crate) run_id: Option<String>,
+    pub(crate) title: &'static str,
+    pub(crate) detail_rows: Vec<RecommendationDetailRow>,
     pub(crate) attack_surface: Option<AttackSurfaceRiskModel>,
     pub(crate) summary: Option<String>,
+    pub(crate) report_headers: [&'static str; 4],
+    pub(crate) report_commands: [&'static str; 4],
+    pub(crate) empty_state: RecommendationEmptyState,
     pub(crate) rows: Vec<RecommendationRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RecommendationDetailRow {
+    pub(crate) cells: [String; 2],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct RecommendationEmptyState {
+    pub(crate) title: &'static str,
+    pub(crate) explanations: [&'static str; 2],
+    pub(crate) actions: [(&'static str, &'static str); 2],
+    pub(crate) commands: [&'static str; 3],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,15 +41,52 @@ pub(crate) struct RecommendationRow {
 
 pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
     let source = RecommendationSource::from_app(app);
-    let source_path = source.path.display().to_string();
     let report = read_recommendations(&source.path);
+    let source_detail = artifact_detail_label(&source.path);
     RecommendationModel {
-        source_detail: artifact_detail_label(&source.path),
-        source_path,
-        run_id: source.run_id,
+        title: "RECOMMEND",
+        detail_rows: recommendation_detail_rows(source_detail, source.run_id),
         attack_surface: source.path.parent().and_then(attack_surface_risk_model),
         summary: report.as_ref().and_then(|view| view.summary.clone()),
+        report_headers: RECOMMENDATION_REPORT_HEADERS,
+        report_commands: RECOMMENDATION_REPORT_COMMANDS,
+        empty_state: recommendation_empty_state(),
         rows: report.map(|view| view.rows).unwrap_or_default(),
+    }
+}
+
+fn recommendation_detail_rows(
+    source_detail: String,
+    run_id: Option<String>,
+) -> Vec<RecommendationDetailRow> {
+    let mut rows = vec![recommendation_detail_row("recommendations", source_detail)];
+    if let Some(run_id) = run_id {
+        rows.push(recommendation_detail_row("run", run_id));
+    }
+    rows
+}
+
+fn recommendation_detail_row(label: &str, value: String) -> RecommendationDetailRow {
+    RecommendationDetailRow {
+        cells: [label.to_string(), value],
+    }
+}
+
+fn recommendation_empty_state() -> RecommendationEmptyState {
+    RecommendationEmptyState {
+        title: "no recommendations artifact",
+        explanations: [
+            "recommend reads the latest recommendations.json artifact.",
+            "generate it through normal tool dispatch when planning is needed.",
+        ],
+        actions: [
+            (
+                "run module-recommender:recommend",
+                "writes recommendations.json",
+            ),
+            ("runs", "inspect persisted runs"),
+        ],
+        commands: RECOMMENDATION_EMPTY_COMMANDS,
     }
 }
 
@@ -174,6 +231,25 @@ mod tests {
                 "no".to_string(),
                 "No reason recorded.".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn recommendation_model_shapes_static_chrome_and_empty_state() {
+        let app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        let model = recommendation_model(&app);
+
+        assert_eq!(model.title, "RECOMMEND");
+        assert_eq!(model.detail_rows[0].cells[0], "recommendations");
+        assert_eq!(model.report_headers, ["pri", "tool", "runtime", "reason"]);
+        assert_eq!(
+            model.report_commands,
+            ["run <tool> [json]", "trace <run>", "runs", "back"]
+        );
+        assert_eq!(model.empty_state.title, "no recommendations artifact");
+        assert_eq!(
+            model.empty_state.commands,
+            ["run module-recommender:recommend", "runs", "back"]
         );
     }
 }

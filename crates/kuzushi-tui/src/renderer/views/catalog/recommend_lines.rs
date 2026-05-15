@@ -5,11 +5,10 @@ pub(crate) fn recommend_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> 
     let model = recommendation_model(app);
     let mut lines = context_strip(app, area);
     lines.push(blank());
-    lines.push(divider("RECOMMEND", area.width));
+    lines.push(divider(model.title, area.width));
 
-    lines.push(detail("recommendations", &model.source_detail));
-    if let Some(run_id) = &model.run_id {
-        lines.push(detail("run", run_id));
+    for row in &model.detail_rows {
+        lines.push(detail(&row.cells[0], &row.cells[1]));
     }
     if let Some(surface) = &model.attack_surface {
         lines.push(attack_surface_risk_line(surface, area.width));
@@ -17,7 +16,7 @@ pub(crate) fn recommend_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> 
     lines.push(blank());
 
     if model.rows.is_empty() {
-        append_empty_recommendations(lines, area)
+        append_empty_recommendations(lines, &model, area)
     } else {
         append_report(lines, &model, area)
     }
@@ -33,7 +32,7 @@ fn append_report(
         lines.push(blank());
     }
     lines.push(aligned_header(
-        &["pri", "tool", "runtime", "reason"],
+        &model.report_headers,
         &[6, 26, 8, value_width(area, 48)],
     ));
     let take = (area.height.saturating_sub(10) as usize).max(4);
@@ -42,31 +41,24 @@ fn append_report(
     }
     lines.push(blank());
     lines.push(command_list_line(
-        &["run <tool> [json]", "trace <run>", "runs", "back"],
+        &model.report_commands,
         area.width as usize,
     ));
     lines
 }
 
-fn append_empty_recommendations(mut lines: Vec<Line<'static>>, area: Rect) -> Vec<Line<'static>> {
+fn append_empty_recommendations(
+    mut lines: Vec<Line<'static>>,
+    model: &RecommendationModel,
+    area: Rect,
+) -> Vec<Line<'static>> {
+    let empty = &model.empty_state;
     lines.extend(empty_state_panel(
-        "no recommendations artifact",
-        &[
-            "recommend reads the latest recommendations.json artifact.",
-            "generate it through normal tool dispatch when planning is needed.",
-        ],
-        &[
-            (
-                "run module-recommender:recommend",
-                "writes recommendations.json",
-            ),
-            ("runs", "inspect persisted runs"),
-        ],
+        empty.title,
+        &empty.explanations,
+        &empty.actions,
     ));
-    lines.push(command_list_line(
-        &["run module-recommender:recommend", "runs", "back"],
-        area.width as usize,
-    ));
+    lines.push(command_list_line(&empty.commands, area.width as usize));
     lines
 }
 
