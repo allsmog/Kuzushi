@@ -1,7 +1,8 @@
 use super::*;
 use crate::ui_view_models::{
-    plain_command_result_model, plain_live_activity_rows, plain_prereq_plan_model,
-    plain_render_mode, PlainCommandResultModel, PlainPrereqPlanModel, PlainRenderMode,
+    plain_command_result_model, plain_live_activity_model, plain_prereq_plan_model,
+    plain_render_mode, PlainCommandResultModel, PlainLiveActivityModel, PlainPrereqPlanModel,
+    PlainRenderMode,
 };
 
 pub fn render_plain_app(app: &ShellApp, width: usize) -> String {
@@ -86,8 +87,8 @@ fn plain_prereq_plan_lines(plan: PlainPrereqPlanModel, width: usize) -> Vec<Stri
 
 fn prepend_plain_activity_lines(app: &ShellApp, width: usize, lines: Vec<String>) -> Vec<String> {
     let mut prefix = Vec::new();
-    if let Some(rows) = plain_live_activity_rows(app) {
-        prefix.extend(plain_live_activity_lines(rows, width));
+    if let Some(model) = plain_live_activity_model(app) {
+        prefix.extend(plain_live_activity_lines(model, width));
         prefix.push(String::new());
     }
     if let Some(plan) = plain_prereq_plan_model(app) {
@@ -100,14 +101,8 @@ fn prepend_plain_activity_lines(app: &ShellApp, width: usize, lines: Vec<String>
     prefix.into_iter().chain(lines).collect()
 }
 
-fn plain_live_activity_lines(
-    rows: Vec<crate::ui_view_models::PlainLiveActivityRow>,
-    width: usize,
-) -> Vec<String> {
-    let mut lines = vec![plain_section_divider("LIVE ACTIVITY", width)];
-    lines.extend(
-        rows.into_iter()
-            .map(|row| format!("{}: {}", row.label, row.value)),
-    );
+fn plain_live_activity_lines(model: PlainLiveActivityModel, width: usize) -> Vec<String> {
+    let mut lines = vec![plain_section_divider(model.title, width)];
+    lines.extend(model.rows);
     lines
 }

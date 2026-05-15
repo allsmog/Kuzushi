@@ -133,7 +133,7 @@ pub(crate) use knowledge_base::{
     PlainKnowledgeBaseArtifacts, PlainKnowledgeBaseAttachmentRow, PlainKnowledgeBaseAttachments,
     PlainKnowledgeBaseModel,
 };
-pub(crate) use live_activity::{plain_live_activity_rows, PlainLiveActivityRow};
+pub(crate) use live_activity::{plain_live_activity_model, PlainLiveActivityModel};
 pub(crate) use module_detail::{
     focused_module_detail_model, module_detail_model, ModuleDetailModel,
 };
