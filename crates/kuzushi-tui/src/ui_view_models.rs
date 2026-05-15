@@ -22,6 +22,7 @@ mod display_text;
 mod failure_handoff;
 mod finding_summary;
 mod findings;
+mod help;
 mod home_cockpit;
 mod keybindings;
 mod knowledge_base;
@@ -74,6 +75,7 @@ pub(crate) use findings::{
     findings_model, selected_finding_detail_model, FindingDetailModel, FindingEvidenceRow,
     FindingListRow, FindingsModel, TriageSummaryModel,
 };
+pub(crate) use help::{help_model, quickstart_model, HelpCategoryModel, HelpCommandRow};
 pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use knowledge_base::{

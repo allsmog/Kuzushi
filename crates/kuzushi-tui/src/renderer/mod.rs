@@ -5,9 +5,6 @@ use self::chrome::*;
 use self::shared::*;
 use self::views::*;
 use crate::app::{ScanPanelState, ShellApp, ShellView, ThreatView};
-use crate::commands::{
-    shell_command_specs, shell_help_examples, ShellCommandCategory, ShellCommandSpec,
-};
 use crate::theme;
 pub(in crate::renderer) use chrome::*;
 use kuzushi_core::{sorted_finding_aliases, Severity};
