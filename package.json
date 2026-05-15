@@ -113,7 +113,6 @@
     "@kuzushi/randori-plugin": "github:allsmog/randori-plugin",
     "@kuzushi/tob-skills": "github:allsmog/tob-security-skills",
     "@kuzushi/vuln-scout": "github:allsmog/vuln-scout",
-    "@openai/codex-sdk": "^0.125.0",
     "better-sqlite3": "^12.8.0",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
