@@ -34,13 +34,14 @@ fn push_plain_sast_tasks_table(lines: &mut Vec<String>, model: &PlainSastTasksMo
 }
 
 fn plain_sast_task_row(row: &PlainSastTaskRow, widths: &[usize]) -> String {
+    let [state, id, cost, scan_task, notes] = &row.cells;
     table_text(
         &[
-            row.state,
-            row.id,
-            row.cost,
-            row.scan_task,
-            &fit(row.notes, widths.get(4).copied().unwrap_or(20)),
+            state,
+            id,
+            cost,
+            scan_task,
+            &fit(notes, widths.get(4).copied().unwrap_or(20)),
         ],
         widths,
     )

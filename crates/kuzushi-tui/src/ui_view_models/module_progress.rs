@@ -86,7 +86,7 @@ fn selected_sast_rows(app: &ShellApp, summary: &ModuleRunSummary) -> Vec<ModuleP
         .rows
         .into_iter()
         .filter(|row| row.selected)
-        .map(|row| selected_sast_row(row.id, summary.scan_done))
+        .map(|row| selected_sast_row(row.task_id, summary.scan_done))
         .collect::<Vec<_>>();
     rows.push(triage_row(summary.findings));
     rows
