@@ -3,6 +3,7 @@ use crate::ActivitySession;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActivityFooterModel {
     pub(crate) body: String,
+    pub(crate) body_line: String,
     pub(crate) hints: &'static [ActivityFooterHint],
     pub(crate) plain_hints: Vec<(&'static str, &'static str)>,
 }
@@ -47,8 +48,10 @@ const NARROW_HINTS: &[ActivityFooterHint] = &[
 
 pub(crate) fn activity_footer_model(session: &ActivitySession, width: u16) -> ActivityFooterModel {
     let hints = footer_hints(width);
+    let body = focus_body(session);
     ActivityFooterModel {
-        body: focus_body(session),
+        body_line: fit(&body, width as usize),
+        body,
         hints,
         plain_hints: plain_hint_pairs(hints),
     }
@@ -93,6 +96,18 @@ fn footer_hints(width: u16) -> &'static [ActivityFooterHint] {
     FULL_HINTS
 }
 
+fn fit(value: &str, width: usize) -> String {
+    let len = value.chars().count();
+    if len <= width {
+        return value.to_string();
+    }
+    if width <= 1 {
+        return "…".repeat(width);
+    }
+    let keep = width.saturating_sub(1);
+    format!("{}…", value.chars().take(keep).collect::<String>())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,6 +129,7 @@ mod tests {
             model.body,
             " ▸ FOCUS  triage:run  Active  steps 3  reviewing evidence"
         );
+        assert_eq!(model.body_line, model.body);
         assert_eq!(
             model.hints.last().map(|hint| hint.plain_key_text),
             Some("c")
@@ -134,6 +150,10 @@ mod tests {
         assert_eq!(
             activity_footer_model(&session, 80).body,
             " ▸ FOCUS  hover [j/k] to inspect a task"
+        );
+        assert_eq!(
+            activity_footer_model(&session, 18).body_line,
+            " ▸ FOCUS  hover […"
         );
 
         session.focus_task = Some("patch:finding".to_string());

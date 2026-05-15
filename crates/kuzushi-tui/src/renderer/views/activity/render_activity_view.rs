@@ -169,7 +169,7 @@ fn render_focus_footer(frame: &mut Frame<'_>, area: Rect, session: &ActivitySess
 fn focus_footer_lines(width: u16, session: &ActivitySession) -> Vec<Line<'static>> {
     let footer = activity_footer_model(session, width);
     vec![
-        Line::from(vec![Span::styled(footer.body, theme::label())]),
+        Line::from(vec![Span::styled(footer.body_line, theme::label())]),
         Line::from(key_hint_spans(footer.hints)),
     ]
 }
