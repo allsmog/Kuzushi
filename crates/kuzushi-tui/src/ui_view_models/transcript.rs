@@ -19,16 +19,24 @@ pub(crate) fn transcript_model(app: &ShellApp, visible_count: usize) -> Transcri
     }
 }
 
+pub(crate) fn transcript_model_from_log_index(app: &ShellApp, log_start: usize) -> TranscriptModel {
+    let log_start = log_start.min(app.log.len());
+    TranscriptModel {
+        rows: transcript_rows_all(&app.log[log_start..]),
+    }
+}
+
 fn transcript_rows(log: &[LogLine], visible_count: usize) -> Vec<TranscriptRow> {
     if visible_count == 0 {
         return Vec::new();
     }
-    let rows = log
-        .iter()
-        .flat_map(TranscriptRow::from_log_line)
-        .collect::<Vec<_>>();
+    let rows = transcript_rows_all(log);
     let start = rows.len().saturating_sub(visible_count);
     rows.into_iter().skip(start).collect()
+}
+
+fn transcript_rows_all(log: &[LogLine]) -> Vec<TranscriptRow> {
+    log.iter().flat_map(TranscriptRow::from_log_line).collect()
 }
 
 impl TranscriptRow {

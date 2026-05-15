@@ -1,5 +1,8 @@
 use super::*;
-use crate::ui_view_models::{prereq_prompt_model, PrereqPromptModel, PrereqPromptStepModel};
+use crate::ui_view_models::{
+    prereq_prompt_model, transcript_model_from_log_index, PrereqPromptModel, PrereqPromptStepModel,
+    TranscriptRow,
+};
 
 pub fn render_plain_app(app: &ShellApp, width: usize) -> String {
     let lines = render_plain_lines(app, width);
@@ -67,9 +70,8 @@ pub(crate) fn render_plain_command_result_lines(
         format!("command: {command}"),
         "logs:".to_string(),
     ];
-    let log_start = log_start.min(app.log.len());
-    for line in &app.log[log_start..] {
-        lines.extend(plain_log_lines(line));
+    for row in transcript_model_from_log_index(app, log_start).rows {
+        lines.push(plain_log_line(&row));
     }
     lines.push(String::new());
     lines.push(plain_section_divider("VIEW", width));
@@ -79,27 +81,15 @@ pub(crate) fn render_plain_command_result_lines(
     trim_plain_lines(lines)
 }
 
-pub(crate) fn plain_log_lines(line: &LogLine) -> Vec<String> {
-    let mut lines = Vec::new();
-    let body_lines = if line.body.is_empty() {
-        vec![""]
-    } else {
-        line.body.lines().collect::<Vec<_>>()
-    };
-    for (index, body) in body_lines.into_iter().enumerate() {
-        if line.prefix == ">" {
-            if index == 0 {
-                lines.push(format!("> {body}"));
-            } else {
-                lines.push(format!("  {body}"));
-            }
-        } else if index == 0 {
-            lines.push(format!("{}: {body}", line.prefix));
-        } else {
-            lines.push(format!("  {body}"));
-        }
+fn plain_log_line(row: &TranscriptRow) -> String {
+    if row.continuation {
+        return format!("  {}", row.body);
     }
-    lines
+    if row.prefix == ">" {
+        format!("> {}", row.body)
+    } else {
+        format!("{}: {}", row.prefix, row.body)
+    }
 }
 
 fn plain_prereq_plan_lines(plan: &PrereqPromptModel, width: usize) -> Vec<String> {

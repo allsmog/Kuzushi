@@ -123,7 +123,7 @@ pub(crate) use threat_stride::threat_stride_rollup;
 #[cfg(test)]
 pub(crate) use threat_stride::threat_stride_rollup_from_doc;
 pub(crate) use tools::{tools_model, ToolRow};
-pub(crate) use transcript::transcript_model;
+pub(crate) use transcript::{transcript_model, transcript_model_from_log_index, TranscriptRow};
 pub(crate) use view_status::view_status_segment;
 pub(crate) use workspace::{workspace_model, WorkspaceModel, WorkspaceRollupRow};
 
