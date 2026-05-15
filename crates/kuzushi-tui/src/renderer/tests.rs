@@ -8,7 +8,7 @@ use ratatui::Terminal;
 
 use crate::commands::{shell_command_specs, shell_help_examples, ShellCommandCategory};
 use crate::ui_view_models::{
-    catalog_model, prompt_text, threat_dfd_nodes_from_doc, threat_scope_buckets_from_doc,
+    catalog_model, prompt_text, threat_dfd_model_from_doc, threat_scope_buckets_from_doc,
     threat_story_rows_from_doc, threat_stride_rollup_from_doc, view_status_segment,
     ModuleRunStatusKind, RoutingMode, ThreatStrideTone,
 };
@@ -1050,7 +1050,7 @@ fn dfd_canonical_lines_render_design_diagram() {
 }
 
 #[test]
-fn threat_dfd_nodes_from_doc_returns_id_type_zone_triples() {
+fn threat_dfd_model_from_doc_returns_id_type_zone_triples() {
     let doc = serde_json::json!({
         "dfd": {
             "nodes": [
@@ -1061,20 +1061,38 @@ fn threat_dfd_nodes_from_doc_returns_id_type_zone_triples() {
             ]
         }
     });
-    let nodes = threat_dfd_nodes_from_doc(&doc).expect("expected non-empty nodes");
-    assert_eq!(nodes.len(), 2);
-    assert_eq!(nodes[0].id, "actor-user");
-    assert_eq!(nodes[0].node_type, "external-entity");
-    assert_eq!(nodes[0].trust_zone, "external");
-    assert_eq!(nodes[1].id, "web");
-    assert_eq!(nodes[1].trust_zone, "internal");
+    let model = threat_dfd_model_from_doc(&doc).expect("expected non-empty nodes");
+    assert_eq!(model.header, "NODES FROM threat-model.json · 2");
+    assert_eq!(model.rows.len(), 2);
+    assert_eq!(model.rows[0].cells[0], "actor-user");
+    assert_eq!(model.rows[0].cells[1], "external-entity");
+    assert_eq!(model.rows[0].cells[2], "external");
+    assert_eq!(model.rows[1].cells[0], "web");
+    assert_eq!(model.rows[1].cells[2], "internal");
 }
 
 #[test]
-fn threat_dfd_nodes_from_doc_returns_none_when_missing() {
-    assert!(threat_dfd_nodes_from_doc(&serde_json::json!({})).is_none());
-    assert!(threat_dfd_nodes_from_doc(&serde_json::json!({"dfd": {}})).is_none());
-    assert!(threat_dfd_nodes_from_doc(&serde_json::json!({"dfd": {"nodes": []}})).is_none());
+fn threat_dfd_model_from_doc_caps_visible_rows() {
+    let doc = serde_json::json!({
+        "dfd": {
+            "nodes": [
+                {"id": "n1"}, {"id": "n2"}, {"id": "n3"},
+                {"id": "n4"}, {"id": "n5"}, {"id": "n6"},
+                {"id": "n7"}, {"id": "n8"}, {"id": "n9"}
+            ]
+        }
+    });
+    let model = threat_dfd_model_from_doc(&doc).expect("expected non-empty nodes");
+    assert_eq!(model.header, "NODES FROM threat-model.json · 9");
+    assert_eq!(model.rows.len(), 8);
+    assert_eq!(model.rows[7].cells[0], "n8");
+}
+
+#[test]
+fn threat_dfd_model_from_doc_returns_none_when_missing() {
+    assert!(threat_dfd_model_from_doc(&serde_json::json!({})).is_none());
+    assert!(threat_dfd_model_from_doc(&serde_json::json!({"dfd": {}})).is_none());
+    assert!(threat_dfd_model_from_doc(&serde_json::json!({"dfd": {"nodes": []}})).is_none());
 }
 
 #[test]
