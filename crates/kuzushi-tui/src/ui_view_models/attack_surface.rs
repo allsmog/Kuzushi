@@ -1,21 +1,22 @@
 use std::path::Path;
 use std::{collections::BTreeMap, fs};
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct AttackSurfaceRiskModel {
-    pub high_risk: usize,
-    pub max_risk_score: u64,
-    pub risk_tiers: BTreeMap<String, usize>,
-    pub top_surface: Option<String>,
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AttackSurfaceRiskModel {
+    pub(crate) summary: String,
 }
 
-pub fn attack_surface_risk_model(run_dir: &Path) -> Option<AttackSurfaceRiskModel> {
+pub(crate) fn attack_surface_risk_model(run_dir: &Path) -> Option<AttackSurfaceRiskModel> {
     let value = read_attack_surface(run_dir)?;
+    let risk_tiers = summary_risk_tiers(&value);
+    let top_surface = top_surface_label(&value);
     Some(AttackSurfaceRiskModel {
-        high_risk: summary_usize(&value, "highRisk"),
-        max_risk_score: summary_u64(&value, "maxRiskScore"),
-        risk_tiers: summary_risk_tiers(&value),
-        top_surface: top_surface_label(&value),
+        summary: attack_surface_risk_summary(
+            summary_usize(&value, "highRisk"),
+            summary_u64(&value, "maxRiskScore"),
+            &risk_tiers,
+            top_surface.as_deref(),
+        ),
     })
 }
 
@@ -76,6 +77,54 @@ fn surface_label(tier: Option<&str>, title: Option<&str>) -> Option<String> {
     }
 }
 
+fn attack_surface_risk_summary(
+    high_risk: usize,
+    max_risk_score: u64,
+    risk_tiers: &BTreeMap<String, usize>,
+    top_surface: Option<&str>,
+) -> String {
+    let top = top_surface.unwrap_or("none");
+    let mut parts = vec![
+        format!("{high_risk} high/critical"),
+        format!("max {max_risk_score}"),
+    ];
+    if let Some(tiers) = risk_tier_summary(risk_tiers) {
+        parts.push(format!("tiers {tiers}"));
+    }
+    parts.push(format!("top {top}"));
+    parts.join(", ")
+}
+
+fn risk_tier_summary(tiers: &BTreeMap<String, usize>) -> Option<String> {
+    let mut keys = tiers.keys().collect::<Vec<_>>();
+    keys.sort_by(|left, right| {
+        tier_rank(left)
+            .cmp(&tier_rank(right))
+            .then_with(|| left.cmp(right))
+    });
+    let summary = keys
+        .into_iter()
+        .filter_map(|tier| tier_count_segment(tier, tiers.get(tier).copied()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    (!summary.is_empty()).then_some(summary)
+}
+
+fn tier_count_segment(tier: &str, count: Option<usize>) -> Option<String> {
+    let count = count.filter(|count| *count > 0)?;
+    Some(format!("{tier}={count}"))
+}
+
+fn tier_rank(tier: &str) -> usize {
+    match tier {
+        "critical" => 0,
+        "high" => 1,
+        "medium" => 2,
+        "low" => 3,
+        _ => 4,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,9 +151,9 @@ mod tests {
 
         let model = attack_surface_risk_model(temp.path()).unwrap();
 
-        assert_eq!(model.risk_tiers.get("critical"), Some(&1));
-        assert_eq!(model.risk_tiers.get("high"), Some(&1));
-        assert_eq!(model.risk_tiers.get("medium"), Some(&2));
-        assert_eq!(model.top_surface.as_deref(), Some("critical POST /admin"));
+        assert_eq!(
+            model.summary,
+            "2 high/critical, max 100, tiers critical=1, high=1, medium=2, top critical POST /admin"
+        );
     }
 }
