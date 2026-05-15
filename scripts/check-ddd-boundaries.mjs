@@ -238,8 +238,9 @@ const rules = [
   },
   {
     name: "TUI threat renderers read threat-model view models",
-    roots: ["crates/kuzushi-tui/src/renderer/shared/threat_model/current_threat_model_doc.rs"],
-    forbidden: /\b(load_persistent_threat_model|std::env|std::path|PathBuf|read_to_string)\b/,
+    roots: ["crates/kuzushi-tui/src/renderer/views/threat", "crates/kuzushi-tui/src/renderer/shared/threat_model"],
+    forbidden:
+      /\b(load_persistent_threat_model|threat_model_doc\(|serde_json|std::env|std::path|PathBuf|read_to_string)\b/,
   },
 ];
 

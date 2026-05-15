@@ -7,8 +7,8 @@ use ratatui::buffer::Buffer;
 use ratatui::Terminal;
 
 use crate::ui_view_models::{
-    threat_scope_buckets_from_doc, threat_story_rows_from_doc, threat_stride_rollup_from_doc,
-    view_status_segment, RoutingMode,
+    threat_dfd_nodes_from_doc, threat_scope_buckets_from_doc, threat_story_rows_from_doc,
+    threat_stride_rollup_from_doc, view_status_segment, RoutingMode,
 };
 
 use super::*;
@@ -1015,7 +1015,7 @@ fn dfd_canonical_lines_render_design_diagram() {
 }
 
 #[test]
-fn dfd_nodes_from_doc_returns_id_type_zone_triples() {
+fn threat_dfd_nodes_from_doc_returns_id_type_zone_triples() {
     let doc = serde_json::json!({
         "dfd": {
             "nodes": [
@@ -1026,20 +1026,20 @@ fn dfd_nodes_from_doc_returns_id_type_zone_triples() {
             ]
         }
     });
-    let nodes = dfd_nodes_from_doc(&doc).expect("expected non-empty nodes");
+    let nodes = threat_dfd_nodes_from_doc(&doc).expect("expected non-empty nodes");
     assert_eq!(nodes.len(), 2);
-    assert_eq!(nodes[0].0, "actor-user");
-    assert_eq!(nodes[0].1, "external-entity");
-    assert_eq!(nodes[0].2, "external");
-    assert_eq!(nodes[1].0, "web");
-    assert_eq!(nodes[1].2, "internal");
+    assert_eq!(nodes[0].id, "actor-user");
+    assert_eq!(nodes[0].node_type, "external-entity");
+    assert_eq!(nodes[0].trust_zone, "external");
+    assert_eq!(nodes[1].id, "web");
+    assert_eq!(nodes[1].trust_zone, "internal");
 }
 
 #[test]
-fn dfd_nodes_from_doc_returns_none_when_missing() {
-    assert!(dfd_nodes_from_doc(&serde_json::json!({})).is_none());
-    assert!(dfd_nodes_from_doc(&serde_json::json!({"dfd": {}})).is_none());
-    assert!(dfd_nodes_from_doc(&serde_json::json!({"dfd": {"nodes": []}})).is_none());
+fn threat_dfd_nodes_from_doc_returns_none_when_missing() {
+    assert!(threat_dfd_nodes_from_doc(&serde_json::json!({})).is_none());
+    assert!(threat_dfd_nodes_from_doc(&serde_json::json!({"dfd": {}})).is_none());
+    assert!(threat_dfd_nodes_from_doc(&serde_json::json!({"dfd": {"nodes": []}})).is_none());
 }
 
 #[test]
