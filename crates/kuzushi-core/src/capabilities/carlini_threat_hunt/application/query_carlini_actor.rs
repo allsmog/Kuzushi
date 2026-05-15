@@ -1,6 +1,18 @@
 use super::run_carlini_threat_hunt::CarliniDebugArtifacts;
 use super::*;
-use crate::structured_output::balanced_json_slices;
+use crate::structured_output::{
+    balanced_json_slices, parse_or_repair_required_structured_json_with_cost,
+};
+
+/// Output of a single carlini actor query. `cost_usd` accumulates every
+/// LLM call we paid for to produce `value`: the initial response, any
+/// max-output-tokens retry, and any repair pass. Returning it explicitly
+/// keeps the cost from being dropped on the floor at the report layer
+/// (previously hardcoded to 0.0).
+pub(crate) struct CarliniActorQuery {
+    pub(crate) value: Value,
+    pub(crate) cost_usd: f64,
+}
 
 pub(crate) fn query_carlini_actor(
     runtime: &dyn AgentRuntime,
@@ -12,7 +24,7 @@ pub(crate) fn query_carlini_actor(
     actor_hunt: &ActorHunt,
     actor_fingerprint: &str,
     debug_artifacts: Option<&CarliniDebugArtifacts>,
-) -> Result<Value> {
+) -> Result<CarliniActorQuery> {
     let prompt = build_actor_prompt(target, actor_hunt, options, inventory, actor_fingerprint);
     write_carlini_actor_prompt_artifact(debug_artifacts, actor_fingerprint, &prompt);
     let request = carlini_actor_request(model, target, prompt, input);
@@ -22,26 +34,34 @@ pub(crate) fn query_carlini_actor(
         findings_schema(),
     );
     let request = request.with_structured_output(contract.runtime_contract());
-    let response = runtime.query_blocking(request.clone())?;
-    write_carlini_actor_response_artifact(debug_artifacts, actor_fingerprint, "initial", &response);
-    let response = if response.truncated {
-        retry_carlini_with_higher_output_budget(runtime, &request)
-            .inspect(|retry| {
+    let initial = runtime.query_blocking(request.clone())?;
+    write_carlini_actor_response_artifact(debug_artifacts, actor_fingerprint, "initial", &initial);
+    let mut accumulated_cost = initial.cost_usd;
+    let response = if initial.truncated {
+        match retry_carlini_with_higher_output_budget(runtime, &request) {
+            Ok(retry) => {
+                accumulated_cost += retry.cost_usd;
                 write_carlini_actor_response_artifact(
                     debug_artifacts,
                     actor_fingerprint,
                     "retry",
-                    retry,
+                    &retry,
                 );
-            })
-            .unwrap_or(response)
+                retry
+            }
+            Err(_) => initial,
+        }
     } else {
-        response
+        initial
     };
     if let Some(value) = extract_carlini_findings_response(&response) {
-        return Ok(value);
+        return Ok(CarliniActorQuery {
+            value,
+            cost_usd: accumulated_cost,
+        });
     }
-    parse_or_repair_required_structured_json(
+    let response_cost = response.cost_usd;
+    let costed = parse_or_repair_required_structured_json_with_cost(
         response,
         contract,
         require_json_object,
@@ -63,7 +83,16 @@ pub(crate) fn query_carlini_actor(
             }
             repair_response
         },
-    )
+    )?;
+    // `parse_or_repair_required_structured_json_with_cost` reports the
+    // initial response cost plus any repair cost. We've already counted
+    // the initial response above (in `accumulated_cost`), so add the
+    // repair-only delta.
+    let repair_only_cost = (costed.cost_usd - response_cost).max(0.0);
+    Ok(CarliniActorQuery {
+        value: costed.value,
+        cost_usd: accumulated_cost + repair_only_cost,
+    })
 }
 
 pub(crate) fn extract_carlini_findings_response(response: &AgentQueryResponse) -> Option<Value> {
@@ -315,6 +344,7 @@ pub(crate) fn carlini_threat_hunt_report(
     prompt_inventory_files: usize,
     threat_focused_prompt_files: usize,
     findings: Vec<Finding>,
+    cost_usd: f64,
 ) -> Result<CarliniThreatHuntReport> {
     let persisted = persist_findings(&target, &findings, ctx)?;
     Ok(CarliniThreatHuntReport {
@@ -327,6 +357,6 @@ pub(crate) fn carlini_threat_hunt_report(
         findings,
         persisted,
         kb_context: Some(options.kb_context),
-        cost_usd: 0.0,
+        cost_usd,
     })
 }
