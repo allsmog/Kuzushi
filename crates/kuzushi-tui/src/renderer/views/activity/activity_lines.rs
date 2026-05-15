@@ -3,8 +3,8 @@ use super::feed_pane::feed_row_style;
 use super::*;
 use crate::ui_view_models::{
     activity_dag_pane_rows, activity_empty_state_model, activity_feed_pane_rows,
-    activity_footer_model, activity_header_model, activity_pane_chrome_model,
-    activity_plain_pane_widths, ActivityPaneTitle,
+    activity_footer_model, activity_header_model, activity_plain_pane_header_model,
+    activity_plain_pane_widths, ActivityPlainPaneHeaderCell,
 };
 use std::time::Instant;
 
@@ -25,13 +25,12 @@ pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(divider(&header.summary_title, area.width));
 
     let widths = activity_plain_pane_widths(area.width);
-    let pane_chrome = activity_pane_chrome_model(session);
-    lines.push(pane_header_line(
-        &pane_chrome.dag,
-        &pane_chrome.feed,
-        widths.dag,
-        widths.feed,
-    ));
+    let pane_header = activity_plain_pane_header_model(session, widths.dag, widths.feed);
+    lines.push(Line::from(vec![
+        pane_header_cell_span(&pane_header.dag),
+        Span::styled(pane_header.separator.to_string(), theme::subtle()),
+        pane_header_cell_span(&pane_header.feed),
+    ]));
     lines.extend(activity_pane_lines(session, widths.dag, widths.feed));
 
     lines.push(blank());
@@ -104,27 +103,15 @@ fn combined_activity_pane_line(
     )
 }
 
-fn pane_header_line(
-    left: &ActivityPaneTitle,
-    right: &ActivityPaneTitle,
-    left_w: usize,
-    right_w: usize,
-) -> Line<'static> {
-    Line::from(vec![
-        Span::styled(pad_to(&left.plain_header, left_w), pane_title_style(left)),
-        Span::styled("│".to_string(), theme::subtle()),
-        Span::styled(
-            pad_to(&right.plain_header, right_w),
-            pane_title_style(right),
-        ),
-    ])
-}
-
-fn pane_title_style(title: &ActivityPaneTitle) -> ratatui::style::Style {
-    if title.focused {
+fn pane_title_style(cell: &ActivityPlainPaneHeaderCell) -> ratatui::style::Style {
+    if cell.focused {
         return theme::accent();
     }
     theme::label()
+}
+
+fn pane_header_cell_span(cell: &ActivityPlainPaneHeaderCell) -> Span<'static> {
+    Span::styled(cell.text.clone(), pane_title_style(cell))
 }
 
 fn combined_pane_line(
