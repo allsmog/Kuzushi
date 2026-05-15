@@ -17,13 +17,6 @@ pub(crate) fn tools_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 
 fn push_tool_rows(lines: &mut Vec<Line<'static>>, widths: &[usize], rows: &[ToolRow]) {
     for row in rows {
-        lines.push(aligned_row(
-            &[
-                row.name.clone(),
-                row.headless.clone(),
-                row.description.clone(),
-            ],
-            widths,
-        ));
+        lines.push(aligned_row(&row.cells, widths));
     }
 }
