@@ -6,17 +6,26 @@ pub(in crate::renderer::views) fn append_progress_section(
     area: Rect,
     summary: &ModuleRunSummary,
 ) {
-    let sast_rows = app.sast_task_rows();
-    let show_per_task = sast_rows.iter().any(|row| row.selected)
+    let sast_tasks = sast_tasks_model(app);
+    let show_per_task = sast_tasks.rows.iter().any(|row| row.selected)
         && app.focused_module.as_deref() == Some("sast")
         && (summary.scan_running || summary.scan_done);
 
     if append_real_scan_progress(lines, app, area, summary, show_per_task) {
         return;
     }
-    if append_selected_sast_progress(lines, area, summary, &sast_rows, show_per_task) {
+    if append_selected_sast_progress(lines, area, summary, &sast_tasks, show_per_task) {
         return;
     }
+    append_fallback_progress(lines, app, area, summary);
+}
+
+fn append_fallback_progress(
+    lines: &mut Vec<Line<'static>>,
+    app: &ShellApp,
+    area: Rect,
+    summary: &ModuleRunSummary,
+) {
     if app.focused_module.as_deref() == Some("sast") || summary.has_scan {
         append_sast_pipeline_progress(lines, area, summary);
         return;
@@ -66,7 +75,7 @@ pub(in crate::renderer::views) fn append_selected_sast_progress(
     lines: &mut Vec<Line<'static>>,
     area: Rect,
     summary: &ModuleRunSummary,
-    sast_rows: &[SastTaskRow],
+    sast_tasks: &SastTasksModel,
     show_per_task: bool,
 ) -> bool {
     if !show_per_task {
@@ -74,7 +83,7 @@ pub(in crate::renderer::views) fn append_selected_sast_progress(
     }
 
     lines.push(divider("SCAN PROGRESS", area.width));
-    for row in sast_rows.iter().filter(|row| row.selected) {
+    for row in sast_tasks.rows.iter().filter(|row| row.selected) {
         let (kind, done_count, total, status) = selected_sast_task_progress(summary.scan_done);
         lines.push(progress_bar_line(row.id, done_count, total, status, kind));
     }
