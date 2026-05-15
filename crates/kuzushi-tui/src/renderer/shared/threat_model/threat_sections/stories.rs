@@ -10,46 +10,50 @@ pub(crate) fn stories_from_doc(doc: &serde_json::Value) -> Option<Vec<StoryRow>>
     if threats.is_empty() {
         return None;
     }
-    let mut rows: Vec<StoryRow> = threats
-        .iter()
-        .filter_map(|t| {
-            let id = t.get("id").and_then(|v| v.as_str())?.to_string();
-            let severity = t
-                .get("impact")
-                .and_then(|v| v.as_str())
-                .map(impact_to_severity)
-                .unwrap_or(Severity::Medium);
-            let title = t
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("untitled")
-                .to_string();
-            let attack = t
-                .get("attackVector")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
-            let location = t
-                .get("affectedFiles")
-                .and_then(|v| v.as_array())
-                .and_then(|files| files.first())
-                .map(|f| {
-                    let path = f.get("filePath").and_then(|v| v.as_str()).unwrap_or("");
-                    let line = f.get("startLine").and_then(|v| v.as_u64()).unwrap_or(0);
-                    if path.is_empty() {
-                        String::new()
-                    } else if line == 0 {
-                        path.to_string()
-                    } else {
-                        format!("{path}:{line}")
-                    }
-                })
-                .unwrap_or_default();
-            Some((id, severity, title, attack, location))
-        })
-        .collect();
+    let mut rows: Vec<StoryRow> = threats.iter().filter_map(story_from_threat).collect();
     rows.sort_by_key(|(_, sev, _, _, _)| std::cmp::Reverse(severity_rank(*sev)));
     Some(rows)
+}
+
+fn story_from_threat(threat: &serde_json::Value) -> Option<StoryRow> {
+    Some((
+        threat.get("id").and_then(|v| v.as_str())?.to_string(),
+        threat_severity(threat),
+        string_field(threat, "title").unwrap_or_else(|| "untitled".to_string()),
+        string_field(threat, "attackVector").unwrap_or_default(),
+        first_affected_file_location(threat),
+    ))
+}
+
+fn threat_severity(threat: &serde_json::Value) -> Severity {
+    threat
+        .get("impact")
+        .and_then(|v| v.as_str())
+        .map(impact_to_severity)
+        .unwrap_or(Severity::Medium)
+}
+
+fn string_field(value: &serde_json::Value, key: &str) -> Option<String> {
+    value.get(key)?.as_str().map(ToString::to_string)
+}
+
+fn first_affected_file_location(threat: &serde_json::Value) -> String {
+    threat
+        .get("affectedFiles")
+        .and_then(|v| v.as_array())
+        .and_then(|files| files.first())
+        .map(format_affected_file)
+        .unwrap_or_default()
+}
+
+fn format_affected_file(file: &serde_json::Value) -> String {
+    let path = file.get("filePath").and_then(|v| v.as_str()).unwrap_or("");
+    let line = file.get("startLine").and_then(|v| v.as_u64()).unwrap_or(0);
+    match (path.is_empty(), line) {
+        (true, _) => String::new(),
+        (false, 0) => path.to_string(),
+        (false, _) => format!("{path}:{line}"),
+    }
 }
 
 /// Fixture matching the canonical 4 attacker stories used when no real

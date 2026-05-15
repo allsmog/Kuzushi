@@ -6,7 +6,7 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::Terminal;
 
-use crate::ui_view_models::{view_status_segment, RoutingMode};
+use crate::ui_view_models::{threat_stride_rollup_from_doc, view_status_segment, RoutingMode};
 
 use super::*;
 
@@ -1063,7 +1063,7 @@ fn threats_dfd_view_renders_canonical_diagram_header() {
 }
 
 #[test]
-fn stride_rollup_from_doc_parses_real_threats() {
+fn threat_stride_rollup_from_doc_parses_real_threats() {
     let doc = serde_json::json!({
         "threats": [
             {"id": "T-001", "category": "spoofing",          "title": "spoofed login",    "impact": "high"},
@@ -1072,63 +1072,64 @@ fn stride_rollup_from_doc_parses_real_threats() {
             {"id": "T-004", "category": "information-disclosure", "title": "log leak",    "impact": "low"},
         ]
     });
-    let rollup = stride_rollup_from_doc(&doc).expect("expected rollup from non-empty threats");
+    let rollup =
+        threat_stride_rollup_from_doc(&doc).expect("expected rollup from non-empty threats");
     assert_eq!(rollup.len(), 6);
 
-    let total: usize = rollup.iter().map(|r| r.3).sum();
+    let total: usize = rollup.iter().map(|row| row.count).sum();
     assert_eq!(total, 4);
 
     // Spoofing: 2 threats, max impact = high
     let spoof = &rollup[0];
-    assert_eq!(spoof.0, "S");
-    assert_eq!(spoof.2, "Spoofing");
-    assert_eq!(spoof.3, 2);
-    assert_eq!(spoof.1, Severity::High);
-    assert!(spoof.4.contains("spoofed login"));
-    assert!(spoof.4.contains("stolen token"));
+    assert_eq!(spoof.letter, "S");
+    assert_eq!(spoof.category, "Spoofing");
+    assert_eq!(spoof.count, 2);
+    assert_eq!(spoof.severity, Severity::High);
+    assert!(spoof.description.contains("spoofed login"));
+    assert!(spoof.description.contains("stolen token"));
 
     // Tampering: 1 threat, impact = critical
     let tamper = &rollup[1];
-    assert_eq!(tamper.3, 1);
-    assert_eq!(tamper.1, Severity::Critical);
-    assert_eq!(tamper.4, "config tamper");
+    assert_eq!(tamper.count, 1);
+    assert_eq!(tamper.severity, Severity::Critical);
+    assert_eq!(tamper.description, "config tamper");
 
     // Repudiation: 0 threats, default Low severity, empty description
     let repud = &rollup[2];
-    assert_eq!(repud.3, 0);
-    assert_eq!(repud.1, Severity::Low);
-    assert!(repud.4.is_empty());
+    assert_eq!(repud.count, 0);
+    assert_eq!(repud.severity, Severity::Low);
+    assert!(repud.description.is_empty());
 
     // Info-disclosure: 1 threat, impact = low
     let info = &rollup[3];
-    assert_eq!(info.3, 1);
-    assert_eq!(info.1, Severity::Low);
-    assert_eq!(info.4, "log leak");
+    assert_eq!(info.count, 1);
+    assert_eq!(info.severity, Severity::Low);
+    assert_eq!(info.description, "log leak");
 }
 
 #[test]
-fn stride_rollup_from_doc_returns_none_on_empty_or_missing_threats() {
-    assert!(stride_rollup_from_doc(&serde_json::json!({})).is_none());
-    assert!(stride_rollup_from_doc(&serde_json::json!({"threats": []})).is_none());
-    assert!(stride_rollup_from_doc(&serde_json::json!({"threats": null})).is_none());
+fn threat_stride_rollup_from_doc_returns_none_on_empty_or_missing_threats() {
+    assert!(threat_stride_rollup_from_doc(&serde_json::json!({})).is_none());
+    assert!(threat_stride_rollup_from_doc(&serde_json::json!({"threats": []})).is_none());
+    assert!(threat_stride_rollup_from_doc(&serde_json::json!({"threats": null})).is_none());
 }
 
 #[test]
-fn stride_rollup_from_doc_normalizes_underscored_categories() {
+fn threat_stride_rollup_from_doc_normalizes_underscored_categories() {
     let doc = serde_json::json!({
         "threats": [
             {"category": "denial_of_service",        "title": "ddos",  "impact": "medium"},
             {"category": "elevation_of_privilege",   "title": "sudo bypass", "impact": "critical"},
         ]
     });
-    let rollup = stride_rollup_from_doc(&doc).expect("rollup should accept underscored");
+    let rollup = threat_stride_rollup_from_doc(&doc).expect("rollup should accept underscored");
     let dos = &rollup[4];
-    assert_eq!(dos.0, "D");
-    assert_eq!(dos.3, 1);
+    assert_eq!(dos.letter, "D");
+    assert_eq!(dos.count, 1);
     let elev = &rollup[5];
-    assert_eq!(elev.0, "E");
-    assert_eq!(elev.3, 1);
-    assert_eq!(elev.1, Severity::Critical);
+    assert_eq!(elev.letter, "E");
+    assert_eq!(elev.count, 1);
+    assert_eq!(elev.severity, Severity::Critical);
 }
 
 #[test]
