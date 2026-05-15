@@ -68,8 +68,77 @@ pub(crate) fn scan_findings_count(data: &serde_json::Value) -> u64 {
 }
 
 pub(crate) fn scan_cost_usd(result: &serde_json::Value) -> f64 {
-    result
-        .get("costUsd")
-        .and_then(serde_json::Value::as_f64)
-        .unwrap_or(0.0)
+    if let Some(top) = result.get("costUsd").and_then(serde_json::Value::as_f64) {
+        return top;
+    }
+    let data = match result.get("data") {
+        Some(data) => data,
+        None => return 0.0,
+    };
+    SCAN_COST_STAGES
+        .iter()
+        .filter_map(|stage| {
+            data.get(stage)
+                .and_then(|node| node.get("costUsd"))
+                .and_then(serde_json::Value::as_f64)
+        })
+        .sum()
+}
+
+/// Stages that report their own `costUsd` inside `data.<stage>`. The CLI's
+/// one-line `summary: … $X.XXXX` rolls these up because the scan envelope
+/// has no top-level `costUsd` of its own.
+const SCAN_COST_STAGES: &[&str] = &[
+    "agentic",
+    "carlini",
+    "fullModeMulti",
+    "systemsHunt",
+    "taintIris",
+    "taintIrisNext",
+    "triage",
+    "verify",
+];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn scan_cost_usd_sums_per_stage_costs() {
+        let envelope = json!({
+            "ok": true,
+            "data": {
+                "agentic": { "costUsd": 0.17743, "count": 1 },
+                "triage": { "costUsd": 0.00601, "tp": 2 },
+                "taintIrisNext": { "costUsd": 0.0, "count": 0 },
+            }
+        });
+        let total = scan_cost_usd(&envelope);
+        assert!((total - 0.18344).abs() < 1e-6, "got {total}");
+    }
+
+    #[test]
+    fn scan_cost_usd_prefers_top_level_when_present() {
+        let envelope = json!({
+            "ok": true,
+            "costUsd": 0.5,
+            "data": {
+                "agentic": { "costUsd": 0.17743 },
+            }
+        });
+        assert!((scan_cost_usd(&envelope) - 0.5).abs() < 1e-9);
+    }
+
+    #[test]
+    fn scan_cost_usd_returns_zero_for_static_only_run() {
+        let envelope = json!({
+            "ok": true,
+            "data": {
+                "findingsCount": 41,
+                "engines": ["semgrep", "secret-scan"],
+            }
+        });
+        assert_eq!(scan_cost_usd(&envelope), 0.0);
+    }
 }
