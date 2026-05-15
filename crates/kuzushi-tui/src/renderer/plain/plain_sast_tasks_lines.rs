@@ -2,32 +2,19 @@ use super::*;
 
 pub(crate) fn plain_sast_tasks_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
-    let rows = app.sast_task_rows();
-    let enabled = rows.iter().filter(|row| row.selected).count();
-    let blocked = rows.iter().filter(|row| row.source == "blocked").count();
-    let mode = app
-        .option_store
-        .effective_stored_values("sast:scan")
-        .get("taskMode")
-        .and_then(serde_json::Value::as_str)
-        .filter(|mode| *mode == "manual")
-        .map(|_| "manual allowlist")
-        .unwrap_or("auto + denylist");
+    let model = crate::ui_view_models::sast_tasks_model(app);
 
     lines.push(String::new());
     lines.push(plain_section_divider("SAST TASKS", width));
-    lines.push(format!("mode: {mode}"));
-    lines.push(format!(
-        "selected: {enabled}/{} enabled, {blocked} blocked",
-        rows.len()
-    ));
+    lines.push(format!("mode: {}", model.mode_label));
+    lines.push(format!("selected: {}", model.selected_summary));
     lines.push(String::new());
     let widths = sast_task_table_widths(width.min(u16::MAX as usize) as u16);
     lines.push(table_text(
         &["state", "id", "cost", "scan", "notes"],
         &widths,
     ));
-    for row in rows {
+    for row in model.rows {
         lines.push(table_text(
             &[
                 row.state,
@@ -61,24 +48,30 @@ pub(crate) fn plain_help_lines(app: &ShellApp, width: usize) -> Vec<String> {
     }
 
     for category in ShellCommandCategory::ORDER {
-        lines.push(String::new());
-        // Mirror the `category_divider` from the Ratatui renderer in plain
-        // text: section name followed by the design-mockup blurb on one line.
-        lines.push(format!(
-            "{} — {}",
-            category.label(),
-            help_category_blurb(category)
-        ));
-        for spec in shell_command_specs().filter(|spec| spec.category == category) {
-            lines.push(format!("{} - {}", spec.command, spec.description));
-            let aliases = plain_help_alias_text(spec);
-            if aliases != "-" {
-                lines.push(format!("  aliases / examples: {aliases}"));
-            }
-        }
+        append_plain_help_category(&mut lines, category);
     }
 
     lines
+}
+
+fn append_plain_help_category(lines: &mut Vec<String>, category: ShellCommandCategory) {
+    lines.push(String::new());
+    lines.push(format!(
+        "{} — {}",
+        category.label(),
+        help_category_blurb(category)
+    ));
+    for spec in shell_command_specs().filter(|spec| spec.category == category) {
+        append_plain_help_spec(lines, spec);
+    }
+}
+
+fn append_plain_help_spec(lines: &mut Vec<String>, spec: &ShellCommandSpec) {
+    lines.push(format!("{} - {}", spec.command, spec.description));
+    let aliases = plain_help_alias_text(spec);
+    if aliases != "-" {
+        lines.push(format!("  aliases / examples: {aliases}"));
+    }
 }
 
 pub(crate) fn plain_help_alias_text(spec: &ShellCommandSpec) -> String {
