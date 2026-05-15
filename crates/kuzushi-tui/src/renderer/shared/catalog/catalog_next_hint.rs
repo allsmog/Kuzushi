@@ -36,11 +36,10 @@ pub(crate) fn catalog_module_row(
 
 pub(crate) fn tool_console_row(
     name: &str,
+    status: &str,
     description: &str,
-    headless: bool,
     width: u16,
 ) -> Line<'static> {
-    let status = if headless { "headless" } else { "interactive" };
     let name_width = if width < 80 { 22 } else { 30 };
     let used = 4 + name_width + status.len() + 6;
     Line::from(vec![

@@ -5,9 +5,9 @@ use std::path::{Path, PathBuf};
 pub(crate) struct ModuleDetailModel {
     pub(crate) id: String,
     pub(crate) name: String,
-    pub(crate) description: String,
+    pub(crate) summary: String,
     pub(crate) primary_tool: String,
-    pub(crate) visible_tools: Vec<ModuleToolModel>,
+    pub(crate) visible_tools: Vec<ModuleToolRow>,
     pub(crate) stored_options: Vec<(String, String)>,
     pub(crate) prompts: Vec<ModulePromptOnDisk>,
     pub(crate) log_count: usize,
@@ -20,10 +20,8 @@ pub(crate) struct ModulePromptOnDisk {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ModuleToolModel {
-    pub(crate) name: String,
-    pub(crate) description: String,
-    pub(crate) headless: bool,
+pub(crate) struct ModuleToolRow {
+    pub(crate) cells: [String; 3],
 }
 
 pub(crate) fn focused_module_detail_model(app: &ShellApp) -> Option<ModuleDetailModel> {
@@ -39,12 +37,12 @@ pub(crate) fn module_detail_model(app: &ShellApp, module_id: &str) -> Option<Mod
     let visible_tools = visible_module_tools(module);
     let primary_tool = visible_tools
         .first()
-        .map(|tool| tool.name.clone())
+        .map(|tool| tool.cells[0].clone())
         .unwrap_or_else(|| "no-tool".to_string());
     Some(ModuleDetailModel {
         id: module.metadata().id.clone(),
         name: module.metadata().name.clone(),
-        description: module.metadata().description.clone(),
+        summary: module.metadata().description.clone(),
         primary_tool,
         stored_options: module_stored_options(app, &visible_tools),
         prompts: module_prompts_model(app, module_id),
@@ -97,25 +95,36 @@ fn workspace_root(app: &ShellApp) -> &Path {
     app.target.as_deref().unwrap_or_else(|| Path::new("."))
 }
 
-fn visible_module_tools(module: &kuzushi_core::BuiltinModule) -> Vec<ModuleToolModel> {
+fn visible_module_tools(module: &kuzushi_core::BuiltinModule) -> Vec<ModuleToolRow> {
     module
         .tools()
         .iter()
         .filter(|tool| !tool.hidden)
-        .map(|tool| ModuleToolModel {
-            name: tool.name.clone(),
-            description: tool.description.clone(),
-            headless: tool.headless,
+        .map(|tool| ModuleToolRow {
+            cells: [
+                tool.name.clone(),
+                tool_status_label(tool.headless).to_string(),
+                tool.description.clone(),
+            ],
         })
         .collect()
 }
 
-fn module_stored_options(app: &ShellApp, tools: &[ModuleToolModel]) -> Vec<(String, String)> {
+fn tool_status_label(headless: bool) -> &'static str {
+    if headless {
+        "headless"
+    } else {
+        "interactive"
+    }
+}
+
+fn module_stored_options(app: &ShellApp, tools: &[ModuleToolRow]) -> Vec<(String, String)> {
     let mut out = Vec::new();
     for tool in tools {
-        let stored = app.option_store.effective_stored_values(&tool.name);
+        let tool_name = &tool.cells[0];
+        let stored = app.option_store.effective_stored_values(tool_name);
         for (name, value) in stored.iter() {
-            out.push((format!("{}::{}", tool.name, name), format_json_value(value)));
+            out.push((format!("{tool_name}::{name}"), format_json_value(value)));
         }
     }
     out.sort_by(|a, b| a.0.cmp(&b.0));
@@ -157,6 +166,10 @@ mod tests {
 
         assert_eq!(model.id, "sast");
         assert!(!model.visible_tools.is_empty());
+        assert!(model
+            .visible_tools
+            .iter()
+            .all(|tool| tool.cells[1] == "headless" || tool.cells[1] == "interactive"));
     }
 
     #[test]
