@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::{plan_card_model, threat_patch_card_model};
+use crate::ui_view_models::{plan_card_model, threat_patch_card_model, throttle_banner_model};
 
 pub(crate) fn render_threat_patch_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if area.height == 0 {
@@ -60,7 +60,7 @@ pub(crate) fn render_throttle_banner(frame: &mut Frame<'_>, area: Rect, app: &Sh
     if area.height == 0 {
         return;
     }
-    let Some(throttle) = &app.advisory.throttle else {
+    let Some(throttle) = throttle_banner_model(app) else {
         return;
     };
     // Chip-style banner per `design/mockups/rate-limited.jsx`:

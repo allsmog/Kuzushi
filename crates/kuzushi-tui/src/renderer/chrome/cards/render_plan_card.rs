@@ -1,5 +1,7 @@
 use super::*;
-use crate::ui_view_models::{plan_card_model, PlanCardModel, PlanChangeRow};
+use crate::ui_view_models::{
+    cost_cap_halt_model, plan_card_model, CostCapHaltModel, PlanCardModel, PlanChangeRow,
+};
 
 pub(crate) fn render_plan_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if area.height == 0 {
@@ -92,17 +94,10 @@ pub(crate) fn render_cost_cap_halt(frame: &mut Frame<'_>, area: Rect, app: &Shel
     if area.height == 0 {
         return;
     }
-    let Some(halt) = app.advisory.budget_halt.as_ref() else {
+    let Some(halt) = cost_cap_halt_model(app) else {
         return;
     };
-    let header = fit(
-        &format!(
-            "■ COST CAP HALT · spent ${:.4} / cap ${:.4}",
-            halt.spent_usd, halt.limit_usd
-        ),
-        area.width as usize,
-    );
-    let mut lines = vec![Line::styled(header, theme::danger())];
+    let mut lines = vec![cost_cap_halt_header_line(&halt, area.width as usize)];
     if area.height > 1 {
         // Mirror the unbracketed key style from `keybindings_line` /
         // `design/mockups/_shared.jsx::footer` — accent key + muted hint
@@ -121,4 +116,8 @@ pub(crate) fn render_cost_cap_halt(frame: &mut Frame<'_>, area: Rect, app: &Shel
         lines.push(action_line);
     }
     render_lines(frame, area, lines);
+}
+
+fn cost_cap_halt_header_line(halt: &CostCapHaltModel, width: usize) -> Line<'static> {
+    Line::styled(fit(&halt.header, width), theme::danger())
 }

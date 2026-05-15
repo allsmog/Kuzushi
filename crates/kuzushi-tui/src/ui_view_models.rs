@@ -7,6 +7,7 @@ use crate::ShellApp;
 use std::path::{Path, PathBuf};
 
 mod active_stage;
+mod advisory_chrome;
 mod attack_surface;
 mod auth;
 mod catalog;
@@ -39,6 +40,7 @@ mod threat_stride;
 mod tools;
 mod view_status;
 pub(crate) use active_stage::active_stage_label;
+pub(crate) use advisory_chrome::{cost_cap_halt_model, throttle_banner_model, CostCapHaltModel};
 pub(crate) use attack_surface::{attack_surface_risk_model, AttackSurfaceRiskModel};
 pub(crate) use auth::{
     auth_env_summary, auth_provider_rows, model_auth_status, oauth_summary, AuthProviderRow,
