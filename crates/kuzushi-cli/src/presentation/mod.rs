@@ -1,4 +1,5 @@
 pub(crate) mod runs_output;
+pub(crate) mod safe_text;
 pub(crate) mod scan_ci;
 pub(crate) mod scan_output;
 pub(crate) mod terminal;

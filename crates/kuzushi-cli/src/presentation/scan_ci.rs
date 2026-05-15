@@ -1,3 +1,4 @@
+use super::safe_text::sanitize_for_log_line;
 use super::scan_output::{scan_cost_usd, scan_findings_count};
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -17,7 +18,13 @@ pub(crate) fn emit_scan_ci_error(
                 &format!("scanning → failed ({})", format_duration(elapsed))
             )
         );
-        println!("{}", ci_line(started, "error", &error.to_string()));
+        // Error chains can carry LLM-derived text (e.g. bridge response
+        // bodies). Strip control characters so an embedded `\n[+0.0s] exit: 0`
+        // can't spoof a fake success line under our prefix.
+        println!(
+            "{}",
+            ci_line(started, "error", &sanitize_for_log_line(&error.to_string()))
+        );
         println!("{}", ci_line(started, "exit", "1"));
     }
 }

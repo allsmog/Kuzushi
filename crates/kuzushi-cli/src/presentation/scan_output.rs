@@ -34,7 +34,10 @@ pub(crate) fn emit_scan_output(
     if json {
         println!("{}", scan_json_output(workspace, &data));
     } else if let Some(output) = result.get("output").and_then(serde_json::Value::as_str) {
-        println!("{output}");
+        // Tool/agent output passes through LLMs and scanned source —
+        // strip ANSI/control bytes so a prompt-injected escape sequence
+        // can't move the cursor, clear the screen, or spoof a fake prompt.
+        println!("{}", super::safe_text::sanitize_for_terminal(output));
     }
     Ok(())
 }
@@ -91,7 +94,9 @@ pub(crate) fn scan_cost_usd(result: &serde_json::Value) -> f64 {
 const SCAN_COST_STAGES: &[&str] = &[
     "agentic",
     "carlini",
+    "carliniThreatHunt",
     "fullModeMulti",
+    "offenseReview",
     "systemsHunt",
     "taintIris",
     "taintIrisNext",

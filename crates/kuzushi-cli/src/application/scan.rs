@@ -83,7 +83,26 @@ pub(crate) fn apply_scan_since_scope(
 }
 
 pub(crate) fn scan_scope_body(files: &[PathBuf]) -> String {
-    files.iter().map(|p| format!("{}\n", p.display())).collect()
+    files
+        .iter()
+        .filter_map(|p| {
+            let rendered = p.display().to_string();
+            // A path containing `\n` or `\r` would inject extra entries in
+            // the scope file consumed by downstream engines (since.txt is
+            // line-delimited). Git accepts such paths in working-tree
+            // entries, so a hostile target repo could craft one to bypass
+            // scope. Drop instead of escape — legitimate filenames have
+            // no embedded newlines.
+            if rendered.contains('\n') || rendered.contains('\r') {
+                eprintln!(
+                    "scan-scope: dropping path with embedded newline/CR: {:?}",
+                    rendered
+                );
+                return None;
+            }
+            Some(format!("{rendered}\n"))
+        })
+        .collect()
 }
 
 pub(crate) fn emit_scan_scope_line(
@@ -149,5 +168,38 @@ pub(crate) fn scan_runtime(
         )?))
     } else {
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::scan_scope_body;
+    use std::path::PathBuf;
+
+    #[test]
+    fn scope_body_drops_paths_with_embedded_newline() {
+        let files = vec![
+            PathBuf::from("src/lib.rs"),
+            PathBuf::from("evil\n[+0.0s] exit: 0"),
+            PathBuf::from("src/main.rs"),
+        ];
+        let body = scan_scope_body(&files);
+        assert!(body.contains("src/lib.rs"));
+        assert!(body.contains("src/main.rs"));
+        assert!(
+            !body.contains("evil"),
+            "newline-bearing path must be dropped, got: {body:?}"
+        );
+        // The body itself only contains the two safe entries plus terminators
+        let lines: Vec<_> = body.lines().filter(|l| !l.is_empty()).collect();
+        assert_eq!(lines.len(), 2);
+    }
+
+    #[test]
+    fn scope_body_drops_paths_with_carriage_return() {
+        let files = vec![PathBuf::from("safe.rs"), PathBuf::from("evil\rgotcha")];
+        let body = scan_scope_body(&files);
+        assert!(body.contains("safe.rs"));
+        assert!(!body.contains("gotcha"));
     }
 }
