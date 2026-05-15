@@ -25,6 +25,7 @@ mod run_timeline;
 mod run_trace;
 mod status_footer;
 mod threat_model;
+mod threat_stride;
 mod tools;
 mod view_status;
 pub(crate) use active_stage::active_stage_label;
@@ -53,6 +54,9 @@ pub(crate) use run_trace::{
 };
 pub(crate) use status_footer::status_footer_model;
 pub(crate) use threat_model::{threat_model_doc, threat_summary_review, ThreatSummaryReview};
+pub(crate) use threat_stride::threat_stride_rollup;
+#[cfg(test)]
+pub(crate) use threat_stride::threat_stride_rollup_from_doc;
 pub(crate) use tools::{tools_model, ToolRow};
 pub(crate) use view_status::view_status_segment;
 
