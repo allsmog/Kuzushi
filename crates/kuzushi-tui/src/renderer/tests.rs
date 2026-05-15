@@ -1730,6 +1730,22 @@ fn renders_config_onboarding_without_silent_model_selection() {
 }
 
 #[test]
+fn plain_config_onboarding_uses_explicit_model_selection() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.config.model = None;
+    app.session_thinking_level = None;
+    app.shell_view = ShellView::Config;
+
+    let rendered = render_plain_app(&app, 80);
+
+    assert!(rendered.contains("CONFIG"));
+    assert!(rendered.contains("model: unconfigured"));
+    assert!(rendered.contains("onboarding: model <n> selects an explicit provider:model"));
+    assert!(rendered.contains("openai-oauth:gpt-5.5"));
+    assert_strict_plain_80(&rendered);
+}
+
+#[test]
 fn renders_help_grouped_by_operator_workflow() {
     let backend = TestBackend::new(110, 130);
     let mut terminal = Terminal::new(backend).unwrap();
