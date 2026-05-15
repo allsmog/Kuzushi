@@ -2,13 +2,9 @@ use super::*;
 use crate::ui_view_models::ThreatScopeTone;
 
 pub(super) fn append_scope_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'static>>) {
-    let buckets = crate::ui_view_models::threat_scope_buckets(app);
-    let total: usize = buckets.iter().map(|bucket| bucket.item_count).sum();
-    lines.push(section_header_line(
-        &format!("SCOPE · {total} issues"),
-        area.width,
-    ));
-    for bucket in &buckets {
+    let model = crate::ui_view_models::threat_scope_model(app);
+    lines.push(section_header_line(&model.header, area.width));
+    for bucket in &model.buckets {
         append_scope_bucket(bucket, lines);
     }
     lines.push(blank());
@@ -27,9 +23,6 @@ fn append_scope_bucket(
     bucket: &crate::ui_view_models::ThreatScopeBucket,
     lines: &mut Vec<Line<'static>>,
 ) {
-    if bucket.item_count == 0 {
-        return;
-    }
     lines.push(Line::from(vec![
         Span::raw("   "),
         Span::styled(bucket.header.clone(), threat_scope_tone_style(bucket.tone)),

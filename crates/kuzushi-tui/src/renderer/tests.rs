@@ -8,7 +8,7 @@ use ratatui::Terminal;
 
 use crate::commands::{shell_command_specs, shell_help_examples, ShellCommandCategory};
 use crate::ui_view_models::{
-    catalog_model, prompt_text, threat_dfd_model_from_doc, threat_scope_buckets_from_doc,
+    catalog_model, prompt_text, threat_dfd_model_from_doc, threat_scope_model_from_doc,
     threat_story_model_from_doc, threat_stride_rollup_from_doc, view_status_segment,
     ModuleRunStatusKind, RoutingMode, ThreatStrideTone,
 };
@@ -986,7 +986,7 @@ fn threat_story_model_from_doc_caps_visible_rows() {
 }
 
 #[test]
-fn threat_scope_buckets_from_doc_groups_by_impact() {
+fn threat_scope_model_from_doc_groups_by_impact() {
     let doc = serde_json::json!({
         "threats": [
             {"title": "a", "impact": "critical"},
@@ -998,7 +998,10 @@ fn threat_scope_buckets_from_doc_groups_by_impact() {
             {"title": "d", "impact": "medium"}
         ]
     });
-    let buckets = threat_scope_buckets_from_doc(&doc).expect("non-empty");
+    let model = threat_scope_model_from_doc(&doc).expect("non-empty");
+    let buckets = &model.buckets;
+    assert_eq!(model.header, "SCOPE · 7 issues");
+    assert_eq!(buckets.len(), 3);
     assert_eq!(buckets[0].header, "CRITICAL · 1");
     assert_eq!(buckets[0].item_count, 1);
     assert_eq!(buckets[1].header, "HIGH · 5");
@@ -1007,8 +1010,6 @@ fn threat_scope_buckets_from_doc_groups_by_impact() {
     assert_eq!(buckets[1].overflow_label.as_deref(), Some("… 1 more"));
     assert_eq!(buckets[2].header, "MEDIUM · 1");
     assert_eq!(buckets[2].item_count, 1);
-    assert_eq!(buckets[3].header, "LOW · 0");
-    assert!(buckets[3].visible_items.is_empty());
 }
 
 #[test]
