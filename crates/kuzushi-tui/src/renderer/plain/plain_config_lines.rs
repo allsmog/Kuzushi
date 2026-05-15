@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui_view_models::catalog_model;
 
 pub(crate) fn plain_config_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
@@ -69,6 +70,7 @@ fn push_plain_model_table(lines: &mut Vec<String>, width: usize) {
 }
 
 pub(crate) fn plain_context_strip(app: &ShellApp, width: usize) -> Vec<String> {
+    let catalog = catalog_model(app);
     let target = app
         .target
         .as_ref()
@@ -85,7 +87,7 @@ pub(crate) fn plain_context_strip(app: &ShellApp, width: usize) -> Vec<String> {
             "{} | {target} | {view} | {} | {} mods",
             routing_mode_segment(app),
             findings_count_summary(&app.findings),
-            app.registry.modules().count()
+            catalog.module_count
         ),
         width,
     )]
