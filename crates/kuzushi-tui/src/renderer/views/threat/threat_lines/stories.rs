@@ -2,13 +2,10 @@ use super::*;
 use crate::ui_view_models::ThreatStoryTone;
 
 pub(super) fn append_story_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'static>>) {
-    let stories = crate::ui_view_models::threat_story_rows(app);
-    lines.push(section_header_line(
-        &format!("ATTACKER STORIES · {}", stories.len()),
-        area.width,
-    ));
-    for story in stories.into_iter().take(8) {
-        let [id, severity, title, attack, location] = story.cells;
+    let model = crate::ui_view_models::threat_story_model(app);
+    lines.push(section_header_line(&model.header, area.width));
+    for story in model.rows {
+        let [id, severity, title] = story.cells;
         lines.push(Line::from(vec![
             Span::raw("   "),
             Span::styled("▸ ", theme::warn()),
@@ -16,8 +13,9 @@ pub(super) fn append_story_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Lin
             Span::styled(pad(&severity, 9), threat_story_tone_style(story.tone)),
             Span::styled(title, theme::primary()),
         ]));
-        append_story_detail("attack ", attack, lines);
-        append_story_detail("loc    ", location, lines);
+        for detail in story.details {
+            append_story_detail(detail.label, detail.value, lines);
+        }
     }
 }
 
@@ -33,9 +31,6 @@ fn threat_story_tone_style(tone: ThreatStoryTone) -> Style {
 }
 
 fn append_story_detail(label: &'static str, value: String, lines: &mut Vec<Line<'static>>) {
-    if value.is_empty() {
-        return;
-    }
     lines.push(Line::from(vec![
         Span::raw("              "),
         Span::styled(label, theme::subtle()),

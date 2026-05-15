@@ -9,7 +9,7 @@ use ratatui::Terminal;
 use crate::commands::{shell_command_specs, shell_help_examples, ShellCommandCategory};
 use crate::ui_view_models::{
     catalog_model, prompt_text, threat_dfd_model_from_doc, threat_scope_buckets_from_doc,
-    threat_story_rows_from_doc, threat_stride_rollup_from_doc, view_status_segment,
+    threat_story_model_from_doc, threat_stride_rollup_from_doc, view_status_segment,
     ModuleRunStatusKind, RoutingMode, ThreatStrideTone,
 };
 
@@ -944,7 +944,7 @@ fn sast_progress_bars_use_scan_progress_per_task_when_present() {
 }
 
 #[test]
-fn threat_story_rows_from_doc_sorts_by_impact_severity() {
+fn threat_story_model_from_doc_sorts_by_impact_severity() {
     let doc = serde_json::json!({
         "threats": [
             {"id": "T-001", "title": "low risk",  "impact": "low",      "category": "spoofing",  "attackVector": "vec1"},
@@ -953,14 +953,36 @@ fn threat_story_rows_from_doc_sorts_by_impact_severity() {
             {"id": "T-003", "title": "high issue", "impact": "high",     "category": "elevation_of_privilege"}
         ]
     });
-    let stories = threat_story_rows_from_doc(&doc).expect("non-empty stories");
-    assert_eq!(stories.len(), 3);
-    assert_eq!(stories[0].cells[0], "T-002");
-    assert_eq!(stories[0].cells[1], "CRITICAL");
-    assert_eq!(stories[0].cells[4], "src/api.rs:42");
-    assert_eq!(stories[1].cells[0], "T-003");
-    assert_eq!(stories[1].cells[1], "HIGH");
-    assert_eq!(stories[2].cells[0], "T-001");
+    let model = threat_story_model_from_doc(&doc).expect("non-empty stories");
+    assert_eq!(model.header, "ATTACKER STORIES · 3");
+    assert_eq!(model.rows.len(), 3);
+    assert_eq!(model.rows[0].cells[0], "T-002");
+    assert_eq!(model.rows[0].cells[1], "CRITICAL");
+    assert_eq!(model.rows[0].details[1].value, "src/api.rs:42");
+    assert_eq!(model.rows[1].cells[0], "T-003");
+    assert_eq!(model.rows[1].cells[1], "HIGH");
+    assert_eq!(model.rows[2].cells[0], "T-001");
+}
+
+#[test]
+fn threat_story_model_from_doc_caps_visible_rows() {
+    let doc = serde_json::json!({
+        "threats": [
+            {"id": "T-001", "title": "one", "impact": "high"},
+            {"id": "T-002", "title": "two", "impact": "high"},
+            {"id": "T-003", "title": "three", "impact": "high"},
+            {"id": "T-004", "title": "four", "impact": "high"},
+            {"id": "T-005", "title": "five", "impact": "high"},
+            {"id": "T-006", "title": "six", "impact": "high"},
+            {"id": "T-007", "title": "seven", "impact": "high"},
+            {"id": "T-008", "title": "eight", "impact": "high"},
+            {"id": "T-009", "title": "nine", "impact": "high"}
+        ]
+    });
+    let model = threat_story_model_from_doc(&doc).expect("non-empty stories");
+    assert_eq!(model.header, "ATTACKER STORIES · 9");
+    assert_eq!(model.rows.len(), 8);
+    assert_eq!(model.rows[7].cells[0], "T-008");
 }
 
 #[test]

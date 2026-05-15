@@ -192,8 +192,8 @@ pub(crate) use threat_patch::threat_patch_card_model;
 pub(crate) use threat_scope::threat_scope_buckets_from_doc;
 pub(crate) use threat_scope::{threat_scope_buckets, ThreatScopeBucket, ThreatScopeTone};
 #[cfg(test)]
-pub(crate) use threat_stories::threat_story_rows_from_doc;
-pub(crate) use threat_stories::{threat_story_rows, ThreatStoryTone};
+pub(crate) use threat_stories::threat_story_model_from_doc;
+pub(crate) use threat_stories::{threat_story_model, ThreatStoryTone};
 #[cfg(test)]
 pub(crate) use threat_stride::threat_stride_rollup_from_doc;
 pub(crate) use threat_stride::{threat_stride_rollup, ThreatStrideRow, ThreatStrideTone};
