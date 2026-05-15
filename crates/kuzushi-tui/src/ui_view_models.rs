@@ -161,7 +161,8 @@ pub(crate) use prompt_tuning::{
     prompts_model, tune_model, PromptRow, TuneActionRow, TuneHouseRules, TuneModel,
 };
 pub(crate) use recent_module_activity::{
-    recent_module_activity_model, ModuleActivityModel, ModuleActivityRow,
+    recent_module_activity_model, ModuleActivityKind, ModuleActivityModel, ModuleActivityRow,
+    ModuleActivityTone,
 };
 pub(crate) use recommendation::{recommendation_model, RecommendationModel, RecommendationRow};
 pub(crate) use routing::{

@@ -179,7 +179,7 @@ const rules = [
       /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\.registry\.modules\(|\.tools\(\)|\.metadata\(\)|app\.focused_module|\bmodule_detail_model\(|ModuleToolModel|\.description\b|\.headless\b/,
   },
   { name: "TUI module progress renderer reads module-progress view model", roots: ["crates/kuzushi-tui/src/renderer/views/module/append_progress_section.rs"], forbidden: /\b(option_store|sast_task_rows|serde_json|crate::app::SastTaskRow|sast_tasks_model|app\.(?:focused_module|scan_progress))\b/ },
-  { name: "TUI recent module activity renderer reads activity view model", roots: ["crates/kuzushi-tui/src/renderer/views/module/recent_module_activity_lines.rs"], forbidden: /\b(LogLine|recon_snapshot|carlini_snapshot|agentic_sast_snapshot|\.log\b|crate::app::ReconSnapshot|kuzushi_core::(?:CarliniThreatHuntReport|AgenticSastReport|ReconService|Finding))\b/ },
+  { name: "TUI recent module activity renderer reads activity view model", roots: ["crates/kuzushi-tui/src/renderer/views/module/recent_module_activity_lines.rs"], forbidden: /\b(LogLine|recon_snapshot|carlini_snapshot|agentic_sast_snapshot|\.log\b|crate::app::ReconSnapshot|kuzushi_core::(?:CarliniThreatHuntReport|AgenticSastReport|ReconService|Finding)|ModuleActivityRow::(?:Transcript|ReconService|ReconHost|Finding))\b|\.(?:prefix|body|host|port|service|banner|label|state|rule_id|location)\b/ },
   {
     name: "TUI context progress renderer reads context snapshot view model",
     roots: ["crates/kuzushi-tui/src/renderer/views/module/append_sast_pipeline_progress.rs"],
