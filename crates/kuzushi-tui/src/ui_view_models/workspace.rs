@@ -24,6 +24,14 @@ pub(crate) struct WorkspaceRollupRow {
     pub(crate) severity: Severity,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlainWorkspaceModel {
+    pub(crate) title: &'static str,
+    pub(crate) summary_rows: Vec<String>,
+    pub(crate) empty_rows: Vec<String>,
+    pub(crate) next_hint: &'static str,
+}
+
 pub(crate) fn workspace_model(app: &ShellApp) -> WorkspaceModel {
     let view = &app.workspace_view;
     WorkspaceModel {
@@ -39,6 +47,40 @@ pub(crate) fn workspace_model(app: &ShellApp) -> WorkspaceModel {
         empty: view.root.is_none(),
         rollup_total: app.findings.len(),
         rollup_rows: rollup_rows(&app.findings),
+    }
+}
+
+pub(crate) fn plain_workspace_model(app: &ShellApp) -> PlainWorkspaceModel {
+    PlainWorkspaceModel::from_workspace_model(workspace_model(app))
+}
+
+impl PlainWorkspaceModel {
+    fn from_workspace_model(model: WorkspaceModel) -> Self {
+        PlainWorkspaceModel {
+            title: "WORKSPACE",
+            summary_rows: vec![
+                format!("status: {}", model.status),
+                format!("target: {}", model.target_label),
+                format!("state: {}", model.state_label),
+                format!("findings db: {}", model.findings_db_label),
+                format!("findings: {}", model.findings_label),
+                format!("last export: {}", model.last_export_label),
+            ],
+            empty_rows: plain_workspace_empty_rows(model.empty),
+            next_hint:
+                "Next: workspace status, workspace export findings <path>.json, kuzushi pr-comment",
+        }
+    }
+}
+
+fn plain_workspace_empty_rows(empty: bool) -> Vec<String> {
+    if empty {
+        vec![
+            String::new(),
+            "No active workspace. Next: scan <target> or kuzushi shell --target .".to_string(),
+        ]
+    } else {
+        Vec::new()
     }
 }
 

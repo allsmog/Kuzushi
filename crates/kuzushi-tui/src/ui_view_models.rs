@@ -196,7 +196,9 @@ pub(crate) use transcript::{
     plain_command_result_model, transcript_model, PlainCommandResultModel,
 };
 pub(crate) use view_status::view_status_segment;
-pub(crate) use workspace::{workspace_model, WorkspaceModel, WorkspaceRollupRow};
+pub(crate) use workspace::{
+    plain_workspace_model, workspace_model, PlainWorkspaceModel, WorkspaceModel, WorkspaceRollupRow,
+};
 
 pub use crate::{
     ActivitySession, OptionsFilter, OptionsView, PaneFocus, ReconSnapshot, ScanPanelState,
