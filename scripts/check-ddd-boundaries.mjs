@@ -169,6 +169,7 @@ const rules = [
     ],
     forbidden: /\b(std::fs|serde_json|read_dir|read_to_string|PathBuf|Path::new|\.exists\()/,
   },
+  { name: "TUI run alias renderer reads run-trace view model", roots: ["crates/kuzushi-tui/src/renderer/views/runs/trace_step_line.rs"], forbidden: /\b(sorted_finding_aliases|app\.findings|Finding|\.fingerprint|\.title)\b/ },
   {
     name: "TUI module detail renderers read prompt view models",
     roots: ["crates/kuzushi-tui/src/renderer/views/module/module_lines.rs"],

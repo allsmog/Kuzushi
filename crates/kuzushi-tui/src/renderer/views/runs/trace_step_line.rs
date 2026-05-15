@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::TraceStep;
+use crate::ui_view_models::{alias_reference_model, TraceStep};
 
 pub(crate) fn trace_step_line(step: &TraceStep, width: u16) -> Line<'static> {
     let label = trace_step_label(step);
@@ -76,18 +76,15 @@ fn trace_step_label(step: &TraceStep) -> String {
 
 pub(crate) fn alias_reference_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
-    let aliases = sorted_finding_aliases(&app.findings);
+    let model = alias_reference_model(app);
     lines.push(blank());
-    if aliases.is_empty() {
-        lines.push(muted("aliases: load findings first with findings"));
+    if model.rows.is_empty() {
+        lines.push(muted(model.empty_message));
         return lines;
     }
     lines.push(divider("ALIASES", area.width));
-    for (alias, finding) in aliases.into_iter().take(3) {
-        lines.push(detail(
-            &alias,
-            &format!("{} {}", short(&finding.fingerprint), finding.title),
-        ));
+    for row in model.rows {
+        lines.push(detail(&row.alias, &row.detail));
     }
     lines
 }

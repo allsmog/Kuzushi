@@ -1,5 +1,18 @@
 use crate::ShellApp;
+use kuzushi_core::sorted_finding_aliases;
 use std::path::{Path, PathBuf};
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AliasReferenceModel {
+    pub(crate) rows: Vec<AliasReferenceRow>,
+    pub(crate) empty_message: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AliasReferenceRow {
+    pub(crate) alias: String,
+    pub(crate) detail: String,
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct ReplayModel {
@@ -59,6 +72,24 @@ pub(crate) fn trace_model(app: &ShellApp, run_id: &str) -> TraceModel {
             triage.into_display(),
             verify.into_display(),
         ],
+    }
+}
+
+pub(crate) fn alias_reference_model(app: &ShellApp) -> AliasReferenceModel {
+    AliasReferenceModel {
+        rows: sorted_finding_aliases(&app.findings)
+            .into_iter()
+            .take(3)
+            .map(|(alias, finding)| AliasReferenceRow {
+                alias,
+                detail: format!(
+                    "{} {}",
+                    short_fingerprint(&finding.fingerprint),
+                    finding.title
+                ),
+            })
+            .collect(),
+        empty_message: "aliases: load findings first with findings",
     }
 }
 
@@ -155,6 +186,10 @@ fn string_field(value: &serde_json::Value, key: &str) -> Option<String> {
         .map(str::to_string)
 }
 
+fn short_fingerprint(value: &str) -> String {
+    value.chars().take(8).collect()
+}
+
 struct RunArtifactPath {
     label: &'static str,
     path: PathBuf,
@@ -172,5 +207,50 @@ impl RunArtifactPath {
             label: self.label,
             detail,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::{Finding, Severity, V2Config};
+
+    #[test]
+    fn alias_reference_model_projects_top_aliases() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.findings = vec![
+            named_finding("bbbb2222bbbb", "second"),
+            named_finding("aaaa1111aaaa", "first"),
+            named_finding("cccc3333cccc", "third"),
+            named_finding("dddd4444dddd", "hidden fourth"),
+        ];
+
+        let model = alias_reference_model(&app);
+
+        assert_eq!(model.rows.len(), 3);
+        assert_eq!(model.rows[0].alias, "F-0001");
+        assert_eq!(model.rows[0].detail, "aaaa1111 first");
+        assert!(model.rows.iter().all(|row| !row.detail.contains("hidden")));
+    }
+
+    #[test]
+    fn alias_reference_model_explains_empty_findings() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        let model = alias_reference_model(&app);
+
+        assert!(model.rows.is_empty());
+        assert_eq!(
+            model.empty_message,
+            "aliases: load findings first with findings"
+        );
+    }
+
+    fn named_finding(fingerprint: &str, title: &str) -> Finding {
+        let mut finding =
+            Finding::new_semgrep("demo.rule", "src/app.rs", 1, None, Severity::High, title);
+        finding.fingerprint = fingerprint.to_string();
+        finding.title = title.to_string();
+        finding
     }
 }

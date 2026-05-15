@@ -94,7 +94,8 @@ pub(crate) use routing::{routing_mode, routing_mode_segment, RoutingMode};
 pub(crate) use run_status::scan_status;
 pub(crate) use run_timeline::{run_timeline_model, PastRunStatus, RunTimelineRow};
 pub(crate) use run_trace::{
-    replay_model, trace_model, ReplayModel, RunArtifactDetail, TraceModel, TraceStep,
+    alias_reference_model, replay_model, trace_model, ReplayModel, RunArtifactDetail, TraceModel,
+    TraceStep,
 };
 pub(crate) use sast_tasks::{sast_tasks_model, SastTasksModel};
 pub(crate) use session_story::{
