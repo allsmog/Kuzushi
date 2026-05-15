@@ -138,7 +138,10 @@ pub(crate) use module_run::{
     module_run_live_activity, module_run_summary, ModuleRunLiveActivity, ModuleRunStatusKind,
     ModuleRunSummary,
 };
-pub(crate) use options::{options_model, OptionRow, OptionsModelStatus};
+pub(crate) use options::{
+    options_model, plain_options_model, OptionRow, OptionsModelStatus, PlainOptionRow,
+    PlainOptionsBody, PlainOptionsModel, PlainOptionsTable,
+};
 pub(crate) use patch_review::{patch_review_model, PatchReviewModel, PatchReviewTestRow};
 pub(crate) use plan_card::{plan_card_model, PlanCardModel, PlanChangeRow};
 pub(crate) use prereq_prompt::{

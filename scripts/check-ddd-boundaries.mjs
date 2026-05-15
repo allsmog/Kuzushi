@@ -215,6 +215,7 @@ const rules = [
   { name: "TUI plain context strip reads context-strip view model", roots: ["crates/kuzushi-tui/src/renderer/plain/plain_config_lines.rs"], forbidden: /\b(?:catalog_model|context_strip_model)\b|target:| mods\b/ },
   { name: "TUI plain config summary reads plain config view model", roots: ["crates/kuzushi-tui/src/renderer/plain/plain_config_lines.rs"], forbidden: /\b(?:config_model|ConfigModel|ConfigModelRow)\b|["'](?:CONFIG|MODELS)|runtime:|provider:|reasoning:|onboarding:|Next: model/ },
   { name: "TUI plain config renderer reads catalog view model", roots: ["crates/kuzushi-tui/src/renderer/plain/plain_config_lines.rs"], forbidden: /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\bModuleKind\b|\.registry\.modules\(|\.metadata\(\)/ },
+  { name: "TUI plain options summary reads plain options view model", roots: ["crates/kuzushi-tui/src/renderer/plain/plain_options_lines.rs"], forbidden: /\b(?:options_model|OptionRow|OptionsModelStatus)\b|["'](?:OPTIONS|option|value|default|req|type|aliases|description|tool:|view:)|Unknown tool|Canonical keys|Next: set/ },
   { name: "TUI options renderers read options view model", roots: ["crates/kuzushi-tui/src/renderer/views/options/mod.rs", "crates/kuzushi-tui/src/renderer/plain/plain_options_lines.rs", "crates/kuzushi-tui/src/renderer/plain/plain_sast_tasks_lines.rs"], forbidden: /kuzushi_core::(?:OptionSpec|OptionType|ToolDescriptor)|\.registry\.resolve_tool\(|\.options\b|option_store|sast_task_rows|serde_json/ },
   {
     name: "TUI tools renderer reads tools view model",
@@ -242,11 +243,7 @@ const rules = [
     forbidden: /\bRoutingMode\b|routing_mode\(/,
   },
   { name: "TUI app renderer reads routing view model", roots: ["crates/kuzushi-tui/src/renderer/render_app.rs"], forbidden: /\bShellView::|app\.shell_view\b/ },
-  {
-    name: "TUI status helpers read view-status view model",
-    roots: ["crates/kuzushi-tui/src/renderer/shared/status/mod.rs"],
-    forbidden: /\bShellView::|ThreatView::|view_status_segment\(/,
-  },
+  { name: "TUI status helpers read view-status view model", roots: ["crates/kuzushi-tui/src/renderer/shared/status/mod.rs"], forbidden: /\bShellView::|ThreatView::|view_status_segment\(/ },
   {
     name: "TUI threat renderers read threat-model view models",
     roots: ["crates/kuzushi-tui/src/renderer/views/threat", "crates/kuzushi-tui/src/renderer/shared/threat_model"],
