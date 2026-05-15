@@ -151,7 +151,7 @@ const rules = [
   {
     name: "TUI catalog cockpit renderers do not parse artifacts directly",
     roots: ["crates/kuzushi-tui/src/renderer/views/catalog"],
-    forbidden: /\b(std::fs|serde_json|read_to_string|PathBuf|Path::new|\.exists\()|\.glyph\b|\.state\b|artifact\.label\b|artifact\.path\b/,
+    forbidden: /\b(std::fs|serde_json|read_to_string|PathBuf|Path::new|\.exists\()|\.glyph\b|\.state\b|artifact\.label\b|artifact\.path\b|surface\.(?:high_risk|max_risk_score|risk_tiers|top_surface)\b|risk_tier_summary|tier_rank/,
   },
   {
     name: "TUI runs ledger renderer reads past-run view models",
