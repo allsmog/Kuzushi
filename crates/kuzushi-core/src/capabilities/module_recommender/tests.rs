@@ -191,12 +191,63 @@ fn rich_signals() -> RepositorySignals {
         attack_surface_max_risk_score: 92,
         threat_model_present: false,
         threat_signal_count: 0,
+        threat_model_threats: 0,
+        threat_model_dfd_nodes: 0,
+        threat_model_dfd_flows: 0,
+        threat_model_trust_boundaries: 0,
         findings_available: true,
         finding_count: 3,
         high_or_critical_findings: 1,
         first_finding_fingerprint: Some("fp-low".to_string()),
         first_high_finding_fingerprint: Some("fp-high".to_string()),
     }
+}
+
+#[test]
+fn executor_reads_threat_model_dfd_artifact_shape() {
+    let temp = tempdir().unwrap();
+    fs::create_dir_all(temp.path().join("src")).unwrap();
+    fs::create_dir_all(temp.path().join(".kuzushi")).unwrap();
+    fs::write(temp.path().join("src/app.ts"), "export const ok = true;\n").unwrap();
+    fs::write(
+        temp.path().join(".kuzushi/threat-model.json"),
+        r#"{
+          "document": {
+            "dfd": {
+              "nodes": [{"id":"app"}, {"id":"data-store"}],
+              "flows": [{"id":"flow-data-store"}],
+              "trustBoundaries": [{"id":"tb-public-http"}]
+            },
+            "threats": [{"id":"DTM-001"}, {"id":"DTM-002"}]
+          }
+        }"#,
+    )
+    .unwrap();
+
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let ctx = ToolExecutionContext {
+        config: &V2Config::default(),
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: None,
+    };
+
+    let output = execute_module_recommender_tool(
+        json!({ "maxRecommendations": 10 }),
+        &ctx,
+        vec!["context:build".to_string(), "threat-model:build".to_string()],
+    )
+    .unwrap();
+
+    assert_eq!(
+        output["signals"]["threatModelSource"],
+        json!(".kuzushi/threat-model.json")
+    );
+    assert_eq!(output["signals"]["threatSignalCount"], json!(4));
+    assert_eq!(output["signals"]["threatModelThreats"], json!(2));
+    assert_eq!(output["signals"]["threatModelDfdNodes"], json!(2));
+    assert_eq!(output["signals"]["threatModelDfdFlows"], json!(1));
+    assert_eq!(output["signals"]["threatModelTrustBoundaries"], json!(1));
 }
 
 fn tool_set(names: &[&str]) -> BTreeSet<String> {
