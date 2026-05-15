@@ -19,9 +19,13 @@ pub(in crate::capabilities::taint_iris_next) fn run_taint_iris_next_agent(
         runtime_options,
     ) {
         Ok(parsed) => parsed,
-        Err(QueryAgentError { error, cost_usd }) => {
+        Err(QueryAgentError {
+            error,
+            cost_usd,
+            raw_text,
+        }) => {
             return Ok(invalid_taint_iris_next_agent_result(
-                plan, evidence, error, 1, cost_usd,
+                plan, evidence, error, 1, cost_usd, raw_text,
             ))
         }
     };
@@ -31,6 +35,7 @@ pub(in crate::capabilities::taint_iris_next) fn run_taint_iris_next_agent(
 pub(in crate::capabilities::taint_iris_next) struct QueryAgentError {
     pub(in crate::capabilities::taint_iris_next) error: anyhow::Error,
     pub(in crate::capabilities::taint_iris_next) cost_usd: f64,
+    pub(in crate::capabilities::taint_iris_next) raw_text: Option<String>,
 }
 
 pub(in crate::capabilities::taint_iris_next) fn query_taint_iris_next_agent(
@@ -53,8 +58,10 @@ pub(in crate::capabilities::taint_iris_next) fn query_taint_iris_next_agent(
     .map_err(|error| QueryAgentError {
         error,
         cost_usd: 0.0,
+        raw_text: None,
     })?;
     let first_cost = response.cost_usd;
+    let first_text = response.text.clone();
     match parse_taint_iris_next_agent_response(response) {
         Ok(raw) => Ok((raw, 0, first_cost)),
         Err(_) => {
@@ -69,13 +76,16 @@ pub(in crate::capabilities::taint_iris_next) fn query_taint_iris_next_agent(
             .map_err(|error| QueryAgentError {
                 error,
                 cost_usd: first_cost,
+                raw_text: Some(first_text.clone()),
             })?;
             let total_cost = first_cost + repair.cost_usd;
+            let repair_text = repair.text.clone();
             parse_taint_iris_next_agent_response(repair)
                 .map(|raw| (raw, 1, total_cost))
                 .map_err(|error| QueryAgentError {
                     error,
                     cost_usd: total_cost,
+                    raw_text: Some(repair_text),
                 })
         }
     }
@@ -108,7 +118,9 @@ pub(in crate::capabilities::taint_iris_next) fn invalid_taint_iris_next_agent_re
     error: anyhow::Error,
     retry_count: usize,
     cost_usd: f64,
+    raw_text: Option<String>,
 ) -> TaintIrisNextAgentResult {
+    let text_excerpt = raw_text.as_deref().map(truncate_for_excerpt);
     if plan.allow_deterministic_fallback {
         let (findings, selections, triage) = deterministic_taint_iris_next_fallback(plan, evidence);
         let warnings = vec![
@@ -131,7 +143,7 @@ pub(in crate::capabilities::taint_iris_next) fn invalid_taint_iris_next_agent_re
             structured_output_valid: false,
             structured_output_retry_count: retry_count,
             parse_error: Some(error.to_string()),
-            result_text_excerpt: None,
+            result_text_excerpt: text_excerpt,
             warnings,
             cost_usd,
         };
@@ -157,8 +169,21 @@ pub(in crate::capabilities::taint_iris_next) fn invalid_taint_iris_next_agent_re
         structured_output_valid: false,
         structured_output_retry_count: retry_count,
         parse_error: Some(error.to_string()),
-        result_text_excerpt: None,
+        result_text_excerpt: text_excerpt,
         warnings,
         cost_usd,
     }
+}
+
+fn truncate_for_excerpt(text: &str) -> String {
+    const MAX_LEN: usize = 4096;
+    let trimmed = text.trim();
+    if trimmed.len() <= MAX_LEN {
+        return trimmed.to_string();
+    }
+    let mut end = MAX_LEN;
+    while !trimmed.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}…[truncated {} bytes]", &trimmed[..end], trimmed.len() - end)
 }
