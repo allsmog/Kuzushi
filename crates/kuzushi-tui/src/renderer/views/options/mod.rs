@@ -1,7 +1,7 @@
 use super::*;
 pub(in crate::renderer) use super::*;
 use crate::ui_view_models::{
-    options_model, sast_tasks_model, OptionRow, OptionsModelStatus, OptionsSummaryRow,
+    options_model, sast_tasks_model, OptionRow, OptionsBody, OptionsSummaryRow, OptionsTable,
     SastTasksModel,
 };
 
@@ -17,14 +17,7 @@ pub(crate) fn options_lines(
     for row in &model.summary_rows {
         lines.push(options_summary_row(row));
     }
-    push_options_body(
-        &mut lines,
-        area.width,
-        &model.status,
-        &model.rows,
-        model.table_hint,
-        &model.table_headers,
-    );
+    push_options_body(&mut lines, area.width, &model.body);
     lines
 }
 
@@ -32,36 +25,20 @@ fn options_summary_row(row: &OptionsSummaryRow) -> Line<'static> {
     detail(row.label, &row.value)
 }
 
-fn push_options_body(
-    lines: &mut Vec<Line<'static>>,
-    width: u16,
-    status: &OptionsModelStatus,
-    rows: &[OptionRow],
-    table_hint: &str,
-    table_headers: &[&'static str; 7],
-) {
+fn push_options_body(lines: &mut Vec<Line<'static>>, width: u16, body: &OptionsBody) {
     lines.push(blank());
-    match status {
-        OptionsModelStatus::Ready => {
-            push_options_table(lines, width, rows, table_hint, table_headers)
-        }
-        OptionsModelStatus::UnknownTool { message, .. } => lines.push(muted(message)),
-        OptionsModelStatus::Empty { message, .. } => lines.push(muted(message)),
+    match body {
+        OptionsBody::Table(table) => push_options_table(lines, width, table),
+        OptionsBody::Message { message, .. } => lines.push(muted(message)),
     }
 }
 
-fn push_options_table(
-    lines: &mut Vec<Line<'static>>,
-    width: u16,
-    rows: &[OptionRow],
-    table_hint: &str,
-    table_headers: &[&'static str; 7],
-) {
-    lines.push(muted(&fit(table_hint, width as usize)));
+fn push_options_table(lines: &mut Vec<Line<'static>>, width: u16, table: &OptionsTable) {
+    lines.push(muted(&fit(table.hint, width as usize)));
     lines.push(blank());
     let widths = option_table_widths(width);
-    lines.push(table_header(table_headers, &widths));
-    for row in rows {
+    lines.push(table_header(&table.headers, &widths));
+    for row in &table.rows {
         lines.push(option_row_line(row, &widths));
     }
 }

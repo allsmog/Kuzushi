@@ -5,10 +5,7 @@ use kuzushi_core::modules::{OptionSpec, OptionType};
 pub(crate) struct OptionsModel {
     pub(crate) title: &'static str,
     pub(crate) summary_rows: Vec<OptionsSummaryRow>,
-    pub(crate) table_hint: &'static str,
-    pub(crate) table_headers: [&'static str; 7],
-    pub(crate) status: OptionsModelStatus,
-    pub(crate) rows: Vec<OptionRow>,
+    pub(crate) body: OptionsBody,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -17,17 +14,20 @@ pub(crate) struct OptionsSummaryRow {
     pub(crate) value: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum OptionsModelStatus {
-    Ready,
-    UnknownTool {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum OptionsBody {
+    Table(OptionsTable),
+    Message {
         message: &'static str,
         plain_message: &'static str,
     },
-    Empty {
-        message: &'static str,
-        plain_message: &'static str,
-    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OptionsTable {
+    pub(crate) hint: &'static str,
+    pub(crate) headers: [&'static str; 7],
+    pub(crate) rows: Vec<OptionRow>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -76,7 +76,7 @@ pub(crate) struct PlainOptionRow {
 
 pub(crate) fn options_model(app: &ShellApp, view: &OptionsView) -> OptionsModel {
     let Some(tool) = app.registry.resolve_tool(&view.tool_name) else {
-        return options_model_status(view, unknown_tool_status(), Vec::new());
+        return options_model_body(view, unknown_tool_body());
     };
     let stored = app.option_store.effective_stored_values(&tool.name);
     let mut rows = tool
@@ -85,12 +85,12 @@ pub(crate) fn options_model(app: &ShellApp, view: &OptionsView) -> OptionsModel 
         .filter_map(|spec| option_row(spec, view.filter, stored.get(&spec.name)))
         .collect::<Vec<_>>();
     rows.sort_by_key(|row| !row.has_stored_value);
-    let status = if rows.is_empty() {
-        empty_options_status(view.filter)
+    let body = if rows.is_empty() {
+        empty_options_body(view.filter)
     } else {
-        OptionsModelStatus::Ready
+        OptionsBody::Table(options_table(rows))
     };
-    options_model_status(view, status, rows)
+    options_model_body(view, body)
 }
 
 pub(crate) fn plain_options_model(app: &ShellApp, view: &OptionsView) -> PlainOptionsModel {
@@ -102,15 +102,12 @@ impl PlainOptionsModel {
         let OptionsModel {
             title,
             summary_rows,
-            table_headers,
-            status,
-            rows,
-            ..
+            body,
         } = model;
         PlainOptionsModel {
             title,
             summary_rows: summary_rows.into_iter().map(plain_summary_row).collect(),
-            body: plain_options_body(status, rows, table_headers),
+            body: plain_options_body(body),
         }
     }
 }
@@ -119,26 +116,19 @@ fn plain_summary_row(row: OptionsSummaryRow) -> String {
     format!("{}: {}", row.label, row.value)
 }
 
-fn plain_options_body(
-    status: OptionsModelStatus,
-    rows: Vec<OptionRow>,
-    headers: [&'static str; 7],
-) -> PlainOptionsBody {
-    match status {
-        OptionsModelStatus::Ready => PlainOptionsBody::Table(plain_options_table(headers, rows)),
-        OptionsModelStatus::UnknownTool { plain_message, .. } => {
-            PlainOptionsBody::Message(vec![plain_message.to_string()])
-        }
-        OptionsModelStatus::Empty { plain_message, .. } => {
+fn plain_options_body(body: OptionsBody) -> PlainOptionsBody {
+    match body {
+        OptionsBody::Table(table) => PlainOptionsBody::Table(plain_options_table(table)),
+        OptionsBody::Message { plain_message, .. } => {
             PlainOptionsBody::Message(vec![plain_message.to_string()])
         }
     }
 }
 
-fn plain_options_table(headers: [&'static str; 7], rows: Vec<OptionRow>) -> PlainOptionsTable {
+fn plain_options_table(table: OptionsTable) -> PlainOptionsTable {
     PlainOptionsTable {
-        headers,
-        rows: rows.into_iter().map(plain_option_row).collect(),
+        headers: table.headers,
+        rows: table.rows.into_iter().map(plain_option_row).collect(),
         note: "Canonical keys are in the option column; aliases are compatibility names.",
         next_hint: "Next: set <key> <value>, setg <key> <value>, show advanced, show missing",
     }
@@ -156,18 +146,20 @@ fn plain_option_row(row: OptionRow) -> PlainOptionRow {
     }
 }
 
-fn options_model_status(
-    view: &OptionsView,
-    status: OptionsModelStatus,
-    rows: Vec<OptionRow>,
-) -> OptionsModel {
+fn options_model_body(view: &OptionsView, body: OptionsBody) -> OptionsModel {
     let filter_label = options_filter_label(view.filter);
     OptionsModel {
         title: "OPTIONS",
         summary_rows: options_summary_rows(&view.tool_name, filter_label),
-        table_hint:
+        body,
+    }
+}
+
+fn options_table(rows: Vec<OptionRow>) -> OptionsTable {
+    OptionsTable {
+        hint:
             "set <key> <value> writes session state; setg writes global state. Option names are canonical; aliases work.",
-        table_headers: [
+        headers: [
             "option",
             "value",
             "default",
@@ -176,7 +168,6 @@ fn options_model_status(
             "aliases",
             "description",
         ],
-        status,
         rows,
     }
 }
@@ -228,24 +219,24 @@ fn options_filter_label(filter: OptionsFilter) -> &'static str {
     }
 }
 
-fn unknown_tool_status() -> OptionsModelStatus {
-    OptionsModelStatus::UnknownTool {
+fn unknown_tool_body() -> OptionsBody {
+    OptionsBody::Message {
         message: "Unknown tool. Run tools to inspect the native registry.",
         plain_message: "Unknown tool. Next: tools",
     }
 }
 
-fn empty_options_status(filter: OptionsFilter) -> OptionsModelStatus {
+fn empty_options_body(filter: OptionsFilter) -> OptionsBody {
     match filter {
-        OptionsFilter::Standard => OptionsModelStatus::Empty {
+        OptionsFilter::Standard => OptionsBody::Message {
             message: "No standard options. Run show advanced for hidden controls.",
             plain_message: "No standard options. Next: show advanced",
         },
-        OptionsFilter::Advanced => OptionsModelStatus::Empty {
+        OptionsFilter::Advanced => OptionsBody::Message {
             message: "No advanced options for this tool.",
             plain_message: "No advanced options for this tool.",
         },
-        OptionsFilter::Missing => OptionsModelStatus::Empty {
+        OptionsFilter::Missing => OptionsBody::Message {
             message: "No missing required options for this tool.",
             plain_message: "No missing required options for this tool.",
         },
