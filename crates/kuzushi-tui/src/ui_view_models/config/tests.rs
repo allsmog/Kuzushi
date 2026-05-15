@@ -7,9 +7,20 @@ fn config_model_summarizes_default_runtime_state() {
 
     let model = config_model(&app);
 
+    assert_eq!(model.summary_title, "CONFIG");
     assert_eq!(model.model, "unconfigured");
-    assert_eq!(model.reasoning, "default");
-    assert!(model.onboarding.is_some());
+    assert!(model.summary_rows.contains(&ConfigSummaryRow {
+        label: "model",
+        value: "unconfigured".to_string(),
+    }));
+    assert!(model.summary_rows.contains(&ConfigSummaryRow {
+        label: "reasoning",
+        value: "default".to_string(),
+    }));
+    assert!(model
+        .summary_rows
+        .iter()
+        .any(|row| row.label == "onboarding"));
     assert!(!model.model_rows.is_empty());
     assert!(model.model_rows[app.selected_model_index].selected);
 }
@@ -22,7 +33,10 @@ fn config_model_reports_session_cost_when_available() {
 
     let model = config_model(&app);
 
-    assert_eq!(model.cost, "session $0.0456; last tool $0.0123");
+    assert!(model.summary_rows.contains(&ConfigSummaryRow {
+        label: "cost",
+        value: "session $0.0456; last tool $0.0123".to_string(),
+    }));
 }
 
 #[test]
@@ -32,8 +46,11 @@ fn config_model_preserves_explicit_reasoning_override() {
 
     let model = config_model(&app);
 
-    assert_eq!(model.reasoning, "xhigh");
     assert_eq!(model.reasoning_override, Some("xhigh".to_string()));
+    assert!(model.summary_rows.contains(&ConfigSummaryRow {
+        label: "reasoning",
+        value: "xhigh".to_string(),
+    }));
 }
 
 #[test]
