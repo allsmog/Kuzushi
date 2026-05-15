@@ -15,7 +15,7 @@ pub(crate) fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     }
 
     if collapsed_catalog_active(app, area.width) {
-        collapsed_state::append_collapsed_catalog(app, area, &mut lines);
+        collapsed_state::append_collapsed_catalog(&model, area, &mut lines);
         return lines;
     }
 

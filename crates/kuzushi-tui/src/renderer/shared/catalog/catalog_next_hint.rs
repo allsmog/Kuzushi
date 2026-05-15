@@ -1,29 +1,8 @@
 use super::*;
+use crate::ui_view_models::CatalogModel;
 
-pub(crate) fn catalog_next_hint(app: &ShellApp) -> String {
-    if !app.context_view.exists {
-        return "Build the context snapshot with `context build` so SAST has structure to walk."
-            .to_string();
-    }
-    let critical_count = app
-        .findings
-        .iter()
-        .filter(|f| f.severity == Severity::Critical)
-        .count();
-    if critical_count > 0 {
-        if let Some((alias, _)) = sorted_finding_aliases(&app.findings).into_iter().next() {
-            return format!(
-                "Drill in: `open {alias}` for the highest-severity finding · `findings` for the list."
-            );
-        }
-    }
-    if !app.findings.is_empty() {
-        return format!(
-            "{} finding(s) waiting · `findings` to triage · `threats regen` for STRIDE refresh.",
-            app.findings.len()
-        );
-    }
-    app.first_finding_hint()
+pub(crate) fn catalog_next_hint(model: &CatalogModel) -> &str {
+    &model.collapsed.next_hint
 }
 
 pub(crate) fn catalog_module_row(
