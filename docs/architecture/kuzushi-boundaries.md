@@ -58,6 +58,9 @@ highest-risk dependency violations:
 - failure handoff dispatching tools, runtimes, scanners, verification, or
   subprocesses;
 - TUI renderers dispatching runtime/tool execution;
+- TUI view models and view state dispatching runtime/tool execution;
+- TUI runtime code using "validated" wording for states that are only checked
+  or parsed;
 - Home/Recommend catalog renderers parsing artifacts directly instead of using
   `ui_view_models`;
 - the Runs ledger renderer parsing run summaries directly instead of using
