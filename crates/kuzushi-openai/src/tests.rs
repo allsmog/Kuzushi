@@ -46,6 +46,7 @@ printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234
             kind: RuntimeKind::PiAgentCore,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
+            thinking_level: None,
             agent_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
             anthropic_oauth: None,
         };
@@ -86,6 +87,7 @@ printf '%s' '{"ok":true,"structured":{"verdict":"true_positive","confidence":0.9
             kind: RuntimeKind::PiAgentCore,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
+            thinking_level: None,
             agent_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
             anthropic_oauth: None,
         };
@@ -315,6 +317,38 @@ fi
     }
 
     #[test]
+    fn bridge_failure_rewrites_internal_openai_oauth_provider() {
+        let runtime = RuntimeConfig {
+            kind: RuntimeKind::PiAgentCore,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            thinking_level: None,
+            agent_bridge_command: Some(vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                "printf '%s' '{\"ok\":false,\"error\":\"next-step: no OpenAI credentials for openai-codex. Set up kuzushi auth login openai-codex\"}'"
+                    .to_string(),
+            ]),
+            anthropic_oauth: None,
+        };
+        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+
+        let err = bridge
+            .query_blocking(AgentQueryRequest::new(
+                "openai-codex:gpt-5.5",
+                ".",
+                "system",
+                "prompt",
+            ))
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("OpenAI OAuth"));
+        assert!(err.contains("kuzushi auth login openai"));
+        assert!(!err.contains("openai-codex"));
+    }
+
+    #[test]
     fn query_retries_transient_bridge_failures_with_same_request() {
         let tmp = tempfile::tempdir().unwrap();
         let counter = tmp.path().join("counter");
@@ -326,7 +360,7 @@ N=$(cat {counter})
 echo $((N+1)) > {counter}
 cat > {payload}
 if [ "$N" = "0" ]; then
-  printf '%s' '{{"ok":false,"error":"openai-codex responses error: WebSocket closed 1006"}}'
+  printf '%s' '{{"ok":false,"error":"OpenAI OAuth responses error: WebSocket closed 1006"}}'
 else
   printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
 fi

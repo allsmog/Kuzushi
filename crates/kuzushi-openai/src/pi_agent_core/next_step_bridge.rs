@@ -2,7 +2,9 @@ use anyhow::{Context, Result};
 use kuzushi_core::{AgentLoopStep, AgentToolLoopRequest, LoopHistoryEntry, ToolCall};
 
 use super::bridge_payloads::{BridgeTool, NextStepBridgeRequest, NextStepBridgeResponse};
-use super::bridge_process::{run_next_step_bridge, run_next_step_preflight_bridge};
+use super::bridge_process::{
+    public_bridge_error, run_next_step_bridge, run_next_step_preflight_bridge,
+};
 use super::runtime_config::PiAgentCoreRuntime;
 use crate::messages::build_messages_for_anthropic;
 
@@ -57,11 +59,12 @@ fn next_step_bridge_request(
 
 fn ensure_next_step_response_ok(response: NextStepBridgeResponse) -> Result<AgentLoopStep> {
     if !response.ok {
+        let message = response
+            .error
+            .unwrap_or_else(|| "unknown error".to_string());
         anyhow::bail!(
             "pi-agent-core next-step bridge failed: {}",
-            response
-                .error
-                .unwrap_or_else(|| "unknown error".to_string())
+            public_bridge_error(&message)
         );
     }
     step_from_bridge_response(response)
@@ -71,11 +74,12 @@ fn ensure_next_step_preflight_ok(response: NextStepBridgeResponse) -> Result<()>
     if response.ok {
         return Ok(());
     }
+    let message = response
+        .error
+        .unwrap_or_else(|| "unknown error".to_string());
     anyhow::bail!(
         "pi-agent-core next-step preflight failed: {}",
-        response
-            .error
-            .unwrap_or_else(|| "unknown error".to_string())
+        public_bridge_error(&message)
     )
 }
 
