@@ -3,10 +3,16 @@ use kuzushi_core::modules::{OptionSpec, OptionType};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct OptionsModel {
-    pub(crate) tool_name: String,
-    pub(crate) filter_label: &'static str,
+    pub(crate) title: &'static str,
+    pub(crate) summary_rows: Vec<OptionsSummaryRow>,
     pub(crate) status: OptionsModelStatus,
     pub(crate) rows: Vec<OptionRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct OptionsSummaryRow {
+    pub(crate) label: &'static str,
+    pub(crate) value: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,15 +94,22 @@ pub(crate) fn plain_options_model(app: &ShellApp, view: &OptionsView) -> PlainOp
 
 impl PlainOptionsModel {
     fn from_options_model(model: OptionsModel) -> Self {
+        let OptionsModel {
+            title,
+            summary_rows,
+            status,
+            rows,
+        } = model;
         PlainOptionsModel {
-            title: "OPTIONS",
-            summary_rows: vec![
-                format!("tool: {}", model.tool_name),
-                format!("view: {}", model.filter_label),
-            ],
-            body: plain_options_body(model.status, model.rows),
+            title,
+            summary_rows: summary_rows.into_iter().map(plain_summary_row).collect(),
+            body: plain_options_body(status, rows),
         }
     }
+}
+
+fn plain_summary_row(row: OptionsSummaryRow) -> String {
+    format!("{}: {}", row.label, row.value)
 }
 
 fn plain_options_body(status: OptionsModelStatus, rows: Vec<OptionRow>) -> PlainOptionsBody {
@@ -145,11 +158,26 @@ fn options_model_status(
     status: OptionsModelStatus,
     rows: Vec<OptionRow>,
 ) -> OptionsModel {
+    let filter_label = options_filter_label(view.filter);
     OptionsModel {
-        tool_name: view.tool_name.clone(),
-        filter_label: options_filter_label(view.filter),
+        title: "OPTIONS",
+        summary_rows: options_summary_rows(&view.tool_name, filter_label),
         status,
         rows,
+    }
+}
+
+fn options_summary_rows(tool_name: &str, filter_label: &str) -> Vec<OptionsSummaryRow> {
+    vec![
+        options_summary_row("tool", tool_name),
+        options_summary_row("view", filter_label),
+    ]
+}
+
+fn options_summary_row(label: &'static str, value: &str) -> OptionsSummaryRow {
+    OptionsSummaryRow {
+        label,
+        value: value.to_string(),
     }
 }
 
