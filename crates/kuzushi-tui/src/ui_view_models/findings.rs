@@ -1,8 +1,7 @@
-use super::SeverityCounts;
+use super::{SeverityCounts, SeverityTone};
 use crate::ShellApp;
 use kuzushi_core::{
     finding_source_label, project_finding, sorted_finding_aliases, stable_finding_alias, Finding,
-    Severity,
 };
 
 const FINDINGS_PREVIEW_LIMIT: usize = 8;
@@ -43,7 +42,7 @@ pub(crate) struct FindingsPreviewOverflow {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FindingListRow {
     pub(crate) alias: String,
-    pub(crate) severity: Severity,
+    pub(crate) severity_tone: SeverityTone,
     pub(crate) severity_label: String,
     pub(crate) title: String,
     pub(crate) location: String,
@@ -59,7 +58,7 @@ pub(crate) struct FindingListRow {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FindingDetailModel {
     pub(crate) alias: Option<String>,
-    pub(crate) severity: Severity,
+    pub(crate) severity_tone: SeverityTone,
     pub(crate) severity_label: String,
     pub(crate) title: String,
     pub(crate) location: String,
@@ -174,7 +173,7 @@ impl FindingListRow {
         let projection = project_finding(finding, Some(alias.clone()));
         Self {
             alias,
-            severity: projection.severity,
+            severity_tone: SeverityTone::from_severity(projection.severity),
             severity_label: projection.severity_label,
             title: projection.title,
             location: projection.location,
@@ -194,7 +193,7 @@ impl FindingDetailModel {
         let projection = project_finding(finding, alias);
         Self {
             alias: projection.alias,
-            severity: projection.severity,
+            severity_tone: SeverityTone::from_severity(projection.severity),
             severity_label: finding.severity.as_str().to_string(),
             title: projection.title,
             location: projection.location,

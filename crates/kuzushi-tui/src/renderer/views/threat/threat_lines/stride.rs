@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::{ThreatStrideRow, ThreatStrideTone};
+use crate::ui_view_models::{SeverityTone, ThreatStrideRow, ThreatStrideTone};
 
 pub(super) fn append_stride_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'static>>) {
     let rollup = crate::ui_view_models::threat_stride_rollup(app);
@@ -31,11 +31,11 @@ fn stride_row(row: &ThreatStrideRow, width: u16) -> Line<'static> {
 
 fn threat_stride_tone_style(tone: ThreatStrideTone) -> Style {
     match tone {
-        ThreatStrideTone::Critical => theme::severity(Severity::Critical),
-        ThreatStrideTone::High => theme::severity(Severity::High),
-        ThreatStrideTone::Medium => theme::severity(Severity::Medium),
-        ThreatStrideTone::Low => theme::severity(Severity::Low),
-        ThreatStrideTone::Info => theme::severity(Severity::Info),
-        ThreatStrideTone::Unknown => theme::severity(Severity::Unknown),
+        ThreatStrideTone::Critical => theme::severity_tone(SeverityTone::Critical),
+        ThreatStrideTone::High => theme::severity_tone(SeverityTone::High),
+        ThreatStrideTone::Medium => theme::severity_tone(SeverityTone::Medium),
+        ThreatStrideTone::Low => theme::severity_tone(SeverityTone::Low),
+        ThreatStrideTone::Info => theme::severity_tone(SeverityTone::Info),
+        ThreatStrideTone::Unknown => theme::severity_tone(SeverityTone::Unknown),
     }
 }

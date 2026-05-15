@@ -1,7 +1,7 @@
 use super::*;
 use crate::ui_view_models::{
     recent_module_activity_model, ModuleActivityKind, ModuleActivityModel, ModuleActivityRow,
-    ModuleActivityTone,
+    ModuleActivityTone, SeverityTone,
 };
 
 pub(crate) fn recent_module_activity_lines(
@@ -41,20 +41,6 @@ fn module_activity_line(row: ModuleActivityRow) -> Line<'static> {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn transcript_finding_line(
-    severity: Severity,
-    rule_id: &str,
-    location: &str,
-) -> Line<'static> {
-    module_activity_finding_line(
-        ModuleActivityTone::from_severity(severity),
-        &severity.as_str().to_uppercase(),
-        rule_id,
-        location,
-    )
-}
-
 fn module_activity_finding_line(
     tone: ModuleActivityTone,
     severity: &str,
@@ -73,12 +59,30 @@ fn module_activity_finding_line(
 
 fn module_activity_tone_style(tone: ModuleActivityTone) -> Style {
     match tone {
-        ModuleActivityTone::Critical => theme::severity(Severity::Critical),
-        ModuleActivityTone::High => theme::severity(Severity::High),
-        ModuleActivityTone::Medium => theme::severity(Severity::Medium),
-        ModuleActivityTone::Low => theme::severity(Severity::Low),
-        ModuleActivityTone::Info => theme::severity(Severity::Info),
-        ModuleActivityTone::Unknown => theme::severity(Severity::Unknown),
+        ModuleActivityTone::Critical => theme::severity_tone(SeverityTone::Critical),
+        ModuleActivityTone::High => theme::severity_tone(SeverityTone::High),
+        ModuleActivityTone::Medium => theme::severity_tone(SeverityTone::Medium),
+        ModuleActivityTone::Low => theme::severity_tone(SeverityTone::Low),
+        ModuleActivityTone::Info => theme::severity_tone(SeverityTone::Info),
+        ModuleActivityTone::Unknown => theme::severity_tone(SeverityTone::Unknown),
         ModuleActivityTone::Default => theme::muted(),
     }
+}
+
+#[cfg(test)]
+pub(crate) fn transcript_finding_line(
+    tone: SeverityTone,
+    severity: &str,
+    rule_id: &str,
+    location: &str,
+) -> Line<'static> {
+    let tone = match tone {
+        SeverityTone::Critical => ModuleActivityTone::Critical,
+        SeverityTone::High => ModuleActivityTone::High,
+        SeverityTone::Medium => ModuleActivityTone::Medium,
+        SeverityTone::Low => ModuleActivityTone::Low,
+        SeverityTone::Info => ModuleActivityTone::Info,
+        SeverityTone::Unknown => ModuleActivityTone::Unknown,
+    };
+    module_activity_finding_line(tone, severity, rule_id, location)
 }

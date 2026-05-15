@@ -110,7 +110,7 @@ fn finding_summary_spans(
         Span::raw("  "),
         Span::styled(
             pad(&finding.severity_label, 9),
-            theme::severity(finding.severity),
+            theme::severity_tone(finding.severity_tone),
         ),
         Span::styled(
             pad(&fit(&finding.title, title_w), title_w),

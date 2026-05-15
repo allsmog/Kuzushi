@@ -1,5 +1,5 @@
 use super::*;
-use kuzushi_core::Severity;
+use crate::ui_view_models::SeverityTone;
 use ratatui::prelude::{Color, Modifier, Style};
 
 pub const STATUS_SEPARATOR: &str = " · ";
@@ -73,14 +73,14 @@ pub fn cursor_block() -> Style {
     Style::default().fg(TERM_BG).bg(T_PRIMARY)
 }
 
-pub fn severity(severity: Severity) -> Style {
-    match severity {
-        Severity::Critical => Style::default()
+pub(crate) fn severity_tone(tone: SeverityTone) -> Style {
+    match tone {
+        SeverityTone::Critical => Style::default()
             .fg(SEV_CRITICAL)
             .add_modifier(Modifier::BOLD),
-        Severity::High => Style::default().fg(SEV_HIGH),
-        Severity::Medium => Style::default().fg(SEV_MEDIUM),
-        Severity::Low | Severity::Info => Style::default().fg(SEV_LOW),
-        Severity::Unknown => muted(),
+        SeverityTone::High => Style::default().fg(SEV_HIGH),
+        SeverityTone::Medium => Style::default().fg(SEV_MEDIUM),
+        SeverityTone::Low | SeverityTone::Info => Style::default().fg(SEV_LOW),
+        SeverityTone::Unknown => muted(),
     }
 }

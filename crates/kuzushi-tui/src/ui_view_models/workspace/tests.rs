@@ -1,5 +1,5 @@
 use super::*;
-use kuzushi_core::V2Config;
+use kuzushi_core::{Severity, V2Config};
 use std::path::PathBuf;
 
 #[test]
@@ -47,7 +47,7 @@ fn workspace_model_projects_workspace_summary_and_rollup() {
     assert!(!model.empty);
     assert_eq!(model.rollup_total, 3);
     assert_eq!(model.rollup_rows[0].count, 1);
-    assert_eq!(model.rollup_rows[1].severity, Severity::High);
+    assert_eq!(model.rollup_rows[1].severity_tone, SeverityTone::High);
     assert_eq!(model.rollup_rows[2].count, 0);
     assert_eq!(model.rollup_rows[3].count, 1);
 }

@@ -10,7 +10,7 @@ use crate::commands::{shell_command_specs, shell_help_examples, ShellCommandCate
 use crate::ui_view_models::{
     catalog_model, prompt_text, threat_dfd_model_from_doc, threat_scope_model_from_doc,
     threat_story_model_from_doc, threat_stride_rollup_from_doc, view_status_segment,
-    ModuleRunStatusKind, RoutingMode, ThreatStrideTone,
+    ModuleRunStatusKind, RoutingMode, SeverityTone, ThreatStrideTone,
 };
 
 use super::*;
@@ -3046,12 +3046,17 @@ fn transcript_finding_line_tints_severity_per_mockup() {
     // in c-muted.  Verify `transcript_finding_line` builds the same
     // four-color split (warn glyph, severity tint, accent rule-id,
     // muted location).
-    let line = transcript_finding_line(Severity::Critical, "demo.rule", "src/x.rs:142");
+    let line = transcript_finding_line(
+        SeverityTone::Critical,
+        "CRITICAL",
+        "demo.rule",
+        "src/x.rs:142",
+    );
     let mut roles: Vec<&str> = Vec::new();
     for span in &line.spans {
         roles.push(if span.style == theme::warn() {
             "warn"
-        } else if span.style == theme::severity(Severity::Critical) {
+        } else if span.style == theme::severity_tone(SeverityTone::Critical) {
             "sev-critical"
         } else if span.style == theme::accent() {
             "accent"
@@ -3835,7 +3840,8 @@ fn next_action_line_falls_back_to_primary_when_no_run_or_em_dash() {
 fn compact_finding_row_renders_alias_severity_and_location() {
     let line = compact_finding_row(
         "F-0001",
-        Severity::Critical,
+        "CRITICAL",
+        SeverityTone::Critical,
         "sql injection via order_id concatenation",
         "apps/api/orders.rs:142",
         120,
