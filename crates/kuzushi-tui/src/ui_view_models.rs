@@ -74,7 +74,7 @@ pub(crate) use prompt_tuning::{
 };
 pub(crate) use routing::{routing_mode, routing_mode_segment, RoutingMode};
 pub(crate) use run_status::scan_status;
-pub(crate) use run_timeline::{past_runs_model, PastRun, PastRunStatus};
+pub(crate) use run_timeline::{run_timeline_model, PastRunStatus, RunTimelineRow};
 pub(crate) use run_trace::{
     replay_model, trace_model, ReplayModel, RunArtifactDetail, TraceModel, TraceStep,
 };
