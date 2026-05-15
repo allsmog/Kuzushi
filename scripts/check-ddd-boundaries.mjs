@@ -28,6 +28,31 @@ const boundaries = [
 
 const rules = [
   {
+    name: "context builds repository facts without scanner runtime or tool execution",
+    roots: [
+      "crates/kuzushi-core/src/context.rs",
+      "crates/kuzushi-core/src/repository_inventory.rs",
+      "crates/kuzushi-core/src/static_context.rs",
+      "crates/kuzushi-core/src/workspace/inventory",
+      "crates/kuzushi-core/src/evidence/context",
+      "crates/kuzushi-core/src/modules/context",
+    ],
+    forbidden:
+      /\b(crate::(?:scan|scanners|verification|verify|triage|remediation|patch|report)|AgentRuntime|AgentQueryRequest|TracedRuntime|Command::new|std::process::Command|execute_tool|execute_tool_with_runtime|ratatui|crossterm)\b/,
+  },
+  {
+    name: "attack surface ranks repository entrypoints without scanner runtime or tool execution",
+    roots: ["crates/kuzushi-core/src/attack_surface.rs", "crates/kuzushi-core/src/workspace/attack_surface"],
+    forbidden:
+      /\b(crate::(?:scan|scanners|runtime|modules|verification|verify|triage|remediation|patch|report)|AgentRuntime|AgentQueryRequest|TracedRuntime|Command::new|std::process::Command|execute_tool|execute_tool_with_runtime|ratatui|crossterm)\b/,
+  },
+  {
+    name: "threat model domain stays deterministic without runtime or dispatch dependencies",
+    roots: ["crates/kuzushi-core/src/capabilities/threat_model/domain"],
+    forbidden:
+      /\b(crate::(?:scan|scanners|runtime|modules|verification|verify|triage|remediation|patch|report)|AgentRuntime|AgentQueryRequest|TracedRuntime|Command::new|std::process::Command|execute_tool|execute_tool_with_runtime|ratatui|crossterm)\b/,
+  },
+  {
     name: "findings never call scanners, LLM runtimes, renderers, or subprocesses",
     roots: ["crates/kuzushi-core/src/findings"],
     forbidden:
