@@ -1,4 +1,5 @@
 pub(in crate::renderer) use super::*;
+use crate::ui_view_models::transcript_model;
 
 pub(crate) fn render_transcript(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if area.height == 0 {
@@ -8,27 +9,11 @@ pub(crate) fn render_transcript(frame: &mut Frame<'_>, area: Rect, app: &ShellAp
 }
 
 pub(crate) fn transcript_lines(app: &ShellApp, visible: usize) -> Vec<Line<'static>> {
-    if visible == 0 {
-        return Vec::new();
-    }
-    let mut rows = Vec::new();
-    for line in &app.log {
-        let body_lines = if line.body.is_empty() {
-            vec![""]
-        } else {
-            line.body.lines().collect::<Vec<_>>()
-        };
-        for (index, body) in body_lines.into_iter().enumerate() {
-            rows.push(transcript_line_dated(
-                &line.prefix,
-                body,
-                index > 0,
-                line.time_secs,
-            ));
-        }
-    }
-    let start = rows.len().saturating_sub(visible);
-    rows.into_iter().skip(start).collect()
+    transcript_model(app, visible)
+        .rows
+        .into_iter()
+        .map(|row| transcript_line_dated(&row.prefix, &row.body, row.continuation, row.time_secs))
+        .collect()
 }
 
 pub(crate) fn transcript_line(prefix: &str, body: &str, continuation: bool) -> Line<'static> {
