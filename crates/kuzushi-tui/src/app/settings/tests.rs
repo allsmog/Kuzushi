@@ -34,8 +34,10 @@ mod tests {
     #[test]
     fn legacy_codex_shorthands_are_not_public_selectors() {
         assert!(normalize_auth_provider("codex").is_err());
+        assert!(normalize_auth_provider("openai-codex").is_err());
         assert!(resolve_model_selector("codex:gpt-5.5").is_none());
         assert!(resolve_model_selector("codex-mini").is_none());
+        assert!(resolve_model_selector("openai-codex:gpt-5.5").is_none());
         assert_eq!(
             resolve_model_selector("openai-oauth:gpt-5.5").map(|choice| choice.index),
             Some(3)

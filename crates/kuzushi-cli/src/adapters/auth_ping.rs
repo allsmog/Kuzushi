@@ -136,7 +136,6 @@ fn auth_provider_kind(provider: &str) -> AuthProviderKind {
     const AUTH_PROVIDER_KINDS: &[(&str, AuthProviderKind)] = &[
         ("anthropic", AuthProviderKind::Anthropic),
         ("openai-codex", AuthProviderKind::OpenAiOauth),
-        ("codex", AuthProviderKind::OpenAiOauth),
         ("openai", AuthProviderKind::OpenAiOauth),
     ];
     AUTH_PROVIDER_KINDS

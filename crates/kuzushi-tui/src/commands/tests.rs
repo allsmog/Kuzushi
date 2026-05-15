@@ -95,6 +95,10 @@ mod tests {
             parse_command(&format!("auth {}", "codex")),
             ShellCommand::Unknown(_)
         ));
+        assert!(matches!(
+            parse_command("auth openai-codex"),
+            ShellCommand::Unknown(_)
+        ));
         assert_eq!(
             parse_command("/provider openai"),
             ShellCommand::Provider(Some("openai".to_string()))

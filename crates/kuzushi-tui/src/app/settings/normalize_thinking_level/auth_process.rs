@@ -67,7 +67,7 @@ pub(in crate::app) fn auth_provider_display_name(provider: &str) -> &str {
 
 pub(crate) fn normalize_auth_provider(provider: &str) -> std::result::Result<&'static str, String> {
     match provider.trim().to_ascii_lowercase().as_str() {
-        "" | "openai" | "openai-codex" => Ok("openai-codex"),
+        "" | "openai" => Ok("openai-codex"),
         "anthropic" | "claude" => Ok("anthropic"),
         other => Err(format!(
             "unsupported auth login provider {other:?}. Supported: openai, anthropic. Next: auth login openai"
