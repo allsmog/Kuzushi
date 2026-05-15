@@ -1,70 +1,33 @@
 use super::*;
-use crate::ui_view_models::{auth_env_summary, model_auth_status, oauth_summary};
+use crate::ui_view_models::{config_model, ConfigModel, ConfigModelRow};
 
 pub(crate) fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
-    push_config_summary(&mut lines, app, area);
-    push_config_model_table(&mut lines, app, area);
+    let model = config_model(app);
+    push_config_summary(&mut lines, &model, area);
+    push_config_model_table(&mut lines, &model, area);
     push_config_commands(&mut lines, area);
     lines
 }
 
-fn push_config_summary(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) {
+fn push_config_summary(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area: Rect) {
     lines.push(blank());
     lines.push(divider("CONFIG", area.width));
-    lines.push(detail(
-        "backend",
-        crate::app::runtime_backend_label(&app.config),
-    ));
-    lines.push(detail("provider", &app.provider_label()));
-    lines.push(detail(
-        "model",
-        &app.config
-            .model
-            .as_deref()
-            .map(crate::app::display_model_selector)
-            .unwrap_or_else(|| "unconfigured".to_string()),
-    ));
-    lines.push(detail(
-        "reasoning",
-        app.session_thinking_level.as_deref().unwrap_or("default"),
-    ));
-    lines.push(detail("auth envs", &auth_env_summary(app)));
-    lines.push(detail("oauth", &oauth_summary()));
-    lines.push(detail("base url", base_url_detail(app)));
-    lines.push(detail(
-        "bridge",
-        crate::app::bridge_command_status(&app.config),
-    ));
-    lines.push(detail("cost", &cost_detail(app)));
-    if app.config.model.is_none() {
-        lines.push(detail(
-            "onboarding",
-            "Up/Down selects a model; Enter activates it. OAuth availability is shown below.",
-        ));
+    lines.push(detail("backend", &model.backend));
+    lines.push(detail("provider", &model.provider));
+    lines.push(detail("model", &model.model));
+    lines.push(detail("reasoning", &model.reasoning));
+    lines.push(detail("auth envs", &model.auth_envs));
+    lines.push(detail("oauth", &model.oauth));
+    lines.push(detail("base url", &model.base_url));
+    lines.push(detail("bridge", &model.bridge));
+    lines.push(detail("cost", &model.cost));
+    if let Some(onboarding) = &model.onboarding {
+        lines.push(detail("onboarding", onboarding));
     }
 }
 
-fn base_url_detail(app: &ShellApp) -> &str {
-    app.config
-        .runtime
-        .base_url
-        .as_deref()
-        .unwrap_or("provider default")
-}
-
-fn cost_detail(app: &ShellApp) -> String {
-    if let Some(last) = app.last_tool_cost_usd {
-        format!(
-            "session ${:.4}; last tool ${:.4}",
-            app.session_cost_usd, last
-        )
-    } else {
-        "unavailable until a tool reports costUsd".to_string()
-    }
-}
-
-fn push_config_model_table(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) {
+fn push_config_model_table(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area: Rect) {
     lines.push(blank());
     lines.push(divider("MODELS", area.width));
     let widths = config_model_widths(area);
@@ -72,13 +35,8 @@ fn push_config_model_table(lines: &mut Vec<Line<'static>>, app: &ShellApp, area:
         &["", "#", "model", "effort", "auth"],
         &widths,
     ));
-    for (index, choice) in crate::app::model_choices().iter().enumerate() {
-        lines.push(config_model_row(
-            index,
-            app.selected_model_index,
-            choice,
-            &widths,
-        ));
+    for row in &model.model_rows {
+        lines.push(config_model_row(row, &widths));
     }
 }
 
@@ -86,24 +44,15 @@ fn config_model_widths(area: Rect) -> [usize; 5] {
     [2usize, 2, 28, 6, value_width(area, 28)]
 }
 
-fn config_model_row(
-    index: usize,
-    selected_model_index: usize,
-    choice: &crate::app::ModelChoice,
-    widths: &[usize],
-) -> Line<'static> {
-    let marker = if index == selected_model_index {
-        ">"
-    } else {
-        " "
-    };
+fn config_model_row(row: &ConfigModelRow, widths: &[usize]) -> Line<'static> {
+    let marker = if row.selected { ">" } else { " " };
     aligned_row(
         &[
             marker.to_string(),
-            choice.index.to_string(),
-            crate::app::model_choice_display_selector(choice),
-            choice.thinking_level.to_string(),
-            model_auth_status(choice),
+            row.index.clone(),
+            row.model.clone(),
+            row.effort.clone(),
+            row.auth.clone(),
         ],
         widths,
     )

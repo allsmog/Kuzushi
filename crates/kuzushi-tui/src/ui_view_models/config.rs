@@ -1,0 +1,98 @@
+use super::{auth_env_summary, model_auth_status, oauth_summary};
+use crate::ShellApp;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConfigModel {
+    pub(crate) backend: String,
+    pub(crate) provider: String,
+    pub(crate) model: String,
+    pub(crate) reasoning: String,
+    pub(crate) auth_envs: String,
+    pub(crate) oauth: String,
+    pub(crate) base_url: String,
+    pub(crate) bridge: String,
+    pub(crate) cost: String,
+    pub(crate) onboarding: Option<String>,
+    pub(crate) model_rows: Vec<ConfigModelRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ConfigModelRow {
+    pub(crate) selected: bool,
+    pub(crate) index: String,
+    pub(crate) model: String,
+    pub(crate) effort: String,
+    pub(crate) auth: String,
+}
+
+pub(crate) fn config_model(app: &ShellApp) -> ConfigModel {
+    ConfigModel {
+        backend: crate::app::runtime_backend_label(&app.config).to_string(),
+        provider: app.provider_label(),
+        model: active_model_label(app),
+        reasoning: app
+            .session_thinking_level
+            .as_deref()
+            .unwrap_or("default")
+            .to_string(),
+        auth_envs: auth_env_summary(app),
+        oauth: oauth_summary(),
+        base_url: base_url_detail(app),
+        bridge: crate::app::bridge_command_status(&app.config).to_string(),
+        cost: cost_detail(app),
+        onboarding: onboarding_detail(app),
+        model_rows: config_model_rows(app),
+    }
+}
+
+fn active_model_label(app: &ShellApp) -> String {
+    app.config
+        .model
+        .as_deref()
+        .map(crate::app::display_model_selector)
+        .unwrap_or_else(|| "unconfigured".to_string())
+}
+
+fn base_url_detail(app: &ShellApp) -> String {
+    app.config
+        .runtime
+        .base_url
+        .as_deref()
+        .unwrap_or("provider default")
+        .to_string()
+}
+
+fn cost_detail(app: &ShellApp) -> String {
+    if let Some(last) = app.last_tool_cost_usd {
+        format!(
+            "session ${:.4}; last tool ${:.4}",
+            app.session_cost_usd, last
+        )
+    } else {
+        "unavailable until a tool reports costUsd".to_string()
+    }
+}
+
+fn onboarding_detail(app: &ShellApp) -> Option<String> {
+    app.config.model.is_none().then(|| {
+        "Up/Down selects a model; Enter activates it. OAuth availability is shown below."
+            .to_string()
+    })
+}
+
+fn config_model_rows(app: &ShellApp) -> Vec<ConfigModelRow> {
+    crate::app::model_choices()
+        .iter()
+        .enumerate()
+        .map(|(index, choice)| ConfigModelRow {
+            selected: index == app.selected_model_index,
+            index: choice.index.to_string(),
+            model: crate::app::model_choice_display_selector(choice),
+            effort: choice.thinking_level.to_string(),
+            auth: model_auth_status(choice),
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests;
