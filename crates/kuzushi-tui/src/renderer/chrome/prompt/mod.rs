@@ -1,5 +1,5 @@
 pub(in crate::renderer) use super::*;
-use crate::ui_view_models::prompt_brand;
+use crate::ui_view_models::{prompt_brand, routing_mode, RoutingMode};
 
 pub(crate) fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if area.height == 0 {
