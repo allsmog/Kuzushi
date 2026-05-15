@@ -55,7 +55,7 @@ fn grep_schema() -> serde_json::Value {
             "globs": {
                 "type": "array",
                 "items": {"type": "string"},
-                "description": "File globs to restrict the search (default: **/*.{c,h,cc,cpp,hpp}).",
+                "description": "File globs to restrict the search. Defaults to production C/C++ sources and excludes tests/docs/examples/fixtures unless includeNonProduction is true.",
             },
             "maxResults": {"type": "integer", "minimum": 1, "maximum": 200},
         },

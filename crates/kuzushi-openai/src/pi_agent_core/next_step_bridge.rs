@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use kuzushi_core::{AgentLoopStep, AgentToolLoopRequest, LoopHistoryEntry, ToolCall};
 
 use super::bridge_payloads::{BridgeTool, NextStepBridgeRequest, NextStepBridgeResponse};
-use super::bridge_process::run_next_step_bridge;
+use super::bridge_process::{run_next_step_bridge, run_next_step_preflight_bridge};
 use super::runtime_config::PiAgentCoreRuntime;
 use crate::messages::build_messages_for_anthropic;
 
@@ -14,6 +14,16 @@ pub(crate) fn next_step_blocking(
     let bridge_request = next_step_bridge_request(runtime, request, history);
     let response = run_next_step_bridge(&runtime.command, &bridge_request)?;
     ensure_next_step_response_ok(response)
+}
+
+pub(crate) fn preflight_tool_loop_blocking(
+    runtime: &PiAgentCoreRuntime,
+    request: &AgentToolLoopRequest,
+) -> Result<()> {
+    let mut bridge_request = next_step_bridge_request(runtime, request, &[]);
+    bridge_request.envelope_type = "next-step-preflight";
+    let response = run_next_step_preflight_bridge(&runtime.command, &bridge_request)?;
+    ensure_next_step_preflight_ok(response)
 }
 
 fn next_step_bridge_request(
@@ -55,6 +65,18 @@ fn ensure_next_step_response_ok(response: NextStepBridgeResponse) -> Result<Agen
         );
     }
     step_from_bridge_response(response)
+}
+
+fn ensure_next_step_preflight_ok(response: NextStepBridgeResponse) -> Result<()> {
+    if response.ok {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "pi-agent-core next-step preflight failed: {}",
+        response
+            .error
+            .unwrap_or_else(|| "unknown error".to_string())
+    )
 }
 
 fn step_from_bridge_response(response: NextStepBridgeResponse) -> Result<AgentLoopStep> {

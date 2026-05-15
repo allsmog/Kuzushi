@@ -4,9 +4,11 @@ use crate::proof::whitebox_policy::{
     agentic_hunter_thinking_level, default_whitebox_static_agent_tool_policy,
     mark_whitebox_static_findings, whitebox_static_profile_requested,
 };
-use crate::runtime::{AgentQueryRequest, AgentRuntime};
-use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
-use crate::workspace::artifact_kb::ArtifactKnowledgePromptContext;
+use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime};
+use crate::structured_output::{
+    parse_or_repair_required_structured_json, repair_request_from, StructuredJsonContract,
+};
+use crate::workspace::artifact_kb::{ArtifactKnowledgePromptContext, ArtifactKnowledgeSnippet};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};

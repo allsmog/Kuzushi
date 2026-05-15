@@ -153,7 +153,7 @@ function applyClaudeCodeIdentityPrefix(systemPrompt) {
  * "You are Claude Code...\n\nYou are an auditor." fails the check and
  * trips a sub-second rate_limit_error. Returning an array of text blocks
  * with the identity line as the first block is what pi-ai's OAuth path
- * does (see @mariozechner/pi-ai dist/providers/anthropic.js buildParams).
+ * does (see @earendil-works/pi-ai dist/providers/anthropic.js buildParams).
  */
 function claudeCodeIdentitySystemBlocks(originalSystem) {
   const body = typeof originalSystem === "string" ? originalSystem : "";
@@ -401,28 +401,12 @@ async function runOpenAiResponsesCall(provider, modelId, request) {
     if (!bearerToken) {
       throw new Error("openai-codex responses: no OAuth/API token available");
     }
-    const { completeSimple, getModel } = await import("@mariozechner/pi-ai");
+    const { completeSimple, getModel } = await import("@earendil-works/pi-ai");
     const model = getModel(provider, modelId);
     if (!model) {
       throw new Error(`openai-codex responses: unknown model ${provider}:${modelId}`);
     }
-    const message = await completeSimple(
-      model,
-      {
-        systemPrompt: request.systemPrompt ?? request.system_prompt,
-        messages: [{ role: "user", content: request.prompt, timestamp: Date.now() }],
-      },
-      {
-        apiKey: bearerToken,
-        reasoning:
-          normalizeThinkingLevel(request.thinkingLevel) ??
-          normalizeThinkingLevel(process.env.KUZUSHI_THINKING_LEVEL) ??
-          "low",
-      },
-    );
-    if (message.errorMessage) {
-      throw new Error(`openai-codex responses error: ${message.errorMessage}`);
-    }
+    const message = await completeOpenAiCodexWithRetry(completeSimple, model, request, bearerToken);
     const text = (message.content ?? [])
       .filter((part) => part?.type === "text" && typeof part.text === "string")
       .map((part) => part.text)
@@ -481,6 +465,77 @@ async function runOpenAiResponsesCall(provider, modelId, request) {
   return String(outputText || "").trim();
 }
 
+async function completeOpenAiCodexWithRetry(completeSimple, model, request, bearerToken) {
+  const context = {
+    systemPrompt: request.systemPrompt ?? request.system_prompt,
+    messages: [{ role: "user", content: request.prompt, timestamp: Date.now() }],
+  };
+  const options = {
+    apiKey: bearerToken,
+    reasoning:
+      normalizeThinkingLevel(request.thinkingLevel) ??
+      normalizeThinkingLevel(process.env.KUZUSHI_THINKING_LEVEL) ??
+      "low",
+  };
+  const attempts = 3;
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    let message;
+    try {
+      message = await completeSimple(model, context, options);
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      if (!shouldRetryOpenAiCodexError(lastError.message) || attempt === attempts) {
+        throw new Error(`openai-codex responses error: ${lastError.message}`);
+      }
+      await sleep(openAiCodexRetryDelayMs(attempt));
+      continue;
+    }
+
+    if (!message?.errorMessage) return message;
+
+    lastError = new Error(String(message.errorMessage));
+    if (!shouldRetryOpenAiCodexError(lastError.message) || attempt === attempts) {
+      throw new Error(`openai-codex responses error: ${lastError.message}`);
+    }
+    if (bridgeVerbose) {
+      bridgeLog(
+        `[bridge] openai-codex transient error on attempt ${attempt}/${attempts}: ${lastError.message}\n`,
+      );
+    }
+    await sleep(openAiCodexRetryDelayMs(attempt));
+  }
+  throw new Error(`openai-codex responses error: ${lastError?.message ?? "unknown error"}`);
+}
+
+function shouldRetryOpenAiCodexError(message) {
+  const normalized = String(message ?? "").toLowerCase();
+  return [
+    "websocket closed 1006",
+    "websocket closed",
+    "socket hang up",
+    "econnreset",
+    "etimedout",
+    "network error",
+    "fetch failed",
+    "429",
+    "rate limit",
+    "temporarily unavailable",
+    "internal server error",
+    "bad gateway",
+    "service unavailable",
+    "gateway timeout",
+  ].some((needle) => normalized.includes(needle));
+}
+
+function openAiCodexRetryDelayMs(attempt) {
+  return Math.min(250 * 2 ** (attempt - 1), 1_000);
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function resolveOpenAiBearerToken(provider, request) {
   const freshOauth =
     provider === "openai-codex"
@@ -496,9 +551,11 @@ async function resolveOpenAiBearerToken(provider, request) {
   );
 }
 
-function resolveOpenAiResponsesBaseUrl() {
+function resolveOpenAiResponsesBaseUrl(request = undefined) {
   const fallback = "https://api.openai.com/v1";
-  const raw = String(process.env.OPENAI_BASE_URL || fallback).trim();
+  const raw = String(
+    request?.base_url ?? request?.baseUrl ?? process.env.OPENAI_BASE_URL ?? fallback,
+  ).trim();
   if (!raw) return fallback;
   let parsed;
   try {
@@ -988,7 +1045,7 @@ function makeStreamFnWithMaxTokens(maxOutputTokens) {
   let streamSimplePromise;
   return function streamFnWithMaxTokens(model, llmContext, options) {
     streamSimplePromise =
-      streamSimplePromise ?? import("@mariozechner/pi-ai").then((mod) => mod.streamSimple);
+      streamSimplePromise ?? import("@earendil-works/pi-ai").then((mod) => mod.streamSimple);
     return (async function* () {
       const streamSimple = await streamSimplePromise;
       const stream = streamSimple(model, llmContext, {
@@ -1301,10 +1358,10 @@ function normalizeOAuthProvider(provider) {
 
 async function loadOAuthModule() {
   try {
-    return await import("@mariozechner/pi-ai/oauth");
+    return await import("@earendil-works/pi-ai/oauth");
   } catch (error) {
     throw new Error(
-      `Could not load @mariozechner/pi-ai/oauth for OAuth login/refresh: ${
+      `Could not load @earendil-works/pi-ai/oauth for OAuth login/refresh: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
@@ -1368,7 +1425,7 @@ async function runOAuthLogin(rawProvider) {
   const oauth = await loadOAuthModule();
   const login = provider === "anthropic" ? oauth.loginAnthropic : oauth.loginOpenAICodex;
   if (typeof login !== "function") {
-    throw new Error(`@mariozechner/pi-ai/oauth does not expose a login flow for ${provider}`);
+    throw new Error(`@earendil-works/pi-ai/oauth does not expose a login flow for ${provider}`);
   }
 
   const creds = await login({
@@ -1549,11 +1606,11 @@ async function handlePing(request) {
  */
 async function handleNextStep(request) {
   const [provider, modelId] = parseModelSpec(request.model);
+  if (provider === "openai" || provider === "openai-codex") {
+    return handleOpenAiNextStep(provider, modelId, request);
+  }
   if (provider !== "anthropic") {
-    throw new Error(
-      `next-step bridge only supports anthropic models in this version (got ${provider}). ` +
-        "Open a follow-up phase to add openai/gemini.",
-    );
+    throw new Error(`next-step bridge does not support ${provider} models yet.`);
   }
 
   // Resolve auth header.
@@ -1655,6 +1712,294 @@ async function handleNextStep(request) {
   };
 }
 
+async function handleOpenAiNextStep(provider, modelId, request) {
+  if (provider === "openai-codex") {
+    return handleOpenAiCodexTextNextStep(provider, modelId, request);
+  }
+
+  const bearerToken = await resolveOpenAiBearerToken(provider, request);
+  if (!bearerToken) {
+    throw new Error(
+      `next-step: no OpenAI credentials for ${provider}. Set up kuzushi auth login openai-codex, ` +
+        "OPENAI_API_KEY, or the configured provider API key.",
+    );
+  }
+
+  const payload = {
+    model: modelId,
+    input: openAiInputFromAnthropicMessages(request.messages ?? []),
+    tools: (request.tools ?? []).map(openAiToolDefinition),
+    max_output_tokens: request.max_tokens ?? request.maxTokens ?? 4096,
+  };
+  const systemPrompt = request.systemPrompt ?? request.system_prompt;
+  if (systemPrompt) payload.instructions = systemPrompt;
+  const temperature = numericTemperature(request);
+  if (temperature !== undefined) payload.temperature = temperature;
+
+  const response = await fetch(`${resolveOpenAiResponsesBaseUrl(request)}/responses`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${bearerToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `next-step: OpenAI Responses API ${response.status} ${response.statusText}: ${text.slice(
+        0,
+        500,
+      )}`,
+    );
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`next-step: OpenAI returned non-JSON body: ${text.slice(0, 200)}`);
+  }
+  if (parsed?.error) {
+    throw new Error(`next-step: OpenAI error: ${JSON.stringify(parsed.error).slice(0, 500)}`);
+  }
+
+  const usage = parsed.usage ?? {};
+  const cost_usd = approximateOpenAiCostUsd(modelId, usage);
+  const toolCall = firstOpenAiFunctionCall(parsed);
+  if (toolCall) {
+    return {
+      ok: true,
+      step: "tool_call",
+      call: toolCall,
+      cost_usd,
+    };
+  }
+
+  const finalText = extractOpenAiOutputText(parsed);
+  return {
+    ok: true,
+    step: "final",
+    text: finalText,
+    structured: maybeParseJson(finalText),
+    cost_usd,
+  };
+}
+
+async function handleOpenAiNextStepPreflight(provider, modelId, request) {
+  if (provider === "openai-codex") {
+    await runOpenAiResponsesCall(provider, modelId, {
+      ...request,
+      systemPrompt: "You are a tool-loop preflight probe. Reply with ok.",
+      prompt: "Return ok.",
+      maxOutputTokens: 16,
+    });
+    return {
+      ok: true,
+      step: "final",
+      text: "ok",
+      cost_usd: 0,
+    };
+  }
+
+  const bearerToken = await resolveOpenAiBearerToken(provider, request);
+  if (!bearerToken) {
+    throw new Error(
+      `next-step preflight: no OpenAI credentials for ${provider}. Set up kuzushi auth login ` +
+        "openai-codex, OPENAI_API_KEY, or the configured provider API key.",
+    );
+  }
+  const payload = {
+    model: modelId,
+    input: "Return ok.",
+    max_output_tokens: 16,
+  };
+  const response = await fetch(`${resolveOpenAiResponsesBaseUrl(request)}/responses`, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${bearerToken}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(payload),
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `next-step preflight: OpenAI Responses API ${response.status} ${response.statusText}: ${text.slice(
+        0,
+        500,
+      )}`,
+    );
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new Error(`next-step preflight: OpenAI returned non-JSON body: ${text.slice(0, 200)}`);
+  }
+  if (parsed?.error) {
+    throw new Error(
+      `next-step preflight: OpenAI error: ${JSON.stringify(parsed.error).slice(0, 500)}`,
+    );
+  }
+  return {
+    ok: true,
+    step: "final",
+    text: "ok",
+    cost_usd: approximateOpenAiCostUsd(modelId, parsed.usage ?? {}),
+  };
+}
+
+async function handleOpenAiCodexTextNextStep(provider, modelId, request) {
+  const text = await runOpenAiResponsesCall(provider, modelId, {
+    ...request,
+    systemPrompt: openAiCodexNextStepSystemPrompt(request),
+    prompt: openAiCodexNextStepPrompt(request),
+  });
+  const parsed = maybeParseJson(text);
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error(`next-step: openai-codex returned non-JSON step: ${String(text).slice(0, 500)}`);
+  }
+  return openAiCodexTextStepResponse(parsed, text);
+}
+
+function openAiCodexNextStepSystemPrompt(request) {
+  return [
+    request.systemPrompt ?? request.system_prompt ?? "",
+    "",
+    "You are driving one step of a tool loop. Reply with exactly one JSON object and no prose.",
+    'To call a tool, reply: {"step":"tool_call","call":{"name":"TOOL","input":{...},"callId":"unique-id"}}',
+    'To finish, reply: {"step":"final","text":"...","structured":{... optional ...}}',
+    "Use only the listed tools. Keep callId stable and unique.",
+  ]
+    .filter((part) => String(part).trim().length > 0)
+    .join("\n");
+}
+
+function openAiCodexNextStepPrompt(request) {
+  return [
+    "Available tools:",
+    JSON.stringify(request.tools ?? [], null, 2),
+    "",
+    "Conversation so far:",
+    JSON.stringify(request.messages ?? [], null, 2),
+    "",
+    "Return the next JSON step now.",
+  ].join("\n");
+}
+
+function openAiCodexTextStepResponse(parsed, rawText) {
+  const step = String(parsed.step ?? "").trim();
+  if (step === "tool_call") {
+    const call = parsed.call;
+    if (!call || typeof call !== "object" || typeof call.name !== "string") {
+      throw new Error(`next-step: openai-codex tool_call missing call.name: ${rawText.slice(0, 500)}`);
+    }
+    return {
+      ok: true,
+      step: "tool_call",
+      call: {
+        name: call.name,
+        input: call.input && typeof call.input === "object" ? call.input : {},
+        callId: String(call.callId ?? call.call_id ?? `call_${Date.now()}`),
+      },
+      cost_usd: Number(parsed.cost_usd ?? parsed.costUsd ?? 0) || 0,
+    };
+  }
+  if (step === "final") {
+    const text = typeof parsed.text === "string" ? parsed.text : "";
+    return {
+      ok: true,
+      step: "final",
+      text,
+      structured: parsed.structured ?? maybeParseJson(text),
+      cost_usd: Number(parsed.cost_usd ?? parsed.costUsd ?? 0) || 0,
+    };
+  }
+  throw new Error(`next-step: openai-codex returned unexpected step ${JSON.stringify(parsed.step)}`);
+}
+
+function openAiToolDefinition(tool) {
+  return {
+    type: "function",
+    name: tool.name,
+    description: tool.description,
+    parameters: tool.input_schema ?? tool.inputSchema ?? { type: "object", properties: {} },
+  };
+}
+
+function openAiInputFromAnthropicMessages(messages) {
+  const input = [];
+  for (const message of messages) {
+    const role = message?.role === "assistant" ? "assistant" : "user";
+    const content = message?.content;
+    if (typeof content === "string") {
+      input.push({ role, content });
+      continue;
+    }
+    if (!Array.isArray(content)) continue;
+    const textParts = [];
+    for (const part of content) {
+      if (typeof part === "string") {
+        textParts.push(part);
+      } else if (part?.type === "text" && typeof part.text === "string") {
+        textParts.push(part.text);
+      } else if (part?.type === "tool_use") {
+        input.push({
+          type: "function_call",
+          call_id: part.id,
+          name: part.name,
+          arguments: JSON.stringify(part.input ?? {}),
+        });
+      } else if (part?.type === "tool_result") {
+        input.push({
+          type: "function_call_output",
+          call_id: part.tool_use_id,
+          output: String(part.content ?? ""),
+        });
+      }
+    }
+    if (textParts.length > 0) {
+      input.push({ role, content: textParts.join("\n") });
+    }
+  }
+  return input;
+}
+
+function firstOpenAiFunctionCall(parsed) {
+  for (const item of Array.isArray(parsed?.output) ? parsed.output : []) {
+    if (item?.type !== "function_call") continue;
+    return {
+      name: item.name,
+      input: parseFunctionArguments(item.arguments),
+      callId: item.call_id ?? item.id ?? `call_${Date.now()}`,
+    };
+  }
+  return undefined;
+}
+
+function parseFunctionArguments(argumentsText) {
+  if (!argumentsText) return {};
+  try {
+    return JSON.parse(argumentsText);
+  } catch {
+    return {};
+  }
+}
+
+function extractOpenAiOutputText(parsed) {
+  if (typeof parsed?.output_text === "string") return parsed.output_text;
+  const chunks = [];
+  for (const item of Array.isArray(parsed?.output) ? parsed.output : []) {
+    if (item?.type === "message" && Array.isArray(item.content)) {
+      for (const part of item.content) {
+        if (typeof part?.text === "string") chunks.push(part.text);
+      }
+    }
+  }
+  return chunks.join("");
+}
+
 /**
  * Approximate USD cost from Anthropic's `usage` block. Numbers are
  * rough — production should swap in a per-model rate card. The spend
@@ -1684,6 +2029,35 @@ function approximateCostUsd(modelId, usage) {
   return (input * inRate) / 1000 + (output * outRate) / 1000;
 }
 
+function approximateOpenAiCostUsd(modelId, usage) {
+  const id = String(modelId ?? "").toLowerCase();
+  let inRate = 0.00125;
+  let outRate = 0.01;
+  if (id.includes("mini")) {
+    inRate = 0.00015;
+    outRate = 0.0006;
+  } else if (id.includes("gpt-5")) {
+    inRate = 0.00125;
+    outRate = 0.01;
+  } else if (id.includes("gpt-4.1") || id.includes("gpt-4o")) {
+    inRate = 0.005;
+    outRate = 0.015;
+  }
+  const input =
+    usage.input_tokens ??
+    usage.inputTokens ??
+    usage.prompt_tokens ??
+    usage.promptTokens ??
+    0;
+  const output =
+    usage.output_tokens ??
+    usage.outputTokens ??
+    usage.completion_tokens ??
+    usage.completionTokens ??
+    0;
+  return ((Number(input) || 0) * inRate) / 1000 + ((Number(output) || 0) * outRate) / 1000;
+}
+
 async function main() {
   if (process.argv[2] === "--oauth-login") {
     await runOAuthLogin(process.argv[3] ?? "openai-codex");
@@ -1699,6 +2073,15 @@ async function main() {
     process.stdout.write(JSON.stringify(result));
     return;
   }
+  if (request.type === "next-step-preflight") {
+    const [provider, modelId] = parseModelSpec(request.model);
+    const result =
+      provider === "openai" || provider === "openai-codex"
+        ? await handleOpenAiNextStepPreflight(provider, modelId, request)
+        : { ok: true, step: "final", text: "ok", cost_usd: 0 };
+    process.stdout.write(JSON.stringify(result));
+    return;
+  }
   if (request.type === "ping") {
     const result = await handlePing(request);
     process.stdout.write(JSON.stringify(result));
@@ -1706,11 +2089,11 @@ async function main() {
   }
 
   const [{ Agent, default: DefaultAgent }, { getModel }] = await Promise.all([
-    import("@mariozechner/pi-agent-core"),
-    import("@mariozechner/pi-ai"),
+    import("@earendil-works/pi-agent-core"),
+    import("@earendil-works/pi-ai"),
   ]);
   const AgentCtor = Agent ?? DefaultAgent;
-  if (!AgentCtor) throw new Error("@mariozechner/pi-agent-core did not export Agent");
+  if (!AgentCtor) throw new Error("@earendil-works/pi-agent-core did not export Agent");
 
   const [provider, modelId] = parseModelSpec(request.model);
   const model =

@@ -118,4 +118,27 @@ mod tests {
 
         assert_eq!(run_ids, vec!["run-b", "run-a"]);
     }
+
+    #[test]
+    fn list_run_summaries_marks_dead_process_running_summary_interrupted() {
+        let tmp = tempfile::tempdir().unwrap();
+        if !std::path::Path::new("/proc").exists() {
+            return;
+        }
+        let summary =
+            RunSummary::running("run-stale", "tool", None, "target").with_process_id(u32::MAX);
+        write_run_summary(tmp.path(), &summary).unwrap();
+
+        let loaded = list_run_summaries(tmp.path()).unwrap();
+
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].status, "interrupted");
+        assert!(loaded[0].completed_at_unix.is_some());
+        assert!(loaded[0].process_id.is_none());
+        assert!(loaded[0]
+            .error
+            .as_deref()
+            .unwrap_or_default()
+            .contains("no longer running"));
+    }
 }

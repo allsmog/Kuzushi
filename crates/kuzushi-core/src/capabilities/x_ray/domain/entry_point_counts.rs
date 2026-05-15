@@ -14,12 +14,18 @@ pub(crate) fn parse_entry_point_summary_counts(markdown: &str) -> Option<XRayEnt
             continue;
         }
 
-        let total = count_before_phrase(&lower, "entry point");
-        let permissionless = count_before_phrase(&lower, "permissionless");
+        let total = count_before_phrase(&lower, "entry point")
+            .or_else(|| count_after_label(&lower, "total"));
+        let permissionless = count_before_phrase(&lower, "permissionless")
+            .or_else(|| count_after_label(&lower, "permissionless"));
         let role_gated = count_before_phrase(&lower, "role-gated")
-            .or_else(|| count_before_phrase(&lower, "role gated"));
+            .or_else(|| count_before_phrase(&lower, "role gated"))
+            .or_else(|| count_after_label(&lower, "role-gated"))
+            .or_else(|| count_after_label(&lower, "role gated"));
         let admin_only = count_before_phrase(&lower, "admin-only")
-            .or_else(|| count_before_phrase(&lower, "admin only"));
+            .or_else(|| count_before_phrase(&lower, "admin only"))
+            .or_else(|| count_after_label(&lower, "admin-only"))
+            .or_else(|| count_after_label(&lower, "admin only"));
 
         if total.is_none()
             && permissionless.is_none()
@@ -40,6 +46,21 @@ pub(crate) fn parse_entry_point_summary_counts(markdown: &str) -> Option<XRayEnt
         });
     }
     None
+}
+
+pub(crate) fn count_after_label(line: &str, label: &str) -> Option<usize> {
+    let index = line.find(label)? + label.len();
+    let suffix = line[index..]
+        .trim_start_matches(|ch: char| !ch.is_ascii_digit())
+        .trim_start();
+    let digits = suffix
+        .chars()
+        .take_while(|ch| ch.is_ascii_digit())
+        .collect::<String>();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse().ok()
 }
 
 pub(crate) fn count_before_phrase(line: &str, phrase: &str) -> Option<usize> {

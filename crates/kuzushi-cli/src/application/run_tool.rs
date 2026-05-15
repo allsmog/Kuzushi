@@ -7,7 +7,7 @@ use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::{
     append_run_trace_step, load_config_for_target, new_run_id, write_run_artifact_json,
     write_run_summary, AgentRuntime, FindingStore, ModuleRegistry, RunSummary, RunTraceStep,
-    ToolOptionStore, TraceHandle, TracedRuntime, WorkspaceTarget,
+    ToolOptionStore, TraceHandle, WorkspaceTarget,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
 use std::path::{Path, PathBuf};
@@ -81,8 +81,7 @@ fn start_cli_tool_run_artifacts(
 fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
     let runtime = cli_tool_runtime(run)?;
     let trace = cli_tool_trace(run);
-    let traced_runtime = traced_cli_tool_runtime(runtime.as_ref(), trace.as_ref());
-    let runtime_ref = active_cli_tool_runtime(runtime.as_ref(), traced_runtime.as_ref());
+    let runtime_ref = active_cli_tool_runtime(runtime.as_ref());
     let ctx = ToolExecutionContext {
         config: &run.config,
         workspace: run.workspace.as_ref(),
@@ -116,22 +115,10 @@ fn cli_tool_trace(run: &PreparedCliToolRun) -> Option<TraceHandle> {
         })
 }
 
-fn traced_cli_tool_runtime<'a>(
-    runtime: Option<&'a PiAgentCoreRuntime>,
-    trace: Option<&'a TraceHandle>,
-) -> Option<TracedRuntime<'a>> {
-    runtime
-        .zip(trace)
-        .map(|(runtime, trace)| TracedRuntime::new(runtime as &dyn AgentRuntime, trace.clone()))
-}
-
 fn active_cli_tool_runtime<'a>(
     runtime: Option<&'a PiAgentCoreRuntime>,
-    traced_runtime: Option<&'a TracedRuntime<'a>>,
 ) -> Option<&'a dyn AgentRuntime> {
-    traced_runtime
-        .map(|runtime| runtime as &dyn AgentRuntime)
-        .or_else(|| runtime.map(|runtime| runtime as &dyn AgentRuntime))
+    runtime.map(|runtime| runtime as &dyn AgentRuntime)
 }
 
 fn handle_cli_tool_result(
@@ -213,7 +200,8 @@ pub(crate) fn start_cli_tool_run(target: &Path, tool: &str, input: &serde_json::
         "run",
         Some(tool.to_string()),
         target.display().to_string(),
-    );
+    )
+    .with_process_id(std::process::id());
     if let Some(artifact) = input_artifact {
         summary = summary.with_artifact(artifact);
     }

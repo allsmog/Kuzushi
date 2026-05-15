@@ -3,7 +3,7 @@
 ///
 /// The bridge (`scripts/pi-agent-core-bridge.mjs`) is the actual refresh
 /// authority — it loads `oauth-credentials.json`, refreshes via
-/// `@mariozechner/pi-ai/oauth`, and forwards the access token. This Rust
+/// `@earendil-works/pi-ai/oauth`, and forwards the access token. This Rust
 /// struct exists so:
 ///
 /// * `validate_config` can fail fast at startup if the operator declared

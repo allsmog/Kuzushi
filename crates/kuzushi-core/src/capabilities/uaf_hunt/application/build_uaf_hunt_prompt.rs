@@ -64,13 +64,22 @@ allocator's identity.
 
 pub fn build_uaf_hunt_user_prompt(options: &UafHuntInput) -> String {
     let pairs = format_pairs(&options.alloc_free_pairs);
+    let scope = if options.include_non_production {
+        "Scope: include production code plus tests, examples, docs, and fixtures when relevant."
+    } else {
+        "Scope: production code only by default. Prioritize lib/, src/, and shipped C/C++ sources. \
+         Do not spend budget in tests/, test/, docs/, doc/, examples/, example/, fixtures/, or \
+         __tests__ unless a production call graph reaches that code."
+    };
     format!(
         "Alloc/free pairs to hunt for in this codebase:\n{pairs}\n\n\
+         {scope}\n\n\
          Submit at most {max} of your highest-confidence findings. Each finding \
          MUST cite a call-graph trace produced via clang_callers/clang_callees. \
          Stop and submit `{{\"findings\":[]}}` if you cannot establish any \
          alloc→free→use chain for any pair after walking the call graph.",
         pairs = pairs,
+        scope = scope,
         max = options.max_findings,
     )
 }

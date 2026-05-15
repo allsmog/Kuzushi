@@ -151,6 +151,56 @@ mod tests {
     }
 
     #[test]
+    fn systems_context_skips_non_production_dirs_by_default() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("examples")).unwrap();
+        fs::create_dir_all(temp.path().join("lib")).unwrap();
+        fs::write(
+            temp.path().join("examples/parser.c"),
+            "void ex(char *packet, unsigned len) { char buf[8]; memcpy(buf, packet, len); }\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("lib/parser.c"),
+            "void prod(char *packet, unsigned len) { char buf[8]; memcpy(buf, packet, len); }\n",
+        )
+        .unwrap();
+
+        let output = gather_systems_context(
+            temp.path(),
+            &SystemsHuntInput::from_tool_input(&json!({"maxSurfaces": 10})).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(output.surfaces.len(), 1);
+        assert_eq!(output.surfaces[0].file_path, "lib/parser.c");
+    }
+
+    #[test]
+    fn systems_context_can_include_non_production_dirs() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("examples")).unwrap();
+        fs::write(
+            temp.path().join("examples/parser.c"),
+            "void ex(char *packet, unsigned len) { char buf[8]; memcpy(buf, packet, len); }\n",
+        )
+        .unwrap();
+
+        let output = gather_systems_context(
+            temp.path(),
+            &SystemsHuntInput::from_tool_input(&json!({
+                "includeNonProduction": true,
+                "maxSurfaces": 10
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(output.surfaces.len(), 1);
+        assert_eq!(output.surfaces[0].file_path, "examples/parser.c");
+    }
+
+    #[test]
     fn runs_systems_hunt_through_runtime_and_writes_artifact() {
         let temp = tempdir().unwrap();
         fs::create_dir_all(temp.path().join("src")).unwrap();
@@ -461,6 +511,42 @@ mod tests {
             artifact["recommendation"],
             json!(["bound len to the destination buffer"])
         );
+    }
+
+    #[test]
+    fn normalize_systems_hunt_findings_rejects_under_evidenced_candidates() {
+        let temp = tempdir().unwrap();
+        let artifact_root = temp.path().join(".kuzushi/systems-hunt");
+        let context = ctx_with(vec![surface("src/http.c", "unsafe-region")]);
+        let raw = json!({
+            "findings": [{
+                "title": "NUL byte header candidate",
+                "cwe": "CWE-170",
+                "severity": "high",
+                "filePath": "src/http.c",
+                "startLine": 42,
+                "message": "model suspects a string truncation issue",
+                "evidence": [],
+                "violatedInvariantIds": [],
+                "triggerHypothesisIds": [],
+                "triggerSequence": [],
+                "cheapVerifiable": false
+            }]
+        });
+
+        let (findings, artifacts) =
+            normalize_systems_hunt_findings(raw, temp.path(), &context, &artifact_root, 5).unwrap();
+
+        assert!(findings.is_empty());
+        assert_eq!(artifacts.len(), 1);
+        let artifact: Value =
+            serde_json::from_str(&fs::read_to_string(temp.path().join(&artifacts[0])).unwrap())
+                .unwrap();
+        assert_eq!(artifact["rejected"], json!(true));
+        assert!(artifact["rejectionReason"]
+            .as_str()
+            .unwrap()
+            .contains("under-evidenced"));
     }
 
     // ----- pick_role_for_invariants --------------------------------

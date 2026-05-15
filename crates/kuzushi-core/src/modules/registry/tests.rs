@@ -145,6 +145,11 @@ mod tests {
             .options
             .iter()
             .any(|option| option.name == "strategy"));
+
+        let threat_intel_harvest = registry.resolve_tool("threat-intel:harvest").unwrap();
+        assert!(threat_intel_harvest.options.iter().any(|option| {
+            option.name == "cves" && option.option_type == OptionType::Json && option.required
+        }));
     }
 
     #[test]

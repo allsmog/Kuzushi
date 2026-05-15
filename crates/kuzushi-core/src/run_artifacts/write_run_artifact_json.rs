@@ -10,6 +10,10 @@ pub fn write_run_artifact_json(
     let dir = run_dir(&target, run_id);
     fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
     let path = dir.join(leaf);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Could not create {}", parent.display()))?;
+    }
     fs::write(&path, format!("{}\n", serde_json::to_string_pretty(value)?))
         .with_context(|| format!("Could not write {}", path.display()))?;
     Ok(RunArtifact {

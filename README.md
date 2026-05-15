@@ -248,8 +248,8 @@ Subprocess-backed tools require the operator to install or configure binaries:
 | `recon:nmap` | `nmap`, or pass a binary override. |
 | `recon:subdomain`, `recon:http-fingerprint`, online `ndiff:fetch-cve` | `curl`, unless using offline/local input. |
 
-pi-agent-core-backed tools require Node, `@mariozechner/pi-agent-core`,
-`@mariozechner/pi-ai`, a configured model, and provider credentials. A custom
+pi-agent-core-backed tools require Node, `@earendil-works/pi-agent-core`,
+`@earendil-works/pi-ai`, a configured model, and provider credentials. A custom
 bridge should be supplied through `runtime.agent_bridge_command` in config;
 `KUZUSHI_AGENT_BRIDGE` is kept as a compatibility/bootstrap override.
 

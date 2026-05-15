@@ -4,7 +4,7 @@ pub(crate) fn gather_systems_context(
     target: &Path,
     options: &SystemsHuntInput,
 ) -> Result<SystemsContextOutput> {
-    let inventory = collect_inventory(target, options.max_files, options.head_bytes)?;
+    let inventory = collect_production_inventory(target, options)?;
     let mut by_file: BTreeMap<String, SurfaceAccumulator> = BTreeMap::new();
 
     for (file_path, body) in &inventory {

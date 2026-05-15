@@ -46,6 +46,12 @@ pub(crate) fn threat_intel_module() -> BuiltinModule {
                  (array of strings).",
                 vec![
                     opt(
+                        "cves",
+                        OptionType::Json,
+                        "Array of CVE IDs to harvest into catalog entries.",
+                    )
+                    .required(),
+                    opt(
                         "outputPath",
                         OptionType::Path,
                         "Destination catalog TOML. Defaults to <target>/.kuzushi/catalogs/harvested.toml. Existing files are appended to.",

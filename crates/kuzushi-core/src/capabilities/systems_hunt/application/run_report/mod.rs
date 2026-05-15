@@ -116,6 +116,7 @@ fn query_systems_hunt_with_scope(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let _llm_scope = begin_systems_hunt_scope(ctx);
+    emit_selected_systems_surfaces(ctx, &run.context);
     let raw = query_systems_hunt_findings(
         run.runtime,
         &run.model,
@@ -210,6 +211,33 @@ fn emit_systems_hunt_done(ctx: &ToolExecutionContext<'_>, finding_count: usize) 
             )
             .emit();
     }
+}
+
+fn emit_selected_systems_surfaces(ctx: &ToolExecutionContext<'_>, context: &SystemsContextOutput) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool-progress",
+                "systems-hunt",
+                selected_surfaces_trace_label(context),
+            )
+            .emit();
+    }
+}
+
+fn selected_surfaces_trace_label(context: &SystemsContextOutput) -> String {
+    let surfaces = context
+        .surfaces
+        .iter()
+        .map(|surface| {
+            format!(
+                "{}:{} ({})",
+                surface.file_path, surface.start_line, surface.kind
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("systems-hunt selected surfaces · {surfaces}")
 }
 
 fn query_systems_hunt_findings(

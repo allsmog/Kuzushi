@@ -16,6 +16,13 @@ pub(crate) fn run_next_step_bridge(
     run_json_bridge(command, request, "next-step bridge")
 }
 
+pub(crate) fn run_next_step_preflight_bridge(
+    command: &[String],
+    request: &NextStepBridgeRequest,
+) -> Result<NextStepBridgeResponse> {
+    run_json_bridge(command, request, "next-step preflight bridge")
+}
+
 pub(crate) fn run_bridge(command: &[String], request: &BridgeRequest) -> Result<BridgeResponse> {
     run_json_bridge(command, request, "pi-agent-core bridge")
 }

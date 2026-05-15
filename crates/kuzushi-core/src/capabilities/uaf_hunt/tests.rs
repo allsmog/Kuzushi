@@ -193,6 +193,10 @@ fn default_max_agent_steps_is_120_with_a_400_cap() {
         "first live run hit the cap at 85 steps on a single alloc/free pair; \
          60 default was too low for any real codebase"
     );
+    assert!(
+        !default.include_non_production,
+        "uaf-hunt should spend default budget on production code"
+    );
 
     // Explicit override clamped at 400 (defense against runaway costs).
     let huge = parse_uaf_hunt_input(&json!({"maxAgentSteps": 10_000}), dir.path()).unwrap();
@@ -201,6 +205,9 @@ fn default_max_agent_steps_is_120_with_a_400_cap() {
     // Operator can pick anywhere in [4, 400].
     let custom = parse_uaf_hunt_input(&json!({"maxAgentSteps": 250}), dir.path()).unwrap();
     assert_eq!(custom.max_agent_steps, 250);
+
+    let broad = parse_uaf_hunt_input(&json!({"includeNonProduction": true}), dir.path()).unwrap();
+    assert!(broad.include_non_production);
 }
 
 #[test]

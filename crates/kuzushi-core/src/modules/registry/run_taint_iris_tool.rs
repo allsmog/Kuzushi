@@ -118,6 +118,9 @@ pub(in crate::modules) fn dispatch_runtime_analysis_tool(
         "x-ray:run" | "x-ray:read" | "x-ray:x-ray" => {
             Some(execute_x_ray_tool(name, input.clone(), ctx, runtime))
         }
+        "threat-leads:build" | "threat-leads:read" => {
+            Some(execute_threat_leads_tool(name, input.clone(), ctx))
+        }
         _ => None,
     }
 }

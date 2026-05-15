@@ -41,6 +41,7 @@ pub mod static_ranking;
 pub mod static_registry;
 pub(crate) mod structured_output;
 pub mod systems_hunt;
+pub mod threat_leads;
 pub mod threat_model;
 pub mod variant_ndiff;
 pub mod verification;

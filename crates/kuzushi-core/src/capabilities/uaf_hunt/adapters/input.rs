@@ -15,6 +15,11 @@ pub(crate) fn parse_uaf_hunt_input(input: &Value, target: &Path) -> Result<UafHu
     // before the model converges on a structured Final.
     let max_agent_steps = read_u32(input, &["maxAgentSteps", "max_agent_steps"], 120, 4).min(400);
     let clang_call_timeout_secs = read_u64(input, &["clangTimeoutSecs"], 60, 5).min(300);
+    let include_non_production = read_bool(
+        input,
+        &["includeNonProduction", "include_non_production"],
+        false,
+    );
     let model = input
         .get("model")
         .and_then(Value::as_str)
@@ -27,6 +32,7 @@ pub(crate) fn parse_uaf_hunt_input(input: &Value, target: &Path) -> Result<UafHu
         alloc_free_pairs,
         compile_commands_path,
         clang_call_timeout_secs,
+        include_non_production,
         model,
     })
 }
@@ -146,6 +152,15 @@ fn read_u64(input: &Value, keys: &[&str], default: u64, min: u64) -> u64 {
     for key in keys {
         if let Some(value) = input.get(key).and_then(Value::as_u64) {
             return value.max(min);
+        }
+    }
+    default
+}
+
+fn read_bool(input: &Value, keys: &[&str], default: bool) -> bool {
+    for key in keys {
+        if let Some(value) = input.get(key).and_then(Value::as_bool) {
+            return value;
         }
     }
     default

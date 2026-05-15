@@ -60,7 +60,7 @@ pub(crate) struct NextStepBridgeCall {
     pub(crate) call_id: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BridgeRequest {
     pub(crate) model: String,

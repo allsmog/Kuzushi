@@ -48,7 +48,8 @@ impl ShellApp {
             "tool",
             Some(tool_name.clone()),
             target_label.clone(),
-        );
+        )
+        .with_process_id(std::process::id());
         let _ = write_run_summary(&target, &summary);
         let _ = append_run_trace_step(
             &target,

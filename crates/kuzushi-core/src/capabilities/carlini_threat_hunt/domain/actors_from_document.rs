@@ -104,13 +104,19 @@ pub(crate) fn actors_from_document(document: &Value) -> ActorsResult {
         if !threat_is_high_or_critical(&threat) {
             continue;
         }
-        for actor_id in resolve_threat_actor_ids(
+        let resolved_actor_ids = resolve_threat_actor_ids(
             &threat,
             &actor_ids,
             &actors_by_id,
             &nodes_by_id,
             &flows_by_id,
-        ) {
+        );
+        let routed_actor_ids = if resolved_actor_ids.is_empty() {
+            unresolved_high_threat_actor_ids(&threat, &all_actors)
+        } else {
+            resolved_actor_ids
+        };
+        for actor_id in routed_actor_ids {
             high_threats
                 .entry(actor_id)
                 .or_default()
@@ -184,9 +190,84 @@ fn contains_high_severity_keyword(impact: &str) -> bool {
         "use after free",
         "privilege escalation",
         "authentication bypass",
+        "authorization bypass",
+        "admin takeover",
+        "credential theft",
+        "data exfiltration",
+        "supply chain compromise",
+        "supply-chain compromise",
+        "full db compromise",
+        "database compromise",
+        "unauthorized access",
         "complete system compromise",
         "complete compromise",
         "code execution",
     ];
     SIGNALS.iter().any(|signal| impact.contains(signal))
+}
+
+fn unresolved_high_threat_actor_ids(threat: &Value, actors: &[DfdNode]) -> Vec<String> {
+    let haystack = unresolved_threat_text(threat);
+    let mut routed = actors
+        .iter()
+        .filter(|actor| unresolved_threat_actor_score(actor, &haystack) > 0)
+        .map(|actor| actor.id.clone())
+        .collect::<Vec<_>>();
+    if routed.is_empty() {
+        routed = actors.iter().map(|actor| actor.id.clone()).collect();
+    }
+    unique_strings(routed)
+}
+
+fn unresolved_threat_text(threat: &Value) -> String {
+    let mut parts = vec![threat_search_text(threat)];
+    for key in ["affectedFiles", "affected_files"] {
+        parts.extend(object_string_array(threat, &[key]));
+    }
+    parts.join(" ").to_ascii_lowercase()
+}
+
+fn unresolved_threat_actor_score(actor: &DfdNode, haystack: &str) -> usize {
+    let actor_text = format!(
+        "{} {} {} {}",
+        actor.id, actor.name, actor.description, actor.trust_zone
+    )
+    .to_ascii_lowercase();
+    let mut score = actor_semantic_score(actor, haystack);
+    for (threat_terms, actor_terms, boost) in [
+        (
+            "url server response remote protocol network endpoint ftp http ssh tls redirect credential",
+            "network peer remote internet endpoint http ftp ssh tls",
+            4usize,
+        ),
+        (
+            "dependency library package pkg-config cmake configure build link supply-chain",
+            "third-party dependency library supply-chain build",
+            4usize,
+        ),
+        (
+            "workflow ci github actions commit pull request contributor maintainer release artifact supply-chain",
+            "maintainer contributor ci cd workflow actions pipeline human commit release",
+            4usize,
+        ),
+        (
+            "auth authorization session cookie csrf cors xss api endpoint report dashboard data query credential user admin browser",
+            "user admin browser authenticated web api client",
+            4usize,
+        ),
+        (
+            "file path filename local overwrite traversal helper",
+            "network peer remote internet endpoint",
+            2usize,
+        ),
+    ] {
+        if any_term_matches(haystack, threat_terms) && any_term_matches(&actor_text, actor_terms) {
+            score += boost;
+        }
+    }
+    score
+}
+
+fn any_term_matches(haystack: &str, terms: &str) -> bool {
+    terms.split_whitespace().any(|term| haystack.contains(term))
 }

@@ -34,13 +34,7 @@ pub(crate) fn run_background_tool(
         .unwrap_or_else(|| TraceHandle::jsonl(workspace.root(), run_id))
         .for_tool(tool_name)
         .child(1);
-    let traced_runtime = runtime
-        .as_ref()
-        .map(|runtime| TracedRuntime::new(runtime as &dyn AgentRuntime, trace.clone()));
-    let runtime_ref = traced_runtime
-        .as_ref()
-        .map(|runtime| runtime as &dyn AgentRuntime)
-        .or_else(|| runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime));
+    let runtime_ref = runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime);
     let ctx = ToolExecutionContext {
         config: &config,
         workspace: Some(workspace),

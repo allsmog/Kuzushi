@@ -26,6 +26,8 @@ pub struct RunSummary {
     pub cost_usd: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub process_id: Option<u32>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifacts: Vec<RunArtifact>,
 }
@@ -48,6 +50,7 @@ impl RunSummary {
             findings: None,
             cost_usd: None,
             error: None,
+            process_id: None,
             artifacts: Vec::new(),
         }
     }
@@ -55,6 +58,7 @@ impl RunSummary {
     pub fn complete(mut self) -> Self {
         self.status = "complete".to_string();
         self.completed_at_unix = Some(now_unix());
+        self.process_id = None;
         self
     }
 
@@ -62,6 +66,20 @@ impl RunSummary {
         self.status = "failed".to_string();
         self.completed_at_unix = Some(now_unix());
         self.error = Some(error.into());
+        self.process_id = None;
+        self
+    }
+
+    pub fn interrupted(mut self, error: impl Into<String>) -> Self {
+        self.status = "interrupted".to_string();
+        self.completed_at_unix = Some(now_unix());
+        self.error = Some(error.into());
+        self.process_id = None;
+        self
+    }
+
+    pub fn with_process_id(mut self, process_id: u32) -> Self {
+        self.process_id = Some(process_id);
         self
     }
 

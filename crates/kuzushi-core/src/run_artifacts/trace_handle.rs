@@ -32,6 +32,10 @@ pub fn current_parent_step() -> Option<usize> {
 
 pub trait TraceSink: Send + Sync {
     fn record(&self, step: &RunTraceStep);
+
+    fn run_artifact_location(&self) -> Option<(PathBuf, String)> {
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -127,6 +131,10 @@ impl TraceHandle {
             _not_send: PhantomData,
         }
     }
+
+    pub fn run_artifact_location(&self) -> Option<(PathBuf, String)> {
+        self.inner.sink.run_artifact_location()
+    }
 }
 
 pub struct TraceStepBuilder<'a> {
@@ -200,6 +208,10 @@ impl TraceSink for JsonlSink {
     fn record(&self, step: &RunTraceStep) {
         let _ = append_run_trace_step(&self.target, &self.run_id, step);
     }
+
+    fn run_artifact_location(&self) -> Option<(PathBuf, String)> {
+        Some((self.target.clone(), self.run_id.clone()))
+    }
 }
 
 pub struct BroadcastSink {
@@ -217,6 +229,10 @@ impl TraceSink for BroadcastSink {
     fn record(&self, step: &RunTraceStep) {
         self.inner.record(step);
         let _ = self.tx.send(step.clone());
+    }
+
+    fn run_artifact_location(&self) -> Option<(PathBuf, String)> {
+        self.inner.run_artifact_location()
     }
 }
 

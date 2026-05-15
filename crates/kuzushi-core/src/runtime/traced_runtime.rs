@@ -156,6 +156,34 @@ impl AgentRuntime for TracedRuntime<'_> {
         result
     }
 
+    fn preflight_tool_loop_blocking(&self, request: &AgentToolLoopRequest) -> Result<()> {
+        let start = Instant::now();
+        let result = self.inner.preflight_tool_loop_blocking(request);
+        let elapsed_ms = start.elapsed().as_millis() as u64;
+        match &result {
+            Ok(()) => {
+                let _ = self
+                    .trace
+                    .step("tool-progress", "next-step", "tool-loop preflight ok")
+                    .with_latency_ms(elapsed_ms)
+                    .emit();
+            }
+            Err(error) => {
+                let _ = self
+                    .trace
+                    .step(
+                        "refused",
+                        "next-step",
+                        format!("tool-loop preflight failed: {error}"),
+                    )
+                    .with_latency_ms(elapsed_ms)
+                    .with_severity("danger")
+                    .emit();
+            }
+        }
+        result
+    }
+
     fn model_for_tier(&self, tier: ModelTier, configured: &str) -> String {
         self.inner.model_for_tier(tier, configured)
     }

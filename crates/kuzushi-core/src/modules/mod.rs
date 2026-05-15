@@ -33,6 +33,7 @@ pub(in crate::modules) use support::*;
 pub(in crate::modules) use taint_iris::*;
 pub(in crate::modules) use taint_iris_next::*;
 pub(in crate::modules) use threat_intel_module::*;
+pub(in crate::modules) use threat_leads_module::*;
 pub(in crate::modules) use threat_model_module::*;
 pub(in crate::modules) use triage::*;
 pub(in crate::modules) use triage_module::*;
@@ -81,6 +82,7 @@ mod run_smoke_next_step_tool;
 #[cfg(test)]
 mod tests;
 mod threat_intel_module;
+mod threat_leads_module;
 mod threat_model_module;
 mod triage_module;
 mod uaf_hunt_module;

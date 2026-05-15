@@ -29,6 +29,7 @@ impl ModuleRegistry {
         registry.register(findings_module());
         registry.register(threat_model_module());
         registry.register(x_ray_module());
+        registry.register(threat_leads_module());
         registry.register(vendor_assessment::module());
         registry.register(chrome_rce::module());
         registry.register(dep_hygiene_module());
