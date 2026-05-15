@@ -75,6 +75,16 @@ const rules = [
       /\b(FindingStore|AgentRuntime|execute_tool|execute_tool_with_runtime|std::process|Command::new|ProcessCommand)\b/,
   },
   {
+    name: "TUI view models and views do not execute modules",
+    roots: [
+      "crates/kuzushi-tui/src/ui_view_models.rs",
+      "crates/kuzushi-tui/src/ui_views.rs",
+      "crates/kuzushi-tui/src/ui_theme.rs",
+    ],
+    forbidden:
+      /\b(AgentRuntime|TracedRuntime|execute_tool|execute_tool_with_runtime|start_background_tool|run_background_tool|Command::new|ProcessCommand)\b/,
+  },
+  {
     name: "TUI catalog cockpit renderers do not parse artifacts directly",
     roots: ["crates/kuzushi-tui/src/renderer/views/catalog"],
     forbidden: /\b(std::fs|serde_json|read_to_string|PathBuf|Path::new|\.exists\()/,
