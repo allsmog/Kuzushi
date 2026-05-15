@@ -12,18 +12,19 @@ fn knowledge_base_model_projects_default_store_and_supported_modules() {
     assert_eq!(
         model.summary_rows[0],
         KnowledgeBaseSummaryRow {
-            label: "module",
-            value: "context".to_string(),
+            cells: ["module".to_string(), "context".to_string()],
         }
     );
     assert!(model.summary_rows.contains(&KnowledgeBaseSummaryRow {
-        label: "store",
-        value: ".kuzushi/v2/attachments.json".to_string(),
+        cells: [
+            "store".to_string(),
+            ".kuzushi/v2/attachments.json".to_string(),
+        ],
     }));
     assert!(model
         .summary_rows
         .iter()
-        .any(|row| row.label == "supported" && row.value.contains("threat-model")));
+        .any(|row| row.cells[0] == "supported" && row.cells[1].contains("threat-model")));
     assert_eq!(
         model.commands,
         [
@@ -56,14 +57,13 @@ fn knowledge_base_model_filters_attachments_to_active_module() {
     let model = knowledge_base_model(&app);
 
     assert!(model.summary_rows.contains(&KnowledgeBaseSummaryRow {
-        label: "store",
-        value: "./attachments.json".to_string(),
+        cells: ["store".to_string(), "./attachments.json".to_string()],
     }));
-    assert_eq!(model.artifact_rows[0].state, "present");
-    assert_eq!(model.artifact_rows[0].path, "crates/demo/src/lib.rs");
+    assert_eq!(model.artifact_rows[0].cells[0], "present");
+    assert_eq!(model.artifact_rows[0].cells[1], "crates/demo/src/lib.rs");
     assert_eq!(model.attachment_rows.len(), 1);
-    assert_eq!(model.attachment_rows[0].id, "a-1");
-    assert_eq!(model.attachment_rows[0].kind, "url");
+    assert_eq!(model.attachment_rows[0].cells[0], "a-1");
+    assert_eq!(model.attachment_rows[0].cells[1], "url");
 }
 
 #[test]
@@ -116,15 +116,15 @@ fn plain_knowledge_base_model_projects_artifact_and_attachment_rows() {
     let model = plain_knowledge_base_model(&app);
 
     assert!(model.artifact_section.empty_message.is_none());
-    assert_eq!(model.artifact_section.rows[0].state, "present");
+    assert_eq!(model.artifact_section.rows[0].cells[0], "present");
     assert_eq!(
-        model.artifact_section.rows[0].path,
+        model.artifact_section.rows[0].cells[1],
         "crates/demo/src/lib.rs"
     );
     assert!(model.attachment_section.empty_message.is_none());
     assert_eq!(model.attachment_section.rows.len(), 1);
-    assert_eq!(model.attachment_section.rows[0].id, "a-1");
-    assert_eq!(model.attachment_section.rows[0].kind, "url");
+    assert_eq!(model.attachment_section.rows[0].cells[0], "a-1");
+    assert_eq!(model.attachment_section.rows[0].cells[1], "url");
 }
 
 fn attachment(module_id: &str, id: &str, kind: AttachmentKind) -> AttachmentRecord {
