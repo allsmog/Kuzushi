@@ -3,8 +3,8 @@ use super::feed_pane::{feed_event_style, feed_event_text};
 use super::*;
 use crate::app::ActivitySession;
 use crate::ui_view_models::{
-    activity_footer_model, activity_header_model, activity_pane_chrome_model, ActivityFooterHint,
-    ActivityPaneTitle,
+    activity_feed_placeholder_model, activity_footer_model, activity_header_model,
+    activity_pane_chrome_model, ActivityFooterHint, ActivityPaneTitle,
 };
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
@@ -208,42 +208,9 @@ fn visible_feed_event_lines(session: &ActivitySession, inner_width: usize) -> Ve
 }
 
 fn ensure_feed_placeholder(lines: &mut Vec<Line<'static>>, session: &ActivitySession) {
-    if lines.is_empty() {
-        lines.push(Line::from(vec![Span::styled(
-            feed_placeholder_text(session),
-            theme::muted(),
-        )]));
+    if let (true, Some(model)) = (lines.is_empty(), activity_feed_placeholder_model(session)) {
+        lines.push(Line::from(vec![Span::styled(model.text, theme::muted())]));
     }
-}
-
-fn feed_placeholder_text(session: &ActivitySession) -> String {
-    let hidden_count = hidden_subsystem_event_count(session);
-    if hidden_count == 0 || session.verbose_subsystems {
-        return " (waiting for trace events…)".to_string();
-    }
-    format!(
-        " ({hidden_count} hidden subsystem event{plural} — press V to show)",
-        plural = plural_suffix(hidden_count)
-    )
-}
-
-fn hidden_subsystem_event_count(session: &ActivitySession) -> usize {
-    session
-        .events
-        .iter()
-        .filter(|event| hidden_event_module(&event.step.module_id))
-        .count()
-}
-
-fn hidden_event_module(module_id: &Option<String>) -> bool {
-    module_id
-        .as_deref()
-        .map(crate::app::is_hidden_module_id)
-        .unwrap_or(false)
-}
-
-fn plural_suffix(count: usize) -> &'static str {
-    (count != 1).then_some("s").unwrap_or("")
 }
 
 fn feed_scroll(session: &ActivitySession, line_count: usize, height: usize) -> usize {
