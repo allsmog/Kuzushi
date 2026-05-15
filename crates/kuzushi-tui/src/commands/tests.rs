@@ -91,6 +91,10 @@ mod tests {
             parse_command("auth openai"),
             ShellCommand::AuthLogin(Some("openai-codex".to_string()))
         );
+        assert!(matches!(
+            parse_command(&format!("auth {}", "codex")),
+            ShellCommand::Unknown(_)
+        ));
         assert_eq!(
             parse_command("/provider openai"),
             ShellCommand::Provider(Some("openai".to_string()))

@@ -3,7 +3,7 @@ mod tests {
     use super::super::*;
 
     #[test]
-    fn preferred_model_choice_state_respects_configured_then_codex_openai_anthropic() {
+    fn preferred_model_choice_state_respects_configured_then_oauth_openai_anthropic() {
         assert_eq!(
             preferred_model_choice_index_for_state(
                 Some("anthropic:claude-opus-4-7"),
@@ -28,6 +28,17 @@ mod tests {
         assert_eq!(
             preferred_model_choice_index_for_state(Some("unknown:model"), false, false, false),
             0
+        );
+    }
+
+    #[test]
+    fn legacy_codex_shorthands_are_not_public_selectors() {
+        assert!(normalize_auth_provider("codex").is_err());
+        assert!(resolve_model_selector("codex:gpt-5.5").is_none());
+        assert!(resolve_model_selector("codex-mini").is_none());
+        assert_eq!(
+            resolve_model_selector("openai-oauth:gpt-5.5").map(|choice| choice.index),
+            Some(3)
         );
     }
 }
