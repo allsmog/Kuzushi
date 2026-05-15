@@ -27,6 +27,10 @@ const forbidden = [
 const publicDocForbidden = [
   ["raw Codex wording in public docs", /\bCodex\b|\bcodex\b|\.codex\b|openai-codex/i],
 ];
+const publicSourceForbidden = [
+  ["legacy codex auth selector", /Some\("codex"\)|\|\s*"codex"\b/],
+  ["legacy codex model selector", /"codex(?::gpt|-[^"]*)"/i],
+];
 
 const files = publicFiles();
 const failures = [...identityFailures(), ...files.flatMap(scanFile)];
@@ -99,7 +103,11 @@ function binShimPreservesCompactAlias() {
 }
 
 function lineFailures(file, line, lineNumber) {
-  const checks = isPublicDoc(file) ? [...forbidden, ...publicDocForbidden] : forbidden;
+  const checks = [
+    ...forbidden,
+    ...(isPublicDoc(file) ? publicDocForbidden : []),
+    ...(isProductionPublicSource(file) ? publicSourceForbidden : []),
+  ];
   return checks
     .filter(([, pattern]) => pattern.test(line))
     .map(([label]) => `${file}:${lineNumber} ${label}`);
@@ -128,4 +136,8 @@ function isIgnored(file) {
 
 function isPublicDoc(file) {
   return file === "README.md" || file.startsWith("docs/");
+}
+
+function isProductionPublicSource(file) {
+  return file.includes("/src/") && !file.endsWith("/tests.rs") && !file.endsWith("_tests.rs");
 }
