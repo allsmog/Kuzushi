@@ -24,6 +24,16 @@ const retiredDirs = [
   "src/knowledge",
 ];
 
+const retiredUiPaths = [
+  "src/cli/commands/shell.ts",
+  "src/copilot/shell.ts",
+  "src/ui/App.tsx",
+  "src/ui/components",
+  "src/ui/primitives",
+  "src/ui/render.ts",
+  "src/ui/setup.ts",
+];
+const retiredUiDependencies = ["ink", "react", "react-dom", "@types/react", "@types/react-dom"];
 const deletedReferenceRoot = "reference/ts-runtime-island";
 const sourceRoots = ["src", "scripts/pi-agent-core-bridge.mjs"];
 const docRoots = [
@@ -67,11 +77,19 @@ for (const dir of retiredDirs) {
   }
 }
 
+for (const uiPath of retiredUiPaths) {
+  if (existsSync(path.join(repo, uiPath))) {
+    failures.push(`${uiPath} still exists; interactive shell UI belongs in Rust Ratatui.`);
+  }
+}
+
 if (existsSync(path.join(repo, deletedReferenceRoot))) {
   failures.push(
     `${deletedReferenceRoot} still exists; retired TypeScript runtime files must be deleted.`,
   );
 }
+
+failures.push(...tsxSourceFailures(), ...retiredUiDependencyFailures());
 
 const sourceFiles = sourceRoots.flatMap((root) => walk(root, sourceExtensions));
 for (const file of sourceFiles) {
@@ -116,18 +134,14 @@ console.log("retired TypeScript runtime guardrail passed");
 
 function walk(root, extensions) {
   const abs = path.join(repo, root);
-  let stats;
-  try {
-    stats = statSync(abs);
-  } catch {
-    return [];
-  }
+  const stats = statOrUndefined(abs);
+  if (!stats) return [];
+  if (stats.isFile()) return fileIfExtension(abs, extensions);
+  return stats.isDirectory() ? walkDirectory(root, extensions) : [];
+}
 
-  if (stats.isFile()) {
-    return extensions.has(path.extname(abs)) ? [abs] : [];
-  }
-  if (!stats.isDirectory()) return [];
-
+function walkDirectory(root, extensions) {
+  const abs = path.join(repo, root);
   const out = [];
   for (const entry of readdirSync(abs)) {
     if (entry === "node_modules" || entry === "dist" || entry === ".git") continue;
@@ -136,8 +150,35 @@ function walk(root, extensions) {
   return out;
 }
 
+function statOrUndefined(abs) {
+  try {
+    return statSync(abs);
+  } catch {
+    return undefined;
+  }
+}
+
+function fileIfExtension(abs, extensions) {
+  return extensions.has(path.extname(abs)) ? [abs] : [];
+}
+
 function relative(file) {
   return path.relative(repo, file).replaceAll("\\", "/");
+}
+
+function tsxSourceFailures() {
+  return walk("src", new Set([".tsx"])).map(
+    (file) => `${relative(file)} is a TSX source file; shell UI belongs in Rust Ratatui.`,
+  );
+}
+
+function retiredUiDependencyFailures() {
+  const pkg = JSON.parse(readFileSync(path.join(repo, "package.json"), "utf8"));
+  return ["dependencies", "devDependencies", "optionalDependencies"].flatMap((section) =>
+    retiredUiDependencies
+      .filter((name) => Object.hasOwn(pkg[section] ?? {}, name))
+      .map((name) => `package.json ${section}.${name} must not reintroduce React/Ink UI.`),
+  );
 }
 
 function importSpecifiers(text) {
