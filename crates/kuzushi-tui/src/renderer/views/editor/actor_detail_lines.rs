@@ -1,19 +1,15 @@
 use super::*;
+use crate::ui_view_models::{actor_detail_model, ActorDetailModel, ActorTranscriptRow};
 
 pub(crate) fn actor_detail_lines(app: &ShellApp, area: Rect, index: usize) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
+    let visible = area.height.saturating_sub(8).max(2) as usize;
+    let model = actor_detail_model(app, visible);
     lines.push(blank());
     lines.push(divider(&format!("ACTOR {index}"), area.width));
     lines.push(detail("tool", "semgrep:scan"));
-    lines.push(detail(
-        "status",
-        app.scan
-            .as_ref()
-            .map(scan_status)
-            .unwrap_or_else(|| "idle".to_string())
-            .as_str(),
-    ));
-    lines.push(detail("filter", app.actor_detail_filter.label()));
+    lines.push(detail("status", &model.status));
+    lines.push(detail("filter", &model.filter_label));
     lines.push(keybind_hint_line(&[
         ("f", "cycle filter"),
         ("0", "reset"),
@@ -22,24 +18,23 @@ pub(crate) fn actor_detail_lines(app: &ShellApp, area: Rect, index: usize) -> Ve
     ]));
     lines.push(blank());
 
-    let visible = area.height.saturating_sub(8).max(2) as usize;
-    let filter = app.actor_detail_filter;
-    let mut kept: Vec<&crate::app::LogLine> = app
-        .log
-        .iter()
-        .filter(|line| filter.keeps(&line.prefix))
-        .collect();
-    let start = kept.len().saturating_sub(visible);
-    kept.drain(..start);
-    if kept.is_empty() {
-        lines.push(muted("(no matching transcript entries under this filter)"));
-    } else {
-        for line in kept {
-            lines.push(Line::from(vec![
-                Span::styled(format!("{:>8} ", line.prefix), theme::subtle()),
-                Span::raw(line.body.clone()),
-            ]));
-        }
-    }
+    push_transcript_lines(&mut lines, &model);
     lines
+}
+
+fn push_transcript_lines(lines: &mut Vec<Line<'static>>, model: &ActorDetailModel) {
+    if model.transcript.is_empty() {
+        lines.push(muted("(no matching transcript entries under this filter)"));
+        return;
+    }
+    for row in &model.transcript {
+        lines.push(transcript_line(row));
+    }
+}
+
+fn transcript_line(row: &ActorTranscriptRow) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{:>8} ", row.prefix), theme::subtle()),
+        Span::raw(row.body.clone()),
+    ])
 }

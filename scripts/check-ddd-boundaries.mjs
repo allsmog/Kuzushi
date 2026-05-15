@@ -183,6 +183,7 @@ const rules = [
   { name: "TUI module progress renderer reads SAST task view model", roots: ["crates/kuzushi-tui/src/renderer/views/module/append_progress_section.rs"], forbidden: /\b(option_store|sast_task_rows|serde_json|crate::app::SastTaskRow)\b/ },
   { name: "TUI chrome cards read chrome-card view models", roots: ["crates/kuzushi-tui/src/renderer/chrome/cards/render_threat_patch_card.rs", "crates/kuzushi-tui/src/renderer/chrome/cards/confirm_card_height.rs", "crates/kuzushi-tui/src/renderer/chrome/cards/render_plan_card.rs", "crates/kuzushi-tui/src/renderer/section_slot.rs"], forbidden: /\b(pending_threat_patch|serde_json|crate::app::ThreatPatch|pending_confirm|ConfirmKind|PendingConfirm|advisory\.pending_confirm|advisory\.throttle|advisory\.budget_halt|is_budget_halted|ThrottleAdvisory|crate::app::BudgetHalt)\b/ },
   { name: "TUI plan prereq and patch renderers read review view models", roots: ["crates/kuzushi-tui/src/renderer/chrome/cards/render_plan_card.rs", "crates/kuzushi-tui/src/renderer/chrome/cards/render_prereq_prompt_card.rs", "crates/kuzushi-tui/src/renderer/chrome/cards/render_threat_patch_card.rs", "crates/kuzushi-tui/src/renderer/plain/render_plain_app.rs", "crates/kuzushi-tui/src/renderer/views/patch/patch_lines.rs"], forbidden: /\b(pending_plan|PlanProposal|PlanChange|plan_change_skipped|plan_cursor_clamped|pending_prereq_prompt|PendingPrereqPrompt|PrereqPlanStep|pending_patch|PendingPatch)\b/ },
+  { name: "TUI actor detail renderer reads actor-detail view model", roots: ["crates/kuzushi-tui/src/renderer/views/editor/actor_detail_lines.rs"], forbidden: /\b(actor_detail_filter|crate::app::LogLine|scan_status|\.log\b|\.scan\b)\b/ },
   { name: "TUI prompt-tuning renderer reads prompt-tuning view models", roots: ["crates/kuzushi-tui/src/renderer/views/editor/tune_lines.rs"], forbidden: /\b(read_house_rules|TuneAction|tune_cursor_clamped|prompts_cursor_clamped|focused_module|PROMPT_VERB_NAMES|crate::app::ShellApp)\b/ },
   {
     name: "TUI catalog renderer reads catalog view model",
@@ -245,9 +246,7 @@ const rules = [
   },
 ];
 
-for (const [name, candidates] of boundaries) {
-  if (!hasBoundary(candidates)) failures.push(`missing DDD boundary: ${name}`);
-}
+for (const [name, candidates] of boundaries) if (!hasBoundary(candidates)) failures.push(`missing DDD boundary: ${name}`);
 
 for (const rule of rules) {
   failures.push(...ruleFailures(rule));
