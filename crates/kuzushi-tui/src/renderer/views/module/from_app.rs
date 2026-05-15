@@ -4,55 +4,70 @@ impl ModuleRunSummary {
     pub(in crate::renderer::views) fn from_app(app: &ShellApp) -> Self {
         let scan = app.scan.as_ref();
         let running_tool = app.running_tool_name().map(str::to_string);
-        let target = scan
-            .map(|scan| compact_target_path(&scan.target.display().to_string()))
-            .or_else(|| {
-                app.target
-                    .as_ref()
-                    .map(|path| compact_target_path(&path.display().to_string()))
-            })
-            .unwrap_or_else(|| "target:none".to_string());
-        let stage = scan
-            .map(scan_status)
-            .or_else(|| {
-                app.live_activity
-                    .as_ref()
-                    .map(|activity| activity.phase.label().to_string())
-            })
-            .or_else(|| running_tool.as_ref().map(|_| "running tool".to_string()))
-            .unwrap_or_else(|| "idle".to_string());
-        let findings = scan
-            .map(|scan| scan.findings_count)
-            .unwrap_or(app.findings.len());
-        let run = scan
-            .and_then(|scan| scan.run_id.as_ref())
-            .map(|run_id| format!("run {}", short(run_id)))
-            .unwrap_or_else(|| run_label_without_id(scan.is_some(), running_tool.as_deref()));
-        let active_stage = scan
-            .map(|scan| scan.stage.clone())
-            .unwrap_or_else(|| "idle".to_string());
         let scan_running = scan.is_some_and(|scan| scan.running);
-        let scan_done =
-            scan.is_some() && !scan_running && scan.and_then(|scan| scan.error.as_ref()).is_none();
-        let scan_error = scan.and_then(|scan| scan.error.clone());
 
         Self {
-            target,
-            stage,
-            findings,
-            run,
-            active_stage,
+            target: module_run_target(app, scan),
+            stage: module_run_stage(app, scan, running_tool.as_ref()),
+            findings: module_run_findings(app, scan),
+            run: module_run_label(scan, running_tool.as_deref()),
+            active_stage: module_run_active_stage(scan),
             scan_running,
-            scan_done,
+            scan_done: module_run_done(scan, scan_running),
             has_scan: scan.is_some(),
             running_tool,
-            scan_error,
+            scan_error: scan.and_then(|scan| scan.error.clone()),
         }
     }
 
     pub(in crate::renderer::views) fn tool_is_running(&self) -> bool {
         self.running_tool.is_some()
     }
+}
+
+fn module_run_target(app: &ShellApp, scan: Option<&ScanPanelState>) -> String {
+    scan.map(|scan| compact_target_path(&scan.target.display().to_string()))
+        .or_else(|| {
+            app.target
+                .as_ref()
+                .map(|path| compact_target_path(&path.display().to_string()))
+        })
+        .unwrap_or_else(|| "target:none".to_string())
+}
+
+fn module_run_stage(
+    app: &ShellApp,
+    scan: Option<&ScanPanelState>,
+    running_tool: Option<&String>,
+) -> String {
+    scan.map(scan_status)
+        .or_else(|| {
+            app.live_activity
+                .as_ref()
+                .map(|activity| activity.phase.label().to_string())
+        })
+        .or_else(|| running_tool.map(|_| "running tool".to_string()))
+        .unwrap_or_else(|| "idle".to_string())
+}
+
+fn module_run_findings(app: &ShellApp, scan: Option<&ScanPanelState>) -> usize {
+    scan.map(|scan| scan.findings_count)
+        .unwrap_or(app.findings.len())
+}
+
+fn module_run_label(scan: Option<&ScanPanelState>, running_tool: Option<&str>) -> String {
+    scan.and_then(|scan| scan.run_id.as_ref())
+        .map(|run_id| format!("run {}", short(run_id)))
+        .unwrap_or_else(|| run_label_without_id(scan.is_some(), running_tool))
+}
+
+fn module_run_active_stage(scan: Option<&ScanPanelState>) -> String {
+    scan.map(|scan| scan.stage.clone())
+        .unwrap_or_else(|| "idle".to_string())
+}
+
+fn module_run_done(scan: Option<&ScanPanelState>, scan_running: bool) -> bool {
+    scan.is_some() && !scan_running && scan.and_then(|scan| scan.error.as_ref()).is_none()
 }
 
 pub(in crate::renderer::views) fn run_label_without_id(
@@ -71,6 +86,7 @@ pub(in crate::renderer::views) fn run_label_without_id(
 pub(crate) fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     let summary = ModuleRunSummary::from_app(app);
+    let findings = crate::ui_view_models::findings_model(app);
 
     append_run_status(
         &mut lines,
@@ -81,7 +97,7 @@ pub(crate) fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
     append_live_activity(&mut lines, app, area);
     append_progress_section(&mut lines, app, area, &summary);
     append_scan_error(&mut lines, area, &summary);
-    append_findings_preview(&mut lines, app, area);
+    append_findings_preview(&mut lines, &findings, area);
 
     lines.push(blank());
     lines.push(divider("TRANSCRIPT", area.width));

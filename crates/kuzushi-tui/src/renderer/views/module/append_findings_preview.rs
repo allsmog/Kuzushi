@@ -1,33 +1,31 @@
 use super::*;
+use crate::ui_view_models::FindingsModel;
 
 pub(in crate::renderer::views) fn append_findings_preview(
     lines: &mut Vec<Line<'static>>,
-    app: &ShellApp,
+    model: &FindingsModel,
     area: Rect,
 ) {
-    if app.findings.is_empty() {
+    if model.rows.is_empty() {
         return;
     }
 
     lines.push(blank());
-    let triaged = app
-        .findings
-        .iter()
-        .filter(|finding| finding.triage.is_some())
-        .count();
-    let pending = app.findings.len().saturating_sub(triaged);
-    let header = format!("FINDINGS · {triaged} triaged · {pending} pending");
+    let header = format!(
+        "FINDINGS · {} triaged · {} pending",
+        model.triaged, model.pending
+    );
     lines.push(section_header_line(&header, area.width));
-    for (alias, finding) in sorted_finding_aliases(&app.findings).into_iter().take(8) {
+    for finding in model.rows.iter().take(8) {
         lines.push(compact_finding_row(
-            &alias,
+            &finding.alias,
             finding.severity,
             &finding.title,
-            &finding_location(&finding),
+            &finding.location,
             area.width,
         ));
     }
-    append_more_findings_hint(lines, app.findings.len());
+    append_more_findings_hint(lines, model.total);
 }
 
 pub(in crate::renderer::views) fn append_more_findings_hint(
