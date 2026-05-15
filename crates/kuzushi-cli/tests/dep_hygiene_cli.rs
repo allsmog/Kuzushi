@@ -21,10 +21,20 @@ fn kuzushi_command(home: &std::path::Path) -> Command {
     command
 }
 
-fn latest_run_json(repo: &std::path::Path, leaf: &str) -> Value {
-    let latest = std::fs::read_to_string(repo.join(".kuzushi/latest")).unwrap();
-    let path = repo.join(".kuzushi/runs").join(latest.trim()).join(leaf);
+fn latest_run_id(repo: &std::path::Path) -> String {
+    std::fs::read_to_string(repo.join(".kuzushi/latest"))
+        .unwrap()
+        .trim()
+        .to_string()
+}
+
+fn run_json(repo: &std::path::Path, run_id: &str, leaf: &str) -> Value {
+    let path = repo.join(".kuzushi/runs").join(run_id).join(leaf);
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+fn latest_run_json(repo: &std::path::Path, leaf: &str) -> Value {
+    run_json(repo, &latest_run_id(repo), leaf)
 }
 
 fn assert_latest_static_artifacts(repo: &std::path::Path, expected_tool: &str) {
@@ -696,6 +706,79 @@ fn run_dep_hygiene_check_reaches_native_executor() {
         .and_then(Value::as_str)
         .is_some_and(|output| output.contains("dep-hygiene: 1 risky specifier")));
     assert_latest_static_artifacts(&repo, "dep-hygiene");
+}
+
+#[test]
+fn run_report_build_promotes_markdown_for_report_run() {
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().join("repo");
+    let home = temp.path().join("home");
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(
+        repo.join("package.json"),
+        r#"{"dependencies":{"lodash":"latest"}}"#,
+    )
+    .unwrap();
+
+    let scan = kuzushi_command(&home)
+        .arg("--target")
+        .arg(&repo)
+        .arg("run")
+        .arg("dep-hygiene:check")
+        .output()
+        .unwrap();
+    assert!(
+        scan.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&scan.stderr)
+    );
+    let source_run = latest_run_id(&repo);
+
+    let report = kuzushi_command(&home)
+        .arg("--target")
+        .arg(&repo)
+        .arg("run")
+        .arg("report:build")
+        .output()
+        .unwrap();
+    assert!(
+        report.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&report.stderr)
+    );
+    let body: Value = serde_json::from_slice(&report.stdout).unwrap();
+    assert_eq!(
+        body.pointer("/data/sourceRunId").and_then(Value::as_str),
+        Some(source_run.as_str())
+    );
+    assert!(body
+        .pointer("/reportMarkdown")
+        .and_then(Value::as_str)
+        .is_some_and(|markdown| markdown.contains("dep-hygiene:check")));
+
+    let report_run = latest_run_id(&repo);
+    assert_ne!(report_run, source_run);
+    assert_eq!(
+        run_json(&repo, &report_run, "run.json")
+            .pointer("/tool")
+            .and_then(Value::as_str),
+        Some("report:build")
+    );
+    let report_markdown = std::fs::read_to_string(
+        repo.join(".kuzushi/runs")
+            .join(&report_run)
+            .join("report.md"),
+    )
+    .unwrap();
+    assert!(report_markdown.contains(source_run.as_str()));
+    assert!(report_markdown.contains("dep-hygiene:check"));
+    assert!(run_json(&repo, &report_run, "artifacts.json")
+        .pointer("/artifacts")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .any(|artifact| artifact.pointer("/label").and_then(Value::as_str) == Some("report")));
 }
 
 #[test]
