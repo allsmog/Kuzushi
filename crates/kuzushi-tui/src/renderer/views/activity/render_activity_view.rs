@@ -3,8 +3,9 @@ use super::feed_pane::{feed_event_style, feed_event_text};
 use super::*;
 use crate::app::ActivitySession;
 use crate::ui_view_models::{
-    activity_feed_pause_model, activity_feed_placeholder_model, activity_footer_model,
-    activity_header_model, activity_pane_chrome_model, ActivityFooterHint, ActivityPaneTitle,
+    activity_feed_pause_model, activity_feed_placeholder_model, activity_feed_scroll_offset,
+    activity_footer_model, activity_header_model, activity_pane_chrome_model,
+    activity_task_scroll_offset, ActivityFooterHint, ActivityPaneTitle,
 };
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
@@ -103,7 +104,7 @@ fn render_dag_pane_widget(
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    let scroll = clamp_scroll(session.task_scroll, lines.len(), inner_area.height as usize);
+    let scroll = activity_task_scroll_offset(session, lines.len(), inner_area.height as usize);
     let para = Paragraph::new(lines)
         .scroll((scroll as u16, 0))
         .wrap(Wrap { trim: false });
@@ -162,7 +163,7 @@ fn render_feed_pane_widget(
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
-    let scroll = feed_scroll(session, lines.len(), inner_area.height as usize);
+    let scroll = activity_feed_scroll_offset(session, lines.len(), inner_area.height as usize);
     let para = Paragraph::new(lines)
         .scroll((scroll as u16, 0))
         .wrap(Wrap { trim: false });
@@ -213,13 +214,6 @@ fn ensure_feed_placeholder(lines: &mut Vec<Line<'static>>, session: &ActivitySes
     }
 }
 
-fn feed_scroll(session: &ActivitySession, line_count: usize, height: usize) -> usize {
-    if session.feed_auto_tail {
-        return line_count.saturating_sub(height);
-    }
-    clamp_scroll(session.feed_scroll, line_count, height)
-}
-
 fn render_focus_footer(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
     let lines = focus_footer_lines(area.width, session);
     let para = Paragraph::new(lines).wrap(Wrap { trim: false });
@@ -249,12 +243,4 @@ fn append_key_hint(spans: &mut Vec<Span<'static>>, index: usize, key: &str, hint
     spans.push(Span::styled(format!("[{key}"), theme::accent()));
     spans.push(Span::raw(" "));
     spans.push(Span::styled(format!("{hint}]"), theme::muted()));
-}
-
-fn clamp_scroll(requested: usize, total: usize, viewport: usize) -> usize {
-    if total <= viewport {
-        return 0;
-    }
-    let max = total.saturating_sub(viewport);
-    requested.min(max)
 }
