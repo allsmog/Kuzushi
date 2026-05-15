@@ -26,6 +26,11 @@ pub(crate) struct ModuleToolModel {
     pub(crate) headless: bool,
 }
 
+pub(crate) fn focused_module_detail_model(app: &ShellApp) -> Option<ModuleDetailModel> {
+    let module_id = app.focused_module.as_deref()?;
+    module_detail_model(app, module_id)
+}
+
 pub(crate) fn module_detail_model(app: &ShellApp, module_id: &str) -> Option<ModuleDetailModel> {
     let module = app
         .registry
@@ -135,5 +140,29 @@ fn format_json_value(value: &serde_json::Value) -> String {
         serde_json::Value::Bool(value) => value.to_string(),
         serde_json::Value::Null => "null".to_string(),
         other => serde_json::to_string(other).unwrap_or_else(|_| "<json>".to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::V2Config;
+
+    #[test]
+    fn focused_module_detail_model_uses_current_focus() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.focused_module = Some("sast".to_string());
+
+        let model = focused_module_detail_model(&app).expect("focused module detail");
+
+        assert_eq!(model.id, "sast");
+        assert!(!model.visible_tools.is_empty());
+    }
+
+    #[test]
+    fn focused_module_detail_model_is_empty_without_focus() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        assert!(focused_module_detail_model(&app).is_none());
     }
 }
