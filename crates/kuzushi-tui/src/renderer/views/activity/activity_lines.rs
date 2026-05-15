@@ -1,8 +1,8 @@
-use super::dag_pane::{dag_row_text, dag_state_style, dag_subsystems_row_text};
-use super::feed_pane::{feed_event_style, feed_event_text};
+use super::dag_pane::dag_row_style;
+use super::feed_pane::feed_row_style;
 use super::*;
 use crate::ui_view_models::{
-    activity_feed_pause_model, activity_footer_model, activity_header_model,
+    activity_dag_pane_rows, activity_feed_pane_rows, activity_footer_model, activity_header_model,
     activity_pane_chrome_model, ActivityFooterHint, ActivityPaneTitle,
 };
 use std::time::Instant;
@@ -69,31 +69,17 @@ fn activity_pane_lines(
 }
 
 fn dag_pane_rows(session: &crate::app::ActivitySession, left_w: usize) -> Vec<ActivityPaneRow> {
-    let now = Instant::now();
-    let mut rows = session
-        .tasks
-        .values()
-        .map(|row| (dag_row_text(row, left_w, now), dag_state_style(row.state)))
-        .collect::<Vec<_>>();
-    if let Some(text) = dag_subsystems_row_text(session, left_w) {
-        rows.push((text, theme::muted()));
-    }
-    rows
+    activity_dag_pane_rows(session, left_w, Instant::now())
+        .into_iter()
+        .map(|row| (row.text, dag_row_style(row.tone)))
+        .collect()
 }
 
 fn feed_pane_rows(session: &crate::app::ActivitySession, right_w: usize) -> Vec<ActivityPaneRow> {
-    let mut rows = session
-        .events
-        .iter()
-        .filter_map(|event| {
-            feed_event_text(event, session.verbose_subsystems, right_w)
-                .map(|text| (text, feed_event_style(event)))
-        })
-        .collect::<Vec<_>>();
-    if let Some(model) = activity_feed_pause_model(session) {
-        rows.insert(0, (fit(model.text, right_w), theme::warn()));
-    }
-    rows
+    activity_feed_pane_rows(session, right_w)
+        .into_iter()
+        .map(|row| (row.text, feed_row_style(row.tone)))
+        .collect()
 }
 
 fn combined_activity_pane_line(
