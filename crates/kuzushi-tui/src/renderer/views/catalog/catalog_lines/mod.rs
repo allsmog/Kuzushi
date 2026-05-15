@@ -1,6 +1,6 @@
 use super::*;
 use crate::ui_view_models::{
-    catalog_model, catalog_uses_collapsed_layout, CatalogActionModule, CatalogModel,
+    catalog_default_action_hint, catalog_model, catalog_uses_collapsed_layout, CatalogModel,
     CatalogModuleGroup,
 };
 
@@ -22,7 +22,7 @@ pub(crate) fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         return lines;
     }
 
-    append_default_next_action(&mut lines, model.default_action.as_ref(), area.width);
+    append_default_next_action(&mut lines, &model, area.width);
     append_module_groups(&mut lines, &model, area.width);
     lines
 }
@@ -36,24 +36,12 @@ fn append_modules_header(lines: &mut Vec<Line<'static>>, module_count: usize) {
     lines.push(blank());
 }
 
-fn append_default_next_action(
-    lines: &mut Vec<Line<'static>>,
-    module: Option<&CatalogActionModule>,
-    width: u16,
-) {
-    if let Some(module) = module {
-        let prefix = format!("Run {} against the active target — ", module.id);
-        let budget = next_action_description_budget(width, &prefix);
-        let hint = format!("{prefix}{}", short_sentence(&module.description, budget));
+fn append_default_next_action(lines: &mut Vec<Line<'static>>, model: &CatalogModel, width: u16) {
+    if let Some(module) = model.default_action.as_ref() {
+        let hint = catalog_default_action_hint(module, width);
         lines.push(next_action_line(&hint, width as usize));
         lines.push(blank());
     }
-}
-
-fn next_action_description_budget(width: u16, prefix: &str) -> usize {
-    (width as usize)
-        .saturating_sub(prefix.chars().count() + 8)
-        .max(40)
 }
 
 fn append_module_groups(lines: &mut Vec<Line<'static>>, model: &CatalogModel, width: u16) {
@@ -69,8 +57,8 @@ fn append_module_group(lines: &mut Vec<Line<'static>>, group: &CatalogModuleGrou
     lines.push(category_divider(group.category, blurb, width));
     for module in &group.rows {
         lines.push(catalog_module_row(
-            &module.id,
-            &module.description,
+            &module.cells[0],
+            &module.cells[1],
             module.focused,
             &widths,
         ));
