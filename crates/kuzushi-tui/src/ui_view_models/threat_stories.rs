@@ -1,6 +1,8 @@
 use crate::ShellApp;
 use kuzushi_core::Severity;
 
+pub(crate) const THREAT_STORY_COLUMN_COUNT: usize = 5;
+
 type StorySpec = (
     &'static str,
     Severity,
@@ -42,11 +44,42 @@ const CANONICAL_STORIES: [StorySpec; 4] = [
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ThreatStoryRow {
-    pub(crate) id: String,
-    pub(crate) severity: Severity,
-    pub(crate) title: String,
-    pub(crate) attack: String,
-    pub(crate) location: String,
+    pub(crate) tone: ThreatStoryTone,
+    pub(crate) cells: [String; THREAT_STORY_COLUMN_COUNT],
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ThreatStoryTone {
+    Critical,
+    High,
+    Medium,
+    Low,
+    Info,
+    Unknown,
+}
+
+impl ThreatStoryTone {
+    pub(crate) fn from_severity(severity: Severity) -> Self {
+        match severity {
+            Severity::Critical => Self::Critical,
+            Severity::High => Self::High,
+            Severity::Medium => Self::Medium,
+            Severity::Low => Self::Low,
+            Severity::Info => Self::Info,
+            Severity::Unknown => Self::Unknown,
+        }
+    }
+
+    fn rank(self) -> u8 {
+        match self {
+            Self::Critical => 5,
+            Self::High => 4,
+            Self::Medium => 3,
+            Self::Low => 2,
+            Self::Info => 1,
+            Self::Unknown => 0,
+        }
+    }
 }
 
 pub(crate) fn threat_story_rows(app: &ShellApp) -> Vec<ThreatStoryRow> {
@@ -59,9 +92,7 @@ pub(crate) fn threat_story_rows(app: &ShellApp) -> Vec<ThreatStoryRow> {
 pub(crate) fn threat_story_rows_from_doc(doc: &serde_json::Value) -> Option<Vec<ThreatStoryRow>> {
     let threats = non_empty_threats(doc)?;
     let mut rows: Vec<ThreatStoryRow> = threats.iter().filter_map(story_from_threat).collect();
-    rows.sort_by_key(|story| {
-        std::cmp::Reverse(super::threat_impact::severity_rank(story.severity))
-    });
+    rows.sort_by_key(|story| std::cmp::Reverse(story.tone.rank()));
     Some(rows)
 }
 
@@ -74,13 +105,13 @@ fn non_empty_threats(doc: &serde_json::Value) -> Option<&[serde_json::Value]> {
 }
 
 fn story_from_threat(threat: &serde_json::Value) -> Option<ThreatStoryRow> {
-    Some(ThreatStoryRow {
-        id: string_field(threat, "id")?,
-        severity: threat_severity(threat),
-        title: string_field(threat, "title").unwrap_or_else(|| "untitled".to_string()),
-        attack: string_field(threat, "attackVector").unwrap_or_default(),
-        location: first_affected_file_location(threat),
-    })
+    Some(threat_story_row(
+        string_field(threat, "id")?,
+        threat_severity(threat),
+        string_field(threat, "title").unwrap_or_else(|| "untitled".to_string()),
+        string_field(threat, "attackVector").unwrap_or_default(),
+        first_affected_file_location(threat),
+    ))
 }
 
 fn threat_severity(threat: &serde_json::Value) -> Severity {
@@ -123,14 +154,35 @@ fn format_affected_file(file: &serde_json::Value) -> String {
 fn canonical_story_rows() -> Vec<ThreatStoryRow> {
     CANONICAL_STORIES
         .into_iter()
-        .map(|(id, severity, title, attack, location)| ThreatStoryRow {
-            id: id.to_string(),
-            severity,
-            title: title.to_string(),
-            attack: attack.to_string(),
-            location: location.to_string(),
+        .map(|(id, severity, title, attack, location)| {
+            threat_story_row(
+                id.to_string(),
+                severity,
+                title.to_string(),
+                attack.to_string(),
+                location.to_string(),
+            )
         })
         .collect()
+}
+
+fn threat_story_row(
+    id: String,
+    severity: Severity,
+    title: String,
+    attack: String,
+    location: String,
+) -> ThreatStoryRow {
+    ThreatStoryRow {
+        tone: ThreatStoryTone::from_severity(severity),
+        cells: [
+            id,
+            severity.as_str().to_uppercase(),
+            title,
+            attack,
+            location,
+        ],
+    }
 }
 
 #[cfg(test)]
@@ -152,12 +204,12 @@ mod tests {
         let stories = threat_story_rows_from_doc(&doc).expect("non-empty stories");
 
         assert_eq!(stories.len(), 3);
-        assert_eq!(stories[0].id, "T-002");
-        assert_eq!(stories[0].severity, Severity::Critical);
-        assert_eq!(stories[0].location, "src/api.rs:42");
-        assert_eq!(stories[1].id, "T-003");
-        assert_eq!(stories[1].severity, Severity::High);
-        assert_eq!(stories[2].id, "T-001");
+        assert_eq!(stories[0].cells[0], "T-002");
+        assert_eq!(stories[0].tone, ThreatStoryTone::Critical);
+        assert_eq!(stories[0].cells[4], "src/api.rs:42");
+        assert_eq!(stories[1].cells[0], "T-003");
+        assert_eq!(stories[1].tone, ThreatStoryTone::High);
+        assert_eq!(stories[2].cells[0], "T-001");
     }
 
     #[test]
