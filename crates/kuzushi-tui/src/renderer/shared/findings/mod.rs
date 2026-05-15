@@ -1,4 +1,5 @@
 pub(in crate::renderer) use super::*;
+pub(crate) use crate::ui_view_models::{findings_count_summary, SeverityCounts};
 
 pub(crate) fn compact_finding_row(
     alias: &str,
@@ -25,44 +26,4 @@ pub(crate) fn compact_finding_row(
         Span::styled("  ", Style::default()),
         Span::styled(fit(location, location_w), theme::muted()),
     ])
-}
-
-pub(crate) fn findings_count_summary(findings: &[Finding]) -> String {
-    let counts = SeverityCounts::from_findings(findings);
-    if counts.critical > 0 {
-        return format!("{} findings ({} critical)", findings.len(), counts.critical);
-    }
-    if counts.high > 0 {
-        return format!("{} findings ({} high)", findings.len(), counts.high);
-    }
-    if counts.medium > 0 {
-        return format!("{} findings ({} medium)", findings.len(), counts.medium);
-    }
-    format!("{} findings", findings.len())
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct SeverityCounts {
-    pub(crate) critical: usize,
-    pub(crate) high: usize,
-    pub(crate) medium: usize,
-    pub(crate) low: usize,
-    pub(crate) info: usize,
-}
-
-impl SeverityCounts {
-    pub(crate) fn from_findings(findings: &[Finding]) -> Self {
-        let mut counts = Self::default();
-        for finding in findings {
-            match finding.severity {
-                Severity::Critical => counts.critical += 1,
-                Severity::High => counts.high += 1,
-                Severity::Medium => counts.medium += 1,
-                Severity::Low => counts.low += 1,
-                Severity::Info => counts.info += 1,
-                Severity::Unknown => {}
-            }
-        }
-        counts
-    }
 }

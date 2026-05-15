@@ -1,5 +1,7 @@
-use super::{routing_mode_segment, scan_status, view_status_segment, ShellApp};
-use kuzushi_core::{Finding, Severity};
+use super::{
+    compact_target_path, routing_mode_segment, scan_status, status_footer_findings_summary,
+    view_status_segment, ShellApp,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StatusFooterModel {
@@ -42,7 +44,7 @@ fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
 }
 
 fn status_footer_right_segments(app: &ShellApp, warning: bool) -> Vec<String> {
-    let mut segments = vec![findings_summary(&app.findings)];
+    let mut segments = vec![status_footer_findings_summary(&app.findings)];
     if warning {
         segments.insert(0, "Ctrl+C again to exit".to_string());
     }
@@ -129,56 +131,6 @@ fn context_footer_segment(app: &ShellApp) -> String {
         "ctx: present".to_string()
     } else {
         "ctx: missing".to_string()
-    }
-}
-
-fn compact_target_path(value: &str) -> String {
-    let trimmed = value.trim_end_matches('/');
-    let name = trimmed
-        .rsplit('/')
-        .find(|part| !part.is_empty())
-        .unwrap_or(trimmed);
-    if name.is_empty() {
-        "target:/".to_string()
-    } else {
-        format!("./{name}")
-    }
-}
-
-fn findings_summary(findings: &[Finding]) -> String {
-    let counts = SeverityCounts::from_findings(findings);
-    let mut parts = vec![format!("{} findings", findings.len())];
-    if counts.critical > 0 {
-        parts.push(format!("{} critical", counts.critical));
-    }
-    if counts.high > 0 {
-        parts.push(format!("{} high", counts.high));
-    }
-    if counts.medium > 0 {
-        parts.push(format!("{} medium", counts.medium));
-    }
-    parts.join(" / ")
-}
-
-#[derive(Debug, Default)]
-struct SeverityCounts {
-    critical: usize,
-    high: usize,
-    medium: usize,
-}
-
-impl SeverityCounts {
-    fn from_findings(findings: &[Finding]) -> Self {
-        let mut counts = Self::default();
-        for finding in findings {
-            match finding.severity {
-                Severity::Critical => counts.critical += 1,
-                Severity::High => counts.high += 1,
-                Severity::Medium => counts.medium += 1,
-                _ => {}
-            }
-        }
-        counts
     }
 }
 

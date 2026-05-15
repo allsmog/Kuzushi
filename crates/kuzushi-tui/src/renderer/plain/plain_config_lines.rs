@@ -71,23 +71,11 @@ fn push_plain_model_table(lines: &mut Vec<String>, width: usize) {
 
 pub(crate) fn plain_context_strip(app: &ShellApp, width: usize) -> Vec<String> {
     let catalog = catalog_model(app);
-    let target = app
-        .target
-        .as_ref()
-        .map(|path| {
-            format!(
-                "target:{}",
-                compact_target_path(&path.display().to_string())
-            )
-        })
-        .unwrap_or_else(|| "target:none".to_string());
-    let view = view_status_segment(app);
+    let strip = context_strip_model(app);
     vec![fit(
         &format!(
-            "{} | {target} | {view} | {} | {} mods",
-            routing_mode_segment(app),
-            findings_count_summary(&app.findings),
-            catalog.module_count
+            "{} | target:{} | {} | {} | {} mods",
+            strip.mode, strip.target, strip.view, strip.findings, catalog.module_count
         ),
         width,
     )]
