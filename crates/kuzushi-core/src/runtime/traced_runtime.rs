@@ -223,6 +223,9 @@ impl AgentRuntime for TracedRuntime<'_> {
 
     fn preflight_tool_loop_blocking(&self, request: &AgentToolLoopRequest) -> Result<()> {
         let start = Instant::now();
+        let model = request.model.clone();
+        let prompt_hash = prompt_pair_hash(&request.system_prompt, &request.prompt);
+        let provider = model_provider(&model);
         let result = self.inner.preflight_tool_loop_blocking(request);
         let elapsed_ms = start.elapsed().as_millis() as u64;
         match &result {
@@ -231,6 +234,7 @@ impl AgentRuntime for TracedRuntime<'_> {
                     .trace
                     .step("tool-progress", "next-step", "tool-loop preflight ok")
                     .with_latency_ms(elapsed_ms)
+                    .with_model_metadata(&model, provider, &prompt_hash)
                     .emit();
             }
             Err(error) => {
@@ -242,6 +246,7 @@ impl AgentRuntime for TracedRuntime<'_> {
                         format!("tool-loop preflight failed: {error}"),
                     )
                     .with_latency_ms(elapsed_ms)
+                    .with_model_metadata(&model, provider, &prompt_hash)
                     .with_severity("danger")
                     .emit();
             }

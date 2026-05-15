@@ -183,6 +183,34 @@ fn traced_next_step_emits_tool_progress_then_done() {
 }
 
 #[test]
+fn traced_tool_loop_preflight_emits_model_audit_metadata() {
+    let (sink, runtime) = fresh_runtime(vec![]);
+    let traced = traced(&runtime, sink.clone());
+    let request = AgentToolLoopRequest {
+        model: "openai:gpt-test".to_string(),
+        cwd: ".".into(),
+        system_prompt: "preflight system".to_string(),
+        prompt: "preflight prompt".to_string(),
+        tools: vec![],
+        max_steps: 1,
+        runtime_options: None,
+        temperature: None,
+    };
+
+    traced.preflight_tool_loop_blocking(&request).unwrap();
+
+    let steps = sink.steps.lock().unwrap();
+    assert_eq!(steps[0].kind, "tool-progress");
+    assert_eq!(steps[0].verb.as_deref(), Some("next-step"));
+    assert_eq!(steps[0].model.as_deref(), Some("openai:gpt-test"));
+    assert_eq!(steps[0].provider.as_deref(), Some("openai"));
+    assert!(steps[0]
+        .prompt_hash
+        .as_deref()
+        .is_some_and(|hash| hash.starts_with("fnv1a64:")));
+}
+
+#[test]
 fn traced_triage_emits_reasoning_step() {
     let (sink, runtime) = fresh_runtime(vec![]);
     let traced = traced(&runtime, sink.clone());
