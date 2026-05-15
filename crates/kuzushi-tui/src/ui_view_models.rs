@@ -16,8 +16,10 @@ mod module_detail;
 mod options;
 mod prompt;
 mod routing;
+mod run_status;
 mod run_timeline;
 mod run_trace;
+mod status_footer;
 mod threat_model;
 mod tools;
 mod view_status;
@@ -34,10 +36,12 @@ pub(crate) use module_detail::{module_detail_model, ModuleDetailModel};
 pub(crate) use options::{options_model, OptionRow, OptionsModelStatus};
 pub(crate) use prompt::prompt_brand;
 pub(crate) use routing::{routing_mode, routing_mode_segment, RoutingMode};
+pub(crate) use run_status::scan_status;
 pub(crate) use run_timeline::{past_runs_model, PastRun, PastRunStatus};
 pub(crate) use run_trace::{
     replay_model, trace_model, ReplayModel, RunArtifactDetail, TraceModel, TraceStep,
 };
+pub(crate) use status_footer::status_footer_model;
 pub(crate) use threat_model::threat_model_doc;
 pub(crate) use tools::{tools_model, ToolRow};
 pub(crate) use view_status::view_status_segment;
