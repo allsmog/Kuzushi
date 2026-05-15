@@ -6,6 +6,8 @@ use ratatui::backend::TestBackend;
 use ratatui::buffer::Buffer;
 use ratatui::Terminal;
 
+use crate::ui_view_models::RoutingMode;
+
 use super::*;
 
 #[test]

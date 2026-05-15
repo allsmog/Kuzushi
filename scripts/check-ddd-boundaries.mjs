@@ -227,6 +227,11 @@ const rules = [
     forbidden: /\bstd::env|KUZUSHI_CLI_NAME|binary_stem/,
   },
   {
+    name: "TUI viewport helpers do not own routing view model",
+    roots: ["crates/kuzushi-tui/src/renderer/views/viewport_lines.rs"],
+    forbidden: /\bRoutingMode\b|routing_mode\(/,
+  },
+  {
     name: "TUI threat renderers read threat-model view models",
     roots: ["crates/kuzushi-tui/src/renderer/shared/threat_model/current_threat_model_doc.rs"],
     forbidden: /\b(load_persistent_threat_model|std::env|std::path|PathBuf|read_to_string)\b/,
@@ -253,9 +258,7 @@ console.log(
 
 function repoRoot() {
   try {
-    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
-      encoding: "utf8",
-    }).trim();
+    return execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
   } catch {
     return process.cwd();
   }
@@ -267,15 +270,12 @@ function hasBoundary(candidates) {
 
 function ruleFailures(rule) {
   const files = ruleFiles(rule);
-  const missingRoots =
-    files.length === 0
-      ? [`${rule.name}: no production Rust files matched roots ${rule.roots.join(", ")}`]
-      : [];
-  return missingRoots.concat(
-    files
-      .filter((file) => rule.forbidden.test(sourceWithoutTestModule(file)))
-      .map((file) => `${rule.name}: ${file}`),
-  );
+  if (files.length === 0) {
+    return [`${rule.name}: no production Rust files matched roots ${rule.roots.join(", ")}`];
+  }
+  return files
+    .filter((file) => rule.forbidden.test(sourceWithoutTestModule(file)))
+    .map((file) => `${rule.name}: ${file}`);
 }
 
 function ruleFiles(rule) {
