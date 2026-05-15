@@ -92,31 +92,16 @@ pub(crate) fn sast_tasks_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
         lines.push(detail(row.label, &row.value));
     }
     lines.push(blank());
-    lines.push(muted(&fit(
-        "legend: [x] enabled · [ ] disabled · [A] advanced (off by default; allow with /task allow <id>) · [B] blocked",
-        area.width as usize,
-    )));
+    lines.push(muted(&fit(model.legend, area.width as usize)));
     lines.push(blank());
     push_sast_task_table(&mut lines, area.width, &model);
     lines.push(blank());
-    lines.push(command_list_line(
-        &[
-            "/task block <id>",
-            "/task allow <id>",
-            "/task toggle [id]",
-            "/task mode auto|manual|toggle",
-            "/task reset",
-        ],
-        area.width as usize,
-    ));
+    lines.push(command_list_line(&model.command_hints, area.width as usize));
     lines
 }
 
 fn push_sast_task_table(lines: &mut Vec<Line<'static>>, width: u16, model: &SastTasksModel) {
-    lines.push(table_header(
-        &["state", "id", "cost", "scan", "notes"],
-        &sast_task_table_widths(width),
-    ));
+    lines.push(table_header(&model.headers, &sast_task_table_widths(width)));
     let widths = sast_task_table_widths(width);
     for row in &model.rows {
         lines.push(table_row(

@@ -4,7 +4,10 @@ use crate::{SastTaskMode, SastTaskRow, ShellApp};
 pub(crate) struct SastTasksModel {
     pub(crate) title: &'static str,
     pub(crate) summary_rows: Vec<SastTaskSummaryRow>,
+    pub(crate) legend: &'static str,
+    pub(crate) headers: [&'static str; 5],
     pub(crate) rows: Vec<SastTaskRow>,
+    pub(crate) command_hints: [&'static str; 5],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -45,7 +48,17 @@ pub(crate) fn sast_tasks_model(app: &ShellApp) -> SastTasksModel {
                 value: selected_summary(&rows),
             },
         ],
+        legend:
+            "legend: [x] enabled · [ ] disabled · [A] advanced (off by default; allow with /task allow <id>) · [B] blocked",
+        headers: ["state", "id", "cost", "scan", "notes"],
         rows,
+        command_hints: [
+            "/task block <id>",
+            "/task allow <id>",
+            "/task toggle [id]",
+            "/task mode auto|manual|toggle",
+            "/task reset",
+        ],
     }
 }
 
@@ -62,7 +75,7 @@ impl PlainSastTasksModel {
                 .into_iter()
                 .map(plain_sast_task_summary_row)
                 .collect(),
-            headers: ["state", "id", "cost", "scan", "notes"],
+            headers: model.headers,
             rows: model.rows.into_iter().map(plain_sast_task_row).collect(),
             next_hint:
                 "Next: task block <id>, task allow <id>, task toggle [id], task mode auto|manual|toggle",
@@ -109,6 +122,9 @@ mod tests {
         let model = sast_tasks_model(&app);
 
         assert_eq!(model.title, "SAST TASKS");
+        assert!(model.legend.contains("advanced"));
+        assert_eq!(model.headers, ["state", "id", "cost", "scan", "notes"]);
+        assert!(model.command_hints.contains(&"/task reset"));
         assert!(model
             .summary_rows
             .iter()
