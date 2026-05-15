@@ -41,6 +41,67 @@ fn knowledge_base_model_filters_attachments_to_active_module() {
     assert_eq!(model.attachment_rows[0].kind, "url");
 }
 
+#[test]
+fn plain_knowledge_base_model_projects_empty_sections() {
+    let app = ShellApp::new(V2Config::default(), None);
+
+    let model = plain_knowledge_base_model(&app);
+
+    assert_eq!(model.title, "KB ATTACHMENTS");
+    assert!(model.summary_rows.contains(&"module: context".to_string()));
+    assert_eq!(model.artifact_section.title, "KNOWN ARTIFACTS");
+    assert_eq!(
+        model.artifact_section.headers,
+        ["state", "path", "description"]
+    );
+    assert_eq!(
+        model.artifact_section.empty_message,
+        Some("No known Rust artifacts for this module.")
+    );
+    assert_eq!(model.attachment_section.title, "ATTACHED");
+    assert_eq!(
+        model.attachment_section.headers,
+        ["id", "kind", "source", "status"]
+    );
+    assert_eq!(
+        model.attachment_section.empty_message,
+        Some("No attachments yet. Next: attach <repo-relative-path> or attach <url>")
+    );
+    assert_eq!(
+        model.next_hint,
+        "Next: kb [module], attach <path-or-url>, detach <id>, reparse <id>"
+    );
+}
+
+#[test]
+fn plain_knowledge_base_model_projects_artifact_and_attachment_rows() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.kb_view.module_id = "x-ray".to_string();
+    app.kb_view.artifacts = vec![KnownArtifact {
+        module_id: "x-ray".to_string(),
+        path: "crates/demo/src/lib.rs".to_string(),
+        description: "Rust entrypoint".to_string(),
+        exists: true,
+    }];
+    app.kb_view.attachments = vec![
+        attachment("x-ray", "a-1", AttachmentKind::Url),
+        attachment("context", "a-2", AttachmentKind::Path),
+    ];
+
+    let model = plain_knowledge_base_model(&app);
+
+    assert!(model.artifact_section.empty_message.is_none());
+    assert_eq!(model.artifact_section.rows[0].state, "present");
+    assert_eq!(
+        model.artifact_section.rows[0].path,
+        "crates/demo/src/lib.rs"
+    );
+    assert!(model.attachment_section.empty_message.is_none());
+    assert_eq!(model.attachment_section.rows.len(), 1);
+    assert_eq!(model.attachment_section.rows[0].id, "a-1");
+    assert_eq!(model.attachment_section.rows[0].kind, "url");
+}
+
 fn attachment(module_id: &str, id: &str, kind: AttachmentKind) -> AttachmentRecord {
     AttachmentRecord {
         id: id.to_string(),
