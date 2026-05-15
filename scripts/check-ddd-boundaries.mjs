@@ -223,7 +223,7 @@ const rules = [
   {
     name: "TUI tools renderer reads tools view model",
     roots: ["crates/kuzushi-tui/src/renderer/views/system/tools_lines.rs"],
-    forbidden: /kuzushi_core::ToolDescriptor|\.registry\.tools\(|\.tools\(\)/,
+    forbidden: /kuzushi_core::ToolDescriptor|\.registry\.tools\(|\.tools\(\)|\.name\b|\.headless\b|\.description\b/,
   },
   {
     name: "TUI auth renderer reads auth view model",
