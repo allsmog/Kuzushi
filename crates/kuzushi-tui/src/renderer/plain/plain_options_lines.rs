@@ -1,42 +1,41 @@
 use super::*;
+use crate::ui_view_models::{options_model, OptionRow, OptionsModelStatus};
 
 pub(crate) fn plain_options_lines(
     app: &ShellApp,
     width: usize,
     view: &crate::app::OptionsView,
 ) -> Vec<String> {
+    let model = options_model(app, view);
     let mut lines = plain_context_strip(app, width);
     lines.push(String::new());
     lines.push(plain_section_divider("OPTIONS", width));
-    lines.push(format!("tool: {}", view.tool_name));
-    lines.push(format!("view: {}", options_filter_label(view.filter)));
+    lines.push(format!("tool: {}", model.tool_name));
+    lines.push(format!("view: {}", model.filter_label));
+    push_plain_options_body(&mut lines, width, &model.status, &model.rows);
+    lines
+}
 
-    let Some(tool) = app.registry.resolve_tool(&view.tool_name) else {
-        lines.push(String::new());
-        lines.push("Unknown tool. Next: tools".to_string());
-        return lines;
-    };
-
-    let stored = app.option_store.effective_stored_values(&tool.name);
-    let specs = tool
-        .options
-        .iter()
-        .filter(|spec| option_visible(spec, view.filter, stored.get(&spec.name).is_some()))
-        .collect::<Vec<_>>();
-
-    if specs.is_empty() {
-        lines.push(String::new());
-        lines.push(
-            match view.filter {
-                crate::app::OptionsFilter::Standard => "No standard options. Next: show advanced",
-                crate::app::OptionsFilter::Advanced => "No advanced options for this tool.",
-                crate::app::OptionsFilter::Missing => "No missing required options for this tool.",
-            }
-            .to_string(),
-        );
-        return lines;
+fn push_plain_options_body(
+    lines: &mut Vec<String>,
+    width: usize,
+    status: &OptionsModelStatus,
+    rows: &[OptionRow],
+) {
+    match status {
+        OptionsModelStatus::Ready => push_plain_options_table(lines, width, rows),
+        OptionsModelStatus::UnknownTool => {
+            lines.push(String::new());
+            lines.push("Unknown tool. Next: tools".to_string());
+        }
+        OptionsModelStatus::Empty { plain_message, .. } => {
+            lines.push(String::new());
+            lines.push((*plain_message).to_string());
+        }
     }
+}
 
+fn push_plain_options_table(lines: &mut Vec<String>, width: usize, rows: &[OptionRow]) {
     lines.push(String::new());
     let widths = option_table_widths(width.min(u16::MAX as usize) as u16);
     lines.push(
@@ -55,43 +54,8 @@ pub(crate) fn plain_options_lines(
         .trim_end()
         .to_string(),
     );
-    for spec in specs {
-        let current = stored.get(&spec.name);
-        let required = if spec.required && current.is_none() && spec.default.is_none() {
-            "missing"
-        } else if spec.required {
-            "yes"
-        } else {
-            "no"
-        };
-        let description = option_description(spec);
-        let current = current
-            .map(format_json_value)
-            .unwrap_or_else(|| "-".to_string());
-        let default = spec
-            .default
-            .as_ref()
-            .map(format_json_value)
-            .unwrap_or_else(|| "-".to_string());
-        lines.push(
-            table_text(
-                &[
-                    &spec.name,
-                    &current,
-                    &default,
-                    required,
-                    option_type_label(spec.option_type),
-                    &fit(
-                        &option_alias_label(spec),
-                        widths.get(5).copied().unwrap_or(10),
-                    ),
-                    &fit(&description, widths.get(6).copied().unwrap_or(16)),
-                ],
-                &widths,
-            )
-            .trim_end()
-            .to_string(),
-        );
+    for row in rows {
+        lines.push(plain_option_row(row, &widths));
     }
     lines.push(String::new());
     lines.push(
@@ -100,5 +64,21 @@ pub(crate) fn plain_options_lines(
     lines.push(
         "Next: set <key> <value>, setg <key> <value>, show advanced, show missing".to_string(),
     );
-    lines
+}
+
+fn plain_option_row(row: &OptionRow, widths: &[usize]) -> String {
+    table_text(
+        &[
+            &row.name,
+            &row.value,
+            &row.default_value,
+            row.required,
+            row.option_type,
+            &fit(&row.aliases, widths.get(5).copied().unwrap_or(10)),
+            &fit(&row.description, widths.get(6).copied().unwrap_or(16)),
+        ],
+        widths,
+    )
+    .trim_end()
+    .to_string()
 }

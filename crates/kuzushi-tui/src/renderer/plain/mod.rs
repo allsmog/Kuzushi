@@ -2,11 +2,9 @@ use super::*;
 pub(in crate::renderer) use super::*;
 
 use self::{
-    compact_target_path, findings_count_summary, fit, format_json_value, help_category_blurb,
-    join_or_dash, kb_artifact_widths, kb_attachment_widths, model_auth_status, option_alias_label,
-    option_description, option_table_widths, option_type_label, option_visible,
-    options_filter_label, routing_mode_segment, sast_task_table_widths, shell_view_lines,
-    table_text, wrap_text,
+    compact_target_path, findings_count_summary, fit, help_category_blurb, join_or_dash,
+    kb_artifact_widths, kb_attachment_widths, model_auth_status, option_table_widths,
+    routing_mode_segment, sast_task_table_widths, shell_view_lines, table_text, wrap_text,
 };
 use crate::app::{LogLine, ShellApp, ShellView};
 use crate::commands::{
