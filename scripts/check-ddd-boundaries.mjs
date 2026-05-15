@@ -52,6 +52,12 @@ const rules = [
       /\b(crate::(?:scan|scanners|verification|verify|patch|remediation|report)|verify:finding|patch:finding|report:build|Command::new|std::process|execute_tool|execute_tool_with_runtime)\b/,
   },
   {
+    name: "verify attaches proof without scanner triage patch report or tool dispatch",
+    roots: ["crates/kuzushi-core/src/verify.rs", "crates/kuzushi-core/src/verification"],
+    forbidden:
+      /\b(crate::(?:scan|scanners|modules::triage|triage|remediation|patch|report)|execute_tool|execute_tool_with_runtime)\b/,
+  },
+  {
     name: "report boundary reads artifacts and findings without execution",
     roots: [
       "crates/kuzushi-core/src/report.rs",
