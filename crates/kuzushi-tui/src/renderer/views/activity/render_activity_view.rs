@@ -1,8 +1,11 @@
 use super::dag_pane::{dag_row_text, dag_state_style, dag_subsystems_row_text};
 use super::feed_pane::{feed_event_style, feed_event_text};
 use super::*;
-use crate::app::{ActivitySession, PaneFocus};
-use crate::ui_view_models::{activity_footer_model, activity_header_model, ActivityFooterHint};
+use crate::app::ActivitySession;
+use crate::ui_view_models::{
+    activity_footer_model, activity_header_model, activity_pane_chrome_model, ActivityFooterHint,
+    ActivityPaneTitle,
+};
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
@@ -55,8 +58,9 @@ pub(crate) fn render_activity_view(frame: &mut Frame<'_>, area: Rect, app: &Shel
         .constraints([Constraint::Percentage(46), Constraint::Percentage(54)])
         .split(outer[1]);
 
-    render_dag_pane_widget(frame, panes[0], session);
-    render_feed_pane_widget(frame, panes[1], session);
+    let pane_chrome = activity_pane_chrome_model(session);
+    render_dag_pane_widget(frame, panes[0], session, &pane_chrome.dag);
+    render_feed_pane_widget(frame, panes[1], session, &pane_chrome.feed);
 
     render_focus_footer(frame, outer[2], session);
 }
@@ -77,22 +81,25 @@ fn activity_header_lines(session: &ActivitySession) -> Vec<Line<'static>> {
     ]
 }
 
-fn render_dag_pane_widget(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
+fn render_dag_pane_widget(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    session: &ActivitySession,
+    title: &ActivityPaneTitle,
+) {
     let now = Instant::now();
     let inner_width = area.width.saturating_sub(2) as usize;
     let lines = dag_pane_lines(session, inner_width, now);
-    let title_style = if matches!(session.pane_focus, PaneFocus::Left) {
-        theme::accent()
-    } else {
-        theme::label()
-    };
     // `── DAG ──...` divider style mirrors design/mockups/_shared.jsx
     // `sectionHeader` (lines 94-100): leading "── ", labelled segment in
     // c-label, trailing fill in c-subtle.
     let block = Block::default()
         .borders(Borders::RIGHT)
         .border_style(theme::subtle())
-        .title(Span::styled("── DAG ──", title_style));
+        .title(Span::styled(
+            pane_title_text(title),
+            pane_title_style(title),
+        ));
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
@@ -140,17 +147,18 @@ fn ensure_dag_placeholder(lines: &mut Vec<Line<'static>>) {
     }
 }
 
-fn render_feed_pane_widget(frame: &mut Frame<'_>, area: Rect, session: &ActivitySession) {
+fn render_feed_pane_widget(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    session: &ActivitySession,
+    title: &ActivityPaneTitle,
+) {
     let inner_width = area.width.saturating_sub(2) as usize;
     let lines = feed_pane_lines(session, inner_width);
-    let title_style = if matches!(session.pane_focus, PaneFocus::Right) {
-        theme::accent()
-    } else {
-        theme::label()
-    };
-    let block = Block::default()
-        .borders(Borders::NONE)
-        .title(Span::styled("── FEED ──", title_style));
+    let block = Block::default().borders(Borders::NONE).title(Span::styled(
+        pane_title_text(title),
+        pane_title_style(title),
+    ));
     let inner_area = block.inner(area);
     frame.render_widget(block, area);
 
@@ -159,6 +167,17 @@ fn render_feed_pane_widget(frame: &mut Frame<'_>, area: Rect, session: &Activity
         .scroll((scroll as u16, 0))
         .wrap(Wrap { trim: false });
     frame.render_widget(para, inner_area);
+}
+
+fn pane_title_text(title: &ActivityPaneTitle) -> String {
+    format!("── {} ──", title.label)
+}
+
+fn pane_title_style(title: &ActivityPaneTitle) -> ratatui::style::Style {
+    if title.focused {
+        return theme::accent();
+    }
+    theme::label()
 }
 
 fn feed_pane_lines(session: &ActivitySession, inner_width: usize) -> Vec<Line<'static>> {
