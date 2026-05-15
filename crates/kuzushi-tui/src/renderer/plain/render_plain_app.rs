@@ -1,8 +1,7 @@
 use super::*;
 use crate::ui_view_models::{
-    plain_live_activity_rows, plain_render_mode, prereq_prompt_model,
-    transcript_model_from_log_index, PlainRenderMode, PrereqPromptModel, PrereqPromptStepModel,
-    TranscriptRow,
+    plain_live_activity_rows, plain_prereq_plan_model, plain_render_mode,
+    transcript_model_from_log_index, PlainPrereqPlanModel, PlainRenderMode, TranscriptRow,
 };
 
 pub fn render_plain_app(app: &ShellApp, width: usize) -> String {
@@ -89,19 +88,9 @@ fn plain_log_line(row: &TranscriptRow) -> String {
     }
 }
 
-fn plain_prereq_plan_lines(plan: &PrereqPromptModel, width: usize) -> Vec<String> {
-    let mut lines = vec![
-        plain_section_divider("PREREQUISITE PLAN", width),
-        format!("final tool: {}", plan.final_tool),
-        "review required before prerequisites or final tool start".to_string(),
-    ];
-    for step in &plan.steps {
-        lines.extend(plain_prereq_step_lines(step));
-    }
-    lines.push(format!(
-        "actions: approve | reuse cached | regenerate | cancel (recommended: {})",
-        plan.recommended_action
-    ));
+fn plain_prereq_plan_lines(plan: PlainPrereqPlanModel, width: usize) -> Vec<String> {
+    let mut lines = vec![plain_section_divider(plan.title, width)];
+    lines.extend(plan.rows);
     lines
 }
 
@@ -111,8 +100,8 @@ fn prepend_plain_activity_lines(app: &ShellApp, width: usize, lines: Vec<String>
         prefix.extend(plain_live_activity_lines(rows, width));
         prefix.push(String::new());
     }
-    if let Some(plan) = prereq_prompt_model(app) {
-        prefix.extend(plain_prereq_plan_lines(&plan, width));
+    if let Some(plan) = plain_prereq_plan_model(app) {
+        prefix.extend(plain_prereq_plan_lines(plan, width));
         prefix.push(String::new());
     }
     if prefix.is_empty() {
@@ -131,16 +120,4 @@ fn plain_live_activity_lines(
             .map(|row| format!("{}: {}", row.label, row.value)),
     );
     lines
-}
-
-fn plain_prereq_step_lines(step: &PrereqPromptStepModel) -> Vec<String> {
-    vec![
-        format!(
-            "- {} {} via {}",
-            step.state_label, step.artifact_label, step.tool
-        ),
-        format!("  writes: {}", step.writes),
-        format!("  risk: {}", step.risk),
-        format!("  cost: {}", step.cost_hint),
-    ]
 }
