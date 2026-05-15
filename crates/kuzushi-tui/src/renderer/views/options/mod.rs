@@ -87,9 +87,10 @@ pub(crate) fn sast_tasks_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
     let model = sast_tasks_model(app);
 
     lines.push(blank());
-    lines.push(divider("SAST TASKS", area.width));
-    lines.push(detail("mode", model.mode_label));
-    lines.push(detail("selected", &model.selected_summary));
+    lines.push(divider(model.title, area.width));
+    for row in &model.summary_rows {
+        lines.push(detail(row.label, &row.value));
+    }
     lines.push(blank());
     lines.push(muted(&fit(
         "legend: [x] enabled · [ ] disabled · [A] advanced (off by default; allow with /task allow <id>) · [B] blocked",
