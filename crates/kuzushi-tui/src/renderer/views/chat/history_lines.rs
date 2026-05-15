@@ -1,17 +1,26 @@
 use super::*;
+use crate::ui_view_models::{
+    session_history_model, session_story_model, CommandHistoryModel, SessionStoryModel,
+};
 
 pub(crate) fn history_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("COMMAND HISTORY", area.width));
 
-    let entries = app
-        .command_history
-        .iter()
-        .rev()
-        .take(50)
-        .collect::<Vec<_>>();
-    if entries.is_empty() {
+    let model = session_history_model(app, 50);
+    append_history_rows(&mut lines, &model, area);
+
+    lines.push(blank());
+    lines.push(command_list_line(
+        &["clear", "run <tool>", "show runs", "back"],
+        area.width as usize,
+    ));
+    lines
+}
+
+fn append_history_rows(lines: &mut Vec<Line<'static>>, model: &CommandHistoryModel, area: Rect) {
+    if model.rows.is_empty() {
         lines.extend(empty_state_panel(
             "no commands run yet",
             &[
@@ -25,80 +34,24 @@ pub(crate) fn history_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             ],
         ));
     } else {
-        let start = app.command_history.len().saturating_sub(entries.len()) + 1;
-        let width = (start + entries.len()).to_string().len();
-        for (offset, command) in entries.into_iter().rev().enumerate() {
+        for row_model in &model.rows {
             lines.push(row(&[
-                format!("{:>width$}", start + offset, width = width),
-                fit(command, area.width.saturating_sub(8) as usize),
+                format!("{:>width$}", row_model.number, width = model.number_width),
+                fit(&row_model.command, area.width.saturating_sub(8) as usize),
             ]));
         }
     }
-
-    lines.push(blank());
-    lines.push(command_list_line(
-        &["clear", "run <tool>", "show runs", "back"],
-        area.width as usize,
-    ));
-    lines
 }
 
 pub(crate) fn story_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("SESSION STORY · live event timeline", area.width));
-    if let Some(scan) = &app.scan {
-        let label = if scan.running {
-            if scan.abort_requested {
-                "abort requested"
-            } else if app.is_scan_paused() {
-                "paused"
-            } else {
-                "running"
-            }
-        } else {
-            "idle"
-        };
-        lines.push(row(&[
-            pad("scan", 10),
-            fit(
-                &format!(
-                    "{label} · stage={} · findings={}",
-                    scan.stage, scan.findings_count
-                ),
-                area.width.saturating_sub(14) as usize,
-            ),
-        ]));
-    }
-    lines.push(blank());
 
-    let max_events = (area.height as usize).saturating_sub(8).max(8);
-    let events = app
-        .log
-        .iter()
-        .filter(|line| line.prefix != ">")
-        .rev()
-        .take(max_events)
-        .collect::<Vec<_>>();
-    if events.is_empty() {
-        lines.extend(empty_state_panel(
-            "no session events yet",
-            &[
-                "the timeline replays prior scan / agent / module events.",
-                "run something to populate it.",
-            ],
-            &[
-                ("scan <target>", "umbrella scan against a workspace"),
-                ("ask <question>", "single-shot agent question"),
-                ("run <tool>", "dispatch a registered tool"),
-            ],
-        ));
-    } else {
-        for line in events.into_iter().rev() {
-            let body_width = area.width.saturating_sub(14) as usize;
-            lines.push(row(&[pad(&line.prefix, 10), fit(&line.body, body_width)]));
-        }
-    }
+    let model = session_story_model(app, story_event_limit(area));
+    append_story_scan_row(&mut lines, &model, area);
+    lines.push(blank());
+    append_story_events(&mut lines, &model, area);
 
     lines.push(blank());
     lines.push(command_list_line(
@@ -112,4 +65,39 @@ pub(crate) fn story_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         area.width as usize,
     ));
     lines
+}
+
+fn story_event_limit(area: Rect) -> usize {
+    (area.height as usize).saturating_sub(8).max(8)
+}
+
+fn append_story_scan_row(lines: &mut Vec<Line<'static>>, model: &SessionStoryModel, area: Rect) {
+    if let Some(scan) = &model.scan_row {
+        lines.push(row(&[
+            pad(&scan.label, 10),
+            fit(&scan.body, area.width.saturating_sub(14) as usize),
+        ]));
+    }
+}
+
+fn append_story_events(lines: &mut Vec<Line<'static>>, model: &SessionStoryModel, area: Rect) {
+    if model.events.is_empty() {
+        lines.extend(empty_state_panel(
+            "no session events yet",
+            &[
+                "the timeline replays prior scan / agent / module events.",
+                "run something to populate it.",
+            ],
+            &[
+                ("scan <target>", "umbrella scan against a workspace"),
+                ("ask <question>", "single-shot agent question"),
+                ("run <tool>", "dispatch a registered tool"),
+            ],
+        ));
+    } else {
+        for event in &model.events {
+            let body_width = area.width.saturating_sub(14) as usize;
+            lines.push(row(&[pad(&event.label, 10), fit(&event.body, body_width)]));
+        }
+    }
 }

@@ -33,6 +33,7 @@ mod run_status;
 mod run_timeline;
 mod run_trace;
 mod sast_tasks;
+mod session_story;
 mod status_footer;
 mod threat_dfd;
 mod threat_impact;
@@ -79,6 +80,9 @@ pub(crate) use run_trace::{
     replay_model, trace_model, ReplayModel, RunArtifactDetail, TraceModel, TraceStep,
 };
 pub(crate) use sast_tasks::{sast_tasks_model, SastTasksModel};
+pub(crate) use session_story::{
+    session_history_model, session_story_model, CommandHistoryModel, SessionStoryModel,
+};
 pub(crate) use status_footer::status_footer_model;
 pub(crate) use threat_dfd::threat_dfd_nodes;
 #[cfg(test)]
