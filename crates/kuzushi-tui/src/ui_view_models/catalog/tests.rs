@@ -46,3 +46,16 @@ fn catalog_collapsed_model_prioritizes_critical_alias_hint() {
     assert!(model.collapsed.next_hint.contains("open F-"));
     assert!(model.collapsed.scan_hint.is_none());
 }
+
+#[test]
+fn catalog_collapsed_layout_uses_width_and_expand_toggle() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+
+    let model = catalog_model(&app);
+    assert!(catalog_uses_collapsed_layout(&model, 80));
+    assert!(!catalog_uses_collapsed_layout(&model, 120));
+
+    app.catalog_expanded = true;
+    let model = catalog_model(&app);
+    assert!(!catalog_uses_collapsed_layout(&model, 80));
+}

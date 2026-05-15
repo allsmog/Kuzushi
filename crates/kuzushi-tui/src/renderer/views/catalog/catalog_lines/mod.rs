@@ -1,5 +1,8 @@
 use super::*;
-use crate::ui_view_models::{catalog_model, CatalogActionModule, CatalogModel, CatalogModuleGroup};
+use crate::ui_view_models::{
+    catalog_model, catalog_uses_collapsed_layout, CatalogActionModule, CatalogModel,
+    CatalogModuleGroup,
+};
 
 mod collapsed_state;
 mod empty_state;
@@ -14,7 +17,7 @@ pub(crate) fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         return lines;
     }
 
-    if collapsed_catalog_active(app, area.width) {
+    if catalog_uses_collapsed_layout(&model, area.width) {
         collapsed_state::append_collapsed_catalog(&model, area, &mut lines);
         return lines;
     }
@@ -72,12 +75,4 @@ fn append_module_group(lines: &mut Vec<Line<'static>>, group: &CatalogModuleGrou
             &widths,
         ));
     }
-}
-
-fn compact_catalog_width(width: u16) -> bool {
-    width < 96
-}
-
-fn collapsed_catalog_active(app: &ShellApp, width: u16) -> bool {
-    !app.catalog_expanded && compact_catalog_width(width)
 }

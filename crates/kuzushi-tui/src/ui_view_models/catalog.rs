@@ -8,6 +8,7 @@ pub(crate) const CATALOG_CATEGORY_ORDER: &[&str] = &["OFFENSE", "INTEL", "GOVERN
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CatalogModel {
     pub(crate) module_count: usize,
+    pub(crate) expanded: bool,
     pub(crate) default_action: Option<CatalogActionModule>,
     pub(crate) collapsed: CatalogCollapsedModel,
     pub(crate) groups: Vec<CatalogModuleGroup>,
@@ -49,10 +50,19 @@ pub(crate) fn catalog_model(app: &ShellApp) -> CatalogModel {
     let focused_id = app.focused_module.as_deref();
     CatalogModel {
         module_count,
+        expanded: app.catalog_expanded,
         default_action,
         collapsed: collapsed_catalog_model(app),
         groups: catalog_groups(&modules, focused_id, cursor_id.as_deref()),
     }
+}
+
+pub(crate) fn catalog_uses_collapsed_layout(model: &CatalogModel, width: u16) -> bool {
+    !model.expanded && compact_catalog_width(width)
+}
+
+fn compact_catalog_width(width: u16) -> bool {
+    width < 96
 }
 
 fn collapsed_catalog_model(app: &ShellApp) -> CatalogCollapsedModel {

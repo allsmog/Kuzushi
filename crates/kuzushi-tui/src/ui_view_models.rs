@@ -66,7 +66,10 @@ pub(crate) use auth::{
     auth_env_summary, auth_provider_rows, model_auth_status, oauth_summary, AuthProviderRow,
     AuthProviderState,
 };
-pub(crate) use catalog::{catalog_model, CatalogActionModule, CatalogModel, CatalogModuleGroup};
+pub(crate) use catalog::{
+    catalog_model, catalog_uses_collapsed_layout, CatalogActionModule, CatalogModel,
+    CatalogModuleGroup,
+};
 pub(crate) use chrome_layout::transcript_chrome_height;
 pub(crate) use config::{config_model, ConfigModel, ConfigModelRow};
 pub(crate) use confirm_card::{confirm_card_model, ConfirmCardModel};
