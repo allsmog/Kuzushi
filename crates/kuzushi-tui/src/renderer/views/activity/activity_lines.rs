@@ -107,12 +107,13 @@ fn pane_header_line(
     left_w: usize,
     right_w: usize,
 ) -> Line<'static> {
-    let left_pad = format!(" ── {} ", left.label);
-    let right_pad = format!(" ── {} ", right.label);
     Line::from(vec![
-        Span::styled(pad_to(&left_pad, left_w), pane_title_style(left)),
+        Span::styled(pad_to(&left.plain_header, left_w), pane_title_style(left)),
         Span::styled("│".to_string(), theme::subtle()),
-        Span::styled(pad_to(&right_pad, right_w), pane_title_style(right)),
+        Span::styled(
+            pad_to(&right.plain_header, right_w),
+            pane_title_style(right),
+        ),
     ])
 }
 
