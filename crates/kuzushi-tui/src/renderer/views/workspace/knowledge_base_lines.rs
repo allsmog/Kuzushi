@@ -1,6 +1,7 @@
 use super::*;
 use crate::ui_view_models::{
     knowledge_base_model, KnowledgeBaseArtifactRow, KnowledgeBaseAttachmentRow, KnowledgeBaseModel,
+    KnowledgeBaseSummaryRow,
 };
 
 pub(crate) fn knowledge_base_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -8,26 +9,22 @@ pub(crate) fn knowledge_base_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stat
     let model = knowledge_base_model(app);
 
     lines.push(blank());
-    lines.push(divider("KB ATTACHMENTS", area.width));
-    lines.push(detail("module", &model.module_id_label));
-    lines.push(detail("store", &model.store_label));
-    lines.push(detail("supported", &model.supported_label));
+    lines.push(divider(model.title, area.width));
+    for row in &model.summary_rows {
+        lines.push(summary_row(row));
+    }
     lines.push(blank());
 
     append_known_artifacts(&mut lines, &model, area);
     append_attached_records(&mut lines, &model, area);
 
     lines.push(blank());
-    lines.push(command_list_line(
-        &[
-            "kb [module]",
-            "attach <path-or-url>",
-            "detach <id>",
-            "reparse <id>",
-        ],
-        area.width as usize,
-    ));
+    lines.push(command_list_line(&model.commands, area.width as usize));
     lines
+}
+
+fn summary_row(row: &KnowledgeBaseSummaryRow) -> Line<'static> {
+    detail(row.label, &row.value)
 }
 
 fn append_known_artifacts(lines: &mut Vec<Line<'static>>, model: &KnowledgeBaseModel, area: Rect) {

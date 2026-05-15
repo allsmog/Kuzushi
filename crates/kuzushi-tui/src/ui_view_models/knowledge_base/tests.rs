@@ -8,9 +8,31 @@ fn knowledge_base_model_projects_default_store_and_supported_modules() {
 
     let model = knowledge_base_model(&app);
 
-    assert_eq!(model.module_id_label, "context");
-    assert_eq!(model.store_label, ".kuzushi/v2/attachments.json");
-    assert!(model.supported_label.contains("threat-model"));
+    assert_eq!(model.title, "KB ATTACHMENTS");
+    assert_eq!(
+        model.summary_rows[0],
+        KnowledgeBaseSummaryRow {
+            label: "module",
+            value: "context".to_string(),
+        }
+    );
+    assert!(model.summary_rows.contains(&KnowledgeBaseSummaryRow {
+        label: "store",
+        value: ".kuzushi/v2/attachments.json".to_string(),
+    }));
+    assert!(model
+        .summary_rows
+        .iter()
+        .any(|row| row.label == "supported" && row.value.contains("threat-model")));
+    assert_eq!(
+        model.commands,
+        [
+            "kb [module]",
+            "attach <path-or-url>",
+            "detach <id>",
+            "reparse <id>",
+        ]
+    );
     assert!(model.artifact_rows.is_empty());
     assert!(model.attachment_rows.is_empty());
 }
@@ -33,7 +55,10 @@ fn knowledge_base_model_filters_attachments_to_active_module() {
 
     let model = knowledge_base_model(&app);
 
-    assert_eq!(model.store_label, "./attachments.json");
+    assert!(model.summary_rows.contains(&KnowledgeBaseSummaryRow {
+        label: "store",
+        value: "./attachments.json".to_string(),
+    }));
     assert_eq!(model.artifact_rows[0].state, "present");
     assert_eq!(model.artifact_rows[0].path, "crates/demo/src/lib.rs");
     assert_eq!(model.attachment_rows.len(), 1);
