@@ -2,6 +2,10 @@ use super::*;
 pub(in crate::renderer) use super::*;
 use crate::ui_view_models::{help_model, quickstart_model, HelpCommandRow};
 
+const HELP_COMMAND_COLUMN: usize = 0;
+const HELP_ALIASES_COLUMN: usize = 1;
+const HELP_DESCRIPTION_COLUMN: usize = 2;
+
 pub(crate) fn help_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     let model = help_model();
@@ -26,12 +30,21 @@ pub(crate) fn help_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 }
 
 fn help_command_line(row: &HelpCommandRow, widths: &[usize]) -> Line<'static> {
-    let command = fit(row.command, widths.first().copied().unwrap_or(18));
-    let aliases = fit(&row.aliases, widths.get(1).copied().unwrap_or(18));
+    let command = fit(
+        &row.cells[HELP_COMMAND_COLUMN],
+        widths.get(HELP_COMMAND_COLUMN).copied().unwrap_or(18),
+    );
+    let aliases = fit(
+        &row.cells[HELP_ALIASES_COLUMN],
+        widths.get(HELP_ALIASES_COLUMN).copied().unwrap_or(18),
+    );
     if widths.len() == 2 {
         table_row(&[&command, &aliases], widths)
     } else {
-        let description = fit(row.description, widths.get(2).copied().unwrap_or(20));
+        let description = fit(
+            &row.cells[HELP_DESCRIPTION_COLUMN],
+            widths.get(HELP_DESCRIPTION_COLUMN).copied().unwrap_or(20),
+        );
         table_row(&[&command, &aliases, &description], widths)
     }
 }
