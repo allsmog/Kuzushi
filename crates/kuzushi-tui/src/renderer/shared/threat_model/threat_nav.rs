@@ -1,24 +1,18 @@
 use super::*;
+use crate::ui_view_models::threat_nav_model;
 
 pub(crate) fn threat_nav(active: ThreatView) -> Line<'static> {
-    let items = [
-        (ThreatView::Dfd, "1 DFD"),
-        (ThreatView::Stride, "2 STRIDE"),
-        (ThreatView::Stories, "3 STORIES"),
-        (ThreatView::Scope, "4 SCOPE"),
-        (ThreatView::Summary, "5 SUMMARY"),
-    ];
     let mut spans = Vec::new();
-    for (index, (view, label)) in items.iter().enumerate() {
+    for (index, item) in threat_nav_model(active).iter().enumerate() {
         if index > 0 {
             spans.push(Span::styled("  ", theme::subtle()));
         }
-        let style = if *view == active {
+        let style = if item.active {
             theme::selection()
         } else {
             theme::muted()
         };
-        spans.push(Span::styled(*label, style));
+        spans.push(Span::styled(item.label, style));
     }
     Line::from(spans)
 }
