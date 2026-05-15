@@ -19,6 +19,7 @@ mod keybindings;
 mod module_detail;
 mod options;
 mod prompt;
+mod prompt_tuning;
 mod routing;
 mod run_status;
 mod run_timeline;
@@ -52,6 +53,9 @@ pub(crate) use keybindings::footer_keybindings;
 pub(crate) use module_detail::{module_detail_model, ModuleDetailModel};
 pub(crate) use options::{options_model, OptionRow, OptionsModelStatus};
 pub(crate) use prompt::prompt_brand;
+pub(crate) use prompt_tuning::{
+    prompts_model, tune_model, PromptRow, TuneActionRow, TuneHouseRules, TuneModel,
+};
 pub(crate) use routing::{routing_mode, routing_mode_segment, RoutingMode};
 pub(crate) use run_status::scan_status;
 pub(crate) use run_timeline::{past_runs_model, PastRun, PastRunStatus};

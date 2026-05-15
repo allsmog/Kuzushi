@@ -1,46 +1,64 @@
 use super::*;
+use crate::ui_view_models::{
+    prompts_model, tune_model, PromptRow, TuneActionRow, TuneHouseRules, TuneModel,
+};
 
 pub(crate) fn tune_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
-    let module = app.focused_module.as_deref().unwrap_or("semgrep");
+    let model = tune_model(app, house_rule_line_limit(area));
     lines.push(blank());
-    lines.push(divider("TUNE", area.width));
-    lines.push(detail("module", module));
-    lines.push(detail("severity floor", "medium"));
-    lines.push(detail("triage confidence", "0.70"));
-    lines.push(detail("scan concurrency", "adaptive"));
-    lines.push(detail(
-        "house rules",
-        &format!(".kuzushi/house-rules/{module}.md"),
-    ));
+    append_tune_summary(&mut lines, &model, area.width);
+    append_tune_actions(&mut lines, &model.actions, area.width);
+    append_house_rules(&mut lines, &model.house_rules, area);
+    lines.push(keybind_hint_line(&[
+        ("Up/Down", "move"),
+        ("Enter", "activate"),
+        ("show/set/reset", "direct"),
+        ("back", "home"),
+    ]));
+    lines
+}
+
+fn append_tune_summary(lines: &mut Vec<Line<'static>>, model: &TuneModel, width: u16) {
+    lines.push(divider("TUNE", width));
+    lines.push(detail("module", &model.module));
+    lines.push(detail("severity floor", model.severity_floor));
+    lines.push(detail("triage confidence", model.triage_confidence));
+    lines.push(detail("scan concurrency", model.scan_concurrency));
+    lines.push(detail("house rules", &model.house_rules_path));
     lines.push(blank());
-    lines.push(divider("ACTIONS", area.width));
-    let cursor = app.tune_cursor_clamped();
-    for (index, action) in crate::app::TuneAction::ORDER.iter().enumerate() {
-        let selected = index == cursor;
-        let marker = if selected { ">" } else { " " };
-        let style = if selected {
-            theme::accent().add_modifier(Modifier::BOLD)
-        } else {
-            theme::primary()
-        };
+}
+
+fn append_tune_actions(lines: &mut Vec<Line<'static>>, actions: &[TuneActionRow], width: u16) {
+    lines.push(divider("ACTIONS", width));
+    for action in actions {
+        lines.push(tune_action_label_line(action, width));
         lines.push(Line::styled(
-            fit(&format!("{marker} {}", action.label()), area.width as usize),
-            style,
-        ));
-        lines.push(Line::styled(
-            fit(&format!("    {}", action.hint()), area.width as usize),
+            fit(&format!("    {}", action.hint), width as usize),
             theme::muted(),
         ));
     }
+}
+
+fn tune_action_label_line(action: &TuneActionRow, width: u16) -> Line<'static> {
+    let marker = if action.selected { ">" } else { " " };
+    let style = if action.selected {
+        theme::accent().add_modifier(Modifier::BOLD)
+    } else {
+        theme::primary()
+    };
+    Line::styled(
+        fit(&format!("{marker} {}", action.label), width as usize),
+        style,
+    )
+}
+
+fn append_house_rules(lines: &mut Vec<Line<'static>>, house_rules: &TuneHouseRules, area: Rect) {
     lines.push(blank());
-    match app.read_house_rules() {
-        Some(text) if !text.trim().is_empty() => {
+    match house_rules {
+        TuneHouseRules::Present(rows) => {
             lines.push(divider("HOUSE RULES", area.width));
-            for raw in text
-                .lines()
-                .take((area.height as usize).saturating_sub(10).max(4))
-            {
+            for raw in rows {
                 lines.push(Line::raw(fit(raw, area.width as usize)));
             }
             lines.push(blank());
@@ -51,50 +69,18 @@ pub(crate) fn tune_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             ));
         }
     }
-    lines.push(keybind_hint_line(&[
-        ("Up/Down", "move"),
-        ("Enter", "activate"),
-        ("show/set/reset", "direct"),
-        ("back", "home"),
-    ]));
-    lines
+}
+
+fn house_rule_line_limit(area: Rect) -> usize {
+    (area.height as usize).saturating_sub(10).max(4)
 }
 
 pub(crate) fn prompts_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
-    let module = app.focused_module.as_deref().unwrap_or("semgrep");
+    let model = prompts_model(app);
     lines.push(blank());
-    lines.push(divider("PROMPTS", area.width));
-    lines.push(detail("module", module));
-    lines.push(blank());
-    lines.push(Line::from(vec![
-        Span::raw("  "),
-        Span::styled(
-            table_text(&["verb", "source", "override path"], &[12, 10, 28]),
-            theme::subtle(),
-        ),
-    ]));
-    let cursor = app.prompts_cursor_clamped();
-    for (index, verb) in crate::app::ShellApp::PROMPT_VERB_NAMES.iter().enumerate() {
-        let selected = index == cursor;
-        let marker = if selected { ">" } else { " " };
-        let style = if selected {
-            theme::accent().add_modifier(Modifier::BOLD)
-        } else {
-            theme::primary()
-        };
-        let path = format!(".kuzushi/prompts/{module}/{verb}.md");
-        lines.push(Line::styled(
-            fit(
-                &format!(
-                    "{marker} {}",
-                    table_text(&[verb, "builtin", &path], &[12, 10, value_width(area, 28)],)
-                ),
-                area.width as usize,
-            ),
-            style,
-        ));
-    }
+    append_prompts_header(&mut lines, &model.module, area.width);
+    append_prompt_rows(&mut lines, &model.rows, area);
     lines.push(blank());
     lines.push(keybind_hint_line(&[
         ("Up/Down", "row"),
@@ -107,4 +93,45 @@ pub(crate) fn prompts_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ("back", "home"),
     ]));
     lines
+}
+
+fn append_prompts_header(lines: &mut Vec<Line<'static>>, module: &str, width: u16) {
+    lines.push(divider("PROMPTS", width));
+    lines.push(detail("module", module));
+    lines.push(blank());
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            table_text(&["verb", "source", "override path"], &[12, 10, 28]),
+            theme::subtle(),
+        ),
+    ]));
+}
+
+fn append_prompt_rows(lines: &mut Vec<Line<'static>>, rows: &[PromptRow], area: Rect) {
+    for row in rows {
+        lines.push(prompt_row_line(row, area));
+    }
+}
+
+fn prompt_row_line(row: &PromptRow, area: Rect) -> Line<'static> {
+    let marker = if row.selected { ">" } else { " " };
+    let style = if row.selected {
+        theme::accent().add_modifier(Modifier::BOLD)
+    } else {
+        theme::primary()
+    };
+    Line::styled(
+        fit(
+            &format!(
+                "{marker} {}",
+                table_text(
+                    &[row.verb, row.source, &row.path],
+                    &[12, 10, value_width(area, 28)],
+                )
+            ),
+            area.width as usize,
+        ),
+        style,
+    )
 }
