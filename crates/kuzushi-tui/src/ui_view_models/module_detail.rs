@@ -2,9 +2,50 @@ use crate::ShellApp;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModuleDetailModel {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) primary_tool: String,
+    pub(crate) visible_tools: Vec<ModuleToolModel>,
+    pub(crate) stored_options: Vec<(String, String)>,
+    pub(crate) prompts: Vec<ModulePromptOnDisk>,
+    pub(crate) log_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ModulePromptOnDisk {
     pub(crate) verb: String,
     pub(crate) path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ModuleToolModel {
+    pub(crate) name: String,
+    pub(crate) description: String,
+    pub(crate) headless: bool,
+}
+
+pub(crate) fn module_detail_model(app: &ShellApp, module_id: &str) -> Option<ModuleDetailModel> {
+    let module = app
+        .registry
+        .modules()
+        .find(|module| module.metadata().id == module_id)?;
+    let visible_tools = visible_module_tools(module);
+    let primary_tool = visible_tools
+        .first()
+        .map(|tool| tool.name.clone())
+        .unwrap_or_else(|| "no-tool".to_string());
+    Some(ModuleDetailModel {
+        id: module.metadata().id.clone(),
+        name: module.metadata().name.clone(),
+        description: module.metadata().description.clone(),
+        primary_tool,
+        stored_options: module_stored_options(app, &visible_tools),
+        prompts: module_prompts_model(app, module_id),
+        log_count: module_log_count(app, module_id),
+        visible_tools,
+    })
 }
 
 pub(crate) fn module_prompts_model(app: &ShellApp, module_id: &str) -> Vec<ModulePromptOnDisk> {
@@ -49,4 +90,50 @@ fn display_prompt_path(app: &ShellApp, path: &Path) -> String {
 
 fn workspace_root(app: &ShellApp) -> &Path {
     app.target.as_deref().unwrap_or_else(|| Path::new("."))
+}
+
+fn visible_module_tools(module: &kuzushi_core::BuiltinModule) -> Vec<ModuleToolModel> {
+    module
+        .tools()
+        .iter()
+        .filter(|tool| !tool.hidden)
+        .map(|tool| ModuleToolModel {
+            name: tool.name.clone(),
+            description: tool.description.clone(),
+            headless: tool.headless,
+        })
+        .collect()
+}
+
+fn module_stored_options(app: &ShellApp, tools: &[ModuleToolModel]) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for tool in tools {
+        let stored = app.option_store.effective_stored_values(&tool.name);
+        for (name, value) in stored.iter() {
+            out.push((format!("{}::{}", tool.name, name), format_json_value(value)));
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    out
+}
+
+fn module_log_count(app: &ShellApp, module_id: &str) -> usize {
+    app.log
+        .iter()
+        .filter(|line| is_module_log_line(line, module_id))
+        .count()
+}
+
+fn is_module_log_line(line: &crate::app::LogLine, module_id: &str) -> bool {
+    line.prefix == module_id || line.prefix.starts_with(&format!("{module_id}:"))
+}
+
+fn format_json_value(value: &serde_json::Value) -> String {
+    match value {
+        serde_json::Value::String(value) => value.clone(),
+        serde_json::Value::Number(number) => number.to_string(),
+        serde_json::Value::Bool(value) => value.to_string(),
+        serde_json::Value::Null => "null".to_string(),
+        other => serde_json::to_string(other).unwrap_or_else(|_| "<json>".to_string()),
+    }
 }

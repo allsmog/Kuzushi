@@ -170,11 +170,14 @@ const rules = [
   },
   {
     name: "TUI module detail renderers read prompt view models",
-    roots: [
-      "crates/kuzushi-tui/src/renderer/views/module/module_lines.rs",
-      "crates/kuzushi-tui/src/renderer/views/module/module_stored_options.rs",
-    ],
+    roots: ["crates/kuzushi-tui/src/renderer/views/module/module_lines.rs"],
     forbidden: /\b(std::fs|read_dir|read_to_string|PathBuf|Path::new|\.exists\()/,
+  },
+  {
+    name: "TUI module detail renderer reads module detail view model",
+    roots: ["crates/kuzushi-tui/src/renderer/views/module/module_lines.rs"],
+    forbidden:
+      /kuzushi_core::(?:BuiltinModule|ToolDescriptor)|\.registry\.modules\(|\.tools\(\)|\.metadata\(\)/,
   },
   {
     name: "TUI threat renderers read threat-model view models",
@@ -239,7 +242,7 @@ function trackedFiles() {
     ...gitLines(["ls-files"]),
     ...gitLines(["ls-files", "--others", "--exclude-standard"]),
   ];
-  return [...new Set(files)].sort();
+  return [...new Set(files)].filter((file) => existsSync(path.join(root, file))).sort();
 }
 
 function gitLines(args) {

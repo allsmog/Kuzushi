@@ -16,7 +16,7 @@ mod threat_model;
 pub(crate) use attack_surface::{attack_surface_risk_model, AttackSurfaceRiskModel};
 pub(crate) use failure_handoff::failure_handoff_context;
 pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
-pub(crate) use module_detail::{module_prompts_model, ModulePromptOnDisk};
+pub(crate) use module_detail::{module_detail_model, ModuleDetailModel};
 pub(crate) use run_timeline::{past_runs_model, PastRun, PastRunStatus};
 pub(crate) use run_trace::{
     replay_model, trace_model, ReplayModel, RunArtifactDetail, TraceModel, TraceStep,
