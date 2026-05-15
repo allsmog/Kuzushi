@@ -1,4 +1,4 @@
-use crate::{ShellApp, ShellView};
+use crate::{OptionsView, ShellApp, ShellView};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum RoutingMode {
@@ -7,6 +7,18 @@ pub(crate) enum RoutingMode {
     Agent,
     Plan,
     Run,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlainRenderMode<'a> {
+    Options(&'a OptionsView),
+    SastTasks,
+    Context,
+    Workspace,
+    KnowledgeBase,
+    Config,
+    Help,
+    LineBased,
 }
 
 pub(crate) fn routing_mode(app: &ShellApp) -> RoutingMode {
@@ -32,6 +44,19 @@ pub(crate) fn routing_mode_segment(app: &ShellApp) -> String {
 
 pub(crate) fn uses_activity_frame(app: &ShellApp) -> bool {
     matches!(app.shell_view, ShellView::Activity)
+}
+
+pub(crate) fn plain_render_mode(app: &ShellApp) -> PlainRenderMode<'_> {
+    match &app.shell_view {
+        ShellView::Options(view) => PlainRenderMode::Options(view),
+        ShellView::SastTasks => PlainRenderMode::SastTasks,
+        ShellView::Context => PlainRenderMode::Context,
+        ShellView::Workspace => PlainRenderMode::Workspace,
+        ShellView::KnowledgeBase => PlainRenderMode::KnowledgeBase,
+        ShellView::Config => PlainRenderMode::Config,
+        ShellView::Help => PlainRenderMode::Help,
+        _ => PlainRenderMode::LineBased,
+    }
 }
 
 fn routing_state(app: &ShellApp) -> (bool, bool, bool, bool) {

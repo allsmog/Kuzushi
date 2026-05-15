@@ -1,7 +1,7 @@
 use super::*;
 use crate::ui_view_models::{
-    live_activity_model, prereq_prompt_model, transcript_model_from_log_index, LiveActivityModel,
-    PrereqPromptModel, PrereqPromptStepModel, TranscriptRow,
+    live_activity_model, plain_render_mode, prereq_prompt_model, transcript_model_from_log_index,
+    LiveActivityModel, PlainRenderMode, PrereqPromptModel, PrereqPromptStepModel, TranscriptRow,
 };
 
 pub fn render_plain_app(app: &ShellApp, width: usize) -> String {
@@ -29,33 +29,29 @@ pub fn render_plain_command_result(
 
 pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let width = width.max(40);
-    let mut lines = match &app.shell_view {
-        ShellView::Options(view) => plain_options_lines(app, width, view),
-        ShellView::SastTasks => plain_sast_tasks_lines(app, width),
-        ShellView::Context => plain_context_lines(app, width),
-        ShellView::Workspace => plain_workspace_lines(app, width),
-        ShellView::KnowledgeBase => plain_knowledge_base_lines(app, width),
-        ShellView::Config => plain_config_lines(app, width),
-        ShellView::Help => plain_help_lines(app, width),
-        // Activity view's main render path is frame-level Ratatui (see
-        // render_activity_view); the plain path uses the legacy line-based
-        // helper so non-TTY callers (--scripted, render_plain_app tests)
-        // still get text output. Fall through to shell_view_lines so the
-        // primary_view_lines arm for ShellView::Activity drives the
-        // line-based renderer.
-        _ => {
-            let area = Rect::new(0, 0, width.min(u16::MAX as usize) as u16, u16::MAX);
-            shell_view_lines(app, area)
-                .into_iter()
-                .map(line_to_unstyled_text)
-                .collect()
-        }
+    let mut lines = match plain_render_mode(app) {
+        PlainRenderMode::Options(view) => plain_options_lines(app, width, view),
+        PlainRenderMode::SastTasks => plain_sast_tasks_lines(app, width),
+        PlainRenderMode::Context => plain_context_lines(app, width),
+        PlainRenderMode::Workspace => plain_workspace_lines(app, width),
+        PlainRenderMode::KnowledgeBase => plain_knowledge_base_lines(app, width),
+        PlainRenderMode::Config => plain_config_lines(app, width),
+        PlainRenderMode::Help => plain_help_lines(app, width),
+        PlainRenderMode::LineBased => plain_line_based_view_lines(app, width),
     };
 
     lines = prepend_plain_activity_lines(app, width, lines);
 
     lines = finalize_width_safe_plain_lines(lines, width);
     trim_plain_lines(lines)
+}
+
+fn plain_line_based_view_lines(app: &ShellApp, width: usize) -> Vec<String> {
+    let area = Rect::new(0, 0, width.min(u16::MAX as usize) as u16, u16::MAX);
+    shell_view_lines(app, area)
+        .into_iter()
+        .map(line_to_unstyled_text)
+        .collect()
 }
 
 pub(crate) fn render_plain_command_result_lines(
