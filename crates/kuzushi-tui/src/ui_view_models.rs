@@ -15,6 +15,7 @@ mod display_text;
 mod failure_handoff;
 mod finding_summary;
 mod home_cockpit;
+mod keybindings;
 mod module_detail;
 mod options;
 mod prompt;
@@ -40,6 +41,7 @@ pub(crate) use finding_summary::{
     findings_count_summary, status_footer_findings_summary, SeverityCounts,
 };
 pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
+pub(crate) use keybindings::footer_keybindings;
 pub(crate) use module_detail::{module_detail_model, ModuleDetailModel};
 pub(crate) use options::{options_model, OptionRow, OptionsModelStatus};
 pub(crate) use prompt::prompt_brand;
