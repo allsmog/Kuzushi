@@ -6,7 +6,7 @@ use super::command_router::unknown_command_message;
 use super::findings::{
     format_alias_table, format_chain_alias, parse_chain_alias, sorted_chain_aliases,
 };
-use super::settings::auth_login_status_message;
+use super::settings::{auth_login_process_provider_arg, auth_login_status_message};
 use super::state_transitions::{HotkeyTrigger, ViewHotkeyAction};
 use super::view_state::ChainSeverity;
 use super::*;
@@ -1960,6 +1960,9 @@ fn auth_provider_backend_model_and_cost_commands_are_explicit_and_secret_safe() 
 #[test]
 fn auth_login_status_messages_cover_success_failure_and_spawn_error() {
     use std::os::unix::process::ExitStatusExt;
+
+    assert_eq!(auth_login_process_provider_arg("openai-codex"), "openai");
+    assert_eq!(auth_login_process_provider_arg("anthropic"), "anthropic");
 
     let (prefix, success) =
         auth_login_status_message("anthropic", Ok(std::process::ExitStatus::from_raw(0)));
