@@ -8,7 +8,8 @@ pub(crate) struct ActivityPaneChromeModel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActivityPaneTitle {
-    pub(crate) label: &'static str,
+    pub(crate) block_title: String,
+    pub(crate) plain_header: String,
     pub(crate) focused: bool,
 }
 
@@ -20,7 +21,11 @@ pub(crate) fn activity_pane_chrome_model(session: &ActivitySession) -> ActivityP
 }
 
 fn pane_title(label: &'static str, focused: bool) -> ActivityPaneTitle {
-    ActivityPaneTitle { label, focused }
+    ActivityPaneTitle {
+        block_title: format!("── {label} ──"),
+        plain_header: format!(" ── {label} "),
+        focused,
+    }
 }
 
 #[cfg(test)]
@@ -44,6 +49,18 @@ mod tests {
             ActivityPaneChromeModel {
                 dag: pane_title("DAG", false),
                 feed: pane_title("FEED", true),
+            }
+        );
+    }
+
+    #[test]
+    fn activity_pane_title_projects_renderer_copy() {
+        assert_eq!(
+            pane_title("DAG", true),
+            ActivityPaneTitle {
+                block_title: "── DAG ──".to_string(),
+                plain_header: " ── DAG ".to_string(),
+                focused: true,
             }
         );
     }

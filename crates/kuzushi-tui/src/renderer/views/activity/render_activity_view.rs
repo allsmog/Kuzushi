@@ -100,7 +100,7 @@ fn render_dag_pane_widget(
         .borders(Borders::RIGHT)
         .border_style(theme::subtle())
         .title(Span::styled(
-            pane_title_text(title),
+            title.block_title.clone(),
             pane_title_style(title),
         ));
     let inner_area = block.inner(area);
@@ -133,7 +133,7 @@ fn render_feed_pane_widget(
     let inner_width = area.width.saturating_sub(2) as usize;
     let lines = feed_pane_lines(session, inner_width);
     let block = Block::default().borders(Borders::NONE).title(Span::styled(
-        pane_title_text(title),
+        title.block_title.clone(),
         pane_title_style(title),
     ));
     let inner_area = block.inner(area);
@@ -144,10 +144,6 @@ fn render_feed_pane_widget(
         .scroll((scroll as u16, 0))
         .wrap(Wrap { trim: false });
     frame.render_widget(para, inner_area);
-}
-
-fn pane_title_text(title: &ActivityPaneTitle) -> String {
-    format!("── {} ──", title.label)
 }
 
 fn pane_title_style(title: &ActivityPaneTitle) -> ratatui::style::Style {
