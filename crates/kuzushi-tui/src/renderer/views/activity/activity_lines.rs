@@ -1,8 +1,10 @@
 use super::dag_pane::{dag_row_text, dag_state_style, dag_subsystems_row_text};
 use super::feed_pane::{feed_event_style, feed_event_text};
 use super::*;
-use crate::app::PaneFocus;
-use crate::ui_view_models::{activity_footer_model, activity_header_model, ActivityFooterHint};
+use crate::ui_view_models::{
+    activity_footer_model, activity_header_model, activity_pane_chrome_model, ActivityFooterHint,
+    ActivityPaneTitle,
+};
 use std::time::Instant;
 
 /// Build the line list for the Activity view. Renders a split-pane layout:
@@ -22,12 +24,12 @@ pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(divider(&header.summary_title, area.width));
 
     let (left_w, right_w) = activity_pane_widths(area.width);
+    let pane_chrome = activity_pane_chrome_model(session);
     lines.push(pane_header_line(
-        "DAG",
-        "FEED",
+        &pane_chrome.dag,
+        &pane_chrome.feed,
         left_w,
         right_w,
-        session.pane_focus,
     ));
     lines.extend(activity_pane_lines(session, left_w, right_w));
 
@@ -127,29 +129,25 @@ fn combined_activity_pane_line(
 }
 
 fn pane_header_line(
-    left: &str,
-    right: &str,
+    left: &ActivityPaneTitle,
+    right: &ActivityPaneTitle,
     left_w: usize,
     right_w: usize,
-    focus: PaneFocus,
 ) -> Line<'static> {
-    let left_style = if matches!(focus, PaneFocus::Left) {
-        theme::accent()
-    } else {
-        theme::label()
-    };
-    let right_style = if matches!(focus, PaneFocus::Right) {
-        theme::accent()
-    } else {
-        theme::label()
-    };
-    let left_pad = format!(" ── {left} ");
-    let right_pad = format!(" ── {right} ");
+    let left_pad = format!(" ── {} ", left.label);
+    let right_pad = format!(" ── {} ", right.label);
     Line::from(vec![
-        Span::styled(pad_to(&left_pad, left_w), left_style),
+        Span::styled(pad_to(&left_pad, left_w), pane_title_style(left)),
         Span::styled("│".to_string(), theme::subtle()),
-        Span::styled(pad_to(&right_pad, right_w), right_style),
+        Span::styled(pad_to(&right_pad, right_w), pane_title_style(right)),
     ])
+}
+
+fn pane_title_style(title: &ActivityPaneTitle) -> ratatui::style::Style {
+    if title.focused {
+        return theme::accent();
+    }
+    theme::label()
 }
 
 fn combined_pane_line(
