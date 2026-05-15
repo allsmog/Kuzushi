@@ -20,6 +20,28 @@ fn help_model_projects_registered_examples_and_aliases() {
 }
 
 #[test]
+fn plain_help_model_projects_plain_rows() {
+    let model = plain_help_model();
+
+    assert_eq!(model.title, "HELP");
+    assert!(model.intro.contains("? opens help"));
+    let examples = model.examples_line.as_deref().unwrap_or_default();
+    assert!(examples.starts_with("Examples: "));
+    assert!(examples.contains("scan ."));
+    assert!(examples.contains("run ."));
+    assert!(examples.contains("model 1"));
+    assert!(model
+        .categories
+        .iter()
+        .any(|category| category.heading == "NAVIGATION — browse modules and tools"));
+    assert!(model
+        .categories
+        .iter()
+        .flat_map(|category| category.rows.iter())
+        .any(|row| row.starts_with("  aliases / examples:") && row.contains("/h")));
+}
+
+#[test]
 fn quickstart_model_uses_current_target_scan_shape() {
     let mut app = ShellApp::new(V2Config::default(), None);
 

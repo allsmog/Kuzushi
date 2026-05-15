@@ -1,7 +1,7 @@
 use super::*;
 use crate::ui_view_models::{
-    help_model, plain_sast_tasks_model, HelpCategoryModel, HelpCommandRow, PlainSastTaskRow,
-    PlainSastTasksModel,
+    plain_help_model, plain_sast_tasks_model, PlainHelpCategoryModel, PlainHelpModel,
+    PlainSastTaskRow, PlainSastTasksModel,
 };
 
 pub(crate) fn plain_sast_tasks_lines(app: &ShellApp, width: usize) -> Vec<String> {
@@ -48,32 +48,25 @@ fn plain_sast_task_row(row: &PlainSastTaskRow, widths: &[usize]) -> String {
 
 pub(crate) fn plain_help_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
-    let model = help_model();
-    lines.push(String::new());
-    lines.push(plain_section_divider("HELP", width));
-    lines.push(model.intro.to_string());
-    if !model.examples.is_empty() {
-        lines.push(format!("Examples: {}", model.examples.join(" | ")));
-    }
-
+    let model = plain_help_model();
+    push_plain_help_summary(&mut lines, &model, width);
     for category in &model.categories {
         append_plain_help_category(&mut lines, category);
     }
-
     lines
 }
 
-fn append_plain_help_category(lines: &mut Vec<String>, category: &HelpCategoryModel) {
+fn push_plain_help_summary(lines: &mut Vec<String>, model: &PlainHelpModel, width: usize) {
     lines.push(String::new());
-    lines.push(format!("{} — {}", category.label, category.blurb));
-    for row in &category.commands {
-        append_plain_help_spec(lines, row);
+    lines.push(plain_section_divider(model.title, width));
+    lines.push(model.intro.to_string());
+    if let Some(examples) = &model.examples_line {
+        lines.push(examples.clone());
     }
 }
 
-fn append_plain_help_spec(lines: &mut Vec<String>, row: &HelpCommandRow) {
-    lines.push(format!("{} - {}", row.command, row.description));
-    if row.aliases != "-" {
-        lines.push(format!("  aliases / examples: {}", row.aliases));
-    }
+fn append_plain_help_category(lines: &mut Vec<String>, category: &PlainHelpCategoryModel) {
+    lines.push(String::new());
+    lines.push(category.heading.clone());
+    lines.extend(category.rows.iter().cloned());
 }
