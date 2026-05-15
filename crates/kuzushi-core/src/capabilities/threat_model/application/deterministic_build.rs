@@ -76,6 +76,7 @@ fn deterministic_threat(index: usize, surface: &AttackSurface) -> Value {
 
 fn target_element_ids_for(kind: AttackSurfaceKind) -> &'static [&'static str] {
     match kind {
+        AttackSurfaceKind::HttpRoute => &["http-route"],
         AttackSurfaceKind::DbQueryBoundary => &["data-store"],
         AttackSurfaceKind::CommandExecutionBoundary => &["process-execution"],
         AttackSurfaceKind::DeserializationPoint => &["parser-boundary"],

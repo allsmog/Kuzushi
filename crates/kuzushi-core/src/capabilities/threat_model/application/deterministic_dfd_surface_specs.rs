@@ -5,6 +5,7 @@ use super::deterministic_dfd_specs::{dfd_flow, dfd_node, trust_boundary};
 
 pub(super) fn surface_dfd_nodes() -> Vec<(AttackSurfaceKind, Value)> {
     vec![
+        (AttackSurfaceKind::HttpRoute, http_route_node()),
         (AttackSurfaceKind::RpcHandler, rpc_handler_node()),
         (
             AttackSurfaceKind::FileUploadParsePath,
@@ -20,6 +21,7 @@ pub(super) fn surface_dfd_nodes() -> Vec<(AttackSurfaceKind, Value)> {
 
 pub(super) fn surface_dfd_flows() -> Vec<(AttackSurfaceKind, Value)> {
     vec![
+        (AttackSurfaceKind::HttpRoute, http_route_flow()),
         (AttackSurfaceKind::RpcHandler, rpc_handler_flow()),
         (
             AttackSurfaceKind::FileUploadParsePath,
@@ -56,6 +58,16 @@ pub(super) fn surface_trust_boundaries() -> Vec<(AttackSurfaceKind, Value)> {
             ),
         ),
     ]
+}
+
+fn http_route_node() -> Value {
+    dfd_node(
+        "http-route",
+        "process",
+        "HTTP route",
+        "Detected public HTTP route",
+        "edge",
+    )
 }
 
 fn rpc_handler_node() -> Value {
@@ -95,6 +107,16 @@ fn background_job_node() -> Value {
         "Background job",
         "Detected scheduler or queue consumer",
         "internal",
+    )
+}
+
+fn http_route_flow() -> Value {
+    dfd_flow(
+        "flow-http-route",
+        "External request reaches HTTP route",
+        "actor-external",
+        "http-route",
+        &["tb-public-http"],
     )
 }
 
