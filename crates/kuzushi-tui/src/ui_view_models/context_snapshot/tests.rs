@@ -50,3 +50,50 @@ fn context_snapshot_model_reports_running_context_tool() {
     );
     assert!(model.details.is_none());
 }
+
+#[test]
+fn plain_context_model_projects_missing_snapshot_rows() {
+    let app = ShellApp::new(V2Config::default(), None);
+
+    let model = plain_context_model(&app);
+
+    assert_eq!(model.title, "CONTEXT");
+    assert!(model
+        .summary_rows
+        .contains(&"snapshot: .kuzushi/context-snapshot.json".to_string()));
+    assert!(model.summary_rows.contains(&"state: missing".to_string()));
+    assert!(model
+        .body_rows
+        .contains(&"No context snapshot exists yet. Next: context build writes .kuzushi/context-snapshot.json.".to_string()));
+    assert_eq!(
+        model.next_hint,
+        "Next: context build, context status, context regen repo"
+    );
+}
+
+#[test]
+fn plain_context_model_projects_present_snapshot_details() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.context_view = crate::app::ContextSnapshotView {
+        snapshot_path: Some(PathBuf::from(".kuzushi/context-snapshot.json")),
+        exists: true,
+        status: "snapshot present; 2 indexed file(s)".to_string(),
+        target: Some("/tmp/demo".to_string()),
+        discovery: Some("auto".to_string()),
+        files_indexed: Some(2),
+        total_files: Some(3),
+        languages: vec!["Rust".to_string()],
+        frameworks: vec!["Cargo".to_string()],
+        generated_slices: vec!["repo".to_string(), "app-model".to_string()],
+        stale_slices: Vec::new(),
+    };
+
+    let model = plain_context_model(&app);
+
+    assert!(model.summary_rows.contains(&"state: present".to_string()));
+    assert!(model.body_rows.contains(&"target: /tmp/demo".to_string()));
+    assert!(model
+        .body_rows
+        .contains(&"files: indexed=2 total=3".to_string()));
+    assert!(model.body_rows.contains(&"stale: -".to_string()));
+}

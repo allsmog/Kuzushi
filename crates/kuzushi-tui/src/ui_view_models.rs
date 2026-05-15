@@ -104,7 +104,8 @@ pub(crate) use config::{
 };
 pub(crate) use confirm_card::{confirm_card_model, ConfirmCardModel};
 pub(crate) use context_snapshot::{
-    context_snapshot_model, ContextSnapshotDetails, ContextSnapshotModel,
+    context_snapshot_model, plain_context_model, ContextSnapshotDetails, ContextSnapshotModel,
+    PlainContextModel,
 };
 pub(crate) use context_strip::{
     context_strip_model, plain_context_strip_model, ContextStripModel, ContextStripSegment,

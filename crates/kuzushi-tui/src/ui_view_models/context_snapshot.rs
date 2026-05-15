@@ -29,6 +29,14 @@ pub(crate) struct ContextSnapshotDetails {
     pub(crate) stale: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlainContextModel {
+    pub(crate) title: &'static str,
+    pub(crate) summary_rows: Vec<String>,
+    pub(crate) body_rows: Vec<String>,
+    pub(crate) next_hint: &'static str,
+}
+
 pub(crate) fn context_snapshot_model(app: &ShellApp) -> ContextSnapshotModel {
     let view = &app.context_view;
     let running = context_running(app);
@@ -49,6 +57,48 @@ pub(crate) fn context_snapshot_model(app: &ShellApp) -> ContextSnapshotModel {
         running,
         details: snapshot_present.then(|| ContextSnapshotDetails::from_app(app)),
     }
+}
+
+pub(crate) fn plain_context_model(app: &ShellApp) -> PlainContextModel {
+    PlainContextModel::from_context_snapshot_model(context_snapshot_model(app))
+}
+
+impl PlainContextModel {
+    fn from_context_snapshot_model(model: ContextSnapshotModel) -> Self {
+        PlainContextModel {
+            title: "CONTEXT",
+            summary_rows: vec![
+                format!("snapshot: {}", model.snapshot),
+                format!("state: {}", model.state),
+                format!("status: {}", model.status),
+            ],
+            body_rows: plain_context_body_rows(model.details),
+            next_hint: "Next: context build, context status, context regen repo",
+        }
+    }
+}
+
+fn plain_context_body_rows(details: Option<ContextSnapshotDetails>) -> Vec<String> {
+    match details {
+        Some(details) => plain_context_detail_rows(details),
+        None => vec![
+            String::new(),
+            "No context snapshot exists yet. Next: context build writes .kuzushi/context-snapshot.json."
+                .to_string(),
+        ],
+    }
+}
+
+fn plain_context_detail_rows(details: ContextSnapshotDetails) -> Vec<String> {
+    vec![
+        format!("target: {}", details.target),
+        format!("discovery: {}", details.discovery),
+        format!("files: {}", details.files),
+        format!("languages: {}", details.languages),
+        format!("frameworks: {}", details.frameworks),
+        format!("generated: {}", details.generated),
+        format!("stale: {}", details.stale),
+    ]
 }
 
 fn context_running(app: &ShellApp) -> Option<ContextSnapshotRunning> {
