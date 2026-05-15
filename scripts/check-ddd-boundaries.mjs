@@ -85,6 +85,11 @@ const rules = [
       /\b(AgentRuntime|TracedRuntime|execute_tool|execute_tool_with_runtime|start_background_tool|run_background_tool|Command::new|ProcessCommand)\b/,
   },
   {
+    name: "TUI runtime wording avoids validated without proof",
+    roots: ["crates/kuzushi-tui/src"],
+    forbidden: /\bvalidated\b/i,
+  },
+  {
     name: "TUI catalog cockpit renderers do not parse artifacts directly",
     roots: ["crates/kuzushi-tui/src/renderer/views/catalog"],
     forbidden: /\b(std::fs|serde_json|read_to_string|PathBuf|Path::new|\.exists\()/,
@@ -191,7 +196,12 @@ function sourceWithoutTestModule(file) {
 }
 
 function isProductionRust(file) {
-  return file.endsWith(".rs") && !file.endsWith("/tests.rs") && !file.includes("/tests/");
+  return (
+    file.endsWith(".rs") &&
+    !file.endsWith("/tests.rs") &&
+    !file.endsWith("_tests.rs") &&
+    !file.includes("/tests/")
+  );
 }
 
 function isUnder(file, candidate) {
