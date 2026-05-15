@@ -183,6 +183,11 @@ const rules = [
   },
   { name: "TUI module progress renderer reads SAST task view model", roots: ["crates/kuzushi-tui/src/renderer/views/module/append_progress_section.rs"], forbidden: /\b(option_store|sast_task_rows|serde_json|crate::app::SastTaskRow)\b/ },
   {
+    name: "TUI context progress renderer reads context snapshot view model",
+    roots: ["crates/kuzushi-tui/src/renderer/views/module/append_sast_pipeline_progress.rs"],
+    forbidden: /app\.context_view|ContextSnapshotView|\.snapshot_path|\.exists\b/,
+  },
+  {
     name: "TUI module run renderer reads module-run view model",
     roots: ["crates/kuzushi-tui/src/renderer/views/module/from_app.rs"],
     forbidden:

@@ -4,6 +4,7 @@ use crate::ShellApp;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ContextSnapshotModel {
     pub(crate) snapshot: String,
+    pub(crate) snapshot_present: bool,
     pub(crate) state: &'static str,
     pub(crate) status: String,
     pub(crate) running: Option<ContextSnapshotRunning>,
@@ -31,16 +32,22 @@ pub(crate) struct ContextSnapshotDetails {
 pub(crate) fn context_snapshot_model(app: &ShellApp) -> ContextSnapshotModel {
     let view = &app.context_view;
     let running = context_running(app);
+    let snapshot_present = view.exists;
     ContextSnapshotModel {
         snapshot: view
             .snapshot_path
             .as_ref()
             .map(|path| compact_target_path(&path.display().to_string()))
             .unwrap_or_else(|| ".kuzushi/context-snapshot.json".to_string()),
-        state: if view.exists { "present" } else { "missing" },
+        snapshot_present,
+        state: if snapshot_present {
+            "present"
+        } else {
+            "missing"
+        },
         status: context_status(app, running.as_ref()),
         running,
-        details: view.exists.then(|| ContextSnapshotDetails::from_app(app)),
+        details: snapshot_present.then(|| ContextSnapshotDetails::from_app(app)),
     }
 }
 

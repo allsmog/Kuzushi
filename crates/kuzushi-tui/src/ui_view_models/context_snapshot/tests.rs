@@ -22,6 +22,7 @@ fn context_snapshot_model_projects_present_snapshot() {
     let model = context_snapshot_model(&app);
 
     assert_eq!(model.snapshot, "./context-snapshot.json");
+    assert!(model.snapshot_present);
     assert_eq!(model.state, "present");
     assert_eq!(model.status, "snapshot present; 2 indexed file(s)");
     let details = model.details.expect("present details");
@@ -39,6 +40,7 @@ fn context_snapshot_model_reports_running_context_tool() {
     let model = context_snapshot_model(&app);
 
     assert_eq!(model.state, "missing");
+    assert!(!model.snapshot_present);
     assert!(model
         .status
         .contains("context:build indexing repository context"));
