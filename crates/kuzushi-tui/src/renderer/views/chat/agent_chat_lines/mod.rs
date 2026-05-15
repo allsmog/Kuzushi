@@ -1,8 +1,8 @@
 use super::*;
 use crate::ui_view_models::{
-    agent_chat_model, failure_handoff_context, AgentChatModel, AgentChatSession, AgentChatTurn,
+    agent_chat_model, failure_handoff_model, AgentChatModel, AgentChatSession, AgentChatTurn,
+    FailureHandoffModel,
 };
-use kuzushi_core::run_artifacts::FailureToLlmContext;
 
 mod history;
 mod turn_text;
@@ -38,10 +38,8 @@ pub(crate) fn failure_handoff_lines(app: &ShellApp, area: Rect) -> Vec<Line<'sta
     lines.push(divider("FAILURE HANDOFF", area.width));
     let body_w = area.width.saturating_sub(3) as usize;
 
-    if let Some(context) = failure_handoff_context(app) {
-        append_failure_identity(&mut lines, &context, body_w);
-        append_failure_artifacts(&mut lines, &context, body_w);
-        append_failure_recovery(&mut lines, &context, body_w);
+    if let Some(model) = failure_handoff_model(app) {
+        append_failure_rows(&mut lines, &model, body_w);
     } else {
         append_failure_empty_state(&mut lines);
     }
@@ -107,96 +105,19 @@ fn append_failure_handoff_panel(
         return;
     };
     lines.push(divider("FAILURE HANDOFF", width));
-    append_failure_identity(lines, context, body_w);
-    append_failure_artifacts(lines, context, body_w);
-    append_failure_recovery(lines, context, body_w);
+    append_failure_rows(lines, context, body_w);
     lines.push(blank());
 }
 
-fn append_failure_identity(
-    lines: &mut Vec<Line<'static>>,
-    context: &FailureToLlmContext,
-    body_w: usize,
-) {
-    append_failure_detail(
-        lines,
-        "stage",
-        failure_text(&context.failed_stage, "unknown"),
-        body_w,
-    );
-    append_failure_detail(
-        lines,
-        "cause",
-        failure_text(&context.cause, "unknown"),
-        body_w,
-    );
-    append_failure_detail(lines, "proof", context.allowed_proof_level.clone(), body_w);
+fn append_failure_rows(lines: &mut Vec<Line<'static>>, model: &FailureHandoffModel, body_w: usize) {
+    for row in &model.rows {
+        append_failure_detail(lines, row.label, &row.value, body_w);
+    }
 }
 
-fn append_failure_artifacts(
-    lines: &mut Vec<Line<'static>>,
-    context: &FailureToLlmContext,
-    body_w: usize,
-) {
-    append_failure_detail(
-        lines,
-        "available",
-        format!("{} artifact(s)", context.artifacts_available.len()),
-        body_w,
-    );
-    append_failure_detail(
-        lines,
-        "missing",
-        failure_list(&context.missing_artifacts),
-        body_w,
-    );
-    append_failure_detail(
-        lines,
-        "next",
-        failure_list(&context.next_files_or_artifacts_to_inspect),
-        body_w,
-    );
-}
-
-fn append_failure_recovery(
-    lines: &mut Vec<Line<'static>>,
-    context: &FailureToLlmContext,
-    body_w: usize,
-) {
-    append_failure_detail(
-        lines,
-        "recovery",
-        context.recovery_options.join(" | "),
-        body_w,
-    );
-    append_failure_detail(
-        lines,
-        "forbidden",
-        failure_list(&context.claims_forbidden),
-        body_w,
-    );
-    append_failure_detail(lines, "prompt", context.fallback_prompt.clone(), body_w);
-}
-
-fn append_failure_detail(lines: &mut Vec<Line<'static>>, key: &str, value: String, body_w: usize) {
-    for (index, segment) in wrap_text(&value, body_w).into_iter().enumerate() {
+fn append_failure_detail(lines: &mut Vec<Line<'static>>, key: &str, value: &str, body_w: usize) {
+    for (index, segment) in wrap_text(value, body_w).into_iter().enumerate() {
         let label = if index == 0 { key } else { "" };
         lines.push(detail(label, &segment));
-    }
-}
-
-fn failure_text(value: &str, fallback: &str) -> String {
-    if value.trim().is_empty() {
-        fallback.to_string()
-    } else {
-        value.to_string()
-    }
-}
-
-fn failure_list(values: &[String]) -> String {
-    if values.is_empty() {
-        "none".to_string()
-    } else {
-        values.join(", ")
     }
 }

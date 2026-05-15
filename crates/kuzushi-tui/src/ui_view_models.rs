@@ -113,7 +113,7 @@ pub(crate) use context_strip::{
 };
 pub(crate) use cost::{cost_model, CostBudgetRow, CostBudgetStatus, CostModel, CostTone};
 pub(crate) use display_text::{compact_target_path, format_session_cost};
-pub(crate) use failure_handoff::failure_handoff_context;
+pub(crate) use failure_handoff::{failure_handoff_model, FailureHandoffModel};
 pub(crate) use finding_summary::{
     findings_count_summary, status_footer_findings_summary, SeverityCounts,
 };
