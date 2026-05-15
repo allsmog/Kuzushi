@@ -1,49 +1,47 @@
 use super::*;
+use crate::ui_view_models::threat_patch_card_model;
 
 pub(crate) fn render_threat_patch_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if area.height == 0 {
         return;
     }
-    let Some(patch) = app.pending_threat_patch.as_ref() else {
+    let Some(patch) = threat_patch_card_model(app) else {
         return;
     };
+    let width = area.width as usize;
     let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(Line::styled(
-        fit(
-            &format!("◆ THREAT PATCH · goal: {}", patch.goal),
-            area.width as usize,
-        ),
+    lines.push(threat_patch_line(
+        format!("◆ THREAT PATCH · goal: {}", patch.goal),
+        width,
         theme::accent(),
     ));
-    lines.push(Line::styled(
-        fit(
-            &format!("  summary: {}", patch.summary),
-            area.width as usize,
-        ),
+    lines.push(threat_patch_line(
+        format!("  summary: {}", patch.summary),
+        width,
         theme::primary(),
     ));
-    let key_count = match &patch.patch {
-        serde_json::Value::Object(map) => map.len(),
-        _ => 0,
-    };
-    lines.push(Line::styled(
-        fit(
-            &format!("  patch: {key_count} top-level key(s)"),
-            area.width as usize,
-        ),
+    lines.push(threat_patch_line(
+        format!("  patch: {} top-level key(s)", patch.top_level_keys),
+        width,
         theme::success(),
     ));
     for note in &patch.unsupported {
-        lines.push(Line::styled(
-            fit(&format!("  ! unsupported: {note}"), area.width as usize),
+        lines.push(threat_patch_line(
+            format!("  ! unsupported: {note}"),
+            width,
             theme::warn(),
         ));
     }
-    lines.push(Line::styled(
-        fit("/threats apply   /threats reject", area.width as usize),
+    lines.push(threat_patch_line(
+        "/threats apply   /threats reject".to_string(),
+        width,
         theme::label(),
     ));
     render_lines(frame, area, lines);
+}
+
+fn threat_patch_line(text: String, width: usize, style: Style) -> Line<'static> {
+    Line::styled(fit(&text, width), style)
 }
 
 pub(crate) fn plan_card_height(app: &ShellApp, area: Rect) -> u16 {

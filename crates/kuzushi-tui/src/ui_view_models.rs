@@ -28,6 +28,7 @@ mod status_footer;
 mod threat_dfd;
 mod threat_impact;
 mod threat_model;
+mod threat_patch;
 mod threat_scope;
 mod threat_stories;
 mod threat_stride;
@@ -63,6 +64,7 @@ pub(crate) use threat_dfd::threat_dfd_nodes;
 #[cfg(test)]
 pub(crate) use threat_dfd::threat_dfd_nodes_from_doc;
 pub(crate) use threat_model::{threat_model_doc, threat_summary_review, ThreatSummaryReview};
+pub(crate) use threat_patch::threat_patch_card_model;
 pub(crate) use threat_scope::threat_scope_buckets;
 #[cfg(test)]
 pub(crate) use threat_scope::threat_scope_buckets_from_doc;
