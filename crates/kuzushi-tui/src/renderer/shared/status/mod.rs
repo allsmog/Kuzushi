@@ -1,14 +1,5 @@
 pub(in crate::renderer) use super::*;
-
-pub(crate) fn scan_status(scan: &ScanPanelState) -> String {
-    if scan.running && scan.abort_requested {
-        "abort requested: waiting for subprocess".to_string()
-    } else if scan.running {
-        format!("running: {}", scan.stage)
-    } else {
-        scan.stage.clone()
-    }
-}
+pub(crate) use crate::ui_view_models::scan_status;
 
 /// Cycle through braille spinner frames using `tick` as the index source.
 /// Pass `app.spinner_phase as usize` so the animation advances on the event

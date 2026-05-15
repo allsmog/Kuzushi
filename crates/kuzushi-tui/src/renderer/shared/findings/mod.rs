@@ -27,21 +27,6 @@ pub(crate) fn compact_finding_row(
     ])
 }
 
-pub(crate) fn findings_summary(findings: &[Finding]) -> String {
-    let counts = SeverityCounts::from_findings(findings);
-    let mut parts = vec![format!("{} findings", findings.len())];
-    if counts.critical > 0 {
-        parts.push(format!("{} critical", counts.critical));
-    }
-    if counts.high > 0 {
-        parts.push(format!("{} high", counts.high));
-    }
-    if counts.medium > 0 {
-        parts.push(format!("{} medium", counts.medium));
-    }
-    parts.join(" / ")
-}
-
 pub(crate) fn findings_count_summary(findings: &[Finding]) -> String {
     let counts = SeverityCounts::from_findings(findings);
     if counts.critical > 0 {
