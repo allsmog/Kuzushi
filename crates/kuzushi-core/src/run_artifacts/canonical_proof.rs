@@ -1,17 +1,35 @@
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
-const EXPLICIT_PROOF_POINTERS: &[&str] =
-    &["/data/proof", "/data/proofs", "/data/verification", "/proof"];
+const EXPLICIT_PROOF_POINTERS: &[&str] = &["/data/proof", "/data/proofs", "/proof"];
+const VERIFICATION_POINTERS: &[&str] = &["/data/verification"];
 
 const FINDING_POINTERS: &[&str] = &["/data/coreFindings", "/data/findings", "/findings"];
 
 pub(crate) fn proof_snapshot_value(output: &Value) -> Option<Value> {
-    explicit_proof_snapshot(output).or_else(|| static_proof_snapshot(output))
+    explicit_proof_snapshot(output)
+        .or_else(|| meaningful_verification_snapshot(output))
+        .or_else(|| static_proof_snapshot(output))
 }
 
 fn explicit_proof_snapshot(output: &Value) -> Option<Value> {
     value_at(output, EXPLICIT_PROOF_POINTERS).cloned()
+}
+
+fn meaningful_verification_snapshot(output: &Value) -> Option<Value> {
+    let verification = value_at(output, VERIFICATION_POINTERS)?;
+    verification_has_results(verification).then(|| verification.clone())
+}
+
+fn verification_has_results(verification: &Value) -> bool {
+    verification
+        .get("verified")
+        .and_then(Value::as_u64)
+        .is_some_and(|count| count > 0)
+        || verification
+            .get("results")
+            .and_then(Value::as_array)
+            .is_some_and(|results| !results.is_empty())
 }
 
 fn static_proof_snapshot(output: &Value) -> Option<Value> {

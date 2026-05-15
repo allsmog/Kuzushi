@@ -1075,6 +1075,7 @@ fn scan_tasks_iac_scan_reaches_scan_engine_path() {
     let findings = store.list_findings(10).unwrap();
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].tool, "iac-scan");
+    assert_latest_static_artifacts(&repo, "iac-scan");
 }
 
 #[test]
