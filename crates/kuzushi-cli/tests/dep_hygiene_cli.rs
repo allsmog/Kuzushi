@@ -21,6 +21,12 @@ fn kuzushi_command(home: &std::path::Path) -> Command {
     command
 }
 
+fn latest_run_json(repo: &std::path::Path, leaf: &str) -> Value {
+    let latest = std::fs::read_to_string(repo.join(".kuzushi/latest")).unwrap();
+    let path = repo.join(".kuzushi/runs").join(latest.trim()).join(leaf);
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
 fn write_systems_hunt_fixture(repo: &std::path::Path) {
     std::fs::create_dir_all(repo.join("src")).unwrap();
     std::fs::write(
@@ -738,7 +744,7 @@ fn run_context_build_writes_compatible_snapshot_artifact() {
 }
 
 #[test]
-fn run_secret_scan_reaches_native_executor() {
+fn run_secret_scan_reaches_native_executor_and_writes_canonical_findings() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -775,6 +781,47 @@ fn run_secret_scan_reaches_native_executor() {
         .pointer("/data/findings/0/evidence")
         .and_then(Value::as_str)
         .is_some_and(|evidence| evidence.contains("sk-p********")));
+
+    let findings = latest_run_json(&repo, "findings.json");
+    assert_eq!(
+        findings.pointer("/0/tool").and_then(Value::as_str),
+        Some("secret-scan")
+    );
+    assert_eq!(
+        findings
+            .pointer("/0/staticProofState")
+            .and_then(Value::as_str),
+        Some("signal_only")
+    );
+
+    let proof = latest_run_json(&repo, "proof.json");
+    assert_eq!(
+        proof.pointer("/source").and_then(Value::as_str),
+        Some("normalized-findings")
+    );
+    assert_eq!(
+        proof
+            .pointer("/countsByState/signal_only")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        proof
+            .pointer("/runtimeVerification")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+
+    let artifacts = latest_run_json(&repo, "artifacts.json");
+    let artifact_labels = artifacts
+        .pointer("/artifacts")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .filter_map(|artifact| artifact.pointer("/label").and_then(Value::as_str))
+        .collect::<Vec<_>>();
+    assert!(artifact_labels.contains(&"findings"));
+    assert!(artifact_labels.contains(&"proof"));
 }
 
 #[test]
