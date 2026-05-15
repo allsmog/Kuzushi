@@ -84,11 +84,10 @@ fn append_context_snapshot(lines: &mut Vec<Line<'static>>, context: &ContextSnap
 
 pub(in crate::renderer::views) fn append_generic_tool_progress(
     lines: &mut Vec<Line<'static>>,
-    app: &ShellApp,
     area: Rect,
+    module: &str,
     summary: &ModuleRunSummary,
 ) {
-    let module = app.focused_module.as_deref().unwrap_or("tool");
     let running = summary.tool_is_running();
     lines.push(divider("TOOL RUN", area.width));
     lines.push(pipeline_row(

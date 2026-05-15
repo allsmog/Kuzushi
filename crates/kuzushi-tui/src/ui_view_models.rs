@@ -28,6 +28,7 @@ mod keybindings;
 mod knowledge_base;
 mod live_activity;
 mod module_detail;
+mod module_progress;
 mod module_run;
 mod options;
 mod patch_review;
@@ -87,6 +88,10 @@ pub(crate) use knowledge_base::{
 };
 pub(crate) use live_activity::{live_activity_model, LiveActivityModel};
 pub(crate) use module_detail::{module_detail_model, ModuleDetailModel};
+pub(crate) use module_progress::{
+    module_progress_model, ModuleProgressKind, ModuleProgressModel, ModuleProgressRow,
+    ModuleProgressSection,
+};
 pub(crate) use module_run::{
     module_run_live_activity, module_run_summary, ModuleRunLiveActivity, ModuleRunSummary,
 };

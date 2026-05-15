@@ -42,8 +42,9 @@ pub(in crate::renderer) use super::*;
 /// transcript that mirrors the design's `<span className="cursor">` from the
 /// running mockups (sast-running.jsx, carlini-running.jsx, agentic-sast-running.jsx).
 use crate::ui_view_models::{
-    context_snapshot_model, module_run_live_activity, module_run_summary, sast_tasks_model,
-    ContextSnapshotModel, ModuleRunLiveActivity, ModuleRunSummary, SastTasksModel,
+    context_snapshot_model, module_progress_model, module_run_live_activity, module_run_summary,
+    ContextSnapshotModel, ModuleProgressKind, ModuleProgressModel, ModuleProgressRow,
+    ModuleProgressSection, ModuleRunLiveActivity, ModuleRunSummary,
 };
 pub(in crate::renderer) use append_findings_preview::*;
 pub(in crate::renderer) use append_progress_section::*;
