@@ -194,9 +194,9 @@ pub(crate) use threat_scope::{threat_scope_buckets, ThreatScopeBucket, ThreatSco
 #[cfg(test)]
 pub(crate) use threat_stories::threat_story_rows_from_doc;
 pub(crate) use threat_stories::{threat_story_rows, ThreatStoryTone};
-pub(crate) use threat_stride::threat_stride_rollup;
 #[cfg(test)]
 pub(crate) use threat_stride::threat_stride_rollup_from_doc;
+pub(crate) use threat_stride::{threat_stride_rollup, ThreatStrideRow, ThreatStrideTone};
 pub(crate) use tools::{tools_model, ToolRow};
 pub(crate) use transcript::{
     plain_command_result_model, transcript_model, PlainCommandResultModel,

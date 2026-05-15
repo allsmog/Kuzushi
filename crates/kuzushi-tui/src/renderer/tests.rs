@@ -10,7 +10,7 @@ use crate::commands::{shell_command_specs, shell_help_examples, ShellCommandCate
 use crate::ui_view_models::{
     catalog_model, prompt_text, threat_dfd_nodes_from_doc, threat_scope_buckets_from_doc,
     threat_story_rows_from_doc, threat_stride_rollup_from_doc, view_status_segment,
-    ModuleRunStatusKind, RoutingMode,
+    ModuleRunStatusKind, RoutingMode, ThreatStrideTone,
 };
 
 use super::*;
@@ -1112,37 +1112,33 @@ fn threat_stride_rollup_from_doc_parses_real_threats() {
     });
     let rollup =
         threat_stride_rollup_from_doc(&doc).expect("expected rollup from non-empty threats");
-    assert_eq!(rollup.len(), 6);
+    assert_eq!(rollup.header, "STRIDE ROLLUP · 4 issues");
+    assert_eq!(rollup.rows.len(), 6);
 
-    let total: usize = rollup.iter().map(|row| row.count).sum();
-    assert_eq!(total, 4);
+    let spoof = &rollup.rows[0];
+    assert_eq!(spoof.cells[0], "S");
+    assert_eq!(spoof.cells[1], "Spoofing");
+    assert_eq!(spoof.cells[2], "2");
+    assert_eq!(spoof.cells[3], "issues");
+    assert_eq!(spoof.tone, ThreatStrideTone::High);
+    assert!(spoof.detail.as_deref().unwrap().contains("spoofed login"));
+    assert!(spoof.detail.as_deref().unwrap().contains("stolen token"));
 
-    // Spoofing: 2 threats, max impact = high
-    let spoof = &rollup[0];
-    assert_eq!(spoof.letter, "S");
-    assert_eq!(spoof.category, "Spoofing");
-    assert_eq!(spoof.count, 2);
-    assert_eq!(spoof.severity, Severity::High);
-    assert!(spoof.description.contains("spoofed login"));
-    assert!(spoof.description.contains("stolen token"));
+    let tamper = &rollup.rows[1];
+    assert_eq!(tamper.cells[2], "1");
+    assert_eq!(tamper.cells[3], "issue");
+    assert_eq!(tamper.tone, ThreatStrideTone::Critical);
+    assert_eq!(tamper.detail.as_deref(), Some("config tamper"));
 
-    // Tampering: 1 threat, impact = critical
-    let tamper = &rollup[1];
-    assert_eq!(tamper.count, 1);
-    assert_eq!(tamper.severity, Severity::Critical);
-    assert_eq!(tamper.description, "config tamper");
+    let repud = &rollup.rows[2];
+    assert_eq!(repud.cells[2], "0");
+    assert_eq!(repud.tone, ThreatStrideTone::Low);
+    assert_eq!(repud.detail, None);
 
-    // Repudiation: 0 threats, default Low severity, empty description
-    let repud = &rollup[2];
-    assert_eq!(repud.count, 0);
-    assert_eq!(repud.severity, Severity::Low);
-    assert!(repud.description.is_empty());
-
-    // Info-disclosure: 1 threat, impact = low
-    let info = &rollup[3];
-    assert_eq!(info.count, 1);
-    assert_eq!(info.severity, Severity::Low);
-    assert_eq!(info.description, "log leak");
+    let info = &rollup.rows[3];
+    assert_eq!(info.cells[2], "1");
+    assert_eq!(info.tone, ThreatStrideTone::Low);
+    assert_eq!(info.detail.as_deref(), Some("log leak"));
 }
 
 #[test]
@@ -1161,13 +1157,13 @@ fn threat_stride_rollup_from_doc_normalizes_underscored_categories() {
         ]
     });
     let rollup = threat_stride_rollup_from_doc(&doc).expect("rollup should accept underscored");
-    let dos = &rollup[4];
-    assert_eq!(dos.letter, "D");
-    assert_eq!(dos.count, 1);
-    let elev = &rollup[5];
-    assert_eq!(elev.letter, "E");
-    assert_eq!(elev.count, 1);
-    assert_eq!(elev.severity, Severity::Critical);
+    let dos = &rollup.rows[4];
+    assert_eq!(dos.cells[0], "D");
+    assert_eq!(dos.cells[2], "1");
+    let elev = &rollup.rows[5];
+    assert_eq!(elev.cells[0], "E");
+    assert_eq!(elev.cells[2], "1");
+    assert_eq!(elev.tone, ThreatStrideTone::Critical);
 }
 
 #[test]

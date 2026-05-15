@@ -43,31 +43,56 @@ const CANONICAL_STRIDE_ROWS: [StrideSpec; 6] = [
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ThreatStrideRow {
-    pub(crate) letter: &'static str,
-    pub(crate) severity: Severity,
-    pub(crate) category: &'static str,
-    pub(crate) count: usize,
-    pub(crate) description: String,
+pub(crate) struct ThreatStrideModel {
+    pub(crate) header: String,
+    pub(crate) rows: Vec<ThreatStrideRow>,
 }
 
-pub(crate) fn threat_stride_rollup(app: &ShellApp) -> Vec<ThreatStrideRow> {
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ThreatStrideRow {
+    pub(crate) tone: ThreatStrideTone,
+    pub(crate) cells: [String; 4],
+    pub(crate) detail: Option<String>,
+    issue_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ThreatStrideTone {
+    Critical,
+    High,
+    Medium,
+    Low,
+    Info,
+    Unknown,
+}
+
+impl ThreatStrideTone {
+    fn from_severity(severity: Severity) -> Self {
+        match severity {
+            Severity::Critical => Self::Critical,
+            Severity::High => Self::High,
+            Severity::Medium => Self::Medium,
+            Severity::Low => Self::Low,
+            Severity::Info => Self::Info,
+            Severity::Unknown => Self::Unknown,
+        }
+    }
+}
+
+pub(crate) fn threat_stride_rollup(app: &ShellApp) -> ThreatStrideModel {
     super::threat_model_doc(app)
         .as_ref()
         .and_then(threat_stride_rollup_from_doc)
         .unwrap_or_else(canonical_stride_rollup)
 }
 
-pub(crate) fn threat_stride_rollup_from_doc(
-    doc: &serde_json::Value,
-) -> Option<Vec<ThreatStrideRow>> {
+pub(crate) fn threat_stride_rollup_from_doc(doc: &serde_json::Value) -> Option<ThreatStrideModel> {
     let threats = non_empty_threats(doc)?;
-    Some(
-        stride_categories()
-            .into_iter()
-            .map(|category| row_for_category(category, threats))
-            .collect(),
-    )
+    let rows = stride_categories()
+        .into_iter()
+        .map(|category| row_for_category(category, threats))
+        .collect();
+    Some(threat_stride_model(rows))
 }
 
 fn non_empty_threats(doc: &serde_json::Value) -> Option<&[serde_json::Value]> {
@@ -102,13 +127,13 @@ fn category(letter: &'static str, key: &'static str, label: &'static str) -> Str
 
 fn row_for_category(category: StrideCategory, threats: &[serde_json::Value]) -> ThreatStrideRow {
     let matching = matching_threats(category.key, threats);
-    ThreatStrideRow {
-        letter: category.letter,
-        severity: max_severity(&matching),
-        category: category.label,
-        count: matching.len(),
-        description: threat_titles(&matching).join(", "),
-    }
+    threat_stride_row(
+        category.letter,
+        max_severity(&matching),
+        category.label,
+        matching.len(),
+        threat_titles(&matching).join(", "),
+    )
 }
 
 fn matching_threats<'a>(
@@ -155,22 +180,53 @@ fn threat_titles(threats: &[&serde_json::Value]) -> Vec<String> {
         .collect()
 }
 
-fn canonical_stride_rollup() -> Vec<ThreatStrideRow> {
-    CANONICAL_STRIDE_ROWS
+fn canonical_stride_rollup() -> ThreatStrideModel {
+    let rows = CANONICAL_STRIDE_ROWS
         .into_iter()
         .map(threat_stride_row_from_spec)
-        .collect()
+        .collect();
+    threat_stride_model(rows)
 }
 
 fn threat_stride_row_from_spec(
     (letter, severity, category, count, description): StrideSpec,
 ) -> ThreatStrideRow {
+    threat_stride_row(letter, severity, category, count, description.to_string())
+}
+
+fn threat_stride_row(
+    letter: &str,
+    severity: Severity,
+    category: &str,
+    count: usize,
+    description: String,
+) -> ThreatStrideRow {
     ThreatStrideRow {
-        letter,
-        severity,
-        category,
-        count,
-        description: description.to_string(),
+        tone: ThreatStrideTone::from_severity(severity),
+        cells: [
+            letter.to_string(),
+            category.to_string(),
+            count.to_string(),
+            issue_label(count).to_string(),
+        ],
+        detail: (!description.is_empty()).then_some(description),
+        issue_count: count,
+    }
+}
+
+fn issue_label(count: usize) -> &'static str {
+    if count == 1 {
+        "issue"
+    } else {
+        "issues"
+    }
+}
+
+fn threat_stride_model(rows: Vec<ThreatStrideRow>) -> ThreatStrideModel {
+    let issue_count: usize = rows.iter().map(|row| row.issue_count).sum();
+    ThreatStrideModel {
+        header: format!("STRIDE ROLLUP · {issue_count} issues"),
+        rows,
     }
 }
 
@@ -191,20 +247,28 @@ mod tests {
         });
 
         let rollup = threat_stride_rollup_from_doc(&doc).expect("expected rollup");
-        let total: usize = rollup.iter().map(|row| row.count).sum();
 
-        assert_eq!(rollup.len(), 6);
-        assert_eq!(total, 4);
-        assert_eq!(rollup[0].letter, "S");
-        assert_eq!(rollup[0].severity, Severity::High);
-        assert_eq!(rollup[0].count, 2);
-        assert!(rollup[0].description.contains("spoofed login"));
-        assert!(rollup[0].description.contains("stolen token"));
-        assert_eq!(rollup[1].severity, Severity::Critical);
-        assert_eq!(rollup[1].description, "config tamper");
-        assert_eq!(rollup[2].severity, Severity::Low);
-        assert!(rollup[2].description.is_empty());
-        assert_eq!(rollup[3].description, "log leak");
+        assert_eq!(rollup.header, "STRIDE ROLLUP · 4 issues");
+        assert_eq!(rollup.rows.len(), 6);
+        assert_eq!(rollup.rows[0].cells[0], "S");
+        assert_eq!(rollup.rows[0].tone, ThreatStrideTone::High);
+        assert_eq!(rollup.rows[0].cells[2], "2");
+        assert_eq!(rollup.rows[0].cells[3], "issues");
+        assert!(rollup.rows[0]
+            .detail
+            .as_deref()
+            .unwrap()
+            .contains("spoofed login"));
+        assert!(rollup.rows[0]
+            .detail
+            .as_deref()
+            .unwrap()
+            .contains("stolen token"));
+        assert_eq!(rollup.rows[1].tone, ThreatStrideTone::Critical);
+        assert_eq!(rollup.rows[1].detail.as_deref(), Some("config tamper"));
+        assert_eq!(rollup.rows[2].tone, ThreatStrideTone::Low);
+        assert_eq!(rollup.rows[2].detail, None);
+        assert_eq!(rollup.rows[3].detail.as_deref(), Some("log leak"));
     }
 
     #[test]
@@ -225,10 +289,10 @@ mod tests {
 
         let rollup = threat_stride_rollup_from_doc(&doc).expect("expected rollup");
 
-        assert_eq!(rollup[4].letter, "D");
-        assert_eq!(rollup[4].count, 1);
-        assert_eq!(rollup[5].letter, "E");
-        assert_eq!(rollup[5].count, 1);
-        assert_eq!(rollup[5].severity, Severity::Critical);
+        assert_eq!(rollup.rows[4].cells[0], "D");
+        assert_eq!(rollup.rows[4].cells[2], "1");
+        assert_eq!(rollup.rows[5].cells[0], "E");
+        assert_eq!(rollup.rows[5].cells[2], "1");
+        assert_eq!(rollup.rows[5].tone, ThreatStrideTone::Critical);
     }
 }
