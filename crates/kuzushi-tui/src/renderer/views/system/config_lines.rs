@@ -8,7 +8,7 @@ pub(crate) fn config_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let model = config_model(app);
     push_config_summary(&mut lines, &model, area);
     push_config_model_table(&mut lines, &model, area);
-    push_config_commands(&mut lines, area);
+    push_config_commands(&mut lines, &model, area);
     lines
 }
 
@@ -56,15 +56,7 @@ fn config_model_row(row: &ConfigModelRow, widths: &[usize]) -> Line<'static> {
     )
 }
 
-fn push_config_commands(lines: &mut Vec<Line<'static>>, area: Rect) {
+fn push_config_commands(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area: Rect) {
     lines.push(blank());
-    lines.push(command_list_line(
-        &[
-            "Up/Down select",
-            "Enter choose",
-            "model <n> [xhigh]",
-            "auth login openai|anthropic",
-        ],
-        area.width as usize,
-    ));
+    lines.push(command_list_line(&model.commands, area.width as usize));
 }

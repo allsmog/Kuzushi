@@ -28,6 +28,15 @@ fn config_model_summarizes_default_runtime_state() {
     );
     assert!(!model.model_table.rows.is_empty());
     assert!(model.model_table.rows[app.selected_model_index].selected);
+    assert_eq!(
+        model.commands,
+        [
+            "Up/Down select",
+            "Enter choose",
+            "model <n> [xhigh]",
+            "auth login openai|anthropic",
+        ]
+    );
 }
 
 #[test]

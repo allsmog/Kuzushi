@@ -9,6 +9,7 @@ pub(crate) struct ConfigModel {
     pub(crate) summary_title: &'static str,
     pub(crate) summary_rows: Vec<ConfigSummaryRow>,
     pub(crate) model_table: ConfigModelTable,
+    pub(crate) commands: [&'static str; 4],
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -73,6 +74,12 @@ pub(crate) fn config_model(app: &ShellApp) -> ConfigModel {
             headers: ["", "#", "model", "effort", "auth"],
             rows: config_model_rows(app),
         },
+        commands: [
+            "Up/Down select",
+            "Enter choose",
+            "model <n> [xhigh]",
+            "auth login openai|anthropic",
+        ],
     }
 }
 
