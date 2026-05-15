@@ -4,7 +4,7 @@ use super::*;
 use crate::ui_view_models::{
     activity_dag_pane_rows, activity_empty_state_model, activity_feed_pane_rows,
     activity_footer_model, activity_header_model, activity_pane_chrome_model,
-    activity_plain_pane_widths, ActivityFooterHint, ActivityPaneTitle,
+    activity_plain_pane_widths, ActivityPaneTitle,
 };
 use std::time::Instant;
 
@@ -37,7 +37,7 @@ pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
     let footer = activity_footer_model(session, area.width);
     lines.push(focus_footer_line(&footer.body, area.width));
-    lines.push(activity_keybind_hint_line(footer.hints));
+    lines.push(keybind_hint_line(&footer.plain_hints));
     lines
 }
 
@@ -144,14 +144,6 @@ fn focus_footer_line(body: &str, width: u16) -> Line<'static> {
         fit(body, width as usize),
         theme::label(),
     )])
-}
-
-fn activity_keybind_hint_line(hints: &[ActivityFooterHint]) -> Line<'static> {
-    let pairs = hints
-        .iter()
-        .map(|hint| (hint.key, hint.hint))
-        .collect::<Vec<_>>();
-    keybind_hint_line(&pairs)
 }
 
 fn pad_to(s: &str, width: usize) -> String {
