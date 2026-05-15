@@ -392,7 +392,7 @@ mod tests {
         .unwrap();
         fs::write(
             temp.path().join("src/app.ts"),
-            "import express from 'express';\nconst app = express();\napp.use('/admin', requireAuth);\napp.use(csurf());\nconst tenantId = req.user.tenantId;\napp.post('/login', (req, res) => { db.query(req.body.name); res.send('ok'); });\napp.post('/session', (req, res) => { req.session.user = req.body.user; res.cookie('sid', req.session.id); });\napp.post('/proxy', async (req, res) => { await fetch(req.body.url); res.send('ok'); });\n",
+            "import express from 'express';\nconst app = express();\napp.use('/admin', requireAuth);\napp.use(csurf());\nconst tenantId = req.user.tenantId;\napp.post('/login', (req, res) => { db.query(req.body.name); res.send('ok'); });\napp.post('/session', (req, res) => { req.session.user = req.body.user; res.cookie('sid', req.session.id); });\napp.post('/proxy', async (req, res) => { await fetch(req.body.url); res.send('ok'); });\napp.post('/graphql', graphqlHTTP({ schema }));\napp.post('/upload', upload.single('file'), (req, res) => res.send('ok'));\napp.post('/import', (req, res) => JSON.parse(req.body.payload));\napp.post('/run', (req, res) => exec(req.body.cmd));\ncron.schedule('* * * * *', runJob);\n",
         )
         .unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
@@ -463,11 +463,28 @@ mod tests {
             &degraded,
             "tenant-isolation-control"
         ));
+        assert!(document_has_dfd_node(&degraded, "rpc-handler"));
+        assert!(document_has_dfd_flow(&degraded, "flow-rpc-handler"));
+        assert!(document_has_dfd_trust_boundary(&degraded, "tb-rpc-handler"));
+        assert!(document_has_threat_target(&degraded, "rpc-handler"));
+        assert!(document_has_dfd_node(&degraded, "file-upload-parser"));
+        assert!(document_has_dfd_flow(&degraded, "flow-file-upload"));
+        assert!(document_has_dfd_trust_boundary(&degraded, "tb-file-upload"));
+        assert!(document_has_threat_target(&degraded, "file-upload-parser"));
+        assert!(document_has_dfd_node(&degraded, "parser-boundary"));
+        assert!(document_has_dfd_flow(&degraded, "flow-parser-boundary"));
+        assert!(document_has_dfd_trust_boundary(&degraded, "tb-parser-boundary"));
+        assert!(document_has_threat_target(&degraded, "parser-boundary"));
+        assert!(document_has_dfd_node(&degraded, "background-job"));
+        assert!(document_has_dfd_flow(&degraded, "flow-background-job"));
         assert!(document_has_related_cwe(&degraded, "CWE-918"));
         assert!(document_has_related_cwe(&degraded, "CWE-287"));
         assert!(document_has_related_cwe(&degraded, "CWE-384"));
         assert!(document_has_related_cwe(&degraded, "CWE-352"));
         assert!(document_has_related_cwe(&degraded, "CWE-639"));
+        assert!(document_has_related_cwe(&degraded, "CWE-502"));
+        assert!(document_has_related_cwe(&degraded, "CWE-434"));
+        assert!(document_has_related_cwe(&degraded, "CWE-78"));
         assert!(document_has_attacker_story_threat_id(&degraded, "DTM-001"));
         assert!(document_has_narrative_input(
             &degraded,

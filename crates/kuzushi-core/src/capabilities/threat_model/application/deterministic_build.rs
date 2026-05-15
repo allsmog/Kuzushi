@@ -78,6 +78,10 @@ fn target_element_ids_for(kind: AttackSurfaceKind) -> &'static [&'static str] {
     match kind {
         AttackSurfaceKind::DbQueryBoundary => &["data-store"],
         AttackSurfaceKind::CommandExecutionBoundary => &["process-execution"],
+        AttackSurfaceKind::DeserializationPoint => &["parser-boundary"],
+        AttackSurfaceKind::FileUploadParsePath => &["file-upload-parser"],
+        AttackSurfaceKind::RpcHandler => &["rpc-handler"],
+        AttackSurfaceKind::BackgroundJob => &["background-job"],
         AttackSurfaceKind::ExternalServiceClient => &["external-service"],
         AttackSurfaceKind::AuthBoundary => &["auth-control"],
         AttackSurfaceKind::SessionStateBoundary => &["session-state"],

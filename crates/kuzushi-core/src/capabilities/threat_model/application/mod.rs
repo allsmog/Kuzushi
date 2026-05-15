@@ -19,6 +19,7 @@ mod collect_s2;
 mod collect_s3;
 mod deterministic_build;
 mod deterministic_dfd;
+mod deterministic_dfd_surface_specs;
 mod deterministic_dfd_specs;
 mod deterministic_input;
 mod inventory_files;
