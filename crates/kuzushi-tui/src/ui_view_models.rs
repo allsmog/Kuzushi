@@ -91,7 +91,7 @@ pub(crate) use agent_chat::{agent_chat_model, AgentChatModel, AgentChatSession, 
 pub(crate) use attack_surface::{attack_surface_risk_model, AttackSurfaceRiskModel};
 pub(crate) use auth::{
     auth_env_summary, auth_provider_rows, model_auth_status, oauth_summary, AuthProviderRow,
-    AuthProviderState,
+    AuthProviderTone,
 };
 pub(crate) use catalog::{
     catalog_model, catalog_uses_collapsed_layout, CatalogActionModule, CatalogModel,
