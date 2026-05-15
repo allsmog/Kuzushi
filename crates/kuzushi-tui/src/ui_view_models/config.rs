@@ -26,6 +26,29 @@ pub(crate) struct ConfigModelRow {
     pub(crate) auth: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlainConfigModel {
+    pub(crate) summary_title: &'static str,
+    pub(crate) summary_rows: Vec<String>,
+    pub(crate) model_table: PlainConfigModelTable,
+    pub(crate) next_hint: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlainConfigModelTable {
+    pub(crate) title: &'static str,
+    pub(crate) headers: [&'static str; 4],
+    pub(crate) rows: Vec<PlainConfigModelRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlainConfigModelRow {
+    pub(crate) index: String,
+    pub(crate) model: String,
+    pub(crate) effort: String,
+    pub(crate) auth: String,
+}
+
 pub(crate) fn config_model(app: &ShellApp) -> ConfigModel {
     ConfigModel {
         backend: crate::app::runtime_backend_label(&app.config).to_string(),
@@ -45,6 +68,53 @@ pub(crate) fn config_model(app: &ShellApp) -> ConfigModel {
         onboarding: onboarding_detail(app),
         model_rows: config_model_rows(app),
     }
+}
+
+pub(crate) fn plain_config_model(app: &ShellApp) -> PlainConfigModel {
+    PlainConfigModel::from_config_model(config_model(app))
+}
+
+impl PlainConfigModel {
+    fn from_config_model(model: ConfigModel) -> Self {
+        PlainConfigModel {
+            summary_title: "CONFIG",
+            summary_rows: plain_config_summary_rows(&model),
+            model_table: PlainConfigModelTable {
+                title: "MODELS",
+                headers: ["#", "model", "effort", "auth"],
+                rows: plain_config_model_rows(model.model_rows),
+            },
+            next_hint: "Next: model <n> [xhigh], auth login openai, auth login anthropic, cost",
+        }
+    }
+}
+
+fn plain_config_summary_rows(model: &ConfigModel) -> Vec<String> {
+    let mut rows = vec![
+        format!("runtime: {}", model.backend),
+        format!("provider: {}", model.provider),
+        format!("model: {}", model.model),
+        format!("reasoning: {}", model.reasoning),
+        format!("cost: {}", model.cost),
+    ];
+    if model.onboarding.is_some() {
+        rows.push(
+            "onboarding: model <n> selects an explicit provider:model; no fallback model is selected."
+                .to_string(),
+        );
+    }
+    rows
+}
+
+fn plain_config_model_rows(rows: Vec<ConfigModelRow>) -> Vec<PlainConfigModelRow> {
+    rows.into_iter()
+        .map(|row| PlainConfigModelRow {
+            index: row.index,
+            model: row.model,
+            effort: row.effort,
+            auth: row.auth,
+        })
+        .collect()
 }
 
 fn active_model_label(app: &ShellApp) -> String {
