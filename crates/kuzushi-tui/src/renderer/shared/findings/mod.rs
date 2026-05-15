@@ -1,9 +1,10 @@
 pub(in crate::renderer) use super::*;
-pub(crate) use crate::ui_view_models::{findings_count_summary, SeverityCounts};
+pub(crate) use crate::ui_view_models::{findings_count_summary, SeverityCounts, SeverityTone};
 
 pub(crate) fn compact_finding_row(
     alias: &str,
-    severity: Severity,
+    severity_label: &str,
+    severity_tone: SeverityTone,
     name: &str,
     location: &str,
     width: u16,
@@ -19,8 +20,8 @@ pub(crate) fn compact_finding_row(
         Span::styled(pad(alias, alias_w), theme::accent()),
         Span::raw("  "),
         Span::styled(
-            pad(&severity.as_str().to_uppercase(), sev_w),
-            theme::severity(severity),
+            pad(severity_label, sev_w),
+            theme::severity_tone(severity_tone),
         ),
         Span::styled(pad(&fit(name, name_w), name_w), theme::primary()),
         Span::styled("  ", Style::default()),

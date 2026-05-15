@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::ThreatScopeTone;
+use crate::ui_view_models::{SeverityTone, ThreatScopeTone};
 
 pub(super) fn append_scope_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'static>>) {
     let model = crate::ui_view_models::threat_scope_model(app);
@@ -44,11 +44,11 @@ fn append_scope_bucket(
 
 fn threat_scope_tone_style(tone: ThreatScopeTone) -> Style {
     match tone {
-        ThreatScopeTone::Critical => theme::severity(Severity::Critical),
-        ThreatScopeTone::High => theme::severity(Severity::High),
-        ThreatScopeTone::Medium => theme::severity(Severity::Medium),
-        ThreatScopeTone::Low => theme::severity(Severity::Low),
-        ThreatScopeTone::Info => theme::severity(Severity::Info),
-        ThreatScopeTone::Unknown => theme::severity(Severity::Unknown),
+        ThreatScopeTone::Critical => theme::severity_tone(SeverityTone::Critical),
+        ThreatScopeTone::High => theme::severity_tone(SeverityTone::High),
+        ThreatScopeTone::Medium => theme::severity_tone(SeverityTone::Medium),
+        ThreatScopeTone::Low => theme::severity_tone(SeverityTone::Low),
+        ThreatScopeTone::Info => theme::severity_tone(SeverityTone::Info),
+        ThreatScopeTone::Unknown => theme::severity_tone(SeverityTone::Unknown),
     }
 }

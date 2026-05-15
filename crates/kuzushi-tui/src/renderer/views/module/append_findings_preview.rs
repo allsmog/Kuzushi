@@ -16,7 +16,8 @@ pub(in crate::renderer::views) fn append_findings_preview(
     for finding in &preview.rows {
         lines.push(compact_finding_row(
             &finding.alias,
-            finding.severity,
+            &finding.severity_label,
+            finding.severity_tone,
             &finding.title,
             &finding.location,
             area.width,

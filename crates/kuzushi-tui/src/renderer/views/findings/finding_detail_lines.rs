@@ -22,7 +22,7 @@ fn append_finding_title(finding: &FindingDetailModel, lines: &mut Vec<Line<'stat
     lines.push(Line::from(vec![
         Span::styled(
             finding.severity_label.clone(),
-            theme::severity(finding.severity),
+            theme::severity_tone(finding.severity_tone),
         ),
         Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
         Span::styled(finding.title.clone(), theme::heading()),

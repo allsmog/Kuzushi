@@ -71,5 +71,5 @@ fn append_workspace_rollup(lines: &mut Vec<Line<'static>>, model: &WorkspaceMode
 }
 
 fn workspace_rollup_line(row: &WorkspaceRollupRow) -> Line<'static> {
-    severity_rollup_bar(row.label, row.count, row.total, row.severity)
+    severity_rollup_bar(row.label, row.count, row.total, row.severity_tone)
 }

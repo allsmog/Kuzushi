@@ -57,6 +57,7 @@ mod run_timeline;
 mod run_trace;
 mod sast_tasks;
 mod session_story;
+mod severity_tone;
 mod status_footer;
 mod threat_dfd;
 mod threat_impact;
@@ -175,6 +176,7 @@ pub(crate) use sast_tasks::{
 pub(crate) use session_story::{
     session_history_model, session_story_model, CommandHistoryModel, SessionStoryModel,
 };
+pub(crate) use severity_tone::SeverityTone;
 pub(crate) use status_footer::status_footer_model;
 pub(crate) use threat_dfd::threat_dfd_model;
 #[cfg(test)]

@@ -129,7 +129,7 @@ const rules = [
     name: "TUI renderers consume view models without stores or runtime dispatch",
     roots: ["crates/kuzushi-tui/src/renderer"],
     forbidden:
-      /\b(FindingStore|AgentRuntime|execute_tool|execute_tool_with_runtime|std::process|Command::new|ProcessCommand)\b/,
+      /\b(FindingStore|AgentRuntime|execute_tool|execute_tool_with_runtime|std::process|Command::new|ProcessCommand|kuzushi_core::Severity)\b/,
   },
   {
     name: "TUI view models and views do not execute modules",

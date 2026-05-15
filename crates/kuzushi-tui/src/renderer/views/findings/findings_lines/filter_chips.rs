@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::FindingsModel;
+use crate::ui_view_models::{FindingsModel, SeverityTone};
 
 pub(super) fn filter_chip_line(model: &FindingsModel) -> Line<'static> {
     let counts = model.counts;
@@ -11,11 +11,19 @@ pub(super) fn filter_chip_line(model: &FindingsModel) -> Line<'static> {
         (
             "critical",
             counts.critical,
-            theme::severity(Severity::Critical),
+            theme::severity_tone(SeverityTone::Critical),
         ),
-        ("high", counts.high, theme::severity(Severity::High)),
-        ("medium", counts.medium, theme::severity(Severity::Medium)),
-        ("low", counts.low, theme::severity(Severity::Low)),
+        (
+            "high",
+            counts.high,
+            theme::severity_tone(SeverityTone::High),
+        ),
+        (
+            "medium",
+            counts.medium,
+            theme::severity_tone(SeverityTone::Medium),
+        ),
+        ("low", counts.low, theme::severity_tone(SeverityTone::Low)),
     ] {
         chip_spans.push(Span::raw("  "));
         chip_spans.push(Span::styled(format!("{label}:{n}"), style));

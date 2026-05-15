@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::ThreatStoryTone;
+use crate::ui_view_models::{SeverityTone, ThreatStoryTone};
 
 pub(super) fn append_story_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'static>>) {
     let model = crate::ui_view_models::threat_story_model(app);
@@ -21,12 +21,12 @@ pub(super) fn append_story_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Lin
 
 fn threat_story_tone_style(tone: ThreatStoryTone) -> Style {
     match tone {
-        ThreatStoryTone::Critical => theme::severity(Severity::Critical),
-        ThreatStoryTone::High => theme::severity(Severity::High),
-        ThreatStoryTone::Medium => theme::severity(Severity::Medium),
-        ThreatStoryTone::Low => theme::severity(Severity::Low),
-        ThreatStoryTone::Info => theme::severity(Severity::Info),
-        ThreatStoryTone::Unknown => theme::severity(Severity::Unknown),
+        ThreatStoryTone::Critical => theme::severity_tone(SeverityTone::Critical),
+        ThreatStoryTone::High => theme::severity_tone(SeverityTone::High),
+        ThreatStoryTone::Medium => theme::severity_tone(SeverityTone::Medium),
+        ThreatStoryTone::Low => theme::severity_tone(SeverityTone::Low),
+        ThreatStoryTone::Info => theme::severity_tone(SeverityTone::Info),
+        ThreatStoryTone::Unknown => theme::severity_tone(SeverityTone::Unknown),
     }
 }
 

@@ -1,6 +1,6 @@
-use super::{compact_target_path, SeverityCounts};
+use super::{compact_target_path, SeverityCounts, SeverityTone};
 use crate::ShellApp;
-use kuzushi_core::{Finding, Severity};
+use kuzushi_core::Finding;
 use std::path::Path;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,7 +21,7 @@ pub(crate) struct WorkspaceRollupRow {
     pub(crate) label: &'static str,
     pub(crate) count: usize,
     pub(crate) total: usize,
-    pub(crate) severity: Severity,
+    pub(crate) severity_tone: SeverityTone,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -102,10 +102,10 @@ fn rollup_rows(findings: &[Finding]) -> Vec<WorkspaceRollupRow> {
     let counts = SeverityCounts::from_findings(findings);
     let total = findings.len();
     vec![
-        rollup_row("CRITICAL", counts.critical, total, Severity::Critical),
-        rollup_row("HIGH    ", counts.high, total, Severity::High),
-        rollup_row("MEDIUM  ", counts.medium, total, Severity::Medium),
-        rollup_row("LOW     ", counts.low, total, Severity::Low),
+        rollup_row("CRITICAL", counts.critical, total, SeverityTone::Critical),
+        rollup_row("HIGH    ", counts.high, total, SeverityTone::High),
+        rollup_row("MEDIUM  ", counts.medium, total, SeverityTone::Medium),
+        rollup_row("LOW     ", counts.low, total, SeverityTone::Low),
     ]
 }
 
@@ -113,13 +113,13 @@ fn rollup_row(
     label: &'static str,
     count: usize,
     total: usize,
-    severity: Severity,
+    severity_tone: SeverityTone,
 ) -> WorkspaceRollupRow {
     WorkspaceRollupRow {
         label,
         count,
         total,
-        severity,
+        severity_tone,
     }
 }
 
