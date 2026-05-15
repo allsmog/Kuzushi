@@ -24,6 +24,9 @@ const forbidden = [
   ["raw openai-codex selector help", /\bSupported selectors:\s*openai,\s*openai-codex\b/i],
   ["raw auth codex example", /\baliases\s*\/\s*examples:\s*auth\s+codex\b/i],
 ];
+const publicDocForbidden = [
+  ["raw Codex wording in public docs", /\bCodex\b|\bcodex\b|\.codex\b|openai-codex/i],
+];
 
 const files = publicFiles();
 const failures = files.flatMap(scanFile);
@@ -66,7 +69,8 @@ function scanFile(file) {
 }
 
 function lineFailures(file, line, lineNumber) {
-  return forbidden
+  const checks = isPublicDoc(file) ? [...forbidden, ...publicDocForbidden] : forbidden;
+  return checks
     .filter(([, pattern]) => pattern.test(line))
     .map(([label]) => `${file}:${lineNumber} ${label}`);
 }
@@ -90,4 +94,8 @@ function isIgnored(file) {
     file.startsWith("dist/") ||
     file.startsWith("coverage/")
   );
+}
+
+function isPublicDoc(file) {
+  return file === "README.md" || file.startsWith("docs/");
 }

@@ -11,22 +11,8 @@ AF_ALG/splice/page-cache style privilege-escalation bugs (the class behind
 - Rust toolchain + cargo available.
 - Network egress for model/provider calls.
 - OAuth credential file at `~/.kuzushi/oauth-credentials.json` containing an
-  OpenAI token bag. The manual migration below writes the runtime
-  compatibility key for older pi-agent-core provider routing.
-
-If you only have `/home/claude/.codex/remote/.oauth_token`, copy it once:
-
-```bash
-mkdir -p ~/.kuzushi
-python3 - <<'PY'
-import json, pathlib
-src = pathlib.Path('/home/claude/.codex/remote/.oauth_token')
-out = pathlib.Path.home()/'.kuzushi'/'oauth-credentials.json'
-tok = src.read_text().strip()
-out.write_text(json.dumps({"openai-codex":{"access":tok}}, indent=2)+"\n")
-print(out)
-PY
-```
+  OpenAI token bag. Run `kuzushi auth login openai` when the credential file is
+  missing.
 
 ## 2) Build and smoke-check the Rust shell
 
@@ -100,7 +86,7 @@ key handling.
 - TUI seems idle: inspect `/tmp/kuzushi-copyfail.log` and run `auth ping`
   outside shell to isolate auth/runtime issues.
 
-## 7) Validated command path (tested in this repo)
+## 7) Smoke-checked command path
 
 The following command sequence is known-good in this repository and mirrors a
 Copy-Fail-style Rust workflow without relying on interactive key routing:
