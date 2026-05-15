@@ -65,6 +65,7 @@ jobs:
       - run: pnpm quality:crap-risk
       - run: pnpm quality:identity
       - run: pnpm quality:architecture
+      - run: pnpm quality:model-safety
       - run: pnpm check
 
   # ── Codegen drift check (parallel after install) ──────────────────────────

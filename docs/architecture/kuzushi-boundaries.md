@@ -46,10 +46,11 @@ The architecture gate is:
 
 ```bash
 pnpm quality:architecture
+pnpm quality:model-safety
 ```
 
-It currently verifies that the required boundary files exist and blocks the
-highest-risk dependency violations:
+These commands verify that the required boundary files exist, block the
+highest-risk dependency violations, and catch hardcoded model fallback patterns:
 
 - context code dispatching scanners, runtimes, tools, reports, or UI renderers;
 - attack-surface code dispatching scanners, runtimes, tools, reports, or UI
@@ -75,6 +76,8 @@ highest-risk dependency violations:
 - TUI view models and view state dispatching runtime/tool execution;
 - TUI runtime code using "validated" wording for states that are only checked
   or parsed;
+- production code using hardcoded provider-model literals as fallback or direct
+  `model` field defaults;
 - Home/Recommend catalog renderers parsing artifacts directly instead of using
   `ui_view_models`;
 - the Runs ledger renderer parsing run summaries directly instead of using

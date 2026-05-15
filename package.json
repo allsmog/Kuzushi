@@ -61,6 +61,7 @@
     "quality:crap-risk": "node scripts/crap-risk-gate.mjs",
     "quality:identity": "node scripts/check-public-identity.mjs",
     "quality:architecture": "node scripts/check-ddd-boundaries.mjs",
+    "quality:model-safety": "node scripts/check-model-safety.mjs",
     "verify:pack": "node scripts/verify-pack.mjs",
     "publish:npm": "bash scripts/publish-npm.sh",
     "publish:npm:dry": "bash scripts/publish-npm.sh",
