@@ -1,48 +1,31 @@
 use super::*;
-use crate::ui_view_models::{catalog_model, model_auth_status};
+use crate::ui_view_models::{catalog_model, config_model, ConfigModel, ConfigModelRow};
 
 pub(crate) fn plain_config_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
-    push_plain_config_summary(&mut lines, app, width);
-    push_plain_model_table(&mut lines, width);
+    let model = config_model(app);
+    push_plain_config_summary(&mut lines, &model, width);
+    push_plain_model_table(&mut lines, &model, width);
     lines.push(String::new());
     lines
         .push("Next: model <n> [xhigh], auth login openai, auth login anthropic, cost".to_string());
     lines
 }
 
-fn push_plain_config_summary(lines: &mut Vec<String>, app: &ShellApp, width: usize) {
+fn push_plain_config_summary(lines: &mut Vec<String>, model: &ConfigModel, width: usize) {
     lines.push(String::new());
     lines.push(plain_section_divider("CONFIG", width));
-    lines.push(format!(
-        "runtime: {}",
-        crate::app::runtime_backend_label(&app.config)
-    ));
-    lines.push(format!("provider: {}", app.provider_label()));
-    lines.push(format!(
-        "model: {}",
-        app.config
-            .model
-            .as_deref()
-            .map(crate::app::display_model_selector)
-            .unwrap_or_else(|| "unconfigured".to_string())
-    ));
-    lines.push(format!(
-        "reasoning: {}",
-        app.session_thinking_level.as_deref().unwrap_or("default")
-    ));
-    lines.push(format!(
-        "cost: {}",
-        app.last_tool_cost_usd
-            .map(|cost| format!("last ${cost:.4}; session ${:.4}", app.session_cost_usd))
-            .unwrap_or_else(|| "unavailable until a tool reports costUsd".to_string())
-    ));
-    if app.config.model.is_none() {
+    lines.push(format!("runtime: {}", model.backend));
+    lines.push(format!("provider: {}", model.provider));
+    lines.push(format!("model: {}", model.model));
+    lines.push(format!("reasoning: {}", model.reasoning));
+    lines.push(format!("cost: {}", model.cost));
+    if model.onboarding.is_some() {
         lines.push("onboarding: model <n> selects an explicit provider:model; no fallback model is selected.".to_string());
     }
 }
 
-fn push_plain_model_table(lines: &mut Vec<String>, width: usize) {
+fn push_plain_model_table(lines: &mut Vec<String>, model: &ConfigModel, width: usize) {
     lines.push(String::new());
     lines.push(plain_section_divider("MODELS", width));
     lines.push(table_text(
@@ -50,23 +33,21 @@ fn push_plain_model_table(lines: &mut Vec<String>, width: usize) {
         &plain_model_widths(width),
     ));
     let widths = plain_model_widths(width);
-    for choice in crate::app::model_choices() {
-        lines.push(table_text(
-            &[
-                &choice.index.to_string(),
-                &fit(
-                    &crate::app::model_choice_display_selector(choice),
-                    widths.get(1).copied().unwrap_or(28),
-                ),
-                choice.thinking_level,
-                &fit(
-                    &model_auth_status(choice),
-                    widths.get(3).copied().unwrap_or(18),
-                ),
-            ],
-            &widths,
-        ));
+    for row in &model.model_rows {
+        lines.push(plain_model_row(row, &widths));
     }
+}
+
+fn plain_model_row(row: &ConfigModelRow, widths: &[usize]) -> String {
+    table_text(
+        &[
+            &row.index,
+            &fit(&row.model, widths.get(1).copied().unwrap_or(28)),
+            &row.effort,
+            &fit(&row.auth, widths.get(3).copied().unwrap_or(18)),
+        ],
+        widths,
+    )
 }
 
 pub(crate) fn plain_context_strip(app: &ShellApp, width: usize) -> Vec<String> {
