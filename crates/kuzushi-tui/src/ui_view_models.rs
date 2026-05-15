@@ -7,6 +7,7 @@ use crate::ShellApp;
 use std::path::{Path, PathBuf};
 
 mod active_stage;
+mod activity_feed_pause;
 mod activity_feed_placeholder;
 mod activity_footer;
 mod activity_header;
@@ -62,6 +63,7 @@ mod transcript;
 mod view_status;
 mod workspace;
 pub(crate) use active_stage::active_stage_label;
+pub(crate) use activity_feed_pause::activity_feed_pause_model;
 pub(crate) use activity_feed_placeholder::activity_feed_placeholder_model;
 pub(crate) use activity_footer::{activity_footer_model, ActivityFooterHint};
 pub(crate) use activity_header::activity_header_model;

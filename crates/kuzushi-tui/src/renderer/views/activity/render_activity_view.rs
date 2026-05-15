@@ -3,8 +3,8 @@ use super::feed_pane::{feed_event_style, feed_event_text};
 use super::*;
 use crate::app::ActivitySession;
 use crate::ui_view_models::{
-    activity_feed_placeholder_model, activity_footer_model, activity_header_model,
-    activity_pane_chrome_model, ActivityFooterHint, ActivityPaneTitle,
+    activity_feed_pause_model, activity_feed_placeholder_model, activity_footer_model,
+    activity_header_model, activity_pane_chrome_model, ActivityFooterHint, ActivityPaneTitle,
 };
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
@@ -181,16 +181,16 @@ fn pane_title_style(title: &ActivityPaneTitle) -> ratatui::style::Style {
 }
 
 fn feed_pane_lines(session: &ActivitySession, inner_width: usize) -> Vec<Line<'static>> {
-    let mut lines = paused_feed_line(session).into_iter().collect::<Vec<_>>();
+    let mut lines = feed_pause_line(session).into_iter().collect::<Vec<_>>();
     lines.extend(visible_feed_event_lines(session, inner_width));
     ensure_feed_placeholder(&mut lines, session);
     lines
 }
 
-fn paused_feed_line(session: &ActivitySession) -> Option<Line<'static>> {
-    session.paused.then(|| {
+fn feed_pause_line(session: &ActivitySession) -> Option<Line<'static>> {
+    activity_feed_pause_model(session).map(|model| {
         Line::from(vec![Span::styled(
-            " ⏸ paused — press p to resume".to_string(),
+            format!(" {}", model.text),
             theme::warn(),
         )])
     })

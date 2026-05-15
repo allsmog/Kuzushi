@@ -2,8 +2,8 @@ use super::dag_pane::{dag_row_text, dag_state_style, dag_subsystems_row_text};
 use super::feed_pane::{feed_event_style, feed_event_text};
 use super::*;
 use crate::ui_view_models::{
-    activity_footer_model, activity_header_model, activity_pane_chrome_model, ActivityFooterHint,
-    ActivityPaneTitle,
+    activity_feed_pause_model, activity_footer_model, activity_header_model,
+    activity_pane_chrome_model, ActivityFooterHint, ActivityPaneTitle,
 };
 use std::time::Instant;
 
@@ -90,17 +90,10 @@ fn feed_pane_rows(session: &crate::app::ActivitySession, right_w: usize) -> Vec<
                 .map(|text| (text, feed_event_style(event)))
         })
         .collect::<Vec<_>>();
-    push_pause_feed_row(session.paused, &mut rows, right_w);
-    rows
-}
-
-fn push_pause_feed_row(paused: bool, rows: &mut Vec<ActivityPaneRow>, right_w: usize) {
-    if paused {
-        rows.insert(
-            0,
-            (fit("⏸ paused — press p to resume", right_w), theme::warn()),
-        );
+    if let Some(model) = activity_feed_pause_model(session) {
+        rows.insert(0, (fit(model.text, right_w), theme::warn()));
     }
+    rows
 }
 
 fn combined_activity_pane_line(
