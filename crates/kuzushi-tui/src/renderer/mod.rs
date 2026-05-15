@@ -10,9 +10,7 @@ use crate::commands::{
 };
 use crate::theme;
 pub(in crate::renderer) use chrome::*;
-use kuzushi_core::{
-    sorted_finding_aliases, AttachmentKind, Severity, SUPPORTED_ATTACHMENT_MODULES,
-};
+use kuzushi_core::{sorted_finding_aliases, Severity};
 pub(in crate::renderer) use plain::*;
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Modifier, Span, Style};

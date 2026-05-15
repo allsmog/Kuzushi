@@ -24,6 +24,7 @@ mod finding_summary;
 mod findings;
 mod home_cockpit;
 mod keybindings;
+mod knowledge_base;
 mod module_detail;
 mod options;
 mod patch_review;
@@ -75,6 +76,9 @@ pub(crate) use findings::{
 };
 pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
 pub(crate) use keybindings::footer_keybindings;
+pub(crate) use knowledge_base::{
+    knowledge_base_model, KnowledgeBaseArtifactRow, KnowledgeBaseAttachmentRow, KnowledgeBaseModel,
+};
 pub(crate) use module_detail::{module_detail_model, ModuleDetailModel};
 pub(crate) use options::{options_model, OptionRow, OptionsModelStatus};
 pub(crate) use patch_review::{patch_review_model, PatchReviewModel, PatchReviewTestRow};

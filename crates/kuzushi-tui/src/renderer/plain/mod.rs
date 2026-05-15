@@ -11,7 +11,6 @@ use crate::commands::{
 };
 use crate::ui_view_models::context_strip_model;
 pub(in crate::renderer) use finalize_width_safe_plain_lines::*;
-use kuzushi_core::{AttachmentKind, SUPPORTED_ATTACHMENT_MODULES};
 pub(in crate::renderer) use plain_config_lines::*;
 pub(in crate::renderer) use plain_context_lines::*;
 pub(in crate::renderer) use plain_knowledge_base_lines::*;

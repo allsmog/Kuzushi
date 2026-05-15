@@ -1,58 +1,65 @@
 use super::*;
+use crate::ui_view_models::{
+    knowledge_base_model, KnowledgeBaseArtifactRow, KnowledgeBaseAttachmentRow, KnowledgeBaseModel,
+};
 
 pub(crate) fn knowledge_base_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
-    let module_id = app.kb_view.module_id.as_str();
-    let attachments = app
-        .kb_view
-        .attachments
-        .iter()
-        .filter(|record| record.module_id == module_id)
-        .collect::<Vec<_>>();
-    let store = app
-        .kb_view
-        .store_path
-        .as_ref()
-        .map(|path| compact_target_path(&path.display().to_string()))
-        .unwrap_or_else(|| ".kuzushi/v2/attachments.json".to_string());
+    let model = knowledge_base_model(app);
 
     lines.push(blank());
     lines.push(divider("KB ATTACHMENTS", area.width));
-    lines.push(detail("module", module_id));
-    lines.push(detail("store", &store));
-    lines.push(detail(
-        "supported",
-        &SUPPORTED_ATTACHMENT_MODULES.join(", "),
+    lines.push(detail("module", &model.module_id_label));
+    lines.push(detail("store", &model.store_label));
+    lines.push(detail("supported", &model.supported_label));
+    lines.push(blank());
+
+    append_known_artifacts(&mut lines, &model, area);
+    append_attached_records(&mut lines, &model, area);
+
+    lines.push(blank());
+    lines.push(command_list_line(
+        &[
+            "kb [module]",
+            "attach <path-or-url>",
+            "detach <id>",
+            "reparse <id>",
+        ],
+        area.width as usize,
     ));
-    lines.push(blank());
+    lines
+}
 
+fn append_known_artifacts(lines: &mut Vec<Line<'static>>, model: &KnowledgeBaseModel, area: Rect) {
     lines.push(divider("KNOWN ARTIFACTS", area.width));
-    if app.kb_view.artifacts.is_empty() {
+    if model.artifact_rows.is_empty() {
         lines.push(muted("No known Rust artifacts for this module."));
-    } else {
-        lines.push(table_header(
-            &["state", "path", "description"],
-            &kb_artifact_widths(area.width),
-        ));
-        let widths = kb_artifact_widths(area.width);
-        for artifact in &app.kb_view.artifacts {
-            lines.push(table_row(
-                &[
-                    if artifact.exists {
-                        "present"
-                    } else {
-                        "missing"
-                    },
-                    &fit(&artifact.path, widths.get(1).copied().unwrap_or(24)),
-                    &fit(&artifact.description, widths.get(2).copied().unwrap_or(20)),
-                ],
-                &widths,
-            ));
-        }
+        return;
     }
+    lines.push(table_header(
+        &["state", "path", "description"],
+        &kb_artifact_widths(area.width),
+    ));
+    let widths = kb_artifact_widths(area.width);
+    for artifact in &model.artifact_rows {
+        lines.push(artifact_row(artifact, &widths));
+    }
+}
 
+fn artifact_row(artifact: &KnowledgeBaseArtifactRow, widths: &[usize]) -> Line<'static> {
+    table_row(
+        &[
+            artifact.state,
+            &fit(&artifact.path, widths.get(1).copied().unwrap_or(24)),
+            &fit(&artifact.description, widths.get(2).copied().unwrap_or(20)),
+        ],
+        widths,
+    )
+}
+
+fn append_attached_records(lines: &mut Vec<Line<'static>>, model: &KnowledgeBaseModel, area: Rect) {
     lines.push(blank());
-    if attachments.is_empty() {
+    if model.attachment_rows.is_empty() {
         lines.push(divider("ATTACHED · empty", area.width));
         lines.extend(empty_state_panel(
             "no attachments yet",
@@ -69,40 +76,29 @@ pub(crate) fn knowledge_base_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stat
                 ("kb pull kev", "preload the KEV / NVD / CWE catalogs"),
             ],
         ));
-    } else {
-        lines.push(divider("ATTACHED", area.width));
-        lines.push(table_header(
-            &["id", "kind", "source", "status"],
-            &kb_attachment_widths(area.width),
-        ));
-        let widths = kb_attachment_widths(area.width);
-        for record in attachments {
-            let kind = match &record.kind {
-                AttachmentKind::Path => "path",
-                AttachmentKind::Url => "url",
-            };
-            lines.push(table_row(
-                &[
-                    &record.id,
-                    kind,
-                    &fit(&record.source, widths.get(2).copied().unwrap_or(22)),
-                    &fit(&record.status, widths.get(3).copied().unwrap_or(18)),
-                ],
-                &widths,
-            ));
-        }
+        return;
     }
-    lines.push(blank());
-    lines.push(command_list_line(
-        &[
-            "kb [module]",
-            "attach <path-or-url>",
-            "detach <id>",
-            "reparse <id>",
-        ],
-        area.width as usize,
+    lines.push(divider("ATTACHED", area.width));
+    lines.push(table_header(
+        &["id", "kind", "source", "status"],
+        &kb_attachment_widths(area.width),
     ));
-    lines
+    let widths = kb_attachment_widths(area.width);
+    for record in &model.attachment_rows {
+        lines.push(attachment_row(record, &widths));
+    }
+}
+
+fn attachment_row(record: &KnowledgeBaseAttachmentRow, widths: &[usize]) -> Line<'static> {
+    table_row(
+        &[
+            &record.id,
+            record.kind,
+            &fit(&record.source, widths.get(2).copied().unwrap_or(22)),
+            &fit(&record.status, widths.get(3).copied().unwrap_or(18)),
+        ],
+        widths,
+    )
 }
 
 pub(crate) fn kb_artifact_widths(width: u16) -> Vec<usize> {
