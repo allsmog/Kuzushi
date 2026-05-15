@@ -58,6 +58,12 @@ const rules = [
       /\b(crate::(?:scan|scanners|modules::triage|triage|remediation|patch|report)|execute_tool|execute_tool_with_runtime)\b/,
   },
   {
+    name: "patch suggests remediation without scanner triage verify report or tool dispatch",
+    roots: ["crates/kuzushi-core/src/patch.rs", "crates/kuzushi-core/src/remediation/patch"],
+    forbidden:
+      /\b(crate::(?:scan|scanners|modules::triage|triage|verification|verify|report|capabilities::module_recommender)|execute_tool|execute_tool_with_runtime)\b/,
+  },
+  {
     name: "report boundary reads artifacts and findings without execution",
     roots: [
       "crates/kuzushi-core/src/report.rs",
