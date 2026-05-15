@@ -1,72 +1,49 @@
 use super::*;
-use crate::ui_view_models::{options_model, OptionRow, OptionsModelStatus};
+use crate::ui_view_models::{
+    plain_options_model, PlainOptionRow, PlainOptionsBody, PlainOptionsModel, PlainOptionsTable,
+};
 
 pub(crate) fn plain_options_lines(
     app: &ShellApp,
     width: usize,
     view: &crate::app::OptionsView,
 ) -> Vec<String> {
-    let model = options_model(app, view);
+    let model = plain_options_model(app, view);
     let mut lines = plain_context_strip(app, width);
-    lines.push(String::new());
-    lines.push(plain_section_divider("OPTIONS", width));
-    lines.push(format!("tool: {}", model.tool_name));
-    lines.push(format!("view: {}", model.filter_label));
-    push_plain_options_body(&mut lines, width, &model.status, &model.rows);
+    push_plain_options_summary(&mut lines, &model, width);
+    push_plain_options_body(&mut lines, width, &model.body);
     lines
 }
 
-fn push_plain_options_body(
-    lines: &mut Vec<String>,
-    width: usize,
-    status: &OptionsModelStatus,
-    rows: &[OptionRow],
-) {
-    match status {
-        OptionsModelStatus::Ready => push_plain_options_table(lines, width, rows),
-        OptionsModelStatus::UnknownTool => {
+fn push_plain_options_summary(lines: &mut Vec<String>, model: &PlainOptionsModel, width: usize) {
+    lines.push(String::new());
+    lines.push(plain_section_divider(model.title, width));
+    lines.extend(model.summary_rows.iter().cloned());
+}
+
+fn push_plain_options_body(lines: &mut Vec<String>, width: usize, body: &PlainOptionsBody) {
+    match body {
+        PlainOptionsBody::Table(table) => push_plain_options_table(lines, width, table),
+        PlainOptionsBody::Message(rows) => {
             lines.push(String::new());
-            lines.push("Unknown tool. Next: tools".to_string());
-        }
-        OptionsModelStatus::Empty { plain_message, .. } => {
-            lines.push(String::new());
-            lines.push((*plain_message).to_string());
+            lines.extend(rows.iter().cloned());
         }
     }
 }
 
-fn push_plain_options_table(lines: &mut Vec<String>, width: usize, rows: &[OptionRow]) {
+fn push_plain_options_table(lines: &mut Vec<String>, width: usize, table: &PlainOptionsTable) {
     lines.push(String::new());
     let widths = option_table_widths(width.min(u16::MAX as usize) as u16);
-    lines.push(
-        table_text(
-            &[
-                "option",
-                "value",
-                "default",
-                "req",
-                "type",
-                "aliases",
-                "description",
-            ],
-            &widths,
-        )
-        .trim_end()
-        .to_string(),
-    );
-    for row in rows {
+    lines.push(table_text(&table.headers, &widths).trim_end().to_string());
+    for row in &table.rows {
         lines.push(plain_option_row(row, &widths));
     }
     lines.push(String::new());
-    lines.push(
-        "Canonical keys are in the option column; aliases are compatibility names.".to_string(),
-    );
-    lines.push(
-        "Next: set <key> <value>, setg <key> <value>, show advanced, show missing".to_string(),
-    );
+    lines.push(table.note.to_string());
+    lines.push(table.next_hint.to_string());
 }
 
-fn plain_option_row(row: &OptionRow, widths: &[usize]) -> String {
+fn plain_option_row(row: &PlainOptionRow, widths: &[usize]) -> String {
     table_text(
         &[
             &row.name,

@@ -37,3 +37,48 @@ fn options_model_marks_unknown_tools() {
     assert_eq!(model.status, OptionsModelStatus::UnknownTool);
     assert!(model.rows.is_empty());
 }
+
+#[test]
+fn plain_options_model_projects_ready_table() {
+    let app = ShellApp::new(V2Config::default(), None);
+
+    let model = plain_options_model(&app, &options_view("sast:scan", OptionsFilter::Standard));
+
+    assert_eq!(model.title, "OPTIONS");
+    assert_eq!(
+        model.summary_rows,
+        vec!["tool: sast:scan".to_string(), "view: options".to_string()]
+    );
+    let PlainOptionsBody::Table(table) = model.body else {
+        panic!("expected ready options table");
+    };
+    assert_eq!(
+        table.headers,
+        [
+            "option",
+            "value",
+            "default",
+            "req",
+            "type",
+            "aliases",
+            "description"
+        ]
+    );
+    assert!(table.rows.iter().any(|row| row.name == "triage"));
+    assert_eq!(
+        table.next_hint,
+        "Next: set <key> <value>, setg <key> <value>, show advanced, show missing"
+    );
+}
+
+#[test]
+fn plain_options_model_projects_unknown_tool_message() {
+    let app = ShellApp::new(V2Config::default(), None);
+
+    let model = plain_options_model(&app, &options_view("missing:tool", OptionsFilter::Standard));
+
+    assert_eq!(
+        model.body,
+        PlainOptionsBody::Message(vec!["Unknown tool. Next: tools".to_string()])
+    );
+}

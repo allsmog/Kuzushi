@@ -31,6 +31,38 @@ pub(crate) struct OptionRow {
     has_stored_value: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlainOptionsModel {
+    pub(crate) title: &'static str,
+    pub(crate) summary_rows: Vec<String>,
+    pub(crate) body: PlainOptionsBody,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PlainOptionsBody {
+    Table(PlainOptionsTable),
+    Message(Vec<String>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlainOptionsTable {
+    pub(crate) headers: [&'static str; 7],
+    pub(crate) rows: Vec<PlainOptionRow>,
+    pub(crate) note: &'static str,
+    pub(crate) next_hint: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlainOptionRow {
+    pub(crate) name: String,
+    pub(crate) value: String,
+    pub(crate) default_value: String,
+    pub(crate) required: &'static str,
+    pub(crate) option_type: &'static str,
+    pub(crate) aliases: String,
+    pub(crate) description: String,
+}
+
 pub(crate) fn options_model(app: &ShellApp, view: &OptionsView) -> OptionsModel {
     let Some(tool) = app.registry.resolve_tool(&view.tool_name) else {
         return options_model_status(view, OptionsModelStatus::UnknownTool, Vec::new());
@@ -48,6 +80,64 @@ pub(crate) fn options_model(app: &ShellApp, view: &OptionsView) -> OptionsModel 
         OptionsModelStatus::Ready
     };
     options_model_status(view, status, rows)
+}
+
+pub(crate) fn plain_options_model(app: &ShellApp, view: &OptionsView) -> PlainOptionsModel {
+    PlainOptionsModel::from_options_model(options_model(app, view))
+}
+
+impl PlainOptionsModel {
+    fn from_options_model(model: OptionsModel) -> Self {
+        PlainOptionsModel {
+            title: "OPTIONS",
+            summary_rows: vec![
+                format!("tool: {}", model.tool_name),
+                format!("view: {}", model.filter_label),
+            ],
+            body: plain_options_body(model.status, model.rows),
+        }
+    }
+}
+
+fn plain_options_body(status: OptionsModelStatus, rows: Vec<OptionRow>) -> PlainOptionsBody {
+    match status {
+        OptionsModelStatus::Ready => PlainOptionsBody::Table(plain_options_table(rows)),
+        OptionsModelStatus::UnknownTool => {
+            PlainOptionsBody::Message(vec!["Unknown tool. Next: tools".to_string()])
+        }
+        OptionsModelStatus::Empty { plain_message, .. } => {
+            PlainOptionsBody::Message(vec![plain_message.to_string()])
+        }
+    }
+}
+
+fn plain_options_table(rows: Vec<OptionRow>) -> PlainOptionsTable {
+    PlainOptionsTable {
+        headers: [
+            "option",
+            "value",
+            "default",
+            "req",
+            "type",
+            "aliases",
+            "description",
+        ],
+        rows: rows.into_iter().map(plain_option_row).collect(),
+        note: "Canonical keys are in the option column; aliases are compatibility names.",
+        next_hint: "Next: set <key> <value>, setg <key> <value>, show advanced, show missing",
+    }
+}
+
+fn plain_option_row(row: OptionRow) -> PlainOptionRow {
+    PlainOptionRow {
+        name: row.name,
+        value: row.value,
+        default_value: row.default_value,
+        required: row.required,
+        option_type: row.option_type,
+        aliases: row.aliases,
+        description: row.description,
+    }
 }
 
 fn options_model_status(
