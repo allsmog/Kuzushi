@@ -1,172 +1,53 @@
 use super::*;
+use crate::ui_view_models::{recent_module_activity_model, ModuleActivityModel, ModuleActivityRow};
 
 pub(crate) fn recent_module_activity_lines(
     app: &ShellApp,
     module_id: &str,
     take: usize,
 ) -> Vec<Line<'static>> {
-    if let Some(lines) = recent_snapshot_activity_lines(app, module_id, take) {
-        return lines;
+    module_activity_lines(recent_module_activity_model(app, module_id, take))
+}
+
+fn module_activity_lines(model: ModuleActivityModel) -> Vec<Line<'static>> {
+    model.rows.into_iter().map(module_activity_line).collect()
+}
+
+fn module_activity_line(row: ModuleActivityRow) -> Line<'static> {
+    match row {
+        ModuleActivityRow::Transcript { prefix, body } => transcript_line(&prefix, &body, false),
+        ModuleActivityRow::ReconService {
+            host,
+            port,
+            service,
+            banner,
+        } => Line::from(vec![
+            Span::styled(" ▸ ", theme::warn()),
+            Span::styled(host, theme::primary()),
+            Span::styled(":", theme::subtle()),
+            Span::styled(format!("{port}"), theme::accent()),
+            Span::raw("  "),
+            Span::styled(pad(&service, 14), theme::muted()),
+            Span::styled(banner, theme::primary()),
+        ]),
+        ModuleActivityRow::ReconHost { label, state } => Line::from(vec![
+            Span::styled(" ▸ ", theme::warn()),
+            Span::styled(label, theme::primary()),
+            Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
+            Span::styled(state, theme::muted()),
+        ]),
+        ModuleActivityRow::Finding {
+            severity,
+            rule_id,
+            location,
+        } => transcript_finding_line(severity, &rule_id, &location),
     }
-    recent_log_activity_lines(app, module_id, take)
-}
-
-fn recent_snapshot_activity_lines(
-    app: &ShellApp,
-    module_id: &str,
-    take: usize,
-) -> Option<Vec<Line<'static>>> {
-    recon_activity_lines(app, module_id, take)
-        .or_else(|| threat_hunt_activity_lines(app, module_id))
-        .or_else(|| agentic_activity_lines(app, module_id))
-}
-
-fn recon_activity_lines(
-    app: &ShellApp,
-    module_id: &str,
-    take: usize,
-) -> Option<Vec<Line<'static>>> {
-    if module_id != "recon" {
-        return None;
-    }
-    let snapshot = app.recon_snapshot.as_ref()?;
-    let lines = recon_snapshot_lines(snapshot, take);
-    (!lines.is_empty()).then_some(lines)
-}
-
-fn threat_hunt_activity_lines(app: &ShellApp, module_id: &str) -> Option<Vec<Line<'static>>> {
-    if module_id != "carlini-threat-hunt" && module_id != "offense-review" {
-        return None;
-    }
-    app.carlini_snapshot.as_ref().map(carlini_snapshot_lines)
-}
-
-fn agentic_activity_lines(app: &ShellApp, module_id: &str) -> Option<Vec<Line<'static>>> {
-    if module_id != "agentic-sast" {
-        return None;
-    }
-    app.agentic_sast_snapshot
-        .as_ref()
-        .map(agentic_sast_snapshot_lines)
-}
-
-fn recent_log_activity_lines(app: &ShellApp, module_id: &str, take: usize) -> Vec<Line<'static>> {
-    let recent = recent_module_log(app, module_id, take);
-    let mut out = Vec::new();
-    for (prefix, body) in &recent {
-        for body_line in body.lines() {
-            out.push(transcript_line(prefix, body_line, false));
-        }
-    }
-    out
-}
-
-fn recent_module_log(app: &ShellApp, module_id: &str, take: usize) -> Vec<(String, String)> {
-    let module_id = module_id.to_string();
-    let mut matches: Vec<(String, String)> = app
-        .log
-        .iter()
-        .rev()
-        .filter(|line| {
-            line.prefix == module_id
-                || line.prefix.starts_with(&format!("{module_id}:"))
-                || line.body.contains(&format!("{module_id}:"))
-                || is_recon_tool_log(line, &module_id)
-        })
-        .take(take)
-        .map(|line| (line.prefix.clone(), line.body.clone()))
-        .collect();
-    matches.reverse();
-    matches
-}
-
-fn is_recon_tool_log(line: &LogLine, module_id: &str) -> bool {
-    module_id == "recon"
-        && (line.prefix == "tool" || line.prefix == "result")
-        && line.body.contains("recon")
-}
-
-pub(crate) fn recon_snapshot_lines(
-    snapshot: &crate::app::ReconSnapshot,
-    take: usize,
-) -> Vec<Line<'static>> {
-    if !snapshot.services.is_empty() {
-        return recon_service_lines(snapshot, take);
-    }
-    recon_host_lines(snapshot, take)
-}
-
-fn recon_service_lines(snapshot: &crate::app::ReconSnapshot, take: usize) -> Vec<Line<'static>> {
-    snapshot
-        .services
-        .iter()
-        .take(take)
-        .map(|service| {
-            let svc = service
-                .name
-                .clone()
-                .unwrap_or_else(|| service.proto.clone());
-            let banner = service
-                .banner
-                .clone()
-                .unwrap_or_else(|| service.state.clone());
-            Line::from(vec![
-                Span::styled(" ▸ ", theme::warn()),
-                Span::styled(
-                    recon_service_host_label(snapshot, service),
-                    theme::primary(),
-                ),
-                Span::styled(":", theme::subtle()),
-                Span::styled(format!("{}", service.port), theme::accent()),
-                Span::raw("  "),
-                Span::styled(pad(&svc, 14), theme::muted()),
-                Span::styled(banner, theme::primary()),
-            ])
-        })
-        .collect()
-}
-
-fn recon_host_lines(snapshot: &crate::app::ReconSnapshot, take: usize) -> Vec<Line<'static>> {
-    snapshot
-        .hosts
-        .iter()
-        .take(take)
-        .map(|host| {
-            let label = host
-                .hostname
-                .clone()
-                .unwrap_or_else(|| host.address.clone());
-            Line::from(vec![
-                Span::styled(" ▸ ", theme::warn()),
-                Span::styled(label, theme::primary()),
-                Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
-                Span::styled(host.state.clone(), theme::muted()),
-            ])
-        })
-        .collect()
-}
-
-fn recon_service_host_label(
-    snapshot: &crate::app::ReconSnapshot,
-    service: &kuzushi_core::ReconService,
-) -> String {
-    snapshot
-        .hosts
-        .iter()
-        .find(|host| host.id == service.host_id)
-        .map(|host| {
-            host.hostname
-                .clone()
-                .unwrap_or_else(|| host.address.clone())
-        })
-        .unwrap_or_else(|| "unknown".to_string())
 }
 
 pub(crate) fn transcript_finding_line(
     severity: Severity,
     rule_id: &str,
-    file_path: &str,
-    line: u32,
+    location: &str,
 ) -> Line<'static> {
     Line::from(vec![
         Span::styled(" ▸ ", theme::warn()),
@@ -177,6 +58,6 @@ pub(crate) fn transcript_finding_line(
         Span::raw(" "),
         Span::styled(rule_id.to_string(), theme::accent()),
         Span::raw("  "),
-        Span::styled(format!("{file_path}:{line}"), theme::muted()),
+        Span::styled(location.to_string(), theme::muted()),
     ])
 }

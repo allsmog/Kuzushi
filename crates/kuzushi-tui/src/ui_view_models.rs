@@ -36,6 +36,7 @@ mod plan_card;
 mod prereq_prompt;
 mod prompt;
 mod prompt_tuning;
+mod recent_module_activity;
 mod routing;
 mod run_status;
 mod run_timeline;
@@ -102,6 +103,9 @@ pub(crate) use prereq_prompt::{prereq_prompt_model, PrereqPromptModel, PrereqPro
 pub(crate) use prompt::prompt_brand;
 pub(crate) use prompt_tuning::{
     prompts_model, tune_model, PromptRow, TuneActionRow, TuneHouseRules, TuneModel,
+};
+pub(crate) use recent_module_activity::{
+    recent_module_activity_model, ModuleActivityModel, ModuleActivityRow,
 };
 pub(crate) use routing::{routing_mode, routing_mode_segment, RoutingMode};
 pub(crate) use run_status::scan_status;
