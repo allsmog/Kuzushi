@@ -151,10 +151,27 @@ fn iac_signals(signals: &RepositorySignals) -> Vec<String> {
 }
 
 fn codeql_signals(signals: &RepositorySignals) -> Vec<String> {
-    vec![format!(
+    let mut codeql_signals = vec![format!(
         "CodeQL languages: {}",
         signals.codeql_languages.join(", ")
-    )]
+    )];
+    if let Some(related_cwes) = related_cwe_signal(signals) {
+        codeql_signals.push(related_cwes);
+    }
+    codeql_signals
+}
+
+fn related_cwe_signal(signals: &RepositorySignals) -> Option<String> {
+    if signals.threat_model_related_cwes.is_empty() {
+        return None;
+    }
+    let cwes = signals
+        .threat_model_related_cwes
+        .iter()
+        .take(8)
+        .map(|(cwe, count)| format!("{cwe}={count}"))
+        .collect::<Vec<_>>();
+    Some(format!("threat-model related CWEs: {}", cwes.join(", ")))
 }
 
 fn attack_surface_signals(signals: &RepositorySignals) -> Vec<String> {

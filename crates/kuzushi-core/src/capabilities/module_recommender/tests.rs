@@ -104,6 +104,31 @@ fn omits_recommendations_for_missing_capabilities() {
 }
 
 #[test]
+fn codeql_recommendation_mentions_threat_model_related_cwes() {
+    let mut signals = rich_signals();
+    signals.threat_model_present = true;
+    signals.threat_model_related_cwes = BTreeMap::from([
+        ("CWE-20".to_string(), 2),
+        ("CWE-918".to_string(), 1),
+    ]);
+    let request = RecommenderRequest {
+        target: "/repo".to_string(),
+        max_recommendations: 10,
+        available_tools: tool_set(&["codeql:scan"]),
+        signals,
+    };
+
+    let report = build_recommendation_report(request);
+
+    assert!(report.recommendations.iter().any(|recommendation| {
+        recommendation.tool == "codeql:scan"
+            && recommendation
+                .signals
+                .contains(&"threat-model related CWEs: CWE-20=2, CWE-918=1".to_string())
+    }));
+}
+
+#[test]
 fn executor_reads_workspace_inventory_and_visible_capabilities() {
     let temp = tempdir().unwrap();
     let src = temp.path().join("src");
