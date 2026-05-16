@@ -195,6 +195,7 @@ fn rich_signals() -> RepositorySignals {
         threat_model_dfd_nodes: 0,
         threat_model_dfd_flows: 0,
         threat_model_trust_boundaries: 0,
+        threat_model_related_cwes: BTreeMap::new(),
         findings_available: true,
         finding_count: 3,
         high_or_critical_findings: 1,
@@ -218,7 +219,10 @@ fn executor_reads_threat_model_dfd_artifact_shape() {
               "flows": [{"id":"flow-data-store"}],
               "trustBoundaries": [{"id":"tb-public-http"}]
             },
-            "threats": [{"id":"DTM-001"}, {"id":"DTM-002"}]
+            "threats": [
+              {"id":"DTM-001", "relatedCwe":["CWE-20", "CWE-918"]},
+              {"id":"DTM-002", "relatedCwe":["CWE-20"]}
+            ]
           }
         }"#,
     )
@@ -248,6 +252,8 @@ fn executor_reads_threat_model_dfd_artifact_shape() {
     assert_eq!(output["signals"]["threatModelDfdNodes"], json!(2));
     assert_eq!(output["signals"]["threatModelDfdFlows"], json!(1));
     assert_eq!(output["signals"]["threatModelTrustBoundaries"], json!(1));
+    assert_eq!(output["signals"]["threatModelRelatedCwes"]["CWE-20"], json!(2));
+    assert_eq!(output["signals"]["threatModelRelatedCwes"]["CWE-918"], json!(1));
 }
 
 fn tool_set(names: &[&str]) -> BTreeSet<String> {

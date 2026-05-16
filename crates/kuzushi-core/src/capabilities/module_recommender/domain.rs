@@ -46,6 +46,7 @@ pub(crate) struct RepositorySignals {
     pub(crate) threat_model_dfd_nodes: usize,
     pub(crate) threat_model_dfd_flows: usize,
     pub(crate) threat_model_trust_boundaries: usize,
+    pub(crate) threat_model_related_cwes: BTreeMap<String, usize>,
     pub(crate) findings_available: bool,
     pub(crate) finding_count: usize,
     pub(crate) high_or_critical_findings: usize,
