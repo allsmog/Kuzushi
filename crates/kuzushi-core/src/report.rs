@@ -4,6 +4,7 @@
 //! not run scanners, dispatch tools, or ask an LLM for new evidence.
 
 mod application;
+mod artifact_summary;
 mod domain;
 mod failure_handoff;
 mod markdown;

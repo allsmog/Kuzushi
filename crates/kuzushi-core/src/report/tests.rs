@@ -42,7 +42,10 @@ fn builds_markdown_report_from_latest_completed_non_report_run() {
                 "flows": [{"id": "flow-data-store"}],
                 "trustBoundaries": [{"id": "tb-public-http"}]
             },
-            "threats": [{"id": "T-001"}, {"id": "T-002"}]
+            "threats": [
+                {"id": "T-001", "relatedCwe": ["CWE-20", "CWE-918"]},
+                {"id": "T-002", "relatedCwe": ["CWE-20"]}
+            ]
         }),
     )
     .unwrap();
@@ -86,7 +89,7 @@ fn builds_markdown_report_from_latest_completed_non_report_run() {
         "attack-surface.json: present - 4 surface(s), 2 high risk, max 98, tiers critical=1, high=1, medium=2"
     ));
     assert!(report.report_markdown.contains(
-        "threat-model.json: present - methodology stride, 2 threat(s), DFD nodes=2, flows=1, boundaries=1"
+        "threat-model.json: present - methodology stride, 2 threat(s), DFD nodes=2, flows=1, boundaries=1, CWEs CWE-20=2, CWE-918=1"
     ));
     assert!(report.report_markdown.contains("findings.json: present"));
     assert!(report.report_markdown.contains("events.jsonl: present - 1 line(s)"));
