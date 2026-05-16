@@ -1,3 +1,7 @@
+use super::threat_model_signals::{
+    threat_model_array_count, threat_model_dfd_count, threat_model_related_cwes,
+    threat_signal_count,
+};
 use super::*;
 
 pub(crate) fn execute_module_recommender_tool(
@@ -105,6 +109,7 @@ fn repository_signals(
         threat_model_dfd_nodes: threat_model_dfd_count(threat_model, "nodes"),
         threat_model_dfd_flows: threat_model_dfd_count(threat_model, "flows"),
         threat_model_trust_boundaries: threat_model_dfd_count(threat_model, "trustBoundaries"),
+        threat_model_related_cwes: threat_model_related_cwes(threat_model),
         findings_available,
         finding_count: findings.len(),
         high_or_critical_findings: high_or_critical_findings(findings),
@@ -172,76 +177,6 @@ fn iac_file_count(inventory: &RepositoryInventory) -> usize {
 
 fn is_iac_config_kind(kind: &str) -> bool {
     matches!(kind, "compose" | "dockerfile")
-}
-
-fn threat_signal_count(threat_model: Option<&Value>) -> usize {
-    threat_model
-        .map(canonical_threat_document)
-        .map(count_threat_model_signals)
-        .unwrap_or(0)
-}
-
-fn count_threat_model_signals(document: &Value) -> usize {
-    count_known_arrays(document) + count_nested_known_arrays(document)
-}
-
-fn count_nested_known_arrays(document: &Value) -> usize {
-    ["dfd", "model", "threatModel"]
-        .iter()
-        .filter_map(|key| document.get(*key))
-        .map(count_known_arrays)
-        .sum()
-}
-
-fn count_known_arrays(document: &Value) -> usize {
-    threat_signal_keys()
-        .iter()
-        .map(|key| json_array_len(document, key))
-        .sum()
-}
-
-fn threat_signal_keys() -> &'static [&'static str] {
-    &[
-        "actors",
-        "edges",
-        "findings",
-        "nodes",
-        "scenarios",
-        "securityStories",
-        "stories",
-        "threats",
-    ]
-}
-
-fn json_array_len(document: &Value, key: &str) -> usize {
-    document
-        .get(key)
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0)
-}
-
-fn threat_model_dfd_count(threat_model: Option<&Value>, key: &str) -> usize {
-    let Some(document) = threat_model.map(canonical_threat_document) else {
-        return 0;
-    };
-    document
-        .get("dfd")
-        .and_then(|dfd| dfd.get(key))
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0)
-}
-
-fn threat_model_array_count(threat_model: Option<&Value>, key: &str) -> usize {
-    threat_model
-        .map(canonical_threat_document)
-        .map(|document| json_array_len(document, key))
-        .unwrap_or(0)
-}
-
-fn canonical_threat_document(value: &Value) -> &Value {
-    value.get("document").unwrap_or(value)
 }
 
 fn high_or_critical_findings(findings: &[Finding]) -> usize {

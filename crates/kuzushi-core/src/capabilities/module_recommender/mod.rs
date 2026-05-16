@@ -14,6 +14,7 @@ mod adapters;
 mod application;
 mod domain;
 mod rule_catalog;
+mod threat_model_signals;
 #[cfg(test)]
 mod tests;
 
