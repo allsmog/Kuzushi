@@ -1,3 +1,4 @@
+use super::artifact_summary::{summarize_json_artifact, summarize_text_artifact};
 use super::failure_handoff::load_report_failure_handoffs;
 use super::markdown::render_report_markdown;
 use super::{CanonicalReportArtifact, RunReportBuild};
@@ -163,10 +164,6 @@ fn read_text_file(path: &Path) -> Option<String> {
     fs::read_to_string(path).ok()
 }
 
-fn summarize_text_artifact(body: &str) -> String {
-    format!("{} line(s)", body.lines().count())
-}
-
 fn generated_report_artifact(run_dir: &Path) -> CanonicalReportArtifact {
     let path = run_dir.join("report.md");
     CanonicalReportArtifact::present(
@@ -175,110 +172,6 @@ fn generated_report_artifact(run_dir: &Path) -> CanonicalReportArtifact {
         path.display().to_string(),
         "generated report",
     )
-}
-
-fn summarize_json_artifact(value: &Value) -> String {
-    if let Some(summary) = text_summary(value) {
-        return summary;
-    }
-    match value {
-        Value::Array(items) => format!("{} record(s)", items.len()),
-        Value::Object(object) => format!("{} top-level field(s)", object.len()),
-        _ => "present".to_string(),
-    }
-}
-
-fn text_summary(value: &Value) -> Option<String> {
-    value
-        .get("summary")
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| threat_model_summary(value))
-        .or_else(|| attack_surface_summary(value))
-}
-
-fn threat_model_summary(value: &Value) -> Option<String> {
-    let document = value.get("document").unwrap_or(value);
-    let threats = array_len(document.get("threats"));
-    let dfd = document.get("dfd");
-    let nodes = array_len(dfd.and_then(|value| value.get("nodes")));
-    let flows = array_len(dfd.and_then(|value| value.get("flows")));
-    let boundaries = array_len(dfd.and_then(|value| value.get("trustBoundaries")));
-    if threats.is_none() && nodes.is_none() {
-        return None;
-    }
-    let mut parts = methodology_segment(document).into_iter().collect::<Vec<_>>();
-    parts.push(format!("{} threat(s)", threats.unwrap_or_default()));
-    parts.extend(dfd_segments(nodes, flows, boundaries));
-    Some(parts.join(", "))
-}
-
-fn methodology_segment(document: &Value) -> Option<String> {
-    document
-        .get("methodology")
-        .and_then(Value::as_str)
-        .map(|methodology| format!("methodology {methodology}"))
-}
-
-fn dfd_segments(
-    nodes: Option<usize>,
-    flows: Option<usize>,
-    boundaries: Option<usize>,
-) -> Vec<String> {
-    vec![
-        format!("DFD nodes={}", nodes.unwrap_or_default()),
-        format!("flows={}", flows.unwrap_or_default()),
-        format!("boundaries={}", boundaries.unwrap_or_default()),
-    ]
-}
-
-fn array_len(value: Option<&Value>) -> Option<usize> {
-    value.and_then(Value::as_array).map(Vec::len)
-}
-
-fn attack_surface_summary(value: &Value) -> Option<String> {
-    let summary = value.get("summary")?.as_object()?;
-    let total = summary.get("surfaceCount")?.as_u64()?;
-    let high = summary.get("highRisk").and_then(Value::as_u64).unwrap_or(0);
-    let mut parts = vec![format!("{total} surface(s)"), format!("{high} high risk")];
-    if let Some(max) = summary.get("maxRiskScore").and_then(Value::as_u64) {
-        parts.push(format!("max {max}"));
-    }
-    if let Some(tiers) = risk_tier_summary(summary.get("byRiskTier")) {
-        parts.push(format!("tiers {tiers}"));
-    }
-    Some(parts.join(", "))
-}
-
-fn risk_tier_summary(value: Option<&Value>) -> Option<String> {
-    let object = value?.as_object()?;
-    let mut tiers = object.keys().collect::<Vec<_>>();
-    tiers.sort_by(|left, right| {
-        tier_rank(left)
-            .cmp(&tier_rank(right))
-            .then_with(|| left.cmp(right))
-    });
-    let summary = tiers
-        .into_iter()
-        .filter_map(|tier| tier_count_segment(tier, object.get(tier)))
-        .collect::<Vec<_>>()
-        .join(", ");
-    (!summary.is_empty()).then_some(summary)
-}
-
-fn tier_count_segment(tier: &str, count: Option<&Value>) -> Option<String> {
-    let count = count.and_then(Value::as_u64).filter(|count| *count > 0)?;
-    Some(format!("{tier}={count}"))
-}
-
-fn tier_rank(tier: &str) -> usize {
-    match tier {
-        "critical" => 0,
-        "high" => 1,
-        "medium" => 2,
-        "low" => 3,
-        _ => 4,
-    }
 }
 
 fn write_report_markdown(target: &Path, run_id: &str, markdown: &str) -> Result<PathBuf> {
