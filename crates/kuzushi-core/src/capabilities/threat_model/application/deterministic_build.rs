@@ -42,9 +42,13 @@ fn deterministic_threat_surfaces(
 ) -> Vec<&AttackSurface> {
     surfaces
         .iter()
-        .filter(|surface| surface.risk.score >= 50)
+        .filter(|surface| emits_deterministic_threat(surface))
         .take(max_threats)
         .collect()
+}
+
+fn emits_deterministic_threat(surface: &AttackSurface) -> bool {
+    surface.risk.score >= 50 || surface.kind == AttackSurfaceKind::BackgroundJob
 }
 
 fn deterministic_threats(surfaces: &[&AttackSurface]) -> Vec<Value> {
@@ -206,17 +210,19 @@ fn likelihood_for_risk(tier: &str) -> &'static str {
 
 fn cwe_for(kind: AttackSurfaceKind) -> Vec<&'static str> {
     match kind {
+        AttackSurfaceKind::HttpRoute => vec!["CWE-20"],
+        AttackSurfaceKind::RpcHandler => vec!["CWE-20"],
         AttackSurfaceKind::CommandExecutionBoundary => vec!["CWE-78"],
         AttackSurfaceKind::DbQueryBoundary => vec!["CWE-89"],
         AttackSurfaceKind::DeserializationPoint => vec!["CWE-502"],
         AttackSurfaceKind::FileUploadParsePath => vec!["CWE-434"],
+        AttackSurfaceKind::BackgroundJob => vec!["CWE-400"],
         AttackSurfaceKind::ExternalServiceClient => vec!["CWE-918"],
         AttackSurfaceKind::CliEntrypoint => vec!["CWE-20"],
         AttackSurfaceKind::AuthBoundary => vec!["CWE-287"],
         AttackSurfaceKind::SessionStateBoundary => vec!["CWE-384"],
         AttackSurfaceKind::RequestTrustBoundary => vec!["CWE-352"],
         AttackSurfaceKind::TenantIsolationBoundary => vec!["CWE-639"],
-        _ => Vec::new(),
     }
 }
 
