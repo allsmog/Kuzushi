@@ -82,13 +82,13 @@ fn target_element_ids_for(kind: AttackSurfaceKind) -> &'static [&'static str] {
         AttackSurfaceKind::DeserializationPoint => &["parser-boundary"],
         AttackSurfaceKind::FileUploadParsePath => &["file-upload-parser"],
         AttackSurfaceKind::RpcHandler => &["rpc-handler"],
+        AttackSurfaceKind::CliEntrypoint => &["cli-entrypoint"],
         AttackSurfaceKind::BackgroundJob => &["background-job"],
         AttackSurfaceKind::ExternalServiceClient => &["external-service"],
         AttackSurfaceKind::AuthBoundary => &["auth-control"],
         AttackSurfaceKind::SessionStateBoundary => &["session-state"],
         AttackSurfaceKind::RequestTrustBoundary => &["request-trust-control"],
         AttackSurfaceKind::TenantIsolationBoundary => &["tenant-isolation-control"],
-        _ => &["app"],
     }
 }
 
@@ -211,6 +211,7 @@ fn cwe_for(kind: AttackSurfaceKind) -> Vec<&'static str> {
         AttackSurfaceKind::DeserializationPoint => vec!["CWE-502"],
         AttackSurfaceKind::FileUploadParsePath => vec!["CWE-434"],
         AttackSurfaceKind::ExternalServiceClient => vec!["CWE-918"],
+        AttackSurfaceKind::CliEntrypoint => vec!["CWE-20"],
         AttackSurfaceKind::AuthBoundary => vec!["CWE-287"],
         AttackSurfaceKind::SessionStateBoundary => vec!["CWE-384"],
         AttackSurfaceKind::RequestTrustBoundary => vec!["CWE-352"],

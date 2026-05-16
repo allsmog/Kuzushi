@@ -15,6 +15,7 @@ pub(super) fn surface_dfd_nodes() -> Vec<(AttackSurfaceKind, Value)> {
             AttackSurfaceKind::DeserializationPoint,
             parser_boundary_node(),
         ),
+        (AttackSurfaceKind::CliEntrypoint, cli_entrypoint_node()),
         (AttackSurfaceKind::BackgroundJob, background_job_node()),
     ]
 }
@@ -31,6 +32,7 @@ pub(super) fn surface_dfd_flows() -> Vec<(AttackSurfaceKind, Value)> {
             AttackSurfaceKind::DeserializationPoint,
             parser_boundary_flow(),
         ),
+        (AttackSurfaceKind::CliEntrypoint, cli_entrypoint_flow()),
         (AttackSurfaceKind::BackgroundJob, background_job_flow()),
     ]
 }
@@ -55,6 +57,14 @@ pub(super) fn surface_trust_boundaries() -> Vec<(AttackSurfaceKind, Value)> {
                 "tb-parser-boundary",
                 "Parser boundary",
                 "flow-parser-boundary",
+            ),
+        ),
+        (
+            AttackSurfaceKind::CliEntrypoint,
+            trust_boundary(
+                "tb-process-entrypoint",
+                "Process entrypoint boundary",
+                "flow-cli-entrypoint",
             ),
         ),
     ]
@@ -97,6 +107,16 @@ fn parser_boundary_node() -> Value {
         "Parser boundary",
         "Detected parser or deserialization boundary",
         "internal",
+    )
+}
+
+fn cli_entrypoint_node() -> Value {
+    dfd_node(
+        "cli-entrypoint",
+        "process",
+        "CLI entrypoint",
+        "Detected command-line argument entrypoint",
+        "host",
     )
 }
 
@@ -147,6 +167,16 @@ fn parser_boundary_flow() -> Value {
         "actor-external",
         "parser-boundary",
         &["tb-parser-boundary"],
+    )
+}
+
+fn cli_entrypoint_flow() -> Value {
+    dfd_flow(
+        "flow-cli-entrypoint",
+        "External command input reaches process entrypoint",
+        "actor-external",
+        "cli-entrypoint",
+        &["tb-process-entrypoint"],
     )
 }
 
