@@ -484,6 +484,7 @@ mod tests {
         assert!(document_has_threat_target(&degraded, "cli-entrypoint"));
         assert!(document_has_dfd_node(&degraded, "background-job"));
         assert!(document_has_dfd_flow(&degraded, "flow-background-job"));
+        assert!(document_has_threat_target(&degraded, "background-job"));
         assert!(document_has_related_cwe(&degraded, "CWE-918"));
         assert!(document_has_related_cwe(&degraded, "CWE-287"));
         assert!(document_has_related_cwe(&degraded, "CWE-384"));
@@ -493,6 +494,15 @@ mod tests {
         assert!(document_has_related_cwe(&degraded, "CWE-434"));
         assert!(document_has_related_cwe(&degraded, "CWE-78"));
         assert!(document_has_related_cwe(&degraded, "CWE-20"));
+        assert!(document_has_related_cwe(&degraded, "CWE-400"));
+        assert!(document_threat_target_has_cwe(&degraded, "http-route", "CWE-20"));
+        assert!(document_threat_target_has_cwe(&degraded, "rpc-handler", "CWE-20"));
+        assert!(document_threat_target_has_cwe(&degraded, "cli-entrypoint", "CWE-20"));
+        assert!(document_threat_target_has_cwe(
+            &degraded,
+            "background-job",
+            "CWE-400"
+        ));
         assert!(document_has_attacker_story_threat_id(&degraded, "DTM-001"));
         assert!(document_has_narrative_input(
             &degraded,
@@ -737,6 +747,15 @@ mod tests {
         document_array(value, "/data/document/threats")
             .iter()
             .any(|threat| json_array_contains_str(threat.get("relatedCwe"), cwe))
+    }
+
+    fn document_threat_target_has_cwe(value: &Value, target_id: &str, cwe: &str) -> bool {
+        document_array(value, "/data/document/threats")
+            .iter()
+            .any(|threat| {
+                json_array_contains_str(threat.get("targetElementIds"), target_id)
+                    && json_array_contains_str(threat.get("relatedCwe"), cwe)
+            })
     }
 
     fn document_has_threat_target(value: &Value, target_id: &str) -> bool {
