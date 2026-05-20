@@ -1,0 +1,37 @@
+rules:
+  - id: android-intent-parse-uri-from-extra
+    message: |
+      Intent.parseUri / Intent.getParcelableExtra used to construct an
+      Intent that is then started — classic intent-redirection sink
+      (CWE-940). If the URI/extra is attacker-controlled, the calling app
+      becomes a launcher for arbitrary components, including internal
+      activities that trust the caller.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-940
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: |
+              Intent $I = Intent.parseUri($URI, ...);
+              ...
+              $CTX.startActivity($I);
+          - pattern: |
+              Intent $I = ($CAST) $SRC.getParcelableExtra($KEY);
+              ...
+              $CTX.startActivity($I);
+
+  - id: android-implicit-broadcast-no-permission
+    message: |
+      sendBroadcast(intent) without a permission lets any installed app
+      receive the broadcast (CWE-925). If the intent carries auth tokens,
+      session IDs, or location, attackers register a matching receiver
+      and read them.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      cwe: CWE-925
+      category: security
+    pattern: $CTX.sendBroadcast($I)
+    pattern-not: $CTX.sendBroadcast($I, $PERM)

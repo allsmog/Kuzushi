@@ -1,0 +1,19 @@
+rules:
+  - id: android-clipboard-credentials
+    message: |
+      Credentials copied to the global clipboard via
+      ClipboardManager.setPrimaryClip (CWE-312). Any background app
+      registered as a clipboard listener can read it; on Android 12+ the
+      OS surfaces a paste warning but the bytes still leave the app.
+      Mark the ClipData with ClipDescription.EXTRA_IS_SENSITIVE on API 33+
+      or stop using the clipboard for credentials entirely.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      cwe: CWE-312
+      category: security
+    patterns:
+      - pattern: $CM.setPrimaryClip(ClipData.newPlainText($LABEL, $VALUE))
+      - metavariable-regex:
+          metavariable: $LABEL
+          regex: "(?i)\"(password|token|secret|api[_-]?key|otp|2fa)\""

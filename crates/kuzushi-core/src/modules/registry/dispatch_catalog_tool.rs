@@ -103,7 +103,9 @@ pub(in crate::modules) fn dispatch_native_security_tool(
         | "android-apk:prepare"
         | "android-apk:manifest-scan"
         | "android-apk:network-security-config"
-        | "android-apk:fileprovider-scan" => Some(native_scanners::execute_tool(
+        | "android-apk:fileprovider-scan"
+        | "android-apk:webview-scan"
+        | "android-apk:sast-handoff" => Some(native_scanners::execute_tool(
             name,
             input.clone(),
             ctx,

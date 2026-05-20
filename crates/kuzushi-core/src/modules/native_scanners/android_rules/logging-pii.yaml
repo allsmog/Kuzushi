@@ -1,0 +1,50 @@
+rules:
+  - id: android-log-session-token
+    message: |
+      Logged a session token / auth bearer via android.util.Log
+      (CWE-532). Logs are world-readable on rooted devices and adb. Move
+      to redacted logging or strip in release builds.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      cwe: CWE-532
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: Log.d($TAG, "..." + $TOKEN + "...")
+          - pattern: Log.i($TAG, "..." + $TOKEN + "...")
+          - pattern: Log.v($TAG, "..." + $TOKEN + "...")
+      - metavariable-regex:
+          metavariable: $TOKEN
+          regex: "(?i)(token|bearer|session|password|secret|api[_-]?key|access)"
+
+  - id: android-log-location
+    message: |
+      Logged Location object directly (CWE-532). Even verbose logs end
+      up in crash reports / device backups. Drop to debug-only and strip
+      from release.
+    severity: INFO
+    languages: [java]
+    metadata:
+      cwe: CWE-532
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: Log.d($TAG, "..." + $LOC.getLatitude() + "...")
+          - pattern: Log.d($TAG, "..." + $LOC.getLongitude() + "...")
+
+  - id: android-toast-credentials
+    message: |
+      Toast.makeText() with a string containing "password" / "token" /
+      "key" — credential disclosure to anyone watching the screen (CWE-200).
+    severity: INFO
+    languages: [java]
+    metadata:
+      cwe: CWE-200
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: Toast.makeText($CTX, "$MSG", $LEN)
+      - metavariable-regex:
+          metavariable: $MSG
+          regex: "(?i)(password|token|secret|api[_-]?key)"

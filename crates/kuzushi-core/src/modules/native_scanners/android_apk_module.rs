@@ -12,8 +12,36 @@ pub(in crate::modules) fn android_apk_module() -> BuiltinModule {
             manifest_scan_tool(),
             network_security_config_tool(),
             fileprovider_scan_tool(),
+            webview_scan_tool(),
+            sast_handoff_tool(),
         ],
         vec![],
+    )
+}
+
+fn webview_scan_tool() -> ToolDescriptor {
+    tool_with_options(
+        "android-apk:webview-scan",
+        "Run a bundled semgrep rule pack tuned for Android WebView/JS-bridge, intent redirection, mutable PendingIntent, crypto misuse, PII logging, and clipboard credential exposure against the decompiled jadx source tree.",
+        vec![
+            target_option(),
+            opt(
+                "jadxDir",
+                OptionType::Path,
+                "Override path to the decompiled jadx sources directory. Defaults to <target>/android-decompiled/jadx/sources.",
+            )
+            .aliases(&["jadx_dir"])
+            .advanced(),
+            binary_option("Semgrep binary path."),
+        ],
+    )
+}
+
+fn sast_handoff_tool() -> ToolDescriptor {
+    tool_with_options(
+        "android-apk:sast-handoff",
+        "Bridge node that returns the decompiled tree layout (jadx/apktool/raw paths, taint-sources.json) so downstream Java SAST engines can be invoked against the right roots. Emits next-step commands; warns when prepare/manifest-scan haven't run yet.",
+        vec![target_option()],
     )
 }
 
