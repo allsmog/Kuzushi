@@ -1,0 +1,63 @@
+rules:
+  - id: android-mode-world-readable
+    message: |
+      Context.MODE_WORLD_READABLE (and MODE_WORLD_WRITEABLE) make app
+      data readable / writable by every other installed app (CWE-276).
+      Deprecated since API 17; still present in older Lyft-class apps
+      and frequently the path for cred-token leaks.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-276
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: $CTX.openFileOutput($NAME, Context.MODE_WORLD_READABLE)
+          - pattern: $CTX.openFileOutput($NAME, Context.MODE_WORLD_WRITEABLE)
+          - pattern: $CTX.getSharedPreferences($NAME, Context.MODE_WORLD_READABLE)
+          - pattern: $CTX.getSharedPreferences($NAME, Context.MODE_WORLD_WRITEABLE)
+          - pattern: $CTX.openOrCreateDatabase($NAME, Context.MODE_WORLD_READABLE, ...)
+          - pattern: $CTX.openOrCreateDatabase($NAME, Context.MODE_WORLD_WRITEABLE, ...)
+
+  - id: android-external-storage-for-sensitive
+    message: |
+      Writing to getExternalStorageDirectory() / getExternalFilesDir()
+      and the path or filename mentions credentials / tokens / keys
+      (CWE-200, CWE-922). External storage is world-readable on legacy
+      Android and may be readable by other apps via READ_EXTERNAL_STORAGE.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      cwe: CWE-200
+      category: security
+    patterns:
+      - pattern-either:
+          - patterns:
+              - pattern: new File(Environment.getExternalStorageDirectory(), "$NAME")
+              - metavariable-regex:
+                  metavariable: $NAME
+                  regex: "(?i)(password|token|secret|api[_-]?key|credential|auth|session)"
+          - patterns:
+              - pattern: new File($CTX.getExternalFilesDir(...), "$NAME")
+              - metavariable-regex:
+                  metavariable: $NAME
+                  regex: "(?i)(password|token|secret|api[_-]?key|credential|auth|session)"
+
+  - id: android-shared-prefs-no-encryption
+    message: |
+      getSharedPreferences("$NAME", ...) used to store data that looks
+      like credentials (CWE-312). Use EncryptedSharedPreferences (Jetpack
+      Security) or the StrongBox-backed Keystore on API 28+.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      cwe: CWE-312
+      category: security
+    patterns:
+      - patterns:
+          - pattern-either:
+              - pattern: $CTX.getSharedPreferences("$NAME", ...).edit().putString("$KEY", $VALUE)
+              - pattern: $CTX.getSharedPreferences("$NAME", ...).edit().putString($KEY, $VALUE)
+          - metavariable-regex:
+              metavariable: $KEY
+              regex: "(?i)\"(password|token|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|credential|jwt)\""

@@ -9,7 +9,7 @@ use kuzushi_core::{
     WorkspaceTarget,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub(crate) async fn scan_command(
     target: PathBuf,
@@ -22,25 +22,30 @@ pub(crate) async fn scan_command(
     since: Option<String>,
     include_worktree: bool,
 ) -> Result<()> {
-    let workspace = WorkspaceTarget::new(&target)?;
+    if is_apk_file(&target) {
+        return scan_apk_command(target, json, ci).await;
+    }
+    scan_source_tree_command(ScanArgs {
+        target,
+        mode,
+        tasks,
+        triage,
+        json,
+        ci,
+        budget,
+        since,
+        include_worktree,
+    })
+    .await
+}
+
+async fn scan_source_tree_command(args: ScanArgs) -> Result<()> {
+    let workspace = WorkspaceTarget::new(&args.target)?;
     let config = load_config_for_target(Some(workspace.root()))?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let registry = ModuleRegistry::with_v2_builtins();
-
-    apply_scan_since_scope(&workspace, since.as_deref(), include_worktree, json, ci)?;
-    apply_scan_budget_caps(
-        &workspace,
-        budget.as_deref(),
-        config.operator.spend_hard_ceiling_usd,
-        json,
-        ci,
-    )?;
-    let option_store = scan_option_store(&workspace)?;
-    let input = registry.prepare_tool_input(
-        "sast:scan",
-        scan_tool_input(mode, &tasks, triage),
-        Some(&option_store),
-    )?;
+    apply_pre_scan_policy(&workspace, &config, &args)?;
+    let input = build_sast_scan_input(&workspace, &registry, args.mode, &args.tasks, args.triage)?;
     let runtime = scan_runtime(&config, &input)?;
     let ctx = ToolExecutionContext {
         config: &config,
@@ -48,19 +53,78 @@ pub(crate) async fn scan_command(
         findings_store: Some(&store),
         trace: None,
     };
+    run_and_emit_sast_scan(&registry, input, &ctx, runtime.as_ref(), &workspace, &args, &config)
+}
 
+pub(crate) struct ScanArgs {
+    pub(crate) target: PathBuf,
+    pub(crate) mode: Option<ScanModeArg>,
+    pub(crate) tasks: Vec<String>,
+    pub(crate) triage: Option<bool>,
+    pub(crate) json: bool,
+    pub(crate) ci: bool,
+    pub(crate) budget: Option<String>,
+    pub(crate) since: Option<String>,
+    pub(crate) include_worktree: bool,
+}
+
+fn apply_pre_scan_policy(
+    workspace: &WorkspaceTarget,
+    config: &kuzushi_core::V2Config,
+    args: &ScanArgs,
+) -> Result<()> {
+    apply_scan_since_scope(
+        workspace,
+        args.since.as_deref(),
+        args.include_worktree,
+        args.json,
+        args.ci,
+    )?;
+    apply_scan_budget_caps(
+        workspace,
+        args.budget.as_deref(),
+        config.operator.spend_hard_ceiling_usd,
+        args.json,
+        args.ci,
+    )
+}
+
+
+fn build_sast_scan_input(
+    workspace: &WorkspaceTarget,
+    registry: &ModuleRegistry,
+    mode: Option<ScanModeArg>,
+    tasks: &[String],
+    triage: Option<bool>,
+) -> Result<serde_json::Value> {
+    let option_store = scan_option_store(workspace)?;
+    registry.prepare_tool_input(
+        "sast:scan",
+        scan_tool_input(mode, tasks, triage),
+        Some(&option_store),
+    )
+}
+
+fn run_and_emit_sast_scan(
+    registry: &ModuleRegistry,
+    input: serde_json::Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&PiAgentCoreRuntime>,
+    workspace: &WorkspaceTarget,
+    args: &ScanArgs,
+    config: &kuzushi_core::V2Config,
+) -> Result<()> {
     let started = std::time::Instant::now();
-    emit_scan_ci_start(ci, started, &target, &config, &tasks);
-
+    emit_scan_ci_start(args.ci, started, &args.target, config, &args.tasks);
     let result = registry.execute_tool_with_runtime(
         "sast:scan",
         input,
-        &ctx,
-        runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
+        ctx,
+        runtime.map(|runtime| runtime as &dyn AgentRuntime),
     );
     let elapsed = started.elapsed();
-    let result = scan_result_or_report_ci_error(result, ci, started, elapsed)?;
-    emit_scan_output(&workspace, &result, json, ci, started, elapsed)
+    let result = scan_result_or_report_ci_error(result, args.ci, started, elapsed)?;
+    emit_scan_output(workspace, &result, args.json, args.ci, started, elapsed)
 }
 
 pub(crate) fn apply_scan_since_scope(
@@ -128,6 +192,55 @@ pub(crate) fn scan_worktree_suffix(include_worktree: bool) -> &'static str {
     } else {
         ""
     }
+}
+
+fn is_apk_file(target: &Path) -> bool {
+    if !target.is_file() {
+        return false;
+    }
+    target
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("apk"))
+        .unwrap_or(false)
+}
+
+async fn scan_apk_command(apk: PathBuf, json: bool, ci: bool) -> Result<()> {
+    let workspace_dir = apk
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let workspace = WorkspaceTarget::new(&workspace_dir)?;
+    let config = load_config_for_target(Some(workspace.root()))?;
+    let store = FindingStore::open(workspace.findings_db_path())?;
+    let registry = ModuleRegistry::with_v2_builtins();
+    let input = registry.prepare_tool_input(
+        "android-apk:scan",
+        apk_scan_tool_input(&apk, &workspace_dir),
+        None,
+    )?;
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: Some(&store),
+        trace: None,
+    };
+    let started = std::time::Instant::now();
+    emit_scan_ci_start(ci, started, &apk, &config, &Vec::new());
+    let result =
+        registry.execute_tool_with_runtime("android-apk:scan", input, &ctx, None);
+    let elapsed = started.elapsed();
+    let result = scan_result_or_report_ci_error(result, ci, started, elapsed)?;
+    emit_scan_output(&workspace, &result, json, ci, started, elapsed)
+}
+
+fn apk_scan_tool_input(apk: &Path, workspace: &Path) -> serde_json::Value {
+    serde_json::json!({
+        "apk": apk.display().to_string(),
+        "target": workspace.display().to_string(),
+        "decompiler": "both",
+    })
 }
 
 pub(crate) fn scan_tool_input(
