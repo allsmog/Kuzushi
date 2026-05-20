@@ -90,7 +90,7 @@ fn hybrid_detect_tool() -> ToolDescriptor {
 fn code_scan_tool() -> ToolDescriptor {
     tool_with_options(
         "android-apk:code-scan",
-        "Run the bundled Android Semgrep rule pack against the decompiled jadx source tree. Covers WebView/JS-bridge misuse, intent redirection, mutable PendingIntent, ECB/MD5/SHA-1/static-IV crypto misuse, PII logging, clipboard credential exposure, MODE_WORLD_* file modes, plaintext SharedPreferences, HostnameVerifier/X509TrustManager all-accept patterns, SQL injection via rawQuery/execSQL string concat, deeplink URI loaded into WebView, reflection on Intent extras, intent redirection through extras, and Keystore-misuse patterns (RSA PKCS1, no user auth, hardcoded SecretKeySpec).",
+        "Run the bundled Android Semgrep rule pack against the decompiled jadx source tree. Covers WebView/JS-bridge misuse, intent redirection, mutable PendingIntent, ECB/MD5/SHA-1/static-IV crypto misuse, PII logging, clipboard credential exposure, MODE_WORLD_* file modes, plaintext SharedPreferences, HostnameVerifier/X509TrustManager all-accept patterns, SQL injection via rawQuery/execSQL string concat, deeplink URI loaded into WebView, reflection on Intent extras, intent redirection through extras, and Keystore-misuse patterns (RSA PKCS1, no user auth, hardcoded SecretKeySpec). Writes a .semgrepignore in the scan root that filters out gms / androidx / kotlin / okhttp / retrofit / react-native / dagger noise; pass includeLibraries=true to disable.",
         vec![
             target_option(),
             opt(
@@ -99,6 +99,12 @@ fn code_scan_tool() -> ToolDescriptor {
                 "Override path to the decompiled jadx sources directory. Defaults to <target>/android-decompiled/jadx/sources.",
             )
             .aliases(&["jadx_dir"])
+            .advanced(),
+            opt(
+                "includeLibraries",
+                OptionType::Bool,
+                "Set true to scan well-known library packages (gms, androidx, kotlin, okhttp, retrofit, react-native, dagger, etc.) in addition to first-party code. Default is to exclude them via .semgrepignore so the report focuses on the app's own surface.",
+            )
             .advanced(),
             binary_option("Semgrep binary path."),
         ],
