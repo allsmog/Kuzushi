@@ -28,6 +28,11 @@ regex = "1"
 # parser keeps the manifest scanners side-effect-free and easy to
 # unit-test on inline fixtures.
 quick-xml = "0.36"
+# goblin parses the ELF .so files shipped inside an APK's lib/<abi>/
+# directories so android-apk:native-libs can enumerate dynamic imports
+# (system/exec/dlopen), exports (JNI Java_* methods), and the
+# per-architecture variants without shelling out to nm/objdump.
+goblin = { version = "0.10", default-features = false, features = ["std", "elf32", "elf64", "endian_fd"] }
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true

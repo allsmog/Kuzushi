@@ -14,8 +14,44 @@ pub(in crate::modules) fn android_apk_module() -> BuiltinModule {
             fileprovider_scan_tool(),
             webview_scan_tool(),
             sast_handoff_tool(),
+            native_libs_tool(),
+            hybrid_detect_tool(),
         ],
         vec![],
+    )
+}
+
+fn native_libs_tool() -> ToolDescriptor {
+    tool_with_options(
+        "android-apk:native-libs",
+        "Enumerate `.so` files under <workspace>/android-decompiled/raw/lib/<abi>/, parse their ELF dynsyms with goblin, and emit findings for dangerous imports (system/execve/dlopen/strcpy) and JNI export attack surface.",
+        vec![
+            target_option(),
+            opt(
+                "libRoot",
+                OptionType::Path,
+                "Override the lib/<abi>/ root. Defaults to <target>/android-decompiled/raw/lib.",
+            )
+            .aliases(&["lib_root"])
+            .advanced(),
+        ],
+    )
+}
+
+fn hybrid_detect_tool() -> ToolDescriptor {
+    tool_with_options(
+        "android-apk:hybrid-detect",
+        "Detect hybrid app frameworks (Cordova, React Native, Capacitor, Flutter, Ionic) by their on-disk fingerprints in the unzipped APK so you know which JavaScript / Dart bundles deserve a follow-up review.",
+        vec![
+            target_option(),
+            opt(
+                "rawRoot",
+                OptionType::Path,
+                "Override the unzipped APK root. Defaults to <target>/android-decompiled/raw.",
+            )
+            .aliases(&["raw_root"])
+            .advanced(),
+        ],
     )
 }
 
