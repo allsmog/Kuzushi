@@ -5,6 +5,7 @@ pub(in crate::modules) fn register_modules(registry: &mut ModuleRegistry) {
     registry.register(codeql_module());
     registry.register(iac_scan_module());
     registry.register(exploit_chain_module());
+    registry.register(android_apk_module());
 }
 
 pub(in crate::modules) fn execute_tool(
@@ -18,6 +19,8 @@ pub(in crate::modules) fn execute_tool(
         "codeql:scan" => run_codeql_scan(input, ctx),
         "iac-scan:scan" => run_iac_scan(input, ctx),
         "exploit-chain:scan" => run_exploit_chain_scan(input, ctx, runtime),
+        "android-apk:check-env" => run_android_apk_check_env(input, ctx),
+        "android-apk:prepare" => run_android_apk_prepare(input, ctx),
         other => anyhow::bail!("native scanner tool {other:?} has no executor mapping"),
     }
 }

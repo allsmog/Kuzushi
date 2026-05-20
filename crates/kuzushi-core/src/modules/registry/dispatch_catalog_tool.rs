@@ -95,9 +95,17 @@ pub(in crate::modules) fn dispatch_native_security_tool(
     match name {
         "dep-hygiene:check" => Some(run_dep_hygiene_tool(input, ctx)),
         "secret-scan:scan" => Some(run_secret_scan_tool(input, ctx)),
-        "semgrep:scan" | "codeql:scan" | "iac-scan:scan" | "exploit-chain:scan" => Some(
-            native_scanners::execute_tool(name, input.clone(), ctx, runtime),
-        ),
+        "semgrep:scan"
+        | "codeql:scan"
+        | "iac-scan:scan"
+        | "exploit-chain:scan"
+        | "android-apk:check-env"
+        | "android-apk:prepare" => Some(native_scanners::execute_tool(
+            name,
+            input.clone(),
+            ctx,
+            runtime,
+        )),
         "sast:scan" => Some(run_sast_scan(input.clone(), ctx, runtime)),
         _ => None,
     }
