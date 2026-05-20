@@ -30,14 +30,32 @@ tree of source code. The `android-apk` module bridges that gap:
    base/domain configs and user-CA trust anchors.
 5. **`android-apk:fileprovider-scan`** parses `res/xml/file_paths.xml` and
    flags broad FileProvider path descriptors (root-path, broad external).
-6. The existing scanners (`semgrep:scan`, `codeql:scan`, `secret-scan:scan`,
-   `exploit-chain:scan`, `agentic-sast:scan`, `taint-iris-next:hunt`,
-   `triage:run`, `verify:finding`) consume the decompiled tree.
+6. **`android-apk:webview-scan`** runs a bundled Semgrep rule pack
+   covering WebView/JS-bridge misuse, intent redirection, mutable
+   `PendingIntent`, ECB/MD5/SHA-1/static-IV crypto misuse, PII logging,
+   and clipboard credential leaks against the decompiled jadx tree.
+7. **`android-apk:sast-handoff`** returns the canonical scan target
+   plus next-step commands so downstream scanners
+   (`semgrep:scan`, `codeql:scan`, `exploit-chain:scan`,
+   `agentic-sast:scan`, `taint-iris-next:hunt`, `secret-scan:scan`)
+   can be invoked against the right subtrees.
+8. **`android-apk:native-libs`** enumerates `.so` files under
+   `<workspace>/android-decompiled/raw/lib/<abi>/`, parses their ELF
+   dynamic symbols with goblin, and flags dangerous imports
+   (`system`/`execve`/`dlopen`/`strcpy`) plus JNI export attack
+   surface (`Java_*`).
+9. **`android-apk:hybrid-detect`** finds on-disk fingerprints of
+   Cordova / React Native / Capacitor / Flutter / Ionic so you know
+   when to follow up on the embedded JS/Dart bundle.
 
-Later phases of the `android-apk` module add WebView / JS-bridge scanning,
-the `sast-handoff` node that retargets downstream scanners onto
-`android-decompiled/jadx/sources` automatically, native `.so` triage via
-the `revng` MCP, and smali fallback for heavily obfuscated apps.
+The existing scanners (`semgrep:scan`, `codeql:scan`, `secret-scan:scan`,
+`exploit-chain:scan`, `agentic-sast:scan`, `taint-iris-next:hunt`,
+`triage:run`, `verify:finding`) consume the decompiled tree.
+
+Future work tracked in the plan: full smali fallback for code that's so
+heavily obfuscated `jadx` produces unusable Java; deeper revng MCP
+integration so native `.so` analysis can identify symbolic taint flows
+into JNI exports.
 
 > **HackerOne authorization.** Before each session, walk through
 > [docs/hackerone-scope-checklist.md](./hackerone-scope-checklist.md) to
