@@ -7,7 +7,7 @@ assertion_line: 289
  -- SESSION STORY | live event timeline --------------------------------------------------------------------------------
 
 system      kuzushi shell
-startup     ready: 33 module(s), 48 tool(s), target none
+startup     ready: 34 module(s), 50 tool(s), target none
 help        type help for commands | ? <text> to ask | scan to start
 
 Ctrl+O toggle | /history commands | /show runs | /replay <runId> | /trace <runId>

@@ -88,9 +88,14 @@ impl ShellApp {
     }
 
     pub(super) fn reset_completion_cycle_for_key(&mut self, key: KeyEvent) {
-        if !matches!(key.code, KeyCode::Tab) {
-            self.reset_completion_cycle();
+        // Tab keeps the cycle alive (it's the cycle's input). Esc owns
+        // the cycle teardown via `esc_clear_or_restore` (M3 §3.3) so the
+        // popup can restore the operator's original prefix instead of
+        // losing it to a blanket reset.
+        if matches!(key.code, KeyCode::Tab | KeyCode::Esc) {
+            return;
         }
+        self.reset_completion_cycle();
     }
 
     pub(super) fn handle_control_key(

@@ -2239,6 +2239,32 @@ fn tab_cycles_through_completion_candidates() {
 }
 
 #[test]
+fn esc_during_active_completion_cycle_restores_original_prefix() {
+    // M3 §3.3: when the operator types a partial command and presses
+    // Tab, a completion cycle starts. Esc must close the popup AND put
+    // the original prefix back so the operator doesn't lose what they
+    // typed. The clear-on-Esc draft stash is reserved for the non-cycle
+    // case.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_input("sca");
+    let prefix = app.input.clone();
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert!(
+        app.completion_cycle.is_some(),
+        "Tab must open a completion cycle when candidates are available"
+    );
+    assert_ne!(app.input, prefix, "Tab applied the first candidate");
+
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert!(app.completion_cycle.is_none(), "Esc closes the cycle");
+    assert_eq!(
+        app.input, prefix,
+        "Esc must restore the operator's typed prefix"
+    );
+}
+
+#[test]
 fn esc_stashes_input_and_one_more_esc_restores_it() {
     // P3-2: previously Esc wiped the input with no recovery, so a long
     // command typed and then Esc'd was lost forever (Up arrow restores
