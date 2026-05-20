@@ -1,0 +1,206 @@
+use super::*;
+
+use crate::scan::{ScanCancellation, SemgrepScanner};
+use std::fs;
+use std::path::{Path, PathBuf};
+
+const ANDROID_RULE_FILES: &[(&str, &str)] = &[
+    ("webview.yaml", include_str!("android_rules/webview.yaml")),
+    ("intent-redirection.yaml", include_str!("android_rules/intent-redirection.yaml")),
+    ("pendingintent.yaml", include_str!("android_rules/pendingintent.yaml")),
+    ("crypto-misuse.yaml", include_str!("android_rules/crypto-misuse.yaml")),
+    ("logging-pii.yaml", include_str!("android_rules/logging-pii.yaml")),
+    ("clipboard.yaml", include_str!("android_rules/clipboard.yaml")),
+];
+
+pub(in crate::modules) fn run_webview_scan(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    let target = resolve_tool_target(&input, ctx)?;
+    emit_step(ctx, "tool", "scan", &format!("webview-scan start · target={}", target.display()));
+    let outcome = match scan_with_android_rules(&input, &target) {
+        Ok(outcome) => outcome,
+        Err(error) => return Ok(failed_tool_output("android-apk:webview-scan", &target, error)),
+    };
+    let persisted = persist_tool_findings(
+        "android-apk",
+        &target,
+        &outcome.findings,
+        ctx.workspace,
+        ctx.findings_store,
+    )?;
+    emit_step(ctx, "done", "scan", &format!("webview-scan complete · {} findings", outcome.findings.len()));
+    Ok(webview_scan_output(&outcome, persisted))
+}
+
+struct WebviewScanOutcome {
+    scan_root: PathBuf,
+    rules_dir: PathBuf,
+    findings: Vec<Finding>,
+}
+
+fn scan_with_android_rules(input: &Value, workspace_root: &Path) -> Result<WebviewScanOutcome> {
+    let scan_root = resolve_jadx_sources(input, workspace_root)?;
+    let rules_dir = materialize_rules(workspace_root)?;
+    let scanner = semgrep_with_rules(input, &rules_dir);
+    let mut findings = scanner
+        .scan_with_cancel(&scan_root, &ScanCancellation::default())
+        .map_err(|error| anyhow::anyhow!("semgrep failed: {error}"))?;
+    rebrand_findings(&mut findings);
+    Ok(WebviewScanOutcome {
+        scan_root,
+        rules_dir,
+        findings,
+    })
+}
+
+fn resolve_jadx_sources(input: &Value, workspace_root: &Path) -> Result<PathBuf> {
+    if let Some(raw) = input
+        .get("jadxDir")
+        .or_else(|| input.get("jadx_dir"))
+        .and_then(Value::as_str)
+    {
+        let path = PathBuf::from(raw);
+        if path.is_dir() {
+            return Ok(path);
+        }
+    }
+    let candidate = workspace_root
+        .join("android-decompiled")
+        .join("jadx")
+        .join("sources");
+    if !candidate.is_dir() {
+        anyhow::bail!(
+            "android-apk:webview-scan: missing {}. Run `android-apk:prepare` with decompiler=jadx or 'both' first.",
+            candidate.display()
+        );
+    }
+    Ok(candidate)
+}
+
+fn materialize_rules(workspace_root: &Path) -> Result<PathBuf> {
+    let rules_dir = workspace_root.join(".kuzushi").join("android-rules");
+    fs::create_dir_all(&rules_dir)
+        .map_err(|error| anyhow::anyhow!("could not create {}: {error}", rules_dir.display()))?;
+    for (name, contents) in ANDROID_RULE_FILES {
+        let path = rules_dir.join(name);
+        fs::write(&path, contents)
+            .map_err(|error| anyhow::anyhow!("could not write {}: {error}", path.display()))?;
+    }
+    Ok(rules_dir)
+}
+
+fn semgrep_with_rules(input: &Value, rules_dir: &Path) -> SemgrepScanner {
+    let binary = input
+        .get("binary")
+        .or_else(|| input.get("scannerBin"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or("semgrep")
+        .to_string();
+    SemgrepScanner {
+        binary,
+        config: vec![rules_dir.display().to_string()],
+    }
+}
+
+fn rebrand_findings(findings: &mut [Finding]) {
+    for finding in findings {
+        finding.tool = "android-apk".to_string();
+        if !finding.rule_id.starts_with("android-apk:") {
+            finding.rule_id = format!("android-apk:webview:{}", finding.rule_id);
+        }
+    }
+}
+
+fn emit_step(ctx: &ToolExecutionContext<'_>, kind: &str, verb: &str, message: &str) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace.step(kind, verb, message.to_string()).emit();
+    }
+}
+
+fn webview_scan_output(
+    outcome: &WebviewScanOutcome,
+    persisted: Option<GenericPersistedRun>,
+) -> Value {
+    let summary = format!(
+        "android-apk:webview-scan: {} findings under {} (rules from {})",
+        outcome.findings.len(),
+        outcome.scan_root.display(),
+        outcome.rules_dir.display()
+    );
+    json!({
+        "ok": true,
+        "summary": summary,
+        "output": summary,
+        "data": {
+            "scanRoot": outcome.scan_root.display().to_string(),
+            "rulesDir": outcome.rules_dir.display().to_string(),
+            "rulePackFiles": ANDROID_RULE_FILES.iter().map(|(name, _)| *name).collect::<Vec<_>>(),
+            "findings": outcome.findings,
+            "persisted": persisted,
+        },
+        "warnings": [],
+        "errors": [],
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn rule_pack_files_present() {
+        assert_eq!(ANDROID_RULE_FILES.len(), 6);
+        for (name, contents) in ANDROID_RULE_FILES {
+            assert!(contents.contains("rules:"), "rule file {name} missing rules: header");
+        }
+    }
+
+    #[test]
+    fn materialize_rules_writes_every_pack_file() {
+        let dir = tempdir().unwrap();
+        let rules_dir = materialize_rules(dir.path()).unwrap();
+        for (name, _) in ANDROID_RULE_FILES {
+            assert!(rules_dir.join(name).is_file(), "rule {name} not written");
+        }
+    }
+
+    #[test]
+    fn semgrep_with_rules_uses_path_as_single_config() {
+        let dir = tempdir().unwrap();
+        let scanner = semgrep_with_rules(&json!({}), dir.path());
+        assert_eq!(scanner.binary, "semgrep");
+        assert_eq!(scanner.config, vec![dir.path().display().to_string()]);
+    }
+
+    #[test]
+    fn semgrep_with_rules_honors_binary_override() {
+        let dir = tempdir().unwrap();
+        let scanner = semgrep_with_rules(&json!({"binary": "/opt/semgrep"}), dir.path());
+        assert_eq!(scanner.binary, "/opt/semgrep");
+    }
+
+    #[test]
+    fn rebrand_findings_prefixes_rule_ids() {
+        use crate::findings::Severity;
+        let mut findings = vec![
+            Finding::new_tool("semgrep", "webview-jvbridge", "x.java", 10, None, Severity::High, "m"),
+            Finding::new_tool("semgrep", "android-apk:keep-as-is", "y.java", 20, None, Severity::Low, "m"),
+        ];
+        rebrand_findings(&mut findings);
+        assert_eq!(findings[0].tool, "android-apk");
+        assert_eq!(findings[0].rule_id, "android-apk:webview:webview-jvbridge");
+        assert_eq!(findings[1].rule_id, "android-apk:keep-as-is");
+    }
+
+    #[test]
+    fn resolve_jadx_sources_errors_when_missing() {
+        let dir = tempdir().unwrap();
+        let error = resolve_jadx_sources(&json!({}), dir.path()).expect_err("missing dir rejected");
+        assert!(error.to_string().contains("Run `android-apk:prepare`"));
+    }
+}
