@@ -95,28 +95,16 @@ fn check_application_flags(manifest: &ParsedManifest, manifest_path: &str) -> Ve
     let mut findings = Vec::new();
     let app = &manifest.application;
     if app.debuggable == Some(true) {
-        findings.push(finding(
-            "android-apk:debuggable-true",
-            manifest_path,
-            Severity::High,
-            "Application declares android:debuggable=\"true\" (CWE-489). Anyone with adb access can attach JDWP and read memory; ship with debuggable disabled.",
-        ));
+        findings.push(finding_at("android-apk:debuggable-true", manifest_path, 1, Severity::High,
+            "Application declares android:debuggable=\"true\" (CWE-489). Anyone with adb access can attach JDWP and read memory; ship with debuggable disabled."));
     }
     if app.allow_backup == Some(true) {
-        findings.push(finding(
-            "android-apk:allow-backup-true",
-            manifest_path,
-            Severity::Medium,
-            "Application declares android:allowBackup=\"true\" (CWE-921). adb backup can extract app data when USB debugging is enabled.",
-        ));
+        findings.push(finding_at("android-apk:allow-backup-true", manifest_path, 2, Severity::Medium,
+            "Application declares android:allowBackup=\"true\" (CWE-921). adb backup can extract app data when USB debugging is enabled."));
     }
     if app.uses_cleartext_traffic == Some(true) {
-        findings.push(finding(
-            "android-apk:cleartext-traffic",
-            manifest_path,
-            Severity::Medium,
-            "Application declares android:usesCleartextTraffic=\"true\" (CWE-319). HTTP traffic is permitted; prefer scoped network-security-config.",
-        ));
+        findings.push(finding_at("android-apk:cleartext-traffic", manifest_path, 3, Severity::Medium,
+            "Application declares android:usesCleartextTraffic=\"true\" (CWE-319). HTTP traffic is permitted; prefer scoped network-security-config."));
     }
     findings
 }
@@ -125,36 +113,50 @@ fn check_components(manifest: &ParsedManifest, manifest_path: &str) -> Vec<Findi
     manifest
         .components
         .iter()
-        .flat_map(|component| component_findings(component, manifest_path))
+        .enumerate()
+        .flat_map(|(index, component)| component_findings(component, manifest_path, index))
         .collect()
 }
 
-fn component_findings(component: &Component, manifest_path: &str) -> Vec<Finding> {
+fn component_findings(
+    component: &Component,
+    manifest_path: &str,
+    index: usize,
+) -> Vec<Finding> {
     if !component.is_effectively_exported() {
         return Vec::new();
     }
+    let line = component_synthetic_line(index);
     let mut findings = Vec::new();
     if component.permission.is_none() {
-        findings.push(exported_no_permission_finding(component, manifest_path));
+        findings.push(exported_no_permission_finding(component, manifest_path, line));
     }
-    findings.extend(provider_findings(component, manifest_path));
+    findings.extend(provider_findings(component, manifest_path, line));
     findings
 }
 
-fn provider_findings(component: &Component, manifest_path: &str) -> Vec<Finding> {
+fn component_synthetic_line(index: usize) -> u32 {
+    // Each manifest component finding shares the same file path and CWE; the
+    // findings-store dedup key buckets line numbers in groups of 16, so we
+    // space synthetic lines by 16 here to keep one entry per component.
+    1 + (index as u32) * 16
+}
+
+fn provider_findings(component: &Component, manifest_path: &str, line: u32) -> Vec<Finding> {
     if !matches!(component.kind, ComponentKind::Provider) {
         return Vec::new();
     }
-    check_provider_export(component, manifest_path)
+    check_provider_export(component, manifest_path, line)
         .into_iter()
         .collect()
 }
 
-fn exported_no_permission_finding(component: &Component, manifest_path: &str) -> Finding {
+fn exported_no_permission_finding(component: &Component, manifest_path: &str, line: u32) -> Finding {
     let label = component.kind.label();
-    finding(
+    finding_at(
         &format!("android-apk:exported-{label}-no-permission"),
         manifest_path,
+        line,
         Severity::High,
         &format!(
             "{label} {:?} is exported without android:permission (CWE-926). Any other app can invoke it via Intent.",
@@ -163,13 +165,14 @@ fn exported_no_permission_finding(component: &Component, manifest_path: &str) ->
     )
 }
 
-fn check_provider_export(component: &Component, manifest_path: &str) -> Option<Finding> {
+fn check_provider_export(component: &Component, manifest_path: &str, line: u32) -> Option<Finding> {
     if component.grant_uri_permissions == Some(true) {
         return None;
     }
-    Some(finding(
+    Some(finding_at(
         "android-apk:provider-exported-no-grant",
         manifest_path,
+        line,
         Severity::High,
         &format!(
             "ContentProvider {:?} is exported without android:grantUriPermissions (CWE-200). Path traversal and arbitrary file read are likely.",
@@ -180,14 +183,16 @@ fn check_provider_export(component: &Component, manifest_path: &str) -> Option<F
 
 fn check_deeplinks(manifest: &ParsedManifest, manifest_path: &str) -> Vec<Finding> {
     let mut findings = Vec::new();
-    for component in &manifest.components {
-        for filter in &component.intent_filters {
+    for (index, component) in manifest.components.iter().enumerate() {
+        for (filter_index, filter) in component.intent_filters.iter().enumerate() {
             if !filter.is_browseable_deeplink() {
                 continue;
             }
-            findings.push(finding(
+            let line = component_synthetic_line(index) + (filter_index as u32);
+            findings.push(finding_at(
                 "android-apk:browseable-deeplink",
                 manifest_path,
+                line,
                 Severity::Info,
                 &format!(
                     "Browseable deeplink on {} {:?}: schemes={:?} hosts={:?}. Trace deeplink handling for taint into sensitive sinks.",
@@ -202,16 +207,8 @@ fn check_deeplinks(manifest: &ParsedManifest, manifest_path: &str) -> Vec<Findin
     findings
 }
 
-fn finding(rule_id: &str, file_path: &str, severity: Severity, message: &str) -> Finding {
-    Finding::new_tool(
-        "android-apk",
-        rule_id,
-        file_path,
-        1,
-        None,
-        severity,
-        message.to_string(),
-    )
+fn finding_at(rule_id: &str, file_path: &str, line: u32, severity: Severity, message: &str) -> Finding {
+    Finding::new_tool("android-apk", rule_id, file_path, line, None, severity, message.to_string())
 }
 
 
