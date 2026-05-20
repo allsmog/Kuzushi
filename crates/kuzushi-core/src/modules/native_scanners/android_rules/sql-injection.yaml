@@ -1,0 +1,52 @@
+rules:
+  - id: android-rawquery-string-concat
+    message: |
+      SQLiteDatabase.rawQuery / execSQL called with a string built by
+      concatenation (CWE-89). If any piece of the string comes from
+      Intent extras, deeplink URIs, exported ContentProvider arguments,
+      or remote JSON, it's a SQL injection sink.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-89
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: $DB.rawQuery("..." + $X, ...)
+          - pattern: $DB.rawQuery($X + "...", ...)
+          - pattern: $DB.execSQL("..." + $X)
+          - pattern: $DB.execSQL($X + "...")
+          - pattern: $DB.rawQueryWithFactory($F, "..." + $X, ...)
+
+  - id: android-rawquery-format-string
+    message: |
+      SQLiteDatabase.rawQuery called with String.format / String.join /
+      MessageFormat (CWE-89). Format-based query building bypasses
+      parameter binding — switch to selectionArgs / ContentProviderClient
+      / Room.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      cwe: CWE-89
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: $DB.rawQuery(String.format(...), ...)
+          - pattern: $DB.execSQL(String.format(...))
+          - pattern: $DB.rawQuery(MessageFormat.format(...), ...)
+
+  - id: android-content-provider-raw-selection
+    message: |
+      ContentProvider.query / update / delete with a `selection` clause
+      built by concatenation (CWE-89). Exported ContentProviders that do
+      this are SQL-injectable from any installed app.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-89
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: $RESOLVER.query($URI, $PROJ, "..." + $X, ...)
+          - pattern: $RESOLVER.update($URI, $VALUES, "..." + $X, ...)
+          - pattern: $RESOLVER.delete($URI, "..." + $X, ...)

@@ -11,17 +11,22 @@ const ANDROID_RULE_FILES: &[(&str, &str)] = &[
     ("crypto-misuse.yaml", include_str!("android_rules/crypto-misuse.yaml")),
     ("logging-pii.yaml", include_str!("android_rules/logging-pii.yaml")),
     ("clipboard.yaml", include_str!("android_rules/clipboard.yaml")),
+    ("insecure-storage.yaml", include_str!("android_rules/insecure-storage.yaml")),
+    ("ssl-tls.yaml", include_str!("android_rules/ssl-tls.yaml")),
+    ("sql-injection.yaml", include_str!("android_rules/sql-injection.yaml")),
+    ("deeplink-handling.yaml", include_str!("android_rules/deeplink-handling.yaml")),
+    ("keystore-misuse.yaml", include_str!("android_rules/keystore-misuse.yaml")),
 ];
 
-pub(in crate::modules) fn run_webview_scan(
+pub(in crate::modules) fn run_code_scan(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
-    emit_step(ctx, "tool", "scan", &format!("webview-scan start · target={}", target.display()));
+    emit_step(ctx, "tool", "scan", &format!("code-scan start · target={}", target.display()));
     let outcome = match scan_with_android_rules(&input, &target) {
         Ok(outcome) => outcome,
-        Err(error) => return Ok(failed_tool_output("android-apk:webview-scan", &target, error)),
+        Err(error) => return Ok(failed_tool_output("android-apk:code-scan", &target, error)),
     };
     let persisted = persist_tool_findings(
         "android-apk",
@@ -30,17 +35,17 @@ pub(in crate::modules) fn run_webview_scan(
         ctx.workspace,
         ctx.findings_store,
     )?;
-    emit_step(ctx, "done", "scan", &format!("webview-scan complete · {} findings", outcome.findings.len()));
-    Ok(webview_scan_output(&outcome, persisted))
+    emit_step(ctx, "done", "scan", &format!("code-scan complete · {} findings", outcome.findings.len()));
+    Ok(code_scan_output(&outcome, persisted))
 }
 
-struct WebviewScanOutcome {
+struct CodeScanOutcome {
     scan_root: PathBuf,
     rules_dir: PathBuf,
     findings: Vec<Finding>,
 }
 
-fn scan_with_android_rules(input: &Value, workspace_root: &Path) -> Result<WebviewScanOutcome> {
+fn scan_with_android_rules(input: &Value, workspace_root: &Path) -> Result<CodeScanOutcome> {
     let scan_root = resolve_jadx_sources(input, workspace_root)?;
     let rules_dir = materialize_rules(workspace_root)?;
     let scanner = semgrep_with_rules(input, &rules_dir);
@@ -48,7 +53,7 @@ fn scan_with_android_rules(input: &Value, workspace_root: &Path) -> Result<Webvi
         .scan_with_cancel(&scan_root, &ScanCancellation::default())
         .map_err(|error| anyhow::anyhow!("semgrep failed: {error}"))?;
     rebrand_findings(&mut findings);
-    Ok(WebviewScanOutcome {
+    Ok(CodeScanOutcome {
         scan_root,
         rules_dir,
         findings,
@@ -110,9 +115,13 @@ fn rebrand_findings(findings: &mut [Finding]) {
     for finding in findings {
         finding.tool = "android-apk".to_string();
         if !finding.rule_id.starts_with("android-apk:") {
-            finding.rule_id = format!("android-apk:webview:{}", finding.rule_id);
+            finding.rule_id = format!("android-apk:{}", leaf_rule_id(&finding.rule_id));
         }
     }
+}
+
+fn leaf_rule_id(raw: &str) -> &str {
+    raw.rsplit('.').next().unwrap_or(raw)
 }
 
 fn emit_step(ctx: &ToolExecutionContext<'_>, kind: &str, verb: &str, message: &str) {
@@ -121,12 +130,12 @@ fn emit_step(ctx: &ToolExecutionContext<'_>, kind: &str, verb: &str, message: &s
     }
 }
 
-fn webview_scan_output(
-    outcome: &WebviewScanOutcome,
+fn code_scan_output(
+    outcome: &CodeScanOutcome,
     persisted: Option<GenericPersistedRun>,
 ) -> Value {
     let summary = format!(
-        "android-apk:webview-scan: {} findings under {} (rules from {})",
+        "android-apk:code-scan: {} findings under {} (rules from {})",
         outcome.findings.len(),
         outcome.scan_root.display(),
         outcome.rules_dir.display()
@@ -154,9 +163,10 @@ mod tests {
 
     #[test]
     fn rule_pack_files_present() {
-        assert_eq!(ANDROID_RULE_FILES.len(), 6);
+        assert_eq!(ANDROID_RULE_FILES.len(), 11);
         for (name, contents) in ANDROID_RULE_FILES {
             assert!(contents.contains("rules:"), "rule file {name} missing rules: header");
+            assert!(contents.contains("metadata:"), "rule file {name} missing metadata");
         }
     }
 
@@ -185,16 +195,42 @@ mod tests {
     }
 
     #[test]
-    fn rebrand_findings_prefixes_rule_ids() {
+    fn rebrand_findings_collapses_dot_separated_ids() {
         use crate::findings::Severity;
         let mut findings = vec![
-            Finding::new_tool("semgrep", "webview-jvbridge", "x.java", 10, None, Severity::High, "m"),
-            Finding::new_tool("semgrep", "android-apk:keep-as-is", "y.java", 20, None, Severity::Low, "m"),
+            Finding::new_tool(
+                "semgrep",
+                "kuzushi.android-rules.android-md5-for-auth",
+                "x.java",
+                10,
+                None,
+                Severity::High,
+                "m",
+            ),
+            Finding::new_tool(
+                "semgrep",
+                "android-apk:keep-as-is",
+                "y.java",
+                20,
+                None,
+                Severity::Low,
+                "m",
+            ),
+            Finding::new_tool(
+                "semgrep",
+                "android-md5-for-auth",
+                "z.java",
+                30,
+                None,
+                Severity::Medium,
+                "m",
+            ),
         ];
         rebrand_findings(&mut findings);
         assert_eq!(findings[0].tool, "android-apk");
-        assert_eq!(findings[0].rule_id, "android-apk:webview:webview-jvbridge");
+        assert_eq!(findings[0].rule_id, "android-apk:android-md5-for-auth");
         assert_eq!(findings[1].rule_id, "android-apk:keep-as-is");
+        assert_eq!(findings[2].rule_id, "android-apk:android-md5-for-auth");
     }
 
     #[test]
