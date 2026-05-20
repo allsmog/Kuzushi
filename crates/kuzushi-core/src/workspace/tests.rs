@@ -89,6 +89,7 @@ mod tests {
             snippet: "db.query(request.query.q)".to_string(),
             rationale: "The request value is used in a SQL query".to_string(),
             confidence: 91,
+            ..Default::default()
         }]);
         store.insert_finding("run-1", &finding).unwrap();
 
@@ -167,6 +168,7 @@ mod tests {
             snippet: "db.query(request.query.q)".to_string(),
             rationale: "User-controlled value flows into SQL".to_string(),
             confidence: 91,
+            ..Default::default()
         }])
     }
 

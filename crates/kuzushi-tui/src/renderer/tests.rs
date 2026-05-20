@@ -242,6 +242,7 @@ fn renders_selected_finding_detail() {
         snippet: "file.save(filepath)".to_string(),
         rationale: "Raw upload path reaches a filesystem write".to_string(),
         confidence: 92,
+        ..Default::default()
     }]);
     app.findings = vec![finding.clone()];
     app.selected_finding = Some(finding);
@@ -380,6 +381,7 @@ fn findings_rows_preview_structured_evidence_at_wide_width() {
             snippet: "filename = file.filename".to_string(),
             rationale: "The upload filename is attacker-controlled".to_string(),
             confidence: 90,
+            ..Default::default()
         },
         FindingEvidence {
             kind: "filesystem_sink".to_string(),
@@ -388,6 +390,7 @@ fn findings_rows_preview_structured_evidence_at_wide_width() {
             snippet: "file.save(filepath)".to_string(),
             rationale: "The raw filename controls the write target".to_string(),
             confidence: 94,
+            ..Default::default()
         },
     ]);
     app.findings = vec![finding];

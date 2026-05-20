@@ -154,6 +154,22 @@ impl FindingStore {
             "cost_usd",
             "alter table triage add column cost_usd real not null default 0.0",
         )?;
+        // M2 §2.3: HTTP-evidence kind. Imported Burp/HAR captures store the
+        // full request/response as nullable text blobs on finding_evidence
+        // rows. Additive migration — existing rows keep request_blob and
+        // response_blob NULL.
+        ensure_column(
+            &self.conn,
+            "finding_evidence",
+            "request_blob",
+            "alter table finding_evidence add column request_blob text",
+        )?;
+        ensure_column(
+            &self.conn,
+            "finding_evidence",
+            "response_blob",
+            "alter table finding_evidence add column response_blob text",
+        )?;
         Ok(())
     }
 }

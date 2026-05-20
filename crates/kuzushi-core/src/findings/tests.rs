@@ -292,6 +292,7 @@ mod tests {
                 snippet: "filename = file.filename".to_string(),
                 rationale: "The upload filename comes directly from the request".to_string(),
                 confidence: 90,
+                ..Default::default()
             },
             FindingEvidence {
                 kind: "filesystem_sink".to_string(),
@@ -300,6 +301,7 @@ mod tests {
                 snippet: "file.save(filepath)".to_string(),
                 rationale: "The attacker-controlled filename reaches a write sink".to_string(),
                 confidence: 94,
+                ..Default::default()
             },
         ]);
 
@@ -317,6 +319,7 @@ mod tests {
             snippet: "Image.open(input_path)".to_string(),
             rationale: "Pillow plugin initialization is the parser boundary".to_string(),
             confidence: 88,
+            ..Default::default()
         }]);
         store.insert_finding(run_id, &replacement).unwrap();
 

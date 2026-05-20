@@ -11,6 +11,7 @@ use self::support::resolve_tool_target;
 use crate::findings::FindingStore;
 use crate::runtime::AgentRuntime;
 use anyhow::{Context, Result};
+pub(in crate::modules) use bounty_module::*;
 pub(in crate::modules) use carlini_threat_hunt_module::*;
 pub(in crate::modules) use descriptor::*;
 pub(in crate::modules) use full_mode_config_paths::*;
@@ -73,6 +74,7 @@ mod vendor_assessment;
 mod verify;
 mod workspace_tools;
 
+mod bounty_module;
 mod carlini_threat_hunt_module;
 mod full_mode_config_paths;
 mod full_mode_dry_run;

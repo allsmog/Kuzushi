@@ -1,13 +1,21 @@
 mod http_fingerprint;
+mod import_amass;
+mod import_httpx;
+mod import_nmap_xml;
+mod import_nuclei;
 mod nmap;
 mod subdomain;
 
 pub(crate) use http_fingerprint::run_recon_http_fingerprint;
+pub(crate) use import_amass::run_recon_import_amass;
+pub(crate) use import_httpx::run_recon_import_httpx;
+pub(crate) use import_nmap_xml::run_recon_import_nmap_xml;
+pub(crate) use import_nuclei::run_recon_import_nuclei;
 pub(crate) use nmap::run_recon_nmap;
 pub(crate) use subdomain::run_recon_subdomain;
 
 use crate::capabilities::recon::adapters::{
-    HttpFingerprintInput, NmapInput, ReconHttpFingerprinter, ReconNmapScanner,
+    required_path, HttpFingerprintInput, NmapInput, ReconHttpFingerprinter, ReconNmapScanner,
     ReconSubdomainEnumerator, SubdomainInput,
 };
 use crate::capabilities::recon::domain::{

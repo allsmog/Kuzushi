@@ -35,12 +35,24 @@ fn active_status_footer_segments(app: &ShellApp, activity: FooterActivity) -> Ve
 }
 
 fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
-    vec![
+    let mut segments = vec![
         routing_mode_segment(app),
         target_footer_segment(app),
-        context_footer_segment(app),
-        view_status_segment(app),
-    ]
+    ];
+    if let Some(chip) = scope_footer_segment(app) {
+        segments.push(chip);
+    }
+    segments.push(context_footer_segment(app));
+    segments.push(view_status_segment(app));
+    segments
+}
+
+fn scope_footer_segment(app: &ShellApp) -> Option<String> {
+    let scope = app.program_scope.as_ref()?;
+    if scope.is_empty() {
+        return None;
+    }
+    Some("scope: on".to_string())
 }
 
 fn status_footer_right_segments(app: &ShellApp, warning: bool) -> Vec<String> {

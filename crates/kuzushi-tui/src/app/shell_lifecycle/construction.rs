@@ -89,6 +89,7 @@ impl ShellApp {
             history_scroll: 0,
             kb_scroll: 0,
             logs_scroll: 0,
+            program_scope: None,
             last_char_at: None,
             scroll_offset: 0,
             spinner_phase: 0,
@@ -126,6 +127,7 @@ impl ShellApp {
         if target.is_some() {
             app.refresh_findings(false);
         }
+        app.refresh_program_scope();
         app
     }
 }
