@@ -30,11 +30,42 @@ pub(crate) fn render_keybind_footer(frame: &mut Frame<'_>, area: Rect, app: &She
         theme::subtle(),
     ));
 
-    if area.height > 1 {
+    // M4 §4.2: when the area is tall enough for two keybinding rows
+    // (`keybind_footer_height` returns 3 on narrow widths), wrap the
+    // binding list across both lines so nothing truncates. Otherwise
+    // keep the single-line layout that the wide-terminal snapshot has
+    // pinned for years.
+    if area.height >= 3 {
+        let (top, bottom) = split_keybindings_for_wrap(app);
+        lines.push(keybindings_line_from_pairs(top, area.width as usize));
+        lines.push(keybindings_line_from_pairs(bottom, area.width as usize));
+    } else if area.height > 1 {
         lines.push(keybindings_line(app, area.width as usize));
     }
 
     render_lines(frame, area, lines);
+}
+
+fn split_keybindings_for_wrap(
+    app: &ShellApp,
+) -> (
+    Vec<(&'static str, &'static str)>,
+    Vec<(&'static str, &'static str)>,
+) {
+    let bindings: Vec<(&'static str, &'static str)> = footer_keybindings(app)
+        .into_iter()
+        .map(|binding| (binding.key, binding.label))
+        .collect();
+    let midpoint = bindings.len().div_ceil(2);
+    let (top, bottom) = bindings.split_at(midpoint);
+    (top.to_vec(), bottom.to_vec())
+}
+
+fn keybindings_line_from_pairs(
+    bindings: Vec<(&'static str, &'static str)>,
+    width: usize,
+) -> Line<'static> {
+    Line::from(keybinding_spans(bindings, width))
 }
 
 pub(crate) fn keybindings_line(app: &ShellApp, width: usize) -> Line<'static> {
