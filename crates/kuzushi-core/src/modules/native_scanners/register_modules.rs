@@ -28,6 +28,7 @@ pub(in crate::modules) fn execute_tool(
         "android-apk:sast-handoff" => run_sast_handoff(input, ctx),
         "android-apk:native-libs" => run_native_libs_scan(input, ctx),
         "android-apk:hybrid-detect" => run_hybrid_detect(input, ctx),
+        "android-apk:scan" => run_android_apk_scan(input, ctx),
         other => anyhow::bail!("native scanner tool {other:?} has no executor mapping"),
     }
 }
