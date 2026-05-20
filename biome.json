@@ -120,7 +120,7 @@
       }
     },
     {
-      "includes": ["scripts/pi-agent-core-bridge.mjs"],
+      "includes": ["scripts/pi-agent-core-bridge.mjs", "scripts/check-ddd-boundaries.mjs"],
       "formatter": {
         "enabled": false
       }
