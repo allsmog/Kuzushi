@@ -452,3 +452,14 @@ fn activity_view_default_split_pane() {
 
     assert_plain_snapshot("activity_view_default_split_pane", &render_at_120(&mut app));
 }
+
+#[test]
+fn auth_view_default_with_rotate_section() {
+    // M3 §3.4: the Auth view carries the providers table, model + spend
+    // sections, and a ROTATE hint block so operators can recover from a
+    // bad key without leaving the shell. This snapshot pins the layout
+    // so future tweaks don't silently drop the rotate hints.
+    let mut app = fresh_app();
+    app.shell_view = ShellView::Auth;
+    assert_plain_snapshot("auth_view_default", &render_at_120(&mut app));
+}
