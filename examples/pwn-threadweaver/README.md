@@ -107,3 +107,55 @@ binary's 5-slot create limit and Create's mandatory 256-byte memset of
 freshly-allocated chunks make that surprisingly fiddly. Treat the example
 as a primitives demonstration and a Kuzushi tool showcase rather than a
 complete weaponised exploit.
+
+## exploit_fsop.py — work-in-progress FSOP variant
+
+`exploit_fsop.py` is a separate, longer chain that demonstrates the
+stdout-buffer-hijack technique the user suggested. It:
+
+1. Gets the heap leak via UAF (same as `exploit.py`).
+2. Forces a libc leak via the **smallbin / worker-tcache overflow**
+   trick instead of the dl-chunk free path. We Edit slot 0 to clear
+   A's tcache key, then Process slot 0 eight times. The worker thread
+   has its own per-thread tcache (separate from main's), so after seven
+   `tcache_put`s its tcache fills, and the eighth `_int_free(A)` skips
+   tcache and routes A into the unsorted bin. A's fd field now holds
+   `&main_arena.bins[0] - 0x10`, giving libc base.
+   This route is important because it doesn't burn slot 4 — we still
+   have a Create budget left for the FSOP stage.
+3. Tcache-poisons via slot-3 alias to `tcache_perthread_struct`, then
+   lands slot 4 at `_IO_2_1_stdout_ - 0x90`. Create's 256-byte memset
+   zeroes bytes 0..0x6f of the stdout struct (`_flags`, all the
+   `_IO_*_ptr`/`_*_base`/`_*_end` fields) but PRESERVES `_fileno` at
+   offset 0x70 (still `=1`) and the vtable at offset 0xd8 (still
+   `=_IO_file_jumps`). The followup printf `[+] Task 4 created…` is
+   what verifies the corruption survives — that line reliably appears
+   on stdout.
+4. Edits slot 4 with a fake stdout body: `_flags = 0xfbad0800` (with
+   `_IO_CURRENTLY_PUTTING` set, so `_IO_new_file_overflow`'s prelude
+   doesn't reset the buffer pointers), and `_IO_write_base`/
+   `_IO_buf_base` aimed at `heap_base + 0x2d0`. That heap address is
+   inside the still-intact dl-runtime chunk so it should hold
+   libplugin/ld/binary pointers (= a PIE leak the moment we trigger a
+   flush).
+
+What goes wrong: the next time anything frees a chunk through the
+non-tcache path (notably the worker's `tcache_thread_shutdown` when
+the binary exits via option 8) it sees that the iter-8 free in step 2
+already cleared B's `prev_inuse` bit, and aborts with `double free or
+corruption (!prev)` before the flush we'd be reading actually reaches
+us. The libplugin pointers never get dumped.
+
+The FSOP setup itself is sound — it survives the menu's followup
+printfs and the binary stays alive after the Create corruption — but
+the worker-tcache overflow path leaves an `_int_free`-side
+consistency check unsatisfiable later, and we run out of slots before
+we can clean it up. Open questions if anyone picks this up:
+
+- Replace the smallbin trick with a different libc-leak primitive that
+  doesn't leave A in a half-freed state (a write-to-unsorted via
+  tcache-perthread direct manipulation might work).
+- Or build the FSOP via stderr-hijack so the dump fires during an
+  earlier printf, before the worker's exit.
+- Or just keep the multi-slot budget tighter and reserve one Create
+  for an actual `open(/flag.txt)` setcontext-chain trigger.
