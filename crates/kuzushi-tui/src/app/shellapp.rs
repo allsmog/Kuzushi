@@ -72,6 +72,10 @@ pub struct ShellApp {
     pub modules_scroll: usize,
     pub history_scroll: usize,
     pub kb_scroll: usize,
+    /// Scroll offset in the `ShellView::Logs` (full-screen transcript) view.
+    /// M1 §1.1 — operators page through the complete log buffer here instead
+    /// of relying on the truncated embedded transcript strip.
+    pub logs_scroll: usize,
     pub last_char_at: Option<Instant>,
     pub scroll_offset: u16,
     pub spinner_phase: u8,

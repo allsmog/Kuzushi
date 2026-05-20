@@ -43,16 +43,32 @@ fn plain_help_model_projects_plain_rows() {
 
 #[test]
 fn quickstart_model_uses_current_target_scan_shape() {
+    // M1 §1.2: the Quickstart now has an explicit `target` step at index 1
+    // (numbered 2), which shifts scan/context to the indexes below.
     let mut app = ShellApp::new(V2Config::default(), None);
 
     let no_target = quickstart_model(&app);
 
-    assert!(no_target.steps[2].text.starts_with("scan . / run"));
+    let scan_step = no_target
+        .steps
+        .iter()
+        .find(|step| step.text.contains("scan"))
+        .expect("scan step present");
+    assert!(scan_step.text.starts_with("scan . / run"));
     assert!(no_target.first_finding_tip.contains("`scan .`"));
+    assert!(no_target
+        .steps
+        .iter()
+        .any(|step| step.text.contains("target <path>")));
 
     app.target = Some(PathBuf::from("."));
     let with_target = quickstart_model(&app);
 
-    assert!(with_target.steps[2].text.starts_with("scan / run"));
+    let scan_step = with_target
+        .steps
+        .iter()
+        .find(|step| step.text.starts_with("scan / run"))
+        .expect("scan step present when target set");
+    assert!(scan_step.text.starts_with("scan / run"));
     assert!(with_target.first_finding_tip.contains("`scan`"));
 }

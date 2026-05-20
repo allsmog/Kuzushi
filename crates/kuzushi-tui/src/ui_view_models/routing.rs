@@ -58,6 +58,7 @@ pub(crate) enum ThreatAndRunViewRoute<'a> {
 pub(crate) enum SystemViewRoute<'a> {
     Help { scroll: usize },
     Quickstart { scroll: usize },
+    Logs { scroll: usize },
     Config,
     Tools { scroll: usize },
     Options(&'a OptionsView),
@@ -168,6 +169,9 @@ fn system_view_route(app: &ShellApp) -> Option<SystemViewRoute<'_>> {
         }),
         ShellView::Quickstart => Some(SystemViewRoute::Quickstart {
             scroll: app.help_scroll,
+        }),
+        ShellView::Logs => Some(SystemViewRoute::Logs {
+            scroll: app.logs_scroll,
         }),
         ShellView::Config => Some(SystemViewRoute::Config),
         ShellView::Tools => Some(SystemViewRoute::Tools {

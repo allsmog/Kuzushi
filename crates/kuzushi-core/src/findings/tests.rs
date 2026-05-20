@@ -804,6 +804,68 @@ mod tests {
     }
 
     #[test]
+    fn save_triage_against_missing_finding_id_returns_clean_fk_error() {
+        // M1 §1.5: this protects against the "triage:assertions FK fault"
+        // family — historically the bus worker could call `save_triage`
+        // with a finding_id that did not exist yet (race with the findings
+        // insert). SQLite must enforce the FK so callers observe a clean
+        // Err and never silently corrupt the triage table.
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-fk", Path::new("/repo"), "running")
+            .unwrap();
+        let stale_id: i64 = 9_999_999;
+        let outcome = TriageOutcome {
+            verdict: TriageVerdict::TruePositive,
+            confidence: 0.5,
+            rationale: "synthetic".to_string(),
+            cost_usd: 0.0,
+        };
+        let result = store.save_triage(stale_id, &outcome);
+        let err = match result {
+            Ok(_) => panic!("FK constraint must reject orphan triage rows"),
+            Err(err) => err.to_string(),
+        };
+        let lowered = err.to_lowercase();
+        assert!(
+            lowered.contains("foreign key") || lowered.contains("constraint"),
+            "expected FK constraint error, got {err}"
+        );
+    }
+
+    #[test]
+    fn save_triage_after_finding_insert_succeeds_with_dedup_safe_id() {
+        // Companion to the FK error test — confirms the happy path: when
+        // a triage write follows its findings insert in the same scan,
+        // the FK is satisfied. This is the contract callers must keep.
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-fk-ok", Path::new("/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "triage-test",
+            "rule.test",
+            "src/x.rs",
+            1,
+            None,
+            Severity::Medium,
+            "x",
+        );
+        let id = store.insert_finding("run-fk-ok", &finding).unwrap();
+        store
+            .save_triage(
+                id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.7,
+                    rationale: "ok".to_string(),
+                    cost_usd: 0.0,
+                },
+            )
+            .expect("triage insert must succeed when finding exists");
+    }
+
+    #[test]
     fn get_latest_verification_returns_none_when_no_rows() {
         let store = FindingStore::open_in_memory().unwrap();
         store

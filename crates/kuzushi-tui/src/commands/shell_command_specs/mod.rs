@@ -116,6 +116,7 @@ fn parse_session_command(verb: &str) -> Option<ShellCommand> {
         "pause" => Some(ShellCommand::Pause),
         "story" => Some(ShellCommand::Story),
         "quickstart" => Some(ShellCommand::Quickstart),
+        "logs" | "log" | "transcript" => Some(ShellCommand::Logs),
         "activity" | "progress" | "a" => Some(ShellCommand::Activity),
         "handoff" | "failure" | "failures" => Some(ShellCommand::FailureHandoff),
         _ => None,
