@@ -260,7 +260,7 @@ pub(crate) fn findings_to_csv(findings: &[Finding]) -> Result<String> {
         "message",
     ])?;
     for finding in findings {
-        writer.write_record(&csv_finding_row(finding))?;
+        writer.write_record(csv_finding_row(finding))?;
     }
     let bytes = writer
         .into_inner()

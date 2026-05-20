@@ -58,6 +58,13 @@ pub(crate) fn check_scanner_binary(binary: &'static str) -> DoctorCheck {
             let next = match binary {
                 "semgrep" => "Install Semgrep (`pipx install semgrep` or `brew install semgrep`) or pass a scanner binary in tool input.",
                 "codeql" => "Install the CodeQL CLI or pass {\"binary\":\"/path/to/codeql\"} to codeql:scan.",
+                // M2 §2.2 recon-intake adapters consume the output of these
+                // bounty tools but do not invoke them — doctor reports
+                // their absence as a warning so operators know the tool
+                // is missing if they intended to use it.
+                "amass" => "Install OWASP Amass (`brew install amass` or `go install github.com/owasp-amass/amass/v4/...`) to feed recon:import.",
+                "httpx" => "Install ProjectDiscovery httpx (`go install github.com/projectdiscovery/httpx/cmd/httpx@latest`) to feed recon:import.",
+                "nuclei" => "Install ProjectDiscovery nuclei (`go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest`) to feed recon:import.",
                 _ => "Install the missing scanner binary or configure the tool input with an explicit path.",
             };
             DoctorCheck::warn(binary, format!("{binary} was not found on PATH"), next)

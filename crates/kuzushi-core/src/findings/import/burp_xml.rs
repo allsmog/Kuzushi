@@ -69,7 +69,9 @@ struct BurpItem {
 
 #[derive(Default)]
 struct CurrentField {
-    name: Option<String>,
+    // `name` lives on the End event via `event.name()` so we never store
+    // it here. `base64` and `text` accumulate while we wait for the End
+    // tag to dispatch the value.
     base64: bool,
     text: String,
 }
@@ -91,7 +93,6 @@ fn parse_burp_items(xml: &str) -> Result<Vec<BurpItem>> {
                 }
                 let base64 = attribute(&event, "base64")? == Some("true".to_string());
                 current_field = CurrentField {
-                    name: Some(name),
                     base64,
                     text: String::new(),
                 };
@@ -218,6 +219,7 @@ fn build_burp_finding(item: &BurpItem) -> Finding {
         request_blob: Some(item.request.clone()).filter(|s| !s.is_empty()),
         response_blob: Some(item.response.clone()).filter(|s| !s.is_empty()),
     };
+    let summary = format!("{method} {url} (imported)", url = item.url);
     Finding::new_tool(
         "burp-xml",
         "http-evidence",
@@ -225,7 +227,7 @@ fn build_burp_finding(item: &BurpItem) -> Finding {
         0,
         None,
         Severity::Info,
-        &format!("{method} {url} (imported)", method = method, url = item.url),
+        &summary,
     )
     .with_evidence(vec![evidence])
 }
