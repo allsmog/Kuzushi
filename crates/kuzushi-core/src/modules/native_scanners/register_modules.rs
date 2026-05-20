@@ -21,6 +21,9 @@ pub(in crate::modules) fn execute_tool(
         "exploit-chain:scan" => run_exploit_chain_scan(input, ctx, runtime),
         "android-apk:check-env" => run_android_apk_check_env(input, ctx),
         "android-apk:prepare" => run_android_apk_prepare(input, ctx),
+        "android-apk:manifest-scan" => run_manifest_scan(input, ctx),
+        "android-apk:network-security-config" => run_network_security_config_scan(input, ctx),
+        "android-apk:fileprovider-scan" => run_fileprovider_scan(input, ctx),
         other => anyhow::bail!("native scanner tool {other:?} has no executor mapping"),
     }
 }
