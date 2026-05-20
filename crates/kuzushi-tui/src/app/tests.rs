@@ -906,6 +906,50 @@ JSON
 }
 
 #[test]
+fn logs_command_routes_to_full_screen_transcript() {
+    // M1 §1.1: `logs` (alias `log`, `transcript`) switches into the new
+    // full-screen `ShellView::Logs` view so operators can scroll through
+    // the entire 500-line buffer instead of seeing only the embedded strip.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.handle_command(parse_command("logs"));
+    assert!(matches!(app.shell_view, ShellView::Logs));
+
+    // Aliases (log, transcript) reach the same view.
+    app.shell_view = ShellView::Home;
+    app.handle_command(parse_command("log"));
+    assert!(matches!(app.shell_view, ShellView::Logs));
+
+    app.shell_view = ShellView::Home;
+    app.handle_command(parse_command("transcript"));
+    assert!(matches!(app.shell_view, ShellView::Logs));
+}
+
+#[test]
+fn logs_view_routes_j_k_and_page_keys_to_logs_scroll() {
+    // M1 §1.1: while in the Logs view, j/k and PgDn/PgUp must drive the
+    // dedicated `logs_scroll` field rather than the shared `scroll_offset`
+    // — otherwise the transcript would visually stay pinned while the
+    // generic offset advances.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Logs;
+    app.scroll_offset = 0;
+    app.logs_scroll = 0;
+
+    app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
+    assert_eq!(app.logs_scroll, 10);
+    assert_eq!(app.scroll_offset, 0);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+    assert_eq!(app.logs_scroll, 11);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
+    assert_eq!(app.logs_scroll, 0);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
+    assert_eq!(app.logs_scroll, usize::MAX);
+}
+
+#[test]
 fn help_command_routes_to_rust_shell_help_without_removed_cli_paths() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.handle_command(parse_command("/help"));
@@ -1382,7 +1426,7 @@ fn workspace_export_rejects_unsupported_formats_actionably() {
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
 
     app.handle_command(ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
-        output: tmp.path().join("findings.sarif"),
+        output: tmp.path().join("findings.xml"),
     }));
 
     let error = app
@@ -1394,7 +1438,7 @@ fn workspace_export_rejects_unsupported_formats_actionably() {
         .unwrap_or_default();
     assert!(error.contains("unsupported workspace findings export extension"));
     assert!(error.contains("Next: workspace export findings <path>.json"));
-    assert!(!tmp.path().join("findings.sarif").exists());
+    assert!(!tmp.path().join("findings.xml").exists());
 }
 
 #[test]
@@ -2007,25 +2051,25 @@ fn doctor_verb_points_to_cli_not_ask_agent() {
 }
 
 #[test]
-fn implicit_target_assignment_emits_log_line() {
-    // P2-3: typing `findings` with no target silently flipped target
-    // from None to cwd. Now that flip emits a transcript line so the
-    // operator sees the new value before they wonder why the header
-    // changed.
+fn open_store_refuses_to_silently_assume_cwd_target() {
+    // M1 §1.3: typing `findings` with no target used to silently flip
+    // target from None to cwd, which is dangerous for bug-bounty work
+    // where scope discipline matters. open_store now errors with an
+    // actionable hint and never mutates self.target.
     let mut app = ShellApp::new(V2Config::default(), None);
     assert!(app.target.is_none());
-    let _ = app.open_store();
-    assert!(app.target.is_some());
-    assert!(app
-        .log
-        .iter()
-        .any(|line| { line.prefix == "target" && line.body.contains("(implied from cwd)") }));
-
-    // Re-opening the same workspace doesn't re-log — only the first
-    // transition is interesting.
-    let log_count = app.log.len();
-    let _ = app.open_store();
-    assert_eq!(app.log.len(), log_count);
+    let result = app.open_store();
+    let err = match result {
+        Ok(_) => panic!("open_store must refuse when no target is set"),
+        Err(err) => err,
+    };
+    let message = err.to_string();
+    assert!(
+        message.contains("no target set"),
+        "error must instruct the operator how to recover, got: {message}"
+    );
+    assert!(message.contains("target ."));
+    assert!(app.target.is_none(), "self.target must not be mutated");
 }
 
 #[test]
@@ -2191,6 +2235,32 @@ fn tab_cycles_through_completion_candidates() {
         app.input.starts_with("use co"),
         "Tab after 'use co' should pick a co* candidate, got {:?}",
         app.input
+    );
+}
+
+#[test]
+fn esc_during_active_completion_cycle_restores_original_prefix() {
+    // M3 §3.3: when the operator types a partial command and presses
+    // Tab, a completion cycle starts. Esc must close the popup AND put
+    // the original prefix back so the operator doesn't lose what they
+    // typed. The clear-on-Esc draft stash is reserved for the non-cycle
+    // case.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_input("sca");
+    let prefix = app.input.clone();
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    assert!(
+        app.completion_cycle.is_some(),
+        "Tab must open a completion cycle when candidates are available"
+    );
+    assert_ne!(app.input, prefix, "Tab applied the first candidate");
+
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert!(app.completion_cycle.is_none(), "Esc closes the cycle");
+    assert_eq!(
+        app.input, prefix,
+        "Esc must restore the operator's typed prefix"
     );
 }
 

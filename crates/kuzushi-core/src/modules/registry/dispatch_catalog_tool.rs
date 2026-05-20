@@ -48,9 +48,65 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "router:show" => Some(router_show_tool(input.clone(), ctx)),
         "workspace:status" => Some(Ok(workspace_status_json(ctx))),
         "workspace:export-findings" => Some(export_workspace_findings_tool(input.clone(), ctx)),
+        "bounty:import-har" => Some(bounty_import_har_tool(input, ctx)),
+        "bounty:import-burp" => Some(bounty_import_burp_tool(input, ctx)),
         "findings:list" => Some(list_findings_tool(input, ctx)),
         "report:build" => Some(build_report_tool(input, ctx)),
         _ => None,
+    }
+}
+
+fn bounty_import_har_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let workspace = ctx
+        .workspace
+        .context("bounty:import-har requires an active workspace target")?;
+    let path = bounty_import_path(input, "bounty:import-har")?;
+    let summary = crate::findings::import::import_har(workspace, &path)?;
+    Ok(json!({
+        "ok": true,
+        "output": format!(
+            "bounty:import-har imported {} finding(s){} from {}",
+            summary.imported,
+            scope_skip_suffix(summary.skipped_out_of_scope),
+            summary.source_path,
+        ),
+        "data": summary,
+    }))
+}
+
+fn bounty_import_burp_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let workspace = ctx
+        .workspace
+        .context("bounty:import-burp requires an active workspace target")?;
+    let path = bounty_import_path(input, "bounty:import-burp")?;
+    let summary = crate::findings::import::import_burp_xml(workspace, &path)?;
+    Ok(json!({
+        "ok": true,
+        "output": format!(
+            "bounty:import-burp imported {} finding(s){} from {}",
+            summary.imported,
+            scope_skip_suffix(summary.skipped_out_of_scope),
+            summary.source_path,
+        ),
+        "data": summary,
+    }))
+}
+
+fn bounty_import_path(input: &Value, tool: &str) -> Result<std::path::PathBuf> {
+    let raw = input
+        .get("path")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow::anyhow!("{tool} requires path=<file>"))?;
+    Ok(std::path::PathBuf::from(raw))
+}
+
+fn scope_skip_suffix(skipped: usize) -> String {
+    if skipped == 0 {
+        String::new()
+    } else {
+        format!(" ({skipped} out-of-scope skipped)")
     }
 }
 

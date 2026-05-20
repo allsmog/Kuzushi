@@ -12,8 +12,29 @@ pub(crate) fn auth_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     push_auth_provider_section(&mut lines, app, area);
     push_auth_model_section(&mut lines, &config, area);
     push_auth_spend_section(&mut lines, &cost, area);
+    push_auth_rotate_section(&mut lines, area);
     push_auth_commands(&mut lines, area);
     lines
+}
+
+fn push_auth_rotate_section(lines: &mut Vec<Line<'static>>, area: Rect) {
+    // M3 §3.4: rotate/clear hints. Operators rotating keys mid-session
+    // need to know which env var to update and how to re-auth without
+    // restarting the shell. Surfaced inline so the path stays
+    // self-documenting.
+    lines.push(divider("ROTATE · clear & re-auth", area.width));
+    for hint in [
+        "unset env: `unset ANTHROPIC_API_KEY` (host shell) then re-launch kuzushi",
+        "clear oauth: `auth login anthropic` or `auth login openai` to refresh",
+        "switch model: `model <provider:id>` (e.g. `model anthropic:claude-opus-4-7`)",
+    ] {
+        lines.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled("• ", theme::muted()),
+            Span::styled(fit(hint, area.width.saturating_sub(3) as usize), theme::primary()),
+        ]));
+    }
+    lines.push(blank());
 }
 
 fn push_auth_provider_section(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) {

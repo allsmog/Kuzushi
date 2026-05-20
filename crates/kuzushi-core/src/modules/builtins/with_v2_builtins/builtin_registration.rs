@@ -70,4 +70,5 @@ fn register_security_modules(registry: &mut ModuleRegistry) {
 fn register_deferred_adapter_modules(registry: &mut ModuleRegistry) {
     registry.register(prompt_armor::module().deferred());
     registry.register(recon_module().deferred());
+    registry.register(bounty_module());
 }

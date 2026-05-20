@@ -200,7 +200,10 @@ fn quickstart_follows_doctor_context_scan_findings_report_path() {
         "findings / open F-0001",
         "proof state",
         "workspace export",
-        "kuzushi pr-comment",
+        "pr-comment",
+        // M1 §1.2 additions: explicit scope + observability steps.
+        "target <path>",
+        "activity / logs",
     ] {
         assert!(
             rendered.contains(expected),
@@ -239,6 +242,7 @@ fn renders_selected_finding_detail() {
         snippet: "file.save(filepath)".to_string(),
         rationale: "Raw upload path reaches a filesystem write".to_string(),
         confidence: 92,
+        ..Default::default()
     }]);
     app.findings = vec![finding.clone()];
     app.selected_finding = Some(finding);
@@ -377,6 +381,7 @@ fn findings_rows_preview_structured_evidence_at_wide_width() {
             snippet: "filename = file.filename".to_string(),
             rationale: "The upload filename is attacker-controlled".to_string(),
             confidence: 90,
+            ..Default::default()
         },
         FindingEvidence {
             kind: "filesystem_sink".to_string(),
@@ -385,6 +390,7 @@ fn findings_rows_preview_structured_evidence_at_wide_width() {
             snippet: "file.save(filepath)".to_string(),
             rationale: "The raw filename controls the write target".to_string(),
             confidence: 94,
+            ..Default::default()
         },
     ]);
     app.findings = vec![finding];
@@ -2580,24 +2586,29 @@ fn assert_strict_plain_width(rendered: &str, width: usize) {
 }
 
 #[test]
-fn keybindings_overflow_points_at_help() {
-    // P3-6: at narrow terminal widths the keybind footer used to drop
-    // remaining keys under a silent `+more` token. Operators had no way
-    // to discover the hidden bindings. Now the overflow chip tells
-    // them where to look.
+fn keybindings_wrap_to_a_second_row_at_narrow_widths() {
+    // M4 §4.2 (supersedes P3-6): narrow terminals used to truncate the
+    // keybind footer behind a `help more` chip. Now the chrome adds an
+    // extra row instead so every binding stays legible. This regression
+    // asserts both halves of the binding list make it onto the
+    // rendered surface at width 60.
     let backend = TestBackend::new(60, 20);
     let mut terminal = Terminal::new(backend).unwrap();
     let app = ShellApp::new(V2Config::default(), None);
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
-    assert!(
-        rendered.contains("help more"),
-        "narrow keybind footer must point at help: {rendered}"
-    );
-    assert!(
-        !rendered.contains("+more"),
-        "silent +more chip must be replaced"
-    );
+    // The first half of the binding list is in the top row, second
+    // half in the row below. Assert that both representative bindings
+    // (the first one and one previously in overflow) reach the buffer.
+    for needle in ["Tab", "scan", "Ctrl+C"] {
+        assert!(
+            rendered.contains(needle),
+            "narrow footer must surface {needle}: {rendered}"
+        );
+    }
+    // The legacy `+more` / `help more` overflow chip should no longer
+    // appear — wrap supersedes truncation.
+    assert!(!rendered.contains("+more"));
 }
 
 #[test]

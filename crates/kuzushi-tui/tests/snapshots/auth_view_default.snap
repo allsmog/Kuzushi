@@ -1,0 +1,22 @@
+---
+view: auth
+---
+ KUZUSHI mode:shell | target none | ctx missing | model unconfigured | findings 0 findings | view auth
+
+ -- PROVIDERS ----------------------------------------------------------------------------------------------------------
+  ✗  pi-agent-core missing    OPENAI_API_KEY=missing
+  ✗  anthropic     missing    ANTHROPIC_API_KEY=missing; oauth missing
+  |  openai        inactive   oauth missing
+
+ -- MODEL | effective --------------------------------------------------------------------------------------------------
+ current  unconfigured | backend pi-agent-core | routing direct
+
+ -- SPEND | this session -----------------------------------------------------------------------------------------------
+ session   $0.0000   | last tool —
+
+ -- ROTATE | clear & re-auth -------------------------------------------------------------------------------------------
+ • unset env: `unset ANTHROPIC_API_KEY` (host shell) then re-launch kuzushi
+ • clear oauth: `auth login anthropic` or `auth login openai` to refresh
+ • switch model: `model <provider:id>` (e.g. `model anthropic:claude-opus-4-7`)
+
+auth login openai | auth login anthropic | model <provider:id> | config | back

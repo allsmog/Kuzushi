@@ -452,3 +452,118 @@ fn activity_view_default_split_pane() {
 
     assert_plain_snapshot("activity_view_default_split_pane", &render_at_120(&mut app));
 }
+
+#[test]
+fn auth_view_default_with_rotate_section() {
+    // M3 §3.4: the Auth view carries the providers table, model + spend
+    // sections, and a ROTATE hint block so operators can recover from a
+    // bad key without leaving the shell. This snapshot pins the layout
+    // so future tweaks don't silently drop the rotate hints.
+    let mut app = fresh_app();
+    app.shell_view = ShellView::Auth;
+    assert_plain_snapshot("auth_view_default", &render_at_120(&mut app));
+}
+
+#[test]
+fn footer_wrapped_narrow_terminal() {
+    // M4 §4.2: terminals narrower than 70 cols (tmux side panes, sshd
+    // on mobile, side-by-side editor splits) get a two-line keybinding
+    // footer so nothing truncates. This snapshot pins the wrap shape
+    // at width 60 — the chrome rule plus two keybinding rows.
+    let mut app = fresh_app();
+    app.shell_view = ShellView::Home;
+    for line in &mut app.log {
+        if line.time_secs != 0 {
+            line.time_secs = SNAPSHOT_LOG_TIME;
+        }
+    }
+    let rendered = strip_line_end_whitespace(&render_plain_app(&app, 60));
+    assert_plain_snapshot("footer_wrapped_narrow", &rendered);
+}
+
+#[test]
+fn every_shell_view_produces_non_empty_plain_output() {
+    // M4 §4.3: plain-mode parity. The LineBased fallback already paints
+    // every view that lacks a dedicated `PlainRenderMode`, but a future
+    // refactor that breaks a view's `*_lines` source would silently
+    // produce empty plain output. This regression asserts non-empty
+    // plain text for every ShellView variant so the contract holds.
+    let scenarios: Vec<(&str, ShellView)> = vec![
+        ("home", ShellView::Home),
+        ("catalog", ShellView::Catalog),
+        ("recommend", ShellView::Recommend),
+        ("module", ShellView::Module),
+        ("module_run", ShellView::ModuleRun),
+        ("findings", ShellView::Findings),
+        ("finding", ShellView::Finding),
+        ("tune", ShellView::Tune),
+        ("threat_summary", ShellView::Threat(ThreatView::Summary)),
+        ("threat_dfd", ShellView::Threat(ThreatView::Dfd)),
+        ("threat_stride", ShellView::Threat(ThreatView::Stride)),
+        ("threat_stories", ShellView::Threat(ThreatView::Stories)),
+        ("threat_scope", ShellView::Threat(ThreatView::Scope)),
+        ("threat_editor", ShellView::ThreatEditor),
+        ("prompts_editor", ShellView::PromptsEditor),
+        ("actor_detail", ShellView::ActorDetail(0)),
+        ("runs", ShellView::Runs),
+        ("replay", ShellView::Replay("run-1".to_string())),
+        ("trace", ShellView::Trace("run-1".to_string())),
+        ("help", ShellView::Help),
+        ("quickstart", ShellView::Quickstart),
+        ("logs", ShellView::Logs),
+        ("config", ShellView::Config),
+        ("tools", ShellView::Tools),
+        (
+            "options",
+            ShellView::Options(OptionsView {
+                tool_name: "sast:scan".to_string(),
+                filter: OptionsFilter::Standard,
+            }),
+        ),
+        ("sast_tasks", ShellView::SastTasks),
+        ("context", ShellView::Context),
+        ("workspace", ShellView::Workspace),
+        ("knowledge_base", ShellView::KnowledgeBase),
+        ("failure_handoff", ShellView::FailureHandoff),
+        ("agent_chat", ShellView::AgentChat),
+        ("history", ShellView::History),
+        ("story", ShellView::Story),
+        ("auth", ShellView::Auth),
+        ("cost", ShellView::Cost),
+        ("patch", ShellView::Patch("F-0001".to_string())),
+        ("pwn", ShellView::Pwn),
+        ("activity", ShellView::Activity),
+    ];
+
+    for (label, view) in scenarios {
+        let mut app = fresh_app();
+        app.shell_view = view;
+        let rendered = render_plain_app(&app, SNAPSHOT_WIDTH);
+        assert!(
+            !rendered.trim().is_empty(),
+            "ShellView {label} produced empty plain output"
+        );
+        assert!(
+            !rendered.contains('\x1b'),
+            "ShellView {label} plain output leaked ANSI escapes: {rendered}"
+        );
+    }
+}
+
+#[test]
+fn home_view_high_contrast_is_renderable_without_panic() {
+    // M4 §4.1: KUZUSHI_THEME=high-contrast flips the palette to bright
+    // white + bold. The plain renderer strips colours but the view must
+    // still produce output. The reduced_motion env var pauses the
+    // spinner; this test covers the rendering side, the spinner cadence
+    // gate is unit-tested in `state_transitions::ticking`.
+    let mut app = fresh_app();
+    app.shell_view = ShellView::Home;
+    let rendered = render_plain_app(&app, SNAPSHOT_WIDTH);
+    assert!(rendered.contains("HOME"));
+    // Locked in: plain output never carries ANSI escapes regardless of
+    // theme, so high-contrast and default render identically through
+    // `render_plain_app`. Colour comes back when the TUI renders to a
+    // real terminal via render_app.
+    assert!(!rendered.contains('\x1b'));
+}

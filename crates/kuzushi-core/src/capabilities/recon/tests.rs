@@ -351,4 +351,237 @@ HTTP
         assert!(error.contains("cancelled"));
         assert!(started_at.elapsed() < Duration::from_secs(3));
     }
+
+    // ── M2 §2.2: recon intake adapters ──────────────────────────────
+
+    fn import_input(tool: &str, jsonl_path: &Path) -> serde_json::Value {
+        json!({"tool": tool, "path": jsonl_path.display().to_string()})
+    }
+
+    #[test]
+    fn import_amass_jsonl_creates_hosts_with_recorded_sources() {
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("amass.jsonl");
+        fs::write(
+            &dump,
+            "{\"name\":\"api.lab.test\",\"domain\":\"lab.test\",\"sources\":[\"crtsh\"]}\n\
+             {\"name\":\"www.lab.test\",\"domain\":\"lab.test\",\"sources\":[\"wayback\"]}\n",
+        )
+        .unwrap();
+
+        let result = execute_recon_tool("recon:import", import_input("amass", &dump), &ctx)
+            .expect("amass import succeeds");
+
+        let hosts = result["data"]["hosts"].as_array().unwrap();
+        assert_eq!(hosts.len(), 2);
+        assert!(hosts
+            .iter()
+            .any(|host| host["address"] == "api.lab.test"));
+    }
+
+    #[test]
+    fn import_httpx_jsonl_creates_host_service_pairs() {
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("httpx.jsonl");
+        fs::write(
+            &dump,
+            "{\"url\":\"https://api.lab.test\",\"host\":\"api.lab.test\",\"port\":443,\"scheme\":\"https\",\"status_code\":200,\"title\":\"API\",\"tech\":[\"nginx\"]}\n",
+        ).unwrap();
+
+        let result = execute_recon_tool("recon:import", import_input("httpx", &dump), &ctx)
+            .expect("httpx import succeeds");
+
+        let services = result["data"]["services"].as_array().unwrap();
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0]["port"], 443);
+        assert_eq!(services[0]["proto"], "tcp");
+        assert_eq!(services[0]["name"], "nginx");
+    }
+
+    #[test]
+    fn import_nuclei_jsonl_creates_notes_with_severity() {
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("nuclei.jsonl");
+        fs::write(
+            &dump,
+            "{\"template-id\":\"http-missing-security-headers\",\"info\":{\"severity\":\"info\",\"name\":\"missing headers\"},\"matched-at\":\"https://api.lab.test/\",\"host\":\"api.lab.test\"}\n",
+        ).unwrap();
+
+        let result = execute_recon_tool("recon:import", import_input("nuclei", &dump), &ctx)
+            .expect("nuclei import succeeds");
+
+        let notes = result["data"]["notes"].as_array().unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(
+            notes[0]["data"]["template"], "http-missing-security-headers"
+        );
+    }
+
+    #[test]
+    fn import_nmap_xml_creates_host_service_rows() {
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("nmap.xml");
+        fs::write(
+            &dump,
+            r#"<?xml version="1.0"?>
+            <nmaprun>
+              <host>
+                <status state="up" />
+                <address addr="10.0.0.1" addrtype="ipv4" />
+                <hostnames><hostname name="lab.test" /></hostnames>
+                <ports>
+                  <port protocol="tcp" portid="80">
+                    <state state="open" />
+                    <service name="http" product="nginx" />
+                  </port>
+                </ports>
+              </host>
+            </nmaprun>"#,
+        )
+        .unwrap();
+
+        let result = execute_recon_tool("recon:import", import_input("nmap-xml", &dump), &ctx)
+            .expect("nmap-xml import succeeds");
+
+        let hosts = result["data"]["hosts"].as_array().unwrap();
+        assert_eq!(hosts.len(), 1);
+        let services = result["data"]["services"].as_array().unwrap();
+        assert_eq!(services.len(), 1);
+        assert_eq!(services[0]["port"], 80);
+    }
+
+    #[test]
+    fn recon_import_refuses_unknown_kind_with_actionable_error() {
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("anything.jsonl");
+        fs::write(&dump, "{}\n").unwrap();
+        let err = execute_recon_tool("recon:import", import_input("burp", &dump), &ctx)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("amass, httpx, nuclei, nmap-xml"));
+    }
+
+    #[test]
+    fn scope_toml_refuses_out_of_scope_recon_target() {
+        // M2 §2.1: recon dispatch must refuse OutOfScope targets so
+        // operators don't accidentally scan their bounty's deny list.
+        // Unknown verdicts (target matches neither list) are allowed
+        // through — only an explicit OutOfScope refuses.
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let scope_dir = workspace_dir.path().join(".kuzushi");
+        fs::create_dir_all(&scope_dir).unwrap();
+        fs::write(
+            scope_dir.join("scope.toml"),
+            "[in_scope]\nhosts = [\"*.lab.test\"]\n\
+             [out_of_scope]\nhosts = [\"evil.com\"]\n",
+        )
+        .unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let err = execute_recon_tool(
+            "recon:subdomain",
+            json!({"domain": "evil.com", "source": "crtsh"}),
+            &ctx,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("out of scope"), "got: {err}");
+    }
+
+    #[test]
+    fn recon_import_amass_skips_out_of_scope_hosts_per_entry() {
+        // P1 review: `recon:import` requests carry `{tool, path}` and
+        // no top-level target, so the dispatch-level scope guard
+        // returned None. Each importer must now check every parsed
+        // entry against scope.toml. Out-of-scope amass results stay
+        // out of the recon store.
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let scope_dir = workspace_dir.path().join(".kuzushi");
+        fs::create_dir_all(&scope_dir).unwrap();
+        fs::write(
+            scope_dir.join("scope.toml"),
+            "[in_scope]\nhosts = [\"*.lab.test\"]\n\
+             [out_of_scope]\nhosts = [\"evil.com\"]\n",
+        )
+        .unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("amass.jsonl");
+        fs::write(
+            &dump,
+            "{\"name\":\"api.lab.test\",\"sources\":[\"crtsh\"]}\n\
+             {\"name\":\"evil.com\",\"sources\":[\"crtsh\"]}\n",
+        )
+        .unwrap();
+
+        let result = execute_recon_tool("recon:import", import_input("amass", &dump), &ctx)
+            .expect("amass import succeeds");
+
+        let hosts = result["data"]["hosts"].as_array().unwrap();
+        assert_eq!(hosts.len(), 1, "out-of-scope host must be skipped");
+        assert_eq!(hosts[0]["address"], "api.lab.test");
+    }
+
+    #[test]
+    fn recon_import_nmap_xml_skips_non_open_ports() {
+        // P2 review: nmap XML carries closed/filtered ports alongside
+        // open ones. The importer documents it should keep only open
+        // ports — this regression locks the filter in so future
+        // refactors can't silently re-pollute the recon view.
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("nmap.xml");
+        fs::write(
+            &dump,
+            r#"<?xml version="1.0"?>
+            <nmaprun>
+              <host>
+                <status state="up" />
+                <address addr="10.0.0.1" addrtype="ipv4" />
+                <ports>
+                  <port protocol="tcp" portid="80">
+                    <state state="open" />
+                    <service name="http" />
+                  </port>
+                  <port protocol="tcp" portid="22">
+                    <state state="filtered" />
+                    <service name="ssh" />
+                  </port>
+                  <port protocol="tcp" portid="443">
+                    <state state="closed" />
+                    <service name="https" />
+                  </port>
+                </ports>
+              </host>
+            </nmaprun>"#,
+        )
+        .unwrap();
+
+        let result =
+            execute_recon_tool("recon:import", import_input("nmap-xml", &dump), &ctx)
+                .expect("nmap-xml import succeeds");
+
+        let services = result["data"]["services"].as_array().unwrap();
+        assert_eq!(services.len(), 1, "only the open port should land");
+        assert_eq!(services[0]["port"], 80);
+    }
 }

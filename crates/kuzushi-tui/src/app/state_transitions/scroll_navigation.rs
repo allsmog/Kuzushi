@@ -105,6 +105,7 @@ impl ShellApp {
             PageScrollKind::History => &mut self.history_scroll,
             PageScrollKind::KnowledgeBase => &mut self.kb_scroll,
             PageScrollKind::Modules => &mut self.modules_scroll,
+            PageScrollKind::Logs => &mut self.logs_scroll,
         }
     }
 
@@ -113,6 +114,7 @@ impl ShellApp {
             ShellView::Catalog => self.catalog_expanded,
             ShellView::Help
             | ShellView::Quickstart
+            | ShellView::Logs
             | ShellView::Tools
             | ShellView::Options(_)
             | ShellView::Runs
