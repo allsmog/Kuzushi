@@ -90,7 +90,46 @@ kuzushi run android-apk:check-env --input '{
 }'
 ```
 
-## End-to-end workflow
+## One-command pipeline
+
+For a quick first pass, run the umbrella tool. It validates the APK,
+decompiles, scans every framework surface, and prints a per-stage
+breakdown:
+
+```bash
+kuzushi run android-apk:scan --input '{
+  "apk": "~/lyft-bug-hunt/me.lyft.android-2026.42.apk",
+  "decompiler": "both"
+}'
+```
+
+Output is shaped like:
+
+```
+android-apk:scan: 8 stages, 21 findings, 3 skipped, 22858ms
+
+stages:
+  [+] prepare                        findings=0
+  [+] manifest-scan                  findings=10
+  [x] network-security-config        findings=0   (skipped — no config)
+  [x] fileprovider-scan              findings=0   (skipped — no FileProvider)
+  [+] webview-scan                   findings=11
+  [x] native-libs                    findings=0   (skipped — no .so files)
+  [+] hybrid-detect                  findings=0
+  [+] sast-handoff                   findings=0
+```
+
+Stages that can't run (missing `network_security_config.xml`,
+`file_paths.xml`, or `lib/<abi>/`) show up in `warnings` rather than
+failing the pipeline — most APKs only ship a subset of these. After
+the umbrella finishes, run `kuzushi findings --severity high,critical`
+to inspect everything that landed in the findings store, then chase
+individual leads through the manual workflow below.
+
+Skip flags (`skipNative`, `skipWebview`, `skipHybrid`) cut runtime when
+the corresponding subsystem is missing or you've already inspected it.
+
+## End-to-end workflow (manual, per-tool)
 
 ### 1. Authenticate
 

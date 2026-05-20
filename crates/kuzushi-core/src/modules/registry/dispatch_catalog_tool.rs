@@ -107,7 +107,8 @@ pub(in crate::modules) fn dispatch_native_security_tool(
         | "android-apk:webview-scan"
         | "android-apk:sast-handoff"
         | "android-apk:native-libs"
-        | "android-apk:hybrid-detect" => Some(native_scanners::execute_tool(
+        | "android-apk:hybrid-detect"
+        | "android-apk:scan" => Some(native_scanners::execute_tool(
             name,
             input.clone(),
             ctx,

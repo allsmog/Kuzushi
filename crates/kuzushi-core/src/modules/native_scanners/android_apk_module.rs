@@ -16,6 +16,7 @@ pub(in crate::modules) fn android_apk_module() -> BuiltinModule {
             sast_handoff_tool(),
             native_libs_tool(),
             hybrid_detect_tool(),
+            scan_tool(),
         ],
         vec![],
     )
@@ -33,6 +34,36 @@ fn native_libs_tool() -> ToolDescriptor {
                 "Override the lib/<abi>/ root. Defaults to <target>/android-decompiled/raw/lib.",
             )
             .aliases(&["lib_root"])
+            .advanced(),
+        ],
+    )
+}
+
+fn scan_tool() -> ToolDescriptor {
+    tool_with_options(
+        "android-apk:scan",
+        "Umbrella: validates the APK, decompiles it, then runs every android-apk:* scanner (manifest, network-security-config, fileprovider, webview, native-libs, hybrid-detect) and the sast-handoff bridge in one pass. Returns a per-stage summary so you can drill into individual results.",
+        vec![
+            apk_option(),
+            decompiler_option(),
+            target_option(),
+            opt(
+                "skipWebview",
+                OptionType::Bool,
+                "Skip the bundled Semgrep webview rule pack (saves runtime if semgrep isn't installed).",
+            )
+            .advanced(),
+            opt(
+                "skipNative",
+                OptionType::Bool,
+                "Skip native .so triage (saves runtime when the APK ships no lib/ directory).",
+            )
+            .advanced(),
+            opt(
+                "skipHybrid",
+                OptionType::Bool,
+                "Skip hybrid-app framework detection.",
+            )
             .advanced(),
         ],
     )
