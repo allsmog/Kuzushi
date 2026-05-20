@@ -1,5 +1,5 @@
 use crate::findings::{Finding, FindingEvidence, FindingStore, Severity};
-use crate::workspace::{load_program_scope, ScopeVerdict, WorkspaceTarget};
+use crate::workspace::{load_program_scope, ProgramScope, WorkspaceTarget};
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::path::Path;
@@ -25,18 +25,12 @@ pub struct HarImportSummary {
 /// Out-of-scope entries are skipped silently with a counter. Within-
 /// scope and Unknown entries are imported.
 pub fn import_har(workspace: &WorkspaceTarget, path: &Path) -> Result<HarImportSummary> {
-    let body = std::fs::read_to_string(path)
-        .with_context(|| format!("Could not read HAR file {}", path.display()))?;
-    let document: Value = serde_json::from_str(&body)
-        .with_context(|| format!("HAR file {} is not valid JSON", path.display()))?;
+    let document = read_har_document(path)?;
     let entries = document
         .pointer("/log/entries")
         .and_then(Value::as_array)
         .ok_or_else(|| {
-            anyhow::anyhow!(
-                "HAR file {} missing log.entries array",
-                path.display()
-            )
+            anyhow::anyhow!("HAR file {} missing log.entries array", path.display())
         })?;
 
     let scope = load_program_scope(workspace).context("Could not load scope.toml")?;
@@ -47,21 +41,7 @@ pub fn import_har(workspace: &WorkspaceTarget, path: &Path) -> Result<HarImportS
     let mut imported = 0usize;
     let mut skipped = 0usize;
     for entry in entries {
-        let Some(request) = entry.get("request") else {
-            continue;
-        };
-        let Some(url) = request.get("url").and_then(Value::as_str) else {
-            continue;
-        };
-        if let Some(scope) = scope.as_ref() {
-            if scope.verdict(url) == ScopeVerdict::OutOfScope {
-                skipped += 1;
-                continue;
-            }
-        }
-        let finding = build_har_finding(url, request, entry.get("response"));
-        store.insert_finding(&run_id, &finding)?;
-        imported += 1;
+        persist_har_entry(&store, &run_id, scope.as_ref(), entry, &mut imported, &mut skipped)?;
     }
 
     Ok(HarImportSummary {
@@ -70,6 +50,39 @@ pub fn import_har(workspace: &WorkspaceTarget, path: &Path) -> Result<HarImportS
         skipped_out_of_scope: skipped,
         source_path: path.display().to_string(),
     })
+}
+
+fn read_har_document(path: &Path) -> Result<Value> {
+    let body = std::fs::read_to_string(path)
+        .with_context(|| format!("Could not read HAR file {}", path.display()))?;
+    serde_json::from_str(&body)
+        .with_context(|| format!("HAR file {} is not valid JSON", path.display()))
+}
+
+fn persist_har_entry(
+    store: &FindingStore,
+    run_id: &str,
+    scope: Option<&ProgramScope>,
+    entry: &Value,
+    imported: &mut usize,
+    skipped: &mut usize,
+) -> Result<()> {
+    let Some(request) = entry.get("request") else {
+        return Ok(());
+    };
+    let Some(url) = request.get("url").and_then(Value::as_str) else {
+        return Ok(());
+    };
+    if let Some(scope) = scope {
+        if !scope.host_allowed(url) {
+            *skipped += 1;
+            return Ok(());
+        }
+    }
+    let finding = build_har_finding(url, request, entry.get("response"));
+    store.insert_finding(run_id, &finding)?;
+    *imported += 1;
+    Ok(())
 }
 
 fn build_har_finding(url: &str, request: &Value, response: Option<&Value>) -> Finding {

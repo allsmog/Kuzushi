@@ -503,4 +503,85 @@ HTTP
         .to_string();
         assert!(err.contains("out of scope"), "got: {err}");
     }
+
+    #[test]
+    fn recon_import_amass_skips_out_of_scope_hosts_per_entry() {
+        // P1 review: `recon:import` requests carry `{tool, path}` and
+        // no top-level target, so the dispatch-level scope guard
+        // returned None. Each importer must now check every parsed
+        // entry against scope.toml. Out-of-scope amass results stay
+        // out of the recon store.
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let scope_dir = workspace_dir.path().join(".kuzushi");
+        fs::create_dir_all(&scope_dir).unwrap();
+        fs::write(
+            scope_dir.join("scope.toml"),
+            "[in_scope]\nhosts = [\"*.lab.test\"]\n\
+             [out_of_scope]\nhosts = [\"evil.com\"]\n",
+        )
+        .unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("amass.jsonl");
+        fs::write(
+            &dump,
+            "{\"name\":\"api.lab.test\",\"sources\":[\"crtsh\"]}\n\
+             {\"name\":\"evil.com\",\"sources\":[\"crtsh\"]}\n",
+        )
+        .unwrap();
+
+        let result = execute_recon_tool("recon:import", import_input("amass", &dump), &ctx)
+            .expect("amass import succeeds");
+
+        let hosts = result["data"]["hosts"].as_array().unwrap();
+        assert_eq!(hosts.len(), 1, "out-of-scope host must be skipped");
+        assert_eq!(hosts[0]["address"], "api.lab.test");
+    }
+
+    #[test]
+    fn recon_import_nmap_xml_skips_non_open_ports() {
+        // P2 review: nmap XML carries closed/filtered ports alongside
+        // open ones. The importer documents it should keep only open
+        // ports — this regression locks the filter in so future
+        // refactors can't silently re-pollute the recon view.
+        let workspace_dir = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+        let dump = workspace_dir.path().join("nmap.xml");
+        fs::write(
+            &dump,
+            r#"<?xml version="1.0"?>
+            <nmaprun>
+              <host>
+                <status state="up" />
+                <address addr="10.0.0.1" addrtype="ipv4" />
+                <ports>
+                  <port protocol="tcp" portid="80">
+                    <state state="open" />
+                    <service name="http" />
+                  </port>
+                  <port protocol="tcp" portid="22">
+                    <state state="filtered" />
+                    <service name="ssh" />
+                  </port>
+                  <port protocol="tcp" portid="443">
+                    <state state="closed" />
+                    <service name="https" />
+                  </port>
+                </ports>
+              </host>
+            </nmaprun>"#,
+        )
+        .unwrap();
+
+        let result =
+            execute_recon_tool("recon:import", import_input("nmap-xml", &dump), &ctx)
+                .expect("nmap-xml import succeeds");
+
+        let services = result["data"]["services"].as_array().unwrap();
+        assert_eq!(services.len(), 1, "only the open port should land");
+        assert_eq!(services[0]["port"], 80);
+    }
 }

@@ -2,9 +2,13 @@ mod http_fingerprint;
 mod import_amass;
 mod import_httpx;
 mod import_nmap_xml;
+mod import_nmap_xml_parse;
 mod import_nuclei;
+mod import_shared;
 mod nmap;
 mod subdomain;
+
+pub(crate) use import_shared::{read_jsonl_path, ReconImportContext};
 
 pub(crate) use http_fingerprint::run_recon_http_fingerprint;
 pub(crate) use import_amass::run_recon_import_amass;

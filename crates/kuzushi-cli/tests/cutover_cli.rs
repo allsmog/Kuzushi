@@ -433,7 +433,12 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
     );
     assert!(plain.contains("Finding F-0001"));
     assert!(plain.contains("Proof state: source_sink_linked"));
-    assert!(plain.contains("Runtime validation: execution_confirmed"));
+    // The detail report prints `Runtime verification:` — the older
+    // "validation" label was renamed but this assertion was missed.
+    assert!(
+        plain.contains("Runtime verification: execution_confirmed"),
+        "plain finding detail should carry the renamed Runtime verification label: {plain}"
+    );
     assert!(plain.contains("Patch result:"));
     assert!(plain.contains("Next action: patch"));
 

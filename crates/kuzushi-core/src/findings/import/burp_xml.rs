@@ -1,5 +1,5 @@
 use crate::findings::{Finding, FindingEvidence, FindingStore, Severity};
-use crate::workspace::{load_program_scope, ScopeVerdict, WorkspaceTarget};
+use crate::workspace::{load_program_scope, ProgramScope, WorkspaceTarget};
 use anyhow::{Context, Result};
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
@@ -35,19 +35,7 @@ pub fn import_burp_xml(workspace: &WorkspaceTarget, path: &Path) -> Result<BurpI
     let mut imported = 0usize;
     let mut skipped = 0usize;
     for item in items {
-        let url = item.url.clone();
-        if url.is_empty() {
-            continue;
-        }
-        if let Some(scope) = scope.as_ref() {
-            if scope.verdict(&url) == ScopeVerdict::OutOfScope {
-                skipped += 1;
-                continue;
-            }
-        }
-        let finding = build_burp_finding(&item);
-        store.insert_finding(&run_id, &finding)?;
-        imported += 1;
+        persist_burp_item(&store, &run_id, scope.as_ref(), &item, &mut imported, &mut skipped)?;
     }
 
     Ok(BurpImportSummary {
@@ -56,6 +44,29 @@ pub fn import_burp_xml(workspace: &WorkspaceTarget, path: &Path) -> Result<BurpI
         skipped_out_of_scope: skipped,
         source_path: path.display().to_string(),
     })
+}
+
+fn persist_burp_item(
+    store: &FindingStore,
+    run_id: &str,
+    scope: Option<&ProgramScope>,
+    item: &BurpItem,
+    imported: &mut usize,
+    skipped: &mut usize,
+) -> Result<()> {
+    if item.url.is_empty() {
+        return Ok(());
+    }
+    if let Some(scope) = scope {
+        if !scope.host_allowed(&item.url) {
+            *skipped += 1;
+            return Ok(());
+        }
+    }
+    let finding = build_burp_finding(item);
+    store.insert_finding(run_id, &finding)?;
+    *imported += 1;
+    Ok(())
 }
 
 #[derive(Debug, Default, Clone)]
@@ -69,9 +80,6 @@ struct BurpItem {
 
 #[derive(Default)]
 struct CurrentField {
-    // `name` lives on the End event via `event.name()` so we never store
-    // it here. `base64` and `text` accumulate while we wait for the End
-    // tag to dispatch the value.
     base64: bool,
     text: String,
 }
@@ -79,59 +87,19 @@ struct CurrentField {
 fn parse_burp_items(xml: &str) -> Result<Vec<BurpItem>> {
     let mut reader = Reader::from_str(xml);
     reader.config_mut().trim_text(false);
-    let mut items = Vec::new();
-    let mut current_item: Option<BurpItem> = None;
-    let mut current_field = CurrentField::default();
-
+    let mut state = BurpParseState::default();
     loop {
         match reader.read_event() {
-            Ok(Event::Start(event)) => {
-                let name = String::from_utf8_lossy(event.name().as_ref()).to_string();
-                if name == "item" {
-                    current_item = Some(BurpItem::default());
-                    continue;
-                }
-                let base64 = attribute(&event, "base64")? == Some("true".to_string());
-                current_field = CurrentField {
-                    base64,
-                    text: String::new(),
-                };
-            }
-            Ok(Event::Text(event)) => {
-                let chunk = event
-                    .unescape()
-                    .context("Burp XML text decode failed")?
-                    .into_owned();
-                current_field.text.push_str(&chunk);
-            }
-            Ok(Event::CData(event)) => {
-                let chunk = String::from_utf8_lossy(event.as_ref()).into_owned();
-                current_field.text.push_str(&chunk);
-            }
-            Ok(Event::End(event)) => {
-                let name = String::from_utf8_lossy(event.name().as_ref()).to_string();
-                if name == "item" {
-                    if let Some(item) = current_item.take() {
-                        items.push(item);
-                    }
-                    continue;
-                }
-                let Some(item) = current_item.as_mut() else {
-                    current_field = CurrentField::default();
-                    continue;
-                };
-                let field_text = std::mem::take(&mut current_field.text);
-                let decoded = decode_burp_text(&field_text, current_field.base64);
-                match name.as_str() {
-                    "url" => item.url = decoded.trim().to_string(),
-                    "method" => item.method = decoded.trim().to_string(),
-                    "status" => item.status = decoded.trim().to_string(),
-                    "request" => item.request = decoded,
-                    "response" => item.response = decoded,
-                    _ => {}
-                }
-                current_field = CurrentField::default();
-            }
+            Ok(Event::Start(event)) => handle_burp_open(&event, &mut state)?,
+            Ok(Event::Text(event)) => state
+                .current_field
+                .text
+                .push_str(&event.unescape().context("Burp XML text decode failed")?),
+            Ok(Event::CData(event)) => state
+                .current_field
+                .text
+                .push_str(&String::from_utf8_lossy(event.as_ref())),
+            Ok(Event::End(event)) => handle_burp_close(&event, &mut state),
             Ok(Event::Eof) => break,
             Err(err) => anyhow::bail!(
                 "Burp XML parse error at byte {}: {err}",
@@ -140,7 +108,60 @@ fn parse_burp_items(xml: &str) -> Result<Vec<BurpItem>> {
             _ => {}
         }
     }
-    Ok(items)
+    Ok(state.items)
+}
+
+#[derive(Default)]
+struct BurpParseState {
+    items: Vec<BurpItem>,
+    current_item: Option<BurpItem>,
+    current_field: CurrentField,
+}
+
+fn handle_burp_open(
+    event: &quick_xml::events::BytesStart<'_>,
+    state: &mut BurpParseState,
+) -> Result<()> {
+    let name = String::from_utf8_lossy(event.name().as_ref()).to_string();
+    if name == "item" {
+        state.current_item = Some(BurpItem::default());
+        return Ok(());
+    }
+    let base64 = attribute(event, "base64")? == Some("true".to_string());
+    state.current_field = CurrentField {
+        base64,
+        text: String::new(),
+    };
+    Ok(())
+}
+
+fn handle_burp_close(event: &quick_xml::events::BytesEnd<'_>, state: &mut BurpParseState) {
+    let name = String::from_utf8_lossy(event.name().as_ref()).to_string();
+    if name == "item" {
+        if let Some(item) = state.current_item.take() {
+            state.items.push(item);
+        }
+        return;
+    }
+    let Some(item) = state.current_item.as_mut() else {
+        state.current_field = CurrentField::default();
+        return;
+    };
+    let field_text = std::mem::take(&mut state.current_field.text);
+    let decoded = decode_burp_text(&field_text, state.current_field.base64);
+    assign_burp_field(item, &name, decoded);
+    state.current_field = CurrentField::default();
+}
+
+fn assign_burp_field(item: &mut BurpItem, name: &str, decoded: String) {
+    match name {
+        "url" => item.url = decoded.trim().to_string(),
+        "method" => item.method = decoded.trim().to_string(),
+        "status" => item.status = decoded.trim().to_string(),
+        "request" => item.request = decoded,
+        "response" => item.response = decoded,
+        _ => {}
+    }
 }
 
 fn attribute(event: &quick_xml::events::BytesStart<'_>, key: &str) -> Result<Option<String>> {
@@ -158,49 +179,7 @@ fn decode_burp_text(raw: &str, base64: bool) -> String {
     if !base64 {
         return raw.to_string();
     }
-    decode_base64(raw.trim()).unwrap_or_else(|_| raw.to_string())
-}
-
-fn decode_base64(input: &str) -> Result<String> {
-    let bytes = base64_decode(input.as_bytes())?;
-    String::from_utf8(bytes).context("Burp XML body decoded to non-UTF-8")
-}
-
-fn base64_decode(input: &[u8]) -> Result<Vec<u8>> {
-    // Inline a small standard-base64 decoder so we don't add a new crate
-    // dependency just for one body field. Whitespace (including newlines)
-    // is tolerated. Returns Err on any non-base64 character or bad pad.
-    let mut out = Vec::with_capacity(input.len() * 3 / 4);
-    let mut buf: u32 = 0;
-    let mut bits = 0u8;
-    let mut padding = 0u8;
-    for &byte in input {
-        if byte.is_ascii_whitespace() {
-            continue;
-        }
-        if byte == b'=' {
-            padding += 1;
-            continue;
-        }
-        if padding > 0 {
-            anyhow::bail!("invalid base64: non-pad after padding");
-        }
-        let value = match byte {
-            b'A'..=b'Z' => byte - b'A',
-            b'a'..=b'z' => byte - b'a' + 26,
-            b'0'..=b'9' => byte - b'0' + 52,
-            b'+' => 62,
-            b'/' => 63,
-            _ => anyhow::bail!("invalid base64 character"),
-        };
-        buf = (buf << 6) | (value as u32);
-        bits += 6;
-        if bits >= 8 {
-            bits -= 8;
-            out.push(((buf >> bits) & 0xFF) as u8);
-        }
-    }
-    Ok(out)
+    super::burp_base64::decode_base64_string(raw.trim()).unwrap_or_else(|_| raw.to_string())
 }
 
 fn build_burp_finding(item: &BurpItem) -> Finding {
@@ -213,7 +192,7 @@ fn build_burp_finding(item: &BurpItem) -> Finding {
         kind: "http-request".to_string(),
         file_path: item.url.clone(),
         line: 0,
-        snippet: format!("{method} {url}", method = method, url = item.url),
+        snippet: format!("{method} {url}", url = item.url),
         rationale: "Imported from Burp Suite XML".to_string(),
         confidence: 50,
         request_blob: Some(item.request.clone()).filter(|s| !s.is_empty()),
@@ -240,7 +219,7 @@ mod tests {
     fn base64_encode(input: &[u8]) -> String {
         const ALPHABET: &[u8] =
             b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let mut out = String::with_capacity((input.len() + 2) / 3 * 4);
+        let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
         for chunk in input.chunks(3) {
             let len = chunk.len();
             let b0 = chunk[0] as u32;
@@ -308,21 +287,12 @@ mod tests {
         fs::create_dir_all(&scope_dir).unwrap();
         fs::write(
             scope_dir.join("scope.toml"),
-            "[in_scope]\nhosts = [\"*.lab.test\"]\n",
-        )
-        .unwrap();
-        let path = tmp.path().join("burp.xml");
-        fs::write(&path, fixture_burp_xml("evil.example")).unwrap();
-        // evil.example has no out_of_scope rule, only matches Unknown via
-        // in_scope mismatch — but the strict interpretation in M2 §2.1 is
-        // that we refuse only OutOfScope, so Unknown still imports. Use a
-        // dedicated out_of_scope rule to verify the skip path.
-        fs::write(
-            scope_dir.join("scope.toml"),
             "[in_scope]\nhosts = [\"*.lab.test\"]\n\
              [out_of_scope]\nhosts = [\"evil.example\"]\n",
         )
         .unwrap();
+        let path = tmp.path().join("burp.xml");
+        fs::write(&path, fixture_burp_xml("evil.example")).unwrap();
 
         let summary = import_burp_xml(&workspace, &path).unwrap();
         assert_eq!(summary.imported, 0);
