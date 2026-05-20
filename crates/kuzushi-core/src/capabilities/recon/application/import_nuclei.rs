@@ -1,10 +1,11 @@
 use super::*;
 
-/// Import a nuclei JSONL findings dump
-/// (`nuclei -jsonl -o out.jsonl`) into the recon store as `ReconNote`
-/// rows. One note per template hit, tagged with `severity` for later
-/// filtering in the recon view. Findings table is unaffected — nuclei
-/// outputs are recorded as recon intelligence, not Kuzushi findings.
+const TOOL_PREFIX: &str = "recon:import-nuclei";
+
+/// Import a nuclei JSONL findings dump (`nuclei -jsonl -o out.jsonl`)
+/// into the recon store as `ReconNote` rows. One note per template hit,
+/// tagged with `severity` for later filtering. Out-of-scope hosts (per
+/// `.kuzushi/scope.toml`) are skipped silently with a counter.
 pub(crate) fn run_recon_import_nuclei(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
@@ -12,79 +13,91 @@ pub(crate) fn run_recon_import_nuclei(
     let workspace = ctx.workspace.context(
         "recon:import needs an active workspace. Pass --target <repo> or start the shell with --target.",
     )?;
-    let path = required_path(input, "path", "recon:import nuclei needs a `path` field")?;
-    let body = std::fs::read_to_string(&path)
-        .with_context(|| format!("Could not read {}", path.display()))?;
-
-    let mut store = ReconWorkspaceStore::open(workspace)?;
-    let workspace_id = store.ensure_default_workspace(workspace.root())?;
-    let mut notes = Vec::new();
-
+    let (path, body) = read_jsonl_path(input, "recon:import nuclei needs a `path` field")?;
+    let mut context = ReconImportContext::open(workspace)?;
     for (lineno, line) in body.lines().enumerate() {
-        let trimmed = line.trim();
-        if trimmed.is_empty() {
-            continue;
+        ingest_nuclei_line(&mut context, line, lineno)?;
+    }
+    context.into_report(TOOL_PREFIX, path.display().to_string())
+}
+
+fn ingest_nuclei_line(
+    context: &mut ReconImportContext<'_>,
+    line: &str,
+    lineno: usize,
+) -> Result<()> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return Ok(());
+    }
+    let entry: Value = serde_json::from_str(trimmed)
+        .with_context(|| format!("nuclei JSONL line {} is not valid JSON", lineno + 1))?;
+    let host_value = nuclei_host(&entry);
+    if let Some(host) = host_value.as_deref() {
+        if !context.admit_host(host) {
+            return Ok(());
         }
-        let entry: Value = serde_json::from_str(trimmed)
-            .with_context(|| format!("nuclei JSONL line {} is not valid JSON", lineno + 1))?;
-        let template = entry
-            .get("template-id")
-            .or_else(|| entry.get("templateID"))
-            .and_then(Value::as_str)
-            .unwrap_or("nuclei");
-        let severity = entry
-            .pointer("/info/severity")
-            .and_then(Value::as_str)
-            .unwrap_or("info");
-        let host_value = entry
-            .get("host")
-            .or_else(|| entry.get("matched-at"))
-            .and_then(Value::as_str);
-        let host_id = match host_value {
-            Some(host) => {
-                let recorded = store.upsert_host(
-                    &workspace_id,
+    }
+    persist_nuclei_entry(context, &entry, host_value.as_deref())
+}
+
+fn nuclei_host(entry: &Value) -> Option<String> {
+    entry
+        .get("host")
+        .or_else(|| entry.get("matched-at"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn persist_nuclei_entry(
+    context: &mut ReconImportContext<'_>,
+    entry: &Value,
+    host_value: Option<&str>,
+) -> Result<()> {
+    let host_id = match host_value {
+        Some(host) => Some(
+            context
+                .store
+                .upsert_host(
+                    &context.workspace_id,
                     host,
                     Some(host),
                     "alive",
                     json!({
-                        "discoveredBy": "recon:import-nuclei",
+                        "discoveredBy": TOOL_PREFIX,
                         "discoveredAt": now_isoish(),
                     }),
-                )?;
-                Some(recorded.id)
-            }
-            None => None,
-        };
-        let note = store.create_note(
-            &workspace_id,
-            host_id.as_deref(),
-            None,
-            &format!("recon:import-nuclei:{template}"),
-            json!({
-                "template": template,
-                "severity": severity,
-                "matched_at": entry.get("matched-at").cloned().unwrap_or(Value::Null),
-                "info": entry.get("info").cloned().unwrap_or(Value::Null),
-                "raw": entry.clone(),
-            }),
-        )?;
-        notes.push(note);
-    }
+                )?
+                .id,
+        ),
+        None => None,
+    };
+    let template = entry
+        .get("template-id")
+        .or_else(|| entry.get("templateID"))
+        .and_then(Value::as_str)
+        .unwrap_or("nuclei");
+    let note = context.store.create_note(
+        &context.workspace_id,
+        host_id.as_deref(),
+        None,
+        &format!("{TOOL_PREFIX}:{template}"),
+        nuclei_note_payload(entry, template),
+    )?;
+    context.notes.push(note);
+    Ok(())
+}
 
-    Ok(ReconReport {
-        tool: "recon:import-nuclei".to_string(),
-        target: path.display().to_string(),
-        hosts: Vec::new(),
-        services: Vec::new(),
-        notes,
-        persisted: ReconPersisted {
-            workspace_id,
-            db: workspace.findings_db_path().display().to_string(),
-            host_count: store.count_hosts()?,
-            service_count: store.count_services()?,
-        },
-        subdomains: Vec::new(),
-        fingerprint: BTreeMap::new(),
+fn nuclei_note_payload(entry: &Value, template: &str) -> Value {
+    let severity = entry
+        .pointer("/info/severity")
+        .and_then(Value::as_str)
+        .unwrap_or("info");
+    json!({
+        "template": template,
+        "severity": severity,
+        "matched_at": entry.get("matched-at").cloned().unwrap_or(Value::Null),
+        "info": entry.get("info").cloned().unwrap_or(Value::Null),
+        "raw": entry.clone(),
     })
 }

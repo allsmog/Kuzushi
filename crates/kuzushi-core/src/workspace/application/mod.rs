@@ -5,6 +5,8 @@ use serde_json::json;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod export_markdown_bundle;
+mod export_sarif;
 mod export_workspace_findings;
 mod load_program_scope;
 mod status;

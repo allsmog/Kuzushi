@@ -6,6 +6,7 @@
 //! recon artefact — HTTP evidence belongs in the findings ledger so
 //! triage/verify/patch workflows can reference it.
 
+mod burp_base64;
 mod burp_xml;
 mod har;
 
