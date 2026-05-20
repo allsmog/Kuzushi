@@ -13,17 +13,19 @@ pub(crate) fn workspace_module() -> BuiltinModule {
             ),
             tool_with_options(
                 "workspace:export-findings",
-                "Export persisted workspace findings to a local JSON or JSONL file.",
+                "Export persisted workspace findings to a local file or markdown bundle directory. \
+                 Supports JSON, JSONL, SARIF 2.1.0, CSV, and a multi-file markdown bundle.",
                 vec![
                     opt(
                         "output",
                         OptionType::Path,
-                        "Output path for exported findings. Relative paths resolve under the workspace root.",
+                        "Output path for exported findings. Relative paths resolve under the workspace root. \
+                         Use a directory path when format=markdown-bundle.",
                     )
                     .aliases(&["path"])
                     .required(),
                     opt("format", OptionType::Enum, "Export format.")
-                        .choices(&["json", "jsonl"]),
+                        .choices(&["json", "jsonl", "sarif", "csv", "markdown-bundle"]),
                 ],
             ),
         ],

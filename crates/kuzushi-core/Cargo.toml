@@ -15,10 +15,20 @@ async-trait.workspace = true
 # with `format=csv`). Local dep — only kuzushi-core currently needs it.
 csv = "1.3"
 dirs.workspace = true
+# globset powers `.kuzushi/scope.toml` host glob matching (M2 §2.1).
+# Lets operators express `*.example.com` style allow/deny rules so
+# recon and Burp/HAR import refuse out-of-scope hosts.
+globset = "0.4"
+# ipnet powers CIDR-range matching in `.kuzushi/scope.toml`.
+ipnet = "2.10"
 kuzushi-codeindex = { path = "../kuzushi-codeindex" }
 kuzushi-mcp-common = { path = "../kuzushi-mcp-common" }
 kuzushi-sandbox = { path = "../kuzushi-sandbox" }
 libc.workspace = true
+# quick-xml parses Burp Suite XML exports (M2 §2.3) and nmap XML
+# (M2 §2.2) into the canonical Finding/Recon shapes — no external
+# binary, sub-ms on typical PoC traffic dumps.
+quick-xml = "0.36"
 # Regex powers the per-target source/sink discovery sweep
 # (`source_sink_discovery::run`) which scans the source tree for
 # language-specific entry-point markers and privesc/RCE primitives

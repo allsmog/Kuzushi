@@ -106,4 +106,9 @@ pub struct ShellApp {
     /// Operators can opt out via `setg ui.auto_open_activity false` (parsed
     /// in `ShellApp::new`).
     pub auto_open_activity: bool,
+    /// Bug-bounty program scope loaded from `<target>/.kuzushi/scope.toml`
+    /// when the target is set (M2 §2.1). Cached on the app so the footer
+    /// chip and any in-shell validators don't hit disk every frame.
+    /// `None` means no scope file is present.
+    pub program_scope: Option<kuzushi_core::ProgramScope>,
 }
