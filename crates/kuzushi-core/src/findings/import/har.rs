@@ -93,6 +93,7 @@ fn build_har_finding(url: &str, request: &Value, response: Option<&Value>) -> Fi
             Some(response_blob)
         },
     };
+    let summary = format!("{method} {url} (imported)");
     Finding::new_tool(
         "burp-har",
         "http-evidence",
@@ -100,7 +101,7 @@ fn build_har_finding(url: &str, request: &Value, response: Option<&Value>) -> Fi
         0,
         None,
         Severity::Info,
-        &format!("{method} {url} (imported)"),
+        &summary,
     )
     .with_evidence(vec![evidence])
 }
@@ -122,7 +123,7 @@ fn render_har_request(request: &Value) -> String {
         .and_then(Value::as_str)
         .filter(|body| !body.is_empty())
     {
-        out.push_str("\n");
+        out.push('\n');
         out.push_str(body);
     }
     out
@@ -145,7 +146,7 @@ fn render_har_response(response: &Value) -> String {
         .and_then(Value::as_str)
         .filter(|body| !body.is_empty())
     {
-        out.push_str("\n");
+        out.push('\n');
         out.push_str(body);
     }
     out
