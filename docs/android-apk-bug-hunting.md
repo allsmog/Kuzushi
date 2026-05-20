@@ -92,16 +92,19 @@ kuzushi run android-apk:check-env --input '{
 
 ## One-command pipeline
 
-For a quick first pass, run the umbrella tool. It validates the APK,
-decompiles, scans every framework surface, and prints a per-stage
-breakdown:
+`kuzushi scan` auto-detects `.apk` files and routes them through the
+android-apk pipeline. Run it directly against your downloaded APK:
 
 ```bash
-kuzushi run android-apk:scan --input '{
-  "apk": "~/lyft-bug-hunt/me.lyft.android-2026.42.apk",
-  "decompiler": "both"
-}'
+kuzushi scan ./me.lyft.android-2026.42.apk
 ```
+
+(or equivalently, the explicit form
+`kuzushi run android-apk:scan --input '{"apk":"./me.lyft.android-2026.42.apk"}'`).
+
+Both forms validate the APK, decompile it, and run every
+android-apk:* scanner plus the sast-handoff bridge in one pass, with a
+per-stage breakdown.
 
 Output is shaped like:
 
