@@ -81,6 +81,36 @@ pub(in crate::modules) fn pwn_module() -> BuiltinModule {
                     model_option(),
                 ],
             ),
+            tool_with_options(
+                "pwn:menu-probe",
+                "Spawn a menu-driven challenge binary and probe each numbered choice to capture prompts, response shape, and refcount/UAF hints.",
+                vec![
+                    opt("binary", OptionType::Path, "Binary or loader+binary path to probe.").required(),
+                    opt("argv", OptionType::StringList, "Additional argv values for the loader/binary."),
+                    opt("env", OptionType::Json, "Environment object for the process (e.g. {\"LD_LIBRARY_PATH\":\".\"})."),
+                    opt("maxChoices", OptionType::Int, "Upper bound on menu choices to probe.").aliases(&["max_choices"]).default(json!(10)),
+                    opt("timeoutMs", OptionType::Int, "Per-probe wall-clock timeout in milliseconds.").aliases(&["timeout_ms"]).default(json!(400)),
+                ],
+            ),
+            tool_with_options(
+                "pwn:exploit-run",
+                "Execute a pwntools-style exploit script under a wall-clock timeout and capture stdout/stderr plus any LEAK/FLAG markers.",
+                vec![
+                    opt("script", OptionType::Path, "Python exploit script to invoke.").required(),
+                    opt("python", OptionType::String, "Interpreter to invoke (default: python3).").default(json!("python3")),
+                    opt("argv", OptionType::StringList, "Additional argv passed to the script."),
+                    opt("env", OptionType::Json, "Environment object for the script invocation."),
+                    opt("workdir", OptionType::Path, "Working directory (default: parent of script)."),
+                    opt("timeoutMs", OptionType::Int, "Wall-clock timeout in milliseconds.").aliases(&["timeout_ms"]).default(json!(15000)),
+                ],
+            ),
+            tool_with_options(
+                "pwn:heap-uaf-scan",
+                "Scan a binary for refcount-based free patterns and other heap UAF indicators (atomic dec, free without alive-flag clear, tcache-sized allocations).",
+                vec![
+                    opt("binary", OptionType::Path, "Binary to scan.").required(),
+                ],
+            ),
         ],
         vec![],
     )
@@ -99,6 +129,9 @@ pub(in crate::modules) fn dispatch_pwn_tool(
         "pwn:calibrate-local" => Some(calibrate_local(input, ctx)),
         "pwn:run-candidates" => Some(run_candidates(input, ctx)),
         "pwn:auto-solve" => Some(auto_solve(input, ctx, runtime)),
+        "pwn:menu-probe" => Some(menu_probe(input, ctx)),
+        "pwn:exploit-run" => Some(exploit_run(input, ctx)),
+        "pwn:heap-uaf-scan" => Some(heap_uaf_scan(input, ctx)),
         _ => None,
     }
 }
@@ -472,6 +505,374 @@ fn run_candidates(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value
         "attempts": attempts,
         "output": "pwn candidate attempts recorded; execute irreversible remote operations only with explicit operator review",
     }))
+}
+
+fn menu_probe(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let binary = required_file(input, "binary")?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool-progress",
+                "menu-probe",
+                format!("probe {}", binary.display()),
+            )
+            .emit();
+    }
+    let max_choices = input
+        .get("maxChoices")
+        .and_then(Value::as_i64)
+        .unwrap_or(10)
+        .clamp(1, 32) as u32;
+    let timeout = Duration::from_millis(
+        input
+            .get("timeoutMs")
+            .and_then(Value::as_i64)
+            .unwrap_or(400)
+            .clamp(50, 5_000) as u64,
+    );
+    let argv = string_list(input.get("argv"));
+    let mut probes = Vec::new();
+    let initial = run_menu_probe_step(&binary, &argv, input.get("env"), b"", timeout)?;
+    let prompts = extract_menu_prompts(&initial);
+    for choice in 1..=max_choices {
+        let script = format!("{choice}\n\n\n\n");
+        let observation = run_menu_probe_step(
+            &binary,
+            &argv,
+            input.get("env"),
+            script.as_bytes(),
+            timeout,
+        )?;
+        probes.push(json!({
+            "choice": choice,
+            "stdoutExcerpt": observation.chars().take(800).collect::<String>(),
+            "looksValid": !observation.contains("[-] Invalid choice")
+                && !observation.contains("Invalid choice"),
+        }));
+    }
+    Ok(json!({
+        "binary": binary.display().to_string(),
+        "initialOutput": initial.chars().take(1600).collect::<String>(),
+        "menuPrompts": prompts,
+        "probes": probes,
+        "output": format!(
+            "menu probe finished -- {} prompts captured, {} choices probed",
+            extract_menu_prompts(&initial).len(),
+            probes.len()
+        ),
+    }))
+}
+
+fn run_menu_probe_step(
+    binary: &Path,
+    argv: &[String],
+    env_value: Option<&Value>,
+    stdin_bytes: &[u8],
+    timeout: Duration,
+) -> Result<String> {
+    let mut command = Command::new(binary);
+    if let Some(parent) = binary.parent() {
+        command.current_dir(parent);
+    }
+    command
+        .args(argv)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(env) = env_value.and_then(Value::as_object) {
+        for (key, value) in env {
+            if let Some(value) = value.as_str() {
+                command.env(key, value);
+            }
+        }
+    }
+    let mut child = command
+        .spawn()
+        .with_context(|| format!("could not spawn {}", binary.display()))?;
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin.write_all(stdin_bytes).ok();
+        let _ = stdin.write_all(b"8\n");
+    }
+    let output = wait_or_kill(child, timeout)?;
+    let mut text = String::from_utf8_lossy(&output.stdout).into_owned();
+    text.push_str(&String::from_utf8_lossy(&output.stderr));
+    Ok(text)
+}
+
+fn extract_menu_prompts(output: &str) -> Vec<String> {
+    let mut prompts = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for line in output.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let starts_numeric = trimmed
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_ascii_digit())
+            && trimmed.contains('.');
+        if starts_numeric && seen.insert(trimmed.to_string()) {
+            prompts.push(trimmed.to_string());
+        }
+    }
+    prompts
+}
+
+fn exploit_run(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let script = required_file(input, "script")?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool-progress",
+                "exploit-run",
+                format!("run exploit {}", script.display()),
+            )
+            .emit();
+    }
+    let python = input
+        .get("python")
+        .and_then(Value::as_str)
+        .unwrap_or("python3")
+        .to_string();
+    let argv = string_list(input.get("argv"));
+    let timeout = Duration::from_millis(
+        input
+            .get("timeoutMs")
+            .and_then(Value::as_i64)
+            .unwrap_or(15_000)
+            .clamp(500, 600_000) as u64,
+    );
+    let mut command = Command::new(&python);
+    let workdir = input
+        .get("workdir")
+        .and_then(Value::as_str)
+        .map(PathBuf::from)
+        .or_else(|| script.parent().map(Path::to_path_buf));
+    if let Some(dir) = workdir.as_ref() {
+        command.current_dir(dir);
+    }
+    command
+        .arg(&script)
+        .args(&argv)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    if let Some(env) = input.get("env").and_then(Value::as_object) {
+        for (key, value) in env {
+            if let Some(value) = value.as_str() {
+                command.env(key, value);
+            }
+        }
+    }
+    let child = command
+        .spawn()
+        .with_context(|| format!("could not spawn {} {}", python, script.display()))?;
+    let output = wait_or_kill(child, timeout)?;
+    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let combined = format!("{stdout}\n{stderr}");
+    let leaks = collect_leak_markers(&combined);
+    let flag = extract_flag_marker(&combined);
+    Ok(json!({
+        "script": script.display().to_string(),
+        "exitStatus": format!("{}", output.status),
+        "stdoutExcerpt": stdout.chars().take(4000).collect::<String>(),
+        "stderrExcerpt": stderr.chars().take(2000).collect::<String>(),
+        "leaks": leaks,
+        "flag": flag,
+        "output": format!(
+            "exploit-run completed status={} leaks={} flag={}",
+            output.status,
+            leaks.len(),
+            flag.is_some()
+        ),
+    }))
+}
+
+fn collect_leak_markers(text: &str) -> Vec<Value> {
+    let mut leaks = Vec::new();
+    for line in text.lines() {
+        let lower = line.to_ascii_lowercase();
+        if lower.contains("leak") || lower.contains("base =") || lower.contains("base=") {
+            if let Some(hex_start) = line.find("0x") {
+                let rest = &line[hex_start..];
+                let hex_end = rest
+                    .char_indices()
+                    .skip(2)
+                    .find(|(_, c)| !c.is_ascii_hexdigit())
+                    .map(|(idx, _)| idx)
+                    .unwrap_or(rest.len());
+                let value = &rest[..hex_end];
+                leaks.push(json!({
+                    "line": line.trim(),
+                    "value": value,
+                }));
+            }
+        }
+    }
+    leaks
+}
+
+fn extract_flag_marker(text: &str) -> Option<String> {
+    for line in text.lines() {
+        if let Some(idx) = line.find("HTB{") {
+            let rest = &line[idx..];
+            if let Some(end) = rest.find('}') {
+                return Some(rest[..=end].to_string());
+            }
+        }
+        if let Some(idx) = line.find("flag{") {
+            let rest = &line[idx..];
+            if let Some(end) = rest.find('}') {
+                return Some(rest[..=end].to_string());
+            }
+        }
+    }
+    None
+}
+
+fn heap_uaf_scan(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let binary = required_file(input, "binary")?;
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "tool-progress",
+                "heap-uaf-scan",
+                format!("uaf scan {}", binary.display()),
+            )
+            .emit();
+    }
+    let mut disasm = Command::new("objdump");
+    disasm
+        .arg("-d")
+        .arg("-M")
+        .arg("intel")
+        .arg(binary.as_os_str())
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let output = disasm
+        .output()
+        .context("could not invoke objdump for heap UAF scan")?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "objdump exited with {}: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let text = String::from_utf8_lossy(&output.stdout).into_owned();
+    let mut summary = HeapUafSummary::default();
+    let lines: Vec<&str> = text.lines().collect();
+    let mut window_after_free: Option<usize> = None;
+    for (idx, line) in lines.iter().enumerate() {
+        let lower = line.to_ascii_lowercase();
+        if lower.contains("call") && lower.contains("malloc@plt") {
+            summary.malloc_call_sites += 1;
+        }
+        if lower.contains("call") && lower.contains("free@plt") {
+            summary.free_call_sites += 1;
+            window_after_free = Some(idx);
+        }
+        if lower.contains("lock") && (lower.contains("dec") || lower.contains("sub")) {
+            summary.atomic_decrement_sites += 1;
+        }
+        if lower.contains("pthread_create@plt") || lower.contains("pthread_join@plt") {
+            summary.uses_pthreads = true;
+        }
+        if lower.contains("pthread_mutex_lock@plt") {
+            summary.uses_pthread_mutex = true;
+        }
+        if lower.contains("xchg") || (lower.contains("lock") && lower.contains("add")) {
+            summary.atomic_increment_sites += 1;
+        }
+        if let Some(call_idx) = window_after_free {
+            if idx - call_idx <= 8 && line.contains("mov") && line.contains("[r") {
+                let last_token = line.split_whitespace().last().unwrap_or("");
+                if last_token.contains("0") && !last_token.contains("rax") {
+                    summary.post_free_clears += 1;
+                    window_after_free = None;
+                }
+            }
+            if idx - call_idx > 12 {
+                window_after_free = None;
+            }
+        }
+    }
+    summary.likely_refcount_pattern =
+        summary.atomic_decrement_sites > 0 && summary.free_call_sites > 0;
+    summary.likely_uaf_pattern =
+        summary.free_call_sites > 0 && summary.post_free_clears < summary.free_call_sites;
+    summary.likely_threaded = summary.uses_pthreads;
+    let exploitation_hints = suggest_uaf_hints(&summary);
+    Ok(json!({
+        "binary": binary.display().to_string(),
+        "summary": summary,
+        "exploitationHints": exploitation_hints,
+        "output": format!(
+            "heap UAF scan: refcount={} uaf={} threaded={}",
+            summary.likely_refcount_pattern,
+            summary.likely_uaf_pattern,
+            summary.likely_threaded
+        ),
+    }))
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct HeapUafSummary {
+    malloc_call_sites: usize,
+    free_call_sites: usize,
+    atomic_decrement_sites: usize,
+    atomic_increment_sites: usize,
+    post_free_clears: usize,
+    uses_pthreads: bool,
+    uses_pthread_mutex: bool,
+    likely_refcount_pattern: bool,
+    likely_uaf_pattern: bool,
+    likely_threaded: bool,
+}
+
+fn suggest_uaf_hints(summary: &HeapUafSummary) -> Vec<String> {
+    let mut hints = Vec::new();
+    if summary.likely_refcount_pattern && summary.likely_uaf_pattern {
+        hints.push(
+            "Refcount-based free without pointer/alive clear is the canonical UAF pattern -- delete leaves slot reusable for View/Edit primitives.".to_string(),
+        );
+    }
+    if summary.likely_threaded {
+        hints.push(
+            "Threaded program: race conditions between worker and main may amplify the UAF (e.g. queued Process op double-frees once refcount reaches 0)."
+                .to_string(),
+        );
+    }
+    if summary.malloc_call_sites > 0 && summary.free_call_sites > 0 {
+        hints.push(
+            "Standard tcache poisoning workflow: free two chunks of the same size, leak fd via UAF view, edit fd to redirect malloc to a controlled address."
+                .to_string(),
+        );
+    }
+    if summary.atomic_decrement_sites > 1 {
+        hints.push(
+            "Multiple atomic decrements suggest refcount manipulation -- consider triggering Process+Delete races for double-free or extra refcount drops."
+                .to_string(),
+        );
+    }
+    hints
+}
+
+fn string_list(value: Option<&Value>) -> Vec<String> {
+    value
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default()
 }
 
 fn auto_solve(
@@ -1671,6 +2072,55 @@ mod tests {
         assert!(names.contains(&"pwn:calibrate-local"));
         assert!(names.contains(&"pwn:run-candidates"));
         assert!(names.contains(&"pwn:auto-solve"));
+        assert!(names.contains(&"pwn:menu-probe"));
+        assert!(names.contains(&"pwn:exploit-run"));
+        assert!(names.contains(&"pwn:heap-uaf-scan"));
+    }
+
+    #[test]
+    fn collect_leak_markers_extracts_hex_after_keyword() {
+        let text = "[+] heap_base = 0x55557910e000\n[*] libc base = 0x7f8019200000\n";
+        let leaks = collect_leak_markers(text);
+        assert_eq!(leaks.len(), 2);
+        assert_eq!(leaks[0]["value"], "0x55557910e000");
+        assert_eq!(leaks[1]["value"], "0x7f8019200000");
+    }
+
+    #[test]
+    fn extract_flag_marker_recognises_htb_braces() {
+        let text = "leaked stack\nFlag: HTB{tcache_uaf_for_the_win}\nbye";
+        assert_eq!(
+            extract_flag_marker(text).as_deref(),
+            Some("HTB{tcache_uaf_for_the_win}")
+        );
+    }
+
+    #[test]
+    fn extract_menu_prompts_picks_numbered_lines() {
+        let menu = "Welcome!\n1. Create task\n2. Edit task\n   3. View task\n8. Exit\n";
+        let prompts = extract_menu_prompts(menu);
+        assert!(prompts.iter().any(|line| line.contains("1. Create task")));
+        assert!(prompts.iter().any(|line| line.contains("3. View task")));
+        assert!(prompts.iter().any(|line| line.contains("8. Exit")));
+    }
+
+    #[test]
+    fn heap_uaf_summary_flags_refcount_pattern() {
+        let summary = HeapUafSummary {
+            malloc_call_sites: 2,
+            free_call_sites: 1,
+            atomic_decrement_sites: 1,
+            atomic_increment_sites: 1,
+            post_free_clears: 0,
+            uses_pthreads: true,
+            uses_pthread_mutex: true,
+            likely_refcount_pattern: true,
+            likely_uaf_pattern: true,
+            likely_threaded: true,
+        };
+        let hints = suggest_uaf_hints(&summary);
+        assert!(hints.iter().any(|h| h.to_lowercase().contains("refcount")));
+        assert!(hints.iter().any(|h| h.contains("tcache")));
     }
 
     #[test]
