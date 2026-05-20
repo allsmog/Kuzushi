@@ -36,11 +36,9 @@ quick-xml = "0.36"
 # dependency via tree-sitter; declare it explicitly so the discovery
 # crate isn't relying on an indirect feature.
 regex = "1"
-# quick-xml parses AndroidManifest.xml, network_security_config.xml,
-# and file_paths.xml during android-apk scanning. Streaming pull-style
-# parser keeps the manifest scanners side-effect-free and easy to
-# unit-test on inline fixtures.
-quick-xml = "0.36"
+# quick-xml is already declared above (used by Burp/nmap XML imports
+# and re-used by the android-apk scanners for AndroidManifest.xml,
+# network_security_config.xml, and file_paths.xml).
 # goblin parses the ELF .so files shipped inside an APK's lib/<abi>/
 # directories so android-apk:native-libs can enumerate dynamic imports
 # (system/exec/dlopen), exports (JNI Java_* methods), and the
