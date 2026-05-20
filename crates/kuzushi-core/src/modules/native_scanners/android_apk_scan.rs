@@ -237,28 +237,25 @@ fn aggregate_totals(stages: &[StageOutcome]) -> PipelineTotals {
         if !stage_ok(stage) {
             totals.failures += 1;
         }
-        totals.findings += stage_finding_count(&stage.value);
+        totals.findings += stage_findings_array(&stage.value).len();
     }
     totals
 }
 
-fn stage_finding_count(value: &Value) -> usize {
-    value
-        .get("data")
-        .and_then(|d| d.get("findings"))
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0)
-}
-
 fn stage_to_json(stage: &StageOutcome) -> Value {
+    let stage_findings = stage_findings_array(&stage.value);
     json!({
         "name": stage.name,
         "ok": stage_ok(stage),
         "summary": stage.value.get("summary").cloned().unwrap_or(Value::Null),
-        "findings": stage_finding_count(&stage.value),
+        "findings": stage_findings.len(),
+        "findingItems": stage_findings,
         "errors": stage.value.get("errors").cloned().unwrap_or(json!([])),
     })
+}
+
+fn stage_findings_array(value: &Value) -> Vec<Value> {
+    value.pointer("/data/findings").and_then(Value::as_array).cloned().unwrap_or_default()
 }
 
 #[cfg(test)]
