@@ -1,0 +1,66 @@
+rules:
+  - id: android-deeplink-uri-into-webview
+    message: |
+      Deep-link URI from getIntent().getData() loaded directly into a
+      WebView (CWE-79, CWE-601). Attacker-controlled URL navigates the
+      WebView to anything they want — phishing, JS execution, or local
+      file read if other WebView mitigations are off. Validate the
+      scheme and host against an allowlist before loadUrl.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-601
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: |
+              Uri $U = getIntent().getData();
+              ...
+              $WV.loadUrl($U.toString());
+          - pattern: |
+              Uri $U = getIntent().getData();
+              ...
+              $WV.loadUrl($U.$M());
+
+  - id: android-deeplink-extra-into-reflection
+    message: |
+      Intent extra used as a class / method name for reflection
+      (CWE-470). Attacker-controlled extras let any installed app pick
+      which internal class to load.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-470
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: |
+              String $NAME = getIntent().getStringExtra($KEY);
+              ...
+              Class.forName($NAME);
+          - pattern: |
+              String $NAME = getIntent().getStringExtra($KEY);
+              ...
+              $CLS.getMethod($NAME, ...);
+
+  - id: android-deeplink-redirect-to-extra-intent
+    message: |
+      An incoming Intent's extras contain another Intent that is then
+      started — CWE-940 intent redirection. Lyft-class apps with auth
+      flows are a classic target: the launcher entrypoint receives a
+      "next intent" and fires it without checking the target component.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-940
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: |
+              Intent $NEXT = ($T) getIntent().getParcelableExtra($KEY);
+              ...
+              startActivity($NEXT);
+          - pattern: |
+              Intent $NEXT = ($T) getIntent().getParcelableExtra($KEY);
+              ...
+              startActivityForResult($NEXT, ...);

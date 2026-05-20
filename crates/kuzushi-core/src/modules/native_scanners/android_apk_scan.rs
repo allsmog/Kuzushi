@@ -38,7 +38,7 @@ struct ScanPlan {
     apk_input: Value,
     workspace_input: Value,
     skip_native: bool,
-    skip_webview: bool,
+    skip_code: bool,
     skip_hybrid: bool,
 }
 
@@ -68,7 +68,7 @@ impl ScanPlan {
             apk_input,
             workspace_input,
             skip_native: read_skip_flag(input, "skipNative"),
-            skip_webview: read_skip_flag(input, "skipWebview"),
+            skip_code: read_skip_flag(input, "skipCode") || read_skip_flag(input, "skipWebview"),
             skip_hybrid: read_skip_flag(input, "skipHybrid"),
         })
     }
@@ -99,8 +99,8 @@ fn run_scan_stages(plan: &ScanPlan, ctx: &ToolExecutionContext<'_>) -> Vec<Stage
         "fileprovider-scan",
         run_fileprovider_scan(plan.workspace_input.clone(), ctx),
     );
-    if !plan.skip_webview {
-        push_stage(&mut stages, "webview-scan", run_webview_scan(plan.workspace_input.clone(), ctx));
+    if !plan.skip_code {
+        push_stage(&mut stages, "code-scan", run_code_scan(plan.workspace_input.clone(), ctx));
     }
     if !plan.skip_native {
         push_stage(&mut stages, "native-libs", run_native_libs_scan(plan.workspace_input.clone(), ctx));
@@ -282,7 +282,7 @@ mod tests {
         let stages = vec![
             stage("prepare", true, 0),
             stage("manifest-scan", true, 5),
-            stage("webview-scan", false, 0),
+            stage("code-scan", false, 0),
             stage("native-libs", true, 2),
         ];
         let totals = aggregate_totals(&stages);
@@ -313,13 +313,21 @@ mod tests {
             "apkPath": "./app.apk",
             "decompiler": "jadx",
             "skipNative": true,
-            "skipWebview": true,
+            "skipCode": true,
         });
         let plan = ScanPlan::from_input(&input, &target).unwrap();
         assert_eq!(plan.apk_input.get("apk"), Some(&Value::String("./app.apk".into())));
         assert_eq!(plan.apk_input.get("decompiler"), Some(&Value::String("jadx".into())));
         assert!(plan.skip_native);
-        assert!(plan.skip_webview);
+        assert!(plan.skip_code);
         assert!(!plan.skip_hybrid);
+    }
+
+    #[test]
+    fn plan_skip_webview_alias_still_works() {
+        let target = std::path::PathBuf::from("/tmp/ws");
+        let input = json!({"apk": "./app.apk", "skipWebview": true});
+        let plan = ScanPlan::from_input(&input, &target).unwrap();
+        assert!(plan.skip_code);
     }
 }

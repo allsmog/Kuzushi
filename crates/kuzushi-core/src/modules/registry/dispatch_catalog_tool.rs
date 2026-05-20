@@ -104,7 +104,7 @@ pub(in crate::modules) fn dispatch_native_security_tool(
         | "android-apk:manifest-scan"
         | "android-apk:network-security-config"
         | "android-apk:fileprovider-scan"
-        | "android-apk:webview-scan"
+        | "android-apk:code-scan"
         | "android-apk:sast-handoff"
         | "android-apk:native-libs"
         | "android-apk:hybrid-detect"

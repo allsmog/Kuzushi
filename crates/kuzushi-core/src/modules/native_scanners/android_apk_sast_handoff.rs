@@ -98,7 +98,7 @@ fn build_next_steps(layout: &HandoffLayout, scan_target: &Path) -> Vec<String> {
         steps.push(format!("kuzushi run exploit-chain:scan --input '{{\"target\":\"{}\"}}'", scan_target.display()));
         steps.push(format!("kuzushi run agentic-sast:scan --input '{{\"target\":\"{}\"}}'", scan_target.display()));
         steps.push(format!("kuzushi run taint-iris-next:hunt --input '{{\"target\":\"{}\"}}'", scan_target.display()));
-        steps.push("kuzushi run android-apk:webview-scan --input '{}'".to_string());
+        steps.push("kuzushi run android-apk:code-scan --input '{}'".to_string());
     }
     if let Some(raw) = layout.raw_root.as_ref() {
         steps.push(format!("kuzushi run secret-scan:scan --input '{{\"target\":\"{}\"}}'", raw.display()));
@@ -182,6 +182,6 @@ mod tests {
         assert!(steps.iter().any(|s| s.contains("semgrep:scan")));
         assert!(steps.iter().any(|s| s.contains("taint-iris-next:hunt")));
         assert!(steps.iter().any(|s| s.contains("secret-scan:scan")));
-        assert!(steps.iter().any(|s| s.contains("android-apk:webview-scan")));
+        assert!(steps.iter().any(|s| s.contains("android-apk:code-scan")));
     }
 }

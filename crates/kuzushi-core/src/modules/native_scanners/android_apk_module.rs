@@ -12,7 +12,7 @@ pub(in crate::modules) fn android_apk_module() -> BuiltinModule {
             manifest_scan_tool(),
             network_security_config_tool(),
             fileprovider_scan_tool(),
-            webview_scan_tool(),
+            code_scan_tool(),
             sast_handoff_tool(),
             native_libs_tool(),
             hybrid_detect_tool(),
@@ -48,10 +48,11 @@ fn scan_tool() -> ToolDescriptor {
             decompiler_option(),
             target_option(),
             opt(
-                "skipWebview",
+                "skipCode",
                 OptionType::Bool,
-                "Skip the bundled Semgrep webview rule pack (saves runtime if semgrep isn't installed).",
+                "Skip the bundled Semgrep code-scan rule pack (saves runtime if semgrep isn't installed). Alias: skipWebview.",
             )
+            .aliases(&["skipWebview"])
             .advanced(),
             opt(
                 "skipNative",
@@ -86,10 +87,10 @@ fn hybrid_detect_tool() -> ToolDescriptor {
     )
 }
 
-fn webview_scan_tool() -> ToolDescriptor {
+fn code_scan_tool() -> ToolDescriptor {
     tool_with_options(
-        "android-apk:webview-scan",
-        "Run a bundled semgrep rule pack tuned for Android WebView/JS-bridge, intent redirection, mutable PendingIntent, crypto misuse, PII logging, and clipboard credential exposure against the decompiled jadx source tree.",
+        "android-apk:code-scan",
+        "Run the bundled Android Semgrep rule pack against the decompiled jadx source tree. Covers WebView/JS-bridge misuse, intent redirection, mutable PendingIntent, ECB/MD5/SHA-1/static-IV crypto misuse, PII logging, clipboard credential exposure, MODE_WORLD_* file modes, plaintext SharedPreferences, HostnameVerifier/X509TrustManager all-accept patterns, SQL injection via rawQuery/execSQL string concat, deeplink URI loaded into WebView, reflection on Intent extras, intent redirection through extras, and Keystore-misuse patterns (RSA PKCS1, no user auth, hardcoded SecretKeySpec).",
         vec![
             target_option(),
             opt(
