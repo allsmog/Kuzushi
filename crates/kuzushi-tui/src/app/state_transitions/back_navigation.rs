@@ -56,6 +56,7 @@ fn returns_to_catalog(view: &ShellView) -> bool {
         ShellView::Findings
             | ShellView::Help
             | ShellView::Quickstart
+            | ShellView::Logs
             | ShellView::Config
             | ShellView::Tools
             | ShellView::Runs

@@ -88,6 +88,7 @@ impl ShellApp {
             modules_scroll: 0,
             history_scroll: 0,
             kb_scroll: 0,
+            logs_scroll: 0,
             last_char_at: None,
             scroll_offset: 0,
             spinner_phase: 0,

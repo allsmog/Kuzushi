@@ -30,6 +30,28 @@ fn status_footer_model_surfaces_ctrl_c_warning() {
 }
 
 #[test]
+fn status_footer_model_marks_cwd_target_with_warning_chip() {
+    // M1 §1.3: when the active target equals the process cwd the footer
+    // shows `target:cwd (.)` so the operator knows scope is implicit.
+    let tmp = tempfile::tempdir().unwrap();
+    let original_cwd = std::env::current_dir().ok();
+    std::env::set_current_dir(tmp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
+
+    let model = status_footer_model(&app);
+
+    if let Some(cwd) = original_cwd {
+        let _ = std::env::set_current_dir(cwd);
+    }
+    assert!(
+        model.left_segments.iter().any(|s| s == "target:cwd (.)"),
+        "expected target:cwd (.) chip, got {:?}",
+        model.left_segments
+    );
+}
+
+#[test]
 fn status_footer_model_prefers_active_scan_status() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.config.model = Some("openai:gpt-5.2".to_string());

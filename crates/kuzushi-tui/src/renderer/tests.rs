@@ -200,7 +200,10 @@ fn quickstart_follows_doctor_context_scan_findings_report_path() {
         "findings / open F-0001",
         "proof state",
         "workspace export",
-        "kuzushi pr-comment",
+        "pr-comment",
+        // M1 §1.2 additions: explicit scope + observability steps.
+        "target <path>",
+        "activity / logs",
     ] {
         assert!(
             rendered.contains(expected),

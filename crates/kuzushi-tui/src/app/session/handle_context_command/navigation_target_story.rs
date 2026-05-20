@@ -13,6 +13,14 @@ impl ShellApp {
         );
     }
 
+    /// Switch to the full-screen transcript view (M1 §1.1). The embedded
+    /// 2-row transcript strip only shows the latest lines; this view paints
+    /// the entire buffer and is scrollable via `j`/`k`/`g`/`G`/`PgUp`/`PgDn`.
+    pub fn show_logs(&mut self) {
+        self.shell_view = ShellView::Logs;
+        self.scroll_offset = u16::MAX; // start tailing
+    }
+
     pub fn handle_target_command(&mut self, raw: Option<&str>) {
         let Some(raw) = raw.map(str::trim).filter(|raw| !raw.is_empty()) else {
             let current = self

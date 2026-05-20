@@ -120,10 +120,26 @@ fn model_footer_segment(app: &ShellApp) -> String {
 }
 
 fn target_footer_segment(app: &ShellApp) -> String {
-    app.target
-        .as_ref()
-        .map(|path| compact_target_path(&path.display().to_string()))
-        .unwrap_or_else(|| "target:none".to_string())
+    let Some(path) = app.target.as_ref() else {
+        return "target:none".to_string();
+    };
+    if target_is_cwd(path) {
+        return "target:cwd (.)".to_string();
+    }
+    compact_target_path(&path.display().to_string())
+}
+
+fn target_is_cwd(path: &std::path::Path) -> bool {
+    let Ok(cwd) = std::env::current_dir() else {
+        return false;
+    };
+    let Ok(cwd_canonical) = std::fs::canonicalize(&cwd) else {
+        return false;
+    };
+    let Ok(target_canonical) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    cwd_canonical == target_canonical
 }
 
 fn context_footer_segment(app: &ShellApp) -> String {

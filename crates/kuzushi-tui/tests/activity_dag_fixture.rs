@@ -132,7 +132,11 @@ fn parent_step_indents_child_event_in_feed() {
 #[test]
 fn auto_open_flips_view_on_tool_start() {
     use kuzushi_tui::{ShellApp, ShellCommand, ShellView};
+    let tmp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
+    // M1 §1.3: target must be set explicitly — dispatch no longer falls back
+    // to cwd silently. Use a tempdir so the workspace resolves cleanly.
+    app.target = Some(tmp.path().to_path_buf());
     app.shell_view = ShellView::Home;
     assert!(app.auto_open_activity, "default should be on");
     assert!(matches!(app.shell_view, ShellView::Home));
@@ -155,7 +159,9 @@ fn auto_open_flips_view_on_tool_start() {
 #[test]
 fn auto_open_disabled_does_not_open_activity() {
     use kuzushi_tui::{ShellApp, ShellCommand, ShellView};
+    let tmp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
     app.auto_open_activity = false;
 
     app.handle_command(ShellCommand::RunTool {
@@ -286,7 +292,10 @@ fn seed_from_registry_pre_populates_dag_pane() {
 #[test]
 fn cancel_hotkey_in_activity_emits_visible_signal() {
     use kuzushi_tui::{ShellApp, ShellCommand, ShellView};
+    let tmp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
+    // M1 §1.3: dispatch requires an explicit target.
+    app.target = Some(tmp.path().to_path_buf());
     app.handle_command(ShellCommand::RunTool {
         tool: Some("findings:list".to_string()),
         input: None,

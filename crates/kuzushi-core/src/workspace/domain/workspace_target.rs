@@ -43,10 +43,13 @@ impl WorkspaceTarget {
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
 pub enum WorkspaceExportFormat {
     Json,
     Jsonl,
+    Sarif,
+    Csv,
+    MarkdownBundle,
 }
 
 impl WorkspaceExportFormat {
@@ -54,18 +57,29 @@ impl WorkspaceExportFormat {
         match value.trim().to_ascii_lowercase().as_str() {
             "json" => Ok(Self::Json),
             "jsonl" | "ndjson" => Ok(Self::Jsonl),
+            "sarif" => Ok(Self::Sarif),
+            "csv" => Ok(Self::Csv),
+            "markdown-bundle" | "markdown_bundle" | "bundle" => Ok(Self::MarkdownBundle),
             other => anyhow::bail!(
-                "unsupported workspace findings export format {other:?}. Supported formats: json, jsonl"
+                "unsupported workspace findings export format {other:?}. \
+                 Supported formats: json, jsonl, sarif, csv, markdown-bundle"
             ),
         }
     }
 
     pub fn from_output_path(path: &Path) -> Result<Self> {
+        if path.to_string_lossy().ends_with(".sarif.json") {
+            return Ok(Self::Sarif);
+        }
         match path.extension().and_then(|extension| extension.to_str()) {
             Some("json") | None => Ok(Self::Json),
             Some("jsonl") | Some("ndjson") => Ok(Self::Jsonl),
+            Some("sarif") => Ok(Self::Sarif),
+            Some("csv") => Ok(Self::Csv),
             Some(other) => anyhow::bail!(
-                "unsupported workspace findings export extension .{other}. Supported extensions: .json, .jsonl"
+                "unsupported workspace findings export extension .{other}. \
+                 Supported extensions: .json, .jsonl, .sarif, .sarif.json, .csv. \
+                 Pass format=markdown-bundle explicitly for directory output."
             ),
         }
     }
@@ -74,6 +88,9 @@ impl WorkspaceExportFormat {
         match self {
             Self::Json => "json",
             Self::Jsonl => "jsonl",
+            Self::Sarif => "sarif",
+            Self::Csv => "csv",
+            Self::MarkdownBundle => "markdown-bundle",
         }
     }
 }

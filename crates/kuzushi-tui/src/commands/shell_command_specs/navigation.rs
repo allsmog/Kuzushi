@@ -49,4 +49,10 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         category: ShellCommandCategory::Navigation,
         description: "first-run guided setup",
     },
+    ShellCommandSpec {
+        command: "logs",
+        aliases: &["/logs", "log", "transcript", "/transcript"],
+        category: ShellCommandCategory::Navigation,
+        description: "scrollable full-screen transcript",
+    },
 ];

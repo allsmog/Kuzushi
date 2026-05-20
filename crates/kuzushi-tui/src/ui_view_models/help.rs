@@ -163,28 +163,47 @@ fn help_alias_text(spec: &ShellCommandSpec) -> String {
 }
 
 fn quickstart_steps(app: &ShellApp) -> Vec<QuickstartStep> {
+    // M1 §1.2: the Quickstart paints full-screen now (no embedded transcript
+    // chrome) so it can carry the complete bug-bounty operator path —
+    // scope, scan, triage, export, observe.
     vec![
         QuickstartStep {
             number: "1",
-            text: "doctor                    CLI preflight: kuzushi doctor",
+            text: "doctor                     CLI preflight: kuzushi doctor",
         },
         QuickstartStep {
             number: "2",
-            text: "context build              write .kuzushi/context-snapshot.json",
+            text: quickstart_target_step(app),
         },
         QuickstartStep {
             number: "3",
-            text: quickstart_scan_step(app),
+            text: "context build              write .kuzushi/context-snapshot.json",
         },
         QuickstartStep {
             number: "4",
-            text: "findings / open F-0001     inspect evidence and proof state",
+            text: quickstart_scan_step(app),
         },
         QuickstartStep {
             number: "5",
-            text: "report output              workspace export; kuzushi pr-comment",
+            text: "findings / open F-0001     inspect evidence and proof state",
+        },
+        QuickstartStep {
+            number: "6",
+            text: "workspace export findings out.sarif   SARIF / CSV / pr-comment bundle",
+        },
+        QuickstartStep {
+            number: "7",
+            text: "activity / logs            live DAG feed; logs view = full transcript",
         },
     ]
+}
+
+fn quickstart_target_step(app: &ShellApp) -> &'static str {
+    if app.target.is_some() {
+        "target (set)               current target ready; type `target <path>` to switch"
+    } else {
+        "target <path>              set bug-bounty scope explicitly (`target .` = cwd)"
+    }
 }
 
 fn quickstart_scan_step(app: &ShellApp) -> &'static str {

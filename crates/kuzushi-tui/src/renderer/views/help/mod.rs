@@ -1,6 +1,8 @@
 use super::*;
 pub(in crate::renderer) use super::*;
-use crate::ui_view_models::{help_model, quickstart_model, HelpCommandRow};
+use crate::ui_view_models::{
+    help_model, quickstart_model, transcript_model_from_log_index, HelpCommandRow,
+};
 
 const HELP_COMMAND_COLUMN: usize = 0;
 const HELP_ALIASES_COLUMN: usize = 1;
@@ -80,6 +82,31 @@ pub(crate) fn quickstart_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
         "Type `help` for the full command reference, or `back` to return.",
         area.width as usize,
     )));
+    lines
+}
+
+/// Full-screen scrollable transcript view (M1 §1.1). Unlike the embedded
+/// 2-row transcript strip at the bottom of every other view, this paints
+/// the entire log buffer; `j`/`k`/`g`/`G`/`PgUp`/`PgDn` page through it.
+pub(crate) fn logs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    let mut lines = context_strip(app, area);
+    lines.push(blank());
+    lines.push(divider("LOGS", area.width));
+    let total = app.log.len();
+    let hint = format!(
+        "{total} log lines · j/k scroll · g/G jump · PgUp/PgDn page · back to return"
+    );
+    lines.push(muted(&fit(&hint, area.width as usize)));
+    lines.push(blank());
+    let model = transcript_model_from_log_index(app, 0);
+    for row in model.rows {
+        lines.push(transcript_line_dated(
+            &row.prefix,
+            &row.body,
+            row.continuation,
+            row.time_secs,
+        ));
+    }
     lines
 }
 
