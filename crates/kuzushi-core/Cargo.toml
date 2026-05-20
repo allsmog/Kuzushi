@@ -23,6 +23,11 @@ libc.workspace = true
 # dependency via tree-sitter; declare it explicitly so the discovery
 # crate isn't relying on an indirect feature.
 regex = "1"
+# quick-xml parses AndroidManifest.xml, network_security_config.xml,
+# and file_paths.xml during android-apk scanning. Streaming pull-style
+# parser keeps the manifest scanners side-effect-free and easy to
+# unit-test on inline fixtures.
+quick-xml = "0.36"
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true

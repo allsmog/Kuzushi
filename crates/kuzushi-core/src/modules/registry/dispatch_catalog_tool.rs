@@ -100,7 +100,10 @@ pub(in crate::modules) fn dispatch_native_security_tool(
         | "iac-scan:scan"
         | "exploit-chain:scan"
         | "android-apk:check-env"
-        | "android-apk:prepare" => Some(native_scanners::execute_tool(
+        | "android-apk:prepare"
+        | "android-apk:manifest-scan"
+        | "android-apk:network-security-config"
+        | "android-apk:fileprovider-scan" => Some(native_scanners::execute_tool(
             name,
             input.clone(),
             ctx,

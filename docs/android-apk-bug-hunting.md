@@ -18,15 +18,31 @@ tree of source code. The `android-apk` module bridges that gap:
    are available.
 2. **`android-apk:prepare`** validates the APK, unzips raw resources, and
    decompiles to Java source under `<workspace>/android-decompiled/`.
-3. The existing scanners (`semgrep:scan`, `codeql:scan`, `secret-scan:scan`,
+3. **`android-apk:manifest-scan`** parses the apktool-decoded
+   `AndroidManifest.xml` and emits findings for `debuggable`, `allowBackup`,
+   cleartext traffic, exported components without permissions, deep links,
+   and insecure providers. Also writes
+   `<workspace>/android-decompiled/taint-sources.json` listing exported
+   entry points — Phase C will feed this into `taint-iris-next`
+   automatically.
+4. **`android-apk:network-security-config`** parses
+   `res/xml/network_security_config.xml` and flags cleartext-permitted
+   base/domain configs and user-CA trust anchors.
+5. **`android-apk:fileprovider-scan`** parses `res/xml/file_paths.xml` and
+   flags broad FileProvider path descriptors (root-path, broad external).
+6. The existing scanners (`semgrep:scan`, `codeql:scan`, `secret-scan:scan`,
    `exploit-chain:scan`, `agentic-sast:scan`, `taint-iris-next:hunt`,
    `triage:run`, `verify:finding`) consume the decompiled tree.
 
-Later phases of the `android-apk` module add manifest analysis, WebView /
-file-provider / network-security-config scanners, native `.so` triage via
-the `revng` MCP, and a `sast-handoff` node that retargets downstream
-scanners onto `android-decompiled/jadx/sources` automatically. This document
-covers the Phase A flow (manual handoff).
+Later phases of the `android-apk` module add WebView / JS-bridge scanning,
+the `sast-handoff` node that retargets downstream scanners onto
+`android-decompiled/jadx/sources` automatically, native `.so` triage via
+the `revng` MCP, and smali fallback for heavily obfuscated apps.
+
+> **HackerOne authorization.** Before each session, walk through
+> [docs/hackerone-scope-checklist.md](./hackerone-scope-checklist.md) to
+> confirm the app, version, and activities you're about to perform are
+> in scope.
 
 ## Prerequisites
 
