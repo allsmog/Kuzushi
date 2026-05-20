@@ -1,0 +1,77 @@
+rules:
+  - id: android-webview-js-bridge-enabled
+    message: |
+      WebView has JavaScript enabled and exposes a Java object via
+      addJavascriptInterface. On Android <4.2 (API 17) this is a remote
+      code execution primitive; on later versions the bridge is still
+      reachable from any URL the WebView loads — load a trusted page only,
+      or treat every method on the exposed object as attacker-callable.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-749
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: |
+              $WV.getSettings().setJavaScriptEnabled(true);
+              ...
+              $WV.addJavascriptInterface(...);
+          - pattern: |
+              $WV.addJavascriptInterface(...);
+              ...
+              $WV.getSettings().setJavaScriptEnabled(true);
+
+  - id: android-webview-allow-universal-access
+    message: |
+      WebView setAllowUniversalAccessFromFileURLs(true) lets file:// pages
+      read arbitrary cross-origin content (CWE-200). Treat as RCE if the
+      attacker can land any file in the app's writable storage.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-200
+      category: security
+    pattern: $S.setAllowUniversalAccessFromFileURLs(true)
+
+  - id: android-webview-allow-file-access
+    message: |
+      WebView setAllowFileAccess(true) plus a malformed
+      shouldOverrideUrlLoading lets attacker pages navigate to file:// and
+      exfiltrate files (CWE-200). Default is false on API 30+ — re-enabling
+      is dangerous unless the WebView is sandboxed to a single trusted URL.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      cwe: CWE-200
+      category: security
+    pattern: $S.setAllowFileAccess(true)
+
+  - id: android-webview-allow-file-from-file-urls
+    message: |
+      setAllowFileAccessFromFileURLs(true) lets file:// pages read other
+      local files (CWE-200). Same MITRE pattern as the universal-access
+      variant — kill it unless the WebView is single-purpose.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      cwe: CWE-200
+      category: security
+    pattern: $S.setAllowFileAccessFromFileURLs(true)
+
+  - id: android-webview-ignore-ssl-errors
+    message: |
+      WebViewClient.onReceivedSslError calls SslErrorHandler.proceed(),
+      bypassing TLS validation (CWE-295). This means *every* HTTPS request
+      from the WebView trusts attacker-supplied certs.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-295
+      category: security
+    pattern: |
+      public void onReceivedSslError(WebView $W, SslErrorHandler $H, SslError $E) {
+        ...
+        $H.proceed();
+        ...
+      }
