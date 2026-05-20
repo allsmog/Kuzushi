@@ -8,7 +8,7 @@ assertion_line: 89
 target             none
 latest run         none
 run status         no run.json
-modules            33
+modules            34
 findings           0
 
 ▸ NEXT Run scan . to create the first Kuzushi run artifacts.

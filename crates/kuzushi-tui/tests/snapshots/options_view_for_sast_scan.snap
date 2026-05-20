@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 307
 ---
-mode:shell | target:none | options[sast:scan] | 0 findings | 33 mods
+mode:shell | target:none | options[sast:scan] | 0 findings | 34 mods
 
  -- OPTIONS ------------------------------------------------------------------------------------------------------------
 tool: sast:scan

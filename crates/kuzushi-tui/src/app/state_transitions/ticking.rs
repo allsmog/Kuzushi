@@ -16,12 +16,16 @@ impl ShellApp {
             }
         }
         if self.has_running_work() {
+            // M4 §4.1: reduced-motion mode pauses the spinner. The
+            // operator still sees the static frame plus the textual
+            // status (`tool: active`) so progress is legible without
+            // animation.
             let now = Instant::now();
             let due = self
                 .last_spinner_advance
                 .map(|prev| now.duration_since(prev) >= SPINNER_FRAME)
                 .unwrap_or(true);
-            if due {
+            if due && !crate::theme::active_theme().reduced_motion {
                 self.spinner_phase = self.spinner_phase.wrapping_add(1);
                 self.last_spinner_advance = Some(now);
                 changed = true;

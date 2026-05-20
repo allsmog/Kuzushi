@@ -15,6 +15,12 @@ pub(crate) fn build_doctor_report(target: PathBuf) -> DoctorReport {
 
     checks.push(check_scanner_binary("semgrep"));
     checks.push(check_scanner_binary("codeql"));
+    // M2 §2.2: optional recon-intake binaries. Doctor warns if they
+    // are absent so operators know which bounty workflows they can
+    // feed via `recon:import` without leaving the cockpit.
+    checks.push(check_scanner_binary("amass"));
+    checks.push(check_scanner_binary("httpx"));
+    checks.push(check_scanner_binary("nuclei"));
     checks.extend(deterministic_capability_checks());
     checks.push(check_container_runtime());
     checks.push(check_revng_image());

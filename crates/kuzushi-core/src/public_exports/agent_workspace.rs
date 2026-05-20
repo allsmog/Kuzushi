@@ -47,6 +47,7 @@ pub use crate::runtime::{
     TracedRuntime, TriageRequest,
 };
 pub use crate::workspace::{
-    export_workspace_findings, workspace_status_for_target, WorkspaceExportFormat,
+    export_workspace_findings, load_program_scope, workspace_status_for_target, HostPattern,
+    ProgramScope, ProgramScopeFile, ProgramScopeList, ScopeVerdict, WorkspaceExportFormat,
     WorkspaceFindingsExport, WorkspaceStatus, WorkspaceTarget,
 };

@@ -14,12 +14,20 @@ impl ShellApp {
             self.scroll_active_activity_pane(-(amount as isize));
             return;
         }
+        if matches!(self.shell_view, ShellView::Logs) {
+            self.logs_scroll = self.logs_scroll.saturating_sub(amount as usize);
+            return;
+        }
         self.scroll_offset = self.scroll_offset.saturating_sub(amount);
     }
 
     pub fn scroll_down(&mut self, amount: u16) {
         if matches!(self.shell_view, ShellView::Activity) {
             self.scroll_active_activity_pane(amount as isize);
+            return;
+        }
+        if matches!(self.shell_view, ShellView::Logs) {
+            self.logs_scroll = self.logs_scroll.saturating_add(amount as usize);
             return;
         }
         self.scroll_offset = self.scroll_offset.saturating_add(amount);
@@ -33,6 +41,10 @@ impl ShellApp {
                     PaneFocus::Right => session.feed_scroll = 0,
                 }
             }
+            return;
+        }
+        if matches!(self.shell_view, ShellView::Logs) {
+            self.logs_scroll = 0;
             return;
         }
         self.scroll_offset = 0;
@@ -51,6 +63,10 @@ impl ShellApp {
                     }
                 }
             }
+            return;
+        }
+        if matches!(self.shell_view, ShellView::Logs) {
+            self.logs_scroll = usize::MAX;
             return;
         }
         self.scroll_offset = u16::MAX;

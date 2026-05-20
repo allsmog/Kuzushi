@@ -42,6 +42,7 @@ pub(crate) const COMMAND_HANDLERS: &[CommandHandler] = &[
     handle_plan_apply_command,
     handle_plan_discard_command,
     handle_quickstart_command,
+    handle_logs_command,
     handle_target_command,
     handle_ask_command,
     handle_options_command,

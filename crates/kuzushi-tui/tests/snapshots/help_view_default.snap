@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 162
 ---
-mode:shell | target:none | help | 0 findings | 33 mods
+mode:shell | target:none | help | 0 findings | 34 mods
 
  -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
@@ -25,6 +25,8 @@ back - return to the previous view
   aliases / examples: /back, /b, b
 quickstart - first-run guided setup
   aliases / examples: /quickstart
+logs - scrollable full-screen transcript
+  aliases / examples: /logs, log, transcript, /transcript
 
 RUN / SCAN — dispatch tools and scans
 scan [target] - run configured scanners
