@@ -26,10 +26,25 @@ pub(crate) fn oauth_provider_status(provider: &str) -> String {
             .and_then(serde_json::Value::as_str)
             .is_some()
     {
+        if let Some(expires) = entry.get("expires").and_then(serde_json::Value::as_u64) {
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as u64)
+                .unwrap_or(0);
+            if expires <= now {
+                return "expired; will refresh on next call".to_string();
+            }
+        }
         "stored; value hidden".to_string()
     } else {
         "incomplete".to_string()
     }
+}
+
+pub(crate) fn oauth_credentials_path_display() -> String {
+    oauth_credentials_path()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "~/.kuzushi/oauth-credentials.json".to_string())
 }
 
 pub(crate) fn thinking_level_from_input(input: &serde_json::Value) -> Option<String> {

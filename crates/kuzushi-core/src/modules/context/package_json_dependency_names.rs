@@ -74,13 +74,25 @@ pub(in crate::modules) fn inspect_manifest_text(
     probes: &[&'static str],
     matches: &mut BTreeSet<&'static str>,
 ) -> Result<()> {
+    let mapped = probes
+        .iter()
+        .map(|probe| (*probe, *probe))
+        .collect::<Vec<_>>();
+    inspect_manifest_signals(path, &mapped, matches)
+}
+
+pub(in crate::modules) fn inspect_manifest_signals(
+    path: &Path,
+    probes: &[(&str, &'static str)],
+    matches: &mut BTreeSet<&'static str>,
+) -> Result<()> {
     let Ok(raw) = fs::read_to_string(path) else {
         return Ok(());
     };
     let lower = raw.to_lowercase();
-    for needle in probes {
+    for (needle, signal) in probes {
         if lower.contains(needle) {
-            matches.insert(needle);
+            matches.insert(signal);
         }
     }
     Ok(())
@@ -100,29 +112,46 @@ pub(in crate::modules) fn collect_context_files(
     entries.sort_by_key(|entry| entry.path());
 
     for entry in entries {
-        let path = entry.path();
-        let file_name = entry.file_name();
-        if should_skip_path(&file_name.to_string_lossy()) {
-            continue;
-        }
-
-        let Ok(file_type) = entry.file_type() else {
-            continue;
-        };
-        if file_type.is_dir() {
-            collect_context_files(root, &path, sample_limit, files_indexed, files_sample)?;
-        } else if file_type.is_file() {
-            *files_indexed += 1;
-            if files_sample.len() < sample_limit {
-                let display_path = path
-                    .strip_prefix(root)
-                    .unwrap_or(&path)
-                    .display()
-                    .to_string();
-                files_sample.push(display_path);
-            }
-        }
+        collect_context_entry(root, entry, sample_limit, files_indexed, files_sample)?;
     }
 
     Ok(())
+}
+
+fn collect_context_entry(
+    root: &Path,
+    entry: fs::DirEntry,
+    sample_limit: usize,
+    files_indexed: &mut usize,
+    files_sample: &mut Vec<String>,
+) -> Result<()> {
+    if should_skip_path(&entry.file_name().to_string_lossy()) {
+        return Ok(());
+    }
+    let Ok(file_type) = entry.file_type() else {
+        return Ok(());
+    };
+    let path = entry.path();
+    if file_type.is_dir() {
+        return collect_context_files(root, &path, sample_limit, files_indexed, files_sample);
+    }
+    if file_type.is_file() {
+        collect_context_file(root, &path, sample_limit, files_indexed, files_sample);
+    }
+    Ok(())
+}
+
+fn collect_context_file(
+    root: &Path,
+    path: &Path,
+    sample_limit: usize,
+    files_indexed: &mut usize,
+    files_sample: &mut Vec<String>,
+) {
+    *files_indexed += 1;
+    if files_sample.len() >= sample_limit {
+        return;
+    }
+    let display_path = path.strip_prefix(root).unwrap_or(path).display().to_string();
+    files_sample.push(display_path);
 }

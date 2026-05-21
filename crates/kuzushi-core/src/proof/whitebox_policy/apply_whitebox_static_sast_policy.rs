@@ -1,4 +1,5 @@
 use super::*;
+use crate::findings::is_runtime_proof_state;
 use serde_json::Map;
 
 pub(in crate::proof::whitebox_policy) fn normalize_agent_tool_name(tool: &str) -> String {
@@ -113,14 +114,7 @@ pub(in crate::proof::whitebox_policy) fn rewrite_execution_proof_states(
 }
 
 pub(in crate::proof::whitebox_policy) fn is_execution_proof_state(value: &str) -> bool {
-    matches!(
-        value.trim(),
-        "execution_confirmed"
-            | "runtime_confirmed"
-            | "dynamic_confirmed"
-            | "exploit_confirmed"
-            | "poc_confirmed"
-    )
+    is_runtime_proof_state(value)
 }
 
 pub(in crate::proof::whitebox_policy) fn truthy_bool(input: &Value, keys: &[&str]) -> Result<bool> {

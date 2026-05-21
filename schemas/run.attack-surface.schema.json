@@ -1,0 +1,163 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kuzushi.dev/schemas/run.attack-surface.schema.json",
+  "title": "Kuzushi Run Attack-Surface Snapshot",
+  "description": "Canonical schema for .kuzushi/runs/<runId>/attack-surface.json. Rich producer snapshots may add fields; deterministic absence markers use the shared run snapshot marker fields.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "runId": { "type": "string" },
+    "run_id": { "type": "string" },
+    "status": { "$ref": "#/definitions/runStatus" },
+    "runStatus": { "$ref": "#/definitions/runStatus" },
+    "summary": {
+      "type": ["string", "object"],
+      "anyOf": [
+        { "type": "string" },
+        { "$ref": "#/definitions/attackSurfaceSummary" }
+      ]
+    },
+    "artifacts": { "type": "array" },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "rootName": { "type": "string" },
+    "root_name": { "type": "string" },
+    "surfaces": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/surface" }
+    },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/surface" }
+    },
+    "attackSurfaces": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/surface" }
+    },
+    "attack_surfaces": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/surface" }
+    },
+    "surfaceCount": { "type": "integer", "minimum": 0 },
+    "surface_count": { "type": "integer", "minimum": 0 },
+    "total": { "type": "integer", "minimum": 0 },
+    "highRisk": { "type": "integer", "minimum": 0 },
+    "high_risk": { "type": "integer", "minimum": 0 },
+    "maxRiskScore": { "type": "integer", "minimum": 0 },
+    "max_risk_score": { "type": "integer", "minimum": 0 },
+    "byRiskTier": { "type": "object" },
+    "by_risk_tier": { "type": "object" },
+    "byKind": { "type": "object" },
+    "by_kind": { "type": "object" },
+    "byFile": { "type": "object" },
+    "by_file": { "type": "object" },
+    "risk": { "type": "object" },
+    "rank": { "type": "integer", "minimum": 0 },
+    "score": { "type": "integer", "minimum": 0 },
+    "tier": { "$ref": "#/definitions/riskTier" },
+    "reasons": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "kind": { "$ref": "#/definitions/surfaceKind" },
+    "framework": { "type": "string" },
+    "method": { "$ref": "#/definitions/routeMethod" },
+    "route": {
+      "type": "string",
+      "pattern": "^(\\/|\\*)"
+    },
+    "boundary": { "type": "string" },
+    "language": { "type": "string" },
+    "evidence": { "type": "string" }
+  },
+  "definitions": {
+    "runStatus": {
+      "type": "string",
+      "enum": ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"]
+    },
+    "attackSurfaceSummary": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "total": { "type": "integer", "minimum": 0 },
+        "byKind": { "type": "object" },
+        "by_kind": { "type": "object" },
+        "byFile": { "type": "object" },
+        "by_file": { "type": "object" },
+        "highRisk": { "type": "integer", "minimum": 0 },
+        "high_risk": { "type": "integer", "minimum": 0 },
+        "maxRiskScore": { "type": "integer", "minimum": 0 },
+        "max_risk_score": { "type": "integer", "minimum": 0 },
+        "byRiskTier": { "type": "object" },
+        "by_risk_tier": { "type": "object" }
+      }
+    },
+    "surface": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "$ref": "#/definitions/surfaceKind" },
+        "path": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "language": { "type": "string" },
+        "framework": { "type": "string" },
+        "title": { "type": "string" },
+        "evidence": { "type": "string" },
+        "method": { "$ref": "#/definitions/routeMethod" },
+        "route": {
+          "type": "string",
+          "pattern": "^(\\/|\\*)"
+        },
+        "boundary": { "type": "string" },
+        "risk": { "$ref": "#/definitions/risk" },
+        "metadata": { "type": "object" }
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "rank": { "type": "integer", "minimum": 0 },
+        "score": { "type": "integer", "minimum": 0 },
+        "tier": { "$ref": "#/definitions/riskTier" },
+        "reasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "surfaceKind": {
+      "type": "string",
+      "enum": [
+        "http_route",
+        "rpc_handler",
+        "cli_entrypoint",
+        "background_job",
+        "deserialization_point",
+        "file_upload_parse_path",
+        "external_service_client",
+        "auth_boundary",
+        "session_state_boundary",
+        "request_trust_boundary",
+        "tenant_isolation_boundary",
+        "db_query_boundary",
+        "command_execution_boundary"
+      ]
+    },
+    "riskTier": {
+      "type": "string",
+      "enum": ["critical", "high", "medium", "low"]
+    },
+    "routeMethod": {
+      "type": "string",
+      "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE", "CONNECT", "ANY", "USE"]
+    }
+  }
+}

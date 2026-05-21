@@ -1,11 +1,17 @@
-# Kuzushi — Security-Native AI Operating Environment
+# Kuzushi Vision
 
-Status: aspirational product vision, not current operator usage. For the
-shipping Rust CLI/TUI workflow, start with `README.md`.
+Status: roadmap and product strategy. For the shipping Rust CLI/TUI workflow,
+start with `README.md`.
 
-Kuzushi is not only a scanner. It is a security-native AI operating environment that combines offensive security, defensive operations, and compliance governance into a single interactive platform — powered by explicit model-backed tools, backed by a persistent workspace, and delivered through the native Rust CLI/TUI.
+Kuzushi's shipping product focus is an evidence-backed repository security
+workbench: local-first scan, shell, and run surfaces over durable findings,
+proof states, verification records, suppressions, patches, reports, traces,
+and run artifacts.
 
-The difference is "VS Code with extensions" vs. "Burp Suite." Both can do web security testing. One was built for it.
+The long-term vision is broader security-agent operations, but every expansion
+has to strengthen the current evidence workflow first. Capabilities that do
+not produce clear artifacts, proof state, operator next actions, or audit
+trails belong in roadmap material, not the primary product promise.
 
 ## Three Execution Modes
 
@@ -69,15 +75,18 @@ Kuzushi's capabilities come from `CopilotModule`s that expose tools (for interac
 | **variant-hunter** | offense | Lifts confirmed findings into portable signatures and hunts for variants across the repo (including vendored deps) |
 | **n-day-diff-hunter** | offense | CVE-diff-based n-day hunting and variant search |
 
-### Shipping today — external `CopilotModule` package
+### Compatibility / package-shaped modules
 
 | Package | Module ID | What It Does |
 |---------|-----------|--------------|
-| `@kuzushi/augur` | **augur** | Neuro-symbolic SAST (IRIS/ICLR 2025 style LLM-driven CodeQL taint analysis). Load via `--load package:@kuzushi/augur`. |
+| `@kuzushi/augur` | **augur** | Neuro-symbolic SAST (IRIS/ICLR 2025 style LLM-driven CodeQL taint analysis). Package/module shape exists, but native Rust CLI/TUI dynamic package loading is not the supported operator path today. |
 
-### Roadmap — not yet shipped
+### Roadmap — not primary product surface
 
-These are the North Star modules — design intent exists, implementations do not (yet). Treat the entries below as the direction this vision is pointing toward, not current capability:
+These are North Star directions. Treat the entries below as roadmap material,
+not current capability and not the product's near-term wedge. They should only
+graduate when they produce first-class evidence artifacts and fit the
+scan/findings/proof/report loop.
 
 | Module | Category | Intended scope |
 |--------|----------|----------------|
@@ -88,9 +97,12 @@ These are the North Star modules — design intent exists, implementations do no
 | **yokai** | defense | Supply chain tripwires: dependency confusion, typosquatting, registry canaries |
 | **revgraph** | intel | Binary reverse engineering: Ghidra + Neo4j, NL2Cypher queries, function embeddings |
 
-## What a Session Looks Like
+## What a Future Session Could Look Like
 
-_Aspirational example — the `blackbox`, `honeypot`, and `shinsa` transcript below references roadmap modules. Today, the actual session surface covers `sast`, `randori`, `vuln-scout`, `tob`, `variant-hunter`, `n-day-diff-hunter`, and the `augur` package._
+_Aspirational example. The transcript below intentionally includes roadmap
+modules and should not be read as current CLI/TUI behavior. The current
+operator path is the evidence loop in `README.md`: doctor, context, scan,
+findings, finding detail, suppress/verify/patch/report._
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -143,7 +155,9 @@ kuzushi> [shinsa] Running PCI DSS v4.0 assessment...
   2 gaps linked to findings in workspace. Generate patches?
 ```
 
-One conversation. Offense, defense, compliance, remediation.
+The important product idea is not "one chat that does everything." It is one
+evidence graph that can connect repository context, threat model, findings,
+proof, suppressions, patches, and reports without losing provenance.
 
 ## Workspace & Knowledge Graph
 

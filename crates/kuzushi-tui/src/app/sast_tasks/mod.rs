@@ -14,5 +14,4 @@ mod show_sast_tasks;
 #[cfg(test)]
 mod tests;
 mod valid_sast_task_ids;
-pub(super) use resolve_sast_task::parse_native_scan_tasks;
 pub(super) use valid_sast_task_ids::valid_sast_task_ids;

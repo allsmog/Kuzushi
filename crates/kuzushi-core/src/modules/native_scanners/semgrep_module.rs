@@ -49,60 +49,85 @@ pub(in crate::modules) fn codeql_module() -> BuiltinModule {
         vec![tool_with_options(
             "codeql:scan",
             "Run CodeQL and normalize semantic findings.",
-            vec![
-                target_option(),
-                binary_option("CodeQL binary path."),
-                opt("mode", OptionType::Enum, "Analysis mode or preset.")
-                    .aliases(&["preset"])
-                    .choices(&["standard", "whitebox-static"])
-                    .default(json!("standard"))
-                    .advanced(),
-                opt(
-                    "whiteboxStatic",
-                    OptionType::Json,
-                    "Enable whitebox-static mode.",
-                )
-                .aliases(&["whitebox_static"])
-                .advanced(),
-                opt(
-                    "staticProofState",
-                    OptionType::String,
-                    "Default static proof state for whitebox-static findings.",
-                )
-                .aliases(&["static_proof_state"])
-                .advanced(),
-                opt("dbPath", OptionType::Path, "Existing CodeQL database path.")
-                    .aliases(&["db_path"])
-                    .advanced(),
-                opt("language", OptionType::Enum, "CodeQL language to analyze.").choices(&[
-                    "javascript",
-                    "python",
-                    "csharp",
-                    "c#",
-                    "java",
-                    "go",
-                    "cpp",
-                    "c++",
-                    "c-cpp",
-                    "swift",
-                    "ruby",
-                    "rust",
-                    "typescript",
-                ]),
-                opt("suite", OptionType::String, "CodeQL query suite.").advanced(),
-                opt("threads", OptionType::Int, "CodeQL worker thread count.").advanced(),
-                opt("ram", OptionType::Int, "CodeQL RAM budget in MB.").advanced(),
-                opt(
-                    "multiLanguage",
-                    OptionType::Bool,
-                    "Analyze all detected CodeQL languages.",
-                )
-                .aliases(&["multi_language"])
-                .default(json!(false)),
-            ],
+            codeql_options(),
         )],
         vec![dag("codeql:scan", "findings", &["context:build"])],
     )
+}
+
+fn codeql_options() -> Vec<OptionSpec> {
+    let mut options = vec![
+        target_option(),
+        binary_option("CodeQL binary path."),
+        scan_mode_option(),
+        whitebox_static_option(),
+        static_proof_state_option(),
+        opt("dbPath", OptionType::Path, "Existing CodeQL database path.")
+            .aliases(&["db_path"])
+            .advanced(),
+        codeql_language_option(),
+        opt("suite", OptionType::String, "CodeQL query suite.").advanced(),
+        opt("threads", OptionType::Int, "CodeQL worker thread count.").advanced(),
+        opt("ram", OptionType::Int, "CodeQL RAM budget in MB.").advanced(),
+    ];
+    options.push(codeql_multi_language_option());
+    options
+}
+
+fn scan_mode_option() -> OptionSpec {
+    opt("mode", OptionType::Enum, "Analysis mode or preset.")
+        .aliases(&["preset"])
+        .choices(&["standard", "whitebox-static"])
+        .default(json!("standard"))
+        .advanced()
+}
+
+fn whitebox_static_option() -> OptionSpec {
+    opt(
+        "whiteboxStatic",
+        OptionType::Json,
+        "Enable whitebox-static mode.",
+    )
+    .aliases(&["whitebox_static"])
+    .advanced()
+}
+
+fn static_proof_state_option() -> OptionSpec {
+    opt(
+        "staticProofState",
+        OptionType::String,
+        "Default static proof state for whitebox-static findings.",
+    )
+    .aliases(&["static_proof_state"])
+    .advanced()
+}
+
+fn codeql_language_option() -> OptionSpec {
+    opt("language", OptionType::Enum, "CodeQL language to analyze.").choices(&[
+        "javascript",
+        "python",
+        "csharp",
+        "c#",
+        "java",
+        "go",
+        "cpp",
+        "c++",
+        "c-cpp",
+        "swift",
+        "ruby",
+        "rust",
+        "typescript",
+    ])
+}
+
+fn codeql_multi_language_option() -> OptionSpec {
+    opt(
+        "multiLanguage",
+        OptionType::Bool,
+        "Analyze all detected CodeQL languages.",
+    )
+    .aliases(&["multi_language"])
+    .default(json!(false))
 }
 
 pub(in crate::modules) fn iac_scan_module() -> BuiltinModule {
@@ -138,6 +163,64 @@ pub(in crate::modules) fn iac_scan_module() -> BuiltinModule {
             ],
         )],
         vec![dag("iac-scan:scan", "findings", &["context:build"])],
+    )
+}
+
+pub(in crate::modules) fn cargo_audit_module() -> BuiltinModule {
+    builtin_module(
+        "cargo-audit",
+        "Cargo Audit",
+        ModuleKind::Defense,
+        "Run cargo-audit against Rust lockfiles and persist advisory findings.",
+        vec![tool_with_options(
+            "cargo-audit:scan",
+            "Run cargo audit and persist normalized findings.",
+            vec![target_option()],
+        )],
+        vec![dag("cargo-audit:scan", "findings", &["context:build"])],
+    )
+}
+
+pub(in crate::modules) fn license_scan_module() -> BuiltinModule {
+    builtin_module(
+        "license-scan",
+        "License Scan",
+        ModuleKind::Defense,
+        "Scan package manifests for missing or copyleft license declarations.",
+        vec![tool_with_options(
+            "license-scan:scan",
+            "Scan package manifests for license-risk findings.",
+            vec![
+                target_option(),
+                opt(
+                    "requireSourceSpdxHeaders",
+                    OptionType::Bool,
+                    "Require source files to carry SPDX license headers.",
+                )
+                .aliases(&[
+                    "require_source_spdx_headers",
+                    "requireSpdxHeaders",
+                    "require_spdx_headers",
+                ])
+                .default(json!(false)),
+            ],
+        )],
+        vec![dag("license-scan:scan", "findings", &["context:build"])],
+    )
+}
+
+pub(in crate::modules) fn sbom_scan_module() -> BuiltinModule {
+    builtin_module(
+        "sbom-scan",
+        "SBOM Scan",
+        ModuleKind::Governance,
+        "Extract a deterministic dependency inventory from package manifests.",
+        vec![tool_with_options(
+            "sbom-scan:scan",
+            "Extract package manifest dependencies into an SBOM-style inventory.",
+            vec![target_option()],
+        )],
+        vec![dag("sbom-scan:scan", "artifact", &["context:build"])],
     )
 }
 

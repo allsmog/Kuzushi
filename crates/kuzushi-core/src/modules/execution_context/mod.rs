@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::artifact_kb::{artifact_knowledge_prompt_context, ArtifactKnowledgePromptContext};
 use crate::config::V2Config;
@@ -16,6 +16,15 @@ pub struct ToolExecutionContext<'a> {
 }
 
 impl<'a> ToolExecutionContext<'a> {
+    pub fn run_id(&self) -> Option<String> {
+        self.run_artifact_location().map(|(_, run_id)| run_id)
+    }
+
+    pub fn run_artifact_location(&self) -> Option<(PathBuf, String)> {
+        self.trace
+            .and_then(|trace| trace.run_artifact_location())
+    }
+
     pub fn artifact_knowledge_context(
         &self,
         target: &Path,
@@ -44,5 +53,44 @@ impl<'a> ToolExecutionContext<'a> {
                 snippets: Vec::new(),
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::config::V2Config;
+
+    #[test]
+    fn traced_context_exposes_run_artifact_location() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = V2Config::default();
+        let trace = TraceHandle::jsonl(tmp.path(), "run-context");
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: None,
+            findings_store: None,
+            trace: Some(&trace),
+        };
+
+        let (target, run_id) = ctx.run_artifact_location().unwrap();
+
+        assert_eq!(target, tmp.path());
+        assert_eq!(run_id, "run-context");
+        assert_eq!(ctx.run_id().as_deref(), Some("run-context"));
+    }
+
+    #[test]
+    fn untraced_context_has_no_run_id() {
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: None,
+            findings_store: None,
+            trace: None,
+        };
+
+        assert!(ctx.run_id().is_none());
+        assert!(ctx.run_artifact_location().is_none());
     }
 }

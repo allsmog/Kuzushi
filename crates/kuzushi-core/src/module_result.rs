@@ -1,4 +1,11 @@
+use crate::artifact_contract::ARTIFACT_PATH_KEYS;
 use serde_json::{json, Map, Value};
+
+mod envelope;
+
+pub(crate) use envelope::{
+    completed_output_result, failed_output_result, partial_output_result, skipped_output_result,
+};
 
 pub(crate) fn normalize_module_result(output: Value) -> Value {
     match output {
@@ -6,15 +13,11 @@ pub(crate) fn normalize_module_result(output: Value) -> Value {
             ensure_contract_fields(&mut object);
             Value::Object(object)
         }
-        other => json!({
-            "ok": true,
-            "status": "completed",
-            "summary": "tool returned a non-object value",
-            "artifacts": [],
-            "warnings": [],
-            "errors": [],
-            "data": other,
-        }),
+        other => completed_output_result(
+            "tool returned a non-object value",
+            "tool returned a non-object value",
+            other,
+        ),
     }
 }
 
@@ -252,16 +255,23 @@ fn message_value(value: &Value) -> Option<Value> {
     }
 }
 
-const ARTIFACT_PATH_KEYS: [&str; 9] = [
-    "path",
-    "file",
-    "filePath",
-    "reportPath",
-    "reportJsonPath",
-    "scopePath",
-    "dir",
-    "outputDir",
-    "promptsDir",
-];
-
 const MAX_SUMMARY_CHARS: usize = 160;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_object_output_normalizes_through_completed_envelope() {
+        let output = normalize_module_result(json!(["a", "b"]));
+
+        assert_eq!(output["ok"], json!(true));
+        assert_eq!(output["status"], json!("completed"));
+        assert_eq!(output["summary"], json!("tool returned a non-object value"));
+        assert_eq!(output["output"], json!("tool returned a non-object value"));
+        assert_eq!(output["data"], json!(["a", "b"]));
+        assert!(output["artifacts"].as_array().unwrap().is_empty());
+        assert!(output["warnings"].as_array().unwrap().is_empty());
+        assert!(output["errors"].as_array().unwrap().is_empty());
+    }
+}

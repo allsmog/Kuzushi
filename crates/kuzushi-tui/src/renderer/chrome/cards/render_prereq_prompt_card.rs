@@ -96,20 +96,25 @@ fn prereq_step_line(step: &PrereqPromptStepModel, width: u16) -> Line<'static> {
 }
 
 fn prereq_step_detail_lines(step: &PrereqPromptStepModel, width: u16) -> Vec<Line<'static>> {
-    [
+    let mut details = vec![
         format!("writes {}", step.writes),
         format!("risk {}", step.risk),
         format!("cost {}", step.cost_hint),
-    ]
-    .into_iter()
-    .map(|detail| {
-        Line::from(vec![
-            Span::raw("    "),
-            Span::styled(
-                fit(&detail, width.saturating_sub(4) as usize),
-                theme::muted(),
-            ),
-        ])
-    })
-    .collect()
+    ];
+    if let Some(hint) = step.state_hint {
+        details.push(format!("state {hint}"));
+    }
+
+    details
+        .into_iter()
+        .map(|detail| {
+            Line::from(vec![
+                Span::raw("    "),
+                Span::styled(
+                    fit(&detail, width.saturating_sub(4) as usize),
+                    theme::muted(),
+                ),
+            ])
+        })
+        .collect()
 }

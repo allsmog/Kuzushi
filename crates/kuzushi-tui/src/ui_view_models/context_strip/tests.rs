@@ -12,6 +12,7 @@ fn context_strip_model_reports_idle_shell_state() {
     assert_eq!(model.mode, "mode:shell");
     assert_eq!(model.target, "none");
     assert!(!model.context_present);
+    assert_eq!(model.context_state, "missing");
     assert_eq!(model.model, "unconfigured");
     assert_eq!(model.findings, "0 findings");
     assert_eq!(model.view, "modules");
@@ -20,11 +21,11 @@ fn context_strip_model_reports_idle_shell_state() {
         model.compact_segments(),
         [
             "mode:shell",
-            "target none",
-            "ctx missing",
-            "model unconfigured",
+            "target:none",
+            "ctx:missing",
+            "model:unconfigured",
             "0 findings",
-            "view modules"
+            "view:modules"
         ]
     );
 }
@@ -41,11 +42,26 @@ fn context_strip_model_formats_target_model_context_and_cost() {
 
     assert_eq!(model.target, "./acme");
     assert!(model.context_present);
+    assert_eq!(model.context_state, "present");
     assert_eq!(model.model, "openai:gpt-5.2");
     assert_eq!(model.cost, Some("$0.42".to_string()));
     assert!(model
         .compact_segments()
-        .contains(&"ctx ✓ present".to_string()));
+        .contains(&"ctx:✓ present".to_string()));
+}
+
+#[test]
+fn context_strip_model_reports_malformed_context_snapshot() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.context_view.status = "malformed context snapshot. Next: context build".to_string();
+
+    let model = context_strip_model(&app);
+
+    assert!(!model.context_present);
+    assert_eq!(model.context_state, "malformed");
+    assert!(model
+        .compact_segments()
+        .contains(&"ctx:malformed".to_string()));
 }
 
 #[test]
@@ -79,6 +95,7 @@ fn plain_context_strip_line_projects_status_and_module_count() {
         mode: "mode:shell".to_string(),
         target: "none".to_string(),
         context_present: false,
+        context_state: "missing",
         model: "unconfigured".to_string(),
         findings: "0 findings".to_string(),
         view: "modules".to_string(),
@@ -91,7 +108,7 @@ fn plain_context_strip_line_projects_status_and_module_count() {
 
     assert_eq!(
         plain_context_strip_line(&strip, 12, 80),
-        "mode:shell | target:none | modules | 0 findings | 12 mods"
+        "mode:shell · target:none · view:modules · 0 findings · modules:12"
     );
     assert_eq!(plain_context_strip_line(&strip, 12, 10), "mode:sh...");
 }

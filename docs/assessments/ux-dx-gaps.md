@@ -4,10 +4,12 @@ Status: historical Ink-era audit. The current operator-facing shell is Rust
 Ratatui under `crates/kuzushi-tui`; do not use the TypeScript/Ink paths below
 as places to add new interactive shell behavior.
 
-This is the audit + fix-list for the interactive Kuzushi shell (Ink TUI),
-slash-verb dispatch, plain-text fallback, and the keybind reducer.
+This historical audit covered the former interactive Kuzushi shell, its
+slash-verb dispatch, plain-text fallback, and keybind reducer. Current
+interactive shell work belongs in the Rust Ratatui files under
+`crates/kuzushi-tui`.
 
-Scope (per the source tree):
+Historical scope:
 - `src/ui/components/*View.tsx`
 - `src/copilot/shell.ts` (slash-verb dispatcher — switch-statement based on
   this branch; not a registry)

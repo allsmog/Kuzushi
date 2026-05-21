@@ -89,6 +89,7 @@ fn line_has_session_state(lower: &str) -> bool {
         &[
             "express-session",
             "cookie-session",
+            "request.cookies",
             "req.session",
             "res.cookie",
             "session(",
@@ -147,6 +148,11 @@ fn line_has_tenant_reference(lower: &str) -> bool {
             "workspace_id",
             "accountid",
             "account_id",
+            "currentteam",
+            "current_team",
+            "teamid",
+            "team_id",
+            "team.id",
         ],
     )
 }

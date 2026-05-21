@@ -69,8 +69,12 @@ pub(crate) fn module_detail_model(app: &ShellApp, module_id: &str) -> Option<Mod
 
 pub(crate) fn module_prompts_model(app: &ShellApp, module_id: &str) -> Vec<ModulePromptOnDisk> {
     let root = prompt_root(app, module_id);
-    let Ok(entries) = std::fs::read_dir(&root) else {
+    if !root.exists() {
         return Vec::new();
+    };
+    let entries = match std::fs::read_dir(&root) {
+        Ok(entries) => entries,
+        Err(_) => return vec![malformed_prompt_root(app, &root)],
     };
     let mut prompts: Vec<ModulePromptOnDisk> = entries
         .flatten()
@@ -78,6 +82,13 @@ pub(crate) fn module_prompts_model(app: &ShellApp, module_id: &str) -> Vec<Modul
         .collect();
     prompts.sort_by(|a, b| a.verb.cmp(&b.verb));
     prompts
+}
+
+fn malformed_prompt_root(app: &ShellApp, root: &Path) -> ModulePromptOnDisk {
+    ModulePromptOnDisk {
+        verb: "artifact-load".to_string(),
+        path: format!("{} (unreadable)", display_prompt_path(app, root)),
+    }
 }
 
 fn prompt_root(app: &ShellApp, module_id: &str) -> PathBuf {
@@ -215,7 +226,7 @@ fn format_json_value(value: &serde_json::Value) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuzushi_core::V2Config;
+    use kuzushi_core::{ToolOptionStore, V2Config};
 
     #[test]
     fn focused_module_detail_model_uses_current_focus() {
@@ -245,6 +256,7 @@ mod tests {
     #[test]
     fn module_detail_model_shapes_options_section() {
         let mut app = ShellApp::new(V2Config::default(), None);
+        app.option_store = ToolOptionStore::new();
         app.focused_module = Some("sast".to_string());
         app.option_store.set_value(
             kuzushi_core::OptionScope::Session,
@@ -280,5 +292,26 @@ mod tests {
         assert_eq!(prompts.header, "PROMPTS · 2");
         assert_eq!(prompts.rows[0].0, "system");
         assert_eq!(prompts.rows[1].0, "triage");
+    }
+
+    #[test]
+    fn module_detail_model_surfaces_unreadable_prompt_root() {
+        let temp = tempfile::tempdir().unwrap();
+        let prompt_root = temp.path().join(".kuzushi/prompts/sast");
+        std::fs::create_dir_all(prompt_root.parent().unwrap()).unwrap();
+        std::fs::write(&prompt_root, "not a directory").unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.target = Some(temp.path().to_path_buf());
+        app.focused_module = Some("sast".to_string());
+
+        let model = focused_module_detail_model(&app).expect("focused module detail");
+        let prompts = model.prompts_section.expect("prompts section");
+
+        assert_eq!(prompts.header, "PROMPTS · 1");
+        assert_eq!(prompts.rows[0].0, "artifact-load");
+        assert_eq!(
+            prompts.rows[0].1,
+            ".kuzushi/prompts/sast (unreadable)".to_string()
+        );
     }
 }

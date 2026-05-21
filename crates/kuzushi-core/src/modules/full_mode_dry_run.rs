@@ -117,16 +117,20 @@ pub(crate) fn full_mode_dry_run_response(
     let plan = crate::capabilities::full_mode_multi::plan(cfg)?;
     let model_hint = ctx.config.model.as_deref();
     let cost = crate::full_mode_cost_summary(&plan, model_hint);
-    Ok(json!({
-        "ok": true,
-        "data": {
-            "findings": [],
-            "plan": plan,
-            "chunksDispatched": 0,
-            "chunksFailed": 0,
-            "costUsd": 0.0,
-            "dryRun": true,
-        },
+    let summary = format!(
+        "full-mode:hunt planned {} chunk{} over {} file{}",
+        cost.chunks,
+        if cost.chunks == 1 { "" } else { "s" },
+        cost.files,
+        if cost.files == 1 { "" } else { "s" }
+    );
+    let data = json!({
+        "findings": [],
+        "plan": plan,
+        "chunksDispatched": 0,
+        "chunksFailed": 0,
+        "costUsd": 0.0,
+        "dryRun": true,
         "summary": {
             "chunks": cost.chunks,
             "files": cost.files,
@@ -135,7 +139,10 @@ pub(crate) fn full_mode_dry_run_response(
             "estUsdHigh": cost.usd_high,
             "dryRun": true,
         },
-    }))
+    });
+    let mut result = crate::module_result::completed_output_result(summary.clone(), summary, data);
+    result["costUsd"] = json!(0.0);
+    Ok(result)
 }
 
 pub(crate) fn required_full_mode_runtime(
@@ -145,17 +152,16 @@ pub(crate) fn required_full_mode_runtime(
         .ok_or_else(|| anyhow::anyhow!("full-mode:hunt requires an agent runtime; none configured"))
 }
 
-pub(crate) fn full_mode_routed_runtime(
-    runtime: &dyn AgentRuntime,
+pub(crate) fn full_mode_routed_runtime<'a>(
+    runtime: &'a dyn AgentRuntime,
     ctx: &ToolExecutionContext<'_>,
-) -> Result<crate::agent_router::RoutedRuntime> {
+) -> Result<crate::agent_router::RoutedRuntime<'a>> {
     use crate::agent_router::{AgentRouter, RoutedRuntime};
     use std::sync::Arc;
 
     let router = Arc::new(AgentRouter::load(&full_mode_config_paths(ctx))?);
-    let inner_arc: Arc<dyn AgentRuntime> = unsafe_clone_runtime_ref(runtime);
-    Ok(RoutedRuntime::new(
-        inner_arc,
+    Ok(RoutedRuntime::borrowed(
+        runtime,
         router,
         ctx.config.model.clone(),
     ))

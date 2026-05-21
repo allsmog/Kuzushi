@@ -9,13 +9,13 @@ For vocabulary and dependency rules, see
 | Change | Primary files | Focused checks |
 | --- | --- | --- |
 | Rust CLI command, flags, exit behavior | `crates/kuzushi-cli/src/main.rs`, `crates/kuzushi-cli/tests/` | `cargo test -p kuzushi-cli cutover_cli` |
-| Rust TUI command/reducer behavior | `crates/kuzushi-tui/src/app.rs`, `crates/kuzushi-tui/src/app/state_transitions.rs`, `crates/kuzushi-tui/src/commands.rs` | `cargo test -p kuzushi-tui app::tests` |
-| Rust TUI rendering/plain output | `crates/kuzushi-tui/src/renderer.rs`, `crates/kuzushi-tui/src/renderer/plain.rs`, `crates/kuzushi-tui/src/theme/mod.rs` | `cargo test -p kuzushi-tui renderer::tests` |
-| Module/tool registry | `crates/kuzushi-core/src/modules.rs`, `crates/kuzushi-core/src/modules/*`, `src/modules/*` for retained SDK contracts | `cargo test -p kuzushi-core modules` |
-| Findings persistence/reporting | `crates/kuzushi-core/src/findings.rs`, `crates/kuzushi-core/src/findings/reporting.rs`, CLI findings paths | `cargo test -p kuzushi-core findings`; `cargo test -p kuzushi-cli cutover_cli` |
-| Scan orchestration | `crates/kuzushi-core/src/scan.rs`, `crates/kuzushi-core/src/modules/sast_run.rs`, `crates/kuzushi-cli/src/main.rs` | `cargo test -p kuzushi-core scan`; `bash tests/e2e/run-smoke.sh` |
+| Rust TUI command/reducer behavior | `crates/kuzushi-tui/src/app/`, `crates/kuzushi-tui/src/commands.rs` | `cargo test -p kuzushi-tui app::tests` |
+| Rust TUI rendering/plain output | `crates/kuzushi-tui/src/renderer/`, `crates/kuzushi-tui/src/renderer/plain/`, `crates/kuzushi-tui/src/theme/mod.rs` | `cargo test -p kuzushi-tui renderer::tests` |
+| Module/tool registry | `crates/kuzushi-core/src/modules/`, `src/modules/*` for retained SDK contracts | `cargo test -p kuzushi-core modules` |
+| Findings persistence/reporting | `crates/kuzushi-core/src/findings/`, `crates/kuzushi-core/src/findings/presentation/`, CLI findings paths | `cargo test -p kuzushi-core findings`; `cargo test -p kuzushi-cli cutover_cli` |
+| Scan orchestration | `crates/kuzushi-core/src/scan/`, `crates/kuzushi-core/src/modules/application/sast_scan/`, `crates/kuzushi-cli/src/main.rs` | `cargo test -p kuzushi-core scan`; `bash tests/e2e/run-smoke.sh` |
 | Verify/sandbox | `crates/kuzushi-core/src/verify.rs`, `crates/kuzushi-sandbox`, verification tests | `cargo test -p kuzushi-core verify` |
-| Agent runtime/model enforcement | `src/agent-runtime/enforcement.ts`, `src/config.ts`, Rust runtime bridge call sites | `pnpm typecheck`; runtime no-fallback tests named in `AGENTS.md` |
+| Agent runtime/model enforcement | `crates/kuzushi-core/src/runtime/policy/no_silent_fallback.rs`, `crates/kuzushi-core/src/agent_router/`, Rust runtime bridge call sites | `node scripts/check-model-safety.mjs`; focused Rust no-fallback tests |
 | Retained TypeScript helpers | `src/modules`, `src/ui` non-visual helpers, `src/testing`, `src/store.ts` | `pnpm typecheck`; `pnpm test -- --run` when behavior changes |
 | Docs/evals/public examples | `README.md`, `docs/`, `examples/`, `.github/workflows/kuzushi-reference.yml`, `scripts/check-doc-command-drift.mjs` | `pnpm check:docs`; run any example script touched |
 
@@ -42,8 +42,8 @@ For vocabulary and dependency rules, see
 2. Run the deterministic workflow:
    `examples/first-wow/run.sh`.
 3. Inspect one module:
-   `crates/kuzushi-core/src/modules/native_scanners.rs` and its tests under
-   `crates/kuzushi-core/src/modules.rs`.
+   `crates/kuzushi-core/src/modules/native_scanners/mod.rs` and its tests under
+   `crates/kuzushi-core/src/modules/tests.rs`.
 4. Run one tool through the registry:
    `cargo run -q -p kuzushi-cli -- --target . run secret-scan:scan --input '{}'`.
 5. Open shell help without changing code:

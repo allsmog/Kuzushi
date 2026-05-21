@@ -70,6 +70,7 @@ mod tests {
     #[test]
     fn governance_validates_provider_model_syntax() {
         assert!(validate_model_spec("openai:gpt-5.5").is_ok());
+        assert!(validate_model_spec(" openai:gpt-5.5 ").is_ok());
         assert!(validate_model_spec("gpt-5.5")
             .unwrap_err()
             .to_string()
@@ -78,6 +79,23 @@ mod tests {
             .unwrap_err()
             .to_string()
             .contains("both provider and model id"));
+    }
+
+    #[test]
+    fn governance_normalizes_explicit_model_whitespace() {
+        assert_eq!(
+            require_configured_model("triage:run", Some(" openai : gpt-5.5 ")).unwrap(),
+            "openai:gpt-5.5"
+        );
+        assert_eq!(
+            resolve_explicit_model(
+                "triage:run",
+                Some(" anthropic : claude-sonnet-4-6 ".to_string()),
+                Some("openai:gpt-5.5"),
+            )
+            .unwrap(),
+            "anthropic:claude-sonnet-4-6"
+        );
     }
 
     #[test]

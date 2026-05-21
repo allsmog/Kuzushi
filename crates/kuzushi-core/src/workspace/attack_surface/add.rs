@@ -99,7 +99,32 @@ pub(crate) fn add_route_surface(
     route: &InventoryRouteController,
 ) {
     let method = route.method.clone().unwrap_or_else(|| "ANY".to_string());
-    let route_path = route.route.clone().unwrap_or_else(|| "unknown".to_string());
+    let Some(route_path) = route.route.clone() else {
+        return;
+    };
+    for method in inventory_route_methods(route, &method) {
+        add_route_method_surface(builder, route, &method, &route_path);
+    }
+}
+
+fn inventory_route_methods(route: &InventoryRouteController, method: &str) -> Vec<String> {
+    if route.framework.as_deref() != Some("ASP.NET Core") || !method.contains(',') {
+        return vec![method.to_string()];
+    }
+    method
+        .split(',')
+        .map(str::trim)
+        .filter(|method| !method.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn add_route_method_surface(
+    builder: &mut AttackSurfaceBuilder,
+    route: &InventoryRouteController,
+    method: &str,
+    route_path: &str,
+) {
     builder.add(AttackSurfaceDraft {
         kind: AttackSurfaceKind::HttpRoute,
         path: route.path.clone(),
@@ -110,8 +135,8 @@ pub(crate) fn add_route_surface(
         framework: route.framework.clone(),
         title: format!("{method} {route_path}"),
         evidence: route.detail.clone(),
-        method: Some(method),
-        route: Some(route_path),
+        method: Some(method.to_string()),
+        route: Some(route_path.to_string()),
         boundary: Some("public_http".to_string()),
         metadata: json!({ "source": "repository_inventory" }),
     });

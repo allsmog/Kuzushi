@@ -1,7 +1,7 @@
 use super::*;
 
 pub fn run_deep_auditor(
-    runtime: &RoutedRuntime,
+    runtime: &RoutedRuntime<'_>,
     spend: Option<&SpendLimiter>,
     cfg: &DeepAuditConfig,
     finding: &Finding,
@@ -25,7 +25,7 @@ pub fn run_deep_auditor(
 }
 
 fn run_deep_audit_pass(
-    runtime: &RoutedRuntime,
+    runtime: &RoutedRuntime<'_>,
     spend: Option<&SpendLimiter>,
     cfg: &DeepAuditConfig,
     finding: &Finding,
@@ -70,7 +70,7 @@ fn run_deep_audit_pass(
     })
 }
 
-fn resolve_deep_audit_model(runtime: &RoutedRuntime) -> Result<String> {
+fn resolve_deep_audit_model(runtime: &RoutedRuntime<'_>) -> Result<String> {
     runtime
         .resolve_model(AgentRole::DeepAuditor, 0, None)
         .ok_or_else(|| {
@@ -141,7 +141,7 @@ fn append_static_evidence_prompt(
 }
 
 fn synthesize_truncated_deep_audit(
-    runtime: &RoutedRuntime,
+    runtime: &RoutedRuntime<'_>,
     request: &AgentToolLoopRequest,
     cfg: &DeepAuditConfig,
     outcome: AgentLoopOutcome,

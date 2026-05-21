@@ -196,22 +196,18 @@ logic is duplicated across CLI, TUI, reports, persistence, and tool execution.
 ### Model & runtime safety (no silent fallback)
 
 Kuzushi will **never silently switch agent runtime, provider, or model**
-without explicit operator consent. The enforcement boundary lives in
-`src/agent-runtime/enforcement.ts` (`enforceAgentQuery`) and is called
-by every concrete adapter (`claude.ts`, `pi-ai.ts`, `codex.ts`) before
-any provider dispatch, plus by `loadConfig` in `src/config.ts` so an
-incompatible runtime/model pair fails at startup.
+without explicit operator consent. The Rust enforcement boundary lives in
+`crates/kuzushi-core/src/runtime/policy/no_silent_fallback.rs`, the Rust
+agent router rejects fallback chains, and `scripts/check-model-safety.mjs`
+keeps those paths wired into CI.
 
 Allowed fallbacks:
 1. Same-model transport retries (network 5xx, rate limit 429) — handled
    inside each adapter, model object is reused.
 2. Batch API → sequential per-prompt fallback — see
-   `src/agent-runtime/execution.ts`. Tested in
-   `tests/agent-runtime/batch-preserves-model.test.ts`.
-3. Informational stale-model warnings — see `claude.ts:detectStaleModel`.
-   Banner only, never rewrites the model.
-4. Backend defaults from `src/config/defaults.ts` *only when the operator
-   has not configured a model at all*.
+   the runtime execution helpers. The configured model is preserved.
+3. Informational stale-model warnings. Banner only, never rewrites the model.
+4. Backend defaults only when the operator has not configured a model at all.
 5. Deterministic non-LLM fallback that is clearly labeled (e.g. extraction
    degradation in taint-analysis when `consentToExtractionLabelingFallback`
    is set).
@@ -220,8 +216,7 @@ Forbidden behaviors (caught by enforcement):
 - Empty/missing `model` substituted with a backend default.
 - Operator-configured model that is incompatible with the chosen runtime
   (e.g. `agentRuntimeBackend=codex` + `model=anthropic:claude-...`).
-- `fallbackModel` plumbed through without explicit operator consent
-  (`consentToModelFallback: true` or `KUZUSHI_ALLOW_MODEL_FALLBACK=1`).
+- Fallback model chains plumbed through provider or router configuration.
 - Hardcoded `?? "anthropic:..."` defaults inside modules / orchestrator
   helpers — they bypass `ctx.config.model`.
 

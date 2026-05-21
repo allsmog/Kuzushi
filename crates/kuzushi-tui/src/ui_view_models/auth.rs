@@ -4,6 +4,8 @@ use crate::ShellApp;
 pub(crate) enum AuthProviderTone {
     Connected,
     Missing,
+    Expired,
+    Incomplete,
     Inactive,
 }
 
@@ -12,6 +14,8 @@ impl AuthProviderTone {
         match self {
             AuthProviderTone::Connected => "connected",
             AuthProviderTone::Missing => "missing",
+            AuthProviderTone::Expired => "expired",
+            AuthProviderTone::Incomplete => "incomplete",
             AuthProviderTone::Inactive => "inactive",
         }
     }
@@ -23,12 +27,32 @@ pub(crate) struct AuthProviderRow {
     pub(crate) cells: [String; 3],
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct AuthLoginModel {
+    pub(crate) provider: String,
+    pub(crate) method: String,
+    pub(crate) status: String,
+    pub(crate) flow: String,
+    pub(crate) store_path: String,
+}
+
 pub(crate) fn auth_provider_rows(app: &ShellApp) -> Vec<AuthProviderRow> {
     vec![
         runtime_env_row(app),
         anthropic_auth_row(),
         openai_oauth_row(),
+        github_copilot_auth_row(),
     ]
+}
+
+pub(crate) fn auth_login_model(app: &ShellApp) -> Option<AuthLoginModel> {
+    app.auth_login.as_ref().map(|login| AuthLoginModel {
+        provider: login.provider.clone(),
+        method: login.method.clone(),
+        status: login.status.clone(),
+        flow: login.detail.clone(),
+        store_path: login.store_path.clone(),
+    })
 }
 
 pub(crate) fn model_auth_status(choice: &crate::app::ModelChoice) -> String {
@@ -49,10 +73,22 @@ pub(crate) fn auth_env_summary(app: &ShellApp) -> String {
 
 pub(crate) fn oauth_summary() -> String {
     format!(
-        "openai {}; anthropic {}",
-        crate::app::oauth_provider_status("openai-codex"),
-        crate::app::oauth_provider_status("anthropic")
+        "openai={} · anthropic={} · github-copilot={}",
+        oauth_short_status("openai-codex"),
+        oauth_short_status("anthropic"),
+        oauth_short_status("github-copilot")
     )
+}
+
+fn oauth_short_status(provider: &str) -> String {
+    let raw = crate::app::oauth_provider_status(provider);
+    if raw.starts_with("stored") {
+        "✓ stored".to_string()
+    } else if raw.starts_with("expired") {
+        "! expired".to_string()
+    } else {
+        "— missing".to_string()
+    }
 }
 
 fn runtime_env_row(app: &ShellApp) -> AuthProviderRow {
@@ -78,7 +114,11 @@ fn anthropic_auth_row() -> AuthProviderRow {
     let oauth = crate::app::oauth_provider_status("anthropic");
     auth_provider_row(
         "anthropic",
-        connected_or_missing(env_set || oauth == "ok"),
+        if env_set {
+            AuthProviderTone::Connected
+        } else {
+            oauth_tone(&oauth)
+        },
         format!(
             "ANTHROPIC_API_KEY={}; oauth {oauth}",
             if env_set { "set" } else { "missing" }
@@ -88,13 +128,14 @@ fn anthropic_auth_row() -> AuthProviderRow {
 
 fn openai_oauth_row() -> AuthProviderRow {
     let oauth = crate::app::oauth_provider_status("openai-codex");
+    auth_provider_row("openai", oauth_tone(&oauth), format!("oauth {oauth}"))
+}
+
+fn github_copilot_auth_row() -> AuthProviderRow {
+    let oauth = crate::app::oauth_provider_status("github-copilot");
     auth_provider_row(
-        "openai",
-        if oauth == "ok" {
-            AuthProviderTone::Connected
-        } else {
-            AuthProviderTone::Inactive
-        },
+        "github-copilot",
+        oauth_tone(&oauth),
         format!("oauth {oauth}"),
     )
 }
@@ -111,6 +152,20 @@ fn connected_or_missing(connected: bool) -> AuthProviderTone {
         AuthProviderTone::Connected
     } else {
         AuthProviderTone::Missing
+    }
+}
+
+fn oauth_tone(status: &str) -> AuthProviderTone {
+    if status.starts_with("stored") {
+        AuthProviderTone::Connected
+    } else if status.starts_with("expired") {
+        AuthProviderTone::Expired
+    } else if status == "incomplete" || status == "unreadable" {
+        AuthProviderTone::Incomplete
+    } else if status == "missing" {
+        AuthProviderTone::Missing
+    } else {
+        AuthProviderTone::Inactive
     }
 }
 

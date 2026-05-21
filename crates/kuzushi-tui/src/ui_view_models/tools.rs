@@ -7,7 +7,7 @@ pub(crate) struct ToolsModel {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ToolRow {
-    pub(crate) cells: [String; 3],
+    pub(crate) cells: [String; 2],
 }
 
 pub(crate) fn tools_model(app: &ShellApp) -> ToolsModel {
@@ -16,11 +16,7 @@ pub(crate) fn tools_model(app: &ShellApp) -> ToolsModel {
             .registry
             .tools()
             .map(|tool| ToolRow {
-                cells: [
-                    tool.name.clone(),
-                    tool.headless.to_string(),
-                    tool.description.clone(),
-                ],
+                cells: [tool.name.clone(), tool.description.clone()],
             })
             .collect(),
     }

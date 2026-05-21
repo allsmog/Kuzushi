@@ -123,6 +123,26 @@ pub fn finding_evidence_preview(finding: &Finding) -> String {
         .to_string()
 }
 
+pub fn finding_remediation_hint(finding: &Finding) -> Option<String> {
+    if let Some(remediation) = finding.remediation.as_ref().filter(|value| !value.trim().is_empty())
+    {
+        return Some(remediation.trim().to_string());
+    }
+    finding
+        .message
+        .lines()
+        .map(str::trim)
+        .find_map(remediation_line)
+}
+
+fn remediation_line(line: &str) -> Option<String> {
+    let hint = line
+        .strip_prefix("Remediation:")
+        .or_else(|| line.strip_prefix("Fix:"))?
+        .trim();
+    (!hint.is_empty()).then(|| hint.to_string())
+}
+
 pub fn severity_badge(severity: Severity) -> &'static str {
     severity_label(severity, SEVERITY_BADGES, "⬜ LOW")
 }

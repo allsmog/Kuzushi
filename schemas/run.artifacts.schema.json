@@ -1,0 +1,84 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kuzushi.dev/schemas/run.artifacts.schema.json",
+  "title": "Kuzushi Run Artifact Manifest",
+  "description": "Canonical schema for .kuzushi/runs/<runId>/artifacts.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["artifacts"],
+  "anyOf": [{ "required": ["runId"] }, { "required": ["run_id"] }],
+  "properties": {
+    "runId": { "type": "string", "minLength": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/artifact" }
+    }
+  },
+  "definitions": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "anyOf": [
+            { "required": ["label"] },
+            { "required": ["name"] },
+            { "required": ["title"] }
+          ]
+        },
+        {
+          "anyOf": [
+            { "required": ["path"] },
+            { "required": ["file"] },
+            { "required": ["filePath"] },
+            { "required": ["file_path"] },
+            { "required": ["reportPath"] },
+            { "required": ["report_path"] },
+            { "required": ["reportJsonPath"] },
+            { "required": ["report_json_path"] },
+            { "required": ["scopePath"] },
+            { "required": ["scope_path"] },
+            { "required": ["dir"] },
+            { "required": ["outputDir"] },
+            { "required": ["output_dir"] },
+            { "required": ["promptsDir"] },
+            { "required": ["prompts_dir"] }
+          ]
+        },
+        {
+          "anyOf": [
+            { "required": ["kind"] },
+            { "required": ["type"] }
+          ]
+        }
+      ],
+      "properties": {
+        "label": { "type": "string" },
+        "name": { "type": "string" },
+        "title": { "type": "string" },
+        "path": { "type": "string" },
+        "file": { "type": "string" },
+        "filePath": { "type": "string" },
+        "file_path": { "type": "string" },
+        "reportPath": { "type": "string" },
+        "report_path": { "type": "string" },
+        "reportJsonPath": { "type": "string" },
+        "report_json_path": { "type": "string" },
+        "scopePath": { "type": "string" },
+        "scope_path": { "type": "string" },
+        "dir": { "type": "string" },
+        "outputDir": { "type": "string" },
+        "output_dir": { "type": "string" },
+        "promptsDir": { "type": "string" },
+        "prompts_dir": { "type": "string" },
+        "kind": { "$ref": "#/definitions/artifactKind" },
+        "type": { "$ref": "#/definitions/artifactKind" }
+      }
+    },
+    "artifactKind": {
+      "type": "string",
+      "enum": ["json", "jsonl", "markdown", "sarif", "directory", "artifact"]
+    }
+  }
+}

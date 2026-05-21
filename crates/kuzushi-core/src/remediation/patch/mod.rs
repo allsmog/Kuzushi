@@ -21,6 +21,7 @@ mod build_patch_prompt;
 mod detect_validation_plan;
 mod ensure_git_repository;
 mod from_tool_input;
+mod patch_refusal_response;
 mod patch_result_to_tool_json;
 mod run_patch_finding;
 mod validate_patch;

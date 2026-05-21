@@ -10,6 +10,7 @@ mod tests {
         AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentToolLoopRequest,
         LoopHistoryEntry, TriageRequest,
     };
+    use crate::run_artifacts::{write_run_summary, RunSummary};
     use crate::workspace::WorkspaceTarget;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -777,6 +778,14 @@ OUT
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
+        assert!(result
+            .get("summary")
+            .and_then(Value::as_str)
+            .is_some_and(|summary| summary.starts_with("chrome-rce:scan found")));
+        assert_eq!(
             result.pointer("/data/count").and_then(Value::as_u64),
             Some(1)
         );
@@ -829,6 +838,10 @@ OUT
             .execute_tool("chrome-rce:review-trigger", json!({}), &ctx)
             .unwrap();
 
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("skipped")
+        );
         assert_eq!(
             result.pointer("/data/count").and_then(Value::as_u64),
             Some(0)
@@ -958,6 +971,15 @@ OUT
                 Some(true),
                 "{tool}"
             );
+            assert_eq!(
+                result.get("status").and_then(Value::as_str),
+                Some("completed"),
+                "{tool}"
+            );
+            assert!(result
+                .get("summary")
+                .and_then(Value::as_str)
+                .is_some_and(|summary| summary.starts_with(tool)));
             assert!(
                 result.pointer("/data/findings/0").is_some()
                     || result.pointer("/data/count").and_then(Value::as_u64) == Some(1),
@@ -1016,6 +1038,14 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("failed")
+        );
+        assert!(result
+            .get("errors")
+            .and_then(Value::as_array)
+            .is_some_and(|errors| !errors.is_empty()));
         assert!(result
             .get("output")
             .and_then(Value::as_str)
@@ -1042,6 +1072,7 @@ OUT
         let config_result = registry
             .execute_tool("prompt-armor:config", json!({"action": "init"}), &ctx)
             .unwrap();
+        assert_completed_result_envelope(&config_result, "prompt-armor:config");
         assert_eq!(
             config_result
                 .pointer("/data/exists")
@@ -1056,6 +1087,7 @@ OUT
                 &ctx,
             )
             .unwrap();
+        assert_completed_result_envelope(&diff_result, "prompt-armor:diff complete");
         assert_eq!(
             diff_result
                 .pointer("/data/lineDelta")
@@ -1066,11 +1098,27 @@ OUT
         let report_result = registry
             .execute_tool("prompt-armor:report", json!({}), &ctx)
             .unwrap();
+        assert_eq!(
+            report_result.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
+        assert!(report_result
+            .get("summary")
+            .and_then(Value::as_str)
+            .is_some_and(|summary| summary.starts_with("prompt-armor:report complete")));
+        assert!(report_result
+            .get("errors")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty));
         let report_path = report_result
             .pointer("/data/reportPath")
             .and_then(Value::as_str)
             .unwrap();
         assert!(Path::new(report_path).exists());
+        assert_eq!(
+            report_result.pointer("/artifacts/0/path").and_then(Value::as_str),
+            Some(report_path)
+        );
         assert!(report_result
             .pointer("/data/artifacts")
             .and_then(Value::as_array)
@@ -1276,11 +1324,18 @@ OUT
             .collect::<Vec<_>>();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_result_envelope(&result, "context:build indexed");
         assert_eq!(
             result
                 .pointer("/data/snapshot/fileIndex/totalFiles")
                 .and_then(Value::as_u64),
             Some(2)
+        );
+        assert_eq!(
+            result
+                .pointer("/data/snapshot/fileIndex/truncated")
+                .and_then(Value::as_bool),
+            Some(false)
         );
         assert_eq!(
             result
@@ -1306,6 +1361,47 @@ OUT
                 .pointer("/fileIndex/totalFiles")
                 .and_then(Value::as_u64),
             Some(2)
+        );
+    }
+
+    #[test]
+    fn context_build_marks_file_index_truncation() {
+        let temp = tempdir().unwrap();
+        fs::write(temp.path().join("a.rs"), "fn a() {}\n").unwrap();
+        fs::write(temp.path().join("b.rs"), "fn b() {}\n").unwrap();
+        fs::write(temp.path().join("c.rs"), "fn c() {}\n").unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool("context:build", json!({"sampleLimit": 1}), &ctx)
+            .unwrap();
+
+        assert_eq!(
+            result
+                .pointer("/data/snapshot/fileIndex/totalFiles")
+                .and_then(Value::as_u64),
+            Some(3)
+        );
+        assert_eq!(
+            result
+                .pointer("/data/snapshot/fileIndex/truncated")
+                .and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(
+            result
+                .pointer("/data/snapshot/fileIndex/tree")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(1)
         );
     }
 
@@ -1358,6 +1454,111 @@ OUT
         assert!(outbound_clients.iter().any(|client| {
             client.get("kind").and_then(Value::as_str) == Some("external_service_client")
         }));
+    }
+
+    #[test]
+    fn context_build_excludes_non_route_helper_calls_from_routes() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("Cargo.toml"),
+            "[package]\nname = \"fixture\"\n[dependencies]\naxum = \"0.7\"\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/server.ts"),
+            "import express from 'express';\nconst app = express();\napp.get('/users', handler);\nheaders.get('x-signature');\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/main.rs"),
+            "use axum::{routing::get, Router};\nfn app() { Router::new().route(\"/ready\", get(ready)); builder.route(\"not-a-path\"); }\n",
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool("context:build", json!({"sampleLimit": 20}), &ctx)
+            .unwrap();
+        let app_routes = result
+            .pointer("/data/snapshot/appModel/routes")
+            .and_then(Value::as_array)
+            .unwrap();
+        let inventory_routes = result
+            .pointer("/data/snapshot/repositoryInventory/routesControllers")
+            .and_then(Value::as_array)
+            .unwrap();
+
+        assert_route_path(app_routes, "/users");
+        assert_route_path(app_routes, "/ready");
+        assert_no_route_path(app_routes, "x-signature");
+        assert_no_route_path(app_routes, "not-a-path");
+        assert_no_route_path(inventory_routes, "x-signature");
+        assert_no_route_path(inventory_routes, "not-a-path");
+    }
+
+    #[test]
+    fn context_build_projects_nextjs_route_methods_into_app_model() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src/app/api/health")).unwrap();
+        fs::create_dir_all(temp.path().join("pages/api/webhooks")).unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"next":"14.0.0"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("src/app/api/health/route.ts"),
+            "export function HEAD() { return new Response(null); }\nexport const OPTIONS = () => Response.json({ ok: true });\n",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("pages/api/webhooks/[[...slug]].ts"),
+            "export default function handler(req, res) { res.json({ ok: true }); }\n",
+        )
+        .unwrap();
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool("context:build", json!({"sampleLimit": 20}), &ctx)
+            .unwrap();
+        let app_routes = result
+            .pointer("/data/snapshot/appModel/routes")
+            .and_then(Value::as_array)
+            .unwrap();
+        let inventory_routes = result
+            .pointer("/data/snapshot/repositoryInventory/routesControllers")
+            .and_then(Value::as_array)
+            .unwrap();
+
+        assert_route(app_routes, "HEAD", "/api/health", "Next.js");
+        assert_route(app_routes, "OPTIONS", "/api/health", "Next.js");
+        assert_route(app_routes, "ANY", "/api/webhooks/:slug", "Next.js");
+        assert_route(inventory_routes, "HEAD", "/api/health", "Next.js");
+        assert_route(inventory_routes, "OPTIONS", "/api/health", "Next.js");
+        assert_route(inventory_routes, "ANY", "/api/webhooks/:slug", "Next.js");
     }
 
     #[test]
@@ -1476,6 +1677,7 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_result_envelope(&result, "dep-hygiene:");
         assert_eq!(
             result.pointer("/data/count").and_then(Value::as_u64),
             Some(1)
@@ -1499,6 +1701,12 @@ OUT
                 .pointer("/data/coreFindings/0/tool")
                 .and_then(Value::as_str),
             Some("dep-hygiene")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/coreFindings/0/staticProofState")
+                .and_then(Value::as_str),
+            Some("signal_only")
         );
         assert!(result
             .pointer("/data/coreFindings/0/fingerprint")
@@ -1539,6 +1747,41 @@ OUT
     }
 
     #[test]
+    fn dispatches_cargo_audit_scan_without_lockfile() {
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool("cargo-audit:scan", json!({}), &ctx)
+            .unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_result_envelope(&result, "cargo-audit:");
+        assert_eq!(
+            result.pointer("/data/count").and_then(Value::as_u64),
+            Some(0)
+        );
+        assert!(result
+            .pointer("/data/coreFindings")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty));
+        assert!(result
+            .pointer("/data/persisted/runId")
+            .and_then(Value::as_str)
+            .is_some());
+        assert!(store.list_findings(10).unwrap().is_empty());
+    }
+
+    #[test]
     fn dispatches_secret_scan() {
         let temp = tempdir().unwrap();
         fs::write(
@@ -1569,6 +1812,7 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_result_envelope(&result, "secret-scan:");
         assert_eq!(
             result
                 .pointer("/data/findings/0/ruleId")
@@ -1588,6 +1832,12 @@ OUT
                 .pointer("/data/coreFindings/0/tool")
                 .and_then(Value::as_str),
             Some("secret-scan")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/coreFindings/0/staticProofState")
+                .and_then(Value::as_str),
+            Some("signal_only")
         );
         assert!(result
             .pointer("/data/coreFindings/0/fingerprint")
@@ -1628,6 +1878,173 @@ OUT
     }
 
     #[test]
+    fn dispatches_license_scan_and_persists_findings() {
+        let temp = tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"demo","license":"AGPL-3.0"}"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("LICENSE"),
+            "GNU Affero General Public License\nVersion 3\n",
+        )
+        .unwrap();
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool("license-scan:scan", json!({}), &ctx)
+            .unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_result_envelope(&result, "license-scan:");
+        assert_eq!(
+            result.pointer("/data/count").and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            result
+                .pointer("/data/findings/0/ruleId")
+                .and_then(Value::as_str),
+            Some("license-scan/strong-copyleft")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/coreFindings/0/staticProofState")
+                .and_then(Value::as_str),
+            Some("signal_only")
+        );
+        assert!(result
+            .pointer("/data/persisted/runId")
+            .and_then(Value::as_str)
+            .is_some());
+        assert_eq!(store.list_findings(10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn license_scan_dispatch_honors_spdx_header_policy() {
+        let temp = tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"name":"demo","license":"MIT"}"#,
+        )
+        .unwrap();
+        fs::write(temp.path().join("LICENSE"), "MIT License\n").unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/lib.rs"), "pub fn demo() {}\n").unwrap();
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool(
+                "license-scan:scan",
+                json!({"requireSourceSpdxHeaders": true}),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            result
+                .pointer("/data/findings/0/ruleId")
+                .and_then(Value::as_str),
+            Some("license-scan/missing-spdx-header")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/findings/0/filePath")
+                .and_then(Value::as_str),
+            Some("src/lib.rs")
+        );
+        assert_eq!(store.list_findings(10).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn license_scan_missing_target_failure_is_explicit() {
+        let temp = tempdir().unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: None,
+            findings_store: None,
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool(
+                "license-scan:scan",
+                json!({"target": temp.path().join("missing").display().to_string()}),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(result.get("status").and_then(Value::as_str), Some("failed"));
+        assert_eq!(
+            result.pointer("/data/tool").and_then(Value::as_str),
+            Some("license-scan:scan")
+        );
+        assert!(result["errors"][0]
+            .as_str()
+            .is_some_and(|error| error.contains("license-scan: target does not exist")));
+    }
+
+    #[test]
+    fn dispatches_sbom_scan_inventory() {
+        let temp = tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"^4.18.0"}}"#,
+        )
+        .unwrap();
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let result = registry.execute_tool("sbom-scan:scan", json!({}), &ctx).unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_result_envelope(&result, "sbom-scan:");
+        assert_eq!(
+            result.pointer("/data/componentCount").and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            result
+                .pointer("/data/components/0/name")
+                .and_then(Value::as_str),
+            Some("express")
+        );
+    }
+
+    #[test]
     fn dispatches_iac_scan_and_persists_findings() {
         let temp = tempdir().unwrap();
         fs::write(
@@ -1652,6 +2069,7 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_result_envelope(&result, "iac-scan:");
         assert_eq!(
             result.pointer("/data/count").and_then(Value::as_u64),
             Some(3)
@@ -1666,6 +2084,12 @@ OUT
             .pointer("/data/persisted/runId")
             .and_then(Value::as_str)
             .is_some());
+        assert_eq!(
+            result
+                .pointer("/data/coreFindings/0/staticProofState")
+                .and_then(Value::as_str),
+            Some("signal_only")
+        );
         assert_eq!(store.list_findings(10).unwrap().len(), 3);
     }
 
@@ -1743,6 +2167,15 @@ OUT
             )
             .unwrap();
 
+        assert_eq!(result.get("status").and_then(Value::as_str), Some("completed"));
+        assert!(result
+            .get("summary")
+            .and_then(Value::as_str)
+            .is_some_and(|summary| summary.starts_with("sast:scan")));
+        assert!(result
+            .get("errors")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty));
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
             result
@@ -1759,6 +2192,53 @@ OUT
                     && output.contains("dep-hygiene")
                     && output.contains("secret-scan")
             }));
+    }
+
+    #[test]
+    fn sast_scan_dispatches_cargo_audit_task_without_lockfile() {
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool(
+                "sast:scan",
+                json!({
+                    "taskMode": "manual",
+                    "tasks": ["cargo-audit"]
+                }),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(result.get("status").and_then(Value::as_str), Some("completed"));
+        assert!(result
+            .get("summary")
+            .and_then(Value::as_str)
+            .is_some_and(|summary| summary.starts_with("sast:scan")));
+        assert!(result
+            .get("errors")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty));
+        assert_eq!(result.pointer("/data/findingsCount").and_then(Value::as_u64), Some(0));
+        assert!(result
+            .pointer("/data/coreFindings")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty));
+        assert!(result
+            .get("output")
+            .and_then(Value::as_str)
+            .is_some_and(|output| output.contains("cargo-audit")));
+        assert!(store.list_findings(10).unwrap().is_empty());
     }
 
     #[test]
@@ -1839,6 +2319,7 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_result_envelope(&result, "agentic-sast:");
         assert_eq!(
             result.pointer("/data/count").and_then(Value::as_u64),
             Some(1)
@@ -2052,6 +2533,7 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_result_envelope(&result, "taint-iris:");
         assert_eq!(
             result.pointer("/data/count").and_then(Value::as_u64),
             Some(1)
@@ -2139,6 +2621,10 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            result.pointer("/status").and_then(Value::as_str),
+            Some("completed")
+        );
         assert_eq!(
             result.pointer("/data/cwes/0/id").and_then(Value::as_str),
             Some("CWE-89")
@@ -2241,6 +2727,7 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_result_envelope(&result, "carlini-threat-hunt:");
         assert_eq!(runtime.queries().len(), 1);
         assert_eq!(store.list_findings(10).unwrap().len(), 1);
     }
@@ -2527,6 +3014,10 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
         assert_eq!(
             result.pointer("/data/count").and_then(Value::as_u64),
             Some(1)
@@ -2989,6 +3480,7 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_result_envelope(&result, "semgrep:");
         assert_eq!(
             result.pointer("/data/count").and_then(Value::as_u64),
             Some(1)
@@ -3139,6 +3631,7 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_result_envelope(&result, "codeql:");
         assert_eq!(
             result.pointer("/data/count").and_then(Value::as_u64),
             Some(1)
@@ -3327,6 +3820,7 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_result_envelope(&result, "findings:list:");
         assert_eq!(
             result.pointer("/data/count").and_then(Value::as_u64),
             Some(1)
@@ -3341,6 +3835,65 @@ OUT
             .get("output")
             .and_then(Value::as_str)
             .is_some_and(|output| output.contains("SQL injection in search")));
+    }
+
+    #[test]
+    fn dispatches_report_build_for_run_artifacts() {
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let source = RunSummary::running(
+            "run-report-source",
+            "tool",
+            Some("secret-scan:scan".to_string()),
+            temp.path().display().to_string(),
+        )
+        .complete()
+        .with_findings(Some(0));
+        write_run_summary(temp.path(), &source).unwrap();
+
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+        let result = registry
+            .execute_tool("report:build", json!({"runId": "run-report-source"}), &ctx)
+            .unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
+        assert!(result
+            .get("summary")
+            .and_then(Value::as_str)
+            .is_some_and(|summary| summary.starts_with("Report built for run")));
+        assert_eq!(
+            result.pointer("/data/sourceRunId").and_then(Value::as_str),
+            Some("run-report-source")
+        );
+        assert!(result
+            .get("reportMarkdown")
+            .and_then(Value::as_str)
+            .is_some_and(|markdown| markdown.contains("# Kuzushi Run Report")));
+        let report_path = result
+            .pointer("/artifacts/0/path")
+            .and_then(Value::as_str)
+            .expect("report artifact path");
+        assert!(report_path.ends_with(".kuzushi/runs/run-report-source/report.md"));
+        assert!(Path::new(report_path).exists());
+        assert!(result
+            .get("warnings")
+            .and_then(Value::as_array)
+            .is_some());
+        assert!(result
+            .get("errors")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty));
     }
 
     #[test]
@@ -3393,6 +3946,7 @@ OUT
             )
             .unwrap();
 
+        assert_completed_result_envelope(&result, "[+] Triaged");
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
             result.pointer("/data/triaged").and_then(Value::as_u64),
@@ -3665,6 +4219,11 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(result.pointer("/status").and_then(Value::as_str), Some("completed"));
+        assert_eq!(
+            result.pointer("/summary").and_then(Value::as_str),
+            Some("full-mode:hunt planned 1 chunk over 1 file")
+        );
         assert_eq!(
             result.pointer("/data/dryRun").and_then(Value::as_bool),
             Some(true)
@@ -3730,6 +4289,7 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_result_envelope(&result, "verify:finding complete");
         assert_eq!(
             result.pointer("/data/fingerprint").and_then(Value::as_str),
             Some("from-bridge")
@@ -3903,6 +4463,7 @@ OUT
             Some(true),
             "result: {result}"
         );
+        assert_completed_result_envelope(&result, "patch:finding ");
         assert_eq!(
             result.pointer("/data/status").and_then(Value::as_str),
             Some("SOUND")
@@ -4052,5 +4613,66 @@ OUT
                 .and_then(Value::as_u64),
             Some(2)
         );
+    }
+
+    fn assert_completed_result_envelope(result: &Value, summary_prefix: &str) {
+        assert_eq!(result.get("status").and_then(Value::as_str), Some("completed"));
+        assert!(result
+            .get("summary")
+            .and_then(Value::as_str)
+            .is_some_and(|summary| summary.starts_with(summary_prefix)));
+        assert!(result
+            .get("artifacts")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty));
+        assert!(result
+            .get("warnings")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty));
+        assert!(result
+            .get("errors")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty));
+    }
+
+    fn assert_route_path(routes: &[Value], expected: &str) {
+        assert!(
+            routes.iter().any(|route| route_path(route) == Some(expected)),
+            "missing route {expected}: {routes:#?}"
+        );
+    }
+
+    fn assert_no_route_path(routes: &[Value], unexpected: &str) {
+        assert!(
+            routes
+                .iter()
+                .all(|route| route_path(route) != Some(unexpected)),
+            "unexpected route {unexpected}: {routes:#?}"
+        );
+    }
+
+    fn assert_route(routes: &[Value], method: &str, path: &str, framework: &str) {
+        assert!(
+            routes.iter().any(|route| {
+                route.get("method").and_then(Value::as_str) == Some(method)
+                    && route_endpoint(route) == Some(path)
+                    && route.get("framework").and_then(Value::as_str) == Some(framework)
+            }),
+            "missing route {method} {path} {framework}: {routes:#?}"
+        );
+    }
+
+    fn route_endpoint(route: &Value) -> Option<&str> {
+        route
+            .get("route")
+            .or_else(|| route.get("path"))
+            .and_then(Value::as_str)
+    }
+
+    fn route_path(route: &Value) -> Option<&str> {
+        route
+            .get("path")
+            .or_else(|| route.get("route"))
+            .and_then(Value::as_str)
     }
 }

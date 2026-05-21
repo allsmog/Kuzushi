@@ -90,10 +90,11 @@ pub(crate) fn missing_ndiff_fix_pattern_source(
     source: &NdiffFixPatternSource,
 ) -> Option<Value> {
     if id.is_none() && source.patch_url.trim().is_empty() {
-        return Some(json!({
-            "ok": false,
-            "output": "ndiff:extract-fix-pattern requires at least one of: id, patchText, or patchUrl.",
-        }));
+        return Some(crate::module_result::failed_output_result(
+            "ndiff:extract-fix-pattern rejected input",
+            "ndiff:extract-fix-pattern requires at least one of: id, patchText, or patchUrl.",
+            json!({ "reason": "missing-source" }),
+        ));
     }
     None
 }
@@ -118,10 +119,11 @@ fn apply_optional_ndiff_advisory(source: &mut NdiffFixPatternSource, found: Opti
 }
 
 fn ndiff_advisory_fetch_error(id: &str, error: anyhow::Error) -> Value {
-    json!({
-        "ok": false,
-        "output": format!("Could not fetch {id}: {error:#}"),
-    })
+    crate::module_result::failed_output_result(
+        "ndiff:extract-fix-pattern advisory fetch failed",
+        format!("Could not fetch {id}: {error:#}"),
+        json!({ "id": id, "reason": "advisory-fetch-error" }),
+    )
 }
 
 pub(crate) fn apply_found_ndiff_advisory(source: &mut NdiffFixPatternSource, found: CveRecord) {
@@ -166,32 +168,36 @@ fn apply_ndiff_patch_fetch_success(
 }
 
 fn ndiff_patch_fetch_error(patch_url: &str, error: anyhow::Error) -> Value {
-    json!({
-        "ok": false,
-        "output": format!("Could not fetch patch content from {patch_url}: {error:#}"),
-    })
+    crate::module_result::failed_output_result(
+        "ndiff:extract-fix-pattern patch fetch failed",
+        format!("Could not fetch patch content from {patch_url}: {error:#}"),
+        json!({ "patchUrl": patch_url, "reason": "patch-fetch-error" }),
+    )
 }
 
 pub(crate) fn unresolved_ndiff_patch_response() -> Value {
-    json!({
-        "ok": false,
-        "output": "ndiff:extract-fix-pattern could not resolve any patch content to analyze.",
-    })
+    crate::module_result::failed_output_result(
+        "ndiff:extract-fix-pattern patch content unavailable",
+        "ndiff:extract-fix-pattern could not resolve any patch content to analyze.",
+        json!({ "reason": "unresolved-patch-content" }),
+    )
 }
 
 pub(crate) fn unfetched_ndiff_patch_response(patch_url: &str, input: &Value) -> Value {
-    json!({
-        "ok": false,
-        "output": format!(
-            "Could not fetch patch content from {}{}.",
-            patch_url,
-            if input.get("offline").and_then(Value::as_bool).unwrap_or(false) {
-                " (offline mode)"
-            } else {
-                ""
-            }
-        ),
-    })
+    let output = format!(
+        "Could not fetch patch content from {}{}.",
+        patch_url,
+        if input.get("offline").and_then(Value::as_bool).unwrap_or(false) {
+            " (offline mode)"
+        } else {
+            ""
+        }
+    );
+    crate::module_result::failed_output_result(
+        "ndiff:extract-fix-pattern patch content unavailable",
+        output,
+        json!({ "patchUrl": patch_url, "reason": "patch-content-unavailable" }),
+    )
 }
 
 pub(crate) fn ndiff_fix_pattern_response(
@@ -203,14 +209,13 @@ pub(crate) fn ndiff_fix_pattern_response(
         .context("ndiff:extract-fix-pattern output parse failed: expected a JSON object")?;
     let output = ndiff_fix_pattern_output(object);
 
-    Ok(json!({
-        "ok": true,
-        "output": output,
-        "data": {
-            "advisory": source.record,
-            "pattern": pattern,
-            "patchUrl": source.patch_url,
-        },
-        "costUsd": 0.0,
-    }))
+    let data = json!({
+        "advisory": source.record,
+        "pattern": pattern,
+        "patchUrl": source.patch_url,
+    });
+    let mut result =
+        crate::module_result::completed_output_result("ndiff:extract-fix-pattern completed", output, data);
+    result["costUsd"] = json!(0.0);
+    Ok(result)
 }

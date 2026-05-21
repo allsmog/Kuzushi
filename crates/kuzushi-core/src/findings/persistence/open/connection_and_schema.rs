@@ -23,137 +23,179 @@ impl FindingStore {
     }
 
     pub fn init(&self) -> Result<()> {
-        self.conn.execute_batch(
-            r#"
-            pragma foreign_keys = on;
-
-            create table if not exists scan_runs (
-              id text primary key,
-              target text not null,
-              status text not null,
-              started_at text not null,
-              completed_at text,
-              findings_count integer not null default 0
-            );
-
-            create table if not exists findings (
-              id integer primary key autoincrement,
-              scan_id text not null references scan_runs(id) on delete cascade,
-              fingerprint text not null,
-              rule_id text not null,
-              title text not null,
-              severity text not null,
-              file_path text not null,
-              start_line integer not null,
-              end_line integer,
-              message text not null,
-              tool text not null,
-              actor_fingerprint text,
-              static_proof_state text,
-              created_at text not null,
-              unique(scan_id, fingerprint)
-            );
-
-            create table if not exists triage (
-              finding_id integer primary key references findings(id) on delete cascade,
-              verdict text not null,
-              confidence real not null,
-              rationale text not null,
-              created_at text not null
-            );
-
-            create table if not exists finding_evidence (
-              finding_id integer not null references findings(id) on delete cascade,
-              ordinal integer not null,
-              kind text not null,
-              file_path text not null,
-              line integer not null,
-              snippet text not null,
-              rationale text not null,
-              confidence integer not null,
-              primary key (finding_id, ordinal)
-            );
-            create index if not exists idx_finding_evidence_finding
-              on finding_evidence(finding_id, ordinal);
-
-            create table if not exists patch_results (
-              patch_run_id text primary key,
-              fingerprint text not null,
-              repo text not null,
-              diff text,
-              status text not null
-                check (status in ('APPLY_FAILED','BUILD_FAILED','STILL_VULNERABLE',
-                                  'TESTS_FAILED','SOUND','VERIFIED','UNKNOWN')),
-              iterations integer not null default 1,
-              build_command text,
-              test_command text,
-              worktree_path text,
-              cost_usd real,
-              validator_log text,
-              history_json text not null,
-              created_at text not null default (datetime('now')),
-              updated_at text not null default (datetime('now'))
-            );
-
-            create index if not exists idx_patch_results_fingerprint
-              on patch_results(fingerprint, created_at desc);
-            create index if not exists idx_patch_results_repo_status
-              on patch_results(repo, status);
-
-            create table if not exists verifications (
-              id integer primary key autoincrement,
-              finding_id integer not null references findings(id) on delete cascade,
-              proof_level integer not null,
-              proof_verdict text not null,
-              backend text not null,
-              language text,
-              harness_path text,
-              crash_evidence text,
-              duration_ms integer not null default 0,
-              cost_usd real not null default 0.0,
-              notes_json text,
-              created_at text not null
-            );
-            create index if not exists idx_verifications_finding
-              on verifications(finding_id, created_at desc);
-            "#,
-        )?;
-        ensure_column(
-            &self.conn,
-            "findings",
-            "actor_fingerprint",
-            "alter table findings add column actor_fingerprint text",
-        )?;
-        ensure_column(
-            &self.conn,
-            "findings",
-            "static_proof_state",
-            "alter table findings add column static_proof_state text",
-        )?;
-        ensure_column(
-            &self.conn,
-            "findings",
-            "vuln_source",
-            "alter table findings add column vuln_source text",
-        )?;
-        ensure_column(
-            &self.conn,
-            "findings",
-            "dedup_key",
-            "alter table findings add column dedup_key text",
-        )?;
-        self.conn.execute_batch(
-            "create index if not exists idx_findings_dedup_key
-               on findings(scan_id, dedup_key) where dedup_key is not null;
-             create index if not exists idx_findings_vuln_source
-               on findings(vuln_source) where vuln_source is not null;",
-        )?;
-        ensure_column(
-            &self.conn,
-            "triage",
-            "cost_usd",
-            "alter table triage add column cost_usd real not null default 0.0",
-        )?;
+        create_schema(&self.conn)?;
+        migrate_findings_columns(&self.conn)?;
+        create_findings_indexes(&self.conn)?;
+        migrate_triage_columns(&self.conn)?;
         Ok(())
     }
 }
+
+fn create_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch(FINDINGS_SCHEMA)?;
+    Ok(())
+}
+
+fn migrate_findings_columns(conn: &Connection) -> Result<()> {
+    for column in FINDING_COLUMN_MIGRATIONS {
+        ensure_column(conn, "findings", column.name, column.sql)?;
+    }
+    Ok(())
+}
+
+fn create_findings_indexes(conn: &Connection) -> Result<()> {
+    conn.execute_batch(
+        "create index if not exists idx_findings_dedup_key
+           on findings(scan_id, dedup_key) where dedup_key is not null;
+         create index if not exists idx_findings_vuln_source
+           on findings(vuln_source) where vuln_source is not null;",
+    )?;
+    Ok(())
+}
+
+fn migrate_triage_columns(conn: &Connection) -> Result<()> {
+    ensure_column(
+        conn,
+        "triage",
+        "cost_usd",
+        "alter table triage add column cost_usd real not null default 0.0",
+    )
+}
+
+struct ColumnMigration {
+    name: &'static str,
+    sql: &'static str,
+}
+
+const FINDING_COLUMN_MIGRATIONS: &[ColumnMigration] = &[
+    ColumnMigration {
+        name: "actor_fingerprint",
+        sql: "alter table findings add column actor_fingerprint text",
+    },
+    ColumnMigration {
+        name: "static_proof_state",
+        sql: "alter table findings add column static_proof_state text",
+    },
+    ColumnMigration {
+        name: "vuln_source",
+        sql: "alter table findings add column vuln_source text",
+    },
+    ColumnMigration {
+        name: "dedup_key",
+        sql: "alter table findings add column dedup_key text",
+    },
+    ColumnMigration {
+        name: "suppressed",
+        sql: "alter table findings add column suppressed integer not null default 0",
+    },
+    ColumnMigration {
+        name: "snoozed_until",
+        sql: "alter table findings add column snoozed_until text",
+    },
+    ColumnMigration {
+        name: "remediation",
+        sql: "alter table findings add column remediation text",
+    },
+    ColumnMigration {
+        name: "references_json",
+        sql: "alter table findings add column references_json text",
+    },
+];
+
+const FINDINGS_SCHEMA: &str = r#"
+pragma foreign_keys = on;
+
+create table if not exists scan_runs (
+  id text primary key,
+  target text not null,
+  status text not null,
+  started_at text not null,
+  completed_at text,
+  findings_count integer not null default 0
+);
+
+create table if not exists findings (
+  id integer primary key autoincrement,
+  scan_id text not null references scan_runs(id) on delete cascade,
+  fingerprint text not null,
+  rule_id text not null,
+  title text not null,
+  severity text not null,
+  file_path text not null,
+  start_line integer not null,
+  end_line integer,
+  message text not null,
+  tool text not null,
+  actor_fingerprint text,
+  static_proof_state text,
+  created_at text not null,
+  suppressed integer not null default 0,
+  snoozed_until text,
+  remediation text,
+  references_json text,
+  unique(scan_id, fingerprint)
+);
+
+create table if not exists triage (
+  finding_id integer primary key references findings(id) on delete cascade,
+  verdict text not null,
+  confidence real not null,
+  rationale text not null,
+  created_at text not null
+);
+
+create table if not exists finding_evidence (
+  finding_id integer not null references findings(id) on delete cascade,
+  ordinal integer not null,
+  kind text not null,
+  file_path text not null,
+  line integer not null,
+  snippet text not null,
+  rationale text not null,
+  confidence integer not null,
+  primary key (finding_id, ordinal)
+);
+create index if not exists idx_finding_evidence_finding
+  on finding_evidence(finding_id, ordinal);
+
+create table if not exists patch_results (
+  patch_run_id text primary key,
+  fingerprint text not null,
+  repo text not null,
+  diff text,
+  status text not null
+    check (status in ('APPLY_FAILED','BUILD_FAILED','STILL_VULNERABLE',
+                      'TESTS_FAILED','SOUND','VERIFIED','UNKNOWN')),
+  iterations integer not null default 1,
+  build_command text,
+  test_command text,
+  worktree_path text,
+  cost_usd real,
+  validator_log text,
+  history_json text not null,
+  created_at text not null default (datetime('now')),
+  updated_at text not null default (datetime('now'))
+);
+
+create index if not exists idx_patch_results_fingerprint
+  on patch_results(fingerprint, created_at desc);
+create index if not exists idx_patch_results_repo_status
+  on patch_results(repo, status);
+
+create table if not exists verifications (
+  id integer primary key autoincrement,
+  finding_id integer not null references findings(id) on delete cascade,
+  proof_level integer not null,
+  proof_verdict text not null,
+  backend text not null,
+  language text,
+  harness_path text,
+  crash_evidence text,
+  duration_ms integer not null default 0,
+  cost_usd real not null default 0.0,
+  notes_json text,
+  created_at text not null
+);
+create index if not exists idx_verifications_finding
+  on verifications(finding_id, created_at desc);
+"#;

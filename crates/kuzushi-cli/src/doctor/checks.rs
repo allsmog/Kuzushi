@@ -70,6 +70,7 @@ pub(crate) fn deterministic_capability_checks() -> Vec<DoctorCheck> {
         built_in_capability_check("secret-scan", "built-in secret scanner is available"),
         built_in_capability_check("dep-hygiene", "built-in manifest analyzer is available"),
         built_in_capability_check("iac-scan", "built-in IaC scanner is available"),
+        built_in_capability_check("license-scan", "built-in license-risk scanner is available"),
         cargo_audit_capability_check(),
     ]
 }
@@ -170,23 +171,32 @@ pub(crate) fn check_model_config(config: &kuzushi_core::V2Config) -> DoctorCheck
             "no explicit model configured; static scanners still work",
             "Set `KUZUSHI_MODEL=provider:model` or add `model = \"provider:model\"` before using agentic tools.",
         ),
-        Some(model) => match model.split_once(':') {
-            Some((provider, name)) if !provider.trim().is_empty() && !name.trim().is_empty() => {
-                DoctorCheck::ok(
-                    "model",
-                    format!(
-                        "explicit model configured for provider {}",
-                        provider.trim()
-                    ),
-                )
-            }
-            _ => DoctorCheck::fail(
-                "model",
-                format!("model must use non-empty provider:model syntax, got {model:?}"),
-                "Set `KUZUSHI_MODEL=provider:model` or fix config.toml.",
-            ),
-        },
+        Some(model) => model_config_check(model),
     }
+}
+
+fn model_config_check(model: &str) -> DoctorCheck {
+    match kuzushi_core::runtime::canonical_model_spec(model) {
+        Ok(canonical) => DoctorCheck::ok(
+            "model",
+            format!(
+                "explicit model configured for provider {}",
+                model_provider(&canonical)
+            ),
+        ),
+        Err(error) => DoctorCheck::fail(
+            "model",
+            error.to_string(),
+            "Set `KUZUSHI_MODEL=provider:model` or fix config.toml.",
+        ),
+    }
+}
+
+fn model_provider(model: &str) -> &str {
+    model
+        .split_once(':')
+        .map(|(provider, _)| provider)
+        .unwrap_or(model)
 }
 
 pub(crate) fn check_auth_env(config: &kuzushi_core::V2Config) -> DoctorCheck {

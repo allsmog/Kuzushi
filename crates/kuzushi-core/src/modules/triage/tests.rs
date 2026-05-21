@@ -196,6 +196,9 @@ mod tests {
 
         assert_eq!(response["ok"], json!(true));
         assert_eq!(response["status"], json!("skipped"));
+        assert_eq!(response["errors"], json!([]));
+        assert_eq!(response["warnings"][0], json!("No findings matched triage input."));
         assert_eq!(response["data"]["findings"], json!([]));
+        assert_eq!(response["costUsd"], json!(0.0));
     }
 }

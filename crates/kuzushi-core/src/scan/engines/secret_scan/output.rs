@@ -8,16 +8,15 @@ impl SecretScanReport {
     }
 
     pub fn to_tool_json(&self) -> Value {
-        serde_json::json!({
-            "ok": true,
-            "output": self.output(),
-            "data": {
+        crate::scan::completed_scan_tool_json(
+            self.output(),
+            serde_json::json!({
                 "findings": self.findings,
                 "filesScanned": self.files_scanned,
                 "filesSkipped": self.files_skipped,
                 "target": self.target,
-            }
-        })
+            }),
+        )
     }
 }
 

@@ -1,4 +1,4 @@
-use super::{SeverityCounts, SeverityTone};
+use super::{context_snapshot_state, SeverityCounts, SeverityTone};
 use crate::ShellApp;
 use kuzushi_core::{
     finding_source_label, project_finding, sorted_finding_aliases, stable_finding_alias, Finding,
@@ -102,7 +102,7 @@ pub(crate) fn findings_model(app: &ShellApp) -> FindingsModel {
         counts: SeverityCounts::from_findings(&app.findings),
         header: format!("FINDINGS · {total} · {triaged} triaged · {pending} pending"),
         cursor: app.findings_cursor.min(total.saturating_sub(1)),
-        empty: empty_state(app.context_view.exists),
+        empty: empty_state(context_snapshot_state(app)),
         preview: findings_preview(total, triaged, pending, &rows),
         rows,
     }
@@ -128,16 +128,20 @@ fn finding_rows(app: &ShellApp) -> Vec<FindingListRow> {
         .collect()
 }
 
-fn empty_state(context_exists: bool) -> FindingsEmptyState {
-    if context_exists {
-        return FindingsEmptyState {
+fn empty_state(context_state: &'static str) -> FindingsEmptyState {
+    match context_state {
+        "present" => FindingsEmptyState {
             hint: "scan runs configured scanners against the active target.",
             context_cta: None,
-        };
-    }
-    FindingsEmptyState {
-        hint: "scan dispatches the umbrella scanner once context-snapshot exists.",
-        context_cta: Some(("context build", "build the snapshot first if you have time")),
+        },
+        "malformed" => FindingsEmptyState {
+            hint: "context snapshot is malformed; rebuild it before scanning.",
+            context_cta: Some(("context build", "rewrite the malformed snapshot first")),
+        },
+        _ => FindingsEmptyState {
+            hint: "scan dispatches the umbrella scanner once context-snapshot exists.",
+            context_cta: Some(("context build", "build the snapshot first if you have time")),
+        },
     }
 }
 

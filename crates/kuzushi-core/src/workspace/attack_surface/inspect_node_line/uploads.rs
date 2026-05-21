@@ -6,6 +6,8 @@ pub(super) fn inspect(inspection: &NodeLineInspection<'_>, builder: &mut AttackS
         "upload.single(",
         "upload.array(",
         "upload.fields(",
+        "req.files",
+        "request.files",
         "busboy(",
         "formidable(",
         "multipart",

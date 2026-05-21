@@ -138,9 +138,9 @@ shipping a new DAG-side hook today.
 ### 2.5. Module-contributed shell views/verbs/keybinds — REJECTED
 
 **Gap.** Modules cannot register a `ShellView` id, slash verb, or keybind
-through the SDK. Adding a view today requires a six-step recipe in CLAUDE.md
-that touches `ShellState`, `shell.ts`, `CopilotShell.tsx`, `plain-renderer.ts`,
-plus per-view input handlers.
+through the SDK. Adding a view today requires the Rust shell recipe in
+CLAUDE.md: define view state, command specs, state transitions, view models,
+Ratatui rendering, plain output, and focused tests under `crates/kuzushi-tui`.
 
 **Why reject (for now).** No high-confidence concrete blocking module yet —
 the existing per-module home renderer + `module-run` view + tools table

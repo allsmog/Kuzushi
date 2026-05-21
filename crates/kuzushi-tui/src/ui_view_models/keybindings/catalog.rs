@@ -15,7 +15,7 @@ fn home_keybindings() -> Vec<FooterKeybinding> {
     vec![
         bind("modules", "browse"),
         bind("recommend", "plan"),
-        bind("scan", "scan target"),
+        bind("scan", "run scanners"),
         bind("Ctrl+C", "exit"),
     ]
 }
@@ -24,7 +24,7 @@ fn collapsed_catalog_keybindings() -> Vec<FooterKeybinding> {
     vec![
         bind("modules", "browse"),
         bind("use <id>", "focus module"),
-        bind("scan", "scan target"),
+        bind("scan", "run scanners"),
         bind("Ctrl+C", "exit"),
     ]
 }
@@ -33,8 +33,9 @@ fn expanded_catalog_keybindings() -> Vec<FooterKeybinding> {
     vec![
         bind("j/k", "row"),
         bind("PgUp/PgDn", "scroll"),
+        bind("Enter", "use selected row"),
         bind("use <id>", "focus module"),
-        bind("findings", "findings"),
+        bind("findings", "list"),
         bind("?", "help"),
     ]
 }

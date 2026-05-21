@@ -7,23 +7,48 @@ pub(crate) struct AttackSurfaceRiskModel {
 }
 
 pub(crate) fn attack_surface_risk_model(run_dir: &Path) -> Option<AttackSurfaceRiskModel> {
-    let value = read_attack_surface(run_dir)?;
+    let value = match read_attack_surface(run_dir)? {
+        AttackSurfaceRead::Present(value) => value,
+        AttackSurfaceRead::Malformed => return Some(malformed_attack_surface_model()),
+    };
     let risk_tiers = summary_risk_tiers(&value);
+    let frameworks = framework_counts(&value);
     let top_surface = top_surface_label(&value);
     Some(AttackSurfaceRiskModel {
         summary: attack_surface_risk_summary(
             summary_usize(&value, "highRisk"),
             summary_u64(&value, "maxRiskScore"),
             &risk_tiers,
+            &frameworks,
             top_surface.as_deref(),
         ),
     })
 }
 
-fn read_attack_surface(run_dir: &Path) -> Option<serde_json::Value> {
+fn read_attack_surface(run_dir: &Path) -> Option<AttackSurfaceRead> {
     let path = run_dir.join("attack-surface.json");
-    let text = fs::read_to_string(path).ok()?;
-    serde_json::from_str(&text).ok()
+    if !path.exists() {
+        return None;
+    }
+    let text = match fs::read_to_string(path) {
+        Ok(text) => text,
+        Err(_) => return Some(AttackSurfaceRead::Malformed),
+    };
+    match serde_json::from_str(&text) {
+        Ok(value) => Some(AttackSurfaceRead::Present(value)),
+        Err(_) => Some(AttackSurfaceRead::Malformed),
+    }
+}
+
+enum AttackSurfaceRead {
+    Present(serde_json::Value),
+    Malformed,
+}
+
+fn malformed_attack_surface_model() -> AttackSurfaceRiskModel {
+    AttackSurfaceRiskModel {
+        summary: "malformed attack-surface.json".to_string(),
+    }
 }
 
 fn summary_usize(value: &serde_json::Value, key: &str) -> usize {
@@ -68,6 +93,27 @@ fn top_surface_label(value: &serde_json::Value) -> Option<String> {
     surface_label(tier, title)
 }
 
+fn framework_counts(value: &serde_json::Value) -> BTreeMap<String, usize> {
+    let mut counts = BTreeMap::new();
+    let Some(surfaces) = value.get("surfaces").and_then(serde_json::Value::as_array) else {
+        return counts;
+    };
+    for surface in surfaces {
+        if let Some(framework) = surface_framework(surface) {
+            *counts.entry(framework.to_string()).or_default() += 1;
+        }
+    }
+    counts
+}
+
+fn surface_framework(surface: &serde_json::Value) -> Option<&str> {
+    surface
+        .get("framework")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|framework| !framework.is_empty())
+}
+
 fn surface_label(tier: Option<&str>, title: Option<&str>) -> Option<String> {
     match (tier, title) {
         (Some(tier), Some(title)) => Some(format!("{tier} {title}")),
@@ -81,6 +127,7 @@ fn attack_surface_risk_summary(
     high_risk: usize,
     max_risk_score: u64,
     risk_tiers: &BTreeMap<String, usize>,
+    frameworks: &BTreeMap<String, usize>,
     top_surface: Option<&str>,
 ) -> String {
     let top = top_surface.unwrap_or("none");
@@ -91,8 +138,15 @@ fn attack_surface_risk_summary(
     if let Some(tiers) = risk_tier_summary(risk_tiers) {
         parts.push(format!("tiers {tiers}"));
     }
+    if let Some(frameworks) = framework_summary(frameworks) {
+        parts.push(format!("frameworks {frameworks}"));
+    }
     parts.push(format!("top {top}"));
     parts.join(", ")
+}
+
+fn framework_summary(frameworks: &BTreeMap<String, usize>) -> Option<String> {
+    count_summary(frameworks)
 }
 
 fn risk_tier_summary(tiers: &BTreeMap<String, usize>) -> Option<String> {
@@ -102,17 +156,25 @@ fn risk_tier_summary(tiers: &BTreeMap<String, usize>) -> Option<String> {
             .cmp(&tier_rank(right))
             .then_with(|| left.cmp(right))
     });
+    count_summary_for_keys(keys, tiers)
+}
+
+fn count_summary(counts: &BTreeMap<String, usize>) -> Option<String> {
+    count_summary_for_keys(counts.keys().collect(), counts)
+}
+
+fn count_summary_for_keys(keys: Vec<&String>, counts: &BTreeMap<String, usize>) -> Option<String> {
     let summary = keys
         .into_iter()
-        .filter_map(|tier| tier_count_segment(tier, tiers.get(tier).copied()))
+        .filter_map(|key| count_segment(key, counts.get(key).copied()))
         .collect::<Vec<_>>()
         .join(", ");
     (!summary.is_empty()).then_some(summary)
 }
 
-fn tier_count_segment(tier: &str, count: Option<usize>) -> Option<String> {
+fn count_segment(label: &str, count: Option<usize>) -> Option<String> {
     let count = count.filter(|count| *count > 0)?;
-    Some(format!("{tier}={count}"))
+    Some(format!("{label}={count}"))
 }
 
 fn tier_rank(tier: &str) -> usize {
@@ -141,8 +203,21 @@ mod tests {
                     "byRiskTier": {"critical": 1, "high": 1, "medium": 2}
                 },
                 "surfaces": [{
+                    "framework": "Spring",
                     "title": "POST /admin",
                     "risk": {"tier": "critical"}
+                }, {
+                    "framework": "Rails",
+                    "title": "POST /admin/jobs",
+                    "risk": {"tier": "high"}
+                }, {
+                    "framework": "Next.js",
+                    "title": "POST /api/session",
+                    "risk": {"tier": "medium"}
+                }, {
+                    "framework": "Spring",
+                    "title": "POST /admin/users",
+                    "risk": {"tier": "medium"}
                 }]
             })
             .to_string(),
@@ -153,7 +228,34 @@ mod tests {
 
         assert_eq!(
             model.summary,
-            "2 high/critical, max 100, tiers critical=1, high=1, medium=2, top critical POST /admin"
+            "2 high/critical, max 100, tiers critical=1, high=1, medium=2, frameworks Next.js=1, Rails=1, Spring=2, top critical POST /admin"
         );
+    }
+
+    #[test]
+    fn attack_surface_model_surfaces_malformed_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("attack-surface.json"), "{not-json").unwrap();
+
+        let model = attack_surface_risk_model(temp.path()).unwrap();
+
+        assert_eq!(model.summary, "malformed attack-surface.json");
+    }
+
+    #[test]
+    fn attack_surface_model_surfaces_unreadable_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join("attack-surface.json")).unwrap();
+
+        let model = attack_surface_risk_model(temp.path()).unwrap();
+
+        assert_eq!(model.summary, "malformed attack-surface.json");
+    }
+
+    #[test]
+    fn attack_surface_model_keeps_missing_artifact_empty() {
+        let temp = tempfile::tempdir().unwrap();
+
+        assert!(attack_surface_risk_model(temp.path()).is_none());
     }
 }

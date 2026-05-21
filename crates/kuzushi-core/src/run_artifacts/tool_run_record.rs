@@ -6,6 +6,7 @@ use super::tool_run_record_events::{
     append_done_trace, append_failed_trace, append_started_event, append_started_trace,
     append_tool_event,
 };
+use crate::artifact_contract::tool_result_artifact_spec;
 use crate::module_result::normalize_module_result;
 
 #[derive(Debug, Clone, Copy)]
@@ -28,13 +29,35 @@ impl<'a> ToolRunRecord<'a> {
 }
 
 pub fn record_tool_run_started(record: ToolRunRecord<'_>, input: &Value) {
+    record_tool_run_started_with_metadata(record, input, None, None);
+}
+
+pub fn record_tool_run_started_with_metadata(
+    record: ToolRunRecord<'_>,
+    input: &Value,
+    model: Option<String>,
+    config_hash: Option<String>,
+) {
+    record_tool_run_started_with_reproducibility(record, input, model, config_hash, Vec::new());
+}
+
+pub fn record_tool_run_started_with_reproducibility(
+    record: ToolRunRecord<'_>,
+    input: &Value,
+    model: Option<String>,
+    config_hash: Option<String>,
+    loaded_modules: Vec<String>,
+) {
     let mut summary = RunSummary::running(
         record.run_id.to_string(),
         record.kind,
         Some(record.tool.to_string()),
         record.target.display().to_string(),
     )
-    .with_process_id(std::process::id());
+    .with_process_id(std::process::id())
+    .with_model(model)
+    .with_config_hash(config_hash)
+    .with_loaded_modules(loaded_modules);
     let input_artifact =
         write_run_artifact_json(record.target, record.run_id, "input.json", "input", input).ok();
     if let Some(artifact) = input_artifact.clone() {
@@ -112,12 +135,22 @@ pub fn tool_run_output_findings_count(output: &Value) -> Option<u64> {
         })
 }
 
+fn tool_run_output_model(output: &Value) -> Option<String> {
+    output
+        .get("model")
+        .or_else(|| output.pointer("/data/model"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
 fn result_artifact(record: ToolRunRecord<'_>, output: &Value) -> Option<RunArtifact> {
+    let spec = tool_result_artifact_spec("result.json")
+        .expect("tool result artifact must be in shared spec");
     write_run_artifact_json(
         record.target,
         record.run_id,
-        "result.json",
-        "result",
+        spec.leaf,
+        spec.label,
         output,
     )
     .ok()
@@ -128,18 +161,39 @@ fn completed_summary(
     output: &Value,
     artifacts: Vec<RunArtifact>,
 ) -> RunSummary {
-    artifacts.into_iter().fold(
-        RunSummary::running(
-            record.run_id.to_string(),
-            record.kind,
-            Some(record.tool.to_string()),
-            record.target.display().to_string(),
-        )
+    let seed = summary_seed(record)
         .complete()
         .with_findings(tool_run_output_findings_count(output))
-        .with_cost(tool_run_output_cost_usd(output)),
-        RunSummary::with_artifact,
-    )
+        .with_cost(tool_run_output_cost_usd(output));
+    let seed = with_output_model(seed, output);
+    artifacts
+        .into_iter()
+        .fold(seed, RunSummary::with_artifact)
+}
+
+fn summary_seed(record: ToolRunRecord<'_>) -> RunSummary {
+    let seed = RunSummary::running(
+        record.run_id.to_string(),
+        record.kind,
+        Some(record.tool.to_string()),
+        record.target.display().to_string(),
+    );
+    match load_run_summary(record.target, record.run_id) {
+        Ok(existing) => summary_seed_from_existing(seed, &existing),
+        Err(_) => seed,
+    }
+}
+
+fn summary_seed_from_existing(mut seed: RunSummary, existing: &RunSummary) -> RunSummary {
+    seed.started_at_unix = existing.started_at_unix;
+    seed.with_reproducibility_from(existing)
+}
+
+fn with_output_model(summary: RunSummary, output: &Value) -> RunSummary {
+    let Some(model) = tool_run_output_model(output) else {
+        return summary;
+    };
+    summary.with_model(Some(model))
 }
 
 fn result_output_for_status(
@@ -171,13 +225,7 @@ fn apply_output_status(status: &str, mut summary: RunSummary) -> RunSummary {
 
 fn failed_summary(record: ToolRunRecord<'_>, error: &str, artifacts: &[RunArtifact]) -> RunSummary {
     artifacts.iter().cloned().fold(
-        RunSummary::running(
-            record.run_id.to_string(),
-            record.kind,
-            Some(record.tool.to_string()),
-            record.target.display().to_string(),
-        )
-        .failed(error.to_string()),
+        summary_seed(record).failed(error.to_string()),
         RunSummary::with_artifact,
     )
 }

@@ -1,22 +1,23 @@
 use super::*;
 
 pub fn run_shell(config: V2Config, target: Option<&WorkspaceTarget>) -> Result<()> {
-    run_shell_with_plain(config, target, false)
+    run_shell_with_plain(config, target, false, ModuleRegistry::with_v2_builtins())
 }
 
 pub fn run_shell_with_plain(
     config: V2Config,
     target: Option<&WorkspaceTarget>,
     force_plain: bool,
+    registry: ModuleRegistry,
 ) -> Result<()> {
     let mut stdin = io::stdin();
     let stdin_is_terminal = stdin.is_terminal();
     let stdout_is_terminal = io::stdout().is_terminal();
     if should_run_plain_shell(force_plain, stdin_is_terminal, stdout_is_terminal) {
-        return run_plain_shell(config, target, &mut stdin, stdin_is_terminal);
+        return run_plain_shell(config, target, &mut stdin, stdin_is_terminal, registry);
     }
 
-    run_terminal_shell(config, target)
+    run_terminal_shell(config, target, registry)
 }
 
 pub(crate) fn should_run_plain_shell(
@@ -47,9 +48,13 @@ pub(crate) fn plain_shell_env_requested() -> bool {
         || env::var_os("KUZUSHI_LOW_BANDWIDTH").is_some()
 }
 
-pub(crate) fn run_terminal_shell(config: V2Config, target: Option<&WorkspaceTarget>) -> Result<()> {
+pub(crate) fn run_terminal_shell(
+    config: V2Config,
+    target: Option<&WorkspaceTarget>,
+    registry: ModuleRegistry,
+) -> Result<()> {
     let mut terminal = setup_terminal()?;
-    let mut app = ShellApp::new(config, target);
+    let mut app = ShellApp::with_registry(config, target, registry);
     open_start_view(&mut app);
     let result = terminal_shell_loop(&mut terminal, &mut app);
     let _ = restore_terminal(&mut terminal);

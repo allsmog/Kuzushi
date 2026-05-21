@@ -18,14 +18,15 @@ pub use crate::concurrency::{
     current_priority, default_concurrency_for, with_priority, ModelGate, Priority, PriorityPermit,
 };
 pub use crate::config::{
-    load_anthropic_oauth_config, load_config, load_config_for_target, AnthropicOauthConfig,
-    ConfigPaths, RuntimeConfig, RuntimeKind, V2Config,
+    config_hash, load_anthropic_oauth_config, load_config, load_config_for_target,
+    AnthropicOauthConfig, ConfigPaths, RuntimeConfig, RuntimeKind, V2Config,
 };
 pub use crate::events::{CoreEvent, EventSink, InMemoryEventSink, ScanProgress};
 pub use crate::modules::{
     agent_runtime_tool_names, tool_needs_runtime, tool_requires_agent_runtime,
     tool_uses_agent_runtime, wants_sast_runtime, AgenticSastPersistedRun, AgenticSastReport,
-    BuiltinModule, ModuleMetadata, ModuleRegistry, ToolDescriptor, RUNTIME_TOOL_NAMES,
+    BuiltinModule, DynamicModuleLoadOptions, ModuleMetadata, ModuleRegistry, ToolDescriptor,
+    RUNTIME_TOOL_NAMES,
 };
 pub use crate::options::{OptionScope, OptionTarget, ToolOptionStore};
 pub use crate::repository_inventory::{
@@ -36,8 +37,9 @@ pub use crate::repository_inventory::{
 pub use crate::run_artifacts::{
     append_run_trace_step, list_run_summaries, load_run_summary, new_run_id,
     next_run_trace_step_number, run_dir, runs_root, write_run_artifact_json, write_run_summary,
-    BroadcastSink, JsonlSink, ParentScope, RunArtifact, RunSummary, RunTraceStep, TraceHandle,
-    TraceSink, TraceStepBuilder,
+    BroadcastSink, JsonlSink, ParentScope, RunArtifact, RunEnvFingerprint, RunHouseRuleFingerprint,
+    RunLlmCallAudit, RunPromptOverrideFingerprint, RunSummary, RunTargetGitMetadata, RunTraceStep,
+    TraceHandle, TraceSink, TraceStepBuilder,
 };
 pub use crate::runtime::{
     append_structured_output_contract, model_provider, prompt_pair_hash, run_tool_loop,

@@ -8,12 +8,20 @@ pub(crate) fn inspect_python_line(
     builder: &mut AttackSurfaceBuilder,
 ) {
     let detail = trim_detail(line);
+    if is_python_import_line(&detail) {
+        return;
+    }
     let lower = detail.to_ascii_lowercase();
     for detector in PYTHON_LINE_DETECTORS {
         if detector.matches(&lower) {
             builder.add(detector.surface(source_file, framework, line_number, &detail));
         }
     }
+}
+
+fn is_python_import_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("import ") || trimmed.starts_with("from ")
 }
 
 struct PythonLineDetector {
@@ -57,7 +65,21 @@ const PYTHON_LINE_DETECTORS: &[PythonLineDetector] = &[
         title: "Authentication or authorization guard",
         boundary: "auth_guard",
         detector: "python.auth-guard",
-        needles: &["login_required", "permission_required"],
+        needles: &[
+            "login_required",
+            "jwt_required",
+            "permission_required",
+            "permission_classes",
+            "authentication_classes",
+            "isauthenticated",
+            "has_permission",
+            "depends(get_current_user",
+            "security(",
+            "oauth2passwordbearer",
+            "httpbearer",
+            "apikeyheader",
+            "api_key_header",
+        ],
     },
     PythonLineDetector {
         kind: AttackSurfaceKind::SessionStateBoundary,
@@ -78,7 +100,16 @@ const PYTHON_LINE_DETECTORS: &[PythonLineDetector] = &[
         title: "Request trust boundary",
         boundary: "request_trust",
         detector: "python.request-trust",
-        needles: &["csrf_protect", "csrf_exempt", "cors(", "samesite", "set_cookie"],
+        needles: &[
+            "csrf_protect",
+            "csrf_exempt",
+            "cors(",
+            "request.cookies",
+            "request.headers",
+            "request.meta",
+            "samesite",
+            "set_cookie",
+        ],
     },
     PythonLineDetector {
         kind: AttackSurfaceKind::TenantIsolationBoundary,
@@ -86,12 +117,19 @@ const PYTHON_LINE_DETECTORS: &[PythonLineDetector] = &[
         boundary: "tenant_isolation",
         detector: "python.tenant-isolation",
         needles: &[
-            "tenant_id",
-            "tenantid",
+            "account_id",
+            "current_org",
+            "current_organization",
+            "current_team",
+            "current_tenant",
+            "workspace_id",
             "organization_id",
             "org_id",
-            "workspace_id",
-            "account_id",
+            "request.user.organization",
+            "request.user.team",
+            "team_id",
+            "tenant_id",
+            "tenantid",
         ],
     },
     PythonLineDetector {
@@ -100,6 +138,30 @@ const PYTHON_LINE_DETECTORS: &[PythonLineDetector] = &[
         boundary: "parser_boundary",
         detector: "python.deserialization",
         needles: &["pickle.loads", "yaml.load(", "json.loads("],
+    },
+    PythonLineDetector {
+        kind: AttackSurfaceKind::FileUploadParsePath,
+        title: "File upload or multipart parser",
+        boundary: "file_upload",
+        detector: "python.file-upload",
+        needles: &[
+            "uploadfile",
+            "filestorage",
+            "file(",
+            "files.getlist(",
+            "request.files",
+            "request.post['file']",
+            "request.post.get('file'",
+            "req.get_param('file'",
+            "req.get_param(\"file\"",
+            "multipart",
+            "multipartparser",
+            "formdata",
+            "parse_multipart",
+            "forms.filefield",
+            "models.filefield",
+            "filefield(",
+        ],
     },
     PythonLineDetector {
         kind: AttackSurfaceKind::DbQueryBoundary,
@@ -121,5 +183,25 @@ const PYTHON_LINE_DETECTORS: &[PythonLineDetector] = &[
         boundary: "process_execution",
         detector: "python.command-exec",
         needles: &["shell=true", "subprocess.", "os.system("],
+    },
+    PythonLineDetector {
+        kind: AttackSurfaceKind::BackgroundJob,
+        title: "Background job or queue consumer",
+        boundary: "async_job",
+        detector: "python.background-job",
+        needles: &[
+            "@celery.task",
+            "@shared_task",
+            "@app.task",
+            "@dramatiq.actor",
+            "@huey.task",
+            "celery.task(",
+            "rq.worker",
+            "queue.get(",
+            "kafka.consumer",
+            "consumer.poll(",
+            "receive_message(",
+            "subscriberclient",
+        ],
     },
 ];

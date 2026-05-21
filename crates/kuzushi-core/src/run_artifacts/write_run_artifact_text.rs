@@ -14,11 +14,11 @@ pub(crate) fn write_run_artifact_text(
     let path = dir.join(leaf);
     fs::write(&path, body_with_trailing_newline(body))
         .with_context(|| format!("Could not write {}", path.display()))?;
-    let artifact = RunArtifact {
-        label: label.into(),
-        path: path.display().to_string(),
-        kind: kind.into(),
-    };
+    let label = label.into();
+    let kind = kind.into();
+    let path = path.display().to_string();
+    let artifact = RunArtifact::from_declared(&label, &path, Some(&kind))
+        .context("run artifact path must not be empty")?;
     record_run_artifact(target, run_id, &artifact)?;
     Ok(artifact)
 }

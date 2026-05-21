@@ -212,23 +212,25 @@ fn plugin_adapter_response(
     findings: Vec<Finding>,
     persisted: Option<GenericPersistedRun>,
 ) -> Value {
-    json!({
-        "ok": true,
-        "output": render_generic_findings_output(
-            run.spec.tool_name,
-            &run.target,
-            &findings,
-            &persisted
-        ),
-        "data": {
+    let output = render_generic_findings_output(
+        run.spec.tool_name,
+        &run.target,
+        &findings,
+        &persisted,
+    );
+    let mut result = crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
             "target": run.target.display().to_string(),
             "pluginRoot": run.plugin_root.display().to_string(),
             "count": findings.len(),
             "findings": findings,
             "persisted": persisted,
-        },
-        "costUsd": 0.0,
-    })
+        }),
+    );
+    result["costUsd"] = json!(0.0);
+    result
 }
 
 pub(crate) fn require_json_object(value: Value) -> Result<Value> {

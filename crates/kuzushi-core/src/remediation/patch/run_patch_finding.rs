@@ -75,28 +75,21 @@ fn confirmed_patch_candidate(
     input: &PatchFindingInput,
 ) -> Result<PatchCandidateLookup> {
     let Some(finding) = store.get_finding_by_reference(&input.fingerprint)? else {
-        return Ok(PatchCandidateLookup::Refused(json!({
-            "ok": false,
-            "output": format!("[-] No finding with fingerprint '{}'.", input.fingerprint),
-        })));
+        return Ok(PatchCandidateLookup::Refused(
+            super::patch_refusal_response::missing_patch_finding_response(&input.fingerprint),
+        ));
     };
     let Some(triage) = finding.triage.clone() else {
-        return Ok(PatchCandidateLookup::Refused(json!({
-            "ok": false,
-            "output": format!(
-                "[-] Finding '{}' has no triage verdict. Run triage:run first.",
-                finding.fingerprint
-            ),
-        })));
+        return Ok(PatchCandidateLookup::Refused(
+            super::patch_refusal_response::untriaged_patch_finding_response(&finding.fingerprint),
+        ));
     };
     if triage.verdict != TriageVerdict::TruePositive {
-        return Ok(PatchCandidateLookup::Refused(json!({
-            "ok": false,
-            "output": format!(
-                "[-] Finding '{}' is not confirmed true_positive; patch:finding only patches confirmed findings.",
-                finding.fingerprint
+        return Ok(PatchCandidateLookup::Refused(
+            super::patch_refusal_response::unconfirmed_patch_finding_response(
+                &finding.fingerprint,
             ),
-        })));
+        ));
     }
     Ok(PatchCandidateLookup::Ready(ConfirmedPatchFinding {
         finding,

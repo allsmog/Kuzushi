@@ -4,26 +4,45 @@
 > shape, evidence pack metadata, finding aliases. Reviewer perspective:
 > "I'm a SOC analyst / PR reviewer who has never run Kuzushi — does the
 > artefact help me do my job?"
+>
+> Status note: this is a historical TypeScript-era audit. The Rust
+> PR-comment path now renders diff-scoped findings, alias deep links,
+> truncation notes, CWE columns, evidence previews, and exploit-chain story
+> sections from `result.json`. The Rust scan event path emits structured
+> elapsed-time CI lines from `crates/kuzushi-cli/src/presentation/scan_ci.rs`,
+> including summary, error, and exit lines. Rust `run.json`/`summary.json` now
+> carry available reproducibility metadata: Kuzushi version, platform,
+> optional build-provided git identifiers, target git metadata, model, config
+> hash slots, prompt/house-rule digests, threat-model digest, and environment
+> fingerprints. The Rust PR-comment CLI reads that metadata for footer stamps
+> when `--run-id` is supplied, and uses recorded LLM audit calls for per-phase
+> cost hints.
 
 ## Top-10 operational weaknesses
 
 | #  | Where                                   | Current behaviour                                                                                                                  | What's missing                                                                                                                                  | Confidence |
 | -- | --------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- | ---------- |
-| 1  | `src/report-pr-comment.ts:32-54`        | Header → counts → cost → table. No diff-aware "new in this PR" section even though `/since` exists.                                | A `newSinceRef`/`changedFiles` scope so `buildPrComment` can render a "🆕 New in this PR" lead block above the global table.                    | high       |
-| 2  | `src/report-pr-comment.ts:83-98`        | Findings table = severity / title / location only. No CWE, no rationale snippet, no remediation hint, no per-finding link to run. | Add CWE column when known; one-line rationale below each row; hyperlink the alias to `runUrl#F-NNNN`; emit code-block of file path, language-tagged. | high       |
-| 3  | `src/report-pr-comment.ts:32`           | Top-N truncation hardcoded "and the rest are dropped on the floor".                                                                | Append a "+ N more findings" footer line so reviewers know the table is truncated and where to read the rest.                                   | high       |
-| 4  | `src/report-pr-comment.ts:67-81`        | Cost line lumps `triage + verify + poc + variant`. Reviewer can't see where the spend went.                                        | Surface per-phase spend when > 0; show triage / verify / poc as `$x.xx triage · $y.yy verify`.                                                  | medium     |
-| 5  | `src/report-pr-comment.ts` (no chains)  | Exploit chains never make it into the PR comment, despite being the highest-value output of a Kuzushi run.                         | Add a chain section above the findings table when `summary.exploitChains.length > 0`, rendered as the **story**: entry → step → impact.        | high       |
-| 6  | `src/ui/ci-stream.ts:88-90`             | Timestamp is `new Date().toISOString()` at write time, not the event timestamp. Replays / OOO events look wrong.                   | Prefer `state.summary?.runStartedAt` / event timestamp when available; keep wall-clock as fallback.                                             | medium     |
-| 7  | `src/ui/ci-stream.ts:77-83`             | End summary is the only "final" line. No exit-code line, no failure-mode line, no `failedTasks` enumeration.                       | Emit a final `result:` line with verdict counts + exit hint, and a per-failed-task `error:` line, both prefixed with a structured tag a CI grep can latch onto. | high       |
-| 8  | `src/ui/state.ts:239-293` `ActionableFinding` | No stable `id` separate from `fingerprint`, no `suppressed`/`snoozedUntil`, no `remediation` hint, no `cwe[]`, no link to a guide. | Add optional `id`, `cwe`, `remediation`, `references[]`, `suppressed`, `snoozedUntil`, `firstSeenAt`. All optional → backwards-compatible.        | high       |
-| 9  | `src/types.ts:307-318` `ExploitChain`   | Steps lack `filePath` / `startLine` so the renderer has to dereference each fingerprint to draw the path.                          | Add optional `filePath` and `startLine` on each step — keep fingerprint as the canonical join key; `narrative` summary at top level.            | medium     |
-| 10 | `src/bus/workers/audit-worker.ts:94-107` `run.json` | Persists `runId`, `context`, `config`, `scanOpts` but no `kuzushiVersion`, `gitSha`, `model`, `configHash`. Triage analyst three weeks later can't reproduce. | Compute and store `kuzushiVersion`, `gitSha`, `gitBranch`, `model`, `configHash` (sha256 of canonical config JSON), `nodeVersion`, `platform`. | high       |
+| 1  | `src/report-pr-comment.ts:32-54`        | Historical TypeScript issue; Rust PR comments now render a "New in this PR" section from diff-scoped input while preserving stable global aliases. | Keep coverage in `findings/presentation/pr_comment/tests.rs::diff_section_preserves_global_stable_aliases`.                                     | resolved   |
+| 2  | `src/report-pr-comment.ts:83-98`        | Historical TypeScript issue; Rust PR comments include alias deep links, CWE, location, evidence preview rows, and optional remediation hints when producers provide them. | Keep improving fix guidance quality at producer boundaries.                                                                                       | resolved   |
+| 3  | `src/report-pr-comment.ts:32`           | Historical TypeScript issue; Rust PR comments include explicit top-N truncation notes.                                             | Keep top-N behavior visible in footer coverage.                                                                                                  | resolved   |
+| 4  | `src/report-pr-comment.ts:67-81`        | Historical TypeScript issue; Rust PR comments group recorded LLM audit cost by phase when run metadata is available.               | Keep `pr_comment_tests.rs` coverage for phase-cost extraction from `run.json`.                                                                    | resolved   |
+| 5  | `src/report-pr-comment.ts` (no chains)  | Historical TypeScript issue; Rust PR comments render exploit-chain story sections from `result.json`.                              | Continue improving chain narratives as producers add richer step evidence.                                                                        | resolved   |
+| 6  | `src/ui/ci-stream.ts:88-90`             | Historical TypeScript issue; `src/ui/ci-stream.ts` is deleted. Rust CI output now uses elapsed timestamps from a captured `Instant`. | Keep `crates/kuzushi-cli/src/tests.rs::ci_line_uses_relative_timestamp_and_prefix` covering the structured prefix.                              | resolved   |
+| 7  | `src/ui/ci-stream.ts:77-83`             | Historical TypeScript issue; the Rust scan CI path emits `summary:`, `error:`, and `exit:` lines.                                  | Continue enriching result bodies from canonical run artifacts as scan/report metadata grows.                                                    | resolved   |
+| 8  | `src/ui/state.ts:239-293` `ActionableFinding` | Historical TypeScript UI issue; current Rust findings have optional store IDs, fingerprints, CWE projection, proof state, verification, evidence, suppression, snooze, remediation, and reference metadata. | Keep lifecycle metadata surfaced through operator views as those workflows mature.                                                                | resolved   |
+| 9  | `src/types.ts:307-318` `ExploitChain`   | Historical TypeScript issue; current schemas and Rust exploit-chain outputs carry optional `filePath` and `startLine` on steps.    | Keep direct step-location coverage in exploit-chain output and PR-comment tests.                                                                  | resolved   |
+| 10 | `src/bus/workers/audit-worker.ts:94-107` `run.json` | Historical TypeScript issue; Rust `run.json`/`summary.json` now carry Kuzushi version, platform, build git IDs, target git metadata, model, config hash, prompt/house-rule digests, threat-model digest, environment fingerprints, and LLM audit calls when available. | Keep new reproducibility metadata reflected in `docs/architecture/kuzushi-artifacts.md` and Markdown reports.                                    | resolved   |
 
-Lower-priority observations, not addressed in this PR but noted:
-- Severity scoring is inconsistent across modules (some use `critical` lowercase, some `CRITICAL` uppercase, scanners emit `severity: string` with no enum). Worth documenting + adding a normalizer.
+Lower-priority observations:
+- Severity scoring is normalized in Rust report artifact summaries, so mixed
+  scanner labels such as `ERROR`, `Warning`, `HIGH`, and `note` roll up into
+  canonical `high`, `medium`, and `info` buckets. Keep producer-level severity
+  enums narrow as scanner surfaces mature.
 - `/since <ref>` does not affect `summary.json` — the "diff scope" only lives in the shell view.
-- No machine-readable schema for `summary.json` — operators have to read TypeScript to know the shape.
+- `summary.json` now has the same machine-readable metadata contract as
+  `run.json` in `schemas/run.summary.schema.json`; richer per-artifact schemas
+  can still be added for canonical snapshots such as `findings.json` and
+  `proof.json`.
 
 ## Sample current PR comment vs. proposed PR comment
 

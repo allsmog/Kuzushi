@@ -1,0 +1,218 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kuzushi.dev/schemas/run.failures.schema.json",
+  "title": "Kuzushi Run Failures",
+  "description": "Canonical schema for .kuzushi/runs/<runId>/failures.json.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "failures"],
+  "anyOf": [{ "required": ["runId"] }, { "required": ["run_id"] }],
+  "properties": {
+    "runId": { "type": "string", "minLength": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "status": { "$ref": "#/definitions/runStatus" },
+    "failures": {
+      "type": "array",
+      "maxItems": 12,
+      "items": { "$ref": "#/definitions/failure" }
+    }
+  },
+  "definitions": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "anyOf": [
+            { "required": ["label"] },
+            { "required": ["name"] },
+            { "required": ["title"] }
+          ]
+        },
+        {
+          "anyOf": [
+            { "required": ["path"] },
+            { "required": ["file"] },
+            { "required": ["filePath"] },
+            { "required": ["file_path"] },
+            { "required": ["reportPath"] },
+            { "required": ["report_path"] },
+            { "required": ["reportJsonPath"] },
+            { "required": ["report_json_path"] },
+            { "required": ["scopePath"] },
+            { "required": ["scope_path"] },
+            { "required": ["dir"] },
+            { "required": ["outputDir"] },
+            { "required": ["output_dir"] },
+            { "required": ["promptsDir"] },
+            { "required": ["prompts_dir"] }
+          ]
+        },
+        {
+          "anyOf": [
+            { "required": ["kind"] },
+            { "required": ["type"] }
+          ]
+        }
+      ],
+      "properties": {
+        "label": { "type": "string" },
+        "name": { "type": "string" },
+        "title": { "type": "string" },
+        "path": { "type": "string" },
+        "file": { "type": "string" },
+        "filePath": { "type": "string" },
+        "file_path": { "type": "string" },
+        "reportPath": { "type": "string" },
+        "report_path": { "type": "string" },
+        "reportJsonPath": { "type": "string" },
+        "report_json_path": { "type": "string" },
+        "scopePath": { "type": "string" },
+        "scope_path": { "type": "string" },
+        "dir": { "type": "string" },
+        "outputDir": { "type": "string" },
+        "output_dir": { "type": "string" },
+        "promptsDir": { "type": "string" },
+        "prompts_dir": { "type": "string" },
+        "kind": { "$ref": "#/definitions/artifactKind" },
+        "type": { "$ref": "#/definitions/artifactKind" }
+      }
+    },
+    "artifactKind": {
+      "type": "string",
+      "enum": ["json", "jsonl", "markdown", "sarif", "directory", "artifact"]
+    },
+    "runStatus": {
+      "type": "string",
+      "enum": ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"]
+    },
+    "failure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool", "status", "error"],
+      "anyOf": [
+        { "required": ["agentThreadContext"] },
+        { "required": ["agent_thread_context"] }
+      ],
+      "properties": {
+        "tool": { "type": "string" },
+        "status": { "$ref": "#/definitions/runStatus" },
+        "error": { "type": "string" },
+        "agentThreadContext": { "$ref": "#/definitions/failureContext" },
+        "agent_thread_context": { "$ref": "#/definitions/failureContext" }
+      }
+    },
+    "failureContext": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cause"],
+      "allOf": [
+        { "anyOf": [{ "required": ["failedStage"] }, { "required": ["failed_stage"] }] },
+        { "anyOf": [{ "required": ["whatFailed"] }, { "required": ["what_failed"] }] },
+        {
+          "anyOf": [
+            { "required": ["artifactsAvailable"] },
+            { "required": ["artifacts_available"] }
+          ]
+        },
+        {
+          "anyOf": [
+            { "required": ["missingArtifacts"] },
+            { "required": ["missing_artifacts"] }
+          ]
+        },
+        {
+          "anyOf": [
+            { "required": ["allowedProofLevel"] },
+            { "required": ["allowed_proof_level"] }
+          ]
+        },
+        {
+          "anyOf": [
+            { "required": ["nextFilesOrArtifactsToInspect"] },
+            { "required": ["next_files_or_artifacts_to_inspect"] }
+          ]
+        },
+        {
+          "anyOf": [
+            { "required": ["recoveryOptions"] },
+            { "required": ["recovery_options"] }
+          ]
+        },
+        {
+          "anyOf": [
+            { "required": ["fallbackPrompt"] },
+            { "required": ["fallback_prompt"] }
+          ]
+        },
+        {
+          "anyOf": [
+            { "required": ["claimsForbidden"] },
+            { "required": ["claims_forbidden"] }
+          ]
+        }
+      ],
+      "properties": {
+        "failedStage": { "type": "string", "minLength": 1 },
+        "failed_stage": { "type": "string", "minLength": 1 },
+        "cause": { "type": "string", "minLength": 1 },
+        "whatFailed": { "type": "string", "minLength": 1 },
+        "what_failed": { "type": "string", "minLength": 1 },
+        "artifactsAvailable": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "$ref": "#/definitions/artifact" }
+        },
+        "artifacts_available": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "$ref": "#/definitions/artifact" }
+        },
+        "missingArtifacts": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "missing_artifacts": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "allowedProofLevel": { "type": "string", "minLength": 1 },
+        "allowed_proof_level": { "type": "string", "minLength": 1 },
+        "nextFilesOrArtifactsToInspect": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "next_files_or_artifacts_to_inspect": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "recoveryOptions": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "recovery_options": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "fallbackPrompt": { "type": "string", "minLength": 1 },
+        "fallback_prompt": { "type": "string", "minLength": 1 },
+        "claimsForbidden": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "claims_forbidden": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  }
+}

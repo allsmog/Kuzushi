@@ -20,5 +20,7 @@ pub use domain::{
     AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry, ModelTier, SubagentRole, ToolBox,
     ToolCall, ToolCallHandler, ToolResult, TriageRequest,
 };
-pub use policy::{require_configured_model, resolve_explicit_model, validate_model_spec};
+pub use policy::{
+    canonical_model_spec, require_configured_model, resolve_explicit_model, validate_model_spec,
+};
 pub use traced_runtime::{model_provider, prompt_pair_hash, TracedRuntime};

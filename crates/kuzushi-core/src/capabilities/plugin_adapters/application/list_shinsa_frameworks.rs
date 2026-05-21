@@ -13,14 +13,7 @@ pub(crate) fn list_shinsa_frameworks(input: Value) -> Result<Value> {
     let root = match resolve_required_plugin_root(&input, spec) {
         Ok(root) => root,
         Err(error) => {
-            return Ok(json!({
-                "ok": false,
-                "output": error.to_string(),
-                "data": {
-                    "skills": [],
-                    "frameworks": ["iso27001-annex-a", "nist-sp-800-53-rev5"],
-                },
-            }));
+            return Ok(missing_shinsa_frameworks_response(error.to_string()));
         }
     };
     let skills_root = root.join("skills");
@@ -33,13 +26,33 @@ pub(crate) fn list_shinsa_frameworks(input: Value) -> Result<Value> {
         }
     }
     skills.sort();
-    Ok(json!({
-        "ok": true,
-        "output": format!("shinsa-plugin path: {}\nSkill modules: {}", root.display(), skills.len()),
-        "data": {
+    Ok(shinsa_frameworks_response(root, skills))
+}
+
+fn missing_shinsa_frameworks_response(message: String) -> Value {
+    crate::module_result::failed_output_result(
+        message.clone(),
+        message,
+        json!({
+            "skills": [],
+            "frameworks": ["iso27001-annex-a", "nist-sp-800-53-rev5"],
+        }),
+    )
+}
+
+fn shinsa_frameworks_response(root: std::path::PathBuf, skills: Vec<String>) -> Value {
+    let output = format!(
+        "shinsa-plugin path: {}\nSkill modules: {}",
+        root.display(),
+        skills.len()
+    );
+    crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
             "pluginRoot": root.display().to_string(),
             "skills": skills,
             "frameworks": ["iso27001-annex-a", "nist-sp-800-53-rev5"],
-        },
-    }))
+        }),
+    )
 }

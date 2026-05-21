@@ -82,8 +82,9 @@ pub(crate) fn run_plain_shell(
     target: Option<&WorkspaceTarget>,
     stdin: &mut io::Stdin,
     stdin_is_terminal: bool,
+    registry: ModuleRegistry,
 ) -> Result<()> {
-    let mut app = ShellApp::new(config, target);
+    let mut app = ShellApp::with_registry(config, target, registry);
     open_start_view(&mut app);
     let mut script = String::new();
     if !stdin_is_terminal {

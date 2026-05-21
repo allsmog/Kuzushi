@@ -909,6 +909,23 @@ fn run_dep_hygiene_check_missing_target_is_actionable() {
     );
 }
 
+fn assert_latest_failed_run_bundle(repo: &std::path::Path, expected_tool: &str, error: &str) {
+    let run_id = latest_run_id(repo);
+    let run = run_json(repo, &run_id, "run.json");
+    let failures = run_json(repo, &run_id, "failures.json");
+    let result = run_json(repo, &run_id, "result.json");
+
+    assert_eq!(run.get("status").and_then(Value::as_str), Some("failed"));
+    assert_eq!(run.get("tool").and_then(Value::as_str), Some(expected_tool));
+    assert_eq!(
+        failures.get("status").and_then(Value::as_str),
+        Some("failed")
+    );
+    assert!(failures.to_string().contains(error));
+    assert_eq!(result.get("status").and_then(Value::as_str), Some("failed"));
+    assert!(result.to_string().contains(error));
+}
+
 #[test]
 fn run_context_build_writes_compatible_snapshot_artifact() {
     let temp = tempfile::tempdir().unwrap();
@@ -1516,6 +1533,7 @@ fn run_variant_hunt_without_model_fails_without_silent_fallback() {
         stderr.contains("requires an explicit model") && stderr.contains("fallback model"),
         "stderr: {stderr}"
     );
+    assert_latest_failed_run_bundle(&repo, "variant:hunt", "requires an explicit model");
 }
 
 #[test]
@@ -1542,6 +1560,7 @@ fn run_ndiff_hunt_without_model_fails_without_silent_fallback() {
         stderr.contains("requires an explicit model") && stderr.contains("fallback model"),
         "stderr: {stderr}"
     );
+    assert_latest_failed_run_bundle(&repo, "ndiff:hunt-variants", "requires an explicit model");
 }
 
 #[cfg(unix)]
@@ -1954,6 +1973,11 @@ fn run_carlini_threat_hunt_without_model_fails_without_silent_fallback() {
         stderr.contains("requires an explicit model") && stderr.contains("fallback model"),
         "stderr: {stderr}"
     );
+    assert_latest_failed_run_bundle(
+        &repo,
+        "carlini-threat-hunt:run",
+        "requires an explicit model",
+    );
 }
 
 #[test]
@@ -2003,6 +2027,11 @@ fn run_systems_hunt_without_model_fails_without_silent_fallback() {
     assert!(
         stderr.contains("requires an explicit model") && stderr.contains("fallback model"),
         "stderr: {stderr}"
+    );
+    assert_latest_failed_run_bundle(
+        &repo,
+        "systems-hunt:systems-hunt",
+        "requires an explicit model",
     );
 }
 
@@ -2684,6 +2713,7 @@ fn run_triage_without_model_fails_without_silent_fallback() {
         stderr.contains("requires an explicit model") && stderr.contains("fallback model"),
         "stderr: {stderr}"
     );
+    assert_latest_failed_run_bundle(&repo, "triage:run", "requires an explicit model");
 }
 
 #[cfg(unix)]
@@ -2756,6 +2786,7 @@ fn run_verify_finding_without_model_fails_without_silent_fallback() {
         stderr.contains("requires an explicit model") && stderr.contains("fallback model"),
         "stderr: {stderr}"
     );
+    assert_latest_failed_run_bundle(&repo, "verify:finding", "requires an explicit model");
 }
 
 #[cfg(unix)]

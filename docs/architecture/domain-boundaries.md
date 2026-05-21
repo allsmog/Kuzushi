@@ -4,14 +4,17 @@ Kuzushi uses light domain boundaries to keep security behavior explicit. This
 is not a request to add enterprise layers. Prefer small, behavior-preserving
 helpers and tests over generic repositories, factories, or traits.
 
-For "where do I edit this?" and focused commands, see
+The port-level boundary contract is
+[`docs/architecture/kuzushi-boundaries.md`](./kuzushi-boundaries.md). For
+"where do I edit this?" and focused commands, see
 [`docs/devex/new-contributor-map.md`](../devex/new-contributor-map.md).
 
 ## Findings Domain
 
 Owner files:
-`crates/kuzushi-core/src/findings.rs`,
-`crates/kuzushi-core/src/findings/reporting.rs`, and CLI findings/report paths.
+`crates/kuzushi-core/src/findings/`, findings presentation helpers under
+`crates/kuzushi-core/src/findings/presentation/`, and CLI findings/report
+paths.
 
 Vocabulary:
 `Finding`, `Fingerprint`, `Severity`, `TriageVerdict`, `ProofLevel`,
@@ -45,8 +48,7 @@ running Semgrep, selecting scan tasks, prompting a model, applying patches.
 ## Module / Tool Domain
 
 Owner files:
-`crates/kuzushi-core/src/modules.rs`,
-`crates/kuzushi-core/src/modules/*`, `src/modules/types.ts`,
+`crates/kuzushi-core/src/modules/`, `src/modules/types.ts`,
 `src/modules/define.ts`, `src/modules/loader.ts`, and `src/modules/registry.ts`.
 
 Vocabulary:
@@ -80,8 +82,8 @@ terminal key handling, CI workflow text, scanner subprocess internals.
 ## Scan / Run Domain
 
 Owner files:
-`crates/kuzushi-core/src/scan.rs`,
-`crates/kuzushi-core/src/modules/sast_run.rs`,
+`crates/kuzushi-core/src/scan/`,
+`crates/kuzushi-core/src/modules/application/sast_scan/`,
 `crates/kuzushi-cli/src/main.rs`, and scan worker/artifact readers.
 
 Vocabulary:
@@ -115,8 +117,10 @@ finding alias presentation, TUI layout, module manifest validation.
 ## Runtime / Model Domain
 
 Owner files:
-`src/agent-runtime/enforcement.ts`, concrete TS adapters, `src/config.ts`, Rust
-runtime bridge wiring, and no-fallback tests.
+`crates/kuzushi-core/src/runtime/policy/no_silent_fallback.rs`,
+`crates/kuzushi-core/src/agent_router/`, Rust runtime bridge wiring,
+`crates/kuzushi-core/src/modules/resolve_tool_model.rs`,
+`scripts/check-model-safety.mjs`, and no-fallback tests.
 
 Vocabulary:
 `AgentRuntime`, `ModelSpec`, provider, backend, transport retry,
@@ -147,11 +151,10 @@ finding severity ranking, TUI command parsing, scanner JSON parsing.
 ## Shell / TUI Domain
 
 Owner files:
-`crates/kuzushi-tui/src/app.rs`,
-`crates/kuzushi-tui/src/app/state_transitions.rs`,
+`crates/kuzushi-tui/src/app/`,
 `crates/kuzushi-tui/src/commands.rs`,
-`crates/kuzushi-tui/src/renderer.rs`,
-`crates/kuzushi-tui/src/renderer/plain.rs`, and
+`crates/kuzushi-tui/src/renderer/`,
+`crates/kuzushi-tui/src/renderer/plain/`, and
 `crates/kuzushi-tui/src/theme/mod.rs`.
 
 Vocabulary:

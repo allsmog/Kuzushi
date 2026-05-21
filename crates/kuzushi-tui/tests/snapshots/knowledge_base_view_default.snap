@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 265
 ---
-mode:shell | target:none | kb | 0 findings | 33 mods
+mode:shell | target:none | view:kb | 0 findings | modules:36
 
  -- KB ATTACHMENTS -----------------------------------------------------------------------------------------------------
 module: context

@@ -42,8 +42,8 @@ Legend: ✓ = present, ✗ = absent, ◐ = partial / opt-in, N/A = not applicabl
 | `ExecutionContext.datastore` (operator overrides)             | ✗    | ✓     | ✗   | shell-only; scan and run can only read `taskConfig` via `resolveOption`. |
 | `ExecutionContext.print` (PrintSink)                          | ◐    | ✓     | ✗   | scan workers wire it; run leaves it undefined. |
 | Findings persistence (`.kuzushi/findings.sqlite3`)            | ✓    | ✓     | ◐   | run touches the DB only for tools that open it themselves (e.g. `triage:run`). |
-| Per-run artefacts (`.kuzushi/runs/<runId>/`)                  | ✓    | ✓     | ✓   | scan writes full pipeline artifacts; shell and `run` write shared `summary.json`, `trace.jsonl`, and result/input JSON for tool dispatch. |
-| `runId` propagated into tool context                          | ✓    | ◐     | ◐   | shell + run mint run ids for artifacts, but the id is not yet part of `ToolExecutionContext`. |
+| Per-run artefacts (`.kuzushi/runs/<runId>/`)                  | ✓    | ✓     | ✓   | All three write the canonical run bundle: `run.json`, `events.jsonl`, `trace.jsonl`, canonical snapshot files, `failures.json`, `report.md`, `artifacts.json`, legacy `summary.json`, and tool input/result artifacts where applicable. |
+| `runId` propagated into tool context                          | ✓    | ✓     | ✓   | `ToolExecutionContext::run_id()` exposes the active trace-backed artifact run id; shell and run wire traced tool artifacts. |
 | `--audit-log` produces JSONL trail                            | ✓    | ✗     | ✗   | scan-only flag; the underlying audit-worker is registered only by `registerAllWorkers`. |
 | Cost-tracking / `costBudgetUsd` enforcement                   | ✓    | ◐     | ✗   | scan: `bus/orchestrator.ts` halts at budget. shell: enforced if operator wires `enforcer:` (currently nobody does — see "Top gaps" 2). run: same gap. |
 | Cost-cap halt card (continue/abort)                           | ✓    | ✓     | N/A | scan-only UI; shell shows the card on its own pipeline runs; run is non-interactive. |
@@ -120,9 +120,12 @@ Legend: ✓ = present, ✗ = absent, ◐ = partial / opt-in, N/A = not applicabl
 
 8. **Per-run artefacts (`.kuzushi/runs/<runId>/`) were scan-only.**
    *(Fixed)* Shell tool dispatch and headless `kuzushi run` now mint a
-   run id and write a shared `summary.json`, `trace.jsonl`, and
-   input/result JSON artifacts. Scan still owns the richer
-   triage/verify/patch JSONL pipeline files.
+   run id and write the same canonical run bundle as scan:
+   `run.json`, `events.jsonl`, `trace.jsonl`, context/attack-surface/
+   threat-model/recommendations/findings/proof/failure/report snapshots,
+   `artifacts.json`, legacy `summary.json`, and input/result JSON
+   artifacts. Scan still owns the richer triage/verify/patch JSONL
+   pipeline files.
 
 ## Codified intentional asymmetries
 
@@ -149,9 +152,9 @@ Legend: ✓ = present, ✗ = absent, ◐ = partial / opt-in, N/A = not applicabl
   `V` reveals them in the feed. Cancel via `c`; reset via `R`; pause
   feed auto-tail via `p`; manual scroll pins position until `G`.
 - **Pipeline-only artefacts remain scan-only.** Single-tool invocations
-  write `summary.json`, `trace.jsonl`, and input/result JSON, but do not
-  produce scan-specific `triage.jsonl`, `verify.jsonl`, or `patch.jsonl`
-  unless the tool itself emits them.
+  write the canonical run bundle plus input/result JSON where applicable,
+  but do not produce scan-specific `triage.jsonl`, `verify.jsonl`, or
+  `patch.jsonl` unless the tool itself emits them.
 - **Workspace handle in `ExecutionContext` is shell-only.** `kuzushi run`
   takes a `--workspace` *id* (passed to tools that look it up themselves),
   but does not wire the `WorkspaceHandle` capability — that needs the
@@ -180,8 +183,12 @@ See the diff accompanying this assessment:
 6. `CLAUDE.md` gains a "Mode parity" section codifying the intentional
    asymmetries above.
 7. Shared run artifacts now cover scan, shell tool dispatch, and
-   headless `kuzushi run`; `kuzushi runs list/show/trace` exposes the
-   same on-disk format outside the TUI.
+   headless `kuzushi run` with the canonical run bundle documented in
+   `docs/architecture/kuzushi-artifacts.md`; `kuzushi runs list/show/trace`
+   exposes the same on-disk format outside the TUI.
+8. `ToolExecutionContext` exposes `run_id()` and `run_artifact_location()`
+   from the active trace sink, so tool code can link follow-up artifacts to
+   the current run without parsing trace paths.
 
 ## Not fixed (tracked for follow-up)
 

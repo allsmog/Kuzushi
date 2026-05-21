@@ -16,15 +16,15 @@ pub(crate) fn scope(root: &Path, update: ScopeUpdate, clear: bool) -> Result<Val
 fn clear_scope(root: &Path) -> Result<Value> {
     let scope = empty_scope();
     let scope_path = save_scope(root, &scope)?;
-    Ok(json!({
-        "ok": true,
-        "output": "Vendor assessment draft scope cleared.",
-        "data": {
+    Ok(crate::module_result::completed_output_result(
+        "Vendor assessment draft scope cleared.",
+        "Vendor assessment draft scope cleared.",
+        json!({
             "cleared": true,
             "scope": scope,
             "scopePath": scope_path.display().to_string(),
-        },
-    }))
+        }),
+    ))
 }
 
 fn update_scope(root: &Path, update: ScopeUpdate) -> Result<Value> {
@@ -42,20 +42,21 @@ fn document_count(scope: &Value) -> usize {
 }
 
 fn scope_response(scope: Value, scope_path: PathBuf, docs: usize) -> Value {
-    json!({
-        "ok": true,
-        "output": format!(
-            "Vendor assessment scope\n  Vendor: {}\n  Product: {}\n  Documents: {}\n  Scope: {}",
-            scope.get("vendorName").and_then(Value::as_str).filter(|v| !v.is_empty()).unwrap_or("(unset)"),
-            scope.get("productName").and_then(Value::as_str).filter(|v| !v.is_empty()).unwrap_or("(unset)"),
-            docs,
-            scope_path.display(),
-        ),
-        "data": {
+    let output = format!(
+        "Vendor assessment scope\n  Vendor: {}\n  Product: {}\n  Documents: {}\n  Scope: {}",
+        scope.get("vendorName").and_then(Value::as_str).filter(|v| !v.is_empty()).unwrap_or("(unset)"),
+        scope.get("productName").and_then(Value::as_str).filter(|v| !v.is_empty()).unwrap_or("(unset)"),
+        docs,
+        scope_path.display(),
+    );
+    crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
             "scope": scope,
             "scopePath": scope_path.display().to_string(),
-        },
-    })
+        }),
+    )
 }
 
 pub(crate) fn prompts(root: &Path, update: ScopeUpdate, run_id: Option<String>) -> Result<Value> {
@@ -92,18 +93,21 @@ fn prompts_response(
     prompts: Vec<(String, String)>,
     scope: &Value,
 ) -> Value {
-    json!({
-        "ok": true,
-        "output": format!(
-            "Prompt bundle written to {}\nProfile: {}\nPrompts: {}",
-            prompts_dir.display(),
-            scope.get("profile").and_then(Value::as_str).unwrap_or("enterprise-ai"),
-            prompts.len()
-        ),
-        "data": {
+    let output = format!(
+        "Prompt bundle written to {}\nProfile: {}\nPrompts: {}",
+        prompts_dir.display(),
+        scope.get("profile").and_then(Value::as_str).unwrap_or("enterprise-ai"),
+        prompts.len()
+    );
+    let mut result = crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
             "runId": run_id,
             "promptsDir": prompts_dir.display().to_string(),
             "prompts": prompts.iter().map(|(file, content)| json!({"fileName": file, "content": content})).collect::<Vec<_>>(),
-        },
-    })
+        }),
+    );
+    result["artifacts"] = json!([{ "label": "prompts", "path": prompts_dir.display().to_string() }]);
+    result
 }

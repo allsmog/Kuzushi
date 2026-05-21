@@ -45,67 +45,151 @@ pub(crate) fn run_classifier_score_tool(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    use crate::agent_router::{AgentRouter, RoutedRuntime};
-    use crate::capabilities::classifier_gate::{ClassifierConfig, LikelyVulnClassifier};
-    use crate::config::ConfigPaths;
-    use std::sync::Arc;
+    let run = prepare_classifier_score(&input, ctx, runtime)?;
+    let routed = classifier_routed_runtime(run.runtime, ctx, run.workspace.root())?;
+    let gate = classifier_gate(&routed, run.workspace, run.target_percentile)?;
+    let score = gate.score(&run.finding, run.workspace.root())?;
+    let should_audit = gate.should_deep_audit(score);
+    let threshold = gate.current_threshold();
+    let n = gate.samples_seen();
+    save_classifier_skip_if_needed(&run, &gate, score, should_audit)?;
+    Ok(classifier_score_response(
+        &run.finding,
+        score,
+        should_audit,
+        threshold,
+        n,
+    ))
+}
 
-    let runtime = runtime.ok_or_else(|| {
-        anyhow::anyhow!("classifier-gate:score requires an agent runtime; none configured")
-    })?;
-    let workspace = ctx
-        .workspace
-        .ok_or_else(|| anyhow::anyhow!("classifier-gate:score requires a workspace target"))?;
+struct ClassifierScoreRun<'a> {
+    runtime: &'a dyn AgentRuntime,
+    workspace: &'a crate::WorkspaceTarget,
+    store: FindingStore,
+    finding: crate::findings::Finding,
+    target_percentile: f32,
+}
+
+fn prepare_classifier_score<'a>(
+    input: &Value,
+    ctx: &'a ToolExecutionContext<'_>,
+    runtime: Option<&'a dyn AgentRuntime>,
+) -> Result<ClassifierScoreRun<'a>> {
+    let runtime = required_classifier_runtime(runtime)?;
+    let workspace = required_classifier_workspace(ctx)?;
     let store = FindingStore::open(workspace.findings_db_path())?;
+    let finding = classifier_finding(input, &store)?;
+    Ok(ClassifierScoreRun {
+        runtime,
+        workspace,
+        store,
+        finding,
+        target_percentile: classifier_target_percentile(input),
+    })
+}
 
+fn required_classifier_runtime(runtime: Option<&dyn AgentRuntime>) -> Result<&dyn AgentRuntime> {
+    runtime.ok_or_else(|| {
+        anyhow::anyhow!("classifier-gate:score requires an agent runtime; none configured")
+    })
+}
+
+fn required_classifier_workspace<'a>(
+    ctx: &ToolExecutionContext<'a>,
+) -> Result<&'a crate::WorkspaceTarget> {
+    ctx.workspace
+        .ok_or_else(|| anyhow::anyhow!("classifier-gate:score requires a workspace target"))
+}
+
+fn classifier_finding(
+    input: &Value,
+    store: &FindingStore,
+) -> Result<crate::findings::Finding> {
     let fingerprint = input
         .get("findingFingerprint")
         .and_then(Value::as_str)
         .ok_or_else(|| anyhow::anyhow!("classifier-gate:score: findingFingerprint is required"))?;
-    let finding = store
+    store
         .get_finding_by_reference(fingerprint)?
-        .ok_or_else(|| anyhow::anyhow!("classifier-gate:score: no finding for {fingerprint:?}"))?;
-    let target_percentile = input
+        .ok_or_else(|| anyhow::anyhow!("classifier-gate:score: no finding for {fingerprint:?}"))
+}
+
+fn classifier_target_percentile(input: &Value) -> f32 {
+    input
         .get("targetPercentile")
         .and_then(Value::as_f64)
         .map(|v| v as f32)
-        .unwrap_or(0.80);
+        .unwrap_or(0.80)
+}
+
+fn classifier_routed_runtime<'a>(
+    runtime: &'a dyn AgentRuntime,
+    ctx: &ToolExecutionContext<'_>,
+    root: &std::path::Path,
+) -> Result<crate::agent_router::RoutedRuntime<'a>> {
+    use crate::agent_router::{AgentRouter, RoutedRuntime};
+    use crate::config::ConfigPaths;
+    use std::sync::Arc;
 
     let paths = ConfigPaths {
         home_dir: dirs::home_dir().unwrap_or_default(),
-        target_dir: Some(workspace.root().to_path_buf()),
+        target_dir: Some(root.to_path_buf()),
     };
     let router = Arc::new(AgentRouter::load(&paths)?);
-    let inner_arc: Arc<dyn AgentRuntime> = unsafe_clone_runtime_ref(runtime);
-    let routed = RoutedRuntime::new(inner_arc, router, ctx.config.model.clone());
+    Ok(RoutedRuntime::borrowed(
+        runtime,
+        router,
+        ctx.config.model.clone(),
+    ))
+}
+
+fn classifier_gate<'a>(
+    runtime: &'a crate::agent_router::RoutedRuntime<'a>,
+    workspace: &crate::WorkspaceTarget,
+    target_percentile: f32,
+) -> Result<crate::capabilities::classifier_gate::LikelyVulnClassifier<'a>> {
+    use crate::capabilities::classifier_gate::{ClassifierConfig, LikelyVulnClassifier};
 
     let cfg = ClassifierConfig {
         target_percentile,
         state_db: Some(workspace.findings_db_path()),
         ..Default::default()
     };
-    let gate = LikelyVulnClassifier::new(&routed, cfg)?;
-    let score = gate.score(&finding, workspace.root())?;
-    let should_audit = gate.should_deep_audit(score);
-    let threshold = gate.current_threshold();
-    let n = gate.samples_seen();
+    LikelyVulnClassifier::new(runtime, cfg)
+}
 
-    if !should_audit {
-        if let Some(id) = finding.id {
-            let outcome = gate.skip_outcome(score);
-            store.save_triage(id, &outcome)?;
-        }
-    }
+fn save_classifier_skip_if_needed(
+    run: &ClassifierScoreRun<'_>,
+    gate: &crate::capabilities::classifier_gate::LikelyVulnClassifier<'_>,
+    score: f32,
+    should_audit: bool,
+) -> Result<()> {
+    let Some(id) = run.finding.id.filter(|_| !should_audit) else {
+        return Ok(());
+    };
+    let outcome = gate.skip_outcome(score);
+    run.store.save_triage(id, &outcome)
+}
 
-    Ok(json!({
-        "ok": true,
-        "data": {
-            "findingId": finding.id,
-            "fingerprint": finding.fingerprint,
-            "score": score,
-            "shouldDeepAudit": should_audit,
-            "threshold": threshold,
-            "samplesSeen": n,
-        },
-    }))
+fn classifier_score_response(
+    finding: &crate::findings::Finding,
+    score: f32,
+    should_audit: bool,
+    threshold: f32,
+    samples_seen: usize,
+) -> Value {
+    let summary = format!(
+        "classifier-gate:score {:.3} ({})",
+        score,
+        if should_audit { "audit" } else { "skip" }
+    );
+    let data = json!({
+        "findingId": finding.id,
+        "fingerprint": finding.fingerprint,
+        "score": score,
+        "shouldDeepAudit": should_audit,
+        "threshold": threshold,
+        "samplesSeen": samples_seen,
+    });
+    crate::module_result::completed_output_result(summary.clone(), summary, data)
 }

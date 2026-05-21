@@ -1,5 +1,10 @@
 use super::{CanonicalReportArtifact, ReportFailureHandoff};
-use crate::run_artifacts::{RunArtifact, RunLlmCallAudit, RunSummary};
+use crate::run_artifacts::{
+    RunArtifact, RunEnvFingerprint, RunHouseRuleFingerprint, RunLlmCallAudit,
+    RunPromptOverrideFingerprint, RunSummary, RunTargetGitMetadata,
+};
+
+const FAILURE_LIST_RENDER_LIMIT: usize = 12;
 
 pub(super) fn render_report_markdown(
     summary: &RunSummary,
@@ -26,8 +31,96 @@ fn report_header_lines(summary: &RunSummary) -> Vec<String> {
         format!("- Cost USD: {}", optional_cost(summary.cost_usd)),
         String::new(),
     ];
+    lines.extend(reproducibility_lines(summary));
     lines.extend(llm_call_lines(&summary.llm_calls));
     lines
+}
+
+fn reproducibility_lines(summary: &RunSummary) -> Vec<String> {
+    let mut lines = vec!["## Reproducibility".to_string()];
+    lines.extend([
+        metadata_line("Kuzushi Version", summary.kuzushi_version.as_deref()),
+        metadata_line("Platform", summary.platform.as_deref()),
+        metadata_line("Model", summary.model.as_deref()),
+        metadata_line("Config Hash", summary.config_hash.as_deref()),
+        metadata_line("Git SHA", summary.git_sha.as_deref()),
+        metadata_line("Git Branch", summary.git_branch.as_deref()),
+        metadata_line("Threat Model SHA256", summary.threat_model_sha256.as_deref()),
+        target_git_metadata_line(summary.target_git.as_ref()),
+    ]);
+    lines.push(format!(
+        "- House Rules: {}",
+        house_rule_metadata(&summary.house_rules)
+    ));
+    lines.push(format!(
+        "- Prompt Overrides: {}",
+        prompt_override_metadata(&summary.prompt_overrides)
+    ));
+    lines.push(format!(
+        "- Environment: {}",
+        env_fingerprint_metadata(&summary.env_fingerprint)
+    ));
+    lines.push(String::new());
+    lines
+}
+
+fn env_fingerprint_metadata(env: &[RunEnvFingerprint]) -> String {
+    if env.is_empty() {
+        return "not recorded".to_string();
+    }
+    bounded_metadata_parts(env.iter().map(env_fingerprint_part), env.len())
+}
+
+fn target_git_line(git: &RunTargetGitMetadata) -> String {
+    let branch = git.branch.as_deref().unwrap_or("detached");
+    let dirty = if git.dirty { "dirty" } else { "clean" };
+    format!("{} {branch} {dirty}", git.sha)
+}
+
+fn target_git_metadata_line(git: Option<&RunTargetGitMetadata>) -> String {
+    let Some(git) = git else {
+        return metadata_line("Target Git", None);
+    };
+    let value = target_git_line(git);
+    metadata_line("Target Git", Some(&value))
+}
+
+fn env_fingerprint_part(env: &RunEnvFingerprint) -> String {
+    format!("{} {}", env.key, env.fingerprint)
+}
+
+fn prompt_override_metadata(rules: &[RunPromptOverrideFingerprint]) -> String {
+    if rules.is_empty() {
+        return "not recorded".to_string();
+    }
+    bounded_metadata_parts(rules.iter().map(prompt_override_part), rules.len())
+}
+
+fn prompt_override_part(rule: &RunPromptOverrideFingerprint) -> String {
+    format!("{}:{} {}", rule.module, rule.verb, rule.sha256)
+}
+
+fn house_rule_metadata(rules: &[RunHouseRuleFingerprint]) -> String {
+    if rules.is_empty() {
+        return "not recorded".to_string();
+    }
+    bounded_metadata_parts(rules.iter().map(house_rule_part), rules.len())
+}
+
+fn house_rule_part(rule: &RunHouseRuleFingerprint) -> String {
+    format!("{} {}", rule.module, rule.sha256)
+}
+
+fn bounded_metadata_parts(parts: impl Iterator<Item = String>, total: usize) -> String {
+    let mut rendered = parts.take(6).collect::<Vec<_>>();
+    if total > 6 {
+        rendered.push(format!("... and {} more", total - 6));
+    }
+    rendered.join(", ")
+}
+
+fn metadata_line(label: &str, value: Option<&str>) -> String {
+    format!("- {label}: {}", value.unwrap_or("not recorded"))
 }
 
 fn llm_call_lines(calls: &[RunLlmCallAudit]) -> Vec<String> {
@@ -138,10 +231,17 @@ fn artifact_presence(artifact: &CanonicalReportArtifact) -> &'static str {
 
 fn list_or_none(values: &[String]) -> String {
     if values.is_empty() {
-        "none".to_string()
-    } else {
-        values.join(", ")
+        return "none".to_string();
     }
+    bounded_list(values, FAILURE_LIST_RENDER_LIMIT)
+}
+
+fn bounded_list(values: &[String], limit: usize) -> String {
+    let mut rendered = values.iter().take(limit).cloned().collect::<Vec<_>>();
+    if values.len() > limit {
+        rendered.push(format!("... and {} more", values.len() - limit));
+    }
+    rendered.join(", ")
 }
 
 fn optional_number(value: Option<u64>) -> String {

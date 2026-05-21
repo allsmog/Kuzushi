@@ -1,11 +1,9 @@
 # Replay / Trace / Audit — Critical Assessment
 
-Status: historical 2026-04-30 assessment, retained for design context.
-Current Rust scan, shell tool dispatch, and headless `kuzushi run` write
-shared `.kuzushi/runs/<runId>/summary.json` and trace artifacts; older
-sections below may describe gaps that have since been closed. Some sample
-payloads preserve legacy TypeScript scan arguments for audit context; they
-are not current Rust CLI examples.
+Status: Rust-current replay/trace assessment. Rust scan, shell tool
+dispatch, and headless `kuzushi run` write shared `.kuzushi/runs/<runId>/`
+artifacts; older design examples below are retained only where explicitly
+marked as proposals.
 
 The goal is to answer: **can an operator reproduce, query, diff, and prune
 past runs from disk alone?**
@@ -18,51 +16,57 @@ past runs from disk alone?**
 
 | File              | Producer                                | Trigger              | Always-on? |
 | ----------------- | --------------------------------------- | -------------------- | ---------- |
-| `scan.jsonl`      | `registerScanEventLog` (audit-worker)   | `scan:agent-activity`| **yes**    |
-| `run.json`        | `registerAuditWorker`                   | `pipeline:start`     | gated on `auditLog` |
-| `triage.jsonl`    | `registerAuditWorker`                   | `triage:*`           | gated on `auditLog` |
-| `verify.jsonl`    | `registerAuditWorker`                   | `verification:*`     | gated on `auditLog` |
-| `stats.json`      | `registerAuditWorker`                   | `pipeline:complete`  | gated on `auditLog` |
-| `summary.json`    | _missing today_ — referenced in CLAUDE.md and mocks but never written | — | — |
+| `run.json`        | Rust run artifact substrate             | scan/tool run start and completion | **yes** |
+| `summary.json`    | Rust run artifact substrate             | scan/tool run start and completion | **yes** |
+| `events.jsonl`    | Rust run events                         | scan/tool lifecycle  | **yes** |
+| `trace.jsonl`     | Rust `TraceHandle` / TUI broadcast sink | traced tool/runtime steps | **yes** |
+| `context.json`    | canonical snapshot promotion            | run start / producer output | **yes** |
+| `attack-surface.json` | canonical snapshot promotion        | run start / producer output | **yes** |
+| `threat-model.json` | canonical snapshot promotion          | run start / producer output | **yes** |
+| `recommendations.json` | canonical snapshot promotion       | run start / producer output | **yes** |
+| `findings.json`   | canonical snapshot promotion            | run start / producer output | **yes** |
+| `proof.json`      | canonical snapshot promotion            | run start / producer output | **yes** |
+| `failures.json`   | Rust failure handoff writer             | run start / failed tool output | **yes** |
+| `report.md`       | report producer or placeholder writer   | run start / report output | **yes** |
+| `report.sarif`    | optional SARIF-capable producers        | producer output      | optional |
 
 ### 1.2 SQLite — `.kuzushi/findings.sqlite3`
 
-`pipeline_runs` row carries: `runId`, `repo`, `moduleId`, `toolName`,
-`resumeLabel`, `startedAt`, `status`, `configJson`, `scanOptsJson`,
-`findingsJson`, `contextJson`, `totalCostUsd`, `completedAt`, `updatedAt`,
-`metricsJson`, `assertionsJson`, `promptHash`. Findings live in `findings`,
-keyed by `fingerprint` and scoped to `repo` (not `runId`).
+The Rust findings store carries finding rows and supporting workspace state.
+Run-level reproducibility and trace data live under `.kuzushi/runs/<runId>/`;
+CLI and TUI replay surfaces consume that on-disk format directly.
 
 ### 1.3 Field-level reproducibility / queryability gaps
 
 | Field needed for "reproducible from disk alone" | Persisted today?                |
 | ----------------------------------------------- | ------------------------------- |
-| `runId` / `startedAt` / `completedAt`           | yes (sqlite + run.json)         |
-| `status` / `totalCostUsd`                       | yes (sqlite)                    |
-| Full `KuzushiConfig`                            | yes (`configJson`, `run.json`)  |
-| Resolved `ScanOpts`                             | yes (`scanOptsJson`, `run.json`) |
-| **Kuzushi version**                             | **no**                          |
-| **Effective model id** (post-resolution)        | **no** — only inside config blob |
-| **Agent runtime backend**                       | inside config blob (not surfaced) |
-| **Config hash** (post-CLI overlay)              | **no**                          |
-| **Git sha + dirty flag** of the scanned repo    | **no**                          |
-| **CLI invocation argv**                         | **no**                          |
-| **Env vars that affected behaviour** (`KUZUSHI_*`) | **no**                       |
-| **Prompt-override fingerprints** (`.kuzushi/prompts/`) | **no**                  |
-| **House-rules fingerprints** (`.kuzushi/house-rules/`) | **no**                  |
-| **Threat-model digest** (`.kuzushi/threat-model.json`) | **no**                  |
-| **Loaded module specifiers** (`--load`, package paths) | **no**                  |
-| Findings list                                   | yes (`findingsJson`)            |
-| Per-event audit trail                           | partial — only when `--audit-log` |
+| `runId` / `startedAt` / `completedAt`           | yes (`run.json` / `summary.json`) |
+| `status` / `totalCostUsd`                       | yes (`run.json` / `summary.json`) |
+| Full `KuzushiConfig`                            | no full dump; config hash is recorded |
+| Resolved scan/tool input                        | yes (`input.json` / `result.json` where available) |
+| **Kuzushi version**                             | yes (`kuzushiVersion`)           |
+| **Effective model id** (post-resolution)        | yes when configured or emitted by runtime metadata |
+| **Agent runtime backend**                       | partial; provider/runtime are present in LLM audit entries |
+| **Config hash** (post-CLI overlay)              | yes (`configHash`)               |
+| **Git sha + dirty flag** of the scanned repo    | yes in Rust `run.json` / `summary.json` as `targetGit` when target is a git worktree |
+| **CLI invocation argv**                         | yes (`cliArgs`, bounded and redacted) |
+| **Env vars that affected behaviour** (`KUZUSHI_*`) | yes in Rust `run.json` / `summary.json` as hashes or `<set>` for secret-looking keys |
+| **Prompt-override fingerprints** (`.kuzushi/prompts/`) | yes in Rust `run.json` / `summary.json` when present |
+| **House-rules fingerprints** (`.kuzushi/house-rules/`) | yes in Rust `run.json` / `summary.json` when present |
+| **Threat-model digest** (`.kuzushi/threat-model.json`) | yes in Rust `run.json` / `summary.json` when present |
+| **Loaded module specifiers** (`--load`, package paths) | yes (`loadedModules`; Rust static registry entries are recorded as `builtin:<id>`) |
+| Findings list                                   | yes (`findings.json`, findings store) |
+| Per-event audit trail                           | yes (`events.jsonl`, `trace.jsonl`) |
 
 Cross-run query story today: **shell-only**. No `kuzushi runs query`,
 no `findings search` across runs. Operators can `grep` JSONL files but
 they have heterogeneous shapes (one event per line, but the payload
 shape varies by `eventType`).
 
-There is no retention policy: `.kuzushi/runs/` grows forever. There is no
-`runs prune`, no disk-budget. Tests under `tests/copilot/` exercise
-`replay`/`trace` formatters but not retention or run-metadata roundtrip.
+Retention is now operator-controlled through `kuzushi runs prune` with
+`--older-than-days`, `--keep-last`, and `--dry-run`. The command deletes only
+safe run-id directories, repairs `.kuzushi/latest`, and is covered by focused
+Rust CLI tests. A disk-budget policy is still future work.
 
 ---
 
@@ -70,14 +74,14 @@ There is no retention policy: `.kuzushi/runs/` grows forever. There is no
 
 | # | Change                                                                                                       | Where                                                            | Confidence |
 | - | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- | ---------- |
-| 1 | Write `summary.json` on every run with reproducibility metadata (kuzushi version, git sha, model, config hash, argv, prompt/house-rules fingerprints, finding counts). | `src/bus/workers/audit-worker.ts`, new `src/copilot/run-metadata.ts` | **high**   |
-| 2 | Make `summary.json` always-on (decouple from `auditLog`); the gated triage/verify JSONL stay opt-in. | `src/bus/workers/audit-worker.ts:74`                              | **high**   |
-| 3 | Add `kuzushi runs prune --older-than <duration>` and `--keep-last <n>`, with `--dry-run`. | new `src/cli/commands/runs-prune.ts`, wired in `src/cli.ts:1357`  | **high**   |
-| 4 | Add `kuzushi runs diff <a> <b>` showing new / fixed / drifted findings (already had `compare-runs` for metrics; this is finding-set diff). | new `src/cli/commands/runs-diff.ts`, wired in `src/cli.ts`         | **high**   |
-| 5 | Improve `/show runs` to surface duration, finding count, status; add `--status` filter parity with `kuzushi runs list`. | `src/copilot/replay.ts:44`, `src/copilot/shell.ts:7141`           | **high**   |
-| 6 | Add `--json` and `--all` flags to `/trace` for jq-friendliness (one stable-shape event per line). | `src/copilot/replay.ts`, `src/copilot/shell.ts:7189`              | **high**   |
-| 7 | Add `kuzushi runs replay <runId> --json` and `kuzushi runs trace <runId> [--json]` so the same affordances exist outside the shell. | `src/cli.ts` (under `runsCmd`)                                    | **high**   |
-| 8 | Persist `kuzushiVersion` + `gitSha` columns on `pipeline_runs` so SQL-level queries don't need to join JSONL. | new migration `src/migrations/107_*.ts`, `src/store.ts:53`         | medium — schema migration touches every existing DB |
+| 1 | Keep `summary.json` always-on with reproducibility metadata. Rust now covers version, platform, build git ids, target git metadata, model, config hash, LLM-call metadata, bounded/redacted CLI argv, env fingerprints, prompt override fingerprints, house-rules fingerprints, and threat-model digest. | `crates/kuzushi-core/src/run_artifacts/` | **high** |
+| 2 | Keep canonical run artifacts always-on and independent of optional producer output. | `crates/kuzushi-core/src/run_artifacts/` | **high** |
+| 3 | Add `kuzushi runs prune --older-than-days <n>` and `--keep-last <n>`, with `--dry-run`. Implemented in Rust with safe run-id checks and `.kuzushi/latest` repair. | `crates/kuzushi-cli/src/application/runs.rs` | **high** |
+| 4 | Add `kuzushi runs diff <a> <b>` showing new / fixed / drifted findings. Implemented in Rust against canonical `findings.json` snapshots with plain and JSON output. | `crates/kuzushi-cli/src/application/runs_diff.rs` | **high** |
+| 5 | Improve `/show runs` to surface duration, finding count, status. Rust CLI `kuzushi runs list` and `kuzushi runs show` now show completed-run duration; `kuzushi runs list --status <status[,status]>` filters by run status with explicit status validation. | `crates/kuzushi-tui/src/ui_view_models/run_trace.rs`, `crates/kuzushi-cli/src/application/runs.rs`, and `crates/kuzushi-cli/src/presentation/runs_output.rs` | **high** |
+| 6 | Keep `kuzushi runs trace <runId> --json` jq-friendly and consider an `--all` variant only if trace/event files diverge. | `crates/kuzushi-cli/src/application/runs.rs` | **high** |
+| 7 | Shell `/replay <runId>` and `/trace <runId>` should keep consuming the same `.kuzushi/runs/<runId>/` artifacts as CLI `kuzushi runs show/trace`. | `crates/kuzushi-tui/src/ui_view_models/run_trace.rs` | **high** |
+| 8 | If SQL-level run queries become product scope, add Rust migrations for selected run metadata instead of reintroducing retired store paths. | future Rust persistence migration | medium |
 
 Out-of-scope but worth mentioning:
 
@@ -149,14 +153,14 @@ fields are additive; nothing in the v0 schema is renamed or removed.
 
 ---
 
-## 4 · Diff design — `kuzushi runs diff <a> <b>`
+## 4 · Diff surface — `kuzushi runs diff <a> <b>`
 
-Reads `pipeline_runs.findingsJson` for both runs, fingerprint-keys them,
-emits four sets:
+Reads `.kuzushi/runs/<runId>/findings.json` for both runs, fingerprint-keys
+the canonical finding snapshots, and emits four sets:
 
 - **new** — fingerprint present in B, absent from A
 - **fixed** — fingerprint present in A, absent from B
-- **drifted** — same fingerprint, differing `verdict` / `displaySeverity` / `confidence`
+- **drifted** — same fingerprint, differing `verdict` / `displaySeverity` / `severity` / `confidence`
 - **stable** — count only
 
 Output is a plain table by default and a structured JSON object under
@@ -164,14 +168,15 @@ Output is a plain table by default and a structured JSON object under
 
 ---
 
-## 5 · Cleanup design — `kuzushi runs prune`
+## 5 · Cleanup surface — `kuzushi runs prune`
 
-Two retention strategies (operator picks one):
+Two retention strategies are implemented and can be combined:
 
-- `--older-than <duration>` — `7d`, `30d`, `12h`. Wall-clock vs. `startedAt`.
+- `--older-than-days <n>` — wall-clock retention against run `startedAt`.
 - `--keep-last <n>` — preserves N most recent runs per repo.
 
 Implementation deletes the run dir under `.kuzushi/runs/<runId>/` and the
-matching `pipeline_runs` row. `--dry-run` lists what would be deleted.
-Default behaviour skips runs in active state (`scanning` / `running` /
-`triaging` / `verifying`) for safety.
+latest pointer is repaired to the newest remaining run, or removed when no runs
+remain. `--dry-run` lists what would be deleted without touching disk. The
+implementation refuses unsafe run ids containing empty, relative, or path
+separator components before deletion.

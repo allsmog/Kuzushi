@@ -52,6 +52,15 @@ findings, including curl findings, do not belong here.
   Actor response artifacts now label any tool-shaped JSON prelude as ignored
   and not executed, so operators do not mistake prompt text for evidence
   collection.
+- Product positioning now names the shipping surface as an evidence-backed
+  repository security workbench instead of leading with the broader
+  security-operating-environment roadmap.
+- `VISION.md`, `FEATURES.md`, and `docs/modules.md` now mark aspirational
+  pwn/offense/governance/dynamic-loader material as roadmap or compatibility
+  surface unless it is wired into the native Rust registry.
+- Cross-channel finding dedup now uses 8-line buckets instead of 16-line
+  buckets to reduce accidental merges in dense files while preserving nearby
+  scanner/agent convergence.
 
 ## Validation Runs
 
@@ -127,10 +136,6 @@ findings, including curl findings, do not belong here.
   expect `<target>/.kuzushi/x-ray`. Decide whether to keep the public contract
   as `x-ray/` or mirror/symlink it from `.kuzushi/x-ray` inside Kuzushi instead
   of relying on manual compatibility links.
-- `taint-iris-next:hunt` emits useful plan/evidence summaries but does not
-  normalize those into `.data.findings[]` or persisted finding records. Decide
-  whether those triage summaries are findings, candidate records, or evidence
-  artifacts, then persist them consistently.
 - Tool input validation should make unsupported knobs discoverable. Example:
   `reasoningEffort` was rejected by `taint-iris-next`; either expose the option
   where supported or return a clearer supported-options error.

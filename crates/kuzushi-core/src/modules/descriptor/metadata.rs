@@ -90,6 +90,7 @@ pub(in crate::modules) fn tool_with_options(
         description: description.to_string(),
         headless: true,
         hidden: false,
+        runtime_requirement: RuntimeRequirement::Never,
         options,
     }
 }

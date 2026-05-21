@@ -192,7 +192,7 @@ fn pane_focus_routes_jk_to_focused_scroll_offset() {
     assert_eq!(session.feed_scroll, 0, "feed must not move");
 
     // Tab to right pane and scroll
-    drop(session);
+    let _ = session;
     app.activity.as_mut().unwrap().toggle_pane_focus();
     app.scroll_down(7);
     let session = app.activity.as_ref().unwrap();
@@ -222,7 +222,7 @@ fn pause_toggle_preserves_pinned_feed_scroll() {
         );
     }
     session.pane_focus = kuzushi_tui::PaneFocus::Right;
-    drop(session);
+    let _ = session;
 
     // Operator scrolls up by 5 — pins position, unpins auto-tail.
     app.scroll_down(5);
@@ -245,7 +245,7 @@ fn pause_toggle_preserves_pinned_feed_scroll() {
     );
 
     // G (scroll-to-bottom) restores auto-tail.
-    drop(session);
+    let _ = session;
     app.scroll_to_bottom();
     let session = app.activity.as_ref().unwrap();
     assert!(session.feed_auto_tail, "G should reset live auto-tail");

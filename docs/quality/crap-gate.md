@@ -11,6 +11,11 @@ pnpm quality:crap-risk
 
 CI runs this command in `.github/workflows/ci.yml`.
 
+When `cargo llvm-cov` and `cargo crap` are available, `scripts/crap-gate.sh`
+runs the real coverage-backed CRAP gate. Its default threshold is also 7;
+raising it requires an explicit `KUZUSHI_CRAP_THRESHOLD` or `--threshold`
+override and should be documented in the change.
+
 ## Score
 
 The proxy score is:
@@ -25,6 +30,11 @@ The gate fails changed production Rust/JS/TS code when:
 - function complexity is greater than 4;
 - a function has more than 40 logical lines;
 - a production file has more than 300 logical lines.
+
+For tracked files that already exist, the proxy scores functions whose bodies
+overlap the diff. Added and untracked files are scored in full, including the
+file-size limit. This keeps the gate focused on new or modified code without
+turning unrelated legacy functions in a touched file into a blocker.
 
 ## Weights
 

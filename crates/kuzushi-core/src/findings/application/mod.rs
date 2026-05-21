@@ -11,6 +11,6 @@ pub(crate) use generic_tool_findings::{
 };
 pub use projections::{
     finding_confidence_label, finding_cwe_label, finding_evidence_preview, finding_location,
-    finding_source_label, finding_verdict_label, project_finding, severity_badge, severity_icon,
-    FindingProjection,
+    finding_remediation_hint, finding_source_label, finding_verdict_label, project_finding,
+    severity_badge, severity_icon, FindingProjection,
 };

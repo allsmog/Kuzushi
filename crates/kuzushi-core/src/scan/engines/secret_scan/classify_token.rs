@@ -29,33 +29,75 @@ fn aws_access_key_match(token: &str) -> Option<Detector> {
 }
 
 fn prefixed_token_detector(token: &str) -> Option<Detector> {
-    if matches_prefixed_token(
-        token,
-        &["ghp_", "gho_", "ghu_", "ghs_", "ghr_"],
-        36,
-        is_alnum,
-    ) {
-        return Some(github_pat_detector());
-    }
-    if matches_prefixed_token(
-        token,
-        &["xoxa-", "xoxb-", "xoxp-", "xoxr-", "xoxs-"],
-        10,
-        is_alnum_hyphen,
-    ) {
-        return Some(slack_token_detector());
-    }
-    if matches_prefixed_token(token, &["sk_live_", "pk_live_", "rk_live_"], 24, is_alnum) {
-        return Some(stripe_live_key_detector());
-    }
-    if matches_prefixed_token(token, &["sk_test_", "pk_test_", "rk_test_"], 24, is_alnum) {
-        return Some(stripe_test_key_detector());
-    }
-    if matches_prefixed_token(token, &["sk-ant-"], 20, is_alnum_underscore_hyphen) {
-        return Some(anthropic_api_key_detector());
-    }
-    None
+    PREFIXED_TOKEN_RULES
+        .iter()
+        .find(|rule| rule.matches(token))
+        .map(|rule| (rule.detector)())
 }
+
+struct PrefixedTokenRule {
+    prefixes: &'static [&'static str],
+    min_suffix_len: usize,
+    suffix_char: fn(u8) -> bool,
+    detector: fn() -> Detector,
+}
+
+impl PrefixedTokenRule {
+    fn matches(&self, token: &str) -> bool {
+        matches_prefixed_token(token, self.prefixes, self.min_suffix_len, self.suffix_char)
+    }
+}
+
+const PREFIXED_TOKEN_RULES: &[PrefixedTokenRule] = &[
+    PrefixedTokenRule {
+        prefixes: &["ghp_", "gho_", "ghu_", "ghs_", "ghr_"],
+        min_suffix_len: 36,
+        suffix_char: is_alnum,
+        detector: github_pat_detector,
+    },
+    PrefixedTokenRule {
+        prefixes: &["github_pat_"],
+        min_suffix_len: 36,
+        suffix_char: is_alnum_underscore_hyphen,
+        detector: github_pat_detector,
+    },
+    PrefixedTokenRule {
+        prefixes: &["glpat-"],
+        min_suffix_len: 20,
+        suffix_char: is_alnum_underscore_hyphen,
+        detector: gitlab_pat_detector,
+    },
+    PrefixedTokenRule {
+        prefixes: &["npm_"],
+        min_suffix_len: 36,
+        suffix_char: is_alnum_underscore_hyphen,
+        detector: npm_access_token_detector,
+    },
+    PrefixedTokenRule {
+        prefixes: &["xoxa-", "xoxb-", "xoxp-", "xoxr-", "xoxs-"],
+        min_suffix_len: 10,
+        suffix_char: is_alnum_hyphen,
+        detector: slack_token_detector,
+    },
+    PrefixedTokenRule {
+        prefixes: &["sk_live_", "pk_live_", "rk_live_"],
+        min_suffix_len: 24,
+        suffix_char: is_alnum,
+        detector: stripe_live_key_detector,
+    },
+    PrefixedTokenRule {
+        prefixes: &["sk_test_", "pk_test_", "rk_test_"],
+        min_suffix_len: 24,
+        suffix_char: is_alnum,
+        detector: stripe_test_key_detector,
+    },
+    PrefixedTokenRule {
+        prefixes: &["sk-ant-"],
+        min_suffix_len: 20,
+        suffix_char: is_alnum_underscore_hyphen,
+        detector: anthropic_api_key_detector,
+    },
+];
 
 fn google_api_key_match(token: &str) -> Option<Detector> {
     (token.len() == 39

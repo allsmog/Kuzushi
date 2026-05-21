@@ -125,6 +125,14 @@ OUT
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
+        assert!(result
+            .get("summary")
+            .and_then(Value::as_str)
+            .is_some_and(|summary| summary.starts_with("recon:nmap discovered")));
+        assert_eq!(
             result
                 .pointer("/data/hosts/0/address")
                 .and_then(Value::as_str),

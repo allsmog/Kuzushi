@@ -1,7 +1,7 @@
 use super::*;
 
 impl<'a> LikelyVulnClassifier<'a> {
-    pub fn new(runtime: &'a RoutedRuntime, cfg: ClassifierConfig) -> Result<Self> {
+    pub fn new(runtime: &'a RoutedRuntime<'a>, cfg: ClassifierConfig) -> Result<Self> {
         let quantile = match cfg.state_db.as_deref() {
             Some(db) => load_quantile(db, cfg.target_percentile)?,
             None => QuantileEstimator::new(cfg.target_percentile),

@@ -1,6 +1,5 @@
 use super::output_contract::normalize_tool_output_contract;
 use super::*;
-use crate::modules::registry::ToolDispatchResult;
 
 impl ModuleRegistry {
     pub fn execute_tool(
@@ -45,11 +44,7 @@ impl ModuleRegistry {
         if tool.is_none() && !self.is_registered_dag_node(name) {
             anyhow::bail!("unknown tool {name:?}. Next: run catalog:tools or use the Rust shell `tools` command");
         }
-        let input = if let Some(store) = option_store {
-            store.effective_tool_input(name, input)?
-        } else {
-            input
-        };
+        let input = prepare_input_with_stored_options(name, input, option_store, tool)?;
         Ok(if let Some(tool) = tool {
             validate_tool_input_options(tool, input)?
         } else {
@@ -75,24 +70,29 @@ impl ModuleRegistry {
         let traced_runtime = traced_tool_runtime(runtime, scoped_trace.as_ref());
         let runtime = active_tool_runtime(runtime, traced_runtime.as_ref());
 
-        if let Some(result) = self.dispatch_prepared_tool_mapping(name, &input, ctx, runtime) {
-            return result.map(|output| normalize_tool_output_contract(name, output));
-        }
-        anyhow::bail!("registered tool or DAG node {name:?} has no Rust executor mapping")
+        let executor = self
+            .executors
+            .get(name)
+            .with_context(|| format!("registered tool or DAG node {name:?} has no Rust executor mapping"))?;
+        let result = executor(self, name, &input, ctx, runtime);
+        return result.map(|output| normalize_tool_output_contract(name, output));
     }
+}
 
-    fn dispatch_prepared_tool_mapping(
-        &self,
-        name: &str,
-        input: &Value,
-        ctx: &ToolExecutionContext<'_>,
-        runtime: Option<&dyn AgentRuntime>,
-    ) -> ToolDispatchResult {
-        self.dispatch_catalog_tool(name)
-            .or_else(|| self.dispatch_module_recommender_tool(name, input, ctx))
-            .or_else(|| dispatch_pre_threat_intel_tool(name, input, ctx, runtime))
-            .or_else(|| self.dispatch_threat_intel_tool(name, input, ctx, runtime))
-            .or_else(|| dispatch_post_threat_intel_tool(name, input, ctx, runtime))
+fn prepare_input_with_stored_options(
+    name: &str,
+    input: Value,
+    option_store: Option<&ToolOptionStore>,
+    tool: Option<&ToolDescriptor>,
+) -> Result<Value> {
+    match (option_store, tool) {
+        (Some(store), Some(tool)) => store.effective_tool_input_with_stored_filter(
+            name,
+            input,
+            |option_name| tool.options.iter().any(|spec| spec.matches_name_or_alias(option_name)),
+        ),
+        (Some(store), None) => store.effective_tool_input(name, input),
+        (None, _) => Ok(input),
     }
 }
 
@@ -135,32 +135,6 @@ fn active_tool_runtime<'scope>(
     traced_runtime
         .map(|runtime| runtime as &dyn AgentRuntime)
         .or(runtime)
-}
-
-fn dispatch_pre_threat_intel_tool(
-    name: &str,
-    input: &Value,
-    ctx: &ToolExecutionContext<'_>,
-    runtime: Option<&dyn AgentRuntime>,
-) -> ToolDispatchResult {
-    dispatch_context_workspace_tool(name, input, ctx)
-        .or_else(|| dispatch_native_security_tool(name, input, ctx, runtime))
-        .or_else(|| dispatch_agentic_security_tool(name, input, ctx, runtime))
-        .or_else(|| dispatch_systems_hunt_tool(name, input, ctx, runtime))
-        .or_else(|| dispatch_uaf_hunt_tool(name, input, ctx, runtime))
-        .or_else(|| dispatch_pwn_tool(name, input, ctx, runtime))
-}
-
-fn dispatch_post_threat_intel_tool(
-    name: &str,
-    input: &Value,
-    ctx: &ToolExecutionContext<'_>,
-    runtime: Option<&dyn AgentRuntime>,
-) -> ToolDispatchResult {
-    dispatch_runtime_analysis_tool(name, input, ctx, runtime)
-        .or_else(|| dispatch_finding_action_tool(name, input, ctx, runtime))
-        .or_else(|| dispatch_recon_assessment_tool(name, input, ctx, runtime))
-        .or_else(|| dispatch_plugin_prompt_tool(name, input, ctx, runtime))
 }
 
 /// Derive a module id from a qualified tool name (`semgrep:scan` -> `semgrep`).

@@ -23,9 +23,11 @@ libc.workspace = true
 # dependency via tree-sitter; declare it explicitly so the discovery
 # crate isn't relying on an indirect feature.
 regex = "1"
+roxmltree = "0.20"
 rusqlite.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+serde_yaml = "0.9"
 tempfile.workspace = true
 thiserror.workspace = true
 tokio.workspace = true

@@ -52,14 +52,6 @@ pub(crate) fn parse_references(raw: Option<&Value>, fallback_kind: &str) -> Vec<
 pub(crate) fn parse_narrative(raw: &Value) -> Option<Value> {
     let record = raw.as_object()?;
     let overview = str_field(record, &["overview"]).unwrap_or_default();
-    let input_categories = record
-        .get("input_categories")
-        .or_else(|| record.get("inputCategories"))
-        .and_then(Value::as_object);
-    let criticality = record
-        .get("criticality_buckets")
-        .or_else(|| record.get("criticalityBuckets"))
-        .and_then(Value::as_object);
     let attacker_stories = record
         .get("attacker_stories")
         .or_else(|| record.get("attackerStories"))
@@ -89,21 +81,44 @@ pub(crate) fn parse_narrative(raw: &Value) -> Option<Value> {
     }
     Some(json!({
         "overview": overview,
-        "inputCategories": {
-            "attackerControlled": input_categories.map(|r| string_array_field(r, &["attacker_controlled", "attackerControlled"])).unwrap_or_default(),
-            "operatorControlled": input_categories.map(|r| string_array_field(r, &["operator_controlled", "operatorControlled"])).unwrap_or_default(),
-            "developerControlled": input_categories.map(|r| string_array_field(r, &["developer_controlled", "developerControlled"])).unwrap_or_default(),
-            "externalServices": input_categories.map(|r| string_array_field(r, &["external_services", "externalServices"])).unwrap_or_default(),
-            "sandboxBoundary": input_categories.map(|r| string_array_field(r, &["sandbox_boundary", "sandboxBoundary"])).unwrap_or_default(),
-            "assumptions": input_categories.map(|r| string_array_field(r, &["assumptions"])).unwrap_or_default(),
-        },
+        "inputCategories": narrative_input_categories(record),
         "attackerStories": attacker_stories,
-        "criticalityBuckets": {
-            "critical": criticality.map(|r| string_array_field(r, &["critical"])).unwrap_or_default(),
-            "high": criticality.map(|r| string_array_field(r, &["high"])).unwrap_or_default(),
-            "medium": criticality.map(|r| string_array_field(r, &["medium"])).unwrap_or_default(),
-            "low": criticality.map(|r| string_array_field(r, &["low"])).unwrap_or_default(),
-        },
+        "criticalityBuckets": narrative_criticality_buckets(record),
         "outOfScope": out_of_scope,
     }))
+}
+
+fn narrative_input_categories(record: &Map<String, Value>) -> Value {
+    let categories = object_field(record, &["input_categories", "inputCategories"]);
+    json!({
+        "attackerControlled": category_array(categories, &["attacker_controlled", "attackerControlled"]),
+        "operatorControlled": category_array(categories, &["operator_controlled", "operatorControlled"]),
+        "developerControlled": category_array(categories, &["developer_controlled", "developerControlled"]),
+        "externalServices": category_array(categories, &["external_services", "externalServices"]),
+        "credentialFlows": category_array(categories, &["credential_flows", "credentialFlows"]),
+        "authorizationFlows": category_array(categories, &["authorization_flows", "authorizationFlows"]),
+        "fileIngestFlows": category_array(categories, &["file_ingest_flows", "fileIngestFlows"]),
+        "dataEgressFlows": category_array(categories, &["data_egress_flows", "dataEgressFlows"]),
+        "callbackFlows": category_array(categories, &["callback_flows", "callbackFlows"]),
+        "sandboxBoundary": category_array(categories, &["sandbox_boundary", "sandboxBoundary"]),
+        "assumptions": category_array(categories, &["assumptions"]),
+    })
+}
+
+fn narrative_criticality_buckets(record: &Map<String, Value>) -> Value {
+    let criticality = object_field(record, &["criticality_buckets", "criticalityBuckets"]);
+    json!({
+        "critical": category_array(criticality, &["critical"]),
+        "high": category_array(criticality, &["high"]),
+        "medium": category_array(criticality, &["medium"]),
+        "low": category_array(criticality, &["low"]),
+    })
+}
+
+fn object_field<'a>(record: &'a Map<String, Value>, keys: &[&str]) -> Option<&'a Map<String, Value>> {
+    keys.iter().find_map(|key| record.get(*key)).and_then(Value::as_object)
+}
+
+fn category_array(record: Option<&Map<String, Value>>, keys: &[&str]) -> Vec<String> {
+    record.map(|value| string_array_field(value, keys)).unwrap_or_default()
 }

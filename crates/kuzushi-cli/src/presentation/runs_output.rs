@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 use kuzushi_core::{RunSummary, WorkspaceTarget};
 use std::path::Path;
+use std::time::Duration;
+
+use super::scan_ci::format_duration;
 
 pub(crate) fn runs_list_output(
     workspace: &WorkspaceTarget,
@@ -40,9 +43,10 @@ pub(crate) fn run_list_row(run: &RunSummary) -> String {
         .findings
         .map(|count| count.to_string())
         .unwrap_or_else(|| "-".to_string());
+    let duration = run_duration_label(run).unwrap_or_else(|| "-".to_string());
     format!(
-        "{}  {:<9} {:<24} findings={} target={}",
-        run.run_id, run.status, tool, findings, run.target
+        "{}  {:<9} {:<24} duration={} findings={} target={}",
+        run.run_id, run.status, tool, duration, findings, run.target
     )
 }
 
@@ -133,30 +137,72 @@ fn format_trace_module_verb(step: &serde_json::Value) -> String {
 }
 
 pub(crate) fn run_summary_plain(summary: &RunSummary) -> String {
-    let mut lines = vec![
+    let mut lines = run_summary_header(summary);
+    push_run_summary_tool(&mut lines, summary);
+    lines.push(format!("Target: {}", summary.target));
+    push_run_summary_duration(&mut lines, summary);
+    push_run_summary_findings(&mut lines, summary);
+    push_run_summary_cost(&mut lines, summary);
+    push_run_summary_error(&mut lines, summary);
+    push_run_summary_artifacts(&mut lines, summary);
+    lines.push(format!("Next: kuzushi runs trace {}", summary.run_id));
+    format!("{}\n", lines.join("\n"))
+}
+
+fn run_summary_header(summary: &RunSummary) -> Vec<String> {
+    vec![
         format!("Run {}", summary.run_id),
         format!("Status: {}", summary.status),
         format!("Kind: {}", summary.kind),
-    ];
+    ]
+}
+
+fn push_run_summary_tool(lines: &mut Vec<String>, summary: &RunSummary) {
     if let Some(tool) = &summary.tool {
         lines.push(format!("Tool: {tool}"));
     }
-    lines.push(format!("Target: {}", summary.target));
+}
+
+fn push_run_summary_duration(lines: &mut Vec<String>, summary: &RunSummary) {
+    if let Some(duration) = run_duration_label(summary) {
+        lines.push(format!("Duration: {duration}"));
+    }
+}
+
+fn push_run_summary_findings(lines: &mut Vec<String>, summary: &RunSummary) {
     if let Some(findings) = summary.findings {
         lines.push(format!("Findings: {findings}"));
     }
+}
+
+fn push_run_summary_cost(lines: &mut Vec<String>, summary: &RunSummary) {
     if let Some(cost) = summary.cost_usd {
         lines.push(format!("Cost USD: {cost:.4}"));
     }
+}
+
+fn push_run_summary_error(lines: &mut Vec<String>, summary: &RunSummary) {
     if let Some(error) = &summary.error {
         lines.push(format!("Error: {error}"));
     }
+}
+
+fn push_run_summary_artifacts(lines: &mut Vec<String>, summary: &RunSummary) {
     if !summary.artifacts.is_empty() {
         lines.push("Artifacts:".to_string());
         for artifact in &summary.artifacts {
             lines.push(format!("  {}: {}", artifact.label, artifact.path));
         }
     }
-    lines.push(format!("Next: kuzushi runs trace {}", summary.run_id));
-    format!("{}\n", lines.join("\n"))
+}
+
+fn run_duration_label(summary: &RunSummary) -> Option<String> {
+    summary_elapsed(summary).map(format_duration)
+}
+
+fn summary_elapsed(summary: &RunSummary) -> Option<Duration> {
+    let completed = summary.completed_at_unix?;
+    completed
+        .checked_sub(summary.started_at_unix)
+        .map(Duration::from_secs)
 }

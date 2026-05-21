@@ -81,16 +81,13 @@ impl RunReportBuild {
     }
 
     pub fn to_tool_json(&self) -> Value {
-        json!({
-            "ok": true,
-            "status": "completed",
-            "summary": self.summary,
-            "reportMarkdown": self.report_markdown,
-            "artifacts": [self.report_artifact()],
-            "warnings": self.report_warnings(),
-            "errors": [],
-            "data": self,
-        })
+        let mut response = crate::module_result::completed_output_result(
+            self.summary.clone(),
+            self.summary.clone(),
+            json!(self),
+        );
+        add_report_response_fields(&mut response, self);
+        response
     }
 
     fn report_artifact(&self) -> Value {
@@ -107,6 +104,17 @@ impl RunReportBuild {
             .filter(|artifact| !artifact.present)
             .map(missing_artifact_warning)
             .collect()
+    }
+}
+
+fn add_report_response_fields(response: &mut Value, report: &RunReportBuild) {
+    if let Some(object) = response.as_object_mut() {
+        object.insert(
+            "reportMarkdown".to_string(),
+            json!(report.report_markdown.clone()),
+        );
+        object.insert("artifacts".to_string(), json!([report.report_artifact()]));
+        object.insert("warnings".to_string(), json!(report.report_warnings()));
     }
 }
 

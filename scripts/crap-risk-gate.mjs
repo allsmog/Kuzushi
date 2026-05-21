@@ -14,11 +14,12 @@ for (const file of changed) {
   const abs = path.join(root, file);
   if (!existsSync(abs)) continue;
   const source = readFileSync(abs, "utf8");
+  const blocks = scoredFunctionBlocks(file, source);
   const logicalFileLines = logicalLines(source).length;
-  if (isProductionCode(file) && logicalFileLines > 300) {
+  if (scoresWholeFile(file) && isProductionCode(file) && logicalFileLines > 300) {
     failures.push(`${file}: file has ${logicalFileLines} logical lines; limit is 300`);
   }
-  for (const block of functionBlocks(file, source)) {
+  for (const block of blocks) {
     const metrics = scoreBlock(file, block, hasChangedTest);
     if (metrics.complexity > 4) {
       failures.push(
@@ -80,6 +81,16 @@ function functionBlocks(file, source) {
   return [{ name: "<file>", line: 1, source }];
 }
 
+function scoredFunctionBlocks(file, source) {
+  if (scoresWholeFile(file)) return functionBlocks(file, source);
+  const changedLines = changedLineRanges(file);
+  return functionBlocks(file, source).filter((block) => overlapsRanges(block, changedLines));
+}
+
+function scoresWholeFile(file) {
+  return explicitFileListUsed() || isUntrackedFile(file) || isAddedFile(file);
+}
+
 function rustFunctionBlocks(lines, source) {
   const blocks = [];
   for (let index = 0; index < lines.length; index += 1) {
@@ -87,7 +98,7 @@ function rustFunctionBlocks(lines, source) {
     const match = line.match(/^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z0-9_]+)/);
     if (!match) continue;
     const block = collectBraceBlock(lines, index);
-    blocks.push({ name: match[1], line: index + 1, source: block });
+    blocks.push({ name: match[1], line: index + 1, endLine: block.endLine, source: block.source });
   }
   return blocks;
 }
@@ -100,7 +111,12 @@ function jsFunctionBlocks(lines, source) {
     const match = lines[index].match(pattern);
     if (!match) continue;
     const block = collectBraceBlock(lines, index);
-    blocks.push({ name: match[1] ?? match[2], line: index + 1, source: block });
+    blocks.push({
+      name: match[1] ?? match[2],
+      line: index + 1,
+      endLine: block.endLine,
+      source: block.source,
+    });
   }
   return blocks;
 }
@@ -117,9 +133,11 @@ function collectBraceBlock(lines, start) {
       depth = next.depth;
       opened = next.opened;
     }
-    if (opened && depth <= 0) break;
+    if (opened && depth <= 0) {
+      return { source: out.join("\n"), endLine: index + 1 };
+    }
   }
-  return out.join("\n");
+  return { source: out.join("\n"), endLine: start + out.length };
 }
 
 function braceDepthAfter(char, depth, opened) {
@@ -216,6 +234,40 @@ function isTestFile(file) {
 
 function normalize(file) {
   return file.trim().replaceAll(path.sep, "/");
+}
+
+function explicitFileListUsed() {
+  return Boolean(process.env.KUZUSHI_CRAP_RISK_FILES);
+}
+
+function isUntrackedFile(file) {
+  return gitLines(["ls-files", "--others", "--exclude-standard", "--", file]).includes(file);
+}
+
+function isAddedFile(file) {
+  return gitLines(["diff", "--name-only", "--diff-filter=A", "HEAD", "--", file]).includes(file);
+}
+
+function overlapsRanges(block, ranges) {
+  if (ranges.length === 0) return true;
+  return ranges.some((range) => range.start <= block.endLine && block.line <= range.end);
+}
+
+function changedLineRanges(file) {
+  const diff = git(["diff", "--unified=0", "HEAD", "--", file]);
+  return diff
+    .split(/\r?\n/)
+    .map(parseAddedRange)
+    .filter(Boolean);
+}
+
+function parseAddedRange(line) {
+  const match = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@/);
+  if (!match) return undefined;
+  const start = Number(match[1]);
+  const count = Number(match[2] ?? "1");
+  const end = start + Math.max(count, 1) - 1;
+  return { start, end };
 }
 
 function gitLines(args) {

@@ -41,12 +41,10 @@ pub(crate) fn execute_deep_semantic_report(
 }
 
 pub(crate) fn tool_json<T: Serialize>(output: String, data: T) -> Value {
-    json!({
-        "ok": true,
-        "output": output,
-        "data": data,
-        "costUsd": 0.0,
-    })
+    let mut result =
+        crate::module_result::completed_output_result(output.clone(), output, json!(data));
+    result["costUsd"] = json!(0.0);
+    result
 }
 
 pub fn gather_surfaces(target: &Path, input: &Value) -> Result<SystemsContextOutput> {

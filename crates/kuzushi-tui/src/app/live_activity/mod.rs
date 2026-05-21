@@ -192,6 +192,8 @@ fn searching_tool(tool_name: &str) -> bool {
             | "semgrep:scan"
             | "codeql:scan"
             | "iac-scan:scan"
+            | "license-scan:scan"
+            | "cargo-audit:scan"
             | "secret-scan:scan"
             | "recon:http-fingerprint"
             | "recon:nmap"

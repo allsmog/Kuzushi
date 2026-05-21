@@ -178,18 +178,19 @@ fn assessment_response(
     artifacts: AssessmentArtifacts,
     prompts_dir: PathBuf,
 ) -> Value {
-    json!({
-        "ok": true,
-        "output": format!(
-            "Vendor assessment complete ({}, {}).\nReport: {}\nJSON:   {}\nScope:  {}\nPrompts: {}",
-            report.get("overallRisk").and_then(Value::as_str).unwrap_or("needs-review"),
-            report.get("confidence").and_then(Value::as_str).unwrap_or("low"),
-            artifacts.report_path.display(),
-            artifacts.report_json_path.display(),
-            artifacts.scope_path.display(),
-            prompts_dir.display(),
-        ),
-        "data": {
+    let output = format!(
+        "Vendor assessment complete ({}, {}).\nReport: {}\nJSON:   {}\nScope:  {}\nPrompts: {}",
+        report.get("overallRisk").and_then(Value::as_str).unwrap_or("needs-review"),
+        report.get("confidence").and_then(Value::as_str).unwrap_or("low"),
+        artifacts.report_path.display(),
+        artifacts.report_json_path.display(),
+        artifacts.scope_path.display(),
+        prompts_dir.display(),
+    );
+    let mut result = crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
             "runId": run_id,
             "report": report,
             "scope": scope,
@@ -199,9 +200,16 @@ fn assessment_response(
                 "reportJsonPath": artifacts.report_json_path.display().to_string(),
                 "promptsDir": prompts_dir.display().to_string(),
             },
-        },
-        "costUsd": 0.0,
-    })
+        }),
+    );
+    result["artifacts"] = json!([
+        { "label": "report", "path": artifacts.report_path.display().to_string() },
+        { "label": "report json", "path": artifacts.report_json_path.display().to_string() },
+        { "label": "scope", "path": artifacts.scope_path.display().to_string() },
+        { "label": "prompts", "path": prompts_dir.display().to_string() },
+    ]);
+    result["costUsd"] = json!(0.0);
+    result
 }
 
 pub(crate) fn require_json_object(value: Value) -> Result<Value> {

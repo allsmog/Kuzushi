@@ -1,7 +1,7 @@
 use super::*;
 use crate::ui_view_models::{
-    auth_provider_rows, config_model, cost_model, ConfigModel, CostBudgetStatus, CostModel,
-    CostTone,
+    auth_login_model, auth_provider_rows, config_model, cost_model, AuthLoginModel, ConfigModel,
+    CostBudgetStatus, CostModel, CostTone,
 };
 
 pub(crate) fn auth_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -10,16 +10,70 @@ pub(crate) fn auth_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let cost = cost_model(app);
     lines.push(blank());
     push_auth_provider_section(&mut lines, app, area);
+    push_auth_login_section(&mut lines, auth_login_model(app).as_ref(), area);
     push_auth_model_section(&mut lines, &config, area);
     push_auth_spend_section(&mut lines, &cost, area);
     push_auth_commands(&mut lines, area);
     lines
 }
 
+fn push_auth_login_section(
+    lines: &mut Vec<Line<'static>>,
+    model: Option<&AuthLoginModel>,
+    area: Rect,
+) {
+    let Some(login) = model else {
+        return;
+    };
+    lines.push(divider("OAUTH · latest flow", area.width));
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled("provider  ", theme::muted()),
+        Span::styled(login.provider.clone(), theme::primary()),
+        Span::styled(" · ", theme::subtle()),
+        Span::styled("method ", theme::muted()),
+        Span::styled(login.method.clone(), theme::primary()),
+        Span::styled(" · ", theme::subtle()),
+        Span::styled("status ", theme::muted()),
+        Span::styled(login.status.clone(), auth_login_status_style(&login.status)),
+    ]));
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled("flow      ", theme::muted()),
+        Span::styled(login.flow.clone(), theme::primary()),
+    ]));
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled("store     ", theme::muted()),
+        Span::styled(login.store_path.clone(), theme::primary()),
+        Span::styled(" · values hidden", theme::muted()),
+    ]));
+    lines.push(blank());
+}
+
+fn auth_login_status_style(status: &str) -> ratatui::style::Style {
+    match status {
+        "connected" => theme::success(),
+        "failed" => theme::danger(),
+        "waiting" | "starting" => theme::warn(),
+        _ => theme::muted(),
+    }
+}
+
 fn push_auth_provider_section(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) {
-    lines.push(divider("PROVIDERS", area.width));
     let providers = auth_provider_rows(app);
-    for row in &providers {
+    let (backend_rows, provider_rows): (Vec<_>, Vec<_>) = providers
+        .iter()
+        .partition(|row| row.cells[0] == "pi-agent-core");
+    if !backend_rows.is_empty() {
+        lines.push(divider("BACKEND", area.width));
+        for row in &backend_rows {
+            lines.push(auth_provider_line(row));
+        }
+        lines.push(blank());
+    }
+    lines.push(divider("PROVIDERS", area.width));
+    for row in &provider_rows {
         lines.push(auth_provider_line(row));
     }
     lines.push(blank());
@@ -96,8 +150,10 @@ fn auth_budget_tone_style(tone: CostTone) -> ratatui::style::Style {
 fn push_auth_commands(lines: &mut Vec<Line<'static>>, area: Rect) {
     lines.push(command_list_line(
         &[
-            "auth login openai",
+            "auth login openai browser",
+            "auth login openai headless",
             "auth login anthropic",
+            "auth login github-copilot",
             "model <provider:id>",
             "config",
             "back",

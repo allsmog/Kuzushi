@@ -1,4 +1,4 @@
-use super::{attack_surface_risk_model, read_latest_run_id, AttackSurfaceRiskModel};
+use super::{attack_surface_risk_model, AttackSurfaceRiskModel};
 use crate::ShellApp;
 use std::path::{Path, PathBuf};
 
@@ -11,6 +11,7 @@ const HOME_ARTIFACTS: &[HomeArtifactSpec] = &[
     HomeArtifactSpec::new("proof", "proof.json"),
     HomeArtifactSpec::new("failures", "failures.json"),
     HomeArtifactSpec::new("report", "report.md"),
+    HomeArtifactSpec::new("manifest", "artifacts.json"),
 ];
 const HOME_ARTIFACT_COLUMN_COUNT: usize = 4;
 const HOME_COMMANDS: [&str; 6] = [
@@ -46,7 +47,7 @@ pub struct HomeArtifactRow {
 pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
     let run = HomeRunModel::from_app(app);
     let target = target_label(app);
-    let latest_run = run.run_id.clone().unwrap_or_else(|| "none".to_string());
+    let latest_run = run.latest_run_label();
     let run_status = run_status_label(&run.run_dir);
     let module_count = app.registry.modules().count();
     let finding_count = app.findings.len();
@@ -61,7 +62,7 @@ pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
         ),
         attack_surface: attack_surface_risk_model(&run.run_dir),
         next_action: home_next_action(app),
-        rail_legend: "rails: ✓ recorded → ○ placeholder ⚠ failed ■ missing ◆ partial",
+        rail_legend: "rails: ✓ recorded → ○ placeholder ⚠ failed/malformed ■ missing ◆ partial",
         command_labels: HOME_COMMANDS,
         artifacts: home_artifact_rows(&run.run_dir),
     }
@@ -98,7 +99,7 @@ fn target_label(app: &ShellApp) -> String {
 
 fn home_next_action(app: &ShellApp) -> String {
     if app.target.is_none() {
-        return "Run scan . to create the first Kuzushi run artifacts.".to_string();
+        return "Run `scan .` (the dot means the current directory) to create the first Kuzushi run artifacts.".to_string();
     }
     if app.findings.is_empty() {
         return format!(
@@ -118,7 +119,7 @@ fn home_artifact_rows(run_dir: &Path) -> Vec<HomeArtifactRow> {
 
 fn home_artifact_row(run_dir: &Path, artifact: &HomeArtifactSpec) -> HomeArtifactRow {
     let path = run_dir.join(artifact.leaf);
-    let state = artifact_state(&path);
+    let state = artifact_state(&path, artifact);
     HomeArtifactRow {
         cells: [
             state.glyph.to_string(),
@@ -129,12 +130,26 @@ fn home_artifact_row(run_dir: &Path, artifact: &HomeArtifactSpec) -> HomeArtifac
     }
 }
 
-fn artifact_state(path: &Path) -> HomeArtifactState {
+fn artifact_state(path: &Path, artifact: &HomeArtifactSpec) -> HomeArtifactState {
     if !path.exists() {
         return HomeArtifactState::missing();
     }
-    let text = std::fs::read_to_string(path).unwrap_or_default();
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return HomeArtifactState::malformed();
+    };
+    if artifact.is_json() {
+        return artifact_state_from_json_text(&text);
+    }
     artifact_state_from_text(&text)
+}
+
+fn artifact_state_from_json_text(text: &str) -> HomeArtifactState {
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(text) else {
+        return HomeArtifactState::malformed();
+    };
+    artifact_status_from_value(&value)
+        .and_then(|status| state_for_status(&status))
+        .unwrap_or_else(HomeArtifactState::recorded)
 }
 
 fn artifact_state_from_text(text: &str) -> HomeArtifactState {
@@ -145,6 +160,10 @@ fn artifact_state_from_text(text: &str) -> HomeArtifactState {
 
 fn artifact_status(text: &str) -> Option<String> {
     let value = serde_json::from_str::<serde_json::Value>(text).ok()?;
+    artifact_status_from_value(&value)
+}
+
+fn artifact_status_from_value(value: &serde_json::Value) -> Option<String> {
     value
         .get("status")
         .or_else(|| value.pointer("/summary/status"))
@@ -170,16 +189,21 @@ fn state_for_unstructured_artifact(text: &str) -> HomeArtifactState {
 }
 
 fn run_status_label(run_dir: &Path) -> String {
-    std::fs::read_to_string(run_dir.join("run.json"))
-        .ok()
-        .and_then(|text| serde_json::from_str::<serde_json::Value>(&text).ok())
-        .and_then(|value| {
-            value
-                .get("status")
-                .and_then(serde_json::Value::as_str)
-                .map(str::to_string)
-        })
-        .unwrap_or_else(|| "no run.json".to_string())
+    let path = run_dir.join("run.json");
+    if !path.exists() {
+        return "no run.json".to_string();
+    }
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return "malformed run.json".to_string();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
+        return "malformed run.json".to_string();
+    };
+    value
+        .get("status")
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| "status unknown".to_string())
 }
 
 struct HomeArtifactSpec {
@@ -191,10 +215,15 @@ impl HomeArtifactSpec {
     const fn new(label: &'static str, leaf: &'static str) -> Self {
         Self { label, leaf }
     }
+
+    fn is_json(&self) -> bool {
+        self.leaf.ends_with(".json")
+    }
 }
 
 struct HomeRunModel {
     run_id: Option<String>,
+    latest_pointer_invalid: bool,
     run_dir: PathBuf,
 }
 
@@ -203,15 +232,73 @@ impl HomeRunModel {
         let Some(root) = app.target.as_ref() else {
             return Self {
                 run_id: None,
+                latest_pointer_invalid: false,
                 run_dir: PathBuf::from(".kuzushi/runs/latest"),
             };
         };
-        let run_id = read_latest_run_id(root);
-        let run_dir = run_id
+        let latest = home_latest_run_id(root);
+        let run_dir = latest
+            .run_id
             .as_ref()
             .map(|id| root.join(".kuzushi").join("runs").join(id))
             .unwrap_or_else(|| root.join(".kuzushi/runs/latest"));
-        Self { run_id, run_dir }
+        Self {
+            run_id: latest.run_id,
+            latest_pointer_invalid: latest.invalid,
+            run_dir,
+        }
+    }
+
+    fn latest_run_label(&self) -> String {
+        if self.latest_pointer_invalid {
+            "invalid latest pointer".to_string()
+        } else {
+            self.run_id.clone().unwrap_or_else(|| "none".to_string())
+        }
+    }
+}
+
+struct HomeLatestRunId {
+    run_id: Option<String>,
+    invalid: bool,
+}
+
+fn home_latest_run_id(root: &Path) -> HomeLatestRunId {
+    let latest_path = root.join(".kuzushi/latest");
+    match std::fs::metadata(&latest_path) {
+        Ok(metadata) if metadata.is_file() => home_latest_run_file(&latest_path),
+        Ok(_) => HomeLatestRunId {
+            run_id: None,
+            invalid: true,
+        },
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => HomeLatestRunId {
+            run_id: None,
+            invalid: false,
+        },
+        Err(_) => HomeLatestRunId {
+            run_id: None,
+            invalid: true,
+        },
+    }
+}
+
+fn home_latest_run_file(path: &Path) -> HomeLatestRunId {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return HomeLatestRunId {
+            run_id: None,
+            invalid: true,
+        };
+    };
+    let run_id = text.trim();
+    if run_id.is_empty() {
+        return HomeLatestRunId {
+            run_id: None,
+            invalid: true,
+        };
+    }
+    HomeLatestRunId {
+        run_id: Some(run_id.to_string()),
+        invalid: false,
     }
 }
 
@@ -243,6 +330,10 @@ impl HomeArtifactState {
 
     const fn partial() -> Self {
         Self::new("◆", "partial")
+    }
+
+    const fn malformed() -> Self {
+        Self::new("⚠", "malformed")
     }
 }
 

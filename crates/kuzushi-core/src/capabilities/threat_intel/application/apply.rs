@@ -2,9 +2,9 @@ use crate::capabilities::threat_intel::adapters::load_catalog_from_path;
 use crate::capabilities::threat_intel::application::dispatch::{plan_for_entry, DispatchPlan};
 use crate::modules::ToolExecutionContext;
 use crate::runtime::AgentRuntime;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde_json::{json, Value};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Apply a threat-intel catalog: load the TOML, route each entry to
 /// the right hunt, return a per-entry result with the dispatch
@@ -32,78 +32,178 @@ pub fn apply_threat_intel_catalog(
 ) -> Result<Value> {
     let entries = load_catalog_from_path(catalog_path)?;
     let mut results = Vec::with_capacity(entries.len());
-    let mut dispatched = 0u32;
-    let mut skipped = 0u32;
-    let mut failed = 0u32;
-    let mut total_findings = 0u64;
+    let mut stats = ThreatIntelApplyStats::default();
 
     for entry in &entries {
-        let plan = plan_for_entry(entry);
-        match plan {
-            DispatchPlan::Dispatched { tool_name, input } => {
-                if dispatch_live {
-                    match dispatch_tool(tool_name, input.clone(), ctx, runtime) {
-                        Ok(result) => {
-                            let count = extract_findings_count(&result);
-                            total_findings += count;
-                            dispatched += 1;
-                            results.push(json!({
-                                "id": entry.id,
-                                "status": "dispatched",
-                                "tool": tool_name,
-                                "input": input,
-                                "findingsCount": count,
-                                "tool_result": result,
-                            }));
-                        }
-                        Err(err) => {
-                            failed += 1;
-                            results.push(json!({
-                                "id": entry.id,
-                                "status": "dispatch-failed",
-                                "tool": tool_name,
-                                "input": input,
-                                "error": format!("{err:#}"),
-                            }));
-                        }
-                    }
-                } else {
-                    dispatched += 1;
-                    results.push(json!({
-                        "id": entry.id,
-                        "status": "planned",
-                        "tool": tool_name,
-                        "input": input,
-                    }));
-                }
-            }
-            DispatchPlan::Skipped { reason } => {
-                skipped += 1;
-                results.push(json!({
-                    "id": entry.id,
-                    "status": "skipped",
-                    "hunt": entry.hunt.as_str(),
-                    "reason": reason,
-                }));
-            }
+        apply_threat_intel_entry(
+            entry,
+            ctx,
+            runtime,
+            dispatch_live,
+            &mut dispatch_tool,
+            &mut stats,
+            &mut results,
+        );
+    }
+    Ok(threat_intel_apply_response(
+        catalog_path,
+        entries.len(),
+        results,
+        stats,
+        !dispatch_live,
+    ))
+}
+
+#[derive(Default)]
+struct ThreatIntelApplyStats {
+    dispatched: u32,
+    skipped: u32,
+    failed: u32,
+    total_findings: u64,
+}
+
+fn apply_threat_intel_entry(
+    entry: &crate::capabilities::threat_intel::domain::CatalogEntry,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    dispatch_live: bool,
+    dispatch_tool: &mut impl FnMut(
+        &str,
+        Value,
+        &ToolExecutionContext<'_>,
+        Option<&dyn AgentRuntime>,
+    ) -> Result<Value>,
+    stats: &mut ThreatIntelApplyStats,
+    results: &mut Vec<Value>,
+) {
+    match plan_for_entry(entry) {
+        DispatchPlan::Dispatched { tool_name, input } if dispatch_live => {
+            apply_live_threat_intel_entry(entry, tool_name, input, ctx, runtime, dispatch_tool, stats, results);
+        }
+        DispatchPlan::Dispatched { tool_name, input } => {
+            stats.dispatched += 1;
+            results.push(planned_threat_intel_entry(entry, tool_name, input));
+        }
+        DispatchPlan::Skipped { reason } => {
+            stats.skipped += 1;
+            results.push(skipped_threat_intel_entry(entry, reason));
         }
     }
+}
 
-    Ok(json!({
-        "ok": true,
-        "data": {
-            "catalogPath": catalog_path.display().to_string(),
-            "entries": results,
-        },
-        "summary": {
-            "totalEntries": entries.len(),
-            "dispatched": dispatched,
-            "skipped": skipped,
-            "failed": failed,
-            "totalFindings": total_findings,
-            "dryRun": !dispatch_live,
-        },
-    }))
+fn apply_live_threat_intel_entry(
+    entry: &crate::capabilities::threat_intel::domain::CatalogEntry,
+    tool_name: &str,
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    dispatch_tool: &mut impl FnMut(
+        &str,
+        Value,
+        &ToolExecutionContext<'_>,
+        Option<&dyn AgentRuntime>,
+    ) -> Result<Value>,
+    stats: &mut ThreatIntelApplyStats,
+    results: &mut Vec<Value>,
+) {
+    match dispatch_tool(tool_name, input.clone(), ctx, runtime) {
+        Ok(result) => record_threat_intel_dispatch(entry, tool_name, input, result, stats, results),
+        Err(err) => record_threat_intel_dispatch_failure(entry, tool_name, input, err, stats, results),
+    }
+}
+
+fn record_threat_intel_dispatch(
+    entry: &crate::capabilities::threat_intel::domain::CatalogEntry,
+    tool_name: &str,
+    input: Value,
+    result: Value,
+    stats: &mut ThreatIntelApplyStats,
+    results: &mut Vec<Value>,
+) {
+    let count = extract_findings_count(&result);
+    stats.total_findings += count;
+    stats.dispatched += 1;
+    results.push(json!({
+        "id": entry.id,
+        "status": "dispatched",
+        "tool": tool_name,
+        "input": input,
+        "findingsCount": count,
+        "tool_result": result,
+    }));
+}
+
+fn record_threat_intel_dispatch_failure(
+    entry: &crate::capabilities::threat_intel::domain::CatalogEntry,
+    tool_name: &str,
+    input: Value,
+    err: anyhow::Error,
+    stats: &mut ThreatIntelApplyStats,
+    results: &mut Vec<Value>,
+) {
+    stats.failed += 1;
+    results.push(json!({
+        "id": entry.id,
+        "status": "dispatch-failed",
+        "tool": tool_name,
+        "input": input,
+        "error": format!("{err:#}"),
+    }));
+}
+
+fn planned_threat_intel_entry(
+    entry: &crate::capabilities::threat_intel::domain::CatalogEntry,
+    tool_name: &str,
+    input: Value,
+) -> Value {
+    json!({
+        "id": entry.id,
+        "status": "planned",
+        "tool": tool_name,
+        "input": input,
+    })
+}
+
+fn skipped_threat_intel_entry(
+    entry: &crate::capabilities::threat_intel::domain::CatalogEntry,
+    reason: String,
+) -> Value {
+    json!({
+        "id": entry.id,
+        "status": "skipped",
+        "hunt": entry.hunt.as_str(),
+        "reason": reason,
+    })
+}
+
+fn threat_intel_apply_response(
+    catalog_path: &Path,
+    total_entries: usize,
+    entries: Vec<Value>,
+    stats: ThreatIntelApplyStats,
+    dry_run: bool,
+) -> Value {
+    let summary = json!({
+        "totalEntries": total_entries,
+        "dispatched": stats.dispatched,
+        "skipped": stats.skipped,
+        "failed": stats.failed,
+        "totalFindings": stats.total_findings,
+        "dryRun": dry_run,
+    });
+    let text = format!(
+        "threat-intel:apply {} {} of {} entr{}",
+        if dry_run { "planned" } else { "dispatched" },
+        stats.dispatched,
+        total_entries,
+        if total_entries == 1 { "y" } else { "ies" }
+    );
+    let data = json!({
+        "catalogPath": catalog_path.display().to_string(),
+        "entries": entries,
+        "summary": summary,
+    });
+    crate::module_result::completed_output_result(text.clone(), text, data)
 }
 
 pub fn list_threat_intel_catalog(catalog_path: &Path) -> Result<Value> {
@@ -123,112 +223,23 @@ pub fn list_threat_intel_catalog(catalog_path: &Path) -> Result<Value> {
             })
         })
         .collect();
-    Ok(json!({
-        "ok": true,
-        "data": {
-            "catalogPath": catalog_path.display().to_string(),
-            "entries": rows,
-        },
-        "summary": {
-            "totalEntries": entries.len(),
-        },
-    }))
+    Ok(threat_intel_list_response(catalog_path, rows))
 }
 
-pub fn resolve_catalog_path(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
-    if let Some(explicit) = explicit_catalog_path(input, ctx)? {
-        return Ok(explicit);
-    }
-    default_catalog_path(ctx)
-}
-
-fn explicit_catalog_path(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Option<PathBuf>> {
-    let Some(raw) = input
-        .get("catalogPath")
-        .and_then(Value::as_str)
-        .filter(|s| !s.is_empty())
-    else {
-        return Ok(None);
-    };
-    let resolved = resolve_explicit_catalog_path(PathBuf::from(raw), ctx)?;
-    require_existing_catalog_path(&resolved)?;
-    Ok(Some(resolved))
-}
-
-fn resolve_explicit_catalog_path(path: PathBuf, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
-    if path.is_absolute() {
-        return Ok(path);
-    }
-    Ok(catalog_relative_base(ctx)?.join(path))
-}
-
-fn catalog_relative_base(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
-    ctx.workspace
-        .map(|workspace| workspace.root().to_path_buf())
-        .map_or_else(
-            || std::env::current_dir().context("threat-intel: could not resolve current directory"),
-            Ok,
-        )
-}
-
-fn require_existing_catalog_path(path: &Path) -> Result<()> {
-    if !path.exists() {
-        anyhow::bail!(
-            "threat-intel: catalogPath {} does not exist",
-            path.display()
-        );
-    }
-    Ok(())
-}
-
-fn default_catalog_path(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
-    // Default: <target>/.kuzushi/catalogs/<first-toml>.
-    let dir = default_catalog_dir(ctx)?;
-    ensure_catalog_dir_exists(&dir)?;
-    first_toml_catalog_under(&dir)
-}
-
-fn default_catalog_dir(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
-    let workspace = ctx.workspace.ok_or_else(missing_workspace_catalog_error)?;
-    Ok(workspace.root().join(".kuzushi").join("catalogs"))
-}
-
-fn missing_workspace_catalog_error() -> anyhow::Error {
-    anyhow::anyhow!(
-        "threat-intel: no workspace target; pass `catalogPath` explicitly or run with --target"
-    )
-}
-
-fn ensure_catalog_dir_exists(dir: &Path) -> Result<()> {
-    if dir.is_dir() {
-        return Ok(());
-    }
-    anyhow::bail!(
-        "threat-intel: no catalog supplied. Pass `catalogPath` or create one at {}/<name>.toml",
-        dir.display()
-    )
-}
-
-fn first_toml_catalog_under(dir: &Path) -> Result<PathBuf> {
-    let mut candidates: Vec<PathBuf> = std::fs::read_dir(dir)
-        .with_context(|| format!("threat-intel: could not read {}", dir.display()))?
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| is_toml_catalog_path(path))
-        .collect();
-    candidates.sort();
-    candidates.into_iter().next().ok_or_else(|| {
-        anyhow::anyhow!(
-            "threat-intel: no .toml files under {}; place a catalog there or pass `catalogPath`",
-            dir.display()
-        )
-    })
-}
-
-fn is_toml_catalog_path(path: &Path) -> bool {
-    path.extension()
-        .and_then(|ext| ext.to_str())
-        .is_some_and(|ext| ext.eq_ignore_ascii_case("toml"))
+fn threat_intel_list_response(catalog_path: &Path, entries: Vec<Value>) -> Value {
+    let total_entries = entries.len();
+    let summary = json!({ "totalEntries": total_entries });
+    let text = format!(
+        "threat-intel:list loaded {} entr{}",
+        total_entries,
+        if total_entries == 1 { "y" } else { "ies" }
+    );
+    let data = json!({
+        "catalogPath": catalog_path.display().to_string(),
+        "entries": entries,
+        "summary": summary,
+    });
+    crate::module_result::completed_output_result(text.clone(), text, data)
 }
 
 fn extract_findings_count(result: &Value) -> u64 {

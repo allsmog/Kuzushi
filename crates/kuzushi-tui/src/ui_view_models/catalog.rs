@@ -1,3 +1,4 @@
+use super::context_snapshot_state;
 use crate::ShellApp;
 use kuzushi_core::modules::ModuleKind;
 use kuzushi_core::{sorted_finding_aliases, Severity};
@@ -122,9 +123,16 @@ fn collapsed_target_warning(app: &ShellApp) -> Option<&'static str> {
 }
 
 fn catalog_next_hint(app: &ShellApp) -> String {
-    if !app.context_view.exists {
-        return "Build the context snapshot with `context build` so SAST has structure to walk."
-            .to_string();
+    match context_snapshot_state(app) {
+        "missing" => {
+            return "Build the context snapshot with `context build` so SAST has structure to walk."
+                .to_string();
+        }
+        "malformed" => {
+            return "Context snapshot is malformed; rerun `context build` before scanning."
+                .to_string();
+        }
+        _ => {}
     }
     critical_finding_hint(app)
         .or_else(|| findings_waiting_hint(app))
@@ -239,6 +247,8 @@ fn catalog_category(id: &str, kind: ModuleKind) -> &'static str {
         | "carlini-threat-hunt"
         | "secret-scan"
         | "iac-scan"
+        | "license-scan"
+        | "cargo-audit"
         | "dep-hygiene"
         | "taint-iris"
         | "taint-iris-next"

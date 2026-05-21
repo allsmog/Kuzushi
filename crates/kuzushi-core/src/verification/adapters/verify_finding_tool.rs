@@ -20,19 +20,10 @@ pub(crate) struct VerifyFindingToolRequest<'a> {
 pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> Result<Value> {
     let input = VerifyFindingInput::from_tool_input(&request.input, request.workspace_root)?;
     let Some(finding) = request.store.get_finding_by_reference(&input.fingerprint)? else {
-        return Ok(json!({
-            "ok": false,
-            "output": format!("[-] No finding with fingerprint '{}'.", input.fingerprint),
-        }));
+        return Ok(missing_finding_response(&input.fingerprint));
     };
     let Some(triage) = finding.triage.clone() else {
-        return Ok(json!({
-            "ok": false,
-            "output": format!(
-                "[-] Finding '{}' has no triage verdict. Run triage:run first.",
-                finding.fingerprint
-            ),
-        }));
+        return Ok(untriaged_finding_response(&finding.fingerprint));
     };
 
     let runtime = require_verify_finding_runtime(request.runtime)?;
@@ -56,6 +47,30 @@ pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> 
     )?;
 
     Ok(verify_finding_response(result))
+}
+
+fn missing_finding_response(fingerprint: &str) -> Value {
+    let output = format!("[-] No finding with fingerprint '{fingerprint}'.");
+    crate::module_result::failed_output_result(
+        "verify:finding failed",
+        output,
+        json!({
+            "fingerprint": fingerprint,
+            "reason": "missing-finding",
+        }),
+    )
+}
+
+fn untriaged_finding_response(fingerprint: &str) -> Value {
+    let output = format!("[-] Finding '{fingerprint}' has no triage verdict. Run triage:run first.");
+    crate::module_result::failed_output_result(
+        "verify:finding failed",
+        output,
+        json!({
+            "fingerprint": fingerprint,
+            "reason": "missing-triage",
+        }),
+    )
 }
 
 fn require_verify_finding_runtime(runtime: Option<&dyn AgentRuntime>) -> Result<&dyn AgentRuntime> {
@@ -88,19 +103,18 @@ fn verify_finding_response(result: Value) -> Value {
     lines.push("      cost=$0.0000".to_string());
     let summary = format!("verify:finding complete ({verdict})");
     let proof = verification_proof_snapshot(&result);
+    let data = verification_response_data(result, &proof, &summary);
+    let mut response =
+        crate::module_result::completed_output_result(summary, lines.join("\n"), data);
+    add_verification_response_metadata(&mut response, proof);
+    response
+}
 
-    json!({
-        "ok": true,
-        "status": "completed",
-        "summary": summary,
-        "output": lines.join("\n"),
-        "artifacts": [],
-        "warnings": [],
-        "errors": [],
-        "data": verification_response_data(result, &proof, &summary),
-        "proof": proof,
-        "costUsd": 0.0,
-    })
+fn add_verification_response_metadata(response: &mut Value, proof: Value) {
+    if let Some(object) = response.as_object_mut() {
+        object.insert("proof".to_string(), proof);
+        object.insert("costUsd".to_string(), json!(0.0));
+    }
 }
 
 fn verification_response_data(result: Value, proof: &Value, summary: &str) -> Value {
@@ -142,5 +156,19 @@ mod tests {
         assert_eq!(response["data"]["proof"]["fingerprint"], json!("fp-1"));
         assert_eq!(response["data"]["exploitable"], json!(true));
         assert!(response["artifacts"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn missing_finding_response_uses_failed_result_envelope() {
+        let response = missing_finding_response("missing");
+
+        assert_eq!(response["ok"], json!(false));
+        assert_eq!(response["status"], json!("failed"));
+        assert_eq!(response["summary"], json!("verify:finding failed"));
+        assert_eq!(response["data"]["reason"], json!("missing-finding"));
+        assert!(response["errors"][0]
+            .as_str()
+            .unwrap()
+            .contains("No finding with fingerprint 'missing'"));
     }
 }

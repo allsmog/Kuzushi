@@ -4,7 +4,9 @@ use super::*;
 pub struct PrCommentInput {
     pub repo_name: Option<String>,
     pub findings: Vec<Finding>,
+    pub chains: Vec<PrCommentChain>,
     pub cost_usd: f64,
+    pub phase_costs: Vec<PrCommentPhaseCost>,
     pub elapsed: Option<Duration>,
     pub run_url: Option<String>,
     pub top_n: Option<usize>,
@@ -13,6 +15,28 @@ pub struct PrCommentInput {
     pub git_sha: Option<String>,
     pub run_id: Option<String>,
     pub changed_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct PrCommentPhaseCost {
+    pub label: String,
+    pub cost_usd: f64,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PrCommentChain {
+    pub id: String,
+    pub title: String,
+    pub severity: String,
+    pub steps: Vec<PrCommentChainStep>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PrCommentChainStep {
+    pub role: String,
+    pub description: String,
+    pub file_path: String,
+    pub start_line: u32,
 }
 
 pub fn build_pr_comment(input: &PrCommentInput) -> String {
@@ -39,45 +63,91 @@ pub fn build_pr_comment(input: &PrCommentInput) -> String {
         .cloned()
         .collect();
 
+    let mut sections = header_sections(input, &repo_name, &sorted, new_in_pr.len(), changed.is_some());
+    append_chain_sections(&mut sections, input);
+    append_new_in_pr_sections(&mut sections, input, changed.is_some(), &new_in_pr);
+
+    let total = sorted.len();
+    let truncated = aliased.iter().take(top_n).cloned().collect::<Vec<_>>();
+    append_top_findings_sections(&mut sections, input, top_n, total, &truncated);
+    append_footer_sections(&mut sections, input, top_n, total);
+    sections.push(String::new());
+    sections.join("\n")
+}
+
+fn header_sections(
+    input: &PrCommentInput,
+    repo_name: &str,
+    sorted: &[Finding],
+    new_in_pr_count: usize,
+    diff_scoped: bool,
+) -> Vec<String> {
     let header_suffix = input
         .run_url
         .as_deref()
         .map(|url| format!(" · [run]({url})"))
         .unwrap_or_default();
-    let header = format!("### 🔐 Kuzushi scan · `{repo_name}`{header_suffix}");
-    let verdict = render_verdict_counts(&sorted, new_in_pr.len(), changed.is_some());
-    let cost = render_cost_line(input);
+    vec![
+        format!("### 🔐 Kuzushi scan · `{repo_name}`{header_suffix}"),
+        String::new(),
+        render_verdict_counts(sorted, new_in_pr_count, diff_scoped),
+        String::new(),
+        render_cost_line(input),
+    ]
+}
 
-    let mut sections: Vec<String> = vec![header, String::new(), verdict, String::new(), cost];
-
-    if let Some(_set) = changed {
-        if !new_in_pr.is_empty() {
-            sections.push(String::new());
-            sections.push(render_findings_block(
-                "New in this PR",
-                &new_in_pr,
-                input.run_url.as_deref(),
-                new_in_pr.len(),
-                None,
-            ));
-        }
+fn append_chain_sections(sections: &mut Vec<String>, input: &PrCommentInput) {
+    if input.chains.is_empty() {
+        return;
     }
+    sections.push(String::new());
+    sections.push(render_chains_block(&input.chains));
+}
 
-    let total = sorted.len();
-    let truncated = aliased.iter().take(top_n).cloned().collect::<Vec<_>>();
+fn append_new_in_pr_sections(
+    sections: &mut Vec<String>,
+    input: &PrCommentInput,
+    diff_scoped: bool,
+    new_in_pr: &[(String, Finding)],
+) {
+    if !diff_scoped || new_in_pr.is_empty() {
+        return;
+    }
+    sections.push(String::new());
+    sections.push(render_findings_block(
+        "New in this PR",
+        new_in_pr,
+        input.run_url.as_deref(),
+        new_in_pr.len(),
+        None,
+    ));
+}
+
+fn append_top_findings_sections(
+    sections: &mut Vec<String>,
+    input: &PrCommentInput,
+    top_n: usize,
+    total: usize,
+    truncated: &[(String, Finding)],
+) {
     sections.push(String::new());
     sections.push(render_findings_block(
         &format!("Top findings ({} of {total})", truncated.len().min(top_n)),
-        &truncated,
+        truncated,
         input.run_url.as_deref(),
         total,
         Some(top_n),
     ));
+}
 
+fn append_footer_sections(
+    sections: &mut Vec<String>,
+    input: &PrCommentInput,
+    top_n: usize,
+    total: usize,
+) {
     sections.push(String::new());
     sections.push(render_footer(input, top_n, total));
-    sections.push(String::new());
-    sections.join("\n")
 }
 
 pub(crate) fn changed_set(files: &[String]) -> Option<HashSet<String>> {

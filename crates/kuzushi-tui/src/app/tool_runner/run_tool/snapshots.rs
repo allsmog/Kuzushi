@@ -6,7 +6,7 @@ impl ShellApp {
     /// offense-review / agentic-sast snapshots reachable across log truncation.
     pub(crate) fn cache_tool_snapshot(&mut self, tool_name: &str, result: &serde_json::Value) {
         if tool_name.starts_with("pwn:") {
-            self.cache_pwn_snapshot(tool_name, result);
+            self.cache_pwn_snapshot(tool_name, result.get("data").unwrap_or(result));
             return;
         }
         let Some(data) = result.get("data") else {
@@ -24,6 +24,7 @@ type SnapshotCache = fn(&mut ShellApp, &str, &serde_json::Value) -> bool;
 
 const SNAPSHOT_CACHES: &[SnapshotCache] = &[
     cache_recon_snapshot,
+    cache_exploit_chain_snapshot,
     cache_threat_hunt_snapshot,
     cache_agentic_sast_snapshot,
     cache_patch_snapshot,
@@ -41,6 +42,41 @@ fn cache_recon_snapshot(app: &mut ShellApp, tool_name: &str, data: &serde_json::
         last_target: data_string(data, "target"),
     });
     true
+}
+
+fn cache_exploit_chain_snapshot(
+    app: &mut ShellApp,
+    tool_name: &str,
+    data: &serde_json::Value,
+) -> bool {
+    if tool_name != "exploit-chain:scan" {
+        return false;
+    }
+    app.chains = exploit_chain_aliases(data);
+    true
+}
+
+fn exploit_chain_aliases(data: &serde_json::Value) -> Vec<ExploitChain> {
+    data.get("chains")
+        .and_then(serde_json::Value::as_array)
+        .map(|chains| chains.iter().filter_map(exploit_chain_alias).collect())
+        .unwrap_or_default()
+}
+
+fn exploit_chain_alias(chain: &serde_json::Value) -> Option<ExploitChain> {
+    Some(ExploitChain {
+        id: data_string(chain, "id")?,
+        severity: chain_severity(chain.get("overallSeverity")?.as_str()?),
+        title: data_string(chain, "name")?,
+    })
+}
+
+fn chain_severity(value: &str) -> ChainSeverity {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "critical" | "crit" => ChainSeverity::Critical,
+        "medium" | "med" => ChainSeverity::Medium,
+        _ => ChainSeverity::High,
+    }
 }
 
 fn cache_threat_hunt_snapshot(

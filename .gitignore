@@ -1,4 +1,5 @@
 node_modules/
+.pnpm-store/
 dist/
 target/
 native/
@@ -51,3 +52,5 @@ kuzushi-*-prompt.md
 # can land anywhere kuzushi spawns joern from. Match it everywhere
 # rather than just the repo root.
 workspace/
+!crates/kuzushi-core/src/workspace/
+!crates/kuzushi-core/src/workspace/**

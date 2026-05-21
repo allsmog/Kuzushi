@@ -30,6 +30,7 @@ mod as_key;
 mod query_blocking;
 mod route_types;
 mod routed_runtime_dispatch;
+mod runtime_handle;
 mod router_state;
 #[cfg(test)]
 mod tests;
@@ -38,3 +39,4 @@ pub use as_key::AgentRole;
 pub use route_types::AgentRouter;
 pub use route_types::ModelRoute;
 pub use router_state::RoutedRuntime;
+pub use runtime_handle::RuntimeHandle;

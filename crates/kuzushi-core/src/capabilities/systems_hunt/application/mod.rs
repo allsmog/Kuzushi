@@ -20,6 +20,7 @@ mod gather_systems_context;
 mod indexed_taint_path_found;
 mod invariants_from_input;
 mod normalize_deep_semantic_findings;
+mod normalize_systems_hunt_candidate;
 mod normalize_systems_hunt_findings;
 mod prompt_payload;
 mod query_deep_semantic_findings;

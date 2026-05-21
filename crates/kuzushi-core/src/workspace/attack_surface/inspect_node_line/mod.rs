@@ -47,7 +47,7 @@ impl<'a> NodeLineInspection<'a> {
         line: &'a str,
     ) -> Option<Self> {
         let detail = trim_detail(line);
-        if detail.is_empty() {
+        if detail.is_empty() || is_node_import_line(&detail) {
             return None;
         }
         Some(Self {
@@ -91,4 +91,35 @@ impl<'a> NodeLineInspection<'a> {
             json!({ "source": "source_line", "detector": detector }),
         ));
     }
+}
+
+fn is_node_import_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    is_module_import_export(trimmed) || is_commonjs_require_assignment(trimmed)
+}
+
+fn is_module_import_export(line: &str) -> bool {
+    line.starts_with("import ") || is_module_reexport(line)
+}
+
+fn is_module_reexport(line: &str) -> bool {
+    line.starts_with("export {")
+        || line.starts_with("export *")
+        || line.starts_with("export type ")
+        || line.starts_with("export interface ")
+        || line.starts_with("export from ")
+}
+
+fn is_commonjs_require_assignment(line: &str) -> bool {
+    starts_with_js_binding(line) && contains_require_call(line)
+}
+
+fn starts_with_js_binding(line: &str) -> bool {
+    ["const ", "let ", "var "]
+        .iter()
+        .any(|prefix| line.starts_with(prefix))
+}
+
+fn contains_require_call(line: &str) -> bool {
+    line.contains("require(") || line.contains("require (")
 }

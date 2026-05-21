@@ -1,7 +1,9 @@
 use super::*;
 
 use super::approval::{confirm_gate_for_tool, parse_pending_patch, ConfirmKind};
-use super::artifacts::{append_trace_step, write_run_failure_handoff, write_run_summary};
+use super::artifacts::{
+    append_run_status_event, append_trace_step, write_run_failure_handoff, write_run_summary,
+};
 use super::command_router::unknown_command_message;
 use super::findings::{
     format_alias_table, format_chain_alias, parse_chain_alias, sorted_chain_aliases,
@@ -9,7 +11,6 @@ use super::findings::{
 use super::settings::{auth_login_process_provider_arg, auth_login_status_message};
 use super::state_transitions::{HotkeyTrigger, ViewHotkeyAction};
 use super::view_state::ChainSeverity;
-use super::*;
 use crate::commands::{
     parse_command, ContextCommand, SastTaskCommand, SastTaskModeCommand, ShellCommand,
     WorkspaceCommand,
@@ -918,9 +919,8 @@ fn help_command_routes_to_rust_shell_help_without_removed_cli_paths() {
         .map(|line| line.body.as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(help_log.contains("/modules"));
-    assert!(help_log.contains("/tools"));
-    assert!(help_log.contains("/run <tool> [json]"));
+    assert!(help_log.contains("help"));
+    assert!(help_log.contains("Examples"));
     assert!(!help_log.contains("--load"));
     assert!(!help_log.contains("Ink"));
     assert!(!help_log.contains("TypeScript"));
@@ -1135,6 +1135,7 @@ fn scan_completion_logs_same_stable_alias_used_by_findings() {
         abort_requested: false,
         error: None,
     });
+    app.activity = Some(ActivitySession::new("scan-pending"));
     app.apply_scan_event(ScanEvent::Finished {
         run_id: "run-1".to_string(),
         findings_count: 2,
@@ -1143,10 +1144,22 @@ fn scan_completion_logs_same_stable_alias_used_by_findings() {
     assert!(app.log.iter().any(|line| {
         line.prefix == "scan" && line.body.contains("top alias F-0001 -> aaaa1111")
     }));
+    assert!(app.log.iter().any(
+        |line| line.prefix == "result" && line.body == "fail (2 findings / 2 high) exit_hint=1"
+    ));
     assert_eq!(
         kuzushi_core::stable_finding_alias(&app.findings, "aaaa1111").as_deref(),
         Some("F-0001")
     );
+    assert_eq!(
+        app.activity.as_ref().map(|session| session.run_id.as_str()),
+        Some("run-1")
+    );
+    let events =
+        fs::read_to_string(kuzushi_core::run_dir(workspace.root(), "run-1").join("events.jsonl"))
+            .unwrap();
+    assert!(events.contains(r#""status":"completed""#));
+    assert!(events.contains(r#""tool":"sast:scan""#));
 }
 
 #[test]
@@ -1479,12 +1492,10 @@ fn scan_path_reads_stored_sast_options() {
         serde_json::json!("critical,high"),
     );
 
-    let options = app.scan_options_from_store().unwrap();
+    let input = app.scan_input_from_store().unwrap();
 
-    assert_eq!(
-        options.severity,
-        Some(vec![Severity::Critical, Severity::High])
-    );
+    assert_eq!(input["severity"], serde_json::json!(["critical", "high"]));
+    assert_eq!(input.get("severity_filter"), None);
 }
 
 #[test]
@@ -1531,15 +1542,9 @@ fn task_commands_update_sast_scan_selection_options() {
         .unwrap();
     assert_eq!(prepared["disabledTasks"], serde_json::json!(["semgrep"]));
 
-    let scan_options = app.scan_options_from_store().unwrap();
-    assert_eq!(
-        scan_options.tasks,
-        Some(vec![
-            "dep-hygiene".to_string(),
-            "secret-scan".to_string(),
-            "iac-scan".to_string()
-        ])
-    );
+    assert_eq!(prepared["disabledTasks"], serde_json::json!(["semgrep"]));
+    assert_eq!(prepared["taskMode"], serde_json::json!("auto"));
+    assert_eq!(prepared.get("disabled_tasks"), None);
 }
 
 #[test]
@@ -1680,6 +1685,15 @@ fn ux_empty_and_error_states_name_next_real_commands() {
     assert!(missing_scanner.contains("could not find scanner binary"));
     assert!(missing_scanner.contains("Next:"));
     assert!(missing_scanner.contains("task block semgrep"));
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "error"
+            && line.body.contains("stage=scan task=sast:scan")
+            && line.body.contains("could not find scanner binary")
+    }));
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.prefix == "result" && line.body == "fail (scan failed) exit_hint=1"));
 
     app.apply_scan_event(ScanEvent::Failed {
         error: "internal shell-state error: selected finding disappeared".to_string(),
@@ -1900,7 +1914,7 @@ fn auth_provider_backend_model_and_cost_commands_are_explicit_and_secret_safe() 
     assert!(!auth.contains("sk-"));
 
     app.handle_command(ShellCommand::AuthLogin(Some("not-a-provider".to_string())));
-    assert_eq!(app.shell_view, ShellView::Config);
+    assert_eq!(app.shell_view, ShellView::Auth);
     assert!(app.log.iter().any(|line| {
         line.prefix == "error" && line.body.contains("unsupported auth login provider")
     }));
@@ -1961,23 +1975,32 @@ fn auth_provider_backend_model_and_cost_commands_are_explicit_and_secret_safe() 
 fn auth_login_status_messages_cover_success_failure_and_spawn_error() {
     use std::os::unix::process::ExitStatusExt;
 
-    assert_eq!(auth_login_process_provider_arg("openai-codex"), "openai");
+    assert_eq!(
+        auth_login_process_provider_arg("openai-codex"),
+        "openai-codex"
+    );
     assert_eq!(auth_login_process_provider_arg("anthropic"), "anthropic");
 
-    let (prefix, success) =
-        auth_login_status_message("anthropic", Ok(std::process::ExitStatus::from_raw(0)));
+    let (prefix, success) = auth_login_status_message(
+        "anthropic",
+        "browser",
+        Ok(std::process::ExitStatus::from_raw(0)),
+    );
     assert_eq!(prefix, "auth");
     assert!(success.contains("Next: model 5"));
 
     let (prefix, failed) = auth_login_status_message(
         "openai-codex",
+        "headless",
         Ok(std::process::ExitStatus::from_raw(1 << 8)),
     );
     assert_eq!(prefix, "error");
     assert!(failed.contains("exited"));
+    assert!(failed.contains("openai OAuth"));
 
     let (prefix, spawn) = auth_login_status_message(
         "openai-codex",
+        "browser",
         Err(std::io::Error::new(std::io::ErrorKind::NotFound, "missing")),
     );
     assert_eq!(prefix, "error");
@@ -2452,12 +2475,10 @@ fn session_history_clear_load_resume_pause_and_story_are_explicit() {
         .any(|line| { line.prefix == "load" && line.body.contains("already available") }));
 
     app.handle_command(parse_command("/load file:///tmp/module.js"));
-    assert!(app.log.iter().any(|line| {
-        line.prefix == "error"
-            && line
-                .body
-                .contains("dynamic module loading is not supported")
-    }));
+    assert!(app
+        .log
+        .iter()
+        .any(|line| { line.prefix == "error" && line.body.contains("is not trusted") }));
 
     app.handle_command(parse_command("/pause"));
     assert!(app.log.iter().any(|line| {
@@ -2713,6 +2734,32 @@ fn run_command_dispatches_iac_scan_through_registry_and_persists() {
     let findings = store.list_findings(10).unwrap();
     assert_eq!(findings.len(), 1);
     assert_eq!(findings[0].tool, "iac-scan");
+}
+
+#[test]
+fn run_command_dispatches_cargo_audit_through_registry() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::write(
+        tmp.path().join("Cargo.toml"),
+        "[package]\nname = \"demo\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+    )
+    .unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.handle_command(ShellCommand::Use("cargo-audit".to_string()));
+    app.handle_command(ShellCommand::RunTool {
+        tool: None,
+        input: None,
+    });
+    drain_tool(&mut app);
+
+    assert_eq!(app.shell_view, ShellView::Activity);
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "result" && line.body.contains("cargo-audit: 0 advisory findings")
+    }));
+
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    assert!(store.list_findings(10).unwrap().is_empty());
 }
 
 #[test]
@@ -3582,6 +3629,10 @@ fn make_finding(severity: Severity, fp: &str, title: &str) -> Finding {
         created_at: String::new(),
         vuln_source: None,
         dedup_key: None,
+        suppressed: false,
+        snoozed_until: None,
+        remediation: None,
+        references: Vec::new(),
         evidence: Vec::new(),
     }
 }
@@ -4634,6 +4685,11 @@ fn agent_answer_event_records_llm_audit_metadata() {
     assert_eq!(summary.llm_calls[0].provider, "openai");
     assert!(summary.llm_calls[0].prompt_hash.starts_with("fnv1a64:"));
     assert_eq!(summary.llm_calls[0].cost_usd, Some(0.012));
+    let events =
+        fs::read_to_string(kuzushi_core::run_dir(tmp.path(), "agent-answer").join("events.jsonl"))
+            .unwrap();
+    assert!(events.contains(r#""status":"completed""#));
+    assert!(events.contains(r#""tool":"agent:ask""#));
 }
 
 #[test]
@@ -4667,6 +4723,11 @@ fn agent_failure_event_records_bounded_failure_handoff() {
         .agent_thread_context
         .fallback_prompt
         .contains("bridge denied"));
+    let events =
+        fs::read_to_string(kuzushi_core::run_dir(tmp.path(), "agent-failed").join("events.jsonl"))
+            .unwrap();
+    assert!(events.contains(r#""status":"failed""#));
+    assert!(events.contains(r#""tool":"agent:ask""#));
 }
 
 fn test_agent_audit() -> AgentCallAudit {
@@ -4699,6 +4760,11 @@ fn scan_failure_event_records_bounded_failure_handoff() {
         .agent_thread_context
         .fallback_prompt
         .contains("semgrep binary missing"));
+    let events =
+        fs::read_to_string(kuzushi_core::run_dir(tmp.path(), "scan-failed").join("events.jsonl"))
+            .unwrap();
+    assert!(events.contains(r#""status":"failed""#));
+    assert!(events.contains(r#""tool":"sast:scan""#));
 }
 
 #[test]
@@ -5059,6 +5125,26 @@ fn write_run_summary_writes_canonical_run_metadata_under_target() {
 }
 
 #[test]
+fn append_run_status_event_records_tool_lifecycle_event() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_run_summary(Some(tmp.path()), "r-event", "running", None, "/tmp/demo");
+    append_run_status_event(
+        Some(tmp.path()),
+        "r-event",
+        "sast:scan",
+        "complete",
+        "sast:scan completed",
+    );
+
+    let body = fs::read_to_string(tmp.path().join(".kuzushi/runs/r-event/events.jsonl")).unwrap();
+    let event: serde_json::Value = serde_json::from_str(body.lines().next().unwrap()).unwrap();
+    assert_eq!(event["kind"], "tool");
+    assert_eq!(event["status"], "completed");
+    assert_eq!(event["tool"], "sast:scan");
+    assert_eq!(event["message"], "sast:scan completed");
+}
+
+#[test]
 fn write_run_failure_handoff_records_bounded_context() {
     let tmp = tempfile::tempdir().unwrap();
     write_run_summary(Some(tmp.path()), "r-failed", "failed", None, "/tmp/demo");
@@ -5117,6 +5203,34 @@ fn cache_tool_snapshot_populates_pending_patch_for_patch_run() {
         Some("approval.patches = human-required")
     );
     assert_eq!(app.shell_view, ShellView::Patch("F-0001".to_string()));
+}
+
+#[test]
+fn cache_tool_snapshot_populates_exploit_chain_aliases() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let result = serde_json::json!({
+        "data": {
+            "chains": [{
+                "id": "C-0001",
+                "name": "Template render chain",
+                "overallSeverity": "critical",
+                "steps": [{
+                    "findingFingerprint": "fp",
+                    "role": "template-input",
+                    "description": "request body controls template text",
+                    "filePath": "app.js",
+                    "startLine": 3
+                }]
+            }]
+        }
+    });
+
+    app.cache_tool_snapshot("exploit-chain:scan", &result);
+
+    assert_eq!(app.chains.len(), 1);
+    assert_eq!(app.chains[0].id, "C-0001");
+    assert_eq!(app.chains[0].severity, ChainSeverity::Critical);
+    assert_eq!(app.chains[0].title, "Template render chain");
 }
 
 #[test]

@@ -1,0 +1,205 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kuzushi.dev/schemas/run.context.schema.json",
+  "title": "Kuzushi Run Context Snapshot",
+  "description": "Canonical schema for .kuzushi/runs/<runId>/context.json. Rich producer snapshots may add fields; deterministic absence markers use the shared run snapshot marker fields.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "runId": { "type": "string" },
+    "run_id": { "type": "string" },
+    "status": { "$ref": "#/definitions/runStatus" },
+    "runStatus": { "$ref": "#/definitions/runStatus" },
+    "summary": { "type": "string" },
+    "artifacts": { "type": "array" },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "context": { "type": "object" },
+    "contextSnapshot": { "type": "object" },
+    "context_snapshot": { "type": "object" },
+    "target": { "type": "string" },
+    "timestamp": { "type": "integer", "minimum": 0 },
+    "discovery": { "type": "string" },
+    "options": { "type": "object" },
+    "filesIndexed": { "type": "integer", "minimum": 0 },
+    "files_indexed": { "type": "integer", "minimum": 0 },
+    "repoContext": { "type": "object" },
+    "repo_context": { "type": "object" },
+    "repositoryInventory": { "$ref": "#/definitions/repositoryInventory" },
+    "repository_inventory": { "$ref": "#/definitions/repositoryInventory" },
+    "attackSurfaceMap": { "$ref": "#/definitions/attackSurfaceMap" },
+    "attack_surface_map": { "$ref": "#/definitions/attackSurfaceMap" },
+    "fileIndex": { "$ref": "#/definitions/fileIndex" },
+    "file_index": { "$ref": "#/definitions/fileIndex" },
+    "appModel": { "$ref": "#/definitions/appModel" },
+    "app_model": { "$ref": "#/definitions/appModel" },
+    "generatedSlices": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "generated_slices": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "staleSlices": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "stale_slices": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "scanner": { "type": "string" },
+    "filesSample": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "files_sample": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "definitions": {
+    "runStatus": {
+      "type": "string",
+      "enum": ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"]
+    },
+    "appModel": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "routes": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/appRoute" }
+        },
+        "outboundClients": { "type": "array" },
+        "outbound_clients": { "type": "array" },
+        "serviceBoundaries": { "type": "array" },
+        "service_boundaries": { "type": "array" },
+        "dataStores": { "type": "array" },
+        "data_stores": { "type": "array" },
+        "backgroundJobs": { "type": "array" },
+        "background_jobs": { "type": "array" }
+      }
+    },
+    "repositoryInventory": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "rootName": { "type": "string" },
+        "root_name": { "type": "string" },
+        "languages": { "type": "array" },
+        "sourceFiles": { "type": "array" },
+        "source_files": { "type": "array" },
+        "manifests": { "type": "array" },
+        "dependencyManifests": { "type": "array" },
+        "dependency_manifests": { "type": "array" },
+        "configFiles": { "type": "array" },
+        "config_files": { "type": "array" },
+        "frameworks": { "type": "array" },
+        "entrypoints": { "type": "array" },
+        "routesControllers": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/inventoryRoute" }
+        },
+        "routes_controllers": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/inventoryRoute" }
+        },
+        "generatedVendorPaths": { "type": "array" },
+        "generated_vendor_paths": { "type": "array" }
+      }
+    },
+    "inventoryRoute": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "kind": { "type": "string" },
+        "path": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "method": { "type": "string" },
+        "route": {
+          "type": "string",
+          "pattern": "^(\\/|\\*)"
+        },
+        "framework": { "type": "string" },
+        "detail": { "type": "string" }
+      }
+    },
+    "attackSurfaceMap": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "rootName": { "type": "string" },
+        "root_name": { "type": "string" },
+        "surfaces": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/attackSurface" }
+        },
+        "summary": { "type": "object" }
+      }
+    },
+    "attackSurface": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "kind": { "type": "string" },
+        "path": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "language": { "type": "string" },
+        "framework": { "type": "string" },
+        "title": { "type": "string" },
+        "evidence": { "type": "string" },
+        "method": { "$ref": "#/definitions/routeMethod" },
+        "route": {
+          "type": "string",
+          "pattern": "^(\\/|\\*)"
+        },
+        "boundary": { "type": "string" },
+        "risk": { "type": "object" },
+        "metadata": { "type": "object" }
+      }
+    },
+    "fileIndex": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "tree": { "type": "array" },
+        "totalFiles": { "type": "integer", "minimum": 0 },
+        "total_files": { "type": "integer", "minimum": 0 },
+        "truncated": { "type": "boolean" },
+        "patternMatches": { "type": "object" },
+        "pattern_matches": { "type": "object" }
+      }
+    },
+    "appRoute": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "method": { "$ref": "#/definitions/routeMethod" },
+        "path": {
+          "type": "string",
+          "pattern": "^(\\/|\\*)"
+        },
+        "framework": { "type": "string" },
+        "source": { "type": "string" },
+        "route": {
+          "type": "string",
+          "pattern": "^(\\/|\\*)"
+        }
+      }
+    },
+    "routeMethod": {
+      "type": "string",
+      "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE", "CONNECT", "ANY", "USE"]
+    }
+  }
+}

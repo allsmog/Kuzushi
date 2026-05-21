@@ -25,12 +25,37 @@ pub(crate) fn fit(value: &str, max_chars: usize) -> String {
     if max_chars <= 3 {
         return value.chars().take(max_chars).collect();
     }
-    let mut truncated = value
-        .chars()
-        .take(max_chars.saturating_sub(3))
-        .collect::<String>();
-    truncated.push_str("...");
-    truncated
+    let budget = max_chars.saturating_sub(3);
+    let head: String = value.chars().take(budget).collect();
+    let trimmed = trim_to_word_boundary(&head);
+    format!("{trimmed}...")
+}
+
+fn trim_to_word_boundary(head: &str) -> &str {
+    // Only honor word boundaries on space/tab — hyphens and slashes are
+    // load-bearing inside identifiers (run-ids, paths, module names).
+    // Never trim past 70% of the head — short labels would otherwise
+    // collapse to a single character + ellipsis.
+    let total = head.chars().count();
+    if total == 0 {
+        return head;
+    }
+    let min_keep = (total * 7 / 10).max(1);
+    last_word_boundary_after(head, min_keep)
+        .map(|byte| head[..byte].trim_end_matches([' ', ',']))
+        .unwrap_or(head)
+}
+
+fn last_word_boundary_after(head: &str, min_keep: usize) -> Option<usize> {
+    let mut chars_seen = 0usize;
+    let mut boundary = None;
+    for (idx, ch) in head.char_indices() {
+        chars_seen += 1;
+        if matches!(ch, ' ' | '\t' | ',') && chars_seen > min_keep {
+            boundary = Some(idx);
+        }
+    }
+    boundary
 }
 
 pub(crate) fn wrap_text(value: &str, width: usize) -> Vec<String> {

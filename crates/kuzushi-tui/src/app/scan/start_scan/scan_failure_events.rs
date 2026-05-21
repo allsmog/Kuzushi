@@ -11,7 +11,9 @@ impl ShellApp {
         if let Some(run_id) = &run_id {
             self.write_scan_failure_artifacts(run_id, &actionable);
         }
+        self.log_structured_scan_error(&actionable);
         self.log("error", actionable);
+        self.log("result", "fail (scan failed) exit_hint=1");
         self.set_refused_activity("sast:scan", "scan failed");
     }
 
@@ -63,34 +65,24 @@ impl ShellApp {
             None,
             &self.scan_target_label(),
         );
+        append_run_status_event(
+            self.target.as_deref(),
+            run_id,
+            "sast:scan",
+            "failed",
+            "sast:scan failed",
+        );
         write_run_failure_handoff(self.target.as_deref(), run_id, "sast:scan", "failed", error);
     }
 
-    pub(crate) fn apply_scan_cancelled(&mut self, run_id: String) {
-        if let Some(scan) = &mut self.scan {
-            scan.run_id = Some(run_id.clone());
-            scan.stage = "cancelled".to_string();
-            scan.running = false;
-            scan.abort_requested = false;
-            scan.error = None;
-        }
-        append_trace_step(
-            self.target.as_deref(),
-            &run_id,
-            1_000,
-            "refused",
-            "cancelled",
-            None,
-            None,
+    fn log_structured_scan_error(&mut self, error: &str) {
+        self.log(
+            "error",
+            format!("stage=scan task=sast:scan msg={}", quoted_log_value(error)),
         );
-        write_run_summary(
-            self.target.as_deref(),
-            &run_id,
-            "paused",
-            None,
-            &self.scan_target_label(),
-        );
-        self.log("scan", format!("cancelled {}", short_fingerprint(&run_id)));
-        self.set_paused_activity("sast:scan", "scan cancelled");
     }
+}
+
+fn quoted_log_value(value: &str) -> String {
+    format!("\"{}\"", value.replace('"', "\\\""))
 }

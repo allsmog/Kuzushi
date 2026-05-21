@@ -1,7 +1,37 @@
 use crate::capabilities::full_mode_multi::domain::FullModeReport;
 
 pub fn report_to_tool_json(report: &FullModeReport) -> serde_json::Value {
-    let mut summary = serde_json::json!({
+    let summary = full_mode_summary_text(report);
+    let data = serde_json::json!({
+        "findings": report.findings,
+        "plan": report.plan,
+        "chunksDispatched": report.chunks_dispatched,
+        "chunksFailed": report.chunks_failed,
+        "failedChunkErrors": report.failed_chunk_errors,
+        "costUsd": report.cost_usd,
+        "dryRun": report.dry_run,
+        "firstChunkError": report.first_chunk_error,
+        "summary": full_mode_summary(report),
+    });
+    let mut result =
+        crate::module_result::completed_output_result(summary.clone(), summary, data);
+    result["costUsd"] = serde_json::json!(report.cost_usd);
+    result
+}
+
+fn full_mode_summary_text(report: &FullModeReport) -> String {
+    format!(
+        "full-mode:hunt {} {} chunk{} over {} file{}",
+        if report.dry_run { "planned" } else { "completed" },
+        report.plan.chunks.len(),
+        if report.plan.chunks.len() == 1 { "" } else { "s" },
+        report.plan.total_files,
+        if report.plan.total_files == 1 { "" } else { "s" }
+    )
+}
+
+fn full_mode_summary(report: &FullModeReport) -> serde_json::Value {
+    serde_json::json!({
         "chunks": report.plan.chunks.len(),
         "files": report.plan.total_files,
         "totalTokens": report.plan.total_tokens,
@@ -11,19 +41,45 @@ pub fn report_to_tool_json(report: &FullModeReport) -> serde_json::Value {
         "failedChunkErrors": report.failed_chunk_errors,
         "costUsd": report.cost_usd,
         "dryRun": report.dry_run,
-    });
-    // Surface the captured chunk error in the summary too so an operator
-    // glancing at the trailer of the tool result doesn't have to dig into
-    // `data.firstChunkError` to know why the scan dispatched 0 chunks.
-    if let (Some(err), Some(map)) = (report.first_chunk_error.as_deref(), summary.as_object_mut()) {
-        map.insert(
-            "firstChunkError".to_string(),
-            serde_json::Value::String(err.to_string()),
+        "firstChunkError": report.first_chunk_error,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capabilities::full_mode_multi::domain::{FullModePlan, FullModeReport};
+
+    #[test]
+    fn report_output_uses_completed_envelope() {
+        let report = FullModeReport {
+            findings: Vec::new(),
+            plan: FullModePlan {
+                chunks: Vec::new(),
+                total_files: 2,
+                total_bytes: 128,
+                total_tokens: 32,
+            },
+            chunks_dispatched: 0,
+            chunks_failed: 0,
+            failed_chunk_errors: Vec::new(),
+            cost_usd: 0.0,
+            dry_run: true,
+            first_chunk_error: None,
+        };
+
+        let output = report_to_tool_json(&report);
+
+        assert_eq!(output["ok"], serde_json::json!(true));
+        assert_eq!(output["status"], serde_json::json!("completed"));
+        assert_eq!(
+            output["summary"],
+            serde_json::json!("full-mode:hunt planned 0 chunks over 2 files")
+        );
+        assert_eq!(output["data"]["dryRun"], serde_json::json!(true));
+        assert_eq!(
+            output["data"]["summary"]["totalTokens"],
+            serde_json::json!(32)
         );
     }
-    serde_json::json!({
-        "ok": true,
-        "data": report,
-        "summary": summary,
-    })
 }

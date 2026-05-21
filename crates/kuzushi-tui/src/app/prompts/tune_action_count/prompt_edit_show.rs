@@ -9,23 +9,11 @@ impl ShellApp {
             );
             return;
         };
-        if let Some(parent) = path.parent() {
-            if let Err(error) = std::fs::create_dir_all(parent) {
-                self.log(
-                    "error",
-                    format!("could not create {}: {error}", parent.display()),
-                );
-                return;
-            }
+        if !self.ensure_prompt_edit_parent(&path) {
+            return;
         }
-        if !path.exists() {
-            if let Err(error) = std::fs::write(&path, "") {
-                self.log(
-                    "error",
-                    format!("could not seed {}: {error}", path.display()),
-                );
-                return;
-            }
+        if !self.ensure_prompt_override_editable(&path) {
+            return;
         }
         let editor = std::env::var("EDITOR").unwrap_or_else(|_| "${EDITOR}".to_string());
         self.log(
@@ -35,6 +23,49 @@ impl ShellApp {
                 path.display()
             ),
         );
+    }
+
+    fn ensure_prompt_edit_parent(&mut self, path: &std::path::Path) -> bool {
+        let Some(parent) = path.parent() else {
+            return true;
+        };
+        match std::fs::create_dir_all(parent) {
+            Ok(_) => true,
+            Err(error) => {
+                self.log(
+                    "error",
+                    format!("could not create {}: {error}", parent.display()),
+                );
+                false
+            }
+        }
+    }
+
+    fn ensure_prompt_override_editable(&mut self, path: &std::path::Path) -> bool {
+        match prompt_edit_path_state(path) {
+            PromptEditPathState::File => true,
+            PromptEditPathState::Missing => self.seed_prompt_override(path),
+            PromptEditPathState::Unreadable => {
+                self.log(
+                    "prompt",
+                    format!("could not edit unreadable override at {}", path.display()),
+                );
+                false
+            }
+        }
+    }
+
+    fn seed_prompt_override(&mut self, path: &std::path::Path) -> bool {
+        match std::fs::write(path, "") {
+            Ok(_) => true,
+            Err(error) => {
+                self.log(
+                    "error",
+                    format!("could not seed {}: {error}", path.display()),
+                );
+                false
+            }
+        }
     }
 
     pub(crate) fn prompt_show(&mut self, name: &str) {
@@ -49,6 +80,7 @@ impl ShellApp {
             PromptOverrideText::Missing => self.log_missing_prompt_override(&path),
             PromptOverrideText::Empty => self.log_empty_prompt_override(&path),
             PromptOverrideText::Present(text) => self.log_prompt_override_text(&path, &text),
+            PromptOverrideText::Unreadable => self.log_unreadable_prompt_override(&path),
         }
     }
 
@@ -75,18 +107,30 @@ impl ShellApp {
             self.log("prompt", line.to_string());
         }
     }
+
+    fn log_unreadable_prompt_override(&mut self, path: &std::path::Path) {
+        self.log(
+            "prompt",
+            format!("could not read override at {}", path.display()),
+        );
+    }
 }
 
 enum PromptOverrideText {
     Missing,
     Empty,
     Present(String),
+    Unreadable,
 }
 
 fn prompt_override_text(path: &std::path::Path) -> PromptOverrideText {
-    std::fs::read_to_string(path)
-        .map(prompt_override_text_from_string)
-        .unwrap_or(PromptOverrideText::Missing)
+    if !path.exists() {
+        return PromptOverrideText::Missing;
+    }
+    match std::fs::read_to_string(path) {
+        Ok(text) => prompt_override_text_from_string(text),
+        Err(_) => PromptOverrideText::Unreadable,
+    }
 }
 
 fn prompt_override_text_from_string(text: String) -> PromptOverrideText {
@@ -94,5 +138,20 @@ fn prompt_override_text_from_string(text: String) -> PromptOverrideText {
         PromptOverrideText::Empty
     } else {
         PromptOverrideText::Present(text)
+    }
+}
+
+enum PromptEditPathState {
+    File,
+    Missing,
+    Unreadable,
+}
+
+fn prompt_edit_path_state(path: &std::path::Path) -> PromptEditPathState {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => PromptEditPathState::File,
+        Ok(_) => PromptEditPathState::Unreadable,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => PromptEditPathState::Missing,
+        Err(_) => PromptEditPathState::Unreadable,
     }
 }

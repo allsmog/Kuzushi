@@ -103,11 +103,17 @@ pub(crate) fn workspace_export_completion_values(_: &ShellApp) -> Vec<String> {
 }
 
 pub(crate) fn auth_action_completion_values(_: &ShellApp) -> Vec<String> {
-    string_values(&["status", "login", "openai", "anthropic"])
+    string_values(&["status", "login", "openai", "anthropic", "github-copilot"])
 }
 
 pub(crate) fn auth_login_completion_values(_: &ShellApp) -> Vec<String> {
-    string_values(&["openai", "anthropic"])
+    string_values(&[
+        "openai",
+        "openai browser",
+        "openai headless",
+        "anthropic",
+        "github-copilot",
+    ])
 }
 
 pub(crate) fn show_action_completion_values(_: &ShellApp) -> Vec<String> {

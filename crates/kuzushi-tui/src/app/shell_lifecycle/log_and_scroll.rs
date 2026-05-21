@@ -91,10 +91,25 @@ impl ShellApp {
         let current = Some(self.shell_view.clone());
         if self.prev_shell_view != current {
             self.scroll_offset = 0;
+            if let Some(prev) = self.prev_shell_view.take() {
+                self.push_nav_history(prev);
+            }
             self.prev_shell_view = current;
             true
         } else {
             false
+        }
+    }
+
+    fn push_nav_history(&mut self, view: ShellView) {
+        const NAV_HISTORY_DEPTH: usize = 16;
+        if self.nav_history.last() == Some(&view) {
+            return;
+        }
+        self.nav_history.push(view);
+        if self.nav_history.len() > NAV_HISTORY_DEPTH {
+            let excess = self.nav_history.len() - NAV_HISTORY_DEPTH;
+            self.nav_history.drain(..excess);
         }
     }
 }

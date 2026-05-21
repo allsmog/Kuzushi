@@ -8,12 +8,20 @@ pub(crate) fn inspect_rust_line(
     builder: &mut AttackSurfaceBuilder,
 ) {
     let detail = trim_detail(line);
+    if is_rust_import_line(&detail) {
+        return;
+    }
     let lower = detail.to_ascii_lowercase();
     for detector in RUST_LINE_DETECTORS {
         if detector.matches(&lower) {
             builder.add(detector.surface(source_file, framework, line_number, &detail));
         }
     }
+}
+
+fn is_rust_import_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("use ") || trimmed.starts_with("mod ") || trimmed.starts_with("pub mod ")
 }
 
 struct RustLineDetector {
@@ -67,6 +75,8 @@ const RUST_LINE_DETECTORS: &[RustLineDetector] = &[
         needles: &[
             "cookie::",
             ".cookie(",
+            "cookies.get(",
+            "jar.get(",
             "session.insert",
             "session.get",
             "jsonwebtoken::decode",
@@ -78,7 +88,14 @@ const RUST_LINE_DETECTORS: &[RustLineDetector] = &[
         title: "Request trust boundary",
         boundary: "request_trust",
         detector: "rust.request-trust",
-        needles: &["csrf", "cors", "same_site", "samesite", "access-control-allow-origin"],
+        needles: &[
+            "csrf",
+            "cors",
+            "same_site",
+            "samesite",
+            "access-control-allow-origin",
+            "headers.get(",
+        ],
     },
     RustLineDetector {
         kind: AttackSurfaceKind::TenantIsolationBoundary,
@@ -86,12 +103,14 @@ const RUST_LINE_DETECTORS: &[RustLineDetector] = &[
         boundary: "tenant_isolation",
         detector: "rust.tenant-isolation",
         needles: &[
-            "tenant_id",
-            "tenantid",
+            "account_id",
+            "current_team",
             "organization_id",
             "org_id",
+            "team_id",
+            "tenant_id",
+            "tenantid",
             "workspace_id",
-            "account_id",
         ],
     },
     RustLineDetector {
@@ -100,6 +119,19 @@ const RUST_LINE_DETECTORS: &[RustLineDetector] = &[
         boundary: "parser_boundary",
         detector: "rust.deserialization",
         needles: &["serde_json::from", "serde_yaml::from", "bincode::"],
+    },
+    RustLineDetector {
+        kind: AttackSurfaceKind::FileUploadParsePath,
+        title: "File upload or multipart parser",
+        boundary: "file_upload",
+        detector: "rust.file-upload",
+        needles: &[
+            "multipart::",
+            "multipartform",
+            "field_name(",
+            "field.name()",
+            "next_field().await",
+        ],
     },
     RustLineDetector {
         kind: AttackSurfaceKind::DbQueryBoundary,
@@ -116,6 +148,13 @@ const RUST_LINE_DETECTORS: &[RustLineDetector] = &[
         needles: &["reqwest::", "ureq::", "hyper::client"],
     },
     RustLineDetector {
+        kind: AttackSurfaceKind::RpcHandler,
+        title: "gRPC handler",
+        boundary: "rpc_handler",
+        detector: "rust.grpc-handler",
+        needles: &["tonic::transport::server", ".add_service("],
+    },
+    RustLineDetector {
         kind: AttackSurfaceKind::CommandExecutionBoundary,
         title: "Command execution boundary",
         boundary: "process_execution",
@@ -128,6 +167,25 @@ const RUST_LINE_DETECTORS: &[RustLineDetector] = &[
         boundary: "process_entrypoint",
         detector: "rust.cli-entrypoint",
         needles: &["std::env::args"],
+    },
+    RustLineDetector {
+        kind: AttackSurfaceKind::BackgroundJob,
+        title: "Background job or queue consumer",
+        boundary: "async_job",
+        detector: "rust.background-job",
+        needles: &[
+            "tokio::spawn",
+            "tokio_cron_scheduler",
+            "cron::schedule",
+            ".recv().await",
+            "consumer.recv",
+            "streamconsumer",
+            "basic_consume",
+            "lapin::",
+            "client.subscribe(",
+            "jetstream.subscribe(",
+            "redis::cmd(\"subscribe\"",
+        ],
     },
 ];
 

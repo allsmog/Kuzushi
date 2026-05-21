@@ -17,11 +17,10 @@ pub fn write_run_artifact_json(
     }
     fs::write(&path, format!("{}\n", serde_json::to_string_pretty(value)?))
         .with_context(|| format!("Could not write {}", path.display()))?;
-    let artifact = RunArtifact {
-        label: label.into(),
-        path: path.display().to_string(),
-        kind: "json".to_string(),
-    };
+    let label = label.into();
+    let path = path.display().to_string();
+    let artifact = RunArtifact::from_declared(&label, &path, Some("json"))
+        .context("run artifact path must not be empty")?;
     record_run_artifact(target, run_id, &artifact)?;
     Ok(artifact)
 }
@@ -34,6 +33,7 @@ pub fn append_run_trace_step(
     let dir = run_dir(target, run_id);
     fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
     let path = dir.join("trace.jsonl");
+    reject_non_file_trace_target(&path)?;
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -49,12 +49,16 @@ pub fn next_run_trace_step_number(target: impl AsRef<Path>, run_id: &str) -> usi
     let Ok(text) = fs::read_to_string(path) else {
         return 1;
     };
-    text.lines()
-        .filter_map(|line| serde_json::from_str::<RunTraceStep>(line).ok())
-        .map(|step| step.n)
-        .max()
-        .unwrap_or(0)
-        .saturating_add(1)
+    crate::run_artifacts::jsonl_numbering::next_jsonl_number::<RunTraceStep>(&text, |step| step.n)
+}
+
+fn reject_non_file_trace_target(path: &Path) -> Result<()> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(()),
+        Ok(_) => anyhow::bail!("Run trace target is not a file: {}", path.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("Could not inspect {}", path.display())),
+    }
 }
 
 pub(crate) fn now_unix() -> u64 {

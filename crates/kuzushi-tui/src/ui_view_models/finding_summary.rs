@@ -17,16 +17,23 @@ pub(crate) fn findings_count_summary(findings: &[Finding]) -> String {
 pub(crate) fn status_footer_findings_summary(findings: &[Finding]) -> String {
     let counts = SeverityCounts::from_findings(findings);
     let mut parts = vec![format!("{} findings", findings.len())];
-    if counts.critical > 0 {
-        parts.push(format!("{} critical", counts.critical));
-    }
-    if counts.high > 0 {
-        parts.push(format!("{} high", counts.high));
-    }
-    if counts.medium > 0 {
-        parts.push(format!("{} medium", counts.medium));
-    }
+    append_nonzero_severity(&mut parts, counts.critical, "critical");
+    append_nonzero_severity(&mut parts, counts.high, "high");
+    append_nonzero_severity(&mut parts, counts.medium, "medium");
     parts.join(" / ")
+}
+
+pub(crate) fn ci_result_findings_summary(findings: &[Finding], fallback_count: usize) -> String {
+    if findings.is_empty() && fallback_count > 0 {
+        return format!("{fallback_count} finding(s)");
+    }
+    status_footer_findings_summary(findings)
+}
+
+fn append_nonzero_severity(parts: &mut Vec<String>, count: usize, label: &str) {
+    if count > 0 {
+        parts.push(format!("{count} {label}"));
+    }
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]

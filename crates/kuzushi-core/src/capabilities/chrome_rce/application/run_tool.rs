@@ -51,21 +51,22 @@ fn persist_chrome_rce_findings(
 }
 
 fn scan_response(target: &Path, findings: Vec<Finding>, persisted: impl serde::Serialize) -> Value {
-    json!({
-        "ok": true,
-        "output": format!(
-            "chrome-rce:scan found {} finding{} under {}",
-            findings.len(),
-            if findings.len() == 1 { "" } else { "s" },
-            target.display()
-        ),
-        "data": {
+    let summary = format!(
+        "chrome-rce:scan found {} finding{} under {}",
+        findings.len(),
+        if findings.len() == 1 { "" } else { "s" },
+        target.display()
+    );
+    crate::module_result::completed_output_result(
+        summary.clone(),
+        summary,
+        json!({
             "target": target.display().to_string(),
             "count": findings.len(),
             "findings": findings,
             "persisted": persisted,
-        },
-    })
+        }),
+    )
 }
 
 pub(crate) fn run_review_trigger(
@@ -100,15 +101,17 @@ fn hot_path_findings(changed: &[String]) -> Vec<Finding> {
 }
 
 fn skipped_review_response(target: &Path) -> Value {
-    json!({
-        "ok": true,
-        "output": "chrome-rce:review-trigger skipped: pass diffBase to enable PR hot-path review.",
-        "data": {
+    let summary = "chrome-rce:review-trigger skipped: pass diffBase to enable PR hot-path review.";
+    crate::module_result::skipped_output_result(
+        summary,
+        summary,
+        Vec::new(),
+        json!({
             "target": target.display().to_string(),
             "count": 0,
             "findings": [],
-        },
-    })
+        }),
+    )
 }
 
 fn review_response(
@@ -118,21 +121,22 @@ fn review_response(
     findings: Vec<Finding>,
     persisted: impl serde::Serialize,
 ) -> Value {
-    json!({
-        "ok": true,
-        "output": format!(
-            "chrome-rce:review-trigger matched {} hot path{} vs {}",
-            findings.len(),
-            if findings.len() == 1 { "" } else { "s" },
-            diff_base
-        ),
-        "data": {
+    let summary = format!(
+        "chrome-rce:review-trigger matched {} hot path{} vs {}",
+        findings.len(),
+        if findings.len() == 1 { "" } else { "s" },
+        diff_base
+    );
+    crate::module_result::completed_output_result(
+        summary.clone(),
+        summary,
+        json!({
             "target": target.display().to_string(),
             "diffBase": diff_base,
             "changedFiles": changed,
             "count": findings.len(),
             "findings": findings,
             "persisted": persisted,
-        },
-    })
+        }),
+    )
 }

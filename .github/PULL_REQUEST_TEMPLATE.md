@@ -35,8 +35,8 @@ What is the blast radius if this is wrong? How do we revert?
 ## Screenshots / logs
 
 <!--
-For UI changes (Ink shell) or changes that affect terminal output, include a
-screenshot or pasted transcript. Delete this section otherwise.
+For Rust Ratatui TUI changes or changes that affect terminal output, include
+a screenshot or pasted transcript. Delete this section otherwise.
 -->
 
 ## Checklist

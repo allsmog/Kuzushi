@@ -2,7 +2,7 @@
 
 # Kuzushi
 
-Kuzushi is a security-native code agent for repositories.
+Kuzushi is an evidence-backed repository security workbench.
 
 It does not try to be another generic coding assistant. It scans real
 codebases, preserves evidence, ranks likely vulnerabilities, and helps teams
@@ -15,6 +15,22 @@ next action.
 The primary operator path is the native Rust CLI and Ratatui shell. The npm
 `kuzushi` binary, plus the shorter `kz` alias, invokes that native CLI through
 `bin/kuzushi-rs.mjs`.
+
+## Product Focus
+
+Kuzushi's current product is deliberately narrower than its long-term research
+roadmap: local-first repository security investigation for serious AppSec and
+product-security operators. The core contract is evidence, not chat:
+
+1. build or refresh repository context;
+2. scan with deterministic and model-backed tools;
+3. persist findings, traces, proof state, and run artifacts;
+4. inspect one finding's evidence and current proof level;
+5. choose the next action: suppress, verify, patch, or report.
+
+Roadmap surfaces such as binary exploitation, broad pentest automation,
+governance packs, and defensive operations should reinforce that evidence
+workflow before they become primary product surfaces.
 
 ## Install
 
@@ -33,11 +49,15 @@ pnpm build:native
 node bin/kuzushi-rs.mjs --help
 ```
 
-The published `kuzushi` command resolves `native/<platform>-<arch>/kuzushi`
-first, then local Cargo build outputs. Set `KUZUSHI_NATIVE_BIN` to point the
-wrapper at a specific binary.
+The published `kuzushi` command resolves `native/<platform>-<arch>/kuzushi`,
+and the published `kz` alias resolves `native/<platform>-<arch>/kz`; both then
+fall back to local Cargo build outputs for the invoked name. Set
+`KUZUSHI_NATIVE_BIN` to point the wrapper at a specific binary.
 
 ## Quick Start
+
+This is the golden path. It is the workflow new operators should try before
+touching advanced modules or deferred plugin-backed tools.
 
 ```bash
 # Check config, local state, scanners, and the pi-agent-core bridge.
@@ -83,8 +103,8 @@ kuzushi [--target <path>] [--plain] [command]
 kz [--target <path>] [--plain] [command]
 ```
 
-Bare `kuzushi` starts the shell.
-Bare `kz` starts the same shell with the compact `kz>` prompt.
+Bare `kuzushi` starts the shell with the `kuzushi>` prompt; bare `kz` starts
+the same shell with the compact `kz>` prompt.
 Use `--plain` or `KUZUSHI_PLAIN=1` to force line-oriented output with no ANSI
 escapes, animation, or box drawing. `KUZUSHI_SCREEN_READER=1` and
 `KUZUSHI_LOW_BANDWIDTH=1` are aliases for the same strict plain shell mode.
@@ -98,7 +118,7 @@ inside the TUI and your terminal still gives you a selection modifier.
 | `kuzushi scan <repo> [--mode standard\|whitebox-static] [--tasks a,b] [--triage] [--json] [--ci]` | Run the Rust SAST umbrella executor and persist findings. |
 | `kuzushi findings --target <repo> [--severity high,critical] [--verdict true_positive] [--name text] [--file-path path] [--limit 50] [--json]` | List persisted findings. |
 | `kuzushi finding <F-0001\|fingerprint-prefix> --target <repo> [--json]` | Inspect one finding's evidence, proof state, verification summary, patch result, and next action. |
-| `kuzushi runs list\|show <runId>\|trace <runId> --target <repo>` | Inspect replayable summaries, result artifacts, and trace JSONL under `.kuzushi/runs/<runId>/`. |
+| `kuzushi runs list [--status completed,failed]\|show <runId>\|trace <runId>\|diff <a> <b>\|prune --target <repo>` | Inspect, compare, or prune replayable summaries, result artifacts, and trace JSONL under `.kuzushi/runs/<runId>/`. |
 | `kuzushi suppress <F-0001> --target <repo> --reason <text> [--days 90]` | Record an expiring, evidence-backed suppression; findings remain visible in audit/report output. |
 | `kuzushi suppressions --target <repo>` | List suppression memory and the audit store path. |
 | `kuzushi permissions [--target <repo>]` | Show the current model fallback, approval, headless-run, and sandbox policy summary. |
@@ -122,6 +142,9 @@ kuzushi scan . --tasks agentic-sast --triage --json
 kuzushi findings --target . --severity high,critical --limit 10
 kuzushi finding F-0001 --target .
 kuzushi runs list --target .
+kuzushi runs list --target . --status failed,partial
+kuzushi runs diff run-a run-b --target . --json
+kuzushi runs prune --target . --older-than-days 30 --keep-last 20 --dry-run
 kuzushi permissions --target .
 kuzushi pr-comment --target . --repo allsmog/Kuzushi > kuzushi-report.md
 kuzushi --target . run context:build --input '{}'
@@ -221,6 +244,8 @@ current built-ins are:
 | `x-ray` | `x-ray:run`, `x-ray:read` |
 | `dep-hygiene` | `dep-hygiene:check` |
 | `secret-scan` | `secret-scan:scan` |
+| `license-scan` | `license-scan:scan` |
+| `sbom-scan` | `sbom-scan:scan` |
 | `variant` | `variant:lift-pattern`, `variant:hunt` |
 | `ndiff` | `ndiff:fetch-cve`, `ndiff:extract-fix-pattern`, `ndiff:hunt-variants` |
 | `iac-scan` | `iac-scan:scan` |
@@ -229,17 +254,27 @@ current built-ins are:
 | `workspace` | `workspace:status`, `workspace:export-findings` |
 
 Internal DAG modules such as `context-lite`, `pipeline`, and `systems-hunt`
-stay hidden from `kuzushi modules`. Deferred compatibility modules are also
-hidden from the public catalog and shell completions, but remain executable by
-exact tool name for operators who opt into them: `chrome-rce`,
-`prompt-armor`, `pwn`, `recon`, `shinsa`, `tob`, `uaf-hunt`,
-`vendor-assessment`, and `vuln-scout`.
+stay hidden from `kuzushi modules`; `systems-hunt:*` entries are internal DAG
+nodes selected through `sast:scan`, not public catalog tools. Deferred
+compatibility modules are also hidden from the public catalog and shell
+completions, but remain executable by exact tool name for operators who opt
+into them: `carlini-threat-hunt`, `chrome-rce`, `prompt-armor`, `pwn`,
+`recon`, `shinsa`, `tob`, `uaf-hunt`, `vendor-assessment`, and `vuln-scout`.
 
 ## External Dependencies
 
 Native deterministic tools run without an LLM: `module-recommender`,
-`context`, `findings`, `dep-hygiene`, `secret-scan`, `iac-scan`, and local
-artifact readers.
+`context`, `findings`, `dep-hygiene`, `secret-scan`, `license-scan`, `sbom-scan`,
+`iac-scan`, and local artifact readers.
+
+`license-scan` checks package manifest license declarations, top-level
+repository `LICENSE`/`COPYING` consistency, and SPDX source headers that
+disagree with manifest licenses. Set `requireSourceSpdxHeaders` on
+`license-scan:scan` to require SPDX headers on source files.
+
+`sbom-scan` extracts first-party npm, Cargo, and Python dependency inventory
+with package URLs, SHA-256 digests for recognized lockfiles, npm package-lock
+dependency edges, and CycloneDX/SPDX JSON projections in the tool result.
 
 Subprocess-backed tools require the operator to install or configure binaries:
 
@@ -284,6 +319,7 @@ not silently succeed and they do not substitute a different model.
 | `.kuzushi/latest` | latest completed, partial, failed, skipped, or running run id |
 | `.kuzushi/runs/<runId>/run.json` | canonical run metadata, status, cost, LLM audit, and artifact list |
 | `.kuzushi/runs/<runId>/events.jsonl` | tool lifecycle events |
+| `.kuzushi/runs/<runId>/trace.jsonl` | ordered trace steps for replay and activity views |
 | `.kuzushi/runs/<runId>/context.json` | run-scoped context snapshot or explicit skipped marker |
 | `.kuzushi/runs/<runId>/attack-surface.json` | run-scoped attack-surface snapshot or explicit skipped marker |
 | `.kuzushi/runs/<runId>/threat-model.json` | run-scoped threat-model snapshot or explicit skipped marker |
@@ -291,14 +327,22 @@ not silently succeed and they do not substitute a different model.
 | `.kuzushi/runs/<runId>/findings.json` | normalized finding snapshot or explicit skipped marker |
 | `.kuzushi/runs/<runId>/proof.json` | proof-state snapshot or explicit skipped marker |
 | `.kuzushi/runs/<runId>/failures.json` | bounded failure handoff context, empty when no failure is recorded |
-| `.kuzushi/runs/<runId>/report.md` | generated or placeholder Markdown report |
-| `.kuzushi/runs/<runId>/report.sarif` | optional SARIF report when a tool emits one |
+| `.kuzushi/runs/<runId>/report.md` | generated or placeholder Markdown report; promoted from `reportMarkdown`/`report_markdown` and `data.reportMarkdown`/`data.report_markdown` output aliases |
+| `.kuzushi/runs/<runId>/artifacts.json` | canonical artifact manifest for the run |
+| `.kuzushi/runs/<runId>/result.json` | tool result envelope for direct tool runs |
+| `.kuzushi/runs/<runId>/report.sarif` | optional SARIF report promoted from `reportSarif`/`report_sarif` and `data.reportSarif`/`data.report_sarif` output aliases |
 | `.kuzushi/runs/<runId>/summary.json` | legacy compatibility mirror of `run.json` |
 | `.kuzushi/runs/<runId>/triage.jsonl` | `sast:scan --triage` and post-scan triage |
 | `.kuzushi/runs/<runId>/verify.jsonl` | `sast:scan` with verify/auto-patch inputs |
 | `x-ray/` | `x-ray:run` |
 | `.kuzushi/vendor-assessment/` | vendor assessment tools |
 | `.prompt-armor/` | PromptArmor deterministic config/report tools |
+
+Machine-readable run schemas live under `schemas/run.*.schema.json` and ship
+through the npm subpath `kuzushi/schemas/*`. They document the canonical
+camelCase artifact fields and the snake_case aliases accepted by Rust readers,
+including `runId`/`run_id`, `startedAtUnix`/`started_at_unix`,
+`promptHash`/`prompt_hash`, and `agentThreadContext`/`agent_thread_context`.
 
 See [docs/rust-migration-status.md](docs/rust-migration-status.md) for the
 module-by-module cutover ledger, intentional removals, artifact compatibility
@@ -327,7 +371,7 @@ Useful package scripts:
 | `pnpm test:e2e` | Run the native smoke test. |
 | `pnpm quality:crap-risk` | Gate changed production Rust/JS/TS code with the CRAP-risk < 7 proxy. |
 | `pnpm doctor` | Run source-checkout development diagnostics; use `kuzushi doctor` for Rust CLI preflight. |
-| `pnpm check:docs` | Guard public docs/workflows against stale Rust CLI command examples and retired TS runtime imports. |
+| `pnpm check:docs` | Guard port-contract docs, public docs/workflows, stale Rust CLI command examples, and retired TS runtime imports. |
 | `pnpm export:source [path]` | Create a clean source tarball from tracked files with local state excluded. |
 
 ## TypeScript Retention

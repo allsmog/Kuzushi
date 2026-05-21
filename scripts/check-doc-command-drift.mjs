@@ -9,7 +9,7 @@ const roots = [
   "docs",
   "examples",
   "recipes",
-  ".github/workflows/kuzushi-reference.yml",
+  ".github",
   "AGENTS.md",
   "RELEASING.md",
 ];
@@ -44,10 +44,33 @@ const banned = [
   { label: "kuzushi create-module", regex: /kuzushi\s+create-module/g },
 ];
 
+const currentGuidanceFiles = [
+  "docs/architecture/domain-boundaries.md",
+  "docs/current-architecture.mmd",
+  "docs/devex/new-contributor-map.md",
+];
+
+const modelGuidanceFiles = ["AGENTS.md", ...currentGuidanceFiles];
+
+const staleSplitPathPatterns = [
+  { label: "old modules.rs path", regex: /crates\/kuzushi-core\/src\/modules\.rs/ },
+  { label: "old findings.rs path", regex: /crates\/kuzushi-core\/src\/findings\.rs/ },
+  { label: "old scan.rs path", regex: /crates\/kuzushi-core\/src\/scan\.rs/ },
+  { label: "old TUI app.rs path", regex: /crates\/kuzushi-tui\/src\/app\.rs/ },
+  { label: "old TUI renderer.rs path", regex: /crates\/kuzushi-tui\/src\/renderer\.rs/ },
+];
+
+const staleModelPathPatterns = [
+  { label: "deleted TS model enforcement path", regex: /src\/agent-runtime\/enforcement\.ts/ },
+];
+
 const allowedContext =
   /\b(legacy|historical|removed|unsupported|not current|does not support|does not expose|do not use|do not add|do not resurrect|deleted|reference-only|preserved reference|retained TypeScript\/Ink references|old TypeScript|former TypeScript)\b/i;
 
-const failures = [];
+const failures = [
+  ...currentGuidanceFiles.flatMap((file) => checkCurrentGuidancePaths(file, staleSplitPathPatterns)),
+  ...modelGuidanceFiles.flatMap((file) => checkCurrentGuidancePaths(file, staleModelPathPatterns)),
+];
 
 for (const file of roots.flatMap(walk)) {
   const rel = path.relative(repo, file);
@@ -65,7 +88,7 @@ for (const file of roots.flatMap(walk)) {
       const context = lines
         .slice(Math.max(0, index - 4), Math.min(lines.length, index + 5))
         .join("\n");
-      const hasKuzushiContext = /\bkuzushi\b/i.test(context);
+      const hasKuzushiContext = /(^|[\s`'"|])kuzushi(\s|$)/i.test(context);
       const explicitlyAllowed = fileLabeledLegacy || allowedContext.test(context);
 
       if (pattern.needsKuzushiContext && !hasKuzushiContext) {
@@ -100,21 +123,26 @@ console.log("doc command drift check passed");
 
 function walk(root) {
   const abs = path.join(repo, root);
-  let stats;
+  const stats = safeStat(abs);
+  if (stats === null) return [];
+  if (stats.isFile()) return scannedFile(abs);
+  if (!stats.isDirectory()) return [];
+  return walkDirectory(root, abs);
+}
+
+function safeStat(abs) {
   try {
-    stats = statSync(abs);
+    return statSync(abs);
   } catch {
-    return [];
+    return null;
   }
+}
 
-  if (stats.isFile()) {
-    return shouldScan(abs) ? [abs] : [];
-  }
+function scannedFile(abs) {
+  return shouldScan(abs) ? [abs] : [];
+}
 
-  if (!stats.isDirectory()) {
-    return [];
-  }
-
+function walkDirectory(root, abs) {
   const out = [];
   for (const entry of readdirSync(abs)) {
     if (entry === "node_modules" || entry === ".kuzushi") continue;
@@ -125,4 +153,21 @@ function walk(root) {
 
 function shouldScan(file) {
   return textExtensions.has(path.extname(file));
+}
+
+function checkCurrentGuidancePaths(file, patterns) {
+  const abs = path.join(repo, file);
+  const lines = readFileSync(abs, "utf8").split(/\r?\n/);
+  return lines.flatMap((line, index) => stalePathFailures(file, line, index, patterns));
+}
+
+function stalePathFailures(file, line, index, patterns) {
+  return patterns
+    .filter((pattern) => pattern.regex.test(line))
+    .map((pattern) => ({
+      file,
+      line: index + 1,
+      pattern: pattern.label,
+      text: line.trim(),
+    }));
 }

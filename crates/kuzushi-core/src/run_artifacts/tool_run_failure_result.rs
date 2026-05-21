@@ -11,12 +11,16 @@ pub(crate) fn failed_tool_result_with_context(
 }
 
 fn failed_tool_result(tool: &str, error: &str, artifacts: &[RunArtifact]) -> Value {
-    serde_json::json!({
-        "ok": false,
-        "status": "failed",
-        "summary": format!("{tool} failed"),
-        "artifacts": artifacts,
-        "warnings": [],
-        "errors": [error],
-    })
+    let mut result = crate::module_result::failed_output_result(
+        format!("{tool} failed"),
+        error.to_string(),
+        serde_json::json!({
+            "tool": tool,
+            "error": error,
+        }),
+    );
+    if let Some(object) = result.as_object_mut() {
+        object.insert("artifacts".to_string(), serde_json::json!(artifacts));
+    }
+    result
 }

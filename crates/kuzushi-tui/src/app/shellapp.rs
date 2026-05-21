@@ -13,6 +13,11 @@ pub struct ShellApp {
     pub focused_module: Option<String>,
     pub shell_view: ShellView,
     pub prev_shell_view: Option<ShellView>,
+    /// Bounded navigation history. Each view transition that isn't itself
+    /// a back-navigation pushes the previous view here. `go_back` pops the
+    /// most recent entry. Cap depth at NAV_HISTORY_DEPTH to keep memory
+    /// bounded; older entries are discarded.
+    pub nav_history: Vec<ShellView>,
     pub catalog_expanded: bool,
     /// Index of the catalog row the operator's cursor is on.  `j`/`k`
     /// move the cursor; `Enter` runs `use <module>` for that row.  Per
@@ -40,6 +45,7 @@ pub struct ShellApp {
     pub workspace_view: WorkspaceView,
     pub kb_view: KnowledgeBaseView,
     pub pwn_view: PwnView,
+    pub auth_login: Option<AuthLoginView>,
     pub agent_chat: Option<AgentChatView>,
     pub session_thinking_level: Option<String>,
     pub findings: Vec<Finding>,

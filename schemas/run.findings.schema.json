@@ -1,0 +1,130 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kuzushi.dev/schemas/run.findings.schema.json",
+  "title": "Kuzushi Run Findings Snapshot",
+  "description": "Canonical schema for .kuzushi/runs/<runId>/findings.json. Rich producer snapshots are arrays of findings; deterministic absence markers use the shared run snapshot marker fields.",
+  "type": ["object", "array"],
+  "additionalProperties": true,
+  "items": { "$ref": "#/definitions/finding" },
+  "properties": {
+    "runId": { "type": "string" },
+    "run_id": { "type": "string" },
+    "status": { "$ref": "#/definitions/runStatus" },
+    "runStatus": { "$ref": "#/definitions/runStatus" },
+    "summary": { "type": "string" },
+    "artifacts": { "type": "array" },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "coreFindings": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/finding" }
+    },
+    "core_findings": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/finding" }
+    },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/finding" }
+    }
+  },
+  "definitions": {
+    "runStatus": {
+      "type": "string",
+      "enum": ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"]
+    },
+    "finding": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "fingerprint": { "type": "string" },
+        "tool": { "type": "string" },
+        "ruleId": { "type": "string" },
+        "rule_id": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "severity": { "$ref": "#/definitions/severity" },
+        "confidence": { "$ref": "#/definitions/confidence" },
+        "filePath": { "type": "string" },
+        "file_path": { "type": "string" },
+        "startLine": { "type": "integer", "minimum": 1 },
+        "start_line": { "type": "integer", "minimum": 1 },
+        "endLine": { "type": "integer", "minimum": 1 },
+        "end_line": { "type": "integer", "minimum": 1 },
+        "staticProofState": { "$ref": "#/definitions/proofState" },
+        "static_proof_state": { "$ref": "#/definitions/proofState" },
+        "proofState": { "$ref": "#/definitions/proofState" },
+        "proof_state": { "$ref": "#/definitions/proofState" },
+        "properties": { "$ref": "#/definitions/findingProperties" },
+        "cwe": { "type": ["string", "array"] },
+        "evidence": { "type": ["string", "array", "object"] },
+        "suppressed": { "type": "boolean" },
+        "snoozedUntil": { "type": "string" },
+        "snoozed_until": { "type": "string" },
+        "remediation": { "type": "string" },
+        "references": { "type": "array" }
+      }
+    },
+    "findingProperties": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "staticProofState": { "$ref": "#/definitions/proofState" },
+        "static_proof_state": { "$ref": "#/definitions/proofState" },
+        "proofState": { "$ref": "#/definitions/proofState" },
+        "proof_state": { "$ref": "#/definitions/proofState" }
+      }
+    },
+    "severity": {
+      "type": "string",
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "low",
+        "info",
+        "unknown",
+        "ERROR",
+        "WARNING",
+        "INFO"
+      ]
+    },
+    "confidence": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": ["high", "medium", "low", "unknown", "HIGH", "MEDIUM", "LOW", "UNKNOWN"]
+        },
+        { "type": "number", "minimum": 0, "maximum": 1 },
+        { "type": "integer", "minimum": 0, "maximum": 100 }
+      ]
+    },
+    "proofState": {
+      "type": "string",
+      "enum": [
+        "signal_only",
+        "code_cited",
+        "source_sink_linked",
+        "sanitizer_checked",
+        "statically_confirmed",
+        "statically_rejected",
+        "needs_runtime_evidence",
+        "execution_confirmed",
+        "runtime_confirmed",
+        "dynamic_confirmed",
+        "exploit_confirmed",
+        "poc_confirmed",
+        "runtime_reviewed",
+        "execution_attempted",
+        "execution_rejected"
+      ]
+    }
+  }
+}

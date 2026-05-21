@@ -42,18 +42,6 @@ fn should_build_deterministically(
     runtime.is_none() || (read_string(input, &["model"]).is_none() && ctx.config.model.is_none())
 }
 
-fn require_threat_model_runtime<'a>(
-    runtime: Option<&'a dyn AgentRuntime>,
-    flavor: BuildFlavor,
-) -> Result<&'a dyn AgentRuntime> {
-    runtime.with_context(|| {
-        format!(
-            "{} requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
-            flavor.tool_name()
-        )
-    })
-}
-
 fn threat_model_build_verb(flavor: BuildFlavor) -> &'static str {
     match flavor {
         BuildFlavor::ThreatModel => "build",

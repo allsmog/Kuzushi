@@ -30,6 +30,7 @@ pub(crate) struct RepositorySignals {
     pub(crate) findings_source: String,
     pub(crate) source_files: usize,
     pub(crate) languages: Vec<String>,
+    pub(crate) frameworks: Vec<String>,
     pub(crate) codeql_languages: Vec<String>,
     pub(crate) dependency_manifests: usize,
     pub(crate) config_files: usize,

@@ -1,10 +1,12 @@
 use serde_json::{json, Map, Value};
 use std::collections::BTreeMap;
 
-const EXPLICIT_PROOF_POINTERS: &[&str] = &["/data/proof", "/data/proofs", "/proof"];
-const VERIFICATION_POINTERS: &[&str] = &["/data/verification"];
+use crate::findings::{is_runtime_proof_state, StaticProofState};
 
-const FINDING_POINTERS: &[&str] = &["/data/coreFindings", "/data/findings", "/findings"];
+const EXPLICIT_PROOF_POINTERS: &[&str] = &["/data/proof", "/data/proofs", "/proof", "/proofs"];
+const VERIFICATION_POINTERS: &[&str] = &["/data/verification", "/verification"];
+
+const FINDING_POINTERS: &[&str] = &["/data/coreFindings", "/data/findings", "/coreFindings", "/findings"];
 
 pub(crate) fn proof_snapshot_value(output: &Value) -> Option<Value> {
     explicit_proof_snapshot(output)
@@ -22,12 +24,17 @@ fn meaningful_verification_snapshot(output: &Value) -> Option<Value> {
 }
 
 fn verification_has_results(verification: &Value) -> bool {
-    verification
-        .get("verified")
+    value_at(verification, &["/verified", "/verifiedCount", "/verified_count"])
         .and_then(Value::as_u64)
         .is_some_and(|count| count > 0)
-        || verification
-            .get("results")
+        || value_at(
+            verification,
+            &[
+                "/results",
+                "/verificationResults",
+                "/verification_results",
+            ],
+        )
             .and_then(Value::as_array)
             .is_some_and(|results| !results.is_empty())
 }
@@ -44,7 +51,7 @@ fn finding_values(output: &Value) -> Option<&Vec<Value>> {
 
 fn static_proof_entry(finding: &Value) -> Option<Value> {
     let object = finding.as_object()?;
-    let state = string_field(object, &["staticProofState", "static_proof_state"])?;
+    let state = canonical_proof_state(finding_proof_state(object)?);
     Some(json!({
         "fingerprint": string_field(object, &["fingerprint"]),
         "tool": string_field(object, &["tool"]),
@@ -55,16 +62,55 @@ fn static_proof_entry(finding: &Value) -> Option<Value> {
     }))
 }
 
+fn finding_proof_state<'a>(object: &'a Map<String, Value>) -> Option<&'a str> {
+    string_field(object, PROOF_STATE_KEYS).or_else(|| {
+        object
+            .get("properties")
+            .and_then(Value::as_object)
+            .and_then(|properties| string_field(properties, PROOF_STATE_KEYS))
+    })
+}
+
+const PROOF_STATE_KEYS: &[&str] = &[
+    "staticProofState",
+    "static_proof_state",
+    "proofState",
+    "proof_state",
+];
+
+fn canonical_proof_state(raw: &str) -> String {
+    StaticProofState::try_from(raw)
+        .map(StaticProofState::as_str)
+        .unwrap_or_else(|_| raw.trim())
+        .to_string()
+}
+
 fn static_proof_report(entries: Vec<Value>) -> Value {
+    let runtime_verification = has_runtime_proof_state(&entries);
     json!({
         "status": "completed",
-        "summary": format!("{} static proof state(s) recorded from normalized findings", entries.len()),
+        "summary": format!("{} proof state(s) recorded from normalized findings", entries.len()),
         "source": "normalized-findings",
-        "proofLevel": "static-signal-only",
-        "runtimeVerification": false,
+        "proofLevel": proof_level(runtime_verification),
+        "runtimeVerification": runtime_verification,
         "countsByState": counts_by_state(&entries),
         "findings": entries,
     })
+}
+
+fn proof_level(runtime_verification: bool) -> &'static str {
+    if runtime_verification {
+        "runtime-and-static"
+    } else {
+        "static-signal-only"
+    }
+}
+
+fn has_runtime_proof_state(entries: &[Value]) -> bool {
+    entries
+        .iter()
+        .filter_map(|entry| entry.get("staticProofState").and_then(Value::as_str))
+        .any(is_runtime_proof_state)
 }
 
 fn counts_by_state(entries: &[Value]) -> BTreeMap<String, usize> {

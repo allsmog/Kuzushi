@@ -1,8 +1,18 @@
-# Kuzushi Feature Notes
+# Kuzushi Feature Backlog
+
+This file is roadmap/backlog material. It is not the current product surface.
+The shipping product focus is the evidence-backed repository security
+workbench described in `README.md`: doctor, context, scan, findings, proof,
+suppression/verification/patching, and PR-ready reporting.
+
+Features listed here should graduate only when they produce first-class
+Kuzushi artifacts and fit the repository evidence loop. Experimental pwn,
+rev.ng, pentest, governance, or defensive operations ideas must not displace
+the primary golden path in user-facing docs or shell hierarchy.
 
 ## Pwn And rev.ng Readiness
 
-Kuzushi already has the start of a useful binary-exploitation workflow in source:
+Kuzushi has an experimental binary-exploitation workflow in source:
 
 - `pwn:profile-binary`
 - `pwn:reverse`

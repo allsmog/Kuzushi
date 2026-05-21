@@ -37,8 +37,39 @@ pub(crate) fn run_x_ray(
         XRayArtifactContent::from_value_owned,
     )?;
     drop(_agent_scope);
-    write_x_ray_artifacts(&input.target, content)?;
+    finish_x_ray_run(&input, ctx, content)
+}
 
+pub(crate) fn read_x_ray(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let target = resolve_target(&input, ctx)?;
+    let repo_name = repo_name(&target);
+    let data = read_x_ray_report_artifacts(&target, Some(&repo_name), "rust", 0.0)?;
+    Ok(x_ray_response(
+        render_x_ray_read_summary(&data),
+        json!(data),
+        &data,
+    ))
+}
+
+fn x_ray_response(output: String, data: Value, report: &XRayReportData) -> Value {
+    let mut result =
+        crate::module_result::completed_output_result(output.clone(), output, data);
+    result["artifacts"] = json!([
+        { "label": "x-ray", "path": report.artifact_paths.x_ray },
+        { "label": "entry points", "path": report.artifact_paths.entry_points },
+        { "label": "invariants", "path": report.artifact_paths.invariants },
+        { "label": "architecture", "path": report.artifact_paths.architecture_svg },
+    ]);
+    result["costUsd"] = json!(report.cost_usd);
+    result
+}
+
+fn finish_x_ray_run(
+    input: &XRayRunInput,
+    ctx: &ToolExecutionContext<'_>,
+    content: XRayArtifactContent,
+) -> Result<Value> {
+    write_x_ray_artifacts(&input.target, content)?;
     let data =
         read_x_ray_report_artifacts(&input.target, Some(&input.repo_name), "pi-agent-core", 0.0)?;
     if let Some(trace) = ctx.trace {
@@ -46,21 +77,5 @@ pub(crate) fn run_x_ray(
     }
     let mut data_json = json!(data);
     data_json["kbContext"] = json!(&input.kb_context);
-    Ok(json!({
-        "ok": true,
-        "output": render_x_ray_run_summary(&data),
-        "data": data_json,
-        "costUsd": 0.0,
-    }))
-}
-
-pub(crate) fn read_x_ray(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
-    let target = resolve_target(&input, ctx)?;
-    let repo_name = repo_name(&target);
-    let data = read_x_ray_report_artifacts(&target, Some(&repo_name), "rust", 0.0)?;
-    Ok(json!({
-        "ok": true,
-        "output": render_x_ray_read_summary(&data),
-        "data": data,
-    }))
+    Ok(x_ray_response(render_x_ray_run_summary(&data), data_json, &data))
 }

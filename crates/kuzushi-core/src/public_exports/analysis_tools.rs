@@ -39,8 +39,15 @@ pub use crate::diff_scope::{
 pub use crate::iac_scan::{
     scan_iac, IacScanFinding, IacScanKind, IacScanOptions, IacScanReport, IacScanScanner,
 };
+pub use crate::license_scan::{
+    scan_licenses, scan_licenses_with_options, LicenseScanFinding, LicenseScanOptions,
+    LicenseScanReport, LicenseScanScanner,
+};
 pub use crate::recon::{
     execute_recon_tool, ReconHost, ReconNote, ReconService, ReconWorkspaceStore,
+};
+pub use crate::sbom_scan::{
+    scan_sbom, SbomComponent, SbomDependencyEdge, SbomLockfile, SbomScanReport,
 };
 pub use crate::scan::{
     default_scan_engines, index_codeql_sarif_as_static_evidence, normalize_codeql_sarif,

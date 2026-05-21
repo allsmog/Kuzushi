@@ -4,29 +4,23 @@ pub(crate) use super::*;
 use self::{PlanChange, PlanProposal, ThreatPatch, ASK_SYSTEM_PROMPT};
 use anyhow::{Context, Result};
 pub(crate) use background_tool_worker::*;
-pub(crate) use cancel_scan_worker_if_requested::*;
 use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::{
-    default_scan_engines, tool_needs_runtime, tool_uses_agent_runtime, AgentQueryRequest,
-    AgentRuntime, Finding, FindingStore, ModuleRegistry, ScanCancellation, ScanEngine,
-    ScanRunOptions, Severity, TraceHandle, V2Config, WorkspaceTarget,
+    tool_needs_runtime, tool_uses_agent_runtime, AgentQueryRequest, AgentRuntime, FindingStore,
+    ModuleRegistry, ScanCancellation, TraceHandle, V2Config, WorkspaceTarget,
 };
 use kuzushi_openai::PiAgentCoreRuntime;
 pub(crate) use parse_plan_json::*;
 pub(crate) use parse_threat_patch_json::*;
 pub(crate) use run_background_tool::*;
-pub(crate) use run_scan_worker_scanners::*;
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 pub(crate) use threat_regen_worker::*;
 pub(crate) use tool_run_status::*;
-use uuid::Uuid;
 mod background_tool_worker;
-mod cancel_scan_worker_if_requested;
 mod parse_plan_json;
 mod parse_threat_patch_json;
 mod run_background_tool;
-mod run_scan_worker_scanners;
 mod threat_regen_worker;
 mod tool_run_status;
 pub(super) use background_tool_worker::background_tool_worker;

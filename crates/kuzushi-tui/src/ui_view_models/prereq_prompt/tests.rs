@@ -26,11 +26,41 @@ fn prereq_prompt_model_formats_step_details() {
     assert_eq!(model.recommended_action, "reuse");
     assert_eq!(model.steps[0].state_label, "cached");
     assert!(model.steps[0].cached);
+    assert_eq!(model.steps[0].state_hint, None);
     assert_eq!(model.steps[0].artifact_label, "context snapshot");
     assert_eq!(model.steps[0].tool, "context-lite:index");
     assert_eq!(model.steps[0].writes, ".kuzushi/context-snapshot.json");
     assert_eq!(model.steps[0].risk, "local filesystem reads only");
     assert_eq!(model.steps[0].cost_hint, "no model cost");
+}
+
+#[test]
+fn prereq_prompt_model_marks_invalid_artifacts_non_reusable() {
+    let prompt = PendingPrereqPrompt {
+        final_tool: "sast:scan".to_string(),
+        recommended_action: PrereqPlanAction::Approve,
+        steps: vec![PrereqPlanStep {
+            tool: "context:build".to_string(),
+            artifact_path: PathBuf::from(".kuzushi/context-snapshot.json"),
+            artifact_label: "context snapshot".to_string(),
+            artifact_state: PrereqArtifactState::Invalid,
+            writes: vec![PathBuf::from(".kuzushi/context-snapshot.json")],
+            model_backed: false,
+            expensive: false,
+            risk: "local filesystem reads only".to_string(),
+            cost_hint: "no model cost".to_string(),
+        }],
+    };
+
+    let model = PrereqPromptModel::from_prompt(&prompt);
+
+    assert_eq!(model.recommended_action, "approve");
+    assert_eq!(model.steps[0].state_label, "invalid");
+    assert!(!model.steps[0].cached);
+    assert_eq!(
+        model.steps[0].state_hint,
+        Some("invalid artifact; approve or regenerate before reuse")
+    );
 }
 
 #[test]
@@ -67,4 +97,32 @@ fn plain_prereq_plan_model_formats_operator_rows() {
                 .to_string(),
         ]
     );
+}
+
+#[test]
+fn plain_prereq_plan_model_explains_invalid_artifact_state() {
+    let prompt = PendingPrereqPrompt {
+        final_tool: "sast:scan".to_string(),
+        recommended_action: PrereqPlanAction::Approve,
+        steps: vec![PrereqPlanStep {
+            tool: "context:build".to_string(),
+            artifact_path: PathBuf::from(".kuzushi/context-snapshot.json"),
+            artifact_label: "context snapshot".to_string(),
+            artifact_state: PrereqArtifactState::Invalid,
+            writes: vec![PathBuf::from(".kuzushi/context-snapshot.json")],
+            model_backed: false,
+            expensive: false,
+            risk: "local filesystem reads only".to_string(),
+            cost_hint: "no model cost".to_string(),
+        }],
+    };
+
+    let model = PlainPrereqPlanModel::from_prompt_model(PrereqPromptModel::from_prompt(&prompt));
+
+    assert!(model
+        .rows
+        .contains(&"- invalid context snapshot via context:build".to_string()));
+    assert!(model
+        .rows
+        .contains(&"  state: invalid artifact; approve or regenerate before reuse".to_string()));
 }

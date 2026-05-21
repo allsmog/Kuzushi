@@ -37,7 +37,7 @@ impl ShellApp {
             .and_then(|model| model.split_once(':').map(|(provider, _)| provider))
             .map(display_model_provider)
             .filter(|provider| !provider.trim().is_empty())
-            .unwrap_or("unconfigured")
+            .unwrap_or("— none active (press Enter on a row)")
             .to_string()
     }
 

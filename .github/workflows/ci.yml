@@ -4,15 +4,11 @@ on:
   push:
     branches: [main]
     paths-ignore:
-      - "**/*.md"
-      - "docs/**"
       - ".gitignore"
       - "LICENSE"
   pull_request:
     branches: [main]
     paths-ignore:
-      - "**/*.md"
-      - "docs/**"
       - ".gitignore"
       - "LICENSE"
   workflow_call:
@@ -66,6 +62,7 @@ jobs:
       - run: pnpm quality:identity
       - run: pnpm quality:architecture
       - run: pnpm quality:model-safety
+      - run: pnpm check:docs
       - run: pnpm check
 
   # ── Codegen drift check (parallel after install) ──────────────────────────
@@ -114,7 +111,7 @@ jobs:
       - run: cargo test --workspace
       - run: cargo build --workspace
       - run: cargo build -p kuzushi-cli --release
-      - run: mkdir -p native/linux-x64 && cp target/release/kuzushi native/linux-x64/kuzushi && chmod +x native/linux-x64/kuzushi
+      - run: node scripts/stage-native-binary.mjs
       - name: Upload native artifact
         uses: actions/upload-artifact@v4
         with:
@@ -174,7 +171,7 @@ jobs:
   # ── Verify the packed tarball is consistent (after build) ────────────────
   verify-pack:
     name: verify-pack
-    needs: build
+    needs: [build, rust-cli]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -190,6 +187,11 @@ jobs:
         with:
           name: dist
           path: dist/
+      - name: Download native artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-x64
+          path: native/
       - run: pnpm verify:pack
 
   # ── E2E smoke against native artifact ────────────────────────────────────

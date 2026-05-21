@@ -1,0 +1,140 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kuzushi.dev/schemas/run.threat-model.schema.json",
+  "title": "Kuzushi Run Threat-Model Snapshot",
+  "description": "Canonical schema for .kuzushi/runs/<runId>/threat-model.json. Rich producer snapshots may add fields; deterministic absence markers use the shared run snapshot marker fields.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "runId": { "type": "string" },
+    "run_id": { "type": "string" },
+    "status": { "$ref": "#/definitions/runStatus" },
+    "runStatus": { "$ref": "#/definitions/runStatus" },
+    "summary": { "type": ["string", "object"] },
+    "artifacts": { "type": "array" },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "document": { "type": "object" },
+    "version": { "type": "string" },
+    "methodology": { "$ref": "#/definitions/methodology" },
+    "dfd": { "$ref": "#/definitions/dfd" },
+    "nodes": { "type": "array" },
+    "flows": { "type": "array" },
+    "trustBoundaries": { "type": "array" },
+    "trust_boundaries": { "type": "array" },
+    "threats": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/threat" }
+    },
+    "relatedCwe": { "$ref": "#/definitions/stringList" },
+    "related_cwe": { "$ref": "#/definitions/stringList" },
+    "cwe": { "$ref": "#/definitions/stringList" },
+    "attackSurface": { "$ref": "#/definitions/attackSurfaceHandoff" },
+    "narrative": { "$ref": "#/definitions/narrative" },
+    "degradation": { "type": "object" }
+  },
+  "definitions": {
+    "runStatus": {
+      "type": "string",
+      "enum": ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"]
+    },
+    "methodology": {
+      "type": "string",
+      "enum": ["pasta", "stride", "dread"]
+    },
+    "dfd": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "nodes": { "type": "array" },
+        "flows": { "type": "array" },
+        "trustBoundaries": { "type": "array" },
+        "trust_boundaries": { "type": "array" }
+      }
+    },
+    "threat": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "relatedCwe": { "$ref": "#/definitions/stringList" },
+        "related_cwe": { "$ref": "#/definitions/stringList" },
+        "cwe": { "$ref": "#/definitions/stringList" }
+      }
+    },
+    "attackSurfaceHandoff": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "entryPoints": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "roleGates": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "externalSinks": {
+          "type": "array",
+          "items": { "type": "object" }
+        },
+        "trustedCallers": {
+          "type": "array",
+          "items": { "type": "object" }
+        }
+      }
+    },
+    "narrative": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "overview": { "type": "string" },
+        "inputCategories": { "$ref": "#/definitions/inputCategories" },
+        "input_categories": { "$ref": "#/definitions/inputCategories" },
+        "attackerStories": { "type": "array" },
+        "criticalityBuckets": { "type": "object" },
+        "outOfScope": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "inputCategories": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "attackerControlled": { "$ref": "#/definitions/stringList" },
+        "attacker_controlled": { "$ref": "#/definitions/stringList" },
+        "operatorControlled": { "$ref": "#/definitions/stringList" },
+        "operator_controlled": { "$ref": "#/definitions/stringList" },
+        "developerControlled": { "$ref": "#/definitions/stringList" },
+        "developer_controlled": { "$ref": "#/definitions/stringList" },
+        "externalServices": { "$ref": "#/definitions/stringList" },
+        "external_services": { "$ref": "#/definitions/stringList" },
+        "credentialFlows": { "$ref": "#/definitions/stringList" },
+        "credential_flows": { "$ref": "#/definitions/stringList" },
+        "authorizationFlows": { "$ref": "#/definitions/stringList" },
+        "authorization_flows": { "$ref": "#/definitions/stringList" },
+        "fileIngestFlows": { "$ref": "#/definitions/stringList" },
+        "file_ingest_flows": { "$ref": "#/definitions/stringList" },
+        "dataEgressFlows": { "$ref": "#/definitions/stringList" },
+        "data_egress_flows": { "$ref": "#/definitions/stringList" },
+        "callbackFlows": { "$ref": "#/definitions/stringList" },
+        "callback_flows": { "$ref": "#/definitions/stringList" },
+        "sandboxBoundary": { "$ref": "#/definitions/stringList" },
+        "sandbox_boundary": { "$ref": "#/definitions/stringList" },
+        "assumptions": { "$ref": "#/definitions/stringList" }
+      }
+    },
+    "stringList": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  }
+}

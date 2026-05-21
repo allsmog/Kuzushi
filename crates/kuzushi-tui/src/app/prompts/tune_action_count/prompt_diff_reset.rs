@@ -9,16 +9,19 @@ impl ShellApp {
             );
             return;
         };
-        if path.exists() {
-            self.log(
+        match prompt_override_path_state(&path) {
+            PromptOverridePathState::File => self.log(
                 "prompt",
                 format!("diff candidate: git diff -- {}", path.display()),
-            );
-        } else {
-            self.log(
+            ),
+            PromptOverridePathState::Missing => self.log(
                 "prompt",
                 format!("no override file to diff at {}", path.display()),
-            );
+            ),
+            PromptOverridePathState::Unreadable => self.log(
+                "prompt",
+                format!("could not diff unreadable override at {}", path.display()),
+            ),
         }
     }
 
@@ -30,19 +33,43 @@ impl ShellApp {
             );
             return;
         };
-        if !path.exists() {
-            self.log(
+        match prompt_override_path_state(&path) {
+            PromptOverridePathState::File => self.remove_prompt_override(&path),
+            PromptOverridePathState::Missing => self.log(
                 "prompt",
                 format!("no override at {} to reset", path.display()),
-            );
-            return;
+            ),
+            PromptOverridePathState::Unreadable => self.log(
+                "prompt",
+                format!("could not reset unreadable override at {}", path.display()),
+            ),
         }
-        match std::fs::remove_file(&path) {
+    }
+
+    fn remove_prompt_override(&mut self, path: &std::path::Path) {
+        match std::fs::remove_file(path) {
             Ok(_) => self.log("prompt", format!("removed override {}", path.display())),
             Err(error) => self.log(
                 "error",
                 format!("could not remove {}: {error}", path.display()),
             ),
         }
+    }
+}
+
+enum PromptOverridePathState {
+    File,
+    Missing,
+    Unreadable,
+}
+
+fn prompt_override_path_state(path: &std::path::Path) -> PromptOverridePathState {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => PromptOverridePathState::File,
+        Ok(_) => PromptOverridePathState::Unreadable,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            PromptOverridePathState::Missing
+        }
+        Err(_) => PromptOverridePathState::Unreadable,
     }
 }

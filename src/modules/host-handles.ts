@@ -24,14 +24,12 @@
 export type UiStatePatch = Record<string, unknown>;
 
 /**
- * Minimal UIStore surface. Concrete `UIStore` (in `src/ui/state.ts`) is a
- * structural superset of this interface — `getState()` returns the rich
- * `UIState`, but modules that only need string-keyed reads see it via
- * the `unknown` return.
+ * Minimal host UI surface. The active Rust shell adapter is a structural
+ * superset of this interface; modules that only need string-keyed reads see
+ * it via the `unknown` return.
  *
  * Tools use this for two things today:
- *   1. `getState()` to read the current shell phase / surface custom renderers
- *      when the Ink shell is active.
+ *   1. `getState()` to read the current shell phase or active run metadata.
  *   2. `update(partial)` to push a progress-rail entry (repo name, shell
  *      context snapshot, etc.).
  *
@@ -39,9 +37,8 @@ export type UiStatePatch = Record<string, unknown>;
  * than casting to the concrete class — adding methods is non-breaking.
  */
 /**
- * Narrow shape for one row in the ModuleRunView "steps" block. Mirrors the
- * host `ModuleRunStep` (in `src/ui/state.ts`) but re-declared here so the
- * SDK surface stays free of internal UI imports.
+ * Narrow shape for one row in the ModuleRunView "steps" block. Re-declared
+ * here so the SDK surface stays free of internal UI imports.
  */
 export interface ModuleRunStepLike {
   id: string;

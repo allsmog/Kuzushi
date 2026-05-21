@@ -39,11 +39,8 @@ impl ReconReport {
     }
 
     pub(crate) fn to_tool_json(&self) -> Value {
-        json!({
-            "ok": true,
-            "output": self.output(),
-            "data": self,
-        })
+        let output = self.output();
+        crate::module_result::completed_output_result(output.clone(), output, json!(self))
     }
 }
 

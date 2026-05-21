@@ -144,8 +144,8 @@ pub(crate) struct ModelsTomlFile {
     pub(crate) concurrency: BTreeMap<String, u32>,
 }
 
-pub struct RoutedRuntime {
-    pub(crate) inner: Arc<dyn AgentRuntime>,
+pub struct RoutedRuntime<'a> {
+    pub(crate) inner: RuntimeHandle<'a>,
     pub(crate) router: Arc<AgentRouter>,
     /// `ctx.config.model` — used when no route matches the role.
     pub(crate) operator_default: Option<String>,

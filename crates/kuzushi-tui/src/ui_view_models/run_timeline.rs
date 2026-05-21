@@ -12,6 +12,7 @@ pub(crate) enum PastRunStatus {
     Partial,
     Paused,
     Failed,
+    Malformed,
     Unknown,
 }
 
@@ -42,6 +43,7 @@ impl PastRun {
             PastRunStatus::Partial => "partial",
             PastRunStatus::Paused => "paused",
             PastRunStatus::Failed => "failed",
+            PastRunStatus::Malformed => "malformed",
             PastRunStatus::Unknown => "—",
         }
     }
@@ -112,7 +114,13 @@ fn past_run_row(past: &PastRun) -> RunTimelineRow {
 }
 
 fn short_id(run_id: &str) -> String {
-    run_id.chars().take(8).collect()
+    let chars: Vec<char> = run_id.chars().collect();
+    if chars.len() <= 16 {
+        return run_id.to_string();
+    }
+    let head: String = chars.iter().take(6).collect();
+    let tail: String = chars.iter().skip(chars.len() - 6).collect();
+    format!("{head}…{tail}")
 }
 
 fn pending_id() -> String {
@@ -154,8 +162,15 @@ fn past_run_from_entry(entry: std::fs::DirEntry) -> Option<PastRun> {
 }
 
 fn read_past_run_metadata(run_dir: &Path) -> (PastRunStatus, Option<u64>, String) {
-    let value = read_run_artifact_json(&run_dir.join("run.json"))
-        .or_else(|| read_run_artifact_json(&run_dir.join("summary.json")));
+    let value = match read_run_artifact_json(&run_dir.join("run.json")) {
+        JsonArtifactRead::Present(value) => Some(value),
+        JsonArtifactRead::Malformed => return malformed_past_run_metadata("run.json"),
+        JsonArtifactRead::Missing => match read_run_artifact_json(&run_dir.join("summary.json")) {
+            JsonArtifactRead::Present(value) => Some(value),
+            JsonArtifactRead::Malformed => return malformed_past_run_metadata("summary.json"),
+            JsonArtifactRead::Missing => None,
+        },
+    };
     let Some(value) = value else {
         return empty_past_run_metadata();
     };
@@ -174,13 +189,32 @@ fn read_past_run_metadata(run_dir: &Path) -> (PastRunStatus, Option<u64>, String
     )
 }
 
-fn read_run_artifact_json(path: &Path) -> Option<serde_json::Value> {
-    let bytes = std::fs::read(path).ok()?;
-    serde_json::from_slice::<serde_json::Value>(&bytes).ok()
+enum JsonArtifactRead {
+    Present(serde_json::Value),
+    Malformed,
+    Missing,
+}
+
+fn read_run_artifact_json(path: &Path) -> JsonArtifactRead {
+    if !path.exists() {
+        return JsonArtifactRead::Missing;
+    };
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(_) => return JsonArtifactRead::Malformed,
+    };
+    match serde_json::from_slice::<serde_json::Value>(&bytes) {
+        Ok(value) => JsonArtifactRead::Present(value),
+        Err(_) => JsonArtifactRead::Malformed,
+    }
 }
 
 fn empty_past_run_metadata() -> (PastRunStatus, Option<u64>, String) {
     (PastRunStatus::Unknown, None, String::new())
+}
+
+fn malformed_past_run_metadata(file: &str) -> (PastRunStatus, Option<u64>, String) {
+    (PastRunStatus::Malformed, None, format!("malformed {file}"))
 }
 
 fn parse_past_run_status(status: &str) -> PastRunStatus {

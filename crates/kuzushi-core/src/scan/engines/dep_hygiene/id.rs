@@ -73,7 +73,8 @@ fn cargo_audit_finding(entry: &Value) -> Option<Finding> {
         None,
         severity,
         message,
-    ))
+    )
+    .with_static_proof_state(StaticProofState::SignalOnly))
 }
 
 fn cargo_audit_advisory_field<'a>(

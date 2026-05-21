@@ -51,6 +51,9 @@ mod tests {
         let auth = app.completion_candidates("auth login a");
         assert!(auth.contains(&"auth login anthropic".to_string()));
 
+        let openai_auth = app.completion_candidates("auth login o");
+        assert!(openai_auth.contains(&"auth login openai headless".to_string()));
+
         let task_mode = app.completion_candidates("task mode m");
         assert!(task_mode.contains(&"task mode manual".to_string()));
     }

@@ -9,57 +9,24 @@ impl FindingStore {
         // dedup_key (legacy callers).
         if let Some(dedup_key) = finding.dedup_key.as_deref() {
             if let Some(existing) = self.find_collision(scan_id, dedup_key, &finding.fingerprint)? {
-                let new_sev = finding.severity;
-                let merge_id = existing.id.expect("existing finding always has id");
-                let merged_tool = merge_tool_list(&existing.tool, &finding.tool);
-                let merged_source = merge_vuln_source(existing.vuln_source, finding.vuln_source);
-                if new_sev > existing.severity {
-                    // Replace the headline rule_id/title/message with the
-                    // higher-severity finding so the operator sees the
-                    // dominant one.
-                    self.conn.execute(
-                        r#"update findings set
-                             severity = ?, rule_id = ?, title = ?, message = ?,
-                             tool = ?, vuln_source = ?
-                           where id = ?"#,
-                        params![
-                            new_sev.as_str(),
-                            finding.rule_id,
-                            finding.title,
-                            finding.message,
-                            merged_tool,
-                            merged_source.map(|s| s.as_str()),
-                            merge_id,
-                        ],
-                    )?;
-                    self.replace_finding_evidence(merge_id, &finding.evidence)?;
-                } else if existing.tool != merged_tool {
-                    self.conn.execute(
-                        "update findings set tool = ?, vuln_source = ? where id = ?",
-                        params![merged_tool, merged_source.map(|s| s.as_str()), merge_id],
-                    )?;
-                }
-                return Ok(merge_id);
+                return self.merge_finding_collision(existing, finding);
             }
         }
 
+        self.upsert_finding(scan_id, finding)?;
+        let id: i64 = self.conn.query_row(
+            "select id from findings where scan_id = ?1 and fingerprint = ?2",
+            params![scan_id, finding.fingerprint],
+            |row| row.get(0),
+        )?;
+        self.replace_finding_evidence(id, &finding.evidence)?;
+        Ok(id)
+    }
+
+    fn upsert_finding(&self, scan_id: &str, finding: &Finding) -> Result<()> {
+        let references_json = references_json(&finding.references)?;
         self.conn.execute(
-            r#"
-            insert into findings(
-              scan_id, fingerprint, rule_id, title, severity, file_path,
-              start_line, end_line, message, tool, actor_fingerprint,
-              static_proof_state, created_at, vuln_source, dedup_key
-            )
-            values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15)
-            on conflict(scan_id, fingerprint) do update set
-              title = excluded.title,
-              severity = excluded.severity,
-              message = excluded.message,
-              actor_fingerprint = excluded.actor_fingerprint,
-              static_proof_state = coalesce(excluded.static_proof_state, findings.static_proof_state),
-              vuln_source = coalesce(excluded.vuln_source, findings.vuln_source),
-              dedup_key = coalesce(excluded.dedup_key, findings.dedup_key)
-            "#,
+            UPSERT_FINDING_SQL,
             params![
                 scan_id,
                 finding.fingerprint,
@@ -76,16 +43,69 @@ impl FindingStore {
                 finding.created_at,
                 finding.vuln_source.map(|s| s.as_str()),
                 finding.dedup_key,
+                finding.suppressed,
+                finding.snoozed_until,
+                finding.remediation,
+                references_json,
             ],
         )?;
+        Ok(())
+    }
 
-        let id: i64 = self.conn.query_row(
-            "select id from findings where scan_id = ?1 and fingerprint = ?2",
-            params![scan_id, finding.fingerprint],
-            |row| row.get(0),
+    fn merge_finding_collision(&self, existing: Finding, finding: &Finding) -> Result<i64> {
+        let merge_id = existing.id.expect("existing finding always has id");
+        let merged_tool = merge_tool_list(&existing.tool, &finding.tool);
+        let merged_source = merge_vuln_source(existing.vuln_source, finding.vuln_source);
+        if finding.severity > existing.severity {
+            self.replace_collision_headline(merge_id, finding, &merged_tool, merged_source)?;
+            self.replace_finding_evidence(merge_id, &finding.evidence)?;
+        } else if existing.tool != merged_tool {
+            self.update_collision_tool(merge_id, &merged_tool, merged_source)?;
+        }
+        Ok(merge_id)
+    }
+
+    fn replace_collision_headline(
+        &self,
+        id: i64,
+        finding: &Finding,
+        merged_tool: &str,
+        merged_source: Option<VulnSource>,
+    ) -> Result<()> {
+        self.conn.execute(
+            r#"update findings set
+                 severity = ?, rule_id = ?, title = ?, message = ?,
+                 tool = ?, vuln_source = ?, suppressed = ?,
+                 snoozed_until = ?, remediation = ?, references_json = ?
+               where id = ?"#,
+            params![
+                finding.severity.as_str(),
+                finding.rule_id,
+                finding.title,
+                finding.message,
+                merged_tool,
+                merged_source.map(|s| s.as_str()),
+                finding.suppressed,
+                finding.snoozed_until,
+                finding.remediation,
+                references_json(&finding.references)?,
+                id,
+            ],
         )?;
-        self.replace_finding_evidence(id, &finding.evidence)?;
-        Ok(id)
+        Ok(())
+    }
+
+    fn update_collision_tool(
+        &self,
+        id: i64,
+        merged_tool: &str,
+        merged_source: Option<VulnSource>,
+    ) -> Result<()> {
+        self.conn.execute(
+            "update findings set tool = ?, vuln_source = ? where id = ?",
+            params![merged_tool, merged_source.map(|s| s.as_str()), id],
+        )?;
+        Ok(())
     }
 
     /// Look up an existing finding in the same scan that shares the
@@ -117,24 +137,42 @@ impl FindingStore {
             Finding {
                 id: Some(id),
                 scan_id: Some(scan_id.to_string()),
-                fingerprint: String::new(),
-                rule_id: String::new(),
-                title: String::new(),
                 severity,
-                file_path: String::new(),
-                start_line: 0,
-                end_line: None,
-                message: String::new(),
                 tool,
-                actor_fingerprint: None,
-                static_proof_state: None,
-                triage: None,
-                verification: None,
-                created_at: String::new(),
                 vuln_source,
                 dedup_key: Some(dedup_key.to_string()),
-                evidence: Vec::new(),
+                ..Finding::default()
             }
         }))
     }
 }
+
+fn references_json(references: &[String]) -> Result<Option<String>> {
+    if references.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(serde_json::to_string(references)?))
+}
+
+const UPSERT_FINDING_SQL: &str = r#"
+insert into findings(
+  scan_id, fingerprint, rule_id, title, severity, file_path,
+  start_line, end_line, message, tool, actor_fingerprint,
+  static_proof_state, created_at, vuln_source, dedup_key,
+  suppressed, snoozed_until, remediation, references_json
+)
+values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
+        ?16, ?17, ?18, ?19)
+on conflict(scan_id, fingerprint) do update set
+  title = excluded.title,
+  severity = excluded.severity,
+  message = excluded.message,
+  actor_fingerprint = excluded.actor_fingerprint,
+  static_proof_state = coalesce(excluded.static_proof_state, findings.static_proof_state),
+  vuln_source = coalesce(excluded.vuln_source, findings.vuln_source),
+  dedup_key = coalesce(excluded.dedup_key, findings.dedup_key),
+  suppressed = excluded.suppressed,
+  snoozed_until = excluded.snoozed_until,
+  remediation = excluded.remediation,
+  references_json = excluded.references_json
+"#;

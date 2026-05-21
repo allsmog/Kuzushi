@@ -2,19 +2,19 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 307
 ---
-mode:shell | target:none | options[sast:scan] | 0 findings | 33 mods
+mode:shell | target:none | view:options[sast:scan] | 0 findings | modules:36
 
  -- OPTIONS ------------------------------------------------------------------------------------------------------------
 tool: sast:scan
 view: options
 
 option            value       default    req    type   aliases           description
-mode              -           standard   no     enum   preset            Analysis mode or preset. Choices: standard|w...
+mode              -           standard   no     enum   preset            Analysis mode or preset. Choices:...
 taskMode          -           auto       no     enum   task_mode         Task-selection mode. Choices: auto|manual.
 tasks             -           -          no     list   taskIds, task...  Manual task allowlist. Use /tasks to edit.
 disabledTasks     -           -          no     list   disabled_tasks    Auto-mode task denylist. Use /tasks to edit.
-severity          -           -          no     list   -                 Optional severity filter: critical, high, me...
-triage            -           false      no     bool   aiTriage, ai_...  Run model-backed triage after static scanners.
+severity          -           -          no     list   -                 Optional severity filter: critical, high...
+triage            -           false      no     bool   aiTriage...       Run model-backed triage after static scanners.
 
 Canonical keys are in the option column; aliases are compatibility names.
 Next: set <key> <value>, setg <key> <value>, show advanced, show missing

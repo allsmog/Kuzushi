@@ -13,7 +13,7 @@ pub(super) fn threat_model_dfd_count(threat_model: Option<&Value>, key: &str) ->
     };
     document
         .get("dfd")
-        .and_then(|dfd| dfd.get(key))
+        .and_then(|dfd| dfd_array_value(dfd, key))
         .and_then(Value::as_array)
         .map(Vec::len)
         .unwrap_or(0)
@@ -35,7 +35,7 @@ pub(super) fn threat_model_related_cwes(threat_model: Option<&Value>) -> BTreeMa
         return counts;
     };
     for threat in threats {
-        collect_related_cwes(threat.get("relatedCwe"), &mut counts);
+        collect_related_cwes(threat, &mut counts);
     }
     counts
 }
@@ -80,8 +80,15 @@ fn json_array_len(document: &Value, key: &str) -> usize {
         .unwrap_or(0)
 }
 
-fn collect_related_cwes(value: Option<&Value>, counts: &mut BTreeMap<String, usize>) {
-    let Some(cwes) = value.and_then(Value::as_array) else {
+fn dfd_array_value<'a>(dfd: &'a Value, key: &str) -> Option<&'a Value> {
+    dfd.get(key).or_else(|| match key {
+        "trustBoundaries" => dfd.get("trust_boundaries"),
+        _ => None,
+    })
+}
+
+fn collect_related_cwes(threat: &Value, counts: &mut BTreeMap<String, usize>) {
+    let Some(cwes) = related_cwe_value(threat).and_then(Value::as_array) else {
         return;
     };
     for cwe in cwes.iter().filter_map(Value::as_str).filter(non_empty) {
@@ -89,10 +96,20 @@ fn collect_related_cwes(value: Option<&Value>, counts: &mut BTreeMap<String, usi
     }
 }
 
+fn related_cwe_value(threat: &Value) -> Option<&Value> {
+    threat
+        .get("relatedCwe")
+        .or_else(|| threat.get("related_cwe"))
+        .or_else(|| threat.get("cwe"))
+}
+
 fn non_empty(value: &&str) -> bool {
     !value.trim().is_empty()
 }
 
 fn canonical_threat_document(value: &Value) -> &Value {
-    value.get("document").unwrap_or(value)
+    value
+        .get("document")
+        .or_else(|| value.pointer("/data/document"))
+        .unwrap_or(value)
 }

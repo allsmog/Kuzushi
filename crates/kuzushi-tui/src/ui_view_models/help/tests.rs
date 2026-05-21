@@ -47,12 +47,12 @@ fn quickstart_model_uses_current_target_scan_shape() {
 
     let no_target = quickstart_model(&app);
 
-    assert!(no_target.steps[2].text.starts_with("scan . / run"));
+    assert!(no_target.steps[2].text.starts_with("scan ."));
     assert!(no_target.first_finding_tip.contains("`scan .`"));
 
     app.target = Some(PathBuf::from("."));
     let with_target = quickstart_model(&app);
 
-    assert!(with_target.steps[2].text.starts_with("scan / run"));
+    assert!(with_target.steps[2].text.starts_with("scan "));
     assert!(with_target.first_finding_tip.contains("`scan`"));
 }

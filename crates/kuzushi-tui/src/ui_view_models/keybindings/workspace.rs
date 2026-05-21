@@ -13,26 +13,26 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
 
 fn options_keybindings() -> Vec<FooterKeybinding> {
     vec![
-        bind("set key value", "set"),
-        bind("show advanced", "advanced"),
-        bind("show missing", "missing"),
+        bind("set key value", "session opt"),
+        bind("show advanced", "advanced opts"),
+        bind("show missing", "required"),
         bind("back", "module"),
     ]
 }
 
 fn context_keybindings() -> Vec<FooterKeybinding> {
     vec![
-        bind("context build", "build"),
-        bind("context status", "status"),
-        bind("context regen repo", "regen"),
+        bind("context build", "rebuild"),
+        bind("context status", "summary"),
+        bind("context regen repo", "refresh index"),
         bind("back", "module"),
     ]
 }
 
 fn workspace_status_keybindings() -> Vec<FooterKeybinding> {
     vec![
-        bind("workspace status", "status"),
-        bind("workspace export", "findings"),
+        bind("workspace status", "summary"),
+        bind("workspace export", "export findings"),
         bind("scan <target>", "select target"),
         bind("back", "module"),
     ]
@@ -41,8 +41,8 @@ fn workspace_status_keybindings() -> Vec<FooterKeybinding> {
 fn knowledge_base_keybindings() -> Vec<FooterKeybinding> {
     vec![
         bind("PgUp/PgDn", "scroll"),
-        bind("attach <path>", "attach"),
-        bind("detach <id>", "detach"),
-        bind("reparse <id>", "reparse"),
+        bind("attach <path>", "add file"),
+        bind("detach <id>", "remove"),
+        bind("reparse <id>", "refresh"),
     ]
 }

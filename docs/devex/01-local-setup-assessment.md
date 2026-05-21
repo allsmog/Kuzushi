@@ -123,8 +123,9 @@ compile cache. On a warm machine this turns a 200 ms incremental rebuild
 into a 6–8 s cold rebuild.
 
 **Fix applied:** Split into `build` (incremental `tsc`) and `build:clean`
-(`clean:dist && tsc`). `prepack` still calls `build:clean` for pristine
-publishes. `dist/.tsbuildinfo` already in `.gitignore` via `*.tsbuildinfo`.
+(`clean:dist && tsc`). `prepack` calls `build:clean` plus `build:native`
+for pristine publishes. `dist/.tsbuildinfo` already in `.gitignore` via
+`*.tsbuildinfo`.
 
 ### 7. [M / M] No devcontainer — Codespaces contributors start from scratch
 **Files:** (none — `.devcontainer/` does not exist)

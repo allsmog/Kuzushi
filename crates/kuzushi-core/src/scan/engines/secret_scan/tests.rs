@@ -11,6 +11,9 @@ mod tests {
                 "AWS_ACCESS_KEY_ID=AKIA1234567890ABCDEF",
                 "aws_secret_access_key = \"abcdEFGH1234567890abcdEFGH1234567890ABCD\"",
                 "GITHUB_TOKEN=ghp_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ",
+                "GITHUB_FINE_GRAINED=github_pat_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ0123456789",
+                "GITLAB_TOKEN=glpat-abcdefghijklmnopqrst",
+                "NPM_TOKEN=npm_abcdefghijklmnopqrstuvwxyzABCDEFGHIJ",
                 "password = \"aB3$eF6!hI9@kL2%mN5^\"",
             ]
             .join("\n"),
@@ -40,7 +43,17 @@ mod tests {
         assert!(rule_ids.contains("secret-scan/aws-access-key"));
         assert!(rule_ids.contains("secret-scan/aws-secret-key"));
         assert!(rule_ids.contains("secret-scan/github-pat"));
+        assert!(rule_ids.contains("secret-scan/gitlab-pat"));
+        assert!(rule_ids.contains("secret-scan/npm-access-token"));
         assert!(rule_ids.contains("secret-scan/generic-secret-assignment"));
+        assert_eq!(
+            report
+                .findings
+                .iter()
+                .filter(|finding| finding.rule_id == "secret-scan/github-pat")
+                .count(),
+            2
+        );
         assert!(report
             .findings
             .iter()

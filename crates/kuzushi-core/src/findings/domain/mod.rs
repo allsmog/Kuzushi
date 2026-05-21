@@ -22,6 +22,7 @@ pub use persisted_results::{
     PatchAttempt, PatchResult, PersistedProofVerdict, PersistedSandboxBackend,
     PersistedVerification, TriageVerdict,
 };
+pub(crate) use static_proof_state::is_runtime_proof_state;
 pub use static_proof_state::StaticProofState;
 pub use triage_outcome::TriageOutcome;
 

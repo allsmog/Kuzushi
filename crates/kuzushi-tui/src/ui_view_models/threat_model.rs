@@ -2,11 +2,10 @@ use crate::{ShellApp, ThreatPatch};
 use std::path::PathBuf;
 
 pub(crate) fn threat_model_doc(app: &ShellApp) -> Option<serde_json::Value> {
-    let doc = kuzushi_core::load_persistent_threat_model(&threat_model_root(app))?;
-    if doc.is_null() {
-        return None;
+    match read_threat_model_artifact(app) {
+        ThreatModelArtifact::Present(doc) if !doc.is_null() => Some(doc),
+        _ => None,
     }
-    Some(doc)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,10 +24,15 @@ pub(crate) struct ThreatSummaryReview {
 }
 
 pub(crate) fn threat_summary_review(app: &ShellApp) -> ThreatSummaryReview {
-    ThreatSummaryReview::from_doc(
-        threat_model_doc(app).as_ref(),
-        app.pending_threat_patch.as_ref(),
-    )
+    match read_threat_model_artifact(app) {
+        ThreatModelArtifact::Present(doc) if !doc.is_null() => {
+            ThreatSummaryReview::from_doc(Some(&doc), app.pending_threat_patch.as_ref())
+        }
+        ThreatModelArtifact::Malformed => {
+            ThreatSummaryReview::malformed(app.pending_threat_patch.as_ref())
+        }
+        _ => ThreatSummaryReview::unknown(app.pending_threat_patch.as_ref()),
+    }
 }
 
 impl ThreatSummaryReview {
@@ -78,6 +82,24 @@ impl ThreatSummaryReview {
             ],
         }
     }
+
+    fn malformed(patch: Option<&ThreatPatch>) -> Self {
+        Self {
+            status: "malformed".to_string(),
+            summary: "malformed .kuzushi/threat-model.json".to_string(),
+            threats: "unknown".to_string(),
+            assets: "unknown".to_string(),
+            actors: "unknown".to_string(),
+            flows: "unknown".to_string(),
+            trust_boundaries: "unknown".to_string(),
+            assumptions: vec!["threat-model artifact could not be parsed".to_string()],
+            missing_inputs: vec!["valid threat-model.json".to_string()],
+            proposed_changes: proposed_changes(patch),
+            limitations: vec![
+                "threat model artifact is malformed; do not infer threats from it".to_string(),
+            ],
+        }
+    }
 }
 
 fn threat_model_root(app: &ShellApp) -> PathBuf {
@@ -85,6 +107,29 @@ fn threat_model_root(app: &ShellApp) -> PathBuf {
         .clone()
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn read_threat_model_artifact(app: &ShellApp) -> ThreatModelArtifact {
+    let path = threat_model_root(app)
+        .join(".kuzushi")
+        .join("threat-model.json");
+    if !path.exists() {
+        return ThreatModelArtifact::Missing;
+    };
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(_) => return ThreatModelArtifact::Malformed,
+    };
+    match serde_json::from_str(&raw) {
+        Ok(value) => ThreatModelArtifact::Present(value),
+        Err(_) => ThreatModelArtifact::Malformed,
+    }
+}
+
+enum ThreatModelArtifact {
+    Present(serde_json::Value),
+    Malformed,
+    Missing,
 }
 
 fn doc_summary(doc: &serde_json::Value) -> String {
@@ -120,10 +165,9 @@ fn array_len(value: Option<&serde_json::Value>) -> Option<usize> {
     value.and_then(serde_json::Value::as_array).map(Vec::len)
 }
 
-fn count_label(count: Option<usize>, singular: &str) -> String {
+fn count_label(count: Option<usize>, _singular: &str) -> String {
     match count {
-        Some(1) => format!("1 {singular}"),
-        Some(count) => format!("{count} {singular}s"),
+        Some(count) => format!("{count}"),
         None => "unknown".to_string(),
     }
 }
@@ -199,11 +243,11 @@ mod tests {
 
         assert_eq!(review.status, "current persisted model");
         assert_eq!(review.summary, "checkout threat model");
-        assert_eq!(review.threats, "2 threats");
-        assert_eq!(review.assets, "3 assets");
-        assert_eq!(review.actors, "2 actors");
-        assert_eq!(review.flows, "1 data flow");
-        assert_eq!(review.trust_boundaries, "1 trust boundary");
+        assert_eq!(review.threats, "2");
+        assert_eq!(review.assets, "3");
+        assert_eq!(review.actors, "2");
+        assert_eq!(review.flows, "1");
+        assert_eq!(review.trust_boundaries, "1");
         assert_eq!(review.assumptions, vec!["cookies are in scope"]);
         assert_eq!(review.missing_inputs, vec!["network diagram"]);
         assert!(review
@@ -230,6 +274,48 @@ mod tests {
                 "add tenant boundary".to_string(),
                 "unsupported: needs runtime traces".to_string()
             ]
+        );
+    }
+
+    #[test]
+    fn threat_summary_review_surfaces_malformed_persistent_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        let artifact_dir = temp.path().join(".kuzushi");
+        std::fs::create_dir_all(&artifact_dir).unwrap();
+        std::fs::write(artifact_dir.join("threat-model.json"), "{not-json").unwrap();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.target = Some(temp.path().to_path_buf());
+
+        let review = threat_summary_review(&app);
+
+        assert_eq!(review.status, "malformed");
+        assert_eq!(review.summary, "malformed .kuzushi/threat-model.json");
+        assert_eq!(
+            review.assumptions,
+            vec!["threat-model artifact could not be parsed"]
+        );
+        assert!(review
+            .limitations
+            .iter()
+            .any(|line| line.contains("do not infer threats")));
+    }
+
+    #[test]
+    fn threat_summary_review_surfaces_unreadable_persistent_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        let artifact_dir = temp.path().join(".kuzushi");
+        std::fs::create_dir_all(&artifact_dir).unwrap();
+        std::fs::create_dir(artifact_dir.join("threat-model.json")).unwrap();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.target = Some(temp.path().to_path_buf());
+
+        let review = threat_summary_review(&app);
+
+        assert_eq!(review.status, "malformed");
+        assert_eq!(review.summary, "malformed .kuzushi/threat-model.json");
+        assert_eq!(
+            review.missing_inputs,
+            vec!["valid threat-model.json".to_string()]
         );
     }
 }

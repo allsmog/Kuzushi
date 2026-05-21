@@ -226,11 +226,13 @@ struct SastScanResultParts<'a> {
 }
 
 fn sast_scan_result(parts: SastScanResultParts<'_>) -> Value {
-    json!({
-        "ok": true,
-        "output": parts.lines.join("\n"),
-        "data": sast_scan_data(parts),
-    })
+    let output = parts.lines.join("\n");
+    let summary = output
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("sast:scan completed")
+        .to_string();
+    crate::module_result::completed_output_result(summary, output, sast_scan_data(parts))
 }
 
 fn sast_scan_data(parts: SastScanResultParts<'_>) -> Value {

@@ -8,3 +8,5 @@ mod prompt_edit_show;
 mod prompt_list;
 mod prompt_paths;
 mod prompt_set;
+
+pub(crate) use house_rules::HouseRulesRead;

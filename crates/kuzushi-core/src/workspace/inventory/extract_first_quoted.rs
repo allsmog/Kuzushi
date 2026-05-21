@@ -38,7 +38,7 @@ pub(crate) fn python_route_methods(line: &str) -> Option<String> {
 }
 
 fn python_http_methods() -> &'static [&'static str] {
-    &["get", "post", "put", "patch", "delete"]
+    &["get", "post", "put", "patch", "delete", "options", "head"]
 }
 
 fn nonempty_method_list(methods: Vec<String>) -> Option<String> {

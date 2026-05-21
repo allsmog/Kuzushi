@@ -17,6 +17,7 @@ fn language_kind_table() -> &'static [(&'static [&'static str], &'static str)] {
         (&["rs"], "Rust"),
         (&["java"], "Java"),
         (&["kt", "kts"], "Kotlin"),
+        (&["cs"], "C#"),
         (&["rb"], "Ruby"),
         (&["php"], "PHP"),
         (&["c", "h"], "C"),

@@ -11,6 +11,7 @@ pub(crate) struct PrereqPromptModel {
 pub(crate) struct PrereqPromptStepModel {
     pub(crate) state_label: String,
     pub(crate) cached: bool,
+    pub(crate) state_hint: Option<&'static str>,
     pub(crate) artifact_label: String,
     pub(crate) tool: String,
     pub(crate) writes: String,
@@ -73,6 +74,7 @@ impl PrereqPromptStepModel {
         Self {
             state_label: step.artifact_state.label().to_string(),
             cached: step.artifact_state == PrereqArtifactState::Cached,
+            state_hint: prereq_artifact_state_hint(step.artifact_state),
             artifact_label: step.artifact_label.clone(),
             tool: step.tool.clone(),
             writes: step
@@ -88,7 +90,7 @@ impl PrereqPromptStepModel {
 }
 
 fn plain_prereq_step_rows(step: PrereqPromptStepModel) -> Vec<String> {
-    vec![
+    let mut rows = vec![
         format!(
             "- {} {} via {}",
             step.state_label, step.artifact_label, step.tool
@@ -96,7 +98,20 @@ fn plain_prereq_step_rows(step: PrereqPromptStepModel) -> Vec<String> {
         format!("  writes: {}", step.writes),
         format!("  risk: {}", step.risk),
         format!("  cost: {}", step.cost_hint),
-    ]
+    ];
+    if let Some(hint) = step.state_hint {
+        rows.push(format!("  state: {hint}"));
+    }
+    rows
+}
+
+fn prereq_artifact_state_hint(state: PrereqArtifactState) -> Option<&'static str> {
+    match state {
+        PrereqArtifactState::Invalid => {
+            Some("invalid artifact; approve or regenerate before reuse")
+        }
+        PrereqArtifactState::Cached | PrereqArtifactState::Missing => None,
+    }
 }
 
 #[cfg(test)]

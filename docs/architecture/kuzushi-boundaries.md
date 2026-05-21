@@ -74,6 +74,8 @@ highest-risk dependency violations, and catch hardcoded model fallback patterns:
   patch, report, or recommender code;
 - TUI renderers dispatching runtime/tool execution;
 - TUI view models and view state dispatching runtime/tool execution;
+- retired TypeScript/React/Ink shell files, dependencies, imports, and duplicate
+  TypeScript shell-router symbols;
 - TUI runtime code using "validated" wording for states that are only checked
   or parsed;
 - production code using hardcoded provider-model literals as fallback or direct

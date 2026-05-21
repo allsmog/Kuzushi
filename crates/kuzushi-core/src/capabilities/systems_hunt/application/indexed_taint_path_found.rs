@@ -110,6 +110,7 @@ pub(crate) fn build_systems_hunt_prompt(
     ))
 }
 
+#[cfg(test)]
 pub(crate) fn format_context_for_prompt(context: &SystemsContextOutput) -> Result<String> {
     let surfaces = context
         .surfaces
@@ -128,6 +129,7 @@ pub(crate) fn format_context_for_prompt(context: &SystemsContextOutput) -> Resul
     }))?)
 }
 
+#[cfg(test)]
 fn compact_surface_for_prompt(surface: &RankedSystemsSurface) -> Value {
     json!({
         "id": &surface.id,
@@ -143,6 +145,7 @@ fn compact_surface_for_prompt(surface: &RankedSystemsSurface) -> Value {
     })
 }
 
+#[cfg(test)]
 fn compact_surface_pack_for_prompt(pack: &SystemsSurfacePack) -> Value {
     json!({
         "surfaceId": &pack.surface_id,

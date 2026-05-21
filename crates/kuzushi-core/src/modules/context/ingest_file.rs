@@ -43,7 +43,9 @@ impl RepoContextSignals {
             &["gin-gonic/gin", "gorilla/mux"],
             &mut self.frameworks,
         )?;
-        inspect_manifest_text(&root.join("go.mod"), &["gorm.io/gorm"], &mut self.orm_or_db)
+        inspect_manifest_text(&root.join("go.mod"), &["gorm.io/gorm"], &mut self.orm_or_db)?;
+        inspect_backend_framework_manifests(root, &mut self.frameworks)?;
+        inspect_dotnet_project_manifests(root, &mut self.frameworks)
     }
 
     pub(in crate::modules) fn into_json(self) -> Value {
@@ -58,6 +60,74 @@ impl RepoContextSignals {
     }
 }
 
+fn inspect_backend_framework_manifests(
+    root: &Path,
+    frameworks: &mut BTreeSet<&'static str>,
+) -> Result<()> {
+    for manifest in BACKEND_FRAMEWORK_MANIFESTS {
+        inspect_manifest_signals(&root.join(manifest.path), manifest.probes, frameworks)?;
+    }
+    Ok(())
+}
+
+struct BackendFrameworkManifest {
+    path: &'static str,
+    probes: &'static [(&'static str, &'static str)],
+}
+
+const SPRING_PROBES: &[(&str, &str)] = &[
+    ("spring-boot-starter", "spring"),
+    ("org.springframework", "spring"),
+];
+
+const BACKEND_FRAMEWORK_MANIFESTS: &[BackendFrameworkManifest] = &[
+    BackendFrameworkManifest {
+        path: "build.gradle",
+        probes: SPRING_PROBES,
+    },
+    BackendFrameworkManifest {
+        path: "build.gradle.kts",
+        probes: SPRING_PROBES,
+    },
+    BackendFrameworkManifest {
+        path: "pom.xml",
+        probes: SPRING_PROBES,
+    },
+    BackendFrameworkManifest {
+        path: "Gemfile",
+        probes: &[("rails", "rails")],
+    },
+    BackendFrameworkManifest {
+        path: "composer.json",
+        probes: &[("laravel/framework", "laravel")],
+    },
+];
+
+const DOTNET_FRAMEWORK_PROBES: &[(&str, &str)] = &[
+    ("microsoft.net.sdk.web", "aspnet-core"),
+    ("microsoft.aspnetcore", "aspnet-core"),
+];
+
+fn inspect_dotnet_project_manifests(
+    root: &Path,
+    frameworks: &mut BTreeSet<&'static str>,
+) -> Result<()> {
+    let Ok(entries) = fs::read_dir(root) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("csproj"))
+        {
+            inspect_manifest_signals(&path, DOTNET_FRAMEWORK_PROBES, frameworks)?;
+        }
+    }
+    Ok(())
+}
+
 pub(in crate::modules) fn language_for_context_file(file: &str) -> Option<&'static str> {
     match Path::new(file).extension().and_then(|ext| ext.to_str())? {
         "js" | "jsx" => Some("JavaScript"),
@@ -66,6 +136,7 @@ pub(in crate::modules) fn language_for_context_file(file: &str) -> Option<&'stat
         "py" => Some("Python"),
         "go" => Some("Go"),
         "java" => Some("Java"),
+        "cs" => Some("C#"),
         "rb" => Some("Ruby"),
         "php" => Some("PHP"),
         "c" | "h" => Some("C"),

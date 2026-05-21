@@ -6,7 +6,7 @@ use crate::proof::whitebox_policy::{
 };
 use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime};
 use crate::structured_output::{
-    parse_or_repair_required_structured_json, repair_request_from, StructuredJsonContract,
+    repair_request_from, StructuredJsonContract,
 };
 use crate::workspace::artifact_kb::{ArtifactKnowledgePromptContext, ArtifactKnowledgeSnippet};
 use anyhow::{Context, Result};

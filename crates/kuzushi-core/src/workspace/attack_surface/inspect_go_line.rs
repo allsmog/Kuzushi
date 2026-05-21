@@ -8,12 +8,22 @@ pub(crate) fn inspect_go_line(
     builder: &mut AttackSurfaceBuilder,
 ) {
     let detail = trim_detail(line);
+    if is_go_import_line(&detail) {
+        return;
+    }
     let lower = detail.to_ascii_lowercase();
     for detector in GO_LINE_DETECTORS {
         if detector.matches(&lower) {
             builder.add(detector.surface(source_file, framework, line_number, &detail));
         }
     }
+}
+
+fn is_go_import_line(line: &str) -> bool {
+    let trimmed = line.trim_start();
+    trimmed.starts_with("package ")
+        || trimmed.starts_with("import ")
+        || trimmed.starts_with('"')
 }
 
 struct GoLineDetector {
@@ -78,7 +88,14 @@ const GO_LINE_DETECTORS: &[GoLineDetector] = &[
         title: "Request trust boundary",
         boundary: "request_trust",
         detector: "go.request-trust",
-        needles: &["csrf", "cors.", "alloworigins", "samesite", "access-control-allow-origin"],
+        needles: &[
+            "csrf",
+            "cors.",
+            "alloworigins",
+            "samesite",
+            "access-control-allow-origin",
+            "r.header.get(",
+        ],
     },
     GoLineDetector {
         kind: AttackSurfaceKind::TenantIsolationBoundary,
@@ -86,12 +103,14 @@ const GO_LINE_DETECTORS: &[GoLineDetector] = &[
         boundary: "tenant_isolation",
         detector: "go.tenant-isolation",
         needles: &[
-            "tenantid",
-            "tenant_id",
+            "accountid",
+            "currentteam",
             "organizationid",
             "orgid",
+            "teamid",
+            "tenant_id",
+            "tenantid",
             "workspaceid",
-            "accountid",
         ],
     },
     GoLineDetector {
@@ -100,6 +119,18 @@ const GO_LINE_DETECTORS: &[GoLineDetector] = &[
         boundary: "parser_boundary",
         detector: "go.deserialization",
         needles: &["json.newdecoder", "yaml.", "proto.unmarshal"],
+    },
+    GoLineDetector {
+        kind: AttackSurfaceKind::FileUploadParsePath,
+        title: "File upload or multipart parser",
+        boundary: "file_upload",
+        detector: "go.file-upload",
+        needles: &[
+            "parsemultipartform(",
+            "formfile(",
+            "multipart.reader",
+            "multipart.newreader",
+        ],
     },
     GoLineDetector {
         kind: AttackSurfaceKind::DbQueryBoundary,
@@ -116,10 +147,34 @@ const GO_LINE_DETECTORS: &[GoLineDetector] = &[
         needles: &["http.get(", "http.post(", "http.newrequest(", ".do(req"],
     },
     GoLineDetector {
+        kind: AttackSurfaceKind::RpcHandler,
+        title: "gRPC handler",
+        boundary: "rpc_handler",
+        detector: "go.grpc-handler",
+        needles: &["grpc.newserver(", "grpcserver("],
+    },
+    GoLineDetector {
         kind: AttackSurfaceKind::CommandExecutionBoundary,
         title: "Command execution boundary",
         boundary: "process_execution",
         detector: "go.command-exec",
         needles: &["exec.command(", "os.startprocess("],
+    },
+    GoLineDetector {
+        kind: AttackSurfaceKind::BackgroundJob,
+        title: "Background job or queue consumer",
+        boundary: "async_job",
+        detector: "go.background-job",
+        needles: &[
+            "cron.addfunc(",
+            "readmessage(",
+            "channel.consume(",
+            "receivemessage(",
+            "subscription.receive(",
+            "nats.subscribe(",
+            "handlemux.handlefunc(",
+            "asynq.handlerfunc(",
+            "router.addhandler(",
+        ],
     },
 ];

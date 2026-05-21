@@ -1,16 +1,13 @@
-use crate::tool_requirements::{
-    reject_shell_only_run_dot, run_tool_workspace, tool_needs_finding_store, tool_needs_runtime,
-};
+#[cfg(test)]
+pub(crate) use super::run_tool_prepare::start_cli_tool_run_with_loaded_modules;
+use super::run_tool_prepare::{prepare_cli_tool_run, PreparedCliToolRun};
 use crate::tool_run_artifacts::{fail_cli_tool_run, finish_cli_tool_run};
-use anyhow::{Context, Result};
+use anyhow::Result;
 use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::run_artifacts::{
-    load_run_summary, output_with_run_fallback_context, record_tool_run_started, ToolRunRecord,
+    load_run_artifacts, load_run_summary, output_with_run_fallback_context,
 };
-use kuzushi_core::{
-    load_config_for_target, new_run_id, AgentRuntime, FindingStore, ModuleRegistry,
-    ToolOptionStore, TraceHandle, WorkspaceTarget,
-};
+use kuzushi_core::{AgentRuntime, ToolOptionStore, TraceHandle, WorkspaceTarget};
 use kuzushi_openai::PiAgentCoreRuntime;
 use std::path::{Path, PathBuf};
 
@@ -19,74 +16,24 @@ pub(crate) fn run_tool_command(
     input: String,
     options: Vec<String>,
     target: Option<PathBuf>,
+    load: Vec<String>,
+    allow_untrusted_module: bool,
 ) -> Result<()> {
-    let run = prepare_cli_tool_run(tool, input, options, target)?;
+    let run = prepare_cli_tool_run(tool, input, options, target, load, allow_untrusted_module)?;
     let output = execute_cli_tool_run(&run)?;
     println!("{}", serde_json::to_string_pretty(&output)?);
     fail_cli_on_failed_tool_output(&output)
 }
 
-struct PreparedCliToolRun {
-    tool: String,
-    workspace: Option<WorkspaceTarget>,
-    config: kuzushi_core::V2Config,
-    store: Option<FindingStore>,
-    registry: ModuleRegistry,
-    input: serde_json::Value,
-    artifact_target: PathBuf,
-    run_id: String,
-}
-
-fn prepare_cli_tool_run(
-    tool: String,
-    input: String,
-    options: Vec<String>,
-    target: Option<PathBuf>,
-) -> Result<PreparedCliToolRun> {
-    reject_shell_only_run_dot(&tool)?;
-    let workspace = run_tool_workspace(&tool, target.as_deref())?;
-    let config = load_config_for_target(workspace.as_ref().map(WorkspaceTarget::root))?;
-    let registry = ModuleRegistry::with_v2_builtins();
-    let input = serde_json::from_str(&input).context("--input must be JSON")?;
-    let option_store = run_option_store(workspace.as_ref(), &tool, &options)?;
-    let input = registry.prepare_tool_input(&tool, input, Some(&option_store))?;
-    let store = open_cli_tool_finding_store(workspace.as_ref(), &tool)?;
-    let (artifact_target, run_id) =
-        start_cli_tool_run_artifacts(workspace.as_ref(), &tool, &input)?;
-    Ok(PreparedCliToolRun {
-        tool,
-        workspace,
-        config,
-        store,
-        registry,
-        input,
-        artifact_target,
-        run_id,
-    })
-}
-
-fn open_cli_tool_finding_store(
-    workspace: Option<&WorkspaceTarget>,
-    tool: &str,
-) -> Result<Option<FindingStore>> {
-    workspace
-        .filter(|_| tool_needs_finding_store(tool))
-        .map(|workspace| FindingStore::open(workspace.findings_db_path()))
-        .transpose()
-}
-
-fn start_cli_tool_run_artifacts(
-    workspace: Option<&WorkspaceTarget>,
-    tool: &str,
-    input: &serde_json::Value,
-) -> Result<(PathBuf, String)> {
-    let target = cli_tool_run_artifact_target(workspace)?;
-    let run_id = start_cli_tool_run(&target, tool, input);
-    Ok((target, run_id))
-}
-
 fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
-    let runtime = cli_tool_runtime(run)?;
+    let runtime = match cli_tool_runtime(run) {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            let message = error.to_string();
+            fail_cli_tool_run_artifacts(run, &message);
+            return Ok(cli_failed_output_with_fallback_context(run, &message));
+        }
+    };
     let trace = cli_tool_trace(run);
     let runtime_ref = active_cli_tool_runtime(runtime.as_ref());
     let ctx = ToolExecutionContext {
@@ -102,7 +49,7 @@ fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
 }
 
 fn cli_tool_runtime(run: &PreparedCliToolRun) -> Result<Option<PiAgentCoreRuntime>> {
-    if tool_needs_runtime(&run.tool, &run.input) {
+    if run.registry.tool_needs_runtime(&run.tool, &run.input) {
         return Ok(Some(PiAgentCoreRuntime::from_config(
             &run.config,
             std::env::current_dir()?,
@@ -171,7 +118,33 @@ fn cli_output_with_fallback_context(
     run: &PreparedCliToolRun,
     output: serde_json::Value,
 ) -> serde_json::Value {
+    let output = output_with_cli_run_artifacts(&run.artifact_target, &run.run_id, output);
     output_with_run_fallback_context(&run.artifact_target, &run.run_id, output)
+}
+
+pub(crate) fn output_with_cli_run_artifacts(
+    target: &Path,
+    run_id: &str,
+    mut output: serde_json::Value,
+) -> serde_json::Value {
+    let Some(object) = output.as_object_mut() else {
+        return output;
+    };
+    if output_has_artifacts(object) {
+        return output;
+    }
+    if let Ok(artifacts) = load_run_artifacts(target, run_id) {
+        object.insert("artifacts".to_string(), serde_json::json!(artifacts));
+    }
+    output
+}
+
+fn output_has_artifacts(object: &serde_json::Map<String, serde_json::Value>) -> bool {
+    match object.get("artifacts") {
+        Some(serde_json::Value::Array(items)) => !items.is_empty(),
+        Some(serde_json::Value::Null) | None => false,
+        Some(_) => true,
+    }
 }
 
 fn fail_cli_on_failed_tool_output(output: &serde_json::Value) -> Result<()> {
@@ -240,18 +213,4 @@ pub(crate) fn parse_option_override(raw: &str) -> Result<(String, String)> {
         anyhow::bail!("--option key must not be empty");
     }
     Ok((name.to_string(), value.trim().to_string()))
-}
-
-fn cli_tool_run_artifact_target(workspace: Option<&WorkspaceTarget>) -> Result<PathBuf> {
-    match workspace {
-        Some(workspace) => Ok(workspace.root().to_path_buf()),
-        None => Ok(std::env::current_dir()?),
-    }
-}
-
-pub(crate) fn start_cli_tool_run(target: &Path, tool: &str, input: &serde_json::Value) -> String {
-    let run_id = new_run_id("run");
-    let record = ToolRunRecord::new(target, &run_id, "run", tool);
-    record_tool_run_started(record, input);
-    run_id
 }

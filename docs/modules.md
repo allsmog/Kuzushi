@@ -22,17 +22,41 @@ declarations. Kuzushi's shell, scan pipeline, and `run` command all dispatch
 through the same module contract — a tool written once works in all three
 modes.
 
-## 2. When to build one
+## 2. Current Rust Product Status
+
+Kuzushi has one module/tool contract, but not every loading surface is equally
+productized today.
+
+- **Built-in Rust modules are the shipping product surface.** They appear in
+  `kuzushi modules`, `kuzushi tools`, shell `/use`, scan tasks, and
+  `kuzushi run <module:tool>`.
+- **Retained TypeScript SDK modules are an authoring and compatibility
+  surface.** The SDK remains useful for tests, package shape, MCP bridging,
+  and migration references.
+- **Dynamic `file://` and `package:` module loading is not a supported Rust
+  CLI/TUI operator workflow yet.** Do not promise operators that arbitrary
+  third-party modules can be loaded into the native shell until that loader is
+  wired and tested in Rust.
+- **MCP servers and deferred plugin adapters are exact, explicit integrations.**
+  They should declare required binaries, plugin roots, bridge commands, and
+  model policy through options/config rather than implying generic extension
+  loading.
+
+This guide documents the contract and the SDK shape. Shipping behavior should
+be checked against `kuzushi modules`, `kuzushi tools`, and the Rust registry
+tests before docs claim a capability is available to operators.
+
+## 3. When to build one
 
 Build a module when:
 
 - You have a new scanner, intel feed, recon probe, or remediation action and
   it shouldn't live inside the core `sast` module.
 - You want independent versioning, tests, and release cadence.
-- You need to ship capability to operators via `--load file://…` or
-  `--load package:@scope/name` without forking Kuzushi.
+- You need a stable capability boundary that can later graduate into the Rust
+  built-in registry or a supported dynamic-loader surface.
 
-## 3. Anatomy
+## 4. Anatomy
 
 ```text
 my-module/
@@ -49,7 +73,7 @@ The current Rust CLI does not ship a module scaffolder. Create this layout
 manually or copy an in-tree module fixture until a Rust-native scaffolder is
 added.
 
-## 4. Manifest — `module.manifest.json`
+## 5. Manifest — `module.manifest.json`
 
 | Field | Type | Required | Notes |
 |-------|------|----------|-------|
@@ -81,7 +105,7 @@ added.
 The published schema at `schemas/module.manifest.schema.json` gives editors
 autocomplete and inline validation.
 
-## 5. The `CopilotModule` contract
+## 6. The `CopilotModule` contract
 
 Use `defineModule()` from `kuzushi/modules`. It's an identity function that
 gives TypeScript tight inference and runs a construction-time guard that
@@ -130,7 +154,7 @@ Optional fields: `rank` (`"manual" | "low" | "normal" | "good" | "great" | "exce
 
 See `src/modules/core-sast.ts` for the canonical reference.
 
-## 6. Writing a tool
+## 7. Writing a tool
 
 Every tool:
 
@@ -158,7 +182,7 @@ defineTool<"my-module">({
 });
 ```
 
-### 6.1. Writing a `DagTool`
+### 7.1. Writing a `DagTool`
 
 A `DagTool` is a `ModuleTool` that participates in the scan pipeline DAG.
 It has everything a normal tool has (`name`, `inputSchema`, `execute`) plus a
@@ -202,7 +226,7 @@ scan mode uses.
 overviews or LLM tool lists should still be authored with `defineDagTool`;
 set `hidden: true` and keep dependency names qualified.
 
-## 7. `ExecutionContext` reference
+## 8. `ExecutionContext` reference
 
 | Field | Stability | Purpose |
 |-------|-----------|---------|
@@ -233,9 +257,10 @@ are structural supersets — no casts needed when the host passes them in.
 ### Resolving `model` in a module
 
 Modules **must not** hardcode model strings as fallbacks. The runtime
-boundary (`src/agent-runtime/enforcement.ts`) rejects empty / incompatible
-models, and `loadConfig` validates `agentRuntimeBackend` against
-`config.model` before any LLM call. The right resolution chain is:
+boundary (`crates/kuzushi-core/src/runtime/policy/no_silent_fallback.rs`
+plus the Rust agent router) rejects empty / incompatible models and fallback
+chains before any LLM call. `scripts/check-model-safety.mjs` keeps that
+boundary wired into CI. The right resolution chain is:
 
 ```ts
 const model =
@@ -251,7 +276,7 @@ precedence and falls back to `context.config.model`.
 Anything that looks like `model = X ?? "anthropic:claude-..."` is the
 silent-fallback pattern the audit removed and must not return.
 
-### 7.1. Rust-side: `ctx.trace` (live module-progress feed)
+### 8.1. Rust-side: `ctx.trace` (live module-progress feed)
 
 Rust-native modules — anything in `crates/kuzushi-core/src/modules/**` — get
 an additional optional handle on `ToolExecutionContext`:
@@ -310,7 +335,7 @@ so cross-module categorization stays consistent):
 | `tool-start` / `tool-progress` / `tool-complete` | Sub-tool calls inside an agentic run. Use with `child(parent)`. |
 | `refused` / `failing` | Severity = `danger`; flips the row to Failing in the dashboard. |
 
-### 7.2. Per-LLM-call tracing via `TracedRuntime` + `parent_scope`
+### 8.2. Per-LLM-call tracing via `TracedRuntime` + `parent_scope`
 
 Beyond the explicit `ctx.trace.step(...)` boundaries above, **every LLM
 call is auto-traced**. The dispatch wrapper at
@@ -362,7 +387,7 @@ See `src/run_artifacts/trace_handle.rs` for the implementation and
 `crates/kuzushi-tui/tests/activity_dag_fixture.rs` for end-to-end
 integration tests showing how to drive the view from a fake DAG.
 
-## 8. `reportActivity` vs `reportOutput`
+## 9. `reportActivity` vs `reportOutput`
 
 Use `reportActivity` for **structured phase labels** — they land in the
 shell's progress rail and scrollback:
@@ -384,7 +409,7 @@ ctx.reportOutput?.("npm install: added 142 packages in 3.4s");
 Both are best-effort and optional — the `?.` matters in unit tests where no
 bus is wired.
 
-## 9. `costUsd`
+## 10. `costUsd`
 
 LLM-driven tools should report per-invocation spend so the shell can show a
 run-level total and honor `--budget` caps:
@@ -398,7 +423,7 @@ return {
 };
 ```
 
-## 10. Capability probe — `ctx.host.capabilities`
+## 11. Capability probe — `ctx.host.capabilities`
 
 `ctx.host` is populated by `CopilotCore.executeTool`. Feature-probe before
 depending on an optional capability so your tool survives both shell-mode
@@ -417,9 +442,10 @@ Well-known capabilities: `"workspace"`, `"ui-store"`, `"datastore"`,
 The set is open — authors can publish modules that probe future capabilities
 without a kuzushi release.
 
-## 11. Load specifiers
+## 12. Load specifiers
 
-Kuzushi resolves four specifier prefixes:
+The TypeScript loader and compatibility layer understand four specifier
+prefixes:
 
 | Prefix | Example | Source |
 |--------|---------|--------|
@@ -430,16 +456,12 @@ Kuzushi resolves four specifier prefixes:
 
 A bare string (`"foo"`) defaults to `{ type: "builtin", id: "foo" }`.
 
-```bash
-# Interactive shell with a local module
-kuzushi shell --load file:///abs/path/to/my-module
+The native Rust CLI/TUI does not currently expose `--load file://...` or
+`--load package:...` as a supported operator path. Use the table above to
+author compatible modules and tests, but only document dynamic loading in
+operator-facing material after the Rust loader is wired end to end.
 
-# Headless single-tool dispatch
-kuzushi run my-module:ping --input '{"target":"example.com"}' \
-  --load file:///abs/path/to/my-module
-```
-
-## 12. Load errors — `ModuleLoadError`
+## 13. Load errors — `ModuleLoadError`
 
 The loader throws `ModuleLoadError` instead of plain `Error`. Branch on
 `err.code`:
@@ -458,7 +480,7 @@ The loader throws `ModuleLoadError` instead of plain `Error`. Branch on
 `ModuleLoadError extends Error`, so legacy `catch (err) { err.message }`
 patterns keep working.
 
-## 13. Testing
+## 14. Testing
 
 The `kuzushi/testing` export gives you in-memory helpers so tools can be
 unit-tested without spinning up a real runtime or SQLite store.
@@ -489,13 +511,13 @@ describe("my-module", () => {
 permissive defaults and accepts per-field overrides. See
 `src/testing/index.ts` for the full helper list.
 
-## 14. Scaffolding status
+## 15. Scaffolding status
 
 The legacy TypeScript CLI had a `kuzushi create-module` scaffolder during SDK
 hardening. That command is not part of the current Rust operator CLI, so it
 must not appear in first-run instructions or CI examples.
 
-Until a Rust-native scaffolder is implemented, create the layout from §3
+Until a Rust-native scaffolder is implemented, create the layout from §4
 manually:
 
 - `module.manifest.json` with `$schema`, `id`, `displayName`, `version`,
@@ -505,7 +527,7 @@ manually:
 - `src/index.test.ts` using `createMockToolContext` + `expectModuleShape`.
 - `README.md` with load and run examples.
 
-## 15. MCP modules
+## 16. MCP modules
 
 Kuzushi can bridge any MCP-compatible server into a `CopilotModule` via
 `--load mcp:<spec>`. Each MCP tool becomes a `ModuleTool`; the bridge
@@ -521,11 +543,11 @@ Auth tokens flow via `CreateMcpModuleOptions.authToken` or the
 The minimum an MCP server must implement to be Kuzushi-compatible is
 documented in [`mcp-server-requirements.md`](./mcp-server-requirements.md).
 
-## 16. Troubleshooting
+## 17. Troubleshooting
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| `Unknown tool: module:action` | Module not loaded, wrong id, or tool prefix mismatch. | Check `/modules`; verify `--load` specifier. |
+| `Unknown tool: module:action` | Module not registered, wrong id, unsupported dynamic loading path, or tool prefix mismatch. | Check `kuzushi modules` / `kuzushi tools`; for Rust CLI usage, use a built-in or explicitly wired integration. |
 | `ModuleLoadError: MANIFEST_MISSING` | No `module.manifest.json` at the path. | Add manifest at module root. |
 | `ModuleLoadError: REQUIREMENTS_UNMET` | Missing env var or Node version. | Set env; upgrade Node per manifest. |
 | `ModuleLoadError: ID_MISMATCH` | Manifest `id` ≠ exported module's `id`. | Align them. |
@@ -534,7 +556,7 @@ documented in [`mcp-server-requirements.md`](./mcp-server-requirements.md).
 | `ModuleLoadError: SDK_INCOMPATIBLE` | Manifest `kuzushiSdkVersion` major differs from host. | Bump manifest or pin host. |
 | MCP tool stuck for 60s | Server timeout. | Raise `timeoutMs` or investigate server. |
 
-## 17. Minimal starter
+## 18. Minimal starter
 
 Complete one-file module, copy-pasteable:
 
@@ -572,9 +594,7 @@ export default defineModule({
 });
 ```
 
-Ship it with a `module.manifest.json` as shown in §4, build to `./dist/index.js`,
-then:
-
-```bash
-kuzushi shell --load file:///abs/path/to/my-module
-```
+Ship it with a `module.manifest.json` as shown in §5 and build to
+`./dist/index.js`. Today, use this starter for SDK tests and compatibility
+work; native Rust CLI/TUI dynamic loading should wait for the supported loader
+path described in §2 and §12.

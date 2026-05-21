@@ -10,14 +10,15 @@ pub(super) fn shinsa_response(
     findings: Vec<Finding>,
     persisted: Option<GenericPersistedRun>,
 ) -> Value {
-    json!({
-        "ok": true,
-        "output": format!(
-            "{tool_name} complete\n  Mode:     {mode}\n  Output:   {}/\n  Artifacts: shinsa-state.json compliance-report.md\n  Findings: {}",
-            output_dir,
-            findings.len()
-        ),
-        "data": {
+    let output = format!(
+        "{tool_name} complete\n  Mode:     {mode}\n  Output:   {}/\n  Artifacts: shinsa-state.json compliance-report.md\n  Findings: {}",
+        output_dir,
+        findings.len()
+    );
+    let mut result = crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
             "target": target.display().to_string(),
             "mode": mode,
             "pluginRoot": plugin_root.display().to_string(),
@@ -26,7 +27,12 @@ pub(super) fn shinsa_response(
             "reportPath": artifacts.report_path.display().to_string(),
             "findings": findings,
             "persisted": persisted,
-        },
-        "costUsd": 0.0,
-    })
+        }),
+    );
+    result["artifacts"] = json!([
+        { "label": "state", "path": artifacts.state_path.display().to_string() },
+        { "label": "report", "path": artifacts.report_path.display().to_string() },
+    ]);
+    result["costUsd"] = json!(0.0);
+    result
 }

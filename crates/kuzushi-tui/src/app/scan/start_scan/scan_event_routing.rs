@@ -4,36 +4,13 @@ use kuzushi_core::RunTraceStep;
 impl ShellApp {
     pub(crate) fn apply_scan_event(&mut self, event: ScanEvent) {
         match event {
-            ScanEvent::Started { run_id, target } => self.apply_scan_started(run_id, target),
             ScanEvent::Stage(stage) => self.apply_scan_stage(stage),
-            ScanEvent::FindingStored {
-                fingerprint,
-                severity,
-                title,
-            } => self.apply_scan_finding_stored(fingerprint, severity, title),
             ScanEvent::Finished {
                 run_id,
                 findings_count,
             } => self.apply_scan_finished(run_id, findings_count),
             ScanEvent::Failed { error } => self.apply_scan_failed(error),
-            ScanEvent::Cancelled { run_id } => self.apply_scan_cancelled(run_id),
         }
-    }
-
-    pub(crate) fn apply_scan_started(&mut self, run_id: String, target: PathBuf) {
-        if let Some(scan) = &mut self.scan {
-            scan.run_id = Some(run_id.clone());
-            scan.target = target;
-            scan.stage = "starting scan".to_string();
-            scan.abort_requested = false;
-        }
-        // Mirror the run_id into the Activity session so the dashboard
-        // header reflects the worker's actual run id (replacing the
-        // "scan-pending" placeholder set by start_scan).
-        if let Some(session) = self.activity.as_mut() {
-            session.run_id = run_id.clone();
-        }
-        self.log("scan", format!("run {}", short_fingerprint(&run_id)));
     }
 
     pub(crate) fn apply_scan_stage(&mut self, stage: String) {

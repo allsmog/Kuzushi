@@ -15,7 +15,8 @@ impl FindingStore {
               f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
               f.static_proof_state, f.created_at,
               t.verdict, t.confidence, t.rationale, t.cost_usd,
-              f.vuln_source, f.dedup_key
+              f.vuln_source, f.dedup_key, f.suppressed, f.snoozed_until,
+              f.remediation, f.references_json
             from findings f
             left join triage t on t.finding_id = f.id
             where f.scan_id = ?1
@@ -38,7 +39,8 @@ impl FindingStore {
               f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
               f.static_proof_state, f.created_at,
               t.verdict, t.confidence, t.rationale, t.cost_usd,
-              f.vuln_source, f.dedup_key
+              f.vuln_source, f.dedup_key, f.suppressed, f.snoozed_until,
+              f.remediation, f.references_json
             from findings f
             left join triage t on t.finding_id = f.id
             order by
@@ -55,20 +57,35 @@ impl FindingStore {
         )?;
 
         let rows = stmt.query_map([], row_to_finding)?;
-        let mut count = 0;
-        let mut findings = Vec::new();
-        for row in rows {
-            let finding = row.context("Could not list findings")?;
-            if !filter.matches(&finding) {
-                continue;
-            }
-            count += 1;
-            if findings.len() < filter.limit {
-                findings.push(finding);
-            }
-        }
-
+        let (count, mut findings) = collect_filtered_findings(rows, filter)?;
         self.attach_evidence_to_findings(&mut findings)?;
         Ok(FindingListReport { count, findings })
     }
+}
+
+fn collect_filtered_findings(
+    rows: impl Iterator<Item = rusqlite::Result<Finding>>,
+    filter: &FindingListFilter,
+) -> Result<(usize, Vec<Finding>)> {
+    let mut count = 0;
+    let mut findings = Vec::new();
+    for row in rows {
+        let finding = row.context("Could not list findings")?;
+        count += push_matching_finding(&mut findings, finding, filter) as usize;
+    }
+    Ok((count, findings))
+}
+
+fn push_matching_finding(
+    findings: &mut Vec<Finding>,
+    finding: Finding,
+    filter: &FindingListFilter,
+) -> bool {
+    if !filter.matches(&finding) {
+        return false;
+    }
+    if findings.len() < filter.limit {
+        findings.push(finding);
+    }
+    true
 }

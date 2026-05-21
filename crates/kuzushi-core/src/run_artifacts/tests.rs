@@ -1,7 +1,12 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use crate::artifact_contract::{
+        CANONICAL_RUN_ARTIFACTS, OPTIONAL_RUN_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
+    };
     use std::fs;
+    use std::path::Path;
+    use std::process::Command;
 
     #[test]
     fn trace_step_v2_round_trip_preserves_new_fields() {
@@ -46,6 +51,34 @@ mod tests {
     }
 
     #[test]
+    fn trace_step_accepts_camel_case_reader_aliases() {
+        let json = serde_json::json!({
+            "n": 4,
+            "kind": "reasoning",
+            "label": "query",
+            "latencyMs": 25,
+            "costUsd": 0.02,
+            "moduleId": "triage",
+            "verb": "run",
+            "parentStep": 3,
+            "severity": "info",
+            "startedAtMs": 1_700_000_000_000u64,
+            "model": "openai:gpt-test",
+            "provider": "openai",
+            "promptHash": "fnv1a64:abc"
+        });
+
+        let parsed: RunTraceStep = serde_json::from_value(json).unwrap();
+
+        assert_eq!(parsed.latency_ms, Some(25));
+        assert_eq!(parsed.cost_usd, Some(0.02));
+        assert_eq!(parsed.module_id.as_deref(), Some("triage"));
+        assert_eq!(parsed.parent_step, Some(3));
+        assert_eq!(parsed.started_at_ms, Some(1_700_000_000_000));
+        assert_eq!(parsed.prompt_hash.as_deref(), Some("fnv1a64:abc"));
+    }
+
+    #[test]
     fn trace_step_v2_omits_unset_optional_fields_from_serialized_form() {
         let step = RunTraceStep::new(1, "tool", "context:build started");
         let json = serde_json::to_string(&step).unwrap();
@@ -67,6 +100,122 @@ mod tests {
 
         assert_eq!(step.module_id.as_deref(), Some("semgrep"));
         assert_eq!(step.verb.as_deref(), Some("scan"));
+    }
+
+    #[test]
+    fn run_event_numbering_counts_malformed_rows_and_uses_max_n() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-event-numbering";
+        let events_path = run_dir(tmp.path(), run_id).join("events.jsonl");
+        fs::create_dir_all(events_path.parent().unwrap()).unwrap();
+        fs::write(
+            &events_path,
+            [
+                r#"{"n":1,"kind":"tool","status":"started","message":"start","atUnix":1}"#,
+                "",
+                "not-json",
+                r#"{"n":7,"kind":"tool","status":"completed","message":"done","at_unix":2}"#,
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        assert_eq!(next_run_event_number(tmp.path(), run_id), 8);
+    }
+
+    #[test]
+    fn run_event_numbering_advances_past_malformed_tail_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-event-malformed-tail";
+        let events_path = run_dir(tmp.path(), run_id).join("events.jsonl");
+        fs::create_dir_all(events_path.parent().unwrap()).unwrap();
+        fs::write(
+            &events_path,
+            [
+                r#"{"n":1,"kind":"tool","status":"started","message":"start","atUnix":1}"#,
+                "{not-json",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        assert_eq!(next_run_event_number(tmp.path(), run_id), 3);
+    }
+
+    #[test]
+    fn run_trace_numbering_advances_past_malformed_tail_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-trace-malformed-tail";
+        let trace_path = run_dir(tmp.path(), run_id).join("trace.jsonl");
+        fs::create_dir_all(trace_path.parent().unwrap()).unwrap();
+        fs::write(
+            &trace_path,
+            [
+                r#"{"n":1,"kind":"reasoning","label":"query"}"#,
+                "{not-json",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        assert_eq!(next_run_trace_step_number(tmp.path(), run_id), 3);
+    }
+
+    #[test]
+    fn run_event_accepts_tool_name_aliases() {
+        let camel: RunEvent = serde_json::from_str(
+            r#"{"n":1,"kind":"tool","status":"started","message":"ask","atUnix":1,"toolName":"agent:ask"}"#,
+        )
+        .unwrap();
+        let snake: RunEvent = serde_json::from_str(
+            r#"{"n":2,"kind":"tool","status":"completed","message":"scan","at_unix":2,"tool_name":"sast:scan"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(camel.tool.as_deref(), Some("agent:ask"));
+        assert_eq!(snake.tool.as_deref(), Some("sast:scan"));
+    }
+
+    #[test]
+    fn run_event_accepts_artifact_path_aliases() {
+        let camel: RunEvent = serde_json::from_str(
+            r#"{"n":1,"kind":"tool","status":"started","message":"scan","atUnix":1,"artifactPath":" input.json "}"#,
+        )
+        .unwrap();
+        let snake: RunEvent = serde_json::from_str(
+            r#"{"n":2,"kind":"tool","status":"completed","message":"done","at_unix":2,"artifact_path":"result.jsonl"}"#,
+        )
+        .unwrap();
+
+        assert_eq!(camel.artifact.as_ref().map(|artifact| artifact.path.as_str()), Some("input.json"));
+        assert_eq!(camel.artifact.as_ref().map(|artifact| artifact.kind.as_str()), Some("json"));
+        assert_eq!(snake.artifact.as_ref().map(|artifact| artifact.path.as_str()), Some("result.jsonl"));
+        assert_eq!(snake.artifact.as_ref().map(|artifact| artifact.kind.as_str()), Some("jsonl"));
+    }
+
+    #[test]
+    fn run_event_with_artifact_normalizes_direct_artifact_values() {
+        let event = RunEvent::new(1, "tool", "completed", "done").with_artifact(RunArtifact {
+            label: " result ".to_string(),
+            path: " result.json ".to_string(),
+            kind: " JSON ".to_string(),
+        });
+
+        let artifact = event.artifact.as_ref().unwrap();
+        assert_eq!(artifact.label, "result");
+        assert_eq!(artifact.path, "result.json");
+        assert_eq!(artifact.kind, "json");
+    }
+
+    #[test]
+    fn run_event_with_artifact_drops_blank_direct_artifact_path() {
+        let event = RunEvent::new(1, "tool", "completed", "done").with_artifact(RunArtifact {
+            label: "empty".to_string(),
+            path: "   ".to_string(),
+            kind: "json".to_string(),
+        });
+
+        assert!(event.artifact.is_none());
     }
 
     #[test]
@@ -106,6 +255,906 @@ mod tests {
     }
 
     #[test]
+    fn run_summary_records_malformed_trace_line_count() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-llm-audit-malformed";
+        let trace_path = run_dir(tmp.path(), run_id).join("trace.jsonl");
+        fs::create_dir_all(trace_path.parent().unwrap()).unwrap();
+        fs::write(
+            &trace_path,
+            [
+                serde_json::to_string(
+                    &RunTraceStep::new(1, "reasoning", "query")
+                        .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:abc123"),
+                )
+                .unwrap(),
+                "{not-json".to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+
+        let loaded = load_run_summary(tmp.path(), run_id).unwrap();
+        assert_eq!(loaded.llm_calls.len(), 1);
+        assert_eq!(loaded.trace_malformed_lines, Some(1));
+
+        let metadata = fs::read_to_string(run_dir(tmp.path(), run_id).join("run.json")).unwrap();
+        assert!(metadata.contains("\"traceMalformedLines\": 1"));
+    }
+
+    #[test]
+    fn run_summary_records_available_reproducibility_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-repro-metadata";
+        let summary = RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+            .complete()
+            .with_model(Some(" openai:gpt-test ".to_string()))
+            .with_config_hash(Some(" sha256:abc123 ".to_string()));
+
+        write_run_summary(tmp.path(), &summary).unwrap();
+
+        let loaded = load_run_summary(tmp.path(), run_id).unwrap();
+        assert_eq!(
+            loaded.kuzushi_version.as_deref(),
+            Some(env!("CARGO_PKG_VERSION"))
+        );
+        assert_eq!(loaded.platform, Some(runtime_platform_label()));
+        assert_eq!(loaded.model.as_deref(), Some("openai:gpt-test"));
+        assert_eq!(loaded.config_hash.as_deref(), Some("sha256:abc123"));
+        assert!(!loaded.cli_args.is_empty());
+
+        let metadata = fs::read_to_string(run_dir(tmp.path(), run_id).join("run.json")).unwrap();
+        assert!(metadata.contains("\"kuzushiVersion\""));
+        assert!(metadata.contains("\"platform\""));
+        assert!(metadata.contains("\"model\": \"openai:gpt-test\""));
+        assert!(metadata.contains("\"configHash\": \"sha256:abc123\""));
+        assert!(metadata.contains("\"cliArgs\""));
+    }
+
+    #[test]
+    fn run_summary_schema_matches_serialized_metadata_keys() {
+        let schema = run_summary_schema();
+        let value = serde_json::to_value(representative_run_summary()).unwrap();
+
+        assert_required_schema_fields_exist(&schema, &value);
+        assert_serialized_fields_are_declared(&schema, &value);
+        assert_run_summary_llm_entries_match_schema(&schema, &value);
+    }
+
+    #[test]
+    fn run_summary_schema_covers_snake_case_metadata_aliases() {
+        let schema = run_summary_schema();
+        let value = representative_snake_case_run_summary();
+
+        assert_serialized_fields_are_declared(&schema, &value);
+        assert_run_summary_llm_entries_match_schema(&schema, &value);
+        assert_schema_allows_required_alias_pair(&schema, ["runId", "run_id"]);
+        assert_schema_allows_required_alias_pair(
+            &schema,
+            ["startedAtUnix", "started_at_unix"],
+        );
+        assert_llm_call_schema_requires_prompt_hash_aliases(&schema);
+    }
+
+    #[test]
+    fn run_summary_schema_covers_artifact_reader_aliases() {
+        let schema = run_summary_schema();
+        let artifact_schema = &schema["definitions"]["artifact"];
+
+        assert_schema_declares_definition_fields(
+            &schema,
+            "artifact",
+            &[
+                "name",
+                "title",
+                "filePath",
+                "file_path",
+                "reportJsonPath",
+                "report_json_path",
+                "promptsDir",
+                "prompts_dir",
+                "type",
+            ],
+        );
+        assert_schema_allows_required_alias_set(artifact_schema, &["label", "name", "title"]);
+        assert_schema_allows_required_alias_set(artifact_schema, &["kind", "type"]);
+    }
+
+    #[test]
+    fn run_artifact_manifest_schema_matches_serialized_keys() {
+        let schema = run_artifact_manifest_schema();
+        let value = serde_json::to_value(representative_artifact_manifest()).unwrap();
+
+        assert_required_schema_fields_exist(&schema, &value);
+        assert_serialized_fields_are_declared(&schema, &value);
+        assert_artifact_entries_match_schema(&schema, &value);
+    }
+
+    #[test]
+    fn run_artifact_manifest_schema_covers_snake_case_run_id_alias() {
+        let schema = run_artifact_manifest_schema();
+        let value = representative_snake_case_artifact_manifest();
+
+        assert_serialized_fields_are_declared(&schema, &value);
+        assert_artifact_entries_match_schema(&schema, &value);
+        assert_schema_requires_any_field(&schema, &["runId", "run_id"]);
+    }
+
+    #[test]
+    fn run_artifact_manifest_schema_covers_artifact_reader_aliases() {
+        let schema = run_artifact_manifest_schema();
+        let artifact_schema = &schema["definitions"]["artifact"];
+
+        assert_schema_declares_definition_fields(
+            &schema,
+            "artifact",
+            &[
+                "name",
+                "title",
+                "file",
+                "filePath",
+                "file_path",
+                "reportPath",
+                "report_path",
+                "reportJsonPath",
+                "report_json_path",
+                "scopePath",
+                "scope_path",
+                "dir",
+                "outputDir",
+                "output_dir",
+                "promptsDir",
+                "prompts_dir",
+                "type",
+            ],
+        );
+        assert_schema_allows_required_alias_set(artifact_schema, &["label", "name", "title"]);
+        assert_schema_allows_required_alias_set(artifact_schema, &["kind", "type"]);
+    }
+
+    #[test]
+    fn run_failures_schema_matches_serialized_keys() {
+        let schema = run_failures_schema();
+        let value = serde_json::to_value(representative_run_failures()).unwrap();
+
+        assert_required_schema_fields_exist(&schema, &value);
+        assert_serialized_fields_are_declared(&schema, &value);
+        assert_failure_entries_match_schema(&schema, &value);
+    }
+
+    #[test]
+    fn run_failures_schema_covers_snake_case_aliases() {
+        let schema = run_failures_schema();
+        let value = representative_snake_case_run_failures();
+
+        assert_serialized_fields_are_declared(&schema, &value);
+        assert_failure_entries_match_schema(&schema, &value);
+        assert_schema_requires_any_field(&schema, &["runId", "run_id"]);
+        assert_failure_schema_requires_any_context_key(&schema);
+        assert_failure_context_schema_requires_alias_pairs(&schema);
+    }
+
+    #[test]
+    fn run_failures_schema_covers_available_artifact_aliases() {
+        let schema = run_failures_schema();
+        let artifact_schema = &schema["definitions"]["artifact"];
+
+        assert_schema_declares_definition_fields(
+            &schema,
+            "artifact",
+            &[
+                "name",
+                "title",
+                "file",
+                "filePath",
+                "file_path",
+                "reportJsonPath",
+                "report_json_path",
+                "promptsDir",
+                "prompts_dir",
+                "type",
+            ],
+        );
+        assert_schema_allows_required_alias_set(artifact_schema, &["label", "name", "title"]);
+        assert_schema_allows_required_alias_set(artifact_schema, &["kind", "type"]);
+    }
+
+    #[test]
+    fn run_event_schema_matches_serialized_keys() {
+        let schema = run_event_schema();
+        let value = serde_json::to_value(representative_run_event()).unwrap();
+
+        assert_required_schema_fields_exist(&schema, &value);
+        assert_serialized_fields_are_declared(&schema, &value);
+        assert_event_artifact_matches_schema(&schema, &value);
+    }
+
+    #[test]
+    fn run_event_schema_covers_reader_aliases() {
+        let schema = run_event_schema();
+
+        assert_schema_allows_required_alias_pair(&schema, ["atUnix", "at_unix"]);
+        assert_schema_declares_fields(
+            &schema,
+            &[
+                "toolName",
+                "tool_name",
+                "artifactPath",
+                "artifact_path",
+            ],
+        );
+    }
+
+    #[test]
+    fn run_event_schema_covers_artifact_reader_aliases() {
+        let schema = run_event_schema();
+        let artifact_schema = &schema["definitions"]["artifact"];
+
+        assert_schema_declares_definition_fields(
+            &schema,
+            "artifact",
+            &[
+                "name",
+                "title",
+                "filePath",
+                "file_path",
+                "reportJsonPath",
+                "report_json_path",
+                "promptsDir",
+                "prompts_dir",
+                "type",
+            ],
+        );
+        assert_schema_allows_required_alias_set(artifact_schema, &["label", "name", "title"]);
+        assert_schema_allows_required_alias_set(artifact_schema, &["kind", "type"]);
+    }
+
+    #[test]
+    fn run_trace_schema_matches_serialized_keys() {
+        let schema = run_trace_schema();
+        let value = serde_json::to_value(representative_trace_step()).unwrap();
+
+        assert_required_schema_fields_exist(&schema, &value);
+        assert_serialized_fields_are_declared(&schema, &value);
+    }
+
+    #[test]
+    fn run_trace_schema_covers_reader_aliases() {
+        let schema = run_trace_schema();
+
+        assert_schema_declares_fields(
+            &schema,
+            &[
+                "latencyMs",
+                "costUsd",
+                "moduleId",
+                "parentStep",
+                "startedAtMs",
+                "promptHash",
+            ],
+        );
+    }
+
+    #[test]
+    fn run_context_schema_covers_marker_and_rich_snapshot_keys() {
+        let schema = run_context_schema();
+        let marker = representative_missing_context_snapshot();
+        let rich = representative_rich_context_snapshot();
+
+        assert_snapshot_marker_fields_are_declared(&schema);
+        assert_serialized_fields_are_declared(&schema, &marker);
+        assert_serialized_fields_are_declared(&schema, &rich);
+    }
+
+    #[test]
+    fn run_attack_surface_schema_covers_marker_and_rich_snapshot_keys() {
+        let schema = run_attack_surface_schema();
+        let marker = representative_missing_attack_surface_snapshot();
+        let rich = representative_rich_attack_surface_snapshot();
+
+        assert_snapshot_marker_fields_are_declared(&schema);
+        assert_serialized_fields_are_declared(&schema, &marker);
+        assert_serialized_fields_are_declared(&schema, &rich);
+    }
+
+    #[test]
+    fn run_threat_model_schema_covers_marker_and_rich_snapshot_keys() {
+        let schema = run_threat_model_schema();
+        let marker = representative_missing_threat_model_snapshot();
+        let rich = representative_rich_threat_model_snapshot();
+
+        assert_snapshot_marker_fields_are_declared(&schema);
+        assert_serialized_fields_are_declared(&schema, &marker);
+        assert_serialized_fields_are_declared(&schema, &rich);
+    }
+
+    #[test]
+    fn run_recommendations_schema_covers_marker_and_rich_snapshot_keys() {
+        let schema = run_recommendations_schema();
+        let marker = representative_missing_recommendations_snapshot();
+        let rich = representative_rich_recommendations_snapshot();
+        let enveloped = representative_data_wrapped_recommendations_snapshot();
+
+        assert_snapshot_marker_fields_are_declared(&schema);
+        assert_serialized_fields_are_declared(&schema, &marker);
+        assert_serialized_fields_are_declared(&schema, &rich);
+        assert_serialized_fields_are_declared(&schema, &enveloped);
+        assert_recommendation_entries_match_schema(&schema, &rich);
+        assert_recommendation_report_matches_schema(&schema, &enveloped["data"]);
+        assert_recommendation_report_envelope_aliases_match_schema(&schema);
+    }
+
+    #[test]
+    fn run_findings_schema_covers_marker_and_rich_snapshot_keys() {
+        let schema = run_findings_schema();
+        let marker = representative_missing_findings_snapshot();
+        let rich = representative_rich_findings_snapshot();
+
+        assert_snapshot_marker_fields_are_declared(&schema);
+        assert_serialized_fields_are_declared(&schema, &marker);
+        assert_finding_entries_match_schema(&schema, &rich);
+    }
+
+    #[test]
+    fn run_proof_schema_covers_marker_and_rich_snapshot_keys() {
+        let schema = run_proof_schema();
+        let marker = representative_missing_proof_snapshot();
+        let rich = representative_rich_proof_snapshot();
+        let verification = representative_verification_proof_snapshot();
+        let snake_verification = representative_snake_case_verification_proof_snapshot();
+
+        assert_snapshot_marker_fields_are_declared(&schema);
+        assert_serialized_fields_are_declared(&schema, &marker);
+        assert_serialized_fields_are_declared(&schema, &rich);
+        assert_serialized_fields_are_declared(&schema, &verification);
+        assert_serialized_fields_are_declared(&schema, &snake_verification);
+        assert_proof_finding_entries_match_schema(&schema, &rich);
+    }
+
+    #[test]
+    fn run_summary_records_house_rule_fingerprints() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_house_rule(tmp.path(), "semgrep", "prefer reachable sinks");
+        write_house_rule(tmp.path(), "triage", "mark evidence-only findings");
+
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running("run-house-rules", "tool", None, "target").complete(),
+        )
+        .unwrap();
+
+        let loaded = load_run_summary(tmp.path(), "run-house-rules").unwrap();
+        assert_eq!(loaded.house_rules.len(), 2);
+        assert_eq!(loaded.house_rules[0].module, "semgrep");
+        assert_eq!(
+            loaded.house_rules[0].path,
+            ".kuzushi/house-rules/semgrep.md"
+        );
+        assert!(loaded.house_rules[0].sha256.starts_with("sha256:"));
+        let metadata =
+            fs::read_to_string(run_dir(tmp.path(), "run-house-rules").join("run.json")).unwrap();
+        assert!(metadata.contains("\"houseRules\""));
+    }
+
+    #[test]
+    fn run_summary_records_prompt_override_fingerprints() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_prompt_override(tmp.path(), "triage", "run", "prioritize critical sinks");
+        write_prompt_override(tmp.path(), "verify", "finding", "require runtime proof");
+
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running("run-prompts", "tool", None, "target").complete(),
+        )
+        .unwrap();
+
+        let loaded = load_run_summary(tmp.path(), "run-prompts").unwrap();
+        assert_eq!(loaded.prompt_overrides.len(), 2);
+        assert_eq!(loaded.prompt_overrides[0].module, "triage");
+        assert_eq!(loaded.prompt_overrides[0].verb, "run");
+        assert_eq!(
+            loaded.prompt_overrides[0].path,
+            ".kuzushi/prompts/triage/run.md"
+        );
+        assert!(loaded.prompt_overrides[0].sha256.starts_with("sha256:"));
+        let metadata = fs::read_to_string(run_dir(tmp.path(), "run-prompts").join("run.json"))
+            .unwrap();
+        assert!(metadata.contains("\"promptOverrides\""));
+    }
+
+    #[test]
+    fn run_summary_records_threat_model_digest() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(tmp.path().join(".kuzushi")).unwrap();
+        fs::write(
+            tmp.path().join(".kuzushi").join("threat-model.json"),
+            r#"{"methodology":"STRIDE"}"#,
+        )
+        .unwrap();
+
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running("run-threat-digest", "tool", None, "target").complete(),
+        )
+        .unwrap();
+
+        let loaded = load_run_summary(tmp.path(), "run-threat-digest").unwrap();
+        assert!(loaded
+            .threat_model_sha256
+            .as_deref()
+            .is_some_and(|hash| hash.starts_with("sha256:")));
+        let metadata =
+            fs::read_to_string(run_dir(tmp.path(), "run-threat-digest").join("run.json"))
+                .unwrap();
+        assert!(metadata.contains("\"threatModelSha256\""));
+    }
+
+    #[test]
+    fn run_summary_records_target_git_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        if !init_git_repo(tmp.path()) {
+            return;
+        }
+
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running("run-target-git", "tool", None, "target").complete(),
+        )
+        .unwrap();
+
+        let loaded = load_run_summary(tmp.path(), "run-target-git").unwrap();
+        let git = loaded.target_git.expect("target git metadata");
+        assert_eq!(git.branch.as_deref(), Some("main"));
+        assert!(!git.dirty);
+        assert!(git.sha.len() >= 7);
+
+        fs::write(tmp.path().join("tracked.txt"), "changed\n").unwrap();
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running("run-target-git-dirty", "tool", None, "target").complete(),
+        )
+        .unwrap();
+        let dirty = load_run_summary(tmp.path(), "run-target-git-dirty").unwrap();
+        assert!(dirty.target_git.expect("target git metadata").dirty);
+    }
+
+    #[test]
+    fn tool_run_complete_records_output_model_in_run_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-output-model";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "triage:run");
+
+        record_tool_run_started(record, &serde_json::json!({}));
+        record_tool_run_complete(
+            record,
+            &serde_json::json!({
+                "ok": true,
+                "data": {
+                    "model": "openai:gpt-test",
+                    "findingsCount": 0
+                }
+            }),
+        );
+
+        let loaded = load_run_summary(tmp.path(), run_id).unwrap();
+        assert_eq!(loaded.model.as_deref(), Some("openai:gpt-test"));
+        assert_eq!(loaded.findings, Some(0));
+    }
+
+    fn write_house_rule(target: &Path, module: &str, body: &str) {
+        let dir = target.join(".kuzushi").join("house-rules");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("{module}.md")), body).unwrap();
+    }
+
+    fn write_prompt_override(target: &Path, module: &str, verb: &str, body: &str) {
+        let dir = target.join(".kuzushi").join("prompts").join(module);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join(format!("{verb}.md")), body).unwrap();
+    }
+
+    fn init_git_repo(target: &Path) -> bool {
+        run_git(target, &["init", "-b", "main"])
+            && run_git(target, &["config", "user.email", "test@example.com"])
+            && run_git(target, &["config", "user.name", "Kuzushi Test"])
+            && write_initial_commit(target)
+    }
+
+    fn write_initial_commit(target: &Path) -> bool {
+        fs::write(target.join("tracked.txt"), "initial\n").is_ok()
+            && run_git(target, &["add", "tracked.txt"])
+            && run_git(target, &["commit", "-m", "initial"])
+    }
+
+    fn run_git(target: &Path, args: &[&str]) -> bool {
+        Command::new("git")
+            .arg("-C")
+            .arg(target)
+            .args(args)
+            .output()
+            .map(|output| output.status.success())
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn load_run_summary_accepts_snake_case_metadata_aliases() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-snake-metadata";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_dir(tmp.path(), run_id).join("run.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "kind": "tool",
+                "status": "completed",
+                "tool": "agentic:test",
+                "target": "target",
+                "started_at_unix": 1,
+                "completed_at_unix": 2,
+                "findings": 3,
+                "cost_usd": 0.5,
+                "process_id": 99,
+                "kuzushi_version": "1.2.3-test",
+                "git_sha": "abc123",
+                "git_branch": "main",
+                "model": "openai:gpt-test",
+                "config_hash": "sha256:def456",
+                "platform": "darwin-arm64",
+                "loaded_module_specifiers": ["builtin:agentic-sast", "builtin:context"],
+                "llm_calls": [
+                    {
+                        "n": 1,
+                        "kind": "reasoning",
+                        "verb": "query",
+                        "model": "openai:gpt-test",
+                        "provider": "openai",
+                        "prompt_hash": "fnv1a64:abc123",
+                        "latency_ms": 42,
+                        "cost_usd": 0.25
+                    }
+                ],
+                "artifacts": []
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let loaded = load_run_summary(tmp.path(), run_id).unwrap();
+
+        assert_eq!(loaded.run_id, run_id);
+        assert_eq!(loaded.started_at_unix, 1);
+        assert_eq!(loaded.completed_at_unix, Some(2));
+        assert_eq!(loaded.cost_usd, Some(0.5));
+        assert_eq!(loaded.process_id, Some(99));
+        assert_eq!(loaded.kuzushi_version.as_deref(), Some("1.2.3-test"));
+        assert_eq!(loaded.git_sha.as_deref(), Some("abc123"));
+        assert_eq!(loaded.git_branch.as_deref(), Some("main"));
+        assert_eq!(loaded.model.as_deref(), Some("openai:gpt-test"));
+        assert_eq!(loaded.config_hash.as_deref(), Some("sha256:def456"));
+        assert_eq!(loaded.platform.as_deref(), Some("darwin-arm64"));
+        assert_eq!(
+            loaded.loaded_modules,
+            vec!["builtin:agentic-sast", "builtin:context"]
+        );
+        assert_eq!(loaded.llm_calls[0].prompt_hash, "fnv1a64:abc123");
+        assert_eq!(loaded.llm_calls[0].latency_ms, Some(42));
+        assert_eq!(loaded.llm_calls[0].cost_usd, Some(0.25));
+    }
+
+    #[test]
+    fn load_run_artifacts_accepts_snake_case_manifest_run_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-snake-manifest";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_dir(tmp.path(), run_id).join("artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": "run metadata",
+                        "path": "run.json",
+                        "kind": "json"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let artifacts = load_run_artifacts(tmp.path(), run_id).unwrap();
+
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0].label, "run metadata");
+        assert_eq!(artifacts[0].path, "run.json");
+    }
+
+    #[test]
+    fn load_run_artifacts_accepts_manifest_artifact_field_aliases() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-artifact-aliases";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_dir(tmp.path(), run_id).join("artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "name": " report json ",
+                        "report_json_path": " reports/report.json ",
+                        "type": " JSON "
+                    },
+                    {
+                        "title": " prompts ",
+                        "prompts_dir": " .kuzushi/prompts ",
+                        "type": " Directory "
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let artifacts = load_run_artifacts(tmp.path(), run_id).unwrap();
+
+        assert_eq!(artifacts.len(), 2);
+        assert_eq!(artifacts[0].label, "report json");
+        assert_eq!(artifacts[0].path, "reports/report.json");
+        assert_eq!(artifacts[0].kind, "json");
+        assert_eq!(artifacts[1].label, "prompts");
+        assert_eq!(artifacts[1].path, ".kuzushi/prompts");
+        assert_eq!(artifacts[1].kind, "directory");
+    }
+
+    #[test]
+    fn load_run_artifacts_drops_blank_manifest_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-blank-path";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_dir(tmp.path(), run_id).join("artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": "blank",
+                        "path": "   ",
+                        "kind": "json"
+                    },
+                    {
+                        "label": "run metadata",
+                        "path": "run.json",
+                        "kind": "json"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let artifacts = load_run_artifacts(tmp.path(), run_id).unwrap();
+
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0].label, "run metadata");
+        assert_eq!(artifacts[0].path, "run.json");
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_non_file_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-non-file";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        let manifest_path = run_dir(tmp.path(), run_id).join("artifacts.json");
+        fs::remove_file(&manifest_path).unwrap();
+        fs::create_dir(&manifest_path).unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+
+        assert!(error.to_string().contains("Artifact manifest is not a file"));
+        assert!(error.to_string().contains("artifacts.json"));
+    }
+
+    #[test]
+    fn record_run_artifact_normalizes_direct_artifact_values() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-direct-artifact-normalization";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+
+        super::super::artifact_manifest::record_run_artifact(
+            tmp.path(),
+            run_id,
+            &RunArtifact {
+                label: " report json ".to_string(),
+                path: " reports/report.json ".to_string(),
+                kind: " JSON ".to_string(),
+            },
+        )
+        .unwrap();
+
+        let artifacts = load_run_artifacts(tmp.path(), run_id).unwrap();
+
+        assert!(artifacts.iter().any(|artifact| {
+            artifact.label == "report json"
+                && artifact.path == "reports/report.json"
+                && artifact.kind == "json"
+        }));
+    }
+
+    #[test]
+    fn record_run_artifact_rejects_blank_direct_artifact_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-direct-artifact-empty-path";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+
+        let error = super::super::artifact_manifest::record_run_artifact(
+            tmp.path(),
+            run_id,
+            &RunArtifact {
+                label: "empty".to_string(),
+                path: "   ".to_string(),
+                kind: "json".to_string(),
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("run artifact path must not be empty"));
+        assert!(!load_run_artifacts(tmp.path(), run_id)
+            .unwrap()
+            .iter()
+            .any(|artifact| artifact.label == "empty"));
+    }
+
+    #[test]
+    fn artifact_writers_return_normalized_artifacts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-writer-artifact-normalization";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("report:build".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+
+        let json = write_run_artifact_json(
+            tmp.path(),
+            run_id,
+            "result.json",
+            " result ",
+            &serde_json::json!({"ok": true}),
+        )
+        .unwrap();
+        let markdown = super::super::write_run_artifact_text(
+            tmp.path(),
+            run_id,
+            "report.md",
+            " report ",
+            " Markdown ",
+            "# Report",
+        )
+        .unwrap();
+
+        assert_eq!(json.label, "result");
+        assert_eq!(json.kind, "json");
+        assert_eq!(markdown.label, "report");
+        assert_eq!(markdown.kind, "markdown");
+    }
+
+    #[test]
+    fn load_run_failures_accepts_artifact_field_aliases() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-failure-artifact-aliases";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("triage:run".to_string()), "target")
+                .failed("runtime unavailable"),
+        )
+        .unwrap();
+        fs::write(
+            run_dir(tmp.path(), run_id).join("failures.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "status": "failed",
+                "failures": [{
+                    "tool": "triage:run",
+                    "status": "failed",
+                    "error": "runtime unavailable",
+                    "agent_thread_context": {
+                        "failed_stage": "triage:run",
+                        "cause": "runtime unavailable",
+                        "what_failed": "triage did not complete",
+                        "artifacts_available": [{
+                            "title": " triage transcript ",
+                            "file_path": " .kuzushi/runs/run-failure-artifact-aliases/triage.json ",
+                            "type": " JSON "
+                        }],
+                        "missing_artifacts": ["proof.json"],
+                        "allowed_proof_level": "artifact-review-only",
+                        "next_files_or_artifacts_to_inspect": ["failures.json"],
+                        "recovery_options": ["rerun triage"],
+                        "fallback_prompt": "continue the run",
+                        "claims_forbidden": ["verified claim"]
+                    }
+                }]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let failures = load_run_failures(tmp.path(), run_id).unwrap();
+        let artifact = &failures.failures[0].agent_thread_context.artifacts_available[0];
+
+        assert_eq!(artifact.label, "triage transcript");
+        assert_eq!(
+            artifact.path,
+            ".kuzushi/runs/run-failure-artifact-aliases/triage.json"
+        );
+        assert_eq!(artifact.kind, "json");
+    }
+
+    #[test]
+    fn load_run_failures_rejects_non_file_failures_artifact() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-non-file-failures";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("triage:run".to_string()), "target")
+                .failed("runtime unavailable"),
+        )
+        .unwrap();
+        let path = run_dir(tmp.path(), run_id).join("failures.json");
+        fs::remove_file(&path).unwrap();
+        fs::create_dir_all(&path).unwrap();
+
+        let error = load_run_failures(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Run failures artifact is not a file"));
+        assert!(message.contains("failures.json"));
+    }
+
+    #[test]
     fn writes_summary_artifact_and_trace_under_run_dir() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = new_run_id("tool");
@@ -119,6 +1168,15 @@ mod tests {
         let summary_path = write_run_summary(tmp.path(), &summary).unwrap();
         assert!(summary_path.ends_with("summary.json"));
         assert_canonical_run_files_exist(tmp.path(), &run_id);
+        let running_manifest_artifacts = load_run_artifacts(tmp.path(), &run_id).unwrap();
+        assert_manifest_has_canonical_run_artifacts(&running_manifest_artifacts);
+        let context_marker =
+            fs::read_to_string(run_dir(tmp.path(), &run_id).join("context.json")).unwrap();
+        assert!(context_marker.contains(&format!("\"run_id\": \"{run_id}\"")));
+        let placeholder_report =
+            fs::read_to_string(run_dir(tmp.path(), &run_id).join("report.md")).unwrap();
+        assert!(placeholder_report.contains(&format!("# Kuzushi Run {run_id}")));
+        assert!(placeholder_report.contains("No report was recorded for this run."));
         assert_eq!(
             fs::read_to_string(tmp.path().join(".kuzushi/latest")).unwrap(),
             format!("{run_id}\n")
@@ -140,6 +1198,12 @@ mod tests {
         assert_eq!(loaded.artifacts.len(), 1);
         let metadata = fs::read_to_string(run_dir(tmp.path(), &run_id).join("run.json")).unwrap();
         assert!(metadata.contains("\"status\": \"completed\""));
+        let context_marker =
+            fs::read_to_string(run_dir(tmp.path(), &run_id).join("context.json")).unwrap();
+        assert!(context_marker.contains("\"runStatus\": \"completed\""));
+        let placeholder_report =
+            fs::read_to_string(run_dir(tmp.path(), &run_id).join("report.md")).unwrap();
+        assert!(placeholder_report.contains("Status: completed"));
         assert!(load_run_failures(tmp.path(), &run_id)
             .unwrap()
             .failures
@@ -155,6 +1219,223 @@ mod tests {
         assert_manifest_has(&manifest_artifacts, "result.json");
         let trace = fs::read_to_string(run_dir(tmp.path(), &run_id).join("trace.jsonl")).unwrap();
         assert!(trace.contains("context:build started"));
+    }
+
+    #[test]
+    fn write_run_summary_rejects_non_file_snapshot_marker_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-non-file-snapshot-marker";
+        fs::create_dir_all(run_dir(tmp.path(), run_id).join("context.json")).unwrap();
+        let summary = RunSummary::running(run_id, "tool", Some("context:build".to_string()), "target");
+
+        let error = write_run_summary(tmp.path(), &summary).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("Canonical marker target is not a file"));
+        assert!(error.to_string().contains("context.json"));
+    }
+
+    #[test]
+    fn write_run_summary_rejects_non_file_report_marker_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-non-file-report-marker";
+        fs::create_dir_all(run_dir(tmp.path(), run_id).join("report.md")).unwrap();
+        let summary = RunSummary::running(run_id, "tool", Some("report:build".to_string()), "target");
+
+        let error = write_run_summary(tmp.path(), &summary).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("Canonical marker target is not a file"));
+        assert!(error.to_string().contains("report.md"));
+    }
+
+    #[test]
+    fn write_run_summary_rejects_non_file_manifest_placeholder_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-non-file-manifest-placeholder";
+        fs::create_dir_all(run_dir(tmp.path(), run_id).join("artifacts.json")).unwrap();
+        let summary = RunSummary::running(run_id, "tool", Some("context:build".to_string()), "target");
+
+        let error = write_run_summary(tmp.path(), &summary).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("Canonical JSON artifact target is not a file"));
+        assert!(error.to_string().contains("artifacts.json"));
+    }
+
+    #[test]
+    fn write_run_summary_rejects_non_file_jsonl_placeholder_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-non-file-jsonl-placeholder";
+        fs::create_dir_all(run_dir(tmp.path(), run_id).join("events.jsonl")).unwrap();
+        let summary = RunSummary::running(run_id, "tool", Some("context:build".to_string()), "target");
+
+        let error = write_run_summary(tmp.path(), &summary).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("Canonical text artifact target is not a file"));
+        assert!(error.to_string().contains("events.jsonl"));
+    }
+
+    #[test]
+    fn write_run_summary_rejects_non_file_metadata_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-non-file-metadata";
+        fs::create_dir_all(run_dir(tmp.path(), run_id).join("run.json")).unwrap();
+        let summary = RunSummary::running(run_id, "tool", Some("context:build".to_string()), "target");
+
+        let error = write_run_summary(tmp.path(), &summary).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("Run metadata target is not a file"));
+        assert!(error.to_string().contains("run.json"));
+    }
+
+    #[test]
+    fn write_run_summary_rejects_non_file_latest_pointer_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-non-file-latest-pointer";
+        fs::create_dir_all(tmp.path().join(".kuzushi/latest")).unwrap();
+        let summary = RunSummary::running(run_id, "tool", Some("context:build".to_string()), "target");
+
+        let error = write_run_summary(tmp.path(), &summary).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("Latest run pointer target is not a file"));
+        assert!(error.to_string().contains(".kuzushi/latest"));
+    }
+
+    #[test]
+    fn append_run_event_rejects_non_file_event_log_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-non-file-events";
+        fs::create_dir_all(run_dir(tmp.path(), run_id).join("events.jsonl")).unwrap();
+        let event = RunEvent::new(1, "tool", "started", "context:build");
+
+        let error = append_run_event(tmp.path(), run_id, &event).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("Run event log target is not a file"));
+        assert!(error.to_string().contains("events.jsonl"));
+    }
+
+    #[test]
+    fn append_run_trace_step_rejects_non_file_trace_target() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-non-file-trace";
+        fs::create_dir_all(run_dir(tmp.path(), run_id).join("trace.jsonl")).unwrap();
+        let step = RunTraceStep::new(1, "tool", "context:build");
+
+        let error = append_run_trace_step(tmp.path(), run_id, &step).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("Run trace target is not a file"));
+        assert!(error.to_string().contains("trace.jsonl"));
+    }
+
+    #[test]
+    fn run_summary_with_artifact_normalizes_direct_artifact_values() {
+        let summary = RunSummary::running("run-summary-artifact", "tool", None, "target")
+            .with_artifact(RunArtifact {
+                label: " result ".to_string(),
+                path: " result.json ".to_string(),
+                kind: " JSON ".to_string(),
+            });
+
+        assert_eq!(summary.artifacts.len(), 1);
+        assert_eq!(summary.artifacts[0].label, "result");
+        assert_eq!(summary.artifacts[0].path, "result.json");
+        assert_eq!(summary.artifacts[0].kind, "json");
+    }
+
+    #[test]
+    fn run_summary_with_artifact_drops_blank_direct_artifact_path() {
+        let summary = RunSummary::running("run-summary-artifact", "tool", None, "target")
+            .with_artifact(RunArtifact {
+                label: "empty".to_string(),
+                path: "   ".to_string(),
+                kind: "json".to_string(),
+            });
+
+        assert!(summary.artifacts.is_empty());
+    }
+
+    #[test]
+    fn final_summary_refreshes_only_generated_absence_markers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = new_run_id("marker-refresh");
+        let summary = RunSummary::running(
+            run_id.clone(),
+            "tool",
+            Some("context:build".to_string()),
+            tmp.path().display().to_string(),
+        );
+
+        write_run_summary(tmp.path(), &summary).unwrap();
+        write_run_artifact_json(
+            tmp.path(),
+            &run_id,
+            "findings.json",
+            "findings",
+            &serde_json::json!({"status": "skipped", "summary": "producer-owned"}),
+        )
+        .unwrap();
+        write_run_summary(tmp.path(), &summary.complete()).unwrap();
+
+        let context_marker =
+            fs::read_to_string(run_dir(tmp.path(), &run_id).join("context.json")).unwrap();
+        let findings = fs::read_to_string(run_dir(tmp.path(), &run_id).join("findings.json"))
+            .unwrap();
+
+        assert!(context_marker.contains("\"runStatus\": \"completed\""));
+        assert!(findings.contains("producer-owned"));
+        assert!(!findings.contains("\"runStatus\": \"completed\""));
+    }
+
+    #[test]
+    fn paused_summary_propagates_status_to_canonical_placeholders() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = new_run_id("paused");
+        let mut summary = RunSummary::running(
+            run_id.clone(),
+            "shell",
+            None,
+            tmp.path().display().to_string(),
+        );
+        summary.status = "paused".to_string();
+
+        write_run_summary(tmp.path(), &summary).unwrap();
+
+        let metadata = fs::read_to_string(run_dir(tmp.path(), &run_id).join("run.json")).unwrap();
+        let placeholder_report =
+            fs::read_to_string(run_dir(tmp.path(), &run_id).join("report.md")).unwrap();
+        let failures = load_run_failures(tmp.path(), &run_id).unwrap();
+        let manifest_artifacts = load_run_artifacts(tmp.path(), &run_id).unwrap();
+
+        assert!(metadata.contains("\"status\": \"paused\""));
+        for leaf in [
+            "context.json",
+            "attack-surface.json",
+            "threat-model.json",
+            "recommendations.json",
+            "findings.json",
+            "proof.json",
+        ] {
+            let marker = fs::read_to_string(run_dir(tmp.path(), &run_id).join(leaf)).unwrap();
+            assert!(marker.contains("\"runStatus\": \"paused\""), "{leaf}");
+        }
+        assert!(placeholder_report.contains("Status: paused"));
+        assert_eq!(failures.status, "paused");
+        assert!(failures.failures.is_empty());
+        assert_manifest_has_canonical_run_artifacts(&manifest_artifacts);
     }
 
     fn assert_canonical_run_files_exist(target: &Path, run_id: &str) {
@@ -185,23 +1466,63 @@ mod tests {
         );
     }
 
+    fn assert_manifest_has_path(artifacts: &[RunArtifact], path: &str) {
+        assert!(
+            artifacts.iter().any(|artifact| artifact.path == path),
+            "manifest missing artifact path {path}"
+        );
+    }
+
     fn assert_manifest_has_canonical_run_artifacts(artifacts: &[RunArtifact]) {
-        for leaf in [
-            "run.json",
-            "events.jsonl",
-            "trace.jsonl",
-            "context.json",
-            "attack-surface.json",
-            "threat-model.json",
-            "recommendations.json",
-            "findings.json",
-            "proof.json",
-            "failures.json",
-            "report.md",
-            "artifacts.json",
-        ] {
-            assert_manifest_has(artifacts, leaf);
+        for spec in CANONICAL_RUN_ARTIFACTS {
+            assert!(
+                artifacts.iter().any(|artifact| {
+                    artifact.path.ends_with(spec.leaf)
+                        && artifact.label == spec.label
+                        && artifact.kind == spec.kind
+                }),
+                "manifest missing canonical artifact {} ({}, {})",
+                spec.leaf,
+                spec.label,
+                spec.kind
+            );
         }
+    }
+
+    fn assert_manifest_has_sarif_report_artifact(artifacts: &[RunArtifact]) {
+        for spec in OPTIONAL_RUN_ARTIFACTS {
+            assert!(
+                artifacts.iter().any(|artifact| {
+                    artifact.path.ends_with(spec.leaf)
+                        && artifact.label == spec.label
+                        && artifact.kind == spec.kind
+                }),
+                "manifest missing optional artifact {} ({}, {})",
+                spec.leaf,
+                spec.label,
+                spec.kind
+            );
+        }
+    }
+
+    fn assert_manifest_has_tool_result_artifact(artifacts: &[RunArtifact]) {
+        for spec in TOOL_RESULT_ARTIFACTS {
+            assert!(
+                artifacts.iter().any(|artifact| {
+                    artifact.path.ends_with(spec.leaf)
+                        && artifact.label == spec.label
+                        && artifact.kind == spec.kind
+                }),
+                "manifest missing tool-result artifact {} ({}, {})",
+                spec.leaf,
+                spec.label,
+                spec.kind
+            );
+        }
+    }
+
+    fn runtime_platform_label() -> String {
+        format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
     }
 
     #[test]
@@ -284,6 +1605,138 @@ mod tests {
     }
 
     #[test]
+    fn failure_handoff_normalizes_available_artifacts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-failure-artifact-normalization";
+        let artifact = RunArtifact {
+            label: " result ".to_string(),
+            path: " result.json ".to_string(),
+            kind: " JSON ".to_string(),
+        };
+
+        write_run_failures(
+            tmp.path(),
+            run_id,
+            "context:build",
+            "failed",
+            "artifact unavailable",
+            &[artifact],
+        )
+        .unwrap();
+
+        let context = load_run_failure_context(tmp.path(), run_id)
+            .unwrap()
+            .expect("failure context");
+
+        assert_eq!(context.artifacts_available[0].label, "result");
+        assert_eq!(context.artifacts_available[0].path, "result.json");
+        assert_eq!(context.artifacts_available[0].kind, "json");
+        assert!(context
+            .next_files_or_artifacts_to_inspect
+            .contains(&"result.json".to_string()));
+    }
+
+    #[test]
+    fn run_failures_offer_existing_sarif_as_optional_follow_up() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-failed-sarif";
+        let dir = run_dir(tmp.path(), run_id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("report.md"), "# Failed Scan\n").unwrap();
+        fs::write(dir.join("report.sarif"), r#"{"version":"2.1.0","runs":[]}"#).unwrap();
+
+        write_run_failures(
+            tmp.path(),
+            run_id,
+            "semgrep:scan",
+            "failed",
+            "scanner exited",
+            &[],
+        )
+        .unwrap();
+
+        let context = load_run_failure_context(tmp.path(), run_id)
+            .unwrap()
+            .expect("failure context");
+        assert!(!context
+            .missing_artifacts
+            .contains(&"report.sarif".to_string()));
+        assert!(!context
+            .missing_artifacts
+            .contains(&"report.md".to_string()));
+        assert!(context
+            .next_files_or_artifacts_to_inspect
+            .iter()
+            .any(|path| path.ends_with("report.md")));
+        assert!(context
+            .next_files_or_artifacts_to_inspect
+            .iter()
+            .any(|path| path.ends_with("report.sarif")));
+    }
+
+    #[test]
+    fn run_failures_treat_non_file_canonical_artifacts_as_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-failed-non-file-artifact";
+        let dir = run_dir(tmp.path(), run_id);
+        fs::create_dir_all(dir.join("proof.json")).unwrap();
+        let declared = RunArtifact {
+            label: "proof".to_string(),
+            path: dir.join("proof.json").display().to_string(),
+            kind: "json".to_string(),
+        };
+
+        write_run_failures(
+            tmp.path(),
+            run_id,
+            "verify:finding",
+            "failed",
+            "proof artifact is invalid",
+            &[declared],
+        )
+        .unwrap();
+
+        let context = load_run_failure_context(tmp.path(), run_id)
+            .unwrap()
+            .expect("failure context");
+        assert!(context.missing_artifacts.contains(&"proof.json".to_string()));
+        assert!(context.fallback_prompt.contains("Missing artifacts:"));
+        assert!(context.fallback_prompt.contains("proof.json"));
+    }
+
+    #[test]
+    fn run_failures_prioritize_follow_up_files_under_inspection_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-failed-many-artifacts";
+        let artifacts = (0..20)
+            .map(|index| RunArtifact {
+                label: format!("artifact {index}"),
+                path: format!(".kuzushi/runs/{run_id}/extra-{index}.json"),
+                kind: "json".to_string(),
+            })
+            .collect::<Vec<_>>();
+
+        write_run_failures(
+            tmp.path(),
+            run_id,
+            "semgrep:scan",
+            "failed",
+            "scanner exited",
+            &artifacts,
+        )
+        .unwrap();
+
+        let context = load_run_failure_context(tmp.path(), run_id)
+            .unwrap()
+            .expect("failure context");
+        assert!(context.next_files_or_artifacts_to_inspect.len() <= 12);
+        assert_eq!(context.artifacts_available.len(), 12);
+        assert_eq!(context.artifacts_available[11].label, "artifact 11");
+        assert!(context.next_files_or_artifacts_to_inspect[0].ends_with("failures.json"));
+        assert!(context.next_files_or_artifacts_to_inspect[1].ends_with("result.json"));
+    }
+
+    #[test]
     fn failed_tool_run_records_result_envelope_with_fallback_context() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-failed-result";
@@ -318,9 +1771,8 @@ mod tests {
             .iter()
             .any(|artifact| artifact.path.ends_with("result.json")));
         let manifest = load_run_artifacts(tmp.path(), run_id).unwrap();
-        assert!(manifest
-            .iter()
-            .any(|artifact| artifact.path.ends_with("result.json")));
+        assert_manifest_has_canonical_run_artifacts(&manifest);
+        assert_manifest_has_tool_result_artifact(&manifest);
     }
 
     #[test]
@@ -365,7 +1817,16 @@ mod tests {
                 "data": {
                     "snapshot": {
                         "repoContext": {"languages": ["Rust"]},
-                        "attackSurfaceMap": [{"kind": "Route", "path": "/login"}]
+                        "attackSurfaceMap": {
+                            "summary": {
+                                "total": 2,
+                                "byKind": {"file_upload_parse_path": 1, "http_route": 1}
+                            },
+                            "surfaces": [
+                                {"kind": "http_route", "path": "/login"},
+                                {"kind": "file_upload_parse_path", "path": "/upload"}
+                            ]
+                        }
                     },
                     "document": {"methodology": "STRIDE"},
                     "findings": [{"ruleId": "demo"}],
@@ -380,9 +1841,10 @@ mod tests {
         assert!(fs::read_to_string(dir.join("context.json"))
             .unwrap()
             .contains("repoContext"));
-        assert!(fs::read_to_string(dir.join("attack-surface.json"))
-            .unwrap()
-            .contains("/login"));
+        let attack_surface = fs::read_to_string(dir.join("attack-surface.json")).unwrap();
+        assert!(attack_surface.contains("/login"));
+        assert!(attack_surface.contains("/upload"));
+        assert!(attack_surface.contains("file_upload_parse_path"));
         assert!(fs::read_to_string(dir.join("threat-model.json"))
             .unwrap()
             .contains("STRIDE"));
@@ -414,6 +1876,54 @@ mod tests {
         assert!(summary.artifacts.iter().any(|artifact| {
             artifact.path.ends_with("report.sarif") && artifact.kind == "sarif"
         }));
+        assert!(summary.artifacts.iter().any(|artifact| {
+            artifact.path.ends_with("report.sarif") && artifact.label == "SARIF report"
+        }));
+
+        let manifest_artifacts = load_run_artifacts(tmp.path(), run_id).unwrap();
+        assert_manifest_has_sarif_report_artifact(&manifest_artifacts);
+    }
+
+    #[test]
+    fn tool_run_complete_promotes_snake_case_report_artifacts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-snake-report";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "report:build");
+
+        record_tool_run_started(record, &serde_json::json!({}));
+        record_tool_run_complete(
+            record,
+            &serde_json::json!({
+                "ok": true,
+                "data": {
+                    "report_markdown": "# Snake Report",
+                    "report_sarif": {"version": "2.1.0", "runs": [{"results": []}]}
+                }
+            }),
+        );
+
+        let dir = run_dir(tmp.path(), run_id);
+        assert!(fs::read_to_string(dir.join("report.md"))
+            .unwrap()
+            .contains("Snake Report"));
+        assert!(fs::read_to_string(dir.join("report.sarif"))
+            .unwrap()
+            .contains("\"version\": \"2.1.0\""));
+
+        let summary = load_run_summary(tmp.path(), run_id).unwrap();
+        assert!(summary
+            .artifacts
+            .iter()
+            .any(|artifact| artifact.path.ends_with("report.md")));
+        assert!(summary.artifacts.iter().any(|artifact| {
+            artifact.path.ends_with("report.sarif") && artifact.kind == "sarif"
+        }));
+        assert!(summary.artifacts.iter().any(|artifact| {
+            artifact.path.ends_with("report.sarif") && artifact.label == "SARIF report"
+        }));
+
+        let manifest_artifacts = load_run_artifacts(tmp.path(), run_id).unwrap();
+        assert_manifest_has_sarif_report_artifact(&manifest_artifacts);
     }
 
     #[test]
@@ -465,6 +1975,253 @@ mod tests {
     }
 
     #[test]
+    fn tool_run_complete_promotes_root_core_findings_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-root-core-findings";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "codeql:scan");
+
+        record_tool_run_started(record, &serde_json::json!({}));
+        record_tool_run_complete(
+            record,
+            &serde_json::json!({
+                "ok": true,
+                "status": "completed",
+                "coreFindings": [{
+                    "fingerprint": "codeql-fp",
+                    "tool": "codeql",
+                    "ruleId": "js/sql-injection",
+                    "filePath": "src/app.ts",
+                    "startLine": 7,
+                    "staticProofState": "source_sink_linked"
+                }]
+            }),
+        );
+
+        let findings_body =
+            fs::read_to_string(run_dir(tmp.path(), run_id).join("findings.json")).unwrap();
+        let findings = serde_json::from_str::<serde_json::Value>(&findings_body).unwrap();
+        assert_eq!(findings[0]["fingerprint"], serde_json::json!("codeql-fp"));
+        assert_eq!(findings[0]["ruleId"], serde_json::json!("js/sql-injection"));
+
+        let proof_body =
+            fs::read_to_string(run_dir(tmp.path(), run_id).join("proof.json")).unwrap();
+        let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
+        assert_eq!(
+            proof["countsByState"]["source_sink_linked"],
+            serde_json::json!(1)
+        );
+        assert_eq!(
+            proof["findings"][0]["filePath"],
+            serde_json::json!("src/app.ts")
+        );
+    }
+
+    #[test]
+    fn tool_run_complete_promotes_proof_state_aliases() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-proof-state-alias";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "sast:scan");
+
+        record_tool_run_started(record, &serde_json::json!({}));
+        record_tool_run_complete(
+            record,
+            &serde_json::json!({
+                "ok": true,
+                "data": {
+                    "coreFindings": [
+                        {"fingerprint": "a", "tool": "sast", "proofState": "execution_confirmed"},
+                        {"fingerprint": "b", "tool": "sast", "proof_state": "code_cited"},
+                        {"fingerprint": "c", "tool": "sast", "proof_state": "code-cited"}
+                    ]
+                }
+            }),
+        );
+
+        let proof_body =
+            fs::read_to_string(run_dir(tmp.path(), run_id).join("proof.json")).unwrap();
+        let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
+
+        assert_eq!(
+            proof["countsByState"]["execution_confirmed"],
+            serde_json::json!(1)
+        );
+        assert_eq!(proof["countsByState"]["code_cited"], serde_json::json!(2));
+        assert!(proof["countsByState"].get("code-cited").is_none());
+        assert_eq!(proof["runtimeVerification"], serde_json::json!(true));
+        assert_eq!(proof["proofLevel"], serde_json::json!("runtime-and-static"));
+    }
+
+    #[test]
+    fn tool_run_complete_marks_runtime_reviewed_and_attempted_states_as_runtime_proof() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-runtime-proof-state";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "verify:finding");
+
+        record_tool_run_started(record, &serde_json::json!({}));
+        record_tool_run_complete(
+            record,
+            &serde_json::json!({
+                "ok": true,
+                "data": {
+                    "coreFindings": [
+                        {"fingerprint": "reviewed", "tool": "verify", "proof_state": "runtime_reviewed"},
+                        {"fingerprint": "attempted", "tool": "verify", "proof_state": "execution_attempted"},
+                        {"fingerprint": "rejected", "tool": "verify", "proof_state": "execution_rejected"}
+                    ]
+                }
+            }),
+        );
+
+        let proof_body =
+            fs::read_to_string(run_dir(tmp.path(), run_id).join("proof.json")).unwrap();
+        let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
+
+        assert_eq!(proof["runtimeVerification"], serde_json::json!(true));
+        assert_eq!(proof["proofLevel"], serde_json::json!("runtime-and-static"));
+        assert_eq!(proof["countsByState"]["runtime_reviewed"], serde_json::json!(1));
+        assert_eq!(
+            proof["countsByState"]["execution_attempted"],
+            serde_json::json!(1)
+        );
+        assert_eq!(
+            proof["countsByState"]["execution_rejected"],
+            serde_json::json!(1)
+        );
+    }
+
+    #[test]
+    fn tool_run_complete_promotes_nested_properties_proof_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-proof-state-properties";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "codeql:scan");
+
+        record_tool_run_started(record, &serde_json::json!({}));
+        record_tool_run_complete(
+            record,
+            &serde_json::json!({
+                "ok": true,
+                "data": {
+                    "coreFindings": [
+                        {
+                            "fingerprint": "codeql-a",
+                            "tool": "codeql",
+                            "ruleId": "js/sql-injection",
+                            "filePath": "src/app.ts",
+                            "properties": {"staticProofState": "source-sink-linked"}
+                        },
+                        {
+                            "fingerprint": "codeql-b",
+                            "tool": "codeql",
+                            "ruleId": "js/xss",
+                            "filePath": "src/app.ts",
+                            "properties": {"proof_state": "runtime_confirmed"}
+                        }
+                    ]
+                }
+            }),
+        );
+
+        let proof_body =
+            fs::read_to_string(run_dir(tmp.path(), run_id).join("proof.json")).unwrap();
+        let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
+
+        assert_eq!(
+            proof["countsByState"]["source_sink_linked"],
+            serde_json::json!(1)
+        );
+        assert_eq!(
+            proof["countsByState"]["runtime_confirmed"],
+            serde_json::json!(1)
+        );
+        assert_eq!(proof["runtimeVerification"], serde_json::json!(true));
+        assert_eq!(
+            proof["findings"][0]["staticProofState"],
+            serde_json::json!("source_sink_linked")
+        );
+    }
+
+    #[test]
+    fn tool_run_complete_promotes_root_proofs_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-root-proofs";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "verify:finding");
+
+        record_tool_run_started(record, &serde_json::json!({}));
+        record_tool_run_complete(
+            record,
+            &serde_json::json!({
+                "ok": true,
+                "proofs": {
+                    "proofLevel": 3,
+                    "proofVerdict": "needs-runtime-evidence"
+                }
+            }),
+        );
+
+        let proof_body =
+            fs::read_to_string(run_dir(tmp.path(), run_id).join("proof.json")).unwrap();
+        let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
+
+        assert_eq!(proof["proofLevel"], serde_json::json!(3));
+        assert_eq!(
+            proof["proofVerdict"],
+            serde_json::json!("needs-runtime-evidence")
+        );
+    }
+
+    #[test]
+    fn tool_run_complete_promotes_root_verification_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-root-verification";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "verify:finding");
+
+        record_tool_run_started(record, &serde_json::json!({}));
+        record_tool_run_complete(
+            record,
+            &serde_json::json!({
+                "ok": true,
+                "verification": {
+                    "verified": 1,
+                    "results": [{"findingId": "F-1", "verdict": "confirmed"}]
+                }
+            }),
+        );
+
+        let proof_body =
+            fs::read_to_string(run_dir(tmp.path(), run_id).join("proof.json")).unwrap();
+        let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
+
+        assert_eq!(proof["verified"], serde_json::json!(1));
+        assert_eq!(proof["results"][0]["findingId"], serde_json::json!("F-1"));
+    }
+
+    #[test]
+    fn tool_run_complete_promotes_snake_case_verification_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-snake-verification";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "verify:finding");
+
+        record_tool_run_started(record, &serde_json::json!({}));
+        record_tool_run_complete(
+            record,
+            &serde_json::json!({
+                "ok": true,
+                "verification": {
+                    "verified_count": 1,
+                    "verification_results": [{"finding_id": "F-1", "verdict": "confirmed"}]
+                }
+            }),
+        );
+
+        let proof_body =
+            fs::read_to_string(run_dir(tmp.path(), run_id).join("proof.json")).unwrap();
+        let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
+
+        assert_eq!(proof["verified_count"], serde_json::json!(1));
+        assert_eq!(proof["verification_results"][0]["finding_id"], serde_json::json!("F-1"));
+    }
+
+    #[test]
     fn tool_run_complete_promotes_full_module_recommendation_report() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-recommendations";
@@ -484,7 +2241,8 @@ mod tests {
                 "target": "/repo",
                 "signals": {
                     "sourceFiles": 12,
-                    "languages": ["TypeScript"],
+                    "languages": ["Python"],
+                    "frameworks": ["Falcon", "Litestar", "Sanic"],
                     "attackSurfaceHighRisk": 2
                 },
                 "capabilities": {
@@ -495,10 +2253,10 @@ mod tests {
                 "recommendations": [
                     {
                         "moduleId": "semgrep",
-                        "tool": "semgrep:scan",
-                        "priority": "high",
-                        "reason": "source files are present",
-                        "signals": ["12 source files"],
+                        "tool": "threat-model:build",
+                        "priority": "medium",
+                        "reason": "attack-surface signals exist",
+                        "signals": ["frameworks: Falcon, Litestar, Sanic"],
                         "requiresRuntime": false,
                         "nextInput": {"target": "/repo"}
                     }
@@ -520,7 +2278,125 @@ mod tests {
         );
         assert_eq!(
             report["recommendations"][0]["tool"],
+            serde_json::json!("threat-model:build")
+        );
+        assert_eq!(
+            report["recommendations"][0]["signals"][0],
+            serde_json::json!("frameworks: Falcon, Litestar, Sanic")
+        );
+    }
+
+    #[test]
+    fn tool_run_complete_promotes_snake_case_recommendation_report() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-snake-recommendations";
+        let record = ToolRunRecord::new(
+            tmp.path(),
+            run_id,
+            "tool",
+            "module-recommender:recommend",
+        );
+
+        record_tool_run_started(record, &serde_json::json!({}));
+        record_tool_run_complete(
+            record,
+            &serde_json::json!({
+                "ok": true,
+                "data": {
+                    "recommendation_report": {
+                        "summary": "1 recommendation for /repo",
+                        "target": "/repo",
+                        "signals": {"source_files": 3},
+                        "capabilities": {
+                            "available_tool_count": 4,
+                            "recommended_tool_count": 1,
+                            "skipped_missing_tools": []
+                        },
+                        "recommendations": [{
+                            "module_id": "semgrep",
+                            "tool": "semgrep:scan",
+                            "priority": "high",
+                            "reason": "source files are present",
+                            "signals": ["3 source files"],
+                            "requires_runtime": false,
+                            "next_input": {"target": "/repo"}
+                        }],
+                        "warnings": [],
+                        "errors": []
+                    }
+                }
+            }),
+        );
+
+        let body =
+            fs::read_to_string(run_dir(tmp.path(), run_id).join("recommendations.json")).unwrap();
+        let report = serde_json::from_str::<serde_json::Value>(&body).unwrap();
+
+        assert_eq!(report["summary"], serde_json::json!("1 recommendation for /repo"));
+        assert_eq!(report["signals"]["source_files"], serde_json::json!(3));
+        assert_eq!(
+            report["capabilities"]["available_tool_count"],
+            serde_json::json!(4)
+        );
+        assert_eq!(
+            report["recommendations"][0]["tool"],
             serde_json::json!("semgrep:scan")
+        );
+    }
+
+    #[test]
+    fn tool_run_complete_promotes_data_wrapped_recommendation_report() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-data-recommendations";
+        let record = ToolRunRecord::new(
+            tmp.path(),
+            run_id,
+            "tool",
+            "module-recommender:recommend",
+        );
+
+        record_tool_run_started(record, &serde_json::json!({}));
+        record_tool_run_complete(
+            record,
+            &serde_json::json!({
+                "ok": true,
+                "status": "completed",
+                "data": {
+                    "summary": "1 recommendation for /repo",
+                    "target": "/repo",
+                    "signals": {"frameworks": ["Falcon", "Litestar", "Sanic"]},
+                    "capabilities": {
+                        "availableToolCount": 4,
+                        "recommendedToolCount": 1,
+                        "skippedMissingTools": []
+                    },
+                    "recommendations": [{
+                        "moduleId": "threat-model",
+                        "tool": "threat-model:build",
+                        "priority": "medium",
+                        "reason": "framework route signals are present",
+                        "signals": ["frameworks: Falcon, Litestar, Sanic"],
+                        "requiresRuntime": false,
+                        "nextInput": {"target": "/repo"}
+                    }],
+                    "warnings": [],
+                    "errors": []
+                }
+            }),
+        );
+
+        let body =
+            fs::read_to_string(run_dir(tmp.path(), run_id).join("recommendations.json")).unwrap();
+        let report = serde_json::from_str::<serde_json::Value>(&body).unwrap();
+
+        assert_eq!(report["summary"], serde_json::json!("1 recommendation for /repo"));
+        assert_eq!(
+            report["signals"]["frameworks"],
+            serde_json::json!(["Falcon", "Litestar", "Sanic"])
+        );
+        assert_eq!(
+            report["recommendations"][0]["signals"][0],
+            serde_json::json!("frameworks: Falcon, Litestar, Sanic")
         );
     }
 
@@ -566,6 +2442,55 @@ mod tests {
     }
 
     #[test]
+    fn tool_run_complete_records_snake_case_declared_artifact_paths() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "tool-declared-snake-artifacts";
+        let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "sast:scan");
+        let report_json = tmp.path().join("report.json");
+        let prompts_dir = tmp.path().join("prompts");
+
+        record_tool_run_started(record, &serde_json::json!({}));
+        record_tool_run_complete(
+            record,
+            &serde_json::json!({
+                "ok": true,
+                "status": "completed",
+                "artifacts": [
+                    {
+                        "name": " report json ",
+                        "report_json_path": report_json.display().to_string(),
+                        "type": " JSON "
+                    }
+                ],
+                "data": {
+                    "artifacts": {
+                        "prompts": {
+                            "title": " prompt overrides ",
+                            "prompts_dir": prompts_dir.display().to_string(),
+                            "type": " Directory "
+                        }
+                    }
+                }
+            }),
+        );
+
+        let summary = load_run_summary(tmp.path(), run_id).unwrap();
+        assert!(summary.artifacts.iter().any(|artifact| {
+            artifact.label == "report json"
+                && artifact.path == report_json.display().to_string()
+                && artifact.kind == "json"
+        }));
+        assert!(summary.artifacts.iter().any(|artifact| {
+            artifact.label == "prompt overrides"
+                && artifact.path == prompts_dir.display().to_string()
+                && artifact.kind == "directory"
+        }));
+        let manifest = load_run_artifacts(tmp.path(), run_id).unwrap();
+        assert_manifest_has_path(&manifest, &report_json.display().to_string());
+        assert_manifest_has_path(&manifest, &prompts_dir.display().to_string());
+    }
+
+    #[test]
     fn tool_run_complete_records_contract_complete_result_envelope() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-result-envelope";
@@ -584,6 +2509,15 @@ mod tests {
         assert!(output["artifacts"].as_array().is_some());
         assert!(output["warnings"].as_array().unwrap().is_empty());
         assert!(output["errors"].as_array().unwrap().is_empty());
+        let summary = load_run_summary(tmp.path(), run_id).unwrap();
+        assert!(summary.artifacts.iter().any(|artifact| {
+            artifact.path.ends_with("result.json")
+                && artifact.label == "tool result"
+                && artifact.kind == "json"
+        }));
+        let manifest = load_run_artifacts(tmp.path(), run_id).unwrap();
+        assert_manifest_has_canonical_run_artifacts(&manifest);
+        assert_manifest_has_tool_result_artifact(&manifest);
     }
 
     #[test]
@@ -609,6 +2543,9 @@ mod tests {
         let failures = load_run_failures(tmp.path(), run_id).unwrap();
         assert_eq!(failures.status, "skipped");
         assert!(failures.failures.is_empty());
+        let manifest = load_run_artifacts(tmp.path(), run_id).unwrap();
+        assert_manifest_has_canonical_run_artifacts(&manifest);
+        assert_manifest_has_tool_result_artifact(&manifest);
     }
 
     #[test]
@@ -638,6 +2575,9 @@ mod tests {
             .artifacts
             .iter()
             .any(|artifact| artifact.path.ends_with("result.json")));
+        let manifest = load_run_artifacts(tmp.path(), run_id).unwrap();
+        assert_manifest_has_canonical_run_artifacts(&manifest);
+        assert_manifest_has_tool_result_artifact(&manifest);
         let failures =
             fs::read_to_string(run_dir(tmp.path(), run_id).join("failures.json")).unwrap();
         assert!(failures.contains("semgrep:scan did not complete successfully"));
@@ -789,6 +2729,803 @@ mod tests {
         let listed = list_run_summaries(tmp.path()).unwrap();
         assert_eq!(listed[0].kind, "tool");
         assert_eq!(listed[0].target, "canonical-target");
+    }
+
+    fn run_summary_schema() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../../schemas/run.summary.schema.json"
+        ))
+        .unwrap()
+    }
+
+    fn run_artifact_manifest_schema() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../../schemas/run.artifacts.schema.json"
+        ))
+        .unwrap()
+    }
+
+    fn run_failures_schema() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../../schemas/run.failures.schema.json"
+        ))
+        .unwrap()
+    }
+
+    fn run_event_schema() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../../schemas/run.events.schema.json")).unwrap()
+    }
+
+    fn run_trace_schema() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../../schemas/run.trace.schema.json")).unwrap()
+    }
+
+    fn run_context_schema() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../../schemas/run.context.schema.json")).unwrap()
+    }
+
+    fn run_attack_surface_schema() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../../schemas/run.attack-surface.schema.json"
+        ))
+        .unwrap()
+    }
+
+    fn run_threat_model_schema() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../../schemas/run.threat-model.schema.json"
+        ))
+        .unwrap()
+    }
+
+    fn run_recommendations_schema() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../../schemas/run.recommendations.schema.json"
+        ))
+        .unwrap()
+    }
+
+    fn run_findings_schema() -> serde_json::Value {
+        serde_json::from_str(include_str!(
+            "../../../../schemas/run.findings.schema.json"
+        ))
+        .unwrap()
+    }
+
+    fn run_proof_schema() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../../schemas/run.proof.schema.json")).unwrap()
+    }
+
+    fn representative_run_summary() -> RunSummary {
+        RunSummary::running("run-schema", "tool", Some("agentic:test".to_string()), "target")
+            .complete()
+            .with_findings(Some(2))
+            .with_cost(Some(0.42))
+            .with_model(Some("openai:gpt-test".to_string()))
+            .with_config_hash(Some("sha256:cfg".to_string()))
+            .with_house_rules(vec![RunHouseRuleFingerprint {
+                module: "triage".to_string(),
+                path: ".kuzushi/house-rules/triage.md".to_string(),
+                sha256: "sha256:rules".to_string(),
+            }])
+            .with_prompt_overrides(vec![RunPromptOverrideFingerprint {
+                module: "triage".to_string(),
+                verb: "run".to_string(),
+                path: ".kuzushi/prompts/triage/run.md".to_string(),
+                sha256: "sha256:prompt".to_string(),
+            }])
+            .with_threat_model_sha256(Some("sha256:threat".to_string()))
+            .with_env_fingerprint(vec![RunEnvFingerprint {
+                key: "KUZUSHI_TEST".to_string(),
+                fingerprint: "sha256:env".to_string(),
+            }])
+            .with_target_git(Some(RunTargetGitMetadata {
+                sha: "abcdef123456".to_string(),
+                branch: Some("main".to_string()),
+                dirty: true,
+            }))
+            .with_cli_args(vec![
+                "kuzushi".to_string(),
+                "run".to_string(),
+                "context:build".to_string(),
+            ])
+            .with_loaded_modules(vec![
+                "builtin:agentic-sast".to_string(),
+                "builtin:context".to_string(),
+            ])
+            .with_llm_calls(vec![RunLlmCallAudit {
+                n: 1,
+                kind: "reasoning".to_string(),
+                verb: Some("run".to_string()),
+                model: "openai:gpt-test".to_string(),
+                provider: "openai".to_string(),
+                prompt_hash: "fnv1a64:abc".to_string(),
+                latency_ms: Some(12),
+                cost_usd: Some(0.01),
+            }])
+            .with_trace_malformed_lines(Some(1))
+            .with_artifact(RunArtifact {
+                label: "result".to_string(),
+                path: ".kuzushi/runs/run-schema/result.json".to_string(),
+                kind: "json".to_string(),
+            })
+    }
+
+    fn representative_artifact_manifest() -> RunArtifactManifest {
+        RunArtifactManifest {
+            run_id: "run-schema".to_string(),
+            artifacts: vec![RunArtifact {
+                label: "run metadata".to_string(),
+                path: ".kuzushi/runs/run-schema/run.json".to_string(),
+                kind: "json".to_string(),
+            }],
+        }
+    }
+
+    fn representative_snake_case_artifact_manifest() -> serde_json::Value {
+        serde_json::json!({
+            "run_id": "run-schema",
+            "artifacts": [{
+                "label": "run metadata",
+                "path": ".kuzushi/runs/run-schema/run.json",
+                "kind": "json"
+            }]
+        })
+    }
+
+    fn representative_snake_case_run_summary() -> serde_json::Value {
+        serde_json::json!({
+            "run_id": "run-schema",
+            "kind": "tool",
+            "status": "completed",
+            "tool": "agentic:test",
+            "target": "target",
+            "started_at_unix": 1,
+            "completed_at_unix": 2,
+            "cost_usd": 0.42,
+            "process_id": 42,
+            "kuzushi_version": "0.24.0-alpha.0",
+            "git_sha": "abcdef123456",
+            "git_branch": "main",
+            "model": "openai:gpt-test",
+            "config_hash": "sha256:cfg",
+            "platform": "darwin-arm64",
+            "house_rules": [{
+                "module": "triage",
+                "path": ".kuzushi/house-rules/triage.md",
+                "sha256": "sha256:rules"
+            }],
+            "prompt_overrides": [{
+                "module": "triage",
+                "verb": "run",
+                "path": ".kuzushi/prompts/triage/run.md",
+                "sha256": "sha256:prompt"
+            }],
+            "threat_model_sha256": "sha256:threat",
+            "env_fingerprint": [{"key": "KUZUSHI_TEST", "fingerprint": "sha256:env"}],
+            "target_git": {"sha": "abcdef123456", "branch": "main", "dirty": true},
+            "cli_args": ["kuzushi", "run", "context:build"],
+            "loaded_modules": ["builtin:agentic-sast", "builtin:context"],
+            "trace_malformed_lines": 1,
+            "llm_calls": [{
+                "n": 1,
+                "kind": "reasoning",
+                "verb": "run",
+                "model": "openai:gpt-test",
+                "provider": "openai",
+                "prompt_hash": "fnv1a64:abc",
+                "latency_ms": 12,
+                "cost_usd": 0.01
+            }],
+            "artifacts": [{
+                "label": "result",
+                "path": ".kuzushi/runs/run-schema/result.json",
+                "kind": "json"
+            }]
+        })
+    }
+
+    fn representative_run_failures() -> RunFailures {
+        RunFailures {
+            run_id: "run-failed".to_string(),
+            status: "failed".to_string(),
+            failures: vec![RunFailure {
+                tool: "triage:run".to_string(),
+                status: "failed".to_string(),
+                error: "runtime unavailable".to_string(),
+                agent_thread_context: FailureToLlmContext {
+                    failed_stage: "triage:run".to_string(),
+                    cause: "runtime unavailable".to_string(),
+                    what_failed: "triage:run did not complete successfully".to_string(),
+                    artifacts_available: vec![RunArtifact {
+                        label: "run metadata".to_string(),
+                        path: ".kuzushi/runs/run-failed/run.json".to_string(),
+                        kind: "json".to_string(),
+                    }],
+                    missing_artifacts: vec!["proof.json".to_string()],
+                    allowed_proof_level: "artifact-review-only".to_string(),
+                    next_files_or_artifacts_to_inspect: vec!["failures.json".to_string()],
+                    recovery_options: vec!["rerun triage".to_string()],
+                    fallback_prompt: "continue failed run".to_string(),
+                    claims_forbidden: vec!["verified claim".to_string()],
+                },
+            }],
+        }
+    }
+
+    fn representative_snake_case_run_failures() -> serde_json::Value {
+        serde_json::json!({
+            "run_id": "run-failed",
+            "status": "failed",
+            "failures": [{
+                "tool": "triage:run",
+                "status": "failed",
+                "error": "runtime unavailable",
+                "agent_thread_context": {
+                    "failed_stage": "triage:run",
+                    "cause": "runtime unavailable",
+                    "what_failed": "triage:run did not complete successfully",
+                    "artifacts_available": [{
+                        "label": "run metadata",
+                        "path": ".kuzushi/runs/run-failed/run.json",
+                        "kind": "json"
+                    }],
+                    "missing_artifacts": ["proof.json"],
+                    "allowed_proof_level": "artifact-review-only",
+                    "next_files_or_artifacts_to_inspect": ["failures.json"],
+                    "recovery_options": ["rerun triage"],
+                    "fallback_prompt": "continue failed run",
+                    "claims_forbidden": ["verified claim"]
+                }
+            }]
+        })
+    }
+
+    fn representative_run_event() -> RunEvent {
+        RunEvent::new(1, "tool", "started", "triage started")
+            .with_tool("triage:run")
+            .with_artifact(RunArtifact {
+                label: "input".to_string(),
+                path: ".kuzushi/runs/run-event/input.json".to_string(),
+                kind: "json".to_string(),
+            })
+    }
+
+    fn representative_trace_step() -> RunTraceStep {
+        RunTraceStep::new(2, "reasoning", "triage query")
+            .with_latency_ms(Some(120))
+            .with_cost_usd(Some(0.02))
+            .with_module_id("triage")
+            .with_verb("run")
+            .with_parent_step(1)
+            .with_severity("info")
+            .with_started_at_ms(1_700_000_000_000)
+            .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:abc")
+    }
+
+    fn representative_missing_context_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "runId": "run-context",
+            "status": "skipped",
+            "runStatus": "completed",
+            "summary": "No context snapshot was recorded for this run.",
+            "artifacts": [],
+            "warnings": ["No context snapshot was recorded for this run."],
+            "errors": []
+        })
+    }
+
+    fn representative_rich_context_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "filesIndexed": 42,
+            "repoContext": {
+                "languages": ["TypeScript", "Rust"],
+                "frameworks": ["Django", "Spring"]
+            },
+            "appModel": {
+                "routes": [{"id": "route-users"}],
+                "outboundClients": [{"id": "stripe"}],
+                "dataStores": [{"id": "postgres"}],
+                "backgroundJobs": [{"id": "sync"}]
+            }
+        })
+    }
+
+    fn representative_missing_attack_surface_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "runId": "run-attack-surface",
+            "status": "skipped",
+            "runStatus": "completed",
+            "summary": "No attack-surface snapshot was recorded for this run.",
+            "artifacts": [],
+            "warnings": ["No attack-surface snapshot was recorded for this run."],
+            "errors": []
+        })
+    }
+
+    fn representative_rich_attack_surface_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "summary": {
+                "surfaceCount": 1,
+                "highRisk": 1,
+                "maxRiskScore": 82,
+                "byRiskTier": {"high": 1},
+                "byKind": {"http_route": 1}
+            },
+            "surfaces": [{
+                "id": "route-users",
+                "kind": "http_route",
+                "framework": "Spring",
+                "risk": {
+                    "rank": 1,
+                    "score": 82,
+                    "tier": "high",
+                    "reasons": ["auth boundary"]
+                }
+            }],
+            "attackSurfaces": [],
+            "attack_surfaces": []
+        })
+    }
+
+    fn representative_missing_threat_model_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "runId": "run-threat-model",
+            "status": "skipped",
+            "runStatus": "completed",
+            "summary": "No threat-model snapshot was recorded for this run.",
+            "artifacts": [],
+            "warnings": ["No threat-model snapshot was recorded for this run."],
+            "errors": []
+        })
+    }
+
+    fn representative_rich_threat_model_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "version": "2.0",
+            "methodology": "stride",
+            "dfd": {
+                "nodes": [{"id": "app"}],
+                "flows": [{"id": "flow-public"}],
+                "trust_boundaries": [{"id": "tb-public"}]
+            },
+            "threats": [{
+                "id": "T-001",
+                "related_cwe": ["CWE-20"],
+                "affectedFiles": [{"filePath": "src/app.ts"}]
+            }],
+            "attackSurface": {
+                "entryPoints": [{"name": "handle_request"}]
+            },
+            "narrative": {
+                "overview": "deterministic model",
+                "input_categories": {
+                    "data_egress_flows": ["GET /reports/download"]
+                }
+            },
+            "degradation": {
+                "mode": "deterministic-no-runtime"
+            }
+        })
+    }
+
+    fn representative_missing_recommendations_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "runId": "run-recommendations",
+            "status": "skipped",
+            "runStatus": "completed",
+            "summary": "No module recommendations were recorded for this run.",
+            "artifacts": [],
+            "warnings": ["No module recommendations were recorded for this run."],
+            "errors": []
+        })
+    }
+
+    fn representative_rich_recommendations_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "summary": "1 recommendation for /repo",
+            "target": "/repo",
+            "signals": {
+                "sourceFiles": 12,
+                "frameworks": ["Falcon", "Litestar", "Sanic"],
+                "attackSurfaceHighRisk": 2
+            },
+            "capabilities": {
+                "availableToolCount": 5,
+                "recommendedToolCount": 1,
+                "skippedMissingTools": []
+            },
+            "recommendations": [{
+                "moduleId": "semgrep",
+                "tool": "threat-model:build",
+                "priority": "medium",
+                "reason": "attack-surface signals exist",
+                "signals": ["frameworks: Falcon, Litestar, Sanic"],
+                "requiresRuntime": false,
+                "nextInput": {"target": "/repo"}
+            }],
+            "warnings": [],
+            "errors": []
+        })
+    }
+
+    fn representative_data_wrapped_recommendations_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "status": "completed",
+            "runStatus": "completed",
+            "data": representative_rich_recommendations_snapshot()
+        })
+    }
+
+    fn representative_missing_findings_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "runId": "run-findings",
+            "status": "skipped",
+            "runStatus": "completed",
+            "summary": "No findings snapshot was recorded for this run.",
+            "artifacts": [],
+            "warnings": ["No findings snapshot was recorded for this run."],
+            "errors": []
+        })
+    }
+
+    fn representative_rich_findings_snapshot() -> serde_json::Value {
+        serde_json::json!([{
+            "id": "F-1",
+            "fingerprint": "semgrep:src/app.ts:7",
+            "tool": "semgrep",
+            "ruleId": "js/sql-injection",
+            "title": "SQL injection",
+            "message": "query uses request input",
+            "severity": "high",
+            "confidence": "medium",
+            "filePath": "src/app.ts",
+            "startLine": 7,
+            "endLine": 9,
+            "staticProofState": "source_sink_linked",
+            "properties": {"proofState": "source_sink_linked"},
+            "cwe": ["CWE-89"],
+            "evidence": "source to sink",
+            "suppressed": false,
+            "snoozedUntil": "2026-06-01T00:00:00Z",
+            "remediation": "parameterize the query",
+            "references": ["https://cwe.mitre.org/data/definitions/89.html"]
+        }])
+    }
+
+    fn representative_missing_proof_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "runId": "run-proof",
+            "status": "skipped",
+            "runStatus": "completed",
+            "summary": "No proof snapshot was recorded for this run.",
+            "artifacts": [],
+            "warnings": ["No proof snapshot was recorded for this run."],
+            "errors": []
+        })
+    }
+
+    fn representative_rich_proof_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "status": "completed",
+            "summary": "1 proof state(s) recorded from normalized findings",
+            "source": "normalized-findings",
+            "proofLevel": "runtime-and-static",
+            "runtimeVerification": true,
+            "countsByState": {
+                "runtime_confirmed": 1
+            },
+            "findings": [{
+                "fingerprint": "semgrep:src/app.ts:7",
+                "tool": "semgrep",
+                "ruleId": "js/sql-injection",
+                "filePath": "src/app.ts",
+                "startLine": 7,
+                "staticProofState": "runtime_confirmed"
+            }]
+        })
+    }
+
+    fn representative_verification_proof_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "kind": "verification",
+            "proofLevel": 4,
+            "proofVerdict": "exploited",
+            "verified": 1,
+            "results": [{"findingId": "F-1", "verdict": "confirmed"}]
+        })
+    }
+
+    fn representative_snake_case_verification_proof_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "kind": "verification",
+            "proof_level": 2,
+            "proof_verdict": "needs-runtime-evidence",
+            "verified_count": 1,
+            "verification_results": [{"finding_id": "F-1", "verdict": "confirmed"}]
+        })
+    }
+
+    fn assert_required_schema_fields_exist(schema: &serde_json::Value, value: &serde_json::Value) {
+        for field in schema["required"].as_array().unwrap() {
+            let field = field.as_str().unwrap();
+            assert!(value.get(field).is_some(), "missing required field {field}");
+        }
+    }
+
+    fn assert_schema_requires_any_field(schema: &serde_json::Value, fields: &[&str]) {
+        let any_of = schema["anyOf"].as_array().unwrap();
+        for field in fields {
+            assert!(
+                any_of
+                    .iter()
+                    .any(|entry| required_fields(entry).contains(field)),
+                "schema missing alias requirement for {field}"
+            );
+        }
+    }
+
+    fn assert_failure_schema_requires_any_context_key(schema: &serde_json::Value) {
+        let failure_schema = &schema["definitions"]["failure"];
+        assert_schema_requires_any_field(
+            failure_schema,
+            &["agentThreadContext", "agent_thread_context"],
+        );
+    }
+
+    fn assert_failure_context_schema_requires_alias_pairs(schema: &serde_json::Value) {
+        let context_schema = &schema["definitions"]["failureContext"];
+        for field_pair in [
+            ["failedStage", "failed_stage"],
+            ["whatFailed", "what_failed"],
+            ["artifactsAvailable", "artifacts_available"],
+            ["missingArtifacts", "missing_artifacts"],
+            ["allowedProofLevel", "allowed_proof_level"],
+            [
+                "nextFilesOrArtifactsToInspect",
+                "next_files_or_artifacts_to_inspect",
+            ],
+            ["recoveryOptions", "recovery_options"],
+            ["fallbackPrompt", "fallback_prompt"],
+            ["claimsForbidden", "claims_forbidden"],
+        ] {
+            assert_schema_allows_required_alias_pair(context_schema, field_pair);
+        }
+    }
+
+    fn assert_schema_allows_required_alias_pair(schema: &serde_json::Value, fields: [&str; 2]) {
+        let all_of = schema["allOf"].as_array().unwrap();
+        assert!(
+            all_of.iter().any(|entry| {
+                let any_of = entry["anyOf"].as_array().unwrap();
+                fields
+                    .iter()
+                    .all(|field| any_of.iter().any(|branch| required_fields(branch).contains(field)))
+            }),
+            "schema missing alias requirement pair {fields:?}"
+        );
+    }
+
+    fn assert_schema_allows_required_alias_set(schema: &serde_json::Value, fields: &[&str]) {
+        let all_of = schema["allOf"].as_array().unwrap();
+        assert!(
+            all_of.iter().any(|entry| {
+                let any_of = entry["anyOf"].as_array().unwrap();
+                fields
+                    .iter()
+                    .all(|field| any_of.iter().any(|branch| required_fields(branch).contains(field)))
+            }),
+            "schema missing alias requirement set {fields:?}"
+        );
+    }
+
+    fn required_fields(schema: &serde_json::Value) -> Vec<&str> {
+        schema["required"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|field| field.as_str().unwrap())
+            .collect()
+    }
+
+    fn assert_serialized_fields_are_declared(schema: &serde_json::Value, value: &serde_json::Value) {
+        let properties = schema["properties"].as_object().unwrap();
+        for field in value.as_object().unwrap().keys() {
+            assert!(properties.contains_key(field), "schema missing field {field}");
+        }
+    }
+
+    fn assert_schema_declares_fields(schema: &serde_json::Value, fields: &[&str]) {
+        let properties = schema["properties"].as_object().unwrap();
+        for field in fields {
+            assert!(properties.contains_key(*field), "schema missing field {field}");
+        }
+    }
+
+    fn assert_snapshot_marker_fields_are_declared(schema: &serde_json::Value) {
+        assert_schema_declares_fields(schema, &["runId", "run_id", "status", "runStatus"]);
+    }
+
+    fn assert_schema_declares_definition_fields(
+        schema: &serde_json::Value,
+        definition: &str,
+        fields: &[&str],
+    ) {
+        let properties = schema["definitions"][definition]["properties"]
+            .as_object()
+            .unwrap();
+        for field in fields {
+            assert!(properties.contains_key(*field), "schema missing field {field}");
+        }
+    }
+
+    fn assert_artifact_entries_match_schema(schema: &serde_json::Value, value: &serde_json::Value) {
+        let artifact_schema = schema["definitions"]["artifact"]["properties"]
+            .as_object()
+            .unwrap();
+        for artifact in value["artifacts"].as_array().unwrap() {
+            for field in artifact.as_object().unwrap().keys() {
+                assert!(
+                    artifact_schema.contains_key(field),
+                    "artifact schema missing field {field}"
+                );
+            }
+        }
+    }
+
+    fn assert_run_summary_llm_entries_match_schema(
+        schema: &serde_json::Value,
+        value: &serde_json::Value,
+    ) {
+        let llm_schema = schema["definitions"]["llmCall"]["properties"]
+            .as_object()
+            .unwrap();
+        let calls = value
+            .get("llmCalls")
+            .or_else(|| value.get("llm_calls"))
+            .unwrap()
+            .as_array()
+            .unwrap();
+        for call in calls {
+            for field in call.as_object().unwrap().keys() {
+                assert!(
+                    llm_schema.contains_key(field),
+                    "llm call schema missing field {field}"
+                );
+            }
+        }
+    }
+
+    fn assert_llm_call_schema_requires_prompt_hash_aliases(schema: &serde_json::Value) {
+        let llm_schema = &schema["definitions"]["llmCall"];
+        assert_schema_requires_any_field(llm_schema, &["promptHash", "prompt_hash"]);
+    }
+
+    fn assert_failure_entries_match_schema(schema: &serde_json::Value, value: &serde_json::Value) {
+        let failure_schema = schema["definitions"]["failure"]["properties"]
+            .as_object()
+            .unwrap();
+        let context_schema = schema["definitions"]["failureContext"]["properties"]
+            .as_object()
+            .unwrap();
+        for failure in value["failures"].as_array().unwrap() {
+            for field in failure.as_object().unwrap().keys() {
+                assert!(
+                    failure_schema.contains_key(field),
+                    "failure schema missing field {field}"
+                );
+            }
+            let context = failure
+                .get("agentThreadContext")
+                .or_else(|| failure.get("agent_thread_context"))
+                .unwrap();
+            for field in context.as_object().unwrap().keys() {
+                assert!(
+                    context_schema.contains_key(field),
+                    "failure context schema missing field {field}"
+                );
+            }
+        }
+    }
+
+    fn assert_event_artifact_matches_schema(schema: &serde_json::Value, value: &serde_json::Value) {
+        let artifact_schema = schema["definitions"]["artifact"]["properties"]
+            .as_object()
+            .unwrap();
+        for field in value["artifact"].as_object().unwrap().keys() {
+            assert!(
+                artifact_schema.contains_key(field),
+                "event artifact schema missing field {field}"
+            );
+        }
+    }
+
+    fn assert_recommendation_entries_match_schema(
+        schema: &serde_json::Value,
+        value: &serde_json::Value,
+    ) {
+        let recommendations = value["recommendations"].as_array().unwrap();
+        assert_recommendations_match_schema(schema, recommendations);
+    }
+
+    fn assert_recommendation_report_matches_schema(
+        schema: &serde_json::Value,
+        report: &serde_json::Value,
+    ) {
+        let report_schema = schema["definitions"]["recommendationReport"]["properties"]
+            .as_object()
+            .unwrap();
+        for field in report.as_object().unwrap().keys() {
+            assert!(
+                report_schema.contains_key(field),
+                "recommendation report schema missing field {field}"
+            );
+        }
+        let recommendations = report["recommendations"].as_array().unwrap();
+        assert_recommendations_match_schema(schema, recommendations);
+    }
+
+    fn assert_recommendation_report_envelope_aliases_match_schema(schema: &serde_json::Value) {
+        let report_schema = schema["definitions"]["recommendationReport"]["properties"]
+            .as_object()
+            .unwrap();
+
+        assert_eq!(
+            report_schema["recommendationReport"]["$ref"],
+            serde_json::json!("#/definitions/recommendationReport")
+        );
+        assert_eq!(
+            report_schema["recommendation_report"]["$ref"],
+            serde_json::json!("#/definitions/recommendationReport")
+        );
+    }
+
+    fn assert_recommendations_match_schema(
+        schema: &serde_json::Value,
+        recommendations: &[serde_json::Value],
+    ) {
+        let recommendation_schema = schema["definitions"]["recommendation"]["properties"]
+            .as_object()
+            .unwrap();
+        for recommendation in recommendations {
+            for field in recommendation.as_object().unwrap().keys() {
+                assert!(
+                    recommendation_schema.contains_key(field),
+                    "recommendation schema missing field {field}"
+                );
+            }
+        }
+    }
+
+    fn assert_finding_entries_match_schema(schema: &serde_json::Value, value: &serde_json::Value) {
+        let finding_schema = schema["definitions"]["finding"]["properties"]
+            .as_object()
+            .unwrap();
+        for finding in value.as_array().unwrap() {
+            for field in finding.as_object().unwrap().keys() {
+                assert!(
+                    finding_schema.contains_key(field),
+                    "finding schema missing field {field}"
+                );
+            }
+        }
+    }
+
+    fn assert_proof_finding_entries_match_schema(
+        schema: &serde_json::Value,
+        value: &serde_json::Value,
+    ) {
+        let finding_schema = schema["definitions"]["proofFinding"]["properties"]
+            .as_object()
+            .unwrap();
+        for finding in value["findings"].as_array().unwrap() {
+            for field in finding.as_object().unwrap().keys() {
+                assert!(
+                    finding_schema.contains_key(field),
+                    "proof finding schema missing field {field}"
+                );
+            }
+        }
     }
 
     fn assert_forbidden_success_claims(claims: &[String]) {

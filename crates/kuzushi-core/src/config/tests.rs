@@ -30,6 +30,21 @@ mod tests {
     }
 
     #[test]
+    fn config_hash_is_stable_sha256_label() {
+        let config = V2Config {
+            model: Some("openai:gpt-test".to_string()),
+            ..Default::default()
+        };
+
+        let first = config_hash(&config).unwrap();
+        let second = config_hash(&config).unwrap();
+
+        assert_eq!(first, second);
+        assert!(first.starts_with("sha256:"));
+        assert_eq!(first.len(), "sha256:".len() + 64);
+    }
+
+    #[test]
     fn project_config_overrides_only_safe_fields() {
         // A target repo's `.kuzushi/v2/config.toml` may override the model
         // string but must not be able to redirect runtime or operator
@@ -224,6 +239,27 @@ allow_env_token = true
         })
         .unwrap_err();
         assert!(err.to_string().contains("provider:model"));
+    }
+
+    #[test]
+    fn canonicalizes_configured_model_spec() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v2/config.toml"),
+            r#"model = " openai : gpt-5.5 "
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap();
+
+        assert_eq!(config.model.as_deref(), Some("openai:gpt-5.5"));
     }
 
     #[test]

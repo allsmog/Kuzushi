@@ -1,0 +1,241 @@
+use super::files::{candidate_files, IndexedFile};
+use super::patterns::{LeadPattern, LEAD_PATTERNS};
+use serde_json::{json, Value};
+use std::collections::BTreeMap;
+
+pub(super) fn threat_lead(
+    threat: &Value,
+    nodes: &BTreeMap<String, Value>,
+    flows: &BTreeMap<String, Value>,
+    file_index: &[IndexedFile],
+) -> Option<Value> {
+    let id = string_field(threat, "id")?;
+    let threat_text = searchable_threat_text(threat);
+    let pattern = best_pattern(&threat_text)?;
+    let affected_files = string_array_field(threat, "affectedFiles");
+    let target_ids = string_array_field(threat, "targetElementIds");
+    let linked_nodes = linked_nodes(&target_ids, nodes);
+    let linked_flows = linked_flows(&target_ids, flows, nodes);
+    let candidates = candidate_files(pattern, &affected_files, file_index);
+    let confidence = lead_confidence(&candidates);
+
+    Some(json!({
+        "threatId": id,
+        "title": string_field(threat, "title").unwrap_or_else(|| id.clone()),
+        "category": string_field(threat, "category"),
+        "impact": string_field(threat, "impact"),
+        "likelihood": string_field(threat, "likelihood"),
+        "pattern": pattern.id,
+        "source": pattern.source,
+        "sink": pattern.sink,
+        "candidateFiles": candidates,
+        "affectedFiles": affected_files,
+        "linkedNodes": linked_nodes,
+        "linkedFlows": linked_flows,
+        "preconditions": string_field(threat, "preconditions"),
+        "missingMitigations": string_field(threat, "missingMitigations"),
+        "cwe": pattern.cwes,
+        "classification": lead_classification(&candidates),
+        "confidence": confidence,
+    }))
+}
+
+fn linked_nodes(target_ids: &[String], nodes: &BTreeMap<String, Value>) -> Vec<Value> {
+    target_ids
+        .iter()
+        .filter_map(|id| nodes.get(id).map(|node| summarized_node(id, node)))
+        .collect()
+}
+
+fn linked_flows(
+    target_ids: &[String],
+    flows: &BTreeMap<String, Value>,
+    nodes: &BTreeMap<String, Value>,
+) -> Vec<Value> {
+    target_ids
+        .iter()
+        .filter_map(|id| flows.get(id).map(|flow| summarized_flow(id, flow, nodes)))
+        .collect()
+}
+
+fn lead_confidence(candidates: &[Value]) -> &'static str {
+    if candidates.iter().any(has_multiple_evidence_terms) {
+        "high"
+    } else if candidates.is_empty() {
+        "low"
+    } else {
+        "medium"
+    }
+}
+
+fn has_multiple_evidence_terms(candidate: &Value) -> bool {
+    candidate["evidence"]
+        .as_array()
+        .is_some_and(|items| items.len() >= 2)
+}
+
+fn searchable_threat_text(threat: &Value) -> String {
+    [
+        "title",
+        "description",
+        "impact",
+        "attackVector",
+        "preconditions",
+        "missingMitigations",
+        "category",
+    ]
+    .iter()
+    .filter_map(|key| threat.get(*key).and_then(Value::as_str))
+    .collect::<Vec<_>>()
+    .join(" ")
+    .to_ascii_lowercase()
+}
+
+fn best_pattern(text: &str) -> Option<&'static LeadPattern> {
+    LEAD_PATTERNS
+        .iter()
+        .max_by_key(|pattern| {
+            pattern
+                .trigger_terms
+                .iter()
+                .filter(|term| text.contains(**term))
+                .count()
+        })
+        .filter(|pattern| {
+            pattern
+                .trigger_terms
+                .iter()
+                .any(|term| text.contains(*term))
+        })
+}
+
+pub(super) fn map_by_id(values: Option<&Vec<Value>>) -> BTreeMap<String, Value> {
+    values
+        .into_iter()
+        .flatten()
+        .filter_map(|value| Some((string_field(value, "id")?, value.clone())))
+        .collect()
+}
+
+fn summarized_node(id: &str, node: &Value) -> Value {
+    json!({
+        "id": id,
+        "name": string_field(node, "name"),
+        "type": string_field(node, "type"),
+        "trustZone": string_field(node, "trustZone"),
+    })
+}
+
+fn summarized_flow(id: &str, flow: &Value, nodes: &BTreeMap<String, Value>) -> Value {
+    let source_id = string_field(flow, "sourceId");
+    let target_id = string_field(flow, "targetId");
+    json!({
+        "id": id,
+        "description": string_field(flow, "description"),
+        "sourceId": source_id,
+        "targetId": target_id,
+        "source": source_id.as_ref().and_then(|id| nodes.get(id)).and_then(|node| string_field(node, "name")),
+        "target": target_id.as_ref().and_then(|id| nodes.get(id)).and_then(|node| string_field(node, "name")),
+    })
+}
+
+pub(super) fn string_field(value: &Value, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+}
+
+pub(super) fn string_array_field(value: &Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToString::to_string)
+        .collect()
+}
+
+fn lead_classification(candidates: &[Value]) -> &'static str {
+    if candidates.iter().all(|candidate| {
+        candidate["classification"]
+            .as_str()
+            .is_some_and(|class| class == "example-code" || class == "test-code")
+    }) {
+        "example-or-test-only"
+    } else {
+        "production-or-mixed"
+    }
+}
+
+pub(super) fn lead_priority(lead: &Value) -> u8 {
+    [
+        priority_if(lead["pattern"].as_str() == Some("remote-path-to-local-write"), 100),
+        priority_if(lead["classification"].as_str() == Some("production-or-mixed"), 20),
+        priority_if(lead["confidence"].as_str() == Some("high"), 10),
+        priority_if(
+            lead["title"].as_str().is_some_and(contains_file_write_risk),
+            10,
+        ),
+    ]
+    .into_iter()
+    .sum()
+}
+
+fn priority_if(condition: bool, points: u8) -> u8 {
+    if condition { points } else { 0 }
+}
+
+fn contains_file_write_risk(text: &str) -> bool {
+    let lower = text.to_ascii_lowercase();
+    ["overwrite", "traversal", "file", "path", "helper"]
+        .iter()
+        .any(|term| lower.contains(term))
+}
+
+pub(super) fn threat_id_number(lead: &Value) -> u32 {
+    lead["threatId"]
+        .as_str()
+        .and_then(|id| id.trim_start_matches('t').parse::<u32>().ok())
+        .unwrap_or(u32::MAX)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn chooses_remote_path_pattern_for_file_overwrite_threat() {
+        let pattern = best_pattern(
+            "unsafe url-to-file handling in helper paths local file overwrite traversal",
+        )
+        .expect("pattern");
+
+        assert_eq!(pattern.id, "remote-path-to-local-write");
+    }
+
+    #[test]
+    fn prioritizes_production_file_write_leads() {
+        let low_value = json!({
+            "threatId": "t1",
+            "title": "Workflow identity spoofing",
+            "pattern": "ci-build-supply-chain",
+            "classification": "production-or-mixed",
+            "confidence": "high",
+        });
+        let file_write = json!({
+            "threatId": "t6",
+            "title": "Unsafe URL-to-file handling in helper paths",
+            "pattern": "remote-path-to-local-write",
+            "classification": "production-or-mixed",
+            "confidence": "high",
+        });
+
+        assert!(lead_priority(&file_write) > lead_priority(&low_value));
+    }
+}

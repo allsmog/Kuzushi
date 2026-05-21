@@ -8,45 +8,16 @@ impl ShellApp {
         let (tx, rx) = mpsc::channel();
         let cancel = ScanCancellation::default();
 
-        self.target = Some(request.target_root.clone());
-        self.scan = Some(ScanPanelState {
-            run_id: None,
-            target: request.target_root.clone(),
-            stage: "queued".to_string(),
-            findings_count: 0,
-            running: true,
-            abort_requested: false,
-            error: None,
-        });
-        self.scan_rx = Some(rx);
-        self.scan_cancel = Some(cancel.clone());
-        self.findings.clear();
-        self.selected_finding = None;
-        // Mint an Activity session so trace events from the scan worker
-        // have somewhere to land. The drain pump (drain_trace_events) also
-        // creates one lazily, but seeding it here keeps the run-id consistent
-        // with the scan's eventual run id once the worker assigns one.
-        // Seed from the registry so the DAG pane shows all queued tasks
-        // from the first frame instead of "(no DAG tasks yet)" while the
-        // worker spins up.
-        let mut session = ActivitySession::new("scan-pending");
-        session.seed_from_registry(&self.registry);
-        self.activity = Some(session);
-        self.shell_view = if self.auto_open_activity {
-            ShellView::Activity
-        } else {
-            ShellView::ModuleRun
-        };
-        self.log(
-            "scan",
-            format!("starting {}", request.target_root.display()),
-        );
-        self.set_live_activity(LiveActivity::new(
-            LiveActivityPhase::Searching,
-            "sast:scan",
-            format!("scanning {}", request.target_root.display()),
-        ));
+        self.begin_scan_state(&request, rx, cancel.clone());
+        self.spawn_scan_worker(request, tx, cancel);
+    }
 
+    fn spawn_scan_worker(
+        &self,
+        request: ScanStartRequest,
+        tx: mpsc::Sender<ScanEvent>,
+        cancel: ScanCancellation,
+    ) {
         thread::spawn(move || {
             scan_worker(
                 request.target_root,
@@ -59,6 +30,47 @@ impl ShellApp {
                 request.thinking_level,
             )
         });
+    }
+
+    fn begin_scan_state(
+        &mut self,
+        request: &ScanStartRequest,
+        rx: mpsc::Receiver<ScanEvent>,
+        cancel: ScanCancellation,
+    ) {
+        let run_id = new_run_id("scan");
+        self.target = Some(request.target_root.clone());
+        self.scan = Some(queued_scan_panel(&request.target_root, &run_id));
+        self.scan_rx = Some(rx);
+        self.scan_cancel = Some(cancel);
+        self.findings.clear();
+        self.selected_finding = None;
+        self.activity = Some(self.pending_scan_activity(&run_id));
+        self.shell_view = self.scan_shell_view();
+        self.log_scan_start(&request.target_root);
+    }
+
+    fn pending_scan_activity(&self, run_id: &str) -> ActivitySession {
+        let mut session = ActivitySession::new(run_id);
+        session.seed_from_registry(&self.registry);
+        session
+    }
+
+    fn scan_shell_view(&self) -> ShellView {
+        if self.auto_open_activity {
+            ShellView::Activity
+        } else {
+            ShellView::ModuleRun
+        }
+    }
+
+    fn log_scan_start(&mut self, target_root: &PathBuf) {
+        self.log("scan", format!("starting {}", target_root.display()));
+        self.set_live_activity(LiveActivity::new(
+            LiveActivityPhase::Searching,
+            "sast:scan",
+            format!("scanning {}", target_root.display()),
+        ));
     }
 
     fn prepare_scan_start(&mut self, target: Option<PathBuf>) -> Option<ScanStartRequest> {
@@ -116,15 +128,31 @@ impl ShellApp {
             Some(&self.option_store),
         )
     }
+}
 
-    pub(crate) fn scan_options_from_store(&self) -> Result<ScanRunOptions> {
-        let input = self.scan_input_from_store()?;
-        Ok(ScanRunOptions {
-            severity: parse_scan_severity_filter(&input)?,
-            tasks: parse_native_scan_tasks(&input)?,
-            static_proof_state: None,
-            index_static_evidence: false,
-        })
+fn queued_scan_panel(target_root: &PathBuf, run_id: &str) -> ScanPanelState {
+    ScanPanelState {
+        run_id: Some(run_id.to_string()),
+        target: target_root.clone(),
+        stage: "queued".to_string(),
+        findings_count: 0,
+        running: true,
+        abort_requested: false,
+        error: None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn queued_scan_panel_seeds_failure_handoff_run_id() {
+        let temp = tempfile::tempdir().unwrap();
+        let panel = queued_scan_panel(&temp.path().to_path_buf(), "scan-seeded");
+
+        assert_eq!(panel.run_id.as_deref(), Some("scan-seeded"));
+        assert!(panel.running);
     }
 }
 

@@ -166,7 +166,7 @@ fn quickstart_steps(app: &ShellApp) -> Vec<QuickstartStep> {
     vec![
         QuickstartStep {
             number: "1",
-            text: "doctor                    CLI preflight: kuzushi doctor",
+            text: "kuzushi doctor             CLI preflight (run from your terminal, not here)",
         },
         QuickstartStep {
             number: "2",
@@ -178,20 +178,24 @@ fn quickstart_steps(app: &ShellApp) -> Vec<QuickstartStep> {
         },
         QuickstartStep {
             number: "4",
-            text: "findings / open F-0001     inspect evidence and proof state",
+            text: "run <tool>                 dispatch a single tool (e.g. run semgrep:scan)",
         },
         QuickstartStep {
             number: "5",
-            text: "report output              workspace export; kuzushi pr-comment",
+            text: "findings · open F-0001     inspect evidence and proof state",
+        },
+        QuickstartStep {
+            number: "6",
+            text: "workspace export findings  write a report; kuzushi pr-comment for PR drop",
         },
     ]
 }
 
 fn quickstart_scan_step(app: &ShellApp) -> &'static str {
     if app.target.is_some() {
-        "scan / run                 scan the active target; run <tool> dispatches one tool"
+        "scan                       scan the active target with configured scanners"
     } else {
-        "scan . / run <tool>        scan this directory; run <tool> dispatches one tool"
+        "scan .                     scan the current directory (the dot is cwd)"
     }
 }
 

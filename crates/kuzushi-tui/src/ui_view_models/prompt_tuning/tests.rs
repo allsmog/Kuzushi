@@ -42,6 +42,24 @@ fn tune_model_reads_limited_house_rules() {
 }
 
 #[test]
+fn tune_model_surfaces_unreadable_house_rules() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(temp.path().to_path_buf());
+    app.focused_module = Some("sast".to_string());
+    let rules = temp.path().join(".kuzushi/house-rules/sast.md");
+    fs::create_dir_all(rules.parent().unwrap()).unwrap();
+    fs::create_dir_all(&rules).unwrap();
+
+    let model = tune_model(&app, 2);
+
+    assert_eq!(
+        model.house_rules,
+        TuneHouseRules::Unreadable(rules.display().to_string())
+    );
+}
+
+#[test]
 fn prompts_model_shapes_prompt_rows_for_focused_module() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.focused_module = Some("sast".to_string());

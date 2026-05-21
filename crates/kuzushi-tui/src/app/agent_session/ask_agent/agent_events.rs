@@ -78,6 +78,13 @@ impl ShellApp {
             audit,
         );
         self.write_agent_run_summary(rid, "complete");
+        append_run_status_event(
+            self.target.as_deref(),
+            rid,
+            "agent:ask",
+            "completed",
+            "agent:ask completed",
+        );
     }
 
     fn write_agent_trace_failure(
@@ -99,6 +106,13 @@ impl ShellApp {
             audit,
         );
         self.write_agent_run_summary(rid, "failed");
+        append_run_status_event(
+            self.target.as_deref(),
+            rid,
+            "agent:ask",
+            "failed",
+            "agent:ask failed",
+        );
         write_run_failure_handoff(self.target.as_deref(), rid, "agent:ask", "failed", error);
     }
 

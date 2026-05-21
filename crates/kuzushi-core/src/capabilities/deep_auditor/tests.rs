@@ -67,7 +67,7 @@ mod tests {
         )
     }
 
-    fn routed_runtime_with_role(steps: Vec<AgentLoopStep>) -> RoutedRuntime {
+    fn routed_runtime_with_role(steps: Vec<AgentLoopStep>) -> RoutedRuntime<'static> {
         let runtime: Arc<dyn AgentRuntime> = ScriptedRuntime::new(steps);
         let mut router = AgentRouter::empty();
         router_add_route(
@@ -80,7 +80,7 @@ mod tests {
 
     fn routed_runtime_with_role_typed(
         steps: Vec<AgentLoopStep>,
-    ) -> (RoutedRuntime, Arc<ScriptedRuntime>) {
+    ) -> (RoutedRuntime<'static>, Arc<ScriptedRuntime>) {
         let runtime = ScriptedRuntime::new(steps);
         let runtime_dyn: Arc<dyn AgentRuntime> = runtime.clone();
         let mut router = AgentRouter::empty();

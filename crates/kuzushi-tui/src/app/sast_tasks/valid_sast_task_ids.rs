@@ -7,7 +7,6 @@ pub(crate) struct SastTaskCapability {
     pub(crate) cost: &'static str,
     pub(crate) notes: &'static str,
     pub(crate) default_enabled: bool,
-    pub(crate) native_scan: bool,
     pub(crate) toggleable: bool,
 }
 
@@ -18,7 +17,6 @@ pub(crate) const SAST_TASK_CAPABILITIES: &[SastTaskCapability] = &[
         cost: "low",
         notes: "pattern scanner",
         default_enabled: true,
-        native_scan: true,
         toggleable: true,
     },
     SastTaskCapability {
@@ -27,7 +25,6 @@ pub(crate) const SAST_TASK_CAPABILITIES: &[SastTaskCapability] = &[
         cost: "high",
         notes: "semantic query scanner",
         default_enabled: false,
-        native_scan: true,
         toggleable: true,
     },
     SastTaskCapability {
@@ -36,7 +33,14 @@ pub(crate) const SAST_TASK_CAPABILITIES: &[SastTaskCapability] = &[
         cost: "low",
         notes: "dependency manifest hygiene",
         default_enabled: true,
-        native_scan: true,
+        toggleable: true,
+    },
+    SastTaskCapability {
+        id: "cargo-audit",
+        scan_task: "cargo-audit",
+        cost: "medium",
+        notes: "Rust advisory scanner",
+        default_enabled: true,
         toggleable: true,
     },
     SastTaskCapability {
@@ -45,7 +49,6 @@ pub(crate) const SAST_TASK_CAPABILITIES: &[SastTaskCapability] = &[
         cost: "low",
         notes: "local secret patterns",
         default_enabled: true,
-        native_scan: true,
         toggleable: true,
     },
     SastTaskCapability {
@@ -54,7 +57,14 @@ pub(crate) const SAST_TASK_CAPABILITIES: &[SastTaskCapability] = &[
         cost: "low",
         notes: "IaC misconfiguration scanner",
         default_enabled: true,
-        native_scan: true,
+        toggleable: true,
+    },
+    SastTaskCapability {
+        id: "license-scan",
+        scan_task: "license-scan",
+        cost: "low",
+        notes: "package license risk scanner",
+        default_enabled: false,
         toggleable: true,
     },
     SastTaskCapability {
@@ -63,7 +73,6 @@ pub(crate) const SAST_TASK_CAPABILITIES: &[SastTaskCapability] = &[
         cost: "high",
         notes: "model-backed detector set; run via sast:scan",
         default_enabled: false,
-        native_scan: false,
         toggleable: true,
     },
     SastTaskCapability {
@@ -72,7 +81,6 @@ pub(crate) const SAST_TASK_CAPABILITIES: &[SastTaskCapability] = &[
         cost: "high",
         notes: "threat-model-guided review; run via sast:scan",
         default_enabled: false,
-        native_scan: false,
         toggleable: true,
     },
     SastTaskCapability {
@@ -81,7 +89,6 @@ pub(crate) const SAST_TASK_CAPABILITIES: &[SastTaskCapability] = &[
         cost: "high",
         notes: "source-to-sink analysis; run via sast:scan",
         default_enabled: false,
-        native_scan: false,
         toggleable: true,
     },
     SastTaskCapability {
@@ -90,16 +97,14 @@ pub(crate) const SAST_TASK_CAPABILITIES: &[SastTaskCapability] = &[
         cost: "high",
         notes: "next taint workflow; run via sast:scan",
         default_enabled: false,
-        native_scan: false,
         toggleable: true,
     },
     SastTaskCapability {
         id: "systems-hunt",
         scan_task: "systems-hunt",
         cost: "high",
-        notes: "systems invariant hunt; run via sast:scan",
+        notes: "deferred exact opt-in systems invariant hunt; run via sast:scan",
         default_enabled: false,
-        native_scan: false,
         toggleable: true,
     },
 ];

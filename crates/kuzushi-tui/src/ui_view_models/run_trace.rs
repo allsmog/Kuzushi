@@ -52,9 +52,10 @@ pub(crate) struct TraceStep {
 pub(crate) fn replay_model(app: &ShellApp, run_id: &str) -> ReplayModel {
     let metadata = run_metadata_artifact_detail(app, run_id);
     let triage = run_artifact_detail(app, run_id, "triage", "triage.jsonl");
+    let metadata_missing = metadata.artifact_state() == RunArtifactState::Missing;
     ReplayModel {
         run_id: run_id.to_string(),
-        metadata_missing: !metadata.path.exists(),
+        metadata_missing,
         artifacts: vec![metadata.into_display(), triage.into_display()],
     }
 }
@@ -63,9 +64,10 @@ pub(crate) fn trace_model(app: &ShellApp, run_id: &str) -> TraceModel {
     let trace = run_artifact_detail(app, run_id, "trace", "trace.jsonl");
     let triage = run_artifact_detail(app, run_id, "triage", "triage.jsonl");
     let verify = run_artifact_detail(app, run_id, "verify", "verify.jsonl");
+    let trace_exists = trace.artifact_state() == RunArtifactState::File;
     TraceModel {
         run_id: run_id.to_string(),
-        trace_exists: trace.path.exists(),
+        trace_exists,
         steps: parse_trace_jsonl(&trace.path),
         artifacts: vec![
             trace.into_display(),
@@ -107,7 +109,7 @@ fn run_artifact_detail(
 
 fn run_metadata_artifact_detail(app: &ShellApp, run_id: &str) -> RunArtifactPath {
     let canonical = run_artifact_path(app, run_id, "run.json");
-    let path = if canonical.exists() {
+    let path = if artifact_state(&canonical) != RunArtifactState::Missing {
         canonical
     } else {
         legacy_metadata_path(app, run_id).unwrap_or(canonical)
@@ -120,7 +122,7 @@ fn run_metadata_artifact_detail(app: &ShellApp, run_id: &str) -> RunArtifactPath
 
 fn legacy_metadata_path(app: &ShellApp, run_id: &str) -> Option<PathBuf> {
     let legacy = run_artifact_path(app, run_id, "summary.json");
-    legacy.exists().then_some(legacy)
+    (artifact_state(&legacy) != RunArtifactState::Missing).then_some(legacy)
 }
 
 fn run_artifact_path(app: &ShellApp, run_id: &str, leaf: &str) -> PathBuf {
@@ -135,11 +137,19 @@ fn runs_root(app: &ShellApp) -> PathBuf {
 }
 
 fn parse_trace_jsonl(path: &Path) -> Vec<TraceStep> {
-    let Ok(bytes) = std::fs::read(path) else {
-        return Vec::new();
+    match artifact_state(path) {
+        RunArtifactState::Missing => return Vec::new(),
+        RunArtifactState::Invalid => return vec![malformed_trace_artifact_step()],
+        RunArtifactState::File => {}
+    }
+
+    let bytes = match std::fs::read(path) {
+        Ok(bytes) => bytes,
+        Err(_) => return vec![malformed_trace_artifact_step()],
     };
-    let Ok(text) = std::str::from_utf8(&bytes) else {
-        return Vec::new();
+    let text = match std::str::from_utf8(&bytes) {
+        Ok(text) => text,
+        Err(_) => return vec![malformed_trace_artifact_step()],
     };
     trace_steps_from_text(text)
 }
@@ -147,28 +157,59 @@ fn parse_trace_jsonl(path: &Path) -> Vec<TraceStep> {
 fn trace_steps_from_text(text: &str) -> Vec<TraceStep> {
     text.lines()
         .enumerate()
-        .filter_map(|(idx, raw)| trace_step_from_line(idx, raw))
+        .filter_map(|(idx, raw)| trace_step_from_line(idx, raw.trim()))
         .collect()
 }
 
 fn trace_step_from_line(idx: usize, raw: &str) -> Option<TraceStep> {
-    let raw = raw.trim();
     if raw.is_empty() {
         return None;
     }
-    let value = serde_json::from_str::<serde_json::Value>(raw).ok()?;
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(raw) else {
+        return Some(malformed_trace_step(idx));
+    };
     Some(TraceStep {
         n: step_number(&value, idx),
         kind: string_field(&value, "kind").unwrap_or_else(|| "step".to_string()),
         label: string_field(&value, "label").unwrap_or_else(|| "(no label)".to_string()),
-        latency_ms: u64_field(&value, "latency_ms"),
-        cost_usd: value.get("cost_usd").and_then(serde_json::Value::as_f64),
-        module_id: string_field(&value, "module_id"),
+        latency_ms: u64_alias_field(&value, "latency_ms", "latencyMs"),
+        cost_usd: f64_alias_field(&value, "cost_usd", "costUsd"),
+        module_id: string_alias_field(&value, "module_id", "moduleId"),
         verb: string_field(&value, "verb"),
-        parent_step: u64_field(&value, "parent_step").map(|n| n as usize),
+        parent_step: u64_alias_field(&value, "parent_step", "parentStep").map(|n| n as usize),
         severity: string_field(&value, "severity"),
-        started_at_ms: u64_field(&value, "started_at_ms"),
+        started_at_ms: u64_alias_field(&value, "started_at_ms", "startedAtMs"),
     })
+}
+
+fn malformed_trace_step(idx: usize) -> TraceStep {
+    TraceStep {
+        n: idx + 1,
+        kind: "malformed".to_string(),
+        label: "malformed trace JSONL line".to_string(),
+        latency_ms: None,
+        cost_usd: None,
+        module_id: None,
+        verb: None,
+        parent_step: None,
+        severity: Some("warn".to_string()),
+        started_at_ms: None,
+    }
+}
+
+fn malformed_trace_artifact_step() -> TraceStep {
+    TraceStep {
+        n: 1,
+        kind: "malformed".to_string(),
+        label: "malformed trace artifact".to_string(),
+        latency_ms: None,
+        cost_usd: None,
+        module_id: None,
+        verb: None,
+        parent_step: None,
+        severity: Some("warn".to_string()),
+        started_at_ms: None,
+    }
 }
 
 fn step_number(value: &serde_json::Value, idx: usize) -> usize {
@@ -179,11 +220,26 @@ fn u64_field(value: &serde_json::Value, key: &str) -> Option<u64> {
     value.get(key).and_then(serde_json::Value::as_u64)
 }
 
+fn u64_alias_field(value: &serde_json::Value, canonical: &str, alias: &str) -> Option<u64> {
+    u64_field(value, canonical).or_else(|| u64_field(value, alias))
+}
+
+fn f64_alias_field(value: &serde_json::Value, canonical: &str, alias: &str) -> Option<f64> {
+    value
+        .get(canonical)
+        .or_else(|| value.get(alias))
+        .and_then(serde_json::Value::as_f64)
+}
+
 fn string_field(value: &serde_json::Value, key: &str) -> Option<String> {
     value
         .get(key)
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
+}
+
+fn string_alias_field(value: &serde_json::Value, canonical: &str, alias: &str) -> Option<String> {
+    string_field(value, canonical).or_else(|| string_field(value, alias))
 }
 
 fn short_fingerprint(value: &str) -> String {
@@ -195,18 +251,38 @@ struct RunArtifactPath {
     path: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RunArtifactState {
+    File,
+    Invalid,
+    Missing,
+}
+
 impl RunArtifactPath {
+    fn artifact_state(&self) -> RunArtifactState {
+        artifact_state(&self.path)
+    }
+
     fn into_display(self) -> RunArtifactDetail {
         let display = self.path.display().to_string();
-        let detail = if self.path.exists() {
-            display
-        } else {
-            format!("{display} (missing)")
+        let detail = match artifact_state(&self.path) {
+            RunArtifactState::File => display,
+            RunArtifactState::Invalid => format!("{display} (invalid)"),
+            RunArtifactState::Missing => format!("{display} (missing)"),
         };
         RunArtifactDetail {
             label: self.label,
             detail,
         }
+    }
+}
+
+fn artifact_state(path: &Path) -> RunArtifactState {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => RunArtifactState::File,
+        Ok(_) => RunArtifactState::Invalid,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => RunArtifactState::Missing,
+        Err(_) => RunArtifactState::Invalid,
     }
 }
 
@@ -244,6 +320,100 @@ mod tests {
             model.empty_message,
             "aliases: load findings first with findings"
         );
+    }
+
+    #[test]
+    fn trace_steps_accept_camel_case_artifact_schema_aliases() {
+        let steps = trace_steps_from_text(
+            r#"{"n":1,"kind":"reasoning","label":"query","latencyMs":25,"costUsd":0.02,"moduleId":"triage","verb":"run","parentStep":7,"severity":"info","startedAtMs":1700000000000}"#,
+        );
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].latency_ms, Some(25));
+        assert_eq!(steps[0].cost_usd, Some(0.02));
+        assert_eq!(steps[0].module_id.as_deref(), Some("triage"));
+        assert_eq!(steps[0].parent_step, Some(7));
+        assert_eq!(steps[0].started_at_ms, Some(1_700_000_000_000));
+    }
+
+    #[test]
+    fn trace_steps_surface_malformed_jsonl_rows() {
+        let steps = trace_steps_from_text(
+            [
+                r#"{"n":1,"kind":"reasoning","label":"query"}"#,
+                "{not-json",
+                "",
+                r#"{"n":4,"kind":"done","label":"complete"}"#,
+            ]
+            .join("\n")
+            .as_str(),
+        );
+
+        assert_eq!(steps.len(), 3);
+        assert_eq!(steps[1].n, 2);
+        assert_eq!(steps[1].kind, "malformed");
+        assert_eq!(steps[1].severity.as_deref(), Some("warn"));
+        assert_eq!(steps[1].label, "malformed trace JSONL line");
+        assert_eq!(steps[2].n, 4);
+    }
+
+    #[test]
+    fn trace_steps_surface_unreadable_trace_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("trace.jsonl");
+        std::fs::create_dir(&path).unwrap();
+
+        let steps = parse_trace_jsonl(&path);
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].kind, "malformed");
+        assert_eq!(steps[0].severity.as_deref(), Some("warn"));
+        assert_eq!(steps[0].label, "malformed trace artifact");
+    }
+
+    #[test]
+    fn replay_model_surfaces_non_file_run_metadata_as_invalid() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join(".kuzushi/runs/r-invalid");
+        std::fs::create_dir_all(run_dir.join("run.json")).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.target = Some(temp.path().to_path_buf());
+
+        let model = replay_model(&app, "r-invalid");
+
+        assert!(!model.metadata_missing);
+        assert_eq!(model.artifacts[0].label, "metadata");
+        assert!(model.artifacts[0].detail.ends_with("run.json (invalid)"));
+    }
+
+    #[test]
+    fn trace_model_surfaces_non_file_trace_artifact_as_invalid() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_dir = temp.path().join(".kuzushi/runs/r-invalid-trace");
+        std::fs::create_dir_all(run_dir.join("trace.jsonl")).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.target = Some(temp.path().to_path_buf());
+
+        let model = trace_model(&app, "r-invalid-trace");
+
+        assert!(!model.trace_exists);
+        assert_eq!(model.artifacts[0].label, "trace");
+        assert!(model.artifacts[0].detail.ends_with("trace.jsonl (invalid)"));
+        assert_eq!(model.steps.len(), 1);
+        assert_eq!(model.steps[0].label, "malformed trace artifact");
+    }
+
+    #[test]
+    fn trace_steps_surface_non_utf8_trace_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("trace.jsonl");
+        std::fs::write(&path, [0xff, 0xfe, 0xfd]).unwrap();
+
+        let steps = parse_trace_jsonl(&path);
+
+        assert_eq!(steps.len(), 1);
+        assert_eq!(steps[0].kind, "malformed");
+        assert_eq!(steps[0].label, "malformed trace artifact");
     }
 
     fn named_finding(fingerprint: &str, title: &str) -> Finding {

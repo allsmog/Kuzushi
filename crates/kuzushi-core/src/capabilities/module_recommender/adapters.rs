@@ -26,8 +26,13 @@ pub(crate) fn execute_module_recommender_tool(
             &findings,
         ),
     };
-    serde_json::to_value(build_recommendation_report(request))
-        .context("Could not serialize module recommendations")
+    let report = build_recommendation_report(request);
+    let summary = report.summary.clone();
+    let output = recommendation_report_output(&report);
+    let data = serde_json::to_value(report).context("Could not serialize module recommendations")?;
+    Ok(crate::module_result::completed_output_result(
+        summary, output, data,
+    ))
 }
 
 fn workspace_for_input(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<WorkspaceTarget> {
@@ -79,6 +84,31 @@ fn max_recommendations(input: &Value) -> usize {
         .unwrap_or(8)
 }
 
+fn recommendation_report_output(report: &RecommendationReport) -> String {
+    let mut lines = vec![report.summary.clone()];
+    if !report.recommendations.is_empty() {
+        lines.extend(report.recommendations.iter().take(5).map(recommendation_line));
+    }
+    lines.join("\n")
+}
+
+fn recommendation_line(recommendation: &ModuleRecommendation) -> String {
+    format!(
+        "  - {} ({}): {}",
+        recommendation.tool,
+        recommendation_priority_label(recommendation.priority),
+        recommendation.reason
+    )
+}
+
+fn recommendation_priority_label(priority: RecommendationPriority) -> &'static str {
+    match priority {
+        RecommendationPriority::High => "high",
+        RecommendationPriority::Medium => "medium",
+        RecommendationPriority::Low => "low",
+    }
+}
+
 fn repository_signals(
     inventory: &RepositoryInventory,
     attack_surface: &AttackSurfaceMap,
@@ -93,6 +123,7 @@ fn repository_signals(
         findings_source: findings_source(findings_available),
         source_files: inventory.source_files.len(),
         languages: language_names(inventory),
+        frameworks: framework_names(inventory),
         codeql_languages: codeql_languages(inventory),
         dependency_manifests: inventory.dependency_manifests.len(),
         config_files: inventory.config_files.len(),
@@ -139,6 +170,16 @@ fn language_names(inventory: &RepositoryInventory) -> Vec<String> {
         .languages
         .iter()
         .map(|language| language.name.clone())
+        .collect()
+}
+
+fn framework_names(inventory: &RepositoryInventory) -> Vec<String> {
+    inventory
+        .frameworks
+        .iter()
+        .map(|framework| framework.name.clone())
+        .collect::<BTreeSet<_>>()
+        .into_iter()
         .collect()
 }
 

@@ -28,6 +28,8 @@ pub struct OperatorConfig {
     pub spend_hard_ceiling_usd: Option<f64>,
     #[serde(default)]
     pub trusted_workflow_auto_accept: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub trusted_modules: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
