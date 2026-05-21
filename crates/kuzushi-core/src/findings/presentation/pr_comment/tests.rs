@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use crate::FindingEvidence;
 
     fn make_finding(severity: Severity, fp: &str, title: &str) -> Finding {
         Finding {
@@ -22,6 +23,10 @@ mod tests {
             created_at: String::new(),
             vuln_source: None,
             dedup_key: None,
+            suppressed: false,
+            snoozed_until: None,
+            remediation: None,
+            references: Vec::new(),
             evidence: Vec::new(),
         }
     }
@@ -53,6 +58,16 @@ mod tests {
                 make_finding(Severity::Critical, "fcrit", "sqli"),
             ],
             cost_usd: 0.42,
+            phase_costs: vec![
+                PrCommentPhaseCost {
+                    label: "triage".to_string(),
+                    cost_usd: 0.30,
+                },
+                PrCommentPhaseCost {
+                    label: "verify".to_string(),
+                    cost_usd: 0.12,
+                },
+            ],
             ..PrCommentInput::default()
         };
         let body = build_pr_comment(&input);
@@ -61,6 +76,8 @@ mod tests {
         assert!(body.contains("🟥 CRIT"));
         assert!(body.contains("🟧 HIGH"));
         assert!(body.contains("$0.42"));
+        assert!(body.contains("triage **$0.30**"));
+        assert!(body.contains("verify **$0.12**"));
         // critical-first ordering
         let crit_pos = body.find("F-0001").unwrap();
         let high_pos = body.find("F-0002").unwrap();
@@ -69,6 +86,45 @@ mod tests {
         let crit_row_start = body[crit_pos..].find("|").unwrap() + crit_pos;
         let crit_row_end = body[crit_row_start..].find('\n').unwrap() + crit_row_start;
         assert!(body[crit_row_start..crit_row_end].contains("sqli"));
+    }
+
+    #[test]
+    fn findings_table_includes_cwe_and_evidence_preview() {
+        let mut finding = make_finding(Severity::High, "fcwe", "CWE-89 SQL injection");
+        finding.message = "Evidence: query builder receives request param".to_string();
+        finding.evidence = vec![FindingEvidence {
+            kind: "source".to_string(),
+            file_path: "src/db.rs".to_string(),
+            line: 12,
+            snippet: "query(user_input)".to_string(),
+            rationale: "user input reaches SQL".to_string(),
+            confidence: 90,
+        }];
+        let input = PrCommentInput {
+            findings: vec![finding],
+            run_url: Some("https://example/runs/1".to_string()),
+            ..PrCommentInput::default()
+        };
+        let body = build_pr_comment(&input);
+
+        assert!(body.contains("| ID | Severity | CWE | Title | Location |"));
+        assert!(body.contains("[F-0001](https://example/runs/1#F-0001)"));
+        assert!(body.contains("| 🟧 HIGH | CWE-89 |"));
+        assert!(body.contains("> **F-0001 evidence:** evidence 1 anchors"));
+        assert!(body.contains("src/db.rs:12"));
+    }
+
+    #[test]
+    fn findings_table_includes_remediation_hint_when_present() {
+        let mut finding = make_finding(Severity::High, "ffix", "unsafe redirect");
+        finding.message = "Evidence: redirect target is user controlled\nRemediation: allowlist internal redirect targets".to_string();
+        let input = PrCommentInput {
+            findings: vec![finding],
+            ..PrCommentInput::default()
+        };
+        let body = build_pr_comment(&input);
+
+        assert!(body.contains("> **F-0001 remediation:** allowlist internal redirect targets"));
     }
 
     #[test]
@@ -122,6 +178,32 @@ mod tests {
         let body = build_pr_comment(&input);
         assert!(body.contains("New in this PR"));
         assert!(body.contains("🆕 **1 new in this PR**"));
+    }
+
+    #[test]
+    fn exploit_chain_section_renders_story_steps() {
+        let input = PrCommentInput {
+            chains: vec![PrCommentChain {
+                id: "chain-1".to_string(),
+                title: "session token reuse".to_string(),
+                severity: "high".to_string(),
+                steps: vec![PrCommentChainStep {
+                    role: "source".to_string(),
+                    description: "attacker controls callback".to_string(),
+                    file_path: "src/auth.rs".to_string(),
+                    start_line: 42,
+                }],
+            }],
+            ..PrCommentInput::default()
+        };
+        let body = build_pr_comment(&input);
+
+        assert!(body.contains("#### Exploit chains (1)"));
+        assert!(body.contains("chain-1"));
+        assert!(body.contains("HIGH"));
+        assert!(body.contains("session token reuse"));
+        assert!(body.contains("src/auth.rs:42"));
+        assert!(body.contains("attacker controls callback"));
     }
 
     #[test]

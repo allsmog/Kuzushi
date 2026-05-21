@@ -46,8 +46,6 @@ impl Finding {
         let vuln_source = Some(VulnSource::from_tool(&tool));
 
         Self {
-            id: None,
-            scan_id: None,
             fingerprint,
             rule_id,
             title,
@@ -59,12 +57,10 @@ impl Finding {
             tool,
             actor_fingerprint: None,
             static_proof_state: None,
-            triage: None,
-            verification: None,
             created_at: now_isoish(),
             vuln_source,
             dedup_key,
-            evidence: Vec::new(),
+            ..Self::default()
         }
     }
 
@@ -84,6 +80,11 @@ impl Finding {
 
     pub fn with_evidence(mut self, evidence: Vec<FindingEvidence>) -> Self {
         self.evidence = evidence;
+        self
+    }
+
+    pub fn with_remediation(mut self, remediation: impl Into<String>) -> Self {
+        self.remediation = Some(remediation.into());
         self
     }
 

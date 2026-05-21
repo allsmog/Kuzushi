@@ -63,7 +63,10 @@ fn append_house_rules(lines: &mut Vec<Line<'static>>, house_rules: &TuneHouseRul
             }
             lines.push(blank());
         }
-        _ => {
+        TuneHouseRules::Unreadable(path) => {
+            lines.push(muted(&format!("house rules file is unreadable: {path}")));
+        }
+        TuneHouseRules::Empty => {
             lines.push(muted(
                 "(no house rules set; pick edit house rules and type a value)",
             ));
@@ -102,7 +105,7 @@ fn append_prompts_header(lines: &mut Vec<Line<'static>>, module: &str, width: u1
     lines.push(Line::from(vec![
         Span::raw("  "),
         Span::styled(
-            table_text(&["verb", "source", "override path"], &[12, 10, 28]),
+            table_text(&["verb", "override", "override path"], &[12, 10, 28]),
             theme::subtle(),
         ),
     ]));

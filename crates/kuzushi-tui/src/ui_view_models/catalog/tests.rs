@@ -26,6 +26,19 @@ fn catalog_collapsed_model_steers_context_then_findings() {
 }
 
 #[test]
+fn catalog_collapsed_model_surfaces_malformed_context_snapshot() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.context_view.status = "malformed context snapshot. Next: context build".to_string();
+
+    let model = catalog_model(&app);
+
+    assert_eq!(
+        model.collapsed.next_hint,
+        "Context snapshot is malformed; rerun `context build` before scanning."
+    );
+}
+
+#[test]
 fn catalog_collapsed_model_prioritizes_critical_alias_hint() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.context_view.exists = true;

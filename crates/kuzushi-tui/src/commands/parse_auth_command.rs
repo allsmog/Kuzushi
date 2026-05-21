@@ -3,12 +3,23 @@ use super::*;
 pub(crate) fn parse_auth_command(args: &[&str]) -> ShellCommand {
     match args.first().copied() {
         None | Some("status") => ShellCommand::Auth,
-        Some("login") => ShellCommand::AuthLogin(args.get(1).map(|value| (*value).to_string())),
-        Some("openai") => ShellCommand::AuthLogin(Some("openai-codex".to_string())),
+        Some("login") => parse_auth_login_command(args),
+        Some("openai") => ShellCommand::AuthLogin(Some("openai".to_string())),
         Some("anthropic") | Some("claude") => {
             ShellCommand::AuthLogin(Some("anthropic".to_string()))
         }
+        Some("github-copilot") | Some("copilot") => {
+            ShellCommand::AuthLogin(Some("github-copilot".to_string()))
+        }
         Some(other) => ShellCommand::Unknown(format!("auth {other}")),
+    }
+}
+
+fn parse_auth_login_command(args: &[&str]) -> ShellCommand {
+    match args.get(1).copied() {
+        Some("codex" | "openai-codex") => ShellCommand::Unknown(format!("auth login {}", args[1])),
+        Some(_) => ShellCommand::AuthLogin(Some(args[1..].join(" "))),
+        None => ShellCommand::AuthLogin(None),
     }
 }
 

@@ -154,6 +154,7 @@ mod tests {
             .iter()
             .any(|row| row.cells[0] == "selected" && row.cells[1].contains("enabled")));
         assert!(model.rows.iter().any(|row| row.task_id == "semgrep"));
+        assert!(model.rows.iter().any(|row| row.task_id == "cargo-audit"));
     }
 
     #[test]
@@ -187,6 +188,7 @@ mod tests {
             .summary_rows
             .contains(&"mode: auto + denylist".to_string()));
         assert!(model.rows.iter().any(|row| row.cells[1] == "semgrep"));
+        assert!(model.rows.iter().any(|row| row.cells[1] == "cargo-audit"));
         assert_eq!(
             model.next_hint,
             "Next: task block <id>, task allow <id>, task toggle [id], task mode auto|manual|toggle"

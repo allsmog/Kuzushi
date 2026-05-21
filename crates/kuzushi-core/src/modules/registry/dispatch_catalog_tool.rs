@@ -44,7 +44,7 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "context:build" | "context-lite:index" => {
             Some(context::build_context_snapshot(input.clone(), ctx))
         }
-        "config:show" => Some(Ok(json!(ctx.config))),
+        "config:show" => Some(Ok(config_show_json(ctx))),
         "router:show" => Some(router_show_tool(input.clone(), ctx)),
         "workspace:status" => Some(Ok(workspace_status_json(ctx))),
         "workspace:export-findings" => Some(export_workspace_findings_tool(input.clone(), ctx)),
@@ -54,16 +54,27 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
     }
 }
 
+pub(in crate::modules) fn config_show_json(ctx: &ToolExecutionContext<'_>) -> Value {
+    let output = "config:show loaded effective Kuzushi configuration".to_string();
+    let data = json!({
+        "config": ctx.config,
+        "runtime": ctx.config.runtime.kind,
+        "model": ctx.config.model,
+    });
+    crate::module_result::completed_output_result(output.clone(), output, data)
+}
+
 pub(in crate::modules) fn workspace_status_json(ctx: &ToolExecutionContext<'_>) -> Value {
-    json!({
-        "ok": ctx.workspace.is_some(),
-        "output": workspace_status_output(ctx),
+    let output = workspace_status_output(ctx);
+    let data = json!({
+        "active": ctx.workspace.is_some(),
         "root": ctx.workspace.map(|workspace| workspace.root().display().to_string()),
         "stateDir": ctx.workspace.map(|workspace| workspace.state_dir().display().to_string()),
         "findingsDb": ctx.workspace.map(|workspace| workspace.findings_db_path().display().to_string()),
         "runtime": ctx.config.runtime.kind,
         "model": ctx.config.model,
-    })
+    });
+    crate::module_result::completed_output_result(output.clone(), output, data)
 }
 
 pub(in crate::modules) fn list_findings_tool(
@@ -95,9 +106,18 @@ pub(in crate::modules) fn dispatch_native_security_tool(
     match name {
         "dep-hygiene:check" => Some(run_dep_hygiene_tool(input, ctx)),
         "secret-scan:scan" => Some(run_secret_scan_tool(input, ctx)),
-        "semgrep:scan" | "codeql:scan" | "iac-scan:scan" | "exploit-chain:scan" => Some(
-            native_scanners::execute_tool(name, input.clone(), ctx, runtime),
-        ),
+        "semgrep:scan"
+        | "codeql:scan"
+        | "iac-scan:scan"
+        | "cargo-audit:scan"
+        | "license-scan:scan"
+        | "sbom-scan:scan"
+        | "exploit-chain:scan" => Some(native_scanners::execute_tool(
+            name,
+            input.clone(),
+            ctx,
+            runtime,
+        )),
         "sast:scan" => Some(run_sast_scan(input.clone(), ctx, runtime)),
         _ => None,
     }

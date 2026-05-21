@@ -26,19 +26,10 @@ const LOCAL_TSC = resolve(
 );
 const TSC = existsSync(LOCAL_TSC) ? LOCAL_TSC : "tsc";
 
-// `perf/` is intentionally dropped from the project list — its
-// micro-benchmarks import `../src/scanners/dedup.js`,
-// `../src/migrations/index.js`, `../src/store.js`, `../src/agents/types.js`,
-// and `../src/types.js`, all of which were removed when the scanner /
-// store / agent surface migrated to Rust. The benches themselves still
-// exist in `perf/` so a future PR can re-target them at the new
-// runtime (or delete them). Until then, typechecking the dead imports
-// just produces noise that masks real regressions. See
-// `docs/devex/04-codegen-assessment.md` for the same pattern applied
-// to the codegen registry in PR #60.
 const projects = [
   { name: "src", cmd: TSC, args: ["--noEmit"] },
   { name: "benchmarks", cmd: TSC, args: ["-p", "benchmarks/tsconfig.json", "--noEmit"] },
+  { name: "perf", cmd: TSC, args: ["-p", "perf/tsconfig.json", "--noEmit"] },
 ];
 
 const COLORS = process.stdout.isTTY

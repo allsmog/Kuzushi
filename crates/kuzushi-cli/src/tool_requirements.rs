@@ -66,6 +66,8 @@ pub(crate) const WORKSPACE_TOOL_NAMES: &[&str] = &[
     "semgrep:scan",
     "codeql:scan",
     "iac-scan:scan",
+    "license-scan:scan",
+    "sbom-scan:scan",
 ];
 
 pub(crate) const FINDING_STORE_TOOL_PREFIXES: &[&str] = &[
@@ -102,6 +104,7 @@ pub(crate) const FINDING_STORE_TOOL_NAMES: &[&str] = &[
     "semgrep:scan",
     "codeql:scan",
     "iac-scan:scan",
+    "license-scan:scan",
 ];
 
 pub(crate) fn tool_defaults_to_workspace(tool: &str) -> bool {
@@ -116,6 +119,7 @@ pub(crate) fn tool_needs_finding_store(tool: &str) -> bool {
 /// Whether `kuzushi run <tool>` needs to construct an agent runtime
 /// before dispatch. Thin re-export of `kuzushi_core::tool_needs_runtime`
 /// — the canonical name + input-aware combiner shared with the shell.
+#[cfg(test)]
 pub(crate) fn tool_needs_runtime(tool: &str, input: &serde_json::Value) -> bool {
     kuzushi_core::tool_needs_runtime(tool, input)
 }

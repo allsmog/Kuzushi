@@ -1,52 +1,80 @@
 use super::*;
 
 pub(crate) fn router_show_tool(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
-    use crate::agent_router::{AgentRole, AgentRouter};
-    use crate::config::ConfigPaths;
+    let router = load_router_for_context(ctx);
+    let roles = router_role_rows(&input, ctx, &router);
+    Ok(router_show_response(ctx.config.model.clone(), &router, roles))
+}
 
-    // Load models.toml if present. Best-effort — missing file = empty router.
+fn load_router_for_context(ctx: &ToolExecutionContext<'_>) -> crate::agent_router::AgentRouter {
     let target = ctx
         .workspace
         .map(|workspace| workspace.root().to_path_buf());
-    let router = ConfigPaths::from_target(target.as_deref())
+    crate::config::ConfigPaths::from_target(target.as_deref())
         .ok()
-        .and_then(|paths| AgentRouter::load(&paths).ok())
-        .unwrap_or_default();
+        .and_then(|paths| crate::agent_router::AgentRouter::load(&paths).ok())
+        .unwrap_or_default()
+}
 
-    let mut roles = Vec::with_capacity(AgentRole::all().len());
-    for role in AgentRole::all() {
-        let key = role.option_store_key();
-        // Operator override merged via effective_tool_input lives in `input`.
-        let option_override = input
-            .as_object()
-            .and_then(|obj| obj.get(&key))
-            .and_then(Value::as_str)
-            .map(str::to_string);
+fn router_role_rows(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    router: &crate::agent_router::AgentRouter,
+) -> Vec<Value> {
+    crate::agent_router::AgentRole::all()
+        .iter()
+        .map(|role| router_role_row(input, ctx, router, *role))
+        .collect()
+}
 
-        let toml_route = router.route(*role).cloned();
+fn router_role_row(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    router: &crate::agent_router::AgentRouter,
+    role: crate::agent_router::AgentRole,
+) -> Value {
+    let key = role.option_store_key();
+    let option_override = router_option_override(input, &key);
+    let toml_route = router.route(role).cloned();
+    let effective = option_override
+        .clone()
+        .or_else(|| toml_route.as_ref().map(|r| r.primary.clone()))
+        .or_else(|| router.default_model().map(str::to_string))
+        .or_else(|| ctx.config.model.clone());
+    json!({
+        "role": role.as_key(),
+        "optionKey": key,
+        "operatorOverride": option_override,
+        "tomlPrimary": toml_route.as_ref().map(|r| r.primary.clone()),
+        "tomlFallbacks": toml_route.as_ref().map(|r| r.fallbacks.clone()).unwrap_or_default(),
+        "effective": effective,
+    })
+}
 
-        let effective = option_override
-            .clone()
-            .or_else(|| toml_route.as_ref().map(|r| r.primary.clone()))
-            .or_else(|| router.default_model().map(str::to_string))
-            .or_else(|| ctx.config.model.clone());
+fn router_option_override(input: &Value, key: &str) -> Option<String> {
+    input
+        .as_object()
+        .and_then(|obj| obj.get(key))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
 
-        roles.push(json!({
-            "role": role.as_key(),
-            "optionKey": key,
-            "operatorOverride": option_override,
-            "tomlPrimary": toml_route.as_ref().map(|r| r.primary.clone()),
-            "tomlFallbacks": toml_route.as_ref().map(|r| r.fallbacks.clone()).unwrap_or_default(),
-            "effective": effective,
-        }));
-    }
-
-    Ok(json!({
-        "ok": true,
-        "configModel": ctx.config.model,
+fn router_show_response(
+    config_model: Option<String>,
+    router: &crate::agent_router::AgentRouter,
+    roles: Vec<Value>,
+) -> Value {
+    let summary = format!("router:show resolved {} role route{}", roles.len(), if roles.len() == 1 { "" } else { "s" });
+    let data = json!({
+        "configModel": config_model,
         "tomlDefaultModel": router.default_model(),
         "roles": roles,
-    }))
+    });
+    crate::module_result::completed_output_result(
+        summary.clone(),
+        summary,
+        data,
+    )
 }
 
 pub(crate) fn run_full_mode_hunt_tool(
@@ -70,8 +98,8 @@ fn run_full_mode_hunt_config(
     run_live_full_mode_hunt(ctx, runtime, cfg)
 }
 
-struct FullModeRuntimeContext {
-    routed: crate::agent_router::RoutedRuntime,
+struct FullModeRuntimeContext<'a> {
+    routed: crate::agent_router::RoutedRuntime<'a>,
     limiter: Option<crate::spend::SpendLimiter>,
 }
 
@@ -97,7 +125,7 @@ fn complete_live_full_mode_report(
 
 fn run_live_full_mode_with_context(
     ctx: &ToolExecutionContext<'_>,
-    runtime_context: &FullModeRuntimeContext,
+    runtime_context: &FullModeRuntimeContext<'_>,
     cfg: &crate::capabilities::full_mode_multi::FullModeConfig,
 ) -> Result<crate::capabilities::full_mode_multi::FullModeReport> {
     let mut report = run_live_full_mode_report(cfg, ctx, runtime_context)?;
@@ -105,19 +133,19 @@ fn run_live_full_mode_with_context(
     Ok(report)
 }
 
-fn prepare_full_mode_runtime_context(
+fn prepare_full_mode_runtime_context<'a>(
     ctx: &ToolExecutionContext<'_>,
-    runtime: Option<&dyn AgentRuntime>,
-) -> Result<FullModeRuntimeContext> {
+    runtime: Option<&'a dyn AgentRuntime>,
+) -> Result<FullModeRuntimeContext<'a>> {
     let routed = required_full_mode_routed_runtime(runtime, ctx)?;
     let limiter = full_mode_spend_limiter(ctx)?;
     Ok(FullModeRuntimeContext { routed, limiter })
 }
 
-fn required_full_mode_routed_runtime(
-    runtime: Option<&dyn AgentRuntime>,
+fn required_full_mode_routed_runtime<'a>(
+    runtime: Option<&'a dyn AgentRuntime>,
     ctx: &ToolExecutionContext<'_>,
-) -> Result<crate::agent_router::RoutedRuntime> {
+) -> Result<crate::agent_router::RoutedRuntime<'a>> {
     let runtime = required_full_mode_runtime(runtime)?;
     full_mode_routed_runtime(runtime, ctx)
 }
@@ -125,7 +153,7 @@ fn required_full_mode_routed_runtime(
 fn run_live_full_mode_report(
     cfg: &crate::capabilities::full_mode_multi::FullModeConfig,
     ctx: &ToolExecutionContext<'_>,
-    runtime_context: &FullModeRuntimeContext,
+    runtime_context: &FullModeRuntimeContext<'_>,
 ) -> Result<crate::capabilities::full_mode_multi::FullModeReport> {
     let report = crate::capabilities::full_mode_multi::run(
         &runtime_context.routed,
@@ -138,7 +166,7 @@ fn run_live_full_mode_report(
 
 fn apply_full_mode_auto_triage(
     ctx: &ToolExecutionContext<'_>,
-    runtime_context: &FullModeRuntimeContext,
+    runtime_context: &FullModeRuntimeContext<'_>,
     cfg: &crate::capabilities::full_mode_multi::FullModeConfig,
     report: &mut crate::capabilities::full_mode_multi::FullModeReport,
 ) -> Result<()> {
@@ -158,7 +186,7 @@ fn apply_full_mode_auto_triage(
 fn auto_triage_full_mode_findings(
     cfg: &crate::capabilities::full_mode_multi::FullModeConfig,
     ctx: &ToolExecutionContext<'_>,
-    routed: &crate::agent_router::RoutedRuntime,
+    routed: &crate::agent_router::RoutedRuntime<'_>,
     report: &crate::capabilities::full_mode_multi::FullModeReport,
 ) -> Result<f64> {
     use crate::spend::SpendLimiter;
@@ -216,7 +244,7 @@ fn auto_triage_config(
 
 fn auto_triage_candidate_cost(
     finding: &crate::findings::Finding,
-    routed: &crate::agent_router::RoutedRuntime,
+    routed: &crate::agent_router::RoutedRuntime<'_>,
     spend: Option<&crate::spend::SpendLimiter>,
     audit_cfg: &crate::capabilities::deep_auditor::DeepAuditConfig,
     store: &crate::findings::FindingStore,
@@ -249,130 +277,5 @@ fn persist_auto_triage_outcome(
     if let Some(id) = finding.id {
         let _ = store.save_triage(id, &outcome.triage);
         let _ = save_evidence(&workspace.findings_db_path(), id, &outcome.evidence);
-    }
-}
-
-pub(crate) fn full_mode_config_from_input(
-    input: &Value,
-    ctx: &ToolExecutionContext<'_>,
-) -> Result<crate::capabilities::full_mode_multi::FullModeConfig> {
-    Ok(crate::capabilities::full_mode_multi::FullModeConfig {
-        workspace_root: resolve_tool_target(input, ctx)?,
-        max_tokens_per_chunk: full_mode_max_tokens(input),
-        deposit_usd_per_chunk: full_mode_deposit(input),
-        include_extensions: Vec::new(),
-        language: full_mode_language(input)?,
-        dry_run: full_mode_dry_run(input),
-        scope_files: full_mode_scope_files(input, ctx)?,
-        failed_chunk_ids: full_mode_failed_chunk_ids(input)?,
-        auto_triage: input
-            .get("autoTriage")
-            .and_then(Value::as_bool)
-            .unwrap_or(false),
-        auto_triage_max_steps: input
-            .get("autoTriageMaxSteps")
-            .and_then(Value::as_u64)
-            .map(|v| v as u32),
-        auto_triage_deposit_usd: input.get("autoTriageDepositUsd").and_then(Value::as_f64),
-    })
-}
-
-pub(crate) fn full_mode_language(
-    input: &Value,
-) -> Result<crate::capabilities::full_mode_multi::FullModeLanguage> {
-    match input
-        .get("language")
-        .and_then(Value::as_str)
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("c") | None => Ok(crate::capabilities::full_mode_multi::FullModeLanguage::C),
-        Some("unknown") => Ok(crate::capabilities::full_mode_multi::FullModeLanguage::Unknown),
-        Some(other) => anyhow::bail!("full-mode:hunt: unknown language {other:?}"),
-    }
-}
-
-pub(crate) fn full_mode_max_tokens(input: &Value) -> usize {
-    input
-        .get("maxTokensPerChunk")
-        .and_then(Value::as_u64)
-        .map(|v| v as usize)
-        .unwrap_or(12_000)
-}
-
-pub(crate) fn full_mode_deposit(input: &Value) -> f64 {
-    input
-        .get("depositUsdPerChunk")
-        .and_then(Value::as_f64)
-        .unwrap_or(2.0)
-}
-
-pub(crate) fn full_mode_failed_chunk_ids(input: &Value) -> Result<Option<Vec<u32>>> {
-    let Some(raw) = input.get("failedChunkIds") else {
-        return Ok(None);
-    };
-    let mut ids = match raw {
-        Value::String(csv) => csv
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(parse_failed_chunk_id)
-            .collect::<Result<Vec<_>>>()?,
-        Value::Array(values) => values
-            .iter()
-            .map(parse_failed_chunk_id_value)
-            .collect::<Result<Vec<_>>>()?,
-        other => anyhow::bail!(
-            "full-mode:hunt failedChunkIds must be a comma-separated string or array, got {other}"
-        ),
-    };
-    ids.sort_unstable();
-    ids.dedup();
-    if ids.is_empty() {
-        Ok(None)
-    } else {
-        Ok(Some(ids))
-    }
-}
-
-fn parse_failed_chunk_id(raw: &str) -> Result<u32> {
-    raw.parse::<u32>()
-        .map_err(|_| anyhow::anyhow!("full-mode:hunt failedChunkIds has non-integer value {raw:?}"))
-}
-
-fn parse_failed_chunk_id_value(value: &Value) -> Result<u32> {
-    match value {
-        Value::Number(number) => number
-            .as_u64()
-            .and_then(|v| u32::try_from(v).ok())
-            .ok_or_else(|| {
-                anyhow::anyhow!("full-mode:hunt failedChunkIds has out-of-range value {number}")
-            }),
-        Value::String(raw) => parse_failed_chunk_id(raw.trim()),
-        other => anyhow::bail!("full-mode:hunt failedChunkIds has invalid array value {other}"),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::full_mode_failed_chunk_ids;
-    use serde_json::json;
-
-    #[test]
-    fn parses_csv_failed_chunk_ids() {
-        let input = json!({"failedChunkIds": "3, 7, 7, 11"});
-        assert_eq!(
-            full_mode_failed_chunk_ids(&input).expect("csv parse should succeed"),
-            Some(vec![3, 7, 11])
-        );
-    }
-
-    #[test]
-    fn parses_array_failed_chunk_ids() {
-        let input = json!({"failedChunkIds": [11, "3", 7, "7"]});
-        assert_eq!(
-            full_mode_failed_chunk_ids(&input).expect("array parse should succeed"),
-            Some(vec![3, 7, 11])
-        );
     }
 }

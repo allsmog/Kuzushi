@@ -69,6 +69,15 @@ pub struct PwnView {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuthLoginView {
+    pub provider: String,
+    pub method: String,
+    pub status: String,
+    pub detail: String,
+    pub store_path: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellView {
     Home,
     Catalog,

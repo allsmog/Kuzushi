@@ -1,10 +1,16 @@
 use super::artifact_manifest::record_canonical_run_artifacts;
 use super::canonical_proof::proof_snapshot_value;
+use super::canonical_run_markers::{
+    write_empty_failures_marker, write_missing_report_marker, write_missing_snapshot_marker,
+};
 use super::canonical_recommendations::recommendations_snapshot_value;
 use super::run_dir;
 use super::write_run_artifact_json;
 use super::write_run_artifact_text;
 use super::RunArtifact;
+use crate::artifact_contract::{
+    canonical_run_artifact_spec, optional_run_artifact_spec, CanonicalRunArtifactSpec,
+};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::fs;
@@ -36,13 +42,20 @@ pub(crate) fn ensure_canonical_run_files(
     let dir = run_dir(target, run_id);
     fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
     for (file_name, summary) in JSON_SNAPSHOT_FILES {
-        write_json_if_missing(dir.join(file_name), missing_snapshot(run_id, status, summary))?;
+        write_missing_snapshot_marker(dir.join(file_name), run_id, status, summary)?;
     }
-    write_empty_failures_marker(dir.join("failures.json"), run_id, status)?;
-    write_json_if_missing(dir.join("artifacts.json"), empty_manifest(run_id))?;
-    write_text_if_missing(dir.join("events.jsonl"), "")?;
-    write_text_if_missing(dir.join("trace.jsonl"), "")?;
-    write_text_if_missing(dir.join("report.md"), missing_report(run_id, status))?;
+    write_empty_failures_marker(dir.join(required_artifact_spec("failures.json").leaf), run_id, status)?;
+    write_json_if_missing(
+        dir.join(required_artifact_spec("artifacts.json").leaf),
+        empty_manifest(run_id),
+    )?;
+    write_text_if_missing(dir.join(required_artifact_spec("events.jsonl").leaf), "")?;
+    write_text_if_missing(dir.join(required_artifact_spec("trace.jsonl").leaf), "")?;
+    write_missing_report_marker(
+        dir.join(required_artifact_spec("report.md").leaf),
+        run_id,
+        status,
+    )?;
     record_canonical_run_artifacts(target, run_id)?;
     Ok(())
 }
@@ -79,8 +92,16 @@ fn record_markdown_report_artifact(
     run_id: &str,
     output: &Value,
 ) {
-    if let Some(markdown) = string_at(output, &["/data/reportMarkdown", "/reportMarkdown"]) {
-        push_text_artifact(artifacts, target, run_id, "report.md", "report", "markdown", markdown);
+    if let Some(markdown) = string_at(
+        output,
+        &[
+            "/data/reportMarkdown",
+            "/data/report_markdown",
+            "/reportMarkdown",
+            "/report_markdown",
+        ],
+    ) {
+        push_text_artifact(artifacts, target, run_id, report_artifact_spec(), markdown);
     }
 }
 
@@ -90,8 +111,16 @@ fn record_sarif_report_artifact(
     run_id: &str,
     output: &Value,
 ) {
-    if let Some(sarif) = sarif_at(output, &["/data/reportSarif", "/reportSarif"]) {
-        push_text_artifact(artifacts, target, run_id, "report.sarif", "sarif", "sarif", &sarif);
+    if let Some(sarif) = sarif_at(
+        output,
+        &[
+            "/data/reportSarif",
+            "/data/report_sarif",
+            "/reportSarif",
+            "/report_sarif",
+        ],
+    ) {
+        push_text_artifact(artifacts, target, run_id, sarif_artifact_spec(), &sarif);
     }
 }
 
@@ -99,26 +128,22 @@ fn push_text_artifact(
     artifacts: &mut Vec<RunArtifact>,
     target: &Path,
     run_id: &str,
-    leaf: &str,
-    label: &str,
-    kind: &str,
+    spec: &CanonicalRunArtifactSpec,
     body: &str,
 ) {
-    if let Ok(artifact) = write_text_artifact(target, run_id, leaf, label, kind, body) {
+    if let Ok(artifact) = write_text_artifact(target, run_id, spec, body) {
         artifacts.push(artifact);
     }
 }
 
 struct JsonSnapshotSpec<'a> {
     leaf: &'a str,
-    label: &'a str,
     pointers: &'a [&'a str],
 }
 
 fn context_snapshot() -> JsonSnapshotSpec<'static> {
     JsonSnapshotSpec {
         leaf: "context.json",
-        label: "context snapshot",
         pointers: &["/data/snapshot", "/data/context", "/context", "/contextSnapshot"],
     }
 }
@@ -126,7 +151,6 @@ fn context_snapshot() -> JsonSnapshotSpec<'static> {
 fn attack_surface_snapshot() -> JsonSnapshotSpec<'static> {
     JsonSnapshotSpec {
         leaf: "attack-surface.json",
-        label: "attack surface",
         pointers: &[
             "/data/snapshot/attackSurfaceMap",
             "/data/attackSurfaceMap",
@@ -140,7 +164,6 @@ fn attack_surface_snapshot() -> JsonSnapshotSpec<'static> {
 fn threat_model_snapshot() -> JsonSnapshotSpec<'static> {
     JsonSnapshotSpec {
         leaf: "threat-model.json",
-        label: "threat model",
         pointers: &["/data/document", "/data/threatModel", "/document", "/threatModel"],
     }
 }
@@ -148,21 +171,8 @@ fn threat_model_snapshot() -> JsonSnapshotSpec<'static> {
 fn findings_snapshot() -> JsonSnapshotSpec<'static> {
     JsonSnapshotSpec {
         leaf: "findings.json",
-        label: "findings",
-        pointers: &["/data/coreFindings", "/data/findings", "/findings"],
+        pointers: &["/data/coreFindings", "/data/findings", "/coreFindings", "/findings"],
     }
-}
-
-fn missing_snapshot(run_id: &str, status: &str, summary: &str) -> Value {
-    json!({
-        "runId": run_id,
-        "status": "skipped",
-        "runStatus": status,
-        "summary": summary,
-        "artifacts": [],
-        "warnings": [summary],
-        "errors": []
-    })
 }
 
 fn record_json_snapshot(
@@ -175,7 +185,10 @@ fn record_json_snapshot(
     let Some(value) = value_at(output, spec.pointers) else {
         return;
     };
-    if let Ok(artifact) = write_run_artifact_json(target, run_id, spec.leaf, spec.label, value) {
+    let artifact_spec = required_artifact_spec(spec.leaf);
+    if let Ok(artifact) =
+        write_run_artifact_json(target, run_id, artifact_spec.leaf, artifact_spec.label, value)
+    {
         artifacts.push(artifact);
     }
 }
@@ -189,9 +202,8 @@ fn record_recommendations_snapshot(
     let Some(value) = recommendations_snapshot_value(output) else {
         return;
     };
-    if let Ok(artifact) =
-        write_run_artifact_json(target, run_id, "recommendations.json", "recommendations", value)
-    {
+    let spec = required_artifact_spec("recommendations.json");
+    if let Ok(artifact) = write_run_artifact_json(target, run_id, spec.leaf, spec.label, value) {
         artifacts.push(artifact);
     }
 }
@@ -205,9 +217,23 @@ fn record_proof_snapshot(
     let Some(value) = proof_snapshot_value(output) else {
         return;
     };
-    if let Ok(artifact) = write_run_artifact_json(target, run_id, "proof.json", "proof", &value) {
+    let spec = required_artifact_spec("proof.json");
+    if let Ok(artifact) = write_run_artifact_json(target, run_id, spec.leaf, spec.label, &value) {
         artifacts.push(artifact);
     }
+}
+
+fn required_artifact_spec(leaf: &str) -> &'static CanonicalRunArtifactSpec {
+    canonical_run_artifact_spec(leaf).expect("canonical snapshot artifact must be in shared spec")
+}
+
+fn report_artifact_spec() -> &'static CanonicalRunArtifactSpec {
+    required_artifact_spec("report.md")
+}
+
+fn sarif_artifact_spec() -> &'static CanonicalRunArtifactSpec {
+    optional_run_artifact_spec("report.sarif")
+        .expect("SARIF report artifact must be in shared optional spec")
 }
 
 fn value_at<'a>(output: &'a Value, pointers: &[&str]) -> Option<&'a Value> {
@@ -232,20 +258,10 @@ fn sarif_at(output: &Value, pointers: &[&str]) -> Option<String> {
 fn write_text_artifact(
     target: &Path,
     run_id: &str,
-    leaf: &str,
-    label: &str,
-    kind: &str,
+    spec: &CanonicalRunArtifactSpec,
     body: &str,
 ) -> Result<RunArtifact> {
-    write_run_artifact_text(target, run_id, leaf, label, kind, body)
-}
-
-fn empty_failures(run_id: &str, status: &str) -> Value {
-    json!({
-        "runId": run_id,
-        "status": status,
-        "failures": []
-    })
+    write_run_artifact_text(target, run_id, spec.leaf, spec.label, spec.kind, body)
 }
 
 fn empty_manifest(run_id: &str) -> Value {
@@ -255,32 +271,11 @@ fn empty_manifest(run_id: &str) -> Value {
     })
 }
 
-fn missing_report(run_id: &str, status: &str) -> String {
-    format!("# Kuzushi Run {run_id}\n\nStatus: {status}\n\nNo report was recorded for this run.\n")
-}
-
 fn write_json_if_missing(path: PathBuf, value: Value) -> Result<()> {
-    if path.exists() {
+    if missing_file_target_exists(&path, "Canonical JSON artifact target")? {
         return Ok(());
     }
     write_json(path, value)
-}
-
-fn write_empty_failures_marker(path: PathBuf, run_id: &str, status: &str) -> Result<()> {
-    if failure_file_has_failures(&path) {
-        return Ok(());
-    }
-    write_json(path, empty_failures(run_id, status))
-}
-
-fn failure_file_has_failures(path: &Path) -> bool {
-    let Ok(body) = fs::read_to_string(path) else {
-        return false;
-    };
-    serde_json::from_str::<Value>(&body)
-        .ok()
-        .and_then(|value| value.get("failures").and_then(Value::as_array).cloned())
-        .is_some_and(|failures| !failures.is_empty())
 }
 
 fn write_json(path: PathBuf, value: Value) -> Result<()> {
@@ -289,8 +284,17 @@ fn write_json(path: PathBuf, value: Value) -> Result<()> {
 }
 
 fn write_text_if_missing(path: PathBuf, body: impl AsRef<str>) -> Result<()> {
-    if path.exists() {
+    if missing_file_target_exists(&path, "Canonical text artifact target")? {
         return Ok(());
     }
     fs::write(&path, body.as_ref()).with_context(|| format!("Could not write {}", path.display()))
+}
+
+fn missing_file_target_exists(path: &Path, label: &str) -> Result<bool> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(true),
+        Ok(_) => anyhow::bail!("{label} is not a file: {}", path.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("Could not inspect {}", path.display())),
+    }
 }

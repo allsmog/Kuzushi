@@ -11,7 +11,7 @@ use crossterm::event::{
 };
 use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
-use kuzushi_core::{V2Config, WorkspaceTarget};
+use kuzushi_core::{ModuleRegistry, V2Config, WorkspaceTarget};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;
 pub(crate) use refresh_terminal_redraw_state::*;

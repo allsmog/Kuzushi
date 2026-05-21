@@ -12,94 +12,148 @@ impl FindingListReport {
             return "  (no findings match)".to_string();
         }
 
-        let aliased = sorted_finding_aliases(&self.findings);
-        let alias_width = aliased
-            .iter()
-            .map(|(alias, _)| alias.len())
-            .max()
-            .unwrap_or(5)
-            .max(5);
-        let fingerprint_width = aliased
-            .iter()
-            .map(|(_, finding)| short_id(&finding.fingerprint).len())
-            .max()
-            .unwrap_or(8)
-            .max(8);
-        let severity_width = self
-            .findings
-            .iter()
-            .map(|finding| finding.severity.as_str().len())
-            .max()
-            .unwrap_or(4)
-            .max(4);
-        let verdict_width = self
-            .findings
-            .iter()
-            .map(|finding| {
-                FindingVerdictFilter::from_finding(finding)
-                    .as_legacy_str()
-                    .len()
-            })
-            .max()
-            .unwrap_or(5)
-            .max(5);
-        let name_width = self
-            .findings
-            .iter()
-            .map(|finding| finding.title.len())
-            .max()
-            .unwrap_or(4)
-            .max(4);
-
-        let mut lines = vec![
-            format!(
-                "  {}  {}  {}  {}  {}",
-                pad("Alias", alias_width),
-                pad("Fingerprint", fingerprint_width),
-                pad("Sev", severity_width),
-                pad("Check", verdict_width),
-                pad("Name", name_width)
-            ),
-            format!(
-                "  {}  {}  {}  {}  {}",
-                "-".repeat(alias_width),
-                "-".repeat(fingerprint_width),
-                "-".repeat(severity_width),
-                "-".repeat(verdict_width),
-                "-".repeat(name_width)
-            ),
-        ];
-
-        for (alias, finding) in aliased {
-            lines.push(format!(
-                "  {}  {}  {}  {}  {}",
-                pad(&alias, alias_width),
-                pad(&short_id(&finding.fingerprint), fingerprint_width),
-                pad(finding.severity.as_str(), severity_width),
-                pad(
-                    FindingVerdictFilter::from_finding(&finding).as_legacy_str(),
-                    verdict_width
-                ),
-                finding.title
-            ));
-        }
-
-        lines.push(String::new());
-        lines.push(format!(
-            "  {} matching (showing {})",
-            self.count,
-            self.findings.len()
-        ));
-        lines.join("\n")
+        finding_list_output_lines(self).join("\n")
     }
 
     pub fn to_tool_json(&self) -> Value {
-        json!({
-            "ok": true,
-            "output": self.output(),
-            "data": self,
-        })
+        crate::module_result::completed_output_result(self.summary(), self.output(), json!(self))
     }
+
+    fn summary(&self) -> String {
+        format!(
+            "findings:list: {} matching finding{}",
+            self.count,
+            plural_suffix(self.count)
+        )
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct FindingTableWidths {
+    alias: usize,
+    fingerprint: usize,
+    severity: usize,
+    verdict: usize,
+    name: usize,
+}
+
+fn finding_list_output_lines(report: &FindingListReport) -> Vec<String> {
+    let aliased = sorted_finding_aliases(&report.findings);
+    let widths = finding_table_widths(&aliased, &report.findings);
+    let mut lines = finding_table_header(widths);
+    lines.extend(
+        aliased
+            .iter()
+            .map(|(alias, finding)| finding_table_row(alias, finding, widths)),
+    );
+    lines.push(String::new());
+    lines.push(matching_line(report));
+    lines
+}
+
+fn finding_table_widths(
+    aliased: &[(String, Finding)],
+    findings: &[Finding],
+) -> FindingTableWidths {
+    FindingTableWidths {
+        alias: max_alias_width(aliased),
+        fingerprint: max_fingerprint_width(aliased),
+        severity: max_severity_width(findings),
+        verdict: max_verdict_width(findings),
+        name: max_name_width(findings),
+    }
+}
+
+fn max_alias_width(aliased: &[(String, Finding)]) -> usize {
+    aliased
+        .iter()
+        .map(|(alias, _)| alias.len())
+        .max()
+        .unwrap_or(5)
+        .max(5)
+}
+
+fn max_fingerprint_width(aliased: &[(String, Finding)]) -> usize {
+    aliased
+        .iter()
+        .map(|(_, finding)| short_id(&finding.fingerprint).len())
+        .max()
+        .unwrap_or(8)
+        .max(8)
+}
+
+fn max_severity_width(findings: &[Finding]) -> usize {
+    findings
+        .iter()
+        .map(|finding| finding.severity.as_str().len())
+        .max()
+        .unwrap_or(4)
+        .max(4)
+}
+
+fn max_verdict_width(findings: &[Finding]) -> usize {
+    findings
+        .iter()
+        .map(|finding| {
+            FindingVerdictFilter::from_finding(finding)
+                .as_legacy_str()
+                .len()
+        })
+        .max()
+        .unwrap_or(5)
+        .max(5)
+}
+
+fn max_name_width(findings: &[Finding]) -> usize {
+    findings
+        .iter()
+        .map(|finding| finding.title.len())
+        .max()
+        .unwrap_or(4)
+        .max(4)
+}
+
+fn finding_table_header(widths: FindingTableWidths) -> Vec<String> {
+    vec![
+        format!(
+            "  {}  {}  {}  {}  {}",
+            pad("Alias", widths.alias),
+            pad("Fingerprint", widths.fingerprint),
+            pad("Sev", widths.severity),
+            pad("Check", widths.verdict),
+            pad("Name", widths.name)
+        ),
+        format!(
+            "  {}  {}  {}  {}  {}",
+            "-".repeat(widths.alias),
+            "-".repeat(widths.fingerprint),
+            "-".repeat(widths.severity),
+            "-".repeat(widths.verdict),
+            "-".repeat(widths.name)
+        ),
+    ]
+}
+
+fn finding_table_row(alias: &str, finding: &Finding, widths: FindingTableWidths) -> String {
+    format!(
+        "  {}  {}  {}  {}  {}",
+        pad(alias, widths.alias),
+        pad(&short_id(&finding.fingerprint), widths.fingerprint),
+        pad(finding.severity.as_str(), widths.severity),
+        pad(
+            FindingVerdictFilter::from_finding(finding).as_legacy_str(),
+            widths.verdict
+        ),
+        finding.title
+    )
+}
+
+fn matching_line(report: &FindingListReport) -> String {
+    format!("  {} matching (showing {})", report.count, report.findings.len())
+}
+
+fn plural_suffix(count: usize) -> &'static str {
+    (count != 1).then_some("s").unwrap_or("")
 }
 
 pub fn format_finding_alias(index: usize) -> String {

@@ -6,7 +6,7 @@
 #   - Working tree must be clean
 #   - Current HEAD must be on main
 #   - The tag v<version> must exist and point at HEAD
-#   - typecheck + tests + clean build must pass
+#   - typecheck + tests + clean JS/native build + package verification must pass
 #
 # Dry-run by default. Pass --publish to actually publish.
 #
@@ -47,7 +47,7 @@ for arg in "$@"; do
   case "$arg" in
     --publish) PUBLISH=1 ;;
     --help|-h)
-      sed -n '2,29p' "$0" | sed 's/^#//; s/^ //'
+      awk 'NR > 1 { if ($0 !~ /^#/) exit; sub(/^# ?/, ""); print }' "$0"
       exit 0
       ;;
     *) fail "unknown arg: $arg" ;;
@@ -128,13 +128,21 @@ log "Clean build"
 pnpm run build:clean
 ok "dist/ rebuilt"
 
+log "Building native Rust package binaries"
+pnpm run build:native
+ok "native binaries staged"
+
+log "Verifying package artifact"
+pnpm run verify:pack
+ok "package artifact ready"
+
 log "Dry-running npm pack to see what ships"
 # `npm pack --dry-run` prints file list + total size.
-npm pack --dry-run 2>&1 | tail -n 60
+npm pack --dry-run --ignore-scripts 2>&1 | tail -n 60
 
 # ── Publish ──────────────────────────────────────────────────────────────────
 
-PUBLISH_ARGS=(publish --access public)
+PUBLISH_ARGS=(publish --access public --ignore-scripts)
 if [ "${NPM_PROVENANCE:-}" = "true" ]; then
   PUBLISH_ARGS+=(--provenance)
 fi

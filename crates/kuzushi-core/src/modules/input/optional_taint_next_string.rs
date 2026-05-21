@@ -41,18 +41,7 @@ pub(in crate::modules) fn parse_sast_tasks(input: &Value) -> Result<Vec<String>>
         anyhow::bail!("sast:scan taskMode=manual requires a non-empty tasks array");
     }
 
-    let mut tasks = requested.unwrap_or_else(|| {
-        if disabled.is_empty() {
-            Vec::new()
-        } else {
-            vec![
-                "semgrep".to_string(),
-                "dep-hygiene".to_string(),
-                "secret-scan".to_string(),
-                "iac-scan".to_string(),
-            ]
-        }
-    });
+    let mut tasks = requested.unwrap_or_else(|| default_sast_tasks_for_disabled_filter(&disabled));
 
     if !disabled.is_empty() {
         tasks.retain(|task| {
@@ -62,4 +51,25 @@ pub(in crate::modules) fn parse_sast_tasks(input: &Value) -> Result<Vec<String>>
         });
     }
     Ok(tasks)
+}
+
+pub(in crate::modules) fn default_native_sast_tasks() -> Vec<String> {
+    [
+        "semgrep",
+        "dep-hygiene",
+        "cargo-audit",
+        "secret-scan",
+        "license-scan",
+        "iac-scan",
+    ]
+    .into_iter()
+    .map(str::to_string)
+    .collect()
+}
+
+fn default_sast_tasks_for_disabled_filter(disabled: &[String]) -> Vec<String> {
+    if disabled.is_empty() {
+        return Vec::new();
+    }
+    default_native_sast_tasks()
 }

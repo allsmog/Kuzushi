@@ -106,9 +106,9 @@ Method (target 3-6 tool calls, max 12):
        on 64-bit. Always identify the bit width of every attacker-controlled
        length used in arithmetic, not just the variable name.
      - Allocation-time guards: kmalloc(struct_size(p, arr, n)) with n already
-       validated by a caller is safe.
+       checked by a caller is safe.
      - kmemdup(src, n) followed by a loop bounded by some-other-count that the
-       caller validated.
+       caller checked.
 
    When you find such a guard, emit triggerable=false with high confidence and
    cite the guard's file:line. When you cannot find one after looking, emit

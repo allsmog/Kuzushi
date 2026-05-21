@@ -47,7 +47,10 @@ fn append_history_rows(lines: &mut Vec<Line<'static>>, model: &CommandHistoryMod
 pub(crate) fn story_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
-    lines.push(divider("SESSION STORY · live event timeline", area.width));
+    lines.push(divider(
+        "SESSION STORY · event log (refresh with /story)",
+        area.width,
+    ));
 
     let model = session_story_model(app, story_event_limit(area));
     append_story_scan_row(&mut lines, &model, area);

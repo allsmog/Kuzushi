@@ -29,10 +29,11 @@ fn variant_hunt_fingerprint(input: &Value) -> Option<String> {
 }
 
 fn missing_variant_hunt_fingerprint_response() -> Value {
-    json!({
-        "ok": false,
-        "output": "variant:hunt requires a fingerprint.",
-    })
+    crate::module_result::failed_output_result(
+        "variant:hunt rejected input",
+        "variant:hunt requires a fingerprint.",
+        json!({ "reason": "missing-fingerprint" }),
+    )
 }
 
 struct VariantHuntRun<'a> {
@@ -126,14 +127,16 @@ fn missing_variant_hunt_finding_response(
     workspace: &crate::workspace::WorkspaceTarget,
     fingerprint: &str,
 ) -> Value {
-    json!({
-        "ok": false,
-        "output": format!(
-            "No finding with fingerprint \"{}\" in {}.",
-            fingerprint,
-            workspace.findings_db_path().display()
-        ),
-    })
+    let output = format!(
+        "No finding with fingerprint \"{}\" in {}.",
+        fingerprint,
+        workspace.findings_db_path().display()
+    );
+    crate::module_result::failed_output_result(
+        "variant:hunt finding not found",
+        output,
+        json!({ "fingerprint": fingerprint, "reason": "finding-not-found" }),
+    )
 }
 
 fn require_variant_hunt_workspace<'a>(
@@ -253,21 +256,24 @@ fn variant_hunt_response(
         run.include_vendored,
         findings.as_slice(),
     );
-    json!({
-        "ok": true,
-        "output": output,
-        "data": {
-            "fingerprint": run.fingerprint,
-            "originalFinding": run.finding,
-            "variants": findings,
-            "scope": {
-                "includeVendored": run.include_vendored,
-                "vendorPaths": visible_vendor_paths(run),
-            },
-            "persisted": persisted,
+    let summary = format!(
+        "variant:hunt completed with {} variant{}",
+        findings.len(),
+        if findings.len() == 1 { "" } else { "s" }
+    );
+    let data = json!({
+        "fingerprint": run.fingerprint,
+        "originalFinding": run.finding,
+        "variants": findings,
+        "scope": {
+            "includeVendored": run.include_vendored,
+            "vendorPaths": visible_vendor_paths(run),
         },
-        "costUsd": 0.0,
-    })
+        "persisted": persisted,
+    });
+    let mut result = crate::module_result::completed_output_result(summary, output, data);
+    result["costUsd"] = json!(0.0);
+    result
 }
 
 fn visible_vendor_paths(run: &VariantHuntRun<'_>) -> Vec<String> {
@@ -280,22 +286,30 @@ fn visible_vendor_paths(run: &VariantHuntRun<'_>) -> Vec<String> {
 
 fn variant_hunt_subject_rejection(fingerprint: &str, finding: &Finding) -> Option<Value> {
     let Some(triage) = finding.triage.as_ref() else {
-        return Some(json!({
-            "ok": false,
-            "output": format!(
+        let output = format!(
                 "variant:hunt expects a confirmed TP; finding \"{}\" has no triage verdict. Run triage:run first.",
                 fingerprint
-            ),
-        }));
+            );
+        return Some(crate::module_result::failed_output_result(
+            "variant:hunt finding is not confirmed",
+            output,
+            json!({ "fingerprint": fingerprint, "reason": "missing-triage" }),
+        ));
     };
     (triage.verdict != TriageVerdict::TruePositive).then(|| {
-        json!({
-            "ok": false,
-            "output": format!(
+        let output = format!(
                 "variant:hunt expects a confirmed TP; finding \"{}\" has verdict \"{}\".",
                 fingerprint,
                 triage.verdict.as_str()
-            ),
-        })
+            );
+        crate::module_result::failed_output_result(
+            "variant:hunt finding is not confirmed",
+            output,
+            json!({
+                "fingerprint": fingerprint,
+                "reason": "non-true-positive",
+                "verdict": triage.verdict.as_str(),
+            }),
+        )
     })
 }

@@ -7,10 +7,18 @@ pub struct RunEvent {
     pub kind: String,
     pub status: String,
     pub message: String,
+    #[serde(alias = "at_unix")]
     pub at_unix: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "toolName", alias = "tool_name")]
     pub tool: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        alias = "artifactPath",
+        alias = "artifact_path",
+        deserialize_with = "deserialize_event_artifact"
+    )]
     pub artifact: Option<RunArtifact>,
 }
 
@@ -38,7 +46,7 @@ impl RunEvent {
     }
 
     pub fn with_artifact(mut self, artifact: RunArtifact) -> Self {
-        self.artifact = Some(artifact);
+        self.artifact = artifact.normalized();
         self
     }
 }
@@ -51,6 +59,7 @@ pub fn append_run_event(
     let dir = run_dir(target, run_id);
     fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
     let path = dir.join("events.jsonl");
+    reject_non_file_event_target(&path)?;
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
@@ -63,7 +72,31 @@ pub fn append_run_event(
 
 pub fn next_run_event_number(target: impl AsRef<Path>, run_id: &str) -> usize {
     let path = run_dir(target, run_id).join("events.jsonl");
-    fs::read_to_string(path)
-        .map(|text| text.lines().count().saturating_add(1))
-        .unwrap_or(1)
+    let Ok(text) = fs::read_to_string(path) else {
+        return 1;
+    };
+    crate::run_artifacts::jsonl_numbering::next_jsonl_number::<RunEvent>(&text, |event| event.n)
+}
+
+fn reject_non_file_event_target(path: &Path) -> Result<()> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(()),
+        Ok(_) => anyhow::bail!("Run event log target is not a file: {}", path.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("Could not inspect {}", path.display())),
+    }
+}
+
+fn deserialize_event_artifact<'de, D>(deserializer: D) -> std::result::Result<Option<RunArtifact>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let Some(value) = Option::<Value>::deserialize(deserializer)? else {
+        return Ok(None);
+    };
+    match value {
+        Value::String(path) => Ok(RunArtifact::from_declared("artifact", &path, None)),
+        Value::Object(_) => serde_json::from_value(value).map(Some).map_err(serde::de::Error::custom),
+        _ => Ok(None),
+    }
 }

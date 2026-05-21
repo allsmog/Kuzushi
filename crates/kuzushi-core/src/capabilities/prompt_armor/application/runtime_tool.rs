@@ -80,22 +80,24 @@ fn runtime_success_response<Persisted: serde::Serialize>(
     success: RuntimeSuccess<'_, Persisted>,
 ) -> Value {
     let request = success.request;
-    json!({
-        "ok": true,
-        "output": format!(
-            "{tool_name} complete\n  Command: /{command}\n  Output: .prompt-armor/\n  Findings: {}",
-            success.findings.len(),
-            tool_name = request.tool_name,
-            command = request.command,
-        ),
-        "data": {
+    let output = format!(
+        "{tool_name} complete\n  Command: /{command}\n  Output: .prompt-armor/\n  Findings: {}",
+        success.findings.len(),
+        tool_name = request.tool_name,
+        command = request.command,
+    );
+    let mut result = crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
             "target": request.target.display().to_string(),
             "pluginRoot": request.plugin_root.display().to_string(),
             "command": request.command,
             "outputDir": success.output_dir.display().to_string(),
             "findings": success.findings,
             "persisted": success.persisted,
-        },
-        "costUsd": 0.0,
-    })
+        }),
+    );
+    result["costUsd"] = json!(0.0);
+    result
 }

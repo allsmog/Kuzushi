@@ -90,15 +90,28 @@ pub(crate) struct TaintIrisNextReport {
 
 impl TaintIrisNextReport {
     pub(crate) fn to_tool_json(&self) -> Value {
+        let data = self.result_data();
+        let mut output = if self.ok {
+            crate::module_result::completed_output_result(self.summary(), self.output.clone(), data)
+        } else {
+            crate::module_result::failed_output_result(self.summary(), self.output.clone(), data)
+        };
+        output["costUsd"] = json!(self.cost_usd);
+        output
+    }
+
+    fn summary(&self) -> String {
+        format!(
+            "taint-iris-next: {} {} under {}",
+            self.mode, self.status, self.target
+        )
+    }
+
+    fn result_data(&self) -> Value {
         let mut data = self.data.clone();
         if let Value::Object(object) = &mut data {
             object.insert("persisted".to_string(), json!(self.persisted));
         }
-        json!({
-            "ok": self.ok,
-            "output": self.output,
-            "data": data,
-            "costUsd": self.cost_usd,
-        })
+        data
     }
 }

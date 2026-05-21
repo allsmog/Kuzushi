@@ -119,18 +119,19 @@ fn append_to_array(value: &mut Value, item: Value) {
 }
 
 fn attach_response(scope: Value, doc: Value, scope_path: PathBuf) -> Value {
-    json!({
-        "ok": true,
-        "output": format!(
-            "Attached {} ({})\nScope: {}",
-            doc.get("title").and_then(Value::as_str).unwrap_or("document"),
-            doc.get("status").and_then(Value::as_str).unwrap_or("attached"),
-            scope_path.display()
-        ),
-        "data": {
+    let output = format!(
+        "Attached {} ({})\nScope: {}",
+        doc.get("title").and_then(Value::as_str).unwrap_or("document"),
+        doc.get("status").and_then(Value::as_str).unwrap_or("attached"),
+        scope_path.display()
+    );
+    crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
             "scope": scope,
             "document": doc,
             "scopePath": scope_path.display().to_string(),
-        },
-    })
+        }),
+    )
 }

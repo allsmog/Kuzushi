@@ -7,8 +7,13 @@ fn auth_provider_rows_hide_secret_values() {
 
     let rows = auth_provider_rows(&app);
 
-    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.len(), 4);
     assert!(rows.iter().any(|row| row.cells[0] == "pi-agent-core"));
+    assert!(rows.iter().any(|row| row.cells[0] == "github-copilot"));
+    assert!(!rows
+        .iter()
+        .flat_map(|row| row.cells.iter())
+        .any(|cell| cell.contains("openai-codex") || cell.contains("codex")));
     assert!(!rows.iter().any(|row| row.cells[2].contains("sk-")));
 }
 
@@ -29,6 +34,9 @@ fn oauth_summary_reports_both_provider_slots() {
 
     assert!(summary.contains("openai"));
     assert!(summary.contains("anthropic"));
+    assert!(summary.contains("github-copilot"));
+    assert!(!summary.contains("openai-codex"));
+    assert!(!summary.contains("codex"));
 }
 
 #[test]

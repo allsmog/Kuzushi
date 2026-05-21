@@ -50,12 +50,12 @@ mod tests {
     }
 
     #[test]
-    fn compute_dedup_key_buckets_lines_by_16() {
+    fn compute_dedup_key_buckets_nearby_lines_by_8() {
         let a = compute_dedup_key("src/foo.c", 42, Some("CWE-787"));
-        let b = compute_dedup_key("src/foo.c", 47, Some("CWE-787"));
-        let c = compute_dedup_key("src/foo.c", 60, Some("CWE-787"));
-        assert_eq!(a, b, "lines 42 and 47 share the bucket 42/16=2");
-        assert_ne!(a, c, "line 60 is in bucket 60/16=3");
+        let b = compute_dedup_key("src/foo.c", 43, Some("CWE-787"));
+        let c = compute_dedup_key("src/foo.c", 48, Some("CWE-787"));
+        assert_eq!(a, b, "lines 42 and 43 share the bucket 42/8=5");
+        assert_ne!(a, c, "line 48 is in the next 8-line bucket");
     }
 
     #[test]
@@ -169,7 +169,7 @@ mod tests {
             "full-mode-multi",
             "full-mode-multi/cwe-78",
             "src/foo.c",
-            45, // same 16-line bucket as 42
+            43, // same 8-line bucket as 42
             Some(45),
             Severity::High,
             "exec with attacker-controlled argv, CWE-78",
@@ -217,7 +217,7 @@ mod tests {
             "semgrep",
             "rule",
             "src/foo.c",
-            47, // same bucket as 42 (both in 32..47)
+            43, // same bucket as 42 (both in 40..47)
             Some(47),
             Severity::Low,
             "weakish suspicion CWE-787",
@@ -330,6 +330,42 @@ mod tests {
     }
 
     #[test]
+    fn stores_optional_finding_lifecycle_metadata() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let run_id = "run-finding-metadata";
+        store
+            .insert_scan_run(run_id, Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let mut finding = Finding::new_tool(
+            "semgrep",
+            "rules/cwe-601",
+            "src/redirect.rs",
+            18,
+            None,
+            Severity::Medium,
+            "Open redirect",
+        )
+        .with_remediation("allowlist redirect targets");
+        finding.suppressed = true;
+        finding.snoozed_until = Some("2026-06-01T00:00:00Z".to_string());
+        finding.references = vec!["https://cwe.mitre.org/data/definitions/601.html".to_string()];
+
+        store.insert_finding(run_id, &finding).unwrap();
+        let stored = store
+            .get_finding_by_fingerprint(&finding.fingerprint)
+            .unwrap()
+            .unwrap();
+
+        assert!(stored.suppressed);
+        assert_eq!(
+            stored.snoozed_until.as_deref(),
+            Some("2026-06-01T00:00:00Z")
+        );
+        assert_eq!(stored.remediation.as_deref(), Some("allowlist redirect targets"));
+        assert_eq!(stored.references, finding.references);
+    }
+
+    #[test]
     fn static_proof_taxonomy_parses_and_serializes_expected_states() {
         let states = [
             ("signal_only", StaticProofState::SignalOnly),
@@ -364,6 +400,9 @@ mod tests {
             "dynamic_confirmed",
             "exploit_confirmed",
             "poc_confirmed",
+            "runtime_reviewed",
+            "execution_attempted",
+            "execution_rejected",
         ] {
             let error = StaticProofState::try_from(raw).unwrap_err().to_string();
             assert!(error.contains("not valid static proof"));
@@ -498,7 +537,7 @@ mod tests {
 
         assert!(output.contains("Finding F-0001"));
         assert!(output.contains("Proof state: source_sink_linked"));
-        assert!(output.contains("Runtime verification: execution_confirmed"));
+        assert!(output.contains("Runtime validation: execution_confirmed"));
         assert!(output.contains("Proof ladder: verified"));
         assert!(output.contains("Next action: patch"));
         assert_eq!(report.next_action, FindingNextAction::Patch);

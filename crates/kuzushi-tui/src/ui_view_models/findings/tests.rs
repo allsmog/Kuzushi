@@ -65,6 +65,23 @@ fn findings_model_describes_context_prereq_when_empty() {
 }
 
 #[test]
+fn findings_model_surfaces_malformed_context_prereq_when_empty() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.context_view.status = "malformed context snapshot. Next: context build".to_string();
+
+    let model = findings_model(&app);
+
+    assert_eq!(
+        model.empty.hint,
+        "context snapshot is malformed; rebuild it before scanning."
+    );
+    assert_eq!(
+        model.empty.context_cta,
+        Some(("context build", "rewrite the malformed snapshot first"))
+    );
+}
+
+#[test]
 fn findings_model_caps_module_preview_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.findings = (0..10)

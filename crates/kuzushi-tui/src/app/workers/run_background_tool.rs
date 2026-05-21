@@ -89,6 +89,8 @@ pub(crate) fn tool_requires_findings_store(tool_name: &str) -> bool {
                 | "semgrep:scan"
                 | "codeql:scan"
                 | "iac-scan:scan"
+                | "license-scan:scan"
+                | "cargo-audit:scan"
         )
 }
 
@@ -127,6 +129,7 @@ mod tests {
     #[test]
     fn deterministic_tools_skip_runtime() {
         assert!(!tool_uses_agent_runtime("semgrep:scan"));
+        assert!(!tool_uses_agent_runtime("cargo-audit:scan"));
         assert!(!tool_uses_agent_runtime("secret-scan:scan"));
         assert!(!tool_uses_agent_runtime("context:build"));
         assert!(!tool_uses_agent_runtime("module-recommender:recommend"));
@@ -152,6 +155,7 @@ mod tests {
         assert!(super::tool_requires_findings_store(
             "offense-review:threat-hunt"
         ));
+        assert!(super::tool_requires_findings_store("cargo-audit:scan"));
         assert!(!super::tool_requires_findings_store(
             "taint-iris-next:dataflow-plan"
         ));

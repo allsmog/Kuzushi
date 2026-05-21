@@ -39,11 +39,45 @@ pub(crate) fn default_workspace_view(target: Option<&WorkspaceTarget>) -> Worksp
 }
 
 pub(crate) fn load_context_snapshot_view(snapshot_path: PathBuf) -> Result<ContextSnapshotView> {
-    if !snapshot_path.exists() {
-        return Ok(default_context_snapshot_view(Some(snapshot_path)));
+    match context_snapshot_path_state(&snapshot_path) {
+        ContextSnapshotPathState::Missing => {
+            return Ok(default_context_snapshot_view(Some(snapshot_path)));
+        }
+        ContextSnapshotPathState::Unreadable => {
+            return Ok(malformed_context_snapshot_view(snapshot_path));
+        }
+        ContextSnapshotPathState::File => {}
     }
 
-    let snapshot = read_context_snapshot_json(&snapshot_path)?;
+    match read_context_snapshot_json(&snapshot_path) {
+        ContextSnapshotRead::Present(snapshot) => {
+            Ok(present_context_snapshot_view(snapshot_path, &snapshot))
+        }
+        ContextSnapshotRead::Malformed => Ok(malformed_context_snapshot_view(snapshot_path)),
+    }
+}
+
+fn context_snapshot_path_state(snapshot_path: &std::path::Path) -> ContextSnapshotPathState {
+    match fs::metadata(snapshot_path) {
+        Ok(metadata) if metadata.is_file() => ContextSnapshotPathState::File,
+        Ok(_) => ContextSnapshotPathState::Unreadable,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            ContextSnapshotPathState::Missing
+        }
+        Err(_) => ContextSnapshotPathState::Unreadable,
+    }
+}
+
+enum ContextSnapshotPathState {
+    File,
+    Missing,
+    Unreadable,
+}
+
+fn present_context_snapshot_view(
+    snapshot_path: PathBuf,
+    snapshot: &serde_json::Value,
+) -> ContextSnapshotView {
     let files_indexed = snapshot
         .get("filesIndexed")
         .and_then(serde_json::Value::as_u64);
@@ -64,7 +98,7 @@ pub(crate) fn load_context_snapshot_view(snapshot_path: PathBuf) -> Result<Conte
         .map(ToString::to_string);
     let status = context_snapshot_status(files_indexed, total_files);
 
-    Ok(ContextSnapshotView {
+    ContextSnapshotView {
         snapshot_path: Some(snapshot_path),
         exists: true,
         status,
@@ -76,14 +110,39 @@ pub(crate) fn load_context_snapshot_view(snapshot_path: PathBuf) -> Result<Conte
         frameworks,
         generated_slices,
         stale_slices,
-    })
+    }
 }
 
-fn read_context_snapshot_json(snapshot_path: &std::path::Path) -> Result<serde_json::Value> {
-    let body = fs::read_to_string(snapshot_path)
-        .with_context(|| format!("Could not read {}", snapshot_path.display()))?;
-    serde_json::from_str(&body)
-        .with_context(|| format!("Could not parse {}", snapshot_path.display()))
+fn read_context_snapshot_json(snapshot_path: &std::path::Path) -> ContextSnapshotRead {
+    let Ok(body) = fs::read_to_string(snapshot_path) else {
+        return ContextSnapshotRead::Malformed;
+    };
+
+    match serde_json::from_str(&body) {
+        Ok(value) => ContextSnapshotRead::Present(value),
+        Err(_) => ContextSnapshotRead::Malformed,
+    }
+}
+
+enum ContextSnapshotRead {
+    Present(serde_json::Value),
+    Malformed,
+}
+
+fn malformed_context_snapshot_view(snapshot_path: PathBuf) -> ContextSnapshotView {
+    ContextSnapshotView {
+        snapshot_path: Some(snapshot_path),
+        exists: false,
+        status: "malformed context snapshot. Next: context build".to_string(),
+        target: None,
+        discovery: None,
+        files_indexed: None,
+        total_files: None,
+        languages: Vec::new(),
+        frameworks: Vec::new(),
+        generated_slices: Vec::new(),
+        stale_slices: Vec::new(),
+    }
 }
 
 fn context_snapshot_status(files_indexed: Option<u64>, total_files: Option<u64>) -> String {
@@ -120,4 +179,46 @@ pub(crate) fn unknown_kb_module_message(module_id: &str) -> String {
         "unknown KB module {module_id:?}. Supported KB modules: {}. Next: kb context",
         SUPPORTED_ATTACHMENT_MODULES.join(", ")
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn load_context_snapshot_view_surfaces_malformed_snapshot() {
+        let temp = tempfile::tempdir().unwrap();
+        let snapshot_path = temp.path().join(".kuzushi/context-snapshot.json");
+        fs::create_dir_all(snapshot_path.parent().unwrap()).unwrap();
+        fs::write(&snapshot_path, "{not-json").unwrap();
+
+        let view = load_context_snapshot_view(snapshot_path.clone()).unwrap();
+
+        assert_eq!(view.snapshot_path, Some(snapshot_path));
+        assert!(!view.exists);
+        assert_eq!(
+            view.status,
+            "malformed context snapshot. Next: context build"
+        );
+        assert!(view.languages.is_empty());
+        assert!(view.frameworks.is_empty());
+    }
+
+    #[test]
+    fn load_context_snapshot_view_surfaces_unreadable_snapshot_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let snapshot_path = temp.path().join(".kuzushi/context-snapshot.json");
+        fs::create_dir_all(&snapshot_path).unwrap();
+
+        let view = load_context_snapshot_view(snapshot_path.clone()).unwrap();
+
+        assert_eq!(view.snapshot_path, Some(snapshot_path));
+        assert!(!view.exists);
+        assert_eq!(
+            view.status,
+            "malformed context snapshot. Next: context build"
+        );
+        assert!(view.languages.is_empty());
+        assert!(view.frameworks.is_empty());
+    }
 }

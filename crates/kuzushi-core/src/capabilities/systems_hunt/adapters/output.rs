@@ -27,12 +27,14 @@ impl SystemsHuntReport {
     }
 
     pub fn to_tool_json(&self) -> Value {
-        json!({
-            "ok": true,
-            "output": self.output(),
-            "data": self,
-            "costUsd": self.cost_usd,
-        })
+        let report_output = self.output();
+        let mut output = crate::module_result::completed_output_result(
+            report_output.clone(),
+            report_output,
+            json!(self),
+        );
+        output["costUsd"] = json!(self.cost_usd);
+        output
     }
 }
 

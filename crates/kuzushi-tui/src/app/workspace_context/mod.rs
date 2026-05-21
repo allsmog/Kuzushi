@@ -2,7 +2,7 @@ use super::*;
 pub(crate) use super::*;
 
 use self::{ContextSnapshotView, KnowledgeBaseView, ShellApp, ShellView, WorkspaceView};
-use anyhow::{Context, Result};
+use anyhow::Result;
 pub(crate) use context_snapshot_views::*;
 use kuzushi_core::{
     attach_source, attachment_store_path, detach_source, is_supported_attachment_module,

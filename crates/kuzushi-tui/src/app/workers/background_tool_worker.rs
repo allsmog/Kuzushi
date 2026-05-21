@@ -2,25 +2,13 @@ use super::*;
 
 #[derive(Debug)]
 pub(crate) enum ScanEvent {
-    Started {
-        run_id: String,
-        target: PathBuf,
-    },
     Stage(String),
-    FindingStored {
-        fingerprint: String,
-        severity: Severity,
-        title: String,
-    },
     Finished {
         run_id: String,
         findings_count: usize,
     },
     Failed {
         error: String,
-    },
-    Cancelled {
-        run_id: String,
     },
 }
 

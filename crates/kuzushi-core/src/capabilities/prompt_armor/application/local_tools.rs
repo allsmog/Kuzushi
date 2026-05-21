@@ -31,15 +31,16 @@ fn write_default_config(path: &Path) -> Result<()> {
 
 fn config_response(path: &Path, action: &str) -> Value {
     let exists = path.exists();
-    json!({
-        "ok": true,
-        "output": config_output(path, action, exists),
-        "data": {
+    let output = config_output(path, action, exists);
+    crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
             "path": path.display().to_string(),
             "exists": exists,
             "content": config_body(path, exists),
-        },
-    })
+        }),
+    )
 }
 
 fn config_body(path: &Path, exists: bool) -> String {
@@ -70,15 +71,21 @@ pub(crate) fn diff(path_a: PathBuf, path_b: PathBuf) -> Result<Value> {
         )
     })?;
     let delta = text_b.lines().count() as isize - text_a.lines().count() as isize;
-    Ok(json!({
-        "ok": true,
-        "output": format!("prompt-armor:diff complete\n  runA: {}\n  runB: {}\n  lineDelta: {}", path_a.display(), path_b.display(), delta),
-        "data": {
+    let output = format!(
+        "prompt-armor:diff complete\n  runA: {}\n  runB: {}\n  lineDelta: {}",
+        path_a.display(),
+        path_b.display(),
+        delta
+    );
+    Ok(crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
             "runA": path_a.display().to_string(),
             "runB": path_b.display().to_string(),
             "lineDelta": delta,
-        },
-    }))
+        }),
+    ))
 }
 
 pub(crate) fn report(target: &Path, output: PathBuf) -> Result<Value> {
@@ -88,14 +95,17 @@ pub(crate) fn report(target: &Path, output: PathBuf) -> Result<Value> {
     let entries = sorted_artifact_entries(&out_dir);
     let body = report_markdown(&entries);
     fs::write(&output, &body).with_context(|| format!("Could not write {}", output.display()))?;
-    Ok(json!({
-        "ok": true,
-        "output": format!("prompt-armor:report complete\nReport: {}", output.display()),
-        "data": {
+    let message = format!("prompt-armor:report complete\nReport: {}", output.display());
+    let mut result = crate::module_result::completed_output_result(
+        message.clone(),
+        message,
+        json!({
             "reportPath": output.display().to_string(),
             "artifacts": entries,
-        },
-    }))
+        }),
+    );
+    result["artifacts"] = json!([{ "label": "report", "path": output.display().to_string() }]);
+    Ok(result)
 }
 
 fn sorted_artifact_entries(out_dir: &Path) -> Vec<String> {

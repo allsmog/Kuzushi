@@ -68,17 +68,16 @@ pub(in crate::modules) fn triage_response(
         dropped_high_conf_fp,
         &summary,
     );
-    json!({
-        "ok": true,
-        "status": "completed",
-        "summary": summary,
-        "output": summary,
-        "artifacts": [],
-        "warnings": warnings,
-        "errors": [],
-        "data": data,
-        "costUsd": stats.total_cost,
-    })
+    let mut result = crate::module_result::completed_output_result(summary.clone(), summary, data);
+    add_triage_response_metadata(&mut result, warnings, stats.total_cost);
+    result
+}
+
+fn add_triage_response_metadata(result: &mut Value, warnings: Vec<String>, cost_usd: f64) {
+    if let Some(object) = result.as_object_mut() {
+        object.insert("warnings".to_string(), json!(warnings));
+        object.insert("costUsd".to_string(), json!(cost_usd));
+    }
 }
 
 fn triage_response_data(

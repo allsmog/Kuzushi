@@ -11,7 +11,7 @@ fn workspace_model_formats_missing_workspace_defaults() {
     assert_eq!(model.target_label, "none");
     assert_eq!(model.state_label, ".kuzushi/v2");
     assert_eq!(model.findings_db_label, ".kuzushi/v2/findings.sqlite3");
-    assert_eq!(model.findings_label, "unknown");
+    assert_eq!(model.findings_label, "— (no scan yet)");
     assert_eq!(model.last_export_label, "none");
     assert!(model.empty);
     assert_eq!(model.rollup_total, 0);

@@ -1,0 +1,131 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kuzushi.dev/schemas/run.recommendations.schema.json",
+  "title": "Kuzushi Run Recommendations Snapshot",
+  "description": "Canonical schema for .kuzushi/runs/<runId>/recommendations.json. Rich producer reports may add fields; deterministic absence markers use the shared run snapshot marker fields.",
+  "type": ["object", "array"],
+  "additionalProperties": true,
+  "properties": {
+    "runId": { "type": "string" },
+    "run_id": { "type": "string" },
+    "status": { "$ref": "#/definitions/runStatus" },
+    "runStatus": { "$ref": "#/definitions/runStatus" },
+    "summary": { "type": "string" },
+    "artifacts": { "type": "array" },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "ok": { "type": "boolean" },
+    "data": { "$ref": "#/definitions/recommendationReport" },
+    "recommendationReport": { "$ref": "#/definitions/recommendationReport" },
+    "recommendation_report": { "$ref": "#/definitions/recommendationReport" },
+    "target": { "type": "string" },
+    "signals": { "type": "object" },
+    "capabilities": { "$ref": "#/definitions/capabilities" },
+    "availableToolCount": { "type": "integer", "minimum": 0 },
+    "available_tool_count": { "type": "integer", "minimum": 0 },
+    "recommendedToolCount": { "type": "integer", "minimum": 0 },
+    "recommended_tool_count": { "type": "integer", "minimum": 0 },
+    "skippedMissingTools": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "skipped_missing_tools": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "recommendations": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/recommendation" }
+    }
+  },
+  "definitions": {
+    "recommendationReport": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "summary": { "type": "string" },
+        "ok": { "type": "boolean" },
+        "target": { "type": "string" },
+        "signals": { "type": "object" },
+        "capabilities": { "$ref": "#/definitions/capabilities" },
+        "availableToolCount": { "type": "integer", "minimum": 0 },
+        "available_tool_count": { "type": "integer", "minimum": 0 },
+        "recommendedToolCount": { "type": "integer", "minimum": 0 },
+        "recommended_tool_count": { "type": "integer", "minimum": 0 },
+        "skippedMissingTools": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "skipped_missing_tools": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "recommendations": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/recommendation" }
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "errors": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "recommendationReport": { "$ref": "#/definitions/recommendationReport" },
+        "recommendation_report": { "$ref": "#/definitions/recommendationReport" }
+      }
+    },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "availableToolCount": { "type": "integer", "minimum": 0 },
+        "available_tool_count": { "type": "integer", "minimum": 0 },
+        "recommendedToolCount": { "type": "integer", "minimum": 0 },
+        "recommended_tool_count": { "type": "integer", "minimum": 0 },
+        "skippedMissingTools": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "skipped_missing_tools": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "runStatus": {
+      "type": "string",
+      "enum": ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"]
+    },
+    "recommendation": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "moduleId": { "type": "string" },
+        "module_id": { "type": "string" },
+        "tool": { "type": "string" },
+        "priority": { "$ref": "#/definitions/priority" },
+        "reason": { "type": "string" },
+        "signals": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "requiresRuntime": { "type": "boolean" },
+        "requires_runtime": { "type": "boolean" },
+        "nextInput": { "type": "object" },
+        "next_input": { "type": "object" }
+      }
+    },
+    "priority": {
+      "type": "string",
+      "enum": ["high", "medium", "low"]
+    }
+  }
+}

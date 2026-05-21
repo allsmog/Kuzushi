@@ -26,6 +26,7 @@
       "types": "./dist/testing/index.d.ts",
       "default": "./dist/testing/index.js"
     },
+    "./schemas/*": "./schemas/*",
     "./package.json": "./package.json"
   },
   "bin": {
@@ -35,7 +36,7 @@
   "scripts": {
     "setup": "bash scripts/bootstrap.sh",
     "doctor": "bash scripts/doctor.sh",
-    "check:docs": "node scripts/check-public-identity.mjs && node scripts/check-doc-command-drift.mjs && node scripts/check-retired-ts-runtime.mjs",
+    "check:docs": "node scripts/check-port-contract.mjs && node scripts/check-public-identity.mjs && node scripts/check-doc-command-drift.mjs && node scripts/check-retired-ts-runtime.mjs",
     "check:retired-ts-runtime": "node scripts/check-retired-ts-runtime.mjs",
     "export:source": "bash scripts/export-clean-source.sh",
     "setup:benchmarks": "bash scripts/setup-benchmarks.sh",
@@ -60,7 +61,7 @@
     "test:coverage": "vitest run --coverage",
     "quality:crap-risk": "node scripts/crap-risk-gate.mjs",
     "quality:identity": "node scripts/check-public-identity.mjs",
-    "quality:architecture": "node scripts/check-ddd-boundaries.mjs",
+    "quality:architecture": "node scripts/check-ddd-boundaries.mjs && node scripts/check-ddd-context-docs.mjs && node scripts/check-artifact-contract.mjs && node scripts/check-result-envelope-contract.mjs && node scripts/check-retired-ts-runtime.mjs && node scripts/check-deferred-surface-contract.mjs && node scripts/check-validated-wording.mjs",
     "quality:model-safety": "node scripts/check-model-safety.mjs",
     "verify:pack": "node scripts/verify-pack.mjs",
     "publish:npm": "bash scripts/publish-npm.sh",
@@ -93,6 +94,8 @@
     "bin",
     "native",
     "scripts/pi-agent-core-bridge.mjs",
+    "scripts/check-native-bindings.mjs",
+    "schemas",
     "assets/ascii",
     "assets/pashov-xray",
     "README.md",
@@ -111,18 +114,20 @@
     "@earendil-works/pi-ai": "0.74.0",
     "@kuzushi/augur": "^0.1.0",
     "@kuzushi/randori-plugin": "github:allsmog/randori-plugin",
-    "@kuzushi/tob-skills": "github:allsmog/tob-security-skills",
-    "@kuzushi/vuln-scout": "github:allsmog/vuln-scout",
     "better-sqlite3": "^12.8.0",
     "chalk": "^5.4.1",
     "commander": "^13.1.0",
-    "promptarmor-plugin": "github:allsmog/promptarmor-plugin",
-    "shinsa-plugin": "github:allsmog/shinsa-plugin",
     "tinyglobby": "^0.2.15",
     "typescript": "^5.7.3",
     "undici": "^7.22.0",
     "yaml": "^2.7.0",
     "zod": "^4.3.6"
+  },
+  "optionalDependencies": {
+    "@kuzushi/tob-skills": "github:allsmog/tob-security-skills",
+    "@kuzushi/vuln-scout": "github:allsmog/vuln-scout",
+    "promptarmor-plugin": "github:allsmog/promptarmor-plugin",
+    "shinsa-plugin": "github:allsmog/shinsa-plugin"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.12",

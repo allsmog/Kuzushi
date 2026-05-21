@@ -27,7 +27,7 @@ pub(crate) struct ClassifierResponse {
 }
 
 pub struct LikelyVulnClassifier<'a> {
-    pub(crate) runtime: &'a RoutedRuntime,
+    pub(crate) runtime: &'a RoutedRuntime<'a>,
     pub(crate) cfg: ClassifierConfig,
     pub(crate) quantile: Mutex<QuantileEstimator>,
 }

@@ -1,0 +1,256 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kuzushi.dev/schemas/run.summary.schema.json",
+  "title": "Kuzushi Run Summary",
+  "description": "Canonical schema for .kuzushi/runs/<runId>/run.json and legacy summary.json metadata.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["kind", "status", "target"],
+  "allOf": [
+    { "anyOf": [{ "required": ["runId"] }, { "required": ["run_id"] }] },
+    {
+      "anyOf": [
+        { "required": ["startedAtUnix"] },
+        { "required": ["started_at_unix"] }
+      ]
+    }
+  ],
+  "properties": {
+    "runId": { "type": "string", "minLength": 1 },
+    "run_id": { "type": "string", "minLength": 1 },
+    "kind": { "$ref": "#/definitions/runKind" },
+    "status": {
+      "type": "string",
+      "enum": ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"]
+    },
+    "tool": { "type": "string" },
+    "target": { "type": "string" },
+    "startedAtUnix": { "type": "integer", "minimum": 0 },
+    "started_at_unix": { "type": "integer", "minimum": 0 },
+    "completedAtUnix": { "type": "integer", "minimum": 0 },
+    "completed_at_unix": { "type": "integer", "minimum": 0 },
+    "findings": { "type": "integer", "minimum": 0 },
+    "costUsd": { "type": "number", "minimum": 0 },
+    "cost_usd": { "type": "number", "minimum": 0 },
+    "error": { "type": "string" },
+    "processId": { "type": "integer", "minimum": 0 },
+    "process_id": { "type": "integer", "minimum": 0 },
+    "kuzushiVersion": { "type": "string" },
+    "kuzushi_version": { "type": "string" },
+    "gitSha": { "type": "string" },
+    "git_sha": { "type": "string" },
+    "gitBranch": { "type": "string" },
+    "git_branch": { "type": "string" },
+    "model": { "type": "string" },
+    "configHash": { "type": "string" },
+    "config_hash": { "type": "string" },
+    "platform": { "type": "string" },
+    "houseRules": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/houseRuleFingerprint" }
+    },
+    "house_rules": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/houseRuleFingerprint" }
+    },
+    "promptOverrides": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/promptOverrideFingerprint" }
+    },
+    "prompt_overrides": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/promptOverrideFingerprint" }
+    },
+    "threatModelSha256": { "type": "string" },
+    "threat_model_sha256": { "type": "string" },
+    "envFingerprint": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/envFingerprint" }
+    },
+    "env_fingerprint": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/envFingerprint" }
+    },
+    "targetGit": { "$ref": "#/definitions/targetGit" },
+    "target_git": { "$ref": "#/definitions/targetGit" },
+    "llmCalls": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/llmCall" }
+    },
+    "llm_calls": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/llmCall" }
+    },
+    "traceMalformedLines": { "type": "integer", "minimum": 1 },
+    "trace_malformed_lines": { "type": "integer", "minimum": 1 },
+    "cliArgs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "cli_args": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "scanArgs": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "scan_args": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "loadedModules": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "loaded_modules": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "loadedModuleSpecifiers": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "loaded_module_specifiers": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/artifact" }
+    }
+  },
+  "definitions": {
+    "runKind": {
+      "type": "string",
+      "enum": ["run", "tool", "scan", "shell"]
+    },
+    "llmCallKind": {
+      "type": "string",
+      "enum": ["tool", "reasoning", "tool-progress", "done", "refused"]
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "anyOf": [
+            { "required": ["label"] },
+            { "required": ["name"] },
+            { "required": ["title"] }
+          ]
+        },
+        {
+          "anyOf": [
+            { "required": ["path"] },
+            { "required": ["file"] },
+            { "required": ["filePath"] },
+            { "required": ["file_path"] },
+            { "required": ["reportPath"] },
+            { "required": ["report_path"] },
+            { "required": ["reportJsonPath"] },
+            { "required": ["report_json_path"] },
+            { "required": ["scopePath"] },
+            { "required": ["scope_path"] },
+            { "required": ["dir"] },
+            { "required": ["outputDir"] },
+            { "required": ["output_dir"] },
+            { "required": ["promptsDir"] },
+            { "required": ["prompts_dir"] }
+          ]
+        },
+        {
+          "anyOf": [
+            { "required": ["kind"] },
+            { "required": ["type"] }
+          ]
+        }
+      ],
+      "properties": {
+        "label": { "type": "string" },
+        "name": { "type": "string" },
+        "title": { "type": "string" },
+        "path": { "type": "string" },
+        "file": { "type": "string" },
+        "filePath": { "type": "string" },
+        "file_path": { "type": "string" },
+        "reportPath": { "type": "string" },
+        "report_path": { "type": "string" },
+        "reportJsonPath": { "type": "string" },
+        "report_json_path": { "type": "string" },
+        "scopePath": { "type": "string" },
+        "scope_path": { "type": "string" },
+        "dir": { "type": "string" },
+        "outputDir": { "type": "string" },
+        "output_dir": { "type": "string" },
+        "promptsDir": { "type": "string" },
+        "prompts_dir": { "type": "string" },
+        "kind": { "$ref": "#/definitions/artifactKind" },
+        "type": { "$ref": "#/definitions/artifactKind" }
+      }
+    },
+    "artifactKind": {
+      "type": "string",
+      "enum": ["json", "jsonl", "markdown", "sarif", "directory", "artifact"]
+    },
+    "envFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "fingerprint"],
+      "properties": {
+        "key": { "type": "string" },
+        "fingerprint": { "type": "string" }
+      }
+    },
+    "houseRuleFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "path", "sha256"],
+      "properties": {
+        "module": { "type": "string" },
+        "path": { "type": "string" },
+        "sha256": { "type": "string" }
+      }
+    },
+    "llmCall": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["n", "kind", "model", "provider"],
+      "anyOf": [{ "required": ["promptHash"] }, { "required": ["prompt_hash"] }],
+      "properties": {
+        "n": { "type": "integer", "minimum": 0 },
+        "kind": { "$ref": "#/definitions/llmCallKind" },
+        "verb": { "type": "string" },
+        "model": { "type": "string" },
+        "provider": { "type": "string" },
+        "promptHash": { "type": "string" },
+        "prompt_hash": { "type": "string" },
+        "latencyMs": { "type": "integer", "minimum": 0 },
+        "latency_ms": { "type": "integer", "minimum": 0 },
+        "costUsd": { "type": "number", "minimum": 0 },
+        "cost_usd": { "type": "number", "minimum": 0 }
+      }
+    },
+    "promptOverrideFingerprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["module", "verb", "path", "sha256"],
+      "properties": {
+        "module": { "type": "string" },
+        "verb": { "type": "string" },
+        "path": { "type": "string" },
+        "sha256": { "type": "string" }
+      }
+    },
+    "targetGit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sha", "dirty"],
+      "properties": {
+        "sha": { "type": "string", "minLength": 1 },
+        "branch": { "type": "string" },
+        "dirty": { "type": "boolean" }
+      }
+    }
+  }
+}

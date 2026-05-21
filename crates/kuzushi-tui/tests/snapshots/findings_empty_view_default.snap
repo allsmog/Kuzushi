@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 33
 ---
- KUZUSHI mode:shell | target none | ctx missing | model unconfigured | findings 0 findings | view findings
+ KUZUSHI mode:shell | target:none | ctx:missing | model:unconfigured | 0 findings | view:findings
 
 filters [all:0]  critical:0  high:0  medium:0  low:0
 

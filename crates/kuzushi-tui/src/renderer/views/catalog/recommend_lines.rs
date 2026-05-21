@@ -33,7 +33,7 @@ fn append_report(
     }
     lines.push(aligned_header(
         &model.report_headers,
-        &[6, 26, 8, value_width(area, 48)],
+        &[6, 26, 8, 34, value_width(area, 82)],
     ));
     let take = (area.height.saturating_sub(10) as usize).max(4);
     for recommendation in model.rows.iter().take(take) {
@@ -63,12 +63,13 @@ fn append_empty_recommendations(
 }
 
 fn recommendation_row(recommendation: &RecommendationRow, width: u16) -> Line<'static> {
-    let [priority, tool, runtime, reason] = &recommendation.cells;
-    let reason_width = (width as usize).saturating_sub(44).max(24);
+    let [priority, tool, runtime, signal, reason] = &recommendation.cells;
+    let reason_width = (width as usize).saturating_sub(82).max(24);
     row(&[
         pad(priority, 6),
         pad(tool, 26),
         pad(runtime, 8),
+        pad(signal, 34),
         fit(reason, reason_width),
     ])
 }

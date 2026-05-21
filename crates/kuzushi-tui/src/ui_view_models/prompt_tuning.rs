@@ -1,4 +1,4 @@
-use crate::{ShellApp, TuneAction};
+use crate::{HouseRulesRead, ShellApp, TuneAction};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TuneModel {
@@ -21,6 +21,7 @@ pub(crate) struct TuneActionRow {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum TuneHouseRules {
     Present(Vec<String>),
+    Unreadable(String),
     Empty,
 }
 
@@ -59,7 +60,7 @@ pub(crate) fn prompts_model(app: &ShellApp) -> PromptsModel {
         .enumerate()
         .map(|(index, verb)| PromptRow {
             verb,
-            source: "builtin",
+            source: "none",
             path: format!(".kuzushi/prompts/{module}/{verb}.md"),
             selected: index == cursor,
         })
@@ -88,13 +89,13 @@ fn tune_action_rows(app: &ShellApp) -> Vec<TuneActionRow> {
 }
 
 fn house_rules(app: &ShellApp, limit: usize) -> TuneHouseRules {
-    let Some(text) = app
-        .read_house_rules()
-        .filter(|text| !text.trim().is_empty())
-    else {
-        return TuneHouseRules::Empty;
-    };
-    TuneHouseRules::Present(text.lines().take(limit).map(ToString::to_string).collect())
+    match app.read_house_rules_state() {
+        HouseRulesRead::Present(text) => {
+            TuneHouseRules::Present(text.lines().take(limit).map(ToString::to_string).collect())
+        }
+        HouseRulesRead::Unreadable(path) => TuneHouseRules::Unreadable(path.display().to_string()),
+        _ => TuneHouseRules::Empty,
+    }
 }
 
 #[cfg(test)]

@@ -56,7 +56,7 @@ fn missing_argument_message(verb: &str) -> Option<String> {
                 .to_string()
         }
         "plan" => "plan needs a natural-language goal. Next: `plan use Claude Sonnet 4.6 with high effort` (Haiku translates intent → option diff, review with /yes or /no)".to_string(),
-        "load" => "load needs a module specifier. Next: `modules` for static registry; dynamic loading is unsupported in the Rust shell.".to_string(),
+        "load" => "load needs a module specifier. Next: `load file:///abs/module.mjs` after trusting it in operator config.".to_string(),
         _ => return None,
     };
     Some(message)

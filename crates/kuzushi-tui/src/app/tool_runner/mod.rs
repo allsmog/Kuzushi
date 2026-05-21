@@ -12,7 +12,7 @@ use super::prereq_chain::{
 };
 pub(crate) use extract_cost_usd::*;
 use kuzushi_core::{
-    new_run_id, next_run_trace_step_number, AgenticSastReport, BroadcastSink,
+    config_hash, new_run_id, next_run_trace_step_number, AgenticSastReport, BroadcastSink,
     CarliniThreatHuntReport, JsonlSink, ReconHost, ReconNote, ReconService, RunTraceStep,
     TraceHandle, TraceSink, WorkspaceTarget,
 };

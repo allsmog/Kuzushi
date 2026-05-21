@@ -12,10 +12,13 @@ fn cost_model_uses_default_budget_when_unset() {
     assert_eq!(model.budget_rows[0].cells[2], "$  5.00");
     assert_eq!(model.budget_rows[0].cells[3], "  0%");
     assert_eq!(model.budget_rows[0].tone, CostTone::Success);
-    assert!(model
-        .spend_rows
-        .iter()
-        .any(|row| row.cells == ["budget".to_string(), "unset".to_string()]));
+    assert!(model.spend_rows.iter().any(|row| {
+        row.cells
+            == [
+                "budget".to_string(),
+                "unset (default $5.00 soft cap shown above)".to_string(),
+            ]
+    }));
     assert_eq!(model.auth_spend_cells[1], "\u{2014}");
     assert!(model.budget_status.is_none());
 }

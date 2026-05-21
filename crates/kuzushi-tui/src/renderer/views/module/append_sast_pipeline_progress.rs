@@ -58,6 +58,9 @@ pub(in crate::renderer::views) fn append_context_build_progress(
     if append_context_snapshot(lines, &context) {
         return;
     }
+    if append_context_malformed(lines, &context) {
+        return;
+    }
     lines.push(pipeline_row(
         "○",
         "context:build",
@@ -78,6 +81,18 @@ fn append_context_snapshot(lines: &mut Vec<Line<'static>>, context: &ContextSnap
         return false;
     }
     lines.push(pipeline_row("✓", "context:build", &context.status));
+    lines.push(pipeline_row("◆", "snapshot", &context.snapshot));
+    true
+}
+
+fn append_context_malformed(
+    lines: &mut Vec<Line<'static>>,
+    context: &ContextSnapshotModel,
+) -> bool {
+    if context.state != "malformed" {
+        return false;
+    }
+    lines.push(pipeline_row("⚠", "context:build", &context.status));
     lines.push(pipeline_row("◆", "snapshot", &context.snapshot));
     true
 }

@@ -104,7 +104,7 @@ pub(crate) use settings::{
 };
 pub use shellapp::ShellApp;
 pub use view_state::{
-    ActivitySession, ActorDetailFilter, AdvisoryState, BudgetHalt, CompletionCycle,
+    ActivitySession, ActorDetailFilter, AdvisoryState, AuthLoginView, BudgetHalt, CompletionCycle,
     ContextSnapshotView, DagTaskRow, DagTaskState, ExploitChain, KnowledgeBaseView, OptionsFilter,
     OptionsView, PaneFocus, PlanChange, PlanProposal, PromptsAction, PwnView, ReconSnapshot,
     RecordedTraceEvent, ScanPanelState, ShellView, SubsystemAggregate, ThreatPatch, ThreatView,

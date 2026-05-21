@@ -4,6 +4,10 @@ Status: implemented on worktree `agent-a46c39ab`
 Date: 2026-04-16
 Owner: DX-5 subagent
 
+Historical note: this assessment predates the Rust app cutover. Shell/TUI
+examples should be read as release history; current interactive work belongs
+under `crates/kuzushi-tui`.
+
 ## Summary
 
 This document records the current state of repository conventions (PR template, Git hooks, commit message format, code ownership), the changes applied in this work, the rationale behind each one, and the explicit escape hatches for engineers who hit friction.

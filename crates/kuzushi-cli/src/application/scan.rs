@@ -1,13 +1,13 @@
+use super::scan_prepare::{prepare_scan_command, PreparedScanCommand, SCAN_TOOL};
 use crate::command::ScanModeArg;
 use crate::presentation::{emit_scan_ci_start, emit_scan_output, scan_result_or_report_ci_error};
-use crate::scan_budget::apply_scan_budget_caps;
 use anyhow::{Context, Result};
 use kuzushi_core::modules::wants_sast_runtime;
 use kuzushi_core::modules::ToolExecutionContext;
-use kuzushi_core::{
-    load_config_for_target, AgentRuntime, FindingStore, ModuleRegistry, ToolOptionStore,
-    WorkspaceTarget,
+use kuzushi_core::run_artifacts::{
+    record_tool_run_failed, record_tool_run_started_with_reproducibility, ToolRunRecord,
 };
+use kuzushi_core::{config_hash, AgentRuntime, ModuleRegistry, ToolOptionStore, WorkspaceTarget};
 use kuzushi_openai::PiAgentCoreRuntime;
 use std::path::PathBuf;
 
@@ -22,26 +22,41 @@ pub(crate) async fn scan_command(
     since: Option<String>,
     include_worktree: bool,
 ) -> Result<()> {
-    let workspace = WorkspaceTarget::new(&target)?;
-    let config = load_config_for_target(Some(workspace.root()))?;
-    let store = FindingStore::open(workspace.findings_db_path())?;
-    let registry = ModuleRegistry::with_v2_builtins();
-
-    apply_scan_since_scope(&workspace, since.as_deref(), include_worktree, json, ci)?;
-    apply_scan_budget_caps(
-        &workspace,
-        budget.as_deref(),
-        config.operator.spend_hard_ceiling_usd,
+    execute_prepared_scan(
+        prepare_scan_command(
+            &target,
+            mode,
+            &tasks,
+            triage,
+            budget.as_deref(),
+            since.as_deref(),
+            include_worktree,
+            json,
+            ci,
+        )?,
+        &target,
+        &tasks,
         json,
         ci,
-    )?;
-    let option_store = scan_option_store(&workspace)?;
-    let input = registry.prepare_tool_input(
-        "sast:scan",
-        scan_tool_input(mode, &tasks, triage),
-        Some(&option_store),
-    )?;
-    let runtime = scan_runtime(&config, &input)?;
+    )
+}
+
+fn execute_prepared_scan(
+    prepared: PreparedScanCommand,
+    target: &PathBuf,
+    tasks: &[String],
+    json: bool,
+    ci: bool,
+) -> Result<()> {
+    let PreparedScanCommand {
+        workspace,
+        config,
+        store,
+        registry,
+        input,
+        runtime,
+        run_id,
+    } = prepared;
     let ctx = ToolExecutionContext {
         config: &config,
         workspace: Some(&workspace),
@@ -52,15 +67,77 @@ pub(crate) async fn scan_command(
     let started = std::time::Instant::now();
     emit_scan_ci_start(ci, started, &target, &config, &tasks);
 
-    let result = registry.execute_tool_with_runtime(
-        "sast:scan",
+    let result = execute_scan_tool(ScanToolExecution {
+        registry: &registry,
         input,
-        &ctx,
-        runtime.as_ref().map(|runtime| runtime as &dyn AgentRuntime),
-    );
+        ctx: &ctx,
+        runtime: runtime.as_ref(),
+        workspace: &workspace,
+        run_id: &run_id,
+        config: &config,
+    });
     let elapsed = started.elapsed();
     let result = scan_result_or_report_ci_error(result, ci, started, elapsed)?;
     emit_scan_output(&workspace, &result, json, ci, started, elapsed)
+}
+
+struct ScanToolExecution<'a> {
+    registry: &'a ModuleRegistry,
+    input: serde_json::Value,
+    ctx: &'a ToolExecutionContext<'a>,
+    runtime: Option<&'a PiAgentCoreRuntime>,
+    workspace: &'a WorkspaceTarget,
+    run_id: &'a str,
+    config: &'a kuzushi_core::V2Config,
+}
+
+fn execute_scan_tool(execution: ScanToolExecution<'_>) -> Result<serde_json::Value> {
+    let failure_input = execution.input.clone();
+    let result = execution.registry.execute_tool_with_runtime(
+        SCAN_TOOL,
+        execution.input,
+        execution.ctx,
+        execution
+            .runtime
+            .map(|runtime| runtime as &dyn AgentRuntime),
+    );
+    record_failed_scan_execution(
+        &result,
+        ScanExecutionFailureRecord {
+            workspace: execution.workspace,
+            registry: execution.registry,
+            run_id: execution.run_id,
+            input: &failure_input,
+            config: execution.config,
+        },
+    );
+    result
+}
+
+struct ScanExecutionFailureRecord<'a> {
+    workspace: &'a WorkspaceTarget,
+    registry: &'a ModuleRegistry,
+    run_id: &'a str,
+    input: &'a serde_json::Value,
+    config: &'a kuzushi_core::V2Config,
+}
+
+fn record_failed_scan_execution(
+    result: &Result<serde_json::Value>,
+    record: ScanExecutionFailureRecord<'_>,
+) {
+    let Err(error) = result else {
+        return;
+    };
+    let tool_run = ToolRunRecord::new(record.workspace.root(), record.run_id, "scan", SCAN_TOOL);
+    record_tool_run_started_with_reproducibility(
+        tool_run,
+        record.input,
+        record.config.model.clone(),
+        config_hash(record.config).ok(),
+        record.registry.loaded_module_specifiers(),
+    );
+    record_tool_run_failed(tool_run, &error.to_string());
 }
 
 pub(crate) fn apply_scan_since_scope(

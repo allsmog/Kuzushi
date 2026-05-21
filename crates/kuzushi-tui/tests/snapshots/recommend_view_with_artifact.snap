@@ -2,16 +2,16 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 0
 ---
- KUZUSHI mode:shell | target ./recommend | ctx missing | model unconfigured | findings 0 findings | view recommend
+ KUZUSHI mode:shell | target:./recommend | ctx:missing | model:unconfigured | 0 findings | view:recommend
 
  -- RECOMMEND ----------------------------------------------------------------------------------------------------------
 recommendations    target/kuzushi-tui-snapshots/recommend/.kuzushi/runs/run-rec/recommendations.json
 run                run-rec
-surface risk       1 high/critical, max 90, tiers critical=1, top critical POST /admin
+surface risk       1 high/critical, max 90, tiers critical=1, frameworks Next.js=1, Spring=1, top critical POST /admin
 
 Prioritize deterministic scanner coverage before model-backed review.
 
-pri     tool                        runtime   reason
-⚠ high  semgrep:scan                no        Source files match the fast native SAST path.
+pri     tool                        runtime   signal                              reason...
+⚠ high  semgrep:scan                no        frameworks: Falcon, Litestar...     Source files match the fast...
 
-run <tool> [json] | trace <run> | runs | back
+▸ try: run <tool> [json] | trace <run> | runs | back

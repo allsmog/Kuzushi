@@ -1,26 +1,42 @@
 #!/usr/bin/env node
-import { chmodSync, copyFileSync, existsSync, mkdirSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 
 const root = process.cwd();
-const exe = process.platform === "win32" ? "kuzushi.exe" : "kuzushi";
-const source = join(root, "target", "release", exe);
+const exes =
+  process.platform === "win32" ? ["kuzushi.exe", "kz.exe"] : ["kuzushi", "kz"];
+const retiredExes =
+  process.platform === "win32" ? ["codex.exe", "kuzushi-ts.exe"] : ["codex", "kuzushi-ts"];
 const outDir = join(root, "native", `${process.platform}-${process.arch}`);
-const destination = join(outDir, exe);
 
-if (!existsSync(source)) {
-  process.stderr.write(
-    `Missing ${source}. Run \`cargo build -p kuzushi-cli --release\` before staging the native package.\n`,
-  );
-  process.exit(1);
+for (const exe of exes) {
+  const source = join(root, "target", "release", exe);
+  if (!existsSync(source)) {
+    process.stderr.write(
+      `Missing ${source}. Run \`cargo build -p kuzushi-cli --release\` before staging the native package.\n`,
+    );
+    process.exit(1);
+  }
 }
 
 mkdirSync(outDir, { recursive: true });
-copyFileSync(source, destination);
-
-if (process.platform !== "win32") {
-  chmodSync(destination, 0o755);
+for (const exe of retiredExes) {
+  const stale = join(outDir, exe);
+  if (existsSync(stale)) {
+    rmSync(stale, { force: true });
+    process.stdout.write(`removed stale ${stale}\n`);
+  }
 }
 
-process.stdout.write(`staged ${destination}\n`);
+for (const exe of exes) {
+  const source = join(root, "target", "release", exe);
+  const destination = join(outDir, exe);
+  copyFileSync(source, destination);
+
+  if (process.platform !== "win32") {
+    chmodSync(destination, 0o755);
+  }
+
+  process.stdout.write(`staged ${destination}\n`);
+}

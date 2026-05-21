@@ -20,7 +20,7 @@ pub(super) struct FullModeChunkResult {
 }
 
 pub(super) fn run_full_mode_chunk(
-    runtime: &RoutedRuntime,
+    runtime: &RoutedRuntime<'_>,
     spend: Option<&SpendLimiter>,
     cfg: &FullModeConfig,
     chunk: &ChunkPlan,
@@ -48,7 +48,7 @@ fn reserve_full_mode_chunk_budget(
 }
 
 fn query_full_mode_chunk(
-    runtime: &RoutedRuntime,
+    runtime: &RoutedRuntime<'_>,
     cfg: &FullModeConfig,
     chunk: &ChunkPlan,
     model: &str,
@@ -68,7 +68,7 @@ fn query_full_mode_chunk(
 }
 
 fn query_full_mode_chunk_with_prompt(
-    runtime: &RoutedRuntime,
+    runtime: &RoutedRuntime<'_>,
     cfg: &FullModeConfig,
     model: &str,
     system_prompt: &str,

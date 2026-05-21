@@ -14,6 +14,8 @@ pub(crate) fn inspect_source_file(
     let text = String::from_utf8_lossy(&bytes);
     let framework = framework_for_source(&source_file.language, &text);
 
+    inspect_source_routes(source_file, framework.as_deref(), &text, builder);
+
     for (index, line) in text.lines().enumerate() {
         let line_number = u32::try_from(index + 1).unwrap_or(u32::MAX);
         inspect_line(
@@ -26,6 +28,19 @@ pub(crate) fn inspect_source_file(
     }
 
     Ok(())
+}
+
+fn inspect_source_routes(
+    source_file: &InventorySourceFile,
+    framework: Option<&str>,
+    text: &str,
+    builder: &mut AttackSurfaceBuilder,
+) {
+    match source_file.language.as_str() {
+        "C#" => inspect_dotnet_routes(source_file, framework, text, builder),
+        "Java" | "Kotlin" => inspect_jvm_routes(source_file, framework, text, builder),
+        _ => {}
+    }
 }
 
 pub(crate) fn inspect_line(
@@ -42,6 +57,10 @@ pub(crate) fn inspect_line(
         "Python" => inspect_python_line(source_file, framework, line_number, line, builder),
         "Go" => inspect_go_line(source_file, framework, line_number, line, builder),
         "Rust" => inspect_rust_line(source_file, framework, line_number, line, builder),
+        "Java" | "Kotlin" => inspect_jvm_line(source_file, framework, line_number, line, builder),
+        "C#" => inspect_dotnet_line(source_file, framework, line_number, line, builder),
+        "Ruby" => inspect_ruby_line(source_file, framework, line_number, line, builder),
+        "PHP" => inspect_php_line(source_file, framework, line_number, line, builder),
         _ => {}
     }
 }

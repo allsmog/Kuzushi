@@ -39,6 +39,26 @@ mod tests {
     }
 
     #[test]
+    fn whitebox_static_policy_downgrades_runtime_review_proof_states() {
+        for state in [
+            "runtime_reviewed",
+            "execution_attempted",
+            "execution_rejected",
+        ] {
+            let (sanitized, policy) = apply_whitebox_static_sast_policy(json!({
+                "mode": "whitebox-static",
+                "proof_state": state,
+                "proof_states": ["signal_only", state]
+            }))
+            .unwrap();
+
+            assert!(!policy.unwrap().execution_proof_states);
+            assert_eq!(sanitized["proof_state"], json!("needs_runtime_evidence"));
+            assert_eq!(sanitized["proof_states"], json!(["needs_runtime_evidence"]));
+        }
+    }
+
+    #[test]
     fn standard_mode_preserves_input() {
         let input = json!({"mode": "standard", "verify": true});
         let (sanitized, policy) = apply_whitebox_static_sast_policy(input.clone()).unwrap();

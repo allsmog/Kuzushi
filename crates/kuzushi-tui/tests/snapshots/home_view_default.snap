@@ -2,16 +2,16 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 89
 ---
- KUZUSHI mode:shell | target none | ctx missing | model unconfigured | findings 0 findings | view home
+ KUZUSHI mode:shell | target:none | ctx:missing | model:unconfigured | 0 findings | view:home
 
  -- HOME ---------------------------------------------------------------------------------------------------------------
 target             none
 latest run         none
 run status         no run.json
-modules            33
+modules            36
 findings           0
 
-▸ NEXT Run scan . to create the first Kuzushi run artifacts.
+▸ NEXT Run `scan .` (the dot means the current directory) to create the first Kuzushi run artifacts.
 
 rails: ✓ recorded → ○ placeholder ⚠ failed ■ missing ◆ partial
 ■    ctx           missing       .kuzushi/runs/latest/context.json
@@ -22,5 +22,6 @@ rails: ✓ recorded → ○ placeholder ⚠ failed ■ missing ◆ partial
 ■    proof         missing       .kuzushi/runs/latest/proof.json
 ■    failures      missing       .kuzushi/runs/latest/failures.json
 ■    report        missing       .kuzushi/runs/latest/report.md
+■    manifest      missing       .kuzushi/runs/latest/artifacts.json
 
-modules | recommend | quickstart | scan . | findings | runs
+▸ try: modules | recommend | quickstart | scan . | findings | runs

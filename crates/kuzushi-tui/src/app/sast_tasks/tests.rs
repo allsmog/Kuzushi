@@ -39,4 +39,38 @@ mod tests {
 
         assert!(!valid_sast_task_ids().contains(&"carlini-threat-hunt"));
     }
+
+    #[test]
+    fn cargo_audit_task_aliases_resolve_to_native_scanner() {
+        for alias in ["cargo-audit", "cargo audit", "cargo-audit:scan"] {
+            let task = resolve_sast_task(alias).unwrap();
+            assert_eq!(task.id, "cargo-audit");
+            assert_eq!(task.scan_task, "cargo-audit");
+            assert!(task.default_enabled);
+        }
+
+        assert!(valid_sast_task_ids().contains(&"cargo-audit"));
+    }
+
+    #[test]
+    fn license_scan_task_aliases_resolve_to_native_scanner() {
+        for alias in ["license-scan", "license", "licenses", "license-scan:scan"] {
+            let task = resolve_sast_task(alias).unwrap();
+            assert_eq!(task.id, "license-scan");
+            assert_eq!(task.scan_task, "license-scan");
+            assert!(!task.default_enabled);
+        }
+
+        assert!(valid_sast_task_ids().contains(&"license-scan"));
+    }
+
+    #[test]
+    fn systems_hunt_task_is_deferred_exact_opt_in() {
+        let task = resolve_sast_task("systems-hunt").unwrap();
+
+        assert_eq!(task.id, "systems-hunt");
+        assert_eq!(task.scan_task, "systems-hunt");
+        assert!(!task.default_enabled);
+        assert!(task.notes.contains("deferred exact opt-in"));
+    }
 }

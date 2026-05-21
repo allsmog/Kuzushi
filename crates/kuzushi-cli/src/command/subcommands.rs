@@ -37,6 +37,9 @@ pub(crate) enum RunsCommand {
     List {
         #[arg(long)]
         target: Option<PathBuf>,
+        /// Filter by run status: running, completed, failed, interrupted, partial, skipped.
+        #[arg(long, value_delimiter = ',')]
+        status: Vec<String>,
         #[arg(long)]
         json: bool,
     },
@@ -53,6 +56,31 @@ pub(crate) enum RunsCommand {
         run_id: String,
         #[arg(long)]
         target: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Compare finding snapshots from two runs.
+    Diff {
+        base_run_id: String,
+        compare_run_id: String,
+        #[arg(long)]
+        target: Option<PathBuf>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete old run artifact directories.
+    Prune {
+        #[arg(long)]
+        target: Option<PathBuf>,
+        /// Delete runs older than this many days.
+        #[arg(long = "older-than-days")]
+        older_than_days: Option<u64>,
+        /// Keep the newest N runs even if they match the age filter.
+        #[arg(long = "keep-last")]
+        keep_last: Option<usize>,
+        /// Report what would be deleted without removing files.
+        #[arg(long)]
+        dry_run: bool,
         #[arg(long)]
         json: bool,
     },

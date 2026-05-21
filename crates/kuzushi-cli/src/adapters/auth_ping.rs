@@ -44,7 +44,8 @@ pub(crate) fn run_auth_ping_checks(
     config: &kuzushi_core::V2Config,
     log: &mut AuthPingLog,
 ) -> Result<()> {
-    eprintln!("[auth ping] provider = {provider}");
+    let provider = auth_ping_provider_kind(provider)?;
+    eprintln!("[auth ping] provider = {}", provider.label());
     probe_auth_credentials(provider, config, log)?;
 
     let model = auth_ping_model(model_override, config)?;
@@ -108,40 +109,46 @@ impl AuthPingLog {
 }
 
 pub(crate) fn probe_auth_credentials(
-    provider: &str,
+    provider: AuthProviderKind,
     config: &kuzushi_core::V2Config,
     log: &mut AuthPingLog,
 ) -> Result<()> {
-    if matches!(auth_provider_kind(provider), AuthProviderKind::Anthropic) {
+    if matches!(provider, AuthProviderKind::Anthropic) {
         return probe_anthropic_credentials(config, log);
     }
     record_openai_auth_if_needed(provider, log);
     Ok(())
 }
 
-fn record_openai_auth_if_needed(provider: &str, log: &mut AuthPingLog) {
-    if matches!(auth_provider_kind(provider), AuthProviderKind::OpenAiOauth) {
+fn record_openai_auth_if_needed(provider: AuthProviderKind, log: &mut AuthPingLog) {
+    if matches!(provider, AuthProviderKind::OpenAi) {
         record_openai_runtime_auth_presence(log);
     }
 }
 
 #[derive(Clone, Copy)]
-enum AuthProviderKind {
+pub(crate) enum AuthProviderKind {
     Anthropic,
-    OpenAiOauth,
-    Other,
+    OpenAi,
 }
 
-fn auth_provider_kind(provider: &str) -> AuthProviderKind {
-    const AUTH_PROVIDER_KINDS: &[(&str, AuthProviderKind)] = &[
-        ("anthropic", AuthProviderKind::Anthropic),
-        ("openai-codex", AuthProviderKind::OpenAiOauth),
-        ("openai", AuthProviderKind::OpenAiOauth),
-    ];
-    AUTH_PROVIDER_KINDS
-        .iter()
-        .find_map(|(name, kind)| (*name == provider).then_some(*kind))
-        .unwrap_or(AuthProviderKind::Other)
+impl AuthProviderKind {
+    fn label(self) -> &'static str {
+        match self {
+            Self::Anthropic => "anthropic",
+            Self::OpenAi => "openai",
+        }
+    }
+}
+
+pub(crate) fn auth_ping_provider_kind(provider: &str) -> Result<AuthProviderKind> {
+    match provider.trim().to_ascii_lowercase().as_str() {
+        "anthropic" => Ok(AuthProviderKind::Anthropic),
+        "openai" => Ok(AuthProviderKind::OpenAi),
+        other => {
+            anyhow::bail!("unsupported auth ping provider {other:?}. Supported: openai, anthropic")
+        }
+    }
 }
 
 pub(crate) fn probe_anthropic_credentials(

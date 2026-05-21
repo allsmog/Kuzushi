@@ -5,7 +5,9 @@
 
 use std::{fs, path::PathBuf};
 
-use kuzushi_core::{Finding, ScanCancellation, Severity, TriageOutcome, TriageVerdict, V2Config};
+use kuzushi_core::{
+    Finding, ScanCancellation, Severity, ToolOptionStore, TriageOutcome, TriageVerdict, V2Config,
+};
 use kuzushi_tui::{
     render_plain_app, OptionsFilter, OptionsView, ShellApp, ShellCommand, ShellView, ThreatView,
 };
@@ -31,7 +33,9 @@ fn strip_line_end_whitespace(output: &str) -> String {
 }
 
 fn fresh_app() -> ShellApp {
-    ShellApp::new(V2Config::default(), None)
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.option_store = ToolOptionStore::new();
+    app
 }
 
 fn reset_snapshot_target(name: &str) -> PathBuf {
@@ -113,6 +117,7 @@ fn recommend_view_with_artifact() {
                 "tool": "semgrep:scan",
                 "priority": "high",
                 "reason": "Source files match the fast native SAST path.",
+                "signals": ["frameworks: Falcon, Litestar, Sanic"],
                 "requiresRuntime": false
             }]
         })
@@ -127,7 +132,15 @@ fn recommend_view_with_artifact() {
                 "maxRiskScore": 90,
                 "byRiskTier": {"critical": 1}
             },
-            "surfaces": [{"title": "POST /admin", "risk": {"tier": "critical"}}]
+            "surfaces": [{
+                "framework": "Spring",
+                "title": "POST /admin",
+                "risk": {"tier": "critical"}
+            }, {
+                "framework": "Next.js",
+                "title": "POST /api/session",
+                "risk": {"tier": "medium"}
+            }]
         })
         .to_string(),
     )

@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 162
 ---
-mode:shell | target:none | help | 0 findings | 33 mods
+mode:shell | target:none | view:help | 0 findings | modules:36
 
  -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
@@ -121,8 +121,9 @@ threats reject - discard the pending threat-model patch
 AUTH / CONFIG / MODEL — auth, model, runtime config
 auth - show env/OAuth status without secrets
   aliases / examples: /auth, auth status
-auth login <provider> - start supported OAuth login
-  aliases / examples: auth openai, auth anthropic, /auth login <provider>
+auth login <provider> [method] - start supported OAuth login flow
+aliases / examples: auth openai, auth anthropic, auth login openai headless, auth login github-copilot, /auth login
+<provider>
 provider - show pi-agent-core provider choices
   aliases / examples: /provider
 backend - show Rust runtime backend

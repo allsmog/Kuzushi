@@ -9,39 +9,8 @@ pub(crate) fn inspect_manifest_frameworks(
     let lower_name = file_name.to_ascii_lowercase();
     let lower = text.to_ascii_lowercase();
 
-    if lower_name == "package.json" {
-        inspect_package_json_frameworks(relative, &lower, builder);
-    }
-
-    if matches!(lower_name.as_str(), "pyproject.toml" | "requirements.txt") {
-        inspect_python_manifest_frameworks(relative, &lower, builder);
-    }
-
-    if lower_name == "go.mod" {
-        inspect_go_manifest_frameworks(relative, &lower, builder);
-    }
-
-    if lower_name == "cargo.toml" {
-        inspect_rust_manifest_frameworks(relative, &lower, builder);
-    }
-}
-
-fn inspect_package_json_frameworks(relative: &str, lower: &str, builder: &mut InventoryBuilder) {
-    inspect_framework_needles(
-        relative,
-        lower,
-        "JavaScript",
-        builder,
-        &[
-            ("\"express\"", "Express"),
-            ("\"fastify\"", "Fastify"),
-            ("\"koa\"", "Koa"),
-            ("\"next\"", "Next.js"),
-            ("\"react\"", "React"),
-            ("\"@nestjs/core\"", "NestJS"),
-        ],
-    );
-    if lower.contains("\"start\"") {
+    inspect_manifest_framework_entries(relative, &lower_name, &lower, builder);
+    if lower_name == "package.json" && lower.contains("\"start\"") {
         builder.add_entrypoint(
             "node-start-script",
             relative,
@@ -50,49 +19,111 @@ fn inspect_package_json_frameworks(relative: &str, lower: &str, builder: &mut In
     }
 }
 
-fn inspect_python_manifest_frameworks(relative: &str, lower: &str, builder: &mut InventoryBuilder) {
-    inspect_framework_needles(
-        relative,
-        lower,
-        "Python",
-        builder,
-        &[
-            ("django", "Django"),
-            ("fastapi", "FastAPI"),
-            ("flask", "Flask"),
-        ],
-    );
+fn inspect_manifest_framework_entries(
+    relative: &str,
+    lower_name: &str,
+    lower: &str,
+    builder: &mut InventoryBuilder,
+) {
+    if lower_name.ends_with(".csproj") {
+        inspect_framework_needles(relative, lower, "C#", builder, DOTNET_FRAMEWORK_PROBES);
+    }
+    for entry in MANIFEST_FRAMEWORK_ENTRIES {
+        if entry.matches_file(lower_name) {
+            inspect_framework_needles(relative, lower, entry.language, builder, entry.needles);
+        }
+    }
 }
 
-fn inspect_go_manifest_frameworks(relative: &str, lower: &str, builder: &mut InventoryBuilder) {
-    inspect_framework_needles(
-        relative,
-        lower,
-        "Go",
-        builder,
-        &[
+struct ManifestFrameworkEntry {
+    file_names: &'static [&'static str],
+    language: &'static str,
+    needles: &'static [(&'static str, &'static str)],
+}
+
+impl ManifestFrameworkEntry {
+    fn matches_file(&self, lower_name: &str) -> bool {
+        self.file_names.contains(&lower_name)
+    }
+}
+
+const MANIFEST_FRAMEWORK_ENTRIES: &[ManifestFrameworkEntry] = &[
+    ManifestFrameworkEntry {
+        file_names: &["package.json"],
+        language: "JavaScript",
+        needles: &[
+            ("\"elysia\"", "Elysia"),
+            ("\"express\"", "Express"),
+            ("\"fastify\"", "Fastify"),
+            ("\"hono\"", "Hono"),
+            ("\"koa\"", "Koa"),
+            ("\"next\"", "Next.js"),
+            ("\"react\"", "React"),
+            ("\"@nestjs/core\"", "NestJS"),
+        ],
+    },
+    ManifestFrameworkEntry {
+        file_names: &["pyproject.toml", "requirements.txt"],
+        language: "Python",
+        needles: &[
+            ("aiohttp", "aiohttp"),
+            ("bottle", "Bottle"),
+            ("django", "Django"),
+            ("falcon", "Falcon"),
+            ("fastapi", "FastAPI"),
+            ("flask", "Flask"),
+            ("litestar", "Litestar"),
+            ("pyramid", "Pyramid"),
+            ("sanic", "Sanic"),
+            ("starlette", "Starlette"),
+            ("starlite", "Litestar"),
+            ("tornado", "Tornado"),
+        ],
+    },
+    ManifestFrameworkEntry {
+        file_names: &["go.mod"],
+        language: "Go",
+        needles: &[
             ("github.com/gin-gonic/gin", "Gin"),
             ("github.com/gorilla/mux", "Gorilla Mux"),
             ("google.golang.org/grpc", "gRPC"),
         ],
-    );
-}
-
-fn inspect_rust_manifest_frameworks(relative: &str, lower: &str, builder: &mut InventoryBuilder) {
-    inspect_framework_needles(
-        relative,
-        lower,
-        "Rust",
-        builder,
-        &[
+    },
+    ManifestFrameworkEntry {
+        file_names: &["cargo.toml"],
+        language: "Rust",
+        needles: &[
             ("axum", "Axum"),
             ("actix-web", "Actix Web"),
             ("rocket", "Rocket"),
             ("warp", "Warp"),
             ("tonic", "Tonic"),
         ],
-    );
-}
+    },
+    ManifestFrameworkEntry {
+        file_names: &["build.gradle", "build.gradle.kts", "pom.xml"],
+        language: "Java",
+        needles: &[
+            ("spring-boot-starter", "Spring"),
+            ("org.springframework", "Spring"),
+        ],
+    },
+    ManifestFrameworkEntry {
+        file_names: &["gemfile"],
+        language: "Ruby",
+        needles: &[("rails", "Rails")],
+    },
+    ManifestFrameworkEntry {
+        file_names: &["composer.json"],
+        language: "PHP",
+        needles: &[("laravel/framework", "Laravel")],
+    },
+];
+
+const DOTNET_FRAMEWORK_PROBES: &[(&str, &str)] = &[
+    ("microsoft.net.sdk.web", "ASP.NET Core"),
+    ("microsoft.aspnetcore", "ASP.NET Core"),
+];
 
 fn inspect_framework_needles(
     relative: &str,

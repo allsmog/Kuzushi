@@ -10,6 +10,7 @@ pub(crate) fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
     append_progress_section(&mut lines, app, area, &summary);
     append_scan_error(&mut lines, area, &summary);
     append_findings_preview(&mut lines, &findings, area);
+    append_post_success_next(&mut lines, &summary, &findings);
 
     lines.push(blank());
     lines.push(divider("TRANSCRIPT", area.width));
@@ -20,6 +21,29 @@ pub(crate) fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
         lines.push(streaming_cursor_line());
     }
     lines
+}
+
+fn append_post_success_next(
+    lines: &mut Vec<Line<'static>>,
+    summary: &ModuleRunSummary,
+    findings: &crate::ui_view_models::FindingsModel,
+) {
+    if summary.scan_running || summary.tool_is_running() {
+        return;
+    }
+    let next_hint = if findings.rows.is_empty() {
+        "▸ NEXT  no findings recorded — try `recommend`, `tasks`, or `use <other-module>`"
+            .to_string()
+    } else if let Some(top) = findings.rows.first() {
+        format!(
+            "▸ NEXT  `open {}` (highest severity) · `findings` · `workspace export findings <path>.json`",
+            top.alias
+        )
+    } else {
+        "▸ NEXT  `findings` to review, `workspace export findings` to share".to_string()
+    };
+    lines.push(blank());
+    lines.push(Line::styled(next_hint, theme::warn()));
 }
 
 fn append_live_activity(

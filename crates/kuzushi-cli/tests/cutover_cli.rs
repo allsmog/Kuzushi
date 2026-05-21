@@ -1,6 +1,6 @@
 use std::fs;
 use std::io::Write;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use kuzushi_core::{
@@ -12,6 +12,10 @@ use serde_json::Value;
 
 fn kuzushi() -> Command {
     Command::new(env!("CARGO_BIN_EXE_kuzushi"))
+}
+
+fn kz() -> Command {
+    Command::new(env!("CARGO_BIN_EXE_kz"))
 }
 
 fn repo_root() -> &'static Path {
@@ -29,6 +33,48 @@ fn stdout(output: std::process::Output) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).expect("stdout should be UTF-8")
+}
+
+fn latest_run_dir(root: &Path) -> PathBuf {
+    let latest = fs::read_to_string(root.join(".kuzushi/latest")).unwrap();
+    root.join(".kuzushi/runs").join(latest.trim())
+}
+
+fn assert_failed_run_bundle(root: &Path, kind: &str, tool: &str) -> (PathBuf, Value) {
+    let run_dir = latest_run_dir(root);
+    let run_json = fs::read_to_string(run_dir.join("run.json")).unwrap();
+    let failures = fs::read_to_string(run_dir.join("failures.json")).unwrap();
+    let failure_json: Value = serde_json::from_str(&failures).unwrap();
+
+    assert_canonical_run_files(&run_dir);
+    assert!(run_json.contains("\"status\": \"failed\""));
+    assert!(run_json.contains(&format!("\"kind\": \"{kind}\"")));
+    assert!(run_json.contains(&format!("\"tool\": \"{tool}\"")));
+    assert_eq!(failure_json["status"], "failed");
+    assert_eq!(failure_json["failures"][0]["tool"], tool);
+    (run_dir, failure_json)
+}
+
+fn assert_canonical_run_files(run_dir: &Path) {
+    for leaf in [
+        "run.json",
+        "events.jsonl",
+        "trace.jsonl",
+        "context.json",
+        "attack-surface.json",
+        "threat-model.json",
+        "recommendations.json",
+        "findings.json",
+        "proof.json",
+        "failures.json",
+        "report.md",
+        "artifacts.json",
+    ] {
+        assert!(
+            run_dir.join(leaf).exists(),
+            "latest run missing canonical artifact {leaf}"
+        );
+    }
 }
 
 fn assert_strict_plain(label: &str, output: &str) {
@@ -102,8 +148,49 @@ fn rust_cli_help_is_the_documented_primary_surface() {
 }
 
 #[test]
+fn rust_cli_compact_alias_is_a_native_binary() {
+    let out = stdout(kz().arg("--help").output().unwrap());
+
+    assert!(out.contains("Kuzushi security-native code agent"));
+    assert!(out.contains("Usage: kz"));
+    assert!(out.contains("run"));
+    assert!(out.contains("shell"));
+}
+
+#[test]
+fn auth_ping_rejects_legacy_codex_provider_selector() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let output = kuzushi()
+        .env("HOME", &home)
+        .args(["auth", "ping"])
+        .arg(format!("openai-{}", "codex"))
+        .args(["--model", "openai:gpt-5.5"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "legacy selector should fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unsupported auth ping provider"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("Supported: openai, anthropic"), "{stderr}");
+}
+
+#[test]
 fn cli_run_dot_is_rejected_as_shell_only_shorthand() {
-    let output = kuzushi().args(["run", "."]).output().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+    let output = kuzushi()
+        .current_dir(tmp.path())
+        .env("HOME", &home)
+        .args(["run", "."])
+        .output()
+        .unwrap();
 
     assert!(
         !output.status.success(),
@@ -113,6 +200,62 @@ fn cli_run_dot_is_rejected_as_shell_only_shorthand() {
     assert!(stderr.contains("`kuzushi run .` is shell-only"), "{stderr}");
     assert!(stderr.contains("use <module>"), "{stderr}");
     assert!(stderr.contains("context:build"), "{stderr}");
+    let (run_dir, _) = assert_failed_run_bundle(tmp.path(), "run", ".");
+    let run_json = fs::read_to_string(run_dir.join("run.json")).unwrap();
+    let failures = fs::read_to_string(run_dir.join("failures.json")).unwrap();
+
+    assert!(run_json.contains("\"tool\": \".\""));
+    assert!(failures.contains("`kuzushi run .` is shell-only"));
+}
+
+#[test]
+fn cli_run_missing_target_writes_failed_artifact_bundle_under_cwd() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let output = kuzushi()
+        .current_dir(tmp.path())
+        .env("HOME", &home)
+        .args(["--target", "missing-target"])
+        .args(["run", "context:build", "--input", "{}"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "missing run target should fail");
+    let (_, failure_json) = assert_failed_run_bundle(tmp.path(), "run", "context:build");
+
+    assert!(failure_json["failures"][0]["error"]
+        .as_str()
+        .is_some_and(|error| error.contains("Target path does not exist")));
+}
+
+#[test]
+fn cli_run_workspace_status_reports_recorded_artifacts() {
+    let tmp = tempfile::tempdir().unwrap();
+    let out = stdout(
+        kuzushi()
+            .args(["--target"])
+            .arg(tmp.path())
+            .args(["run", "workspace:status"])
+            .output()
+            .unwrap(),
+    );
+    let parsed: Value = serde_json::from_str(&out).unwrap();
+    let artifacts = parsed["artifacts"].as_array().unwrap();
+
+    assert!(artifacts.iter().any(|artifact| {
+        artifact["path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("run.json"))
+    }));
+    assert!(artifacts.iter().any(|artifact| {
+        artifact["path"]
+            .as_str()
+            .is_some_and(|path| path.ends_with("result.json"))
+    }));
+    assert!(tmp.path().join(".kuzushi/latest").exists());
+    assert_canonical_run_files(&latest_run_dir(tmp.path()));
 }
 
 #[test]
@@ -519,6 +662,51 @@ fn npm_wrapper_help_reaches_the_rust_binary() {
 }
 
 #[test]
+fn npm_wrapper_kz_alias_reaches_the_compact_rust_binary() {
+    let tmp = tempfile::tempdir().unwrap();
+    let alias_path = tmp.path().join("kz");
+    fs::copy(repo_root().join("bin/kuzushi-rs.mjs"), &alias_path).unwrap();
+
+    let output = Command::new("node")
+        .env("KUZUSHI_NATIVE_BIN", env!("CARGO_BIN_EXE_kz"))
+        .arg(alias_path)
+        .arg("--help")
+        .output()
+        .unwrap();
+    let out = stdout(output);
+
+    assert!(out.contains("Kuzushi security-native code agent"));
+    assert!(out.contains("Usage: kz"));
+    assert!(out.contains("modules"));
+    assert!(out.contains("tools"));
+    assert!(!out.contains("Usage: kuzushi"));
+}
+
+#[test]
+fn npm_wrapper_kz_alias_rejects_mismatched_native_override() {
+    let tmp = tempfile::tempdir().unwrap();
+    let alias_path = tmp.path().join("kz");
+    fs::copy(repo_root().join("bin/kuzushi-rs.mjs"), &alias_path).unwrap();
+
+    let output = Command::new("node")
+        .env("KUZUSHI_NATIVE_BIN", env!("CARGO_BIN_EXE_kuzushi"))
+        .arg(alias_path)
+        .arg("--help")
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "mismatched native override should fail"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("KUZUSHI_NATIVE_BIN must point to a kz binary when invoked as kz"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn npm_package_runtime_surface_is_rust_only() {
     let package_raw = fs::read_to_string(repo_root().join("package.json")).unwrap();
     let package: Value = serde_json::from_str(&package_raw).unwrap();
@@ -721,6 +909,7 @@ fn failed_run_writes_failure_handoff_context() {
     let events = fs::read_to_string(run_dir.join("events.jsonl")).unwrap();
     let artifacts = fs::read_to_string(run_dir.join("artifacts.json")).unwrap();
 
+    assert_canonical_run_files(&run_dir);
     assert!(failures.contains("context:build did not complete successfully"));
     assert!(failures.contains("artifact-review-only"));
     assert!(!failures.contains("validated"));
@@ -744,15 +933,283 @@ fn targetless_run_writes_artifacts_under_current_directory() {
 
     assert_eq!(body["ok"], true);
     assert_eq!(body["status"], "completed");
-    let latest = fs::read_to_string(tmp.path().join(".kuzushi/latest")).unwrap();
-    let run_id = latest.trim();
-    let run_dir = tmp.path().join(".kuzushi/runs").join(run_id);
+    let run_dir = latest_run_dir(tmp.path());
     let run_json = fs::read_to_string(run_dir.join("run.json")).unwrap();
     let result = fs::read_to_string(run_dir.join("result.json")).unwrap();
+    let failures = fs::read_to_string(run_dir.join("failures.json")).unwrap();
 
+    assert_canonical_run_files(&run_dir);
     assert!(run_json.contains("\"kind\": \"run\""));
     assert!(run_json.contains("\"tool\": \"config:show\""));
     assert!(result.contains("\"status\": \"completed\""));
+    assert!(failures.contains("\"status\": \"completed\""));
+}
+
+#[test]
+fn malformed_run_input_writes_failed_artifact_bundle() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let output = kuzushi()
+        .current_dir(tmp.path())
+        .env("HOME", &home)
+        .args(["run", "config:show", "--input", "{not-json"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "malformed input should fail");
+    let (run_dir, failure_json) = assert_failed_run_bundle(tmp.path(), "run", "config:show");
+    let input = fs::read_to_string(run_dir.join("input.json")).unwrap();
+    let report = fs::read_to_string(run_dir.join("report.md")).unwrap();
+
+    assert!(input.contains("rawInput"));
+    assert_eq!(failure_json["failures"][0]["error"], "--input must be JSON");
+    assert!(report.contains("Status: failed"));
+}
+
+#[test]
+fn malformed_run_option_writes_failed_artifact_bundle() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let output = kuzushi()
+        .current_dir(tmp.path())
+        .env("HOME", &home)
+        .args(["run", "config:show", "--input", "{}"])
+        .args(["--option", "missing-equals"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "malformed --option should fail");
+    let (run_dir, failure_json) = assert_failed_run_bundle(tmp.path(), "run", "config:show");
+    let input = fs::read_to_string(run_dir.join("input.json")).unwrap();
+
+    assert_eq!(
+        failure_json["failures"][0]["error"],
+        "--option must be key=value, got \"missing-equals\""
+    );
+    assert!(input.contains("{}"));
+}
+
+#[test]
+fn unknown_run_tool_writes_failed_artifact_bundle() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let output = kuzushi()
+        .current_dir(tmp.path())
+        .env("HOME", &home)
+        .args(["run", "missing:tool", "--input", "{}"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "unknown run tool should fail");
+    let (run_dir, failure_json) = assert_failed_run_bundle(tmp.path(), "run", "missing:tool");
+    let input = fs::read_to_string(run_dir.join("input.json")).unwrap();
+
+    assert!(failure_json["failures"][0]["error"]
+        .as_str()
+        .is_some_and(|error| error.contains("unknown tool \"missing:tool\"")));
+    assert!(input.contains("{}"));
+}
+
+#[test]
+fn runtime_backed_run_missing_model_writes_failed_artifact_bundle() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("repo");
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&repo).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    seed_untriaged_finding(&repo);
+
+    let output = kuzushi()
+        .env("HOME", &home)
+        .args(["--target"])
+        .arg(&repo)
+        .args(["run", "triage:run", "--input", "{}"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "runtime-backed run without model should fail"
+    );
+    let stdout: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let (_, failure_json) = assert_failed_run_bundle(&repo, "run", "triage:run");
+
+    assert_eq!(stdout["status"], "failed");
+    assert_eq!(stdout["fallback_context"]["failedStage"], "triage:run");
+    assert!(failure_json["failures"][0]["error"]
+        .as_str()
+        .is_some_and(|error| error.contains("requires an explicit model")));
+}
+
+fn seed_untriaged_finding(repo: &Path) {
+    let store = FindingStore::open(repo.join(".kuzushi/v2/findings.sqlite3")).unwrap();
+    store.insert_scan_run("run-1", repo, "completed").unwrap();
+    let finding = Finding::new_semgrep(
+        "demo.sql",
+        "src/db.ts",
+        42,
+        Some(42),
+        Severity::High,
+        "SQL injection in search",
+    );
+    store.insert_finding("run-1", &finding).unwrap();
+}
+
+#[test]
+fn invalid_config_writes_failed_run_artifact_bundle() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+    fs::write(home.join(".kuzushi/v2/config.toml"), r#"model = "gpt-5.5""#).unwrap();
+
+    let output = kuzushi()
+        .current_dir(tmp.path())
+        .env("HOME", &home)
+        .args(["run", "config:show", "--input", "{}"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "invalid config should fail");
+    let (run_dir, failure_json) = assert_failed_run_bundle(tmp.path(), "run", "config:show");
+    let input = fs::read_to_string(run_dir.join("input.json")).unwrap();
+
+    assert!(failure_json.to_string().contains("provider:model"));
+    assert!(input.contains("rawInput"));
+}
+
+#[test]
+fn scan_invalid_config_writes_failed_run_artifact_bundle() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("repo");
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&repo).unwrap();
+    fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+    fs::write(home.join(".kuzushi/v2/config.toml"), r#"model = "gpt-5.5""#).unwrap();
+
+    let output = kuzushi()
+        .env("HOME", &home)
+        .arg("scan")
+        .arg(&repo)
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "invalid scan config should fail");
+    let (_, failure_json) = assert_failed_run_bundle(&repo, "scan", "sast:scan");
+
+    assert!(failure_json.to_string().contains("provider:model"));
+}
+
+#[test]
+fn scan_missing_target_writes_failed_run_artifact_bundle() {
+    let tmp = tempfile::tempdir().unwrap();
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let output = kuzushi()
+        .current_dir(tmp.path())
+        .env("HOME", &home)
+        .arg("scan")
+        .arg("missing-target")
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "missing scan target should fail");
+    let (_, failure_json) = assert_failed_run_bundle(tmp.path(), "scan", "sast:scan");
+
+    assert!(failure_json["failures"][0]["error"]
+        .as_str()
+        .is_some_and(|error| error.contains("Target path does not exist")));
+}
+
+#[test]
+fn scan_invalid_since_writes_failed_run_artifact_bundle() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("repo");
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&repo).unwrap();
+    fs::create_dir_all(&home).unwrap();
+
+    let output = kuzushi()
+        .env("HOME", &home)
+        .arg("scan")
+        .arg(&repo)
+        .args(["--since", "missing-ref"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "invalid scan --since should fail");
+    let (_, failure_json) = assert_failed_run_bundle(&repo, "scan", "sast:scan");
+
+    assert_eq!(
+        failure_json["failures"][0]["error"],
+        "--since \"missing-ref\" failed"
+    );
+}
+
+#[test]
+fn scan_invalid_budget_writes_failed_run_artifact_bundle() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("repo");
+    let home = tmp.path().join("home");
+    fs::create_dir_all(&repo).unwrap();
+    fs::create_dir_all(&home).unwrap();
+
+    let output = kuzushi()
+        .env("HOME", &home)
+        .arg("scan")
+        .arg(&repo)
+        .args(["--budget", "unknown=10"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "invalid scan --budget should fail"
+    );
+    let (_, failure_json) = assert_failed_run_bundle(&repo, "scan", "sast:scan");
+
+    assert!(failure_json["failures"][0]["error"]
+        .as_str()
+        .is_some_and(|error| error.contains("invalid --budget spec")));
+}
+
+#[test]
+fn scan_secret_scan_success_writes_canonical_run_artifact_bundle() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("repo");
+    let home = tmp.path().join("home");
+    fs::create_dir_all(repo.join("src")).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    fs::write(repo.join("src/app.js"), "const status = 'ok';\n").unwrap();
+
+    let output = kuzushi()
+        .env("HOME", &home)
+        .arg("scan")
+        .arg(&repo)
+        .args(["--tasks", "secret-scan", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let run_dir = latest_run_dir(&repo);
+    let run_json = fs::read_to_string(run_dir.join("run.json")).unwrap();
+    let failures = fs::read_to_string(run_dir.join("failures.json")).unwrap();
+
+    assert_canonical_run_files(&run_dir);
+    assert!(run_json.contains("\"status\": \"completed\""));
+    assert!(run_json.contains("\"kind\": \"scan\""));
+    assert!(run_json.contains("\"tool\": \"sast:scan\""));
+    assert!(failures.contains("\"status\": \"completed\""));
 }
 
 #[test]
@@ -799,4 +1256,35 @@ fn sast_scan_missing_cargo_audit_writes_failure_handoff_context() {
     assert!(failures.contains("cargo-audit"));
     assert!(failures.contains("artifact-review-only"));
     assert!(artifacts.contains("failures.json"));
+}
+
+#[test]
+fn scan_missing_cargo_audit_writes_failed_artifact_bundle() {
+    let tmp = tempfile::tempdir().unwrap();
+    let repo = tmp.path().join("repo");
+    let home = tmp.path().join("home");
+    let fake_path = tmp.path().join("bin");
+    fs::create_dir_all(&repo).unwrap();
+    fs::create_dir_all(&home).unwrap();
+    fs::create_dir_all(&fake_path).unwrap();
+    fs::write(repo.join("Cargo.lock"), "# lockfile present\n").unwrap();
+
+    let output = kuzushi()
+        .env("HOME", &home)
+        .env("PATH", &fake_path)
+        .arg("scan")
+        .arg(&repo)
+        .args(["--tasks", "cargo-audit", "--json"])
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "cargo-audit scan should fail closed"
+    );
+    let (_, failure_json) = assert_failed_run_bundle(&repo, "scan", "sast:scan");
+
+    assert!(failure_json["failures"][0]["error"]
+        .as_str()
+        .is_some_and(|error| error.contains("cargo-audit")));
 }

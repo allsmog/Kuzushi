@@ -15,14 +15,14 @@ Reports are written under target/crap/ by default.
 Environment:
   KUZUSHI_CRAP_BASELINE       Default baseline path.
   KUZUSHI_CRAP_DIR            Default output directory.
-  KUZUSHI_CRAP_THRESHOLD      Default CRAP threshold, 15.
+  KUZUSHI_CRAP_THRESHOLD      Default CRAP threshold, 7.
   KUZUSHI_CRAP_FAIL_NEW=0     Report but do not fail new changed functions over threshold.
 USAGE
 }
 
 repo_root="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 out_dir="${KUZUSHI_CRAP_DIR:-"$repo_root/target/crap"}"
-threshold="${KUZUSHI_CRAP_THRESHOLD:-15}"
+threshold="${KUZUSHI_CRAP_THRESHOLD:-7}"
 baseline="${KUZUSHI_CRAP_BASELINE:-"$out_dir/baseline.json"}"
 create_baseline=0
 llvm_cov_args=()

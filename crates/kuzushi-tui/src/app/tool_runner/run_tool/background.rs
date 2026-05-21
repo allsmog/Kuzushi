@@ -28,34 +28,52 @@ impl ShellApp {
         thinking_level: Option<String>,
         activity: Option<LiveActivity>,
     ) {
-        if let Some(active) = self.tool_running.as_deref() {
-            self.log(
-                "tool",
-                format!(
-                    "{active} is still running; wait for its result before starting {tool_name}"
-                ),
-            );
+        if self.reject_background_tool_overlap(&tool_name) {
             return;
         }
 
-        let registry = self.registry.clone();
-        let config = self.config.clone();
-        let (tx, rx) = mpsc::channel();
-        let (trace_tx, trace_rx) = mpsc::channel::<RunTraceStep>();
-        let run = prepare_background_tool_run(&workspace, &tool_name, &input, trace_tx);
-        self.attach_background_tool_run(&run, rx, trace_rx, &tool_name, status, activity);
-        spawn_background_tool_worker(
+        let dispatch = prepare_background_tool_dispatch(
+            &self.registry,
+            &self.config,
+            &workspace,
+            &tool_name,
+            &input,
+        );
+        let BackgroundToolDispatch {
             registry,
             config,
+            tx,
+            rx,
+            trace_rx,
+            run,
+        } = dispatch;
+        self.attach_background_tool_run(&run, rx, trace_rx, &tool_name, status, activity);
+        start_prepared_background_worker(
+            registry,
+            config,
+            tx,
+            run,
             workspace,
             tool_name,
             input,
-            run.run_id,
             thinking_level,
-            tx,
-            run.trace_handle,
         );
 
+        self.open_activity_for_started_background_tool();
+    }
+
+    fn reject_background_tool_overlap(&mut self, tool_name: &str) -> bool {
+        let Some(active) = self.tool_running.as_deref() else {
+            return false;
+        };
+        self.log(
+            "tool",
+            format!("{active} is still running; wait for its result before starting {tool_name}"),
+        );
+        true
+    }
+
+    fn open_activity_for_started_background_tool(&mut self) {
         // Auto-open AFTER the worker thread spawns. Earlier, the flip happened
         // before the worker existed, so a fast dispatch error could strand the
         // operator on an empty Activity view. Flipping after thread::spawn
@@ -94,6 +112,29 @@ impl ShellApp {
     }
 }
 
+fn start_prepared_background_worker(
+    registry: ModuleRegistry,
+    config: V2Config,
+    tx: mpsc::Sender<ToolEvent>,
+    run: BackgroundToolRun,
+    workspace: WorkspaceTarget,
+    tool_name: String,
+    input: serde_json::Value,
+    thinking_level: Option<String>,
+) {
+    spawn_background_tool_worker(
+        registry,
+        config,
+        workspace,
+        tool_name,
+        input,
+        run.run_id,
+        thinking_level,
+        tx,
+        run.trace_handle,
+    );
+}
+
 struct BackgroundToolRun {
     target: PathBuf,
     run_id: String,
@@ -101,10 +142,51 @@ struct BackgroundToolRun {
     trace_handle: TraceHandle,
 }
 
+struct BackgroundToolDispatch {
+    registry: ModuleRegistry,
+    config: V2Config,
+    tx: mpsc::Sender<ToolEvent>,
+    rx: mpsc::Receiver<ToolEvent>,
+    trace_rx: mpsc::Receiver<RunTraceStep>,
+    run: BackgroundToolRun,
+}
+
+fn prepare_background_tool_dispatch(
+    registry: &ModuleRegistry,
+    config: &V2Config,
+    workspace: &WorkspaceTarget,
+    tool_name: &str,
+    input: &serde_json::Value,
+) -> BackgroundToolDispatch {
+    let registry = registry.clone();
+    let config = config.clone();
+    let (tx, rx) = mpsc::channel();
+    let (trace_tx, trace_rx) = mpsc::channel::<RunTraceStep>();
+    let loaded_modules = registry.loaded_module_specifiers();
+    let run = prepare_background_tool_run(
+        workspace,
+        tool_name,
+        input,
+        &config,
+        loaded_modules,
+        trace_tx,
+    );
+    BackgroundToolDispatch {
+        registry,
+        config,
+        tx,
+        rx,
+        trace_rx,
+        run,
+    }
+}
+
 fn prepare_background_tool_run(
     workspace: &WorkspaceTarget,
     tool_name: &str,
     input: &serde_json::Value,
+    config: &V2Config,
+    loaded_modules: Vec<String>,
     trace_tx: std::sync::mpsc::Sender<RunTraceStep>,
 ) -> BackgroundToolRun {
     let target = workspace.root().to_path_buf();
@@ -112,7 +194,13 @@ fn prepare_background_tool_run(
     let target_label = target.display().to_string();
     let record =
         kuzushi_core::run_artifacts::ToolRunRecord::new(&target, &run_id, "tool", tool_name);
-    kuzushi_core::run_artifacts::record_tool_run_started(record, input);
+    kuzushi_core::run_artifacts::record_tool_run_started_with_reproducibility(
+        record,
+        input,
+        config.model.clone(),
+        config_hash(config).ok(),
+        loaded_modules,
+    );
     let trace_handle = background_tool_trace_handle(&target, &run_id, trace_tx);
     BackgroundToolRun {
         target,

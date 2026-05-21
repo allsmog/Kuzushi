@@ -1,8 +1,13 @@
 use super::*;
+use crate::artifact_contract::{
+    canonical_run_artifact_spec, CanonicalRunArtifactSpec, CANONICAL_RUN_ARTIFACTS,
+    OPTIONAL_RUN_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RunFailures {
+    #[serde(alias = "run_id")]
     pub run_id: String,
     pub status: String,
     pub failures: Vec<RunFailure>,
@@ -14,51 +19,38 @@ pub struct RunFailure {
     pub tool: String,
     pub status: String,
     pub error: String,
+    #[serde(alias = "agent_thread_context")]
     pub agent_thread_context: FailureToLlmContext,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FailureToLlmContext {
-    #[serde(default)]
+    #[serde(default, alias = "failed_stage")]
     pub failed_stage: String,
-    #[serde(default)]
+    #[serde(default, alias = "cause")]
     pub cause: String,
+    #[serde(alias = "what_failed")]
     pub what_failed: String,
+    #[serde(alias = "artifacts_available")]
     pub artifacts_available: Vec<RunArtifact>,
-    #[serde(default)]
+    #[serde(default, alias = "missing_artifacts")]
     pub missing_artifacts: Vec<String>,
+    #[serde(alias = "allowed_proof_level")]
     pub allowed_proof_level: String,
+    #[serde(alias = "next_files_or_artifacts_to_inspect")]
     pub next_files_or_artifacts_to_inspect: Vec<String>,
-    #[serde(default)]
+    #[serde(default, alias = "recovery_options")]
     pub recovery_options: Vec<String>,
-    #[serde(default)]
+    #[serde(default, alias = "fallback_prompt")]
     pub fallback_prompt: String,
+    #[serde(alias = "claims_forbidden")]
     pub claims_forbidden: Vec<String>,
 }
 
-const CANONICAL_FAILURE_ARTIFACTS: &[&str] = &[
-    "run.json",
-    "events.jsonl",
-    "trace.jsonl",
-    "context.json",
-    "attack-surface.json",
-    "threat-model.json",
-    "recommendations.json",
-    "findings.json",
-    "proof.json",
-    "report.md",
-    "artifacts.json",
-];
+const FOLLOW_UP_RUN_FILES: &[&str] = &["artifacts.json", "run.json", "summary.json"];
 
-const FOLLOW_UP_RUN_FILES: &[&str] = &[
-    "failures.json",
-    "result.json",
-    "artifacts.json",
-    "run.json",
-    "summary.json",
-];
-
+const MAX_AVAILABLE_FAILURE_ARTIFACTS: usize = 12;
 const MAX_NEXT_FAILURE_PATHS: usize = 12;
 
 pub fn write_run_failures(
@@ -86,17 +78,23 @@ pub fn write_run_failures(
         status: status.to_string(),
         failures: vec![failure],
     };
+    let spec = failure_artifact_spec();
     write_run_artifact_json(
         target,
         run_id,
-        "failures.json",
-        "failure handoff",
+        spec.leaf,
+        spec.label,
         &serde_json::to_value(report)?,
     )
 }
 
 pub fn load_run_failures(target: impl AsRef<Path>, run_id: &str) -> Result<RunFailures> {
-    let path = run_dir(target.as_ref(), run_id).join("failures.json");
+    let path = run_dir(target.as_ref(), run_id).join(failure_artifact_spec().leaf);
+    let metadata = fs::metadata(&path)
+        .with_context(|| format!("failed to inspect {}", path.display()))?;
+    if !metadata.is_file() {
+        anyhow::bail!("Run failures artifact is not a file: {}", path.display());
+    }
     let body = fs::read_to_string(&path)
         .with_context(|| format!("failed to read {}", path.display()))?;
     serde_json::from_str(&body).with_context(|| format!("failed to parse {}", path.display()))
@@ -162,7 +160,7 @@ fn failure_to_llm_context(
         failed_stage: tool.to_string(),
         cause: error.to_string(),
         what_failed: format!("{tool} did not complete successfully: {error}"),
-        artifacts_available: artifacts.to_vec(),
+        artifacts_available: available_failure_artifacts(artifacts),
         missing_artifacts,
         allowed_proof_level,
         next_files_or_artifacts_to_inspect: next_artifacts,
@@ -172,23 +170,51 @@ fn failure_to_llm_context(
     }
 }
 
+fn available_failure_artifacts(artifacts: &[RunArtifact]) -> Vec<RunArtifact> {
+    artifacts
+        .iter()
+        .filter_map(RunArtifact::normalized)
+        .take(MAX_AVAILABLE_FAILURE_ARTIFACTS)
+        .collect()
+}
+
 fn next_failure_artifacts(target: &Path, run_id: &str, artifacts: &[RunArtifact]) -> Vec<String> {
     let mut paths = Vec::new();
-    append_available_artifact_paths(&mut paths, artifacts);
     append_follow_up_run_files(&mut paths, target, run_id);
+    append_available_artifact_paths(&mut paths, artifacts);
     paths
 }
 
 fn append_available_artifact_paths(paths: &mut Vec<String>, artifacts: &[RunArtifact]) {
     for artifact in artifacts {
-        push_next_failure_path(paths, artifact.path.clone());
+        if let Some(artifact) = artifact.normalized() {
+            push_next_failure_path(paths, artifact.path);
+        }
     }
 }
 
 fn append_follow_up_run_files(paths: &mut Vec<String>, target: &Path, run_id: &str) {
     let dir = run_dir(target, run_id);
+    push_next_failure_path(
+        paths,
+        dir.join(failure_artifact_spec().leaf).display().to_string(),
+    );
+    for spec in TOOL_RESULT_ARTIFACTS {
+        push_next_failure_path(paths, dir.join(spec.leaf).display().to_string());
+    }
     for leaf in FOLLOW_UP_RUN_FILES {
         push_next_failure_path(paths, dir.join(leaf).display().to_string());
+    }
+    push_existing_follow_up_path(paths, &dir, report_artifact_spec().leaf);
+    for spec in OPTIONAL_RUN_ARTIFACTS {
+        push_existing_follow_up_path(paths, &dir, spec.leaf);
+    }
+}
+
+fn push_existing_follow_up_path(paths: &mut Vec<String>, dir: &Path, leaf: &str) {
+    let path = dir.join(leaf);
+    if path.is_file() {
+        push_next_failure_path(paths, path.display().to_string());
     }
 }
 
@@ -200,10 +226,12 @@ fn push_next_failure_path(paths: &mut Vec<String>, path: String) {
 }
 
 fn missing_failure_artifacts(target: &Path, run_id: &str, artifacts: &[RunArtifact]) -> Vec<String> {
-    CANONICAL_FAILURE_ARTIFACTS
+    CANONICAL_RUN_ARTIFACTS
         .iter()
+        .map(|spec| spec.leaf)
+        .filter(|artifact| *artifact != "failures.json")
         .filter(|artifact| !failure_artifact_exists(target, run_id, artifacts, artifact))
-        .map(|artifact| artifact.to_string())
+        .map(str::to_string)
         .collect()
 }
 
@@ -215,8 +243,30 @@ fn failure_artifact_exists(
 ) -> bool {
     artifacts
         .iter()
-        .any(|available| available.path.ends_with(artifact))
-        || run_dir(target, run_id).join(artifact).exists()
+        .any(|available| declared_failure_artifact_exists(target, run_id, available, artifact))
+        || run_dir(target, run_id).join(artifact).is_file()
+}
+
+fn declared_failure_artifact_exists(
+    target: &Path,
+    run_id: &str,
+    available: &RunArtifact,
+    artifact: &str,
+) -> bool {
+    if !available.path.ends_with(artifact) {
+        return false;
+    }
+    failure_artifact_candidates(target, run_id, &available.path)
+        .iter()
+        .any(|path| path.is_file())
+}
+
+fn failure_artifact_candidates(target: &Path, run_id: &str, path: &str) -> Vec<PathBuf> {
+    let declared = PathBuf::from(path);
+    if declared.is_absolute() {
+        return vec![declared];
+    }
+    vec![target.join(&declared), run_dir(target, run_id).join(declared)]
 }
 
 fn failure_recovery_options(tool: &str, missing_artifacts: &[String]) -> Vec<String> {
@@ -226,6 +276,15 @@ fn failure_recovery_options(tool: &str, missing_artifacts: &[String]) -> Vec<Str
     }
     options.push("Keep follow-up claims at artifact-review-only proof level.".into());
     options
+}
+
+fn failure_artifact_spec() -> &'static CanonicalRunArtifactSpec {
+    canonical_run_artifact_spec("failures.json")
+        .expect("failure handoff artifact must be in shared spec")
+}
+
+fn report_artifact_spec() -> &'static CanonicalRunArtifactSpec {
+    canonical_run_artifact_spec("report.md").expect("report artifact must be in shared spec")
 }
 
 fn failure_fallback_prompt(

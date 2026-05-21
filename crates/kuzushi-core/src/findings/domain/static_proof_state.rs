@@ -34,7 +34,7 @@ impl TryFrom<&str> for StaticProofState {
 
     fn try_from(value: &str) -> Result<Self> {
         let normalized = value.trim();
-        if EXECUTION_PROOF_STATE_ALIASES.contains(&normalized) {
+        if is_runtime_proof_state(normalized) {
             anyhow::bail!("execution proof state {value:?} is not valid static proof");
         }
         STATIC_PROOF_STATE_ALIASES
@@ -94,10 +94,16 @@ const STATIC_PROOF_STATE_ALIASES: &[(&str, StaticProofState)] = &[
     ("needs_runtime", StaticProofState::NeedsRuntimeEvidence),
 ];
 
-const EXECUTION_PROOF_STATE_ALIASES: &[&str] = &[
-    "execution_confirmed",
-    "runtime_confirmed",
-    "dynamic_confirmed",
-    "exploit_confirmed",
-    "poc_confirmed",
-];
+pub(crate) fn is_runtime_proof_state(state: &str) -> bool {
+    matches!(
+        state.trim(),
+        "execution_confirmed"
+            | "runtime_confirmed"
+            | "dynamic_confirmed"
+            | "exploit_confirmed"
+            | "poc_confirmed"
+            | "runtime_reviewed"
+            | "execution_attempted"
+            | "execution_rejected"
+    )
+}

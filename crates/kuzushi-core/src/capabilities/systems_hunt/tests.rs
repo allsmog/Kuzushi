@@ -347,6 +347,10 @@ mod tests {
         )
         .unwrap();
         assert_eq!(output["ok"], json!(true));
+        assert_eq!(output["status"], json!("completed"));
+        assert!(output["summary"]
+            .as_str()
+            .is_some_and(|summary| summary.contains("systems-hunt context")));
         assert!(output["output"].as_str().unwrap().contains("context"));
         assert!(execute_systems_hunt_tool("systems-hunt:nope", json!({}), &ctx, None).is_err());
     }

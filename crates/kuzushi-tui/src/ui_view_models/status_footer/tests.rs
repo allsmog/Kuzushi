@@ -12,7 +12,7 @@ fn status_footer_model_reports_idle_shell_segments() {
 
     assert_eq!(
         model.left_segments,
-        ["mode:shell", "target:none", "ctx: missing", "modules"]
+        ["mode:shell", "target:none", "ctx:missing", "modules"]
     );
     assert_eq!(model.right_segments, ["0 findings"]);
     assert!(!model.warning);
@@ -27,6 +27,19 @@ fn status_footer_model_surfaces_ctrl_c_warning() {
 
     assert!(model.warning);
     assert_eq!(model.right_segments[0], "Ctrl+C again to exit");
+}
+
+#[test]
+fn status_footer_model_reports_malformed_context_snapshot() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.context_view.status = "malformed context snapshot. Next: context build".to_string();
+
+    let model = status_footer_model(&app);
+
+    assert_eq!(
+        model.left_segments,
+        ["mode:shell", "target:none", "ctx:malformed", "modules"]
+    );
 }
 
 #[test]

@@ -264,9 +264,9 @@ export interface ExecutionContext {
   /** Abort signal for cancellation. */
   signal?: AbortSignal;
   /**
-   * UIStore for Ink rendering. When provided, tools that run pipelines
-   * should pass this through so the Ink UI renders progress natively
-   * (PipelineIndicator, StatusFooter, etc.) instead of capturing stdout.
+   * Host UI progress handle. When provided, tools that run pipelines should
+   * pass this through so the Rust shell can render progress natively instead
+   * of capturing stdout.
    *
    * Typed as the narrow `HostUiHandle`; the concrete host `UIStore` is a
    * structural superset, so passing it here is a safe upcast.
@@ -319,8 +319,8 @@ export interface ExecutionContext {
   /**
    * Report a sub-step of the currently running tool to the shell's progress
    * rail. Publishes a `task:activity` bus event under the hood, which the
-   * Ink shell turns into a rolling "↳ <description>" line beneath the
-   * spinner. Best-effort — swallow publish errors, never throw. Optional
+   * shell turns into a rolling progress line. Best-effort — swallow publish
+   * errors, never throw. Optional
    * because some tool-invocation paths (e.g. unit tests) don't wire a bus.
    *
    * Example:

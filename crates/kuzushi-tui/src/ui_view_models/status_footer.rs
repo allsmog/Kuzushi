@@ -1,6 +1,6 @@
 use super::{
-    compact_target_path, routing_mode_segment, scan_status, status_footer_findings_summary,
-    view_status_segment, ShellApp,
+    compact_target_path, context_snapshot_state, routing_mode_segment, scan_status,
+    status_footer_findings_summary, view_status_segment, ShellApp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -122,16 +122,22 @@ fn model_footer_segment(app: &ShellApp) -> String {
 fn target_footer_segment(app: &ShellApp) -> String {
     app.target
         .as_ref()
-        .map(|path| compact_target_path(&path.display().to_string()))
+        .map(|path| {
+            format!(
+                "target:{}",
+                compact_target_path(&path.display().to_string())
+            )
+        })
         .unwrap_or_else(|| "target:none".to_string())
 }
 
 fn context_footer_segment(app: &ShellApp) -> String {
-    if app.context_view.exists {
-        "ctx: present".to_string()
-    } else {
-        "ctx: missing".to_string()
+    match context_snapshot_state(app) {
+        "present" => "ctx:present",
+        "malformed" => "ctx:malformed",
+        _ => "ctx:missing",
     }
+    .to_string()
 }
 
 #[cfg(test)]

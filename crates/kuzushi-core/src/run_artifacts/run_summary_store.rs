@@ -1,5 +1,5 @@
 use super::canonical_run_files::ensure_canonical_run_files;
-use super::llm_audit::load_run_llm_audit;
+use super::run_reproducibility_metadata::summary_with_dynamic_metadata;
 use super::run_paths::latest_run_path;
 use super::{now_unix, run_dir, runs_root, RunSummary};
 use anyhow::{Context, Result};
@@ -13,7 +13,7 @@ pub fn write_run_summary(target: impl AsRef<Path>, summary: &RunSummary) -> Resu
     let target = target.as_ref();
     let dir = run_dir(target, &summary.run_id);
     fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
-    let summary = summary_with_llm_audit(target, summary);
+    let summary = summary_with_dynamic_metadata(target, summary);
     let summary_path = write_run_summary_file(&dir.join(LEGACY_SUMMARY_FILE), &summary)?;
     write_run_summary_file(&dir.join(RUN_METADATA_FILE), &summary)?;
     ensure_canonical_run_files(target, &summary.run_id, &summary.status)?;
@@ -89,17 +89,10 @@ fn readable_summary_path(target: impl AsRef<Path>, run_id: &str) -> PathBuf {
 }
 
 fn write_run_summary_file(path: &Path, summary: &RunSummary) -> Result<PathBuf> {
+    reject_non_file_target(path, "Run metadata target")?;
     let body = format!("{}\n", serde_json::to_string_pretty(summary)?);
     fs::write(path, body).with_context(|| format!("Could not write {}", path.display()))?;
     Ok(path.to_path_buf())
-}
-
-fn summary_with_llm_audit(target: &Path, summary: &RunSummary) -> RunSummary {
-    let llm_calls = load_run_llm_audit(target, &summary.run_id);
-    if llm_calls.is_empty() {
-        return summary.clone();
-    }
-    summary.clone().with_llm_calls(llm_calls)
 }
 
 fn write_latest_run_id(target: &Path, run_id: &str) -> Result<()> {
@@ -107,8 +100,18 @@ fn write_latest_run_id(target: &Path, run_id: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).with_context(|| format!("Could not create {}", parent.display()))?;
     }
+    reject_non_file_target(&path, "Latest run pointer target")?;
     fs::write(&path, format!("{run_id}\n"))
         .with_context(|| format!("Could not write {}", path.display()))
+}
+
+fn reject_non_file_target(path: &Path, label: &str) -> Result<()> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(()),
+        Ok(_) => anyhow::bail!("{label} is not a file: {}", path.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).with_context(|| format!("Could not inspect {}", path.display())),
+    }
 }
 
 fn sort_run_summaries(summaries: &mut [RunSummary]) {

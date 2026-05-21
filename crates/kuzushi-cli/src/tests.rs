@@ -4,15 +4,19 @@ mod tests {
         bridge_ping_error, bridge_ping_summary, parse_bridge_stdout, run_auth_ping_bridge,
     };
     use crate::adapters::auth_oauth::{anthropic_oauth_readiness_message, auth_ping_model};
-    use crate::adapters::auth_ping::AuthPingLog;
+    use crate::adapters::auth_ping::{auth_ping_provider_kind, AuthPingLog};
     use crate::application::config::{config_command, ensure_config_init_allowed};
     use crate::application::run_tool::{
-        apply_option_override, parse_option_override, start_cli_tool_run,
+        apply_option_override, output_with_cli_run_artifacts, parse_option_override,
+        start_cli_tool_run_with_loaded_modules,
     };
+    use crate::application::runs::filter_runs_by_status;
+    use crate::application::runs_diff::runs_diff;
+    use crate::application::runs_prune::runs_prune_plan;
     use crate::application::scan::{scan_scope_body, scan_tool_input, scan_worktree_suffix};
     use crate::application::suppressions::{suppressions_command_output, suppressions_plain_lines};
     use crate::command::{ConfigCommand, McpBackend, ScanModeArg};
-    use crate::doctor::deterministic_capability_checks;
+    use crate::doctor::{check_model_config, deterministic_capability_checks, DoctorStatus};
     use crate::mcp::{mcp_health_spawn_error, mcp_spawn_error};
     use crate::presentation::{
         ci_line, format_duration, plain_output_requested, scan_json_output, scan_started_body,
@@ -26,7 +30,9 @@ mod tests {
         tool_defaults_to_workspace, tool_needs_finding_store, tool_needs_runtime,
     };
     use crate::tool_run_artifacts::{fail_cli_tool_run, finish_cli_tool_run};
-    use kuzushi_core::{load_run_summary, RunSummary, ToolOptionStore, WorkspaceTarget};
+    use kuzushi_core::{
+        load_run_summary, run_dir, write_run_summary, RunSummary, ToolOptionStore, WorkspaceTarget,
+    };
     use std::path::{Path, PathBuf};
 
     #[test]
@@ -80,7 +86,13 @@ mod tests {
 
         assert_eq!(
             names,
-            vec!["secret-scan", "dep-hygiene", "iac-scan", "cargo-audit"]
+            vec![
+                "secret-scan",
+                "dep-hygiene",
+                "iac-scan",
+                "license-scan",
+                "cargo-audit"
+            ]
         );
     }
 
@@ -96,12 +108,16 @@ mod tests {
                     path: "/repo/.kuzushi/runs/run-123/summary.json".to_string(),
                     kind: "json".to_string(),
                 });
+        let mut summary = summary;
+        summary.started_at_unix = 100;
+        summary.completed_at_unix = Some(178);
 
         let rendered = run_summary_plain(&summary);
 
         assert!(rendered.contains("Run run-123"));
         assert!(rendered.contains("Status: failed"));
         assert!(rendered.contains("Tool: sast:scan"));
+        assert!(rendered.contains("Duration: 1m 18s"));
         assert!(rendered.contains("Findings: 2"));
         assert!(rendered.contains("Cost USD: 0.1250"));
         assert!(rendered.contains("Error: boom"));
@@ -119,12 +135,15 @@ mod tests {
         assert!(empty.contains("Next: kuzushi scan"));
 
         let runs = vec![
-            RunSummary::running("run-1", "scan", None, "target").with_findings(Some(3)),
+            summary_started_at("run-1", 100).with_findings(Some(3)),
             RunSummary::running("run-2", "tool", Some("ctx:build".to_string()), "target"),
         ];
         let plain = runs_list_output(&workspace, &runs, false).unwrap();
         assert!(plain.contains("Run artifacts"));
-        assert!(plain.contains("run-1  running   scan"));
+        assert!(plain.contains("run-1"));
+        assert!(plain.contains("completed"));
+        assert!(plain.contains("tool"));
+        assert!(plain.contains("duration=1.0s"));
         assert!(plain.contains("findings=3"));
         assert!(plain.contains("run-2  running   ctx:build"));
         assert!(plain.ends_with('\n'));
@@ -132,6 +151,30 @@ mod tests {
         let json = runs_list_output(&workspace, &runs, true).unwrap();
         assert!(json.contains("\"runId\": \"run-1\""));
         assert!(json.ends_with('\n'));
+    }
+
+    #[test]
+    fn runs_list_status_filter_keeps_matching_statuses() {
+        let runs = vec![
+            RunSummary::running("run-1", "scan", None, "target").complete(),
+            RunSummary::running("run-2", "scan", None, "target").failed("boom"),
+            RunSummary::running("run-3", "scan", None, "target"),
+        ];
+        let filtered =
+            filter_runs_by_status(runs, &["completed".to_string(), "failed".to_string()]).unwrap();
+
+        let run_ids = filtered
+            .iter()
+            .map(|run| run.run_id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(run_ids, vec!["run-1", "run-2"]);
+    }
+
+    #[test]
+    fn runs_list_status_filter_rejects_unknown_statuses() {
+        let error = filter_runs_by_status(Vec::new(), &["done".to_string()]).unwrap_err();
+
+        assert!(error.to_string().contains("unknown run status"));
     }
 
     #[test]
@@ -150,7 +193,21 @@ mod tests {
     fn cli_tool_run_preserves_started_summary_and_artifact_manifest() {
         let tmp = tempfile::tempdir().unwrap();
         let input = serde_json::json!({"model": "local", "maxFindings": 1});
-        let run_id = start_cli_tool_run(tmp.path(), "agentic-sast:scan", &input);
+        let config = kuzushi_core::V2Config {
+            model: Some("openai:gpt-test".to_string()),
+            ..Default::default()
+        };
+        let loaded_modules = vec![
+            "builtin:agentic-sast".to_string(),
+            "builtin:context".to_string(),
+        ];
+        let run_id = start_cli_tool_run_with_loaded_modules(
+            tmp.path(),
+            "agentic-sast:scan",
+            &input,
+            &config,
+            loaded_modules.clone(),
+        );
         let started = load_run_summary(tmp.path(), &run_id).unwrap();
 
         finish_cli_tool_run(
@@ -167,6 +224,11 @@ mod tests {
         let summary = load_run_summary(tmp.path(), &run_id).unwrap();
         assert_eq!(summary.status, "completed");
         assert_eq!(summary.started_at_unix, started.started_at_unix);
+        assert_eq!(summary.model.as_deref(), Some("openai:gpt-test"));
+        assert_eq!(summary.loaded_modules, loaded_modules);
+        assert!(summary.config_hash.as_deref().is_some_and(|hash| {
+            hash.starts_with("sha256:") && hash.len() == "sha256:".len() + 64
+        }));
         assert!(started.process_id.is_some());
         assert!(summary.process_id.is_none());
         let labels = summary
@@ -183,7 +245,13 @@ mod tests {
             );
         }
 
-        let failed_run_id = start_cli_tool_run(tmp.path(), "agentic-sast:scan", &input);
+        let failed_run_id = start_cli_tool_run_with_loaded_modules(
+            tmp.path(),
+            "agentic-sast:scan",
+            &input,
+            &config,
+            Vec::new(),
+        );
         fail_cli_tool_run(
             tmp.path(),
             &failed_run_id,
@@ -194,6 +262,8 @@ mod tests {
         let failed_summary = load_run_summary(tmp.path(), &failed_run_id).unwrap();
         assert_eq!(failed_summary.status, "failed");
         assert_eq!(failed_summary.error.as_deref(), Some("bridge failed"));
+        assert_eq!(failed_summary.model.as_deref(), Some("openai:gpt-test"));
+        assert!(failed_summary.config_hash.is_some());
         let failed_labels = failed_summary
             .artifacts
             .iter()
@@ -207,6 +277,47 @@ mod tests {
                 artifact.path
             );
         }
+    }
+
+    #[test]
+    fn cli_completed_output_includes_recorded_run_artifacts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let input = serde_json::json!({});
+        let config = kuzushi_core::V2Config::default();
+        let run_id = start_cli_tool_run_with_loaded_modules(
+            tmp.path(),
+            "workspace:status",
+            &input,
+            &config,
+            Vec::new(),
+        );
+        finish_cli_tool_run(
+            tmp.path(),
+            &run_id,
+            "workspace:status",
+            &serde_json::json!({
+                "ok": true,
+                "status": "completed",
+                "artifacts": []
+            }),
+        );
+
+        let output = output_with_cli_run_artifacts(
+            tmp.path(),
+            &run_id,
+            serde_json::json!({
+                "ok": true,
+                "status": "completed",
+                "artifacts": []
+            }),
+        );
+        let artifacts = output["artifacts"].as_array().unwrap();
+
+        assert!(artifacts.iter().any(|artifact| {
+            artifact["path"]
+                .as_str()
+                .is_some_and(|path| path.ends_with("result.json"))
+        }));
     }
 
     #[test]
@@ -251,6 +362,95 @@ mod tests {
         assert!(plain.contains("143ms"));
         assert!(plain.contains("$0.0021"));
         assert!(plain.contains("sev=info"));
+    }
+
+    #[test]
+    fn runs_prune_plan_keeps_newest_and_filters_old_runs() {
+        let now = 2_000_000;
+        let runs = vec![
+            summary_started_at("run-old", now - 10 * 86_400),
+            summary_started_at("run-new", now - 60),
+            summary_started_at("run-middle", now - 5 * 86_400),
+        ];
+
+        let plan = runs_prune_plan(&runs, Some(1), Some(1), now).unwrap();
+
+        assert_eq!(plan.run_ids, vec!["run-old", "run-middle"]);
+    }
+
+    #[test]
+    fn runs_prune_plan_requires_a_retention_rule() {
+        let error = runs_prune_plan(&[], None, None, 1).unwrap_err();
+
+        assert!(error
+            .to_string()
+            .contains("requires --older-than-days or --keep-last"));
+    }
+
+    #[test]
+    fn runs_prune_command_deletes_matching_run_directories() {
+        let temp = tempfile::tempdir().unwrap();
+        write_run_summary(
+            temp.path(),
+            &summary_started_at("run-old", 1_000_000 - 10 * 86_400),
+        )
+        .unwrap();
+        write_run_summary(temp.path(), &summary_started_at("run-new", 1_000_000)).unwrap();
+
+        crate::application::runs_prune::runs_prune_command(
+            Some(temp.path().to_path_buf()),
+            None,
+            Some(1),
+            false,
+            false,
+        )
+        .unwrap();
+
+        assert!(!run_dir(temp.path(), "run-old").exists());
+        assert!(run_dir(temp.path(), "run-new").exists());
+        assert_eq!(
+            std::fs::read_to_string(temp.path().join(".kuzushi/latest")).unwrap(),
+            "run-new\n"
+        );
+    }
+
+    #[test]
+    fn runs_diff_classifies_new_fixed_drifted_and_stable_findings() {
+        let temp = tempfile::tempdir().unwrap();
+        write_run_summary(temp.path(), &summary_started_at("run-a", 1_000_000)).unwrap();
+        write_run_summary(temp.path(), &summary_started_at("run-b", 1_000_100)).unwrap();
+        write_findings_snapshot(
+            temp.path(),
+            "run-a",
+            serde_json::json!([
+                {"fingerprint": "fixed", "severity": "high", "confidence": "high"},
+                {"fingerprint": "drift", "severity": "medium", "confidence": "low", "triage": {"verdict": "needs_more_info"}},
+                {"fingerprint": "stable", "severity": "low", "confidence": 0.5}
+            ]),
+        );
+        write_findings_snapshot(
+            temp.path(),
+            "run-b",
+            serde_json::json!([
+                {"fingerprint": "new", "severity": "critical", "confidence": "high"},
+                {"fingerprint": "drift", "severity": "high", "confidence": "medium", "triage": {"verdict": "true_positive"}},
+                {"fingerprint": "stable", "severity": "low", "confidence": 0.5}
+            ]),
+        );
+
+        let diff = runs_diff(temp.path(), "run-a", "run-b").unwrap();
+
+        assert_eq!(diff.new, vec!["new"]);
+        assert_eq!(diff.fixed, vec!["fixed"]);
+        assert_eq!(diff.stable, 1);
+        assert_eq!(diff.drifted.len(), 1);
+        assert_eq!(diff.drifted[0].fingerprint, "drift");
+        assert_eq!(diff.drifted[0].before.severity.as_deref(), Some("medium"));
+        assert_eq!(diff.drifted[0].after.severity.as_deref(), Some("high"));
+        assert_eq!(
+            diff.drifted[0].after.verdict.as_deref(),
+            Some("true_positive")
+        );
     }
 
     #[test]
@@ -338,6 +538,31 @@ mod tests {
         config.model = None;
         let err = auth_ping_model(None, &config).unwrap_err().to_string();
         assert!(err.contains("auth ping requires an explicit model"));
+    }
+
+    #[test]
+    fn auth_ping_accepts_only_public_provider_selectors() {
+        assert!(auth_ping_provider_kind("openai").is_ok());
+        assert!(auth_ping_provider_kind("anthropic").is_ok());
+        assert!(auth_ping_provider_kind("codex").is_err());
+        assert!(auth_ping_provider_kind(&format!("openai-{}", "codex")).is_err());
+    }
+
+    #[test]
+    fn doctor_model_check_uses_shared_model_policy() {
+        let mut config = kuzushi_core::V2Config::default();
+        config.model = Some(" openai : gpt-5.5 ".to_string());
+
+        let check = check_model_config(&config);
+
+        assert_eq!(check.status, DoctorStatus::Ok);
+        assert!(check.detail.contains("provider openai"));
+
+        config.model = Some("gpt-5.5".to_string());
+        let check = check_model_config(&config);
+
+        assert_eq!(check.status, DoctorStatus::Fail);
+        assert!(check.detail.contains("provider:model"));
     }
 
     #[test]
@@ -541,6 +766,21 @@ mod tests {
             serde_json::json!(["semgrep", "codeql"])
         );
         assert_eq!(prepared.get("disabled_tasks"), None);
+    }
+
+    fn summary_started_at(run_id: &str, started_at_unix: u64) -> RunSummary {
+        let mut summary = RunSummary::running(run_id, "tool", None, "target").complete();
+        summary.started_at_unix = started_at_unix;
+        summary.completed_at_unix = Some(started_at_unix + 1);
+        summary
+    }
+
+    fn write_findings_snapshot(target: &Path, run_id: &str, value: serde_json::Value) {
+        std::fs::write(
+            run_dir(target, run_id).join("findings.json"),
+            serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
     }
 
     #[test]

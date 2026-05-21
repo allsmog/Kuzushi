@@ -4,9 +4,22 @@ pub(super) fn inspect(inspection: &NodeLineInspection<'_>, builder: &mut AttackS
     if !inspection.has_any(&[
         "cron.schedule(",
         "new queue(",
+        "new worker(",
+        "@processor(",
+        "@process(",
         "queue(",
         "agenda.define(",
         ".process(",
+        ".consume(",
+        ".subscribe(",
+        "kafka.consumer",
+        "consumer.run(",
+        "sqs.receive",
+        "sqsclient",
+        "pubsub.subscription",
+        "createconsumer(",
+        "nats.subscribe",
+        "redis.subscribe",
         "setinterval(",
     ]) {
         return;

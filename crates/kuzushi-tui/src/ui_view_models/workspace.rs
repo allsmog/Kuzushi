@@ -92,7 +92,7 @@ fn compact_path_or(path: Option<&Path>, fallback: &str) -> String {
 fn count_or_unknown(count: Option<usize>) -> String {
     count
         .map(|count| count.to_string())
-        .unwrap_or_else(|| "unknown".to_string())
+        .unwrap_or_else(|| "— (no scan yet)".to_string())
 }
 
 fn rollup_rows(findings: &[Finding]) -> Vec<WorkspaceRollupRow> {

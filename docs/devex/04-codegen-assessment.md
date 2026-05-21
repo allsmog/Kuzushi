@@ -1,6 +1,10 @@
 # Codegen assessment
 
-**Status:** Infrastructure in place. Three generators live. Bar for adding more is documented.
+**Status:** Infrastructure in place. Two generators live. Bar for adding more is documented.
+
+Historical note: this assessment predates the Rust app cutover. Treat
+TypeScript/Ink examples below as context for old generator decisions, not as
+permission to reintroduce an interactive TypeScript shell.
 
 **Audience:** Future contributors wondering "should this be a generator?" and reviewers judging a PR that adds one.
 
@@ -8,8 +12,8 @@
 
 ## tl;dr
 
-- Kuzushi had **no codegen** before this doc. The Zod schemas in [`src/schemas.ts`](../../src/schemas.ts) are the source of truth for core data shapes, and the 25 migration files in [`src/migrations/`](../../src/migrations/) are the source of truth for the SQLite schema.
-- Hand-writing everything is the right default. Three narrow cases are now generated because *machines can project the Zod/migration truth into a stable external format for free*.
+- Kuzushi had **no codegen** before this doc. The Zod schemas in [`src/schemas.ts`](../../src/schemas.ts) are the source of truth for the generated TypeScript-era schema artifacts.
+- Hand-writing everything is the right default. Two narrow cases are now generated because *machines can project the Zod truth into a stable external format for free*.
 - Everything generated lives under [`generated/`](../../generated/) and is marked `linguist-generated=true` in [`.gitattributes`](../../.gitattributes) so PR diffs collapse and GitHub language stats ignore it.
 - `pnpm codegen` regenerates. `pnpm codegen:check` fails if `generated/` drifts from source — wire it into CI so a bad merge cannot sneak stale artifacts in.
 
@@ -21,7 +25,6 @@
 | --- | --- | --- |
 | `generated/schemas/kuzushi-config.json` | `KuzushiConfigSchema` in `src/schemas.ts` | Machine-readable config description. Useful for IDE JSON validation, external config editors, and the docs site. The Zod schema already exists; exposing it as JSON Schema is a free projection. |
 | `generated/schemas/llm-io/raw-*.json` | `Raw{Triage,Verification,PocHarness}OutputSchema` in `src/schemas.ts` | These are the exact JSON shapes Kuzushi's agent prompts require from the LLM. Exporting JSON Schema lets prompt authors paste them into `response_format` / tool-use `input_schema`, and external consumers parse raw agent outputs against them. |
-| `generated/db/schema.sql` | `src/migrations/*.ts` | Consolidated reference DDL for anyone browsing the repo. Produced by running every migration against an in-memory SQLite DB and dumping `sqlite_master`. Migrations remain the only thing production DBs execute against. |
 
 None of these files are imported by runtime source under `src/`. They are pure external-facing artifacts. If you ever find yourself tempted to `import`/`require` from `generated/` inside `src/`, stop and think — it probably means the Zod schema should be the import target instead.
 
@@ -58,7 +61,6 @@ If a future candidate passes the four-point bar, adding it is ~30 lines (see "Ho
  src/schemas.ts   ──┼──► scripts/codegen/ ──────────┼──► generated/schemas/llm-io/*.json
  (LLM I/O types)    │     (index.ts runs every      │
                     │      generator in order)      │
- src/migrations/ ──┘                                └──► generated/db/schema.sql
 ```
 
 Control flow:
@@ -69,7 +71,9 @@ Control flow:
 
 Determinism is guaranteed by:
 - `scripts/codegen/util.ts`'s `formatJson()` — sorts object keys recursively and appends a single trailing newline so the same Zod schema always yields the same bytes.
-- `db-schema-sql.ts` — queries `sqlite_master` with an explicit `ORDER BY` (type, table name, object name) and filters out internal `sqlite_*` objects.
+- The retired `db-schema-sql.ts` generator is deleted with the TypeScript
+  migration runtime. Add a Rust-sourced schema snapshot generator only after
+  the schema source of truth is explicit in `crates/kuzushi-core`.
 
 ---
 

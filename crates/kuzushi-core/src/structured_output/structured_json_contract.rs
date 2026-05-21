@@ -103,6 +103,7 @@ pub(crate) fn repair_request_from(
     repair_request
 }
 
+#[cfg(test)]
 pub(crate) fn parse_or_repair_required_structured_json<T>(
     response: AgentQueryResponse,
     contract: StructuredJsonContract,
@@ -127,42 +128,80 @@ pub(crate) fn parse_or_repair_required_structured_json_with_cost<T>(
             value,
             cost_usd: initial_cost,
         }),
-        Err(initial_error) => {
-            if response.truncated {
-                return Err(truncation_error(&contract, &response, &initial_error));
-            }
-            let raw = raw_agent_response(&response);
-            let repair_response = repair(
-                build_repair_prompt(&contract, &raw, &initial_error.to_string()),
-                contract.runtime_contract(),
-            )?;
-            if repair_response.truncated {
-                return Err(truncation_error(
-                    &contract,
-                    &repair_response,
-                    &initial_error,
-                ));
-            }
-            let repair_cost = repair_response.cost_usd;
-            let value =
-                parse_and_validate(&repair_response, &contract, &validate).with_context(|| {
-                let repair_raw = raw_agent_response(&repair_response);
-                format!(
-                    "{tool} could not satisfy structured JSON contract `{schema}` after one repair pass.\n\
-                     Initial parse/validation failure: {initial_error}\n\
-                     Repair parse/validation failure is above.\n\
-                     Raw initial model response:\n{raw}\n\
-                     Raw repair model response:\n{repair_raw}",
-                    tool = contract.tool_name,
-                    schema = contract.schema_name,
-                )
-            })?;
-            Ok(CostedStructuredJson {
-                value,
-                cost_usd: initial_cost + repair_cost,
-            })
-        }
+        Err(initial_error) => repair_structured_json_response(
+            response,
+            &contract,
+            &validate,
+            repair,
+            initial_cost,
+            initial_error,
+        ),
     }
+}
+
+fn repair_structured_json_response<T>(
+    response: AgentQueryResponse,
+    contract: &StructuredJsonContract,
+    validate: &impl Fn(Value) -> Result<T>,
+    repair: impl FnOnce(String, AgentStructuredOutput) -> Result<AgentQueryResponse>,
+    initial_cost: f64,
+    initial_error: anyhow::Error,
+) -> Result<CostedStructuredJson<T>> {
+    if response.truncated {
+        return Err(truncation_error(contract, &response, &initial_error));
+    }
+    let raw = raw_agent_response(&response);
+    let repair_response = repair(
+        build_repair_prompt(contract, &raw, &initial_error.to_string()),
+        contract.runtime_contract(),
+    )?;
+    parse_repaired_response(
+        contract,
+        validate,
+        initial_cost,
+        initial_error,
+        raw,
+        repair_response,
+    )
+}
+
+fn parse_repaired_response<T>(
+    contract: &StructuredJsonContract,
+    validate: &impl Fn(Value) -> Result<T>,
+    initial_cost: f64,
+    initial_error: anyhow::Error,
+    raw: String,
+    repair_response: AgentQueryResponse,
+) -> Result<CostedStructuredJson<T>> {
+    if repair_response.truncated {
+        return Err(truncation_error(contract, &repair_response, &initial_error));
+    }
+    let repair_cost = repair_response.cost_usd;
+    let value = parse_and_validate(&repair_response, contract, validate).with_context(|| {
+        repair_failure_message(contract, &initial_error, &raw, &repair_response)
+    })?;
+    Ok(CostedStructuredJson {
+        value,
+        cost_usd: initial_cost + repair_cost,
+    })
+}
+
+fn repair_failure_message(
+    contract: &StructuredJsonContract,
+    initial_error: &anyhow::Error,
+    raw: &str,
+    repair_response: &AgentQueryResponse,
+) -> String {
+    let repair_raw = raw_agent_response(repair_response);
+    format!(
+        "{tool} could not satisfy structured JSON contract `{schema}` after one repair pass.\n\
+         Initial parse/validation failure: {initial_error}\n\
+         Repair parse/validation failure is above.\n\
+         Raw initial model response:\n{raw}\n\
+         Raw repair model response:\n{repair_raw}",
+        tool = contract.tool_name,
+        schema = contract.schema_name,
+    )
 }
 
 #[cfg(test)]

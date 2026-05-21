@@ -397,6 +397,14 @@ mod tests {
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
+        assert!(result
+            .get("summary")
+            .and_then(Value::as_str)
+            .is_some_and(|summary| summary.starts_with("taint-iris-next:")));
+        assert_eq!(
             result.pointer("/data/status").and_then(Value::as_str),
             Some("planned")
         );
@@ -438,6 +446,10 @@ mod tests {
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
+        assert_eq!(
             result.pointer("/data/status").and_then(Value::as_str),
             Some("planned")
         );
@@ -473,6 +485,15 @@ mod tests {
         .unwrap()
         .to_tool_json();
 
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
+        assert!(result
+            .get("summary")
+            .and_then(Value::as_str)
+            .is_some_and(|summary| summary.starts_with("taint-iris-next:")));
         assert_eq!(
             result.pointer("/data/status").and_then(Value::as_str),
             Some("hunted")

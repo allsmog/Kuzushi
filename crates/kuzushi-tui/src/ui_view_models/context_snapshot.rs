@@ -41,6 +41,7 @@ pub(crate) fn context_snapshot_model(app: &ShellApp) -> ContextSnapshotModel {
     let view = &app.context_view;
     let running = context_running(app);
     let snapshot_present = view.exists;
+    let state = context_snapshot_state(app);
     ContextSnapshotModel {
         snapshot: view
             .snapshot_path
@@ -48,11 +49,7 @@ pub(crate) fn context_snapshot_model(app: &ShellApp) -> ContextSnapshotModel {
             .map(|path| compact_target_path(&path.display().to_string()))
             .unwrap_or_else(|| ".kuzushi/context-snapshot.json".to_string()),
         snapshot_present,
-        state: if snapshot_present {
-            "present"
-        } else {
-            "missing"
-        },
+        state,
         status: context_status(app, running.as_ref()),
         running,
         details: snapshot_present.then(|| ContextSnapshotDetails::from_app(app)),
@@ -72,21 +69,37 @@ impl PlainContextModel {
                 format!("state: {}", model.state),
                 format!("status: {}", model.status),
             ],
-            body_rows: plain_context_body_rows(model.details),
+            body_rows: plain_context_body_rows(model.state, model.details),
             next_hint: "Next: context build, context status, context regen repo",
         }
     }
 }
 
-fn plain_context_body_rows(details: Option<ContextSnapshotDetails>) -> Vec<String> {
-    match details {
-        Some(details) => plain_context_detail_rows(details),
-        None => vec![
-            String::new(),
-            "No context snapshot exists yet. Next: context build writes .kuzushi/context-snapshot.json."
-                .to_string(),
-        ],
+fn plain_context_body_rows(
+    state: &'static str,
+    details: Option<ContextSnapshotDetails>,
+) -> Vec<String> {
+    match (state, details) {
+        ("malformed", _) => malformed_context_rows(),
+        (_, Some(details)) => plain_context_detail_rows(details),
+        (_, None) => missing_context_rows(),
     }
+}
+
+fn missing_context_rows() -> Vec<String> {
+    vec![
+        String::new(),
+        "No context snapshot exists yet. Next: context build writes .kuzushi/context-snapshot.json."
+            .to_string(),
+    ]
+}
+
+fn malformed_context_rows() -> Vec<String> {
+    vec![
+        String::new(),
+        "Context snapshot is malformed JSON. Next: context build rewrites .kuzushi/context-snapshot.json."
+            .to_string(),
+    ]
 }
 
 fn plain_context_detail_rows(details: ContextSnapshotDetails) -> Vec<String> {
@@ -121,6 +134,20 @@ fn context_status(app: &ShellApp, running: Option<&ContextSnapshotRunning>) -> S
             )
         })
         .unwrap_or_else(|| app.context_view.status.clone())
+}
+
+pub(crate) fn context_snapshot_state(app: &ShellApp) -> &'static str {
+    if app.context_view.exists {
+        "present"
+    } else if app
+        .context_view
+        .status
+        .starts_with("malformed context snapshot")
+    {
+        "malformed"
+    } else {
+        "missing"
+    }
 }
 
 impl ContextSnapshotDetails {

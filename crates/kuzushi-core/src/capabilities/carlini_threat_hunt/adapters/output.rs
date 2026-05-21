@@ -2,51 +2,90 @@ use super::*;
 
 impl CarliniThreatHuntReport {
     pub(crate) fn output(&self) -> String {
-        let mut lines = vec![format!(
-            "carlini-threat-hunt: {} finding{} from {} actor{} under {}",
-            self.count,
-            if self.count == 1 { "" } else { "s" },
-            self.actors,
-            if self.actors == 1 { "" } else { "s" },
-            self.target
-        )];
-        lines.push(format!("  Actor runs: {}", self.actor_runs));
-        lines.push(format!(
-            "  Prompt source files: {} ({} threat-focused)",
-            self.prompt_inventory_files, self.threat_focused_prompt_files
-        ));
-        if let Some(persisted) = &self.persisted {
-            lines.push(format!(
-                "  Persisted run: {} ({})",
-                persisted.run_id, persisted.findings_db
-            ));
-        }
-        if !self.findings.is_empty() {
-            lines.push(String::new());
-            lines.push("Top findings:".to_string());
-            for finding in self.findings.iter().take(10) {
-                lines.push(format!(
-                    "  - {} - {} - {}:{}",
-                    finding.severity.as_str(),
-                    finding.rule_id,
-                    finding.file_path,
-                    finding.start_line
-                ));
-            }
-            if self.findings.len() > 10 {
-                lines.push(format!("  ... and {} more", self.findings.len() - 10));
-            }
-        }
+        let mut lines = self.output_header_lines();
+        append_carlini_persisted_run(&mut lines, self.persisted.as_ref());
+        append_carlini_top_findings(&mut lines, &self.findings);
         lines.join("\n")
     }
 
     pub(crate) fn to_tool_json(&self) -> Value {
-        json!({
-            "ok": true,
-            "output": self.output(),
-            "data": self,
-            "costUsd": self.cost_usd,
-        })
+        let mut output = crate::module_result::completed_output_result(
+            self.summary(),
+            self.output(),
+            json!(self),
+        );
+        output["costUsd"] = json!(self.cost_usd);
+        output
+    }
+
+    fn summary(&self) -> String {
+        format!(
+            "carlini-threat-hunt: {} finding{} under {}",
+            self.count,
+            if self.count == 1 { "" } else { "s" },
+            self.target
+        )
+    }
+
+    fn output_header_lines(&self) -> Vec<String> {
+        vec![
+            format!(
+                "carlini-threat-hunt: {} finding{} from {} actor{} under {}",
+                self.count,
+                plural_suffix(self.count),
+                self.actors,
+                plural_suffix(self.actors),
+                self.target
+            ),
+            format!("  Actor runs: {}", self.actor_runs),
+            format!(
+                "  Prompt source files: {} ({} threat-focused)",
+                self.prompt_inventory_files, self.threat_focused_prompt_files
+            ),
+        ]
+    }
+}
+
+fn plural_suffix(count: usize) -> &'static str {
+    if count == 1 { "" } else { "s" }
+}
+
+fn append_carlini_persisted_run(
+    lines: &mut Vec<String>,
+    persisted: Option<&CarliniThreatHuntPersistedRun>,
+) {
+    let Some(persisted) = persisted else {
+        return;
+    };
+    lines.push(format!(
+        "  Persisted run: {} ({})",
+        persisted.run_id, persisted.findings_db
+    ));
+}
+
+fn append_carlini_top_findings(lines: &mut Vec<String>, findings: &[Finding]) {
+    if findings.is_empty() {
+        return;
+    }
+    lines.push(String::new());
+    lines.push("Top findings:".to_string());
+    lines.extend(findings.iter().take(10).map(carlini_finding_line));
+    append_carlini_remaining_count(lines, findings.len());
+}
+
+fn carlini_finding_line(finding: &Finding) -> String {
+    format!(
+        "  - {} - {} - {}:{}",
+        finding.severity.as_str(),
+        finding.rule_id,
+        finding.file_path,
+        finding.start_line
+    )
+}
+
+fn append_carlini_remaining_count(lines: &mut Vec<String>, finding_count: usize) {
+    if finding_count > 10 {
+        lines.push(format!("  ... and {} more", finding_count - 10));
     }
 }
 
@@ -86,14 +125,7 @@ pub(crate) fn carlini_artifact_context(
     ctx: &ToolExecutionContext<'_>,
     target: &Path,
 ) -> ArtifactKnowledgePromptContext {
-    let workspace = ctx
-        .workspace
-        .filter(|workspace| workspace.root() == target)
-        .cloned()
-        .or_else(|| crate::workspace::WorkspaceTarget::new(target).ok());
-    if let Some(workspace) = &workspace {
-        let _ = crate::artifact_kb::index_workspace_artifacts(workspace);
-    }
+    index_carlini_workspace_artifacts(ctx, target);
 
     let mut context = ctx.artifact_knowledge_context(
         target,
@@ -101,26 +133,10 @@ pub(crate) fn carlini_artifact_context(
         20,
     );
     if context.snippets.is_empty() {
-        context.snippets = explicit_carlini_context_snippets(target);
-        if !context.snippets.is_empty() {
-            context.status = format!(
-                "available, {} explicit threat-leads/threat-model/x-ray/context snippet(s)",
-                context.snippets.len()
-            );
-        }
-        return context;
+        return context_with_explicit_carlini_snippets(context, target);
     }
 
-    let mut preferred = explicit_carlini_context_snippets(target);
-    preferred.extend(
-        context
-            .snippets
-            .iter()
-            .filter(|snippet| is_carlini_context_artifact(snippet))
-            .cloned(),
-    );
-    preferred = unique_carlini_context_snippets(preferred);
-    let preferred = preferred.into_iter().take(6).collect::<Vec<_>>();
+    let preferred = preferred_carlini_context_snippets(target, &context.snippets);
     if preferred.is_empty() {
         context.snippets.truncate(6);
         return context;
@@ -132,6 +148,48 @@ pub(crate) fn carlini_artifact_context(
         context.snippets.len()
     );
     context
+}
+
+fn index_carlini_workspace_artifacts(ctx: &ToolExecutionContext<'_>, target: &Path) {
+    let workspace = ctx
+        .workspace
+        .filter(|workspace| workspace.root() == target)
+        .cloned()
+        .or_else(|| crate::workspace::WorkspaceTarget::new(target).ok());
+    if let Some(workspace) = &workspace {
+        let _ = crate::artifact_kb::index_workspace_artifacts(workspace);
+    }
+}
+
+fn context_with_explicit_carlini_snippets(
+    mut context: ArtifactKnowledgePromptContext,
+    target: &Path,
+) -> ArtifactKnowledgePromptContext {
+    context.snippets = explicit_carlini_context_snippets(target);
+    if !context.snippets.is_empty() {
+        context.status = format!(
+            "available, {} explicit threat-leads/threat-model/x-ray/context snippet(s)",
+            context.snippets.len()
+        );
+    }
+    context
+}
+
+fn preferred_carlini_context_snippets(
+    target: &Path,
+    snippets: &[ArtifactKnowledgeSnippet],
+) -> Vec<ArtifactKnowledgeSnippet> {
+    let mut preferred = explicit_carlini_context_snippets(target);
+    preferred.extend(
+        snippets
+            .iter()
+            .filter(|snippet| is_carlini_context_artifact(snippet))
+            .cloned(),
+    );
+    unique_carlini_context_snippets(preferred)
+        .into_iter()
+        .take(6)
+        .collect()
 }
 
 fn is_carlini_context_artifact(snippet: &ArtifactKnowledgeSnippet) -> bool {

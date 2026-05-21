@@ -10,8 +10,10 @@ pub(crate) fn resolve_sast_task(raw_id: &str) -> Option<&'static SastTaskCapabil
         "semgrep:scan" => "semgrep",
         "codeql:scan" => "codeql",
         "dep-hygiene:check" => "dep-hygiene",
+        "cargo audit" | "cargo-audit:scan" => "cargo-audit",
         "secret-scan:scan" | "secrets" => "secret-scan",
         "iac-scan:scan" => "iac-scan",
+        "license" | "licenses" | "license-scan:scan" => "license-scan",
         "carlini"
         | "threat-hunt"
         | "carlini-threat-hunt"
@@ -25,99 +27,6 @@ pub(crate) fn resolve_sast_task(raw_id: &str) -> Option<&'static SastTaskCapabil
     SAST_TASK_CAPABILITIES
         .iter()
         .find(|task| task.id == normalized || task.scan_task == normalized)
-}
-
-pub(crate) fn parse_native_scan_tasks(input: &serde_json::Value) -> Result<Option<Vec<String>>> {
-    let mode = read_task_mode(input)?;
-    let selected = selected_scan_tasks(input);
-    ensure_manual_task_selection(mode, &selected)?;
-    if selected.is_empty() {
-        return Ok(None);
-    }
-
-    let native_tasks = native_scan_tasks(selected)?;
-    ensure_native_tasks_present(&native_tasks)?;
-    Ok(Some(native_tasks))
-}
-
-fn read_task_mode(input: &serde_json::Value) -> Result<&str> {
-    let mode = input
-        .get("taskMode")
-        .or_else(|| input.get("task_mode"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("auto");
-    if !matches!(mode, "auto" | "manual") {
-        anyhow::bail!("scan taskMode must be auto or manual");
-    }
-    Ok(mode)
-}
-
-fn selected_scan_tasks(input: &serde_json::Value) -> Vec<String> {
-    let requested = read_task_list_value(input.get("tasks"));
-    if !requested.is_empty() {
-        return requested;
-    }
-    let disabled = disabled_task_ids(input);
-    if disabled.is_empty() {
-        return Vec::new();
-    }
-    SAST_TASK_CAPABILITIES
-        .iter()
-        .filter(|task| task.default_enabled && !disabled.contains(task.id))
-        .map(|task| task.id.to_string())
-        .collect()
-}
-
-fn disabled_task_ids(input: &serde_json::Value) -> BTreeSet<&'static str> {
-    read_task_list_value(
-        input
-            .get("disabledTasks")
-            .or_else(|| input.get("disabled_tasks")),
-    )
-    .iter()
-    .filter_map(|task| resolve_sast_task(task).map(|task| task.id))
-    .collect()
-}
-
-fn ensure_manual_task_selection(mode: &str, selected: &[String]) -> Result<()> {
-    if mode == "manual" && selected.is_empty() {
-        anyhow::bail!("scan taskMode=manual requires at least one task. Next: /task mode auto");
-    }
-    Ok(())
-}
-
-fn native_scan_tasks(selected: Vec<String>) -> Result<Vec<String>> {
-    let mut native_tasks = Vec::new();
-    let mut unsupported = Vec::new();
-    for raw in selected {
-        let Some(task) = resolve_sast_task(&raw) else {
-            anyhow::bail!("{}", unknown_sast_task_message(&raw));
-        };
-        if task.native_scan {
-            native_tasks.push(task.scan_task.to_string());
-        } else {
-            unsupported.push(task.id);
-        }
-    }
-    reject_unsupported_scan_tasks(&unsupported)?;
-    Ok(native_tasks)
-}
-
-fn reject_unsupported_scan_tasks(unsupported: &[&'static str]) -> Result<()> {
-    if !unsupported.is_empty() {
-        anyhow::bail!(
-            "scan supports native tasks only; unsupported here: {}. Next: run sast:scan",
-            unsupported.join(", ")
-        );
-    }
-    Ok(())
-}
-
-fn ensure_native_tasks_present(native_tasks: &[String]) -> Result<()> {
-    if native_tasks.is_empty() {
-        anyhow::bail!("scan selected no native tasks. Next: /tasks or run sast:scan");
-    }
-    Ok(())
 }
 
 pub(crate) fn read_task_list_value(value: Option<&serde_json::Value>) -> Vec<String> {

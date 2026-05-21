@@ -9,16 +9,14 @@
  * Usage:
  *   pnpm perf              # run all benches, median of 5, print table
  *   pnpm perf --json       # also write perf/results.json
- *   pnpm perf --cases dedup,registry
+ *   pnpm perf --cases registry
  */
 
 import { writeFileSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { parseArgs } from "node:util";
 
-import { benchDedup } from "./bench-dedup.js";
 import { benchRegistry } from "./bench-registry.js";
-import { benchStore } from "./bench-store.js";
 
 export interface BenchCase {
   name: string;
@@ -53,26 +51,15 @@ function median(nums: number[]): number {
 
 export async function runBench(bench: BenchCase): Promise<BenchResult> {
   const iters = bench.iterations ?? 5;
-  if (bench.setup) await bench.setup();
+  await runOptionalHook(bench.setup);
 
   // Warm-up — let V8 compile and JIT the hot path before measuring.
   await bench.run();
 
-  const samples: number[] = [];
-  const heapBefore = process.memoryUsage().heapUsed;
-  const rssBefore = process.memoryUsage().rss;
-
-  for (let i = 0; i < iters; i++) {
-    if (global.gc) global.gc();
-    const start = performance.now();
-    await bench.run();
-    samples.push(performance.now() - start);
-  }
-
-  const heapAfter = process.memoryUsage().heapUsed;
-  const rssAfter = process.memoryUsage().rss;
-
-  if (bench.teardown) await bench.teardown();
+  const before = memorySnapshot();
+  const samples = await measureSamples(bench, iters);
+  const after = memorySnapshot();
+  await runOptionalHook(bench.teardown);
 
   return {
     name: bench.name,
@@ -80,10 +67,30 @@ export async function runBench(bench: BenchCase): Promise<BenchResult> {
     minMs: Math.min(...samples),
     maxMs: Math.max(...samples),
     meanMs: samples.reduce((a, b) => a + b, 0) / samples.length,
-    rssDeltaMb: (rssAfter - rssBefore) / MB,
-    heapDeltaMb: (heapAfter - heapBefore) / MB,
+    rssDeltaMb: (after.rss - before.rss) / MB,
+    heapDeltaMb: (after.heap - before.heap) / MB,
     iterations: iters,
   };
+}
+
+async function runOptionalHook(hook: BenchCase["setup"]): Promise<void> {
+  if (hook) await hook();
+}
+
+async function measureSamples(bench: BenchCase, iters: number): Promise<number[]> {
+  const samples: number[] = [];
+  for (let i = 0; i < iters; i++) {
+    global.gc?.();
+    const start = performance.now();
+    await bench.run();
+    samples.push(performance.now() - start);
+  }
+  return samples;
+}
+
+function memorySnapshot(): { heap: number; rss: number } {
+  const usage = process.memoryUsage();
+  return { heap: usage.heapUsed, rss: usage.rss };
 }
 
 function printTable(results: BenchResult[]): void {
@@ -113,52 +120,64 @@ function printTable(results: BenchResult[]): void {
 }
 
 async function main(): Promise<void> {
-  const { values } = parseArgs({
+  const values = parseCliArgs();
+  if (values.help) return printHelp();
+
+  const benches = selectedBenches(values.cases);
+  console.log(`node ${process.version} | cpus=${process.platform}`);
+  console.log(`running ${benches.length} bench(es)...`);
+  console.log();
+
+  const results = await runBenches(benches);
+  printTable(results);
+  writeJsonResults(Boolean(values.json), results);
+}
+
+function parseCliArgs(): { json?: boolean; cases?: string; help?: boolean } {
+  return parseArgs({
     options: {
       json: { type: "boolean", default: false },
       cases: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
     },
     strict: true,
-  });
+  }).values;
+}
 
-  if (values.help) {
-    console.log(`Usage: pnpm perf [--json] [--cases <csv>]
-Available cases: dedup, registry, store`);
-    return;
-  }
+function printHelp(): void {
+  console.log(`Usage: pnpm perf [--json] [--cases <csv>]
+Available cases: registry`);
+}
 
+function selectedBenches(cases?: string): BenchCase[] {
   const enabled = new Set(
-    (values.cases ?? "dedup,registry,store")
+    (cases ?? "registry")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean),
   );
 
   const benches: BenchCase[] = [];
-  if (enabled.has("dedup")) benches.push(...benchDedup());
   if (enabled.has("registry")) benches.push(...benchRegistry());
-  if (enabled.has("store")) benches.push(...benchStore());
+  return benches;
+}
 
-  console.log(`node ${process.version} | cpus=${process.platform}`);
-  console.log(`running ${benches.length} bench(es)...`);
-  console.log();
-
+async function runBenches(benches: BenchCase[]): Promise<BenchResult[]> {
   const results: BenchResult[] = [];
   for (const b of benches) {
     const r = await runBench(b);
     results.push(r);
   }
+  return results;
+}
 
-  printTable(results);
-
-  if (values.json) {
-    writeFileSync(
-      new URL("./results.json", import.meta.url),
-      JSON.stringify({ node: process.version, at: new Date().toISOString(), results }, null, 2),
-    );
-    console.log("\nresults written to perf/results.json");
-  }
+function writeJsonResults(enabled: boolean, results: BenchResult[]): void {
+  if (!enabled) return;
+  writeFileSync(
+    new URL("./results.json", import.meta.url),
+    JSON.stringify({ node: process.version, at: new Date().toISOString(), results }, null, 2),
+  );
+  console.log("\nresults written to perf/results.json");
 }
 
 main().catch((err) => {

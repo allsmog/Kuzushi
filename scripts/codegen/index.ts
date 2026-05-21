@@ -27,13 +27,6 @@ import { mkdir, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 // Registered generators. Add new ones here in alphabetical order.
 import configJsonSchema from "./generators/config-json-schema.js";
-// `db-schema-sql` was intentionally dropped from the registry: its
-// implementation imports `../../../src/migrations/index.js`, but the
-// migration runtime moved to Rust (`crates/kuzushi-core/.../persistence/`).
-// The generator stub still sits in `generators/db-schema-sql.ts` as a
-// reference for the new Rust-driven port; re-register it once the SQL
-// snapshot has a Rust source-of-truth. See PR #60 for the cleanup.
-// import dbSchemaSql from "./generators/db-schema-sql.js";
 import llmIoJsonSchemas from "./generators/llm-io-json-schemas.js";
 import type { Generator } from "./types.js";
 
@@ -56,12 +49,7 @@ export async function runCodegen(options: RunOptions = {}): Promise<{
   ran: string[];
 }> {
   const outDir = options.outDir ?? DEFAULT_OUT_DIR;
-  const quiet = options.quiet ?? false;
-  const log = (msg: string): void => {
-    if (!quiet) {
-      process.stdout.write(`${msg}\n`);
-    }
-  };
+  const log = codegenLogger(options.quiet ?? false);
 
   if (options.clean) {
     await rm(outDir, { recursive: true, force: true });
@@ -82,6 +70,13 @@ export async function runCodegen(options: RunOptions = {}): Promise<{
 
   log(`[codegen] wrote output to ${outDir}`);
   return { outDir, ran };
+}
+
+function codegenLogger(quiet: boolean): (msg: string) => void {
+  if (quiet) return () => {};
+  return (msg: string): void => {
+    process.stdout.write(`${msg}\n`);
+  };
 }
 
 // Allow `tsx scripts/codegen/index.ts` invocation.

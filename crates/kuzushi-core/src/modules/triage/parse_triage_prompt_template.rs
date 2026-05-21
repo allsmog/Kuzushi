@@ -82,7 +82,7 @@ pub(in crate::modules) fn prefilter_score(finding: &Finding) -> i64 {
         }
     }
     match finding.tool.as_str() {
-        "codeql" | "cargo-audit" | "iac-scan" | "secret-scan" => score += 2,
+        "codeql" | "cargo-audit" | "iac-scan" | "license-scan" | "secret-scan" => score += 2,
         "semgrep" => score += 1,
         _ => {}
     }

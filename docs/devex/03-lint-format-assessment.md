@@ -2,6 +2,9 @@
 
 _Scope: `/workspaces/Kuzushi` — Node 22+, TypeScript 5.7, React 18 (Ink), pnpm 10.30.0._
 
+Status: historical pre-Rust-cutover assessment. The shipped interactive shell is
+Rust Ratatui; retain Ink/React references below only as release history.
+
 ## 1. Starting state (pre-DX-3)
 
 Before this change, Kuzushi shipped with **zero** linting or formatting

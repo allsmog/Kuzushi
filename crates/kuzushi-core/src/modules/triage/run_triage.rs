@@ -203,15 +203,10 @@ pub(in crate::modules) fn empty_triage_response(
     input: &TriageRunInput,
     missing_fingerprints: Vec<String>,
 ) -> Value {
-    json!({
-        "ok": true,
-        "status": "skipped",
-        "summary": "No findings matched triage input.",
-        "output": "[-] No findings match. Run a scanner first (`kuzushi scan <repo>`) or pass explicit fingerprints.",
-        "artifacts": [],
-        "warnings": ["No findings matched triage input."],
-        "errors": [],
-        "data": {
+    let summary = "No findings matched triage input.";
+    let output =
+        "[-] No findings match. Run a scanner first (`kuzushi scan <repo>`) or pass explicit fingerprints.";
+    let data = json!({
             "summary": "No findings matched triage input.",
             "triaged": 0,
             "total": 0,
@@ -223,9 +218,15 @@ pub(in crate::modules) fn empty_triage_response(
             "missingFingerprints": missing_fingerprints,
             "batchSize": input.batch_size,
             "findings": [],
-        },
-        "costUsd": 0.0,
-    })
+        });
+    let mut result = crate::module_result::skipped_output_result(
+        summary,
+        output,
+        vec![json!("No findings matched triage input.")],
+        data,
+    );
+    result["costUsd"] = json!(0.0);
+    result
 }
 
 pub(in crate::modules) fn require_triage_runtime(

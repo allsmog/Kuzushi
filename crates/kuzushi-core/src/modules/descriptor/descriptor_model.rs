@@ -32,12 +32,29 @@ pub struct ToolDescriptor {
     pub headless: bool,
     #[serde(default, skip_serializing_if = "is_false")]
     pub hidden: bool,
+    #[serde(default, skip_serializing_if = "RuntimeRequirement::is_never")]
+    pub runtime_requirement: RuntimeRequirement,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<OptionSpec>,
 }
 
 fn is_false(value: &bool) -> bool {
     !*value
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum RuntimeRequirement {
+    #[default]
+    Never,
+    Always,
+    InputAware,
+}
+
+impl RuntimeRequirement {
+    pub fn is_never(&self) -> bool {
+        matches!(self, Self::Never)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

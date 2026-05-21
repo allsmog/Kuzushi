@@ -2,14 +2,6 @@ use super::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
-pub struct RunArtifact {
-    pub label: String,
-    pub path: String,
-    pub kind: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
 pub struct RunLlmCallAudit {
     pub n: usize,
     pub kind: String,
@@ -17,35 +9,121 @@ pub struct RunLlmCallAudit {
     pub verb: Option<String>,
     pub model: String,
     pub provider: String,
+    #[serde(alias = "prompt_hash")]
     pub prompt_hash: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "latency_ms")]
     pub latency_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "cost_usd")]
     pub cost_usd: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RunHouseRuleFingerprint {
+    pub module: String,
+    pub path: String,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RunPromptOverrideFingerprint {
+    pub module: String,
+    pub verb: String,
+    pub path: String,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RunEnvFingerprint {
+    pub key: String,
+    pub fingerprint: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RunTargetGitMetadata {
+    pub sha: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    pub dirty: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RunSummary {
+    #[serde(alias = "run_id")]
     pub run_id: String,
     pub kind: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
     pub target: String,
+    #[serde(alias = "started_at_unix")]
     pub started_at_unix: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "completed_at_unix")]
     pub completed_at_unix: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub findings: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "cost_usd")]
     pub cost_usd: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "process_id")]
     pub process_id: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "kuzushi_version")]
+    pub kuzushi_version: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "git_sha")]
+    pub git_sha: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "git_branch")]
+    pub git_branch: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "config_hash")]
+    pub config_hash: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub platform: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(alias = "house_rules")]
+    pub house_rules: Vec<RunHouseRuleFingerprint>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(alias = "prompt_overrides")]
+    pub prompt_overrides: Vec<RunPromptOverrideFingerprint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "threat_model_sha256")]
+    pub threat_model_sha256: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(alias = "env_fingerprint")]
+    pub env_fingerprint: Vec<RunEnvFingerprint>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "target_git")]
+    pub target_git: Option<RunTargetGitMetadata>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(alias = "llm_calls")]
     pub llm_calls: Vec<RunLlmCallAudit>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "trace_malformed_lines")]
+    pub trace_malformed_lines: Option<usize>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(alias = "cli_args", alias = "scanArgs", alias = "scan_args")]
+    pub cli_args: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(
+        alias = "loaded_modules",
+        alias = "loadedModuleSpecifiers",
+        alias = "loaded_module_specifiers"
+    )]
+    pub loaded_modules: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifacts: Vec<RunArtifact>,
 }
@@ -69,7 +147,21 @@ impl RunSummary {
             cost_usd: None,
             error: None,
             process_id: None,
+            kuzushi_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            git_sha: build_git_sha(),
+            git_branch: build_git_branch(),
+            model: None,
+            config_hash: None,
+            platform: Some(runtime_platform()),
+            house_rules: Vec::new(),
+            prompt_overrides: Vec::new(),
+            threat_model_sha256: None,
+            env_fingerprint: Vec::new(),
+            target_git: None,
             llm_calls: Vec::new(),
+            trace_malformed_lines: None,
+            cli_args: Vec::new(),
+            loaded_modules: Vec::new(),
             artifacts: Vec::new(),
         }
     }
@@ -112,8 +204,38 @@ impl RunSummary {
         self
     }
 
+    pub fn with_model(mut self, model: Option<String>) -> Self {
+        self.model = non_empty_metadata(model);
+        self
+    }
+
+    pub fn with_config_hash(mut self, config_hash: Option<String>) -> Self {
+        self.config_hash = non_empty_metadata(config_hash);
+        self
+    }
+
+    pub fn with_reproducibility_from(mut self, source: &Self) -> Self {
+        self.kuzushi_version = source.kuzushi_version.clone();
+        self.git_sha = source.git_sha.clone();
+        self.git_branch = source.git_branch.clone();
+        self.model = source.model.clone();
+        self.config_hash = source.config_hash.clone();
+        self.platform = source.platform.clone();
+        self.house_rules = source.house_rules.clone();
+        self.prompt_overrides = source.prompt_overrides.clone();
+        self.threat_model_sha256 = source.threat_model_sha256.clone();
+        self.env_fingerprint = source.env_fingerprint.clone();
+        self.target_git = source.target_git.clone();
+        self.cli_args = source.cli_args.clone();
+        self.loaded_modules = source.loaded_modules.clone();
+        self.trace_malformed_lines = source.trace_malformed_lines;
+        self
+    }
+
     pub fn with_artifact(mut self, artifact: RunArtifact) -> Self {
-        self.artifacts.push(artifact);
+        if let Some(artifact) = artifact.normalized() {
+            self.artifacts.push(artifact);
+        }
         self
     }
 
@@ -121,6 +243,81 @@ impl RunSummary {
         self.llm_calls = llm_calls;
         self
     }
+
+    pub fn with_trace_malformed_lines(mut self, malformed_lines: Option<usize>) -> Self {
+        self.trace_malformed_lines = malformed_lines.filter(|count| *count > 0);
+        self
+    }
+
+    pub fn with_house_rules(mut self, house_rules: Vec<RunHouseRuleFingerprint>) -> Self {
+        self.house_rules = house_rules;
+        self
+    }
+
+    pub fn with_prompt_overrides(
+        mut self,
+        prompt_overrides: Vec<RunPromptOverrideFingerprint>,
+    ) -> Self {
+        self.prompt_overrides = prompt_overrides;
+        self
+    }
+
+    pub fn with_threat_model_sha256(mut self, threat_model_sha256: Option<String>) -> Self {
+        self.threat_model_sha256 = non_empty_metadata(threat_model_sha256);
+        self
+    }
+
+    pub fn with_env_fingerprint(mut self, env_fingerprint: Vec<RunEnvFingerprint>) -> Self {
+        self.env_fingerprint = env_fingerprint;
+        self
+    }
+
+    pub fn with_target_git(mut self, target_git: Option<RunTargetGitMetadata>) -> Self {
+        self.target_git = target_git;
+        self
+    }
+
+    pub fn with_cli_args(mut self, cli_args: Vec<String>) -> Self {
+        self.cli_args = cli_args
+            .into_iter()
+            .map(|arg| arg.trim().to_string())
+            .filter(|arg| !arg.is_empty())
+            .collect();
+        self
+    }
+
+    pub fn with_loaded_modules(mut self, loaded_modules: Vec<String>) -> Self {
+        self.loaded_modules = Vec::new();
+        for specifier in loaded_modules {
+            let specifier = specifier.trim().to_string();
+            if !specifier.is_empty() && !self.loaded_modules.contains(&specifier) {
+                self.loaded_modules.push(specifier);
+            }
+        }
+        self
+    }
+}
+
+fn build_git_sha() -> Option<String> {
+    non_empty_env(option_env!("KUZUSHI_GIT_SHA"))
+}
+
+fn build_git_branch() -> Option<String> {
+    non_empty_env(option_env!("KUZUSHI_GIT_BRANCH"))
+}
+
+fn non_empty_env(value: Option<&str>) -> Option<String> {
+    value.and_then(|value| non_empty_metadata(Some(value.to_string())))
+}
+
+fn non_empty_metadata(value: Option<String>) -> Option<String> {
+    value
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn runtime_platform() -> String {
+    format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
 }
 
 // schema v2: adds module/feed metadata and optional LLM audit fields. All new
@@ -132,23 +329,29 @@ pub struct RunTraceStep {
     pub kind: String,
     pub label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "latencyMs")]
     pub latency_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "costUsd")]
     pub cost_usd: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "moduleId")]
     pub module_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verb: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "parentStep")]
     pub parent_step: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub severity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "startedAtMs")]
     pub started_at_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "promptHash")]
     pub prompt_hash: Option<String>,
 }

@@ -20,7 +20,7 @@ pub(super) fn dry_run_report(plan: FullModePlan) -> FullModeReport {
     }
 }
 
-pub(super) fn resolve_full_mode_model(runtime: &RoutedRuntime) -> Result<String> {
+pub(super) fn resolve_full_mode_model(runtime: &RoutedRuntime<'_>) -> Result<String> {
     if let Some(model) = runtime.resolve_model(AgentRole::FullModeMulti, 0, None) {
         crate::runtime::validate_model_spec(&model)
             .with_context(|| "full_mode_multi role resolved an invalid model")?;

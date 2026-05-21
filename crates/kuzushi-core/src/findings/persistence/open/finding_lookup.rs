@@ -11,7 +11,8 @@ impl FindingStore {
                   f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
                   f.static_proof_state, f.created_at,
                   t.verdict, t.confidence, t.rationale, t.cost_usd,
-                  f.vuln_source, f.dedup_key
+                  f.vuln_source, f.dedup_key, f.suppressed, f.snoozed_until,
+                  f.remediation, f.references_json
                 from findings f
                 left join triage t on t.finding_id = f.id
                 where f.fingerprint = ?1
@@ -47,7 +48,8 @@ impl FindingStore {
               f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
               f.static_proof_state, f.created_at,
               t.verdict, t.confidence, t.rationale, t.cost_usd,
-              f.vuln_source, f.dedup_key
+              f.vuln_source, f.dedup_key, f.suppressed, f.snoozed_until,
+              f.remediation, f.references_json
             from findings f
             left join triage t on t.finding_id = f.id
             where f.fingerprint like ?1

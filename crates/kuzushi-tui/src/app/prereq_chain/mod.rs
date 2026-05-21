@@ -36,6 +36,7 @@ pub struct PrereqPlanStep {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrereqArtifactState {
     Cached,
+    Invalid,
     Missing,
 }
 
@@ -103,7 +104,8 @@ impl PrereqChain {
     }
 
     pub fn should_run_step(&self, step: &PrereqStep) -> bool {
-        self.regenerate_existing || !step.artifact_path.exists()
+        self.regenerate_existing
+            || artifact_state(&step.artifact_path) != PrereqArtifactState::Cached
     }
 }
 
@@ -150,6 +152,7 @@ impl PrereqArtifactState {
     pub fn label(self) -> &'static str {
         match self {
             Self::Cached => "cached",
+            Self::Invalid => "invalid",
             Self::Missing => "missing",
         }
     }
@@ -167,18 +170,34 @@ impl PrereqPlanAction {
 }
 
 fn artifact_state(path: &Path) -> PrereqArtifactState {
-    if path.exists() {
-        PrereqArtifactState::Cached
-    } else {
-        PrereqArtifactState::Missing
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => readable_json_artifact_state(path),
+        Ok(_) => PrereqArtifactState::Invalid,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => PrereqArtifactState::Missing,
+        Err(_) => PrereqArtifactState::Invalid,
     }
 }
 
 fn recommended_action(steps: &[PrereqStep]) -> PrereqPlanAction {
-    if steps.iter().all(|step| step.artifact_path.exists()) {
+    if steps
+        .iter()
+        .all(|step| artifact_state(&step.artifact_path) == PrereqArtifactState::Cached)
+    {
         PrereqPlanAction::Reuse
     } else {
         PrereqPlanAction::Approve
+    }
+}
+
+fn readable_json_artifact_state(path: &Path) -> PrereqArtifactState {
+    let Ok(body) = std::fs::read_to_string(path) else {
+        return PrereqArtifactState::Invalid;
+    };
+
+    if serde_json::from_str::<Value>(&body).is_ok() {
+        PrereqArtifactState::Cached
+    } else {
+        PrereqArtifactState::Invalid
     }
 }
 
@@ -325,5 +344,62 @@ mod tests {
         let steps = prereq_steps_for("sast:scan", Path::new("/tmp/repo"));
         assert_eq!(steps.len(), 1);
         assert_eq!(steps[0].tool, "context:build");
+    }
+
+    #[test]
+    fn prereq_plan_marks_non_file_artifact_invalid() {
+        let temp = tempfile::tempdir().unwrap();
+        let artifact_path = temp.path().join(".kuzushi/context-snapshot.json");
+        std::fs::create_dir_all(&artifact_path).unwrap();
+        let step = PrereqStep::new(
+            "context:build",
+            artifact_path,
+            "context snapshot",
+            false,
+            false,
+            "local",
+            "none",
+        );
+        let chain = PrereqChain::new(
+            vec![step.clone()],
+            "sast:scan".to_string(),
+            Value::Null,
+            None,
+        );
+
+        let plan = chain.plan();
+
+        assert_eq!(plan.steps[0].artifact_state, PrereqArtifactState::Invalid);
+        assert_eq!(plan.recommended_action, PrereqPlanAction::Approve);
+        assert!(chain.should_run_step(&step));
+    }
+
+    #[test]
+    fn prereq_plan_marks_malformed_json_artifact_invalid() {
+        let temp = tempfile::tempdir().unwrap();
+        let artifact_path = temp.path().join(".kuzushi/threat-model.json");
+        std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
+        std::fs::write(&artifact_path, "{not-json").unwrap();
+        let step = PrereqStep::new(
+            "threat-model:build",
+            artifact_path,
+            "threat model",
+            true,
+            true,
+            "model",
+            "tokens",
+        );
+        let chain = PrereqChain::new(
+            vec![step.clone()],
+            "offense-review:threat-hunt".to_string(),
+            Value::Null,
+            None,
+        );
+
+        let plan = chain.plan();
+
+        assert_eq!(plan.steps[0].artifact_state, PrereqArtifactState::Invalid);
+        assert_eq!(plan.recommended_action, PrereqPlanAction::Approve);
+        assert!(chain.should_run_step(&step));
     }
 }

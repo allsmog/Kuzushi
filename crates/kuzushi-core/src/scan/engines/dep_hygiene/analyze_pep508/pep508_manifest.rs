@@ -4,6 +4,14 @@ pub(in crate::scan::engines::dep_hygiene) fn analyze_pep508(
     file_path: &Path,
     spec: &str,
 ) -> Option<DepHygieneFinding> {
+    analyze_pep508_for_manifest(ManifestKind::PyprojectToml, file_path, spec)
+}
+
+pub(in crate::scan::engines::dep_hygiene) fn analyze_pep508_for_manifest(
+    manifest: ManifestKind,
+    file_path: &Path,
+    spec: &str,
+) -> Option<DepHygieneFinding> {
     let cleaned = spec.split(';').next().unwrap_or_default().trim();
     let name_len = cleaned
         .chars()
@@ -18,7 +26,7 @@ pub(in crate::scan::engines::dep_hygiene) fn analyze_pep508(
 
     if constraint.is_empty() {
         return Some(DepHygieneFinding::new(
-            ManifestKind::PyprojectToml,
+            manifest,
             file_path,
             name,
             constraint,
@@ -29,7 +37,7 @@ pub(in crate::scan::engines::dep_hygiene) fn analyze_pep508(
 
     if is_floor_only_nonempty_range(constraint) {
         return Some(DepHygieneFinding::new(
-            ManifestKind::PyprojectToml,
+            manifest,
             file_path,
             name,
             constraint,

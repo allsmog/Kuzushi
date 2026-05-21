@@ -135,6 +135,17 @@ fn normalizes_artifact_path_aliases() {
 }
 
 #[test]
+fn normalizes_snake_case_artifact_path_aliases() {
+    let output = normalize_output_value(json!({
+        "artifacts": [{"label": "report", "report_path": "/tmp/report.md"}]
+    }));
+
+    assert_eq!(output["artifacts"][0]["label"], "report");
+    assert_eq!(output["artifacts"][0]["path"], "/tmp/report.md");
+    assert_eq!(output["artifacts"][0]["report_path"], "/tmp/report.md");
+}
+
+#[test]
 fn preserves_unknown_domain_status_under_data() {
     let output = normalize_output_value(json!({"status": "planned"}));
 

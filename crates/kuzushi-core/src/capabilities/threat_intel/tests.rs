@@ -321,9 +321,10 @@ hunt = "ml-finetune"
         panic!("dry run must not dispatch")
     })
     .unwrap();
-    assert_eq!(dry["summary"]["dispatched"], json!(1));
-    assert_eq!(dry["summary"]["skipped"], json!(1));
-    assert_eq!(dry["summary"]["dryRun"], json!(true));
+    assert_eq!(dry["status"], json!("completed"));
+    assert_eq!(dry["data"]["summary"]["dispatched"], json!(1));
+    assert_eq!(dry["data"]["summary"]["skipped"], json!(1));
+    assert_eq!(dry["data"]["summary"]["dryRun"], json!(true));
 
     let live = apply_threat_intel_catalog(&catalog, &ctx, None, true, |name, input, _, _| {
         assert_eq!(name, "taint-iris-next:hunt");
@@ -331,14 +332,15 @@ hunt = "ml-finetune"
         Ok(json!({"ok": true, "summary": {"count": 2}}))
     })
     .unwrap();
-    assert_eq!(live["summary"]["totalFindings"], json!(2));
+    assert_eq!(live["status"], json!("completed"));
+    assert_eq!(live["data"]["summary"]["totalFindings"], json!(2));
     assert_eq!(live["data"]["entries"][0]["status"], json!("dispatched"));
 
     let failed = apply_threat_intel_catalog(&catalog, &ctx, None, true, |_, _, _, _| {
         anyhow::bail!("boom")
     })
     .unwrap();
-    assert_eq!(failed["summary"]["failed"], json!(1));
+    assert_eq!(failed["data"]["summary"]["failed"], json!(1));
     assert_eq!(
         failed["data"]["entries"][0]["status"],
         json!("dispatch-failed")
@@ -386,14 +388,15 @@ sink_signals = ["zmalloc(count * sizeof(...))"]
         |_, _, _, _| panic!("list must not dispatch"),
     )
     .unwrap();
-    assert_eq!(listed["summary"]["totalEntries"], json!(1));
+    assert_eq!(listed["status"], json!("completed"));
+    assert_eq!(listed["data"]["summary"]["totalEntries"], json!(1));
 
     let planned =
         execute_threat_intel_tool("threat-intel:apply", input, &ctx, None, |_, _, _, _| {
             panic!("dry apply must not dispatch")
         })
         .unwrap();
-    assert_eq!(planned["summary"]["dryRun"], json!(true));
+    assert_eq!(planned["data"]["summary"]["dryRun"], json!(true));
 
     let err =
         execute_threat_intel_tool("threat-intel:nope", json!({}), &ctx, None, |_, _, _, _| {
@@ -479,10 +482,11 @@ fn harvest_pipeline_with_mock_dispatch_writes_catalog_and_summary() {
     )
     .unwrap();
 
-    assert_eq!(result["summary"]["totalCves"], 2);
-    assert_eq!(result["summary"]["harvested"], 1);
-    assert_eq!(result["summary"]["skipped"], 1);
-    assert_eq!(result["summary"]["failed"], 0);
+    assert_eq!(result["status"], json!("completed"));
+    assert_eq!(result["data"]["summary"]["totalCves"], 2);
+    assert_eq!(result["data"]["summary"]["harvested"], 1);
+    assert_eq!(result["data"]["summary"]["skipped"], 1);
+    assert_eq!(result["data"]["summary"]["failed"], 0);
 
     let output_path = workspace_root
         .path()
@@ -607,10 +611,10 @@ fn harvest_with_regression_gate_validates_and_writes_entry() {
     let result =
         harvest_threat_intel_catalog(&json!({"cves": ["CVE-TEST"]}), &ctx, None, dispatch).unwrap();
 
-    assert_eq!(result["summary"]["totalCves"], 1);
-    assert_eq!(result["summary"]["harvested"], 1);
-    assert_eq!(result["summary"]["regressionGate"]["validated"], 1);
-    assert_eq!(result["summary"]["regressionGate"]["rejected"], 0);
+    assert_eq!(result["data"]["summary"]["totalCves"], 1);
+    assert_eq!(result["data"]["summary"]["harvested"], 1);
+    assert_eq!(result["data"]["summary"]["regressionGate"]["validated"], 1);
+    assert_eq!(result["data"]["summary"]["regressionGate"]["rejected"], 0);
 
     let per = result["data"]["perCve"][0].clone();
     assert_eq!(per["status"], "harvested");
@@ -713,9 +717,9 @@ fn harvest_with_regression_gate_rejects_non_splitting_pattern() {
         harvest_threat_intel_catalog(&json!({"cves": ["CVE-NOSPLIT"]}), &ctx, None, dispatch)
             .unwrap();
 
-    assert_eq!(result["summary"]["harvested"], 0);
-    assert_eq!(result["summary"]["skipped"], 1);
-    assert_eq!(result["summary"]["regressionGate"]["rejected"], 1);
+    assert_eq!(result["data"]["summary"]["harvested"], 0);
+    assert_eq!(result["data"]["summary"]["skipped"], 1);
+    assert_eq!(result["data"]["summary"]["regressionGate"]["rejected"], 1);
     assert_eq!(result["data"]["perCve"][0]["status"], "rejected-by-gate");
 }
 

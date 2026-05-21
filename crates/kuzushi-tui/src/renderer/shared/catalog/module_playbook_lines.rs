@@ -38,6 +38,78 @@ const MODULE_PLAYBOOKS: &[(&str, ModulePlaybook)] = &[
         },
     ),
     (
+        "semgrep",
+        ModulePlaybook {
+            run: "run . dispatches semgrep:scan for fast pattern findings",
+            needs: "target and optional scanner config",
+            output: ".kuzushi/v2/findings.sqlite3",
+            inspect: "findings · use triage · use verify",
+        },
+    ),
+    (
+        "codeql",
+        ModulePlaybook {
+            run: "run . dispatches codeql:scan for semantic findings",
+            needs: "target and CodeQL language/database options",
+            output: ".kuzushi/v2/findings.sqlite3 and optional SARIF",
+            inspect: "findings · use triage · use verify",
+        },
+    ),
+    (
+        "dep-hygiene",
+        ModulePlaybook {
+            run: "run . dispatches dep-hygiene:check for manifest risk",
+            needs: "target with dependency manifests",
+            output: ".kuzushi/v2/findings.sqlite3",
+            inspect: "findings · use triage · use report",
+        },
+    ),
+    (
+        "cargo-audit",
+        ModulePlaybook {
+            run: "run . dispatches cargo-audit:scan for RustSec advisories",
+            needs: "target with Cargo.lock and cargo-audit installed",
+            output: ".kuzushi/v2/findings.sqlite3",
+            inspect: "findings · use triage · use report",
+        },
+    ),
+    (
+        "secret-scan",
+        ModulePlaybook {
+            run: "run . dispatches secret-scan:scan for credential findings",
+            needs: "target source or config files",
+            output: ".kuzushi/v2/findings.sqlite3",
+            inspect: "findings · use triage · use report",
+        },
+    ),
+    (
+        "iac-scan",
+        ModulePlaybook {
+            run: "run . dispatches iac-scan:scan for IaC misconfiguration findings",
+            needs: "target with Dockerfile, Actions, or Terraform files",
+            output: ".kuzushi/v2/findings.sqlite3",
+            inspect: "findings · use triage · use report",
+        },
+    ),
+    (
+        "license-scan",
+        ModulePlaybook {
+            run: "run . dispatches license-scan:scan for package license risk",
+            needs: "target with package manifests",
+            output: ".kuzushi/v2/findings.sqlite3",
+            inspect: "findings · use triage · use report",
+        },
+    ),
+    (
+        "sbom-scan",
+        ModulePlaybook {
+            run: "run . dispatches sbom-scan:scan for dependency inventory",
+            needs: "target with package manifests",
+            output: "SBOM-style component inventory",
+            inspect: "run sbom-scan:scan · use module-recommender",
+        },
+    ),
+    (
         "carlini-threat-hunt",
         ModulePlaybook {
             run: "run . after threat-model:build to start adversarial actor hunts",

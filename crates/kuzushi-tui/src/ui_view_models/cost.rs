@@ -124,7 +124,7 @@ fn last_tool_text(last_tool: Option<f64>) -> String {
 fn budget_text(budget: Option<f64>) -> String {
     budget
         .map(|value| format!("${value:.2}"))
-        .unwrap_or_else(|| "unset".to_string())
+        .unwrap_or_else(|| "unset (default $5.00 soft cap shown above)".to_string())
 }
 
 fn budget_status(session_cost: f64, budget: Option<f64>) -> Option<CostBudgetStatus> {

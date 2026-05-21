@@ -102,8 +102,17 @@ fn home_view_renders_latest_run_artifact_rail() {
                 "byRiskTier": {"critical": 1, "high": 1}
             },
             "surfaces": [{
+                "framework": "Spring",
                 "title": "Command execution boundary",
                 "risk": {"tier": "critical"}
+            }, {
+                "framework": "Next.js",
+                "title": "POST /api/session",
+                "risk": {"tier": "medium"}
+            }, {
+                "framework": "Rails",
+                "title": "Background job boundary",
+                "risk": {"tier": "high"}
             }]
         })
         .to_string(),
@@ -126,7 +135,7 @@ fn home_view_renders_latest_run_artifact_rail() {
     assert!(rendered.contains("surface risk"));
     assert!(rendered.contains("2 high/critical"));
     assert!(rendered.contains("critical=1"));
-    assert!(rendered.contains("Command execution"));
+    assert!(rendered.contains("frameworks Next.js=1, Rails=1, Spring=1"));
     assert!(rendered.contains("ctx"));
     assert!(rendered.contains("✓"));
     assert!(rendered.contains("recorded"));
@@ -196,8 +205,8 @@ fn quickstart_follows_doctor_context_scan_findings_report_path() {
         "Operator path",
         "kuzushi doctor",
         "context build",
-        "scan . / run <tool>",
-        "findings / open F-0001",
+        "scan .",
+        "findings",
         "proof state",
         "workspace export",
         "kuzushi pr-comment",
@@ -652,6 +661,7 @@ fn module_playbooks_name_supported_run_and_scan_commands() {
         ("context", "context build", "run build"),
         ("threat-model", "threats regen", "threats build"),
         ("sast", "scan runs configured scanners", "run . or scan"),
+        ("cargo-audit", "RustSec advisories", "tool-specific options"),
         ("agentic-sast", "run agentic-sast:scan", "run scan"),
     ];
     for (module, required, stale) in cases {
@@ -659,6 +669,7 @@ fn module_playbooks_name_supported_run_and_scan_commands() {
             "context" => "context:build",
             "threat-model" => "threat-model:build",
             "sast" => "sast:scan",
+            "cargo-audit" => "cargo-audit:scan",
             "agentic-sast" => "agentic-sast:scan",
             _ => "demo:tool",
         };
@@ -1242,10 +1253,10 @@ fn threats_summary_view_is_review_first_without_fake_observations() {
 
     assert!(rendered.contains("THREAT MODEL REVIEW"));
     assert!(rendered.contains("checkout threat model"));
-    assert!(rendered.contains("3 assets"));
-    assert!(rendered.contains("1 actor"));
-    assert!(rendered.contains("1 data flow"));
-    assert!(rendered.contains("1 trust boundary"));
+    assert!(rendered.contains("assets             3"));
+    assert!(rendered.contains("actors             1"));
+    assert!(rendered.contains("data flows         1"));
+    assert!(rendered.contains("trust boundaries   1"));
     assert!(rendered.contains("session cookies are in scope"));
     assert!(rendered.contains("production network diagram"));
     assert!(rendered.contains("none pending"));
@@ -1540,6 +1551,25 @@ fn active_context_build_view_shows_live_feedback() {
     assert!(rendered.contains("request abort"));
     assert!(rendered.contains("kuzushi/context/run>"));
     assert!(!rendered.contains("SCAN PROGRESS"));
+}
+
+#[test]
+fn context_build_view_surfaces_malformed_snapshot() {
+    let backend = TestBackend::new(96, 22);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.focused_module = Some("context".to_string());
+    app.shell_view = ShellView::Context;
+    app.context_view.snapshot_path =
+        Some(std::path::PathBuf::from(".kuzushi/context-snapshot.json"));
+    app.context_view.status = "malformed context snapshot. Next: context build".to_string();
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("malformed context snapshot"));
+    assert!(rendered.contains("context-snapshot.json"));
+    assert!(!rendered.contains("no snapshot yet"));
 }
 
 #[test]
@@ -2325,6 +2355,7 @@ fn recommend_view_renders_latest_recommendations_artifact() {
                 "tool": "semgrep:scan",
                 "priority": "high",
                 "reason": "Source files match the fast native SAST path.",
+                "signals": ["frameworks: Falcon, Litestar, Sanic"],
                 "requiresRuntime": false
             }
         ])
@@ -2340,8 +2371,13 @@ fn recommend_view_renders_latest_recommendations_artifact() {
                 "byRiskTier": {"critical": 1}
             },
             "surfaces": [{
+                "framework": "Spring",
                 "title": "POST /admin",
                 "risk": {"tier": "critical"}
+            }, {
+                "framework": "Next.js",
+                "title": "POST /api/session",
+                "risk": {"tier": "medium"}
             }]
         })
         .to_string(),
@@ -2362,6 +2398,8 @@ fn recommend_view_renders_latest_recommendations_artifact() {
     assert!(rendered.contains("surface risk"));
     assert!(rendered.contains("1 high/critical"));
     assert!(rendered.contains("critical=1"));
+    assert!(rendered.contains("frameworks Next.js=1, Spring=1"));
+    assert!(rendered.contains("frameworks: Falcon"));
     assert!(rendered.contains("⚠ high"));
     assert!(rendered.contains("Source files match"));
 }
@@ -2423,15 +2461,15 @@ fn renders_shell_module_plan_and_run_routing_modes() {
             "missing cockpit strip in {rendered}"
         );
         assert!(
-            rendered.contains(" | target "),
+            rendered.contains(" · target:"),
             "missing target separator in {rendered}"
         );
         assert!(
-            rendered.contains(" | ctx "),
+            rendered.contains(" · ctx:"),
             "missing ctx separator in {rendered}"
         );
         assert!(
-            rendered.contains(" | model "),
+            rendered.contains(" · model:"),
             "missing model separator in {rendered}"
         );
         assert!(
@@ -2626,7 +2664,7 @@ fn header_hides_cost_at_zero_and_compacts_at_higher_amounts() {
     app.session_cost_usd = 0.42;
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
-    assert!(rendered.contains("cost $0.42"));
+    assert!(rendered.contains("cost:$0.42"));
 }
 
 #[test]
@@ -2896,6 +2934,31 @@ fn prereq_plan_card_shows_cached_missing_writes_risk_cost_and_actions() {
 }
 
 #[test]
+fn prereq_plan_card_explains_invalid_artifacts_before_reuse() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(tmp.path().join(".kuzushi/context-snapshot.json")).unwrap();
+    let backend = TestBackend::new(132, 34);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let chain = PrereqChain::new(
+        prereq_steps_for("sast:scan", tmp.path()),
+        "sast:scan".to_string(),
+        serde_json::json!({}),
+        None,
+    );
+    app.pending_prereq_prompt = Some(chain.plan());
+    app.shell_view = ShellView::ModuleRun;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("invalid"));
+    assert!(rendered.contains("invalid artifact"));
+    assert!(rendered.contains("approve"));
+    assert!(rendered.contains("regenerate"));
+}
+
+#[test]
 fn plain_prereq_plan_has_no_ansi_or_box_drawing() {
     let tmp = tempfile::tempdir().unwrap();
     std::fs::create_dir(tmp.path().join(".kuzushi")).unwrap();
@@ -3112,8 +3175,11 @@ fn runs_view_lists_past_runs_from_run_json_with_summary_fallback() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("RUN TIMELINE"));
-    // Both past runs reach the buffer with leading 8-char labels.
-    assert!(rendered.contains("r-2026-0"));
+    // Both past runs reach the buffer with disambiguating short labels.
+    assert!(
+        rendered.contains("r-2026") && rendered.contains("T14-31"),
+        "missing run ID parts in {rendered}"
+    );
     assert!(rendered.contains("completed"));
     assert!(rendered.contains("failed"));
     assert!(rendered.contains("18"));
@@ -3236,7 +3302,7 @@ fn top_status_strip_shows_stage_spinner_while_scan_runs() {
     });
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let running = format!("{:?}", terminal.backend().buffer());
-    assert!(running.contains("stage "), "stage missing: {running}");
+    assert!(running.contains("stage:"), "stage missing: {running}");
     assert!(running.contains("running"));
     // Any of the SPINNER_FRAMES shows up.
     let saw_spinner = SPINNER_FRAMES.iter().any(|f| running.contains(f));
@@ -3295,6 +3361,30 @@ fn auth_view_renders_providers_model_and_spend_sections() {
     assert!(rendered.contains("openai:gpt-4.1"));
     assert!(rendered.contains("$0.42"));
     assert!(rendered.contains("auth login openai"));
+    assert!(rendered.contains("github-copilot"));
+}
+
+#[test]
+fn auth_view_renders_latest_oauth_flow_state() {
+    let backend = TestBackend::new(120, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Auth;
+    app.auth_login = Some(AuthLoginView {
+        provider: "openai".to_string(),
+        method: "headless".to_string(),
+        status: "waiting".to_string(),
+        detail: "device code flow at https://auth.openai.com/codex/device".to_string(),
+        store_path: "~/.kuzushi/oauth-credentials.json".to_string(),
+    });
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("OAUTH"));
+    assert!(rendered.contains("headless"));
+    assert!(rendered.contains("device code flow"));
+    assert!(rendered.contains("oauth-credentials.json"));
 }
 
 #[test]
@@ -3524,6 +3614,18 @@ fn replay_view_prefers_run_json_and_keeps_summary_fallback() {
     let legacy_rendered = render_replay_for_target(tmp.path(), "r-legacy");
     assert!(legacy_rendered.contains("summary.json"));
     assert!(!legacy_rendered.contains("run artefacts not on disk"));
+}
+
+#[test]
+fn replay_view_surfaces_invalid_run_metadata_path() {
+    let tmp = tempfile::tempdir().unwrap();
+    let run_dir = tmp.path().join(".kuzushi/runs/r-invalid");
+    std::fs::create_dir_all(run_dir.join("run.json")).unwrap();
+
+    let rendered = render_replay_for_target(tmp.path(), "r-invalid");
+
+    assert!(rendered.contains("run.json (invalid)"));
+    assert!(!rendered.contains("run artefacts not on disk"));
 }
 
 fn render_replay_for_target(target: &std::path::Path, run_id: &str) -> String {

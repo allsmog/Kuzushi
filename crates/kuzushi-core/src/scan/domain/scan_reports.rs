@@ -29,11 +29,7 @@ impl SemgrepScanReport {
     }
 
     pub fn to_tool_json(&self) -> Value {
-        json!({
-            "ok": true,
-            "output": self.output(),
-            "data": self,
-        })
+        completed_scan_tool_json(self.output(), json!(self))
     }
 }
 
@@ -108,11 +104,7 @@ impl CodeqlScanReport {
     }
 
     pub fn to_tool_json(&self) -> Value {
-        json!({
-            "ok": true,
-            "output": self.output(),
-            "data": self,
-        })
+        completed_scan_tool_json(self.output(), json!(self))
     }
 }
 

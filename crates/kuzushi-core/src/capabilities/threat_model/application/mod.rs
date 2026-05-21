@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) use build_threat_model::*;
-pub(crate) use build_summary::*;
+use build_summary::*;
 pub(crate) use collect_s2::*;
 pub(crate) use collect_s3::*;
 pub(crate) use deterministic_build::*;
@@ -22,6 +22,7 @@ mod deterministic_dfd;
 mod deterministic_dfd_surface_specs;
 mod deterministic_dfd_specs;
 mod deterministic_input;
+mod deterministic_route_context;
 mod inventory_files;
 mod normalize_document;
 mod read_manifest_summary;

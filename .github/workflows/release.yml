@@ -20,7 +20,7 @@ jobs:
     permissions:
       contents: read
 
-  # ── Publish to npm (reuses dist artifact produced by CI gate) ───────────
+  # ── Publish to npm (reuses dist + native artifacts produced by CI gate) ─
   publish-npm:
     needs: ci
     runs-on: ubuntu-latest
@@ -43,6 +43,12 @@ jobs:
         with:
           name: dist
           path: dist/
+      - name: Download native artifact from CI
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-x64
+          path: native/
+      - run: pnpm verify:pack
       # Opt-in provenance: set repo variable NPM_PROVENANCE=true to enable.
       # Requires npm ≥9.5 and a public repository. See docs/devex/02-cicd-assessment.md.
       - name: Publish to npm
@@ -53,12 +59,12 @@ jobs:
           set -euo pipefail
           if [ "${NPM_PROVENANCE:-}" = "true" ]; then
             echo "Publishing with --provenance"
-            npm publish --access public --provenance
+            npm publish --access public --provenance --ignore-scripts
           else
-            npm publish --access public
+            npm publish --access public --ignore-scripts
           fi
 
-  # ── Create GitHub Release (reuses dist artifact + robust changelog) ─────
+  # ── Create GitHub Release (reuses dist/native artifacts + changelog) ────
   github-release:
     needs: ci
     runs-on: ubuntu-latest
@@ -80,10 +86,16 @@ jobs:
         with:
           name: dist
           path: dist/
+      - name: Download native artifact from CI
+        uses: actions/download-artifact@v4
+        with:
+          name: native-linux-x64
+          path: native/
+      - run: pnpm verify:pack
 
       # Pack the tarball for users who want to install from the release.
-      # `prepack` (= pnpm build) is a no-op because dist/ is already populated.
-      - run: npm pack
+      # CI already built dist/ and staged native Rust binaries; skip prepack.
+      - run: npm pack --ignore-scripts
 
       - name: Generate changelog from commits since previous tag
         run: |

@@ -33,7 +33,8 @@ pub(in crate::modules) fn write_sast_run_metadata(
                 workspace.root().display().to_string(),
             )
             .complete()
-            .with_findings(Some(findings_count as u64)),
+            .with_findings(Some(findings_count as u64))
+            .with_loaded_modules(ModuleRegistry::with_v2_builtins().loaded_module_specifiers()),
             crate::run_artifacts::RunSummary::with_artifact,
         );
     crate::run_artifacts::write_run_summary(workspace.root(), &summary)?;

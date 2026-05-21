@@ -15,13 +15,9 @@ fn read_auto_open_activity_pref() -> bool {
     }
 }
 
-impl ShellApp {
-    pub fn new(config: V2Config, target: Option<&WorkspaceTarget>) -> Self {
-        let selected_model_index = preferred_model_choice_index(&config);
-        let (option_store, option_store_error) = persistent_option_store(target);
-        let session_budget_usd = config.operator.session_budget_usd;
-        let trusted_workflow_auto_accept = config.operator.trusted_workflow_auto_accept;
-        let mut app = Self {
+macro_rules! shell_app_initial_state {
+    ($config:expr, $target:expr, $option_store:expr, $registry:expr, $selected_model_index:expr, $session_budget_usd:expr, $trusted_workflow_auto_accept:expr) => {{
+        Self {
             input: String::new(),
             cursor: 0,
             history_index: None,
@@ -29,26 +25,27 @@ impl ShellApp {
             last_cleared_input: None,
             completion_cycle: None,
             log: Vec::new(),
-            target: target.map(|target| target.root().to_path_buf()),
+            target: ($target).map(|target| target.root().to_path_buf()),
             focused_module: None,
             shell_view: ShellView::Catalog,
             prev_shell_view: None,
+            nav_history: Vec::new(),
             catalog_expanded: false,
             catalog_cursor: 0,
             pending_patch: None,
             confirm_allowlist: std::collections::BTreeSet::new(),
             confirm_denylist: std::collections::BTreeSet::new(),
-            config,
-            registry: ModuleRegistry::with_v2_builtins(),
-            option_store,
+            config: $config,
+            registry: $registry,
+            option_store: $option_store,
             command_history: Vec::new(),
             session_cost_usd: 0.0,
             last_tool_cost_usd: None,
-            selected_model_index,
+            selected_model_index: $selected_model_index,
             context_view: default_context_snapshot_view(
-                target.map(|target| target.root().join(".kuzushi/context-snapshot.json")),
+                ($target).map(|target| target.root().join(".kuzushi/context-snapshot.json")),
             ),
-            workspace_view: default_workspace_view(target),
+            workspace_view: default_workspace_view($target),
             kb_view: KnowledgeBaseView {
                 module_id: "context".to_string(),
                 store_path: None,
@@ -56,6 +53,7 @@ impl ShellApp {
                 artifacts: Vec::new(),
             },
             pwn_view: PwnView::default(),
+            auth_login: None,
             agent_chat: None,
             session_thinking_level: None,
             findings: Vec::new(),
@@ -63,10 +61,10 @@ impl ShellApp {
             scan: None,
             should_quit: false,
             ctrl_c_armed_at: None,
-            session_budget_usd,
+            session_budget_usd: $session_budget_usd,
             advisory: AdvisoryState::default(),
             live_activity: None,
-            trusted_workflow_auto_accept,
+            trusted_workflow_auto_accept: $trusted_workflow_auto_accept,
             pending_chain: None,
             pending_prereq_prompt: None,
             pending_plan: None,
@@ -109,7 +107,33 @@ impl ShellApp {
             trace_rx: None,
             activity: None,
             auto_open_activity: read_auto_open_activity_pref(),
-        };
+        }
+    }};
+}
+
+impl ShellApp {
+    pub fn new(config: V2Config, target: Option<&WorkspaceTarget>) -> Self {
+        Self::with_registry(config, target, ModuleRegistry::with_v2_builtins())
+    }
+
+    pub fn with_registry(
+        config: V2Config,
+        target: Option<&WorkspaceTarget>,
+        registry: ModuleRegistry,
+    ) -> Self {
+        let selected_model_index = preferred_model_choice_index(&config);
+        let (option_store, option_store_error) = persistent_option_store(target);
+        let session_budget_usd = config.operator.session_budget_usd;
+        let trusted_workflow_auto_accept = config.operator.trusted_workflow_auto_accept;
+        let mut app = shell_app_initial_state!(
+            config,
+            target,
+            option_store,
+            registry,
+            selected_model_index,
+            session_budget_usd,
+            trusted_workflow_auto_accept
+        );
         app.log("system", "kuzushi shell");
         app.log("startup", app.startup_summary_line());
         if let Some(error) = option_store_error {
@@ -120,7 +144,7 @@ impl ShellApp {
         // copy in the transcript wasted one of only two visible log rows.
         app.log(
             "help",
-            "type help for commands · ? <text> to ask · scan to start",
+            "help for commands · Tab to complete · Ctrl+P/N history · ? <text> to ask · scan to start",
         );
         if target.is_some() {
             app.refresh_findings(false);

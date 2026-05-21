@@ -72,9 +72,11 @@ and `pnpm dev scan ...`, which exercised source execution instead of the
 packaged wrapper. The shipped CLI is the native Rust binary through
 `bin/kuzushi-rs.mjs`, exposed as `kuzushi` and `kz`.
 
-**Fix:** parameterize the smoke script with `KUZUSHI_CMD` (default `pnpm dev`)
-and point CI at `node dist/cli.js` after building. E2E job downloads the
-`dist/` artifact from the `build` job.
+**Fix:** parameterize the smoke script with `KUZUSHI_CMD` (defaulting to the
+local Rust CLI path) and point CI at `node bin/kuzushi-rs.mjs` after
+downloading the staged native binary. E2E downloads both the `dist/` artifact
+and `native/` artifact from the `build` job so it exercises the packaged Rust
+wrapper path, not the retired TypeScript CLI.
 
 ### H4. No `concurrency:` — stacked pushes waste runners (HIGH)
 
@@ -140,11 +142,11 @@ Both jobs re-checkout, re-install (no pnpm cache warmup since they're fresh
 runners), and re-run `pnpm build`. That's three builds per release (one in
 CI gate + two here).
 
-**Fix:** have the gated `ci.yml` invocation publish `dist/` + packed tarball
-as workflow artifacts, and let `publish-npm`/`github-release` download
-instead of rebuild. Note: `npm publish` runs `prepack` (= `pnpm build`)
-automatically; if we download a pre-packed tarball we can `npm publish
-kuzushi-*.tgz` directly and skip prepack. That's the cleanest shape.
+**Fix:** have the gated `ci.yml` invocation publish `dist/` and staged native
+Rust binaries as workflow artifacts, and let `publish-npm`/`github-release`
+download instead of rebuild. Release jobs run `pnpm verify:pack`, then call
+`npm publish --ignore-scripts` or `npm pack --ignore-scripts` so npm lifecycle
+hooks do not rerun `prepack` without the CI Rust build context.
 
 ### R2. Fragile changelog generation (HIGH)
 
@@ -249,7 +251,7 @@ using `rhysd/actionlint` (or an equivalent installed via bash script).
 | ------------------------------------------------------------- | --------------------------------------------- | ---------------------------------- |
 | "CI is slow" on a 2-line PR                                   | Serial pipeline + no path filters             | Paths-ignore skips; parallel split |
 | "Why does `pnpm test` run twice?"                             | `test` + `test:coverage` both in CI           | One coverage run                   |
-| Test fix ships green but `dist/` has a TS compile bug         | E2E uses `tsx src/cli.ts`, not `dist/cli.js`  | E2E downloads `dist/` artifact     |
+| Test fix ships green but packaged CLI is broken               | E2E uses the retired source CLI path, not the Rust wrapper | E2E downloads `dist/` + `native/` artifacts |
 | Changelog generation silently empties on first release        | `head -2 | tail -1` returns empty, `\|\|` never fires | `git describe --tags HEAD^`        |
 | Benchmark flakes ~1/15 runs with "connection refused"         | `sleep 1` before URL file populated           | HTTP poll with timeout             |
 | Release publishes wrong artifact after a speculative tag push | Two `release.yml` runs race                   | `concurrency: release-<ref>`       |
@@ -314,17 +316,19 @@ See commits on this worktree branch for exact changes. High-level:
 1. **`ci.yml`**: splits into `install` → {`typecheck`, `test`, `build`} →
    {`verify-pack`, `e2e`}. Shared `actions/cache` for pnpm store + pip
    wheels. `concurrency`, `timeout-minutes`, `permissions: contents: read`,
-   `paths-ignore` for docs/markdown. Upload `dist/` as artifact.
-2. **`release.yml`**: reuses `ci.yml` as gate, downloads `dist/` artifact,
-   skips rebuild. `git describe` changelog. Provenance behind opt-in var.
-   `concurrency` group.
+   `paths-ignore` for docs/markdown. Upload `dist/` and staged native Rust
+   binaries as artifacts.
+2. **`release.yml`**: reuses `ci.yml` as gate, downloads `dist/` and native
+   artifacts, runs `pnpm verify:pack`, and publishes/packs with lifecycle
+   scripts skipped so release does not rebuild. `git describe` changelog.
+   Provenance behind opt-in var. `concurrency` group.
 3. **`benchmark-regression.yml`**: HTTP poll replaces `sleep 1`,
    `$RUNNER_TEMP`, pip cache, timeout, concurrency.
 4. **`actionlint.yml`**: new workflow that lints `.github/workflows/**` on
    any change.
 5. **`tests/e2e/run-smoke.sh`**: parameterized via `KUZUSHI_CMD` env var so
-   CI can point it at `node dist/cli.js`; default stays `pnpm dev` for local
-   use.
+   CI can point it at `node bin/kuzushi-rs.mjs` with downloaded `native/`;
+   local runs default to the Rust CLI.
 6. **`.github/requirements-ci.txt`**: pinned `semgrep` for pip cache.
 
 ---

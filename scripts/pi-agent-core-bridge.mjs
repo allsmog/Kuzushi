@@ -1438,8 +1438,31 @@ function normalizeOAuthProvider(provider) {
     .trim()
     .toLowerCase();
   if (normalized === "anthropic" || normalized === "claude") return "anthropic";
-  if (normalized === "openai-codex" || normalized === "codex") return "openai-codex";
-  throw new Error("auth login supports providers: openai-codex, anthropic");
+  if (normalized === "openai-codex" || normalized === "codex" || normalized === "openai")
+    return "openai-codex";
+  if (normalized === "github-copilot" || normalized === "copilot") return "github-copilot";
+  throw new Error("auth login supports providers: openai, anthropic, github-copilot");
+}
+
+function normalizeOAuthMethod(provider, method) {
+  const normalized = String(method ?? "")
+    .trim()
+    .toLowerCase();
+  const methodKey = normalized || "browser";
+  const normalizedMethod = oauthMethodAliases(provider)?.[methodKey];
+  if (normalizedMethod) return normalizedMethod;
+  throw new Error(
+    `auth login method ${JSON.stringify(method)} is not supported for ${provider}. ` +
+      "Use openai browser, openai headless, anthropic, or github-copilot.",
+  );
+}
+
+function oauthMethodAliases(provider) {
+  return {
+    "openai-codex": { browser: "browser", headless: "headless", device: "headless" },
+    anthropic: { browser: "browser" },
+    "github-copilot": { browser: "device", device: "device", headless: "device" },
+  }[provider];
 }
 
 async function loadOAuthModule() {
@@ -1455,38 +1478,56 @@ async function loadOAuthModule() {
 }
 
 async function getFreshOAuthAccessTokenForProvider(provider) {
-  if (provider !== "anthropic" && provider !== "openai-codex") return undefined;
+  if (!oauthProviderSupportsRefresh(provider)) return undefined;
   // Fast path: token still fresh — no lock needed, no I/O race.
   const bagInitial = readOauthCredentials();
-  const credsInitial = bagInitial[provider];
-  if (!isProviderCreds(credsInitial)) return undefined;
-  if (Date.now() < credsInitial.expires) return credsInitial.access;
+  const activeToken = activeOAuthAccessToken(bagInitial[provider]);
+  if (activeToken) return activeToken;
 
   // Refresh path: serialise across processes with a sibling lockfile so
   // concurrent bridge invocations (multiple tmux panes) don't each refresh
   // and overwrite each other's refresh token.
-  return withCredentialsLock(oauthCredentialsPath(), async () => {
-    // Re-read under lock — another holder may have just refreshed for us.
-    const bag = readOauthCredentials();
-    const creds = bag[provider];
-    if (!isProviderCreds(creds)) return undefined;
-    if (Date.now() < creds.expires) return creds.access;
+  return withCredentialsLock(oauthCredentialsPath(), () => refreshOAuthCredentialsUnderLock(provider));
+}
 
-    try {
-      const oauth = await loadOAuthModule();
-      const refresh =
-        provider === "anthropic" ? oauth.refreshAnthropicToken : oauth.refreshOpenAICodexToken;
-      if (typeof refresh !== "function") return undefined;
-      const next = await refresh(creds.refresh);
-      if (!isProviderCreds(next)) return undefined;
-      writeOauthCredentials({ ...bag, [provider]: next });
-      return next.access;
-    } catch {
-      // Never surface refresh-error details — they may include redirect URLs
-      // or other artefacts that contain authorisation codes.
-      return undefined;
-    }
-  });
+function oauthProviderSupportsRefresh(provider) {
+  return ["anthropic", "openai-codex", "github-copilot"].includes(provider);
+}
+
+function activeOAuthAccessToken(creds) {
+  if (!isProviderCreds(creds)) return undefined;
+  return Date.now() < creds.expires ? creds.access : undefined;
+}
+
+async function refreshOAuthCredentialsUnderLock(provider) {
+  // Re-read under lock; another holder may have just refreshed for us.
+  const bag = readOauthCredentials();
+  const creds = bag[provider];
+  return activeOAuthAccessToken(creds) ?? refreshOAuthCredentials(provider, bag, creds);
+}
+
+async function refreshOAuthCredentials(provider, bag, creds) {
+  try {
+    const oauth = await loadOAuthModule();
+    const refresh = oauthRefreshFunction(oauth, provider, creds);
+    if (typeof refresh !== "function") return undefined;
+    const next = await refresh(creds.refresh);
+    if (!isProviderCreds(next)) return undefined;
+    writeOauthCredentials({ ...bag, [provider]: next });
+    return next.access;
+  } catch {
+    // Never surface refresh-error details; they may include authorization codes.
+    return undefined;
+  }
+}
+
+function oauthRefreshFunction(oauth, provider, creds) {
+  return {
+    anthropic: oauth.refreshAnthropicToken,
+    "openai-codex": oauth.refreshOpenAICodexToken,
+    "github-copilot": (refreshToken) =>
+      oauth.refreshGitHubCopilotToken(refreshToken, creds.enterpriseUrl),
+  }[provider];
 }
 
 function providerAuthToken(provider) {
@@ -1506,23 +1547,50 @@ function configuredProviderApiKey(provider, request) {
   return undefined;
 }
 
-async function runOAuthLogin(rawProvider) {
+async function runOAuthLogin(rawProvider, rawMethod) {
   const provider = normalizeOAuthProvider(rawProvider);
+  const method = normalizeOAuthMethod(provider, rawMethod ?? process.argv[4]);
+  if (provider === "openai-codex" && method === "headless") {
+    const creds = await loginOpenAICodexHeadless();
+    await persistOAuthCredentials(provider, creds);
+    return;
+  }
   const oauth = await loadOAuthModule();
-  const login = provider === "anthropic" ? oauth.loginAnthropic : oauth.loginOpenAICodex;
+  const login = oauthLoginFunction(oauth, provider);
   if (typeof login !== "function") {
     throw new Error(`@earendil-works/pi-ai/oauth does not expose a login flow for ${provider}`);
   }
 
-  const creds = await login({
-    onAuth: (info) => {
-      process.stdout.write(`Open this URL to authorize ${provider}: ${info.url}\n`);
-      tryOpenBrowser(info.url);
-    },
-    onPrompt: async () => promptManualCode(),
-    onManualCodeInput: async () => promptManualCode(),
+  const creds = await login(oauthLoginCallbacks(provider));
+  await persistOAuthCredentials(provider, creds);
+}
+
+function oauthLoginFunction(oauth, provider) {
+  return {
+    anthropic: oauth.loginAnthropic,
+    "github-copilot": oauth.loginGitHubCopilot,
+    "openai-codex": oauth.loginOpenAICodex,
+  }[provider];
+}
+
+function oauthLoginCallbacks(provider) {
+  const callbacks = {
+    onAuth: (infoOrUrl, instructions) => handleOAuthAuthorization(provider, infoOrUrl, instructions),
+    onPrompt: async (prompt) => promptLine(prompt?.message ?? "Input:", prompt?.allowEmpty === true),
     onProgress: (message) => process.stdout.write(`[oauth] ${message}\n`),
-  });
+  };
+  if (provider === "openai-codex") callbacks.onManualCodeInput = async () => promptManualCode();
+  return callbacks;
+}
+
+function handleOAuthAuthorization(provider, infoOrUrl, instructions) {
+  const info = typeof infoOrUrl === "string" ? { url: infoOrUrl, instructions } : (infoOrUrl ?? {});
+  process.stdout.write(`Open this URL to authorize ${provider}: ${info.url}\n`);
+  if (info.instructions) process.stdout.write(`${info.instructions}\n`);
+  tryOpenBrowser(info.url);
+}
+
+async function persistOAuthCredentials(provider, creds) {
   const persistable = {
     ...creds,
     refresh: String(creds?.refresh ?? ""),
@@ -1537,6 +1605,118 @@ async function runOAuthLogin(rawProvider) {
     return writeOauthCredentials({ ...bag, [provider]: persistable });
   });
   process.stdout.write(`${provider} OAuth credentials saved to ${filePath}\n`);
+}
+
+const OPENAI_CODEX_CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
+const OPENAI_AUTH_ISSUER = "https://auth.openai.com";
+const OPENAI_DEVICE_POLLING_SAFETY_MARGIN_MS = 3000;
+
+function parseJwtClaims(token) {
+  const parts = String(token ?? "").split(".");
+  if (parts.length !== 3) return undefined;
+  try {
+    return JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"));
+  } catch {
+    return undefined;
+  }
+}
+
+function extractOpenAiAccountId(tokens) {
+  for (const token of [tokens?.id_token, tokens?.access_token]) {
+    const claims = parseJwtClaims(token);
+    const accountId =
+      claims?.chatgpt_account_id ??
+      claims?.["https://api.openai.com/auth"]?.chatgpt_account_id ??
+      claims?.organizations?.[0]?.id;
+    if (typeof accountId === "string" && accountId) return accountId;
+  }
+  return undefined;
+}
+
+async function loginOpenAICodexHeadless() {
+  const deviceData = await requestOpenAiDeviceCode();
+  const interval = openAiDevicePollingInterval(deviceData);
+  printOpenAiDeviceInstructions(deviceData);
+
+  while (true) {
+    const data = await pollOpenAiDeviceAuthorization(deviceData);
+    if (data) return exchangeOpenAiDeviceAuthorization(data);
+    await sleep(interval + OPENAI_DEVICE_POLLING_SAFETY_MARGIN_MS);
+  }
+}
+
+async function requestOpenAiDeviceCode() {
+  const response = await fetch(`${OPENAI_AUTH_ISSUER}/api/accounts/deviceauth/usercode`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": "kuzushi/pi-agent-core-bridge",
+    },
+    body: JSON.stringify({ client_id: OPENAI_CODEX_CLIENT_ID }),
+  });
+  if (!response.ok) {
+    throw new Error(`OpenAI device authorization failed: ${response.status}`);
+  }
+  return response.json();
+}
+
+function openAiDevicePollingInterval(deviceData) {
+  return Math.max(parseInt(deviceData.interval, 10) || 5, 1) * 1000;
+}
+
+function printOpenAiDeviceInstructions(deviceData) {
+  process.stdout.write(`Open this URL to authorize openai-codex: ${OPENAI_AUTH_ISSUER}/codex/device\n`);
+  process.stdout.write(`Enter code: ${deviceData.user_code}\n`);
+  tryOpenBrowser(`${OPENAI_AUTH_ISSUER}/codex/device`);
+}
+
+async function pollOpenAiDeviceAuthorization(deviceData) {
+  const response = await fetch(`${OPENAI_AUTH_ISSUER}/api/accounts/deviceauth/token`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "User-Agent": "kuzushi/pi-agent-core-bridge",
+    },
+    body: JSON.stringify({
+      device_auth_id: deviceData.device_auth_id,
+      user_code: deviceData.user_code,
+    }),
+  });
+  if (response.ok) return response.json();
+  if (response.status === 403 || response.status === 404) return undefined;
+  throw new Error(`OpenAI device authorization failed: ${response.status}`);
+}
+
+async function exchangeOpenAiDeviceAuthorization(data) {
+  const tokenResponse = await fetch(`${OPENAI_AUTH_ISSUER}/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: openAiDeviceTokenRequestBody(data),
+  });
+  if (!tokenResponse.ok) {
+    throw new Error(`OpenAI token exchange failed: ${tokenResponse.status}`);
+  }
+  const tokens = await tokenResponse.json();
+  return openAiOAuthCredentials(tokens);
+}
+
+function openAiDeviceTokenRequestBody(data) {
+  return new URLSearchParams({
+    grant_type: "authorization_code",
+    code: data.authorization_code,
+    redirect_uri: `${OPENAI_AUTH_ISSUER}/deviceauth/callback`,
+    client_id: OPENAI_CODEX_CLIENT_ID,
+    code_verifier: data.code_verifier,
+  }).toString();
+}
+
+function openAiOAuthCredentials(tokens) {
+  return {
+    refresh: tokens.refresh_token,
+    access: tokens.access_token,
+    expires: Date.now() + Number(tokens.expires_in ?? 3600) * 1000,
+    accountId: extractOpenAiAccountId(tokens),
+  };
 }
 
 function tryOpenBrowser(url) {
@@ -1556,9 +1736,14 @@ function tryOpenBrowser(url) {
 }
 
 async function promptManualCode() {
-  process.stdout.write(
-    "\nIf the browser cannot reach the local callback, paste the final redirect URL or code#state fragment.\n> ",
+  return promptLine(
+    "\nIf the browser cannot reach the local callback, paste the final redirect URL or code#state fragment.",
+    false,
   );
+}
+
+async function promptLine(message, allowEmpty = false) {
+  process.stdout.write(`${message}\n> `);
   const readline = await import("node:readline/promises");
   const rl = readline.createInterface({
     input: process.stdin,
@@ -1566,7 +1751,8 @@ async function promptManualCode() {
     terminal: process.stdin.isTTY,
   });
   try {
-    return (await rl.question("")).trim();
+    const answer = (await rl.question("")).trim();
+    return allowEmpty ? answer : answer;
   } finally {
     rl.close();
   }

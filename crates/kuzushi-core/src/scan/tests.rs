@@ -179,12 +179,13 @@ mod tests {
     }
 
     #[test]
-    fn default_scan_engines_include_native_secret_scan() {
+    fn default_scan_engines_include_native_deterministic_scanners() {
         let engines = default_scan_engines();
         let ids = engines.iter().map(|engine| engine.id()).collect::<Vec<_>>();
 
         assert!(ids.contains(&"semgrep"));
         assert!(ids.contains(&"dep-hygiene"));
+        assert!(ids.contains(&"cargo-audit"));
         assert!(ids.contains(&"secret-scan"));
         assert!(ids.contains(&"iac-scan"));
     }
@@ -1024,6 +1025,22 @@ exit 2
         let ids = engines.iter().map(|engine| engine.id()).collect::<Vec<_>>();
 
         assert_eq!(ids, vec!["iac-scan"]);
+    }
+
+    #[test]
+    fn scan_engines_for_tasks_resolves_cargo_audit_task() {
+        let engines = scan_engines_for_tasks(&["cargo-audit".to_string()]).unwrap();
+        let ids = engines.iter().map(|engine| engine.id()).collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["cargo-audit"]);
+    }
+
+    #[test]
+    fn scan_engines_for_tasks_resolves_license_scan_task() {
+        let engines = scan_engines_for_tasks(&["license-scan".to_string()]).unwrap();
+        let ids = engines.iter().map(|engine| engine.id()).collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["license-scan"]);
     }
 
     #[cfg(unix)]

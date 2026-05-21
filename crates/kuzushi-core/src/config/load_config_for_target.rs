@@ -17,6 +17,7 @@ pub(crate) struct PartialOperatorConfig {
     pub(crate) session_budget_usd: Option<Option<f64>>,
     pub(crate) spend_hard_ceiling_usd: Option<Option<f64>>,
     pub(crate) trusted_workflow_auto_accept: Option<bool>,
+    pub(crate) trusted_modules: Option<Vec<String>>,
 }
 
 pub fn load_config_for_target(target: Option<&Path>) -> Result<V2Config> {
@@ -36,18 +37,10 @@ pub(crate) enum ConfigSource {
 pub fn load_config(paths: ConfigPaths) -> Result<V2Config> {
     let mut config = V2Config::default();
 
-    let global_path = paths.global_config_path();
-    if global_path.exists() {
-        merge_file(&mut config, &global_path, ConfigSource::Global)?;
-    }
-
-    if let Some(project_path) = paths.project_config_path() {
-        if project_path.exists() {
-            merge_file(&mut config, &project_path, ConfigSource::Project)?;
-        }
-    }
-
+    merge_existing_file(&mut config, paths.global_config_path(), ConfigSource::Global)?;
+    merge_project_file(&mut config, paths.project_config_path())?;
     apply_env_overrides(&mut config);
+    normalize_config(&mut config)?;
     validate_config(&config)?;
     Ok(config)
 }
@@ -81,6 +74,20 @@ pub(crate) fn write_config_body(path: &Path, body: String) -> Result<()> {
     fs::write(path, body).with_context(|| format!("Could not write {}", path.display()))
 }
 
+fn merge_project_file(config: &mut V2Config, path: Option<PathBuf>) -> Result<()> {
+    match path {
+        Some(path) => merge_existing_file(config, path, ConfigSource::Project),
+        None => Ok(()),
+    }
+}
+
+fn merge_existing_file(config: &mut V2Config, path: PathBuf, source: ConfigSource) -> Result<()> {
+    if !path.exists() {
+        return Ok(());
+    }
+    merge_file(config, &path, source)
+}
+
 pub(crate) fn merge_file(
     config: &mut V2Config,
     path: &Path,
@@ -110,38 +117,7 @@ fn reject_untrusted_runtime_overrides(
     if source != ConfigSource::Project {
         return Ok(());
     }
-    let mut forbidden: Vec<&'static str> = Vec::new();
-    if let Some(runtime) = patch.runtime.as_ref() {
-        if runtime.kind.is_some() {
-            forbidden.push("runtime.kind");
-        }
-        if runtime.api_key_env.is_some() {
-            forbidden.push("runtime.api_key_env");
-        }
-        if runtime.base_url.is_some() {
-            forbidden.push("runtime.base_url");
-        }
-        if runtime.agent_bridge_command.is_some() {
-            forbidden.push("runtime.agent_bridge_command");
-        }
-        if runtime.thinking_level.is_some() {
-            forbidden.push("runtime.thinking_level");
-        }
-        if runtime.anthropic_oauth.is_some() {
-            forbidden.push("runtime.anthropic_oauth");
-        }
-    }
-    if let Some(operator) = patch.operator.as_ref() {
-        if operator.session_budget_usd.is_some() {
-            forbidden.push("operator.session_budget_usd");
-        }
-        if operator.spend_hard_ceiling_usd.is_some() {
-            forbidden.push("operator.spend_hard_ceiling_usd");
-        }
-        if operator.trusted_workflow_auto_accept.is_some() {
-            forbidden.push("operator.trusted_workflow_auto_accept");
-        }
-    }
+    let forbidden = forbidden_project_fields(patch);
     if forbidden.is_empty() {
         return Ok(());
     }
@@ -156,41 +132,93 @@ fn reject_untrusted_runtime_overrides(
     );
 }
 
+fn forbidden_project_fields(patch: &PartialConfig) -> Vec<&'static str> {
+    let mut fields = forbidden_runtime_fields(patch.runtime.as_ref());
+    fields.extend(forbidden_operator_fields(patch.operator.as_ref()));
+    fields
+}
+
+fn forbidden_runtime_fields(runtime: Option<&PartialRuntimeConfig>) -> Vec<&'static str> {
+    let Some(runtime) = runtime else {
+        return Vec::new();
+    };
+    [
+        ("runtime.kind", runtime.kind.is_some()),
+        ("runtime.api_key_env", runtime.api_key_env.is_some()),
+        ("runtime.base_url", runtime.base_url.is_some()),
+        (
+            "runtime.agent_bridge_command",
+            runtime.agent_bridge_command.is_some(),
+        ),
+        ("runtime.thinking_level", runtime.thinking_level.is_some()),
+        ("runtime.anthropic_oauth", runtime.anthropic_oauth.is_some()),
+    ]
+    .into_iter()
+    .filter_map(|(field, present)| present.then_some(field))
+    .collect()
+}
+
+fn forbidden_operator_fields(operator: Option<&PartialOperatorConfig>) -> Vec<&'static str> {
+    let Some(operator) = operator else {
+        return Vec::new();
+    };
+    [
+        (
+            "operator.session_budget_usd",
+            operator.session_budget_usd.is_some(),
+        ),
+        (
+            "operator.spend_hard_ceiling_usd",
+            operator.spend_hard_ceiling_usd.is_some(),
+        ),
+        (
+            "operator.trusted_workflow_auto_accept",
+            operator.trusted_workflow_auto_accept.is_some(),
+        ),
+        ("operator.trusted_modules", operator.trusted_modules.is_some()),
+    ]
+    .into_iter()
+    .filter_map(|(field, present)| present.then_some(field))
+    .collect()
+}
+
 pub(crate) fn merge_config(config: &mut V2Config, patch: PartialConfig) {
-    if let Some(model) = patch.model {
-        config.model = model;
-    }
-
+    apply_patch_field(&mut config.model, patch.model);
     if let Some(runtime) = patch.runtime {
-        if let Some(kind) = runtime.kind {
-            config.runtime.kind = kind;
-        }
-        if let Some(api_key_env) = runtime.api_key_env {
-            config.runtime.api_key_env = api_key_env;
-        }
-        if let Some(base_url) = runtime.base_url {
-            config.runtime.base_url = base_url;
-        }
-        if let Some(agent_bridge_command) = runtime.agent_bridge_command {
-            config.runtime.agent_bridge_command = agent_bridge_command;
-        }
-        if let Some(thinking_level) = runtime.thinking_level {
-            config.runtime.thinking_level = thinking_level;
-        }
-        if let Some(anthropic_oauth) = runtime.anthropic_oauth {
-            config.runtime.anthropic_oauth = anthropic_oauth;
-        }
+        merge_runtime_config(&mut config.runtime, runtime);
     }
-
     if let Some(operator) = patch.operator {
-        if let Some(session_budget_usd) = operator.session_budget_usd {
-            config.operator.session_budget_usd = session_budget_usd;
-        }
-        if let Some(spend_hard_ceiling_usd) = operator.spend_hard_ceiling_usd {
-            config.operator.spend_hard_ceiling_usd = spend_hard_ceiling_usd;
-        }
-        if let Some(trusted_workflow_auto_accept) = operator.trusted_workflow_auto_accept {
-            config.operator.trusted_workflow_auto_accept = trusted_workflow_auto_accept;
-        }
+        merge_operator_config(&mut config.operator, operator);
+    }
+}
+
+fn merge_runtime_config(config: &mut RuntimeConfig, patch: PartialRuntimeConfig) {
+    apply_patch_field(&mut config.kind, patch.kind);
+    apply_patch_field(&mut config.api_key_env, patch.api_key_env);
+    apply_patch_field(&mut config.base_url, patch.base_url);
+    apply_patch_field(&mut config.agent_bridge_command, patch.agent_bridge_command);
+    apply_patch_field(&mut config.thinking_level, patch.thinking_level);
+    apply_patch_field(&mut config.anthropic_oauth, patch.anthropic_oauth);
+}
+
+fn merge_operator_config(config: &mut OperatorConfig, patch: PartialOperatorConfig) {
+    apply_patch_field(
+        &mut config.session_budget_usd,
+        patch.session_budget_usd,
+    );
+    apply_patch_field(
+        &mut config.spend_hard_ceiling_usd,
+        patch.spend_hard_ceiling_usd,
+    );
+    apply_patch_field(
+        &mut config.trusted_workflow_auto_accept,
+        patch.trusted_workflow_auto_accept,
+    );
+    apply_patch_field(&mut config.trusted_modules, patch.trusted_modules);
+}
+
+fn apply_patch_field<T>(target: &mut T, patch: Option<T>) {
+    if let Some(value) = patch {
+        *target = value;
     }
 }

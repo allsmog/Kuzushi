@@ -42,6 +42,13 @@ pub use engines::codeql::{
 pub use engines::exploit_chain::{
     scan_exploit_chains, scan_exploit_chains_with_runtime, ExploitChainReport, ExploitChainScanner,
 };
+pub use engines::license_scan::{
+    scan_licenses, scan_licenses_with_options, LicenseScanFinding, LicenseScanOptions,
+    LicenseScanReport, LicenseScanScanner,
+};
+pub use engines::sbom_scan::{
+    scan_sbom, SbomComponent, SbomDependencyEdge, SbomLockfile, SbomScanReport,
+};
 pub(in crate::scan) use engines::semgrep::*;
 pub use subprocess::ScanCancellation;
 use subprocess::{
@@ -49,3 +56,16 @@ use subprocess::{
     configure_scanner_subprocess_env, join_scanner_process_readers, wait_for_scanner_process,
     ProcessOutput,
 };
+
+pub(crate) fn completed_scan_tool_json(output: String, data: Value) -> Value {
+    let summary = output_summary(&output);
+    crate::module_result::completed_output_result(summary, output, data)
+}
+
+fn output_summary(output: &str) -> String {
+    output
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("scan completed")
+        .to_string()
+}

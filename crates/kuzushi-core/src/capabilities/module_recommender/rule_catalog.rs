@@ -23,6 +23,30 @@ static RECOMMENDATION_RULES: &[RecommendationRule] = &[
         next_input: target_input,
     },
     RecommendationRule {
+        tool: "license-scan:scan",
+        priority: RecommendationPriority::Medium,
+        reason: "Package manifests are present and should be checked for license risk.",
+        condition: has_dependency_manifests,
+        signals: dependency_signals,
+        next_input: target_input,
+    },
+    RecommendationRule {
+        tool: "sbom-scan:scan",
+        priority: RecommendationPriority::Medium,
+        reason: "Dependency manifests are present and should be inventoried as an SBOM.",
+        condition: has_dependency_manifests,
+        signals: dependency_signals,
+        next_input: target_input,
+    },
+    RecommendationRule {
+        tool: "cargo-audit:scan",
+        priority: RecommendationPriority::High,
+        reason: "Rust dependency lockfiles should be checked against RustSec advisories.",
+        condition: has_rust_dependencies,
+        signals: rust_dependency_signals,
+        next_input: target_input,
+    },
+    RecommendationRule {
         tool: "iac-scan:scan",
         priority: RecommendationPriority::High,
         reason: "Infrastructure or container configuration is present.",
@@ -92,6 +116,10 @@ fn has_dependency_manifests(signals: &RepositorySignals) -> bool {
     signals.dependency_manifests > 0
 }
 
+fn has_rust_dependencies(signals: &RepositorySignals) -> bool {
+    signals.dependency_manifests > 0 && signals.languages.iter().any(|language| language == "Rust")
+}
+
 fn has_iac_files(signals: &RepositorySignals) -> bool {
     signals.iac_files > 0
 }
@@ -132,7 +160,11 @@ fn codeql_input(request: &RecommenderRequest) -> Value {
 }
 
 fn context_signals(signals: &RepositorySignals) -> Vec<String> {
-    vec![format!("{} indexed source file(s)", signals.source_files)]
+    let mut context = vec![format!("{} indexed source file(s)", signals.source_files)];
+    if !signals.frameworks.is_empty() {
+        context.push(format!("frameworks: {}", signals.frameworks.join(", ")));
+    }
+    context
 }
 
 fn source_file_signals(signals: &RepositorySignals) -> Vec<String> {
@@ -142,6 +174,13 @@ fn source_file_signals(signals: &RepositorySignals) -> Vec<String> {
 fn dependency_signals(signals: &RepositorySignals) -> Vec<String> {
     vec![format!(
         "{} dependency manifest(s)",
+        signals.dependency_manifests
+    )]
+}
+
+fn rust_dependency_signals(signals: &RepositorySignals) -> Vec<String> {
+    vec![format!(
+        "Rust project with {} dependency manifest(s)",
         signals.dependency_manifests
     )]
 }
@@ -191,10 +230,30 @@ fn attack_surface_signals(signals: &RepositorySignals) -> Vec<String> {
             signals.attack_surface_max_risk_score
         ));
     }
-    if let Some(tiers) = attack_surface_tier_signal(signals) {
-        surface_signals.push(tiers);
-    }
+    append_attack_surface_distribution_signals(signals, &mut surface_signals);
+    append_framework_signals(signals, &mut surface_signals);
     surface_signals
+}
+
+fn append_attack_surface_distribution_signals(
+    signals: &RepositorySignals,
+    surface_signals: &mut Vec<String>,
+) {
+    surface_signals.extend(attack_surface_tier_signal(signals));
+    surface_signals.extend(attack_surface_kind_signal(signals));
+}
+
+fn attack_surface_kind_signal(signals: &RepositorySignals) -> Option<String> {
+    if signals.attack_surface_kinds.is_empty() {
+        return None;
+    }
+    let kinds = signals
+        .attack_surface_kinds
+        .iter()
+        .take(8)
+        .map(|(kind, count)| format!("{kind}={count}"))
+        .collect::<Vec<_>>();
+    Some(format!("attack-surface kinds: {}", kinds.join(", ")))
 }
 
 fn attack_surface_tier_signal(signals: &RepositorySignals) -> Option<String> {
@@ -206,6 +265,12 @@ fn attack_surface_tier_signal(signals: &RepositorySignals) -> Option<String> {
         .filter_map(|tier| tier_count_signal(tier, &signals.attack_surface_risk_tiers))
         .collect::<Vec<_>>();
     (!tiers.is_empty()).then(|| format!("attack-surface risk tiers: {}", tiers.join(", ")))
+}
+
+fn append_framework_signals(signals: &RepositorySignals, surface_signals: &mut Vec<String>) {
+    if !signals.frameworks.is_empty() {
+        surface_signals.push(format!("frameworks: {}", signals.frameworks.join(", ")));
+    }
 }
 
 fn tier_count_signal(tier: &str, counts: &BTreeMap<String, usize>) -> Option<String> {

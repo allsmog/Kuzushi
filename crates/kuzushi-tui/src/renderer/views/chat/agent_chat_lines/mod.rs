@@ -62,7 +62,10 @@ fn append_failure_empty_state(lines: &mut Vec<Line<'static>>) {
         &[
             ("runs", "inspect recent run artifacts"),
             ("activity", "watch current module progress"),
-            ("ask <question>", "continue with the agent"),
+            (
+                "ask <question>",
+                "next /ask inherits this failure context once",
+            ),
         ],
     ));
 }

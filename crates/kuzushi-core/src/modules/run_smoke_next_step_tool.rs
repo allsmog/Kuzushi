@@ -14,17 +14,18 @@ pub(crate) fn run_smoke_next_step_tool(
     let outcome = crate::runtime::run_tool_loop(runtime, &request, &mut toolbox)?;
     let echoed = outcome.text.contains(&phrase);
 
-    Ok(json!({
-        "ok": true,
-        "data": {
-            "echoedPhrase": echoed,
-            "stepsUsed": outcome.steps_used,
-            "truncated": outcome.truncated,
-            "costUsd": outcome.cost_usd,
-            "transcript": outcome.transcript,
-            "finalText": outcome.text,
-        },
-    }))
+    let summary = format!("smoke:next-step completed in {} step{}", outcome.steps_used, if outcome.steps_used == 1 { "" } else { "s" });
+    let data = json!({
+        "echoedPhrase": echoed,
+        "stepsUsed": outcome.steps_used,
+        "truncated": outcome.truncated,
+        "costUsd": outcome.cost_usd,
+        "transcript": outcome.transcript,
+        "finalText": outcome.text,
+    });
+    let mut result = crate::module_result::completed_output_result(summary.clone(), summary, data);
+    result["costUsd"] = json!(outcome.cost_usd);
+    Ok(result)
 }
 
 fn smoke_phrase(input: &Value) -> String {
@@ -111,7 +112,40 @@ pub(crate) fn smoke_toolbox() -> crate::runtime::ToolBox {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::runtime::{AgentLoopStep, AgentToolLoopRequest, LoopHistoryEntry, ToolCall};
+    use crate::{TriageOutcome, TriageRequest};
     use crate::V2Config;
+    use std::sync::Mutex;
+
+    struct ScriptedSmokeRuntime {
+        steps: Mutex<Vec<AgentLoopStep>>,
+    }
+
+    impl ScriptedSmokeRuntime {
+        fn new(steps: Vec<AgentLoopStep>) -> Self {
+            Self {
+                steps: Mutex::new(steps),
+            }
+        }
+    }
+
+    impl AgentRuntime for ScriptedSmokeRuntime {
+        fn triage_finding_blocking(&self, _: TriageRequest) -> Result<TriageOutcome> {
+            unreachable!("smoke test uses tool-loop calls")
+        }
+
+        fn supports_tools(&self) -> bool {
+            true
+        }
+
+        fn next_step_blocking(
+            &self,
+            _request: &AgentToolLoopRequest,
+            _history: &[LoopHistoryEntry],
+        ) -> Result<AgentLoopStep> {
+            Ok(self.steps.lock().unwrap().remove(0))
+        }
+    }
 
     fn smoke_context(config: &V2Config) -> ToolExecutionContext<'_> {
         ToolExecutionContext {
@@ -132,5 +166,37 @@ mod tests {
         config.model = None;
         let err = smoke_model(&smoke_context(&config)).unwrap_err().to_string();
         assert!(err.contains("smoke:next-step requires an explicit model"));
+    }
+
+    #[test]
+    fn smoke_next_step_returns_completed_envelope() {
+        let runtime = ScriptedSmokeRuntime::new(vec![
+            AgentLoopStep::ToolCall {
+                call: ToolCall {
+                    name: "echo".to_string(),
+                    input: json!({ "x": "kuzushi-ok" }),
+                    call_id: "call-1".to_string(),
+                },
+            },
+            AgentLoopStep::Final {
+                text: "kuzushi-ok".to_string(),
+                structured: None,
+                cost_usd: Some(0.01),
+            },
+        ]);
+        let config = V2Config {
+            model: Some("openai:gpt-5.5".to_string()),
+            ..V2Config::default()
+        };
+
+        let result = run_smoke_next_step_tool(json!({}), &smoke_context(&config), Some(&runtime))
+            .unwrap();
+
+        assert_eq!(result.pointer("/status").and_then(Value::as_str), Some("completed"));
+        assert_eq!(
+            result.pointer("/data/echoedPhrase").and_then(Value::as_bool),
+            Some(true)
+        );
+        assert_eq!(result.pointer("/costUsd").and_then(Value::as_f64), Some(0.01));
     }
 }

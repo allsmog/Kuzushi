@@ -149,5 +149,6 @@ pub(crate) enum Command {
         #[command(subcommand)]
         command: McpCommand,
     },
+    /// Build a Kuzushi PR comment from persisted run artifacts.
     PrComment(PrCommentArgs),
 }

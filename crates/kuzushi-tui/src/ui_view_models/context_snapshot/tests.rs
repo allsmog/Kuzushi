@@ -72,6 +72,21 @@ fn plain_context_model_projects_missing_snapshot_rows() {
 }
 
 #[test]
+fn plain_context_model_projects_malformed_snapshot_rows() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.context_view.snapshot_path = Some(PathBuf::from(".kuzushi/context-snapshot.json"));
+    app.context_view.status = "malformed context snapshot. Next: context build".to_string();
+
+    let model = plain_context_model(&app);
+
+    assert!(model.summary_rows.contains(&"state: malformed".to_string()));
+    assert!(model
+        .summary_rows
+        .contains(&"status: malformed context snapshot. Next: context build".to_string()));
+    assert!(model.body_rows.contains(&"Context snapshot is malformed JSON. Next: context build rewrites .kuzushi/context-snapshot.json.".to_string()));
+}
+
+#[test]
 fn plain_context_model_projects_present_snapshot_details() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.context_view = crate::app::ContextSnapshotView {

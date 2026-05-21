@@ -43,6 +43,7 @@ pub use rank::PlanChange;
 pub use rank::PlanProposal;
 pub use rank::ThrottleAdvisory;
 pub use rank::TuneAction;
+pub use sast_task_row::AuthLoginView;
 pub use sast_task_row::CompletionCycle;
 pub use sast_task_row::ContextSnapshotView;
 pub use sast_task_row::KnowledgeBaseView;

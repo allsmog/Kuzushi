@@ -98,28 +98,94 @@ fn add_route_risk(surface: &AttackSurface, score: &mut u16, reasons: &mut Vec<St
         *score += 10;
         reasons.push("mutating request method".to_string());
     }
-    if route_contains(
-        surface,
-        &[
-            "admin",
-            "login",
-            "oauth",
-            "session",
-            "csrf",
-            "tenant",
-            "org",
-            "workspace",
-            "account",
-        ],
-    ) {
+    if route_contains(surface, AUTH_OR_ADMIN_ROUTE_MARKERS) {
         *score += 12;
         reasons.push("route touches auth or admin workflow".to_string());
     }
-    if route_contains(surface, &["upload", "graphql", "webhook", "callback"]) {
+    if route_contains(surface, RICH_INPUT_ROUTE_MARKERS) {
         *score += 10;
         reasons.push("route accepts rich external input".to_string());
     }
 }
+
+const AUTH_OR_ADMIN_ROUTE_MARKERS: &[&str] = &[
+    "account",
+    "admin",
+    "2fa",
+    "api-key",
+    "apikey",
+    "backup-code",
+    "billing",
+    "change-email",
+    "credential",
+    "credentials",
+    "csrf",
+    "email-change",
+    "email-verification",
+    "login",
+    "logout",
+    "oidc",
+    "passkey",
+    "invite",
+    "invitation",
+    "impersonate",
+    "mfa",
+    "magic-link",
+    "magiclink",
+    "oauth",
+    "org",
+    "otp",
+    "password",
+    "payment",
+    "permission",
+    "recovery",
+    "recovery-code",
+    "refund",
+    "role",
+    "secret",
+    "saml",
+    "scim",
+    "session",
+    "signin",
+    "signup",
+    "sso",
+    "subscription",
+    "tenant",
+    "token",
+    "totp",
+    "verify-email",
+    "webauthn",
+    "workspace",
+];
+
+const RICH_INPUT_ROUTE_MARKERS: &[&str] = &[
+    "archive",
+    "avatar",
+    "backup",
+    "callback",
+    "connect",
+    "download",
+    "export",
+    "federation",
+    "file",
+    "graphql",
+    "import",
+    "parse",
+    "restore",
+    "return-to",
+    "return_to",
+    "returnto",
+    "return-url",
+    "proxy",
+    "realtime",
+    "redirect",
+    "socket",
+    "subscription",
+    "upload",
+    "webhook",
+    "websocket",
+    "webauthn",
+];
 
 fn add_evidence_risk(surface: &AttackSurface, score: &mut u16, reasons: &mut Vec<String>) {
     let evidence = surface.evidence.to_ascii_lowercase();
@@ -130,13 +196,18 @@ fn add_evidence_risk(surface: &AttackSurface, score: &mut u16, reasons: &mut Vec
 }
 
 const REQUEST_CONTROLLED_EVIDENCE: &[&str] = &[
-    "req.body",
-    "req.query",
-    "params",
-    "input",
-    "tenant",
-    "org_id",
-    "workspace",
+    "$request->file", "request.args", "request.body", "request.cookies", "request.data",
+    "request.cookies", "request.files", "request.form", "request.get", "request.get_json",
+    "request.headers", "request.json", "request.meta", "request.post", "request.query_params",
+    "request.query", "req.body", "req.cookies", "req.file", "req.files", "req.headers",
+    "req.query", "cookies[",
+    "cookies.signed", "cookies.get(", "params", "input", "tenant", "params[",
+    "$request->cookie", "$request->input", "$_cookie", "$_files", "$_get", "$_post",
+    "$_request", "@requestbody", "@requestparam", "@requestheader", "getparameter(",
+    "getheader(", "org_id", "workspace", "r.body", "r.cookie(", "r.header.get(",
+    "formvalue(", "url.query(", "postform", "header.get(", "headers.get(", "json<",
+    "query<", "path<", "form<", "iformfile", "request.body", "request.form.files",
+    "[frombody", "[fromform", "[fromheader", "[fromquery",
 ];
 
 fn mutating_method(method: Option<&str>) -> bool {
@@ -203,6 +274,11 @@ pub(crate) fn language_from_path(path: &str) -> Option<&'static str> {
         "py" => Some("Python"),
         "go" => Some("Go"),
         "rs" => Some("Rust"),
+        "java" => Some("Java"),
+        "kt" | "kts" => Some("Kotlin"),
+        "cs" => Some("C#"),
+        "rb" => Some("Ruby"),
+        "php" => Some("PHP"),
         _ => None,
     }
 }

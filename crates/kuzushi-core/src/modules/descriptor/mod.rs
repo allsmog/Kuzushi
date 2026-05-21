@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 mod tests;
 pub use descriptor_model::{
-    DagNodeDescriptor, ModuleKind, ModuleMetadata, OptionSpec, OptionType, ToolDescriptor,
+    DagNodeDescriptor, ModuleKind, ModuleMetadata, OptionSpec, OptionType, RuntimeRequirement,
+    ToolDescriptor,
 };
 pub use metadata::BuiltinModule;

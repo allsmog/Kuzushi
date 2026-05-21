@@ -40,4 +40,12 @@ mod tests {
         assert!(looks_like_prompt_path("checked-in.md"));
         assert!(!looks_like_prompt_path("inline prompt text"));
     }
+
+    #[test]
+    fn parse_sast_tasks_keeps_cargo_audit_when_auto_tasks_are_filtered() {
+        let tasks = parse_sast_tasks(&json!({"disabledTasks": ["semgrep"]})).unwrap();
+
+        assert!(tasks.iter().any(|task| task == "cargo-audit"));
+        assert!(!tasks.iter().any(|task| task == "semgrep"));
+    }
 }

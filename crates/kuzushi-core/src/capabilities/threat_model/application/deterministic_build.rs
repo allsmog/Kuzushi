@@ -1,8 +1,10 @@
 use super::*;
 use super::deterministic_dfd::deterministic_dfd;
-use crate::attack_surface::{
-    build_attack_surface_map, line_contains_any, AttackSurface, AttackSurfaceKind,
+use super::deterministic_route_context::{
+    authorization_flow_input, callback_flow_input, credential_flow_input, cwe_for_surface,
+    data_egress_input, file_ingest_input,
 };
+use crate::attack_surface::{build_attack_surface_map, line_contains_any, AttackSurface, AttackSurfaceKind};
 
 pub(crate) fn build_deterministic_threat_model(
     input: Value,
@@ -25,12 +27,13 @@ pub(crate) fn build_deterministic_threat_model(
 
 fn deterministic_document(input: &DeterministicBuildInput, surfaces: &[AttackSurface]) -> Result<Value> {
     let threat_surfaces = deterministic_threat_surfaces(surfaces, input.max_threats);
+    let narrative_surfaces = surfaces.iter().collect::<Vec<_>>();
     let document = json!({
         "version": "2.0",
         "methodology": input.methodology,
         "dfd": deterministic_dfd(surfaces),
         "threats": deterministic_threats(&threat_surfaces),
-        "narrative": deterministic_narrative(&threat_surfaces),
+        "narrative": deterministic_narrative(&narrative_surfaces),
         "degradation": deterministic_degradation(),
     });
     apply_methodology(normalize_document(document, &input.methodology)?, &input.methodology)
@@ -65,17 +68,33 @@ fn deterministic_threat(index: usize, surface: &AttackSurface) -> Value {
         "targetElementIds": target_element_ids_for(surface.kind),
         "category": stride_category_for(surface.kind),
         "title": format!("{} exposure", surface.title),
-        "description": format!("Deterministic threat candidate from {} at {}.", surface.kind.as_str(), surface.path),
+        "description": deterministic_threat_description(surface),
         "attackVector": surface.route.clone().unwrap_or_else(|| surface.evidence.clone()),
         "preconditions": ["attacker can reach the recorded boundary"],
         "impact": impact_for_risk(&surface.risk.tier),
         "likelihood": likelihood_for_risk(&surface.risk.tier),
         "existingMitigations": [],
         "missingMitigations": ["Review authorization, input handling, and observability for this boundary."],
-        "relatedCwe": cwe_for(surface.kind),
+        "relatedCwe": cwe_for_surface(surface),
         "affectedFiles": affected_file(surface),
         "evidenceAnchors": evidence_anchor(surface),
     })
+}
+
+fn deterministic_threat_description(surface: &AttackSurface) -> String {
+    format!(
+        "Deterministic threat candidate from {} {} at {}.",
+        surface_context(surface),
+        surface.kind.as_str(),
+        surface.path
+    )
+}
+
+fn surface_context(surface: &AttackSurface) -> String {
+    match (surface.framework.as_deref(), surface.language.as_str()) {
+        (Some(framework), language) => format!("{framework}/{language}"),
+        (None, language) => language.to_string(),
+    }
 }
 
 fn target_element_ids_for(kind: AttackSurfaceKind) -> &'static [&'static str] {
@@ -117,6 +136,11 @@ fn deterministic_input_categories(surfaces: &[&AttackSurface]) -> Value {
         "operatorControlled": Vec::<String>::new(),
         "developerControlled": Vec::<String>::new(),
         "externalServices": strings_from_surfaces(surfaces, external_service_input),
+        "credentialFlows": strings_from_surfaces(surfaces, credential_flow_input),
+        "authorizationFlows": strings_from_surfaces(surfaces, authorization_flow_input),
+        "fileIngestFlows": strings_from_surfaces(surfaces, file_ingest_input),
+        "dataEgressFlows": strings_from_surfaces(surfaces, data_egress_input),
+        "callbackFlows": strings_from_surfaces(surfaces, callback_flow_input),
         "sandboxBoundary": Vec::<String>::new(),
         "assumptions": ["Generated from static attack-surface evidence without LLM enrichment."],
     })
@@ -140,15 +164,19 @@ fn strings_from_surfaces(
 
 fn attacker_controlled_input(surface: &AttackSurface) -> Option<String> {
     if surface.route.is_some()
-        || line_contains_any(
-            &surface.evidence.to_ascii_lowercase(),
-            &["req.", "request.", "params", "input"],
-        )
+        || line_contains_any(&surface.evidence.to_ascii_lowercase(), REQUEST_INPUT_EVIDENCE)
     {
         return Some(surface.title.clone());
     }
     None
 }
+
+const REQUEST_INPUT_EVIDENCE: &[&str] = &[
+    "$request", "$_", "@request", "cookies[", "cookies.signed", "formvalue(", "json<",
+    "cookies.get(", "headers.get(", "params", "query<", "r.body", "r.cookie(",
+    "r.header.get(", "req.", "request.", "input", "iformfile", "request.cookies",
+    "[frombody", "[fromform", "[fromheader", "[fromquery",
+];
 
 fn external_service_input(surface: &AttackSurface) -> Option<String> {
     (surface.kind == AttackSurfaceKind::ExternalServiceClient).then(|| surface.title.clone())
@@ -165,7 +193,7 @@ fn tier_titles(surfaces: &[&AttackSurface], tier: &str) -> Vec<String> {
 fn attacker_story(index: usize, surface: &AttackSurface) -> Value {
     json!({
         "title": format!("Exercise {}", surface.title),
-        "narrative": format!("An external actor targets {} using the recorded {} evidence.", surface.title, surface.kind.as_str()),
+        "narrative": format!("An external actor targets {} using the recorded {} {} evidence.", surface.title, surface_context(surface), surface.kind.as_str()),
         "mitigation": "Confirm controls through review and, where appropriate, explicit verification.",
         "threatIds": [format!("DTM-{number:03}", number = index + 1)],
     })
@@ -208,24 +236,6 @@ fn likelihood_for_risk(tier: &str) -> &'static str {
     }
 }
 
-fn cwe_for(kind: AttackSurfaceKind) -> Vec<&'static str> {
-    match kind {
-        AttackSurfaceKind::HttpRoute => vec!["CWE-20"],
-        AttackSurfaceKind::RpcHandler => vec!["CWE-20"],
-        AttackSurfaceKind::CommandExecutionBoundary => vec!["CWE-78"],
-        AttackSurfaceKind::DbQueryBoundary => vec!["CWE-89"],
-        AttackSurfaceKind::DeserializationPoint => vec!["CWE-502"],
-        AttackSurfaceKind::FileUploadParsePath => vec!["CWE-434"],
-        AttackSurfaceKind::BackgroundJob => vec!["CWE-400"],
-        AttackSurfaceKind::ExternalServiceClient => vec!["CWE-918"],
-        AttackSurfaceKind::CliEntrypoint => vec!["CWE-20"],
-        AttackSurfaceKind::AuthBoundary => vec!["CWE-287"],
-        AttackSurfaceKind::SessionStateBoundary => vec!["CWE-384"],
-        AttackSurfaceKind::RequestTrustBoundary => vec!["CWE-352"],
-        AttackSurfaceKind::TenantIsolationBoundary => vec!["CWE-639"],
-    }
-}
-
 fn affected_file(surface: &AttackSurface) -> Vec<Value> {
     vec![json!({
         "filePath": surface.path,
@@ -237,7 +247,7 @@ fn evidence_anchor(surface: &AttackSurface) -> Vec<Value> {
     vec![json!({
         "filePath": surface.path,
         "startLine": surface.line.unwrap_or(1),
-        "description": surface.evidence,
+        "description": format!("{} [{}]", surface.evidence, surface_context(surface)),
         "source": "attack-surface",
     })]
 }
@@ -263,29 +273,53 @@ fn deterministic_response(
     let threat_count = array_len(document.pointer("/threats"));
     let persistent_artifact = input.target.join(".kuzushi").join("threat-model.json");
     let artifacts = threat_model_artifacts(&normalized_artifact, &persistent_artifact, persisted);
+    let summary = deterministic_summary(&input.repo_name);
+    let output = deterministic_output(flavor, &input.repo_name, threat_count);
+    let data = deterministic_response_data(input, document, normalized_artifact, persistent_artifact, persisted);
+    let mut result = crate::module_result::partial_output_result(
+        summary,
+        output,
+        vec![json!("agent runtime unavailable; generated artifact-review-only threat model")],
+        data,
+    );
+    result["artifacts"] = json!(artifacts);
+    result["costUsd"] = json!(0.0);
+    result
+}
+
+fn deterministic_summary(repo_name: &str) -> String {
+    format!("Built deterministic threat-model artifact for {repo_name} without LLM runtime.")
+}
+
+fn deterministic_output(flavor: BuildFlavor, repo_name: &str, threat_count: usize) -> String {
+    format!(
+        "{} degraded deterministically for {}: {} threat(s).",
+        flavor.tool_name(),
+        repo_name,
+        threat_count
+    )
+}
+
+fn deterministic_response_data(
+    input: DeterministicBuildInput,
+    document: Value,
+    normalized_artifact: PathBuf,
+    persistent_artifact: PathBuf,
+    persisted: bool,
+) -> Value {
     json!({
-        "ok": true,
-        "status": "partial",
-        "summary": format!("Built deterministic threat-model artifact for {} without LLM runtime.", input.repo_name),
-        "output": format!("{} degraded deterministically for {}: {} threat(s).", flavor.tool_name(), input.repo_name, threat_count),
-        "artifacts": artifacts,
-        "warnings": ["agent runtime unavailable; generated artifact-review-only threat model"],
-        "errors": [],
-        "data": {
-            "target": input.target.display().to_string(),
-            "repoName": input.repo_name,
-            "artifactDir": input.output_dir,
-            "normalizedArtifact": normalized_artifact.display().to_string(),
-            "threatModelPath": persistent_artifact.display().to_string(),
-            "provider": "deterministic",
-            "methodology": input.methodology,
-            "slice": input.slice,
-            "stages": input.stages,
-            "document": document,
-            "findings": [],
-            "persisted": persisted,
-            "degradation": deterministic_degradation(),
-        },
-        "costUsd": 0.0,
+        "target": input.target.display().to_string(),
+        "repoName": input.repo_name,
+        "artifactDir": input.output_dir,
+        "normalizedArtifact": normalized_artifact.display().to_string(),
+        "threatModelPath": persistent_artifact.display().to_string(),
+        "provider": "deterministic",
+        "methodology": input.methodology,
+        "slice": input.slice,
+        "stages": input.stages,
+        "document": document,
+        "findings": [],
+        "persisted": persisted,
+        "degradation": deterministic_degradation(),
     })
 }

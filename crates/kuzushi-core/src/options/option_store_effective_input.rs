@@ -15,6 +15,26 @@ impl ToolOptionStore {
         Ok(Value::Object(merged))
     }
 
+    pub fn effective_tool_input_with_stored_filter(
+        &self,
+        tool_name: &str,
+        explicit: Value,
+        mut include_stored_option: impl FnMut(&str) -> bool,
+    ) -> Result<Value> {
+        if self.bindings.is_empty() {
+            return Ok(explicit);
+        }
+
+        let mut merged = Map::new();
+        self.merge_effective_stored_values_with_filter(
+            tool_name,
+            &mut merged,
+            &mut include_stored_option,
+        );
+        merge_explicit_input(tool_name, explicit, &mut merged)?;
+        Ok(Value::Object(merged))
+    }
+
     pub fn effective_stored_values(&self, tool_name: &str) -> BTreeMap<String, Value> {
         let mut merged = Map::new();
         self.merge_effective_stored_values(tool_name, &mut merged);
@@ -26,6 +46,15 @@ impl ToolOptionStore {
         tool_name: &str,
         merged: &mut Map<String, Value>,
     ) {
+        self.merge_effective_stored_values_with_filter(tool_name, merged, &mut |_| true);
+    }
+
+    fn merge_effective_stored_values_with_filter(
+        &self,
+        tool_name: &str,
+        merged: &mut Map<String, Value>,
+        include_stored_option: &mut impl FnMut(&str) -> bool,
+    ) {
         let module_id = tool_name.split_once(':').map(|(module, _)| module);
 
         for scope in [
@@ -33,23 +62,36 @@ impl ToolOptionStore {
             OptionScope::Workspace,
             OptionScope::Session,
         ] {
-            self.merge_target(scope, &OptionTarget::All, merged);
+            self.merge_target_with_filter(scope, &OptionTarget::All, merged, include_stored_option);
             if let Some(module_id) = module_id {
-                self.merge_target(scope, &OptionTarget::Module(module_id.to_string()), merged);
+                self.merge_target_with_filter(
+                    scope,
+                    &OptionTarget::Module(module_id.to_string()),
+                    merged,
+                    include_stored_option,
+                );
             }
-            self.merge_target(scope, &OptionTarget::Tool(tool_name.to_string()), merged);
+            self.merge_target_with_filter(
+                scope,
+                &OptionTarget::Tool(tool_name.to_string()),
+                merged,
+                include_stored_option,
+            );
         }
     }
 
-    pub(crate) fn merge_target(
+    fn merge_target_with_filter(
         &self,
         scope: OptionScope,
         target: &OptionTarget,
         merged: &mut Map<String, Value>,
+        include_stored_option: &mut impl FnMut(&str) -> bool,
     ) {
         if let Some(values) = self.values_for(scope, target) {
             for (name, value) in values {
-                merged.insert(name.clone(), value.clone());
+                if include_stored_option(name) {
+                    merged.insert(name.clone(), value.clone());
+                }
             }
         }
     }

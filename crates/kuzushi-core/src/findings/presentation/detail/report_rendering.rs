@@ -62,7 +62,7 @@ impl FindingDetailReport {
     fn append_proof_lines(&self, lines: &mut Vec<String>) {
         lines.push(String::new());
         lines.push(format!("Proof state: {}", self.proof_state));
-        lines.push(format!("Runtime verification: {}", self.runtime_validation));
+        lines.push(format!("Runtime validation: {}", self.runtime_validation));
         lines.push(format!(
             "Proof ladder: {} - {}",
             self.proof_ladder.stage, self.proof_ladder.reason

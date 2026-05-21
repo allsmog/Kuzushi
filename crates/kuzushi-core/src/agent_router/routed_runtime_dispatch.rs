@@ -1,14 +1,35 @@
 use super::*;
 use serde_json::Value;
 
-impl RoutedRuntime {
+impl<'a> RoutedRuntime<'a> {
     pub fn new(
         inner: Arc<dyn AgentRuntime>,
         router: Arc<AgentRouter>,
         operator_default: Option<String>,
     ) -> Self {
+        Self::owned(inner, router, operator_default)
+    }
+
+    pub fn owned(
+        inner: Arc<dyn AgentRuntime>,
+        router: Arc<AgentRouter>,
+        operator_default: Option<String>,
+    ) -> Self {
         Self {
-            inner,
+            inner: RuntimeHandle::Owned(inner),
+            router,
+            operator_default,
+            option_overrides: BTreeMap::new(),
+        }
+    }
+
+    pub fn borrowed(
+        inner: &'a dyn AgentRuntime,
+        router: Arc<AgentRouter>,
+        operator_default: Option<String>,
+    ) -> Self {
+        Self {
+            inner: RuntimeHandle::Borrowed(inner),
             router,
             operator_default,
             option_overrides: BTreeMap::new(),
@@ -107,7 +128,7 @@ fn role_option_override(values: &BTreeMap<String, Value>, role: AgentRole) -> Op
     (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
-impl RoutedRuntime {
+impl RoutedRuntime<'_> {
     fn explicit_model_override(&self, explicit: Option<&str>) -> Option<String> {
         let trimmed = explicit?.trim();
         (!trimmed.is_empty() && Some(trimmed) != self.operator_default.as_deref().map(str::trim))

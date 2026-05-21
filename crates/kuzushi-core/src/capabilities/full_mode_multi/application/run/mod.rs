@@ -10,7 +10,7 @@ mod chunk_execution;
 mod run_setup;
 
 pub fn run(
-    runtime: &RoutedRuntime,
+    runtime: &RoutedRuntime<'_>,
     spend: Option<&SpendLimiter>,
     cfg: &FullModeConfig,
 ) -> Result<FullModeReport> {
@@ -26,55 +26,76 @@ pub fn run(
 }
 
 fn dispatch_full_mode_chunks(
-    runtime: &RoutedRuntime,
+    runtime: &RoutedRuntime<'_>,
     spend: Option<&SpendLimiter>,
     cfg: &FullModeConfig,
     plan: FullModePlan,
     model: &str,
     system_prompt: &str,
 ) -> Result<FullModeReport> {
-    let mut all_findings = Vec::new();
-    let mut dispatched = 0u32;
-    let mut failed = 0u32;
-    let mut failed_chunk_errors = Vec::new();
-    let mut cost = 0.0f64;
-    let mut first_chunk_error: Option<String> = None;
-
+    let mut chunks = FullModeChunkAccumulator::default();
     for chunk in &plan.chunks {
-        if let Some(ids) = &cfg.failed_chunk_ids {
-            if !ids.contains(&chunk.id) {
-                continue;
-            }
+        if should_skip_chunk(cfg, chunk.id) {
+            continue;
         }
         let chunk_result =
             chunk_execution::run_full_mode_chunk(runtime, spend, cfg, chunk, model, system_prompt)?;
-        if chunk_result.succeeded {
-            dispatched += 1;
-            cost += chunk_result.cost_usd;
-            all_findings.extend(chunk_result.findings);
-        } else {
-            failed += 1;
-            let reason = chunk_result
-                .error
-                .unwrap_or_else(|| "unknown chunk failure".to_string());
-            if first_chunk_error.is_none() {
-                first_chunk_error = Some(reason.clone());
-            }
-            failed_chunk_errors.push(FailedChunkError {
-                chunk_id: chunk.id,
-                reason,
-            });
-        }
+        chunks.record(chunk.id, chunk_result);
     }
 
-    Ok(FullModeReport {
-        findings: all_findings,
-        plan,
-        chunks_dispatched: dispatched,
-        chunks_failed: failed,
-        failed_chunk_errors,
-        cost_usd: cost,
-        dry_run: false,
-        first_chunk_error,
-    })
+    Ok(chunks.into_report(plan))
+}
+
+fn should_skip_chunk(cfg: &FullModeConfig, chunk_id: u32) -> bool {
+    cfg.failed_chunk_ids
+        .as_ref()
+        .is_some_and(|ids| !ids.contains(&chunk_id))
+}
+
+#[derive(Default)]
+struct FullModeChunkAccumulator {
+    findings: Vec<crate::findings::Finding>,
+    dispatched: u32,
+    failed: u32,
+    failed_chunk_errors: Vec<FailedChunkError>,
+    cost_usd: f64,
+    first_chunk_error: Option<String>,
+}
+
+impl FullModeChunkAccumulator {
+    fn record(&mut self, chunk_id: u32, result: chunk_execution::FullModeChunkResult) {
+        if result.succeeded {
+            self.record_success(result);
+            return;
+        }
+
+        self.record_failure(chunk_id, result.error);
+    }
+
+    fn record_success(&mut self, result: chunk_execution::FullModeChunkResult) {
+        self.dispatched += 1;
+        self.cost_usd += result.cost_usd;
+        self.findings.extend(result.findings);
+    }
+
+    fn record_failure(&mut self, chunk_id: u32, error: Option<String>) {
+        self.failed += 1;
+        let reason = error.unwrap_or_else(|| "unknown chunk failure".to_string());
+        self.first_chunk_error.get_or_insert_with(|| reason.clone());
+        self.failed_chunk_errors
+            .push(FailedChunkError { chunk_id, reason });
+    }
+
+    fn into_report(self, plan: FullModePlan) -> FullModeReport {
+        FullModeReport {
+            findings: self.findings,
+            chunks_dispatched: self.dispatched,
+            chunks_failed: self.failed,
+            failed_chunk_errors: self.failed_chunk_errors,
+            cost_usd: self.cost_usd,
+            first_chunk_error: self.first_chunk_error,
+            dry_run: false,
+            plan,
+        }
+    }
 }

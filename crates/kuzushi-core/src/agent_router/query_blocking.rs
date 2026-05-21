@@ -1,7 +1,7 @@
 use super::*;
 
 #[async_trait]
-impl AgentRuntime for RoutedRuntime {
+impl AgentRuntime for RoutedRuntime<'_> {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         validate_routed_request_model("query", &request.model)?;
         self.inner.query_blocking(request)

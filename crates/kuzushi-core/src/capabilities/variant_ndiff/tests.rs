@@ -405,6 +405,10 @@ mod tests {
             .unwrap();
         assert_eq!(lift.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
+            lift.pointer("/status").and_then(Value::as_str),
+            Some("completed")
+        );
+        assert_eq!(
             lift.pointer("/data/signature/sink").and_then(Value::as_str),
             Some("child_process.exec")
         );
@@ -419,6 +423,10 @@ mod tests {
             .unwrap();
         assert_eq!(hunt.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
+            hunt.pointer("/status").and_then(Value::as_str),
+            Some("completed")
+        );
+        assert_eq!(
             hunt.pointer("/data/variants")
                 .and_then(Value::as_array)
                 .unwrap()
@@ -429,6 +437,58 @@ mod tests {
             .pointer("/data/persisted/findingsDb")
             .and_then(Value::as_str)
             .is_some());
+    }
+
+    #[test]
+    fn variant_and_ndiff_input_rejections_use_failed_envelopes() {
+        let temp = tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
+
+        let lift = run_variant_lift_pattern(json!({}), &ctx, Some(&MockRuntime::new())).unwrap();
+        assert_failed_rejection(&lift, "missing-fingerprint");
+
+        let hunt = run_variant_hunt(json!({}), &ctx, Some(&MockRuntime::new())).unwrap();
+        assert_failed_rejection(&hunt, "missing-fingerprint");
+
+        let fetch = run_ndiff_fetch_cve(json!({})).unwrap();
+        assert_failed_rejection(&fetch, "missing-id");
+
+        let extract = run_ndiff_extract_fix_pattern(
+            json!({}),
+            &ctx,
+            Some(&MockRuntime::new()),
+        )
+        .unwrap();
+        assert_failed_rejection(&extract, "missing-source");
+
+        let ndiff_hunt =
+            run_ndiff_hunt_variants(json!({}), &ctx, Some(&MockRuntime::new())).unwrap();
+        assert_failed_rejection(&ndiff_hunt, "missing-pattern");
+    }
+
+    fn assert_failed_rejection(result: &Value, reason: &str) {
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
+        assert_eq!(
+            result.pointer("/status").and_then(Value::as_str),
+            Some("failed")
+        );
+        assert_eq!(
+            result.pointer("/data/reason").and_then(Value::as_str),
+            Some(reason)
+        );
+        assert!(!result
+            .get("errors")
+            .and_then(Value::as_array)
+            .unwrap()
+            .is_empty());
     }
 
     #[test]
@@ -506,6 +566,10 @@ mod tests {
         .unwrap();
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
+            result.pointer("/status").and_then(Value::as_str),
+            Some("completed")
+        );
+        assert_eq!(
             result
                 .pointer("/data/primaryPatchUrl")
                 .and_then(Value::as_str),
@@ -537,9 +601,13 @@ mod tests {
                 json!({"patchText": "--- a/parser.c\n+++ b/parser.c\n+if (len > cap) return -1;\n"}),
                 &ctx,
                 Some(&runtime),
-            )
-            .unwrap();
+        )
+        .unwrap();
         assert_eq!(extract.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            extract.pointer("/status").and_then(Value::as_str),
+            Some("completed")
+        );
         let pattern = extract.pointer("/data/pattern").cloned().unwrap();
 
         let hunt = registry
@@ -551,6 +619,10 @@ mod tests {
             )
             .unwrap();
         assert_eq!(hunt.get("ok").and_then(Value::as_bool), Some(true));
+        assert_eq!(
+            hunt.pointer("/status").and_then(Value::as_str),
+            Some("completed")
+        );
         assert_eq!(
             hunt.pointer("/data/findings")
                 .and_then(Value::as_array)

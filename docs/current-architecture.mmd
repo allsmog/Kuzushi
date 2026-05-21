@@ -14,18 +14,18 @@ flowchart LR
   end
 
   subgraph Shell["Interactive shell mode"]
-    TuiApp["Ratatui shell app<br/>crates/kuzushi-tui/src/app.rs"]
+    TuiApp["Ratatui shell app<br/>crates/kuzushi-tui/src/app/"]
     Commands["Rust command parser<br/>crates/kuzushi-tui/src/commands.rs"]
-    Renderer["Ratatui renderer<br/>crates/kuzushi-tui/src/renderer.rs"]
+    Renderer["Ratatui renderer<br/>crates/kuzushi-tui/src/renderer/"]
     ShellViews["Catalog, module, run,<br/>findings, threats, prompts"]
   end
 
   subgraph Core["Shared Rust core"]
-    Registry["ModuleRegistry<br/>crates/kuzushi-core/src/modules.rs"]
+    Registry["ModuleRegistry<br/>crates/kuzushi-core/src/modules/"]
     ToolCtx["ToolExecutionContext<br/>config, workspace, findings store"]
     Workspace["WorkspaceTarget<br/>crates/kuzushi-core/src/workspace.rs"]
-    Findings["FindingStore<br/>crates/kuzushi-core/src/findings.rs"]
-    ScanCore["ScanEngine trait and scan runner<br/>crates/kuzushi-core/src/scan.rs"]
+    Findings["FindingStore<br/>crates/kuzushi-core/src/findings/"]
+    ScanCore["ScanEngine trait and scan runner<br/>crates/kuzushi-core/src/scan/"]
   end
 
   subgraph Modules["Native module executors"]
@@ -45,7 +45,7 @@ flowchart LR
   subgraph Storage["Persistence and artifacts"]
     Config["~/.kuzushi/v2/config.toml<br/>.kuzushi/v2/config.toml"]
     Db[".kuzushi/v2/findings.sqlite3"]
-    Runs[".kuzushi/runs/&lt;runId&gt;/<br/>summary.json, triage.jsonl, verify.jsonl"]
+    Runs[".kuzushi/runs/&lt;runId&gt;/<br/>run.json, events.jsonl, trace.jsonl"]
     Artifacts["context-snapshot.json<br/>threat-model.json<br/>x-ray/ and module artifacts"]
   end
 

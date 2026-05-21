@@ -209,16 +209,14 @@ fn context_build_response(
     snapshot: Value,
     files_indexed: usize,
 ) -> Value {
-    json!({
-        "ok": true,
-        "output": context_build_output(root, snapshot_path, files_indexed),
-        "data": {
-            "root": root.display().to_string(),
-            "stateDir": state_dir.display().to_string(),
-            "snapshotPath": snapshot_path.display().to_string(),
-            "snapshot": snapshot,
-        },
-    })
+    let output = context_build_output(root, snapshot_path, files_indexed);
+    let data = json!({
+        "root": root.display().to_string(),
+        "stateDir": state_dir.display().to_string(),
+        "snapshotPath": snapshot_path.display().to_string(),
+        "snapshot": snapshot,
+    });
+    crate::module_result::completed_output_result(output.clone(), output, data)
 }
 
 fn context_build_output(root: &Path, snapshot_path: &Path, files_indexed: usize) -> String {

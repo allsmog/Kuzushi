@@ -32,7 +32,10 @@ pub fn write_run_summary(
         None,
         target_label.to_string(),
     )
-    .with_findings(findings);
+    .with_findings(findings)
+    .with_loaded_modules(
+        kuzushi_core::ModuleRegistry::with_v2_builtins().loaded_module_specifiers(),
+    );
     summary.status = canonical_run_status(status).to_string();
     let _ = kuzushi_core::write_run_summary(target, &summary);
 }
@@ -53,6 +56,24 @@ pub fn write_run_failure_handoff(
         error,
         &[],
     );
+}
+
+pub fn append_run_status_event(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    tool: &str,
+    status: &str,
+    message: impl Into<String>,
+) {
+    let Some(target) = target else { return };
+    let event = kuzushi_core::run_artifacts::RunEvent::new(
+        kuzushi_core::run_artifacts::next_run_event_number(target, run_id),
+        "tool",
+        canonical_run_status(status),
+        message,
+    )
+    .with_tool(tool);
+    let _ = kuzushi_core::run_artifacts::append_run_event(target, run_id, &event);
 }
 
 fn canonical_run_status(status: &str) -> &'static str {

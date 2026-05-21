@@ -3,6 +3,7 @@ pub mod artifact_kb;
 pub mod attack_surface;
 pub mod diff_scope;
 mod domain;
+mod git_metadata;
 pub mod inventory;
 pub mod source_span;
 
@@ -14,5 +15,6 @@ pub use artifact_kb::*;
 pub use attack_surface::*;
 pub use diff_scope::*;
 pub use domain::{WorkspaceExportFormat, WorkspaceFindingsExport, WorkspaceTarget};
+pub use git_metadata::target_git_metadata;
 pub use inventory::*;
 pub use source_span::*;

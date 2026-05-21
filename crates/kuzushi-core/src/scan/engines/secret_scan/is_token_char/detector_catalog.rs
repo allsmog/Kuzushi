@@ -33,6 +33,28 @@ pub(in crate::scan::engines::secret_scan) fn github_pat_detector() -> Detector {
     }
 }
 
+pub(in crate::scan::engines::secret_scan) fn gitlab_pat_detector() -> Detector {
+    Detector {
+        id: "gitlab-pat",
+        name: "GitLab Personal Access Token",
+        severity: SecretSeverity::Error,
+        entropy_threshold: None,
+        cwe: "CWE-798",
+        description: "GitLab personal access token.",
+    }
+}
+
+pub(in crate::scan::engines::secret_scan) fn npm_access_token_detector() -> Detector {
+    Detector {
+        id: "npm-access-token",
+        name: "NPM Access Token",
+        severity: SecretSeverity::Error,
+        entropy_threshold: None,
+        cwe: "CWE-798",
+        description: "NPM registry access token.",
+    }
+}
+
 pub(in crate::scan::engines::secret_scan) fn slack_token_detector() -> Detector {
     Detector {
         id: "slack-token",

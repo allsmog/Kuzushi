@@ -1,14 +1,12 @@
 use super::*;
+use kuzushi_core::DynamicModuleLoadOptions;
 #[cfg(test)]
 use kuzushi_core::ScanCancellation;
 
 impl ShellApp {
     pub(crate) fn handle_load_command(&mut self, specifier: Option<String>) {
         self.shell_view = ShellView::Tools;
-        let Some(specifier) = specifier
-            .map(|value| value.trim().to_string())
-            .filter(|value| !value.is_empty())
-        else {
+        let Some(specifier) = normalized_load_specifier(specifier) else {
             self.log(
                 "error",
                 "load requires a module specifier. Next: load builtin:sast or modules",
@@ -16,16 +14,7 @@ impl ShellApp {
             return;
         };
 
-        let module_id = specifier
-            .strip_prefix("builtin:")
-            .unwrap_or(specifier.as_str())
-            .trim();
-        if !module_id.contains(':')
-            && self
-                .registry
-                .modules()
-                .any(|module| module.metadata().id == module_id)
-        {
+        if let Some(module_id) = self.static_module_id_for_load_specifier(&specifier) {
             self.log(
                 "load",
                 format!(
@@ -35,12 +24,30 @@ impl ShellApp {
             return;
         }
 
-        self.log(
-            "error",
-            format!(
-                "dynamic module loading is not supported by the Rust shell; {specifier:?} was not loaded. Next: modules"
-            ),
-        );
+        let options = DynamicModuleLoadOptions {
+            allow_untrusted: false,
+            trusted_specifiers: self.config.operator.trusted_modules.clone(),
+        };
+        match self.registry.load_dynamic_module(&specifier, &options) {
+            Ok(()) => {
+                self.log("load", format!("{specifier} loaded. Next: tools"));
+            }
+            Err(error) => self.log("error", error.to_string()),
+        }
+    }
+
+    fn static_module_id_for_load_specifier(&self, specifier: &str) -> Option<String> {
+        let module_id = specifier
+            .strip_prefix("builtin:")
+            .unwrap_or(specifier)
+            .trim();
+        if module_id.contains(':') {
+            return None;
+        }
+        self.registry
+            .modules()
+            .any(|module| module.metadata().id == module_id)
+            .then(|| module_id.to_string())
     }
 
     pub(crate) fn handle_resume_command(&mut self, run_id: Option<String>) {
@@ -122,4 +129,10 @@ impl ShellApp {
             "no live pause/resume control is active in the Rust shell. Next: scan <target> or run <tool>",
         );
     }
+}
+
+fn normalized_load_specifier(specifier: Option<String>) -> Option<String> {
+    specifier
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
 }

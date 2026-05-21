@@ -1,5 +1,6 @@
 use crate::findings::{
-    finding_location, severity_badge, severity_icon, sorted_finding_aliases, Finding, Severity,
+    finding_cwe_label, finding_evidence_preview, finding_location, finding_remediation_hint,
+    severity_badge, severity_icon, sorted_finding_aliases, Finding, Severity,
 };
 pub(crate) use render_verdict_counts::*;
 pub(crate) use severity_badge::*;
@@ -12,4 +13,4 @@ mod severity_badge;
 mod tests;
 
 pub use build_pr_comment::build_pr_comment;
-pub use build_pr_comment::PrCommentInput;
+pub use build_pr_comment::{PrCommentChain, PrCommentChainStep, PrCommentInput, PrCommentPhaseCost};

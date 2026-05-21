@@ -71,7 +71,10 @@ fn append_attached_records(lines: &mut Vec<Line<'static>>, model: &KnowledgeBase
                     "add a workspace-relative file or directory",
                 ),
                 ("attach https://...", "add a URL · metadata-only by default"),
-                ("kb pull kev", "preload the KEV / NVD / CWE catalogs"),
+                (
+                    "kb pull kev",
+                    "preload KEV / NVD / CWE catalogs (network required)",
+                ),
             ],
         ));
         return;

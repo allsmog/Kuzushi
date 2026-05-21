@@ -24,6 +24,10 @@ pub(crate) fn row_to_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Findin
         verification: None,
         vuln_source: row.vuln_source,
         dedup_key: row.dedup_key,
+        suppressed: row.suppressed,
+        snoozed_until: row.snoozed_until,
+        remediation: row.remediation,
+        references: row.references,
         evidence: Vec::new(),
     })
 }
@@ -46,6 +50,10 @@ struct FindingRow {
     triage: Option<TriageOutcome>,
     vuln_source: Option<VulnSource>,
     dedup_key: Option<String>,
+    suppressed: bool,
+    snoozed_until: Option<String>,
+    remediation: Option<String>,
+    references: Vec<String>,
 }
 
 fn finding_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FindingRow> {
@@ -70,6 +78,10 @@ fn finding_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FindingRow> {
         triage: analysis.triage,
         vuln_source: analysis.vuln_source,
         dedup_key: analysis.dedup_key,
+        suppressed: analysis.suppressed,
+        snoozed_until: analysis.snoozed_until,
+        remediation: analysis.remediation,
+        references: analysis.references,
     })
 }
 
@@ -115,9 +127,14 @@ struct FindingAnalysisRow {
     triage: Option<TriageOutcome>,
     vuln_source: Option<VulnSource>,
     dedup_key: Option<String>,
+    suppressed: bool,
+    snoozed_until: Option<String>,
+    remediation: Option<String>,
+    references: Vec<String>,
 }
 
 fn finding_analysis_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FindingAnalysisRow> {
+    let references_json: Option<String> = row.get(23).ok();
     Ok(FindingAnalysisRow {
         severity: severity_from_row(row)?,
         message: row.get(9)?,
@@ -128,5 +145,14 @@ fn finding_analysis_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FindingAnal
         triage: triage_from_row(row)?,
         vuln_source: vuln_source_from_row(row),
         dedup_key: row.get(19).ok(),
+        suppressed: row.get::<_, i64>(20).unwrap_or(0) != 0,
+        snoozed_until: row.get(21).ok(),
+        remediation: row.get(22).ok(),
+        references: parse_references(references_json.as_deref()),
     })
+}
+
+fn parse_references(raw: Option<&str>) -> Vec<String> {
+    raw.and_then(|value| serde_json::from_str::<Vec<String>>(value).ok())
+        .unwrap_or_default()
 }

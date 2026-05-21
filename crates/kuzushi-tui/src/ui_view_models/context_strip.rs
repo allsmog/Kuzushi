@@ -1,6 +1,7 @@
 use super::{
-    active_stage_label, catalog_model, compact_target_path, findings_count_summary,
-    format_session_cost, routing_mode_segment, view_status_segment, ShellApp,
+    active_stage_label, catalog_model, compact_target_path, context_snapshot_state,
+    findings_count_summary, format_session_cost, routing_mode_segment, view_status_segment,
+    ShellApp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -8,6 +9,7 @@ pub(crate) struct ContextStripModel {
     pub(crate) mode: String,
     pub(crate) target: String,
     pub(crate) context_present: bool,
+    pub(crate) context_state: &'static str,
     pub(crate) model: String,
     pub(crate) findings: String,
     pub(crate) view: String,
@@ -34,6 +36,7 @@ pub(crate) fn context_strip_model(app: &ShellApp) -> ContextStripModel {
         mode: routing_mode_segment(app),
         target: target_segment_value(app),
         context_present: app.context_view.exists,
+        context_state: context_snapshot_state(app),
         model: model_segment_value(app),
         findings: findings_count_summary(&app.findings),
         view: view_status_segment(app),
@@ -60,7 +63,7 @@ fn plain_context_strip_line(
 ) -> String {
     fit_plain_text(
         &format!(
-            "{} | target:{} | {} | {} | {} mods",
+            "{} · target:{} · view:{} · {} · modules:{}",
             strip.mode, strip.target, strip.view, strip.findings, module_count
         ),
         width,
@@ -89,29 +92,31 @@ impl ContextStripModel {
     pub(crate) fn compact_segments(&self) -> Vec<String> {
         let mut segments = vec![
             self.mode.clone(),
-            format!("target {}", self.target),
-            self.context_state(),
-            format!("model {}", self.model),
+            format!("target:{}", self.target),
+            self.context_state_segment(),
+            format!("model:{}", self.model),
             self.findings.clone(),
-            format!("view {}", self.view),
+            format!("view:{}", self.view),
         ];
         if let Some(activity) = &self.compact_activity {
-            segments.push(format!("activity {activity}"));
+            segments.push(format!("activity:{activity}"));
         }
         if let Some(stage) = &self.stage {
-            segments.push(format!("{} {}", stage.label, stage.value));
+            segments.push(format!("{}:{}", stage.label, stage.value));
         }
         if let Some(cost) = &self.cost {
-            segments.push(format!("cost {cost}"));
+            segments.push(format!("cost:{cost}"));
         }
         segments
     }
 
-    fn context_state(&self) -> String {
-        if self.context_present {
-            "ctx ✓ present".to_string()
+    fn context_state_segment(&self) -> String {
+        if self.context_state == "malformed" {
+            "ctx:malformed".to_string()
+        } else if self.context_present {
+            "ctx:✓ present".to_string()
         } else {
-            "ctx missing".to_string()
+            "ctx:missing".to_string()
         }
     }
 }

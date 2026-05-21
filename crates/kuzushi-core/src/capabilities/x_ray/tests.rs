@@ -157,6 +157,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(output.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_x_ray_envelope(&output, "x-ray:run complete");
         assert!(workspace.root().join("x-ray/x-ray.md").exists());
         assert!(output
             .get("output")
@@ -269,6 +270,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(output.get("ok").and_then(Value::as_bool), Some(true));
+        assert_completed_x_ray_envelope(&output, "x-ray:read loaded artifacts");
     }
 
     #[test]
@@ -305,5 +307,21 @@ mod tests {
         .unwrap_err();
 
         assert!(err.to_string().contains("Could not resolve target"));
+    }
+
+    fn assert_completed_x_ray_envelope(output: &Value, summary_prefix: &str) {
+        assert_eq!(output.get("status").and_then(Value::as_str), Some("completed"));
+        assert!(output
+            .get("summary")
+            .and_then(Value::as_str)
+            .is_some_and(|summary| summary.starts_with(summary_prefix)));
+        assert!(output
+            .get("artifacts")
+            .and_then(Value::as_array)
+            .is_some_and(|artifacts| artifacts.len() == 4));
+        assert!(output
+            .get("errors")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty));
     }
 }

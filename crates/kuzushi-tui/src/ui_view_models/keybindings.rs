@@ -18,7 +18,10 @@ pub(crate) fn footer_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         return bindings;
     }
     let mut bindings = idle_keybindings(app);
-    bindings.insert(0, bind("Tab", "complete"));
+    let tab = bind("Tab", "complete");
+    if !bindings.contains(&tab) {
+        bindings.insert(0, tab);
+    }
     bindings
 }
 
@@ -48,7 +51,7 @@ fn default_keybindings() -> Vec<FooterKeybinding> {
     vec![
         bind("Enter", "run command"),
         bind("back", "home"),
-        bind("help", "help"),
+        bind("help", "command list"),
         bind("Ctrl+C", "exit"),
     ]
 }

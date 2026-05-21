@@ -9,7 +9,9 @@ pub use crate::findings::{
     PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, ProofLadderState,
     Severity, StaticProofState, TriageOutcome, TriageVerdict, VulnSource,
 };
-pub use crate::pr_comment::{build_pr_comment, PrCommentInput};
+pub use crate::pr_comment::{
+    build_pr_comment, PrCommentChain, PrCommentChainStep, PrCommentInput, PrCommentPhaseCost,
+};
 pub use crate::remediation::patch::run_patch_finding;
 pub use crate::source_span::{extract_source_span, SourceSpan};
 pub use crate::spend::{

@@ -26,12 +26,6 @@ importers:
       '@kuzushi/randori-plugin':
         specifier: github:allsmog/randori-plugin
         version: https://codeload.github.com/allsmog/randori-plugin/tar.gz/ddf7dd72e0032988e7a47746842a324c9f8219aa
-      '@kuzushi/tob-skills':
-        specifier: github:allsmog/tob-security-skills
-        version: https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2
-      '@kuzushi/vuln-scout':
-        specifier: github:allsmog/vuln-scout
-        version: https://codeload.github.com/allsmog/vuln-scout/tar.gz/8ddf9804e4db7d0f2d95f628ab5e31718e099de8
       better-sqlite3:
         specifier: ^12.8.0
         version: 12.8.0
@@ -41,12 +35,6 @@ importers:
       commander:
         specifier: ^13.1.0
         version: 13.1.0
-      promptarmor-plugin:
-        specifier: github:allsmog/promptarmor-plugin
-        version: https://codeload.github.com/allsmog/promptarmor-plugin/tar.gz/690d60a5b4d2136206ef7dedd516d3fcfddd4db9
-      shinsa-plugin:
-        specifier: github:allsmog/shinsa-plugin
-        version: https://codeload.github.com/allsmog/shinsa-plugin/tar.gz/6637a334ada3e66f0d23af7d90f0138a87d5193b
       tinyglobby:
         specifier: ^0.2.15
         version: 0.2.15
@@ -96,6 +84,19 @@ importers:
       vitest:
         specifier: ^3.0.5
         version: 3.2.4(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)
+    optionalDependencies:
+      '@kuzushi/tob-skills':
+        specifier: github:allsmog/tob-security-skills
+        version: https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2
+      '@kuzushi/vuln-scout':
+        specifier: github:allsmog/vuln-scout
+        version: https://codeload.github.com/allsmog/vuln-scout/tar.gz/8ddf9804e4db7d0f2d95f628ab5e31718e099de8
+      promptarmor-plugin:
+        specifier: github:allsmog/promptarmor-plugin
+        version: https://codeload.github.com/allsmog/promptarmor-plugin/tar.gz/690d60a5b4d2136206ef7dedd516d3fcfddd4db9
+      shinsa-plugin:
+        specifier: github:allsmog/shinsa-plugin
+        version: https://codeload.github.com/allsmog/shinsa-plugin/tar.gz/6637a334ada3e66f0d23af7d90f0138a87d5193b
 
 packages:
 

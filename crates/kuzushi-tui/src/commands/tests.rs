@@ -89,14 +89,30 @@ mod tests {
         );
         assert_eq!(
             parse_command("auth openai"),
-            ShellCommand::AuthLogin(Some("openai-codex".to_string()))
+            ShellCommand::AuthLogin(Some("openai".to_string()))
+        );
+        assert_eq!(
+            parse_command("/auth login openai headless"),
+            ShellCommand::AuthLogin(Some("openai headless".to_string()))
+        );
+        assert_eq!(
+            parse_command("/auth login github-copilot"),
+            ShellCommand::AuthLogin(Some("github-copilot".to_string()))
         );
         assert!(matches!(
             parse_command(&format!("auth {}", "codex")),
             ShellCommand::Unknown(_)
         ));
         assert!(matches!(
-            parse_command("auth openai-codex"),
+            parse_command(&format!("auth {}", "openai-codex")),
+            ShellCommand::Unknown(_)
+        ));
+        assert!(matches!(
+            parse_command("/auth login codex"),
+            ShellCommand::Unknown(_)
+        ));
+        assert!(matches!(
+            parse_command(&format!("/auth login {}", "openai-codex")),
             ShellCommand::Unknown(_)
         ));
         assert_eq!(

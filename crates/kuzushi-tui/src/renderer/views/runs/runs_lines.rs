@@ -5,7 +5,7 @@ pub(crate) fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("RUN TIMELINE", area.width));
-    let widths = [12usize, 14, 9, value_width(area, 40)];
+    let widths = [14usize, 14, 9, value_width(area, 42)];
     lines.push(aligned_header(
         &["runId", "status", "findings", "target"],
         &widths,
@@ -71,7 +71,7 @@ fn run_timeline_status_style(status: PastRunStatus) -> Style {
         PastRunStatus::Complete => theme::success(),
         PastRunStatus::Running => theme::warn(),
         PastRunStatus::Partial | PastRunStatus::Paused => theme::warn(),
-        PastRunStatus::Failed => theme::danger(),
+        PastRunStatus::Failed | PastRunStatus::Malformed => theme::danger(),
         PastRunStatus::Unknown => theme::muted(),
     }
 }

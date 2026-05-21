@@ -1,14 +1,16 @@
 use super::*;
+use crate::artifact_contract::{CanonicalRunArtifactSpec, CANONICAL_RUN_ARTIFACTS};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RunArtifactManifest {
+    #[serde(alias = "run_id")]
     pub run_id: String,
     pub artifacts: Vec<RunArtifact>,
 }
 
 pub fn load_run_artifacts(target: impl AsRef<Path>, run_id: &str) -> Result<Vec<RunArtifact>> {
-    Ok(load_manifest(target, run_id)?.artifacts)
+    Ok(normalized_artifacts(load_manifest(target, run_id)?.artifacts))
 }
 
 pub(crate) fn record_canonical_run_artifacts(
@@ -28,21 +30,35 @@ pub(crate) fn record_run_artifact(
     artifact: &RunArtifact,
 ) -> Result<PathBuf> {
     let mut manifest = load_manifest(&target, run_id)?;
-    upsert_artifact(&mut manifest.artifacts, artifact.clone());
+    let artifact = artifact
+        .normalized()
+        .context("run artifact path must not be empty")?;
+    upsert_artifact(&mut manifest.artifacts, artifact);
     write_manifest(target, &manifest)
 }
 
 fn load_manifest(target: impl AsRef<Path>, run_id: &str) -> Result<RunArtifactManifest> {
     let path = manifest_path(&target, run_id);
-    if !path.exists() {
-        return Ok(RunArtifactManifest {
-            run_id: run_id.to_string(),
-            artifacts: Vec::new(),
-        });
+    let metadata = match fs::metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(empty_manifest(run_id)),
+        Err(error) => {
+            return Err(error).with_context(|| format!("Could not inspect {}", path.display()));
+        }
+    };
+    if !metadata.is_file() {
+        anyhow::bail!("Artifact manifest is not a file: {}", path.display());
     }
     let text =
         fs::read_to_string(&path).with_context(|| format!("Could not read {}", path.display()))?;
     serde_json::from_str(&text).with_context(|| format!("Could not parse {}", path.display()))
+}
+
+fn empty_manifest(run_id: &str) -> RunArtifactManifest {
+    RunArtifactManifest {
+        run_id: run_id.to_string(),
+        artifacts: Vec::new(),
+    }
 }
 
 fn write_manifest(target: impl AsRef<Path>, manifest: &RunArtifactManifest) -> Result<PathBuf> {
@@ -71,10 +87,11 @@ fn canonical_run_artifacts(target: &Path, run_id: &str) -> Vec<RunArtifact> {
         .collect()
 }
 
-struct CanonicalRunArtifactSpec {
-    leaf: &'static str,
-    label: &'static str,
-    kind: &'static str,
+fn normalized_artifacts(artifacts: Vec<RunArtifact>) -> Vec<RunArtifact> {
+    artifacts
+        .into_iter()
+        .filter_map(|artifact| artifact.normalized())
+        .collect()
 }
 
 impl CanonicalRunArtifactSpec {
@@ -86,69 +103,6 @@ impl CanonicalRunArtifactSpec {
         }
     }
 }
-
-const CANONICAL_RUN_ARTIFACTS: &[CanonicalRunArtifactSpec] = &[
-    CanonicalRunArtifactSpec {
-        leaf: "run.json",
-        label: "run metadata",
-        kind: "json",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "events.jsonl",
-        label: "run events",
-        kind: "jsonl",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "trace.jsonl",
-        label: "runtime trace",
-        kind: "jsonl",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "context.json",
-        label: "context snapshot",
-        kind: "json",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "attack-surface.json",
-        label: "attack surface",
-        kind: "json",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "threat-model.json",
-        label: "threat model",
-        kind: "json",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "recommendations.json",
-        label: "recommendations",
-        kind: "json",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "findings.json",
-        label: "findings",
-        kind: "json",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "proof.json",
-        label: "proof",
-        kind: "json",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "failures.json",
-        label: "failure handoff",
-        kind: "json",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "report.md",
-        label: "report",
-        kind: "markdown",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "artifacts.json",
-        label: "artifact manifest",
-        kind: "json",
-    },
-];
 
 fn manifest_path(target: impl AsRef<Path>, run_id: &str) -> PathBuf {
     run_dir(target, run_id).join("artifacts.json")

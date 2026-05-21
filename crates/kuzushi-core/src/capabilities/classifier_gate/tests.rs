@@ -61,7 +61,7 @@ mod tests {
         r
     }
 
-    fn routed(score: f32, likely: bool) -> RoutedRuntime {
+    fn routed(score: f32, likely: bool) -> RoutedRuntime<'static> {
         let inner: Arc<dyn AgentRuntime> = Arc::new(CannedRuntime { score, likely });
         RoutedRuntime::new(
             inner,

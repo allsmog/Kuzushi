@@ -40,18 +40,14 @@ pub(in crate::modules) fn failed_tool_output(
     error: anyhow::Error,
 ) -> Value {
     let error = error.to_string();
-    json!({
-        "ok": false,
-        "status": "failed",
-        "summary": format!("{tool} failed for {}", target.display()),
-        "artifacts": [],
-        "warnings": [],
-        "errors": [error],
-        "data": {
+    crate::module_result::failed_output_result(
+        format!("{tool} failed for {}", target.display()),
+        error,
+        json!({
             "target": target.display().to_string(),
             "tool": tool,
-        },
-    })
+        }),
+    )
 }
 
 pub(in crate::modules) fn should_skip_path(name: &str) -> bool {

@@ -86,15 +86,59 @@ pub struct Finding {
     pub vuln_source: Option<VulnSource>,
     /// Cross-channel collision key. Two findings with the same
     /// `dedup_key` in the same scan are treated as the same underlying
-    /// vulnerability — the higher-severity one wins, the tool list
-    /// merges. Computed from `(file, line/16, normalized_cwe)`.
+    /// vulnerability: the higher-severity one wins and the tool list
+    /// merges. Computed from `(file, line/8, normalized_cwe)` so nearby
+    /// scanner and agent signals still converge without collapsing broad
+    /// 16-line regions in dense security-sensitive files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dedup_key: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub suppressed: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub snoozed_until: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remediation: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<FindingEvidence>,
 }
 
-pub(crate) const DEDUP_LINE_BUCKET: u32 = 16;
+impl Default for Finding {
+    fn default() -> Self {
+        Self {
+            id: None,
+            scan_id: None,
+            fingerprint: String::new(),
+            rule_id: String::new(),
+            title: String::new(),
+            severity: Severity::Unknown,
+            file_path: String::new(),
+            start_line: 0,
+            end_line: None,
+            message: String::new(),
+            tool: String::new(),
+            actor_fingerprint: None,
+            static_proof_state: None,
+            triage: None,
+            verification: None,
+            created_at: String::new(),
+            vuln_source: None,
+            dedup_key: None,
+            suppressed: false,
+            snoozed_until: None,
+            remediation: None,
+            references: Vec::new(),
+            evidence: Vec::new(),
+        }
+    }
+}
+
+pub(crate) const DEDUP_LINE_BUCKET: u32 = 8;
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
 
 pub fn compute_dedup_key(file: &str, line: u32, cwe: Option<&str>) -> String {
     let bucket = line / DEDUP_LINE_BUCKET;

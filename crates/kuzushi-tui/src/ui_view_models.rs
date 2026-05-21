@@ -4,7 +4,6 @@
 //! separate from stores, scanners, and runtime dispatch.
 
 use crate::ShellApp;
-use std::path::Path;
 
 mod active_stage;
 mod activity_dag_rows;
@@ -49,6 +48,7 @@ mod plan_card;
 mod prereq_prompt;
 mod prompt;
 mod prompt_tuning;
+mod pwn;
 mod recent_module_activity;
 mod recommendation;
 mod routing;
@@ -85,8 +85,8 @@ pub(crate) use advisory_chrome::{cost_cap_halt_model, throttle_banner_model, Cos
 pub(crate) use agent_chat::{agent_chat_model, AgentChatModel, AgentChatSession, AgentChatTurn};
 pub(crate) use attack_surface::{attack_surface_risk_model, AttackSurfaceRiskModel};
 pub(crate) use auth::{
-    auth_env_summary, auth_provider_rows, model_auth_status, oauth_summary, AuthProviderRow,
-    AuthProviderTone,
+    auth_env_summary, auth_login_model, auth_provider_rows, model_auth_status, oauth_summary,
+    AuthLoginModel, AuthProviderRow, AuthProviderTone,
 };
 pub(crate) use catalog::{
     catalog_default_action_hint, catalog_model, catalog_uses_collapsed_layout, CatalogModel,
@@ -99,8 +99,8 @@ pub(crate) use config::{
 };
 pub(crate) use confirm_card::{confirm_card_model, ConfirmCardModel};
 pub(crate) use context_snapshot::{
-    context_snapshot_model, plain_context_model, ContextSnapshotDetails, ContextSnapshotModel,
-    PlainContextModel,
+    context_snapshot_model, context_snapshot_state, plain_context_model, ContextSnapshotDetails,
+    ContextSnapshotModel, PlainContextModel,
 };
 pub(crate) use context_strip::{
     context_strip_model, plain_context_strip_model, ContextStripModel, ContextStripSegment,
@@ -110,7 +110,8 @@ pub(crate) use cost::{cost_model, CostBudgetRow, CostBudgetStatus, CostModel, Co
 pub(crate) use display_text::{compact_target_path, format_session_cost};
 pub(crate) use failure_handoff::{failure_handoff_model, FailureHandoffModel};
 pub(crate) use finding_summary::{
-    findings_count_summary, status_footer_findings_summary, SeverityCounts,
+    ci_result_findings_summary, findings_count_summary, status_footer_findings_summary,
+    SeverityCounts,
 };
 pub(crate) use findings::{
     findings_model, selected_finding_detail_model, FindingDetailModel, FindingEvidenceRow,
@@ -153,6 +154,9 @@ pub(crate) use prereq_prompt::{
 pub(crate) use prompt::{prompt_model, prompt_text};
 pub(crate) use prompt_tuning::{
     prompts_model, tune_model, PromptRow, TuneActionRow, TuneHouseRules, TuneModel,
+};
+pub(crate) use pwn::{
+    pwn_dashboard_model, PwnDashboardModel, PwnPrimitiveRow, PwnReverseObservationRow, PwnRoundRow,
 };
 pub(crate) use recent_module_activity::{
     recent_module_activity_model, ModuleActivityKind, ModuleActivityModel, ModuleActivityRow,
@@ -206,10 +210,3 @@ pub use crate::{
     ActivitySession, OptionsFilter, OptionsView, PaneFocus, ReconSnapshot, ScanPanelState,
     ShellView, ThreatView,
 };
-
-pub(super) fn read_latest_run_id(root: &Path) -> Option<String> {
-    std::fs::read_to_string(root.join(".kuzushi/latest"))
-        .ok()
-        .map(|text| text.trim().to_string())
-        .filter(|text| !text.is_empty())
-}

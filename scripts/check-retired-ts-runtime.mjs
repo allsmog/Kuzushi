@@ -27,30 +27,45 @@ const retiredDirs = [
 const retiredUiPaths = [
   "src/cli/commands/shell.ts",
   "src/copilot/shell.ts",
+  "src/copilot/shell-commands.ts",
   "src/ui/App.tsx",
   "src/ui/components",
   "src/ui/primitives",
   "src/ui/render.ts",
   "src/ui/setup.ts",
+  "src/ui/shell-keybinds.ts",
 ];
 const retiredUiDependencies = ["ink", "react", "react-dom", "@types/react", "@types/react-dom"];
 const retiredUiRuntimePackages = new Set(["ink", "react", "react-dom"]);
+const retiredRuntimeWordingPatterns = [
+  { label: "Ink shell wording", regex: /\bInk\b/ },
+  { label: "React shell wording", regex: /\bReact\b/ },
+  { label: "deleted src/ui path", regex: /\bsrc\/ui\b/ },
+];
 const retiredShellRouterPatterns = [
   { label: "ShellCommand type", regex: /\bShellCommand\b/ },
+  { label: "SHELL_COMMAND_CATALOG constant", regex: /\bSHELL_COMMAND_CATALOG\b/ },
   { label: "SHELL_COMMAND_SPECS constant", regex: /\bSHELL_COMMAND_SPECS\b/ },
+  { label: "CommandCatalog symbol", regex: /\bCommandCatalog\b/ },
+  { label: "CommandRouter symbol", regex: /\bCommandRouter\b/ },
+  { label: "SlashCommand symbol", regex: /\bSlashCommand\b/ },
+  { label: "LocalCommandResult symbol", regex: /\bLocalCommandResult\b/ },
+  { label: "ShellCommandResult symbol", regex: /\bShellCommandResult\b/ },
   { label: "shellCommandSpecs helper", regex: /\bshellCommandSpecs\b/ },
   { label: "parseShellCommand helper", regex: /\bparseShellCommand\b/ },
   { label: "handleShellCommand helper", regex: /\bhandleShellCommand\b/ },
+  { label: "handleLocalCommand helper", regex: /\bhandleLocalCommand\b/ },
   { label: "parse_command helper", regex: /\bparse_command\b/ },
   { label: "handle_command helper", regex: /\bhandle_command\b/ },
 ];
 const deletedReferenceRoot = "reference/ts-runtime-island";
-const sourceRoots = ["src", "scripts/pi-agent-core-bridge.mjs"];
+const sourceRoots = ["src", "scripts", "packages", "tests", "benchmarks", "evals", "perf"];
 const docRoots = [
   "README.md",
   "docs",
   "examples",
   "recipes",
+  ".github",
   ".github/workflows/kuzushi-reference.yml",
   "AGENTS.md",
   "RELEASING.md",
@@ -102,15 +117,24 @@ if (existsSync(path.join(repo, deletedReferenceRoot))) {
 failures.push(...tsxSourceFailures(), ...retiredUiDependencyFailures());
 
 const sourceFiles = sourceRoots.flatMap((root) => walk(root, sourceExtensions));
-failures.push(...retiredShellRouterFailures(sourceFiles), ...retiredUiImportFailures(sourceFiles));
+failures.push(
+  ...retiredRuntimeWordingFailures(sourceFiles),
+  ...retiredShellRouterFailures(sourceFiles),
+  ...retiredUiImportFailures(sourceFiles),
+);
 
 for (const file of sourceFiles) {
   const rel = relative(file);
   const text = readFileSync(file, "utf8");
   for (const specifier of importSpecifiers(text)) {
+    const importTarget = normalizedImportTarget(rel, specifier);
+    if (pointsAtRetiredTypeScriptRuntime(importTarget)) {
+      failures.push(`${rel} imports retired TypeScript runtime path ${specifier}`);
+      continue;
+    }
     const resolved = resolveImport(rel, specifier, sourceFiles);
     if (!resolved) continue;
-    if (retiredDirs.some((dir) => resolved.startsWith(`${dir}/`))) {
+    if (pointsAtRetiredTypeScriptRuntime(resolved)) {
       failures.push(`${rel} imports retired TypeScript runtime file ${resolved}`);
     }
   }
@@ -179,8 +203,14 @@ function relative(file) {
 }
 
 function tsxSourceFailures() {
-  return walk("src", new Set([".tsx"])).map(
+  return checkedSourceRoots().flatMap((root) => walk(root, new Set([".tsx"]))).map(
     (file) => `${relative(file)} is a TSX source file; shell UI belongs in Rust Ratatui.`,
+  );
+}
+
+function checkedSourceRoots() {
+  return ["src", "crates", "packages", "tests", "benchmarks", "evals", "perf"].filter((root) =>
+    existsSync(path.join(repo, root)),
   );
 }
 
@@ -196,7 +226,7 @@ function retiredUiDependencyFailures() {
 function retiredShellRouterFailures(files) {
   return files.flatMap((file) => {
     const rel = relative(file);
-    if (!rel.startsWith("src/")) return [];
+    if (rel === "scripts/check-retired-ts-runtime.mjs") return [];
     const text = readFileSync(file, "utf8");
     return retiredShellRouterPatterns
       .filter(({ regex }) => regex.test(text))
@@ -204,6 +234,17 @@ function retiredShellRouterFailures(files) {
         ({ label }) =>
           `${rel} contains ${label}; shell command routing belongs in crates/kuzushi-tui.`,
       );
+  });
+}
+
+function retiredRuntimeWordingFailures(files) {
+  return files.flatMap((file) => {
+    const rel = relative(file);
+    if (!rel.startsWith("src/") || rel.startsWith("src/testing/")) return [];
+    const text = readFileSync(file, "utf8");
+    return retiredRuntimeWordingPatterns
+      .filter(({ regex }) => regex.test(text))
+      .map(({ label }) => `${rel} contains ${label}; shell UI belongs in Rust Ratatui.`);
   });
 }
 
@@ -242,7 +283,7 @@ function packageName(specifier) {
 function resolveImport(from, specifier, sourceFiles) {
   if (!specifier.startsWith(".")) return undefined;
   const sourceSet = new Set(sourceFiles.map(relative));
-  const base = path.posix.normalize(path.posix.join(path.posix.dirname(from), specifier));
+  const base = normalizedImportTarget(from, specifier);
   const candidates = [
     base,
     `${base}.ts`,
@@ -255,6 +296,19 @@ function resolveImport(from, specifier, sourceFiles) {
     path.posix.join(base, "index.js"),
   ];
   return candidates.find((candidate) => sourceSet.has(candidate));
+}
+
+function normalizedImportTarget(from, specifier) {
+  if (!specifier.startsWith(".")) return specifier;
+  return path.posix.normalize(path.posix.join(path.posix.dirname(from), specifier));
+}
+
+function pointsAtRetiredTypeScriptRuntime(target) {
+  if (retiredDirs.some((dir) => target === dir || target.startsWith(`${dir}/`))) {
+    return true;
+  }
+  if (!target.startsWith("src/agent-runtime/")) return false;
+  return !/^src\/agent-runtime\/types(?:\.(?:ts|js))?$/.test(target);
 }
 
 function isHistorical(text) {

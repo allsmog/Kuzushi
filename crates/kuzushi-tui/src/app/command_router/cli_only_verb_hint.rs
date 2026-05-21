@@ -2,7 +2,7 @@ use super::*;
 
 pub(crate) fn cli_only_verb_hint(verb: &str) -> Option<&'static str> {
     match verb {
-        "doctor" => Some("run `kuzushi doctor` from a shell, or `auth` here for credential status"),
+        "doctor" => Some("exit and run `kuzushi doctor`, or try `auth` here"),
         "scan-ci" | "ci" => Some("run `kuzushi scan <target> --ci` from a shell"),
         "pr-comment" => Some("run `kuzushi pr-comment` from a shell"),
         "mcp" => Some("run `kuzushi mcp serve <backend>` from a shell"),

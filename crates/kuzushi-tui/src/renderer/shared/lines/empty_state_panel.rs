@@ -39,8 +39,9 @@ pub(crate) fn empty_state_panel(
 }
 
 pub(crate) fn command_list_line(commands: &[&str], width: usize) -> Line<'static> {
-    let mut spans: Vec<Span<'static>> = Vec::new();
-    let mut used = 0usize;
+    let prefix = "▸ try: ";
+    let mut spans: Vec<Span<'static>> = vec![Span::styled(prefix.to_string(), theme::muted())];
+    let mut used = prefix.chars().count();
     for (i, cmd) in commands.iter().enumerate() {
         if i > 0 {
             spans.push(Span::styled(" · ".to_string(), theme::subtle()));
