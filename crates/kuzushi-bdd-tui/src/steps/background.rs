@@ -1,4 +1,4 @@
-use crate::tmux_harness::TmuxSession;
+use crate::tmux_harness::{ArtifactSeed, TmuxSession};
 use crate::OnboardingWorld;
 use cucumber::{given, when};
 use std::time::Duration;
@@ -7,6 +7,23 @@ use std::time::Duration;
 async fn fresh_workspace(world: &mut OnboardingWorld) {
     world.ensure_binary();
     world.env.clear();
+    world.pending_seeds.clear();
+}
+
+#[given(regex = r#"^the artifact "([^"]+)" is seeded with "(.+)"$"#)]
+async fn seed_artifact_file(world: &mut OnboardingWorld, relative: String, body: String) {
+    world.pending_seeds.push(ArtifactSeed::File {
+        relative,
+        body: body.replace("\\\"", "\""),
+    });
+}
+
+#[given(regex = r#"^the directory "([^"]+)" is seeded with a placeholder file$"#)]
+async fn seed_artifact_dir(world: &mut OnboardingWorld, relative: String) {
+    world.pending_seeds.push(ArtifactSeed::Dir {
+        relative,
+        placeholder: "stub".to_string(),
+    });
 }
 
 #[given("no model is configured")]
@@ -43,7 +60,8 @@ async fn model_and_auth(world: &mut OnboardingWorld) {
 async fn launch_shell(world: &mut OnboardingWorld) {
     world.ensure_binary();
     let binary = world.binary.to_string_lossy().into_owned();
-    let session = TmuxSession::launch(&binary, world.env.clone())
+    let seeds = std::mem::take(&mut world.pending_seeds);
+    let session = TmuxSession::launch_with_seeds(&binary, world.env.clone(), &seeds)
         .expect("tmux session must launch — install tmux and rebuild the CLI if this fails");
     // Give the binary a moment to render its first frame.
     std::thread::sleep(Duration::from_millis(800));
