@@ -49,4 +49,10 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         category: ShellCommandCategory::Navigation,
         description: "first-run guided setup",
     },
+    ShellCommandSpec {
+        command: "onboarding",
+        aliases: &["/onboarding", "/setup", "/planning", "/plan-stage"],
+        category: ShellCommandCategory::Navigation,
+        description: "open the planning-stage multi-select picker",
+    },
 ];

@@ -170,7 +170,7 @@ fn quickstart_steps(app: &ShellApp) -> Vec<QuickstartStep> {
         },
         QuickstartStep {
             number: "2",
-            text: "context build              write .kuzushi/context-snapshot.json",
+            text: "onboarding (or context build)  multi-select planner: context / x-ray / STRIDE / PASTA / CPG / CodeQL / threat intel",
         },
         QuickstartStep {
             number: "3",
