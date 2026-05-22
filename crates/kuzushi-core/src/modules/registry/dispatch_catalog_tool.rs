@@ -50,6 +50,7 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "workspace:export-findings" => Some(export_workspace_findings_tool(input.clone(), ctx)),
         "findings:list" => Some(list_findings_tool(input, ctx)),
         "report:build" => Some(build_report_tool(input, ctx)),
+        "entry-points:extract" => Some(run_entry_points_extract(input, ctx)),
         _ => None,
     }
 }
@@ -119,6 +120,8 @@ pub(in crate::modules) fn dispatch_native_security_tool(
             runtime,
         )),
         "sast:scan" => Some(run_sast_scan(input.clone(), ctx, runtime)),
+        "cpg:build" => Some(run_cpg_build(input, ctx)),
+        "codeql:create-db" => Some(run_codeql_create_db(input, ctx)),
         _ => None,
     }
 }

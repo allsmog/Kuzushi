@@ -40,9 +40,8 @@ fn foundation_executor_for_tool(name: &str) -> Option<ToolExecutor> {
         "catalog:modules" | "catalog:tools" => Some(execute_catalog_tool),
         "module-recommender:recommend" => Some(execute_module_recommender_tool),
         "context:build" | "context-lite:index" | "config:show" | "router:show"
-        | "workspace:status" | "workspace:export-findings" | "findings:list" | "report:build" => {
-            Some(execute_context_workspace_tool)
-        }
+        | "workspace:status" | "workspace:export-findings" | "findings:list" | "report:build"
+        | "entry-points:extract" => Some(execute_context_workspace_tool),
         _ => None,
     }
 }
@@ -51,7 +50,9 @@ fn security_executor_for_tool(name: &str) -> Option<ToolExecutor> {
     match name {
         "dep-hygiene:check" | "secret-scan:scan" | "semgrep:scan" | "codeql:scan"
         | "iac-scan:scan" | "cargo-audit:scan" | "license-scan:scan" | "sbom-scan:scan"
-        | "exploit-chain:scan" | "sast:scan" => Some(execute_native_security_tool),
+        | "exploit-chain:scan" | "sast:scan" | "cpg:build" | "codeql:create-db" => {
+            Some(execute_native_security_tool)
+        }
         "agentic-sast:scan" | "variant:lift-pattern" | "variant:hunt" | "ndiff:fetch-cve"
         | "ndiff:extract-fix-pattern" | "ndiff:hunt-variants" | "carlini-threat-hunt:run"
         | "offense-review:threat-hunt" | "pipeline:taint-cwe-select" | "taint-iris:hunt"
@@ -75,9 +76,10 @@ fn specialist_executor_for_tool(name: &str) -> Option<ToolExecutor> {
         "uaf-hunt:hunt" => Some(execute_uaf_hunt_tool_mapping),
         "pwn:profile-binary" | "pwn:reverse" | "pwn:state" | "pwn:calibrate-local"
         | "pwn:run-candidates" | "pwn:auto-solve" => Some(execute_pwn_tool_mapping),
-        "threat-intel:list" | "threat-intel:apply" | "threat-intel:harvest" => {
-            Some(execute_threat_intel_tool_mapping)
-        }
+        "threat-intel:discover"
+        | "threat-intel:list"
+        | "threat-intel:apply"
+        | "threat-intel:harvest" => Some(execute_threat_intel_tool_mapping),
         _ => None,
     }
 }
@@ -324,6 +326,9 @@ fn register_security_modules(registry: &mut ModuleRegistry) {
     registry.register(report_module());
     registry.register(threat_model_module());
     registry.register(x_ray_module());
+    registry.register(entry_points_module());
+    registry.register(cpg_module());
+    registry.register(codeql_db_module());
     registry.register(threat_leads_module());
     registry.register(vendor_assessment::module().deferred());
     registry.register(chrome_rce::module().deferred());
