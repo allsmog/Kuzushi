@@ -62,6 +62,17 @@ pub(crate) fn run_terminal_shell(
 }
 
 pub(crate) fn open_start_view(app: &mut ShellApp) {
+    // Preserve the onboarding picker chosen by
+    // `apply_initial_onboarding_phase` — otherwise the first-run flow
+    // would be clobbered the moment the terminal shell loop boots.
+    if matches!(
+        app.shell_view,
+        ShellView::ModelPicker
+            | ShellView::AuthMethodPicker(_)
+            | ShellView::PlanningPicker
+    ) {
+        return;
+    }
     app.shell_view = ShellView::Home;
 }
 

@@ -16,6 +16,9 @@ fn primary_view_status(app: &ShellApp) -> Option<String> {
         ShellView::ModuleRun => Some(module_run_status(app)),
         ShellView::Findings => Some("findings".to_string()),
         ShellView::Finding => Some("finding".to_string()),
+        ShellView::ModelPicker => Some("model-picker".to_string()),
+        ShellView::AuthMethodPicker(provider) => Some(format!("auth-picker:{provider}")),
+        ShellView::PlanningPicker => Some("planning".to_string()),
         _ => None,
     }
 }
