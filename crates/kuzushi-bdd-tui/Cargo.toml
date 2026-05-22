@@ -1,0 +1,24 @@
+[package]
+name = "kuzushi-bdd-tui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[[test]]
+name = "onboarding"
+path = "tests/run.rs"
+harness = false
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+cucumber = "0.21"
+futures = "0.3"
+serde_json = { workspace = true }
+tempfile = { workspace = true }
+tokio = { workspace = true }
+uuid = { workspace = true }
