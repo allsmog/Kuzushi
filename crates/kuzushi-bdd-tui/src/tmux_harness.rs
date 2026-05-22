@@ -21,17 +21,36 @@ pub struct TmuxSession {
     _temp_target: tempfile::TempDir,
 }
 
+/// Pre-launch seed instructions applied to the scenario's target dir
+/// before the shell binary starts. `File(path, body)` writes a file;
+/// `Dir(path, placeholder)` creates a directory and writes one file
+/// inside it so artifact-state probes recognize it as `Cached`.
+#[derive(Debug, Clone)]
+pub enum ArtifactSeed {
+    File { relative: String, body: String },
+    Dir { relative: String, placeholder: String },
+}
+
 impl TmuxSession {
     /// Spin up a tmux session running `binary shell --target <tempdir>`
     /// with `HOME` redirected to a tempdir so OAuth / config writes
     /// stay scoped to this scenario.
     pub fn launch(binary: &str, env: HashMap<String, String>) -> Result<Self> {
+        Self::launch_with_seeds(binary, env, &[])
+    }
+
+    pub fn launch_with_seeds(
+        binary: &str,
+        env: HashMap<String, String>,
+        seeds: &[ArtifactSeed],
+    ) -> Result<Self> {
         require_tmux()?;
         let session_name = format!("kbdd-{}", uuid::Uuid::new_v4().simple());
         let temp_home = tempfile::tempdir().context("creating scoped HOME")?;
         let temp_target = tempfile::tempdir().context("creating scoped target")?;
         write_v2_config_from_env(temp_home.path(), &env)?;
         seed_target(temp_target.path())?;
+        apply_artifact_seeds(temp_target.path(), seeds)?;
 
         let mut cmd = format!(
             "HOME={home} ",
@@ -177,5 +196,29 @@ fn seed_target(target: &std::path::Path) -> Result<()> {
         r#"{"name":"bdd-target","version":"1.0.0","dependencies":{"express":"4.18.2"}}"#,
     )
     .context("seeding package.json into BDD target")?;
+    Ok(())
+}
+
+fn apply_artifact_seeds(target: &std::path::Path, seeds: &[ArtifactSeed]) -> Result<()> {
+    for seed in seeds {
+        match seed {
+            ArtifactSeed::File { relative, body } => {
+                let path = target.join(relative);
+                if let Some(parent) = path.parent() {
+                    std::fs::create_dir_all(parent)
+                        .with_context(|| format!("creating parent dir for {}", path.display()))?;
+                }
+                std::fs::write(&path, body)
+                    .with_context(|| format!("seeding file {}", path.display()))?;
+            }
+            ArtifactSeed::Dir { relative, placeholder } => {
+                let dir = target.join(relative);
+                std::fs::create_dir_all(&dir)
+                    .with_context(|| format!("seeding directory {}", dir.display()))?;
+                std::fs::write(dir.join("placeholder"), placeholder)
+                    .with_context(|| format!("seeding placeholder in {}", dir.display()))?;
+            }
+        }
+    }
     Ok(())
 }

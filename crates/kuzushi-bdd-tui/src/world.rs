@@ -1,4 +1,4 @@
-use crate::tmux_harness::TmuxSession;
+use crate::tmux_harness::{ArtifactSeed, TmuxSession};
 use cucumber::World;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -8,6 +8,7 @@ pub struct OnboardingWorld {
     pub session: Option<TmuxSession>,
     pub env: HashMap<String, String>,
     pub binary: PathBuf,
+    pub pending_seeds: Vec<ArtifactSeed>,
 }
 
 impl OnboardingWorld {
