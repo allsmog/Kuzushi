@@ -13,18 +13,40 @@ pub(crate) fn run_next_step_bridge(
     command: &[String],
     request: &NextStepBridgeRequest,
 ) -> Result<NextStepBridgeResponse> {
-    run_json_bridge(command, request, "next-step bridge")
+    run_json_bridge(command, request, "next-step bridge", &[])
 }
 
 pub(crate) fn run_next_step_preflight_bridge(
     command: &[String],
     request: &NextStepBridgeRequest,
 ) -> Result<NextStepBridgeResponse> {
-    run_json_bridge(command, request, "next-step preflight bridge")
+    run_json_bridge(command, request, "next-step preflight bridge", &[])
 }
 
 pub(crate) fn run_bridge(command: &[String], request: &BridgeRequest) -> Result<BridgeResponse> {
-    run_json_bridge(command, request, "pi-agent-core bridge")
+    let extra_env = mcp_artifact_env_for_attachments(&request.tool_policy.mcps_attached);
+    run_json_bridge(command, request, "pi-agent-core bridge", &extra_env)
+}
+
+/// Build `KUZUSHI_MCP_<NAME>_ARTIFACT=<path>` env pairs from the
+/// per-call attachment plan. Constants (treesitter) skip — they don't
+/// need an artifact env. Server names with `-` are uppercased and
+/// translated to `_` so `entry-points` becomes
+/// `KUZUSHI_MCP_ENTRY_POINTS_ARTIFACT`.
+fn mcp_artifact_env_for_attachments(
+    attachments: &[kuzushi_core::McpAttachment],
+) -> Vec<(String, String)> {
+    attachments
+        .iter()
+        .filter(|attachment| !attachment.artifact_path.is_empty())
+        .map(|attachment| {
+            let env = format!(
+                "KUZUSHI_MCP_{}_ARTIFACT",
+                attachment.name.to_uppercase().replace('-', "_")
+            );
+            (env, attachment.artifact_path.clone())
+        })
+        .collect()
 }
 
 pub(crate) fn public_bridge_error(message: &str) -> String {
@@ -33,7 +55,12 @@ pub(crate) fn public_bridge_error(message: &str) -> String {
         .replace("openai-codex", "OpenAI OAuth")
 }
 
-fn run_json_bridge<T, R>(command: &[String], request: &T, label: &str) -> Result<R>
+fn run_json_bridge<T, R>(
+    command: &[String],
+    request: &T,
+    label: &str,
+    extra_env: &[(String, String)],
+) -> Result<R>
 where
     T: Serialize,
     R: DeserializeOwned,
@@ -45,6 +72,9 @@ where
         .stderr(Stdio::piped());
     for (env, path) in mcp_binary_env_defaults() {
         cmd.env(env, path);
+    }
+    for (env, value) in extra_env {
+        cmd.env(env, value);
     }
     let mut child = cmd
         .spawn()
@@ -160,6 +190,11 @@ fn mcp_binary_env_defaults() -> Vec<(&'static str, PathBuf)> {
         ("KUZUSHI_MCP_CLANG_BIN", "kuzushi-mcp-clang"),
         ("KUZUSHI_MCP_GTAGS_BIN", "kuzushi-mcp-gtags"),
         ("KUZUSHI_MCP_REVNG_BIN", "kuzushi-mcp-revng"),
+        ("KUZUSHI_MCP_CONTEXT_BIN", "kuzushi-mcp-context"),
+        ("KUZUSHI_MCP_ENTRY_POINTS_BIN", "kuzushi-mcp-entry-points"),
+        ("KUZUSHI_MCP_THREAT_MODEL_BIN", "kuzushi-mcp-threat-model"),
+        ("KUZUSHI_MCP_THREAT_INTEL_BIN", "kuzushi-mcp-threat-intel"),
+        ("KUZUSHI_MCP_X_RAY_BIN", "kuzushi-mcp-x-ray"),
     ];
     CANDIDATES
         .iter()

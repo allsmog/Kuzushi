@@ -70,8 +70,7 @@ pub(crate) fn run_taint_iris_next_hunt(
     let runtime = require_taint_iris_next_runtime(runtime)?;
     let model = require_taint_iris_next_model(input, ctx)?;
     let runtime_options = taint_iris_next_runtime_options(input, &plan.backend.selected);
-    let mcps_enabled = read_bool_option(input, "mcps").unwrap_or(true);
-    let agent_tool_policy = agent_tool_policy_for_input(input)?.with_mcps(mcps_enabled);
+    let agent_tool_policy = build_taint_iris_next_tool_policy(input, target)?;
     let _trace_scope = ctx.trace.map(|trace| {
         let phase = trace
             .step(
@@ -175,6 +174,65 @@ pub(crate) fn require_taint_iris_next_runtime<'a>(
     runtime.context(
         "taint-iris-next:hunt requires the pi-agent-core runtime in hunt mode. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
     )
+}
+
+/// Build the tool policy for a taint-iris-next hunt, gating MCP
+/// attachment on artifact existence and refusing to dispatch when the
+/// CPG / CodeQL DB are missing. Honors the legacy `mcps: false` input
+/// for callers that explicitly want to suppress MCP attachment (used
+/// by `dataflow-plan` and other planning verbs).
+pub(in crate::capabilities::taint_iris_next) fn build_taint_iris_next_tool_policy(
+    input: &Value,
+    target: &Path,
+) -> Result<AgentToolPolicy> {
+    let mcps_enabled = read_bool_option(input, "mcps").unwrap_or(true);
+    let policy = agent_tool_policy_for_input(input)?;
+    if !mcps_enabled {
+        return Ok(policy);
+    }
+    let policy = policy.with_mcps_for_target(target);
+    ensure_required_mcps(&policy, target, &["joern", "codeql"])?;
+    Ok(policy)
+}
+
+fn ensure_required_mcps(
+    policy: &AgentToolPolicy,
+    target: &Path,
+    required: &[&str],
+) -> Result<()> {
+    let mut missing = Vec::new();
+    for name in required {
+        if !crate::runtime::plan_contains(&policy.mcps_attached, name) {
+            missing.push(*name);
+        }
+    }
+    if missing.is_empty() {
+        return Ok(());
+    }
+    let hints = missing
+        .iter()
+        .map(|name| missing_mcp_hint(name, target))
+        .collect::<Vec<_>>()
+        .join("\n  ");
+    anyhow::bail!(
+        "taint-iris-next:hunt requires MCP servers whose artifacts are missing on {}:\n  {}\nRun `/planning` (or set `mcps: false` to suppress MCP attachment).",
+        target.display(),
+        hints
+    );
+}
+
+fn missing_mcp_hint(name: &str, target: &Path) -> String {
+    match name {
+        "joern" => format!(
+            "- joern (.kuzushi/cpg.bin)              missing -> run `cpg:build` on {}",
+            target.display()
+        ),
+        "codeql" => format!(
+            "- codeql (.kuzushi/codeql-db/)          missing -> run `codeql:create-db` on {}",
+            target.display()
+        ),
+        other => format!("- {other:>17} missing"),
+    }
 }
 
 const JOERN_DEFAULT_MCP_TOOL_TIMEOUT_MS: &str = "180000";

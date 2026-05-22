@@ -8,6 +8,7 @@ use std::path::PathBuf;
 
 pub mod application;
 pub mod domain;
+pub mod mcp_probe;
 pub mod policy;
 #[cfg(test)]
 mod tests;
@@ -17,8 +18,12 @@ pub use application::run_tool_loop;
 pub use domain::{
     append_structured_output_contract, AgentLoopOutcome, AgentLoopStep, AgentQueryRequest,
     AgentQueryResponse, AgentRuntime, AgentRuntimeOptions, AgentStructuredOutput, AgentTool,
-    AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry, ModelTier, SubagentRole, ToolBox,
-    ToolCall, ToolCallHandler, ToolResult, TriageRequest,
+    AgentToolLoopRequest, AgentToolPolicy, LoopHistoryEntry, McpAttachment, ModelTier,
+    SubagentRole, ToolBox, ToolCall, ToolCallHandler, ToolResult, TriageRequest,
+};
+pub use mcp_probe::{
+    mcp_attachment_plan_for_target, plan_contains, McpArtifactSpec, MCP_ARTIFACT_TABLE,
+    MCP_CONSTANT_NAMES,
 };
 pub use policy::{
     canonical_model_spec, require_configured_model, resolve_explicit_model, validate_model_spec,

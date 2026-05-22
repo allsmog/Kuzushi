@@ -150,12 +150,53 @@ pub struct AgentToolPolicy {
     #[serde(default)]
     pub tools: Vec<String>,
     /// If true, the bridge attaches the kuzushi MCP servers
-    /// (tree-sitter, joern, codeql) as agent tools alongside whatever
-    /// the `profile`/`tools` fields specify. This lets a module like
-    /// taint-iris-next opt every hunt into the MCP triangulation
-    /// surface without forcing the operator to set
-    /// `KUZUSHI_AGENT_MCPS=1` in their shell. The env var still works
-    /// as an override for ad-hoc operator runs.
+    /// (tree-sitter, joern, codeql, plus the artifact-backed ones in
+    /// `mcps_attached`) as agent tools alongside whatever the
+    /// `profile`/`tools` fields specify. Use `with_mcps_for_target` to
+    /// populate this from artifact existence rather than hard-coding
+    /// `true` — silent attachment of an MCP whose backing artifact is
+    /// missing produces confusing runtime errors.
     #[serde(default)]
     pub mcps: bool,
+    /// Per-MCP attachment plan: each entry names a kuzushi MCP server
+    /// and the absolute artifact path it should read on startup. Built
+    /// by `mcp_attachment_plan_for_target`; empty when no artifacts
+    /// exist (in which case `mcps` should also be `false`).
+    /// Forward-compatible: older bridges that only know `mcps: bool`
+    /// will ignore this field and continue to attach their built-in
+    /// MCP set; newer bridges (and our own probes) read the explicit
+    /// list so missing-artifact attachments never get queued.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mcps_attached: Vec<McpAttachment>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct McpAttachment {
+    /// Short server name. Maps 1:1 to `KUZUSHI_MCP_<NAME>_BIN`
+    /// (uppercased, `-` → `_`) — e.g. "joern", "codeql", "context",
+    /// "entry-points", "threat-model", "threat-intel", "x-ray",
+    /// "treesitter".
+    pub name: String,
+    /// Absolute path to the artifact the MCP server should read on
+    /// startup. Empty for the treesitter MCP, which operates on the
+    /// source tree directly.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub artifact_path: String,
+}
+
+impl McpAttachment {
+    pub fn new(name: impl Into<String>, artifact_path: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            artifact_path: artifact_path.into(),
+        }
+    }
+
+    pub fn constant(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            artifact_path: String::new(),
+        }
+    }
 }

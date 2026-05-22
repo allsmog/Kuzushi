@@ -9,18 +9,47 @@ impl AgentToolPolicy {
             profile: profile.into(),
             tools: tools.into_iter().map(Into::into).collect(),
             mcps: false,
+            mcps_attached: Vec::new(),
         }
     }
 
-    /// Opt this policy into the kuzushi MCP-as-agent surface (tree-sitter,
-    /// joern, codeql tools become callable from the agent loop).
+    /// Force-enable the legacy MCP boolean. Prefer
+    /// [`Self::with_mcps_for_target`] which probes artifacts on disk —
+    /// the bare boolean attaches every MCP whether or not its backing
+    /// artifact exists, which makes the operator chase confusing
+    /// runtime errors when (for example) a CPG was never built.
+    #[deprecated(
+        note = "Use `with_mcps_for_target` to gate attachment on artifact existence."
+    )]
     pub fn with_mcps(mut self, mcps: bool) -> Self {
         self.mcps = mcps;
         self
     }
 
+    /// Replace the attachment plan with the supplied list and flip
+    /// `mcps` to reflect whether anything is attached. Callers that
+    /// already computed a plan (e.g. for the shell's startup log) can
+    /// pass it through directly without re-probing.
+    pub fn with_mcps_plan(mut self, plan: Vec<crate::runtime::domain::McpAttachment>) -> Self {
+        self.mcps = !plan.is_empty();
+        self.mcps_attached = plan;
+        self
+    }
+
+    /// Probe `target` for foundational artifacts and populate the
+    /// attachment plan. This is the canonical entry point for any tool
+    /// that wants the MCP surface attached — it never attaches a
+    /// server whose backing artifact is missing.
+    pub fn with_mcps_for_target(self, target: &std::path::Path) -> Self {
+        let plan = crate::runtime::mcp_probe::mcp_attachment_plan_for_target(target);
+        self.with_mcps_plan(plan)
+    }
+
     pub fn is_default(&self) -> bool {
-        self.profile == "default" && self.tools.is_empty() && !self.mcps
+        self.profile == "default"
+            && self.tools.is_empty()
+            && !self.mcps
+            && self.mcps_attached.is_empty()
     }
 }
 
@@ -30,18 +59,25 @@ impl Default for AgentToolPolicy {
             profile: "default".to_string(),
             tools: Vec::new(),
             mcps: false,
+            mcps_attached: Vec::new(),
         }
     }
 }
 
 #[cfg(test)]
+#[allow(deprecated)]
 mod policy_tests {
     use super::*;
+    use crate::runtime::domain::McpAttachment;
 
     #[test]
     fn default_policy_does_not_enable_mcps() {
         let policy = AgentToolPolicy::default();
         assert!(!policy.mcps, "default policy must keep MCP surface off");
+        assert!(
+            policy.mcps_attached.is_empty(),
+            "default policy must not list any attachments"
+        );
         assert!(policy.is_default(), "fresh default policy is_default");
     }
 
@@ -68,6 +104,79 @@ mod policy_tests {
         );
         let round_tripped: AgentToolPolicy = serde_json::from_value(json).expect("deserialise");
         assert_eq!(round_tripped, policy);
+    }
+
+    #[test]
+    fn with_mcps_plan_replaces_attachment_list() {
+        let plan = vec![
+            McpAttachment::constant("treesitter"),
+            McpAttachment::new("joern", "/work/.kuzushi/cpg.bin"),
+        ];
+        let policy = AgentToolPolicy::default().with_mcps_plan(plan.clone());
+        assert!(policy.mcps);
+        assert_eq!(policy.mcps_attached, plan);
+        assert!(!policy.is_default());
+    }
+
+    #[test]
+    fn empty_plan_keeps_policy_at_default_when_other_fields_match() {
+        let policy = AgentToolPolicy::default().with_mcps_plan(Vec::new());
+        assert!(!policy.mcps);
+        assert!(policy.is_default());
+    }
+
+    #[test]
+    fn with_mcps_for_target_attaches_only_when_artifact_exists() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join(".kuzushi")).unwrap();
+        std::fs::write(
+            tmp.path().join(".kuzushi/context-snapshot.json"),
+            "{\"target\":\"x\"}",
+        )
+        .unwrap();
+        let policy = AgentToolPolicy::default().with_mcps_for_target(tmp.path());
+        assert!(policy.mcps);
+        let names: Vec<&str> = policy
+            .mcps_attached
+            .iter()
+            .map(|a| a.name.as_str())
+            .collect();
+        assert!(names.contains(&"treesitter"));
+        assert!(names.contains(&"context"));
+        assert!(!names.contains(&"joern"));
+        assert!(!names.contains(&"codeql"));
+    }
+
+    #[test]
+    fn mcps_attached_round_trips_through_serde() {
+        let policy = AgentToolPolicy::default().with_mcps_plan(vec![
+            McpAttachment::constant("treesitter"),
+            McpAttachment::new("context", "/work/.kuzushi/context-snapshot.json"),
+        ]);
+        let json = serde_json::to_value(&policy).expect("serialise");
+        assert_eq!(json["mcps"], serde_json::Value::Bool(true));
+        let attachments = json["mcpsAttached"]
+            .as_array()
+            .expect("mcpsAttached should serialise as camelCase");
+        assert_eq!(attachments.len(), 2);
+        assert_eq!(attachments[0]["name"], "treesitter");
+        assert_eq!(attachments[1]["artifactPath"], "/work/.kuzushi/context-snapshot.json");
+        let round_tripped: AgentToolPolicy = serde_json::from_value(json).expect("deserialise");
+        assert_eq!(round_tripped, policy);
+    }
+
+    #[test]
+    fn backward_compatible_with_old_bridge_payload() {
+        // A bridge that knows only `mcps: true` (no `mcpsAttached`)
+        // must still deserialize cleanly with an empty plan.
+        let json = serde_json::json!({
+            "profile": "legacy",
+            "tools": ["Read"],
+            "mcps": true,
+        });
+        let policy: AgentToolPolicy = serde_json::from_value(json).expect("deserialise");
+        assert!(policy.mcps);
+        assert!(policy.mcps_attached.is_empty());
     }
 }
 

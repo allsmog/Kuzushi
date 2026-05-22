@@ -100,6 +100,22 @@ pub(crate) enum McpBackend {
     Codeql,
     /// rev.ng binary reverse-engineering facts through Docker/Podman.
     Revng,
+    /// Read-only context-snapshot.json queries (repo languages,
+    /// attack surface, file index). Attaches only when the snapshot
+    /// has been built.
+    Context,
+    /// Read-only entry-points.json queries (list, filter by framework
+    /// or method).
+    EntryPoints,
+    /// Read-only threat-model.json queries (full doc, threats by
+    /// severity, DFD elements).
+    ThreatModel,
+    /// Read-only threat-intel candidates.json queries (technologies,
+    /// packages by ecosystem).
+    ThreatIntel,
+    /// Read-only x-ray markdown queries (summary, entry-points,
+    /// invariants).
+    XRay,
 }
 
 impl McpBackend {
@@ -111,6 +127,11 @@ impl McpBackend {
             Self::TreeSitter => "kuzushi-mcp-treesitter",
             Self::Codeql => "kuzushi-mcp-codeql",
             Self::Revng => "kuzushi-mcp-revng",
+            Self::Context => "kuzushi-mcp-context",
+            Self::EntryPoints => "kuzushi-mcp-entry-points",
+            Self::ThreatModel => "kuzushi-mcp-threat-model",
+            Self::ThreatIntel => "kuzushi-mcp-threat-intel",
+            Self::XRay => "kuzushi-mcp-x-ray",
         }
     }
 }

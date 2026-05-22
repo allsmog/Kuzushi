@@ -155,6 +155,23 @@ mod tests {
             "const sql = `SELECT * FROM users WHERE id = ${req.query.id}`;\ndb.query(sql);\n",
         )
         .unwrap();
+        stub_taint_iris_next_mcp_artifacts(root);
+    }
+
+    /// Place empty CPG + CodeQL DB stubs under the workspace target so
+    /// the artifact-aware MCP attachment probe attaches the joern and
+    /// codeql servers. The hunt tests don't actually query these MCPs
+    /// (the stub runtime stands in for the bridge), but the policy
+    /// builder refuses to dispatch without them — see
+    /// `build_taint_iris_next_tool_policy` in
+    /// `application/run_report.rs`.
+    fn stub_taint_iris_next_mcp_artifacts(root: &Path) {
+        let kuzushi = root.join(".kuzushi");
+        fs::create_dir_all(&kuzushi).unwrap();
+        fs::write(kuzushi.join("cpg.bin"), b"CPG\0stub").unwrap();
+        let db = kuzushi.join("codeql-db");
+        fs::create_dir_all(&db).unwrap();
+        fs::write(db.join("placeholder"), "stub").unwrap();
     }
 
     fn evidence_row(cwe: &str, evidence_level: &str) -> TaintIrisNextEvidence {
