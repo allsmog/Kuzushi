@@ -123,6 +123,20 @@ pub enum ShellView {
     /// (queued / active / done / failing per task), right shows a tagged
     /// reasoning feed `[module:verb]`. Session state lives on `app.activity`.
     Activity,
+    /// First-run model picker. Lists the entries in `MODEL_CHOICES` and
+    /// lets the operator pick one with ↑/↓/Enter. Esc falls through to
+    /// `Catalog`. Opened only when `config.model.is_none()` at shell
+    /// startup, or on demand via `/model-picker`.
+    ModelPicker,
+    /// Secondary picker shown after `ModelPicker` when the chosen
+    /// provider supports both an API-key and an OAuth login path
+    /// (anthropic, openai). The string is the provider id; this stays
+    /// on the variant so the renderer + key handler stay stateless.
+    AuthMethodPicker(String),
+    /// Claude-Code-style multi-select that drives the eight planning
+    /// tasks (context build, x-ray, threat-model variants, CPG, CodeQL
+    /// DB, threat intel). State lives on `app.planning_*` fields.
+    PlanningPicker,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -52,6 +52,9 @@ impl ShellApp {
             Some(ShellView::Patch(_)) => "patch",
             Some(ShellView::Pwn) => "pwn",
             Some(ShellView::FailureHandoff) => "handoff",
+            Some(ShellView::ModelPicker) => "model picker",
+            Some(ShellView::AuthMethodPicker(_)) => "auth picker",
+            Some(ShellView::PlanningPicker) => "planning",
             None => "home",
         }
     }
