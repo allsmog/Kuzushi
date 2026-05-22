@@ -112,6 +112,9 @@ impl ModuleRegistry {
         runtime: Option<&dyn AgentRuntime>,
     ) -> ToolDispatchResult {
         use crate::capabilities::threat_intel::execute_threat_intel_tool;
+        if name == "threat-intel:discover" {
+            return Some(run_threat_intel_discover(input, ctx));
+        }
         if !matches!(
             name,
             "threat-intel:list" | "threat-intel:apply" | "threat-intel:harvest"
