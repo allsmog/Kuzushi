@@ -107,13 +107,14 @@ fn ndiff_fix_pattern_request(
     prompt: String,
     thinking_level: String,
 ) -> AgentQueryRequest {
+    let policy = whitebox_static_policy_for_target(&target);
     AgentQueryRequest::new(
         model,
         target,
         NDIFF_FIX_PATTERN_SYSTEM_PROMPT.to_string(),
         prompt,
     )
-    .with_tool_policy(default_whitebox_static_agent_tool_policy())
+    .with_tool_policy(policy)
     .with_thinking_level(thinking_level)
 }
 

@@ -45,7 +45,7 @@ pub(crate) fn run_taint_cwe_select_value(
             TAINT_CWE_SELECT_SYSTEM_PROMPT.to_string(),
             build_taint_cwe_select_prompt(target, &inventory),
         )
-        .with_tool_policy(agent_tool_policy_for_input(input)?),
+        .with_tool_policy(agent_tool_policy_for_input_and_target(input, target)?),
         StructuredJsonContract::new(
             "pipeline:taint-cwe-select",
             "TaintCweSelection",

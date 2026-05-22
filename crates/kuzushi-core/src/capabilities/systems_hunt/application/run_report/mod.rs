@@ -36,7 +36,7 @@ fn prepare_systems_hunt_run<'a>(
     emit_systems_hunt_start(ctx, &target);
     let context = gather_systems_context(&target, &options)?;
     ensure_systems_hunt_surfaces(ctx, &target, &options, &context)?;
-    let execution = resolve_systems_hunt_execution(input, ctx, &options, runtime)?;
+    let execution = resolve_systems_hunt_execution(input, ctx, &options, runtime, &target)?;
     Ok(SystemsHuntRun {
         target,
         options,
@@ -62,6 +62,7 @@ fn resolve_systems_hunt_execution<'a>(
     ctx: &ToolExecutionContext<'_>,
     options: &SystemsHuntInput,
     runtime: Option<&'a dyn AgentRuntime>,
+    target: &Path,
 ) -> Result<SystemsHuntExecution<'a>> {
     let runtime = required_systems_runtime(runtime, "systems-hunt")?;
     let model = resolve_model("systems-hunt", input, ctx, options)?;
@@ -69,7 +70,7 @@ fn resolve_systems_hunt_execution<'a>(
     Ok(SystemsHuntExecution {
         runtime,
         model,
-        agent_tool_policy: default_whitebox_static_agent_tool_policy(),
+        agent_tool_policy: whitebox_static_policy_for_target(target),
         thinking_level: agentic_hunter_thinking_level(input),
         whitebox_static,
     })

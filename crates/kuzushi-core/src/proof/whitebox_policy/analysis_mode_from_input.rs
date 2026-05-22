@@ -32,6 +32,28 @@ pub fn default_whitebox_static_agent_tool_policy() -> AgentToolPolicy {
     )
 }
 
+/// Whitebox-static base policy with the conditional MCP attachment
+/// plan baked in. Use this in every model-backed analysis tool that
+/// would benefit from joern / codeql / context / entry-points /
+/// threat-model / threat-intel / x-ray MCPs — the probe attaches each
+/// server only when its backing artifact exists, so calling this on a
+/// fresh workspace is a no-op (just the constant treesitter MCP is
+/// attached) and there's no penalty for the unconditional migration.
+pub fn whitebox_static_policy_for_target(target: &std::path::Path) -> AgentToolPolicy {
+    default_whitebox_static_agent_tool_policy().with_mcps_for_target(target)
+}
+
+/// Like `agent_tool_policy_for_input` but layers in the conditional
+/// MCP attachment plan for `target`. Prefer this over the bare
+/// `agent_tool_policy_for_input` for any model-backed tool that
+/// benefits from the MCP surface.
+pub fn agent_tool_policy_for_input_and_target(
+    input: &Value,
+    target: &std::path::Path,
+) -> Result<AgentToolPolicy> {
+    Ok(agent_tool_policy_for_input(input)?.with_mcps_for_target(target))
+}
+
 pub fn agentic_hunter_thinking_level(input: &Value) -> String {
     for key in ["thinkingLevel", "reasoningEffort", "effort"] {
         if let Some(value) = input.get(key).and_then(Value::as_str) {

@@ -309,7 +309,7 @@ pub(crate) fn query_taint_iris_agent(
             TAINT_IRIS_SYSTEM_PROMPT.to_string(),
             build_taint_iris_prompt(target, cwes, &inventory, codeql_db.as_deref(), options),
         )
-        .with_tool_policy(agent_tool_policy_for_input(input)?),
+        .with_tool_policy(agent_tool_policy_for_input_and_target(input, target)?),
         StructuredJsonContract::new(
             "taint-iris:hunt",
             "TaintIrisFindings",

@@ -152,7 +152,7 @@ fn ndiff_hunt_request(run: &NdiffHuntRun<'_>, prompt: String) -> AgentQueryReque
         NDIFF_HUNT_SYSTEM_PROMPT.to_string(),
         prompt,
     )
-    .with_tool_policy(default_whitebox_static_agent_tool_policy())
+    .with_tool_policy(whitebox_static_policy_for_target(&run.target))
     .with_thinking_level(run.thinking_level.clone())
 }
 

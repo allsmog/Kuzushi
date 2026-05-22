@@ -29,7 +29,7 @@ fn query_systems_invariants_for_context(
     options: SystemsHuntInput,
 ) -> Result<SystemsInvariantOutput> {
     let runtime = required_systems_runtime(runtime, "systems-hunt:systems-invariant-extract")?;
-    let request = systems_invariant_query_request(input, ctx, &options)?;
+    let request = systems_invariant_query_request(input, ctx, &options, &target)?;
     let _llm_scope = ctx.trace.map(|trace| {
         let phase = trace
             .step(
@@ -61,10 +61,11 @@ fn systems_invariant_query_request(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     options: &SystemsHuntInput,
+    target: &Path,
 ) -> Result<SystemsInvariantQueryRequest> {
     Ok(SystemsInvariantQueryRequest {
         model: systems_invariant_model(input, ctx, options)?,
-        tool_policy: default_whitebox_static_agent_tool_policy(),
+        tool_policy: whitebox_static_policy_for_target(target),
         thinking_level: agentic_hunter_thinking_level(input),
     })
 }

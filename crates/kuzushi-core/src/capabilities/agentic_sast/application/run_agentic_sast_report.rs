@@ -174,7 +174,7 @@ impl AgenticSastRun {
         let model = agentic_sast_model(input, ctx)?;
         let whitebox_static = whitebox_static_profile_requested(input)?;
         let system_prompt = agentic_sast_system_prompt(whitebox_static);
-        let tool_policy = agent_tool_policy_for_input(input)?;
+        let tool_policy = agent_tool_policy_for_input_and_target(input, &target)?;
         let inventory = collect_agentic_repo_inventory_with_filters(
             &target,
             options.max_inventory_files,

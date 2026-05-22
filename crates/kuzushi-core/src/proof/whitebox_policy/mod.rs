@@ -17,11 +17,13 @@ pub(in crate::proof::whitebox_policy) use apply_whitebox_static_sast_policy::{
 mod tests;
 
 pub use analysis_mode_from_input::agent_tool_policy_for_input;
+pub use analysis_mode_from_input::agent_tool_policy_for_input_and_target;
 pub use analysis_mode_from_input::agentic_hunter_thinking_level;
 pub use analysis_mode_from_input::analysis_mode_from_input;
 pub use analysis_mode_from_input::default_whitebox_static_agent_tool_policy;
 pub use analysis_mode_from_input::validate_whitebox_static_agent_tool_policy;
 pub use analysis_mode_from_input::whitebox_static_enabled;
+pub use analysis_mode_from_input::whitebox_static_policy_for_target;
 pub use analysis_mode_from_input::whitebox_static_profile_requested;
 pub use analysis_mode_from_input::whitebox_static_proof_state_from_str;
 pub use analysis_mode_from_input::whitebox_static_triage_prompt_block;
