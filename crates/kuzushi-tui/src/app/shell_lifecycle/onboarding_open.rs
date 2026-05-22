@@ -7,6 +7,7 @@ impl ShellApp {
     /// slash command and the dedicated open_* helpers below.
     pub(crate) fn apply_initial_onboarding_phase(&mut self) {
         let phase = self.compute_initial_onboarding_phase();
+        self.log_mcp_attachment_plan();
         match phase {
             InitialOnboardingPhase::Catalog => {}
             InitialOnboardingPhase::ModelPicker => self.open_model_picker(),
@@ -15,6 +16,24 @@ impl ShellApp {
             }
             InitialOnboardingPhase::PlanningPicker => self.open_planning_picker(),
         }
+    }
+
+    /// Emit a one-line summary of which MCP servers will attach to the
+    /// next agent call based on which artifacts exist on disk. Called
+    /// at shell startup and again whenever a planning task completes so
+    /// the operator sees the plan refresh in real time.
+    pub(crate) fn log_mcp_attachment_plan(&mut self) {
+        let Some(target) = self.target.as_deref() else {
+            return;
+        };
+        let plan = kuzushi_core::mcp_attachment_plan_for_target(target);
+        let summary = if plan.is_empty() {
+            "MCP plan: (none) — build artifacts via /planning to attach servers".to_string()
+        } else {
+            let names: Vec<&str> = plan.iter().map(|a| a.name.as_str()).collect();
+            format!("MCP plan: {}", names.join(", "))
+        };
+        self.log("mcps", summary);
     }
 
     pub(crate) fn open_model_picker(&mut self) {

@@ -1253,6 +1253,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "kuzushi-mcp-context"
+version = "0.24.0-alpha.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "kuzushi-mcp-common",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "kuzushi-mcp-entry-points"
+version = "0.24.0-alpha.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "kuzushi-mcp-common",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "kuzushi-mcp-gtags"
 version = "0.24.0-alpha.0"
 dependencies = [
@@ -1293,6 +1319,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "kuzushi-mcp-threat-intel"
+version = "0.24.0-alpha.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "kuzushi-mcp-common",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "kuzushi-mcp-threat-model"
+version = "0.24.0-alpha.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "kuzushi-mcp-common",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "kuzushi-mcp-treesitter"
 version = "0.24.0-alpha.0"
 dependencies = [
@@ -1312,6 +1364,19 @@ dependencies = [
  "tree-sitter-python",
  "tree-sitter-ruby",
  "tree-sitter-typescript",
+]
+
+[[package]]
+name = "kuzushi-mcp-x-ray"
+version = "0.24.0-alpha.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "kuzushi-mcp-common",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

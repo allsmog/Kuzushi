@@ -52,6 +52,10 @@ impl ShellApp {
             return;
         }
         self.planning_running_tool = None;
+        // Refresh the MCP attachment summary: the completed tool may
+        // have produced an artifact whose absence was the only reason
+        // an MCP wasn't attached.
+        self.log_mcp_attachment_plan();
         if self.planning_run_queue.is_empty() {
             self.log("planning", "planning complete");
             return;

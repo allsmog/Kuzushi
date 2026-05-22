@@ -2937,6 +2937,15 @@ OUT
             "const sql = `SELECT * FROM users WHERE id = ${req.query.id}`;\ndb.query(sql);\n",
         )
         .unwrap();
+        // taint-iris-next:hunt now refuses to dispatch without the
+        // CPG + CodeQL DB artifacts (the artifact-aware MCP probe
+        // gates the policy). Stub both so the hunt phase routes.
+        let kuzushi = temp.path().join(".kuzushi");
+        fs::create_dir_all(&kuzushi).unwrap();
+        fs::write(kuzushi.join("cpg.bin"), b"CPG\0stub").unwrap();
+        let codeql_db = kuzushi.join("codeql-db");
+        fs::create_dir_all(&codeql_db).unwrap();
+        fs::write(codeql_db.join("placeholder"), "stub").unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();

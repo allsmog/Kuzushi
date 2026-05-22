@@ -3024,6 +3024,15 @@ fn run_command_dispatches_legacy_taint_iris_next_hunt_through_pi_agent_core_brid
         "const sql = `SELECT * FROM users WHERE id = ${req.query.id}`;\ndb.query(sql);\n",
     )
     .unwrap();
+    // taint-iris-next:hunt now requires CPG + CodeQL DB artifacts to
+    // attach the joern/codeql MCPs. Stub both so the policy probe
+    // returns the expected attachments and the hunt routes.
+    let kuzushi = tmp.path().join(".kuzushi");
+    fs::create_dir_all(&kuzushi).unwrap();
+    fs::write(kuzushi.join("cpg.bin"), b"CPG\0stub").unwrap();
+    let codeql_db = kuzushi.join("codeql-db");
+    fs::create_dir_all(&codeql_db).unwrap();
+    fs::write(codeql_db.join("placeholder"), "stub").unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let bridge = fake_taint_iris_next_bridge(&tmp.path().to_path_buf());
     let mut config = V2Config::default();
