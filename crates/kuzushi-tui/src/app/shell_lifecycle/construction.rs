@@ -70,6 +70,13 @@ macro_rules! shell_app_initial_state {
             pending_plan: None,
             plan_cursor: 0,
             plan_skipped: BTreeSet::new(),
+            model_picker_cursor: 0,
+            auth_picker_cursor: 0,
+            planning_cursor: 0,
+            planning_selected: BTreeSet::new(),
+            planning_tasks: Vec::new(),
+            planning_run_queue: std::collections::VecDeque::new(),
+            planning_running_tool: None,
             tune_cursor: 0,
             prompts_cursor: 0,
             actor_detail_filter: ActorDetailFilter::All,
@@ -149,6 +156,7 @@ impl ShellApp {
         if target.is_some() {
             app.refresh_findings(false);
         }
+        app.apply_initial_onboarding_phase();
         app
     }
 }

@@ -18,7 +18,7 @@ pub(crate) fn shell_view_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
 pub(crate) fn primary_view_lines(
     app: &ShellApp,
     area: Rect,
-    route: PrimaryViewRoute,
+    route: PrimaryViewRoute<'_>,
 ) -> Vec<Line<'static>> {
     match route {
         PrimaryViewRoute::Home => home_lines(app, area),
@@ -36,6 +36,11 @@ pub(crate) fn primary_view_lines(
         PrimaryViewRoute::Activity { scroll } => {
             viewport_lines(activity_lines(app, area), area.height, scroll)
         }
+        PrimaryViewRoute::ModelPicker => model_picker_lines(app, area),
+        PrimaryViewRoute::AuthMethodPicker { provider } => {
+            auth_method_picker_lines(app, area, provider)
+        }
+        PrimaryViewRoute::PlanningPicker => planning_picker_lines(app, area),
     }
 }
 

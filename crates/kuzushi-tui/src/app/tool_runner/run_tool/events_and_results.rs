@@ -58,6 +58,7 @@ impl ShellApp {
         self.log_failure_context(failure_context);
         self.set_completed_activity(tool_name.clone(), "tool result applied");
         self.advance_chain_after_tool(&tool_name);
+        self.advance_planning_queue_after_tool(&tool_name);
     }
 
     fn apply_failed_tool_event(&mut self, state: ToolEventState, tool_name: String, error: String) {
@@ -85,6 +86,9 @@ impl ShellApp {
         );
         self.log_failure_context(failure_context);
         self.abort_pending_chain(&tool_name);
+        if self.planning_running_tool.as_deref() == Some(&tool_name) {
+            self.cancel_planning_queue();
+        }
     }
 
     fn log_tool_failure(&mut self, tool_name: &str, message: String, abort_requested: bool) {

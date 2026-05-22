@@ -62,6 +62,26 @@ pub struct ShellApp {
     pub pending_plan: Option<PlanProposal>,
     pub plan_cursor: usize,
     pub plan_skipped: BTreeSet<usize>,
+    /// First-run model-picker cursor. Persisted on the app so `↑`/`↓`
+    /// keep their position across re-renders.
+    pub model_picker_cursor: usize,
+    /// Auth-method picker cursor (0 = API key row, 1 = OAuth row).
+    pub auth_picker_cursor: usize,
+    /// Planning-picker cursor (index into `planning_tasks`).
+    pub planning_cursor: usize,
+    /// Set of planning-task ids currently checked. Mirrors the
+    /// `[x]` / `[ ]` state shown in the picker card.
+    pub planning_selected: BTreeSet<PlanningTaskId>,
+    /// Per-row state for the planning picker. Built when the picker
+    /// opens and refreshed when artifacts change.
+    pub planning_tasks: Vec<PlanningTaskRow>,
+    /// Pending planning-run queue (topo-sorted). Drains one task at a
+    /// time after Enter is pressed in the planning picker.
+    pub planning_run_queue: std::collections::VecDeque<PlanningTaskId>,
+    /// Name of the tool currently executing on behalf of the planning
+    /// queue, used by `advance_planning_queue_after_tool` to know when
+    /// to pop the next entry.
+    pub planning_running_tool: Option<String>,
     pub tune_cursor: usize,
     pub prompts_cursor: usize,
     pub actor_detail_filter: ActorDetailFilter,

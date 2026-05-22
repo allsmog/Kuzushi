@@ -23,14 +23,14 @@ pub(crate) enum PlainRenderMode<'a> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ShellViewLineRoute<'a> {
-    Primary(PrimaryViewRoute),
+    Primary(PrimaryViewRoute<'a>),
     ThreatAndRun(ThreatAndRunViewRoute<'a>),
     System(SystemViewRoute<'a>),
     WorkspaceAndSession(WorkspaceSessionViewRoute<'a>),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PrimaryViewRoute {
+pub(crate) enum PrimaryViewRoute<'a> {
     Home,
     Catalog { expanded: bool, scroll: usize },
     Recommend,
@@ -40,6 +40,9 @@ pub(crate) enum PrimaryViewRoute {
     Finding,
     Pwn { scroll: usize },
     Activity { scroll: usize },
+    ModelPicker,
+    AuthMethodPicker { provider: &'a str },
+    PlanningPicker,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -125,7 +128,7 @@ pub(crate) fn plain_render_mode(app: &ShellApp) -> PlainRenderMode<'_> {
     }
 }
 
-fn primary_view_route(app: &ShellApp) -> Option<PrimaryViewRoute> {
+fn primary_view_route(app: &ShellApp) -> Option<PrimaryViewRoute<'_>> {
     match &app.shell_view {
         ShellView::Home => Some(PrimaryViewRoute::Home),
         ShellView::Catalog => Some(PrimaryViewRoute::Catalog {
@@ -143,6 +146,11 @@ fn primary_view_route(app: &ShellApp) -> Option<PrimaryViewRoute> {
         ShellView::Activity => Some(PrimaryViewRoute::Activity {
             scroll: app.scroll_offset as usize,
         }),
+        ShellView::ModelPicker => Some(PrimaryViewRoute::ModelPicker),
+        ShellView::AuthMethodPicker(provider) => Some(PrimaryViewRoute::AuthMethodPicker {
+            provider: provider.as_str(),
+        }),
+        ShellView::PlanningPicker => Some(PrimaryViewRoute::PlanningPicker),
         _ => None,
     }
 }

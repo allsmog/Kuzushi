@@ -24,7 +24,7 @@ pub(crate) use scan::*;
 pub(crate) use services::*;
 pub(crate) use session::*;
 pub(crate) use settings::*;
-pub(crate) use shell_lifecycle::*;
+pub(crate) use shell_lifecycle::{auth_ready_for_provider, *};
 pub(crate) use shellapp::*;
 pub(crate) use threats::*;
 pub(crate) use tool_runner::*;
@@ -66,6 +66,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::mpsc::Receiver;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+mod onboarding;
 mod prompts;
 mod reducers;
 mod runtime;
@@ -93,6 +94,14 @@ pub use agent_chat::ChatTurn;
 pub use approval::{ConfirmKind, PendingConfirm, PendingPatch};
 pub use live_activity::{LiveActivity, LiveActivityPhase};
 pub use log::LogLine;
+pub use onboarding::{
+    any_planning_artifact_missing, artifact_state as planning_artifact_state,
+    build_execution_plan, cli_is_on_path, direct_dependencies, direct_dependents,
+    initial_onboarding_phase, initial_onboarding_phase_for, provider_has_multiple_auth_methods,
+    skip_onboarding_env, toggle_planning_row, topological_order, transitive_dependencies,
+    ArtifactState as PlanningArtifactState, InitialOnboardingPhase, OnboardingInputs,
+    PlanningTaskId, PlanningTaskRow, ToggleOutcome,
+};
 pub use prereq_chain::{
     PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqPlanAction, PrereqPlanStep,
     PrereqStep,

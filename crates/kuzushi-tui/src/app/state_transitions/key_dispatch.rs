@@ -35,6 +35,7 @@ impl ShellApp {
         self.handle_confirm_key(key)
             || self.handle_budget_key(key)
             || self.handle_pending_plan_key(key)
+            || self.handle_picker_key(key)
     }
 
     pub(super) fn handle_confirm_key(&mut self, key: KeyEvent) -> bool {
