@@ -128,7 +128,7 @@ fn carlini_actor_request(
         SYSTEM_PROMPT.to_string(),
         prompt,
     )
-    .with_tool_policy(default_whitebox_static_agent_tool_policy())
+    .with_tool_policy(whitebox_static_policy_for_target(target))
     .with_thinking_level(agentic_hunter_thinking_level(input));
 
     match max_output_tokens_from_input(input) {

@@ -6,7 +6,8 @@ use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
 use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 use crate::whitebox_static::{
-    agent_tool_policy_for_input, mark_whitebox_static_findings, whitebox_static_profile_requested,
+    agent_tool_policy_for_input_and_target, mark_whitebox_static_findings,
+    whitebox_static_profile_requested,
 };
 use crate::workspace::WorkspaceTarget;
 use anyhow::{Context, Result};

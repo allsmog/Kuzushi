@@ -108,7 +108,7 @@ fn variant_lift_request(
         VARIANT_SIGNATURE_SYSTEM_PROMPT.to_string(),
         prompt,
     )
-    .with_tool_policy(default_whitebox_static_agent_tool_policy())
+    .with_tool_policy(whitebox_static_policy_for_target(workspace.root()))
     .with_thinking_level(thinking_level)
 }
 

@@ -16,7 +16,7 @@ pub(crate) fn query_deep_semantic_findings(
             DEEP_SEMANTIC_HUNT_SYSTEM_PROMPT.to_string(),
             deep_semantic_hunt_prompt(cwes, &inventory),
         )
-        .with_tool_policy(default_whitebox_static_agent_tool_policy())
+        .with_tool_policy(whitebox_static_policy_for_target(target))
         .with_thinking_level(agentic_hunter_thinking_level(input)),
         StructuredJsonContract::new(
             "systems-hunt:deep-semantic-hunt",

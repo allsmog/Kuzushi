@@ -15,7 +15,7 @@ pub(crate) fn run_systems_trigger_synth(
     }
     let runtime = required_systems_runtime(runtime, "systems-hunt:systems-trigger-synth")?;
     let model = resolve_model("systems-hunt:systems-trigger-synth", input, ctx, &options)?;
-    let agent_tool_policy = default_whitebox_static_agent_tool_policy();
+    let agent_tool_policy = whitebox_static_policy_for_target(&target);
     let thinking_level = agentic_hunter_thinking_level(input);
     let _llm_scope = ctx.trace.map(|trace| {
         let phase = trace
