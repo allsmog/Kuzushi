@@ -89,6 +89,21 @@ pub(crate) fn handle_quickstart_command(app: &mut ShellApp, command: &ShellComma
     true
 }
 
+pub(crate) fn handle_onboarding_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Onboarding = command else {
+        return false;
+    };
+    if app.target.is_none() {
+        app.log(
+            "onboarding",
+            "no active workspace target; set one with `target <path>` first",
+        );
+        return true;
+    }
+    app.open_planning_picker();
+    true
+}
+
 pub(crate) fn handle_target_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
     let ShellCommand::Target(path) = command else {
         return false;

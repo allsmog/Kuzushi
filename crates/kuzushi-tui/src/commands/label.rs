@@ -41,6 +41,7 @@ pub enum ShellCommand {
     PlanApply,
     PlanDiscard,
     Quickstart,
+    Onboarding,
     Target(Option<String>),
     Ask(String),
     Options {
