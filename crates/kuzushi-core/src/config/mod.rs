@@ -33,9 +33,11 @@ mod tests;
 
 pub use config_model::AnthropicOauthConfig;
 pub use config_model::ConfigPaths;
+pub use config_model::OAUTH_CREDENTIALS_FILE;
 pub use config_model::RuntimeConfig;
 pub use config_model::RuntimeKind;
 pub use config_model::V2Config;
+pub use config_model::default_oauth_credentials_path;
 pub use config_hash::config_hash;
 pub use load_config_for_target::load_anthropic_oauth_config;
 pub use load_config_for_target::load_config;

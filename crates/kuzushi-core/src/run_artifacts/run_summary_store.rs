@@ -2,12 +2,13 @@ use super::canonical_run_files::ensure_canonical_run_files;
 use super::run_reproducibility_metadata::summary_with_dynamic_metadata;
 use super::run_paths::latest_run_path;
 use super::{now_unix, run_dir, runs_root, RunSummary};
+use crate::artifact_contract::{canonical_run_artifact_spec, CanonicalRunArtifactSpec};
 use anyhow::{Context, Result};
+use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 const LEGACY_SUMMARY_FILE: &str = "summary.json";
-const RUN_METADATA_FILE: &str = "run.json";
 
 pub fn write_run_summary(target: impl AsRef<Path>, summary: &RunSummary) -> Result<PathBuf> {
     let target = target.as_ref();
@@ -15,18 +16,17 @@ pub fn write_run_summary(target: impl AsRef<Path>, summary: &RunSummary) -> Resu
     fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
     let summary = summary_with_dynamic_metadata(target, summary);
     let summary_path = write_run_summary_file(&dir.join(LEGACY_SUMMARY_FILE), &summary)?;
-    write_run_summary_file(&dir.join(RUN_METADATA_FILE), &summary)?;
+    write_run_summary_file(&dir.join(run_metadata_artifact_spec().leaf), &summary)?;
     ensure_canonical_run_files(target, &summary.run_id, &summary.status)?;
     write_latest_run_id(target, &summary.run_id)?;
     Ok(summary_path)
 }
 
 pub fn load_run_summary(target: impl AsRef<Path>, run_id: &str) -> Result<RunSummary> {
-    let path = readable_summary_path(target, run_id);
+    let path = readable_summary_path(target, run_id)?;
     let body =
         fs::read_to_string(&path).with_context(|| format!("Could not read {}", path.display()))?;
-    let summary: RunSummary = serde_json::from_str(&body)
-        .with_context(|| format!("Could not parse {}", path.display()))?;
+    let summary = parse_run_summary_body(&body, &path)?;
     Ok(repair_stale_running_summary(&path, summary))
 }
 
@@ -66,8 +66,28 @@ fn is_directory_entry(entry: &fs::DirEntry) -> bool {
 }
 
 fn read_run_metadata_entry(dir: &Path) -> Option<RunSummary> {
-    read_repaired_summary(&dir.join(RUN_METADATA_FILE))
-        .or_else(|| read_repaired_summary(&dir.join(LEGACY_SUMMARY_FILE)))
+    match read_run_metadata_summary(&dir.join(run_metadata_artifact_spec().leaf)) {
+        MetadataSummaryRead::Present(summary) => Some(summary),
+        MetadataSummaryRead::Missing => read_repaired_summary(&dir.join(LEGACY_SUMMARY_FILE)),
+        MetadataSummaryRead::Invalid => None,
+    }
+}
+
+enum MetadataSummaryRead {
+    Present(RunSummary),
+    Missing,
+    Invalid,
+}
+
+fn read_run_metadata_summary(path: &Path) -> MetadataSummaryRead {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => read_repaired_summary(path)
+            .map(MetadataSummaryRead::Present)
+            .unwrap_or(MetadataSummaryRead::Invalid),
+        Ok(_) => MetadataSummaryRead::Invalid,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => MetadataSummaryRead::Missing,
+        Err(_) => MetadataSummaryRead::Invalid,
+    }
 }
 
 fn read_repaired_summary(path: &Path) -> Option<RunSummary> {
@@ -76,16 +96,40 @@ fn read_repaired_summary(path: &Path) -> Option<RunSummary> {
 
 fn read_run_summary_file(summary_path: &Path) -> Option<RunSummary> {
     let body = fs::read_to_string(summary_path).ok()?;
-    serde_json::from_str::<RunSummary>(&body).ok()
+    parse_run_summary_body(&body, summary_path).ok()
 }
 
-fn readable_summary_path(target: impl AsRef<Path>, run_id: &str) -> PathBuf {
+fn parse_run_summary_body(body: &str, path: &Path) -> Result<RunSummary> {
+    let value: Value =
+        serde_json::from_str(body).with_context(|| format!("Could not parse {}", path.display()))?;
+    if !value.is_object() {
+        anyhow::bail!("Run metadata is not a JSON object: {}", path.display());
+    }
+    serde_json::from_value(value).with_context(|| format!("Could not parse {}", path.display()))
+}
+
+fn readable_summary_path(target: impl AsRef<Path>, run_id: &str) -> Result<PathBuf> {
     let dir = run_dir(target, run_id);
-    let canonical = dir.join(RUN_METADATA_FILE);
-    canonical
-        .exists()
-        .then_some(canonical)
-        .unwrap_or_else(|| dir.join(LEGACY_SUMMARY_FILE))
+    let canonical = dir.join(run_metadata_artifact_spec().leaf);
+    if readable_run_metadata_exists(&canonical, "Run metadata")? {
+        return Ok(canonical);
+    }
+    let legacy = dir.join(LEGACY_SUMMARY_FILE);
+    reject_non_file_target(&legacy, "Legacy run summary")?;
+    Ok(legacy)
+}
+
+fn run_metadata_artifact_spec() -> &'static CanonicalRunArtifactSpec {
+    canonical_run_artifact_spec("run.json").expect("run metadata artifact must be in shared spec")
+}
+
+fn readable_run_metadata_exists(path: &Path, label: &str) -> Result<bool> {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => Ok(true),
+        Ok(_) => anyhow::bail!("{label} is not a file: {}", path.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("Could not inspect {}", path.display())),
+    }
 }
 
 fn write_run_summary_file(path: &Path, summary: &RunSummary) -> Result<PathBuf> {

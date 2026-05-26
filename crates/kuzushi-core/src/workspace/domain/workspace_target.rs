@@ -1,5 +1,64 @@
 use super::*;
 
+pub const KUZUSHI_STATE_DIR: &str = ".kuzushi";
+pub const WORKSPACE_STATE_VERSION_DIR: &str = "v2";
+pub const WORKSPACE_CONFIG_FILE: &str = "config.toml";
+pub const WORKSPACE_OPTIONS_FILE: &str = "options.json";
+pub const WORKSPACE_FINDINGS_DB_FILE: &str = "findings.sqlite3";
+pub const WORKSPACE_STATIC_EVIDENCE_DB_FILE: &str = "static-evidence.sqlite3";
+pub const WORKSPACE_ARTIFACT_KB_DB_FILE: &str = "artifact-kb.sqlite3";
+pub const WORKSPACE_ATTACHMENTS_FILE: &str = "attachments.json";
+pub const WORKSPACE_MODELS_FILE: &str = "models.toml";
+pub const WORKSPACE_CODEQL_DB_DIR: &str = "codeql-db";
+pub const LEGACY_CODEQL_STATE_DIR: &str = ".codeql";
+pub const LEGACY_CODEQL_DB_DIR: &str = "db";
+
+pub fn workspace_state_root(root: impl AsRef<Path>) -> PathBuf {
+    root.as_ref().join(KUZUSHI_STATE_DIR)
+}
+
+pub fn workspace_state_dir(root: impl AsRef<Path>) -> PathBuf {
+    workspace_state_root(root).join(WORKSPACE_STATE_VERSION_DIR)
+}
+
+pub fn workspace_config_path(root: impl AsRef<Path>) -> PathBuf {
+    workspace_state_dir(root).join(WORKSPACE_CONFIG_FILE)
+}
+
+pub fn workspace_options_path(root: impl AsRef<Path>) -> PathBuf {
+    workspace_state_dir(root).join(WORKSPACE_OPTIONS_FILE)
+}
+
+pub fn workspace_findings_db_path(root: impl AsRef<Path>) -> PathBuf {
+    workspace_state_dir(root).join(WORKSPACE_FINDINGS_DB_FILE)
+}
+
+pub fn workspace_static_evidence_db_path(root: impl AsRef<Path>) -> PathBuf {
+    workspace_state_dir(root).join(WORKSPACE_STATIC_EVIDENCE_DB_FILE)
+}
+
+pub fn workspace_artifact_kb_db_path(root: impl AsRef<Path>) -> PathBuf {
+    workspace_state_dir(root).join(WORKSPACE_ARTIFACT_KB_DB_FILE)
+}
+
+pub fn workspace_attachments_path(root: impl AsRef<Path>) -> PathBuf {
+    workspace_state_dir(root).join(WORKSPACE_ATTACHMENTS_FILE)
+}
+
+pub fn workspace_models_path(root: impl AsRef<Path>) -> PathBuf {
+    workspace_state_root(root).join(WORKSPACE_MODELS_FILE)
+}
+
+pub fn workspace_codeql_db_path(root: impl AsRef<Path>) -> PathBuf {
+    workspace_state_root(root).join(WORKSPACE_CODEQL_DB_DIR)
+}
+
+pub fn legacy_codeql_db_path(root: impl AsRef<Path>) -> PathBuf {
+    root.as_ref()
+        .join(LEGACY_CODEQL_STATE_DIR)
+        .join(LEGACY_CODEQL_DB_DIR)
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorkspaceTarget {
     pub(crate) root: PathBuf,
@@ -27,11 +86,11 @@ impl WorkspaceTarget {
     }
 
     pub fn state_dir(&self) -> PathBuf {
-        self.root.join(".kuzushi").join("v2")
+        workspace_state_dir(&self.root)
     }
 
     pub fn findings_db_path(&self) -> PathBuf {
-        self.state_dir().join("findings.sqlite3")
+        workspace_findings_db_path(&self.root)
     }
 
     pub fn ensure_state_dir(&self) -> Result<PathBuf> {

@@ -43,7 +43,7 @@ macro_rules! shell_app_initial_state {
             last_tool_cost_usd: None,
             selected_model_index: $selected_model_index,
             context_view: default_context_snapshot_view(
-                ($target).map(|target| target.root().join(".kuzushi/context-snapshot.json")),
+                ($target).map(|target| kuzushi_core::context_snapshot_path(target.root())),
             ),
             workspace_view: default_workspace_view($target),
             kb_view: KnowledgeBaseView {
@@ -144,7 +144,7 @@ impl ShellApp {
         // copy in the transcript wasted one of only two visible log rows.
         app.log(
             "help",
-            "help for commands · Tab to complete · Ctrl+P/N history · ? <text> to ask · scan to start",
+            "type `scan` to begin · `help` for commands · `?<text>` to ask the agent",
         );
         if target.is_some() {
             app.refresh_findings(false);

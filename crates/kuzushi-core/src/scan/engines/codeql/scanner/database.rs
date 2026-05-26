@@ -12,7 +12,7 @@ impl CodeqlScanner {
         }
 
         let language = self.required_codeql_language(target, binary, cancel)?;
-        let db_path = target.join(".kuzushi").join("codeql-db");
+        let db_path = crate::workspace::workspace_codeql_db_path(target);
         if is_codeql_database_dir(&db_path) {
             return Ok(CodeqlDatabase { db_path, language });
         }

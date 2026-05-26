@@ -21,8 +21,12 @@ pub fn run_dir(target: impl AsRef<Path>, run_id: &str) -> PathBuf {
     runs_root(target).join(run_id)
 }
 
+pub fn run_artifact_path(target: impl AsRef<Path>, run_id: &str, leaf: impl AsRef<Path>) -> PathBuf {
+    run_dir(target, run_id).join(leaf)
+}
+
 pub fn kuzushi_root(target: impl AsRef<Path>) -> PathBuf {
-    target.as_ref().join(".kuzushi")
+    crate::workspace::workspace_state_root(target)
 }
 
 pub fn latest_run_path(target: impl AsRef<Path>) -> PathBuf {
@@ -49,4 +53,28 @@ fn now_unix() -> u64 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn run_artifact_paths_use_workspace_state_root() {
+        let target = Path::new("/repo");
+
+        assert_eq!(kuzushi_root(target), crate::workspace::workspace_state_root(target));
+        assert_eq!(runs_root(target), crate::workspace::workspace_state_root(target).join("runs"));
+        assert_eq!(
+            latest_run_path(target),
+            crate::workspace::workspace_state_root(target).join("latest")
+        );
+        assert_eq!(
+            run_artifact_path(target, "run-123", "failures.json"),
+            crate::workspace::workspace_state_root(target)
+                .join("runs")
+                .join("run-123")
+                .join("failures.json")
+        );
+    }
 }

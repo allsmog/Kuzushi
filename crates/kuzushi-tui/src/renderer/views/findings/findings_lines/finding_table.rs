@@ -126,10 +126,7 @@ fn append_finding_detail_lines(
     body: &mut Vec<Line<'static>>,
 ) {
     if wide {
-        let detail = format!(
-            "{} · conf {} · {} · {} · {}",
-            finding.verdict, finding.confidence, finding.cwe, finding.source, finding.evidence
-        );
+        let detail = compose_detail_line(finding, true);
         body.push(indent(
             muted(&fit(&detail, area.width.saturating_sub(4) as usize)),
             4,
@@ -143,12 +140,24 @@ fn append_finding_detail_lines(
         )),
         4,
     ));
-    let detail = format!(
-        "{} · conf {} · {} · {}",
-        finding.verdict, finding.confidence, finding.cwe, finding.source
-    );
+    let detail = compose_detail_line(finding, false);
     body.push(indent(
         muted(&fit(&detail, area.width.saturating_sub(4) as usize)),
         4,
     ));
+}
+
+fn compose_detail_line(finding: &FindingListRow, include_evidence: bool) -> String {
+    let mut parts: Vec<String> = vec![finding.verdict.clone()];
+    if finding.confidence != "-" {
+        parts.push(format!("conf {}", finding.confidence));
+    }
+    if finding.cwe != "-" {
+        parts.push(finding.cwe.clone());
+    }
+    parts.push(finding.source.clone());
+    if include_evidence && !finding.evidence.is_empty() && finding.evidence != finding.title {
+        parts.push(finding.evidence.clone());
+    }
+    parts.join(" · ")
 }

@@ -23,6 +23,7 @@ const forbidden = [
   ["legacy OpenAI OAuth login command", /\bauth\s+login\s+openai-codex\b/i],
   ["openai-codex OAuth label", /\bopenai-codex\s+oauth\b/i],
   ["codex OAuth label", /\bcodex\s+oauth\b/i],
+  ["upstream Codex OAuth device URL", /auth\.openai\.com\/codex\/device/i],
   ["raw openai-codex selector help", /\bSupported selectors:\s*openai,\s*openai-codex\b/i],
   ["raw auth codex example", /\baliases\s*\/\s*examples:\s*auth\s+codex\b/i],
 ];
@@ -36,6 +37,7 @@ const publicSourceForbidden = [
 const renderedUiForbidden = [
   ["legacy Codex wording in rendered TUI snapshot", /\bCodex\b|\bcodex\b|openai-codex/i],
 ];
+const publicOpenAiLoginNeedle = "kuzushi auth login openai, OPENAI_API_KEY";
 const requiredIdentityReferences = [
   {
     label: "public prompt docs",
@@ -56,7 +58,7 @@ const requiredIdentityReferences = [
   {
     label: "TUI prompt model",
     file: "crates/kuzushi-tui/src/ui_view_models/prompt.rs",
-    needles: ['return "kz";', '_ => "kuzushi"', 'format!("{brand}> ")'],
+    needles: ['public_prompt_brand', 'stem.eq_ignore_ascii_case("kz")', 'stem.eq_ignore_ascii_case("kuzushi")', 'cli_name == Some("kz")', 'eq_ignore_ascii_case(".exe")', 'format!("{brand}> ")'],
   },
   {
     label: "TUI cockpit header",
@@ -79,6 +81,49 @@ const requiredIdentityReferences = [
     needles: ['#[command(name = "kuzushi")]', 'Kuzushi security-native code agent'],
   },
   {
+    label: "TUI auth next-step selector identity",
+    file: "crates/kuzushi-tui/src/app/settings/normalize_thinking_level/auth_process.rs",
+    needles: [
+      "display_model_selector(choice.id)",
+      'format!("model {} ({selector})", choice.index)',
+    ],
+  },
+  {
+    label: "TUI auth login detail identity",
+    file: "crates/kuzushi-tui/src/app/settings/handle_model_command/auth_login.rs",
+    needles: ["OpenAI device code flow", "browser PKCE flow with localhost callback"],
+  },
+  {
+    label: "OpenAI bridge public error identity",
+    file: "crates/kuzushi-openai/src/pi_agent_core/bridge_process.rs",
+    needles: [
+      "public_bridge_bytes(stdout)",
+      "bridge_error_detail(&output.stdout, &output.stderr)",
+      ".replace(\"auth login openai-codex\", \"auth login openai\")",
+      ".replace(\"openai-codex\", \"OpenAI OAuth\")",
+    ],
+  },
+  {
+    label: "TUI legacy OpenAI auth selector identity",
+    file: "crates/kuzushi-tui/src/app/command_router/unknown_command_message.rs",
+    needles: [
+      "legacy_auth_selector_message",
+      "auth legacy-openai-oauth",
+      "OpenAI OAuth login uses `auth login openai`",
+    ],
+  },
+  {
+    label: "TUI legacy OpenAI auth parser identity",
+    file: "crates/kuzushi-tui/src/commands/parse_auth_command.rs",
+    needles: [
+      "legacy_openai_oauth_selector_command",
+      "auth legacy-openai-oauth",
+    ],
+    forbidden: [
+      'format!("auth login {}", args[1])',
+    ],
+  },
+  {
     label: "Rust PR comment help identity",
     file: "crates/kuzushi-cli/src/command.rs",
     needles: ["Build a Kuzushi PR comment from persisted run artifacts"],
@@ -90,6 +135,11 @@ const requiredIdentityReferences = [
       'invokedName === "kz"',
       '`${cliName}.exe`',
       "const nativeOverride = process.env.KUZUSHI_NATIVE_BIN",
+      "KUZUSHI_CLI_NAME: cliName",
+      "statSync(nativeOverride).isFile()",
+      "isNativeBinaryFile",
+      "candidates.find(isNativeBinaryFile)",
+      "KUZUSHI_NATIVE_BIN must point to a file",
       "overrideName !== cliName",
       "KUZUSHI_NATIVE_BIN must point to a",
       "native/<platform>-<arch>/kz",
@@ -98,10 +148,15 @@ const requiredIdentityReferences = [
     ],
   },
 ];
+const expectedBinEntries = {
+  kuzushi: "./bin/kuzushi-rs.mjs",
+  kz: "./bin/kuzushi-rs.mjs",
+};
 
 const files = publicFiles();
 const failures = [
   ...identityFailures(),
+  ...bridgePublicWordingFailures(),
   ...requiredIdentityReferences.flatMap(requiredIdentityReferenceFailures),
   ...files.flatMap(scanFile),
 ];
@@ -149,7 +204,7 @@ function identityFailures() {
   return [
     ...packageIdentityFailures(pkg),
     ...binEntryFailures(bin),
-    ...legacyBinFailures(bin),
+    ...binSurfaceFailures(bin),
     ...binShimAliasFailures(),
   ];
 }
@@ -163,24 +218,28 @@ function packageIdentityFailures(pkg) {
   return failures;
 }
 
-function requiredIdentityReferenceFailures({ label, file, needles }) {
+function requiredIdentityReferenceFailures({ label, file, needles, forbidden: forbiddenNeedles = [] }) {
   const source = readFileSync(path.join(root, file), "utf8");
-  return needles
+  return [
+    ...needles
     .filter((needle) => !source.includes(needle))
-    .map((needle) => `${file}: missing ${label} reference ${needle}`);
+      .map((needle) => `${file}: missing ${label} reference ${needle}`),
+    ...forbiddenNeedles
+      .filter((needle) => source.includes(needle))
+      .map((needle) => `${file}: forbidden ${label} reference ${needle}`),
+  ];
 }
 
 function binEntryFailures(bin) {
-  const expected = "./bin/kuzushi-rs.mjs";
-  return ["kuzushi", "kz"].flatMap((name) =>
+  return Object.entries(expectedBinEntries).flatMap(([name, expected]) =>
     bin[name] === expected ? [] : [`package.json: bin.${name} must point at "${expected}"`],
   );
 }
 
-function legacyBinFailures(bin) {
-  return ["codex", "kuzushi-ts"]
-    .filter((name) => Object.hasOwn(bin, name))
-    .map((name) => `package.json: legacy bin.${name} must not be published`);
+function binSurfaceFailures(bin) {
+  return Object.keys(bin)
+    .filter((name) => !Object.hasOwn(expectedBinEntries, name))
+    .map((name) => `package.json: bin.${name} must not be published`);
 }
 
 function binShimAliasFailures() {
@@ -203,9 +262,46 @@ function binShimRejectsMismatchedNativeOverride() {
   const source = readFileSync(path.join(root, "bin/kuzushi-rs.mjs"), "utf8");
   return (
     source.includes("const nativeOverride = process.env.KUZUSHI_NATIVE_BIN") &&
+    source.includes("KUZUSHI_CLI_NAME: cliName") &&
+    !source.includes("process.env.KUZUSHI_CLI_NAME ??") &&
+    source.includes("statSync(nativeOverride).isFile()") &&
+    source.includes("isNativeBinaryFile") &&
+    source.includes("candidates.find(isNativeBinaryFile)") &&
+    source.includes("KUZUSHI_NATIVE_BIN must point to a file") &&
     source.includes("overrideName !== cliName") &&
     source.includes("KUZUSHI_NATIVE_BIN must point to a")
   );
+}
+
+function bridgePublicWordingFailures() {
+  const source = readFileSync(path.join(root, "scripts/pi-agent-core-bridge.mjs"), "utf8");
+  return bridgePublicWordingRules()
+    .filter(({ passes }) => !passes(source))
+    .map(({ message }) => message);
+}
+
+function bridgePublicWordingRules() {
+  const publicLoginPattern =
+    /kuzushi auth login (?:` \+\s*)?"openai, OPENAI_API_KEY|kuzushi auth login openai, ` \+\s*"OPENAI_API_KEY/;
+  return [
+    {
+      passes: (source) => source.includes("authorize OpenAI OAuth"),
+      message:
+        "scripts/pi-agent-core-bridge.mjs: device login must present OpenAI OAuth, not the raw upstream selector",
+    },
+    {
+      passes: (source) => publicLoginPattern.test(source),
+      message: `scripts/pi-agent-core-bridge.mjs: OpenAI credential errors must point at ${publicOpenAiLoginNeedle}`,
+    },
+    {
+      passes: (source) => !source.includes("authorize openai-codex"),
+      message: "scripts/pi-agent-core-bridge.mjs: device login must not ask operators to authorize openai-codex",
+    },
+    {
+      passes: (source) => !source.includes("auth login openai-codex, OPENAI_API_KEY"),
+      message: "scripts/pi-agent-core-bridge.mjs: OpenAI credential errors must not expose auth login openai-codex",
+    },
+  ];
 }
 
 function lineFailures(file, line, lineNumber) {
@@ -246,7 +342,11 @@ function isPublicDoc(file) {
 }
 
 function isProductionPublicSource(file) {
-  return file.includes("/src/") && !file.endsWith("/tests.rs") && !file.endsWith("_tests.rs");
+  return (
+    file.includes("/src/") &&
+    !file.endsWith("/tests.rs") &&
+    !file.endsWith("_tests.rs")
+  );
 }
 
 function isRenderedTuiSnapshot(file) {

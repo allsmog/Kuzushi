@@ -5,7 +5,6 @@ mod tests {
     use crate::static_evidence::{
         StaticEvidenceEdgeKind, StaticEvidenceNode, StaticEvidenceNodeKind, StaticEvidenceStore,
     };
-    use std::fs;
     use tempfile::tempdir;
 
     fn synthetic_finding(file: &str, line: u32, message: &str) -> Finding {
@@ -70,9 +69,7 @@ mod tests {
     fn includes_evidence_subgraph_when_store_populated() {
         let tmp = tempdir().unwrap();
         let workspace = tmp.path();
-        let kuzushi = workspace.join(".kuzushi/v2");
-        fs::create_dir_all(&kuzushi).unwrap();
-        let store_path = kuzushi.join("static-evidence.sqlite3");
+        let store_path = crate::workspace::workspace_static_evidence_db_path(workspace);
 
         // Populate the store with two nodes (Source, Sink) for our finding.
         let store = StaticEvidenceStore::open_path(&store_path).unwrap();
@@ -114,9 +111,7 @@ mod tests {
         // the slice.
         let tmp = tempdir().unwrap();
         let workspace = tmp.path();
-        let kuzushi = workspace.join(".kuzushi/v2");
-        fs::create_dir_all(&kuzushi).unwrap();
-        let store_path = kuzushi.join("static-evidence.sqlite3");
+        let store_path = crate::workspace::workspace_static_evidence_db_path(workspace);
         let store = StaticEvidenceStore::open_path(&store_path).unwrap();
         let f = synthetic_finding("src/foo.c", 42, "OOB write CWE-787");
         let near = StaticEvidenceNode::new(StaticEvidenceNodeKind::Source, "near", "NEAR_BODY")
@@ -144,9 +139,7 @@ mod tests {
         // 30 in-window nodes; assemble must keep at most SUBGRAPH_NODE_CAP.
         let tmp = tempdir().unwrap();
         let workspace = tmp.path();
-        let kuzushi = workspace.join(".kuzushi/v2");
-        fs::create_dir_all(&kuzushi).unwrap();
-        let store_path = kuzushi.join("static-evidence.sqlite3");
+        let store_path = crate::workspace::workspace_static_evidence_db_path(workspace);
         let store = StaticEvidenceStore::open_path(&store_path).unwrap();
         let f = synthetic_finding("src/foo.c", 42, "OOB write CWE-787");
         for i in 0..30u32 {

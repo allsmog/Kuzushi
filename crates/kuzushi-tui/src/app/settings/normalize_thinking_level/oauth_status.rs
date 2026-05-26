@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) fn oauth_credentials_path() -> Option<PathBuf> {
-    env::var_os("HOME").map(|home| PathBuf::from(home).join(".kuzushi/oauth-credentials.json"))
+    env::var_os("HOME").map(kuzushi_core::config::default_oauth_credentials_path)
 }
 
 pub(crate) fn oauth_provider_status(provider: &str) -> String {
@@ -44,7 +44,14 @@ pub(crate) fn oauth_provider_status(provider: &str) -> String {
 pub(crate) fn oauth_credentials_path_display() -> String {
     oauth_credentials_path()
         .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "~/.kuzushi/oauth-credentials.json".to_string())
+        .unwrap_or_else(default_oauth_credentials_path_display)
+}
+
+pub(crate) fn default_oauth_credentials_path_display() -> String {
+    format!(
+        "~/.kuzushi/{}",
+        kuzushi_core::config::OAUTH_CREDENTIALS_FILE
+    )
 }
 
 pub(crate) fn thinking_level_from_input(input: &serde_json::Value) -> Option<String> {

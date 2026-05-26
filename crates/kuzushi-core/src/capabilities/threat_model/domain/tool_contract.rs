@@ -34,6 +34,14 @@ impl BuildFlavor {
         }
     }
 
+    pub(crate) fn default_output_dir(self, target: &Path, run_id: &str) -> String {
+        let path = crate::run_artifacts::run_dir(target, run_id).join(self.default_artifact_leaf());
+        path.strip_prefix(target)
+            .unwrap_or(path.as_path())
+            .to_string_lossy()
+            .replace('\\', "/")
+    }
+
     pub(crate) fn provider(self) -> &'static str {
         "randori-pasta"
     }
@@ -78,4 +86,33 @@ pub(crate) struct BuildInput {
     pub(crate) emit_findings: bool,
     pub(crate) preserve_user_edits: bool,
     pub(crate) model: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_output_dir_uses_shared_run_dir() {
+        let target = Path::new("/repo");
+
+        assert_eq!(
+            BuildFlavor::ThreatModel.default_output_dir(target, "run-1"),
+            crate::run_artifacts::run_dir(target, "run-1")
+                .join(BuildFlavor::ThreatModel.default_artifact_leaf())
+                .strip_prefix(target)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        );
+        assert_eq!(
+            BuildFlavor::RandoriPasta.default_output_dir(target, "run-2"),
+            crate::run_artifacts::run_dir(target, "run-2")
+                .join(BuildFlavor::RandoriPasta.default_artifact_leaf())
+                .strip_prefix(target)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        );
+    }
 }

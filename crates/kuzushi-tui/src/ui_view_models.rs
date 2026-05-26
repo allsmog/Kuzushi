@@ -52,6 +52,7 @@ mod pwn;
 mod recent_module_activity;
 mod recommendation;
 mod routing;
+mod run_paths;
 mod run_status;
 mod run_timeline;
 mod run_trace;
@@ -99,13 +100,10 @@ pub(crate) use config::{
 };
 pub(crate) use confirm_card::{confirm_card_model, ConfirmCardModel};
 pub(crate) use context_snapshot::{
-    context_snapshot_model, context_snapshot_state, plain_context_model, ContextSnapshotDetails,
-    ContextSnapshotModel, PlainContextModel,
+    context_snapshot_model, context_snapshot_relative_path, context_snapshot_state,
+    plain_context_model, ContextSnapshotDetails, ContextSnapshotModel, PlainContextModel,
 };
-pub(crate) use context_strip::{
-    context_strip_model, plain_context_strip_model, ContextStripModel, ContextStripSegment,
-    PlainContextStripModel,
-};
+pub(crate) use context_strip::{context_strip_model, ContextStripModel, ContextStripSegment};
 pub(crate) use cost::{cost_model, CostBudgetRow, CostBudgetStatus, CostModel, CostTone};
 pub(crate) use display_text::{compact_target_path, format_session_cost};
 pub(crate) use failure_handoff::{failure_handoff_model, FailureHandoffModel};
@@ -168,6 +166,10 @@ pub(crate) use routing::{
     uses_activity_frame, PlainRenderMode, PrimaryViewRoute, RoutingMode, ShellViewLineRoute,
     SystemViewRoute, ThreatAndRunViewRoute, WorkspaceSessionViewRoute,
 };
+pub(crate) use run_paths::{
+    ui_latest_run_path, ui_latest_run_relative_path, ui_run_artifact_relative_path, ui_run_dir,
+    ui_runs_root, ui_runs_root_relative_path,
+};
 pub(crate) use run_status::scan_status;
 pub(crate) use run_timeline::{run_timeline_model, PastRunStatus, RunTimelineRow};
 pub(crate) use run_trace::{
@@ -185,7 +187,9 @@ pub(crate) use status_footer::status_footer_model;
 pub(crate) use threat_dfd::threat_dfd_model;
 #[cfg(test)]
 pub(crate) use threat_dfd::threat_dfd_model_from_doc;
-pub(crate) use threat_model::{threat_model_doc, threat_summary_review, ThreatSummaryReview};
+pub(crate) use threat_model::{
+    threat_model_doc, threat_model_relative_path, threat_summary_review, ThreatSummaryReview,
+};
 pub(crate) use threat_navigation::{threat_nav_model, threat_panel_model, ThreatPanel};
 pub(crate) use threat_patch::threat_patch_card_model;
 #[cfg(test)]
@@ -203,7 +207,8 @@ pub(crate) use transcript::{
 };
 pub(crate) use view_status::view_status_segment;
 pub(crate) use workspace::{
-    plain_workspace_model, workspace_model, PlainWorkspaceModel, WorkspaceModel, WorkspaceRollupRow,
+    findings_db_relative_path, plain_workspace_model, workspace_model, PlainWorkspaceModel,
+    WorkspaceModel, WorkspaceRollupRow,
 };
 
 pub use crate::{

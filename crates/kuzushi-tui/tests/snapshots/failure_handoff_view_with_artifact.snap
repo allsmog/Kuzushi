@@ -2,17 +2,17 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 0
 ---
- KUZUSHI mode:shell | target:./failure | ctx:missing | model:unconfigured | 0 findings | view:failure-handoff
+ KUZUSHI mode:shell · target:./failure · ctx:missing · model:unconfigured · 0 findings · view:failure-handoff
 
  -- FAILURE HANDOFF ----------------------------------------------------------------------------------------------------
 stage              semgrep:scan
 cause              semgrep binary missing
 proof              artifact-review-only; runtime verification did not run
-available          0 artifact(s)
+available          0 artifacts
 missing            findings.json
 next               failures.json
 recovery           Install semgrep.
 forbidden          verified
 prompt             Continue the failed Kuzushi run.
 
-▸ try: ask <question> | runs | replay <run> | back
+▸ try: ask <question> · runs · replay <run> · back

@@ -28,11 +28,12 @@ impl ShellApp {
     pub(crate) fn show_history(&mut self) {
         self.shell_view = ShellView::History;
         self.history_scroll = 0;
+        let count = self.command_history.len();
         self.log(
             "history",
             format!(
-                "showing {} command(s). Next: clear or run <tool>",
-                self.command_history.len()
+                "showing {count} {}. Next: clear or run <tool>",
+                if count == 1 { "command" } else { "commands" }
             ),
         );
     }

@@ -43,4 +43,15 @@ mod tests {
             Some(3)
         );
     }
+
+    #[test]
+    fn oauth_credentials_display_uses_shared_leaf_name() {
+        assert_eq!(
+            default_oauth_credentials_path_display(),
+            format!(
+                "~/.kuzushi/{}",
+                kuzushi_core::config::OAUTH_CREDENTIALS_FILE
+            )
+        );
+    }
 }

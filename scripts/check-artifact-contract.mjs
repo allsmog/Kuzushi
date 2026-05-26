@@ -18,41 +18,118 @@ import {
   runTraceSchemaFields,
 } from "./artifact-contract-fields.mjs";
 import { checkCanonicalRunSchemas } from "./artifact-schema-contract.mjs";
-import { checkArtifactSchemaInventory } from "./artifact-schema-inventory-contract.mjs";
-import { tokenChecks } from "./artifact-token-contracts.mjs";
+import {
+  checkArtifactSchemaInventory,
+  checkArtifactSchemaInventoryHelpers,
+} from "./artifact-schema-inventory-contract.mjs";
+import {
+  requiredArtifactSchemaFiles,
+  requiredArtifactSchemaReferences,
+} from "./canonical-run-schema-files.mjs";
+import {
+  checkArtifactTokenContractInvariants,
+  tokenChecks,
+} from "./artifact-token-contracts.mjs";
 import { checkFailureSchemaBounds } from "./check-failure-schema-bounds.mjs";
 import { rustFunctionBody } from "./rust-source-contracts.mjs";
 import {
+  checkCanonicalRunArtifactInvariantHelpers,
+  checkCanonicalRunArtifactInvariants,
   optionalRunArtifacts,
   requiredRunArtifacts,
+  toolInputArtifacts,
   toolResultArtifacts,
 } from "./canonical-run-artifacts.mjs";
 import {
+  checkArtifactManifestContractHelpers,
   checkCanonicalManifestInventory,
   checkCanonicalSnapshotInventory,
   checkCanonicalSpecialWriterInventory,
+  checkCliRunsPathConsumers,
+  checkContextSnapshotPathHelper,
   checkFailureMissingArtifactInventory,
   checkFailureFollowUpInventory,
+  checkHomeCockpitArtifactRail,
+  checkManifestLoaderToolInputMetadata,
   checkOptionalAndToolResultArtifactInventory,
+  checkOauthCredentialPathHelper,
+  checkPatchWorktreePathHelper,
+  checkPersistentThreatModelPathHelper,
+  checkPromptPathHelpers,
+  checkRunArtifactPathHelpers,
+  checkReportArtifactManifestSummary,
+  checkReportJsonlArtifactSummary,
   checkReportReaderInventory,
   checkRunMetadataWriterInventory,
+  checkTaintIrisNextArtifactPathHelpers,
+  checkThreatIntelCatalogPathHelper,
+  checkThreatLeadsPathHelpers,
+  checkTuiAttackSurfaceArtifactLeaf,
+  checkTuiFailureHandoffArtifactLeaf,
+  checkTuiPrereqChainPathHelpers,
+  checkTuiRecommendationArtifactLeaf,
+  checkTuiRunTimelineArtifactLeaves,
+  checkTuiRunsRootHelper,
+  checkTuiThreatModelArtifactLeaf,
+  checkWorkspaceStatePathHelpers,
 } from "./artifact-manifest-contract.mjs";
+import { checkRustSourceContractParsers } from "./rust-source-contract-checks.mjs";
 
 const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
 
 const reportAliasFields = ["reportMarkdown", "report_markdown", "data.reportMarkdown", "data.report_markdown", "reportSarif", "report_sarif", "data.reportSarif", "data.report_sarif"];
 const reportSubstrateAliasFields = ["reportMarkdown", "report_markdown", "reportSarif", "report_sarif"];
+const schemaArchitectureDocChecks = requiredArtifactSchemaReferences().map((reference) => ({
+  label: `run schema architecture doc ${reference.artifactPath}`,
+  file: "docs/architecture/kuzushi-artifacts.md",
+  artifacts:
+    reference.artifactPath === "run.json"
+      ? [reference.schemaFile, reference.artifactPath, "summary.json"]
+      : [reference.schemaFile, reference.artifactPath],
+}));
+
+const manifestContractGuardrailLabels = [
+  "TUI workspace state label must expose workspace_state_relative_path",
+  "TUI workspace state label must cache its derived relative path label",
+  "TUI workspace state label must derive from workspace_state_dir",
+  "TUI workspace state label must not hardcode .kuzushi/v2",
+  "TUI workspace state fallback must use workspace_state_relative_path",
+  "TUI workspace findings DB label must expose findings_db_relative_path",
+  "TUI workspace findings DB label must cache its derived relative path label",
+  "TUI workspace findings DB label must derive from workspace_findings_db_path",
+  "TUI workspace findings DB label must not hardcode .kuzushi/v2/findings.sqlite3",
+  "TUI workspace findings DB fallback must use findings_db_relative_path",
+  "TUI findings empty state must use findings_db_relative_path",
+  "TUI findings empty state must not hardcode .kuzushi/v2/findings.sqlite3",
+  "TUI module playbook findings DB label must use findings_db_relative_path",
+  "TUI module playbook findings DB label must not hardcode .kuzushi/v2/findings.sqlite3",
+  "Carlini attachment renderer must read the shared attachment store",
+  "Carlini attachment renderer must accept product and compatibility attachment modules",
+  "Carlini attachment renderer must resolve attachments through WorkspaceTarget",
+  "Carlini attachment renderer must handle path and URL attachment records",
+  "Carlini attachment renderer must not hardcode per-module attachment paths",
+];
 
 const checks = [
   {
+    label: "artifact manifest guardrail labels",
+    file: "scripts/artifact-manifest-contract.mjs",
+    artifacts: manifestContractGuardrailLabels,
+  },
+  {
     label: "artifact architecture doc",
     file: "docs/architecture/kuzushi-artifacts.md",
-    artifacts: [...requiredRunArtifacts, ...optionalRunArtifacts, ...toolResultArtifacts, ...reportAliasFields],
+    artifacts: [...requiredRunArtifacts, ...optionalRunArtifacts, ...toolInputArtifacts, ...toolResultArtifacts, ...reportAliasFields],
   },
   {
     label: "README artifact table",
     file: "README.md",
-    artifacts: [...requiredRunArtifacts, ...optionalRunArtifacts, ...toolResultArtifacts, ...reportAliasFields],
+    artifacts: [...requiredRunArtifacts, ...optionalRunArtifacts, ...toolInputArtifacts, ...toolResultArtifacts, ...reportAliasFields],
+  },
+  {
+    label: "replay trace artifact inventory",
+    file: "docs/assessments/replay-trace-audit.md",
+    artifacts: [...requiredRunArtifacts, ...optionalRunArtifacts, ...toolInputArtifacts, ...toolResultArtifacts],
   },
   {
     label: "run artifact substrate",
@@ -69,7 +146,7 @@ const checks = [
       "crates/kuzushi-core/src/report/application.rs",
       "crates/kuzushi-core/src/artifact_contract.rs",
     ],
-    artifacts: [...requiredRunArtifacts, ...optionalRunArtifacts, ...toolResultArtifacts],
+    artifacts: [...requiredRunArtifacts, ...optionalRunArtifacts, ...toolInputArtifacts, ...toolResultArtifacts],
   },
   {
     label: "run artifact file-existence regression helper",
@@ -94,6 +171,12 @@ const checks = [
     ],
   },
   {
+    label: "tool input artifact regression",
+    file: "crates/kuzushi-core/src/run_artifacts/tests.rs",
+    artifacts: toolInputArtifacts,
+    functions: ["tool_run_start_records_input_summary_event_and_trace"],
+  },
+  {
     label: "tool result envelope artifact regression",
     file: "crates/kuzushi-core/src/run_artifacts/tests.rs",
     artifacts: toolResultArtifacts,
@@ -105,30 +188,16 @@ const checks = [
     artifacts: ["run.json", "summary.json", ...runSummarySchemaFields],
   },
   {
-    label: "run summary schema architecture doc",
-    file: "docs/architecture/kuzushi-artifacts.md",
-    artifacts: ["schemas/run.summary.schema.json", "run.json", "summary.json"],
-  },
-  {
     label: "run artifact manifest schema",
     file: "schemas/run.artifacts.schema.json",
     artifacts: ["artifacts.json", ...runArtifactManifestSchemaFields],
-  },
-  {
-    label: "run artifact manifest schema architecture doc",
-    file: "docs/architecture/kuzushi-artifacts.md",
-    artifacts: ["schemas/run.artifacts.schema.json", "artifacts.json"],
   },
   {
     label: "run failures schema",
     file: "schemas/run.failures.schema.json",
     artifacts: ["failures.json", ...runFailuresSchemaFields],
   },
-  {
-    label: "run failures schema architecture doc",
-    file: "docs/architecture/kuzushi-artifacts.md",
-    artifacts: ["schemas/run.failures.schema.json", "failures.json"],
-  },
+  ...schemaArchitectureDocChecks,
   {
     label: "schema alias contract architecture doc",
     file: "docs/architecture/kuzushi-artifacts.md",
@@ -142,7 +211,7 @@ const checks = [
   {
     label: "schema package export architecture doc",
     file: "docs/architecture/kuzushi-artifacts.md",
-    artifacts: ["kuzushi/schemas/*", "kuzushi/schemas/run.summary.schema.json"],
+    artifacts: ["kuzushi/schemas/*", ...requiredArtifactSchemaFiles()],
   },
   {
     label: "run events schema",
@@ -150,19 +219,9 @@ const checks = [
     artifacts: ["events.jsonl", ...runEventsSchemaFields],
   },
   {
-    label: "run events schema architecture doc",
-    file: "docs/architecture/kuzushi-artifacts.md",
-    artifacts: ["schemas/run.events.schema.json", "events.jsonl"],
-  },
-  {
     label: "run trace schema",
     file: "schemas/run.trace.schema.json",
     artifacts: ["trace.jsonl", ...runTraceSchemaFields],
-  },
-  {
-    label: "run trace schema architecture doc",
-    file: "docs/architecture/kuzushi-artifacts.md",
-    artifacts: ["schemas/run.trace.schema.json", "trace.jsonl"],
   },
   {
     label: "run context schema",
@@ -170,19 +229,9 @@ const checks = [
     artifacts: runContextSchemaFields,
   },
   {
-    label: "run context schema architecture doc",
-    file: "docs/architecture/kuzushi-artifacts.md",
-    artifacts: ["schemas/run.context.schema.json", "context.json"],
-  },
-  {
     label: "run attack-surface schema",
     file: "schemas/run.attack-surface.schema.json",
     artifacts: runAttackSurfaceSchemaFields,
-  },
-  {
-    label: "run attack-surface schema architecture doc",
-    file: "docs/architecture/kuzushi-artifacts.md",
-    artifacts: ["schemas/run.attack-surface.schema.json", "attack-surface.json"],
   },
   {
     label: "run threat-model schema",
@@ -190,19 +239,9 @@ const checks = [
     artifacts: runThreatModelSchemaFields,
   },
   {
-    label: "run threat-model schema architecture doc",
-    file: "docs/architecture/kuzushi-artifacts.md",
-    artifacts: ["schemas/run.threat-model.schema.json", "threat-model.json"],
-  },
-  {
     label: "run recommendations schema",
     file: "schemas/run.recommendations.schema.json",
     artifacts: runRecommendationsSchemaFields,
-  },
-  {
-    label: "run recommendations schema architecture doc",
-    file: "docs/architecture/kuzushi-artifacts.md",
-    artifacts: ["schemas/run.recommendations.schema.json", "recommendations.json"],
   },
   {
     label: "run findings schema",
@@ -210,19 +249,9 @@ const checks = [
     artifacts: runFindingsSchemaFields,
   },
   {
-    label: "run findings schema architecture doc",
-    file: "docs/architecture/kuzushi-artifacts.md",
-    artifacts: ["schemas/run.findings.schema.json", "findings.json"],
-  },
-  {
     label: "run proof schema",
     file: "schemas/run.proof.schema.json",
     artifacts: runProofSchemaFields,
-  },
-  {
-    label: "run proof schema architecture doc",
-    file: "docs/architecture/kuzushi-artifacts.md",
-    artifacts: ["schemas/run.proof.schema.json", "proof.json"],
   },
 ];
 
@@ -231,15 +260,43 @@ const failures = [
   ...checkCanonicalManifestInventory(root),
   ...checkOptionalAndToolResultArtifactInventory(root),
   ...checkReportReaderInventory(root),
+  ...checkReportArtifactManifestSummary(root),
+  ...checkReportJsonlArtifactSummary(root),
   ...checkFailureFollowUpInventory(root),
   ...checkFailureMissingArtifactInventory(root),
   ...checkCanonicalSnapshotInventory(root),
   ...checkCanonicalSpecialWriterInventory(root),
   ...checkRunMetadataWriterInventory(root),
+  ...checkWorkspaceStatePathHelpers(root),
+  ...checkPatchWorktreePathHelper(root),
+  ...checkThreatIntelCatalogPathHelper(root),
+  ...checkPersistentThreatModelPathHelper(root),
+  ...checkOauthCredentialPathHelper(root),
+  ...checkThreatLeadsPathHelpers(root),
+  ...checkContextSnapshotPathHelper(root),
+  ...checkPromptPathHelpers(root),
+  ...checkTaintIrisNextArtifactPathHelpers(root),
+  ...checkTuiPrereqChainPathHelpers(root),
+  ...checkHomeCockpitArtifactRail(root),
+  ...checkTuiAttackSurfaceArtifactLeaf(root),
+  ...checkTuiRecommendationArtifactLeaf(root),
+  ...checkTuiFailureHandoffArtifactLeaf(root),
+  ...checkTuiThreatModelArtifactLeaf(root),
+  ...checkTuiRunTimelineArtifactLeaves(root),
+  ...checkRunArtifactPathHelpers(root),
+  ...checkTuiRunsRootHelper(root),
+  ...checkCliRunsPathConsumers(root),
+  ...checkArtifactManifestContractHelpers(),
+  ...checkManifestLoaderToolInputMetadata(root),
   ...checkArtifactSchemaInventory(),
+  ...checkArtifactSchemaInventoryHelpers(),
   ...tokenChecks.flatMap(checkTokenReferences),
   ...checkCanonicalRunSchemas(root),
   ...checkFailureSchemaBounds(root),
+  ...checkRustSourceContractParsers(),
+  ...checkArtifactTokenContractInvariants(),
+  ...checkCanonicalRunArtifactInvariants(),
+  ...checkCanonicalRunArtifactInvariantHelpers(),
 ];
 
 if (failures.length > 0) {
@@ -249,7 +306,7 @@ if (failures.length > 0) {
 }
 
 console.log(
-  `Artifact contract check passed for ${requiredRunArtifacts.length} required artifacts, ${optionalRunArtifacts.length} optional artifacts, ${toolResultArtifacts.length} tool-result artifact, report placeholder behavior, and failure handoff safety fields.`,
+  `Artifact contract check passed for ${requiredRunArtifacts.length} required artifacts, ${optionalRunArtifacts.length} optional artifacts, ${toolInputArtifacts.length} tool-input artifact, ${toolResultArtifacts.length} tool-result artifact, report placeholder behavior, and failure handoff safety fields.`,
 );
 
 function checkArtifactReferences(check) {

@@ -102,7 +102,7 @@ impl ShellApp {
             values.push(run_id);
         }
         if let Some(target) = self.target.as_ref() {
-            let runs_dir = target.join(".kuzushi/runs");
+            let runs_dir = kuzushi_core::runs_root(target);
             if let Ok(entries) = fs::read_dir(runs_dir) {
                 values.extend(entries.flatten().filter_map(|entry| {
                     entry
@@ -114,5 +114,37 @@ impl ShellApp {
             }
         }
         values
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ScanPanelState;
+    use kuzushi_core::V2Config;
+    use std::path::PathBuf;
+
+    #[test]
+    fn run_id_completion_values_read_shared_runs_root() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(kuzushi_core::run_dir(temp.path(), "r-past")).unwrap();
+        std::fs::write(kuzushi_core::runs_root(temp.path()).join("not-a-run"), "").unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.target = Some(temp.path().to_path_buf());
+        app.scan = Some(ScanPanelState {
+            run_id: Some("r-active".to_string()),
+            target: PathBuf::from("/tmp/demo"),
+            stage: "running".to_string(),
+            findings_count: 0,
+            running: true,
+            abort_requested: false,
+            error: None,
+        });
+
+        let values = app.run_id_completion_values();
+
+        assert!(values.contains(&"r-active".to_string()));
+        assert!(values.contains(&"r-past".to_string()));
+        assert!(!values.contains(&"not-a-run".to_string()));
     }
 }

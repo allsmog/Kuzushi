@@ -109,9 +109,13 @@ pub(crate) fn handle_modules_command(app: &mut ShellApp, command: &ShellCommand)
     app.shell_view = ShellView::Catalog;
     app.catalog_expanded = true;
     app.modules_scroll = 0;
+    let count = app.registry.modules().count();
     app.log(
         "module",
-        format!("showing {} module(s)", app.registry.modules().count()),
+        format!(
+            "showing {count} {}",
+            if count == 1 { "module" } else { "modules" }
+        ),
     );
     true
 }
@@ -131,9 +135,13 @@ pub(crate) fn handle_tools_command(app: &mut ShellApp, command: &ShellCommand) -
     };
     app.shell_view = ShellView::Tools;
     app.tools_scroll = 0;
+    let count = app.registry.tools().count();
     app.log(
         "tool",
-        format!("showing {} tool(s)", app.registry.tools().count()),
+        format!(
+            "showing {count} {}",
+            if count == 1 { "tool" } else { "tools" }
+        ),
     );
     true
 }

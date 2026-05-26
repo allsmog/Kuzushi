@@ -39,7 +39,8 @@ pub use run_failures::{
     load_run_failure_context, load_run_failures, output_with_run_fallback_context,
     write_run_failures, FailureToLlmContext, RunFailure, RunFailures,
 };
-pub use run_paths::{new_run_id, run_dir, runs_root};
+pub(crate) use run_failures::run_failure_artifact_path;
+pub use run_paths::{latest_run_path, new_run_id, run_artifact_path, run_dir, runs_root};
 pub use run_summary_store::{list_run_summaries, load_run_summary, write_run_summary};
 pub use running::{
     RunEnvFingerprint, RunHouseRuleFingerprint, RunLlmCallAudit, RunPromptOverrideFingerprint,
@@ -58,3 +59,35 @@ pub use write_run_artifact_json::{
     append_run_trace_step, next_run_trace_step_number, write_run_artifact_json,
 };
 pub(crate) use write_run_artifact_text::write_run_artifact_text;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunArtifactSpec {
+    pub leaf: &'static str,
+    pub label: &'static str,
+    pub kind: &'static str,
+}
+
+pub fn canonical_run_artifact_specs() -> Vec<RunArtifactSpec> {
+    crate::artifact_contract::CANONICAL_RUN_ARTIFACTS
+        .iter()
+        .map(public_run_artifact_spec)
+        .collect()
+}
+
+pub fn canonical_run_artifact_spec(leaf: &str) -> Option<RunArtifactSpec> {
+    crate::artifact_contract::canonical_run_artifact_spec(leaf).map(public_run_artifact_spec)
+}
+
+pub fn tool_result_artifact_spec(leaf: &str) -> Option<RunArtifactSpec> {
+    crate::artifact_contract::tool_result_artifact_spec(leaf).map(public_run_artifact_spec)
+}
+
+fn public_run_artifact_spec(
+    spec: &crate::artifact_contract::CanonicalRunArtifactSpec,
+) -> RunArtifactSpec {
+    RunArtifactSpec {
+        leaf: spec.leaf,
+        label: spec.label,
+        kind: spec.kind,
+    }
+}

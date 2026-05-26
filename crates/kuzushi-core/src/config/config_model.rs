@@ -74,6 +74,12 @@ pub struct AnthropicOauthConfig {
     pub allow_env_token: bool,
 }
 
+pub const OAUTH_CREDENTIALS_FILE: &str = "oauth-credentials.json";
+
+pub fn default_oauth_credentials_path(home_dir: impl AsRef<Path>) -> PathBuf {
+    crate::workspace::workspace_state_root(home_dir).join(OAUTH_CREDENTIALS_FILE)
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeKind {
@@ -96,29 +102,23 @@ impl ConfigPaths {
     }
 
     pub fn global_config_path(&self) -> PathBuf {
-        self.home_dir
-            .join(".kuzushi")
-            .join("v2")
-            .join("config.toml")
+        crate::workspace::workspace_config_path(&self.home_dir)
     }
 
     pub fn global_options_path(&self) -> PathBuf {
-        self.home_dir
-            .join(".kuzushi")
-            .join("v2")
-            .join("options.json")
+        crate::workspace::workspace_options_path(&self.home_dir)
     }
 
     pub fn project_config_path(&self) -> Option<PathBuf> {
         self.target_dir
             .as_ref()
-            .map(|target| target.join(".kuzushi").join("v2").join("config.toml"))
+            .map(crate::workspace::workspace_config_path)
     }
 
     pub fn project_options_path(&self) -> Option<PathBuf> {
         self.target_dir
             .as_ref()
-            .map(|target| target.join(".kuzushi").join("v2").join("options.json"))
+            .map(crate::workspace::workspace_options_path)
     }
 }
 

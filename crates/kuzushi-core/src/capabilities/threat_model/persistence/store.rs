@@ -1,13 +1,19 @@
 use super::*;
 
+const THREAT_MODEL_FILE: &str = "threat-model.json";
+
+pub fn persistent_threat_model_path(root: &Path) -> PathBuf {
+    crate::workspace::workspace_state_root(root).join(THREAT_MODEL_FILE)
+}
+
 pub fn load_persistent_threat_model(root: &Path) -> Option<Value> {
-    let path = root.join(".kuzushi").join("threat-model.json");
+    let path = persistent_threat_model_path(root);
     let raw = fs::read_to_string(path).ok()?;
     serde_json::from_str(&raw).ok()
 }
 
 pub fn save_persistent_threat_model(root: &Path, document: &Value, force: bool) -> Result<bool> {
-    let path = root.join(".kuzushi").join("threat-model.json");
+    let path = persistent_threat_model_path(root);
     if should_preserve_persistent_threat_model(&path, force) {
         return Ok(false);
     }
@@ -96,4 +102,20 @@ fn resolve_context_target(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
 
 fn current_target_dir() -> Result<PathBuf> {
     std::env::current_dir().context("Could not resolve current directory")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn persistent_threat_model_path_uses_workspace_state_root() {
+        let root = Path::new("/repo");
+        let state_root = crate::workspace::workspace_state_root(root);
+
+        assert_eq!(
+            persistent_threat_model_path(root),
+            state_root.join(THREAT_MODEL_FILE)
+        );
+    }
 }

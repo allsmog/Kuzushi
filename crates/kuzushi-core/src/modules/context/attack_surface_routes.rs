@@ -74,7 +74,7 @@ pub(in crate::modules) fn attack_surface_service_boundaries(
 }
 
 pub(in crate::modules) fn save_context_snapshot(root: &Path, snapshot: &Value) -> Result<PathBuf> {
-    let snapshot_path = root.join(".kuzushi").join("context-snapshot.json");
+    let snapshot_path = crate::context::context_snapshot_path(root);
     if let Some(parent) = snapshot_path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("Could not create {}", parent.display()))?;

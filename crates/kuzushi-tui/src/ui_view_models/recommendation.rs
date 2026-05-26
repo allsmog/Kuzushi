@@ -1,9 +1,10 @@
-use super::{attack_surface_risk_model, AttackSurfaceRiskModel};
+use super::{attack_surface_risk_model, ui_latest_run_path, ui_run_dir, AttackSurfaceRiskModel};
 use crate::ShellApp;
 use std::path::{Path, PathBuf};
 
 const RECOMMENDATION_COLUMN_COUNT: usize = 5;
-const RECOMMENDATION_REPORT_HEADERS: [&str; 5] = ["pri", "tool", "runtime", "signal", "reason"];
+const RECOMMENDATION_REPORT_HEADERS: [&str; 5] =
+    ["priority", "tool", "runtime", "signal", "reason"];
 const RECOMMENDATION_REPORT_COMMANDS: [&str; 4] =
     ["run <tool> [json]", "trace <run>", "runs", "back"];
 const RECOMMENDATION_EMPTY_COMMANDS: [&str; 3] =
@@ -102,16 +103,22 @@ fn recommendation_empty_state() -> RecommendationEmptyState {
 
 fn artifact_detail_label(path: &Path) -> String {
     let display = path.display().to_string();
-    if path.exists() {
-        display
-    } else {
-        format!("{display} (missing)")
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => display,
+        Ok(_) => format!("{display} (not a file)"),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            format!("{display} (missing)")
+        }
+        Err(_) => format!("{display} (unreadable)"),
     }
 }
 
 fn read_recommendations(path: &Path) -> Option<RecommendationView> {
-    if !path.exists() {
-        return None;
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return Some(non_file_recommendations_view()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => return Some(malformed_recommendations_view()),
     }
     let text = match std::fs::read_to_string(path) {
         Ok(text) => text,
@@ -131,13 +138,29 @@ fn read_recommendations(path: &Path) -> Option<RecommendationView> {
     })
 }
 
-fn malformed_recommendations_view() -> RecommendationView {
+fn non_file_recommendations_view() -> RecommendationView {
     RecommendationView {
-        summary: Some("malformed recommendations.json".to_string()),
+        summary: Some(format!("{} is not a file", recommendations_artifact_leaf())),
         rows: vec![RecommendationRow {
             cells: [
                 "⚠ high".to_string(),
-                "recommendations.json".to_string(),
+                recommendations_artifact_leaf().to_string(),
+                "no".to_string(),
+                "artifact".to_string(),
+                "Artifact path is not a file; regenerate recommendations through module-recommender:recommend."
+                    .to_string(),
+            ],
+        }],
+    }
+}
+
+fn malformed_recommendations_view() -> RecommendationView {
+    RecommendationView {
+        summary: Some(format!("malformed {}", recommendations_artifact_leaf())),
+        rows: vec![RecommendationRow {
+            cells: [
+                "⚠ high".to_string(),
+                recommendations_artifact_leaf().to_string(),
                 "no".to_string(),
                 "artifact".to_string(),
                 "Malformed JSON; regenerate recommendations through module-recommender:recommend."
@@ -250,14 +273,20 @@ impl RecommendationSource {
         let run_dir = latest
             .run_id
             .as_ref()
-            .map(|id| root.join(".kuzushi").join("runs").join(id))
-            .unwrap_or_else(|| root.join(".kuzushi/runs/latest"));
+            .map(|id| ui_run_dir(Some(root), id))
+            .unwrap_or_else(|| ui_run_dir(Some(root), "latest"));
         Self {
             run_id: latest.run_id,
             latest_pointer_invalid: latest.invalid,
-            path: run_dir.join("recommendations.json"),
+            path: run_dir.join(recommendations_artifact_leaf()),
         }
     }
+}
+
+fn recommendations_artifact_leaf() -> &'static str {
+    kuzushi_core::run_artifacts::canonical_run_artifact_spec("recommendations.json")
+        .expect("recommendations artifact must be in shared canonical spec")
+        .leaf
 }
 
 struct RecommendationLatestRunId {
@@ -266,7 +295,7 @@ struct RecommendationLatestRunId {
 }
 
 fn recommendation_latest_run_id(root: &Path) -> RecommendationLatestRunId {
-    let latest_path = root.join(".kuzushi/latest");
+    let latest_path = ui_latest_run_path(Some(root));
     match std::fs::metadata(&latest_path) {
         Ok(metadata) if metadata.is_file() => recommendation_latest_run_file(&latest_path),
         Ok(_) => RecommendationLatestRunId {
@@ -314,6 +343,24 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::fs;
+
+    fn test_run_dir(root: &Path, run_id: &str) -> PathBuf {
+        ui_run_dir(Some(root), run_id)
+    }
+
+    fn write_latest_run(root: &Path, run_id: &str) {
+        fs::write(ui_latest_run_path(Some(root)), run_id).unwrap();
+    }
+
+    fn create_invalid_latest_pointer(root: &Path) {
+        fs::create_dir_all(ui_latest_run_path(Some(root))).unwrap();
+    }
+
+    fn write_blank_latest_pointer(root: &Path) {
+        let latest_path = ui_latest_run_path(Some(root));
+        fs::create_dir_all(latest_path.parent().unwrap()).unwrap();
+        fs::write(latest_path, "\n").unwrap();
+    }
 
     #[test]
     fn recommendation_from_value_shapes_display_row() {
@@ -428,11 +475,11 @@ mod tests {
     #[test]
     fn recommendation_model_reads_data_wrapped_latest_artifact() {
         let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path().join(".kuzushi/runs/run-rec");
+        let run_dir = test_run_dir(temp.path(), "run-rec");
         fs::create_dir_all(&run_dir).unwrap();
-        fs::write(temp.path().join(".kuzushi/latest"), "run-rec").unwrap();
+        write_latest_run(temp.path(), "run-rec");
         fs::write(
-            run_dir.join("recommendations.json"),
+            run_dir.join(recommendations_artifact_leaf()),
             json!({
                 "status": "completed",
                 "data": {
@@ -467,51 +514,52 @@ mod tests {
     #[test]
     fn recommendation_model_surfaces_malformed_latest_artifact() {
         let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path().join(".kuzushi/runs/run-bad-rec");
+        let run_dir = test_run_dir(temp.path(), "run-bad-rec");
         fs::create_dir_all(&run_dir).unwrap();
-        fs::write(temp.path().join(".kuzushi/latest"), "run-bad-rec").unwrap();
-        fs::write(run_dir.join("recommendations.json"), "{not-json").unwrap();
+        write_latest_run(temp.path(), "run-bad-rec");
+        fs::write(run_dir.join(recommendations_artifact_leaf()), "{not-json").unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.target = Some(temp.path().to_path_buf());
 
         let model = recommendation_model(&app);
 
         assert_eq!(
-            model.summary.as_deref(),
-            Some("malformed recommendations.json")
+            model.summary,
+            Some(format!("malformed {}", recommendations_artifact_leaf()))
         );
         assert_eq!(model.rows.len(), 1);
-        assert_eq!(model.rows[0].cells[1], "recommendations.json");
+        assert_eq!(model.rows[0].cells[1], recommendations_artifact_leaf());
         assert_eq!(model.rows[0].cells[3], "artifact");
         assert!(model.rows[0].cells[4].contains("Malformed JSON"));
     }
 
     #[test]
-    fn recommendation_model_surfaces_unreadable_latest_artifact() {
+    fn recommendation_model_surfaces_non_file_latest_artifact() {
         let temp = tempfile::tempdir().unwrap();
-        let run_dir = temp.path().join(".kuzushi/runs/run-unreadable-rec");
+        let run_dir = test_run_dir(temp.path(), "run-unreadable-rec");
         fs::create_dir_all(&run_dir).unwrap();
-        fs::write(temp.path().join(".kuzushi/latest"), "run-unreadable-rec").unwrap();
-        fs::create_dir(run_dir.join("recommendations.json")).unwrap();
+        write_latest_run(temp.path(), "run-unreadable-rec");
+        fs::create_dir(run_dir.join(recommendations_artifact_leaf())).unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.target = Some(temp.path().to_path_buf());
 
         let model = recommendation_model(&app);
 
         assert_eq!(
-            model.summary.as_deref(),
-            Some("malformed recommendations.json")
+            model.summary,
+            Some(format!("{} is not a file", recommendations_artifact_leaf()))
         );
+        assert!(model.detail_rows[0].cells[1].ends_with("(not a file)"));
         assert_eq!(model.rows.len(), 1);
-        assert_eq!(model.rows[0].cells[1], "recommendations.json");
+        assert_eq!(model.rows[0].cells[1], recommendations_artifact_leaf());
         assert_eq!(model.rows[0].cells[3], "artifact");
-        assert!(model.rows[0].cells[4].contains("Malformed JSON"));
+        assert!(model.rows[0].cells[4].contains("Artifact path is not a file"));
     }
 
     #[test]
     fn recommendation_model_surfaces_invalid_latest_pointer() {
         let temp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(temp.path().join(".kuzushi/latest")).unwrap();
+        create_invalid_latest_pointer(temp.path());
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.target = Some(temp.path().to_path_buf());
 
@@ -528,8 +576,7 @@ mod tests {
     #[test]
     fn recommendation_model_surfaces_blank_latest_pointer() {
         let temp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(temp.path().join(".kuzushi")).unwrap();
-        fs::write(temp.path().join(".kuzushi/latest"), "\n").unwrap();
+        write_blank_latest_pointer(temp.path());
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.target = Some(temp.path().to_path_buf());
 
@@ -551,7 +598,7 @@ mod tests {
         assert_eq!(model.detail_rows[0].cells[0], "recommendations");
         assert_eq!(
             model.report_headers,
-            ["pri", "tool", "runtime", "signal", "reason"]
+            ["priority", "tool", "runtime", "signal", "reason"]
         );
         assert_eq!(
             model.report_commands,

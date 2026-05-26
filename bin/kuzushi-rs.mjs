@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
@@ -18,6 +18,10 @@ if (nativeOverride) {
     process.stderr.write(`KUZUSHI_NATIVE_BIN points to missing file: ${nativeOverride}\n`);
     process.exit(127);
   }
+  if (!statSync(nativeOverride).isFile()) {
+    process.stderr.write(`KUZUSHI_NATIVE_BIN must point to a file: ${nativeOverride}\n`);
+    process.exit(127);
+  }
   if (overrideName !== cliName) {
     process.stderr.write(
       `KUZUSHI_NATIVE_BIN must point to a ${exe} binary when invoked as ${cliName}; got ${nativeOverride}.\n`,
@@ -33,7 +37,7 @@ const candidates = [
   join(root, "target", "debug", exe),
 ].filter(Boolean);
 
-const binary = candidates.find((candidate) => existsSync(candidate));
+const binary = candidates.find(isNativeBinaryFile);
 if (!binary) {
   process.stderr.write(
     "Could not find the Kuzushi native binary. Expected native/<platform>-<arch>/kuzushi or native/<platform>-<arch>/kz, or a Cargo build output. Run `pnpm build:native`, run `cargo build -p kuzushi-cli`, or set KUZUSHI_NATIVE_BIN. Then check readiness with `kuzushi doctor --target .`.\n",
@@ -43,7 +47,7 @@ if (!binary) {
 
 const result = spawnSync(binary, process.argv.slice(2), {
   stdio: "inherit",
-  env: { ...process.env, KUZUSHI_CLI_NAME: process.env.KUZUSHI_CLI_NAME ?? cliName },
+  env: { ...process.env, KUZUSHI_CLI_NAME: cliName },
 });
 
 if (result.error) {
@@ -52,3 +56,7 @@ if (result.error) {
 }
 
 process.exit(result.status ?? 0);
+
+function isNativeBinaryFile(candidate) {
+  return existsSync(candidate) && statSync(candidate).isFile();
+}

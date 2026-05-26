@@ -93,7 +93,10 @@ fn threat_model_build_header_lines(input: &BuildInput, persisted: bool) -> Vec<S
         format!("  Provider: {}", BuildFlavor::ThreatModel.provider()),
         format!("  Stages:   {}", input.stages.join(", ")),
         format!("  Artifact: {}", input.output_dir),
-        format!("  Saved:    {}", saved_threat_model_status(persisted)),
+        format!(
+            "  Saved:    {}",
+            saved_threat_model_status(persisted, &input.target)
+        ),
     ]
 }
 
@@ -109,11 +112,15 @@ fn randori_pasta_header_lines(input: &BuildInput) -> Vec<String> {
     ]
 }
 
-fn saved_threat_model_status(persisted: bool) -> &'static str {
+fn saved_threat_model_status(persisted: bool, target: &Path) -> String {
     if persisted {
-        ".kuzushi/threat-model.json"
+        let path = persistent_threat_model_path(target);
+        path.strip_prefix(target)
+            .unwrap_or(path.as_path())
+            .display()
+            .to_string()
     } else {
-        "skipped (operator-edited model preserved)"
+        "skipped (operator-edited model preserved)".to_string()
     }
 }
 

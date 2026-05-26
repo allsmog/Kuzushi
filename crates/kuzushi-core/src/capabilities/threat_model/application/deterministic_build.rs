@@ -271,7 +271,7 @@ fn deterministic_response(
     persisted: bool,
 ) -> Value {
     let threat_count = array_len(document.pointer("/threats"));
-    let persistent_artifact = input.target.join(".kuzushi").join("threat-model.json");
+    let persistent_artifact = persistent_threat_model_path(&input.target);
     let artifacts = threat_model_artifacts(&normalized_artifact, &persistent_artifact, persisted);
     let summary = deterministic_summary(&input.repo_name);
     let output = deterministic_output(flavor, &input.repo_name, threat_count);

@@ -1,8 +1,5 @@
 use super::*;
-use crate::ui_view_models::{
-    plain_config_model, plain_context_strip_model, PlainConfigModel, PlainConfigModelRow,
-    PlainContextStripModel,
-};
+use crate::ui_view_models::{plain_config_model, PlainConfigModel, PlainConfigModelRow};
 
 pub(crate) fn plain_config_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
@@ -46,11 +43,11 @@ fn plain_model_row(row: &PlainConfigModelRow, widths: &[usize]) -> String {
 }
 
 pub(crate) fn plain_context_strip(app: &ShellApp, width: usize) -> Vec<String> {
-    plain_context_strip_rows(plain_context_strip_model(app, width))
-}
-
-fn plain_context_strip_rows(model: PlainContextStripModel) -> Vec<String> {
-    model.rows
+    let area = Rect::new(0, 0, width.min(u16::MAX as usize) as u16, 1);
+    crate::renderer::chrome::context_strip(app, area)
+        .into_iter()
+        .map(line_to_unstyled_text)
+        .collect()
 }
 
 pub(crate) fn plain_model_widths(width: usize) -> Vec<usize> {

@@ -199,42 +199,62 @@ fn is_carlini_context_artifact(snippet: &ArtifactKnowledgeSnippet) -> bool {
     ) || snippet.source_path.starts_with("x-ray/")
         || snippet.source_path.contains("threat-leads")
         || snippet.source_path.contains("threat-model")
-        || snippet
-            .source_path
-            .ends_with(".kuzushi/context-snapshot.json")
+        || is_context_snapshot_source_path(&snippet.source_path)
 }
 
 fn explicit_carlini_context_snippets(target: &Path) -> Vec<ArtifactKnowledgeSnippet> {
-    [
+    let mut sources = vec![
         (
-            ".kuzushi/threat-leads.md",
+            ".kuzushi/threat-leads.md".to_string(),
             "threat-leads",
             "threat-leads.md",
         ),
         (
-            ".kuzushi/threat-leads.json",
+            ".kuzushi/threat-leads.json".to_string(),
             "threat-leads",
             "threat-leads.json",
         ),
-        ("x-ray/entry-points.md", "x-ray", "entry-points.md"),
-        ("x-ray/x-ray.md", "x-ray", "x-ray.md"),
-        ("x-ray/invariants.md", "x-ray", "invariants.md"),
         (
-            ".kuzushi/threat-model.json",
+            "x-ray/entry-points.md".to_string(),
+            "x-ray",
+            "entry-points.md",
+        ),
+        ("x-ray/x-ray.md".to_string(), "x-ray", "x-ray.md"),
+        ("x-ray/invariants.md".to_string(), "x-ray", "invariants.md"),
+    ];
+    sources.extend([
+        (
+            persistent_threat_model_source_path(target),
             "threat-model",
             "threat-model.json",
         ),
-        (
-            ".kuzushi/context-snapshot.json",
-            "context",
-            "context-snapshot.json",
-        ),
-    ]
-    .into_iter()
+        (context_snapshot_source_path(target), "context", "context-snapshot.json"),
+    ]);
+    sources
+        .into_iter()
     .filter_map(|(source_path, module_id, title)| {
-        explicit_context_snippet(target, source_path, module_id, title)
+        explicit_context_snippet(target, &source_path, module_id, title)
     })
     .collect()
+}
+
+fn persistent_threat_model_source_path(target: &Path) -> String {
+    crate::workspace::artifact_kb::relative_workspace_path(
+        target,
+        &crate::capabilities::persistent_threat_model_path(target),
+    )
+}
+
+fn context_snapshot_source_path(target: &Path) -> String {
+    crate::workspace::artifact_kb::relative_workspace_path(
+        target,
+        &crate::context::context_snapshot_path(target),
+    )
+}
+
+fn is_context_snapshot_source_path(source_path: &str) -> bool {
+    let relative = context_snapshot_source_path(Path::new(""));
+    source_path == relative || source_path.ends_with(&format!("/{relative}"))
 }
 
 fn explicit_context_snippet(
@@ -290,4 +310,34 @@ fn compact_carlini_context_text(text: &str, max_chars: usize) -> String {
         compact.push_str("...");
     }
     compact
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_carlini_context_snippets_use_shared_persistent_artifact_paths() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(crate::workspace::workspace_state_root(temp.path())).unwrap();
+        fs::write(
+            crate::capabilities::persistent_threat_model_path(temp.path()),
+            "{}\n",
+        )
+        .unwrap();
+        fs::write(crate::context::context_snapshot_path(temp.path()), "{}\n").unwrap();
+
+        let snippets = explicit_carlini_context_snippets(temp.path());
+        let source_paths = snippets
+            .iter()
+            .map(|snippet| snippet.source_path.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(source_paths.contains(&persistent_threat_model_source_path(temp.path()).as_str()));
+        assert!(source_paths.contains(&context_snapshot_source_path(temp.path()).as_str()));
+        assert!(snippets
+            .iter()
+            .any(|snippet| snippet.module_id == "context"
+                && is_carlini_context_artifact(snippet)));
+    }
 }

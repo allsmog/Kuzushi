@@ -21,9 +21,14 @@ impl ShellApp {
         self.reselect_current_finding();
         self.clamp_findings_cursor();
         if announce {
+            let count = self.findings.len();
             self.log(
                 "findings",
-                format!("loaded {} finding(s)", self.findings.len()),
+                format!(
+                    "loaded {} {}",
+                    count,
+                    if count == 1 { "finding" } else { "findings" }
+                ),
             );
         }
     }

@@ -11,82 +11,121 @@ impl ArtifactKnowledgeStore {
         if !sqlite_table_exists(&conn, "findings")? {
             return Ok(0);
         }
-        let mut stmt = conn.prepare(
-            r#"
+
+        let rows = finding_index_rows(&conn)?;
+        for row in &rows {
+            let record = finding_record(row);
+            self.upsert_record(&record)?;
+        }
+        Ok(rows.len())
+    }
+}
+
+struct FindingIndexRow {
+    scan_id: String,
+    fingerprint: String,
+    rule_id: String,
+    title: String,
+    severity: String,
+    file_path: String,
+    start_line: i64,
+    end_line: Option<i64>,
+    message: String,
+    tool: String,
+    created_at: String,
+}
+
+impl FindingIndexRow {
+    fn from_sql_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            scan_id: row.get(0)?,
+            fingerprint: row.get(1)?,
+            rule_id: row.get(2)?,
+            title: row.get(3)?,
+            severity: row.get(4)?,
+            file_path: row.get(5)?,
+            start_line: row.get(6)?,
+            end_line: row.get(7)?,
+            message: row.get(8)?,
+            tool: row.get(9)?,
+            created_at: row.get(10)?,
+        })
+    }
+}
+
+fn finding_index_rows(conn: &Connection) -> Result<Vec<FindingIndexRow>> {
+    let mut stmt = conn.prepare(
+        r#"
             select scan_id, fingerprint, rule_id, title, severity, file_path,
                    start_line, end_line, message, tool, created_at
             from findings
             order by scan_id, id
             "#,
-        )?;
-        let rows = stmt.query_map([], |row| {
-            let scan_id: String = row.get(0)?;
-            let fingerprint: String = row.get(1)?;
-            let rule_id: String = row.get(2)?;
-            let title: String = row.get(3)?;
-            let severity: String = row.get(4)?;
-            let file_path: String = row.get(5)?;
-            let start_line: i64 = row.get(6)?;
-            let end_line: Option<i64> = row.get(7)?;
-            let message: String = row.get(8)?;
-            let tool: String = row.get(9)?;
-            let created_at: String = row.get(10)?;
-            Ok((
-                scan_id,
-                fingerprint,
-                rule_id,
-                title,
-                severity,
-                file_path,
-                start_line,
-                end_line,
-                message,
-                tool,
-                created_at,
-            ))
-        })?;
+    )?;
+    let rows = stmt
+        .query_map([], FindingIndexRow::from_sql_row)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .context("Could not read persisted finding for artifact KB")?;
+    Ok(rows)
+}
 
-        let mut indexed = 0usize;
-        for row in rows {
-            let (
-                scan_id,
-                fingerprint,
-                rule_id,
-                title,
-                severity,
-                file_path,
-                start_line,
-                end_line,
-                message,
-                tool,
-                created_at,
-            ) = row.context("Could not read persisted finding for artifact KB")?;
-            let refs = vec![format!("{file_path}:{start_line}")];
-            let body = format!(
-                "{title}\nRule: {rule_id}\nSeverity: {severity}\nLocation: {file_path}:{start_line}{}\n\n{message}",
-                end_line
-                    .map(|line| format!("-{line}"))
-                    .unwrap_or_default()
-            );
-            let source_path = format!(".kuzushi/v2/findings.sqlite3#finding/{}", fingerprint);
-            let record = ArtifactKnowledgeRecord::from_body(
-                source_path,
-                tool,
-                Some(scan_id),
-                title,
-                body,
-                refs,
-                json!({
-                    "sourceKind": "finding-row",
-                    "fingerprint": fingerprint,
-                    "ruleId": rule_id,
-                    "severity": severity,
-                    "createdAt": created_at,
-                }),
-            );
-            self.upsert_record(&record)?;
-            indexed += 1;
-        }
-        Ok(indexed)
+fn finding_record(row: &FindingIndexRow) -> ArtifactKnowledgeRecord {
+    ArtifactKnowledgeRecord::from_body(
+        finding_source_path(&row.fingerprint),
+        row.tool.clone(),
+        Some(row.scan_id.clone()),
+        row.title.clone(),
+        finding_body(row),
+        vec![format!("{}:{}", row.file_path, row.start_line)],
+        json!({
+            "sourceKind": "finding-row",
+            "fingerprint": row.fingerprint,
+            "ruleId": row.rule_id,
+            "severity": row.severity,
+            "createdAt": row.created_at,
+        }),
+    )
+}
+
+fn finding_body(row: &FindingIndexRow) -> String {
+    format!(
+        "{}\nRule: {}\nSeverity: {}\nLocation: {}:{}{}\n\n{}",
+        row.title,
+        row.rule_id,
+        row.severity,
+        row.file_path,
+        row.start_line,
+        row.end_line
+            .map(|line| format!("-{line}"))
+            .unwrap_or_default(),
+        row.message
+    )
+}
+
+fn finding_source_path(fingerprint: &str) -> String {
+    format!(
+        "{}#finding/{}",
+        crate::workspace::workspace_findings_db_path(Path::new(""))
+            .to_string_lossy()
+            .replace('\\', "/"),
+        fingerprint
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finding_source_path_uses_workspace_findings_db_path() {
+        assert_eq!(
+            finding_source_path("abc123"),
+            format!(
+                "{}#finding/abc123",
+                crate::workspace::workspace_findings_db_path(Path::new(""))
+                    .to_string_lossy()
+                    .replace('\\', "/")
+            )
+        );
     }
 }

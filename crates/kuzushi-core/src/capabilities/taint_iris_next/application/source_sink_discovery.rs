@@ -440,11 +440,13 @@ pub(crate) fn persist_taint_iris_next_discovered_signals(
     repo_root: &Path,
     signals: &DiscoveredSignals,
 ) {
-    let dir = repo_root.join(".kuzushi");
-    if std::fs::create_dir_all(&dir).is_err() {
+    let path = taint_iris_next_discovered_signals_path(repo_root);
+    let Some(dir) = path.parent() else {
+        return;
+    };
+    if std::fs::create_dir_all(dir).is_err() {
         return;
     }
-    let path = dir.join("discovered-signals.json");
     if let Ok(serialised) = serde_json::to_string_pretty(signals) {
         let _ = std::fs::write(&path, serialised);
     }

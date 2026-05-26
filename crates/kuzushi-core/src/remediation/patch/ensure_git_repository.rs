@@ -1,5 +1,11 @@
 use super::*;
 
+pub(crate) const PATCH_WORKTREES_DIR: &str = "worktrees";
+
+pub(crate) fn patch_worktrees_root(repo_root: &Path) -> PathBuf {
+    crate::workspace::workspace_state_root(repo_root).join(PATCH_WORKTREES_DIR)
+}
+
 pub(crate) fn ensure_git_repository(repo_root: &Path) -> Result<()> {
     let output = Command::new("git")
         .args(["rev-parse", "--is-inside-work-tree"])
@@ -15,7 +21,7 @@ pub(crate) fn ensure_git_repository(repo_root: &Path) -> Result<()> {
 }
 
 pub(crate) fn create_disposable_worktree(repo_root: &Path) -> Result<PathBuf> {
-    let worktree_base = repo_root.join(".kuzushi").join("worktrees");
+    let worktree_base = patch_worktrees_root(repo_root);
     fs::create_dir_all(&worktree_base)
         .with_context(|| format!("Could not create {}", worktree_base.display()))?;
     let worktree_path = worktree_base.join(Uuid::new_v4().to_string());
@@ -94,4 +100,18 @@ pub(crate) fn command_output_text(output: &std::process::Output) -> String {
         .filter(|value| !value.is_empty())
         .collect::<Vec<_>>()
         .join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn patch_worktrees_root_uses_workspace_state_root() {
+        let root = Path::new("/repo");
+        assert_eq!(
+            patch_worktrees_root(root),
+            crate::workspace::workspace_state_root(root).join(PATCH_WORKTREES_DIR)
+        );
+    }
 }

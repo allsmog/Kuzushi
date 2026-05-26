@@ -1,4 +1,5 @@
 use super::*;
+use crate::artifact_contract::{canonical_run_artifact_spec, CanonicalRunArtifactSpec};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -56,9 +57,9 @@ pub fn append_run_event(
     run_id: &str,
     event: &RunEvent,
 ) -> Result<PathBuf> {
-    let dir = run_dir(target, run_id);
+    let dir = run_dir(&target, run_id);
     fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
-    let path = dir.join("events.jsonl");
+    let path = run_artifact_path(&target, run_id, run_events_spec().leaf);
     reject_non_file_event_target(&path)?;
     let mut file = fs::OpenOptions::new()
         .create(true)
@@ -71,11 +72,15 @@ pub fn append_run_event(
 }
 
 pub fn next_run_event_number(target: impl AsRef<Path>, run_id: &str) -> usize {
-    let path = run_dir(target, run_id).join("events.jsonl");
+    let path = run_artifact_path(target, run_id, run_events_spec().leaf);
     let Ok(text) = fs::read_to_string(path) else {
         return 1;
     };
     crate::run_artifacts::jsonl_numbering::next_jsonl_number::<RunEvent>(&text, |event| event.n)
+}
+
+fn run_events_spec() -> &'static CanonicalRunArtifactSpec {
+    canonical_run_artifact_spec("events.jsonl").expect("run events artifact must be in shared spec")
 }
 
 fn reject_non_file_event_target(path: &Path) -> Result<()> {

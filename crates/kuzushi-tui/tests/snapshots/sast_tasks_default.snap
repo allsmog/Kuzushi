@@ -2,24 +2,24 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 137
 ---
-mode:shell | target:none | view:tasks | 0 findings | modules:36
+ KUZUSHI mode:shell · target:none · ctx:missing · model:unconfigured · 0 findings · view:tasks
 
  -- SAST TASKS ---------------------------------------------------------------------------------------------------------
 mode: auto + denylist
 selected: 5/12 enabled, 0 blocked
 
-state  id                        cost   scan                notes
-[x]    semgrep                   low    semgrep             pattern scanner
-[A]    codeql                    high   codeql              semantic query scanner
-[x]    dep-hygiene               low    dep-hygiene         dependency manifest hygiene
-[x]    cargo-audit               me...  cargo-audit         Rust advisory scanner
-[x]    secret-scan               low    secret-scan         local secret patterns
-[x]    iac-scan                  low    iac-scan            IaC misconfiguration scanner
-[A]    license-scan              low    license-scan        package license risk scanner
-[A]    agentic                   high   agentic             model-backed detector set; run via sast:scan
-[A]    offense-review            high   offense-review      threat-model-guided review; run via sast:scan
-[A]    taint-iris                high   taint-iris          source-to-sink analysis; run via sast:scan
-[A]    taint-iris-next           high   taint-iris-next     next taint workflow; run via sast:scan
-[A]    systems-hunt              high   systems-hunt        deferred exact opt-in systems invariant hunt; run via...
+state  id                        cost    scan                notes
+[x]    semgrep                   low     semgrep             pattern scanner
+[A]    codeql                    high    codeql              semantic query scanner
+[x]    dep-hygiene               low     dep-hygiene         dependency manifest hygiene
+[x]    cargo-audit               medium  cargo-audit         Rust advisory scanner
+[x]    secret-scan               low     secret-scan         local secret patterns
+[x]    iac-scan                  low     iac-scan            IaC misconfiguration scanner
+[A]    license-scan              low     license-scan        package license risk scanner
+[A]    agentic                   high    agentic             model-backed detector set; run via sast:scan
+[A]    offense-review            high    offense-review      threat-model-guided review; run via sast:scan
+[A]    taint-iris                high    taint-iris          source-to-sink analysis; run via sast:scan
+[A]    taint-iris-next           high    taint-iris-next     next taint workflow; run via sast:scan
+[A]    systems-hunt              high    systems-hunt        deferred exact opt-in systems invariant hunt; run via...
 
 Next: task block <id>, task allow <id>, task toggle [id], task mode auto|manual|toggle

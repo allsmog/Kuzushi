@@ -10,11 +10,9 @@ pub(crate) const AUTH_CONFIG_MODEL_COMMANDS: &[ShellCommandSpec] = &[
     ShellCommandSpec {
         command: "auth login <provider> [method]",
         aliases: &[
-            "auth openai",
-            "auth anthropic",
-            "auth login openai headless",
-            "auth login github-copilot",
-            "/auth login <provider>",
+            "/auth login openai",
+            "/auth login anthropic",
+            "/auth login github-copilot",
         ],
         category: ShellCommandCategory::AuthConfigModel,
         description: "start supported OAuth login flow",

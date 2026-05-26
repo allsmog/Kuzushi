@@ -15,11 +15,12 @@ use crate::commands::{
     parse_command, ContextCommand, SastTaskCommand, SastTaskModeCommand, ShellCommand,
     WorkspaceCommand,
 };
+use crate::ui_view_models::ui_run_artifact_relative_path;
 use kuzushi_core::run_artifacts::load_run_failures;
 use kuzushi_core::{
-    load_persistent_threat_model, load_run_summary, save_persistent_threat_model, AttachmentRecord,
-    FindingStore, OptionScope, OptionTarget, RuntimeConfig, RuntimeKind, Severity, ToolOptionStore,
-    TriageOutcome, TriageVerdict,
+    load_persistent_threat_model, load_run_summary, run_dir, save_persistent_threat_model,
+    AttachmentRecord, FindingStore, OptionScope, OptionTarget, RuntimeConfig, RuntimeKind,
+    Severity, ToolOptionStore, TriageOutcome, TriageVerdict,
 };
 use std::fs;
 
@@ -133,8 +134,8 @@ fn prereq_plan_cancel_aborts_chain_before_dispatch() {
 #[test]
 fn cached_prereq_reuse_skips_prereq_and_dispatches_final_tool() {
     let tmp = tempfile::tempdir().unwrap();
-    fs::create_dir(tmp.path().join(".kuzushi")).unwrap();
-    fs::write(tmp.path().join(".kuzushi/context-snapshot.json"), "{}\n").unwrap();
+    fs::create_dir(kuzushi_core::workspace_state_root(tmp.path())).unwrap();
+    fs::write(kuzushi_core::context_snapshot_path(tmp.path()), "{}\n").unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
 
@@ -158,8 +159,8 @@ fn cached_prereq_reuse_skips_prereq_and_dispatches_final_tool() {
 #[test]
 fn cached_prereq_regenerate_runs_prereq_after_approval() {
     let tmp = tempfile::tempdir().unwrap();
-    fs::create_dir(tmp.path().join(".kuzushi")).unwrap();
-    fs::write(tmp.path().join(".kuzushi/context-snapshot.json"), "{}\n").unwrap();
+    fs::create_dir(kuzushi_core::workspace_state_root(tmp.path())).unwrap();
+    fs::write(kuzushi_core::context_snapshot_path(tmp.path()), "{}\n").unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
 
@@ -791,10 +792,10 @@ fn write_systems_hunt_fixture(dir: &PathBuf) {
 }
 
 fn write_carlini_threat_model_fixture(dir: &PathBuf) {
-    let state_dir = dir.join(".kuzushi");
-    fs::create_dir_all(&state_dir).unwrap();
+    let threat_model_path = kuzushi_core::capabilities::persistent_threat_model_path(dir);
+    fs::create_dir_all(threat_model_path.parent().unwrap()).unwrap();
     fs::write(
-            state_dir.join("threat-model.json"),
+            threat_model_path,
             r#"{"version":"2.0","dfd":{"nodes":[{"id":"actor-user","type":"external-entity","name":"Authenticated User","description":"External authenticated user","trustZone":"external"},{"id":"web","type":"process","name":"Web","description":"Web app","trustZone":"internal"}],"flows":[{"id":"flow-1","sourceId":"actor-user","targetId":"web","description":"profile request","trustBoundaryIds":["tb-1"],"protocol":"https"}],"trustBoundaries":[{"id":"tb-1","name":"edge","innerZone":"internal","outerZone":"external","crossingFlowIds":["flow-1"]}]},"threats":[{"id":"T-001","actorIds":["actor-user"],"flowIds":["flow-1"],"targetElementIds":["web"],"category":"tampering","title":"Profile HTML injection","description":"query reaches HTML","attackVector":"crafted profile query","impact":"high","likelihood":"medium","affectedFiles":[{"filePath":"src/app.ts","startLine":9}]}],"summary":{"total":1,"bySeverity":{"high":1},"byCategory":{"tampering":1}}}"#,
         )
         .unwrap();
@@ -1213,10 +1214,7 @@ fn run_command_dispatches_context_build_and_writes_snapshot() {
         line.prefix == "result" && line.body.contains("context:build indexed 2 files")
     }));
     assert!(app.context_view.exists);
-    assert!(workspace
-        .root()
-        .join(".kuzushi/context-snapshot.json")
-        .exists());
+    assert!(kuzushi_core::context_snapshot_path(workspace.root()).exists());
 }
 
 #[test]
@@ -1272,10 +1270,7 @@ fn context_build_command_dispatches_context_build_and_writes_snapshot() {
             .any(|line| line.prefix == "result"
                 && line.body.contains("context:build indexed 2 files"))
     );
-    assert!(workspace
-        .root()
-        .join(".kuzushi/context-snapshot.json")
-        .exists());
+    assert!(kuzushi_core::context_snapshot_path(workspace.root()).exists());
 }
 
 #[test]
@@ -1322,10 +1317,7 @@ fn context_regen_unknown_slice_is_actionable_and_does_not_mutate_state() {
         .unwrap_or_default();
     assert!(error.contains("unknown context slice"));
     assert!(error.contains("Next: context regen repo"));
-    assert!(!workspace
-        .root()
-        .join(".kuzushi/context-snapshot.json")
-        .exists());
+    assert!(!kuzushi_core::context_snapshot_path(workspace.root()).exists());
 }
 
 #[test]
@@ -1437,7 +1429,7 @@ fn run_command_applies_session_options_to_focused_module_tool() {
     drain_tool(&mut app);
 
     let snapshot =
-        fs::read_to_string(workspace.root().join(".kuzushi/context-snapshot.json")).unwrap();
+        fs::read_to_string(kuzushi_core::context_snapshot_path(workspace.root())).unwrap();
     let snapshot: serde_json::Value = serde_json::from_str(&snapshot).unwrap();
     assert_eq!(
         snapshot["filesSample"].as_array().unwrap().len(),
@@ -1473,7 +1465,7 @@ fn explicit_run_input_overrides_stored_tool_options() {
     drain_tool(&mut app);
 
     let snapshot =
-        fs::read_to_string(workspace.root().join(".kuzushi/context-snapshot.json")).unwrap();
+        fs::read_to_string(kuzushi_core::context_snapshot_path(workspace.root())).unwrap();
     let snapshot: serde_json::Value = serde_json::from_str(&snapshot).unwrap();
     assert_eq!(
         snapshot["filesSample"].as_array().unwrap().len(),
@@ -1830,7 +1822,7 @@ fn options_command_resolves_default_tool_and_set_updates_session_store() {
     drain_tool(&mut app);
 
     let snapshot =
-        fs::read_to_string(workspace.root().join(".kuzushi/context-snapshot.json")).unwrap();
+        fs::read_to_string(kuzushi_core::context_snapshot_path(workspace.root())).unwrap();
     let snapshot: serde_json::Value = serde_json::from_str(&snapshot).unwrap();
     assert_eq!(snapshot["filesSample"].as_array().unwrap().len(), 1);
     assert!(app
@@ -1989,6 +1981,16 @@ fn auth_login_status_messages_cover_success_failure_and_spawn_error() {
     assert_eq!(prefix, "auth");
     assert!(success.contains("Next: model 5"));
 
+    let (prefix, openai_success) = auth_login_status_message(
+        "openai-codex",
+        "browser",
+        Ok(std::process::ExitStatus::from_raw(0)),
+    );
+    assert_eq!(prefix, "auth");
+    assert!(openai_success.contains("Next: model 3 (openai-oauth:gpt-5.5)"));
+    assert!(!openai_success.contains("openai-codex"));
+    assert!(!openai_success.contains("codex"));
+
     let (prefix, failed) = auth_login_status_message(
         "openai-codex",
         "headless",
@@ -2027,6 +2029,23 @@ fn doctor_verb_points_to_cli_not_ask_agent() {
     // Plain unknown verb still uses the agent-path fallback.
     let message = unknown_command_message("zzwombat");
     assert!(message.contains("Free-form chat"));
+}
+
+#[test]
+fn legacy_openai_oauth_auth_selectors_point_to_public_login_command() {
+    let cases = [
+        format!("auth {}", "codex"),
+        format!("auth {}", "openai-codex"),
+        format!("auth login {}", "codex"),
+        format!("auth login {}", "openai-codex"),
+        "auth legacy-openai-oauth".to_string(),
+    ];
+    for raw in cases {
+        let message = unknown_command_message(&raw);
+        assert!(message.contains("auth login openai"), "{raw}: {message}");
+        assert!(!message.contains("openai-codex"), "{raw}: {message}");
+        assert!(!message.contains("codex"), "{raw}: {message}");
+    }
 }
 
 #[test]
@@ -3411,7 +3430,7 @@ fn run_command_dispatches_threat_model_build_through_pi_agent_core_bridge() {
     assert!(app.log.iter().any(|line| {
         line.prefix == "result" && line.body.contains("threat-model:build complete")
     }));
-    assert!(tmp.path().join(".kuzushi/threat-model.json").exists());
+    assert!(kuzushi_core::capabilities::persistent_threat_model_path(tmp.path()).exists());
     assert!(tmp
         .path()
         .join(".kuzushi/tm/normalized-threat-model.json")
@@ -3829,7 +3848,7 @@ fn startup_logs_first_finding_path_for_bare_shell() {
     assert!(app
         .log
         .iter()
-        .any(|line| line.prefix == "startup" && line.body.contains("module(s)")));
+        .any(|line| line.prefix == "startup" && line.body.contains("modules")));
     // P1-3: the first-finding hint is rendered in the catalog body,
     // not duplicated into the 2-row transcript. Confirm the helper
     // still produces the correct command so `next_action_line` has
@@ -5026,7 +5045,7 @@ fn confirm_gate_detects_fs_write_outside_kuzushi() {
     // .kuzushi/ paths bypass the gate.
     assert!(confirm_gate_for_tool(
         "fs:write",
-        &serde_json::json!({"path": ".kuzushi/runs/r-1/patch.diff"}),
+        &serde_json::json!({"path": ui_run_artifact_relative_path("r-1", "patch.diff")}),
         &allow,
     )
     .is_none());
@@ -5089,7 +5108,7 @@ fn append_trace_step_writes_jsonl_under_target() {
         Some(1200),
         Some(0.012),
     );
-    let path = tmp.path().join(".kuzushi/runs/agent-42/trace.jsonl");
+    let path = run_dir(tmp.path(), "agent-42").join("trace.jsonl");
     let body = std::fs::read_to_string(&path).expect("trace.jsonl");
     let lines: Vec<&str> = body.lines().collect();
     assert_eq!(lines.len(), 2);
@@ -5115,7 +5134,7 @@ fn write_run_summary_writes_canonical_run_metadata_under_target() {
     let tmp = tempfile::tempdir().unwrap();
     write_run_summary(Some(tmp.path()), "r-1", "complete", Some(11), "/tmp/demo");
     for leaf in ["run.json", "summary.json"] {
-        let body = std::fs::read_to_string(tmp.path().join(".kuzushi/runs/r-1").join(leaf))
+        let body = std::fs::read_to_string(run_dir(tmp.path(), "r-1").join(leaf))
             .unwrap_or_else(|_| panic!("{leaf}"));
         let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
         assert_eq!(parsed["status"], "completed");
@@ -5136,7 +5155,7 @@ fn append_run_status_event_records_tool_lifecycle_event() {
         "sast:scan completed",
     );
 
-    let body = fs::read_to_string(tmp.path().join(".kuzushi/runs/r-event/events.jsonl")).unwrap();
+    let body = fs::read_to_string(run_dir(tmp.path(), "r-event").join("events.jsonl")).unwrap();
     let event: serde_json::Value = serde_json::from_str(body.lines().next().unwrap()).unwrap();
     assert_eq!(event["kind"], "tool");
     assert_eq!(event["status"], "completed");
@@ -5190,7 +5209,7 @@ fn cache_tool_snapshot_populates_pending_patch_for_patch_run() {
                 {"name": "happy_path", "blurb": "valid uuid"},
             ],
             "guardrail": "approval.patches = human-required",
-            "staged_at": ".kuzushi/runs/r-1/patch.diff",
+            "staged_at": ui_run_artifact_relative_path("r-1", "patch.diff"),
         }
     });
     app.cache_tool_snapshot("patch:run", &result);

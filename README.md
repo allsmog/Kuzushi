@@ -329,6 +329,7 @@ not silently succeed and they do not substitute a different model.
 | `.kuzushi/runs/<runId>/failures.json` | bounded failure handoff context, empty when no failure is recorded |
 | `.kuzushi/runs/<runId>/report.md` | generated or placeholder Markdown report; promoted from `reportMarkdown`/`report_markdown` and `data.reportMarkdown`/`data.report_markdown` output aliases |
 | `.kuzushi/runs/<runId>/artifacts.json` | canonical artifact manifest for the run |
+| `.kuzushi/runs/<runId>/input.json` | prepared tool input for direct tool runs |
 | `.kuzushi/runs/<runId>/result.json` | tool result envelope for direct tool runs |
 | `.kuzushi/runs/<runId>/report.sarif` | optional SARIF report promoted from `reportSarif`/`report_sarif` and `data.reportSarif`/`data.report_sarif` output aliases |
 | `.kuzushi/runs/<runId>/summary.json` | legacy compatibility mirror of `run.json` |

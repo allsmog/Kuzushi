@@ -1665,7 +1665,7 @@ function openAiDevicePollingInterval(deviceData) {
 }
 
 function printOpenAiDeviceInstructions(deviceData) {
-  process.stdout.write(`Open this URL to authorize openai-codex: ${OPENAI_AUTH_ISSUER}/codex/device\n`);
+  process.stdout.write(`Open this URL to authorize OpenAI OAuth: ${OPENAI_AUTH_ISSUER}/codex/device\n`);
   process.stdout.write(`Enter code: ${deviceData.user_code}\n`);
   tryOpenBrowser(`${OPENAI_AUTH_ISSUER}/codex/device`);
 }
@@ -1989,14 +1989,16 @@ async function handleOpenAiNextStep(provider, modelId, request) {
     return handleOpenAiCodexTextNextStep(provider, modelId, request);
   }
 
-  const bearerToken = await resolveOpenAiBearerToken(provider, request);
-  if (!bearerToken) {
-    throw new Error(
-      `next-step: no OpenAI credentials for ${provider}. Set up kuzushi auth login openai-codex, ` +
-        "OPENAI_API_KEY, or the configured provider API key.",
-    );
-  }
+  const parsed = await postOpenAiResponsesJson(
+    provider,
+    request,
+    openAiNextStepPayload(modelId, request),
+    "next-step",
+  );
+  return openAiNextStepResponse(modelId, parsed);
+}
 
+function openAiNextStepPayload(modelId, request) {
   const payload = {
     model: modelId,
     input: openAiInputFromAnthropicMessages(request.messages ?? []),
@@ -2007,7 +2009,11 @@ async function handleOpenAiNextStep(provider, modelId, request) {
   if (systemPrompt) payload.instructions = systemPrompt;
   const temperature = numericTemperature(request);
   if (temperature !== undefined) payload.temperature = temperature;
+  return payload;
+}
 
+async function postOpenAiResponsesJson(provider, request, payload, prefix) {
+  const bearerToken = await requireOpenAiBearerToken(provider, request, prefix);
   const response = await fetch(`${resolveOpenAiResponsesBaseUrl(request)}/responses`, {
     method: "POST",
     headers: {
@@ -2019,23 +2025,41 @@ async function handleOpenAiNextStep(provider, modelId, request) {
   const text = await response.text();
   if (!response.ok) {
     throw new Error(
-      `next-step: OpenAI Responses API ${response.status} ${response.statusText}: ${text.slice(
+      `${prefix}: OpenAI Responses API ${response.status} ${response.statusText}: ${text.slice(
         0,
         500,
       )}`,
     );
   }
+  return parseOpenAiResponsesJson(text, prefix);
+}
 
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new Error(`next-step: OpenAI returned non-JSON body: ${text.slice(0, 200)}`);
-  }
+async function requireOpenAiBearerToken(provider, request, prefix) {
+  const bearerToken = await resolveOpenAiBearerToken(provider, request);
+  if (bearerToken) return bearerToken;
+  throw new Error(
+    `${prefix}: no OpenAI credentials for ${provider}. Set up kuzushi auth login openai, ` +
+      "OPENAI_API_KEY, or the configured provider API key.",
+  );
+}
+
+function parseOpenAiResponsesJson(text, prefix) {
+  const parsed = parseJsonResponseBody(text, prefix);
   if (parsed?.error) {
-    throw new Error(`next-step: OpenAI error: ${JSON.stringify(parsed.error).slice(0, 500)}`);
+    throw new Error(`${prefix}: OpenAI error: ${JSON.stringify(parsed.error).slice(0, 500)}`);
   }
+  return parsed;
+}
 
+function parseJsonResponseBody(text, prefix) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`${prefix}: OpenAI returned non-JSON body: ${text.slice(0, 200)}`);
+  }
+}
+
+function openAiNextStepResponse(modelId, parsed) {
   const usage = parsed.usage ?? {};
   const cost_usd = approximateOpenAiCostUsd(modelId, usage);
   const toolCall = firstOpenAiFunctionCall(parsed);
@@ -2074,46 +2098,16 @@ async function handleOpenAiNextStepPreflight(provider, modelId, request) {
     };
   }
 
-  const bearerToken = await resolveOpenAiBearerToken(provider, request);
-  if (!bearerToken) {
-    throw new Error(
-      `next-step preflight: no OpenAI credentials for ${provider}. Set up kuzushi auth login ` +
-        "openai-codex, OPENAI_API_KEY, or the configured provider API key.",
-    );
-  }
-  const payload = {
-    model: modelId,
-    input: "Return ok.",
-    max_output_tokens: 16,
-  };
-  const response = await fetch(`${resolveOpenAiResponsesBaseUrl(request)}/responses`, {
-    method: "POST",
-    headers: {
-      authorization: `Bearer ${bearerToken}`,
-      "content-type": "application/json",
+  const parsed = await postOpenAiResponsesJson(
+    provider,
+    request,
+    {
+      model: modelId,
+      input: "Return ok.",
+      max_output_tokens: 16,
     },
-    body: JSON.stringify(payload),
-  });
-  const text = await response.text();
-  if (!response.ok) {
-    throw new Error(
-      `next-step preflight: OpenAI Responses API ${response.status} ${response.statusText}: ${text.slice(
-        0,
-        500,
-      )}`,
-    );
-  }
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    throw new Error(`next-step preflight: OpenAI returned non-JSON body: ${text.slice(0, 200)}`);
-  }
-  if (parsed?.error) {
-    throw new Error(
-      `next-step preflight: OpenAI error: ${JSON.stringify(parsed.error).slice(0, 500)}`,
-    );
-  }
+    "next-step preflight",
+  );
   return {
     ok: true,
     step: "final",

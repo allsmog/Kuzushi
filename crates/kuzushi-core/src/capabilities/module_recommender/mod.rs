@@ -2,13 +2,13 @@ use crate::attack_surface::{build_attack_surface_map_from_inventory, AttackSurfa
 use crate::findings::{Finding, FindingStore, Severity};
 use crate::modules::ToolExecutionContext;
 use crate::repository_inventory::{build_repository_inventory, RepositoryInventory};
-use crate::threat_model::load_persistent_threat_model;
+use crate::threat_model::{load_persistent_threat_model, persistent_threat_model_path};
 use crate::workspace::WorkspaceTarget;
 use anyhow::{Context, Result};
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 mod adapters;
 mod application;

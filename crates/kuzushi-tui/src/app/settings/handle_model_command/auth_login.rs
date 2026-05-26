@@ -157,7 +157,7 @@ impl ShellApp {
 
 fn auth_login_detail(provider: &str, method: &str) -> &'static str {
     match (provider, method) {
-        ("openai-codex", "headless") => "device code flow at https://auth.openai.com/codex/device",
+        ("openai-codex", "headless") => "OpenAI device code flow",
         ("openai-codex", _) => "browser PKCE flow with localhost callback",
         ("anthropic", _) => "browser OAuth flow",
         ("github-copilot", _) => "GitHub device code flow",

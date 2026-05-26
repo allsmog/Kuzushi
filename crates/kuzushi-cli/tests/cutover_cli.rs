@@ -36,14 +36,24 @@ fn stdout(output: std::process::Output) -> String {
 }
 
 fn latest_run_dir(root: &Path) -> PathBuf {
-    let latest = fs::read_to_string(root.join(".kuzushi/latest")).unwrap();
-    root.join(".kuzushi/runs").join(latest.trim())
+    kuzushi_core::run_artifacts::run_dir(root, &latest_run_id(root))
+}
+
+fn latest_run_id(root: &Path) -> String {
+    fs::read_to_string(kuzushi_core::run_artifacts::latest_run_path(root))
+        .unwrap()
+        .trim()
+        .to_string()
+}
+
+fn latest_run_artifact(root: &Path, leaf: &str) -> PathBuf {
+    kuzushi_core::run_artifacts::run_artifact_path(root, &latest_run_id(root), leaf)
 }
 
 fn assert_failed_run_bundle(root: &Path, kind: &str, tool: &str) -> (PathBuf, Value) {
     let run_dir = latest_run_dir(root);
-    let run_json = fs::read_to_string(run_dir.join("run.json")).unwrap();
-    let failures = fs::read_to_string(run_dir.join("failures.json")).unwrap();
+    let run_json = fs::read_to_string(latest_run_artifact(root, "run.json")).unwrap();
+    let failures = fs::read_to_string(latest_run_artifact(root, "failures.json")).unwrap();
     let failure_json: Value = serde_json::from_str(&failures).unwrap();
 
     assert_canonical_run_files(&run_dir);
@@ -200,9 +210,9 @@ fn cli_run_dot_is_rejected_as_shell_only_shorthand() {
     assert!(stderr.contains("`kuzushi run .` is shell-only"), "{stderr}");
     assert!(stderr.contains("use <module>"), "{stderr}");
     assert!(stderr.contains("context:build"), "{stderr}");
-    let (run_dir, _) = assert_failed_run_bundle(tmp.path(), "run", ".");
-    let run_json = fs::read_to_string(run_dir.join("run.json")).unwrap();
-    let failures = fs::read_to_string(run_dir.join("failures.json")).unwrap();
+    let _ = assert_failed_run_bundle(tmp.path(), "run", ".");
+    let run_json = fs::read_to_string(latest_run_artifact(tmp.path(), "run.json")).unwrap();
+    let failures = fs::read_to_string(latest_run_artifact(tmp.path(), "failures.json")).unwrap();
 
     assert!(run_json.contains("\"tool\": \".\""));
     assert!(failures.contains("`kuzushi run .` is shell-only"));
@@ -707,6 +717,88 @@ fn npm_wrapper_kz_alias_rejects_mismatched_native_override() {
 }
 
 #[test]
+fn npm_wrapper_rejects_non_file_native_override() {
+    let tmp = tempfile::tempdir().unwrap();
+    let fake_binary = tmp.path().join("kuzushi");
+    fs::create_dir_all(&fake_binary).unwrap();
+
+    let output = Command::new("node")
+        .current_dir(repo_root())
+        .env("KUZUSHI_NATIVE_BIN", &fake_binary)
+        .args(["bin/kuzushi-rs.mjs", "--help"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success(), "directory override should fail");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("KUZUSHI_NATIVE_BIN must point to a file"),
+        "{stderr}"
+    );
+}
+
+#[test]
+fn npm_wrapper_skips_non_file_fallback_candidate() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    let fake_binary = tmp.path().join("target/release/kuzushi");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(&fake_binary).unwrap();
+    let wrapper = bin_dir.join("kuzushi-rs.mjs");
+    fs::copy(repo_root().join("bin/kuzushi-rs.mjs"), &wrapper).unwrap();
+
+    let output = Command::new("node")
+        .arg(wrapper)
+        .arg("--help")
+        .output()
+        .unwrap();
+
+    assert!(
+        !output.status.success(),
+        "directory fallback candidate should not be spawned"
+    );
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Could not find the Kuzushi native binary"),
+        "{stderr}"
+    );
+    assert!(
+        !stderr.contains("EACCES") && !stderr.contains("spawn"),
+        "{stderr}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn npm_wrapper_owns_cli_name_environment() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let bin_dir = tmp.path().join("bin");
+    let native_dir = tmp.path().join("target/release");
+    fs::create_dir_all(&bin_dir).unwrap();
+    fs::create_dir_all(&native_dir).unwrap();
+    let wrapper = bin_dir.join("kuzushi-rs.mjs");
+    let fake_binary = native_dir.join("kuzushi");
+    fs::copy(repo_root().join("bin/kuzushi-rs.mjs"), &wrapper).unwrap();
+    fs::write(
+        &fake_binary,
+        "#!/usr/bin/env node\nprocess.stdout.write(process.env.KUZUSHI_CLI_NAME || '');\n",
+    )
+    .unwrap();
+    fs::set_permissions(&fake_binary, fs::Permissions::from_mode(0o755)).unwrap();
+
+    let output = Command::new("node")
+        .env("KUZUSHI_CLI_NAME", "kz")
+        .arg(wrapper)
+        .output()
+        .unwrap();
+    let out = stdout(output);
+
+    assert_eq!(out, "kuzushi");
+}
+
+#[test]
 fn npm_package_runtime_surface_is_rust_only() {
     let package_raw = fs::read_to_string(repo_root().join("package.json")).unwrap();
     let package: Value = serde_json::from_str(&package_raw).unwrap();
@@ -934,9 +1026,9 @@ fn targetless_run_writes_artifacts_under_current_directory() {
     assert_eq!(body["ok"], true);
     assert_eq!(body["status"], "completed");
     let run_dir = latest_run_dir(tmp.path());
-    let run_json = fs::read_to_string(run_dir.join("run.json")).unwrap();
+    let run_json = fs::read_to_string(latest_run_artifact(tmp.path(), "run.json")).unwrap();
     let result = fs::read_to_string(run_dir.join("result.json")).unwrap();
-    let failures = fs::read_to_string(run_dir.join("failures.json")).unwrap();
+    let failures = fs::read_to_string(latest_run_artifact(tmp.path(), "failures.json")).unwrap();
 
     assert_canonical_run_files(&run_dir);
     assert!(run_json.contains("\"kind\": \"run\""));
@@ -961,7 +1053,7 @@ fn malformed_run_input_writes_failed_artifact_bundle() {
     assert!(!output.status.success(), "malformed input should fail");
     let (run_dir, failure_json) = assert_failed_run_bundle(tmp.path(), "run", "config:show");
     let input = fs::read_to_string(run_dir.join("input.json")).unwrap();
-    let report = fs::read_to_string(run_dir.join("report.md")).unwrap();
+    let report = fs::read_to_string(latest_run_artifact(tmp.path(), "report.md")).unwrap();
 
     assert!(input.contains("rawInput"));
     assert_eq!(failure_json["failures"][0]["error"], "--input must be JSON");
@@ -1202,8 +1294,8 @@ fn scan_secret_scan_success_writes_canonical_run_artifact_bundle() {
         String::from_utf8_lossy(&output.stderr)
     );
     let run_dir = latest_run_dir(&repo);
-    let run_json = fs::read_to_string(run_dir.join("run.json")).unwrap();
-    let failures = fs::read_to_string(run_dir.join("failures.json")).unwrap();
+    let run_json = fs::read_to_string(latest_run_artifact(&repo, "run.json")).unwrap();
+    let failures = fs::read_to_string(latest_run_artifact(&repo, "failures.json")).unwrap();
 
     assert_canonical_run_files(&run_dir);
     assert!(run_json.contains("\"status\": \"completed\""));

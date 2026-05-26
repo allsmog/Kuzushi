@@ -45,6 +45,16 @@ mod tests {
     }
 
     #[test]
+    fn default_oauth_credentials_path_uses_workspace_state_root() {
+        let home = std::path::Path::new("/home/kuzushi");
+
+        assert_eq!(
+            default_oauth_credentials_path(home),
+            crate::workspace::workspace_state_root(home).join(OAUTH_CREDENTIALS_FILE)
+        );
+    }
+
+    #[test]
     fn project_config_overrides_only_safe_fields() {
         // A target repo's `.kuzushi/v2/config.toml` may override the model
         // string but must not be able to redirect runtime or operator

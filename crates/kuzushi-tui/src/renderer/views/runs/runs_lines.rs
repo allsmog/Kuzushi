@@ -1,5 +1,7 @@
 use super::*;
-use crate::ui_view_models::{run_timeline_model, PastRunStatus, RunTimelineRow};
+use crate::ui_view_models::{
+    run_timeline_model, ui_runs_root_relative_path, PastRunStatus, RunTimelineRow,
+};
 
 pub(crate) fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
@@ -53,14 +55,14 @@ fn append_runs_footer(lines: &mut Vec<Line<'static>>, emitted: usize, area: Rect
 }
 
 fn append_empty_runs(lines: &mut Vec<Line<'static>>) {
+    let runs_root = ui_runs_root_relative_path();
+    let dispatch_detail = format!("every dispatch writes a run dir under {runs_root}/<id>.");
+    let first_run_detail = format!("first run will land at {runs_root}/<id>");
     lines.extend(empty_state_panel(
         "no run timeline entries",
+        &[&dispatch_detail, "this workspace has not run a module yet."],
         &[
-            "every dispatch writes a run dir under .kuzushi/runs/<id>/.",
-            "this workspace has not run a module yet.",
-        ],
-        &[
-            ("scan", "first run will land at .kuzushi/runs/<id>/"),
+            ("scan", first_run_detail.as_str()),
             ("use context", "cheapest first run · indexes the workspace"),
         ],
     ));

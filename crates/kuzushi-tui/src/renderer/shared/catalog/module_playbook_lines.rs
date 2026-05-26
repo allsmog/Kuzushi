@@ -1,147 +1,188 @@
 use super::*;
+use crate::ui_view_models::{
+    context_snapshot_relative_path, findings_db_relative_path, threat_model_relative_path,
+};
 
 const MODULE_PLAYBOOKS: &[(&str, ModulePlaybook)] = &[
     (
         "context",
         ModulePlaybook {
-            run: "context build or run . writes .kuzushi/context-snapshot.json",
+            run: PlaybookText::ContextSnapshotRun,
             needs: "target workspace",
-            output: ".kuzushi/context-snapshot.json",
+            output: PlaybookText::ContextSnapshotPath,
             inspect: "context status · context regen repo",
         },
     ),
     (
         "recon",
         ModulePlaybook {
-            run: "run nmap, subdomain, or http-fingerprint with a target",
+            run: PlaybookText::Static("run nmap, subdomain, or http-fingerprint with a target"),
             needs: "target host or active workspace",
-            output: "recon notes and optional findings",
+            output: PlaybookText::Static("recon notes and optional findings"),
             inspect: "workspace · findings · use threat-model",
         },
     ),
     (
         "threat-model",
         ModulePlaybook {
-            run: "threats regen proposes a STRIDE / DFD patch; run . dispatches threat-model:build",
+            run: PlaybookText::Static(
+                "threats regen proposes a STRIDE / DFD patch; run . dispatches threat-model:build",
+            ),
             needs: "target, context, explicit model",
-            output: ".kuzushi/threat-model.json",
+            output: PlaybookText::ThreatModelPath,
             inspect: "threats summary · threats edit · threats regen",
         },
     ),
     (
         "sast",
         ModulePlaybook {
-            run: "scan runs configured scanners; run . dispatches sast:scan",
+            run: PlaybookText::Static("scan runs configured scanners; run . dispatches sast:scan"),
             needs: "target, scanner/task config",
-            output: ".kuzushi/v2/findings.sqlite3",
+            output: PlaybookText::FindingsDbPath,
             inspect: "tasks · findings · use triage",
         },
     ),
     (
         "semgrep",
         ModulePlaybook {
-            run: "run . dispatches semgrep:scan for fast pattern findings",
+            run: PlaybookText::Static("run . dispatches semgrep:scan for fast pattern findings"),
             needs: "target and optional scanner config",
-            output: ".kuzushi/v2/findings.sqlite3",
+            output: PlaybookText::FindingsDbPath,
             inspect: "findings · use triage · use verify",
         },
     ),
     (
         "codeql",
         ModulePlaybook {
-            run: "run . dispatches codeql:scan for semantic findings",
+            run: PlaybookText::Static("run . dispatches codeql:scan for semantic findings"),
             needs: "target and CodeQL language/database options",
-            output: ".kuzushi/v2/findings.sqlite3 and optional SARIF",
+            output: PlaybookText::FindingsDbPathWithSarif,
             inspect: "findings · use triage · use verify",
         },
     ),
     (
         "dep-hygiene",
         ModulePlaybook {
-            run: "run . dispatches dep-hygiene:check for manifest risk",
+            run: PlaybookText::Static("run . dispatches dep-hygiene:check for manifest risk"),
             needs: "target with dependency manifests",
-            output: ".kuzushi/v2/findings.sqlite3",
+            output: PlaybookText::FindingsDbPath,
             inspect: "findings · use triage · use report",
         },
     ),
     (
         "cargo-audit",
         ModulePlaybook {
-            run: "run . dispatches cargo-audit:scan for RustSec advisories",
+            run: PlaybookText::Static("run . dispatches cargo-audit:scan for RustSec advisories"),
             needs: "target with Cargo.lock and cargo-audit installed",
-            output: ".kuzushi/v2/findings.sqlite3",
+            output: PlaybookText::FindingsDbPath,
             inspect: "findings · use triage · use report",
         },
     ),
     (
         "secret-scan",
         ModulePlaybook {
-            run: "run . dispatches secret-scan:scan for credential findings",
+            run: PlaybookText::Static("run . dispatches secret-scan:scan for credential findings"),
             needs: "target source or config files",
-            output: ".kuzushi/v2/findings.sqlite3",
+            output: PlaybookText::FindingsDbPath,
             inspect: "findings · use triage · use report",
         },
     ),
     (
         "iac-scan",
         ModulePlaybook {
-            run: "run . dispatches iac-scan:scan for IaC misconfiguration findings",
+            run: PlaybookText::Static(
+                "run . dispatches iac-scan:scan for IaC misconfiguration findings",
+            ),
             needs: "target with Dockerfile, Actions, or Terraform files",
-            output: ".kuzushi/v2/findings.sqlite3",
+            output: PlaybookText::FindingsDbPath,
             inspect: "findings · use triage · use report",
         },
     ),
     (
         "license-scan",
         ModulePlaybook {
-            run: "run . dispatches license-scan:scan for package license risk",
+            run: PlaybookText::Static(
+                "run . dispatches license-scan:scan for package license risk",
+            ),
             needs: "target with package manifests",
-            output: ".kuzushi/v2/findings.sqlite3",
+            output: PlaybookText::FindingsDbPath,
             inspect: "findings · use triage · use report",
         },
     ),
     (
         "sbom-scan",
         ModulePlaybook {
-            run: "run . dispatches sbom-scan:scan for dependency inventory",
+            run: PlaybookText::Static("run . dispatches sbom-scan:scan for dependency inventory"),
             needs: "target with package manifests",
-            output: "SBOM-style component inventory",
+            output: PlaybookText::Static("SBOM-style component inventory"),
             inspect: "run sbom-scan:scan · use module-recommender",
         },
     ),
     (
         "carlini-threat-hunt",
         ModulePlaybook {
-            run: "run . after threat-model:build to start adversarial actor hunts",
+            run: PlaybookText::Static(
+                "run . after threat-model:build to start adversarial actor hunts",
+            ),
             needs: "target, threat model, explicit model",
-            output: "threat-hunt runs and promoted findings",
+            output: PlaybookText::Static("threat-hunt runs and promoted findings"),
             inspect: "show trace · findings · use verify",
         },
     ),
     (
         "agentic-sast",
         ModulePlaybook {
-            run: "run . or run agentic-sast:scan starts dataflow and variant hunting agents",
+            run: PlaybookText::Static(
+                "run . or run agentic-sast:scan starts dataflow and variant hunting agents",
+            ),
             needs: "target, context, explicit model",
-            output: "agentic traces and promoted findings",
+            output: PlaybookText::Static("agentic traces and promoted findings"),
             inspect: "findings · show trace · use verify",
         },
     ),
 ];
 
 const DEFAULT_PLAYBOOK: ModulePlaybook = ModulePlaybook {
-    run: "run . to dispatch the primary tool for this module",
+    run: PlaybookText::Static("run . to dispatch the primary tool for this module"),
     needs: "tool-specific options; inspect options .",
-    output: "structured result or artifact when emitted",
+    output: PlaybookText::Static("structured result or artifact when emitted"),
     inspect: "options . · prompts · tune · back",
 };
 
 #[derive(Clone, Copy)]
 struct ModulePlaybook {
-    run: &'static str,
+    run: PlaybookText,
     needs: &'static str,
-    output: &'static str,
+    output: PlaybookText,
     inspect: &'static str,
+}
+
+#[derive(Clone, Copy)]
+enum PlaybookText {
+    Static(&'static str),
+    ContextSnapshotRun,
+    ContextSnapshotPath,
+    FindingsDbPath,
+    FindingsDbPathWithSarif,
+    ThreatModelPath,
+}
+
+impl PlaybookText {
+    fn render(self) -> String {
+        match self {
+            Self::Static(value) => value.to_string(),
+            Self::ContextSnapshotRun => format!(
+                "context build or run . writes {}",
+                context_snapshot_relative_path()
+            ),
+            Self::ContextSnapshotPath => context_snapshot_relative_path().to_string(),
+            Self::FindingsDbPath => findings_db_relative_path().to_string(),
+            Self::FindingsDbPathWithSarif => {
+                format!("{} and optional SARIF", findings_db_relative_path())
+            }
+            Self::ThreatModelPath => threat_model_relative_path().to_string(),
+        }
+    }
 }
 
 pub(crate) fn module_playbook_lines(
@@ -170,34 +211,28 @@ fn append_run_rows(
     width: u16,
 ) {
     let resolution = run_resolution(primary_tool);
-    lines.push(transcript_line(
-        "run .",
-        &fit(&resolution, width as usize),
-        false,
-    ));
-    lines.push(transcript_line(
-        "tool",
-        &fit(playbook.run, width as usize),
-        false,
-    ));
-    lines.push(transcript_line(
-        "needs",
-        &fit(playbook.needs, width as usize),
-        false,
-    ));
-    lines.push(transcript_line(
-        "output",
-        &fit(playbook.output, width as usize),
-        false,
-    ));
+    let run = playbook.run.render();
+    let output = playbook.output.render();
+    lines.push(playbook_row("run .", &fit(&resolution, width as usize)));
+    lines.push(playbook_row("tool", &fit(&run, width as usize)));
+    lines.push(playbook_row("needs", &fit(playbook.needs, width as usize)));
+    lines.push(playbook_row("output", &fit(&output, width as usize)));
+}
+
+fn playbook_row(label: &str, body: &str) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(" · ", theme::muted()),
+        Span::styled(format!("{label:<8}"), theme::subtle()),
+        Span::styled(body.to_string(), theme::primary()),
+    ])
 }
 
 fn run_resolution(primary_tool: &str) -> String {
     if primary_tool == "no-tool" {
-        return "run . has no target because this module exposes no shell tool".to_string();
+        return "no target — this module exposes no shell tool".to_string();
     }
     format!(
-        "run . -> {primary_tool} (shell); terminal: kuzushi --target . run {primary_tool} --input '{{}}'"
+        "dispatches {primary_tool} (shell); terminal: kuzushi --target . run {primary_tool} --input '{{}}'"
     )
 }
 

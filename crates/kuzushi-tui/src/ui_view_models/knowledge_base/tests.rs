@@ -3,6 +3,16 @@ use kuzushi_core::V2Config;
 use std::path::PathBuf;
 
 #[test]
+fn attachments_store_relative_path_uses_core_workspace_path() {
+    assert_eq!(
+        attachments_store_relative_path(),
+        kuzushi_core::workspace::workspace_attachments_path("")
+            .display()
+            .to_string()
+    );
+}
+
+#[test]
 fn knowledge_base_model_projects_default_store_and_supported_modules() {
     let app = ShellApp::new(V2Config::default(), None);
 
@@ -81,7 +91,7 @@ fn plain_knowledge_base_model_projects_empty_sections() {
     );
     assert_eq!(
         model.artifact_section.empty_message,
-        Some("No known Rust artifacts for this module.")
+        Some("No artifacts indexed for this module yet.")
     );
     assert_eq!(model.attachment_section.title, "ATTACHED");
     assert_eq!(

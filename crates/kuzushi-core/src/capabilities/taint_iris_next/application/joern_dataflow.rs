@@ -63,7 +63,7 @@ fn first_standard_joern_launcher() -> Option<PathBuf> {
 /// CPG file the Joern adapter expects under a target. Build with
 /// `joern-parse <target> --output <target>/.kuzushi/cpg.bin`.
 pub(crate) fn joern_cpg_path(target: &Path) -> PathBuf {
-    target.join(".kuzushi").join("cpg.bin")
+    taint_iris_next_joern_cpg_path(target)
 }
 
 /// Resolve the CPG path the pre-agent flow query should load. Honour

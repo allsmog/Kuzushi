@@ -131,7 +131,7 @@ fn finding_rows(app: &ShellApp) -> Vec<FindingListRow> {
 fn empty_state(context_state: &'static str) -> FindingsEmptyState {
     match context_state {
         "present" => FindingsEmptyState {
-            hint: "scan runs configured scanners against the active target.",
+            hint: "runs configured scanners against the active target.",
             context_cta: None,
         },
         "malformed" => FindingsEmptyState {
@@ -139,7 +139,7 @@ fn empty_state(context_state: &'static str) -> FindingsEmptyState {
             context_cta: Some(("context build", "rewrite the malformed snapshot first")),
         },
         _ => FindingsEmptyState {
-            hint: "scan dispatches the umbrella scanner once context-snapshot exists.",
+            hint: "dispatches the umbrella scanner once a context snapshot exists.",
             context_cta: Some(("context build", "build the snapshot first if you have time")),
         },
     }

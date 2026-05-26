@@ -1,6 +1,6 @@
 use super::pr_comment::{load_pr_comment_input, pr_comment_chains_from_value};
 use kuzushi_core::{
-    write_run_summary, PrCommentPhaseCost, RunLlmCallAudit, RunSummary, WorkspaceTarget,
+    run_dir, write_run_summary, PrCommentPhaseCost, RunLlmCallAudit, RunSummary, WorkspaceTarget,
 };
 use serde_json::json;
 use std::time::Duration;
@@ -20,6 +20,7 @@ fn pr_comment_chains_from_result_value_reads_anchored_steps() {
 #[test]
 fn load_pr_comment_input_reads_run_metadata_footer_fields() {
     let (_tmp, workspace) = workspace_with_summary(&summary_with_metadata("run-pr"));
+    write_chain_result(&workspace, "run-pr");
     let input = pr_comment_input_for_run(&workspace, "run-pr", None, None);
 
     assert_eq!(input.cost_usd, 1.25);
@@ -28,6 +29,8 @@ fn load_pr_comment_input_reads_run_metadata_footer_fields() {
     assert_eq!(input.model.as_deref(), Some("openai:gpt-test"));
     assert_eq!(input.git_sha.as_deref(), Some("abcdef123456"));
     assert_eq!(input.phase_costs, expected_phase_costs());
+    assert_eq!(input.chains.len(), 1);
+    assert_eq!(input.chains[0].id, "chain-1");
 }
 
 #[test]
@@ -67,6 +70,15 @@ fn workspace_with_summary(summary: &RunSummary) -> (tempfile::TempDir, Workspace
     write_run_summary(tmp.path(), summary).unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     (tmp, workspace)
+}
+
+fn write_chain_result(workspace: &WorkspaceTarget, run_id: &str) {
+    let dir = run_dir(workspace.root(), run_id);
+    std::fs::create_dir_all(&dir).unwrap();
+    let leaf = kuzushi_core::tool_result_artifact_spec("result.json")
+        .expect("tool result artifact must be in shared spec")
+        .leaf;
+    std::fs::write(dir.join(leaf), chain_result_value().to_string()).unwrap();
 }
 
 fn pr_comment_input_for_run(

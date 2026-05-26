@@ -15,7 +15,10 @@ mod tests {
         assert_eq!(record.source, "notes.md");
         assert_eq!(record.byte_count, Some("operator note\n".len() as u64));
         assert!(record.content_hash.is_some());
-        assert!(attachment_store_path(&workspace).ends_with(".kuzushi/v2/attachments.json"));
+        assert_eq!(
+            attachment_store_path(&workspace),
+            crate::workspace::workspace_attachments_path(workspace.root())
+        );
         assert!(attachment_store_path(&workspace).exists());
     }
 
@@ -80,6 +83,33 @@ mod tests {
         assert!(!known_artifacts(&workspace, "carlini-threat-hunt")
             .unwrap()
             .is_empty());
+        let context = known_artifacts(&workspace, "context").unwrap();
+        assert!(context.iter().any(|artifact| {
+            artifact.path
+                == crate::workspace::artifact_kb::relative_workspace_path(
+                    workspace.root(),
+                    &crate::context::context_snapshot_path(workspace.root()),
+                )
+                && artifact.description == "context snapshot"
+        }));
+        let threat_model = known_artifacts(&workspace, "threat-model").unwrap();
+        assert!(threat_model.iter().any(|artifact| {
+            artifact.path
+                == crate::workspace::artifact_kb::relative_workspace_path(
+                    workspace.root(),
+                    &crate::capabilities::persistent_threat_model_path(workspace.root()),
+                )
+                && artifact.description == "persisted threat model"
+        }));
+        let offense_review = known_artifacts(&workspace, "offense-review").unwrap();
+        assert!(offense_review.iter().any(|artifact| {
+            artifact.path
+                == crate::workspace::artifact_kb::relative_workspace_path(
+                    workspace.root(),
+                    &crate::workspace::workspace_findings_db_path(workspace.root()),
+                )
+                && artifact.description == "hunt findings database"
+        }));
         let x_ray = known_artifacts(&workspace, "x-ray").unwrap();
         assert!(x_ray.iter().any(|artifact| {
             artifact.path == "x-ray/x-ray.md" && artifact.description == "x-ray report"

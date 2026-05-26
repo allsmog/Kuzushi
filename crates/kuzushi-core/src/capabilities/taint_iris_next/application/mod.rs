@@ -1,6 +1,7 @@
 use super::*;
 
 mod agent;
+mod artifact_paths;
 mod backend;
 mod codeql_build;
 mod codeql_dataflow;
@@ -21,6 +22,7 @@ mod syntactic_narrowing;
 mod target_partition;
 
 pub(in crate::capabilities::taint_iris_next) use agent::*;
+pub(crate) use artifact_paths::*;
 pub(crate) use backend::*;
 pub(crate) use codeql_build::*;
 pub(crate) use codeql_dataflow::*;

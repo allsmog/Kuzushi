@@ -677,10 +677,10 @@ fn write_x_ray_fixture(repo: &std::path::Path) {
 }
 
 fn write_carlini_threat_model_fixture(repo: &std::path::Path) {
-    let state_dir = repo.join(".kuzushi");
-    std::fs::create_dir_all(&state_dir).unwrap();
+    let threat_model_path = kuzushi_core::capabilities::persistent_threat_model_path(repo);
+    std::fs::create_dir_all(threat_model_path.parent().unwrap()).unwrap();
     std::fs::write(
-        state_dir.join("threat-model.json"),
+        threat_model_path,
         r#"{"version":"2.0","dfd":{"nodes":[{"id":"actor-user","type":"external-entity","name":"Authenticated User","description":"External authenticated user","trustZone":"external"},{"id":"web","type":"process","name":"Web","description":"Web app","trustZone":"internal"}],"flows":[{"id":"flow-1","sourceId":"actor-user","targetId":"web","description":"profile request","trustBoundaryIds":["tb-1"],"protocol":"https"}],"trustBoundaries":[{"id":"tb-1","name":"edge","innerZone":"internal","outerZone":"external","crossingFlowIds":["flow-1"]}]},"threats":[{"id":"T-001","actorIds":["actor-user"],"flowIds":["flow-1"],"targetElementIds":["web"],"category":"tampering","title":"Profile HTML injection","description":"query reaches HTML","attackVector":"crafted profile query","impact":"high","likelihood":"medium","affectedFiles":[{"filePath":"src/app.ts","startLine":9}]}],"summary":{"total":1,"bySeverity":{"high":1},"byCategory":{"tampering":1}}}"#,
     )
     .unwrap();
@@ -974,7 +974,7 @@ fn run_context_build_writes_compatible_snapshot_artifact() {
         Some("enrichment")
     );
 
-    let snapshot_path = repo.join(".kuzushi/context-snapshot.json");
+    let snapshot_path = kuzushi_core::context::context_snapshot_path(&repo);
     let snapshot: Value = serde_json::from_slice(&std::fs::read(snapshot_path).unwrap()).unwrap();
     assert_eq!(
         snapshot
@@ -2917,7 +2917,7 @@ fn run_threat_model_build_reaches_pi_agent_core_bridge_and_persists() {
             .and_then(Value::as_str),
         Some("T-001")
     );
-    assert!(repo.join(".kuzushi/threat-model.json").exists());
+    assert!(kuzushi_core::capabilities::persistent_threat_model_path(&repo).exists());
     assert!(repo
         .join(".kuzushi/tm/normalized-threat-model.json")
         .exists());

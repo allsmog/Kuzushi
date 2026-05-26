@@ -212,7 +212,7 @@ fn resolved_codeql_build_mode(plan: &CodeqlBuildPlan, language: &str) -> String 
 }
 
 fn prepare_codeql_db_path(target: &Path) -> PathBuf {
-    let db_path = target.join(".kuzushi").join("codeql-db");
+    let db_path = crate::workspace::workspace_codeql_db_path(target);
     let _ = std::fs::remove_dir_all(&db_path);
     db_path
 }
@@ -259,10 +259,12 @@ fn codeql_build_command(plan: &CodeqlBuildPlan) -> String {
 fn write_codeql_build_script(target: &Path, raw: &str) -> Result<PathBuf> {
     // CodeQL's `--command` flag execs a single command directly. A wrapper
     // script lets bash interpret shell operators while CodeQL traces the build.
-    let script_dir = target.join(".kuzushi");
+    let script_path = taint_iris_next_codeql_build_script_path(target);
+    let script_dir = script_path
+        .parent()
+        .context("could not resolve CodeQL build script parent")?;
     std::fs::create_dir_all(&script_dir)
         .with_context(|| format!("could not create {}", script_dir.display()))?;
-    let script_path = script_dir.join("codeql-build.sh");
     let script_body =
         format!("#!/usr/bin/env bash\nset -euo pipefail\ncd \"$(dirname \"$0\")/..\"\n{raw}\n");
     std::fs::write(&script_path, script_body)
@@ -471,7 +473,7 @@ fn db_built(path: &Path) -> bool {
 /// Used by the prereq chain to decide whether to invoke the build tool.
 #[cfg(test)]
 pub(crate) fn has_codeql_db(repo_root: &Path) -> bool {
-    let path = repo_root.join(".kuzushi").join("codeql-db");
+    let path = crate::workspace::workspace_codeql_db_path(repo_root);
     path.is_dir() && db_built(&path)
 }
 
@@ -547,7 +549,7 @@ mod tests {
     #[test]
     fn has_codeql_db_false_for_empty_dir() {
         let temp = tempdir().unwrap();
-        std::fs::create_dir_all(temp.path().join(".kuzushi/codeql-db")).unwrap();
+        std::fs::create_dir_all(crate::workspace::workspace_codeql_db_path(temp.path())).unwrap();
         assert!(!has_codeql_db(temp.path()));
     }
 

@@ -2,11 +2,11 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 162
 ---
-mode:shell | target:none | view:help | 0 findings | modules:36
+ KUZUSHI mode:shell · target:none · ctx:missing · model:unconfigured · 0 findings · view:help
 
  -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
-Examples: scan . | use semgrep | run . | findings | open F-0001 | model 1
+Examples: scan .  ·  use semgrep  ·  run .  ·  findings  ·  open F-0001  ·  model 1
 
 NAVIGATION — browse modules and tools
 home - open Kuzushi cockpit home
@@ -122,8 +122,7 @@ AUTH / CONFIG / MODEL — auth, model, runtime config
 auth - show env/OAuth status without secrets
   aliases / examples: /auth, auth status
 auth login <provider> [method] - start supported OAuth login flow
-aliases / examples: auth openai, auth anthropic, auth login openai headless, auth login github-copilot, /auth login
-<provider>
+  aliases / examples: /auth login openai, /auth login anthropic, /auth login github-copilot
 provider - show pi-agent-core provider choices
   aliases / examples: /provider
 backend - show Rust runtime backend

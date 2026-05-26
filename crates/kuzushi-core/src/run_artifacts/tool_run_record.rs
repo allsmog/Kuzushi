@@ -6,7 +6,7 @@ use super::tool_run_record_events::{
     append_done_trace, append_failed_trace, append_started_event, append_started_trace,
     append_tool_event,
 };
-use crate::artifact_contract::tool_result_artifact_spec;
+use crate::artifact_contract::{tool_input_artifact_spec, tool_result_artifact_spec};
 use crate::module_result::normalize_module_result;
 
 #[derive(Debug, Clone, Copy)]
@@ -58,8 +58,7 @@ pub fn record_tool_run_started_with_reproducibility(
     .with_model(model)
     .with_config_hash(config_hash)
     .with_loaded_modules(loaded_modules);
-    let input_artifact =
-        write_run_artifact_json(record.target, record.run_id, "input.json", "input", input).ok();
+    let input_artifact = input_artifact(record, input);
     if let Some(artifact) = input_artifact.clone() {
         summary = summary.with_artifact(artifact);
     }
@@ -154,6 +153,12 @@ fn result_artifact(record: ToolRunRecord<'_>, output: &Value) -> Option<RunArtif
         output,
     )
     .ok()
+}
+
+fn input_artifact(record: ToolRunRecord<'_>, input: &Value) -> Option<RunArtifact> {
+    let spec =
+        tool_input_artifact_spec("input.json").expect("tool input artifact must be in shared spec");
+    write_run_artifact_json(record.target, record.run_id, spec.leaf, spec.label, input).ok()
 }
 
 fn completed_summary(

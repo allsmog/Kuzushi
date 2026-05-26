@@ -41,10 +41,7 @@ impl<'a> ToolExecutionContext<'a> {
         match WorkspaceTarget::new(target) {
             Ok(workspace) => artifact_knowledge_prompt_context(&workspace, query, limit),
             Err(error) => ArtifactKnowledgePromptContext {
-                db_path: target
-                    .join(".kuzushi")
-                    .join("v2")
-                    .join("artifact-kb.sqlite3")
+                db_path: crate::workspace::workspace_artifact_kb_db_path(target)
                     .display()
                     .to_string(),
                 missing_db: false,
@@ -92,5 +89,29 @@ mod tests {
 
         assert!(ctx.run_id().is_none());
         assert!(ctx.run_artifact_location().is_none());
+    }
+
+    #[test]
+    fn unavailable_artifact_knowledge_context_uses_workspace_kb_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("missing-target");
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: None,
+            findings_store: None,
+            trace: None,
+        };
+
+        let context = ctx.artifact_knowledge_context(&target, "anything", 3);
+
+        assert_eq!(
+            context.db_path,
+            crate::workspace::workspace_artifact_kb_db_path(&target)
+                .display()
+                .to_string()
+        );
+        assert!(context.status.contains("unavailable:"));
+        assert!(context.snippets.is_empty());
     }
 }

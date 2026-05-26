@@ -1,7 +1,7 @@
 use crate::artifact_contract::{
     first_nonempty_value_string, CanonicalRunArtifactSpec, ARTIFACT_KIND_KEYS,
     ARTIFACT_LABEL_KEYS, ARTIFACT_PATH_KEYS, CANONICAL_RUN_ARTIFACTS, OPTIONAL_RUN_ARTIFACTS,
-    TOOL_RESULT_ARTIFACTS,
+    TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
 };
 use serde_json::Value;
 use std::collections::BTreeMap;
@@ -13,6 +13,7 @@ pub(super) fn artifact_manifest_summary(value: &Value) -> Option<String> {
     parts.extend(kind_segment(artifacts));
     parts.extend(canonical_segment(artifacts));
     parts.extend(optional_segment(artifacts));
+    parts.extend(tool_input_segment(artifacts));
     parts.extend(tool_result_segment(artifacts));
     parts.extend(alias_segment(artifacts));
     parts.extend(label_segment(artifacts));
@@ -43,33 +44,20 @@ fn optional_segment(artifacts: &[Value]) -> Option<String> {
     (!labels.is_empty()).then(|| format!("optional {}", labels.join(", ")))
 }
 
+fn tool_input_segment(artifacts: &[Value]) -> Option<String> {
+    let labels = matching_labels(artifacts, &TOOL_INPUT_ARTIFACTS);
+    (!labels.is_empty()).then(|| format!("tool inputs {}", labels.join(", ")))
+}
+
 fn tool_result_segment(artifacts: &[Value]) -> Option<String> {
     let labels = matching_labels(artifacts, &TOOL_RESULT_ARTIFACTS);
     (!labels.is_empty()).then(|| format!("tool results {}", labels.join(", ")))
 }
 
 fn alias_segment(artifacts: &[Value]) -> Option<String> {
-    let label = alias_count(artifacts, &["name", "title"]);
-    let path = alias_count(
-        artifacts,
-        &[
-            "file",
-            "filePath",
-            "file_path",
-            "reportPath",
-            "report_path",
-            "reportJsonPath",
-            "report_json_path",
-            "scopePath",
-            "scope_path",
-            "dir",
-            "outputDir",
-            "output_dir",
-            "promptsDir",
-            "prompts_dir",
-        ],
-    );
-    let kind = alias_count(artifacts, &["type"]);
+    let label = compatibility_alias_count(artifacts, &ARTIFACT_LABEL_KEYS, "label");
+    let path = compatibility_alias_count(artifacts, &ARTIFACT_PATH_KEYS, "path");
+    let kind = compatibility_alias_count(artifacts, &ARTIFACT_KIND_KEYS, "kind");
     let parts = [
         (label > 0).then(|| format!("labels={label}")),
         (path > 0).then(|| format!("paths={path}")),
@@ -81,10 +69,14 @@ fn alias_segment(artifacts: &[Value]) -> Option<String> {
     (!parts.is_empty()).then(|| format!("aliases {}", parts.join(", ")))
 }
 
-fn alias_count(artifacts: &[Value], keys: &[&str]) -> usize {
+fn compatibility_alias_count(artifacts: &[Value], keys: &[&str], canonical_key: &str) -> usize {
     artifacts
         .iter()
-        .filter(|artifact| keys.iter().any(|key| artifact.get(*key).is_some()))
+        .filter(|artifact| {
+            keys.iter()
+                .filter(|key| **key != canonical_key)
+                .any(|key| artifact.get(*key).is_some())
+        })
         .count()
 }
 

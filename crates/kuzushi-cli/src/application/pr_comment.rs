@@ -1,8 +1,8 @@
 use anyhow::Result;
 use kuzushi_core::{
-    build_pr_comment, load_run_summary, FindingListFilter, FindingStore, PrCommentChain,
-    PrCommentChainStep, PrCommentInput, PrCommentPhaseCost, RunLlmCallAudit, RunSummary,
-    WorkspaceTarget,
+    build_pr_comment, load_run_summary, run_artifact_path, tool_result_artifact_spec,
+    FindingListFilter, FindingStore, PrCommentChain, PrCommentChainStep, PrCommentInput,
+    PrCommentPhaseCost, RunLlmCallAudit, RunSummary, WorkspaceTarget,
 };
 use serde_json::Value;
 use std::{collections::BTreeMap, fs, path::PathBuf, time::Duration};
@@ -143,11 +143,7 @@ fn load_pr_comment_chains(
     let Some(run_id) = run_id.filter(|id| !id.trim().is_empty()) else {
         return Vec::new();
     };
-    let path = workspace
-        .root()
-        .join(".kuzushi/runs")
-        .join(run_id)
-        .join("result.json");
+    let path = run_artifact_path(workspace.root(), run_id, result_artifact_leaf());
     let Ok(body) = fs::read_to_string(path) else {
         return Vec::new();
     };
@@ -155,6 +151,12 @@ fn load_pr_comment_chains(
         return Vec::new();
     };
     pr_comment_chains_from_value(&value)
+}
+
+fn result_artifact_leaf() -> &'static str {
+    tool_result_artifact_spec("result.json")
+        .expect("tool result artifact must be in shared spec")
+        .leaf
 }
 
 pub(super) fn pr_comment_chains_from_value(value: &Value) -> Vec<PrCommentChain> {

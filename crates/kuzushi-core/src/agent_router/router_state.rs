@@ -57,7 +57,7 @@ impl AgentRouter {
         paths
             .target_dir
             .as_ref()
-            .map(|target| target.join(".kuzushi").join("models.toml"))
+            .map(crate::workspace::workspace_models_path)
             .map_or(Ok(()), |path| self.merge_existing_file(&path))
     }
 
@@ -93,7 +93,7 @@ fn home_models_path(paths: &ConfigPaths) -> PathBuf {
         .ok()
         .filter(|value| !value.trim().is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| paths.home_dir.join(".kuzushi").join("models.toml"))
+        .unwrap_or_else(|| crate::workspace::workspace_models_path(&paths.home_dir))
 }
 
 fn parse_model_route(

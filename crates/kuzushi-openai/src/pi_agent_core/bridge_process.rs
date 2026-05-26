@@ -3,7 +3,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 
 use super::bridge_payloads::{
     BridgeRequest, BridgeResponse, NextStepBridgeRequest, NextStepBridgeResponse,
@@ -38,14 +38,7 @@ where
     T: Serialize,
     R: DeserializeOwned,
 {
-    let mut cmd = Command::new(&command[0]);
-    cmd.args(&command[1..])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-    for (env, path) in mcp_binary_env_defaults() {
-        cmd.env(env, path);
-    }
+    let mut cmd = configured_bridge_command(command);
     let mut child = cmd
         .spawn()
         .with_context(|| format!("could not start {label} {}", command[0]))?;
@@ -54,24 +47,65 @@ where
     let output = child
         .wait_with_output()
         .with_context(|| format!("could not read {label} output"))?;
-    if !output.status.success() {
-        if !output.stdout.is_empty() {
-            if let Ok(response) = serde_json::from_slice::<R>(&output.stdout) {
-                return Ok(response);
-            }
-        }
-        anyhow::bail!(
-            "{label} exited with {}: {}",
-            output.status,
-            String::from_utf8_lossy(&output.stderr)
-        );
+    parse_bridge_output(output, label)
+}
+
+fn configured_bridge_command(command: &[String]) -> Command {
+    let mut cmd = Command::new(&command[0]);
+    cmd.args(&command[1..])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for (env, path) in mcp_binary_env_defaults() {
+        cmd.env(env, path);
     }
-    serde_json::from_slice::<R>(&output.stdout).with_context(|| {
+    cmd
+}
+
+fn parse_bridge_output<R: DeserializeOwned>(output: Output, label: &str) -> Result<R> {
+    if output.status.success() {
+        return parse_successful_bridge_output(&output.stdout, label);
+    }
+    parse_failed_bridge_output(output, label)
+}
+
+fn parse_successful_bridge_output<R: DeserializeOwned>(stdout: &[u8], label: &str) -> Result<R> {
+    serde_json::from_slice::<R>(stdout).with_context(|| {
         format!(
             "could not parse {label} JSON: {}",
-            String::from_utf8_lossy(&output.stdout)
+            public_bridge_bytes(stdout)
         )
     })
+}
+
+fn parse_failed_bridge_output<R: DeserializeOwned>(output: Output, label: &str) -> Result<R> {
+    if let Some(response) = parse_error_response(&output.stdout) {
+        return Ok(response);
+    }
+    anyhow::bail!(
+        "{label} exited with {}: {}",
+        output.status,
+        bridge_error_detail(&output.stdout, &output.stderr)
+    );
+}
+
+fn parse_error_response<R: DeserializeOwned>(stdout: &[u8]) -> Option<R> {
+    if stdout.is_empty() {
+        return None;
+    }
+    serde_json::from_slice::<R>(stdout).ok()
+}
+
+fn bridge_error_detail(stdout: &[u8], stderr: &[u8]) -> String {
+    if stderr.is_empty() {
+        return public_bridge_bytes(stdout);
+    }
+    public_bridge_bytes(stderr)
+}
+
+fn public_bridge_bytes(bytes: &[u8]) -> String {
+    let raw = String::from_utf8_lossy(bytes);
+    public_bridge_error(raw.as_ref())
 }
 
 fn write_bridge_request<T: Serialize>(
@@ -195,7 +229,11 @@ fn bridge_near_executable(exe: &Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{bridge_near_executable, default_bridge_command, public_bridge_error};
+    use super::{
+        bridge_near_executable, default_bridge_command, public_bridge_error, run_next_step_bridge,
+    };
+    use crate::pi_agent_core::bridge_payloads::NextStepBridgeRequest;
+    use serde_json::json;
     use std::fs;
     use tempfile::tempdir;
 
@@ -301,5 +339,59 @@ mod tests {
         assert!(public.contains("OpenAI OAuth"));
         assert!(public.contains("kuzushi auth login openai"));
         assert!(!public.contains("openai-codex"));
+    }
+
+    #[test]
+    fn bridge_stderr_failure_rewrites_internal_provider_tokens() {
+        let request = test_next_step_request();
+        let command = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "printf '%s' 'no credentials for openai-codex; run auth login openai-codex' >&2; exit 1"
+                .to_string(),
+        ];
+
+        let error = run_next_step_bridge(&command, &request)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("OpenAI OAuth"));
+        assert!(error.contains("auth login openai"));
+        assert!(!error.contains("openai-codex"));
+    }
+
+    #[test]
+    fn bridge_parse_failure_rewrites_internal_provider_tokens() {
+        let request = test_next_step_request();
+        let command = vec![
+            "sh".to_string(),
+            "-c".to_string(),
+            "printf '%s' 'malformed openai-codex response'".to_string(),
+        ];
+
+        let error = run_next_step_bridge(&command, &request)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("OpenAI OAuth"));
+        assert!(!error.contains("openai-codex"));
+    }
+
+    fn test_next_step_request() -> NextStepBridgeRequest {
+        let model = "test-runtime-model".to_string();
+        NextStepBridgeRequest {
+            envelope_type: "next-step",
+            model,
+            cwd: ".".to_string(),
+            system_prompt: "system".to_string(),
+            messages: vec![json!({"role": "user", "content": "prompt"})],
+            tools: Vec::new(),
+            max_tokens: 128,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            api_key: None,
+            base_url: None,
+            runtime_options: None,
+            temperature: None,
+        }
     }
 }

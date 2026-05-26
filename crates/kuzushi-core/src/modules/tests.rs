@@ -10,7 +10,7 @@ mod tests {
         AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentToolLoopRequest,
         LoopHistoryEntry, TriageRequest,
     };
-    use crate::run_artifacts::{write_run_summary, RunSummary};
+    use crate::run_artifacts::{run_dir, write_run_summary, RunSummary};
     use crate::workspace::WorkspaceTarget;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -577,10 +577,10 @@ OUT
     }
 
     fn write_carlini_threat_model_fixture(dir: &Path) {
-        let state_dir = dir.join(".kuzushi");
-        fs::create_dir_all(&state_dir).unwrap();
+        let threat_model_path = crate::capabilities::persistent_threat_model_path(dir);
+        fs::create_dir_all(threat_model_path.parent().unwrap()).unwrap();
         fs::write(
-            state_dir.join("threat-model.json"),
+            threat_model_path,
             r#"{
   "version": "2.0",
   "dfd": {
@@ -3322,15 +3322,13 @@ OUT
         assert!(runtime.requests().is_empty());
         assert!(runtime.queries().is_empty());
 
-        let scan_input = fs::read_to_string(
-            result
-                .pointer("/data/artifacts/dir")
-                .and_then(Value::as_str)
-                .map(Path::new)
-                .unwrap()
-                .join("scan-input.json"),
-        )
-        .unwrap();
+        let scan_input_path = result
+            .pointer("/data/artifacts/input")
+            .and_then(Value::as_str)
+            .map(Path::new)
+            .unwrap();
+        assert!(scan_input_path.ends_with(SAST_SCAN_INPUT_FILE));
+        let scan_input = fs::read_to_string(scan_input_path).unwrap();
         assert!(scan_input.contains("\"mode\": \"whitebox-static\""));
         assert!(!scan_input.contains("execution_confirmed"));
         assert!(scan_input.contains("needs_runtime_evidence"));
@@ -3884,7 +3882,8 @@ OUT
             .pointer("/artifacts/0/path")
             .and_then(Value::as_str)
             .expect("report artifact path");
-        assert!(report_path.ends_with(".kuzushi/runs/run-report-source/report.md"));
+        let expected_report_path = run_dir(workspace.root(), "run-report-source").join("report.md");
+        assert_eq!(Path::new(report_path), expected_report_path.as_path());
         assert!(Path::new(report_path).exists());
         assert!(result
             .get("warnings")
