@@ -198,7 +198,7 @@ pub(crate) fn required_agentic_sast_runtime(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<&dyn AgentRuntime> {
     runtime.context(
-        "agentic-sast:scan requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
+        "agentic-sast:scan requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
     )
 }
 

@@ -4,11 +4,11 @@ use anyhow::{Context, Result};
 pub(crate) fn auth_ping_bridge_command(config: &kuzushi_core::V2Config) -> Vec<String> {
     config
         .runtime
-        .agent_bridge_command
+        .langgraph_bridge_command
         .clone()
         .unwrap_or_else(|| {
             let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-            kuzushi_openai::default_bridge_command(&cwd)
+            kuzushi_openai::default_langgraph_bridge_command(&cwd)
         })
 }
 

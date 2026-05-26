@@ -75,7 +75,7 @@ fn append_agent_empty_state(lines: &mut Vec<Line<'static>>, width: u16) {
     lines.extend(empty_state_panel(
         "no question yet",
         &[
-            "agent chat dispatches a single question through pi-agent-core.",
+            "agent chat dispatches a single question through LangGraph.",
             "tools and findings are read-only; the chat doesn't write to disk.",
         ],
         &[

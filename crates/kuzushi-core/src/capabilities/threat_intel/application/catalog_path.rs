@@ -57,7 +57,7 @@ fn default_catalog_path(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
 
 fn default_catalog_dir(ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
     let workspace = ctx.workspace.ok_or_else(missing_workspace_catalog_error)?;
-    Ok(workspace.root().join(".kuzushi").join("catalogs"))
+    Ok(super::threat_intel_catalogs_dir(workspace.root()))
 }
 
 fn missing_workspace_catalog_error() -> anyhow::Error {

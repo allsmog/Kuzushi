@@ -583,7 +583,7 @@ mod tests {
         )
         .unwrap_err()
         .to_string();
-        assert!(err.contains("requires the pi-agent-core runtime"));
+        assert!(err.contains("requires the LangGraph runtime"));
 
         let runtime = TaintNextRuntime::new();
         let err = run_taint_iris_next_report(

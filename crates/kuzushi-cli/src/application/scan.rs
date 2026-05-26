@@ -8,7 +8,7 @@ use kuzushi_core::run_artifacts::{
     record_tool_run_failed, record_tool_run_started_with_reproducibility, ToolRunRecord,
 };
 use kuzushi_core::{config_hash, AgentRuntime, ModuleRegistry, ToolOptionStore, WorkspaceTarget};
-use kuzushi_openai::PiAgentCoreRuntime;
+use kuzushi_openai::LangGraphRuntime;
 use std::path::PathBuf;
 
 pub(crate) async fn scan_command(
@@ -85,7 +85,7 @@ struct ScanToolExecution<'a> {
     registry: &'a ModuleRegistry,
     input: serde_json::Value,
     ctx: &'a ToolExecutionContext<'a>,
-    runtime: Option<&'a PiAgentCoreRuntime>,
+    runtime: Option<&'a LangGraphRuntime>,
     workspace: &'a WorkspaceTarget,
     run_id: &'a str,
     config: &'a kuzushi_core::V2Config,
@@ -237,9 +237,9 @@ pub(crate) fn scan_option_store(workspace: &WorkspaceTarget) -> Result<ToolOptio
 pub(crate) fn scan_runtime(
     config: &kuzushi_core::V2Config,
     input: &serde_json::Value,
-) -> Result<Option<PiAgentCoreRuntime>> {
+) -> Result<Option<LangGraphRuntime>> {
     if wants_sast_runtime(input) {
-        Ok(Some(PiAgentCoreRuntime::from_config(
+        Ok(Some(LangGraphRuntime::from_config(
             config,
             std::env::current_dir()?,
         )?))

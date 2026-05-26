@@ -1,5 +1,7 @@
 use super::*;
-use crate::ui_view_models::{patch_review_model, PatchReviewModel, PatchReviewTestRow};
+use crate::ui_view_models::{
+    patch_review_model, ui_runs_root_relative_path, PatchReviewModel, PatchReviewTestRow,
+};
 
 pub(crate) fn patch_lines(app: &ShellApp, area: Rect, alias: &str) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
@@ -20,10 +22,14 @@ pub(crate) fn patch_lines(app: &ShellApp, area: Rect, alias: &str) -> Vec<Line<'
 
 fn push_empty_patch_lines(lines: &mut Vec<Line<'static>>, alias: &str, width: u16) {
     lines.push(divider(&format!("PATCH · {alias} · empty"), width));
+    let staged_detail = format!(
+        "patches are produced by `patch:run` and staged under {}/.",
+        ui_runs_root_relative_path()
+    );
     lines.extend(empty_state_panel(
         "no patch staged",
         &[
-            "patches are produced by `patch:run` and staged under .kuzushi/runs/.",
+            staged_detail.as_str(),
             "the operator approves with /patch apply or rejects with /patch reject.",
         ],
         &[

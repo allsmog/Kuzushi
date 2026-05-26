@@ -20,6 +20,8 @@ past runs from disk alone?**
 | `summary.json`    | Rust run artifact substrate             | scan/tool run start and completion | **yes** |
 | `events.jsonl`    | Rust run events                         | scan/tool lifecycle  | **yes** |
 | `trace.jsonl`     | Rust `TraceHandle` / TUI broadcast sink | traced tool/runtime steps | **yes** |
+| `input.json`      | Rust tool-run recorder                  | prepared direct tool input | tool runs |
+| `result.json`     | Rust tool-run recorder                  | direct tool result envelope | tool runs |
 | `context.json`    | canonical snapshot promotion            | run start / producer output | **yes** |
 | `attack-surface.json` | canonical snapshot promotion        | run start / producer output | **yes** |
 | `threat-model.json` | canonical snapshot promotion          | run start / producer output | **yes** |
@@ -29,6 +31,7 @@ past runs from disk alone?**
 | `failures.json`   | Rust failure handoff writer             | run start / failed tool output | **yes** |
 | `report.md`       | report producer or placeholder writer   | run start / report output | **yes** |
 | `report.sarif`    | optional SARIF-capable producers        | producer output      | optional |
+| `artifacts.json`  | Rust artifact manifest writer           | artifact registration | **yes** |
 
 ### 1.2 SQLite — `.kuzushi/findings.sqlite3`
 

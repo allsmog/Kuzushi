@@ -17,8 +17,13 @@ impl ShellApp {
                 self.log(
                     "export",
                     format!(
-                        "wrote {} finding(s) to {} ({})",
+                        "wrote {} {} to {} ({})",
                         report.count,
+                        if report.count == 1 {
+                            "finding"
+                        } else {
+                            "findings"
+                        },
                         report.output_path.display(),
                         report.format.as_str()
                     ),

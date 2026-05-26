@@ -8,12 +8,6 @@ impl ShellApp {
         if safe.is_empty() {
             return None;
         }
-        Some(
-            target
-                .join(".kuzushi")
-                .join("prompts")
-                .join(module)
-                .join(format!("{safe}.md")),
-        )
+        Some(kuzushi_core::prompt_override_path(target, module, &safe))
     }
 }

@@ -52,7 +52,7 @@ pub(crate) fn run_agent_worker(
     question: String,
 ) -> Result<AgentWorkerAnswer> {
     let runtime =
-        PiAgentCoreRuntime::from_config(&config, &cwd)?.with_thinking_level(thinking_level);
+        LangGraphRuntime::from_config(&config, &cwd)?.with_thinking_level(thinking_level);
     let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
         cwd,
@@ -124,12 +124,12 @@ fn planner_runtime(
     config: &V2Config,
     cwd: &PathBuf,
     thinking_level: Option<String>,
-) -> Result<PiAgentCoreRuntime> {
-    Ok(PiAgentCoreRuntime::from_config(config, cwd)?.with_thinking_level(thinking_level))
+) -> Result<LangGraphRuntime> {
+    Ok(LangGraphRuntime::from_config(config, cwd)?.with_thinking_level(thinking_level))
 }
 
 fn planner_response_text(
-    runtime: PiAgentCoreRuntime,
+    runtime: LangGraphRuntime,
     model: String,
     cwd: PathBuf,
     goal: &str,

@@ -1,5 +1,5 @@
 use super::ReportFailureHandoff;
-use crate::run_artifacts::{load_run_failures, run_dir, RunFailure};
+use crate::run_artifacts::{load_run_failures, run_failure_artifact_path, RunFailure};
 use anyhow::Result;
 use std::path::Path;
 
@@ -7,7 +7,7 @@ pub(super) fn load_report_failure_handoffs(
     target: &Path,
     run_id: &str,
 ) -> Result<Vec<ReportFailureHandoff>> {
-    if !run_dir(target, run_id).join("failures.json").exists() {
+    if !run_failure_artifact_path(target, run_id).exists() {
         return Ok(Vec::new());
     }
     Ok(load_run_failures(target, run_id)?

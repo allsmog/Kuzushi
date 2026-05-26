@@ -25,10 +25,37 @@ pub(crate) fn fit(value: &str, max_chars: usize) -> String {
     if max_chars <= 3 {
         return value.chars().take(max_chars).collect();
     }
+    fit_with_ellipsis(value, max_chars)
+}
+
+fn fit_with_ellipsis(value: &str, max_chars: usize) -> String {
     let budget = max_chars.saturating_sub(3);
     let head: String = value.chars().take(budget).collect();
+    if let Some(clean) = clean_sentence_break(&head, budget) {
+        return clean;
+    }
     let trimmed = trim_to_word_boundary(&head);
+    let trimmed = trimmed.trim_end_matches('.');
     format!("{trimmed}...")
+}
+
+fn clean_sentence_break(head: &str, budget: usize) -> Option<String> {
+    let total = head.chars().count();
+    if total < 16 {
+        return None;
+    }
+    let min_keep = (budget * 6 / 10).max(1);
+    let mut chars_seen = 0usize;
+    let mut last_break: Option<usize> = None;
+    let mut prev: Option<char> = None;
+    for (idx, ch) in head.char_indices() {
+        chars_seen += 1;
+        if matches!(prev, Some('.') | Some('!') | Some('?')) && ch == ' ' && chars_seen > min_keep {
+            last_break = Some(idx);
+        }
+        prev = Some(ch);
+    }
+    last_break.map(|byte| head[..byte].trim_end().to_string())
 }
 
 fn trim_to_word_boundary(head: &str) -> &str {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui_view_models::context_snapshot_relative_path;
 
 pub(in crate::renderer::views) fn append_sast_pipeline_progress(
     lines: &mut Vec<Line<'static>>,
@@ -61,11 +62,11 @@ pub(in crate::renderer::views) fn append_context_build_progress(
     if append_context_malformed(lines, &context) {
         return;
     }
-    lines.push(pipeline_row(
-        "○",
-        "context:build",
-        "no snapshot yet; `run .` builds .kuzushi/context-snapshot.json",
-    ));
+    let status = format!(
+        "no snapshot yet; `run .` builds {}",
+        context_snapshot_relative_path()
+    );
+    lines.push(pipeline_row("○", "context:build", &status));
 }
 
 fn append_context_running(lines: &mut Vec<Line<'static>>, context: &ContextSnapshotModel) -> bool {

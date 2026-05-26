@@ -127,7 +127,7 @@ fn chunk_result_from_query(result: Result<Vec<Finding>>, actual_cost: f64) -> Fu
             // `{:#}` walks the full anyhow chain so the dispatcher's
             // operator-facing summary keeps the bridge / provider cause
             // (e.g. "Anthropic API 429" or "Cannot find package
-            // @earendil-works/pi-agent-core") instead of dropping it.
+            // @earendil-works/LangGraph") instead of dropping it.
             error: Some(format!("{error:#}")),
         },
     }

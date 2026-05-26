@@ -3,7 +3,6 @@ use crate::source_span::{extract_source_span, SourceSpan};
 use crate::workspace::WorkspaceTarget;
 use anyhow::{Context, Result};
 pub(crate) use evidence_edge_id::*;
-pub(crate) use evidence_kinds::*;
 pub(crate) use records::*;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};

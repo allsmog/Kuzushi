@@ -15,14 +15,31 @@ impl ModuleRegistry {
     }
 
     pub fn register(&mut self, builtin: BuiltinModule) {
+        self.register_builtin_tools(&builtin);
+        self.register_builtin_dag_executors(&builtin);
+        self.modules.insert(builtin.metadata().id.clone(), builtin);
+    }
+
+    fn register_builtin_tools(&mut self, builtin: &BuiltinModule) {
         for tool in builtin.tools() {
             self.tools
                 .insert(tool.name.clone(), descriptor_with_runtime_policy(tool));
-            if let Some(executor) = executor_for_tool(&tool.name) {
-                self.executors.insert(tool.name.clone(), executor);
+            self.register_executor_if_available(&tool.name);
+        }
+    }
+
+    fn register_builtin_dag_executors(&mut self, builtin: &BuiltinModule) {
+        for node in builtin.dag_nodes() {
+            if !self.executors.contains_key(&node.id) {
+                self.register_executor_if_available(&node.id);
             }
         }
-        self.modules.insert(builtin.metadata().id.clone(), builtin);
+    }
+
+    fn register_executor_if_available(&mut self, name: &str) {
+        if let Some(executor) = executor_for_tool(name) {
+            self.executors.insert(name.to_string(), executor);
+        }
     }
 }
 

@@ -29,7 +29,7 @@ pub(crate) fn run_taint_cwe_select_value(
     }
 
     let runtime = runtime.context(
-        "pipeline:taint-cwe-select requires the pi-agent-core runtime unless cwes are supplied explicitly",
+        "pipeline:taint-cwe-select requires the LangGraph runtime unless cwes are supplied explicitly",
     )?;
     let model = crate::runtime::resolve_explicit_model(
         "pipeline:taint-cwe-select",

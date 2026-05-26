@@ -48,6 +48,9 @@ fn quickstart_model_uses_current_target_scan_shape() {
     let no_target = quickstart_model(&app);
 
     assert!(no_target.steps[2].text.starts_with("scan ."));
+    assert!(no_target.steps[1]
+        .text
+        .contains(".kuzushi/context-snapshot.json"));
     assert!(no_target.first_finding_tip.contains("`scan .`"));
 
     app.target = Some(PathBuf::from("."));

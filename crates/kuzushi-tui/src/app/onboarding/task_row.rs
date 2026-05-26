@@ -37,9 +37,7 @@ impl PlanningTaskRow {
         let artifact_path = target.join(task.artifact_relative_path());
         let artifact_state = artifact_state(&artifact_path);
         let required_cli = task.required_cli();
-        let cli_available = required_cli
-            .map(cli_is_on_path)
-            .unwrap_or(true);
+        let cli_available = required_cli.map(cli_is_on_path).unwrap_or(true);
         Self {
             id: task,
             label: task.label(),

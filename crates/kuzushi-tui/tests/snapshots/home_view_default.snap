@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 89
 ---
- KUZUSHI mode:shell | target:none | ctx:missing | model:unconfigured | 0 findings | view:home
+ KUZUSHI mode:shell · target:none · ctx:missing · model:unconfigured · 0 findings · view:home
 
  -- HOME ---------------------------------------------------------------------------------------------------------------
 target             none
@@ -11,9 +11,9 @@ run status         no run.json
 modules            36
 findings           0
 
-▸ NEXT Run `scan .` (the dot means the current directory) to create the first Kuzushi run artifacts.
+▸ NEXT Run `scan .` to scan the current directory and create the first run artifacts.
 
-rails: ✓ recorded → ○ placeholder ⚠ failed ■ missing ◆ partial
+rails: ✓ recorded · ○ placeholder · ◆ partial · ⚠ failed/malformed · ■ missing
 ■    ctx           missing       .kuzushi/runs/latest/context.json
 ■    surface       missing       .kuzushi/runs/latest/attack-surface.json
 ■    threat        missing       .kuzushi/runs/latest/threat-model.json
@@ -24,4 +24,4 @@ rails: ✓ recorded → ○ placeholder ⚠ failed ■ missing ◆ partial
 ■    report        missing       .kuzushi/runs/latest/report.md
 ■    manifest      missing       .kuzushi/runs/latest/artifacts.json
 
-▸ try: modules | recommend | quickstart | scan . | findings | runs
+▸ try: modules · recommend · quickstart · scan . · findings · runs

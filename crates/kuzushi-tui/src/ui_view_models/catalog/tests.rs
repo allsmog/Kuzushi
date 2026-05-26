@@ -81,7 +81,7 @@ fn catalog_default_action_hint_is_display_ready() {
 
     let hint = catalog_default_action_hint(module, 80);
 
-    assert!(hint.starts_with("Run sast against the active target"));
+    assert!(hint.starts_with("Run sast —"));
     assert!(hint.len() <= 80);
 }
 

@@ -4,9 +4,7 @@ use std::path::PathBuf;
 
 /// Path where a target-specific catalog is persisted, if generated.
 pub(crate) fn taint_iris_next_target_catalog_path(repo_root: &Path) -> PathBuf {
-    repo_root
-        .join(".kuzushi")
-        .join("taint-iris-next-catalog.json")
+    taint_iris_next_target_catalog_artifact_path(repo_root)
 }
 
 /// Try to load a target-specific catalog from disk. Returns `None` when

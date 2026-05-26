@@ -42,7 +42,7 @@ impl ShellApp {
         question: &str,
     ) -> Option<String> {
         let Some(model) = self.config.model.clone() else {
-            let message = "ask requires an explicit model. Next: model, then choose a pi-agent-core provider/model";
+            let message = "ask requires an explicit model. Next: model, then choose a LangGraph provider/model";
             self.show_agent_question_error(prior, question, message.to_string());
             return None;
         };

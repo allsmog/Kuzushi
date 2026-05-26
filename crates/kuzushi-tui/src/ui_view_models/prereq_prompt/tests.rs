@@ -1,6 +1,9 @@
 use super::*;
 use crate::{PrereqPlanAction, PrereqPlanStep};
-use std::path::PathBuf;
+
+fn context_snapshot_fixture_path() -> std::path::PathBuf {
+    kuzushi_core::context_snapshot_path("")
+}
 
 #[test]
 fn prereq_prompt_model_formats_step_details() {
@@ -9,10 +12,10 @@ fn prereq_prompt_model_formats_step_details() {
         recommended_action: PrereqPlanAction::Reuse,
         steps: vec![PrereqPlanStep {
             tool: "context-lite:index".to_string(),
-            artifact_path: PathBuf::from(".kuzushi/context-snapshot.json"),
+            artifact_path: context_snapshot_fixture_path(),
             artifact_label: "context snapshot".to_string(),
             artifact_state: PrereqArtifactState::Cached,
-            writes: vec![PathBuf::from(".kuzushi/context-snapshot.json")],
+            writes: vec![context_snapshot_fixture_path()],
             model_backed: false,
             expensive: false,
             risk: "local filesystem reads only".to_string(),
@@ -41,10 +44,10 @@ fn prereq_prompt_model_marks_invalid_artifacts_non_reusable() {
         recommended_action: PrereqPlanAction::Approve,
         steps: vec![PrereqPlanStep {
             tool: "context:build".to_string(),
-            artifact_path: PathBuf::from(".kuzushi/context-snapshot.json"),
+            artifact_path: context_snapshot_fixture_path(),
             artifact_label: "context snapshot".to_string(),
             artifact_state: PrereqArtifactState::Invalid,
-            writes: vec![PathBuf::from(".kuzushi/context-snapshot.json")],
+            writes: vec![context_snapshot_fixture_path()],
             model_backed: false,
             expensive: false,
             risk: "local filesystem reads only".to_string(),
@@ -70,10 +73,10 @@ fn plain_prereq_plan_model_formats_operator_rows() {
         recommended_action: PrereqPlanAction::Reuse,
         steps: vec![PrereqPlanStep {
             tool: "context-lite:index".to_string(),
-            artifact_path: PathBuf::from(".kuzushi/context-snapshot.json"),
+            artifact_path: context_snapshot_fixture_path(),
             artifact_label: "context snapshot".to_string(),
             artifact_state: PrereqArtifactState::Cached,
-            writes: vec![PathBuf::from(".kuzushi/context-snapshot.json")],
+            writes: vec![context_snapshot_fixture_path()],
             model_backed: false,
             expensive: false,
             risk: "local filesystem reads only".to_string(),
@@ -106,10 +109,10 @@ fn plain_prereq_plan_model_explains_invalid_artifact_state() {
         recommended_action: PrereqPlanAction::Approve,
         steps: vec![PrereqPlanStep {
             tool: "context:build".to_string(),
-            artifact_path: PathBuf::from(".kuzushi/context-snapshot.json"),
+            artifact_path: context_snapshot_fixture_path(),
             artifact_label: "context snapshot".to_string(),
             artifact_state: PrereqArtifactState::Invalid,
-            writes: vec![PathBuf::from(".kuzushi/context-snapshot.json")],
+            writes: vec![context_snapshot_fixture_path()],
             model_backed: false,
             expensive: false,
             risk: "local filesystem reads only".to_string(),

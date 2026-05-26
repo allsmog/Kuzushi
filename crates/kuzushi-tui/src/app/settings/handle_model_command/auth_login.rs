@@ -24,7 +24,7 @@ impl ShellApp {
         self.log(
             "auth",
             format!(
-                "pi-agent-core auth: {api_key_env}={env_status}; ANTHROPIC_API_KEY={anthropic_env}; openai oauth {}; anthropic oauth {}; github-copilot oauth {}; secret values hidden. Next: auth login openai browser, auth login openai headless, auth login github-copilot",
+                "LangGraph auth: {api_key_env}={env_status}; ANTHROPIC_API_KEY={anthropic_env}; openai oauth {}; anthropic oauth {}; github-copilot oauth {}; secret values hidden. Next: auth login openai browser, auth login openai headless, auth login github-copilot",
                 oauth_provider_status("openai-codex"),
                 oauth_provider_status("anthropic"),
                 oauth_provider_status("github-copilot")
@@ -93,7 +93,7 @@ impl ShellApp {
 
     pub(crate) fn auth_login_bridge_command(&mut self) -> Option<Vec<String>> {
         let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-        let command = match PiAgentCoreRuntime::from_config(&self.config, &cwd) {
+        let command = match LangGraphRuntime::from_config(&self.config, &cwd) {
             Ok(runtime) => runtime.command().to_vec(),
             Err(error) => {
                 self.log("error", error.to_string());
@@ -110,7 +110,7 @@ impl ShellApp {
         if command.first().is_some() {
             return Some(command);
         }
-        self.log("error", "pi-agent-core bridge command is empty");
+        self.log("error", "LangGraph bridge command is empty");
         None
     }
 
@@ -121,7 +121,7 @@ impl ShellApp {
         command: &[String],
     ) {
         let Some(program) = command.first() else {
-            self.log("error", "pi-agent-core bridge command is empty");
+            self.log("error", "LangGraph bridge command is empty");
             return;
         };
 
@@ -157,7 +157,7 @@ impl ShellApp {
 
 fn auth_login_detail(provider: &str, method: &str) -> &'static str {
     match (provider, method) {
-        ("openai-codex", "headless") => "device code flow at https://auth.openai.com/codex/device",
+        ("openai-codex", "headless") => "OpenAI device code flow",
         ("openai-codex", _) => "browser PKCE flow with localhost callback",
         ("anthropic", _) => "browser OAuth flow",
         ("github-copilot", _) => "GitHub device code flow",

@@ -111,7 +111,7 @@ fn patch_execution<'a>(
     input: &PatchFindingInput,
 ) -> Result<PatchExecution<'a>> {
     let runtime = runtime.context(
-        "patch:finding requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
+        "patch:finding requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
     )?;
     let model =
         crate::runtime::require_configured_model("patch:finding", ctx.config.model.as_deref())?;

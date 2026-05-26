@@ -19,7 +19,7 @@ pub(crate) fn sast_task_table_widths(width: u16) -> Vec<usize> {
     let total = width as usize;
     let state = 5;
     let id = if total < 88 { 20 } else { 24 };
-    let cost = 5;
+    let cost = 6;
     let scan = if total < 88 { 14 } else { 18 };
     let gaps = 8;
     let notes = total

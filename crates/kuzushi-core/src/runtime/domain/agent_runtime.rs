@@ -24,7 +24,7 @@ pub struct AgentLoopOutcome {
 #[async_trait]
 pub trait AgentRuntime: Send + Sync {
     fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
-        anyhow::bail!("agent runtime does not support generic pi-agent-core queries")
+        anyhow::bail!("agent runtime does not support generic LangGraph queries")
     }
 
     async fn query(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {

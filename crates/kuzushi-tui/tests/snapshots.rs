@@ -6,7 +6,8 @@
 use std::{fs, path::PathBuf};
 
 use kuzushi_core::{
-    Finding, ScanCancellation, Severity, ToolOptionStore, TriageOutcome, TriageVerdict, V2Config,
+    latest_run_path, run_dir, Finding, ScanCancellation, Severity, ToolOptionStore, TriageOutcome,
+    TriageVerdict, V2Config,
 };
 use kuzushi_tui::{
     render_plain_app, OptionsFilter, OptionsView, ShellApp, ShellCommand, ShellView, ThreatView,
@@ -46,6 +47,14 @@ fn reset_snapshot_target(name: &str) -> PathBuf {
     fs::create_dir_all(&root)
         .unwrap_or_else(|error| panic!("failed to create {}: {error}", root.display()));
     root
+}
+
+fn snapshot_run_dir(root: &std::path::Path, run_id: &str) -> PathBuf {
+    run_dir(root, run_id)
+}
+
+fn snapshot_latest_run_path(root: &std::path::Path) -> PathBuf {
+    latest_run_path(root)
 }
 
 fn assert_plain_snapshot(name: &str, actual: &str) {
@@ -106,9 +115,9 @@ fn home_view_default() {
 #[test]
 fn recommend_view_with_artifact() {
     let root = reset_snapshot_target("recommend");
-    let run_dir = root.join(".kuzushi/runs/run-rec");
+    let run_dir = snapshot_run_dir(&root, "run-rec");
     fs::create_dir_all(&run_dir).unwrap();
-    fs::write(root.join(".kuzushi/latest"), "run-rec\n").unwrap();
+    fs::write(snapshot_latest_run_path(&root), "run-rec\n").unwrap();
     fs::write(
         run_dir.join("recommendations.json"),
         serde_json::json!({
@@ -257,16 +266,17 @@ fn findings_list_view_with_two_findings() {
 #[test]
 fn run_timeline_view_with_past_runs() {
     let root = reset_snapshot_target("runs");
-    let runs_root = root.join(".kuzushi/runs");
-    fs::create_dir_all(runs_root.join("r-2026-05-06T14-31")).unwrap();
-    fs::create_dir_all(runs_root.join("r-2026-05-06T15-18")).unwrap();
+    let completed_run_dir = snapshot_run_dir(&root, "r-2026-05-06T14-31");
+    let failed_run_dir = snapshot_run_dir(&root, "r-2026-05-06T15-18");
+    fs::create_dir_all(&completed_run_dir).unwrap();
+    fs::create_dir_all(&failed_run_dir).unwrap();
     fs::write(
-        runs_root.join("r-2026-05-06T14-31/summary.json"),
+        completed_run_dir.join("summary.json"),
         r#"{"status":"complete","findings":18,"target":"~/work/acme-checkout"}"#,
     )
     .unwrap();
     fs::write(
-        runs_root.join("r-2026-05-06T15-18/summary.json"),
+        failed_run_dir.join("summary.json"),
         r#"{"status":"failed","findings":0,"target":"~/work/acme-checkout"}"#,
     )
     .unwrap();
@@ -280,9 +290,9 @@ fn run_timeline_view_with_past_runs() {
 #[test]
 fn failure_handoff_view_with_artifact() {
     let root = reset_snapshot_target("failure");
-    let run_dir = root.join(".kuzushi/runs/run-failed");
+    let run_dir = snapshot_run_dir(&root, "run-failed");
     fs::create_dir_all(&run_dir).unwrap();
-    fs::write(root.join(".kuzushi/latest"), "run-failed\n").unwrap();
+    fs::write(snapshot_latest_run_path(&root), "run-failed\n").unwrap();
     fs::write(
         run_dir.join("failures.json"),
         serde_json::json!({

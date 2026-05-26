@@ -1,4 +1,6 @@
-use super::{run_dir, RunLlmCallAudit, RunTraceStep};
+use super::{run_artifact_path, RunLlmCallAudit, RunTraceStep};
+use crate::artifact_contract::{canonical_run_artifact_spec, CanonicalRunArtifactSpec};
+use serde_json::Value;
 use std::fs;
 use std::path::Path;
 
@@ -8,19 +10,60 @@ pub(crate) struct RunTraceAudit {
 }
 
 pub(crate) fn load_run_trace_audit(target: &Path, run_id: &str) -> RunTraceAudit {
-    fs::read_to_string(run_dir(target, run_id).join("trace.jsonl"))
-        .map(|body| trace_audit_from_jsonl(&body))
-        .unwrap_or_else(|_| RunTraceAudit {
-            llm_calls: Vec::new(),
-            malformed_lines: 0,
-        })
+    let trace_path = run_artifact_path(target, run_id, run_trace_audit_spec().leaf);
+    match read_trace_audit_body(&trace_path) {
+        TraceAuditBody::Present(body) => trace_audit_from_jsonl(&body),
+        TraceAuditBody::Missing => empty_trace_audit(),
+        TraceAuditBody::Invalid => invalid_trace_audit(),
+    }
+}
+
+fn run_trace_audit_spec() -> &'static CanonicalRunArtifactSpec {
+    canonical_run_artifact_spec("trace.jsonl")
+        .expect("runtime trace audit artifact must be in shared spec")
+}
+
+enum TraceAuditBody {
+    Present(String),
+    Missing,
+    Invalid,
+}
+
+fn read_trace_audit_body(path: &Path) -> TraceAuditBody {
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return TraceAuditBody::Invalid,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return TraceAuditBody::Missing;
+        }
+        Err(_) => return TraceAuditBody::Invalid,
+    }
+
+    match fs::read_to_string(path) {
+        Ok(body) => TraceAuditBody::Present(body),
+        Err(_) => TraceAuditBody::Invalid,
+    }
+}
+
+fn empty_trace_audit() -> RunTraceAudit {
+    RunTraceAudit {
+        llm_calls: Vec::new(),
+        malformed_lines: 0,
+    }
+}
+
+fn invalid_trace_audit() -> RunTraceAudit {
+    RunTraceAudit {
+        llm_calls: Vec::new(),
+        malformed_lines: 1,
+    }
 }
 
 fn trace_audit_from_jsonl(body: &str) -> RunTraceAudit {
     let mut llm_calls = Vec::new();
     let mut malformed_lines = 0usize;
     for line in body.lines().filter(|line| !line.trim().is_empty()) {
-        match serde_json::from_str::<RunTraceStep>(line) {
+        match trace_step_from_line(line) {
             Ok(step) => {
                 if let Some(call) = audit_call_from_trace_step(step) {
                     llm_calls.push(call);
@@ -33,6 +76,14 @@ fn trace_audit_from_jsonl(body: &str) -> RunTraceAudit {
         llm_calls,
         malformed_lines,
     }
+}
+
+fn trace_step_from_line(line: &str) -> Result<RunTraceStep, serde_json::Error> {
+    let value = serde_json::from_str::<Value>(line)?;
+    if !value.is_object() {
+        return serde_json::from_value(value);
+    }
+    serde_json::from_value(value)
 }
 
 fn audit_call_from_trace_step(step: RunTraceStep) -> Option<RunLlmCallAudit> {

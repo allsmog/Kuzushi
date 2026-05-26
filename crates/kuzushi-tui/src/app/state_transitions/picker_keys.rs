@@ -1,7 +1,7 @@
 use super::*;
 use crate::app::{
-    auth_ready_for_provider, build_execution_plan, model_choices,
-    provider_has_multiple_auth_methods, toggle_planning_row, ToggleOutcome,
+    auth_ready_for_provider, build_execution_plan, provider_has_multiple_auth_methods,
+    toggle_planning_row, visible_model_choices, ToggleOutcome,
 };
 
 impl ShellApp {
@@ -40,7 +40,7 @@ impl ShellApp {
     }
 
     fn move_model_picker_cursor(&mut self, delta: isize) {
-        let len = model_choices().len();
+        let len = visible_model_choices(self.config.model.as_deref()).len();
         if len == 0 {
             return;
         }
@@ -49,7 +49,8 @@ impl ShellApp {
     }
 
     fn accept_model_picker_choice(&mut self) {
-        let Some(choice) = model_choices().get(self.model_picker_cursor).copied() else {
+        let choices = visible_model_choices(self.config.model.as_deref());
+        let Some(choice) = choices.get(self.model_picker_cursor).copied() else {
             self.log("error", "no model choices available");
             return;
         };
@@ -227,7 +228,11 @@ impl ShellApp {
     }
 
     fn toggle_planning_current_row(&mut self) {
-        let Some(task) = self.planning_tasks.get(self.planning_cursor).map(|row| row.id) else {
+        let Some(task) = self
+            .planning_tasks
+            .get(self.planning_cursor)
+            .map(|row| row.id)
+        else {
             return;
         };
         let outcome = toggle_planning_row(task, &self.planning_tasks, &mut self.planning_selected);
@@ -272,7 +277,10 @@ impl ShellApp {
             ToggleOutcome::MissingCli { task, cli } => {
                 self.log(
                     "planning",
-                    format!("{} needs `{cli}` on PATH — install it or set KUZUSHI_*_BIN", task.label()),
+                    format!(
+                        "{} needs `{cli}` on PATH — install it or set KUZUSHI_*_BIN",
+                        task.label()
+                    ),
                 );
             }
         }

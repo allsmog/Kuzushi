@@ -10,6 +10,36 @@ mod tests {
         app
     }
 
+    fn prompt_override_path(target: &std::path::Path) -> std::path::PathBuf {
+        kuzushi_core::prompt_override_path(target, "sast", "triage")
+    }
+
+    fn prompt_override_root(target: &std::path::Path) -> std::path::PathBuf {
+        kuzushi_core::module_prompt_root(target, "sast")
+    }
+
+    fn house_rule_path(target: &std::path::Path) -> std::path::PathBuf {
+        kuzushi_core::house_rule_path(target, "sast")
+    }
+
+    fn relative_prompt_override_path() -> String {
+        kuzushi_core::relative_prompt_override_path("sast", "triage")
+            .display()
+            .to_string()
+    }
+
+    fn relative_prompt_override_root() -> String {
+        kuzushi_core::relative_module_prompt_root("sast")
+            .display()
+            .to_string()
+    }
+
+    fn relative_house_rule_path() -> String {
+        kuzushi_core::relative_house_rule_path("sast")
+            .display()
+            .to_string()
+    }
+
     #[test]
     fn prompt_edit_seeds_override_file_and_logs_editor_command() {
         let temp = tempfile::tempdir().unwrap();
@@ -17,7 +47,7 @@ mod tests {
 
         app.handle_prompt_verb("edit triage");
 
-        let path = temp.path().join(".kuzushi/prompts/sast/triage.md");
+        let path = prompt_override_path(temp.path());
         assert!(path.exists());
         assert!(app
             .log
@@ -29,7 +59,7 @@ mod tests {
     fn prompt_edit_reports_unreadable_override_path() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
-        let path = temp.path().join(".kuzushi/prompts/sast/triage.md");
+        let path = prompt_override_path(temp.path());
         std::fs::create_dir_all(&path).unwrap();
 
         app.handle_prompt_verb("edit triage");
@@ -48,7 +78,7 @@ mod tests {
     fn prompt_set_reports_unreadable_override_path() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
-        let path = temp.path().join(".kuzushi/prompts/sast/triage.md");
+        let path = prompt_override_path(temp.path());
         std::fs::create_dir_all(&path).unwrap();
 
         app.handle_prompt_verb("set triage \"focus on auth\"");
@@ -72,7 +102,7 @@ mod tests {
             .iter()
             .any(|line| line.body.contains("no override directory")));
 
-        let dir = temp.path().join(".kuzushi/prompts/sast");
+        let dir = prompt_override_root(temp.path());
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("triage.md"), "triage").unwrap();
         std::fs::write(dir.join("verify.md"), "verify").unwrap();
@@ -96,7 +126,7 @@ mod tests {
     fn prompt_list_reports_unreadable_override_root() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
-        let dir = temp.path().join(".kuzushi/prompts/sast");
+        let dir = prompt_override_root(temp.path());
         std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
         std::fs::write(&dir, "not a directory").unwrap();
 
@@ -109,14 +139,14 @@ mod tests {
         assert!(app
             .log
             .iter()
-            .any(|line| line.body.contains(".kuzushi/prompts/sast")));
+            .any(|line| line.body.contains(&relative_prompt_override_root())));
     }
 
     #[test]
     fn tune_show_reports_unreadable_house_rules_file() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
-        let rules = temp.path().join(".kuzushi/house-rules/sast.md");
+        let rules = house_rule_path(temp.path());
         std::fs::create_dir_all(&rules).unwrap();
 
         app.handle_tune_verb("show");
@@ -128,14 +158,14 @@ mod tests {
         assert!(app
             .log
             .iter()
-            .any(|line| line.body.contains(".kuzushi/house-rules/sast.md")));
+            .any(|line| line.body.contains(&relative_house_rule_path())));
     }
 
     #[test]
     fn tune_reset_reports_unreadable_house_rules_file() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
-        let rules = temp.path().join(".kuzushi/house-rules/sast.md");
+        let rules = house_rule_path(temp.path());
         std::fs::create_dir_all(&rules).unwrap();
 
         app.handle_tune_verb("reset");
@@ -151,7 +181,7 @@ mod tests {
     fn tune_set_reports_unreadable_house_rules_file() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
-        let rules = temp.path().join(".kuzushi/house-rules/sast.md");
+        let rules = house_rule_path(temp.path());
         std::fs::create_dir_all(&rules).unwrap();
 
         app.handle_tune_verb("set \"focus on auth\"");
@@ -167,7 +197,7 @@ mod tests {
     fn prompt_show_reports_unreadable_override_file() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
-        let path = temp.path().join(".kuzushi/prompts/sast/triage.md");
+        let path = prompt_override_path(temp.path());
         std::fs::create_dir_all(&path).unwrap();
 
         app.handle_prompt_verb("show triage");
@@ -179,14 +209,14 @@ mod tests {
         assert!(app
             .log
             .iter()
-            .any(|line| line.body.contains(".kuzushi/prompts/sast/triage.md")));
+            .any(|line| line.body.contains(&relative_prompt_override_path())));
     }
 
     #[test]
     fn prompt_diff_reports_unreadable_override_path() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
-        let path = temp.path().join(".kuzushi/prompts/sast/triage.md");
+        let path = prompt_override_path(temp.path());
         std::fs::create_dir_all(&path).unwrap();
 
         app.handle_prompt_verb("diff triage");
@@ -205,7 +235,7 @@ mod tests {
     fn prompt_reset_reports_unreadable_override_path() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
-        let path = temp.path().join(".kuzushi/prompts/sast/triage.md");
+        let path = prompt_override_path(temp.path());
         std::fs::create_dir_all(&path).unwrap();
 
         app.handle_prompt_verb("reset triage");

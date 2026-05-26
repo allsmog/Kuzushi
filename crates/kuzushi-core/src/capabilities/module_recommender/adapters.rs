@@ -19,6 +19,7 @@ pub(crate) fn execute_module_recommender_tool(
         max_recommendations: max_recommendations(&input),
         available_tools: available_tools.into_iter().collect(),
         signals: repository_signals(
+            workspace.root(),
             &inventory,
             &attack_surface,
             threat_model.as_ref(),
@@ -110,6 +111,7 @@ fn recommendation_priority_label(priority: RecommendationPriority) -> &'static s
 }
 
 fn repository_signals(
+    target: &Path,
     inventory: &RepositoryInventory,
     attack_surface: &AttackSurfaceMap,
     threat_model: Option<&Value>,
@@ -119,7 +121,7 @@ fn repository_signals(
     RepositorySignals {
         context_source: "deterministic-workspace-inventory".to_string(),
         attack_surface_source: "deterministic-workspace-analysis".to_string(),
-        threat_model_source: threat_model_source(threat_model),
+        threat_model_source: threat_model_source(target, threat_model),
         findings_source: findings_source(findings_available),
         source_files: inventory.source_files.len(),
         languages: language_names(inventory),
@@ -149,9 +151,13 @@ fn repository_signals(
     }
 }
 
-fn threat_model_source(threat_model: Option<&Value>) -> String {
+fn threat_model_source(target: &Path, threat_model: Option<&Value>) -> String {
     if threat_model.is_some() {
-        ".kuzushi/threat-model.json".to_string()
+        let path = persistent_threat_model_path(target);
+        path.strip_prefix(target)
+            .unwrap_or(path.as_path())
+            .display()
+            .to_string()
     } else {
         "not-recorded".to_string()
     }

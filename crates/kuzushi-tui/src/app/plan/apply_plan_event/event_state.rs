@@ -16,7 +16,7 @@ impl ShellApp {
         self.plan_abort_requested = false;
         self.log(
             "plan",
-            "pi-agent-core response arrived after abort request; discarded",
+            "LangGraph response arrived after abort request; discarded",
         );
         self.set_paused_activity("plan", "proposal discarded after abort request");
         true

@@ -168,7 +168,7 @@ pub(crate) fn check_model_config(config: &kuzushi_core::V2Config) -> DoctorCheck
     {
         None => DoctorCheck::warn(
             "model",
-            "no explicit model configured; static scanners still work",
+            "no explicit model configured; static scanners still work; no fallback model will be selected",
             "Set `KUZUSHI_MODEL=provider:model` or add `model = \"provider:model\"` before using agentic tools.",
         ),
         Some(model) => model_config_check(model),

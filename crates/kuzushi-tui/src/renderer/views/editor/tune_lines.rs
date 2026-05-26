@@ -68,7 +68,7 @@ fn append_house_rules(lines: &mut Vec<Line<'static>>, house_rules: &TuneHouseRul
         }
         TuneHouseRules::Empty => {
             lines.push(muted(
-                "(no house rules set; pick edit house rules and type a value)",
+                "no house rules set — choose `edit house rules` above to add one",
             ));
         }
     }

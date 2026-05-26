@@ -8,8 +8,8 @@
   "required": ["artifacts"],
   "anyOf": [{ "required": ["runId"] }, { "required": ["run_id"] }],
   "properties": {
-    "runId": { "type": "string", "minLength": 1 },
-    "run_id": { "type": "string", "minLength": 1 },
+    "runId": { "$ref": "#/definitions/nonEmptyString" },
+    "run_id": { "$ref": "#/definitions/nonEmptyString" },
     "artifacts": {
       "type": "array",
       "items": { "$ref": "#/definitions/artifact" }
@@ -51,30 +51,1165 @@
             { "required": ["kind"] },
             { "required": ["type"] }
           ]
-        }
+        },
+        { "$ref": "#/definitions/canonicalArtifactMetadata" }
       ],
       "properties": {
-        "label": { "type": "string" },
-        "name": { "type": "string" },
-        "title": { "type": "string" },
-        "path": { "type": "string" },
-        "file": { "type": "string" },
-        "filePath": { "type": "string" },
-        "file_path": { "type": "string" },
-        "reportPath": { "type": "string" },
-        "report_path": { "type": "string" },
-        "reportJsonPath": { "type": "string" },
-        "report_json_path": { "type": "string" },
-        "scopePath": { "type": "string" },
-        "scope_path": { "type": "string" },
-        "dir": { "type": "string" },
-        "outputDir": { "type": "string" },
-        "output_dir": { "type": "string" },
-        "promptsDir": { "type": "string" },
-        "prompts_dir": { "type": "string" },
+        "label": { "$ref": "#/definitions/nonEmptyString" },
+        "name": { "$ref": "#/definitions/nonEmptyString" },
+        "title": { "$ref": "#/definitions/nonEmptyString" },
+        "path": { "$ref": "#/definitions/nonEmptyString" },
+        "file": { "$ref": "#/definitions/nonEmptyString" },
+        "filePath": { "$ref": "#/definitions/nonEmptyString" },
+        "file_path": { "$ref": "#/definitions/nonEmptyString" },
+        "reportPath": { "$ref": "#/definitions/nonEmptyString" },
+        "report_path": { "$ref": "#/definitions/nonEmptyString" },
+        "reportJsonPath": { "$ref": "#/definitions/nonEmptyString" },
+        "report_json_path": { "$ref": "#/definitions/nonEmptyString" },
+        "scopePath": { "$ref": "#/definitions/nonEmptyString" },
+        "scope_path": { "$ref": "#/definitions/nonEmptyString" },
+        "dir": { "$ref": "#/definitions/nonEmptyString" },
+        "outputDir": { "$ref": "#/definitions/nonEmptyString" },
+        "output_dir": { "$ref": "#/definitions/nonEmptyString" },
+        "promptsDir": { "$ref": "#/definitions/nonEmptyString" },
+        "prompts_dir": { "$ref": "#/definitions/nonEmptyString" },
         "kind": { "$ref": "#/definitions/artifactKind" },
         "type": { "$ref": "#/definitions/artifactKind" }
       }
+    },
+    "canonicalArtifactMetadata": {
+      "allOf": [
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)run\\.json$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)run\\.json$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)run\\.json$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)run\\.json$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)run\\.json$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)run\\.json$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)run\\.json$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)run\\.json$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)run\\.json$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)run\\.json$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)run\\.json$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)run\\.json$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)run\\.json$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)run\\.json$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)run\\.json$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "run metadata" },
+              "name": { "const": "run metadata" },
+              "title": { "const": "run metadata" },
+              "kind": { "const": "json" },
+              "type": { "const": "json" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)events\\.jsonl$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)events\\.jsonl$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)events\\.jsonl$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)events\\.jsonl$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)events\\.jsonl$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)events\\.jsonl$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)events\\.jsonl$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)events\\.jsonl$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)events\\.jsonl$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)events\\.jsonl$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)events\\.jsonl$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)events\\.jsonl$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)events\\.jsonl$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)events\\.jsonl$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)events\\.jsonl$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "run events" },
+              "name": { "const": "run events" },
+              "title": { "const": "run events" },
+              "kind": { "const": "jsonl" },
+              "type": { "const": "jsonl" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)trace\\.jsonl$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)trace\\.jsonl$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)trace\\.jsonl$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)trace\\.jsonl$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)trace\\.jsonl$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)trace\\.jsonl$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)trace\\.jsonl$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)trace\\.jsonl$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)trace\\.jsonl$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)trace\\.jsonl$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)trace\\.jsonl$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)trace\\.jsonl$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)trace\\.jsonl$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)trace\\.jsonl$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)trace\\.jsonl$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "runtime trace" },
+              "name": { "const": "runtime trace" },
+              "title": { "const": "runtime trace" },
+              "kind": { "const": "jsonl" },
+              "type": { "const": "jsonl" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)context\\.json$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)context\\.json$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)context\\.json$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)context\\.json$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)context\\.json$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)context\\.json$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)context\\.json$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)context\\.json$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)context\\.json$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)context\\.json$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)context\\.json$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)context\\.json$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)context\\.json$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)context\\.json$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)context\\.json$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "context snapshot" },
+              "name": { "const": "context snapshot" },
+              "title": { "const": "context snapshot" },
+              "kind": { "const": "json" },
+              "type": { "const": "json" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)attack-surface\\.json$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)attack-surface\\.json$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)attack-surface\\.json$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)attack-surface\\.json$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)attack-surface\\.json$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)attack-surface\\.json$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)attack-surface\\.json$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)attack-surface\\.json$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)attack-surface\\.json$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)attack-surface\\.json$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)attack-surface\\.json$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)attack-surface\\.json$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)attack-surface\\.json$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)attack-surface\\.json$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)attack-surface\\.json$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "attack surface" },
+              "name": { "const": "attack surface" },
+              "title": { "const": "attack surface" },
+              "kind": { "const": "json" },
+              "type": { "const": "json" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)threat-model\\.json$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)threat-model\\.json$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)threat-model\\.json$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)threat-model\\.json$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)threat-model\\.json$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)threat-model\\.json$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)threat-model\\.json$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)threat-model\\.json$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)threat-model\\.json$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)threat-model\\.json$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)threat-model\\.json$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)threat-model\\.json$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)threat-model\\.json$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)threat-model\\.json$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)threat-model\\.json$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "threat model" },
+              "name": { "const": "threat model" },
+              "title": { "const": "threat model" },
+              "kind": { "const": "json" },
+              "type": { "const": "json" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)recommendations\\.json$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)recommendations\\.json$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)recommendations\\.json$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)recommendations\\.json$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)recommendations\\.json$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)recommendations\\.json$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)recommendations\\.json$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)recommendations\\.json$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)recommendations\\.json$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)recommendations\\.json$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)recommendations\\.json$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)recommendations\\.json$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)recommendations\\.json$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)recommendations\\.json$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)recommendations\\.json$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "recommendations" },
+              "name": { "const": "recommendations" },
+              "title": { "const": "recommendations" },
+              "kind": { "const": "json" },
+              "type": { "const": "json" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)findings\\.json$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)findings\\.json$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)findings\\.json$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)findings\\.json$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)findings\\.json$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)findings\\.json$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)findings\\.json$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)findings\\.json$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)findings\\.json$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)findings\\.json$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)findings\\.json$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)findings\\.json$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)findings\\.json$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)findings\\.json$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)findings\\.json$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "findings" },
+              "name": { "const": "findings" },
+              "title": { "const": "findings" },
+              "kind": { "const": "json" },
+              "type": { "const": "json" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)proof\\.json$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)proof\\.json$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)proof\\.json$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)proof\\.json$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)proof\\.json$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)proof\\.json$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)proof\\.json$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)proof\\.json$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)proof\\.json$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)proof\\.json$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)proof\\.json$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)proof\\.json$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)proof\\.json$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)proof\\.json$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)proof\\.json$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "proof" },
+              "name": { "const": "proof" },
+              "title": { "const": "proof" },
+              "kind": { "const": "json" },
+              "type": { "const": "json" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)failures\\.json$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)failures\\.json$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)failures\\.json$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)failures\\.json$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)failures\\.json$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)failures\\.json$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)failures\\.json$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)failures\\.json$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)failures\\.json$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)failures\\.json$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)failures\\.json$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)failures\\.json$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)failures\\.json$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)failures\\.json$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)failures\\.json$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "failure handoff" },
+              "name": { "const": "failure handoff" },
+              "title": { "const": "failure handoff" },
+              "kind": { "const": "json" },
+              "type": { "const": "json" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)report\\.md$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)report\\.md$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)report\\.md$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)report\\.md$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)report\\.md$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)report\\.md$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)report\\.md$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)report\\.md$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)report\\.md$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)report\\.md$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)report\\.md$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)report\\.md$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)report\\.md$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)report\\.md$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)report\\.md$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "report" },
+              "name": { "const": "report" },
+              "title": { "const": "report" },
+              "kind": { "const": "markdown" },
+              "type": { "const": "markdown" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)artifacts\\.json$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)artifacts\\.json$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)artifacts\\.json$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)artifacts\\.json$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)artifacts\\.json$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)artifacts\\.json$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)artifacts\\.json$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)artifacts\\.json$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)artifacts\\.json$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)artifacts\\.json$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)artifacts\\.json$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)artifacts\\.json$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)artifacts\\.json$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)artifacts\\.json$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)artifacts\\.json$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "artifact manifest" },
+              "name": { "const": "artifact manifest" },
+              "title": { "const": "artifact manifest" },
+              "kind": { "const": "json" },
+              "type": { "const": "json" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)report\\.sarif$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)report\\.sarif$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)report\\.sarif$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)report\\.sarif$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)report\\.sarif$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)report\\.sarif$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)report\\.sarif$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)report\\.sarif$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)report\\.sarif$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)report\\.sarif$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)report\\.sarif$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)report\\.sarif$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)report\\.sarif$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)report\\.sarif$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)report\\.sarif$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "SARIF report" },
+              "name": { "const": "SARIF report" },
+              "title": { "const": "SARIF report" },
+              "kind": { "const": "sarif" },
+              "type": { "const": "sarif" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)result\\.json$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)result\\.json$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)result\\.json$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)result\\.json$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)result\\.json$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)result\\.json$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)result\\.json$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)result\\.json$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)result\\.json$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)result\\.json$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)result\\.json$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)result\\.json$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)result\\.json$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)result\\.json$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)result\\.json$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "tool result" },
+              "name": { "const": "tool result" },
+              "title": { "const": "tool result" },
+              "kind": { "const": "json" },
+              "type": { "const": "json" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)input\\.json$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)input\\.json$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)input\\.json$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)input\\.json$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)input\\.json$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)input\\.json$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)input\\.json$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)input\\.json$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)input\\.json$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)input\\.json$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)input\\.json$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)input\\.json$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)input\\.json$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)input\\.json$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)input\\.json$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "tool input" },
+              "name": { "const": "tool input" },
+              "title": { "const": "tool input" },
+              "kind": { "const": "json" },
+              "type": { "const": "json" }
+            }
+          }
+        }
+      ]
+    },
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
     },
     "artifactKind": {
       "type": "string",

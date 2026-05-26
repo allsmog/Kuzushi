@@ -48,12 +48,7 @@ fn planning_row_line(
     Line::styled(fit(&body, width as usize), style)
 }
 
-fn planning_row_style(
-    app: &ShellApp,
-    idx: usize,
-    row: &PlanningTaskRow,
-    checked: bool,
-) -> Style {
+fn planning_row_style(app: &ShellApp, idx: usize, row: &PlanningTaskRow, checked: bool) -> Style {
     if !row.cli_available {
         return theme::muted().add_modifier(Modifier::DIM);
     }

@@ -29,9 +29,9 @@ fn append_module_header(lines: &mut Vec<Line<'static>>, module: &ModuleDetailMod
     lines.push(blank());
     lines.push(transcript_line(">", &format!("/use {}", module.id), false));
     lines.push(transcript_line(
-        "use",
+        "module",
         &format!(
-            "focused module {} · primary tool {}",
+            "now using {} · primary tool {}",
             module.id, module.primary_tool
         ),
         false,

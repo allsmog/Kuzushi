@@ -10,15 +10,15 @@ mod tests {
     #[test]
     fn uses_configured_bridge_command() {
         let runtime = RuntimeConfig {
-            kind: RuntimeKind::PiAgentCore,
+            kind: RuntimeKind::LangGraph,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
-            agent_bridge_command: Some(vec!["node".to_string(), "bridge.mjs".to_string()]),
+            langgraph_bridge_command: Some(vec!["node".to_string(), "bridge.mjs".to_string()]),
             anthropic_oauth: None,
         };
 
-        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
         assert_eq!(
             bridge.command(),
             &["node".to_string(), "bridge.mjs".to_string()]
@@ -43,14 +43,14 @@ printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234
         }
 
         let runtime = RuntimeConfig {
-            kind: RuntimeKind::PiAgentCore,
+            kind: RuntimeKind::LangGraph,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
-            agent_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
+            langgraph_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
             anthropic_oauth: None,
         };
-        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
 
         let response = bridge
             .query_blocking(AgentQueryRequest::new(
@@ -84,14 +84,14 @@ printf '%s' '{"ok":true,"structured":{"verdict":"true_positive","confidence":0.9
         }
 
         let runtime = RuntimeConfig {
-            kind: RuntimeKind::PiAgentCore,
+            kind: RuntimeKind::LangGraph,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
-            agent_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
+            langgraph_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
             anthropic_oauth: None,
         };
-        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
 
         let outcome = bridge
             .triage_finding_blocking(TriageRequest {
@@ -144,14 +144,14 @@ fi
         }
 
         let runtime = RuntimeConfig {
-            kind: RuntimeKind::PiAgentCore,
+            kind: RuntimeKind::LangGraph,
             api_key_env: "ANTHROPIC_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
-            agent_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
+            langgraph_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
             anthropic_oauth: None,
         };
-        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
         assert!(bridge.supports_tools());
 
         let req = AgentToolLoopRequest {
@@ -205,11 +205,11 @@ fi
     fn next_step_bridge_surfaces_error_payload() {
         use kuzushi_core::{AgentTool, AgentToolLoopRequest};
         let runtime = RuntimeConfig {
-            kind: RuntimeKind::PiAgentCore,
+            kind: RuntimeKind::LangGraph,
             api_key_env: "ANTHROPIC_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
-            agent_bridge_command: Some(vec![
+            langgraph_bridge_command: Some(vec![
                 "sh".to_string(),
                 "-c".to_string(),
                 "printf '%s' '{\"ok\":false,\"error\":\"no Anthropic credentials\"}'; exit 1"
@@ -217,7 +217,7 @@ fi
             ]),
             anthropic_oauth: None,
         };
-        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
         let req = AgentToolLoopRequest {
             model: "anthropic:claude-sonnet-4-6".to_string(),
             cwd: ".".into(),
@@ -244,11 +244,11 @@ fi
     fn tool_loop_preflight_surfaces_openai_scope_errors_before_first_step() {
         use kuzushi_core::{AgentTool, AgentToolLoopRequest};
         let runtime = RuntimeConfig {
-            kind: RuntimeKind::PiAgentCore,
+            kind: RuntimeKind::LangGraph,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
-            agent_bridge_command: Some(vec![
+            langgraph_bridge_command: Some(vec![
                 "sh".to_string(),
                 "-c".to_string(),
                 "REQ=$(cat); case \"$REQ\" in *next-step-preflight*) printf '%s' '{\"ok\":false,\"error\":\"missing api.responses.write\"}' ;; *) printf '%s' '{\"ok\":true,\"step\":\"final\",\"text\":\"unexpected\"}' ;; esac"
@@ -256,7 +256,7 @@ fi
             ]),
             anthropic_oauth: None,
         };
-        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
         let req = AgentToolLoopRequest {
             model: "openai-codex:gpt-5.5".to_string(),
             cwd: ".".into(),
@@ -281,19 +281,19 @@ fi
     #[test]
     fn bridge_failure_json_is_returned_as_actionable_error() {
         let runtime = RuntimeConfig {
-            kind: RuntimeKind::PiAgentCore,
+            kind: RuntimeKind::LangGraph,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
-            agent_bridge_command: Some(vec![
+            langgraph_bridge_command: Some(vec![
                 "sh".to_string(),
                 "-c".to_string(),
-                "printf '%s' '{\"ok\":false,\"error\":\"install @earendil-works/pi-agent-core\"}'; exit 1"
+                "printf '%s' '{\"ok\":false,\"error\":\"install @earendil-works/LangGraph\"}'; exit 1"
                     .to_string(),
             ]),
             anthropic_oauth: None,
         };
-        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
         let err = bridge
             .triage_finding_blocking(TriageRequest {
                 model: "openai:gpt-4.1".to_string(),
@@ -312,18 +312,18 @@ fi
             .unwrap_err()
             .to_string();
 
-        assert!(err.contains("pi-agent-core bridge failed"));
-        assert!(err.contains("install @earendil-works/pi-agent-core"));
+        assert!(err.contains("LangGraph bridge failed"));
+        assert!(err.contains("install @earendil-works/LangGraph"));
     }
 
     #[test]
     fn bridge_failure_rewrites_internal_openai_oauth_provider() {
         let runtime = RuntimeConfig {
-            kind: RuntimeKind::PiAgentCore,
+            kind: RuntimeKind::LangGraph,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
-            agent_bridge_command: Some(vec![
+            langgraph_bridge_command: Some(vec![
                 "sh".to_string(),
                 "-c".to_string(),
                 "printf '%s' '{\"ok\":false,\"error\":\"next-step: no OpenAI credentials for openai-codex. Set up kuzushi auth login openai-codex\"}'"
@@ -331,7 +331,7 @@ fi
             ]),
             anthropic_oauth: None,
         };
-        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
 
         let err = bridge
             .query_blocking(AgentQueryRequest::new(
@@ -378,14 +378,14 @@ fi
         }
 
         let runtime = RuntimeConfig {
-            kind: RuntimeKind::PiAgentCore,
+            kind: RuntimeKind::LangGraph,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
-            agent_bridge_command: Some(vec![bridge_script.to_string_lossy().into_owned()]),
+            langgraph_bridge_command: Some(vec![bridge_script.to_string_lossy().into_owned()]),
             anthropic_oauth: None,
         };
-        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
         let response = bridge
             .query_blocking(AgentQueryRequest::new(
                 "openai-codex:gpt-5.5",
@@ -422,14 +422,14 @@ printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
                 .unwrap();
         }
         let runtime = RuntimeConfig {
-            kind: RuntimeKind::PiAgentCore,
+            kind: RuntimeKind::LangGraph,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: Some("high".to_string()),
-            agent_bridge_command: Some(vec![bridge_script.to_string_lossy().into_owned()]),
+            langgraph_bridge_command: Some(vec![bridge_script.to_string_lossy().into_owned()]),
             anthropic_oauth: None,
         };
-        let bridge = PiAgentCoreRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
         let mut mcp_environment = BTreeMap::new();
         mcp_environment.insert(
             "KUZUSHI_JOERN_CPG".to_string(),

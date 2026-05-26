@@ -8,7 +8,7 @@ use kuzushi_core::run_artifacts::{
     load_run_artifacts, load_run_summary, output_with_run_fallback_context,
 };
 use kuzushi_core::{AgentRuntime, ToolOptionStore, TraceHandle, WorkspaceTarget};
-use kuzushi_openai::PiAgentCoreRuntime;
+use kuzushi_openai::LangGraphRuntime;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn run_tool_command(
@@ -48,9 +48,9 @@ fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
     handle_cli_tool_result(run, result)
 }
 
-fn cli_tool_runtime(run: &PreparedCliToolRun) -> Result<Option<PiAgentCoreRuntime>> {
+fn cli_tool_runtime(run: &PreparedCliToolRun) -> Result<Option<LangGraphRuntime>> {
     if run.registry.tool_needs_runtime(&run.tool, &run.input) {
-        return Ok(Some(PiAgentCoreRuntime::from_config(
+        return Ok(Some(LangGraphRuntime::from_config(
             &run.config,
             std::env::current_dir()?,
         )?));
@@ -67,7 +67,7 @@ fn cli_tool_trace(run: &PreparedCliToolRun) -> Option<TraceHandle> {
 }
 
 fn active_cli_tool_runtime<'a>(
-    runtime: Option<&'a PiAgentCoreRuntime>,
+    runtime: Option<&'a LangGraphRuntime>,
 ) -> Option<&'a dyn AgentRuntime> {
     runtime.map(|runtime| runtime as &dyn AgentRuntime)
 }

@@ -8,7 +8,7 @@ use kuzushi_core::run_artifacts::{
 use kuzushi_core::{
     config_hash, load_config_for_target, new_run_id, FindingStore, ModuleRegistry, WorkspaceTarget,
 };
-use kuzushi_openai::PiAgentCoreRuntime;
+use kuzushi_openai::LangGraphRuntime;
 use std::path::{Path, PathBuf};
 
 pub(crate) const SCAN_TOOL: &str = "sast:scan";
@@ -19,7 +19,7 @@ pub(crate) struct PreparedScanCommand {
     pub(crate) store: FindingStore,
     pub(crate) registry: ModuleRegistry,
     pub(crate) input: serde_json::Value,
-    pub(crate) runtime: Option<PiAgentCoreRuntime>,
+    pub(crate) runtime: Option<LangGraphRuntime>,
     pub(crate) run_id: String,
 }
 
@@ -157,7 +157,7 @@ impl ScanCommandSetup {
             .inspect_err(|error| self.record_failure(&self.bootstrap.requested_input, error))
     }
 
-    fn runtime(&self, input: &serde_json::Value) -> Result<Option<PiAgentCoreRuntime>> {
+    fn runtime(&self, input: &serde_json::Value) -> Result<Option<LangGraphRuntime>> {
         scan_runtime(&self.config, input).inspect_err(|error| self.record_failure(input, error))
     }
 
@@ -169,7 +169,7 @@ impl ScanCommandSetup {
         self,
         store: FindingStore,
         input: serde_json::Value,
-        runtime: Option<PiAgentCoreRuntime>,
+        runtime: Option<LangGraphRuntime>,
     ) -> PreparedScanCommand {
         PreparedScanCommand {
             workspace: self.bootstrap.workspace,

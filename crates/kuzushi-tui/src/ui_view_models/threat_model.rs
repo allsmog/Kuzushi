@@ -31,6 +31,9 @@ pub(crate) fn threat_summary_review(app: &ShellApp) -> ThreatSummaryReview {
         ThreatModelArtifact::Malformed => {
             ThreatSummaryReview::malformed(app.pending_threat_patch.as_ref())
         }
+        ThreatModelArtifact::NonFile => {
+            ThreatSummaryReview::non_file(app.pending_threat_patch.as_ref())
+        }
         _ => ThreatSummaryReview::unknown(app.pending_threat_patch.as_ref()),
     }
 }
@@ -67,18 +70,18 @@ impl ThreatSummaryReview {
 
     fn unknown(patch: Option<&ThreatPatch>) -> Self {
         Self {
-            status: "unknown".to_string(),
-            summary: "unknown - no persisted threat model found".to_string(),
-            threats: "unknown".to_string(),
-            assets: "unknown".to_string(),
-            actors: "unknown".to_string(),
-            flows: "unknown".to_string(),
-            trust_boundaries: "unknown".to_string(),
-            assumptions: vec!["unknown - build or import a threat model first".to_string()],
-            missing_inputs: vec!["unknown".to_string()],
+            status: "no threat model artifact".to_string(),
+            summary: "build or import a threat model to populate this view".to_string(),
+            threats: "—".to_string(),
+            assets: "—".to_string(),
+            actors: "—".to_string(),
+            flows: "—".to_string(),
+            trust_boundaries: "—".to_string(),
+            assumptions: vec!["build or import a threat model first".to_string()],
+            missing_inputs: vec!["—".to_string()],
             proposed_changes: proposed_changes(patch),
             limitations: vec![
-                "unknown evidence coverage until a threat model artifact exists".to_string(),
+                "evidence coverage is unknown until a threat model artifact exists".to_string(),
             ],
         }
     }
@@ -86,17 +89,35 @@ impl ThreatSummaryReview {
     fn malformed(patch: Option<&ThreatPatch>) -> Self {
         Self {
             status: "malformed".to_string(),
-            summary: "malformed .kuzushi/threat-model.json".to_string(),
+            summary: format!("malformed {}", threat_model_relative_path()),
             threats: "unknown".to_string(),
             assets: "unknown".to_string(),
             actors: "unknown".to_string(),
             flows: "unknown".to_string(),
             trust_boundaries: "unknown".to_string(),
             assumptions: vec!["threat-model artifact could not be parsed".to_string()],
-            missing_inputs: vec!["valid threat-model.json".to_string()],
+            missing_inputs: vec![format!("valid {}", threat_model_file_name())],
             proposed_changes: proposed_changes(patch),
             limitations: vec![
                 "threat model artifact is malformed; do not infer threats from it".to_string(),
+            ],
+        }
+    }
+
+    fn non_file(patch: Option<&ThreatPatch>) -> Self {
+        Self {
+            status: "malformed".to_string(),
+            summary: format!("{} is not a file", threat_model_relative_path()),
+            threats: "unknown".to_string(),
+            assets: "unknown".to_string(),
+            actors: "unknown".to_string(),
+            flows: "unknown".to_string(),
+            trust_boundaries: "unknown".to_string(),
+            assumptions: vec!["threat-model artifact path is not a file".to_string()],
+            missing_inputs: vec![format!("valid {} file", threat_model_file_name())],
+            proposed_changes: proposed_changes(patch),
+            limitations: vec![
+                "threat model artifact path is invalid; do not infer threats from it".to_string(),
             ],
         }
     }
@@ -110,25 +131,46 @@ fn threat_model_root(app: &ShellApp) -> PathBuf {
 }
 
 fn read_threat_model_artifact(app: &ShellApp) -> ThreatModelArtifact {
-    let path = threat_model_root(app)
-        .join(".kuzushi")
-        .join("threat-model.json");
-    if !path.exists() {
-        return ThreatModelArtifact::Missing;
+    let path = threat_model_artifact_path(&threat_model_root(app));
+    match std::fs::metadata(&path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return ThreatModelArtifact::NonFile,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return ThreatModelArtifact::Missing;
+        }
+        Err(_) => return ThreatModelArtifact::Malformed,
     };
     let raw = match std::fs::read_to_string(path) {
         Ok(raw) => raw,
         Err(_) => return ThreatModelArtifact::Malformed,
     };
-    match serde_json::from_str(&raw) {
-        Ok(value) => ThreatModelArtifact::Present(value),
+    match serde_json::from_str::<serde_json::Value>(&raw) {
+        Ok(value) if value.is_object() => ThreatModelArtifact::Present(value),
+        Ok(_) => ThreatModelArtifact::Malformed,
         Err(_) => ThreatModelArtifact::Malformed,
     }
+}
+
+fn threat_model_artifact_path(root: impl AsRef<std::path::Path>) -> PathBuf {
+    kuzushi_core::capabilities::persistent_threat_model_path(root.as_ref())
+}
+
+pub(crate) fn threat_model_relative_path() -> String {
+    threat_model_artifact_path("").display().to_string()
+}
+
+fn threat_model_file_name() -> String {
+    threat_model_artifact_path("")
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("threat-model.json")
+        .to_string()
 }
 
 enum ThreatModelArtifact {
     Present(serde_json::Value),
     Malformed,
+    NonFile,
     Missing,
 }
 
@@ -267,7 +309,10 @@ mod tests {
 
         let review = ThreatSummaryReview::from_doc(None, Some(&patch));
 
-        assert_eq!(review.summary, "unknown - no persisted threat model found");
+        assert_eq!(
+            review.summary,
+            "build or import a threat model to populate this view"
+        );
         assert_eq!(
             review.proposed_changes,
             vec![
@@ -280,16 +325,19 @@ mod tests {
     #[test]
     fn threat_summary_review_surfaces_malformed_persistent_artifact() {
         let temp = tempfile::tempdir().unwrap();
-        let artifact_dir = temp.path().join(".kuzushi");
-        std::fs::create_dir_all(&artifact_dir).unwrap();
-        std::fs::write(artifact_dir.join("threat-model.json"), "{not-json").unwrap();
+        let artifact_path = threat_model_artifact_path(temp.path());
+        std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
+        std::fs::write(artifact_path, "{not-json").unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.target = Some(temp.path().to_path_buf());
 
         let review = threat_summary_review(&app);
 
         assert_eq!(review.status, "malformed");
-        assert_eq!(review.summary, "malformed .kuzushi/threat-model.json");
+        assert_eq!(
+            review.summary,
+            format!("malformed {}", threat_model_relative_path())
+        );
         assert_eq!(
             review.assumptions,
             vec!["threat-model artifact could not be parsed"]
@@ -301,21 +349,60 @@ mod tests {
     }
 
     #[test]
-    fn threat_summary_review_surfaces_unreadable_persistent_artifact() {
+    fn threat_summary_review_surfaces_non_object_persistent_artifact() {
         let temp = tempfile::tempdir().unwrap();
-        let artifact_dir = temp.path().join(".kuzushi");
-        std::fs::create_dir_all(&artifact_dir).unwrap();
-        std::fs::create_dir(artifact_dir.join("threat-model.json")).unwrap();
+        let artifact_path = threat_model_artifact_path(temp.path());
+        std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
+        std::fs::write(artifact_path, "[]").unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         app.target = Some(temp.path().to_path_buf());
 
         let review = threat_summary_review(&app);
 
         assert_eq!(review.status, "malformed");
-        assert_eq!(review.summary, "malformed .kuzushi/threat-model.json");
+        assert_eq!(
+            review.summary,
+            format!("malformed {}", threat_model_relative_path())
+        );
+        assert_eq!(
+            review.assumptions,
+            vec!["threat-model artifact could not be parsed"]
+        );
+    }
+
+    #[test]
+    fn threat_summary_review_surfaces_non_file_persistent_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        let artifact_path = threat_model_artifact_path(temp.path());
+        std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
+        std::fs::create_dir(artifact_path).unwrap();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.target = Some(temp.path().to_path_buf());
+
+        let review = threat_summary_review(&app);
+
+        assert_eq!(review.status, "malformed");
+        assert_eq!(
+            review.summary,
+            format!("{} is not a file", threat_model_relative_path())
+        );
         assert_eq!(
             review.missing_inputs,
-            vec!["valid threat-model.json".to_string()]
+            vec![format!("valid {} file", threat_model_file_name())]
+        );
+        assert_eq!(
+            review.assumptions,
+            vec!["threat-model artifact path is not a file".to_string()]
+        );
+    }
+
+    #[test]
+    fn threat_model_artifact_path_uses_workspace_state_root() {
+        let root = std::path::Path::new("/repo");
+
+        assert_eq!(
+            threat_model_artifact_path(root),
+            kuzushi_core::capabilities::persistent_threat_model_path(root)
         );
     }
 }

@@ -43,11 +43,9 @@ pub(super) fn resolve_output_path(
              Pass --target <repo> or `outputPath` in the input."
         )
     })?;
-    Ok(workspace
-        .root()
-        .join(".kuzushi")
-        .join("catalogs")
-        .join("harvested.toml"))
+    Ok(crate::capabilities::threat_intel::harvested_threat_intel_catalog_path(
+        workspace.root(),
+    ))
 }
 
 fn resolve_explicit_output_path(raw: &str, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {

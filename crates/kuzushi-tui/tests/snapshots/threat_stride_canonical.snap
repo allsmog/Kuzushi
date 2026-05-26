@@ -2,14 +2,14 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 45
 ---
- KUZUSHI mode:shell | target:none | ctx:missing | model:unconfigured | 0 findings | view:threats:stride
+ KUZUSHI mode:shell · target:none · ctx:missing · model:unconfigured · 0 findings · view:threats:stride
 
 1 DFD  2 STRIDE  3 STORIES  4 SCOPE  5 SUMMARY
 
- -- STRIDE ROLLUP | 8 ISSUES -------------------------------------------------------------------------------------------
-    S  Spoofing        2 issues  | jwt without aud-claim, mailgun cname dangling
-    T  Tampering       1 issue  | worker pool reads unsigned amqp messages
+ -- STRIDE ROLLUP · 8 ISSUES -------------------------------------------------------------------------------------------
+    S  Spoofing        2 issues  · jwt without aud-claim, mailgun cname dangling
+    T  Tampering       1 issue  · worker pool reads unsigned amqp messages
     R  Repudiation     0 issues
-    I  Info-disclosure 3 issues  | plaintext PII at db→s3 boundary, debug logs
-    D  DoS             1 issue  | no rate-limit on /checkout/confirm
-    E  Elev-of-priv    1 issue  | admin subdomain shares jwt secret with api
+    I  Info-disclosure 3 issues  · plaintext PII at db→s3 boundary, debug logs
+    D  DoS             1 issue  · no rate-limit on /checkout/confirm
+    E  Elev-of-priv    1 issue  · admin subdomain shares jwt secret with api

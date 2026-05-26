@@ -120,7 +120,7 @@
       }
     },
     {
-      "includes": ["scripts/pi-agent-core-bridge.mjs"],
+      "includes": ["scripts/langgraph-bridge.mjs", "scripts/langgraph-bridge/**/*.mjs"],
       "formatter": {
         "enabled": false
       }

@@ -22,7 +22,7 @@ pub(crate) fn activity_frame_layout() -> ActivityFrameLayout {
 }
 
 pub(crate) fn activity_plain_pane_widths(width: u16) -> ActivityPaneWidths {
-    let usable = (width as usize).saturating_sub(1);
+    let usable = (width as usize).saturating_sub(3);
     let dag = (usable * activity_frame_layout().dag_percent as usize / 100).max(20);
     ActivityPaneWidths {
         dag,
@@ -51,7 +51,7 @@ mod tests {
     fn activity_plain_pane_widths_matches_split_with_minimums() {
         assert_eq!(
             activity_plain_pane_widths(120),
-            ActivityPaneWidths { dag: 54, feed: 65 }
+            ActivityPaneWidths { dag: 53, feed: 64 }
         );
         assert_eq!(
             activity_plain_pane_widths(30),

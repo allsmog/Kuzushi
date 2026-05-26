@@ -149,7 +149,7 @@ export interface AgentToolResultMessage {
 }
 
 /**
- * Streaming deltas surfaced by the pi-ai runtime while an assistant turn
+ * Streaming deltas surfaced by the LangChain runtime while an assistant turn
  * is building. Consumers are free to ignore them; they carry no semantic
  * state the final `assistant` / `tool-result` yields don't already cover.
  *

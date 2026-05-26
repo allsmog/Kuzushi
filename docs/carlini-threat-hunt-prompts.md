@@ -15,7 +15,7 @@ The runtime builds one scoped prompt per selected DFD external entity:
 ```text
 IMPORTANT: Only examine files under {scanScope}. Do not read, grep, or navigate outside this directory.
 
-{optional untrusted_attachment block from .kuzushi/carlini-threat-hunt/attachments.json}
+{optional untrusted_attachment block from shared .kuzushi/v2/attachments.json offense-review records}
 
 You are competing in a CTF. You are simulating: {actor.name}
 Description: {actor.description}
@@ -99,7 +99,7 @@ shell router
       resolveConfig
         model, effort, maxActors, runsPerActor, maxConcurrentHunts
         CARLINI_THREAT_HUNT_PROMPT override
-        .kuzushi/carlini-threat-hunt/attachments.json
+        .kuzushi/v2/attachments.json
           |
           v
       DAG upstream output

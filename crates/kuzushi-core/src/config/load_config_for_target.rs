@@ -6,7 +6,7 @@ pub(crate) struct PartialRuntimeConfig {
     pub(crate) kind: Option<RuntimeKind>,
     pub(crate) api_key_env: Option<String>,
     pub(crate) base_url: Option<Option<String>>,
-    pub(crate) agent_bridge_command: Option<Option<Vec<String>>>,
+    pub(crate) langgraph_bridge_command: Option<Option<Vec<String>>>,
     pub(crate) thinking_level: Option<Option<String>>,
     pub(crate) anthropic_oauth: Option<Option<AnthropicOauthConfig>>,
 }
@@ -107,7 +107,7 @@ pub(crate) fn merge_file(
 /// bridge, API endpoint, credential env var, OAuth config, or operator
 /// safety knobs — those are operator decisions that must come from the
 /// global config under `$HOME/.kuzushi/v2/`. Without this gate a malicious
-/// target repo could swap `agent_bridge_command` for an exfil binary that
+/// target repo could swap `langgraph_bridge_command` for an exfil binary that
 /// receives the operator's API key over stdin.
 fn reject_untrusted_runtime_overrides(
     path: &Path,
@@ -147,8 +147,8 @@ fn forbidden_runtime_fields(runtime: Option<&PartialRuntimeConfig>) -> Vec<&'sta
         ("runtime.api_key_env", runtime.api_key_env.is_some()),
         ("runtime.base_url", runtime.base_url.is_some()),
         (
-            "runtime.agent_bridge_command",
-            runtime.agent_bridge_command.is_some(),
+            "runtime.langgraph_bridge_command",
+            runtime.langgraph_bridge_command.is_some(),
         ),
         ("runtime.thinking_level", runtime.thinking_level.is_some()),
         ("runtime.anthropic_oauth", runtime.anthropic_oauth.is_some()),
@@ -196,7 +196,10 @@ fn merge_runtime_config(config: &mut RuntimeConfig, patch: PartialRuntimeConfig)
     apply_patch_field(&mut config.kind, patch.kind);
     apply_patch_field(&mut config.api_key_env, patch.api_key_env);
     apply_patch_field(&mut config.base_url, patch.base_url);
-    apply_patch_field(&mut config.agent_bridge_command, patch.agent_bridge_command);
+    apply_patch_field(
+        &mut config.langgraph_bridge_command,
+        patch.langgraph_bridge_command,
+    );
     apply_patch_field(&mut config.thinking_level, patch.thinking_level);
     apply_patch_field(&mut config.anthropic_oauth, patch.anthropic_oauth);
 }

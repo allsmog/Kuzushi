@@ -1,4 +1,5 @@
 use super::*;
+use crate::run_artifacts::run_dir;
 use std::sync::mpsc;
 use std::sync::Mutex;
 
@@ -99,7 +100,7 @@ fn jsonl_sink_appends_trace_steps_to_run_artifact() {
 
     let _ = handle.step("reasoning", "run", "classified finding").emit();
 
-    let trace_path = tmp.path().join(".kuzushi/runs/run-1/trace.jsonl");
+    let trace_path = run_dir(tmp.path(), "run-1").join("trace.jsonl");
     let trace = std::fs::read_to_string(trace_path).unwrap();
     assert!(trace.contains("\"module_id\":\"triage\""));
     assert!(trace.contains("\"label\":\"classified finding\""));

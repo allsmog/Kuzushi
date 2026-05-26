@@ -9,14 +9,15 @@ use files::{collect_scan_files, index_files};
 use markdown::render_threat_leads_markdown;
 use output::tool_output;
 
+use crate::capabilities::threat_model::persistent_threat_model_path;
 use crate::modules::ToolExecutionContext;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-pub(super) const ARTIFACT_REL_PATH: &str = ".kuzushi/threat-leads.json";
-pub(super) const SUMMARY_REL_PATH: &str = ".kuzushi/threat-leads.md";
+const THREAT_LEADS_ARTIFACT_FILE: &str = "threat-leads.json";
+const THREAT_LEADS_SUMMARY_FILE: &str = "threat-leads.md";
 
 pub fn execute_threat_leads_tool(
     name: &str,
@@ -113,14 +114,14 @@ fn threat_leads_report(target: &Path, leads: Vec<Value>) -> Value {
         "leadCount": leads.len(),
         "leads": leads,
         "sources": {
-            "threatModel": ARTIFACT_REL_PATH.replace("threat-leads", "threat-model"),
+            "threatModel": workspace_relative_path(target, &persistent_threat_model_path(target)),
             "xRay": ["x-ray/entry-points.md", "x-ray/x-ray.md", "x-ray/invariants.md"]
         }
     })
 }
 
 pub fn read_threat_leads(target: &Path) -> Result<Value> {
-    let path = target.join(ARTIFACT_REL_PATH);
+    let path = threat_leads_artifact_path(target);
     let text = fs::read_to_string(&path)
         .with_context(|| format!("Could not read threat leads artifact {}", path.display()))?;
     serde_json::from_str(&text)
@@ -154,14 +155,14 @@ fn explicit_target(input: &Value) -> Result<Option<PathBuf>> {
 }
 
 fn read_threat_model(target: &Path) -> Result<Value> {
-    let path = target.join(".kuzushi/threat-model.json");
+    let path = persistent_threat_model_path(target);
     let text = fs::read_to_string(&path)
         .with_context(|| format!("Could not read threat model {}", path.display()))?;
     serde_json::from_str(&text).with_context(|| format!("Could not parse {}", path.display()))
 }
 
 fn write_threat_leads(target: &Path, report: &Value) -> Result<()> {
-    let path = target.join(ARTIFACT_REL_PATH);
+    let path = threat_leads_artifact_path(target);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("Could not create {}", parent.display()))?;
@@ -171,7 +172,56 @@ fn write_threat_leads(target: &Path, report: &Value) -> Result<()> {
         format!("{}\n", serde_json::to_string_pretty(report)?),
     )
     .with_context(|| format!("Could not write {}", path.display()))?;
-    let summary_path = target.join(SUMMARY_REL_PATH);
+    let summary_path = threat_leads_summary_path(target);
     fs::write(&summary_path, render_threat_leads_markdown(report))
         .with_context(|| format!("Could not write {}", summary_path.display()))
+}
+
+pub(super) fn threat_leads_artifact_path(target: &Path) -> PathBuf {
+    crate::workspace::workspace_state_root(target).join(THREAT_LEADS_ARTIFACT_FILE)
+}
+
+pub(super) fn threat_leads_summary_path(target: &Path) -> PathBuf {
+    crate::workspace::workspace_state_root(target).join(THREAT_LEADS_SUMMARY_FILE)
+}
+
+fn workspace_relative_path(target: &Path, path: &Path) -> String {
+    path.strip_prefix(target)
+        .unwrap_or(path)
+        .display()
+        .to_string()
+        .replace('\\', "/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn threat_leads_paths_use_workspace_state_root() {
+        let target = Path::new("/repo");
+        let state_root = crate::workspace::workspace_state_root(target);
+
+        assert_eq!(
+            threat_leads_artifact_path(target),
+            state_root.join(THREAT_LEADS_ARTIFACT_FILE)
+        );
+        assert_eq!(
+            threat_leads_summary_path(target),
+            state_root.join(THREAT_LEADS_SUMMARY_FILE)
+        );
+    }
+
+    #[test]
+    fn threat_leads_report_references_persistent_threat_model_artifact() {
+        let report = threat_leads_report(Path::new("/repo"), Vec::new());
+
+        assert_eq!(
+            report["sources"]["threatModel"],
+            workspace_relative_path(
+                Path::new("/repo"),
+                &persistent_threat_model_path(Path::new("/repo"))
+            )
+        );
+    }
 }

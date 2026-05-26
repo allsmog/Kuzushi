@@ -8,7 +8,7 @@ fn auth_provider_rows_hide_secret_values() {
     let rows = auth_provider_rows(&app);
 
     assert_eq!(rows.len(), 4);
-    assert!(rows.iter().any(|row| row.cells[0] == "pi-agent-core"));
+    assert!(rows.iter().any(|row| row.cells[0] == "LangGraph"));
     assert!(rows.iter().any(|row| row.cells[0] == "github-copilot"));
     assert!(!rows
         .iter()

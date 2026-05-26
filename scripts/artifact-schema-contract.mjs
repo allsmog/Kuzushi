@@ -3,10 +3,25 @@ import path from "node:path";
 import { checkFieldShapeSpecs } from "./artifact-schema-shapes.mjs";
 import { checkThreatModelNarrativeFlowAliases } from "./artifact-schema-threat-model.mjs";
 import { canonicalRunSchemaFiles } from "./canonical-run-schema-files.mjs";
+import {
+  artifactKindAliasFields,
+  artifactLabelAliasFields,
+  artifactPathAliasFields,
+  optionalRunArtifactSpecs,
+  requiredRunArtifactSpecs,
+  toolInputArtifactSpecs,
+  toolResultArtifactSpecs,
+} from "./canonical-run-artifacts.mjs";
 
 export { canonicalRunSchemaFiles };
 
-const artifactAliasGroups = [{ path: ["definitions", "artifact"], kind: "allOfAnyOf", fields: ["label", "name", "title"] }, { path: ["definitions", "artifact"], kind: "allOfAnyOf", fields: ["path", "file", "filePath", "file_path", "reportPath", "report_path", "reportJsonPath", "report_json_path", "scopePath", "scope_path", "dir", "outputDir", "output_dir", "promptsDir", "prompts_dir"] }, { path: ["definitions", "artifact"], kind: "allOfAnyOf", fields: ["kind", "type"] }];
+const artifactAliasGroups = [{ path: ["definitions", "artifact"], kind: "allOfAnyOf", fields: artifactLabelAliasFields }, { path: ["definitions", "artifact"], kind: "allOfAnyOf", fields: artifactPathAliasFields }, { path: ["definitions", "artifact"], kind: "allOfAnyOf", fields: artifactKindAliasFields }];
+const reservedArtifactMetadataSpecs = [
+  ...requiredRunArtifactSpecs,
+  ...optionalRunArtifactSpecs,
+  ...toolInputArtifactSpecs,
+  ...toolResultArtifactSpecs,
+];
 
 const requiredAliasGroupsBySchema = {
   "schemas/run.artifacts.schema.json": [
@@ -226,6 +241,7 @@ function checkSchemaDocument(relativeFile, schema) {
     ...(relativeFile === "schemas/run.threat-model.schema.json" && (schemaNode(schema, ["properties", "relatedCwe"])?.$ref !== "#/definitions/stringList" || schemaNode(schema, ["properties", "related_cwe"])?.$ref !== "#/definitions/stringList" || schemaNode(schema, ["properties", "cwe"])?.$ref !== "#/definitions/stringList" || schemaNode(schema, ["properties", "threats", "items"])?.$ref !== "#/definitions/threat" || schemaNode(schema, ["definitions", "threat", "properties", "relatedCwe"])?.$ref !== "#/definitions/stringList" || schemaNode(schema, ["definitions", "threat", "properties", "related_cwe"])?.$ref !== "#/definitions/stringList" || schemaNode(schema, ["definitions", "threat", "properties", "cwe"])?.$ref !== "#/definitions/stringList") ? [`${relativeFile}: threat schema must preserve related-CWE aliases`] : []),
     ...checkThreatModelNarrativeFlowAliases(relativeFile, schema),
     ...checkFieldShapeSpecs(relativeFile, schema, schemaNode),
+    ...checkRunArtifactManifestReservedMetadata(relativeFile, schema),
     ...checkNamedEnums(relativeFile, schema),
   ].filter(Boolean);
 }
@@ -332,4 +348,48 @@ function checkNamedEnums(relativeFile, schema) {
     ...checkEnumValues(relativeFile, schema, spec),
     ...checkDefinitionRefs(relativeFile, schema, spec),
   ]);
+}
+
+function checkRunArtifactManifestReservedMetadata(relativeFile, schema) {
+  if (relativeFile !== "schemas/run.artifacts.schema.json") return [];
+  const rules = schemaNode(schema, ["definitions", "canonicalArtifactMetadata", "allOf"]);
+  if (!Array.isArray(rules)) {
+    return [`${relativeFile}: missing canonical artifact metadata rules`];
+  }
+  return reservedArtifactMetadataSpecs.flatMap((spec) => {
+    const rule = rules.find((candidate) => ruleMatchesPathAlias(candidate, "path", artifactPathPattern(spec.path)));
+    if (!rule) return [`${relativeFile}: missing reserved metadata rule for ${spec.path}`];
+    return [
+      ...missingArtifactPathAliasRules(relativeFile, rule, spec),
+      ...missingArtifactMetadataConsts(relativeFile, rule, spec),
+    ];
+  });
+}
+
+function missingArtifactPathAliasRules(relativeFile, rule, spec) {
+  const pattern = artifactPathPattern(spec.path);
+  return artifactPathAliasFields
+    .filter((alias) => !ruleMatchesPathAlias(rule, alias, pattern))
+    .map((alias) => `${relativeFile}: reserved metadata rule for ${spec.path} must cover ${alias}`);
+}
+
+function ruleMatchesPathAlias(rule, alias, pattern) {
+  return Array.isArray(rule?.if?.anyOf) && rule.if.anyOf.some((branch) => {
+    return requiredFields(branch).includes(alias) && branch?.properties?.[alias]?.pattern === pattern;
+  });
+}
+
+function missingArtifactMetadataConsts(relativeFile, rule, spec) {
+  const properties = rule?.then?.properties;
+  const expected = {
+    ...Object.fromEntries(artifactLabelAliasFields.map((field) => [field, spec.label])),
+    ...Object.fromEntries(artifactKindAliasFields.map((field) => [field, spec.kind])),
+  };
+  return Object.entries(expected)
+    .filter(([field, value]) => properties?.[field]?.const !== value)
+    .map(([field]) => `${relativeFile}: reserved metadata rule for ${spec.path} must set ${field}`);
+}
+
+function artifactPathPattern(artifactPath) {
+  return `(^|/)${artifactPath.replaceAll(".", "\\.")}$`;
 }

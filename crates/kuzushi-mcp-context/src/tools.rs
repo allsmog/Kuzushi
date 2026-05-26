@@ -2,7 +2,7 @@
 //!
 //! The snapshot path is resolved from the `KUZUSHI_MCP_CONTEXT_ARTIFACT`
 //! environment variable (set by the bridge per-call, see
-//! `kuzushi-openai/src/pi_agent_core/bridge_process.rs`). Tools fail
+//! `kuzushi-openai/src/langgraph_runtime/bridge_process.rs`). Tools fail
 //! with a clear error when the env var is missing — the artifact-aware
 //! attachment probe in kuzushi-core is supposed to keep this server
 //! from being attached unless the snapshot exists.
@@ -33,7 +33,9 @@ fn get_descriptor() -> Tool {
 fn languages_descriptor() -> Tool {
     Tool {
         name: "context:repo_languages".to_string(),
-        description: "Return the languages and frameworks the context-build detected for this repository.".to_string(),
+        description:
+            "Return the languages and frameworks the context-build detected for this repository."
+                .to_string(),
         input_schema: json!({"type": "object", "properties": {}}),
     }
 }
@@ -140,7 +142,11 @@ mod tests {
         let _guard = ENV_LOCK.lock().unwrap();
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("context-snapshot.json");
-        std::fs::write(&path, r#"{"target":"/x","repoContext":{"languages":["rust"]}}"#).unwrap();
+        std::fs::write(
+            &path,
+            r#"{"target":"/x","repoContext":{"languages":["rust"]}}"#,
+        )
+        .unwrap();
         std::env::set_var(ARTIFACT_ENV, &path);
         let value = GetHandler.call(json!({})).await.unwrap();
         assert_eq!(value["target"], "/x");

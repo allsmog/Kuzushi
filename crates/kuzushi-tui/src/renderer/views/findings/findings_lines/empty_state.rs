@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::FindingsModel;
+use crate::ui_view_models::{findings_db_relative_path, FindingsModel};
 
 pub(super) fn append_empty_findings(
     model: &FindingsModel,
@@ -7,10 +7,14 @@ pub(super) fn append_empty_findings(
     lines: &mut Vec<Line<'static>>,
 ) {
     lines.push(divider("FINDINGS · empty", area.width));
+    let ledger_detail = format!(
+        "kuzushi keeps the ledger in {}.",
+        findings_db_relative_path()
+    );
     lines.extend(empty_state_panel(
         "no findings yet",
         &[
-            "kuzushi keeps the ledger in .kuzushi/v2/findings.sqlite3.",
+            ledger_detail.as_str(),
             "nothing has been promoted on this workspace.",
         ],
         &[Some(("scan", model.empty.hint)), model.empty.context_cta]

@@ -37,9 +37,10 @@ impl ShellApp {
     }
 
     pub(crate) fn open_model_picker(&mut self) {
+        let visible = visible_model_choices(self.config.model.as_deref());
         self.model_picker_cursor = self
             .model_picker_cursor
-            .min(model_choices().len().saturating_sub(1));
+            .min(visible.len().saturating_sub(1));
         self.shell_view = ShellView::ModelPicker;
         self.log(
             "onboarding",

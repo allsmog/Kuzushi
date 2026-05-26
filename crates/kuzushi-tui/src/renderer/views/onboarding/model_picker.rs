@@ -1,5 +1,5 @@
 use super::*;
-use crate::app::{auth_ready_for_provider, model_choices, ModelChoice};
+use crate::app::{auth_ready_for_provider, visible_model_choices, ModelChoice};
 
 pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -9,7 +9,10 @@ pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static
         "Kuzushi does not silently pick a model for you. Select one to continue.",
     ));
     lines.push(blank());
-    for (idx, choice) in model_choices().iter().enumerate() {
+    for (idx, choice) in visible_model_choices(app.config.model.as_deref())
+        .iter()
+        .enumerate()
+    {
         lines.push(model_picker_row(app, idx, choice, area.width));
     }
     lines.push(blank());
@@ -21,18 +24,17 @@ pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static
     lines
 }
 
-fn model_picker_row(
-    app: &ShellApp,
-    idx: usize,
-    choice: &ModelChoice,
-    width: u16,
-) -> Line<'static> {
-    let marker = if idx == app.model_picker_cursor { ">" } else { " " };
+fn model_picker_row(app: &ShellApp, idx: usize, choice: &ModelChoice, width: u16) -> Line<'static> {
+    let marker = if idx == app.model_picker_cursor {
+        ">"
+    } else {
+        " "
+    };
     let auth_hint = auth_hint_for(choice);
     let body = format!(
         "  {marker} {label}   {provider}/{thinking}   {auth_hint}",
         label = choice.label,
-        provider = choice.provider,
+        provider = crate::app::display_model_provider(choice.provider),
         thinking = choice.thinking_level,
     );
     let style = if idx == app.model_picker_cursor {
@@ -63,7 +65,7 @@ fn auth_hint_for(choice: &ModelChoice) -> String {
             if auth_ready_for_provider("openai-codex") {
                 "OAuth stored".to_string()
             } else {
-                "needs Codex OAuth login".to_string()
+                "needs OpenAI OAuth login".to_string()
             }
         }
         other => format!("provider {other}"),

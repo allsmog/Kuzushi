@@ -1,4 +1,5 @@
 use super::*;
+use crate::ui_view_models::ui_run_artifact_relative_path;
 
 #[test]
 fn patch_review_model_copies_pending_patch_for_matching_alias() {
@@ -10,7 +11,7 @@ fn patch_review_model_copies_pending_patch_for_matching_alias() {
         diff: "+query!".to_string(),
         tests: vec![("orders::sqli".to_string(), "reject payload".to_string())],
         guardrail: Some("human-required".to_string()),
-        staged_at: Some(".kuzushi/runs/r-1/patch.diff".to_string()),
+        staged_at: Some(ui_run_artifact_relative_path("r-1", "patch.diff")),
     });
 
     let model = patch_review_model(&app, "F-0001").expect("matching patch");
@@ -24,7 +25,7 @@ fn patch_review_model_copies_pending_patch_for_matching_alias() {
     assert_eq!(model.guardrail.as_deref(), Some("human-required"));
     assert_eq!(
         model.staged_at.as_deref(),
-        Some(".kuzushi/runs/r-1/patch.diff")
+        Some(ui_run_artifact_relative_path("r-1", "patch.diff").as_str())
     );
 }
 

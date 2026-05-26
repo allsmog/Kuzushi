@@ -20,9 +20,11 @@ pub(in crate::modules) fn write_sast_scan_input(
     artifacts: &SastRunArtifacts,
     input: &Value,
 ) -> Result<()> {
-    let path = artifacts.dir.join("scan-input.json");
-    fs::write(&path, format!("{}\n", serde_json::to_string_pretty(input)?))
-        .with_context(|| format!("Could not write {}", path.display()))
+    fs::write(
+        &artifacts.scan_input,
+        format!("{}\n", serde_json::to_string_pretty(input)?),
+    )
+    .with_context(|| format!("Could not write {}", artifacts.scan_input.display()))
 }
 
 pub(in crate::modules) fn write_static_ranking_json(

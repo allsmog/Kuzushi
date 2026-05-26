@@ -237,6 +237,10 @@ mod tests {
             "threat-model:build complete",
             ["normalized threat model", "persistent threat model"],
         );
+        assert!(result
+            .get("output")
+            .and_then(Value::as_str)
+            .is_some_and(|output| output.contains("  Saved:    .kuzushi/threat-model.json")));
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_eq!(
             result
@@ -261,7 +265,7 @@ mod tests {
             Some(true)
         );
         assert!(has_artifact_label(&result, "normalized threat model"));
-        assert!(temp.path().join(".kuzushi/threat-model.json").exists());
+        assert!(persistent_threat_model_path(temp.path()).exists());
         assert!(temp
             .path()
             .join(".kuzushi/tm-artifacts/normalized-threat-model.json")
@@ -10891,7 +10895,8 @@ mod tests {
     #[test]
     fn reads_randori_pasta_artifacts_and_applies_methodology_overlay() {
         let temp = tempfile::tempdir().unwrap();
-        let artifact_dir = temp.path().join(".kuzushi/runs/run-1/threat-model-output");
+        let output_dir = BuildFlavor::ThreatModel.default_output_dir(temp.path(), "run-1");
+        let artifact_dir = temp.path().join(&output_dir);
         fs::create_dir_all(&artifact_dir).unwrap();
         fs::write(
             artifact_dir.join("pasta-s2.json"),
@@ -10941,7 +10946,7 @@ mod tests {
             .execute_tool(
                 "threat-model:read",
                 json!({
-                    "outputDir": ".kuzushi/runs/run-1/threat-model-output",
+                    "outputDir": output_dir,
                     "methodology": "dread"
                 }),
                 &ctx,

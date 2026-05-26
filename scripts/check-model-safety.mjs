@@ -73,7 +73,11 @@ const REQUIRED_POLICY_COVERAGE = [
   {
     label: "doctor tests cover shared model policy",
     file: "crates/kuzushi-cli/src/tests.rs",
-    required: ["doctor_model_check_uses_shared_model_policy", " openai : gpt-5.5 "],
+    required: [
+      "doctor_model_check_uses_shared_model_policy",
+      " openai : gpt-5.5 ",
+      "no fallback model will be selected",
+    ],
   },
   {
     label: "agent router rejects fallback chains",
@@ -112,7 +116,7 @@ const REQUIRED_POLICY_COVERAGE = [
     required: [
       "background_agent_runtime",
       "if !tool_needs_runtime(tool_name, input)",
-      "PiAgentCoreRuntime::from_config",
+      "LangGraphRuntime::from_config",
     ],
   },
   {

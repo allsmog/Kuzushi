@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
-use kuzushi_core::{run_dir, WorkspaceTarget};
+use kuzushi_core::run_artifacts::canonical_run_artifact_spec;
+use kuzushi_core::{run_artifact_path, WorkspaceTarget};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
@@ -107,7 +108,7 @@ fn load_run_findings(
     target: &Path,
     run_id: &str,
 ) -> Result<BTreeMap<String, RunsFindingSignature>> {
-    let path = run_dir(target, run_id).join("findings.json");
+    let path = run_artifact_path(target, run_id, run_findings_artifact_leaf());
     let body =
         fs::read_to_string(&path).with_context(|| format!("Could not read {}", path.display()))?;
     let value = serde_json::from_str::<Value>(&body)
@@ -116,6 +117,12 @@ fn load_run_findings(
         .into_iter()
         .filter_map(finding_signature)
         .collect())
+}
+
+fn run_findings_artifact_leaf() -> &'static str {
+    canonical_run_artifact_spec("findings.json")
+        .expect("findings artifact must be in shared canonical spec")
+        .leaf
 }
 
 fn finding_array(value: &Value) -> Vec<&Value> {

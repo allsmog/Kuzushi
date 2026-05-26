@@ -102,21 +102,25 @@ pub(crate) fn resolve_taint_codeql_db_path(
     target: &Path,
     workspace_root: Option<&Path>,
 ) -> Option<PathBuf> {
+    taint_codeql_roots(target, workspace_root)
+        .into_iter()
+        .flat_map(|root| taint_codeql_db_candidates(&root))
+        .find(|candidate| candidate.exists())
+}
+
+fn taint_codeql_roots(target: &Path, workspace_root: Option<&Path>) -> Vec<PathBuf> {
     let mut roots = vec![target.to_path_buf()];
     if let Some(workspace_root) = workspace_root {
         roots.push(workspace_root.to_path_buf());
     }
     roots.sort();
     roots.dedup();
-    for root in roots {
-        for candidate in [
-            root.join(".kuzushi").join("codeql-db"),
-            root.join(".codeql").join("db"),
-        ] {
-            if candidate.exists() {
-                return Some(candidate);
-            }
-        }
-    }
-    None
+    roots
+}
+
+fn taint_codeql_db_candidates(root: &Path) -> [PathBuf; 2] {
+    [
+        crate::workspace::workspace_codeql_db_path(root),
+        crate::workspace::legacy_codeql_db_path(root),
+    ]
 }

@@ -36,7 +36,7 @@ pub(crate) fn activity_plain_pane_rows(
     (0..row_count)
         .map(|index| ActivityPlainPaneRow {
             dag: dag_cell(dag_rows.get(index), dag_width),
-            separator: "│",
+            separator: " │ ",
             feed: feed_cell(feed_rows.get(index), feed_width),
         })
         .collect()
@@ -102,7 +102,7 @@ mod tests {
         let rows = activity_plain_pane_rows(&session, 12, 20, Instant::now());
 
         assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].separator, "│");
+        assert_eq!(rows[0].separator, " │ ");
         assert_eq!(rows[0].dag.text.chars().count(), 12);
         assert_eq!(rows[0].dag.tone, Some(ActivityDagRowTone::Done));
         assert_eq!(rows[0].feed.text.chars().count(), 20);

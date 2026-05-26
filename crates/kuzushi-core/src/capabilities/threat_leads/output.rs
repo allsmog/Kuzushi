@@ -3,8 +3,8 @@ use std::path::Path;
 
 pub(super) fn tool_output(target: &Path, report: Value) -> Value {
     let count = report["leadCount"].as_u64().unwrap_or_default();
-    let artifact = target.join(super::ARTIFACT_REL_PATH);
-    let summary = target.join(super::SUMMARY_REL_PATH);
+    let artifact = super::threat_leads_artifact_path(target);
+    let summary = super::threat_leads_summary_path(target);
     let output = format!(
         "threat-leads: {} lead{} for {}\n  Artifact: {}",
         count,

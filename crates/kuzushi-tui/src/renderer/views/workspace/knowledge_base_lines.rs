@@ -30,7 +30,7 @@ fn summary_row(row: &KnowledgeBaseSummaryRow) -> Line<'static> {
 fn append_known_artifacts(lines: &mut Vec<Line<'static>>, model: &KnowledgeBaseModel, area: Rect) {
     lines.push(divider("KNOWN ARTIFACTS", area.width));
     if model.artifact_rows.is_empty() {
-        lines.push(muted("No known Rust artifacts for this module."));
+        lines.push(muted("No artifacts indexed for this module yet."));
         return;
     }
     lines.push(table_header(

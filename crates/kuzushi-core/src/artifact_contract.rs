@@ -104,6 +104,12 @@ pub(crate) const TOOL_RESULT_ARTIFACTS: [CanonicalRunArtifactSpec; 1] =
         kind: "json",
     }];
 
+pub(crate) const TOOL_INPUT_ARTIFACTS: [CanonicalRunArtifactSpec; 1] = [CanonicalRunArtifactSpec {
+    leaf: "input.json",
+    label: "tool input",
+    kind: "json",
+}];
+
 pub(crate) fn canonical_run_artifact_spec(leaf: &str) -> Option<&'static CanonicalRunArtifactSpec> {
     CANONICAL_RUN_ARTIFACTS
         .iter()
@@ -116,6 +122,10 @@ pub(crate) fn optional_run_artifact_spec(leaf: &str) -> Option<&'static Canonica
 
 pub(crate) fn tool_result_artifact_spec(leaf: &str) -> Option<&'static CanonicalRunArtifactSpec> {
     TOOL_RESULT_ARTIFACTS.iter().find(|spec| spec.leaf == leaf)
+}
+
+pub(crate) fn tool_input_artifact_spec(leaf: &str) -> Option<&'static CanonicalRunArtifactSpec> {
+    TOOL_INPUT_ARTIFACTS.iter().find(|spec| spec.leaf == leaf)
 }
 
 pub(crate) fn first_nonempty_string<'a>(

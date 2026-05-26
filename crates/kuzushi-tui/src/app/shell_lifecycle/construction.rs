@@ -43,7 +43,7 @@ macro_rules! shell_app_initial_state {
             last_tool_cost_usd: None,
             selected_model_index: $selected_model_index,
             context_view: default_context_snapshot_view(
-                ($target).map(|target| target.root().join(".kuzushi/context-snapshot.json")),
+                ($target).map(|target| kuzushi_core::context_snapshot_path(target.root())),
             ),
             workspace_view: default_workspace_view($target),
             kb_view: KnowledgeBaseView {
@@ -124,10 +124,17 @@ impl ShellApp {
     }
 
     pub fn with_registry(
-        config: V2Config,
+        mut config: V2Config,
         target: Option<&WorkspaceTarget>,
         registry: ModuleRegistry,
     ) -> Self {
+        let ready_default = target
+            .is_some()
+            .then(|| ready_default_model_choice_index(config.model.as_deref()))
+            .flatten();
+        if let Some(choice) = ready_default.and_then(|index| model_choices().get(index)) {
+            config.model = Some(choice.id.to_string());
+        }
         let selected_model_index = preferred_model_choice_index(&config);
         let (option_store, option_store_error) = persistent_option_store(target);
         let session_budget_usd = config.operator.session_budget_usd;
@@ -141,6 +148,19 @@ impl ShellApp {
             session_budget_usd,
             trusted_workflow_auto_accept
         );
+        if let Some(choice) = model_choices().get(selected_model_index) {
+            app.session_thinking_level = Some(choice.thinking_level.to_string());
+        }
+        if let Some(choice) = ready_default.and_then(|index| model_choices().get(index)) {
+            app.log(
+                "model",
+                format!(
+                    "{} / {} ready; using as session default",
+                    model_choice_display_selector(choice),
+                    choice.thinking_level
+                ),
+            );
+        }
         app.log("system", "kuzushi shell");
         app.log("startup", app.startup_summary_line());
         if let Some(error) = option_store_error {
@@ -151,7 +171,7 @@ impl ShellApp {
         // copy in the transcript wasted one of only two visible log rows.
         app.log(
             "help",
-            "help for commands · Tab to complete · Ctrl+P/N history · ? <text> to ask · scan to start",
+            "type `scan` to begin · `help` for commands · `?<text>` to ask the agent",
         );
         if target.is_some() {
             app.refresh_findings(false);

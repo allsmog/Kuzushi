@@ -60,7 +60,7 @@ This is the golden path. It is the workflow new operators should try before
 touching advanced modules or deferred plugin-backed tools.
 
 ```bash
-# Check config, local state, scanners, and the pi-agent-core bridge.
+# Check config, local state, scanners, and the LangGraph bridge.
 kuzushi doctor --target .
 
 # Build the repository context snapshot used by shell and model-backed tools.
@@ -82,7 +82,7 @@ kuzushi pr-comment --target . > kuzushi-report.md
 Fresh native state is stored under `.kuzushi/v2/`; scan, shell, and headless
 run summaries remain under `.kuzushi/runs/<runId>/`.
 `kuzushi doctor --target .` runs a Rust preflight over config, writable state,
-findings DB openability, optional scanner binaries, and the pi-agent-core
+findings DB openability, optional scanner binaries, and the LangGraph
 bridge without printing credential values.
 
 To see the workflow without real provider credentials or LLM spend, run the
@@ -285,10 +285,11 @@ Subprocess-backed tools require the operator to install or configure binaries:
 | Deferred `recon:nmap` | `nmap`, or pass a binary override. |
 | Deferred `recon:subdomain`, deferred `recon:http-fingerprint`, online `ndiff:fetch-cve` | `curl`, unless using offline/local input. |
 
-pi-agent-core-backed tools require Node, `@earendil-works/pi-agent-core`,
-`@earendil-works/pi-ai`, a configured model, and provider credentials. A custom
-bridge should be supplied through `runtime.agent_bridge_command` in config;
-`KUZUSHI_AGENT_BRIDGE` is kept as a compatibility/bootstrap override.
+LangGraph-backed tools require Node, `@langchain/langgraph`,
+`@langchain/openai` or `@langchain/anthropic`, a configured model, and provider
+credentials. A custom bridge should be supplied through
+`runtime.langgraph_bridge_command` in config; `KUZUSHI_LANGGRAPH_BRIDGE` is the
+bootstrap override.
 
 Deferred plugin-backed wrappers also require exact tool invocation plus
 explicit plugin roots:
@@ -329,6 +330,7 @@ not silently succeed and they do not substitute a different model.
 | `.kuzushi/runs/<runId>/failures.json` | bounded failure handoff context, empty when no failure is recorded |
 | `.kuzushi/runs/<runId>/report.md` | generated or placeholder Markdown report; promoted from `reportMarkdown`/`report_markdown` and `data.reportMarkdown`/`data.report_markdown` output aliases |
 | `.kuzushi/runs/<runId>/artifacts.json` | canonical artifact manifest for the run |
+| `.kuzushi/runs/<runId>/input.json` | prepared tool input for direct tool runs |
 | `.kuzushi/runs/<runId>/result.json` | tool result envelope for direct tool runs |
 | `.kuzushi/runs/<runId>/report.sarif` | optional SARIF report promoted from `reportSarif`/`report_sarif` and `data.reportSarif`/`data.report_sarif` output aliases |
 | `.kuzushi/runs/<runId>/summary.json` | legacy compatibility mirror of `run.json` |

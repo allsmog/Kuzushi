@@ -236,6 +236,30 @@ mod tests {
     }
 
     #[test]
+    fn actor_prompt_attachments_use_shared_workspace_attachment_store() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(temp.path().join("operator-note.md"), "review reset flow\n").unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        crate::attachments::attach_source(&workspace, "offense-review", "operator-note.md")
+            .unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let options = CarliniInput::from_tool_input(&json!({}), &ctx, workspace.root()).unwrap();
+
+        let block = options.attachments_block.as_deref().unwrap();
+        assert!(block.contains("operator-note.md"));
+        assert!(block.contains("review reset flow"));
+        assert!(block.contains("moduleId=\"carlini-threat-hunt\""));
+        assert!(crate::workspace::workspace_attachments_path(workspace.root()).exists());
+    }
+
+    #[test]
     fn input_options_index_x_ray_artifacts_before_loading_kb_context() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("x-ray")).unwrap();

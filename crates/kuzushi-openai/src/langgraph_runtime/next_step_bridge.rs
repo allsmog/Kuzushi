@@ -5,11 +5,11 @@ use super::bridge_payloads::{BridgeTool, NextStepBridgeRequest, NextStepBridgeRe
 use super::bridge_process::{
     public_bridge_error, run_next_step_bridge, run_next_step_preflight_bridge,
 };
-use super::runtime_config::PiAgentCoreRuntime;
+use super::runtime_config::LangGraphRuntime;
 use crate::messages::build_messages_for_anthropic;
 
 pub(crate) fn next_step_blocking(
-    runtime: &PiAgentCoreRuntime,
+    runtime: &LangGraphRuntime,
     request: &AgentToolLoopRequest,
     history: &[LoopHistoryEntry],
 ) -> Result<AgentLoopStep> {
@@ -19,7 +19,7 @@ pub(crate) fn next_step_blocking(
 }
 
 pub(crate) fn preflight_tool_loop_blocking(
-    runtime: &PiAgentCoreRuntime,
+    runtime: &LangGraphRuntime,
     request: &AgentToolLoopRequest,
 ) -> Result<()> {
     let mut bridge_request = next_step_bridge_request(runtime, request, &[]);
@@ -29,7 +29,7 @@ pub(crate) fn preflight_tool_loop_blocking(
 }
 
 fn next_step_bridge_request(
-    runtime: &PiAgentCoreRuntime,
+    runtime: &LangGraphRuntime,
     request: &AgentToolLoopRequest,
     history: &[LoopHistoryEntry],
 ) -> NextStepBridgeRequest {
@@ -63,7 +63,7 @@ fn ensure_next_step_response_ok(response: NextStepBridgeResponse) -> Result<Agen
             .error
             .unwrap_or_else(|| "unknown error".to_string());
         anyhow::bail!(
-            "pi-agent-core next-step bridge failed: {}",
+            "LangGraph next-step bridge failed: {}",
             public_bridge_error(&message)
         );
     }
@@ -78,7 +78,7 @@ fn ensure_next_step_preflight_ok(response: NextStepBridgeResponse) -> Result<()>
         .error
         .unwrap_or_else(|| "unknown error".to_string());
     anyhow::bail!(
-        "pi-agent-core next-step preflight failed: {}",
+        "LangGraph next-step preflight failed: {}",
         public_bridge_error(&message)
     )
 }

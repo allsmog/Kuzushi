@@ -74,9 +74,9 @@ impl ShellApp {
         agent.abort_requested = true;
         self.log(
             "agent",
-            "abort requested; waiting for pi-agent-core to return (process kill not confirmed)",
+            "abort requested; waiting for LangGraph to return (process kill not confirmed)",
         );
-        self.set_paused_activity("agent", "abort requested; waiting for pi-agent-core");
+        self.set_paused_activity("agent", "abort requested; waiting for LangGraph");
         true
     }
 
@@ -87,9 +87,9 @@ impl ShellApp {
         self.plan_abort_requested = true;
         self.log(
             "plan",
-            "abort requested; waiting for pi-agent-core planner to return (process kill not confirmed)",
+            "abort requested; waiting for LangGraph planner to return (process kill not confirmed)",
         );
-        self.set_paused_activity("plan", "abort requested; waiting for pi-agent-core planner");
+        self.set_paused_activity("plan", "abort requested; waiting for LangGraph planner");
         true
     }
 
@@ -100,11 +100,11 @@ impl ShellApp {
         self.threat_abort_requested = true;
         self.log(
             "threats",
-            "abort requested; waiting for pi-agent-core threat worker to return (process kill not confirmed)",
+            "abort requested; waiting for LangGraph threat worker to return (process kill not confirmed)",
         );
         self.set_paused_activity(
             "threat model",
-            "abort requested; waiting for pi-agent-core threat worker",
+            "abort requested; waiting for LangGraph threat worker",
         );
         true
     }

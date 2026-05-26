@@ -7,7 +7,7 @@ use crossterm::execute;
 use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
 pub(crate) use handle_model_command::*;
 use kuzushi_core::{OptionScope, OptionTarget, RuntimeKind, V2Config};
-use kuzushi_openai::PiAgentCoreRuntime;
+use kuzushi_openai::LangGraphRuntime;
 pub(crate) use model_choices::*;
 pub(crate) use preferred_model_choice_index_for_state::*;
 use std::env;

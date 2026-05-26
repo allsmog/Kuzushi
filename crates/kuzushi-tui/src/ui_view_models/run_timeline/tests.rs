@@ -1,5 +1,10 @@
 use super::*;
+use crate::ui_view_models::ui_run_dir;
 use kuzushi_core::V2Config;
+
+fn test_run_dir(root: &Path, run_id: &str) -> PathBuf {
+    ui_run_dir(Some(root), run_id)
+}
 
 #[test]
 fn run_timeline_model_includes_active_scan_row() {
@@ -36,10 +41,10 @@ fn run_timeline_model_includes_active_scan_row() {
 #[test]
 fn run_timeline_model_filters_active_scan_from_past_runs() {
     let temp = tempfile::tempdir().unwrap();
-    let runs_root = temp.path().join(".kuzushi/runs");
-    std::fs::create_dir_all(runs_root.join("r-2026-05-06T14-31")).unwrap();
+    let run_dir = test_run_dir(temp.path(), "r-2026-05-06T14-31");
+    std::fs::create_dir_all(&run_dir).unwrap();
     std::fs::write(
-        runs_root.join("r-2026-05-06T14-31/run.json"),
+        run_dir.join(run_metadata_artifact_leaf()),
         r#"{"status":"completed","findings":18,"target":"~/work/acme"}"#,
     )
     .unwrap();
@@ -67,11 +72,11 @@ fn run_timeline_model_filters_active_scan_from_past_runs() {
 #[test]
 fn run_timeline_model_surfaces_malformed_run_metadata() {
     let temp = tempfile::tempdir().unwrap();
-    let runs_root = temp.path().join(".kuzushi/runs");
-    std::fs::create_dir_all(runs_root.join("r-bad-run-json")).unwrap();
-    std::fs::write(runs_root.join("r-bad-run-json/run.json"), "{not-json").unwrap();
+    let run_dir = test_run_dir(temp.path(), "r-bad-run-json");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    std::fs::write(run_dir.join(run_metadata_artifact_leaf()), "{not-json").unwrap();
     std::fs::write(
-        runs_root.join("r-bad-run-json/summary.json"),
+        run_dir.join(LEGACY_RUN_SUMMARY_FILE),
         r#"{"status":"completed","findings":18,"target":"legacy"}"#,
     )
     .unwrap();
@@ -85,19 +90,43 @@ fn run_timeline_model_surfaces_malformed_run_metadata() {
     assert_eq!(model.rows[0].cells[0], "r-bad-run-json");
     assert_eq!(model.rows[0].cells[1], "malformed");
     assert_eq!(model.rows[0].cells[2], "\u{2014}");
-    assert_eq!(model.rows[0].cells[3], "malformed run.json");
+    assert_eq!(
+        model.rows[0].cells[3],
+        format!("malformed {}", run_metadata_artifact_leaf())
+    );
     assert_eq!(model.rows[0].tone, PastRunStatus::Malformed);
 }
 
 #[test]
-fn run_timeline_model_surfaces_unreadable_run_metadata() {
+fn run_timeline_model_surfaces_non_object_run_metadata() {
     let temp = tempfile::tempdir().unwrap();
-    let runs_root = temp.path().join(".kuzushi/runs");
-    let run_dir = runs_root.join("r-unreadable-run-json");
+    let run_dir = test_run_dir(temp.path(), "r-array-run-json");
     std::fs::create_dir_all(&run_dir).unwrap();
-    std::fs::create_dir(run_dir.join("run.json")).unwrap();
+    std::fs::write(run_dir.join(run_metadata_artifact_leaf()), "[]").unwrap();
+
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(temp.path().to_path_buf());
+
+    let model = run_timeline_model(&app, 20);
+
+    assert_eq!(model.rows.len(), 1);
+    assert_eq!(model.rows[0].cells[0], "r-array-run-json");
+    assert_eq!(model.rows[0].cells[1], "malformed");
+    assert_eq!(
+        model.rows[0].cells[3],
+        format!("malformed {}", run_metadata_artifact_leaf())
+    );
+    assert_eq!(model.rows[0].tone, PastRunStatus::Malformed);
+}
+
+#[test]
+fn run_timeline_model_surfaces_non_file_run_metadata() {
+    let temp = tempfile::tempdir().unwrap();
+    let run_dir = test_run_dir(temp.path(), "r-unreadable-run-json");
+    std::fs::create_dir_all(&run_dir).unwrap();
+    std::fs::create_dir(run_dir.join(run_metadata_artifact_leaf())).unwrap();
     std::fs::write(
-        run_dir.join("summary.json"),
+        run_dir.join(LEGACY_RUN_SUMMARY_FILE),
         r#"{"status":"completed","findings":18,"target":"legacy"}"#,
     )
     .unwrap();
@@ -110,17 +139,19 @@ fn run_timeline_model_surfaces_unreadable_run_metadata() {
     assert_eq!(model.rows.len(), 1);
     assert_eq!(model.rows[0].cells[0], "r-unre…n-json");
     assert_eq!(model.rows[0].cells[1], "malformed");
-    assert_eq!(model.rows[0].cells[3], "malformed run.json");
+    assert_eq!(
+        model.rows[0].cells[3],
+        format!("{} is not a file", run_metadata_artifact_leaf())
+    );
     assert_eq!(model.rows[0].tone, PastRunStatus::Malformed);
 }
 
 #[test]
-fn run_timeline_model_surfaces_unreadable_summary_metadata() {
+fn run_timeline_model_surfaces_non_file_summary_metadata() {
     let temp = tempfile::tempdir().unwrap();
-    let runs_root = temp.path().join(".kuzushi/runs");
-    let run_dir = runs_root.join("r-unreadable-summary-json");
+    let run_dir = test_run_dir(temp.path(), "r-unreadable-summary-json");
     std::fs::create_dir_all(&run_dir).unwrap();
-    std::fs::create_dir(run_dir.join("summary.json")).unwrap();
+    std::fs::create_dir(run_dir.join(LEGACY_RUN_SUMMARY_FILE)).unwrap();
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.target = Some(temp.path().to_path_buf());
@@ -130,6 +161,9 @@ fn run_timeline_model_surfaces_unreadable_summary_metadata() {
     assert_eq!(model.rows.len(), 1);
     assert_eq!(model.rows[0].cells[0], "r-unre…y-json");
     assert_eq!(model.rows[0].cells[1], "malformed");
-    assert_eq!(model.rows[0].cells[3], "malformed summary.json");
+    assert_eq!(
+        model.rows[0].cells[3],
+        format!("{LEGACY_RUN_SUMMARY_FILE} is not a file")
+    );
     assert_eq!(model.rows[0].tone, PastRunStatus::Malformed);
 }

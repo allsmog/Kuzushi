@@ -25,7 +25,7 @@ pub(crate) fn parse_deterministic_build_input(
         slice: read_slice(input),
         stages: read_stages(input, flavor.tool_name())?,
         output_dir: read_string(input, &["outputDir", "output_dir"])
-            .unwrap_or_else(|| format!(".kuzushi/runs/{run_id}/{}", flavor.default_artifact_leaf())),
+            .unwrap_or_else(|| flavor.default_output_dir(&target, &run_id)),
         max_threats: read_usize(input, &["maxThreats", "max_threats"], 30, 1),
         preserve_user_edits: read_bool(input, &["preserveUserEdits", "preserve_user_edits"], true),
         target,

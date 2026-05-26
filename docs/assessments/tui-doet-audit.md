@@ -162,7 +162,7 @@ when grep finds zero `OPEN` markers in this file.
   `anthropic oauth   ! expired (auto-refresh on next call)`
   `github-copilot    — missing`.
 
-### D16 — `provider unconfigured` appears in CONFIG while model `#3 openai-oauth:gpt-5.5` is selected with `OAuth ready`. **[P1] [RESOLVED]**
+### D16 — `provider unconfigured` appears in CONFIG while model `#3 openai-oauth:gpt-5.4` is selected with `OAuth ready`. **[P1] [RESOLVED]**
 
 - Principle: Mapping / conceptual model.
 - The operator sees "provider unconfigured" while clearly a provider is

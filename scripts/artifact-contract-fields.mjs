@@ -1,4 +1,11 @@
-export const runArtifactManifestSchemaFields = ["runId", "run_id", "artifacts", "label", "name", "title", "path", "file", "filePath", "file_path", "reportPath", "report_path", "reportJsonPath", "report_json_path", "scopePath", "scope_path", "dir", "outputDir", "output_dir", "promptsDir", "prompts_dir", "kind", "type"];
+import { artifactAliasFields } from "./canonical-run-artifacts.mjs";
+
+export const runArtifactManifestSchemaFields = [
+  "runId",
+  "run_id",
+  "artifacts",
+  ...artifactAliasFields,
+];
 
 export const forbiddenFailureClaims = [
   "success claim without explicit verification",
@@ -99,13 +106,51 @@ export const runRecommendationsSchemaFields = [
 ];
 
 export const runEventsSchemaFields = [
-  "n", "kind", "status", "message", "atUnix", "at_unix", "tool",
-  "toolName", "tool_name", "artifact", "artifactPath", "artifact_path",
-  "name", "title", "filePath", "file_path", "reportJsonPath",
-  "report_json_path", "promptsDir", "prompts_dir", "type",
+  "n",
+  "kind",
+  "status",
+  "message",
+  "atUnix",
+  "at_unix",
+  "tool",
+  "toolName",
+  "tool_name",
+  "artifact",
+  "artifactPath",
+  "artifact_path",
+  ...artifactAliasFields,
 ];
 
-export const runFailuresSchemaFields = ["runId", "run_id", "status", "failures", "tool", "error", "agentThreadContext", "agent_thread_context", "failedStage", "failed_stage", "cause", "whatFailed", "what_failed", "artifactsAvailable", "artifacts_available", "missingArtifacts", "missing_artifacts", "allowedProofLevel", "allowed_proof_level", "nextFilesOrArtifactsToInspect", "next_files_or_artifacts_to_inspect", "recoveryOptions", "recovery_options", "fallbackPrompt", "fallback_prompt", "claimsForbidden", "claims_forbidden", "label", "name", "title", "path", "file", "filePath", "file_path", "reportJsonPath", "report_json_path", "promptsDir", "prompts_dir", "kind", "type"];
+export const runFailuresSchemaFields = [
+  "runId",
+  "run_id",
+  "status",
+  "failures",
+  "tool",
+  "error",
+  "agentThreadContext",
+  "agent_thread_context",
+  "failedStage",
+  "failed_stage",
+  "cause",
+  "whatFailed",
+  "what_failed",
+  "artifactsAvailable",
+  "artifacts_available",
+  "missingArtifacts",
+  "missing_artifacts",
+  "allowedProofLevel",
+  "allowed_proof_level",
+  "nextFilesOrArtifactsToInspect",
+  "next_files_or_artifacts_to_inspect",
+  "recoveryOptions",
+  "recovery_options",
+  "fallbackPrompt",
+  "fallback_prompt",
+  "claimsForbidden",
+  "claims_forbidden",
+  ...artifactAliasFields,
+];
 
 export const runFindingsSchemaFields = [
   "findings.json",
@@ -231,15 +276,7 @@ export const runSummarySchemaFields = [
   "latencyMs",
   "latency_ms",
   "artifacts",
-  "name",
-  "title",
-  "filePath",
-  "file_path",
-  "reportJsonPath",
-  "report_json_path",
-  "promptsDir",
-  "prompts_dir",
-  "type",
+  ...artifactAliasFields,
   "cliArgs",
   "cli_args",
   "scanArgs",

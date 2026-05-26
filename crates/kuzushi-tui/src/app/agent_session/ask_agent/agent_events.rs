@@ -24,7 +24,7 @@ impl ShellApp {
         if state.abort_requested {
             self.log(
                 "agent",
-                "pi-agent-core response arrived after abort request; ignored",
+                "LangGraph response arrived after abort request; ignored",
             );
             self.set_paused_activity("agent", "response ignored after abort request");
             return;
@@ -49,7 +49,7 @@ impl ShellApp {
         if state.abort_requested {
             self.log(
                 "agent",
-                format!("pi-agent-core ended after abort request: {error}"),
+                format!("LangGraph ended after abort request: {error}"),
             );
             self.set_paused_activity("agent", "worker ended after abort request");
             return;

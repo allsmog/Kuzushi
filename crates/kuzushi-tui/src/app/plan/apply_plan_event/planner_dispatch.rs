@@ -22,7 +22,7 @@ impl ShellApp {
         let Some(model) = self.config.model.clone() else {
             self.log(
                 "error",
-                "/plan requires an explicit model. Next: model, then choose a pi-agent-core provider/model",
+                "/plan requires an explicit model. Next: model, then choose a LangGraph provider/model",
             );
             return;
         };

@@ -2,8 +2,24 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
+import {
+  artifactKindAliasFields,
+  artifactLabelAliasFields,
+  artifactPathAliasFields,
+} from "./canonical-run-artifacts.mjs";
 
 const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
+
+const quotedArtifactPathAliasFields = artifactPathAliasFields.map(
+  (alias) => `"${alias}"`,
+);
+const quotedArtifactLabelAliasFields = artifactLabelAliasFields.map(
+  (alias) => `"${alias}"`,
+);
+const quotedArtifactKindAliasFields = artifactKindAliasFields.map(
+  (alias) => `"${alias}"`,
+);
+const canonicalArtifactAliasKeys = ['"label"', '"path"', '"kind"'];
 
 const checks = [
   {
@@ -16,13 +32,13 @@ const checks = [
       "CanonicalRunArtifactSpec",
       "CANONICAL_RUN_ARTIFACTS",
       "OPTIONAL_RUN_ARTIFACTS",
+      "TOOL_INPUT_ARTIFACTS",
       "TOOL_RESULT_ARTIFACTS",
       "first_nonempty_string",
       "first_nonempty_value_string",
-      '"file_path"',
-      '"report_path"',
-      '"output_dir"',
-      '"prompts_dir"',
+      ...quotedArtifactPathAliasFields,
+      ...quotedArtifactLabelAliasFields,
+      ...quotedArtifactKindAliasFields,
     ],
   },
   {
@@ -55,6 +71,14 @@ const checks = [
     ],
   },
   {
+    label: "report artifact summary covers canonical alias exclusions",
+    file: "crates/kuzushi-core/src/report/tests.rs",
+    tokens: [
+      "report_artifact_manifest_alias_counts_exclude_canonical_fields",
+      "aliases labels=1, paths=1, kinds=1",
+    ],
+  },
+  {
     label: "result normalization uses shared artifact aliases",
     file: "crates/kuzushi-core/src/module_result.rs",
     tokens: ["use crate::artifact_contract::ARTIFACT_PATH_KEYS;"],
@@ -80,6 +104,8 @@ const checks = [
       "ARTIFACT_LABEL_KEYS",
       "ARTIFACT_PATH_KEYS",
       "CANONICAL_RUN_ARTIFACTS",
+      "compatibility_alias_count",
+      ...canonicalArtifactAliasKeys,
     ],
   },
   {

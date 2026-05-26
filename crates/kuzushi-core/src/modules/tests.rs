@@ -10,7 +10,7 @@ mod tests {
         AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentToolLoopRequest,
         LoopHistoryEntry, TriageRequest,
     };
-    use crate::run_artifacts::{write_run_summary, RunSummary};
+    use crate::run_artifacts::{run_dir, write_run_summary, RunSummary};
     use crate::workspace::WorkspaceTarget;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -305,7 +305,7 @@ mod tests {
             }
             let is_plugin_adapter_request =
                 self.queries.lock().unwrap().last().is_some_and(|query| {
-                    query.system_prompt.contains("pi-agent-core adapter")
+                    query.system_prompt.contains("LangGraph adapter")
                         || query.system_prompt.contains("Shinsa compliance adapter")
                         || query.system_prompt.contains("PromptArmor adapter")
                         || query
@@ -358,7 +358,7 @@ mod tests {
             Ok(TriageOutcome {
                 verdict,
                 confidence: 0.87,
-                rationale: "mock pi-agent-core triage".to_string(),
+                rationale: "mock LangGraph triage".to_string(),
                 ..Default::default()
             })
         }
@@ -577,10 +577,10 @@ OUT
     }
 
     fn write_carlini_threat_model_fixture(dir: &Path) {
-        let state_dir = dir.join(".kuzushi");
-        fs::create_dir_all(&state_dir).unwrap();
+        let threat_model_path = crate::capabilities::persistent_threat_model_path(dir);
+        fs::create_dir_all(threat_model_path.parent().unwrap()).unwrap();
         fs::write(
-            state_dir.join("threat-model.json"),
+            threat_model_path,
             r#"{
   "version": "2.0",
   "dfd": {
@@ -2242,7 +2242,7 @@ OUT
     }
 
     #[test]
-    fn sast_scan_can_continue_into_pi_agent_core_triage() {
+    fn sast_scan_can_continue_into_langgraph_runtime_triage() {
         let temp = tempdir().unwrap();
         fs::write(
             temp.path().join("package.json"),
@@ -2491,7 +2491,7 @@ OUT
             .execute_tool("agentic-sast:scan", json!({}), &ctx)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("requires the pi-agent-core runtime"));
+        assert!(err.contains("requires the LangGraph runtime"));
 
         let runtime = MockRuntime::new();
         let err = registry
@@ -2585,7 +2585,7 @@ OUT
             .execute_tool("taint-iris:hunt", json!({}), &ctx)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("requires the pi-agent-core runtime"));
+        assert!(err.contains("requires the LangGraph runtime"));
 
         let runtime = MockRuntime::new();
         let err = registry
@@ -2757,7 +2757,7 @@ OUT
             .execute_tool("carlini-threat-hunt:run", json!({}), &ctx)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("requires the pi-agent-core runtime"));
+        assert!(err.contains("requires the LangGraph runtime"));
 
         let runtime = MockRuntime::new();
         let err = registry
@@ -3062,7 +3062,7 @@ OUT
             .execute_tool("systems-hunt:systems-hunt", json!({"maxFindings": 5}), &ctx)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("requires the pi-agent-core runtime"));
+        assert!(err.contains("requires the LangGraph runtime"));
 
         let runtime = MockRuntime::new();
         let err = registry
@@ -3331,15 +3331,13 @@ OUT
         assert!(runtime.requests().is_empty());
         assert!(runtime.queries().is_empty());
 
-        let scan_input = fs::read_to_string(
-            result
-                .pointer("/data/artifacts/dir")
-                .and_then(Value::as_str)
-                .map(Path::new)
-                .unwrap()
-                .join("scan-input.json"),
-        )
-        .unwrap();
+        let scan_input_path = result
+            .pointer("/data/artifacts/input")
+            .and_then(Value::as_str)
+            .map(Path::new)
+            .unwrap();
+        assert!(scan_input_path.ends_with(SAST_SCAN_INPUT_FILE));
+        let scan_input = fs::read_to_string(scan_input_path).unwrap();
         assert!(scan_input.contains("\"mode\": \"whitebox-static\""));
         assert!(!scan_input.contains("execution_confirmed"));
         assert!(scan_input.contains("needs_runtime_evidence"));
@@ -3893,7 +3891,8 @@ OUT
             .pointer("/artifacts/0/path")
             .and_then(Value::as_str)
             .expect("report artifact path");
-        assert!(report_path.ends_with(".kuzushi/runs/run-report-source/report.md"));
+        let expected_report_path = run_dir(workspace.root(), "run-report-source").join("report.md");
+        assert_eq!(Path::new(report_path), expected_report_path.as_path());
         assert!(Path::new(report_path).exists());
         assert!(result
             .get("warnings")
@@ -4015,7 +4014,7 @@ OUT
             .execute_tool("triage:run", json!({}), &ctx)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("requires the pi-agent-core runtime"));
+        assert!(err.contains("requires the LangGraph runtime"));
 
         let runtime = MockRuntime::new();
         let err = registry
@@ -4388,7 +4387,7 @@ OUT
             )
             .unwrap_err()
             .to_string();
-        assert!(err.contains("requires the pi-agent-core runtime"));
+        assert!(err.contains("requires the LangGraph runtime"));
 
         let runtime = MockRuntime::new();
         let err = registry
@@ -4556,7 +4555,7 @@ OUT
             )
             .unwrap_err()
             .to_string();
-        assert!(err.contains("requires the pi-agent-core runtime"));
+        assert!(err.contains("requires the LangGraph runtime"));
 
         let runtime = MockRuntime::new();
         let err = registry

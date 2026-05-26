@@ -22,7 +22,8 @@ pub(crate) fn build_registry() -> ToolRegistry {
 fn summary_descriptor() -> Tool {
     Tool {
         name: "x_ray:summary".to_string(),
-        description: "Return the contents of x-ray/x-ray.md (architecture summary in markdown).".to_string(),
+        description: "Return the contents of x-ray/x-ray.md (architecture summary in markdown)."
+            .to_string(),
         input_schema: json!({"type": "object", "properties": {}}),
     }
 }

@@ -2,7 +2,7 @@
 
 ## Changelog
 
-### v0.24.0-alpha.0 — Rust/pi-agent-core cutover
+### v0.24.0-alpha.0 — Rust/LangGraph cutover
 
 **Breaking:**
 
@@ -27,12 +27,12 @@
 
 - Native module/tool registry, npm-wrapper smoke coverage, and shell help tests
   verify that docs and help point at executable Rust surfaces.
-- Runtime-backed tools use pi-agent-core through the Rust bridge and still
+- Runtime-backed tools use LangGraph through the Rust bridge and still
   require an explicit configured model. Missing models, scanner binaries,
   bridge commands, or plugin roots fail explicitly.
 - `kuzushi doctor` is now the Rust preflight surface for config, `.kuzushi/v2`
   state writability, findings DB openability, optional scanner binaries,
-  pi-agent-core bridge readiness, and model/auth setup. It reports credential
+  LangGraph bridge readiness, and model/auth setup. It reports credential
   environment variable names only, never secret values.
 - `kuzushi --plain shell` plus `KUZUSHI_PLAIN=1`,
   `KUZUSHI_SCREEN_READER=1`, or `KUZUSHI_LOW_BANDWIDTH=1` force strict

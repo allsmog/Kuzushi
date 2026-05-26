@@ -1,5 +1,8 @@
 use super::compact_target_path;
 use crate::ShellApp;
+use std::sync::OnceLock;
+
+static CONTEXT_SNAPSHOT_RELATIVE_PATH: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ContextSnapshotModel {
@@ -47,7 +50,7 @@ pub(crate) fn context_snapshot_model(app: &ShellApp) -> ContextSnapshotModel {
             .snapshot_path
             .as_ref()
             .map(|path| compact_target_path(&path.display().to_string()))
-            .unwrap_or_else(|| ".kuzushi/context-snapshot.json".to_string()),
+            .unwrap_or_else(|| context_snapshot_relative_path().to_string()),
         snapshot_present,
         state,
         status: context_status(app, running.as_ref()),
@@ -69,7 +72,7 @@ impl PlainContextModel {
                 format!("state: {}", model.state),
                 format!("status: {}", model.status),
             ],
-            body_rows: plain_context_body_rows(model.state, model.details),
+            body_rows: plain_context_body_rows(model.state, &model.status, model.details),
             next_hint: "Next: context build, context status, context regen repo",
         }
     }
@@ -77,10 +80,11 @@ impl PlainContextModel {
 
 fn plain_context_body_rows(
     state: &'static str,
+    status: &str,
     details: Option<ContextSnapshotDetails>,
 ) -> Vec<String> {
     match (state, details) {
-        ("malformed", _) => malformed_context_rows(),
+        ("malformed", _) => malformed_context_rows(status),
         (_, Some(details)) => plain_context_detail_rows(details),
         (_, None) => missing_context_rows(),
     }
@@ -89,17 +93,41 @@ fn plain_context_body_rows(
 fn missing_context_rows() -> Vec<String> {
     vec![
         String::new(),
-        "No context snapshot exists yet. Next: context build writes .kuzushi/context-snapshot.json."
-            .to_string(),
+        format!(
+            "No context snapshot exists yet. Next: context build writes {}.",
+            context_snapshot_relative_path()
+        ),
     ]
 }
 
-fn malformed_context_rows() -> Vec<String> {
+fn malformed_context_rows(status: &str) -> Vec<String> {
+    if status.contains("(not a file)") {
+        return vec![
+            String::new(),
+            format!(
+                "Context snapshot path is not a file. Next: context build rewrites {}.",
+                context_snapshot_relative_path()
+            ),
+        ];
+    }
+
     vec![
         String::new(),
-        "Context snapshot is malformed JSON. Next: context build rewrites .kuzushi/context-snapshot.json."
-            .to_string(),
+        format!(
+            "Context snapshot is malformed JSON. Next: context build rewrites {}.",
+            context_snapshot_relative_path()
+        ),
     ]
+}
+
+pub(crate) fn context_snapshot_relative_path() -> &'static str {
+    CONTEXT_SNAPSHOT_RELATIVE_PATH
+        .get_or_init(|| {
+            kuzushi_core::context_snapshot_path("")
+                .display()
+                .to_string()
+        })
+        .as_str()
 }
 
 fn plain_context_detail_rows(details: ContextSnapshotDetails) -> Vec<String> {

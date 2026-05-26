@@ -1102,7 +1102,7 @@ pub(crate) struct TaintIrisNextArtifactLoad {
 }
 
 pub(crate) fn load_taint_iris_next_context(repo_root: &Path) -> TaintIrisNextArtifactLoad {
-    let path = repo_root.join(".kuzushi").join("context-snapshot.json");
+    let path = crate::context::context_snapshot_path(repo_root);
     match fs::read_to_string(&path) {
         Ok(raw) => match serde_json::from_str::<Value>(&raw) {
             Ok(value) => TaintIrisNextArtifactLoad {
@@ -1424,7 +1424,7 @@ mod catalog_regex_markers_for_discovery_tests {
 }
 
 pub(crate) fn load_taint_iris_next_threat_model(repo_root: &Path) -> TaintIrisNextArtifactLoad {
-    let path = repo_root.join(".kuzushi").join("threat-model.json");
+    let path = crate::capabilities::threat_model::persistent_threat_model_path(repo_root);
     match fs::read_to_string(&path) {
         Ok(raw) => match serde_json::from_str::<Value>(&raw) {
             Ok(value) => TaintIrisNextArtifactLoad {

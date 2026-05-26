@@ -8,7 +8,7 @@ pub(crate) fn run_deep_semantic_cwe_select(
     let target = resolve_target(input, ctx)?;
     let options = SystemsHuntInput::from_tool_input(input)?;
     let runtime = runtime.context(
-        "systems-hunt:deep-semantic-cwe-select requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
+        "systems-hunt:deep-semantic-cwe-select requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
     )?;
     let model = resolve_model(
         "systems-hunt:deep-semantic-cwe-select",
@@ -98,7 +98,7 @@ fn resolve_deep_semantic_execution<'a>(
 ) -> Result<DeepSemanticExecution<'a>> {
     let options = SystemsHuntInput::from_tool_input(input)?;
     let runtime = runtime.context(
-        "systems-hunt:deep-semantic-hunt requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
+        "systems-hunt:deep-semantic-hunt requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
     )?;
     let model = resolve_model("systems-hunt:deep-semantic-hunt", input, ctx, &options)?;
     Ok(DeepSemanticExecution {

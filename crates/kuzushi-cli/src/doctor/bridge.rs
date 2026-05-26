@@ -1,16 +1,16 @@
 use super::DoctorCheck;
-use kuzushi_openai::PiAgentCoreRuntime;
+use kuzushi_openai::LangGraphRuntime;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn check_bridge_command(config: &kuzushi_core::V2Config) -> DoctorCheck {
-    match PiAgentCoreRuntime::from_config(config, current_dir_for_doctor()) {
+    match LangGraphRuntime::from_config(config, current_dir_for_doctor()) {
         Ok(runtime) => bridge_command_check(runtime.command()),
         Err(error) => DoctorCheck::fail(
-            "pi-agent-core bridge",
+            "LangGraph bridge",
             error.to_string(),
-            "Set runtime.agent_bridge_command to an executable command.",
+            "Set runtime.langgraph_bridge_command to an executable command.",
         ),
     }
 }
@@ -18,18 +18,18 @@ pub(crate) fn check_bridge_command(config: &kuzushi_core::V2Config) -> DoctorChe
 fn bridge_command_check(command: &[String]) -> DoctorCheck {
     if command.is_empty() {
         return DoctorCheck::fail(
-            "pi-agent-core bridge",
+            "LangGraph bridge",
             "bridge command is empty",
-            "Set runtime.agent_bridge_command to an executable command.",
+            "Set runtime.langgraph_bridge_command to an executable command.",
         );
     }
     let cwd = current_dir_for_doctor();
     let executable = resolve_executable(&command[0], env::var_os("PATH").as_deref(), &cwd);
     let Some(executable) = executable else {
         return DoctorCheck::fail(
-            "pi-agent-core bridge",
+            "LangGraph bridge",
             format!("bridge executable {:?} was not found", command[0]),
-            "Install Node.js or set runtime.agent_bridge_command to an executable bridge.",
+            "Install Node.js or set runtime.langgraph_bridge_command to an executable bridge.",
         );
     };
 
@@ -38,7 +38,7 @@ fn bridge_command_check(command: &[String]) -> DoctorCheck {
     }
 
     DoctorCheck::ok(
-        "pi-agent-core bridge",
+        "LangGraph bridge",
         format!("{} via {}", command.join(" "), executable.display()),
     )
 }
@@ -46,13 +46,13 @@ fn bridge_command_check(command: &[String]) -> DoctorCheck {
 fn bridge_script_failure(command: &[String], cwd: &Path) -> Option<DoctorCheck> {
     let script = command
         .get(1)
-        .filter(|arg| arg.ends_with("pi-agent-core-bridge.mjs"))?;
+        .filter(|arg| arg.ends_with("langgraph-bridge.mjs"))?;
     let script_path = resolve_command_path(script, cwd);
     (!script_path.exists()).then(|| {
         DoctorCheck::fail(
-            "pi-agent-core bridge",
+            "LangGraph bridge",
             format!("bridge script {} was not found", script_path.display()),
-            "Run from a source checkout, build the npm package, or set runtime.agent_bridge_command.",
+            "Run from a source checkout, build the npm package, or set runtime.langgraph_bridge_command.",
         )
     })
 }

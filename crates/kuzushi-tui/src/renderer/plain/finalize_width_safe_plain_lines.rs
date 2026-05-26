@@ -4,13 +4,14 @@ pub(crate) fn finalize_width_safe_plain_lines(lines: Vec<String>, width: usize) 
     let mut out = Vec::new();
     for line in lines {
         let line = sanitize_for_plain_output(&line);
-        if line.chars().count() <= width {
-            out.push(line);
-        } else if should_truncate_plain_line(&line) {
-            out.push(sanitize_for_plain_output(&fit(&line, width)));
+        let trimmed = line.trim_end().to_string();
+        if trimmed.chars().count() <= width {
+            out.push(trimmed);
+        } else if should_truncate_plain_line(&trimmed) {
+            out.push(sanitize_for_plain_output(&fit(&trimmed, width)));
         } else {
             out.extend(
-                wrap_text(&line, width)
+                wrap_text(&trimmed, width)
                     .into_iter()
                     .map(|line| sanitize_for_plain_output(&line)),
             );
@@ -38,14 +39,21 @@ pub(crate) fn should_truncate_plain_line(line: &str) -> bool {
 }
 
 pub(crate) fn sanitize_for_plain_output(value: &str) -> String {
-    value
-        .chars()
-        .map(|ch| match ch {
-            '\u{2500}'..='\u{257f}' => '-',
-            '\u{00b7}' => '|',
-            _ => ch,
-        })
-        .collect()
+    value.chars().map(box_drawing_to_ascii).collect()
+}
+
+fn box_drawing_to_ascii(ch: char) -> char {
+    match ch {
+        // Horizontal lines (single and double weight): keep as `-`
+        '\u{2500}' | '\u{2501}' | '\u{2504}' | '\u{2505}' | '\u{2508}' | '\u{2509}'
+        | '\u{254c}' | '\u{254d}' | '\u{2550}' => '-',
+        // Vertical lines (single and double weight)
+        '\u{2502}' | '\u{2503}' | '\u{2506}' | '\u{2507}' | '\u{250a}' | '\u{250b}'
+        | '\u{254e}' | '\u{254f}' | '\u{2551}' => '|',
+        // Anything else in the box-drawing block: corners, joins, arrows. Use `+`.
+        '\u{2500}'..='\u{257f}' => '+',
+        _ => ch,
+    }
 }
 
 pub(crate) fn trim_plain_lines(mut lines: Vec<String>) -> Vec<String> {

@@ -100,12 +100,12 @@ fn worker_runtime(
     config: &V2Config,
     cwd: &PathBuf,
     thinking_level: Option<String>,
-) -> Result<PiAgentCoreRuntime> {
-    Ok(PiAgentCoreRuntime::from_config(config, cwd)?.with_thinking_level(thinking_level))
+) -> Result<LangGraphRuntime> {
+    Ok(LangGraphRuntime::from_config(config, cwd)?.with_thinking_level(thinking_level))
 }
 
 fn worker_response_text(
-    runtime: PiAgentCoreRuntime,
+    runtime: LangGraphRuntime,
     model: String,
     cwd: PathBuf,
     system_prompt: String,

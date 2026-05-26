@@ -307,6 +307,7 @@ fn patch_json(post_processing: &SastPostProcessing) -> Value {
 fn sast_artifacts_json(artifacts: &SastRunArtifacts, paths: WhiteboxArtifactPaths) -> Value {
     json!({
         "dir": artifacts.dir.display().to_string(),
+        "input": artifacts.scan_input.display().to_string(),
         "summary": artifacts.sast_summary.display().to_string(),
         "staticNarratives": paths.static_narratives,
         "staticVariants": paths.static_variants,

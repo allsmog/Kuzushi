@@ -175,7 +175,7 @@ struct RegistryScanInvocation {
     store: FindingStore,
     input: serde_json::Value,
     config: V2Config,
-    runtime: Option<PiAgentCoreRuntime>,
+    runtime: Option<LangGraphRuntime>,
 }
 
 impl RegistryScanInvocation {
@@ -249,12 +249,12 @@ fn registry_scan_runtime(
     input: &serde_json::Value,
     config: &V2Config,
     thinking_level: Option<String>,
-) -> Result<Option<PiAgentCoreRuntime>> {
+) -> Result<Option<LangGraphRuntime>> {
     if !kuzushi_core::modules::wants_sast_runtime(input) {
         return Ok(None);
     }
     Ok(Some(
-        PiAgentCoreRuntime::from_config(config, scan_worker_runtime_cwd())?
+        LangGraphRuntime::from_config(config, scan_worker_runtime_cwd())?
             .with_thinking_level(thinking_level),
     ))
 }

@@ -27,8 +27,14 @@ pub struct TmuxSession {
 /// inside it so artifact-state probes recognize it as `Cached`.
 #[derive(Debug, Clone)]
 pub enum ArtifactSeed {
-    File { relative: String, body: String },
-    Dir { relative: String, placeholder: String },
+    File {
+        relative: String,
+        body: String,
+    },
+    Dir {
+        relative: String,
+        placeholder: String,
+    },
 }
 
 impl TmuxSession {
@@ -104,10 +110,7 @@ impl TmuxSession {
                 .status()
                 .context("invoking tmux send-keys")?;
             if !status.success() {
-                bail!(
-                    "tmux send-keys '{key}' returned status {:?}",
-                    status.code()
-                );
+                bail!("tmux send-keys '{key}' returned status {:?}", status.code());
             }
         }
         Ok(())
@@ -211,7 +214,10 @@ fn apply_artifact_seeds(target: &std::path::Path, seeds: &[ArtifactSeed]) -> Res
                 std::fs::write(&path, body)
                     .with_context(|| format!("seeding file {}", path.display()))?;
             }
-            ArtifactSeed::Dir { relative, placeholder } => {
+            ArtifactSeed::Dir {
+                relative,
+                placeholder,
+            } => {
                 let dir = target.join(relative);
                 std::fs::create_dir_all(&dir)
                     .with_context(|| format!("seeding directory {}", dir.display()))?;

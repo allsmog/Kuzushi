@@ -20,9 +20,15 @@ pub(in crate::scan) fn path_codeql_binary() -> Option<String> {
 
 pub(in crate::scan) fn cached_codeql_binary() -> Option<String> {
     dirs::home_dir()
-        .map(|home| home.join(".kuzushi").join("bin").join(codeql_binary_name()))
+        .map(|home| cached_codeql_binary_path(&home))
         .filter(|path| path.exists())
         .map(|path| path.display().to_string())
+}
+
+pub(in crate::scan) fn cached_codeql_binary_path(home: &Path) -> PathBuf {
+    crate::workspace::workspace_state_root(home)
+        .join("bin")
+        .join(codeql_binary_name())
 }
 
 pub(in crate::scan) fn codeql_binary_name() -> &'static str {

@@ -40,7 +40,7 @@ pub struct RuntimeConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub agent_bridge_command: Option<Vec<String>>,
+    pub langgraph_bridge_command: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -50,10 +50,10 @@ pub struct RuntimeConfig {
 impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
-            kind: RuntimeKind::PiAgentCore,
+            kind: RuntimeKind::LangGraph,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
-            agent_bridge_command: None,
+            langgraph_bridge_command: None,
             thinking_level: None,
             anthropic_oauth: None,
         }
@@ -74,10 +74,16 @@ pub struct AnthropicOauthConfig {
     pub allow_env_token: bool,
 }
 
+pub const OAUTH_CREDENTIALS_FILE: &str = "oauth-credentials.json";
+
+pub fn default_oauth_credentials_path(home_dir: impl AsRef<Path>) -> PathBuf {
+    crate::workspace::workspace_state_root(home_dir).join(OAUTH_CREDENTIALS_FILE)
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum RuntimeKind {
-    PiAgentCore,
+    LangGraph,
 }
 
 #[derive(Debug, Clone)]
@@ -96,29 +102,23 @@ impl ConfigPaths {
     }
 
     pub fn global_config_path(&self) -> PathBuf {
-        self.home_dir
-            .join(".kuzushi")
-            .join("v2")
-            .join("config.toml")
+        crate::workspace::workspace_config_path(&self.home_dir)
     }
 
     pub fn global_options_path(&self) -> PathBuf {
-        self.home_dir
-            .join(".kuzushi")
-            .join("v2")
-            .join("options.json")
+        crate::workspace::workspace_options_path(&self.home_dir)
     }
 
     pub fn project_config_path(&self) -> Option<PathBuf> {
         self.target_dir
             .as_ref()
-            .map(|target| target.join(".kuzushi").join("v2").join("config.toml"))
+            .map(crate::workspace::workspace_config_path)
     }
 
     pub fn project_options_path(&self) -> Option<PathBuf> {
         self.target_dir
             .as_ref()
-            .map(|target| target.join(".kuzushi").join("v2").join("options.json"))
+            .map(crate::workspace::workspace_options_path)
     }
 }
 

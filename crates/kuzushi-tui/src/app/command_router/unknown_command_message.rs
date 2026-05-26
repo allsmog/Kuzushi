@@ -5,37 +5,57 @@ pub(crate) fn unknown_command_message(raw: &str) -> String {
     let normalized = trimmed.strip_prefix('/').unwrap_or(trimmed);
     let verb = normalized.split_whitespace().next().unwrap_or_default();
 
-    if let Some(message) = missing_argument_message(verb) {
-        return message;
-    }
-    if let Some(message) = missing_option_message(verb) {
-        return message;
-    }
+    known_unknown_command_message(normalized, verb)
+        .unwrap_or_else(|| fallback_unknown_command_message(trimmed))
+}
 
+fn known_unknown_command_message(normalized: &str, verb: &str) -> Option<String> {
+    missing_argument_message(verb)
+        .or_else(|| missing_option_message(verb))
+        .or_else(|| legacy_auth_selector_message(normalized))
+        .or_else(|| cli_only_command_message(verb))
+        .or_else(|| findings_alias_typo_message(normalized, verb))
+}
+
+fn cli_only_command_message(verb: &str) -> Option<String> {
     // Verbs that only exist as top-level CLI subcommands. The shell rejects
     // them, but the user is probably asking for the diagnostic, so point at
     // the right place rather than punting them into the agent flow.
-    if let Some(cli_hint) = cli_only_verb_hint(verb) {
-        return format!("{trimmed:?} is a CLI subcommand, not an in-shell verb. Next: {cli_hint}");
-    }
+    cli_only_verb_hint(verb).map(|cli_hint| {
+        format!("{verb:?} is a CLI subcommand, not an in-shell verb. Next: {cli_hint}")
+    })
+}
 
+fn findings_alias_typo_message(normalized: &str, verb: &str) -> Option<String> {
     // `findings F-0001` / `finding F-0001` are common typos for `open F-0001`.
     // The user clearly knows what alias they want; they just picked the
     // wrong verb. Point them at the right one instead of punting to /ask.
-    if matches!(verb, "findings" | "finding") {
-        let rest = normalized
-            .split_whitespace()
-            .nth(1)
-            .filter(|arg| arg.to_ascii_uppercase().starts_with("F-"));
-        if let Some(alias) = rest {
-            return format!(
+    matches!(verb, "findings" | "finding")
+        .then(|| normalized.split_whitespace().nth(1))
+        .flatten()
+        .filter(|arg| arg.to_ascii_uppercase().starts_with("F-"))
+        .map(|alias| {
+            format!(
                 "{verb:?} doesn't take arguments. Next: `open {}` to view the finding.",
                 alias.to_ascii_uppercase()
-            );
-        }
-    }
+            )
+        })
+}
 
-    fallback_unknown_command_message(trimmed)
+fn legacy_auth_selector_message(normalized: &str) -> Option<String> {
+    if normalized == "auth legacy-openai-oauth" {
+        return Some(public_openai_oauth_login_message());
+    }
+    let mut parts = normalized.split_whitespace();
+    let first = parts.next()?;
+    let second = parts.next()?;
+    let legacy_selector = matches!(second, "codex" | "openai-codex")
+        || matches!(parts.next(), Some("codex" | "openai-codex"));
+    (first == "auth" && legacy_selector).then(public_openai_oauth_login_message)
+}
+
+fn public_openai_oauth_login_message() -> String {
+    "OpenAI OAuth login uses `auth login openai`. Next: auth login openai browser or auth login openai headless".to_string()
 }
 
 fn missing_argument_message(verb: &str) -> Option<String> {

@@ -95,7 +95,7 @@ fn runtime_env_row(app: &ShellApp) -> AuthProviderRow {
     let api_key_env = app.config.runtime.api_key_env.as_str();
     let env_set = std::env::var_os(api_key_env).is_some();
     auth_provider_row(
-        "pi-agent-core",
+        "LangGraph",
         connected_or_missing(env_set),
         runtime_env_detail(api_key_env, env_set),
     )

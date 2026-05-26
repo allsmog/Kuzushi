@@ -287,7 +287,7 @@ pub(crate) fn structured_json_value(
     }
     parse_json_value_from_agent_text(&response.text).with_context(|| {
         format!(
-            "{} expected pi-agent-core to return JSON for `{}`",
+            "{} expected LangGraph to return JSON for `{}`",
             contract.tool_name, contract.schema_name
         )
     })

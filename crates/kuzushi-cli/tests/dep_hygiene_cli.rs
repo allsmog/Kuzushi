@@ -16,8 +16,8 @@ fn kuzushi_command(home: &std::path::Path) -> Command {
         .env_remove("KUZUSHI_V2_API_KEY_ENV")
         .env_remove("KUZUSHI_BASE_URL")
         .env_remove("KUZUSHI_V2_BASE_URL")
-        .env_remove("KUZUSHI_AGENT_BRIDGE")
-        .env_remove("KUZUSHI_V2_AGENT_BRIDGE");
+        .env_remove("KUZUSHI_LANGGRAPH_BRIDGE")
+        .env_remove("KUZUSHI_V2_LANGGRAPH_BRIDGE");
     command
 }
 
@@ -677,10 +677,10 @@ fn write_x_ray_fixture(repo: &std::path::Path) {
 }
 
 fn write_carlini_threat_model_fixture(repo: &std::path::Path) {
-    let state_dir = repo.join(".kuzushi");
-    std::fs::create_dir_all(&state_dir).unwrap();
+    let threat_model_path = kuzushi_core::capabilities::persistent_threat_model_path(repo);
+    std::fs::create_dir_all(threat_model_path.parent().unwrap()).unwrap();
     std::fs::write(
-        state_dir.join("threat-model.json"),
+        threat_model_path,
         r#"{"version":"2.0","dfd":{"nodes":[{"id":"actor-user","type":"external-entity","name":"Authenticated User","description":"External authenticated user","trustZone":"external"},{"id":"web","type":"process","name":"Web","description":"Web app","trustZone":"internal"}],"flows":[{"id":"flow-1","sourceId":"actor-user","targetId":"web","description":"profile request","trustBoundaryIds":["tb-1"],"protocol":"https"}],"trustBoundaries":[{"id":"tb-1","name":"edge","innerZone":"internal","outerZone":"external","crossingFlowIds":["flow-1"]}]},"threats":[{"id":"T-001","actorIds":["actor-user"],"flowIds":["flow-1"],"targetElementIds":["web"],"category":"tampering","title":"Profile HTML injection","description":"query reaches HTML","attackVector":"crafted profile query","impact":"high","likelihood":"medium","affectedFiles":[{"filePath":"src/app.ts","startLine":9}]}],"summary":{"total":1,"bySeverity":{"high":1},"byCategory":{"tampering":1}}}"#,
     )
     .unwrap();
@@ -974,7 +974,7 @@ fn run_context_build_writes_compatible_snapshot_artifact() {
         Some("enrichment")
     );
 
-    let snapshot_path = repo.join(".kuzushi/context-snapshot.json");
+    let snapshot_path = kuzushi_core::context::context_snapshot_path(&repo);
     let snapshot: Value = serde_json::from_slice(&std::fs::read(snapshot_path).unwrap()).unwrap();
     assert_eq!(
         snapshot
@@ -1212,7 +1212,7 @@ fn run_sast_scan_reaches_scan_runner_executor_and_persists() {
 
 #[cfg(unix)]
 #[test]
-fn run_agentic_sast_scan_reaches_pi_agent_core_bridge_and_persists() {
+fn run_agentic_sast_scan_reaches_langgraph_runtime_bridge_and_persists() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -1223,7 +1223,7 @@ fn run_agentic_sast_scan_reaches_pi_agent_core_bridge_and_persists() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
@@ -1272,7 +1272,7 @@ fn scan_tasks_agentic_reaches_same_agentic_executor() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("scan")
         .arg(&repo)
         .arg("--tasks")
@@ -1298,7 +1298,7 @@ fn scan_tasks_agentic_reaches_same_agentic_executor() {
 
 #[cfg(unix)]
 #[test]
-fn run_variant_lift_pattern_reaches_pi_agent_core_bridge() {
+fn run_variant_lift_pattern_reaches_langgraph_runtime_bridge() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -1310,7 +1310,7 @@ fn run_variant_lift_pattern_reaches_pi_agent_core_bridge() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
@@ -1335,7 +1335,7 @@ fn run_variant_lift_pattern_reaches_pi_agent_core_bridge() {
 
 #[cfg(unix)]
 #[test]
-fn run_variant_hunt_reaches_pi_agent_core_bridge_and_persists() {
+fn run_variant_hunt_reaches_langgraph_runtime_bridge_and_persists() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -1348,7 +1348,7 @@ fn run_variant_hunt_reaches_pi_agent_core_bridge_and_persists() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
@@ -1390,7 +1390,7 @@ fn run_variant_hunt_reaches_pi_agent_core_bridge_and_persists() {
 
 #[cfg(unix)]
 #[test]
-fn run_ndiff_extract_fix_pattern_reaches_pi_agent_core_bridge() {
+fn run_ndiff_extract_fix_pattern_reaches_langgraph_runtime_bridge() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -1400,7 +1400,7 @@ fn run_ndiff_extract_fix_pattern_reaches_pi_agent_core_bridge() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
@@ -1426,7 +1426,7 @@ fn run_ndiff_extract_fix_pattern_reaches_pi_agent_core_bridge() {
 
 #[cfg(unix)]
 #[test]
-fn run_ndiff_hunt_variants_reaches_pi_agent_core_bridge_and_persists() {
+fn run_ndiff_hunt_variants_reaches_langgraph_runtime_bridge_and_persists() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -1437,7 +1437,7 @@ fn run_ndiff_hunt_variants_reaches_pi_agent_core_bridge_and_persists() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
@@ -1565,7 +1565,7 @@ fn run_ndiff_hunt_without_model_fails_without_silent_fallback() {
 
 #[cfg(unix)]
 #[test]
-fn run_taint_iris_hunt_reaches_pi_agent_core_bridge_and_persists() {
+fn run_taint_iris_hunt_reaches_langgraph_runtime_bridge_and_persists() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -1576,7 +1576,7 @@ fn run_taint_iris_hunt_reaches_pi_agent_core_bridge_and_persists() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
@@ -1629,7 +1629,7 @@ fn scan_tasks_taint_iris_reaches_same_taint_iris_executor() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("scan")
         .arg(&repo)
         .arg("--tasks")
@@ -1655,7 +1655,7 @@ fn scan_tasks_taint_iris_reaches_same_taint_iris_executor() {
 
 #[cfg(unix)]
 #[test]
-fn run_taint_iris_next_hunt_reaches_pi_agent_core_bridge_and_persists() {
+fn run_taint_iris_next_hunt_reaches_langgraph_runtime_bridge_and_persists() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -1675,7 +1675,7 @@ fn run_taint_iris_next_hunt_reaches_pi_agent_core_bridge_and_persists() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
@@ -1741,7 +1741,7 @@ fn scan_tasks_taint_iris_next_reaches_same_taint_iris_next_executor() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("scan")
         .arg(&repo)
         .arg("--tasks")
@@ -1767,7 +1767,7 @@ fn scan_tasks_taint_iris_next_reaches_same_taint_iris_next_executor() {
 
 #[cfg(unix)]
 #[test]
-fn run_carlini_threat_hunt_reaches_pi_agent_core_bridge_and_persists() {
+fn run_carlini_threat_hunt_reaches_langgraph_runtime_bridge_and_persists() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -1783,7 +1783,7 @@ fn run_carlini_threat_hunt_reaches_pi_agent_core_bridge_and_persists() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
@@ -1842,7 +1842,7 @@ fn scan_tasks_carlini_reaches_same_carlini_executor() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("scan")
         .arg(&repo)
         .arg("--tasks")
@@ -1868,7 +1868,7 @@ fn scan_tasks_carlini_reaches_same_carlini_executor() {
 
 #[cfg(unix)]
 #[test]
-fn run_systems_hunt_reaches_pi_agent_core_bridge_and_persists() {
+fn run_systems_hunt_reaches_langgraph_runtime_bridge_and_persists() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -1878,7 +1878,7 @@ fn run_systems_hunt_reaches_pi_agent_core_bridge_and_persists() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
@@ -1926,7 +1926,7 @@ fn scan_tasks_systems_hunt_reaches_same_executor() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("scan")
         .arg(&repo)
         .arg("--tasks")
@@ -2000,7 +2000,7 @@ fn run_agentic_sast_without_model_fails_without_silent_fallback() {
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("requires an explicit model")
             || String::from_utf8_lossy(&output.stderr)
-                .contains("requires the pi-agent-core runtime"),
+                .contains("requires the langgraph runtime"),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -2055,7 +2055,7 @@ fn run_taint_iris_without_model_fails_without_silent_fallback() {
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("requires an explicit model")
             || String::from_utf8_lossy(&output.stderr)
-                .contains("requires the pi-agent-core runtime"),
+                .contains("requires the langgraph runtime"),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -2084,7 +2084,7 @@ fn run_taint_iris_next_without_model_fails_without_silent_fallback() {
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("requires an explicit model")
             || String::from_utf8_lossy(&output.stderr)
-                .contains("requires the pi-agent-core runtime"),
+                .contains("requires the langgraph runtime"),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -2104,7 +2104,7 @@ fn run_sast_scan_verify_autopatch_writes_run_artifacts() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
@@ -2639,7 +2639,7 @@ fn findings_command_uses_same_filter_core_as_run_tool() {
 
 #[cfg(unix)]
 #[test]
-fn run_triage_reaches_pi_agent_core_bridge_and_persists() {
+fn run_triage_reaches_langgraph_runtime_bridge_and_persists() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -2650,7 +2650,7 @@ fn run_triage_reaches_pi_agent_core_bridge_and_persists() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
@@ -2718,7 +2718,7 @@ fn run_triage_without_model_fails_without_silent_fallback() {
 
 #[cfg(unix)]
 #[test]
-fn run_verify_finding_reaches_pi_agent_core_bridge() {
+fn run_verify_finding_reaches_langgraph_runtime_bridge() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -2729,7 +2729,7 @@ fn run_verify_finding_reaches_pi_agent_core_bridge() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
@@ -2791,7 +2791,7 @@ fn run_verify_finding_without_model_fails_without_silent_fallback() {
 
 #[cfg(unix)]
 #[test]
-fn run_patch_finding_reaches_pi_agent_core_bridge_and_persists() {
+fn run_patch_finding_reaches_langgraph_runtime_bridge_and_persists() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -2804,7 +2804,7 @@ fn run_patch_finding_reaches_pi_agent_core_bridge_and_persists() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
@@ -2874,7 +2874,7 @@ fn run_patch_finding_without_model_fails_without_silent_fallback() {
 
 #[cfg(unix)]
 #[test]
-fn run_threat_model_build_reaches_pi_agent_core_bridge_and_persists() {
+fn run_threat_model_build_reaches_langgraph_runtime_bridge_and_persists() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -2889,7 +2889,7 @@ fn run_threat_model_build_reaches_pi_agent_core_bridge_and_persists() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
@@ -2917,7 +2917,7 @@ fn run_threat_model_build_reaches_pi_agent_core_bridge_and_persists() {
             .and_then(Value::as_str),
         Some("T-001")
     );
-    assert!(repo.join(".kuzushi/threat-model.json").exists());
+    assert!(kuzushi_core::capabilities::persistent_threat_model_path(&repo).exists());
     assert!(repo
         .join(".kuzushi/tm/normalized-threat-model.json")
         .exists());
@@ -3040,7 +3040,7 @@ fn run_x_ray_read_loads_artifacts_without_runtime() {
 
 #[cfg(unix)]
 #[test]
-fn run_x_ray_run_reaches_pi_agent_core_bridge_and_writes_artifacts() {
+fn run_x_ray_run_reaches_langgraph_runtime_bridge_and_writes_artifacts() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
@@ -3051,7 +3051,7 @@ fn run_x_ray_run_reaches_pi_agent_core_bridge_and_writes_artifacts() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
@@ -3069,7 +3069,7 @@ fn run_x_ray_run_reaches_pi_agent_core_bridge_and_writes_artifacts() {
     assert_eq!(body.get("ok").and_then(Value::as_bool), Some(true));
     assert_eq!(
         body.pointer("/data/runtimeMode").and_then(Value::as_str),
-        Some("pi-agent-core")
+        Some("langgraph")
     );
     assert_eq!(
         body.pointer("/data/verdict/tier").and_then(Value::as_str),
@@ -3116,7 +3116,7 @@ fn scan_triage_uses_same_registry_executor_path() {
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
-        .env("KUZUSHI_AGENT_BRIDGE", bridge.display().to_string())
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("scan")
         .arg(&repo)
         .arg("--tasks")

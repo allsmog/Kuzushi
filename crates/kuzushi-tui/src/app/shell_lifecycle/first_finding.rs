@@ -22,10 +22,20 @@ impl ShellApp {
             .as_ref()
             .map(|path| path.display().to_string())
             .unwrap_or_else(|| "none".to_string());
+        let module_count = self.registry.modules().count();
+        let tool_count = self.registry.tools().count();
         format!(
-            "ready: {} module(s), {} tool(s), target {target}",
-            self.registry.modules().count(),
-            self.registry.tools().count()
+            "ready: {module_count} {}, {tool_count} {}, target {target}",
+            pluralize(module_count, "module", "modules"),
+            pluralize(tool_count, "tool", "tools"),
         )
+    }
+}
+
+fn pluralize(count: usize, singular: &'static str, plural: &'static str) -> &'static str {
+    if count == 1 {
+        singular
+    } else {
+        plural
     }
 }

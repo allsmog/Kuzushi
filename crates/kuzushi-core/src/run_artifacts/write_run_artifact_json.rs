@@ -1,5 +1,6 @@
 use super::artifact_manifest::record_run_artifact;
 use super::*;
+use crate::artifact_contract::{canonical_run_artifact_spec, CanonicalRunArtifactSpec};
 
 pub fn write_run_artifact_json(
     target: impl AsRef<Path>,
@@ -10,7 +11,7 @@ pub fn write_run_artifact_json(
 ) -> Result<RunArtifact> {
     let dir = run_dir(&target, run_id);
     fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
-    let path = dir.join(leaf);
+    let path = run_artifact_path(&target, run_id, leaf);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("Could not create {}", parent.display()))?;
@@ -30,9 +31,9 @@ pub fn append_run_trace_step(
     run_id: &str,
     step: &RunTraceStep,
 ) -> Result<PathBuf> {
-    let dir = run_dir(target, run_id);
+    let dir = run_dir(&target, run_id);
     fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
-    let path = dir.join("trace.jsonl");
+    let path = run_artifact_path(&target, run_id, run_trace_spec().leaf);
     reject_non_file_trace_target(&path)?;
     let mut file = fs::OpenOptions::new()
         .create(true)
@@ -45,11 +46,15 @@ pub fn append_run_trace_step(
 }
 
 pub fn next_run_trace_step_number(target: impl AsRef<Path>, run_id: &str) -> usize {
-    let path = run_dir(target, run_id).join("trace.jsonl");
+    let path = run_artifact_path(target, run_id, run_trace_spec().leaf);
     let Ok(text) = fs::read_to_string(path) else {
         return 1;
     };
     crate::run_artifacts::jsonl_numbering::next_jsonl_number::<RunTraceStep>(&text, |step| step.n)
+}
+
+fn run_trace_spec() -> &'static CanonicalRunArtifactSpec {
+    canonical_run_artifact_spec("trace.jsonl").expect("runtime trace artifact must be in shared spec")
 }
 
 fn reject_non_file_trace_target(path: &Path) -> Result<()> {

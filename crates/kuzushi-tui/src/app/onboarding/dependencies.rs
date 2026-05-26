@@ -112,7 +112,10 @@ mod tests {
         selected.insert(GatherRepoContext);
         selected.insert(MapEntryPoints);
         let ordered = topological_order(&selected);
-        let context_pos = ordered.iter().position(|t| *t == GatherRepoContext).unwrap();
+        let context_pos = ordered
+            .iter()
+            .position(|t| *t == GatherRepoContext)
+            .unwrap();
         let xray_pos = ordered.iter().position(|t| *t == BuildXRay).unwrap();
         let entry_pos = ordered.iter().position(|t| *t == MapEntryPoints).unwrap();
         assert!(context_pos < xray_pos);

@@ -85,7 +85,7 @@ fn read_scope(input: &Value) -> String {
 fn reject_enrichment(enrichment: bool) -> Result<()> {
     if enrichment {
         anyhow::bail!(
-            "context:build Rust native executor does not support LLM enrichment yet; run with {{\"enrichment\":false}} or use a pi-agent-core-backed context adapter once configured"
+            "context:build Rust native executor does not support LLM enrichment yet; run with {{\"enrichment\":false}} or use a LangGraph-backed context adapter once configured"
         );
     }
     Ok(())

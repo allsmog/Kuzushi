@@ -41,6 +41,7 @@ impl PlainLiveActivityModel {
 
 #[cfg(test)]
 mod tests {
+    use super::super::threat_model::threat_model_relative_path;
     use super::*;
     use crate::{LiveActivity, LiveActivityPhase};
     use kuzushi_core::V2Config;
@@ -64,13 +65,15 @@ mod tests {
     #[test]
     fn plain_live_activity_model_projects_plain_lines() {
         let mut app = ShellApp::new(V2Config::default(), None);
+        let detail = format!("writes {}", threat_model_relative_path());
         app.live_activity = Some(LiveActivity::new(
             LiveActivityPhase::WritingArtifact,
             "threat-model:build",
-            "writes .kuzushi/threat-model.json",
+            detail,
         ));
 
         let model = plain_live_activity_model(&app).expect("live activity model");
+        let expected_detail = format!("detail: writes {}", threat_model_relative_path());
 
         assert_eq!(model.title, "LIVE ACTIVITY");
         assert_eq!(
@@ -78,7 +81,7 @@ mod tests {
             vec![
                 "phase: writing artifact".to_string(),
                 "subject: threat-model:build".to_string(),
-                "detail: writes .kuzushi/threat-model.json".to_string(),
+                expected_detail,
             ]
         );
     }

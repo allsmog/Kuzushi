@@ -1,6 +1,6 @@
 [package]
 name = "kuzushi-openai"
-description = "Kuzushi agent runtime bridge backed by pi-agent-core and pi-ai."
+description = "Kuzushi agent runtime bridge backed by LangGraph and LangChain."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

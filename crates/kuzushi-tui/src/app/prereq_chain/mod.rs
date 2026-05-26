@@ -1,6 +1,8 @@
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 
+const TAINT_IRIS_NEXT_CATALOG_ARTIFACT: &str = "taint-iris-next-catalog.json";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PrereqStep {
     pub tool: String,
@@ -202,15 +204,10 @@ fn readable_json_artifact_state(path: &Path) -> PrereqArtifactState {
 }
 
 pub fn prereq_steps_for(tool: &str, target: &Path) -> Vec<PrereqStep> {
-    let kuzushi_dir = target.join(".kuzushi");
     match prereq_chain_kind_for_tool(tool) {
-        PrereqChainKind::ThreatModel => {
-            vec![context_step(&kuzushi_dir), threat_model_step(&kuzushi_dir)]
-        }
-        PrereqChainKind::Context => vec![context_step(&kuzushi_dir)],
-        PrereqChainKind::TaintCatalog => {
-            vec![context_step(&kuzushi_dir), taint_catalog_step(&kuzushi_dir)]
-        }
+        PrereqChainKind::ThreatModel => vec![context_step(target), threat_model_step(target)],
+        PrereqChainKind::Context => vec![context_step(target)],
+        PrereqChainKind::TaintCatalog => vec![context_step(target), taint_catalog_step(target)],
         PrereqChainKind::None => Vec::new(),
     }
 }
@@ -250,10 +247,10 @@ fn context_only_prereq_tool(tool: &str) -> bool {
     )
 }
 
-fn context_step(kuzushi_dir: &Path) -> PrereqStep {
+fn context_step(target: &Path) -> PrereqStep {
     PrereqStep::new(
         "context:build",
-        kuzushi_dir.join("context-snapshot.json"),
+        kuzushi_core::context_snapshot_path(target),
         "context snapshot",
         false,
         false,
@@ -262,10 +259,14 @@ fn context_step(kuzushi_dir: &Path) -> PrereqStep {
     )
 }
 
-fn taint_catalog_step(kuzushi_dir: &Path) -> PrereqStep {
+fn prereq_workspace_root(target: &Path) -> PathBuf {
+    kuzushi_core::workspace_state_root(target)
+}
+
+fn taint_catalog_step(target: &Path) -> PrereqStep {
     PrereqStep::new(
         "taint-iris-next:catalog",
-        kuzushi_dir.join("taint-iris-next-catalog.json"),
+        prereq_workspace_root(target).join(TAINT_IRIS_NEXT_CATALOG_ARTIFACT),
         "taint-iris-next catalog",
         true,
         true,
@@ -274,10 +275,10 @@ fn taint_catalog_step(kuzushi_dir: &Path) -> PrereqStep {
     )
 }
 
-fn threat_model_step(kuzushi_dir: &Path) -> PrereqStep {
+fn threat_model_step(target: &Path) -> PrereqStep {
     PrereqStep::new(
         "threat-model:build",
-        kuzushi_dir.join("threat-model.json"),
+        kuzushi_core::capabilities::persistent_threat_model_path(target),
         "threat model",
         true,
         true,
@@ -333,6 +334,24 @@ mod tests {
     }
 
     #[test]
+    fn prereq_artifact_paths_use_workspace_state_root() {
+        let target = Path::new("/tmp/repo");
+
+        assert_eq!(
+            context_step(target).artifact_path,
+            kuzushi_core::context_snapshot_path(target)
+        );
+        assert_eq!(
+            threat_model_step(target).artifact_path,
+            kuzushi_core::capabilities::persistent_threat_model_path(target)
+        );
+        assert_eq!(
+            taint_catalog_step(target).artifact_path,
+            kuzushi_core::workspace_state_root(target).join(TAINT_IRIS_NEXT_CATALOG_ARTIFACT)
+        );
+    }
+
+    #[test]
     fn taint_iris_next_catalog_chain_includes_context() {
         let steps = prereq_steps_for("taint-iris-next:catalog", Path::new("/tmp/repo"));
         assert_eq!(steps.len(), 1);
@@ -349,7 +368,7 @@ mod tests {
     #[test]
     fn prereq_plan_marks_non_file_artifact_invalid() {
         let temp = tempfile::tempdir().unwrap();
-        let artifact_path = temp.path().join(".kuzushi/context-snapshot.json");
+        let artifact_path = kuzushi_core::context_snapshot_path(temp.path());
         std::fs::create_dir_all(&artifact_path).unwrap();
         let step = PrereqStep::new(
             "context:build",
@@ -377,7 +396,7 @@ mod tests {
     #[test]
     fn prereq_plan_marks_malformed_json_artifact_invalid() {
         let temp = tempfile::tempdir().unwrap();
-        let artifact_path = temp.path().join(".kuzushi/threat-model.json");
+        let artifact_path = kuzushi_core::capabilities::persistent_threat_model_path(temp.path());
         std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
         std::fs::write(&artifact_path, "{not-json").unwrap();
         let step = PrereqStep::new(
