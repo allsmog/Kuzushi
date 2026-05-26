@@ -604,7 +604,7 @@ export const ScanOptsSchema = z.object({
 
 export type ScanOptsZ = z.infer<typeof ScanOptsSchema>;
 
-// Agent runtime config — single flat slot (pi-ai is the only backend).
+// Agent runtime config — single flat slot (LangChain is the only backend).
 
 export const AgentRuntimeCredentialsSchema = z.object({
   apiKey: z.string().optional(),

@@ -77,7 +77,7 @@ pub(crate) fn config_completion_keys() -> &'static [&'static str] {
         "model",
         "runtime.kind",
         "runtime.api_key_env",
-        "runtime.agent_bridge_command",
+        "runtime.langgraph_bridge_command",
         "target",
         "workspace",
     ]

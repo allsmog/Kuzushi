@@ -1,7 +1,5 @@
 use super::*;
 
-pub(crate) const KB_DB_NAME: &str = "artifact-kb.sqlite3";
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ArtifactKnowledgeRecord {

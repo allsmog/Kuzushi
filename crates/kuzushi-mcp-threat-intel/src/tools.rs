@@ -11,7 +11,10 @@ pub(crate) const ARTIFACT_ENV: &str = "KUZUSHI_MCP_THREAT_INTEL_ARTIFACT";
 pub(crate) fn build_registry() -> ToolRegistry {
     ToolRegistry::new()
         .register(candidates_descriptor(), CandidatesHandler)
-        .register(packages_by_ecosystem_descriptor(), PackagesByEcosystemHandler)
+        .register(
+            packages_by_ecosystem_descriptor(),
+            PackagesByEcosystemHandler,
+        )
 }
 
 fn candidates_descriptor() -> Tool {

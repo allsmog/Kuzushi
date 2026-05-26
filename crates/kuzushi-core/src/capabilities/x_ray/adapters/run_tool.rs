@@ -6,7 +6,7 @@ pub(crate) fn run_x_ray(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
     let runtime = runtime.context(
-        "x-ray:run requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
+        "x-ray:run requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
     )?;
     let input = parse_run_input(&input, ctx)?;
     if let Some(trace) = ctx.trace {
@@ -71,7 +71,7 @@ fn finish_x_ray_run(
 ) -> Result<Value> {
     write_x_ray_artifacts(&input.target, content)?;
     let data =
-        read_x_ray_report_artifacts(&input.target, Some(&input.repo_name), "pi-agent-core", 0.0)?;
+        read_x_ray_report_artifacts(&input.target, Some(&input.repo_name), "LangGraph", 0.0)?;
     if let Some(trace) = ctx.trace {
         let _ = trace.step("done", "run", "x-ray:run complete").emit();
     }

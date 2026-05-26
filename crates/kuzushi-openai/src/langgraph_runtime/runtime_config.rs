@@ -2,10 +2,10 @@ use anyhow::Result;
 use kuzushi_core::{RuntimeConfig, V2Config};
 use std::path::Path;
 
-use super::bridge_process::default_bridge_command;
+use super::bridge_process::default_langgraph_bridge_command;
 
 #[derive(Debug, Clone)]
-pub struct PiAgentCoreRuntime {
+pub struct LangGraphRuntime {
     pub(crate) command: Vec<String>,
     pub(crate) api_key_env: String,
     pub(crate) api_key: Option<String>,
@@ -13,7 +13,7 @@ pub struct PiAgentCoreRuntime {
     pub(crate) thinking_level: Option<String>,
 }
 
-impl PiAgentCoreRuntime {
+impl LangGraphRuntime {
     pub fn from_config(config: &V2Config, source_root: impl AsRef<Path>) -> Result<Self> {
         Self::from_runtime_config(&config.runtime, source_root)
     }
@@ -23,11 +23,11 @@ impl PiAgentCoreRuntime {
         source_root: impl AsRef<Path>,
     ) -> Result<Self> {
         let command = runtime
-            .agent_bridge_command
+            .langgraph_bridge_command
             .clone()
-            .unwrap_or_else(|| default_bridge_command(source_root.as_ref()));
+            .unwrap_or_else(|| default_langgraph_bridge_command(source_root.as_ref()));
         if command.is_empty() {
-            anyhow::bail!("pi-agent-core bridge command is empty");
+            anyhow::bail!("LangGraph bridge command is empty");
         }
 
         let api_key = std::env::var(&runtime.api_key_env)

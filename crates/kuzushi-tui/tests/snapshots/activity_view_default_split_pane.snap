@@ -1,14 +1,14 @@
- KUZUSHI mode:shell | target:none | ctx:missing | model:unconfigured | 0 findings | view:activity
+ KUZUSHI mode:shell · target:none · ctx:missing · model:unconfigured · 0 findings · view:activity
 
- -- ACTIVITY  run r-snapshot  |  2/3 done  |  1 running ----------------------------------------------------------------
- -- DAG                                               - -- FEED
- ✓ context:build                                  <1ms-22:13:20  ⏵ [context:build] context:build start
- ✓ semgrep:scan                                   <1ms-22:13:20  ✓ [context:build] context:build complete | 412 files
- ⠋ triage:run                                     <1ms-22:13:20  ⏵ [semgrep:scan] semgrep start
- ⤳ subsystems (1)  task-selector ran                  -22:13:20  ✓ [semgrep:scan] semgrep complete | 14 findings
-                                                      -22:13:20  ⏵ [triage:run] triage start
-                                                      -22:13:20   ↳ … [triage:run] evidence-collect | stage1 kept 14/14
-                                                      -22:13:20   ↳ … [triage:run] verdict=likely-tp severity=high
+ -- ACTIVITY  run r-snapshot  ·  2/3 done  ·  1 running ----------------------------------------------------------------
+ -- DAG                                               |  -- FEED
+ ✓ context:build                                 <1ms | 22:13:20  ⏵ [context:build] context:build start
+ ✓ semgrep:scan                                  <1ms | 22:13:20  ✓ [context:build] context:build complete · 412 files
+ ⠋ triage:run                                    <1ms | 22:13:20  ⏵ [semgrep:scan] semgrep start
+ ⤳ subsystems (1)  task-selector ran                  | 22:13:20  ✓ [semgrep:scan] semgrep complete · 14 findings
+                                                      | 22:13:20  ⏵ [triage:run] triage start
+                                                      | 22:13:20   ↳ … [triage:run] evidence-collect · stage1 kept 14/14
+                                                      | 22:13:20   ↳ … [triage:run] verdict=likely-tp severity=high
 
  ▸ FOCUS  hover [j/k] to inspect a task
  j/k scroll   Tab pane   V verbose   p pause   R reset   Enter focus   c cancel

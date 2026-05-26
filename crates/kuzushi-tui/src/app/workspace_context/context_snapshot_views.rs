@@ -43,6 +43,9 @@ pub(crate) fn load_context_snapshot_view(snapshot_path: PathBuf) -> Result<Conte
         ContextSnapshotPathState::Missing => {
             return Ok(default_context_snapshot_view(Some(snapshot_path)));
         }
+        ContextSnapshotPathState::NonFile => {
+            return Ok(invalid_context_snapshot_view(snapshot_path, "not a file"));
+        }
         ContextSnapshotPathState::Unreadable => {
             return Ok(malformed_context_snapshot_view(snapshot_path));
         }
@@ -60,7 +63,7 @@ pub(crate) fn load_context_snapshot_view(snapshot_path: PathBuf) -> Result<Conte
 fn context_snapshot_path_state(snapshot_path: &std::path::Path) -> ContextSnapshotPathState {
     match fs::metadata(snapshot_path) {
         Ok(metadata) if metadata.is_file() => ContextSnapshotPathState::File,
-        Ok(_) => ContextSnapshotPathState::Unreadable,
+        Ok(_) => ContextSnapshotPathState::NonFile,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
             ContextSnapshotPathState::Missing
         }
@@ -71,6 +74,7 @@ fn context_snapshot_path_state(snapshot_path: &std::path::Path) -> ContextSnapsh
 enum ContextSnapshotPathState {
     File,
     Missing,
+    NonFile,
     Unreadable,
 }
 
@@ -145,6 +149,22 @@ fn malformed_context_snapshot_view(snapshot_path: PathBuf) -> ContextSnapshotVie
     }
 }
 
+fn invalid_context_snapshot_view(snapshot_path: PathBuf, reason: &str) -> ContextSnapshotView {
+    ContextSnapshotView {
+        snapshot_path: Some(snapshot_path),
+        exists: false,
+        status: format!("malformed context snapshot ({reason}). Next: context build"),
+        target: None,
+        discovery: None,
+        files_indexed: None,
+        total_files: None,
+        languages: Vec::new(),
+        frameworks: Vec::new(),
+        generated_slices: Vec::new(),
+        stale_slices: Vec::new(),
+    }
+}
+
 fn context_snapshot_status(files_indexed: Option<u64>, total_files: Option<u64>) -> String {
     format!(
         "snapshot present; {} indexed file(s). Next: context regen repo",
@@ -188,7 +208,7 @@ mod tests {
     #[test]
     fn load_context_snapshot_view_surfaces_malformed_snapshot() {
         let temp = tempfile::tempdir().unwrap();
-        let snapshot_path = temp.path().join(".kuzushi/context-snapshot.json");
+        let snapshot_path = kuzushi_core::context_snapshot_path(temp.path());
         fs::create_dir_all(snapshot_path.parent().unwrap()).unwrap();
         fs::write(&snapshot_path, "{not-json").unwrap();
 
@@ -205,9 +225,9 @@ mod tests {
     }
 
     #[test]
-    fn load_context_snapshot_view_surfaces_unreadable_snapshot_path() {
+    fn load_context_snapshot_view_surfaces_non_file_snapshot_path() {
         let temp = tempfile::tempdir().unwrap();
-        let snapshot_path = temp.path().join(".kuzushi/context-snapshot.json");
+        let snapshot_path = kuzushi_core::context_snapshot_path(temp.path());
         fs::create_dir_all(&snapshot_path).unwrap();
 
         let view = load_context_snapshot_view(snapshot_path.clone()).unwrap();
@@ -216,7 +236,7 @@ mod tests {
         assert!(!view.exists);
         assert_eq!(
             view.status,
-            "malformed context snapshot. Next: context build"
+            "malformed context snapshot (not a file). Next: context build"
         );
         assert!(view.languages.is_empty());
         assert!(view.frameworks.is_empty());

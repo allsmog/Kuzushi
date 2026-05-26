@@ -15,7 +15,7 @@ impl ShellApp {
             self.log(
                 "provider",
                 format!(
-                    "{provider} requested. Rust uses pi-agent-core only; providers are selected through explicit model ids. Next: model {provider}:<model-id>"
+                    "{provider} requested. Rust uses LangGraph only; providers are selected through explicit model ids. Next: model {provider}:<model-id>"
                 ),
             );
             return;
@@ -24,7 +24,7 @@ impl ShellApp {
         self.log(
             "provider",
             format!(
-                "{} via pi-agent-core. Supported selectors: openai, anthropic. Next: model",
+                "{} via LangGraph. Supported selectors: openai, anthropic. Next: model",
                 self.provider_label()
             ),
         );
@@ -34,13 +34,13 @@ impl ShellApp {
         self.shell_view = ShellView::Config;
         if let Some(backend) = backend {
             let normalized = backend.trim().to_ascii_lowercase();
-            if normalized == "pi-agent-core" || normalized == "pi_agent_core" {
-                self.log("backend", "pi-agent-core already selected");
+            if normalized == "LangGraph" || normalized == "langgraph_runtime" {
+                self.log("backend", "LangGraph already selected");
             } else {
                 self.log(
                     "error",
                     format!(
-                        "unsupported Rust backend {backend:?}. Supported: pi-agent-core. Next: backend pi-agent-core"
+                        "unsupported Rust backend {backend:?}. Supported: LangGraph. Next: backend LangGraph"
                     ),
                 );
             }

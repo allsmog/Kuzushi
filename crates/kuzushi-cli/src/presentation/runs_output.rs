@@ -1,5 +1,5 @@
 use anyhow::{Context, Result};
-use kuzushi_core::{RunSummary, WorkspaceTarget};
+use kuzushi_core::{runs_root, RunSummary, WorkspaceTarget};
 use std::path::Path;
 use std::time::Duration;
 
@@ -20,7 +20,7 @@ pub(crate) fn runs_list_plain(workspace: &WorkspaceTarget, runs: &[RunSummary]) 
     if runs.is_empty() {
         return format!(
             "no run artifacts found at {}\nNext: kuzushi scan {}\n",
-            workspace.root().join(".kuzushi/runs").display(),
+            runs_root(workspace.root()).display(),
             workspace.root().display()
         );
     }

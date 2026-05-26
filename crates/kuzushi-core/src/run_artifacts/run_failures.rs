@@ -1,7 +1,7 @@
 use super::*;
 use crate::artifact_contract::{
     canonical_run_artifact_spec, CanonicalRunArtifactSpec, CANONICAL_RUN_ARTIFACTS,
-    OPTIONAL_RUN_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
+    OPTIONAL_RUN_ARTIFACTS, TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -48,7 +48,7 @@ pub struct FailureToLlmContext {
     pub claims_forbidden: Vec<String>,
 }
 
-const FOLLOW_UP_RUN_FILES: &[&str] = &["artifacts.json", "run.json", "summary.json"];
+const LEGACY_FOLLOW_UP_RUN_FILES: &[&str] = &["summary.json"];
 
 const MAX_AVAILABLE_FAILURE_ARTIFACTS: usize = 12;
 const MAX_NEXT_FAILURE_PATHS: usize = 12;
@@ -89,15 +89,27 @@ pub fn write_run_failures(
 }
 
 pub fn load_run_failures(target: impl AsRef<Path>, run_id: &str) -> Result<RunFailures> {
-    let path = run_dir(target.as_ref(), run_id).join(failure_artifact_spec().leaf);
+    let path = run_failure_artifact_path(target.as_ref(), run_id);
     let metadata = fs::metadata(&path)
         .with_context(|| format!("failed to inspect {}", path.display()))?;
     if !metadata.is_file() {
         anyhow::bail!("Run failures artifact is not a file: {}", path.display());
     }
-    let body = fs::read_to_string(&path)
-        .with_context(|| format!("failed to read {}", path.display()))?;
-    serde_json::from_str(&body).with_context(|| format!("failed to parse {}", path.display()))
+    let body =
+        fs::read_to_string(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let value: Value =
+        serde_json::from_str(&body).with_context(|| format!("failed to parse {}", path.display()))?;
+    if !value.is_object() {
+        anyhow::bail!(
+            "Run failures artifact is not a JSON object: {}",
+            path.display()
+        );
+    }
+    serde_json::from_value(value).with_context(|| format!("failed to parse {}", path.display()))
+}
+
+pub(crate) fn run_failure_artifact_path(target: &Path, run_id: &str) -> PathBuf {
+    run_artifact_path(target, run_id, failure_artifact_spec().leaf)
 }
 
 pub fn load_run_failure_context(
@@ -194,25 +206,56 @@ fn append_available_artifact_paths(paths: &mut Vec<String>, artifacts: &[RunArti
 }
 
 fn append_follow_up_run_files(paths: &mut Vec<String>, target: &Path, run_id: &str) {
-    let dir = run_dir(target, run_id);
     push_next_failure_path(
         paths,
-        dir.join(failure_artifact_spec().leaf).display().to_string(),
+        run_artifact_path(target, run_id, failure_artifact_spec().leaf)
+            .display()
+            .to_string(),
     );
-    for spec in TOOL_RESULT_ARTIFACTS {
-        push_next_failure_path(paths, dir.join(spec.leaf).display().to_string());
+    append_spec_follow_up_paths(paths, target, run_id, &TOOL_RESULT_ARTIFACTS);
+    append_spec_follow_up_paths(paths, target, run_id, &TOOL_INPUT_ARTIFACTS);
+    push_next_failure_path(
+        paths,
+        run_artifact_path(target, run_id, manifest_artifact_spec().leaf)
+            .display()
+            .to_string(),
+    );
+    push_next_failure_path(
+        paths,
+        run_artifact_path(target, run_id, run_metadata_artifact_spec().leaf)
+            .display()
+            .to_string(),
+    );
+    for leaf in LEGACY_FOLLOW_UP_RUN_FILES {
+        push_next_failure_path(
+            paths,
+            run_artifact_path(target, run_id, leaf).display().to_string(),
+        );
     }
-    for leaf in FOLLOW_UP_RUN_FILES {
-        push_next_failure_path(paths, dir.join(leaf).display().to_string());
-    }
-    push_existing_follow_up_path(paths, &dir, report_artifact_spec().leaf);
+    push_existing_follow_up_path(paths, target, run_id, report_artifact_spec().leaf);
     for spec in OPTIONAL_RUN_ARTIFACTS {
-        push_existing_follow_up_path(paths, &dir, spec.leaf);
+        push_existing_follow_up_path(paths, target, run_id, spec.leaf);
     }
 }
 
-fn push_existing_follow_up_path(paths: &mut Vec<String>, dir: &Path, leaf: &str) {
-    let path = dir.join(leaf);
+fn append_spec_follow_up_paths(
+    paths: &mut Vec<String>,
+    target: &Path,
+    run_id: &str,
+    specs: &[CanonicalRunArtifactSpec],
+) {
+    for spec in specs {
+        push_next_failure_path(
+            paths,
+            run_artifact_path(target, run_id, spec.leaf)
+                .display()
+                .to_string(),
+        );
+    }
+}
+
+fn push_existing_follow_up_path(paths: &mut Vec<String>, target: &Path, run_id: &str, leaf: &str) {
+    let path = run_artifact_path(target, run_id, leaf);
     if path.is_file() {
         push_next_failure_path(paths, path.display().to_string());
     }
@@ -226,10 +269,11 @@ fn push_next_failure_path(paths: &mut Vec<String>, path: String) {
 }
 
 fn missing_failure_artifacts(target: &Path, run_id: &str, artifacts: &[RunArtifact]) -> Vec<String> {
+    let failure_artifact = failure_artifact_spec().leaf;
     CANONICAL_RUN_ARTIFACTS
         .iter()
         .map(|spec| spec.leaf)
-        .filter(|artifact| *artifact != "failures.json")
+        .filter(|artifact| *artifact != failure_artifact)
         .filter(|artifact| !failure_artifact_exists(target, run_id, artifacts, artifact))
         .map(str::to_string)
         .collect()
@@ -244,7 +288,7 @@ fn failure_artifact_exists(
     artifacts
         .iter()
         .any(|available| declared_failure_artifact_exists(target, run_id, available, artifact))
-        || run_dir(target, run_id).join(artifact).is_file()
+        || run_artifact_path(target, run_id, artifact).is_file()
 }
 
 fn declared_failure_artifact_exists(
@@ -266,7 +310,7 @@ fn failure_artifact_candidates(target: &Path, run_id: &str, path: &str) -> Vec<P
     if declared.is_absolute() {
         return vec![declared];
     }
-    vec![target.join(&declared), run_dir(target, run_id).join(declared)]
+    vec![target.join(&declared), run_artifact_path(target, run_id, &declared)]
 }
 
 fn failure_recovery_options(tool: &str, missing_artifacts: &[String]) -> Vec<String> {
@@ -281,6 +325,15 @@ fn failure_recovery_options(tool: &str, missing_artifacts: &[String]) -> Vec<Str
 fn failure_artifact_spec() -> &'static CanonicalRunArtifactSpec {
     canonical_run_artifact_spec("failures.json")
         .expect("failure handoff artifact must be in shared spec")
+}
+
+fn manifest_artifact_spec() -> &'static CanonicalRunArtifactSpec {
+    canonical_run_artifact_spec("artifacts.json")
+        .expect("artifact manifest must be in shared spec")
+}
+
+fn run_metadata_artifact_spec() -> &'static CanonicalRunArtifactSpec {
+    canonical_run_artifact_spec("run.json").expect("run metadata artifact must be in shared spec")
 }
 
 fn report_artifact_spec() -> &'static CanonicalRunArtifactSpec {

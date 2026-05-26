@@ -2,11 +2,24 @@
 mod tests {
     use super::super::*;
     use crate::artifact_contract::{
-        CANONICAL_RUN_ARTIFACTS, OPTIONAL_RUN_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
+        ARTIFACT_KIND_KEYS, ARTIFACT_LABEL_KEYS, ARTIFACT_PATH_KEYS, CANONICAL_RUN_ARTIFACTS,
+        OPTIONAL_RUN_ARTIFACTS, TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
     };
     use std::fs;
     use std::path::Path;
     use std::process::Command;
+
+    fn relative_run_artifact_path(target: &Path, run_id: &str, leaf: &str) -> String {
+        run_artifact_path(target, run_id, leaf)
+            .strip_prefix(target)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/")
+    }
+
+    fn representative_run_artifact_path(run_id: &str, leaf: &str) -> String {
+        relative_run_artifact_path(Path::new("workspace"), run_id, leaf)
+    }
 
     #[test]
     fn trace_step_v2_round_trip_preserves_new_fields() {
@@ -106,7 +119,7 @@ mod tests {
     fn run_event_numbering_counts_malformed_rows_and_uses_max_n() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-event-numbering";
-        let events_path = run_dir(tmp.path(), run_id).join("events.jsonl");
+        let events_path = run_artifact_path(tmp.path(), run_id, "events.jsonl");
         fs::create_dir_all(events_path.parent().unwrap()).unwrap();
         fs::write(
             &events_path,
@@ -127,7 +140,7 @@ mod tests {
     fn run_event_numbering_advances_past_malformed_tail_rows() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-event-malformed-tail";
-        let events_path = run_dir(tmp.path(), run_id).join("events.jsonl");
+        let events_path = run_artifact_path(tmp.path(), run_id, "events.jsonl");
         fs::create_dir_all(events_path.parent().unwrap()).unwrap();
         fs::write(
             &events_path,
@@ -146,7 +159,7 @@ mod tests {
     fn run_trace_numbering_advances_past_malformed_tail_rows() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-trace-malformed-tail";
-        let trace_path = run_dir(tmp.path(), run_id).join("trace.jsonl");
+        let trace_path = run_artifact_path(tmp.path(), run_id, "trace.jsonl");
         fs::create_dir_all(trace_path.parent().unwrap()).unwrap();
         fs::write(
             &trace_path,
@@ -158,6 +171,32 @@ mod tests {
         )
         .unwrap();
 
+        assert_eq!(next_run_trace_step_number(tmp.path(), run_id), 3);
+    }
+
+    #[test]
+    fn run_jsonl_numbering_advances_past_non_object_rows() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-jsonl-non-object-tail";
+        let events_path = run_artifact_path(tmp.path(), run_id, "events.jsonl");
+        let trace_path = run_artifact_path(tmp.path(), run_id, "trace.jsonl");
+        fs::create_dir_all(events_path.parent().unwrap()).unwrap();
+        fs::write(
+            &events_path,
+            [
+                r#"{"n":1,"kind":"tool","status":"started","message":"start","atUnix":1}"#,
+                "[]",
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        fs::write(
+            &trace_path,
+            [r#"{"n":1,"kind":"reasoning","label":"query"}"#, "[]"].join("\n"),
+        )
+        .unwrap();
+
+        assert_eq!(next_run_event_number(tmp.path(), run_id), 3);
         assert_eq!(next_run_trace_step_number(tmp.path(), run_id), 3);
     }
 
@@ -248,7 +287,7 @@ mod tests {
         assert_eq!(loaded.llm_calls[0].prompt_hash, "fnv1a64:abc123");
         assert_eq!(loaded.llm_calls[0].cost_usd, Some(0.0042));
 
-        let metadata = fs::read_to_string(run_dir(tmp.path(), run_id).join("run.json")).unwrap();
+        let metadata = fs::read_to_string(run_artifact_path(tmp.path(), run_id, "run.json")).unwrap();
         assert!(metadata.contains("\"llmCalls\""));
         assert!(metadata.contains("\"promptHash\": \"fnv1a64:abc123\""));
         assert!(!metadata.contains("query · answer"));
@@ -258,7 +297,7 @@ mod tests {
     fn run_summary_records_malformed_trace_line_count() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-llm-audit-malformed";
-        let trace_path = run_dir(tmp.path(), run_id).join("trace.jsonl");
+        let trace_path = run_artifact_path(tmp.path(), run_id, "trace.jsonl");
         fs::create_dir_all(trace_path.parent().unwrap()).unwrap();
         fs::write(
             &trace_path,
@@ -285,8 +324,55 @@ mod tests {
         assert_eq!(loaded.llm_calls.len(), 1);
         assert_eq!(loaded.trace_malformed_lines, Some(1));
 
-        let metadata = fs::read_to_string(run_dir(tmp.path(), run_id).join("run.json")).unwrap();
+        let metadata = fs::read_to_string(run_artifact_path(tmp.path(), run_id, "run.json")).unwrap();
         assert!(metadata.contains("\"traceMalformedLines\": 1"));
+    }
+
+    #[test]
+    fn run_summary_records_non_object_trace_line_count() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-llm-audit-non-object";
+        let trace_path = run_artifact_path(tmp.path(), run_id, "trace.jsonl");
+        fs::create_dir_all(trace_path.parent().unwrap()).unwrap();
+        fs::write(
+            &trace_path,
+            [
+                serde_json::to_string(
+                    &RunTraceStep::new(1, "reasoning", "query")
+                        .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:abc123"),
+                )
+                .unwrap(),
+                "[]".to_string(),
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+
+        let loaded = load_run_summary(tmp.path(), run_id).unwrap();
+        assert_eq!(loaded.llm_calls.len(), 1);
+        assert_eq!(loaded.trace_malformed_lines, Some(1));
+
+        let metadata = fs::read_to_string(run_artifact_path(tmp.path(), run_id, "run.json")).unwrap();
+        assert!(metadata.contains("\"traceMalformedLines\": 1"));
+    }
+
+    #[test]
+    fn run_trace_audit_marks_non_file_trace_artifact_malformed() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-llm-audit-non-file";
+        fs::create_dir_all(run_artifact_path(tmp.path(), run_id, "trace.jsonl")).unwrap();
+
+        let audit = crate::run_artifacts::llm_audit::load_run_trace_audit(tmp.path(), run_id);
+
+        assert!(audit.llm_calls.is_empty());
+        assert_eq!(audit.malformed_lines, 1);
     }
 
     #[test]
@@ -310,7 +396,7 @@ mod tests {
         assert_eq!(loaded.config_hash.as_deref(), Some("sha256:abc123"));
         assert!(!loaded.cli_args.is_empty());
 
-        let metadata = fs::read_to_string(run_dir(tmp.path(), run_id).join("run.json")).unwrap();
+        let metadata = fs::read_to_string(run_artifact_path(tmp.path(), run_id, "run.json")).unwrap();
         assert!(metadata.contains("\"kuzushiVersion\""));
         assert!(metadata.contains("\"platform\""));
         assert!(metadata.contains("\"model\": \"openai:gpt-test\""));
@@ -363,8 +449,8 @@ mod tests {
                 "type",
             ],
         );
-        assert_schema_allows_required_alias_set(artifact_schema, &["label", "name", "title"]);
-        assert_schema_allows_required_alias_set(artifact_schema, &["kind", "type"]);
+        assert_schema_allows_required_alias_set(artifact_schema, &ARTIFACT_LABEL_KEYS);
+        assert_schema_allows_required_alias_set(artifact_schema, &ARTIFACT_KIND_KEYS);
     }
 
     #[test]
@@ -385,6 +471,13 @@ mod tests {
         assert_serialized_fields_are_declared(&schema, &value);
         assert_artifact_entries_match_schema(&schema, &value);
         assert_schema_requires_any_field(&schema, &["runId", "run_id"]);
+    }
+
+    #[test]
+    fn run_artifact_manifest_schema_rejects_blank_run_identity_aliases() {
+        let schema = run_artifact_manifest_schema();
+
+        assert_manifest_fields_reference_non_empty_string(&schema, &["runId", "run_id"]);
     }
 
     #[test]
@@ -415,8 +508,52 @@ mod tests {
                 "type",
             ],
         );
-        assert_schema_allows_required_alias_set(artifact_schema, &["label", "name", "title"]);
-        assert_schema_allows_required_alias_set(artifact_schema, &["kind", "type"]);
+        assert_schema_allows_required_alias_set(artifact_schema, &ARTIFACT_LABEL_KEYS);
+        assert_schema_allows_required_alias_set(artifact_schema, &ARTIFACT_KIND_KEYS);
+    }
+
+    #[test]
+    fn run_artifact_manifest_schema_rejects_blank_artifact_alias_strings() {
+        let schema = run_artifact_manifest_schema();
+        let artifact_schema = &schema["definitions"]["artifact"];
+
+        assert_artifact_aliases_reference_non_empty_string(
+            artifact_schema,
+            &ARTIFACT_LABEL_KEYS,
+        );
+        assert_artifact_aliases_reference_non_empty_string(artifact_schema, &ARTIFACT_PATH_KEYS);
+        assert_eq!(schema["definitions"]["nonEmptyString"]["minLength"], 1);
+        assert_eq!(schema["definitions"]["nonEmptyString"]["pattern"], "\\S");
+    }
+
+    #[test]
+    fn run_artifact_manifest_schema_constrains_canonical_path_metadata() {
+        let schema = run_artifact_manifest_schema();
+        let rules = schema["definitions"]["canonicalArtifactMetadata"]["allOf"]
+            .as_array()
+            .unwrap();
+
+        for spec in CANONICAL_RUN_ARTIFACTS {
+            assert_schema_rule_matches_artifact_spec(rules, &spec);
+        }
+    }
+
+    #[test]
+    fn run_artifact_manifest_schema_constrains_optional_and_tool_path_metadata() {
+        let schema = run_artifact_manifest_schema();
+        let rules = schema["definitions"]["canonicalArtifactMetadata"]["allOf"]
+            .as_array()
+            .unwrap();
+
+        for spec in OPTIONAL_RUN_ARTIFACTS {
+            assert_schema_rule_matches_artifact_spec(rules, &spec);
+        }
+        for spec in TOOL_INPUT_ARTIFACTS {
+            assert_schema_rule_matches_artifact_spec(rules, &spec);
+        }
+        for spec in TOOL_RESULT_ARTIFACTS {
+            assert_schema_rule_matches_artifact_spec(rules, &spec);
+        }
     }
 
     #[test]
@@ -462,8 +599,8 @@ mod tests {
                 "type",
             ],
         );
-        assert_schema_allows_required_alias_set(artifact_schema, &["label", "name", "title"]);
-        assert_schema_allows_required_alias_set(artifact_schema, &["kind", "type"]);
+        assert_schema_allows_required_alias_set(artifact_schema, &ARTIFACT_LABEL_KEYS);
+        assert_schema_allows_required_alias_set(artifact_schema, &ARTIFACT_KIND_KEYS);
     }
 
     #[test]
@@ -512,8 +649,8 @@ mod tests {
                 "type",
             ],
         );
-        assert_schema_allows_required_alias_set(artifact_schema, &["label", "name", "title"]);
-        assert_schema_allows_required_alias_set(artifact_schema, &["kind", "type"]);
+        assert_schema_allows_required_alias_set(artifact_schema, &ARTIFACT_LABEL_KEYS);
+        assert_schema_allows_required_alias_set(artifact_schema, &ARTIFACT_KIND_KEYS);
     }
 
     #[test]
@@ -635,12 +772,54 @@ mod tests {
         assert_eq!(loaded.house_rules[0].module, "semgrep");
         assert_eq!(
             loaded.house_rules[0].path,
-            ".kuzushi/house-rules/semgrep.md"
+            crate::relative_house_rule_path("semgrep").to_string_lossy()
         );
         assert!(loaded.house_rules[0].sha256.starts_with("sha256:"));
         let metadata =
-            fs::read_to_string(run_dir(tmp.path(), "run-house-rules").join("run.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), "run-house-rules", "run.json"))
+                .unwrap();
         assert!(metadata.contains("\"houseRules\""));
+    }
+
+    #[test]
+    fn run_summary_records_invalid_house_rule_fingerprint_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(crate::house_rule_path(tmp.path(), "triage")).unwrap();
+
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running("run-invalid-house-rule", "tool", None, "target").complete(),
+        )
+        .unwrap();
+
+        let loaded = load_run_summary(tmp.path(), "run-invalid-house-rule").unwrap();
+
+        assert_eq!(loaded.house_rules.len(), 1);
+        assert_eq!(loaded.house_rules[0].module, "triage");
+        assert_eq!(loaded.house_rules[0].sha256, "invalid:not-a-file");
+    }
+
+    #[test]
+    fn run_summary_records_invalid_house_rule_root_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(crate::workspace::workspace_state_root(tmp.path())).unwrap();
+        fs::write(crate::house_rules_root(tmp.path()), "not a directory").unwrap();
+
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running("run-invalid-house-root", "tool", None, "target").complete(),
+        )
+        .unwrap();
+
+        let loaded = load_run_summary(tmp.path(), "run-invalid-house-root").unwrap();
+
+        assert_eq!(loaded.house_rules.len(), 1);
+        assert_eq!(loaded.house_rules[0].module, "<house-rules>");
+        assert_eq!(
+            loaded.house_rules[0].path,
+            crate::relative_house_rules_root().to_string_lossy()
+        );
+        assert_eq!(loaded.house_rules[0].sha256, "invalid:not-a-directory");
     }
 
     #[test]
@@ -661,23 +840,87 @@ mod tests {
         assert_eq!(loaded.prompt_overrides[0].verb, "run");
         assert_eq!(
             loaded.prompt_overrides[0].path,
-            ".kuzushi/prompts/triage/run.md"
+            crate::relative_prompt_override_path("triage", "run").to_string_lossy()
         );
         assert!(loaded.prompt_overrides[0].sha256.starts_with("sha256:"));
-        let metadata = fs::read_to_string(run_dir(tmp.path(), "run-prompts").join("run.json"))
-            .unwrap();
+        let metadata =
+            fs::read_to_string(run_artifact_path(tmp.path(), "run-prompts", "run.json")).unwrap();
         assert!(metadata.contains("\"promptOverrides\""));
+    }
+
+    #[test]
+    fn run_summary_records_invalid_prompt_override_fingerprint_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(crate::prompt_override_path(tmp.path(), "triage", "run")).unwrap();
+
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running("run-invalid-prompt", "tool", None, "target").complete(),
+        )
+        .unwrap();
+
+        let loaded = load_run_summary(tmp.path(), "run-invalid-prompt").unwrap();
+
+        assert_eq!(loaded.prompt_overrides.len(), 1);
+        assert_eq!(loaded.prompt_overrides[0].module, "triage");
+        assert_eq!(loaded.prompt_overrides[0].verb, "run");
+        assert_eq!(loaded.prompt_overrides[0].sha256, "invalid:not-a-file");
+    }
+
+    #[test]
+    fn run_summary_records_invalid_prompt_root_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(crate::workspace::workspace_state_root(tmp.path())).unwrap();
+        fs::write(crate::prompt_overrides_root(tmp.path()), "not a directory").unwrap();
+
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running("run-invalid-prompt-root", "tool", None, "target").complete(),
+        )
+        .unwrap();
+
+        let loaded = load_run_summary(tmp.path(), "run-invalid-prompt-root").unwrap();
+
+        assert_eq!(loaded.prompt_overrides.len(), 1);
+        assert_eq!(loaded.prompt_overrides[0].module, "<prompts>");
+        assert_eq!(loaded.prompt_overrides[0].verb, "<root>");
+        assert_eq!(
+            loaded.prompt_overrides[0].path,
+            crate::relative_prompt_overrides_root().to_string_lossy()
+        );
+        assert_eq!(loaded.prompt_overrides[0].sha256, "invalid:not-a-directory");
+    }
+
+    #[test]
+    fn run_summary_records_invalid_prompt_module_root_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(crate::prompt_overrides_root(tmp.path())).unwrap();
+        fs::write(crate::module_prompt_root(tmp.path(), "triage"), "not a directory").unwrap();
+
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running("run-invalid-prompt-module", "tool", None, "target").complete(),
+        )
+        .unwrap();
+
+        let loaded = load_run_summary(tmp.path(), "run-invalid-prompt-module").unwrap();
+
+        assert_eq!(loaded.prompt_overrides.len(), 1);
+        assert_eq!(loaded.prompt_overrides[0].module, "triage");
+        assert_eq!(loaded.prompt_overrides[0].verb, "<module>");
+        assert_eq!(
+            loaded.prompt_overrides[0].path,
+            crate::relative_module_prompt_root("triage").to_string_lossy()
+        );
+        assert_eq!(loaded.prompt_overrides[0].sha256, "invalid:not-a-directory");
     }
 
     #[test]
     fn run_summary_records_threat_model_digest() {
         let tmp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(tmp.path().join(".kuzushi")).unwrap();
-        fs::write(
-            tmp.path().join(".kuzushi").join("threat-model.json"),
-            r#"{"methodology":"STRIDE"}"#,
-        )
-        .unwrap();
+        let threat_model_path = crate::capabilities::persistent_threat_model_path(tmp.path());
+        fs::create_dir_all(threat_model_path.parent().unwrap()).unwrap();
+        fs::write(threat_model_path, r#"{"methodology":"STRIDE"}"#).unwrap();
 
         write_run_summary(
             tmp.path(),
@@ -691,9 +934,28 @@ mod tests {
             .as_deref()
             .is_some_and(|hash| hash.starts_with("sha256:")));
         let metadata =
-            fs::read_to_string(run_dir(tmp.path(), "run-threat-digest").join("run.json"))
+            fs::read_to_string(run_artifact_path(tmp.path(), "run-threat-digest", "run.json"))
                 .unwrap();
         assert!(metadata.contains("\"threatModelSha256\""));
+    }
+
+    #[test]
+    fn run_summary_records_invalid_threat_model_digest_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(crate::capabilities::persistent_threat_model_path(tmp.path())).unwrap();
+
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running("run-threat-invalid", "tool", None, "target").complete(),
+        )
+        .unwrap();
+
+        let loaded = load_run_summary(tmp.path(), "run-threat-invalid").unwrap();
+
+        assert_eq!(
+            loaded.threat_model_sha256.as_deref(),
+            Some("invalid:not-a-file")
+        );
     }
 
     #[test]
@@ -749,15 +1011,15 @@ mod tests {
     }
 
     fn write_house_rule(target: &Path, module: &str, body: &str) {
-        let dir = target.join(".kuzushi").join("house-rules");
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join(format!("{module}.md")), body).unwrap();
+        let path = crate::house_rule_path(target, module);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
     }
 
     fn write_prompt_override(target: &Path, module: &str, verb: &str, body: &str) {
-        let dir = target.join(".kuzushi").join("prompts").join(module);
-        fs::create_dir_all(&dir).unwrap();
-        fs::write(dir.join(format!("{verb}.md")), body).unwrap();
+        let path = crate::prompt_override_path(target, module, verb);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, body).unwrap();
     }
 
     fn init_git_repo(target: &Path) -> bool {
@@ -794,7 +1056,7 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            run_dir(tmp.path(), run_id).join("run.json"),
+            run_artifact_path(tmp.path(), run_id, "run.json"),
             serde_json::to_string_pretty(&serde_json::json!({
                 "run_id": run_id,
                 "kind": "tool",
@@ -864,7 +1126,7 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            run_dir(tmp.path(), run_id).join("artifacts.json"),
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
                 "run_id": run_id,
                 "artifacts": [
@@ -897,7 +1159,7 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            run_dir(tmp.path(), run_id).join("artifacts.json"),
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
                 "run_id": run_id,
                 "artifacts": [
@@ -929,7 +1191,343 @@ mod tests {
     }
 
     #[test]
-    fn load_run_artifacts_drops_blank_manifest_paths() {
+    fn load_run_artifacts_accepts_matching_manifest_artifact_aliases() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-matching-artifact-aliases";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": " run metadata ",
+                        "name": "run metadata",
+                        "path": " run.json ",
+                        "filePath": "run.json",
+                        "kind": " JSON ",
+                        "type": "json"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let artifacts = load_run_artifacts(tmp.path(), run_id).unwrap();
+
+        assert_eq!(artifacts.len(), 1);
+        assert_eq!(artifacts[0].label, "run metadata");
+        assert_eq!(artifacts[0].path, "run.json");
+        assert_eq!(artifacts[0].kind, "json");
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_conflicting_manifest_artifact_label_aliases() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-conflicting-artifact-label-aliases";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": "run metadata",
+                        "name": "runtime trace",
+                        "path": "run.json",
+                        "kind": "json"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest artifact at index 0 has conflicting label aliases"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_conflicting_manifest_artifact_path_aliases() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-conflicting-artifact-path-aliases";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": "run metadata",
+                        "path": "run.json",
+                        "filePath": "trace.jsonl",
+                        "kind": "json"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest artifact at index 0 has conflicting path aliases"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_conflicting_manifest_artifact_kind_aliases() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-conflicting-artifact-kind-aliases";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": "run metadata",
+                        "path": "run.json",
+                        "kind": "json",
+                        "type": "jsonl"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest artifact at index 0 has conflicting kind aliases"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_non_string_manifest_artifact_label_alias() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-non-string-artifact-label-alias";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": ["run metadata"],
+                        "path": "run.json",
+                        "kind": "json"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest artifact at index 0 label is not a string"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_non_string_manifest_artifact_path_alias() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-non-string-artifact-path-alias";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": "run metadata",
+                        "filePath": ["run.json"],
+                        "kind": "json"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest artifact at index 0 filePath is not a string"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_non_string_manifest_artifact_kind_alias() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-non-string-artifact-kind-alias";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": "run metadata",
+                        "path": "run.json",
+                        "type": ["json"]
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest artifact at index 0 type is not a string"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_missing_manifest_artifact_label_alias() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-missing-artifact-label-alias";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "path": "run.json",
+                        "kind": "json"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(
+            message.contains("Artifact manifest artifact at index 0 is missing label alias")
+        );
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_missing_manifest_artifact_path_alias() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-missing-artifact-path-alias";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": "run metadata",
+                        "kind": "json"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest artifact at index 0 is missing path alias"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_missing_manifest_artifact_kind_alias() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-missing-artifact-kind-alias";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": "run metadata",
+                        "path": "run.json"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest artifact at index 0 is missing kind alias"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_blank_manifest_artifact_path_alias() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-manifest-blank-path";
         write_run_summary(
@@ -939,15 +1537,414 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            run_dir(tmp.path(), run_id).join("artifacts.json"),
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
                 "run_id": run_id,
                 "artifacts": [
                     {
-                        "label": "blank",
+                        "label": "run metadata",
                         "path": "   ",
                         "kind": "json"
-                    },
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest artifact at index 0 path alias is empty"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_blank_manifest_artifact_label_alias() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-blank-label";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": "   ",
+                        "path": "run.json",
+                        "kind": "json"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest artifact at index 0 label alias is empty"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_blank_manifest_artifact_kind_alias() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-blank-kind";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": "run metadata",
+                        "path": "run.json",
+                        "kind": "   "
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest artifact at index 0 kind alias is empty"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_manifest_canonical_artifact_label_mismatch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-canonical-label-mismatch";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": "runtime trace",
+                        "path": "run.json",
+                        "kind": "json"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains(
+            "Artifact manifest artifact at index 0 label does not match canonical artifact contract"
+        ));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_manifest_canonical_artifact_kind_mismatch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-canonical-kind-mismatch";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": "run metadata",
+                        "path": "run.json",
+                        "kind": "jsonl"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains(
+            "Artifact manifest artifact at index 0 kind does not match canonical artifact contract"
+        ));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_manifest_tool_input_artifact_metadata_mismatch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-tool-input-mismatch";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": "tool result",
+                        "path": "input.json",
+                        "kind": "json"
+                    }
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains(
+            "Artifact manifest artifact at index 0 label does not match canonical artifact contract"
+        ));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_non_file_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-non-file";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        let manifest_path = run_artifact_path(tmp.path(), run_id, "artifacts.json");
+        fs::remove_file(&manifest_path).unwrap();
+        fs::create_dir(&manifest_path).unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+
+        assert!(error.to_string().contains("Artifact manifest is not a file"));
+        assert!(error.to_string().contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_non_object_manifest() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-non-object";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(run_artifact_path(tmp.path(), run_id, "artifacts.json"), "[]").unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest is not a JSON object"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_non_array_manifest_artifacts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-non-array-artifacts";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": {}
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest artifacts is not a JSON array"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_manifest_missing_artifacts() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-missing-artifacts";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest is missing artifacts array"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_manifest_missing_run_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-missing-run-id";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "artifacts": []
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest is missing runId"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_manifest_blank_run_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-blank-run-id";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "runId": "   ",
+                "artifacts": []
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest runId is not a non-empty string"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_manifest_blank_snake_case_run_id() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-blank-snake-run-id";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": "   ",
+                "artifacts": []
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest run_id is not a non-empty string"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_manifest_run_id_mismatch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-run-id-mismatch";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "runId": "other-run",
+                "artifacts": []
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest runId does not match requested run id"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_accepts_matching_manifest_run_id_aliases() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-matching-run-id-aliases";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "runId": run_id,
+                "run_id": run_id,
+                "artifacts": [
                     {
                         "label": "run metadata",
                         "path": "run.json",
@@ -963,27 +1960,68 @@ mod tests {
 
         assert_eq!(artifacts.len(), 1);
         assert_eq!(artifacts[0].label, "run metadata");
-        assert_eq!(artifacts[0].path, "run.json");
     }
 
     #[test]
-    fn load_run_artifacts_rejects_non_file_manifest() {
+    fn load_run_artifacts_rejects_conflicting_manifest_run_id_aliases() {
         let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-manifest-non-file";
+        let run_id = "run-manifest-conflicting-run-id-aliases";
         write_run_summary(
             tmp.path(),
             &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
                 .complete(),
         )
         .unwrap();
-        let manifest_path = run_dir(tmp.path(), run_id).join("artifacts.json");
-        fs::remove_file(&manifest_path).unwrap();
-        fs::create_dir(&manifest_path).unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "runId": run_id,
+                "run_id": "other-run",
+                "artifacts": []
+            }))
+            .unwrap(),
+        )
+        .unwrap();
 
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
 
-        assert!(error.to_string().contains("Artifact manifest is not a file"));
-        assert!(error.to_string().contains("artifacts.json"));
+        assert!(message.contains("Artifact manifest runId and run_id disagree"));
+        assert!(message.contains("artifacts.json"));
+    }
+
+    #[test]
+    fn load_run_artifacts_rejects_non_object_manifest_artifact_entry() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-manifest-non-object-artifact-entry";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "artifacts.json"),
+            serde_json::to_string_pretty(&serde_json::json!({
+                "run_id": run_id,
+                "artifacts": [
+                    {
+                        "label": "run metadata",
+                        "path": "run.json",
+                        "kind": "json"
+                    },
+                    []
+                ]
+            }))
+            .unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Artifact manifest artifact at index 1 is not a JSON object"));
+        assert!(message.contains("artifacts.json"));
     }
 
     #[test]
@@ -1085,6 +2123,7 @@ mod tests {
     fn load_run_failures_accepts_artifact_field_aliases() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-failure-artifact-aliases";
+        let triage_path = relative_run_artifact_path(tmp.path(), run_id, "triage.json");
         write_run_summary(
             tmp.path(),
             &RunSummary::running(run_id, "tool", Some("triage:run".to_string()), "target")
@@ -1092,7 +2131,7 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            run_dir(tmp.path(), run_id).join("failures.json"),
+            run_artifact_path(tmp.path(), run_id, "failures.json"),
             serde_json::to_string_pretty(&serde_json::json!({
                 "run_id": run_id,
                 "status": "failed",
@@ -1106,7 +2145,7 @@ mod tests {
                         "what_failed": "triage did not complete",
                         "artifacts_available": [{
                             "title": " triage transcript ",
-                            "file_path": " .kuzushi/runs/run-failure-artifact-aliases/triage.json ",
+                            "file_path": format!(" {triage_path} "),
                             "type": " JSON "
                         }],
                         "missing_artifacts": ["proof.json"],
@@ -1126,10 +2165,7 @@ mod tests {
         let artifact = &failures.failures[0].agent_thread_context.artifacts_available[0];
 
         assert_eq!(artifact.label, "triage transcript");
-        assert_eq!(
-            artifact.path,
-            ".kuzushi/runs/run-failure-artifact-aliases/triage.json"
-        );
+        assert_eq!(artifact.path, triage_path);
         assert_eq!(artifact.kind, "json");
     }
 
@@ -1143,7 +2179,7 @@ mod tests {
                 .failed("runtime unavailable"),
         )
         .unwrap();
-        let path = run_dir(tmp.path(), run_id).join("failures.json");
+        let path = run_artifact_path(tmp.path(), run_id, "failures.json");
         fs::remove_file(&path).unwrap();
         fs::create_dir_all(&path).unwrap();
 
@@ -1151,6 +2187,25 @@ mod tests {
         let message = error.to_string();
 
         assert!(message.contains("Run failures artifact is not a file"));
+        assert!(message.contains("failures.json"));
+    }
+
+    #[test]
+    fn load_run_failures_rejects_non_object_failures_artifact() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-non-object-failures";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("triage:run".to_string()), "target")
+                .failed("runtime unavailable"),
+        )
+        .unwrap();
+        fs::write(run_artifact_path(tmp.path(), run_id, "failures.json"), "[]").unwrap();
+
+        let error = load_run_failures(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Run failures artifact is not a JSON object"));
         assert!(message.contains("failures.json"));
     }
 
@@ -1171,10 +2226,10 @@ mod tests {
         let running_manifest_artifacts = load_run_artifacts(tmp.path(), &run_id).unwrap();
         assert_manifest_has_canonical_run_artifacts(&running_manifest_artifacts);
         let context_marker =
-            fs::read_to_string(run_dir(tmp.path(), &run_id).join("context.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "context.json")).unwrap();
         assert!(context_marker.contains(&format!("\"run_id\": \"{run_id}\"")));
         let placeholder_report =
-            fs::read_to_string(run_dir(tmp.path(), &run_id).join("report.md")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "report.md")).unwrap();
         assert!(placeholder_report.contains(&format!("# Kuzushi Run {run_id}")));
         assert!(placeholder_report.contains("No report was recorded for this run."));
         assert_eq!(
@@ -1183,7 +2238,8 @@ mod tests {
         );
         let result = serde_json::json!({"ok": true});
         let artifact =
-            write_run_artifact_json(tmp.path(), &run_id, "result.json", "result", &result).unwrap();
+            write_run_artifact_json(tmp.path(), &run_id, "result.json", "tool result", &result)
+                .unwrap();
         append_run_trace_step(
             tmp.path(),
             &run_id,
@@ -1196,13 +2252,13 @@ mod tests {
         assert_eq!(loaded.status, "completed");
         assert_eq!(loaded.tool.as_deref(), Some("context:build"));
         assert_eq!(loaded.artifacts.len(), 1);
-        let metadata = fs::read_to_string(run_dir(tmp.path(), &run_id).join("run.json")).unwrap();
+        let metadata = fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "run.json")).unwrap();
         assert!(metadata.contains("\"status\": \"completed\""));
         let context_marker =
-            fs::read_to_string(run_dir(tmp.path(), &run_id).join("context.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "context.json")).unwrap();
         assert!(context_marker.contains("\"runStatus\": \"completed\""));
         let placeholder_report =
-            fs::read_to_string(run_dir(tmp.path(), &run_id).join("report.md")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "report.md")).unwrap();
         assert!(placeholder_report.contains("Status: completed"));
         assert!(load_run_failures(tmp.path(), &run_id)
             .unwrap()
@@ -1217,7 +2273,7 @@ mod tests {
         assert_manifest_has_canonical_run_artifacts(&manifest_artifacts);
         assert_manifest_has(&manifest_artifacts, "context.json");
         assert_manifest_has(&manifest_artifacts, "result.json");
-        let trace = fs::read_to_string(run_dir(tmp.path(), &run_id).join("trace.jsonl")).unwrap();
+        let trace = fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "trace.jsonl")).unwrap();
         assert!(trace.contains("context:build started"));
     }
 
@@ -1225,7 +2281,7 @@ mod tests {
     fn write_run_summary_rejects_non_file_snapshot_marker_target() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-non-file-snapshot-marker";
-        fs::create_dir_all(run_dir(tmp.path(), run_id).join("context.json")).unwrap();
+        fs::create_dir_all(run_artifact_path(tmp.path(), run_id, "context.json")).unwrap();
         let summary = RunSummary::running(run_id, "tool", Some("context:build".to_string()), "target");
 
         let error = write_run_summary(tmp.path(), &summary).unwrap_err();
@@ -1240,7 +2296,7 @@ mod tests {
     fn write_run_summary_rejects_non_file_report_marker_target() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-non-file-report-marker";
-        fs::create_dir_all(run_dir(tmp.path(), run_id).join("report.md")).unwrap();
+        fs::create_dir_all(run_artifact_path(tmp.path(), run_id, "report.md")).unwrap();
         let summary = RunSummary::running(run_id, "tool", Some("report:build".to_string()), "target");
 
         let error = write_run_summary(tmp.path(), &summary).unwrap_err();
@@ -1255,7 +2311,7 @@ mod tests {
     fn write_run_summary_rejects_non_file_manifest_placeholder_target() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-non-file-manifest-placeholder";
-        fs::create_dir_all(run_dir(tmp.path(), run_id).join("artifacts.json")).unwrap();
+        fs::create_dir_all(run_artifact_path(tmp.path(), run_id, "artifacts.json")).unwrap();
         let summary = RunSummary::running(run_id, "tool", Some("context:build".to_string()), "target");
 
         let error = write_run_summary(tmp.path(), &summary).unwrap_err();
@@ -1270,7 +2326,7 @@ mod tests {
     fn write_run_summary_rejects_non_file_jsonl_placeholder_target() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-non-file-jsonl-placeholder";
-        fs::create_dir_all(run_dir(tmp.path(), run_id).join("events.jsonl")).unwrap();
+        fs::create_dir_all(run_artifact_path(tmp.path(), run_id, "events.jsonl")).unwrap();
         let summary = RunSummary::running(run_id, "tool", Some("context:build".to_string()), "target");
 
         let error = write_run_summary(tmp.path(), &summary).unwrap_err();
@@ -1285,7 +2341,7 @@ mod tests {
     fn write_run_summary_rejects_non_file_metadata_target() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-non-file-metadata";
-        fs::create_dir_all(run_dir(tmp.path(), run_id).join("run.json")).unwrap();
+        fs::create_dir_all(run_artifact_path(tmp.path(), run_id, "run.json")).unwrap();
         let summary = RunSummary::running(run_id, "tool", Some("context:build".to_string()), "target");
 
         let error = write_run_summary(tmp.path(), &summary).unwrap_err();
@@ -1294,6 +2350,61 @@ mod tests {
             .to_string()
             .contains("Run metadata target is not a file"));
         assert!(error.to_string().contains("run.json"));
+    }
+
+    #[test]
+    fn load_run_summary_rejects_non_file_run_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-load-non-file-metadata";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("context:build".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        let path = run_artifact_path(tmp.path(), run_id, "run.json");
+        fs::remove_file(&path).unwrap();
+        fs::create_dir(&path).unwrap();
+
+        let error = load_run_summary(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Run metadata is not a file"));
+        assert!(message.contains("run.json"));
+    }
+
+    #[test]
+    fn load_run_summary_rejects_non_file_legacy_summary() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-load-non-file-legacy-summary";
+        let dir = run_dir(tmp.path(), run_id);
+        fs::create_dir_all(&dir).unwrap();
+        fs::create_dir(dir.join("summary.json")).unwrap();
+
+        let error = load_run_summary(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Legacy run summary is not a file"));
+        assert!(message.contains("summary.json"));
+    }
+
+    #[test]
+    fn load_run_summary_rejects_non_object_run_metadata() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-load-non-object-metadata";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("context:build".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+        fs::write(run_artifact_path(tmp.path(), run_id, "run.json"), "[]").unwrap();
+
+        let error = load_run_summary(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("Run metadata is not a JSON object"));
+        assert!(message.contains("run.json"));
     }
 
     #[test]
@@ -1315,7 +2426,7 @@ mod tests {
     fn append_run_event_rejects_non_file_event_log_target() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-non-file-events";
-        fs::create_dir_all(run_dir(tmp.path(), run_id).join("events.jsonl")).unwrap();
+        fs::create_dir_all(run_artifact_path(tmp.path(), run_id, "events.jsonl")).unwrap();
         let event = RunEvent::new(1, "tool", "started", "context:build");
 
         let error = append_run_event(tmp.path(), run_id, &event).unwrap_err();
@@ -1330,7 +2441,7 @@ mod tests {
     fn append_run_trace_step_rejects_non_file_trace_target() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-non-file-trace";
-        fs::create_dir_all(run_dir(tmp.path(), run_id).join("trace.jsonl")).unwrap();
+        fs::create_dir_all(run_artifact_path(tmp.path(), run_id, "trace.jsonl")).unwrap();
         let step = RunTraceStep::new(1, "tool", "context:build");
 
         let error = append_run_trace_step(tmp.path(), run_id, &step).unwrap_err();
@@ -1391,8 +2502,8 @@ mod tests {
         write_run_summary(tmp.path(), &summary.complete()).unwrap();
 
         let context_marker =
-            fs::read_to_string(run_dir(tmp.path(), &run_id).join("context.json")).unwrap();
-        let findings = fs::read_to_string(run_dir(tmp.path(), &run_id).join("findings.json"))
+            fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "context.json")).unwrap();
+        let findings = fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "findings.json"))
             .unwrap();
 
         assert!(context_marker.contains("\"runStatus\": \"completed\""));
@@ -1414,9 +2525,9 @@ mod tests {
 
         write_run_summary(tmp.path(), &summary).unwrap();
 
-        let metadata = fs::read_to_string(run_dir(tmp.path(), &run_id).join("run.json")).unwrap();
+        let metadata = fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "run.json")).unwrap();
         let placeholder_report =
-            fs::read_to_string(run_dir(tmp.path(), &run_id).join("report.md")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "report.md")).unwrap();
         let failures = load_run_failures(tmp.path(), &run_id).unwrap();
         let manifest_artifacts = load_run_artifacts(tmp.path(), &run_id).unwrap();
 
@@ -1429,7 +2540,7 @@ mod tests {
             "findings.json",
             "proof.json",
         ] {
-            let marker = fs::read_to_string(run_dir(tmp.path(), &run_id).join(leaf)).unwrap();
+            let marker = fs::read_to_string(run_artifact_path(tmp.path(), &run_id, leaf)).unwrap();
             assert!(marker.contains("\"runStatus\": \"paused\""), "{leaf}");
         }
         assert!(placeholder_report.contains("Status: paused"));
@@ -1521,6 +2632,22 @@ mod tests {
         }
     }
 
+    fn assert_manifest_has_tool_input_artifact(artifacts: &[RunArtifact]) {
+        for spec in TOOL_INPUT_ARTIFACTS {
+            assert!(
+                artifacts.iter().any(|artifact| {
+                    artifact.path.ends_with(spec.leaf)
+                        && artifact.label == spec.label
+                        && artifact.kind == spec.kind
+                }),
+                "manifest missing tool-input artifact {} ({}, {})",
+                spec.leaf,
+                spec.label,
+                spec.kind
+            );
+        }
+    }
+
     fn runtime_platform_label() -> String {
         format!("{}-{}", std::env::consts::OS, std::env::consts::ARCH)
     }
@@ -1533,7 +2660,7 @@ mod tests {
             tmp.path(),
             run_id,
             "input.json",
-            "input",
+            "tool input",
             &serde_json::json!({"enrichment": true}),
         )
         .unwrap();
@@ -1559,11 +2686,11 @@ mod tests {
         let manifest_artifacts = load_run_artifacts(tmp.path(), run_id).unwrap();
         assert_manifest_has(&manifest_artifacts, "input.json");
         assert_manifest_has(&manifest_artifacts, "failures.json");
-        let events = fs::read_to_string(run_dir(tmp.path(), run_id).join("events.jsonl")).unwrap();
+        let events = fs::read_to_string(run_artifact_path(tmp.path(), run_id, "events.jsonl")).unwrap();
         assert!(events.contains("\"status\":\"started\""));
 
         let failures =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("failures.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "failures.json")).unwrap();
         assert!(failures.contains("context:build did not complete successfully"));
         assert!(failures.contains("artifact-review-only"));
         assert!(failures.contains("input.json"));
@@ -1593,6 +2720,10 @@ mod tests {
             .next_files_or_artifacts_to_inspect
             .iter()
             .any(|path| path.ends_with("result.json")));
+        assert!(context
+            .next_files_or_artifacts_to_inspect
+            .iter()
+            .any(|path| path.ends_with("input.json")));
         assert!(context.next_files_or_artifacts_to_inspect.len() <= 12);
         assert!(context.fallback_prompt.contains("context:build"));
         assert!(context.fallback_prompt.contains("artifact-review-only"));
@@ -1711,7 +2842,11 @@ mod tests {
         let artifacts = (0..20)
             .map(|index| RunArtifact {
                 label: format!("artifact {index}"),
-                path: format!(".kuzushi/runs/{run_id}/extra-{index}.json"),
+                path: relative_run_artifact_path(
+                    tmp.path(),
+                    run_id,
+                    &format!("extra-{index}.json"),
+                ),
                 kind: "json".to_string(),
             })
             .collect::<Vec<_>>();
@@ -1734,6 +2869,7 @@ mod tests {
         assert_eq!(context.artifacts_available[11].label, "artifact 11");
         assert!(context.next_files_or_artifacts_to_inspect[0].ends_with("failures.json"));
         assert!(context.next_files_or_artifacts_to_inspect[1].ends_with("result.json"));
+        assert!(context.next_files_or_artifacts_to_inspect[2].ends_with("input.json"));
     }
 
     #[test]
@@ -1792,11 +2928,11 @@ mod tests {
             .any(|artifact| artifact.path.ends_with("input.json")));
         let manifest_artifacts = load_run_artifacts(tmp.path(), run_id).unwrap();
         assert_manifest_has(&manifest_artifacts, "run.json");
-        assert_manifest_has(&manifest_artifacts, "input.json");
-        let events = fs::read_to_string(run_dir(tmp.path(), run_id).join("events.jsonl")).unwrap();
+        assert_manifest_has_tool_input_artifact(&manifest_artifacts);
+        let events = fs::read_to_string(run_artifact_path(tmp.path(), run_id, "events.jsonl")).unwrap();
         assert!(events.contains("\"status\":\"started\""));
         assert!(events.contains("\"artifact\""));
-        let trace = fs::read_to_string(run_dir(tmp.path(), run_id).join("trace.jsonl")).unwrap();
+        let trace = fs::read_to_string(run_artifact_path(tmp.path(), run_id, "trace.jsonl")).unwrap();
         assert!(trace.contains("context:build started"));
     }
 
@@ -1953,8 +3089,8 @@ mod tests {
             }),
         );
 
-        let body =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("findings.json")).unwrap();
+        let body = fs::read_to_string(run_artifact_path(tmp.path(), run_id, "findings.json"))
+            .unwrap();
         let findings = serde_json::from_str::<serde_json::Value>(&body).unwrap();
 
         assert_eq!(findings[0]["fingerprint"], serde_json::json!("dep-fp"));
@@ -1962,7 +3098,7 @@ mod tests {
         assert!(findings[0].get("packageName").is_none());
 
         let proof_body =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("proof.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
         let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
 
         assert_eq!(proof["source"], serde_json::json!("normalized-findings"));
@@ -1998,13 +3134,13 @@ mod tests {
         );
 
         let findings_body =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("findings.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "findings.json")).unwrap();
         let findings = serde_json::from_str::<serde_json::Value>(&findings_body).unwrap();
         assert_eq!(findings[0]["fingerprint"], serde_json::json!("codeql-fp"));
         assert_eq!(findings[0]["ruleId"], serde_json::json!("js/sql-injection"));
 
         let proof_body =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("proof.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
         let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
         assert_eq!(
             proof["countsByState"]["source_sink_linked"],
@@ -2038,7 +3174,7 @@ mod tests {
         );
 
         let proof_body =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("proof.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
         let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
 
         assert_eq!(
@@ -2073,7 +3209,7 @@ mod tests {
         );
 
         let proof_body =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("proof.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
         let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
 
         assert_eq!(proof["runtimeVerification"], serde_json::json!(true));
@@ -2122,7 +3258,7 @@ mod tests {
         );
 
         let proof_body =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("proof.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
         let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
 
         assert_eq!(
@@ -2159,7 +3295,7 @@ mod tests {
         );
 
         let proof_body =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("proof.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
         let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
 
         assert_eq!(proof["proofLevel"], serde_json::json!(3));
@@ -2188,7 +3324,7 @@ mod tests {
         );
 
         let proof_body =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("proof.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
         let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
 
         assert_eq!(proof["verified"], serde_json::json!(1));
@@ -2214,7 +3350,7 @@ mod tests {
         );
 
         let proof_body =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("proof.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
         let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
 
         assert_eq!(proof["verified_count"], serde_json::json!(1));
@@ -2267,7 +3403,7 @@ mod tests {
         );
 
         let body =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("recommendations.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "recommendations.json")).unwrap();
         let report = serde_json::from_str::<serde_json::Value>(&body).unwrap();
 
         assert_eq!(report["summary"], serde_json::json!("2 recommendations for /repo"));
@@ -2329,7 +3465,7 @@ mod tests {
         );
 
         let body =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("recommendations.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "recommendations.json")).unwrap();
         let report = serde_json::from_str::<serde_json::Value>(&body).unwrap();
 
         assert_eq!(report["summary"], serde_json::json!("1 recommendation for /repo"));
@@ -2386,7 +3522,7 @@ mod tests {
         );
 
         let body =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("recommendations.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "recommendations.json")).unwrap();
         let report = serde_json::from_str::<serde_json::Value>(&body).unwrap();
 
         assert_eq!(report["summary"], serde_json::json!("1 recommendation for /repo"));
@@ -2500,7 +3636,7 @@ mod tests {
         record_tool_run_complete(record, &serde_json::json!({"ok": true}));
 
         let result =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("result.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "result.json")).unwrap();
         let output = serde_json::from_str::<serde_json::Value>(&result).unwrap();
 
         assert_eq!(output["ok"], serde_json::json!(true));
@@ -2579,10 +3715,10 @@ mod tests {
         assert_manifest_has_canonical_run_artifacts(&manifest);
         assert_manifest_has_tool_result_artifact(&manifest);
         let failures =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("failures.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "failures.json")).unwrap();
         assert!(failures.contains("semgrep:scan did not complete successfully"));
         let result =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("result.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "result.json")).unwrap();
         let output = serde_json::from_str::<serde_json::Value>(&result).unwrap();
         assert_eq!(
             output["fallback_context"]["failedStage"],
@@ -2593,7 +3729,7 @@ mod tests {
             .unwrap()
             .iter()
             .any(|claim| claim == "verified claim"));
-        let trace = fs::read_to_string(run_dir(tmp.path(), run_id).join("trace.jsonl")).unwrap();
+        let trace = fs::read_to_string(run_artifact_path(tmp.path(), run_id, "trace.jsonl")).unwrap();
         assert!(trace.contains("\"kind\":\"tool-progress\""));
         assert!(trace.contains("\"severity\":\"warn\""));
     }
@@ -2617,7 +3753,7 @@ mod tests {
         let summary = load_run_summary(tmp.path(), run_id).unwrap();
         assert_eq!(summary.status, "failed");
         let result =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("result.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "result.json")).unwrap();
         let output = serde_json::from_str::<serde_json::Value>(&result).unwrap();
         assert_eq!(output["status"], serde_json::json!("failed"));
         assert_eq!(output["errors"][0], serde_json::json!("scanner failed"));
@@ -2651,7 +3787,7 @@ mod tests {
         assert_eq!(failures.status, "failed");
         assert_eq!(failures.failures[0].error, "scanner missing");
         let result =
-            fs::read_to_string(run_dir(tmp.path(), run_id).join("result.json")).unwrap();
+            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "result.json")).unwrap();
         let output = serde_json::from_str::<serde_json::Value>(&result).unwrap();
         assert_eq!(
             output["fallback_context"]["failedStage"],
@@ -2729,6 +3865,29 @@ mod tests {
         let listed = list_run_summaries(tmp.path()).unwrap();
         assert_eq!(listed[0].kind, "tool");
         assert_eq!(listed[0].target, "canonical-target");
+    }
+
+    #[test]
+    fn list_run_summaries_does_not_fallback_to_legacy_when_run_json_is_invalid() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = runs_root(tmp.path());
+        fs::create_dir_all(root.join("run-invalid-canonical")).unwrap();
+        fs::write(
+            root.join("run-invalid-canonical").join("summary.json"),
+            serde_json::to_string(&RunSummary::running(
+                "run-invalid-canonical",
+                "tool",
+                None,
+                "legacy-target",
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        fs::create_dir(root.join("run-invalid-canonical").join("run.json")).unwrap();
+
+        let listed = list_run_summaries(tmp.path()).unwrap();
+
+        assert!(listed.is_empty());
     }
 
     fn run_summary_schema() -> serde_json::Value {
@@ -2846,7 +4005,7 @@ mod tests {
             .with_trace_malformed_lines(Some(1))
             .with_artifact(RunArtifact {
                 label: "result".to_string(),
-                path: ".kuzushi/runs/run-schema/result.json".to_string(),
+                path: representative_run_artifact_path("run-schema", "result.json"),
                 kind: "json".to_string(),
             })
     }
@@ -2856,7 +4015,7 @@ mod tests {
             run_id: "run-schema".to_string(),
             artifacts: vec![RunArtifact {
                 label: "run metadata".to_string(),
-                path: ".kuzushi/runs/run-schema/run.json".to_string(),
+                path: representative_run_artifact_path("run-schema", "run.json"),
                 kind: "json".to_string(),
             }],
         }
@@ -2867,7 +4026,7 @@ mod tests {
             "run_id": "run-schema",
             "artifacts": [{
                 "label": "run metadata",
-                "path": ".kuzushi/runs/run-schema/run.json",
+                "path": representative_run_artifact_path("run-schema", "run.json"),
                 "kind": "json"
             }]
         })
@@ -2919,7 +4078,7 @@ mod tests {
             }],
             "artifacts": [{
                 "label": "result",
-                "path": ".kuzushi/runs/run-schema/result.json",
+                "path": representative_run_artifact_path("run-schema", "result.json"),
                 "kind": "json"
             }]
         })
@@ -2939,7 +4098,7 @@ mod tests {
                     what_failed: "triage:run did not complete successfully".to_string(),
                     artifacts_available: vec![RunArtifact {
                         label: "run metadata".to_string(),
-                        path: ".kuzushi/runs/run-failed/run.json".to_string(),
+                        path: representative_run_artifact_path("run-failed", "run.json"),
                         kind: "json".to_string(),
                     }],
                     missing_artifacts: vec!["proof.json".to_string()],
@@ -2967,7 +4126,7 @@ mod tests {
                     "what_failed": "triage:run did not complete successfully",
                     "artifacts_available": [{
                         "label": "run metadata",
-                        "path": ".kuzushi/runs/run-failed/run.json",
+                        "path": representative_run_artifact_path("run-failed", "run.json"),
                         "kind": "json"
                     }],
                     "missing_artifacts": ["proof.json"],
@@ -2986,7 +4145,7 @@ mod tests {
             .with_tool("triage:run")
             .with_artifact(RunArtifact {
                 label: "input".to_string(),
-                path: ".kuzushi/runs/run-event/input.json".to_string(),
+                path: representative_run_artifact_path("run-event", "input.json"),
                 kind: "json".to_string(),
             })
     }
@@ -3357,6 +4516,89 @@ mod tests {
         for field in fields {
             assert!(properties.contains_key(*field), "schema missing field {field}");
         }
+    }
+
+    fn assert_manifest_fields_reference_non_empty_string(
+        schema: &serde_json::Value,
+        fields: &[&str],
+    ) {
+        let properties = schema["properties"].as_object().unwrap();
+        for field in fields {
+            assert_eq!(
+                properties[*field]["$ref"], "#/definitions/nonEmptyString",
+                "manifest field {field} must reject blank strings"
+            );
+        }
+    }
+
+    fn assert_artifact_aliases_reference_non_empty_string(
+        artifact_schema: &serde_json::Value,
+        fields: &[&str],
+    ) {
+        let properties = artifact_schema["properties"].as_object().unwrap();
+        for field in fields {
+            assert_eq!(
+                properties[*field]["$ref"], "#/definitions/nonEmptyString",
+                "artifact alias {field} must reject empty strings"
+            );
+        }
+    }
+
+    fn assert_schema_rule_matches_artifact_spec(
+        rules: &[serde_json::Value],
+        spec: &crate::artifact_contract::CanonicalRunArtifactSpec,
+    ) {
+        let rule = artifact_schema_rule(rules, spec.leaf);
+
+        for alias in ARTIFACT_PATH_KEYS {
+            assert_schema_rule_path_alias(rule, alias, spec.leaf);
+        }
+        assert_eq!(schema_rule_const(rule, "label"), spec.label);
+        assert_eq!(schema_rule_const(rule, "name"), spec.label);
+        assert_eq!(schema_rule_const(rule, "title"), spec.label);
+        assert_eq!(schema_rule_const(rule, "kind"), spec.kind);
+        assert_eq!(schema_rule_const(rule, "type"), spec.kind);
+    }
+
+    fn artifact_schema_rule<'a>(
+        rules: &'a [serde_json::Value],
+        leaf: &str,
+    ) -> &'a serde_json::Value {
+        let expected = artifact_path_pattern(leaf);
+        rules
+            .iter()
+            .find(|rule| schema_rule_matches_path_alias(rule, "path", &expected))
+            .unwrap_or_else(|| panic!("missing schema metadata rule for {leaf}"))
+    }
+
+    fn artifact_path_pattern(leaf: &str) -> String {
+        format!("(^|/){}$", leaf.replace('.', "\\."))
+    }
+
+    fn assert_schema_rule_path_alias(rule: &serde_json::Value, alias: &str, leaf: &str) {
+        let expected = artifact_path_pattern(leaf);
+        assert!(
+            schema_rule_matches_path_alias(rule, alias, &expected),
+            "schema metadata rule for {leaf} must cover {alias}"
+        );
+    }
+
+    fn schema_rule_matches_path_alias(
+        rule: &serde_json::Value,
+        alias: &str,
+        expected: &str,
+    ) -> bool {
+        rule["if"]["anyOf"]
+            .as_array()
+            .is_some_and(|branches| branches.iter().any(|branch| path_alias_branch(branch, alias, expected)))
+    }
+
+    fn path_alias_branch(branch: &serde_json::Value, alias: &str, expected: &str) -> bool {
+        required_fields(branch).contains(&alias) && branch["properties"][alias]["pattern"] == expected
+    }
+
+    fn schema_rule_const<'a>(rule: &'a serde_json::Value, field: &str) -> &'a str {
+        rule["then"]["properties"][field]["const"].as_str().unwrap()
     }
 
     fn assert_artifact_entries_match_schema(schema: &serde_json::Value, value: &serde_json::Value) {

@@ -1,3 +1,4 @@
+use super::context_snapshot::context_snapshot_relative_path;
 use crate::commands::{
     shell_command_specs, shell_help_examples, ShellCommandCategory, ShellCommandSpec,
 };
@@ -45,7 +46,7 @@ pub(crate) struct QuickstartModel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct QuickstartStep {
     pub(crate) number: &'static str,
-    pub(crate) text: &'static str,
+    pub(crate) text: String,
 }
 
 pub(crate) fn help_model() -> HelpModel {
@@ -79,7 +80,7 @@ impl PlainHelpModel {
 }
 
 fn plain_examples_line(examples: &[&'static str]) -> Option<String> {
-    (!examples.is_empty()).then(|| format!("Examples: {}", examples.join(" | ")))
+    (!examples.is_empty()).then(|| format!("Examples: {}", examples.join("  ·  ")))
 }
 
 fn plain_help_category(category: HelpCategoryModel) -> PlainHelpCategoryModel {
@@ -166,27 +167,33 @@ fn quickstart_steps(app: &ShellApp) -> Vec<QuickstartStep> {
     vec![
         QuickstartStep {
             number: "1",
-            text: "kuzushi doctor             CLI preflight (run from your terminal, not here)",
+            text: "kuzushi doctor             CLI preflight (run from your terminal, not here)"
+                .to_string(),
         },
         QuickstartStep {
             number: "2",
-            text: "onboarding (or context build)  multi-select planner: context / x-ray / STRIDE / PASTA / CPG / CodeQL / threat intel",
+            text: format!(
+                "onboarding (or context build -> {})  planner: context / x-ray / STRIDE / PASTA / CPG / CodeQL / threat intel",
+                context_snapshot_relative_path()
+            ),
         },
         QuickstartStep {
             number: "3",
-            text: quickstart_scan_step(app),
+            text: quickstart_scan_step(app).to_string(),
         },
         QuickstartStep {
             number: "4",
-            text: "run <tool>                 dispatch a single tool (e.g. run semgrep:scan)",
+            text: "run <tool>                 dispatch a single tool (e.g. run semgrep:scan)"
+                .to_string(),
         },
         QuickstartStep {
             number: "5",
-            text: "findings · open F-0001     inspect evidence and proof state",
+            text: "findings · open F-0001     inspect evidence and proof state".to_string(),
         },
         QuickstartStep {
             number: "6",
-            text: "workspace export findings  write a report; kuzushi pr-comment for PR drop",
+            text: "workspace export findings  write a report; kuzushi pr-comment for PR drop"
+                .to_string(),
         },
     ]
 }

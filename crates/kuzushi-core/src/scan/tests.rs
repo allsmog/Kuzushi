@@ -590,6 +590,18 @@ printf '{"results":[]}'
     }
 
     #[test]
+    fn cached_codeql_binary_path_uses_workspace_state_root() {
+        let home = Path::new("/home/kuzushi");
+
+        assert_eq!(
+            cached_codeql_binary_path(home),
+            crate::workspace::workspace_state_root(home)
+                .join("bin")
+                .join(codeql_binary_name())
+        );
+    }
+
+    #[test]
     fn merge_detected_language_output_accumulates_success_errors_and_cancellation() {
         let mut output = ScanEngineOutput::default();
         let mut errors = Vec::new();
@@ -793,9 +805,8 @@ exit 2
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].tool, "codeql");
         assert_eq!(findings[0].rule_id, "js/sql-injection");
-        assert!(tmp
-            .path()
-            .join(".kuzushi/codeql-db/codeql-database.yml")
+        assert!(crate::workspace::workspace_codeql_db_path(tmp.path())
+            .join("codeql-database.yml")
             .exists());
     }
 

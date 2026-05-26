@@ -1,73 +1,83 @@
 use super::*;
+use crate::attachments::{AttachmentKind, AttachmentRecord};
+use crate::workspace::WorkspaceTarget;
 
 pub(crate) fn render_attachments(root: &Path) -> Result<Option<String>> {
-    let path = root
-        .join(".kuzushi")
-        .join(MODULE_ID)
-        .join("attachments.json");
-    let Some(documents) = load_attachment_documents(&path)? else {
+    let workspace = WorkspaceTarget::new(root)?;
+    let attachments = carlini_attachment_records(&workspace)?;
+    if attachments.is_empty() {
         return Ok(None);
     };
-    let sections = render_attachment_sections(&documents);
+    let sections = render_attachment_sections(&workspace, &attachments);
     Ok(Some(render_attachment_block(&sections)))
 }
 
-fn load_attachment_documents(path: &Path) -> Result<Option<Vec<Value>>> {
-    if !path.exists() {
-        return Ok(None);
-    }
-    let parsed = read_attachment_json(path)?;
-    Ok(non_empty_attachment_documents(parsed))
+fn carlini_attachment_records(workspace: &WorkspaceTarget) -> Result<Vec<AttachmentRecord>> {
+    Ok(crate::attachments::list_attachments(workspace)?
+        .into_iter()
+        .filter(|record| is_carlini_attachment_module(&record.module_id))
+        .collect())
 }
 
-fn read_attachment_json(path: &Path) -> Result<Value> {
-    let raw =
-        fs::read_to_string(path).with_context(|| format!("Could not read {}", path.display()))?;
-    serde_json::from_str::<Value>(&raw)
-        .with_context(|| format!("Could not parse {}", path.display()))
+fn is_carlini_attachment_module(module_id: &str) -> bool {
+    matches!(module_id, "offense-review" | "carlini-threat-hunt")
 }
 
-fn non_empty_attachment_documents(parsed: Value) -> Option<Vec<Value>> {
-    let documents = parsed
-        .get("documents")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default();
-    if documents.is_empty() {
-        return None;
-    }
-    Some(documents)
-}
-
-fn render_attachment_sections(documents: &[Value]) -> Vec<String> {
+fn render_attachment_sections(
+    workspace: &WorkspaceTarget,
+    attachments: &[AttachmentRecord],
+) -> Vec<String> {
     let mut sections = Vec::new();
-    for (index, document) in documents.iter().enumerate() {
-        let title =
-            object_string_value(document, &["title"]).unwrap_or_else(|| "attachment".to_string());
-        let source = object_string_value(document, &["source"]).unwrap_or_default();
-        let kind = object_string_value(document, &["kind"]).unwrap_or_else(|| "other".to_string());
-        let status =
-            object_string_value(document, &["status"]).unwrap_or_else(|| "unknown".to_string());
-        let body = document
-            .get("extracted")
-            .and_then(|value| value.get("text"))
-            .and_then(Value::as_str)
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string)
-            .unwrap_or_else(|| format!("[No extractable text. Status: {status}.]"));
+    for (index, attachment) in attachments.iter().enumerate() {
+        let body = attachment_body(workspace, attachment);
         sections.push(format!(
             "=== ATTACHMENT {} OF {}: {} ===\nSource: {}\nKind: {}\nStatus: {}\n\n{}",
             index + 1,
-            documents.len(),
-            title,
-            source,
-            kind,
-            status,
+            attachments.len(),
+            attachment.title,
+            attachment.source,
+            attachment_kind_label(&attachment.kind),
+            attachment.status,
             body
         ));
     }
     sections
+}
+
+fn attachment_body(workspace: &WorkspaceTarget, attachment: &AttachmentRecord) -> String {
+    match attachment.kind {
+        AttachmentKind::Path => path_attachment_body(workspace, attachment),
+        AttachmentKind::Url => format!(
+            "[No local text was fetched for this URL attachment. Status: {}.]",
+            attachment.status
+        ),
+    }
+}
+
+fn path_attachment_body(workspace: &WorkspaceTarget, attachment: &AttachmentRecord) -> String {
+    let path = workspace.root().join(&attachment.source);
+    fs::read_to_string(&path)
+        .map(|body| bounded_attachment_body(&body))
+        .unwrap_or_else(|error| format!("[Could not read {}: {error}.]", attachment.source))
+}
+
+fn bounded_attachment_body(body: &str) -> String {
+    const MAX_ATTACHMENT_BYTES: usize = 16_384;
+    if body.len() <= MAX_ATTACHMENT_BYTES {
+        return body.trim().to_string();
+    }
+    let mut end = MAX_ATTACHMENT_BYTES;
+    while !body.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}\n[Attachment truncated at {MAX_ATTACHMENT_BYTES} bytes.]", body[..end].trim())
+}
+
+fn attachment_kind_label(kind: &AttachmentKind) -> &'static str {
+    match kind {
+        AttachmentKind::Path => "path",
+        AttachmentKind::Url => "url",
+    }
 }
 
 fn render_attachment_block(sections: &[String]) -> String {

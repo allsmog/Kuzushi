@@ -96,7 +96,7 @@ fn require_shinsa_runtime<'runtime>(
     runtime: Option<&'runtime dyn AgentRuntime>,
 ) -> Result<&'runtime dyn AgentRuntime> {
     runtime.context(format!(
-        "{tool_name} requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies."
+        "{tool_name} requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies."
     ))
 }
 

@@ -31,21 +31,29 @@ pub(crate) fn load_subgraph_slice(
     finding: &Finding,
     workspace_root: &Path,
 ) -> (Vec<StaticEvidenceNode>, Vec<StaticEvidenceEdge>) {
-    let store_path = workspace_root
-        .join(".kuzushi")
-        .join("v2")
-        .join("static-evidence.sqlite3");
-    if !store_path.exists() {
-        return (Vec::new(), Vec::new());
-    }
-    let store = match StaticEvidenceStore::open_path(&store_path) {
-        Ok(store) => store,
-        Err(_) => return (Vec::new(), Vec::new()),
+    let store = match open_static_evidence_store(workspace_root) {
+        Some(store) => store,
+        None => return (Vec::new(), Vec::new()),
     };
-    let all = store
-        .list_nodes_for_finding(&finding.fingerprint)
-        .unwrap_or_default();
+    let nodes = subgraph_nodes_for_finding(&store, finding);
+    let edges = subgraph_edges_for_nodes(&store, &nodes);
 
+    (nodes, edges)
+}
+
+fn open_static_evidence_store(workspace_root: &Path) -> Option<StaticEvidenceStore> {
+    let store_path = crate::workspace::workspace_static_evidence_db_path(workspace_root);
+    if store_path.exists() {
+        StaticEvidenceStore::open_path(store_path).ok()
+    } else {
+        None
+    }
+}
+
+fn subgraph_nodes_for_finding(
+    store: &StaticEvidenceStore,
+    finding: &Finding,
+) -> Vec<StaticEvidenceNode> {
     let kept_kinds = [
         StaticEvidenceNodeKind::Source,
         StaticEvidenceNodeKind::Sink,
@@ -53,12 +61,12 @@ pub(crate) fn load_subgraph_slice(
         StaticEvidenceNodeKind::Guard,
         StaticEvidenceNodeKind::CodeSpan,
     ];
-    let target_line = finding.start_line;
-
-    let mut nodes: Vec<StaticEvidenceNode> = all
+    let mut nodes: Vec<StaticEvidenceNode> = store
+        .list_nodes_for_finding(&finding.fingerprint)
+        .unwrap_or_default()
         .into_iter()
         .filter(|node| kept_kinds.contains(&node.kind))
-        .filter(|node| node_within_window(node, target_line, &finding.file_path))
+        .filter(|node| node_within_window(node, finding.start_line, &finding.file_path))
         .take(SUBGRAPH_NODE_CAP)
         .collect();
 
@@ -70,6 +78,13 @@ pub(crate) fn load_subgraph_slice(
             .then_with(|| a.id.cmp(&b.id))
     });
 
+    nodes
+}
+
+fn subgraph_edges_for_nodes(
+    store: &StaticEvidenceStore,
+    nodes: &[StaticEvidenceNode],
+) -> Vec<StaticEvidenceEdge> {
     let kept_ids: std::collections::HashSet<&str> = nodes.iter().map(|n| n.id.as_str()).collect();
     let mut edges: Vec<StaticEvidenceEdge> = nodes
         .iter()
@@ -81,8 +96,7 @@ pub(crate) fn load_subgraph_slice(
         .collect();
     edges.sort_by(|a, b| a.id.cmp(&b.id));
     edges.dedup_by(|a, b| a.id == b.id);
-
-    (nodes, edges)
+    edges
 }
 
 pub(crate) fn node_within_window(

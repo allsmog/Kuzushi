@@ -10,7 +10,7 @@ mod tests {
         apply_option_override, output_with_cli_run_artifacts, parse_option_override,
         start_cli_tool_run_with_loaded_modules,
     };
-    use crate::application::runs::filter_runs_by_status;
+    use crate::application::runs::{filter_runs_by_status, run_trace_path};
     use crate::application::runs_diff::runs_diff;
     use crate::application::runs_prune::runs_prune_plan;
     use crate::application::scan::{scan_scope_body, scan_tool_input, scan_worktree_suffix};
@@ -31,7 +31,8 @@ mod tests {
     };
     use crate::tool_run_artifacts::{fail_cli_tool_run, finish_cli_tool_run};
     use kuzushi_core::{
-        load_run_summary, run_dir, write_run_summary, RunSummary, ToolOptionStore, WorkspaceTarget,
+        latest_run_path, load_run_summary, run_dir, write_run_summary, RunSummary, ToolOptionStore,
+        WorkspaceTarget,
     };
     use std::path::{Path, PathBuf};
 
@@ -98,6 +99,7 @@ mod tests {
 
     #[test]
     fn run_summary_plain_includes_optional_fields_and_artifacts() {
+        let summary_path = run_dir(Path::new("/repo"), "run-123").join("summary.json");
         let summary =
             RunSummary::running("run-123", "scan", Some("sast:scan".to_string()), "/repo")
                 .failed("boom")
@@ -105,7 +107,7 @@ mod tests {
                 .with_cost(Some(0.125))
                 .with_artifact(kuzushi_core::RunArtifact {
                     label: "summary".to_string(),
-                    path: "/repo/.kuzushi/runs/run-123/summary.json".to_string(),
+                    path: summary_path.display().to_string(),
                     kind: "json".to_string(),
                 });
         let mut summary = summary;
@@ -121,7 +123,7 @@ mod tests {
         assert!(rendered.contains("Findings: 2"));
         assert!(rendered.contains("Cost USD: 0.1250"));
         assert!(rendered.contains("Error: boom"));
-        assert!(rendered.contains("summary: /repo/.kuzushi/runs/run-123/summary.json"));
+        assert!(rendered.contains(&format!("summary: {}", summary_path.display())));
         assert!(rendered.ends_with("Next: kuzushi runs trace run-123\n"));
     }
 
@@ -365,6 +367,19 @@ mod tests {
     }
 
     #[test]
+    fn run_trace_path_uses_shared_trace_artifact_spec() {
+        let workspace = WorkspaceTarget::new(PathBuf::from(".")).unwrap();
+        let leaf = kuzushi_core::run_artifacts::canonical_run_artifact_spec("trace.jsonl")
+            .expect("trace artifact spec")
+            .leaf;
+
+        assert_eq!(
+            run_trace_path(&workspace, "run-123"),
+            run_dir(workspace.root(), "run-123").join(leaf)
+        );
+    }
+
+    #[test]
     fn runs_prune_plan_keeps_newest_and_filters_old_runs() {
         let now = 2_000_000;
         let runs = vec![
@@ -409,7 +424,7 @@ mod tests {
         assert!(!run_dir(temp.path(), "run-old").exists());
         assert!(run_dir(temp.path(), "run-new").exists());
         assert_eq!(
-            std::fs::read_to_string(temp.path().join(".kuzushi/latest")).unwrap(),
+            std::fs::read_to_string(latest_run_path(temp.path())).unwrap(),
             "run-new\n"
         );
     }
@@ -551,6 +566,13 @@ mod tests {
     #[test]
     fn doctor_model_check_uses_shared_model_policy() {
         let mut config = kuzushi_core::V2Config::default();
+        config.model = None;
+
+        let check = check_model_config(&config);
+
+        assert_eq!(check.status, DoctorStatus::Warn);
+        assert!(check.detail.contains("no fallback model will be selected"));
+
         config.model = Some(" openai : gpt-5.5 ".to_string());
 
         let check = check_model_config(&config);
@@ -776,8 +798,11 @@ mod tests {
     }
 
     fn write_findings_snapshot(target: &Path, run_id: &str, value: serde_json::Value) {
+        let leaf = kuzushi_core::run_artifacts::canonical_run_artifact_spec("findings.json")
+            .expect("findings artifact must be in shared canonical spec")
+            .leaf;
         std::fs::write(
-            run_dir(target, run_id).join("findings.json"),
+            run_dir(target, run_id).join(leaf),
             serde_json::to_string_pretty(&value).unwrap(),
         )
         .unwrap();

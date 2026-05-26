@@ -8,10 +8,12 @@ pub(crate) fn resolve_threat_model_document(input: &Value, target: &Path) -> Res
     {
         return unwrap_document(value.clone());
     }
-    let path = target.join(".kuzushi").join("threat-model.json");
+    let path = crate::capabilities::threat_model::persistent_threat_model_path(target);
     let raw = fs::read_to_string(&path).with_context(|| {
+        let artifact = path.strip_prefix(target).unwrap_or(path.as_path());
         format!(
-            "carlini-threat-hunt requires an existing .kuzushi/threat-model.json under {}. Run `kuzushi --target {} run threat-model:build` first or provide a document in the tool input.",
+            "carlini-threat-hunt requires an existing {} under {}. Run `kuzushi --target {} run threat-model:build` first or provide a document in the tool input.",
+            artifact.display(),
             target.display(),
             target.display()
         )

@@ -14,7 +14,7 @@ pub(crate) fn help_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(muted(&fit(model.intro, area.width as usize)));
     if !model.examples.is_empty() {
         lines.push(muted(&fit(
-            &format!("Examples: {}", model.examples.join(" | ")),
+            &format!("Examples: {}", model.examples.join("  ·  ")),
             area.width as usize,
         )));
     }
@@ -64,7 +64,7 @@ pub(crate) fn quickstart_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
         lines.push(Line::from(vec![
             Span::styled(format!("  {}. ", step.number), theme::accent()),
             Span::styled(
-                fit(step.text, area.width.saturating_sub(5) as usize),
+                fit(&step.text, area.width.saturating_sub(5) as usize),
                 theme::primary(),
             ),
         ]));

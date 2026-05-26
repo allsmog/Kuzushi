@@ -12,12 +12,7 @@ impl ShellApp {
     pub fn house_rules_path(&self) -> Option<PathBuf> {
         let module = self.focused_module.as_ref()?;
         let target = self.target.as_ref()?;
-        Some(
-            target
-                .join(".kuzushi")
-                .join("house-rules")
-                .join(format!("{module}.md")),
-        )
+        Some(kuzushi_core::house_rule_path(target, module))
     }
 
     pub fn read_house_rules(&self) -> Option<String> {

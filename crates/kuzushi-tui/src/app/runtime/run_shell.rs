@@ -67,9 +67,7 @@ pub(crate) fn open_start_view(app: &mut ShellApp) {
     // would be clobbered the moment the terminal shell loop boots.
     if matches!(
         app.shell_view,
-        ShellView::ModelPicker
-            | ShellView::AuthMethodPicker(_)
-            | ShellView::PlanningPicker
+        ShellView::ModelPicker | ShellView::AuthMethodPicker(_) | ShellView::PlanningPicker
     ) {
         return;
     }

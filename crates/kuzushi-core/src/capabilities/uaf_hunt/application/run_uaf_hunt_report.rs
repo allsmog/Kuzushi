@@ -27,7 +27,7 @@ pub fn run_uaf_hunt_report(
     if !runtime.supports_tools() {
         anyhow::bail!(
             "uaf-hunt:hunt: configured runtime does not support tool-augmented loops. \
-             PiAgentCoreRuntime is required; check the bridge configuration."
+             LangGraphRuntime is required; check the bridge configuration."
         );
     }
 

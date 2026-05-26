@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { chmodSync, copyFileSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import process from "node:process";
 
@@ -21,6 +21,14 @@ for (const exe of exes) {
 }
 
 mkdirSync(outDir, { recursive: true });
+const allowedExes = new Set(exes);
+for (const entry of readdirSync(outDir)) {
+  if (allowedExes.has(entry)) continue;
+  const stale = join(outDir, entry);
+  rmSync(stale, { recursive: true, force: true });
+  process.stdout.write(`removed uncontracted native payload ${stale}\n`);
+}
+
 for (const exe of retiredExes) {
   const stale = join(outDir, exe);
   if (existsSync(stale)) {

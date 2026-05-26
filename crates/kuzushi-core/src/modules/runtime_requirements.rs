@@ -2,7 +2,7 @@
 //!
 //! Both the Rust shell (`kuzushi-tui::app::workers::run_background_tool`)
 //! and the CLI's `kuzushi run` adapter (`kuzushi-cli::tool_requirements`)
-//! decide whether to construct a `PiAgentCoreRuntime` before dispatching
+//! decide whether to construct a `LangGraphRuntime` before dispatching
 //! a tool. They used to keep their own private allowlists; the lists
 //! drifted, and the TUI's copy was missing `smoke:next-step`,
 //! `full-mode:hunt`, `deep-audit:run`, and `classifier-gate:score`.

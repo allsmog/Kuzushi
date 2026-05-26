@@ -16,37 +16,88 @@ pub fn reparse_source(workspace: &WorkspaceTarget, id: &str) -> Result<Attachmen
 
 pub fn known_artifacts(workspace: &WorkspaceTarget, module_id: &str) -> Result<Vec<KnownArtifact>> {
     ensure_supported_module(module_id)?;
-    let candidates: Vec<(&str, &str)> = match module_id {
-        "context" => vec![(".kuzushi/context-snapshot.json", "context snapshot")],
-        "threat-model" => vec![
-            (".kuzushi/threat-model.json", "persisted threat model"),
-            (
-                ".kuzushi/tm-artifacts/normalized-threat-model.json",
-                "normalized threat model",
-            ),
-        ],
-        "carlini-threat-hunt" | "offense-review" => vec![
-            (".kuzushi/threat-model.json", "required threat-model input"),
-            (".kuzushi/v2/findings.sqlite3", "hunt findings database"),
-        ],
-        "x-ray" => vec![
-            ("x-ray/x-ray.md", "x-ray report"),
-            ("x-ray/entry-points.md", "entry point report"),
-            ("x-ray/invariants.md", "invariants report"),
-            ("x-ray/architecture.svg", "architecture diagram"),
-        ],
-        _ => Vec::new(),
-    };
-
-    Ok(candidates
+    Ok(known_artifact_candidates(workspace, module_id)
         .into_iter()
         .map(|(path, description)| KnownArtifact {
             module_id: module_id.to_string(),
-            path: path.to_string(),
+            path: path.clone(),
             description: description.to_string(),
             exists: workspace.root().join(path).exists(),
         })
         .collect())
+}
+
+fn known_artifact_candidates(
+    workspace: &WorkspaceTarget,
+    module_id: &str,
+) -> Vec<(String, &'static str)> {
+    match module_id {
+        "context" => context_known_artifacts(workspace),
+        "threat-model" => threat_model_known_artifacts(workspace),
+        "carlini-threat-hunt" | "offense-review" => offense_review_known_artifacts(workspace),
+        "x-ray" => x_ray_known_artifacts(),
+        _ => Vec::new(),
+    }
+}
+
+fn context_known_artifacts(workspace: &WorkspaceTarget) -> Vec<(String, &'static str)> {
+    vec![(
+        known_artifact_relative_path(workspace, |root| crate::context::context_snapshot_path(root)),
+        "context snapshot",
+    )]
+}
+
+fn threat_model_known_artifacts(workspace: &WorkspaceTarget) -> Vec<(String, &'static str)> {
+    vec![
+        (
+            known_artifact_relative_path(workspace, |root| {
+                crate::capabilities::persistent_threat_model_path(root)
+            }),
+            "persisted threat model",
+        ),
+        (
+            ".kuzushi/tm-artifacts/normalized-threat-model.json".to_string(),
+            "normalized threat model",
+        ),
+    ]
+}
+
+fn offense_review_known_artifacts(workspace: &WorkspaceTarget) -> Vec<(String, &'static str)> {
+    vec![
+        (
+            known_artifact_relative_path(workspace, |root| {
+                crate::capabilities::persistent_threat_model_path(root)
+            }),
+            "required threat-model input",
+        ),
+        (
+            known_artifact_relative_path(workspace, |root| {
+                crate::workspace::workspace_findings_db_path(root)
+            }),
+            "hunt findings database",
+        ),
+    ]
+}
+
+fn x_ray_known_artifacts() -> Vec<(String, &'static str)> {
+    vec![
+        ("x-ray/x-ray.md".to_string(), "x-ray report"),
+        ("x-ray/entry-points.md".to_string(), "entry point report"),
+        ("x-ray/invariants.md".to_string(), "invariants report"),
+        ("x-ray/architecture.svg".to_string(), "architecture diagram"),
+    ]
+}
+
+fn known_artifact_relative_path(
+    workspace: &WorkspaceTarget,
+    artifact_path: impl FnOnce(&Path) -> PathBuf,
+) -> String {
+    let path = artifact_path(workspace.root());
+    path
+        .strip_prefix(workspace.root())
+        .unwrap_or(&path)
+        .to_string_lossy()
+        .replace('\\', "/")
 }
 
 pub(crate) fn ensure_supported_module(module_id: &str) -> Result<()> {

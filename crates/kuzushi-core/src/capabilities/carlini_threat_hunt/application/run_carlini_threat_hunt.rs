@@ -453,7 +453,7 @@ pub(crate) fn require_carlini_runtime(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<&dyn AgentRuntime> {
     runtime.context(
-        "carlini-threat-hunt:run requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
+        "carlini-threat-hunt:run requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
     )
 }
 

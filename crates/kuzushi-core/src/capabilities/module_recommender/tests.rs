@@ -553,10 +553,10 @@ fn rich_signals() -> RepositorySignals {
 fn executor_reads_threat_model_dfd_artifact_shape() {
     let temp = tempdir().unwrap();
     fs::create_dir_all(temp.path().join("src")).unwrap();
-    fs::create_dir_all(temp.path().join(".kuzushi")).unwrap();
+    fs::create_dir_all(crate::workspace::workspace_state_root(temp.path())).unwrap();
     fs::write(temp.path().join("src/app.ts"), "export const ok = true;\n").unwrap();
     fs::write(
-        temp.path().join(".kuzushi/threat-model.json"),
+        crate::capabilities::persistent_threat_model_path(temp.path()),
         r#"{
           "document": {
             "dfd": {
@@ -590,10 +590,15 @@ fn executor_reads_threat_model_dfd_artifact_shape() {
     .unwrap();
 
     let report = &output["data"];
+    let threat_model_source = crate::capabilities::persistent_threat_model_path(workspace.root())
+        .strip_prefix(workspace.root())
+        .unwrap()
+        .display()
+        .to_string();
 
     assert_eq!(
         report["signals"]["threatModelSource"],
-        json!(".kuzushi/threat-model.json")
+        json!(threat_model_source)
     );
     assert_eq!(report["signals"]["threatSignalCount"], json!(5));
     assert_eq!(report["signals"]["threatModelThreats"], json!(3));

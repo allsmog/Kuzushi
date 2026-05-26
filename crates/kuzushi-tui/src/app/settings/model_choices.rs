@@ -29,19 +29,11 @@ pub(crate) const MODEL_CHOICES: &[ModelChoice] = &[
     },
     ModelChoice {
         index: 3,
-        id: "openai-codex:gpt-5.5",
-        label: "OpenAI OAuth GPT-5.5",
+        id: "openai-codex:gpt-5.4",
+        label: "OpenAI OAuth GPT-5.4",
         provider: "openai-codex",
         auth: "OAuth",
         thinking_level: "xhigh",
-    },
-    ModelChoice {
-        index: 4,
-        id: "openai-codex:gpt-5.5-mini",
-        label: "OpenAI OAuth GPT-5.5 mini",
-        provider: "openai-codex",
-        auth: "OAuth",
-        thinking_level: "high",
     },
     ModelChoice {
         index: 5,
@@ -65,6 +57,31 @@ pub(crate) fn model_choices() -> &'static [ModelChoice] {
     MODEL_CHOICES
 }
 
+pub(crate) fn visible_model_choice_indexes(configured_model: Option<&str>) -> Vec<usize> {
+    vec![
+        visible_primary_openai_choice(configured_model),
+        1,
+        3,
+        4,
+    ]
+}
+
+pub(crate) fn visible_model_choices(configured_model: Option<&str>) -> Vec<&'static ModelChoice> {
+    visible_model_choice_indexes(configured_model)
+        .into_iter()
+        .filter_map(|index| MODEL_CHOICES.get(index))
+        .collect()
+}
+
+fn visible_primary_openai_choice(configured_model: Option<&str>) -> usize {
+    match configured_model {
+        Some("openai-codex:gpt-5.4") => 2,
+        Some("openai:gpt-5.5") => 0,
+        _ if auth_ready_for_provider("openai-codex") => 2,
+        _ => 0,
+    }
+}
+
 pub(crate) fn display_model_selector(model: &str) -> String {
     model
         .strip_prefix("openai-codex:")
@@ -86,9 +103,8 @@ pub(crate) fn model_choice_display_selector(choice: &ModelChoice) -> String {
 pub(crate) fn preferred_model_choice_index(config: &V2Config) -> usize {
     preferred_model_choice_index_for_state(
         config.model.as_deref(),
-        oauth_provider_status("openai-codex").starts_with("stored"),
-        env::var_os("OPENAI_API_KEY").is_some(),
-        env::var_os("ANTHROPIC_API_KEY").is_some()
-            || oauth_provider_status("anthropic").starts_with("stored"),
+        auth_ready_for_provider("openai-codex"),
+        auth_ready_for_provider("openai"),
+        auth_ready_for_provider("anthropic"),
     )
 }

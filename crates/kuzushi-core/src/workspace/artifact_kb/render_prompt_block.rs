@@ -95,7 +95,7 @@ pub struct ArtifactIndexReport {
 }
 
 pub fn artifact_kb_path(workspace: &WorkspaceTarget) -> PathBuf {
-    workspace.state_dir().join(KB_DB_NAME)
+    crate::workspace::workspace_artifact_kb_db_path(workspace.root())
 }
 
 pub fn index_workspace_artifacts(workspace: &WorkspaceTarget) -> Result<ArtifactIndexReport> {

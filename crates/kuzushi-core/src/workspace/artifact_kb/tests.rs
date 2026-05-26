@@ -6,15 +6,15 @@ mod tests {
     #[test]
     fn indexes_known_artifacts_findings_and_searches_offline() {
         let tmp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(tmp.path().join(".kuzushi/runs/run-1")).unwrap();
+        fs::create_dir_all(crate::run_artifacts::run_dir(tmp.path(), "run-1")).unwrap();
         fs::create_dir_all(tmp.path().join("x-ray")).unwrap();
         fs::write(
-            tmp.path().join(".kuzushi/context-snapshot.json"),
+            crate::context::context_snapshot_path(tmp.path()),
             r#"{"repoContext":{"language":"rust"},"notes":"payment routing"}"#,
         )
         .unwrap();
         fs::write(
-            tmp.path().join(".kuzushi/threat-model.json"),
+            crate::capabilities::persistent_threat_model_path(tmp.path()),
             r#"{"dfd":{"nodes":[{"name":"payments api"}]},"threats":["trust boundary"]}"#,
         )
         .unwrap();
@@ -24,7 +24,7 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            tmp.path().join(".kuzushi/runs/run-1/summary.json"),
+            crate::run_artifacts::run_dir(tmp.path(), "run-1").join("summary.json"),
             r#"{"ok":true,"data":{"carliniThreatHunt":{"count":1}}}"#,
         )
         .unwrap();
@@ -53,7 +53,12 @@ mod tests {
 
         let report = index_workspace_artifacts(&workspace).unwrap();
 
-        assert!(report.db_path.ends_with(".kuzushi/v2/artifact-kb.sqlite3"));
+        assert_eq!(
+            report.db_path,
+            crate::workspace::workspace_artifact_kb_db_path(workspace.root())
+                .display()
+                .to_string()
+        );
         assert!(report.indexed >= 5);
         let search = search_artifact_knowledge(&workspace, "payment actor", 10).unwrap();
         assert!(!search.missing_db);
@@ -74,18 +79,19 @@ mod tests {
     #[test]
     fn reindex_updates_existing_source_record() {
         let tmp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(tmp.path().join(".kuzushi")).unwrap();
-        let source = tmp.path().join(".kuzushi/context-snapshot.json");
-        fs::write(&source, r#"{"notes":"alpha service"}"#).unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        fs::create_dir_all(crate::workspace::workspace_state_root(workspace.root())).unwrap();
+        let source = crate::context::context_snapshot_path(workspace.root());
+        fs::write(&source, r#"{"notes":"alpha service"}"#).unwrap();
 
         index_workspace_artifacts(&workspace).unwrap();
         fs::write(&source, r#"{"notes":"beta service"}"#).unwrap();
         index_workspace_artifacts(&workspace).unwrap();
 
         let store = ArtifactKnowledgeStore::open(&workspace).unwrap();
+        let source_path = relative_workspace_path(workspace.root(), &source);
         let records = store
-            .records_for_source(".kuzushi/context-snapshot.json")
+            .records_for_source(&source_path)
             .unwrap();
         assert_eq!(records.len(), 1);
         assert!(records[0].body.contains("beta service"));
@@ -96,10 +102,10 @@ mod tests {
     #[test]
     fn stale_records_report_changed_source_hash() {
         let tmp = tempfile::tempdir().unwrap();
-        fs::create_dir_all(tmp.path().join(".kuzushi")).unwrap();
-        let source = tmp.path().join(".kuzushi/threat-model.json");
-        fs::write(&source, r#"{"threats":["old"]}"#).unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        fs::create_dir_all(crate::workspace::workspace_state_root(workspace.root())).unwrap();
+        let source = crate::capabilities::persistent_threat_model_path(workspace.root());
+        fs::write(&source, r#"{"threats":["old"]}"#).unwrap();
         index_workspace_artifacts(&workspace).unwrap();
         fs::write(&source, r#"{"threats":["new"]}"#).unwrap();
 
@@ -107,7 +113,10 @@ mod tests {
         let stale = store.stale_records(&workspace).unwrap();
 
         assert_eq!(stale.len(), 1);
-        assert_eq!(stale[0].record.source_path, ".kuzushi/threat-model.json");
+        assert_eq!(
+            stale[0].record.source_path,
+            relative_workspace_path(workspace.root(), &source)
+        );
         assert_ne!(
             stale[0].current_hash.as_deref(),
             Some(stale[0].record.content_hash.as_str())

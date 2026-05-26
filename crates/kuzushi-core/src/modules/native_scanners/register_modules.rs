@@ -256,7 +256,7 @@ fn require_exploit_chain_runtime(
 ) -> Result<&dyn AgentRuntime> {
     runtime.ok_or_else(|| {
         anyhow::anyhow!(
-            "exploit-chain:scan requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies."
+            "exploit-chain:scan requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies."
         )
     })
 }

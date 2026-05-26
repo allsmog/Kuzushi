@@ -19,7 +19,7 @@ impl ShellApp {
     }
 
     fn log_model_catalog_choices(&mut self) {
-        for choice in MODEL_CHOICES {
+        for choice in visible_model_choices(self.config.model.as_deref()) {
             self.log("model", model_catalog_choice_line(choice));
         }
     }

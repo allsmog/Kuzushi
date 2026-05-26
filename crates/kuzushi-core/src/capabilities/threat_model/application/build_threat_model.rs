@@ -211,7 +211,7 @@ fn threat_model_response(
     mut lines: Vec<String>,
 ) -> Value {
     append_top_threats(&mut lines, &generated.document);
-    let persistent_artifact = input.target.join(".kuzushi").join("threat-model.json");
+    let persistent_artifact = persistent_threat_model_path(&input.target);
     let artifact_items = threat_model_artifacts(
         &artifacts.normalized_artifact,
         &persistent_artifact,

@@ -2,7 +2,7 @@
 title: "Kuzushi - Current Rust Architecture"
 ---
 flowchart LR
-  %% Current as of 2026-05-05 after the Rust/pi-agent-core cutover.
+  %% Current as of 2026-05-05 after the Rust/LangGraph cutover.
 
   subgraph Entry["Entry points"]
     Npm["npm bin<br/>bin/kuzushi-rs.mjs"]
@@ -31,14 +31,14 @@ flowchart LR
   subgraph Modules["Native module executors"]
     NativeTools["Deterministic Rust tools<br/>context, findings, secrets,<br/>dep hygiene, IaC, Chrome RCE"]
     SubprocessTools["Subprocess adapters<br/>semgrep, codeql, recon, curl/nmap"]
-    AgenticTools["pi-agent-core tools<br/>triage, verify, patch,<br/>agentic SAST, threat-model,<br/>x-ray, variants, plugins"]
+    AgenticTools["LangGraph tools<br/>triage, verify, patch,<br/>agentic SAST, threat-model,<br/>x-ray, variants, plugins"]
     HiddenDag["Hidden DAG/internal nodes<br/>context-lite, pipeline,<br/>systems-hunt internals"]
   end
 
   subgraph Runtime["Agent runtime"]
     RuntimeTrait["AgentRuntime trait<br/>crates/kuzushi-core/src/runtime.rs"]
-    PiBridge["PiAgentCoreRuntime<br/>crates/kuzushi-openai/src/lib.rs"]
-    BridgeScript["Node bridge<br/>scripts/pi-agent-core-bridge.mjs"]
+    LangBridge["LangGraphRuntime<br/>crates/kuzushi-openai/src/lib.rs"]
+    BridgeScript["Node bridge<br/>scripts/langgraph-bridge.mjs"]
     Provider["Configured provider/model<br/>explicit, no silent fallback"]
   end
 

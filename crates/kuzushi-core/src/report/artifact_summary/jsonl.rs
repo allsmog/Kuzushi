@@ -1,12 +1,27 @@
+use crate::run_artifacts::canonical_run_artifact_spec;
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub(super) fn jsonl_summary(file: &str, body: &str) -> Option<String> {
-    match file {
-        "events.jsonl" => events_summary(body),
-        "trace.jsonl" => trace_summary(body),
-        _ => None,
+    if file == run_events_artifact_leaf() {
+        return events_summary(body);
     }
+    if file == run_trace_artifact_leaf() {
+        return trace_summary(body);
+    }
+    None
+}
+
+fn run_events_artifact_leaf() -> &'static str {
+    canonical_run_artifact_spec("events.jsonl")
+        .expect("run events artifact must be in shared canonical spec")
+        .leaf
+}
+
+fn run_trace_artifact_leaf() -> &'static str {
+    canonical_run_artifact_spec("trace.jsonl")
+        .expect("runtime trace artifact must be in shared canonical spec")
+        .leaf
 }
 
 fn events_summary(body: &str) -> Option<String> {
@@ -52,7 +67,8 @@ fn json_lines(body: &str) -> JsonLines {
     let mut malformed = 0;
     for line in body.lines().filter(|line| !line.trim().is_empty()) {
         match serde_json::from_str::<Value>(line) {
-            Ok(value) => values.push(value),
+            Ok(value) if value.is_object() => values.push(value),
+            Ok(_) => malformed += 1,
             Err(_) => malformed += 1,
         }
     }

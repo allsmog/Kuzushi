@@ -154,9 +154,11 @@ mod tests {
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let store = StaticEvidenceStore::open(&workspace).unwrap();
 
-        assert!(store
-            .db_path()
-            .ends_with(".kuzushi/v2/static-evidence.sqlite3"));
+        assert_eq!(
+            store.db_path(),
+            crate::workspace::workspace_static_evidence_db_path(workspace.root())
+                .to_string_lossy()
+        );
         assert!(static_evidence_path(&workspace).exists());
     }
 

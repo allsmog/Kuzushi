@@ -9,7 +9,7 @@ pub(in crate::capabilities::taint_iris_next) fn parse_taint_iris_next_agent_resp
             "taint-iris-next:hunt expected structured output to be a JSON object"
         ),
         None => parse_json_object_from_agent_text(&response.text).with_context(|| {
-            "taint-iris-next:hunt expected pi-agent-core to return JSON with selectedCwes, findings, triage, and notes"
+            "taint-iris-next:hunt expected LangGraph to return JSON with selectedCwes, findings, triage, and notes"
         }),
     }
 }

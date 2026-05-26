@@ -70,7 +70,7 @@ pub(crate) fn required_systems_runtime<'a>(
     tool: &str,
 ) -> Result<&'a dyn AgentRuntime> {
     runtime.with_context(|| format!(
-        "{tool} requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies."
+        "{tool} requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies."
     ))
 }
 

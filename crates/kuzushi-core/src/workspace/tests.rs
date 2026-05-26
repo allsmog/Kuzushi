@@ -14,6 +14,32 @@ mod tests {
             target.findings_db_path(),
             target.root().join(".kuzushi/v2/findings.sqlite3")
         );
+        assert_eq!(
+            workspace_static_evidence_db_path(target.root()),
+            target.root().join(".kuzushi/v2/static-evidence.sqlite3")
+        );
+        assert_eq!(
+            workspace_artifact_kb_db_path(target.root()),
+            target.root().join(".kuzushi/v2/artifact-kb.sqlite3")
+        );
+        assert_eq!(
+            workspace_attachments_path(target.root()),
+            target.root().join(".kuzushi/v2/attachments.json")
+        );
+    }
+
+    #[test]
+    fn resolves_codeql_database_paths_under_project() {
+        let tmp = tempfile::tempdir().unwrap();
+
+        assert_eq!(
+            workspace_codeql_db_path(tmp.path()),
+            tmp.path().join(".kuzushi/codeql-db")
+        );
+        assert_eq!(
+            legacy_codeql_db_path(tmp.path()),
+            tmp.path().join(".codeql/db")
+        );
     }
 
     #[test]

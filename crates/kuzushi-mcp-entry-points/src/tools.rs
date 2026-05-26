@@ -27,7 +27,8 @@ fn list_descriptor() -> Tool {
 fn by_framework_descriptor() -> Tool {
     Tool {
         name: "entry_points:by_framework".to_string(),
-        description: "Filter entry points by framework name (e.g. axum, express, fastapi).".to_string(),
+        description: "Filter entry points by framework name (e.g. axum, express, fastapi)."
+            .to_string(),
         input_schema: json!({
             "type": "object",
             "required": ["framework"],
@@ -41,7 +42,8 @@ fn by_framework_descriptor() -> Tool {
 fn by_method_descriptor() -> Tool {
     Tool {
         name: "entry_points:by_method".to_string(),
-        description: "Filter HTTP-route entry points by method (GET, POST, PUT, DELETE, ...).".to_string(),
+        description: "Filter HTTP-route entry points by method (GET, POST, PUT, DELETE, ...)."
+            .to_string(),
         input_schema: json!({
             "type": "object",
             "required": ["method"],
@@ -100,7 +102,10 @@ fn filter_entries(artifact: Value, predicate: impl Fn(&Value) -> bool) -> Value 
         .and_then(Value::as_array)
         .cloned()
         .unwrap_or_default();
-    let filtered: Vec<Value> = entries.into_iter().filter(|entry| predicate(entry)).collect();
+    let filtered: Vec<Value> = entries
+        .into_iter()
+        .filter(|entry| predicate(entry))
+        .collect();
     json!({
         "total": filtered.len(),
         "entryPoints": filtered,
@@ -136,9 +141,8 @@ mod tests {
     #[tokio::test]
     async fn list_returns_all_entries() {
         let _guard = ENV_LOCK.lock().unwrap();
-        let (_tmp, path) = write_fixture(
-            r#"{"entryPoints":[{"kind":"http-route","method":"GET","path":"/x"}]}"#,
-        );
+        let (_tmp, path) =
+            write_fixture(r#"{"entryPoints":[{"kind":"http-route","method":"GET","path":"/x"}]}"#);
         std::env::set_var(ARTIFACT_ENV, &path);
         let value = ListHandler.call(json!({})).await.unwrap();
         assert_eq!(value["entryPoints"].as_array().unwrap().len(), 1);

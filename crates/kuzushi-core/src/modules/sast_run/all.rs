@@ -35,24 +35,29 @@ impl SastRunIds {
 #[derive(Debug, Clone)]
 pub(in crate::modules) struct SastRunArtifacts {
     pub(in crate::modules) dir: PathBuf,
+    pub(in crate::modules) scan_input: PathBuf,
     pub(in crate::modules) sast_summary: PathBuf,
     pub(in crate::modules) triage_jsonl: PathBuf,
     pub(in crate::modules) verify_jsonl: PathBuf,
 }
 
+pub(in crate::modules) const SAST_SCAN_INPUT_FILE: &str = "scan-input.json";
 pub(in crate::modules) const SAST_SUMMARY_FILE: &str = "sast-summary.json";
+pub(in crate::modules) const SAST_TRIAGE_JSONL_FILE: &str = "triage.jsonl";
+pub(in crate::modules) const SAST_VERIFY_JSONL_FILE: &str = "verify.jsonl";
 
 impl SastRunArtifacts {
     pub(in crate::modules) fn create(workspace: &WorkspaceTarget, run_id: &str) -> Result<Self> {
-        let dir = workspace.root().join(".kuzushi").join("runs").join(run_id);
+        let dir = run_dir(workspace.root(), run_id);
         fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
-        let triage_jsonl = dir.join("triage.jsonl");
-        let verify_jsonl = dir.join("verify.jsonl");
+        let triage_jsonl = dir.join(SAST_TRIAGE_JSONL_FILE);
+        let verify_jsonl = dir.join(SAST_VERIFY_JSONL_FILE);
         fs::write(&triage_jsonl, "")
             .with_context(|| format!("Could not write {}", triage_jsonl.display()))?;
         fs::write(&verify_jsonl, "")
             .with_context(|| format!("Could not write {}", verify_jsonl.display()))?;
         Ok(Self {
+            scan_input: dir.join(SAST_SCAN_INPUT_FILE),
             sast_summary: dir.join(SAST_SUMMARY_FILE),
             triage_jsonl,
             verify_jsonl,

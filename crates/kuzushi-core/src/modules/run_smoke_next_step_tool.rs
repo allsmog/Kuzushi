@@ -79,7 +79,7 @@ pub(crate) fn ensure_smoke_tools_supported(runtime: &dyn AgentRuntime) -> Result
     if !runtime.supports_tools() {
         anyhow::bail!(
             "smoke:next-step: configured runtime does not support tools \
-             (PiAgentCoreRuntime should — check the bridge configuration)"
+             (LangGraphRuntime should — check the bridge configuration)"
         );
     }
     Ok(())

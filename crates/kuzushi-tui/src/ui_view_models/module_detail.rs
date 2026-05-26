@@ -69,12 +69,15 @@ pub(crate) fn module_detail_model(app: &ShellApp, module_id: &str) -> Option<Mod
 
 pub(crate) fn module_prompts_model(app: &ShellApp, module_id: &str) -> Vec<ModulePromptOnDisk> {
     let root = prompt_root(app, module_id);
-    if !root.exists() {
-        return Vec::new();
-    };
+    match std::fs::metadata(&root) {
+        Ok(metadata) if metadata.is_dir() => {}
+        Ok(_) => return vec![invalid_prompt_root(app, &root, "not a directory")],
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+        Err(_) => return vec![invalid_prompt_root(app, &root, "unreadable")],
+    }
     let entries = match std::fs::read_dir(&root) {
         Ok(entries) => entries,
-        Err(_) => return vec![malformed_prompt_root(app, &root)],
+        Err(_) => return vec![invalid_prompt_root(app, &root, "unreadable")],
     };
     let mut prompts: Vec<ModulePromptOnDisk> = entries
         .flatten()
@@ -84,18 +87,18 @@ pub(crate) fn module_prompts_model(app: &ShellApp, module_id: &str) -> Vec<Modul
     prompts
 }
 
-fn malformed_prompt_root(app: &ShellApp, root: &Path) -> ModulePromptOnDisk {
+fn invalid_prompt_root(app: &ShellApp, root: &Path, reason: &str) -> ModulePromptOnDisk {
     ModulePromptOnDisk {
         verb: "artifact-load".to_string(),
-        path: format!("{} (unreadable)", display_prompt_path(app, root)),
+        path: format!("{} ({reason})", display_prompt_path(app, root)),
     }
 }
 
 fn prompt_root(app: &ShellApp, module_id: &str) -> PathBuf {
     app.target
         .as_deref()
-        .map(|target| target.join(".kuzushi/prompts").join(module_id))
-        .unwrap_or_else(|| PathBuf::from(".kuzushi/prompts").join(module_id))
+        .map(|target| kuzushi_core::module_prompt_root(target, module_id))
+        .unwrap_or_else(|| kuzushi_core::relative_module_prompt_root(module_id))
 }
 
 fn prompt_from_entry(app: &ShellApp, entry: std::fs::DirEntry) -> Option<ModulePromptOnDisk> {
@@ -278,7 +281,7 @@ mod tests {
     #[test]
     fn module_detail_model_shapes_prompt_section() {
         let temp = tempfile::tempdir().unwrap();
-        let prompt_root = temp.path().join(".kuzushi/prompts/sast");
+        let prompt_root = kuzushi_core::module_prompt_root(temp.path(), "sast");
         std::fs::create_dir_all(&prompt_root).unwrap();
         std::fs::write(prompt_root.join("triage.md"), "triage").unwrap();
         std::fs::write(prompt_root.join("system.md"), "system").unwrap();
@@ -295,9 +298,9 @@ mod tests {
     }
 
     #[test]
-    fn module_detail_model_surfaces_unreadable_prompt_root() {
+    fn module_detail_model_surfaces_non_directory_prompt_root() {
         let temp = tempfile::tempdir().unwrap();
-        let prompt_root = temp.path().join(".kuzushi/prompts/sast");
+        let prompt_root = kuzushi_core::module_prompt_root(temp.path(), "sast");
         std::fs::create_dir_all(prompt_root.parent().unwrap()).unwrap();
         std::fs::write(&prompt_root, "not a directory").unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
@@ -311,7 +314,10 @@ mod tests {
         assert_eq!(prompts.rows[0].0, "artifact-load");
         assert_eq!(
             prompts.rows[0].1,
-            ".kuzushi/prompts/sast (unreadable)".to_string()
+            format!(
+                "{} (not a directory)",
+                kuzushi_core::relative_module_prompt_root("sast").display()
+            )
         );
     }
 }

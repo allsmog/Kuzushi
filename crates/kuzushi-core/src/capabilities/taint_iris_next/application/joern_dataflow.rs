@@ -63,7 +63,7 @@ fn first_standard_joern_launcher() -> Option<PathBuf> {
 /// CPG file the Joern adapter expects under a target. Build with
 /// `joern-parse <target> --output <target>/.kuzushi/cpg.bin`.
 pub(crate) fn joern_cpg_path(target: &Path) -> PathBuf {
-    target.join(".kuzushi").join("cpg.bin")
+    taint_iris_next_joern_cpg_path(target)
 }
 
 /// Resolve the CPG path the pre-agent flow query should load. Honour
@@ -83,7 +83,7 @@ pub(crate) fn resolve_joern_cpg_path(scan_root: &Path) -> PathBuf {
 }
 
 /// Locate the bundled Scala flow script. Same resolution strategy as the
-/// pi-agent-core bridge: env override, source_root (via `current_exe`
+/// LangGraph bridge: env override, source_root (via `current_exe`
 /// walk-up), then the well-known repo-relative path.
 fn flow_script_path() -> Option<PathBuf> {
     configured_flow_script_path()

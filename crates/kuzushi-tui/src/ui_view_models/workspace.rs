@@ -2,6 +2,10 @@ use super::{compact_target_path, SeverityCounts, SeverityTone};
 use crate::ShellApp;
 use kuzushi_core::Finding;
 use std::path::Path;
+use std::sync::OnceLock;
+
+static FINDINGS_DB_RELATIVE_PATH: OnceLock<String> = OnceLock::new();
+static WORKSPACE_STATE_RELATIVE_PATH: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WorkspaceModel {
@@ -37,10 +41,10 @@ pub(crate) fn workspace_model(app: &ShellApp) -> WorkspaceModel {
     WorkspaceModel {
         status: view.status.clone(),
         target_label: compact_path_or(view.root.as_deref(), "none"),
-        state_label: compact_path_or(view.state_dir.as_deref(), ".kuzushi/v2"),
+        state_label: compact_path_or(view.state_dir.as_deref(), workspace_state_relative_path()),
         findings_db_label: compact_path_or(
             view.findings_db.as_deref(),
-            ".kuzushi/v2/findings.sqlite3",
+            findings_db_relative_path(),
         ),
         findings_label: count_or_unknown(view.findings_count),
         last_export_label: compact_path_or(view.last_export.as_deref(), "none"),
@@ -73,15 +77,28 @@ impl PlainWorkspaceModel {
     }
 }
 
-fn plain_workspace_empty_rows(empty: bool) -> Vec<String> {
-    if empty {
-        vec![
-            String::new(),
-            "No active workspace. Next: scan <target> or kuzushi shell --target .".to_string(),
-        ]
-    } else {
-        Vec::new()
-    }
+fn plain_workspace_empty_rows(_empty: bool) -> Vec<String> {
+    Vec::new()
+}
+
+pub(crate) fn findings_db_relative_path() -> &'static str {
+    FINDINGS_DB_RELATIVE_PATH
+        .get_or_init(|| {
+            kuzushi_core::workspace::workspace_findings_db_path("")
+                .display()
+                .to_string()
+        })
+        .as_str()
+}
+
+pub(crate) fn workspace_state_relative_path() -> &'static str {
+    WORKSPACE_STATE_RELATIVE_PATH
+        .get_or_init(|| {
+            kuzushi_core::workspace::workspace_state_dir("")
+                .display()
+                .to_string()
+        })
+        .as_str()
 }
 
 fn compact_path_or(path: Option<&Path>, fallback: &str) -> String {
@@ -92,7 +109,7 @@ fn compact_path_or(path: Option<&Path>, fallback: &str) -> String {
 fn count_or_unknown(count: Option<usize>) -> String {
     count
         .map(|count| count.to_string())
-        .unwrap_or_else(|| "— (no scan yet)".to_string())
+        .unwrap_or_else(|| "none yet (run scan first)".to_string())
 }
 
 fn rollup_rows(findings: &[Finding]) -> Vec<WorkspaceRollupRow> {

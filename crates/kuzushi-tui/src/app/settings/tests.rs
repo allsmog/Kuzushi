@@ -11,7 +11,7 @@ mod tests {
                 true,
                 true
             ),
-            5
+            4
         );
         assert_eq!(
             preferred_model_choice_index_for_state(None, true, true, true),
@@ -23,7 +23,7 @@ mod tests {
         );
         assert_eq!(
             preferred_model_choice_index_for_state(None, false, false, true),
-            4
+            3
         );
         assert_eq!(
             preferred_model_choice_index_for_state(Some("unknown:model"), false, false, false),
@@ -39,8 +39,19 @@ mod tests {
         assert!(resolve_model_selector("codex-mini").is_none());
         assert!(resolve_model_selector("openai-codex:gpt-5.5").is_none());
         assert_eq!(
-            resolve_model_selector("openai-oauth:gpt-5.5").map(|choice| choice.index),
+            resolve_model_selector("openai-oauth:gpt-5.4").map(|choice| choice.index),
             Some(3)
+        );
+    }
+
+    #[test]
+    fn oauth_credentials_display_uses_shared_leaf_name() {
+        assert_eq!(
+            default_oauth_credentials_path_display(),
+            format!(
+                "~/.kuzushi/{}",
+                kuzushi_core::config::OAUTH_CREDENTIALS_FILE
+            )
         );
     }
 }

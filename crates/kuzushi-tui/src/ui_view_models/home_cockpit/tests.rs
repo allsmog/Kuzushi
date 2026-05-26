@@ -1,5 +1,15 @@
 use super::*;
 
+fn create_invalid_latest_pointer(root: &std::path::Path) {
+    std::fs::create_dir_all(ui_latest_run_path(Some(root))).unwrap();
+}
+
+fn write_blank_latest_pointer(root: &std::path::Path) {
+    let latest_path = ui_latest_run_path(Some(root));
+    std::fs::create_dir_all(latest_path.parent().unwrap()).unwrap();
+    std::fs::write(latest_path, "\n").unwrap();
+}
+
 #[test]
 fn artifact_state_maps_home_rail_glyphs() {
     assert_eq!(
@@ -34,7 +44,14 @@ fn home_artifact_row_shapes_display_cells() {
     let run_dir = temp.path();
     std::fs::write(run_dir.join("context.json"), r#"{"status":"partial"}"#).unwrap();
 
-    let row = home_artifact_row(run_dir, &HomeArtifactSpec::new("ctx", "context.json"));
+    let row = home_artifact_row(
+        run_dir,
+        RunArtifactSpec {
+            label: "context snapshot",
+            leaf: "context.json",
+            kind: "json",
+        },
+    );
 
     assert_eq!(
         row.cells,
@@ -53,7 +70,14 @@ fn home_artifact_row_surfaces_malformed_json_artifacts() {
     let run_dir = temp.path();
     std::fs::write(run_dir.join("context.json"), "{not-json").unwrap();
 
-    let row = home_artifact_row(run_dir, &HomeArtifactSpec::new("ctx", "context.json"));
+    let row = home_artifact_row(
+        run_dir,
+        RunArtifactSpec {
+            label: "context snapshot",
+            leaf: "context.json",
+            kind: "json",
+        },
+    );
 
     assert_eq!(
         row.cells,
@@ -67,15 +91,22 @@ fn home_artifact_row_surfaces_malformed_json_artifacts() {
 }
 
 #[test]
-fn home_artifact_row_surfaces_unreadable_artifact_paths() {
+fn home_artifact_row_surfaces_non_file_artifact_paths() {
     let temp = tempfile::tempdir().unwrap();
     let run_dir = temp.path();
     std::fs::create_dir(run_dir.join("context.json")).unwrap();
 
-    let row = home_artifact_row(run_dir, &HomeArtifactSpec::new("ctx", "context.json"));
+    let row = home_artifact_row(
+        run_dir,
+        RunArtifactSpec {
+            label: "context snapshot",
+            leaf: "context.json",
+            kind: "json",
+        },
+    );
 
     assert_eq!(row.cells[0], "⚠");
-    assert_eq!(row.cells[2], "malformed");
+    assert_eq!(row.cells[2], "not a file");
 }
 
 #[test]
@@ -84,7 +115,14 @@ fn home_artifact_row_keeps_markdown_reports_unstructured() {
     let run_dir = temp.path();
     std::fs::write(run_dir.join("report.md"), "{not-json").unwrap();
 
-    let row = home_artifact_row(run_dir, &HomeArtifactSpec::new("report", "report.md"));
+    let row = home_artifact_row(
+        run_dir,
+        RunArtifactSpec {
+            label: "report",
+            leaf: "report.md",
+            kind: "markdown",
+        },
+    );
 
     assert_eq!(row.cells[2], "recorded");
 }
@@ -105,7 +143,7 @@ fn home_cockpit_model_shapes_static_chrome_and_summary_rows() {
     );
     assert_eq!(
         model.rail_legend,
-        "rails: ✓ recorded → ○ placeholder ⚠ failed/malformed ■ missing ◆ partial"
+        "rails: ✓ recorded · ○ placeholder · ◆ partial · ⚠ failed/malformed · ■ missing"
     );
     assert_eq!(
         model.command_labels,
@@ -123,7 +161,7 @@ fn home_cockpit_model_shapes_static_chrome_and_summary_rows() {
 #[test]
 fn home_cockpit_model_surfaces_invalid_latest_pointer() {
     let temp = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(temp.path().join(".kuzushi/latest")).unwrap();
+    create_invalid_latest_pointer(temp.path());
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     app.target = Some(temp.path().to_path_buf());
 
@@ -142,8 +180,7 @@ fn home_cockpit_model_surfaces_invalid_latest_pointer() {
 #[test]
 fn home_cockpit_model_surfaces_blank_latest_pointer() {
     let temp = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(temp.path().join(".kuzushi")).unwrap();
-    std::fs::write(temp.path().join(".kuzushi/latest"), "\n").unwrap();
+    write_blank_latest_pointer(temp.path());
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
     app.target = Some(temp.path().to_path_buf());
 
@@ -158,17 +195,34 @@ fn home_cockpit_model_surfaces_blank_latest_pointer() {
 #[test]
 fn run_status_label_surfaces_malformed_run_json() {
     let temp = tempfile::tempdir().unwrap();
-    std::fs::write(temp.path().join("run.json"), "{not-json").unwrap();
+    std::fs::write(temp.path().join(run_metadata_artifact_leaf()), "{not-json").unwrap();
 
-    assert_eq!(run_status_label(temp.path()), "malformed run.json");
+    assert_eq!(
+        run_status_label(temp.path()),
+        format!("malformed {}", run_metadata_artifact_leaf())
+    );
 }
 
 #[test]
-fn run_status_label_surfaces_unreadable_run_json() {
+fn run_status_label_surfaces_non_object_run_json() {
     let temp = tempfile::tempdir().unwrap();
-    std::fs::create_dir(temp.path().join("run.json")).unwrap();
+    std::fs::write(temp.path().join(run_metadata_artifact_leaf()), "[]").unwrap();
 
-    assert_eq!(run_status_label(temp.path()), "malformed run.json");
+    assert_eq!(
+        run_status_label(temp.path()),
+        format!("malformed {}", run_metadata_artifact_leaf())
+    );
+}
+
+#[test]
+fn run_status_label_surfaces_non_file_run_json() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(temp.path().join(run_metadata_artifact_leaf())).unwrap();
+
+    assert_eq!(
+        run_status_label(temp.path()),
+        format!("{} is not a file", run_metadata_artifact_leaf())
+    );
 }
 
 #[test]

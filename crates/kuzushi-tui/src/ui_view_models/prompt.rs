@@ -42,19 +42,36 @@ pub(crate) fn prompt_text(brand: &str, mode: RoutingMode, focused_module: Option
 }
 
 fn prompt_brand_from_sources(cli_name: Option<&str>, argv0: Option<&str>) -> &'static str {
-    if cli_name == Some("kz") {
-        return "kz";
+    if let Some(brand) = argv0.and_then(binary_stem).and_then(public_prompt_brand) {
+        return brand;
     }
-    match argv0.and_then(binary_stem) {
-        Some("kz") => "kz",
-        _ => "kuzushi",
+    if cli_name == Some("kz") {
+        "kz"
+    } else {
+        "kuzushi"
+    }
+}
+
+fn public_prompt_brand(stem: &str) -> Option<&'static str> {
+    if stem.eq_ignore_ascii_case("kz") {
+        Some("kz")
+    } else if stem.eq_ignore_ascii_case("kuzushi") {
+        Some("kuzushi")
+    } else {
+        None
     }
 }
 
 fn binary_stem(path: &str) -> Option<&str> {
-    path.rsplit(['/', '\\'])
-        .next()
-        .map(|name| name.strip_suffix(".exe").unwrap_or(name))
+    path.rsplit(['/', '\\']).next().map(strip_windows_exe)
+}
+
+fn strip_windows_exe(name: &str) -> &str {
+    if name.len() >= 4 && name[name.len() - 4..].eq_ignore_ascii_case(".exe") {
+        &name[..name.len() - 4]
+    } else {
+        name
+    }
 }
 
 #[cfg(test)]

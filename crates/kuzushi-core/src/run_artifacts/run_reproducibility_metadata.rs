@@ -4,7 +4,7 @@ use super::{
 };
 use crate::workspace::target_git_metadata;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 pub(crate) fn summary_with_dynamic_metadata(target: &Path, summary: &RunSummary) -> RunSummary {
     let summary = summary_with_llm_audit(target, summary.clone());
@@ -168,39 +168,49 @@ fn sensitive_env_key(key: &str) -> bool {
 }
 
 fn threat_model_sha256(target: &Path) -> Option<String> {
-    file_sha256(&target.join(".kuzushi").join("threat-model.json"))
+    let path = crate::capabilities::threat_model::persistent_threat_model_path(target);
+    match fs::metadata(&path) {
+        Ok(metadata) if metadata.is_file() => file_sha256(&path),
+        Ok(_) => Some("invalid:not-a-file".to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => Some("invalid:unreadable".to_string()),
+    }
 }
 
 fn load_prompt_override_fingerprints(target: &Path) -> Vec<RunPromptOverrideFingerprint> {
-    let dir = target.join(".kuzushi").join("prompts");
-    let Ok(modules) = fs::read_dir(&dir) else {
-        return Vec::new();
+    let dir = crate::options::prompt_overrides_root(target);
+    let modules = match read_provenance_dir(&dir) {
+        Ok(Some(entries)) => entries,
+        Ok(None) => return Vec::new(),
+        Err(sha256) => return vec![invalid_prompt_root_fingerprint(sha256)],
     };
     let mut fingerprints = modules
         .flatten()
-        .filter_map(prompt_module_dir)
-        .flat_map(prompt_override_fingerprints)
+        .flat_map(prompt_module_fingerprints)
         .collect::<Vec<_>>();
     fingerprints.sort_by(prompt_override_order);
     fingerprints
 }
 
-fn prompt_module_dir(entry: fs::DirEntry) -> Option<(String, PathBuf)> {
+fn prompt_module_fingerprints(entry: fs::DirEntry) -> Vec<RunPromptOverrideFingerprint> {
     let path = entry.path();
-    path.is_dir()
-        .then(|| entry.file_name().to_str().map(|name| (name.to_string(), path)))
-        .flatten()
+    let Some(module) = entry.file_name().to_str().map(str::to_string) else {
+        return Vec::new();
+    };
+    match read_provenance_dir(&path) {
+        Ok(Some(entries)) => prompt_override_fingerprints(&module, entries),
+        Ok(None) => Vec::new(),
+        Err(sha256) => vec![invalid_prompt_module_fingerprint(&module, sha256)],
+    }
 }
 
 fn prompt_override_fingerprints(
-    (module, dir): (String, PathBuf),
+    module: &str,
+    entries: fs::ReadDir,
 ) -> Vec<RunPromptOverrideFingerprint> {
-    let Ok(entries) = fs::read_dir(dir) else {
-        return Vec::new();
-    };
     entries
         .flatten()
-        .filter_map(|entry| prompt_override_fingerprint(&module, entry))
+        .filter_map(|entry| prompt_override_fingerprint(module, entry))
         .collect()
 }
 
@@ -209,15 +219,13 @@ fn prompt_override_fingerprint(
     entry: fs::DirEntry,
 ) -> Option<RunPromptOverrideFingerprint> {
     let path = entry.path();
-    if !markdown_file(&path) {
-        return None;
-    }
     let verb = path.file_stem()?.to_str()?.to_string();
+    let sha256 = markdown_artifact_sha256(&path)?;
     Some(RunPromptOverrideFingerprint {
         module: module.to_string(),
         verb: verb.clone(),
         path: prompt_override_relative_path(module, &verb),
-        sha256: file_sha256(&path)?,
+        sha256,
     })
 }
 
@@ -231,9 +239,11 @@ fn prompt_override_order(
 }
 
 fn load_house_rule_fingerprints(target: &Path) -> Vec<RunHouseRuleFingerprint> {
-    let dir = target.join(".kuzushi").join("house-rules");
-    let Ok(entries) = fs::read_dir(&dir) else {
-        return Vec::new();
+    let dir = crate::options::house_rules_root(target);
+    let entries = match read_provenance_dir(&dir) {
+        Ok(Some(entries)) => entries,
+        Ok(None) => return Vec::new(),
+        Err(sha256) => return vec![invalid_house_rule_root_fingerprint(sha256)],
     };
     let mut fingerprints = entries
         .flatten()
@@ -245,19 +255,76 @@ fn load_house_rule_fingerprints(target: &Path) -> Vec<RunHouseRuleFingerprint> {
 
 fn house_rule_fingerprint(entry: fs::DirEntry) -> Option<RunHouseRuleFingerprint> {
     let path = entry.path();
-    if !markdown_file(&path) {
-        return None;
-    }
     let file_name = path.file_name()?.to_str()?.to_string();
+    let sha256 = markdown_artifact_sha256(&path)?;
     Some(RunHouseRuleFingerprint {
         module: path.file_stem()?.to_str()?.to_string(),
         path: house_rule_relative_path(&file_name),
-        sha256: file_sha256(&path)?,
+        sha256,
     })
 }
 
-fn markdown_file(path: &Path) -> bool {
-    path.is_file() && path.extension().and_then(|ext| ext.to_str()) == Some("md")
+fn markdown_artifact_sha256(path: &Path) -> Option<String> {
+    if path.extension().and_then(|ext| ext.to_str()) != Some("md") {
+        return None;
+    }
+    match fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => {
+            file_sha256(path).or_else(|| Some("invalid:unreadable".to_string()))
+        }
+        Ok(_) => Some("invalid:not-a-file".to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(_) => Some("invalid:unreadable".to_string()),
+    }
+}
+
+fn read_provenance_dir(dir: &Path) -> Result<Option<fs::ReadDir>, &'static str> {
+    let metadata = match fs::metadata(dir) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(_) => return Err("invalid:unreadable"),
+    };
+    if !metadata.is_dir() {
+        return Err("invalid:not-a-directory");
+    }
+    fs::read_dir(dir)
+        .map(Some)
+        .map_err(|_| "invalid:unreadable")
+}
+
+fn invalid_house_rule_root_fingerprint(sha256: &str) -> RunHouseRuleFingerprint {
+    RunHouseRuleFingerprint {
+        module: "<house-rules>".to_string(),
+        path: crate::options::relative_house_rules_root()
+            .display()
+            .to_string(),
+        sha256: sha256.to_string(),
+    }
+}
+
+fn invalid_prompt_root_fingerprint(sha256: &str) -> RunPromptOverrideFingerprint {
+    RunPromptOverrideFingerprint {
+        module: "<prompts>".to_string(),
+        verb: "<root>".to_string(),
+        path: crate::options::relative_prompt_overrides_root()
+            .display()
+            .to_string(),
+        sha256: sha256.to_string(),
+    }
+}
+
+fn invalid_prompt_module_fingerprint(
+    module: &str,
+    sha256: &str,
+) -> RunPromptOverrideFingerprint {
+    RunPromptOverrideFingerprint {
+        module: module.to_string(),
+        verb: "<module>".to_string(),
+        path: crate::options::relative_module_prompt_root(module)
+            .display()
+            .to_string(),
+        sha256: sha256.to_string(),
+    }
 }
 
 fn file_sha256(path: &Path) -> Option<String> {
@@ -277,18 +344,14 @@ fn bytes_sha256(bytes: &[u8]) -> String {
 }
 
 fn house_rule_relative_path(file_name: &str) -> String {
-    Path::new(".kuzushi")
-        .join("house-rules")
+    crate::options::relative_house_rules_root()
         .join(file_name)
         .display()
         .to_string()
 }
 
 fn prompt_override_relative_path(module: &str, verb: &str) -> String {
-    Path::new(".kuzushi")
-        .join("prompts")
-        .join(module)
-        .join(format!("{verb}.md"))
+    crate::options::relative_prompt_override_path(module, verb)
         .display()
         .to_string()
 }

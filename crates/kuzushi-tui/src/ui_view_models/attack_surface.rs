@@ -10,6 +10,7 @@ pub(crate) fn attack_surface_risk_model(run_dir: &Path) -> Option<AttackSurfaceR
     let value = match read_attack_surface(run_dir)? {
         AttackSurfaceRead::Present(value) => value,
         AttackSurfaceRead::Malformed => return Some(malformed_attack_surface_model()),
+        AttackSurfaceRead::NonFile => return Some(non_file_attack_surface_model()),
     };
     let risk_tiers = summary_risk_tiers(&value);
     let frameworks = framework_counts(&value);
@@ -26,16 +27,20 @@ pub(crate) fn attack_surface_risk_model(run_dir: &Path) -> Option<AttackSurfaceR
 }
 
 fn read_attack_surface(run_dir: &Path) -> Option<AttackSurfaceRead> {
-    let path = run_dir.join("attack-surface.json");
-    if !path.exists() {
-        return None;
+    let path = run_dir.join(attack_surface_artifact_leaf());
+    match fs::metadata(&path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return Some(AttackSurfaceRead::NonFile),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(_) => return Some(AttackSurfaceRead::Malformed),
     }
     let text = match fs::read_to_string(path) {
         Ok(text) => text,
         Err(_) => return Some(AttackSurfaceRead::Malformed),
     };
-    match serde_json::from_str(&text) {
-        Ok(value) => Some(AttackSurfaceRead::Present(value)),
+    match serde_json::from_str::<serde_json::Value>(&text) {
+        Ok(value) if value.is_object() => Some(AttackSurfaceRead::Present(value)),
+        Ok(_) => Some(AttackSurfaceRead::Malformed),
         Err(_) => Some(AttackSurfaceRead::Malformed),
     }
 }
@@ -43,12 +48,25 @@ fn read_attack_surface(run_dir: &Path) -> Option<AttackSurfaceRead> {
 enum AttackSurfaceRead {
     Present(serde_json::Value),
     Malformed,
+    NonFile,
 }
 
 fn malformed_attack_surface_model() -> AttackSurfaceRiskModel {
     AttackSurfaceRiskModel {
-        summary: "malformed attack-surface.json".to_string(),
+        summary: format!("malformed {}", attack_surface_artifact_leaf()),
     }
+}
+
+fn non_file_attack_surface_model() -> AttackSurfaceRiskModel {
+    AttackSurfaceRiskModel {
+        summary: format!("{} is not a file", attack_surface_artifact_leaf()),
+    }
+}
+
+fn attack_surface_artifact_leaf() -> &'static str {
+    kuzushi_core::run_artifacts::canonical_run_artifact_spec("attack-surface.json")
+        .expect("attack-surface artifact must be in shared canonical spec")
+        .leaf
 }
 
 fn summary_usize(value: &serde_json::Value, key: &str) -> usize {
@@ -195,7 +213,7 @@ mod tests {
     fn attack_surface_model_reads_risk_tier_distribution() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(
-            temp.path().join("attack-surface.json"),
+            temp.path().join(attack_surface_artifact_leaf()),
             serde_json::json!({
                 "summary": {
                     "highRisk": 2,
@@ -235,21 +253,44 @@ mod tests {
     #[test]
     fn attack_surface_model_surfaces_malformed_artifact() {
         let temp = tempfile::tempdir().unwrap();
-        fs::write(temp.path().join("attack-surface.json"), "{not-json").unwrap();
+        fs::write(
+            temp.path().join(attack_surface_artifact_leaf()),
+            "{not-json",
+        )
+        .unwrap();
 
         let model = attack_surface_risk_model(temp.path()).unwrap();
 
-        assert_eq!(model.summary, "malformed attack-surface.json");
+        assert_eq!(
+            model.summary,
+            format!("malformed {}", attack_surface_artifact_leaf())
+        );
     }
 
     #[test]
-    fn attack_surface_model_surfaces_unreadable_artifact() {
+    fn attack_surface_model_surfaces_non_object_artifact() {
         let temp = tempfile::tempdir().unwrap();
-        fs::create_dir(temp.path().join("attack-surface.json")).unwrap();
+        fs::write(temp.path().join(attack_surface_artifact_leaf()), "[]").unwrap();
 
         let model = attack_surface_risk_model(temp.path()).unwrap();
 
-        assert_eq!(model.summary, "malformed attack-surface.json");
+        assert_eq!(
+            model.summary,
+            format!("malformed {}", attack_surface_artifact_leaf())
+        );
+    }
+
+    #[test]
+    fn attack_surface_model_surfaces_non_file_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::create_dir(temp.path().join(attack_surface_artifact_leaf())).unwrap();
+
+        let model = attack_surface_risk_model(temp.path()).unwrap();
+
+        assert_eq!(
+            model.summary,
+            format!("{} is not a file", attack_surface_artifact_leaf())
+        );
     }
 
     #[test]

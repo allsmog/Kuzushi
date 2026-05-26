@@ -8,12 +8,21 @@ use ratatui::Terminal;
 
 use crate::commands::{shell_command_specs, shell_help_examples, ShellCommandCategory};
 use crate::ui_view_models::{
-    catalog_model, prompt_text, threat_dfd_model_from_doc, threat_scope_model_from_doc,
-    threat_story_model_from_doc, threat_stride_rollup_from_doc, view_status_segment,
-    ModuleRunStatusKind, RoutingMode, SeverityTone, ThreatStrideTone,
+    catalog_model, context_snapshot_relative_path, prompt_text, threat_dfd_model_from_doc,
+    threat_model_relative_path, threat_scope_model_from_doc, threat_story_model_from_doc,
+    threat_stride_rollup_from_doc, ui_latest_run_path, ui_run_artifact_relative_path, ui_run_dir,
+    view_status_segment, ModuleRunStatusKind, RoutingMode, SeverityTone, ThreatStrideTone,
 };
 
 use super::*;
+
+fn context_snapshot_fixture_path() -> std::path::PathBuf {
+    kuzushi_core::context_snapshot_path("")
+}
+
+fn target_context_snapshot_path(target: &std::path::Path) -> std::path::PathBuf {
+    kuzushi_core::context_snapshot_path(target)
+}
 
 #[test]
 fn kuzushi_theme_uses_blue_cyan_cockpit_accents() {
@@ -86,9 +95,9 @@ fn home_first_run_state_names_real_artifact_commands() {
 #[test]
 fn home_view_renders_latest_run_artifact_rail() {
     let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join(".kuzushi/runs/run-1");
+    let run_dir = ui_run_dir(Some(tmp.path()), "run-1");
     std::fs::create_dir_all(&run_dir).unwrap();
-    std::fs::write(tmp.path().join(".kuzushi/latest"), "run-1\n").unwrap();
+    std::fs::write(ui_latest_run_path(Some(tmp.path())), "run-1\n").unwrap();
     std::fs::write(run_dir.join("run.json"), r#"{"status":"completed"}"#).unwrap();
     std::fs::write(run_dir.join("context.json"), r#"{"languages":["rust"]}"#).unwrap();
     std::fs::write(run_dir.join("findings.json"), r#"{"status": "skipped"}"#).unwrap();
@@ -205,6 +214,7 @@ fn quickstart_follows_doctor_context_scan_findings_report_path() {
         "Operator path",
         "kuzushi doctor",
         "context build",
+        ".kuzushi/context-snapshot.json",
         "scan .",
         "findings",
         "proof state",
@@ -431,6 +441,9 @@ fn renders_actionable_empty_states_at_80_columns() {
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains(expected), "missing {expected}");
+        if is_runs {
+            assert!(rendered.contains(".kuzushi/runs/<id>"), "{rendered}");
+        }
         // Box-drawing is reserved for the DFD diagram; every other view
         // must remain free of nested boxes (no Ink-style boxed dashboard).
         if !is_dfd {
@@ -687,14 +700,42 @@ fn module_playbooks_name_supported_run_and_scan_commands() {
             "{module} still shows {stale}: {text}"
         );
         assert!(
-            text.contains(&format!("run . -> {primary_tool}")),
+            text.contains(&format!("dispatches {primary_tool}")),
             "{module} does not explain run . resolution: {text}"
         );
         assert!(
             text.contains("terminal: kuzushi --target . run"),
             "{module} does not distinguish terminal run syntax: {text}"
         );
+        if module == "sast" {
+            assert!(
+                text.contains(".kuzushi/v2/findings.sqlite3"),
+                "{module} does not name the findings DB artifact: {text}"
+            );
+        }
+        if module == "context" {
+            assert!(
+                text.contains(context_snapshot_relative_path()),
+                "{module} does not name the shared context snapshot label: {text}"
+            );
+        }
+        if module == "threat-model" {
+            assert!(
+                text.contains(&threat_model_relative_path()),
+                "{module} does not name the shared threat-model label: {text}"
+            );
+        }
     }
+
+    let codeql_text = module_playbook_lines("codeql", "codeql:scan", 120)
+        .into_iter()
+        .map(|line| line_text(&line))
+        .collect::<Vec<_>>()
+        .join("\n");
+    assert!(
+        codeql_text.contains(".kuzushi/v2/findings.sqlite3 and optional SARIF"),
+        "codeql does not name findings DB plus optional SARIF: {codeql_text}"
+    );
 }
 
 #[test]
@@ -1261,9 +1302,23 @@ fn threats_summary_view_is_review_first_without_fake_observations() {
     assert!(rendered.contains("production network diagram"));
     assert!(rendered.contains("none pending"));
     assert!(rendered.contains("not exploit proof"));
-    assert!(rendered.contains("threat-model.json"));
+    assert!(rendered.contains(".kuzushi/threat-model.json"));
     assert!(!rendered.contains("admin.acme-checkout.com"));
     assert!(!rendered.contains("shares the jwt secret"));
+}
+
+#[test]
+fn threats_editor_names_persistent_artifact_path() {
+    let backend = TestBackend::new(120, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::ThreatEditor;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("THREAT MODEL EDIT"));
+    assert!(rendered.contains(".kuzushi/threat-model.json"));
 }
 
 #[test]
@@ -1277,9 +1332,9 @@ fn threats_summary_unknown_state_does_not_invent_data() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("THREAT MODEL REVIEW"));
-    assert!(rendered.contains("unknown - no persisted threat model found"));
+    assert!(rendered.contains("build or import a threat model to populate this view"));
     assert!(rendered.contains("assets"));
-    assert!(rendered.contains("unknown"));
+    assert!(rendered.contains("no threat model artifact"));
     assert!(!rendered.contains("admin.acme-checkout.com"));
 }
 
@@ -1395,6 +1450,7 @@ fn direct_tool_run_header_does_not_show_pending_scan_run() {
 
     assert!(rendered.contains("tool run"));
     assert!(rendered.contains("CONTEXT BUILD"));
+    assert!(rendered.contains(".kuzushi/context-snapshot.json"));
     assert!(!rendered.contains("SCAN PROGRESS"));
     assert!(!rendered.contains("run pending"));
 }
@@ -1509,7 +1565,7 @@ fn renders_context_status_readably_at_80_columns() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.context_view = crate::app::ContextSnapshotView {
-        snapshot_path: Some(std::path::PathBuf::from(".kuzushi/context-snapshot.json")),
+        snapshot_path: Some(context_snapshot_fixture_path()),
         exists: true,
         status: "snapshot present; 2 indexed file(s). Next: context regen repo".to_string(),
         target: Some("/tmp/demo".to_string()),
@@ -1560,8 +1616,7 @@ fn context_build_view_surfaces_malformed_snapshot() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.focused_module = Some("context".to_string());
     app.shell_view = ShellView::Context;
-    app.context_view.snapshot_path =
-        Some(std::path::PathBuf::from(".kuzushi/context-snapshot.json"));
+    app.context_view.snapshot_path = Some(context_snapshot_fixture_path());
     app.context_view.status = "malformed context snapshot. Next: context build".to_string();
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -1729,7 +1784,7 @@ fn plain_kb_list_has_no_ansi_or_box_drawing() {
 fn plain_context_status_has_no_ansi_or_box_drawing() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.context_view = crate::app::ContextSnapshotView {
-        snapshot_path: Some(std::path::PathBuf::from(".kuzushi/context-snapshot.json")),
+        snapshot_path: Some(context_snapshot_fixture_path()),
         exists: true,
         status: "snapshot present; 2 indexed file(s). Next: context regen repo".to_string(),
         target: Some("/tmp/demo".to_string()),
@@ -1827,7 +1882,7 @@ fn renders_config_onboarding_without_silent_model_selection() {
     assert!(rendered.contains("onboarding"));
     assert!(rendered.contains("Up/Down"));
     assert!(rendered.contains(">"));
-    assert!(rendered.contains("openai-oauth:gpt-5.5"));
+    assert!(rendered.contains("openai-oauth:gpt-5.4"));
     assert!(!rendered.contains("┌"));
 }
 
@@ -1843,7 +1898,7 @@ fn plain_config_onboarding_uses_explicit_model_selection() {
     assert!(rendered.contains("CONFIG"));
     assert!(rendered.contains("model: unconfigured"));
     assert!(rendered.contains("onboarding: model <n> selects an explicit provider:model"));
-    assert!(rendered.contains("openai-oauth:gpt-5.5"));
+    assert!(rendered.contains("openai-oauth:gpt-5.4"));
     assert_strict_plain_80(&rendered);
 }
 
@@ -2229,13 +2284,15 @@ fn agent_chat_renders_failure_handoff_panel() {
             what_failed: "semgrep:scan did not complete successfully".to_string(),
             artifacts_available: vec![kuzushi_core::run_artifacts::RunArtifact {
                 label: "run".to_string(),
-                path: ".kuzushi/runs/r-1/run.json".to_string(),
+                path: ui_run_artifact_relative_path("r-1", "run.json"),
                 kind: "json".to_string(),
             }],
             missing_artifacts: vec!["findings.json".to_string()],
             allowed_proof_level: "artifact-review-only; runtime verification did not run"
                 .to_string(),
-            next_files_or_artifacts_to_inspect: vec![".kuzushi/runs/r-1/run.json".to_string()],
+            next_files_or_artifacts_to_inspect: vec![ui_run_artifact_relative_path(
+                "r-1", "run.json",
+            )],
             recovery_options: vec!["Install semgrep and rerun semgrep:scan.".to_string()],
             fallback_prompt: "Continue the failed Kuzushi run for semgrep:scan.".to_string(),
             claims_forbidden: vec!["validated".to_string(), "verified".to_string()],
@@ -2297,9 +2354,9 @@ fn failure_handoff_view_renders_current_context() {
 #[test]
 fn failure_handoff_view_reads_latest_failures_artifact() {
     let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join(".kuzushi/runs/run-1");
+    let run_dir = ui_run_dir(Some(tmp.path()), "run-1");
     std::fs::create_dir_all(&run_dir).unwrap();
-    std::fs::write(tmp.path().join(".kuzushi/latest"), "run-1\n").unwrap();
+    std::fs::write(ui_latest_run_path(Some(tmp.path())), "run-1\n").unwrap();
     std::fs::write(
         run_dir.join("failures.json"),
         serde_json::json!({
@@ -2345,9 +2402,9 @@ fn failure_handoff_view_reads_latest_failures_artifact() {
 #[test]
 fn recommend_view_renders_latest_recommendations_artifact() {
     let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join(".kuzushi/runs/run-1");
+    let run_dir = ui_run_dir(Some(tmp.path()), "run-1");
     std::fs::create_dir_all(&run_dir).unwrap();
-    std::fs::write(tmp.path().join(".kuzushi/latest"), "run-1\n").unwrap();
+    std::fs::write(ui_latest_run_path(Some(tmp.path())), "run-1\n").unwrap();
     std::fs::write(
         run_dir.join("recommendations.json"),
         serde_json::json!([
@@ -2900,8 +2957,9 @@ fn plan_card_keybind_row_drops_bracket_chrome() {
 #[test]
 fn prereq_plan_card_shows_cached_missing_writes_risk_cost_and_actions() {
     let tmp = tempfile::tempdir().unwrap();
-    std::fs::create_dir(tmp.path().join(".kuzushi")).unwrap();
-    std::fs::write(tmp.path().join(".kuzushi/context-snapshot.json"), "{}\n").unwrap();
+    let context_snapshot_path = target_context_snapshot_path(tmp.path());
+    std::fs::create_dir(context_snapshot_path.parent().unwrap()).unwrap();
+    std::fs::write(context_snapshot_path, "{}\n").unwrap();
     let backend = TestBackend::new(132, 34);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -2936,7 +2994,7 @@ fn prereq_plan_card_shows_cached_missing_writes_risk_cost_and_actions() {
 #[test]
 fn prereq_plan_card_explains_invalid_artifacts_before_reuse() {
     let tmp = tempfile::tempdir().unwrap();
-    std::fs::create_dir_all(tmp.path().join(".kuzushi/context-snapshot.json")).unwrap();
+    std::fs::create_dir_all(target_context_snapshot_path(tmp.path())).unwrap();
     let backend = TestBackend::new(132, 34);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -2961,8 +3019,9 @@ fn prereq_plan_card_explains_invalid_artifacts_before_reuse() {
 #[test]
 fn plain_prereq_plan_has_no_ansi_or_box_drawing() {
     let tmp = tempfile::tempdir().unwrap();
-    std::fs::create_dir(tmp.path().join(".kuzushi")).unwrap();
-    std::fs::write(tmp.path().join(".kuzushi/context-snapshot.json"), "{}\n").unwrap();
+    let context_snapshot_path = target_context_snapshot_path(tmp.path());
+    std::fs::create_dir(context_snapshot_path.parent().unwrap()).unwrap();
+    std::fs::write(context_snapshot_path, "{}\n").unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     let chain = PrereqChain::new(
         prereq_steps_for("carlini-threat-hunt:run", tmp.path()),
@@ -3007,10 +3066,11 @@ fn module_run_renders_live_activity_in_body_and_status_strip() {
 #[test]
 fn plain_live_activity_has_no_ansi_or_box_drawing() {
     let mut app = ShellApp::new(V2Config::default(), None);
+    let detail = format!("writes {}", threat_model_relative_path());
     app.live_activity = Some(LiveActivity::new(
         LiveActivityPhase::WritingArtifact,
         "threat-model:build",
-        "writes .kuzushi/threat-model.json",
+        detail,
     ));
 
     let rendered = render_plain_app(&app, 80);
@@ -3018,7 +3078,7 @@ fn plain_live_activity_has_no_ansi_or_box_drawing() {
     assert!(rendered.contains("LIVE ACTIVITY"));
     assert!(rendered.contains("phase: writing artifact"));
     assert!(rendered.contains("subject: threat-model:build"));
-    assert!(rendered.contains("detail: writes .kuzushi/threat-model.json"));
+    assert!(rendered.contains(&format!("detail: writes {}", threat_model_relative_path())));
     assert_strict_plain_80(&rendered);
 }
 
@@ -3151,16 +3211,17 @@ fn runs_view_lists_past_runs_from_run_json_with_summary_fallback() {
     // canonical `run.json`, keeps `summary.json` fallback, and renders
     // one styled row per past run.
     let tmp = tempfile::tempdir().unwrap();
-    let runs_root = tmp.path().join(".kuzushi/runs");
-    std::fs::create_dir_all(runs_root.join("r-2026-05-06T14-31")).unwrap();
-    std::fs::create_dir_all(runs_root.join("r-2026-05-06T15-18")).unwrap();
+    let canonical_run_dir = ui_run_dir(Some(tmp.path()), "r-2026-05-06T14-31");
+    let legacy_run_dir = ui_run_dir(Some(tmp.path()), "r-2026-05-06T15-18");
+    std::fs::create_dir_all(&canonical_run_dir).unwrap();
+    std::fs::create_dir_all(&legacy_run_dir).unwrap();
     std::fs::write(
-        runs_root.join("r-2026-05-06T14-31/run.json"),
+        canonical_run_dir.join("run.json"),
         r#"{"status":"completed","findings":18,"target":"~/work/acme-checkout"}"#,
     )
     .unwrap();
     std::fs::write(
-        runs_root.join("r-2026-05-06T15-18/summary.json"),
+        legacy_run_dir.join("summary.json"),
         r#"{"status":"failed","findings":0,"target":"~/work/acme-checkout"}"#,
     )
     .unwrap();
@@ -3233,7 +3294,7 @@ fn findings_empty_state_uses_panel_pattern_per_mockup() {
     assert!(rendered.contains("FINDINGS · empty"));
     assert!(rendered.contains("∅"));
     assert!(rendered.contains("no findings yet"));
-    assert!(rendered.contains("findings.sqlite3"));
+    assert!(rendered.contains(".kuzushi/v2/findings.sqlite3"));
     assert!(rendered.contains("▸"));
     assert!(rendered.contains("scan"));
     assert!(!rendered.contains("load gh"));
@@ -3374,7 +3435,7 @@ fn auth_view_renders_latest_oauth_flow_state() {
         provider: "openai".to_string(),
         method: "headless".to_string(),
         status: "waiting".to_string(),
-        detail: "device code flow at https://auth.openai.com/codex/device".to_string(),
+        detail: "OpenAI device code flow".to_string(),
         store_path: "~/.kuzushi/oauth-credentials.json".to_string(),
     });
 
@@ -3383,7 +3444,8 @@ fn auth_view_renders_latest_oauth_flow_state() {
 
     assert!(rendered.contains("OAUTH"));
     assert!(rendered.contains("headless"));
-    assert!(rendered.contains("device code flow"));
+    assert!(rendered.contains("OpenAI device code flow"));
+    assert!(!rendered.contains("codex"));
     assert!(rendered.contains("oauth-credentials.json"));
 }
 
@@ -3546,7 +3608,7 @@ fn trace_view_renders_steps_from_trace_jsonl() {
     // small trace.jsonl on disk and verify rows + columns reach
     // the buffer.
     let tmp = tempfile::tempdir().unwrap();
-    let runs_root = tmp.path().join(".kuzushi/runs/r-1");
+    let runs_root = ui_run_dir(Some(tmp.path()), "r-1");
     std::fs::create_dir_all(&runs_root).unwrap();
     std::fs::write(
             runs_root.join("trace.jsonl"),
@@ -3600,8 +3662,8 @@ fn trace_view_empty_when_no_trace_jsonl_on_disk() {
 #[test]
 fn replay_view_prefers_run_json_and_keeps_summary_fallback() {
     let tmp = tempfile::tempdir().unwrap();
-    let canonical = tmp.path().join(".kuzushi/runs/r-canonical");
-    let legacy = tmp.path().join(".kuzushi/runs/r-legacy");
+    let canonical = ui_run_dir(Some(tmp.path()), "r-canonical");
+    let legacy = ui_run_dir(Some(tmp.path()), "r-legacy");
     std::fs::create_dir_all(&canonical).unwrap();
     std::fs::create_dir_all(&legacy).unwrap();
     std::fs::write(canonical.join("run.json"), r#"{"status":"completed"}"#).unwrap();
@@ -3619,12 +3681,12 @@ fn replay_view_prefers_run_json_and_keeps_summary_fallback() {
 #[test]
 fn replay_view_surfaces_invalid_run_metadata_path() {
     let tmp = tempfile::tempdir().unwrap();
-    let run_dir = tmp.path().join(".kuzushi/runs/r-invalid");
+    let run_dir = ui_run_dir(Some(tmp.path()), "r-invalid");
     std::fs::create_dir_all(run_dir.join("run.json")).unwrap();
 
     let rendered = render_replay_for_target(tmp.path(), "r-invalid");
 
-    assert!(rendered.contains("run.json (invalid)"));
+    assert!(rendered.contains("run.json (not a file)"));
     assert!(!rendered.contains("run artefacts not on disk"));
 }
 
@@ -3657,7 +3719,7 @@ fn patch_view_renders_rationale_diff_tests_and_guardrail_sections() {
                 ("orders::tests::happy_path_uuid".to_string(), "valid uuid → row".to_string()),
             ],
             guardrail: Some("approval.patches = human-required".to_string()),
-            staged_at: Some(".kuzushi/runs/r-2113/patch.diff".to_string()),
+            staged_at: Some(ui_run_artifact_relative_path("r-2113", "patch.diff")),
         });
     app.shell_view = ShellView::Patch("F-0001".to_string());
 
@@ -3700,6 +3762,7 @@ fn patch_view_empty_state_when_no_patch_pending() {
     assert!(rendered.contains("∅"));
     assert!(rendered.contains("no patch staged"));
     assert!(rendered.contains("patch:run"));
+    assert!(rendered.contains(".kuzushi/runs/"));
 }
 
 #[test]

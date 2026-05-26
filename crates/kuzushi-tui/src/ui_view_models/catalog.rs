@@ -63,7 +63,7 @@ pub(crate) fn catalog_uses_collapsed_layout(model: &CatalogModel, width: u16) ->
 }
 
 pub(crate) fn catalog_default_action_hint(module: &CatalogActionModule, width: u16) -> String {
-    let prefix = format!("Run {} against the active target — ", module.id);
+    let prefix = format!("Run {} — ", module.id);
     let budget = default_action_description_budget(width, &prefix);
     format!(
         "{prefix}{}",
@@ -152,9 +152,10 @@ fn critical_finding_hint(app: &ShellApp) -> Option<String> {
 
 fn findings_waiting_hint(app: &ShellApp) -> Option<String> {
     (!app.findings.is_empty()).then(|| {
+        let count = app.findings.len();
         format!(
-            "{} finding(s) waiting · `findings` to triage · `threats regen` for STRIDE refresh.",
-            app.findings.len()
+            "{count} {} waiting · `findings` to triage · `threats regen` for STRIDE refresh.",
+            if count == 1 { "finding" } else { "findings" }
         )
     })
 }

@@ -172,7 +172,7 @@ pub(crate) fn require_taint_iris_next_runtime<'a>(
     runtime: Option<&'a dyn AgentRuntime>,
 ) -> Result<&'a dyn AgentRuntime> {
     runtime.context(
-        "taint-iris-next:hunt requires the pi-agent-core runtime in hunt mode. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
+        "taint-iris-next:hunt requires the LangGraph runtime in hunt mode. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
     )
 }
 

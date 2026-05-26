@@ -2,21 +2,27 @@ use kuzushi_core::{Finding, Severity};
 
 pub(crate) fn findings_count_summary(findings: &[Finding]) -> String {
     let counts = SeverityCounts::from_findings(findings);
+    let total = findings.len();
     if counts.critical > 0 {
-        return format!("{} findings ({} critical)", findings.len(), counts.critical);
+        return format!(
+            "{total} {} ({} critical)",
+            finding_noun(total),
+            counts.critical
+        );
     }
     if counts.high > 0 {
-        return format!("{} findings ({} high)", findings.len(), counts.high);
+        return format!("{total} {} ({} high)", finding_noun(total), counts.high);
     }
     if counts.medium > 0 {
-        return format!("{} findings ({} medium)", findings.len(), counts.medium);
+        return format!("{total} {} ({} medium)", finding_noun(total), counts.medium);
     }
-    format!("{} findings", findings.len())
+    format!("{total} {}", finding_noun(total))
 }
 
 pub(crate) fn status_footer_findings_summary(findings: &[Finding]) -> String {
     let counts = SeverityCounts::from_findings(findings);
-    let mut parts = vec![format!("{} findings", findings.len())];
+    let total = findings.len();
+    let mut parts = vec![format!("{total} {}", finding_noun(total))];
     append_nonzero_severity(&mut parts, counts.critical, "critical");
     append_nonzero_severity(&mut parts, counts.high, "high");
     append_nonzero_severity(&mut parts, counts.medium, "medium");
@@ -25,9 +31,17 @@ pub(crate) fn status_footer_findings_summary(findings: &[Finding]) -> String {
 
 pub(crate) fn ci_result_findings_summary(findings: &[Finding], fallback_count: usize) -> String {
     if findings.is_empty() && fallback_count > 0 {
-        return format!("{fallback_count} finding(s)");
+        return format!("{fallback_count} {}", finding_noun(fallback_count));
     }
     status_footer_findings_summary(findings)
+}
+
+fn finding_noun(count: usize) -> &'static str {
+    if count == 1 {
+        "finding"
+    } else {
+        "findings"
+    }
 }
 
 fn append_nonzero_severity(parts: &mut Vec<String>, count: usize, label: &str) {

@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 150
 ---
- KUZUSHI mode:module | target:none | ctx:missing | model:unconfigured | 0 findings | view:tune
+ KUZUSHI mode:module · target:none · ctx:missing · model:unconfigured · 0 findings · view:tune
 
  -- TUNE ---------------------------------------------------------------------------------------------------------------
 module             sast
@@ -19,5 +19,5 @@ house rules        .kuzushi/house-rules/sast.md
   reset house rules
     delete the house-rules file and revert to defaults
 
-(no house rules set; pick edit house rules and type a value)
+no house rules set — choose `edit house rules` above to add one
  Up/Down move   Enter activate   show/set/reset direct   back home

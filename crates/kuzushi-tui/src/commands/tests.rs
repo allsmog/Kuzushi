@@ -99,29 +99,25 @@ mod tests {
             parse_command("/auth login github-copilot"),
             ShellCommand::AuthLogin(Some("github-copilot".to_string()))
         );
-        assert!(matches!(
-            parse_command(&format!("auth {}", "codex")),
-            ShellCommand::Unknown(_)
-        ));
-        assert!(matches!(
-            parse_command(&format!("auth {}", "openai-codex")),
-            ShellCommand::Unknown(_)
-        ));
-        assert!(matches!(
-            parse_command("/auth login codex"),
-            ShellCommand::Unknown(_)
-        ));
-        assert!(matches!(
-            parse_command(&format!("/auth login {}", "openai-codex")),
-            ShellCommand::Unknown(_)
-        ));
+        for command in [
+            format!("auth {}", "codex"),
+            format!("auth {}", "openai-codex"),
+            "auth login codex".to_string(),
+            format!("/auth login {}", "openai-codex"),
+        ] {
+            let parsed = parse_command(&command);
+            let ShellCommand::Unknown(raw) = parsed else {
+                panic!("expected unknown legacy auth selector for {command}");
+            };
+            assert_eq!(raw, "auth legacy-openai-oauth");
+        }
         assert_eq!(
             parse_command("/provider openai"),
             ShellCommand::Provider(Some("openai".to_string()))
         );
         assert_eq!(
-            parse_command("/backend pi-agent-core"),
-            ShellCommand::Backend(Some("pi-agent-core".to_string()))
+            parse_command("/backend LangGraph"),
+            ShellCommand::Backend(Some("LangGraph".to_string()))
         );
         assert_eq!(parse_command("/cost"), ShellCommand::Cost);
         assert_eq!(parse_command("/config"), ShellCommand::Config);

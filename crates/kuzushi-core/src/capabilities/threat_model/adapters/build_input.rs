@@ -12,7 +12,7 @@ pub(crate) fn parse_build_input(
     let stages = read_stages(input, flavor.tool_name())?;
     let run_id = Uuid::new_v4().to_string();
     let output_dir = read_string(input, &["outputDir", "output_dir"])
-        .unwrap_or_else(|| format!(".kuzushi/runs/{run_id}/{}", flavor.default_artifact_leaf()));
+        .unwrap_or_else(|| flavor.default_output_dir(&target, &run_id));
     let max_elements = read_usize(input, &["maxElements", "max_elements"], 40, 5);
     let max_threats = read_usize(input, &["maxThreats", "max_threats"], 30, 1);
     let emit_findings = read_bool(input, &["emitFindings", "emit_findings"], false);

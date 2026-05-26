@@ -1,5 +1,13 @@
 use super::agent_dispatch::agent_question_with_failure_context;
 use kuzushi_core::run_artifacts::{FailureToLlmContext, RunArtifact};
+use std::path::Path;
+
+fn run_artifact_path(root: &str, run_id: &str, leaf: &str) -> String {
+    kuzushi_core::run_dir(Path::new(root), run_id)
+        .join(leaf)
+        .to_string_lossy()
+        .into_owned()
+}
 
 #[test]
 fn failure_context_is_injected_into_agent_prompt_without_replacing_question() {
@@ -9,12 +17,12 @@ fn failure_context_is_injected_into_agent_prompt_without_replacing_question() {
         what_failed: "semgrep:scan did not complete successfully".to_string(),
         artifacts_available: vec![RunArtifact {
             label: "input".to_string(),
-            path: "/tmp/repo/.kuzushi/runs/r-1/input.json".to_string(),
+            path: run_artifact_path("/tmp/repo", "r-1", "input.json"),
             kind: "json".to_string(),
         }],
         missing_artifacts: vec!["findings.json".to_string()],
         allowed_proof_level: "artifact-review-only; runtime verification did not run".to_string(),
-        next_files_or_artifacts_to_inspect: vec!["/tmp/repo/.kuzushi/runs/r-1/run.json".to_string()],
+        next_files_or_artifacts_to_inspect: vec![run_artifact_path("/tmp/repo", "r-1", "run.json")],
         recovery_options: vec!["Install semgrep and rerun semgrep:scan.".to_string()],
         fallback_prompt: "Continue the failed Kuzushi run for semgrep:scan.".to_string(),
         claims_forbidden: vec![

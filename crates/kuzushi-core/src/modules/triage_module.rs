@@ -8,7 +8,7 @@ pub(crate) fn triage_module() -> BuiltinModule {
         "LLM-driven triage of scanner findings with evidence-backed verdicts.",
         vec![tool_with_options(
             "triage:run",
-            "Triage findings with pi-agent-core.",
+            "Triage findings with LangGraph.",
             vec![
                 opt("scanId", OptionType::String, "Scan run id to triage.").aliases(&["scan_id"]),
                 opt(

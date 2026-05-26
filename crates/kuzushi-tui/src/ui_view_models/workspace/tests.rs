@@ -3,15 +3,35 @@ use kuzushi_core::{Severity, V2Config};
 use std::path::PathBuf;
 
 #[test]
+fn findings_db_relative_path_uses_core_workspace_path() {
+    assert_eq!(
+        findings_db_relative_path(),
+        kuzushi_core::workspace::workspace_findings_db_path("")
+            .display()
+            .to_string()
+    );
+}
+
+#[test]
+fn workspace_state_relative_path_uses_core_workspace_path() {
+    assert_eq!(
+        workspace_state_relative_path(),
+        kuzushi_core::workspace::workspace_state_dir("")
+            .display()
+            .to_string()
+    );
+}
+
+#[test]
 fn workspace_model_formats_missing_workspace_defaults() {
     let app = ShellApp::new(V2Config::default(), None);
 
     let model = workspace_model(&app);
 
     assert_eq!(model.target_label, "none");
-    assert_eq!(model.state_label, ".kuzushi/v2");
+    assert_eq!(model.state_label, workspace_state_relative_path());
     assert_eq!(model.findings_db_label, ".kuzushi/v2/findings.sqlite3");
-    assert_eq!(model.findings_label, "— (no scan yet)");
+    assert_eq!(model.findings_label, "none yet (run scan first)");
     assert_eq!(model.last_export_label, "none");
     assert!(model.empty);
     assert_eq!(model.rollup_total, 0);
@@ -63,9 +83,7 @@ fn plain_workspace_model_projects_missing_workspace_rows() {
     assert!(model
         .summary_rows
         .contains(&"findings db: .kuzushi/v2/findings.sqlite3".to_string()));
-    assert!(model.empty_rows.contains(
-        &"No active workspace. Next: scan <target> or kuzushi shell --target .".to_string()
-    ));
+    assert!(model.empty_rows.is_empty());
     assert_eq!(
         model.next_hint,
         "Next: workspace status, workspace export findings <path>.json, kuzushi pr-comment"

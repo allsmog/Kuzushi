@@ -9,7 +9,7 @@ use super::bridge_payloads::{BridgeRequest, BridgeResponse};
 use super::bridge_process::{public_bridge_error, run_bridge};
 use super::next_step_bridge::next_step_blocking as run_next_step_blocking;
 use super::next_step_bridge::preflight_tool_loop_blocking as run_preflight_tool_loop_blocking;
-use super::runtime_config::PiAgentCoreRuntime;
+use super::runtime_config::LangGraphRuntime;
 use super::triage::{clamp_outcome, fallback_triage_outcome, triage_prompt, TRIAGE_SYSTEM_PROMPT};
 use std::thread;
 use std::time::Duration;
@@ -19,7 +19,7 @@ fn clamp_token_count_u32(value: u64) -> u32 {
 }
 
 #[async_trait]
-impl AgentRuntime for PiAgentCoreRuntime {
+impl AgentRuntime for LangGraphRuntime {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
         let structured_output = request.structured_output;
         let runtime_options = request.runtime_options;
@@ -99,7 +99,7 @@ fn run_bridge_with_transport_retries(
         }
         thread::sleep(Duration::from_millis(retry_delay_ms(attempt)));
     }
-    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("pi-agent-core bridge failed")))
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("LangGraph bridge failed")))
 }
 
 enum BridgeAttempt {
@@ -123,13 +123,10 @@ fn bridge_response_error(response: BridgeResponse, final_attempt: bool) -> Resul
         .error
         .unwrap_or_else(|| "unknown error".to_string());
     if final_attempt || !is_transient_bridge_error(&message) {
-        anyhow::bail!(
-            "pi-agent-core bridge failed: {}",
-            public_bridge_error(&message)
-        );
+        anyhow::bail!("LangGraph bridge failed: {}", public_bridge_error(&message));
     }
     Ok(BridgeAttempt::Retry(anyhow::anyhow!(
-        "pi-agent-core bridge failed: {}",
+        "LangGraph bridge failed: {}",
         public_bridge_error(&message)
     )))
 }
@@ -215,7 +212,7 @@ fn empty_triage_outcome() -> TriageOutcome {
     TriageOutcome {
         verdict: TriageVerdict::NeedsReview,
         confidence: 0.0,
-        rationale: "pi-agent-core bridge returned no triage content".to_string(),
+        rationale: "LangGraph bridge returned no triage content".to_string(),
         ..Default::default()
     }
 }

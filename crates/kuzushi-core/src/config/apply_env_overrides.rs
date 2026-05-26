@@ -4,7 +4,7 @@ pub(crate) fn apply_env_overrides(config: &mut V2Config) {
     apply_model_env(config);
     apply_api_key_env(config);
     apply_base_url_env(config);
-    apply_agent_bridge_env(config);
+    apply_langgraph_bridge_env(config);
     apply_anthropic_oauth_env(config);
 }
 
@@ -28,11 +28,11 @@ fn apply_base_url_env(config: &mut V2Config) {
     }
 }
 
-fn apply_agent_bridge_env(config: &mut V2Config) {
-    if let Some(command) = first_env(&["KUZUSHI_AGENT_BRIDGE", "KUZUSHI_V2_AGENT_BRIDGE"]) {
-        let parts = agent_bridge_command_from_env(&command);
+fn apply_langgraph_bridge_env(config: &mut V2Config) {
+    if let Some(command) = first_env(&["KUZUSHI_LANGGRAPH_BRIDGE"]) {
+        let parts = langgraph_bridge_command_from_env(&command);
         if !parts.is_empty() {
-            config.runtime.agent_bridge_command = Some(parts);
+            config.runtime.langgraph_bridge_command = Some(parts);
         }
     }
 }
@@ -94,7 +94,7 @@ fn validate_model(model: &Option<String>) -> Result<()> {
 
 fn validate_runtime(runtime: &RuntimeConfig) -> Result<()> {
     validate_api_key_env(&runtime.api_key_env)?;
-    validate_agent_bridge_command(&runtime.agent_bridge_command)?;
+    validate_langgraph_bridge_command(&runtime.langgraph_bridge_command)?;
     validate_thinking_level(&runtime.thinking_level)
 }
 
@@ -114,12 +114,12 @@ fn validate_api_key_env(api_key_env: &str) -> Result<()> {
     Ok(())
 }
 
-fn validate_agent_bridge_command(command: &Option<Vec<String>>) -> Result<()> {
+fn validate_langgraph_bridge_command(command: &Option<Vec<String>>) -> Result<()> {
     if command
         .as_ref()
         .is_some_and(|command| command.is_empty() || command[0].trim().is_empty())
     {
-        anyhow::bail!("runtime.agent_bridge_command must start with an executable");
+        anyhow::bail!("runtime.langgraph_bridge_command must start with an executable");
     }
     Ok(())
 }
@@ -161,7 +161,7 @@ pub(crate) fn shell_words(value: &str) -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn agent_bridge_command_from_env(value: &str) -> Vec<String> {
+pub(crate) fn langgraph_bridge_command_from_env(value: &str) -> Vec<String> {
     let parts = shell_words(value);
     if is_bare_node_bridge_script(&parts) {
         return vec!["node".to_string(), parts[0].clone()];

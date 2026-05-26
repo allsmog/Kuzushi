@@ -1,12 +1,25 @@
 use super::*;
 use kuzushi_core::V2Config;
-use std::path::PathBuf;
+
+fn context_snapshot_fixture_path() -> std::path::PathBuf {
+    kuzushi_core::context_snapshot_path("")
+}
+
+#[test]
+fn context_snapshot_relative_path_uses_core_context_path() {
+    assert_eq!(
+        context_snapshot_relative_path(),
+        kuzushi_core::context_snapshot_path("")
+            .display()
+            .to_string()
+    );
+}
 
 #[test]
 fn context_snapshot_model_projects_present_snapshot() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.context_view = crate::app::ContextSnapshotView {
-        snapshot_path: Some(PathBuf::from(".kuzushi/context-snapshot.json")),
+        snapshot_path: Some(context_snapshot_fixture_path()),
         exists: true,
         status: "snapshot present; 2 indexed file(s)".to_string(),
         target: Some("/tmp/demo".to_string()),
@@ -60,11 +73,12 @@ fn plain_context_model_projects_missing_snapshot_rows() {
     assert_eq!(model.title, "CONTEXT");
     assert!(model
         .summary_rows
-        .contains(&"snapshot: .kuzushi/context-snapshot.json".to_string()));
+        .contains(&format!("snapshot: {}", context_snapshot_relative_path())));
     assert!(model.summary_rows.contains(&"state: missing".to_string()));
-    assert!(model
-        .body_rows
-        .contains(&"No context snapshot exists yet. Next: context build writes .kuzushi/context-snapshot.json.".to_string()));
+    assert!(model.body_rows.contains(&format!(
+        "No context snapshot exists yet. Next: context build writes {}.",
+        context_snapshot_relative_path()
+    )));
     assert_eq!(
         model.next_hint,
         "Next: context build, context status, context regen repo"
@@ -74,7 +88,7 @@ fn plain_context_model_projects_missing_snapshot_rows() {
 #[test]
 fn plain_context_model_projects_malformed_snapshot_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.context_view.snapshot_path = Some(PathBuf::from(".kuzushi/context-snapshot.json"));
+    app.context_view.snapshot_path = Some(context_snapshot_fixture_path());
     app.context_view.status = "malformed context snapshot. Next: context build".to_string();
 
     let model = plain_context_model(&app);
@@ -83,14 +97,36 @@ fn plain_context_model_projects_malformed_snapshot_rows() {
     assert!(model
         .summary_rows
         .contains(&"status: malformed context snapshot. Next: context build".to_string()));
-    assert!(model.body_rows.contains(&"Context snapshot is malformed JSON. Next: context build rewrites .kuzushi/context-snapshot.json.".to_string()));
+    assert!(model.body_rows.contains(&format!(
+        "Context snapshot is malformed JSON. Next: context build rewrites {}.",
+        context_snapshot_relative_path()
+    )));
+}
+
+#[test]
+fn plain_context_model_projects_non_file_snapshot_rows() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.context_view.snapshot_path = Some(context_snapshot_fixture_path());
+    app.context_view.status =
+        "malformed context snapshot (not a file). Next: context build".to_string();
+
+    let model = plain_context_model(&app);
+
+    assert!(model.summary_rows.contains(&"state: malformed".to_string()));
+    assert!(model.summary_rows.contains(
+        &"status: malformed context snapshot (not a file). Next: context build".to_string()
+    ));
+    assert!(model.body_rows.contains(&format!(
+        "Context snapshot path is not a file. Next: context build rewrites {}.",
+        context_snapshot_relative_path()
+    )));
 }
 
 #[test]
 fn plain_context_model_projects_present_snapshot_details() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.context_view = crate::app::ContextSnapshotView {
-        snapshot_path: Some(PathBuf::from(".kuzushi/context-snapshot.json")),
+        snapshot_path: Some(context_snapshot_fixture_path()),
         exists: true,
         status: "snapshot present; 2 indexed file(s)".to_string(),
         target: Some("/tmp/demo".to_string()),

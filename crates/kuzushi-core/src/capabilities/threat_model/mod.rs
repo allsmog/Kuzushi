@@ -23,4 +23,6 @@ pub(crate) use domain::*;
 pub(crate) use persistence::*;
 
 pub use adapters::execute_threat_model_tool;
-pub use persistence::{load_persistent_threat_model, save_persistent_threat_model};
+pub use persistence::{
+    load_persistent_threat_model, persistent_threat_model_path, save_persistent_threat_model,
+};

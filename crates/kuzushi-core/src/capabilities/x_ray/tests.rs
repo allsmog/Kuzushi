@@ -130,7 +130,7 @@ mod tests {
     }
 
     #[test]
-    fn run_writes_structured_pi_agent_core_artifacts() {
+    fn run_writes_structured_langgraph_runtime_artifacts() {
         let tmp = tempdir().unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let config = V2Config {

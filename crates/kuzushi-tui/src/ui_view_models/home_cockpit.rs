@@ -1,18 +1,11 @@
-use super::{attack_surface_risk_model, AttackSurfaceRiskModel};
+use super::{attack_surface_risk_model, ui_latest_run_path, ui_run_dir, AttackSurfaceRiskModel};
 use crate::ShellApp;
+use kuzushi_core::run_artifacts::{
+    canonical_run_artifact_spec, canonical_run_artifact_specs, RunArtifactSpec,
+};
 use std::path::{Path, PathBuf};
 
-const HOME_ARTIFACTS: &[HomeArtifactSpec] = &[
-    HomeArtifactSpec::new("ctx", "context.json"),
-    HomeArtifactSpec::new("surface", "attack-surface.json"),
-    HomeArtifactSpec::new("threat", "threat-model.json"),
-    HomeArtifactSpec::new("recommend", "recommendations.json"),
-    HomeArtifactSpec::new("findings", "findings.json"),
-    HomeArtifactSpec::new("proof", "proof.json"),
-    HomeArtifactSpec::new("failures", "failures.json"),
-    HomeArtifactSpec::new("report", "report.md"),
-    HomeArtifactSpec::new("manifest", "artifacts.json"),
-];
+const HOME_TIMELINE_ARTIFACTS: [&str; 3] = ["run.json", "events.jsonl", "trace.jsonl"];
 const HOME_ARTIFACT_COLUMN_COUNT: usize = 4;
 const HOME_COMMANDS: [&str; 6] = [
     "modules",
@@ -62,7 +55,8 @@ pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
         ),
         attack_surface: attack_surface_risk_model(&run.run_dir),
         next_action: home_next_action(app),
-        rail_legend: "rails: ✓ recorded → ○ placeholder ⚠ failed/malformed ■ missing ◆ partial",
+        rail_legend:
+            "rails: ✓ recorded · ○ placeholder · ◆ partial · ⚠ failed/malformed · ■ missing",
         command_labels: HOME_COMMANDS,
         artifacts: home_artifact_rows(&run.run_dir),
     }
@@ -99,7 +93,8 @@ fn target_label(app: &ShellApp) -> String {
 
 fn home_next_action(app: &ShellApp) -> String {
     if app.target.is_none() {
-        return "Run `scan .` (the dot means the current directory) to create the first Kuzushi run artifacts.".to_string();
+        return "Run `scan .` to scan the current directory and create the first run artifacts."
+            .to_string();
     }
     if app.findings.is_empty() {
         return format!(
@@ -111,33 +106,43 @@ fn home_next_action(app: &ShellApp) -> String {
 }
 
 fn home_artifact_rows(run_dir: &Path) -> Vec<HomeArtifactRow> {
-    HOME_ARTIFACTS
-        .iter()
+    canonical_run_artifact_specs()
+        .into_iter()
+        .filter(home_artifact_belongs_in_rail)
         .map(|artifact| home_artifact_row(run_dir, artifact))
         .collect()
 }
 
-fn home_artifact_row(run_dir: &Path, artifact: &HomeArtifactSpec) -> HomeArtifactRow {
+fn home_artifact_belongs_in_rail(artifact: &RunArtifactSpec) -> bool {
+    !HOME_TIMELINE_ARTIFACTS.contains(&artifact.leaf)
+}
+
+fn home_artifact_row(run_dir: &Path, artifact: RunArtifactSpec) -> HomeArtifactRow {
     let path = run_dir.join(artifact.leaf);
-    let state = artifact_state(&path, artifact);
+    let state = artifact_state(&path, &artifact);
     HomeArtifactRow {
         cells: [
             state.glyph.to_string(),
-            artifact.label.to_string(),
+            home_artifact_label(artifact.label).to_string(),
             state.label.to_string(),
             path.display().to_string(),
         ],
     }
 }
 
-fn artifact_state(path: &Path, artifact: &HomeArtifactSpec) -> HomeArtifactState {
-    if !path.exists() {
-        return HomeArtifactState::missing();
+fn artifact_state(path: &Path, artifact: &RunArtifactSpec) -> HomeArtifactState {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return HomeArtifactState::non_file(),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return HomeArtifactState::missing();
+        }
+        Err(_) => return HomeArtifactState::malformed(),
     }
     let Ok(text) = std::fs::read_to_string(path) else {
         return HomeArtifactState::malformed();
     };
-    if artifact.is_json() {
+    if is_json_artifact(artifact) {
         return artifact_state_from_json_text(&text);
     }
     artifact_state_from_text(&text)
@@ -189,16 +194,24 @@ fn state_for_unstructured_artifact(text: &str) -> HomeArtifactState {
 }
 
 fn run_status_label(run_dir: &Path) -> String {
-    let path = run_dir.join("run.json");
-    if !path.exists() {
-        return "no run.json".to_string();
+    let path = run_dir.join(run_metadata_artifact_leaf());
+    match std::fs::metadata(&path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return format!("{} is not a file", run_metadata_artifact_leaf()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return format!("no {}", run_metadata_artifact_leaf());
+        }
+        Err(_) => return malformed_run_metadata_label(),
     }
     let Ok(text) = std::fs::read_to_string(path) else {
-        return "malformed run.json".to_string();
+        return malformed_run_metadata_label();
     };
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&text) else {
-        return "malformed run.json".to_string();
+        return malformed_run_metadata_label();
     };
+    if !value.is_object() {
+        return malformed_run_metadata_label();
+    }
     value
         .get("status")
         .and_then(serde_json::Value::as_str)
@@ -206,19 +219,30 @@ fn run_status_label(run_dir: &Path) -> String {
         .unwrap_or_else(|| "status unknown".to_string())
 }
 
-struct HomeArtifactSpec {
-    label: &'static str,
-    leaf: &'static str,
+fn malformed_run_metadata_label() -> String {
+    format!("malformed {}", run_metadata_artifact_leaf())
 }
 
-impl HomeArtifactSpec {
-    const fn new(label: &'static str, leaf: &'static str) -> Self {
-        Self { label, leaf }
-    }
+fn run_metadata_artifact_leaf() -> &'static str {
+    canonical_run_artifact_spec("run.json")
+        .expect("run metadata artifact must be in shared canonical spec")
+        .leaf
+}
 
-    fn is_json(&self) -> bool {
-        self.leaf.ends_with(".json")
+fn home_artifact_label(label: &str) -> &str {
+    match label {
+        "context snapshot" => "ctx",
+        "attack surface" => "surface",
+        "threat model" => "threat",
+        "recommendations" => "recommend",
+        "failure handoff" => "failures",
+        "artifact manifest" => "manifest",
+        _ => label,
     }
+}
+
+fn is_json_artifact(artifact: &RunArtifactSpec) -> bool {
+    artifact.kind == "json" || artifact.leaf.ends_with(".json")
 }
 
 struct HomeRunModel {
@@ -233,15 +257,15 @@ impl HomeRunModel {
             return Self {
                 run_id: None,
                 latest_pointer_invalid: false,
-                run_dir: PathBuf::from(".kuzushi/runs/latest"),
+                run_dir: ui_run_dir(None, "latest"),
             };
         };
         let latest = home_latest_run_id(root);
         let run_dir = latest
             .run_id
             .as_ref()
-            .map(|id| root.join(".kuzushi").join("runs").join(id))
-            .unwrap_or_else(|| root.join(".kuzushi/runs/latest"));
+            .map(|id| ui_run_dir(Some(root), id))
+            .unwrap_or_else(|| ui_run_dir(Some(root), "latest"));
         Self {
             run_id: latest.run_id,
             latest_pointer_invalid: latest.invalid,
@@ -264,7 +288,7 @@ struct HomeLatestRunId {
 }
 
 fn home_latest_run_id(root: &Path) -> HomeLatestRunId {
-    let latest_path = root.join(".kuzushi/latest");
+    let latest_path = ui_latest_run_path(Some(root));
     match std::fs::metadata(&latest_path) {
         Ok(metadata) if metadata.is_file() => home_latest_run_file(&latest_path),
         Ok(_) => HomeLatestRunId {
@@ -334,6 +358,10 @@ impl HomeArtifactState {
 
     const fn malformed() -> Self {
         Self::new("⚠", "malformed")
+    }
+
+    const fn non_file() -> Self {
+        Self::new("⚠", "not a file")
     }
 }
 

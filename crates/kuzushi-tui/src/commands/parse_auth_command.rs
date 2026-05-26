@@ -5,6 +5,7 @@ pub(crate) fn parse_auth_command(args: &[&str]) -> ShellCommand {
         None | Some("status") => ShellCommand::Auth,
         Some("login") => parse_auth_login_command(args),
         Some("openai") => ShellCommand::AuthLogin(Some("openai".to_string())),
+        Some("codex" | "openai-codex") => legacy_openai_oauth_selector_command(),
         Some("anthropic") | Some("claude") => {
             ShellCommand::AuthLogin(Some("anthropic".to_string()))
         }
@@ -17,10 +18,14 @@ pub(crate) fn parse_auth_command(args: &[&str]) -> ShellCommand {
 
 fn parse_auth_login_command(args: &[&str]) -> ShellCommand {
     match args.get(1).copied() {
-        Some("codex" | "openai-codex") => ShellCommand::Unknown(format!("auth login {}", args[1])),
+        Some("codex" | "openai-codex") => legacy_openai_oauth_selector_command(),
         Some(_) => ShellCommand::AuthLogin(Some(args[1..].join(" "))),
         None => ShellCommand::AuthLogin(None),
     }
+}
+
+fn legacy_openai_oauth_selector_command() -> ShellCommand {
+    ShellCommand::Unknown("auth legacy-openai-oauth".to_string())
 }
 
 pub(crate) fn parse_threat_command(args: &[&str]) -> ShellCommand {

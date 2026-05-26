@@ -1,10 +1,12 @@
 use super::compact_target_path;
 use crate::ShellApp;
 use kuzushi_core::{AttachmentKind, AttachmentRecord, KnownArtifact, SUPPORTED_ATTACHMENT_MODULES};
+use std::sync::OnceLock;
 
 const KB_SUMMARY_COLUMN_COUNT: usize = 2;
 const KB_ARTIFACT_COLUMN_COUNT: usize = 3;
 const KB_ATTACHMENT_COLUMN_COUNT: usize = 4;
+static ATTACHMENTS_STORE_RELATIVE_PATH: OnceLock<String> = OnceLock::new();
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct KnowledgeBaseModel {
@@ -136,7 +138,7 @@ fn plain_artifacts(rows: Vec<KnowledgeBaseArtifactRow>) -> PlainKnowledgeBaseArt
         headers: ["state", "path", "description"],
         empty_message: rows
             .is_empty()
-            .then_some("No known Rust artifacts for this module."),
+            .then_some("No artifacts indexed for this module yet."),
         rows: rows.into_iter().map(plain_artifact_row).collect(),
     }
 }
@@ -162,7 +164,17 @@ fn plain_attachment_row(row: KnowledgeBaseAttachmentRow) -> PlainKnowledgeBaseAt
 
 fn store_label(path: Option<&std::path::PathBuf>) -> String {
     path.map(|path| compact_target_path(&path.display().to_string()))
-        .unwrap_or_else(|| ".kuzushi/v2/attachments.json".to_string())
+        .unwrap_or_else(|| attachments_store_relative_path().to_string())
+}
+
+fn attachments_store_relative_path() -> &'static str {
+    ATTACHMENTS_STORE_RELATIVE_PATH
+        .get_or_init(|| {
+            kuzushi_core::workspace::workspace_attachments_path("")
+                .display()
+                .to_string()
+        })
+        .as_str()
 }
 
 fn artifact_rows(artifacts: &[KnownArtifact]) -> Vec<KnowledgeBaseArtifactRow> {

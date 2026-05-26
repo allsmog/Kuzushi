@@ -1,9 +1,9 @@
 /// Declarative hint that the operator expects Anthropic OAuth as the
 /// credential source for `anthropic:*` models.
 ///
-/// The bridge (`scripts/pi-agent-core-bridge.mjs`) is the actual refresh
+/// The bridge (`scripts/langgraph-bridge.mjs`) is the actual refresh
 /// authority — it loads `oauth-credentials.json`, refreshes via
-/// `@earendil-works/pi-ai/oauth`, and forwards the access token. This Rust
+/// the LangGraph bridge, and forwards the access token. This Rust
 /// struct exists so:
 ///
 /// * `validate_config` can fail fast at startup if the operator declared
@@ -33,9 +33,11 @@ mod tests;
 
 pub use config_model::AnthropicOauthConfig;
 pub use config_model::ConfigPaths;
+pub use config_model::OAUTH_CREDENTIALS_FILE;
 pub use config_model::RuntimeConfig;
 pub use config_model::RuntimeKind;
 pub use config_model::V2Config;
+pub use config_model::default_oauth_credentials_path;
 pub use config_hash::config_hash;
 pub use load_config_for_target::load_anthropic_oauth_config;
 pub use load_config_for_target::load_config;

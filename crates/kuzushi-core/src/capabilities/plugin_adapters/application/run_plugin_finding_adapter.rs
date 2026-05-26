@@ -113,7 +113,7 @@ fn require_plugin_adapter_runtime<'a>(
     runtime: Option<&'a dyn AgentRuntime>,
 ) -> Result<&'a dyn AgentRuntime> {
     runtime.context(format!(
-        "{} requires the pi-agent-core runtime. Configure runtime.agent_bridge_command or install the bundled Node bridge dependencies.",
+        "{} requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
         spec.tool_name
     ))
 }
@@ -155,7 +155,7 @@ fn query_plugin_adapter(
             run.model.clone(),
             run.target.clone(),
             format!(
-                "You are Kuzushi's {} pi-agent-core adapter. Return only JSON matching {{\"findings\":[{{\"ruleId\":\"...\",\"filePath\":\"relative/path\",\"startLine\":1,\"severity\":\"critical|high|medium|low|info\",\"message\":\"evidence-backed finding\",\"evidence\":\"source-grounded proof\"}}]}}.",
+                "You are Kuzushi's {} LangGraph adapter. Return only JSON matching {{\"findings\":[{{\"ruleId\":\"...\",\"filePath\":\"relative/path\",\"startLine\":1,\"severity\":\"critical|high|medium|low|info\",\"message\":\"evidence-backed finding\",\"evidence\":\"source-grounded proof\"}}]}}.",
                 run.spec.tool_name
             ),
             build_plugin_adapter_prompt(

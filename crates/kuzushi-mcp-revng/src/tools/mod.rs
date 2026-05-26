@@ -14,6 +14,7 @@ use std::process::Stdio;
 use tokio::process::Command;
 
 const DEFAULT_REVNG_IMAGE: &str = "revng/revng:latest";
+const DEFAULT_REVNG_CONTAINER_PLATFORM: &str = "linux/amd64";
 
 pub(crate) fn build_registry() -> ToolRegistry {
     ToolRegistry::new()
@@ -250,7 +251,6 @@ impl RevngAction {
                 vec![
                     "revng".into(),
                     "artifact".into(),
-                    "--analyze".into(),
                     "decompile-to-single-file".into(),
                     binary,
                 ]
@@ -259,7 +259,6 @@ impl RevngAction {
                 vec![
                     "revng".into(),
                     "artifact".into(),
-                    "--analyze".into(),
                     "render-svg-cfg".into(),
                     binary,
                 ]
@@ -271,20 +270,10 @@ impl RevngAction {
         let binary = binary.display().to_string();
         match self {
             Self::Analyze | Self::ListFunctions | Self::Decompile => {
-                vec![
-                    "artifact".into(),
-                    "--analyze".into(),
-                    "decompile-to-single-file".into(),
-                    binary,
-                ]
+                vec!["artifact".into(), "decompile-to-single-file".into(), binary]
             }
             Self::Cfg => {
-                vec![
-                    "artifact".into(),
-                    "--analyze".into(),
-                    "render-svg-cfg".into(),
-                    binary,
-                ]
+                vec!["artifact".into(), "render-svg-cfg".into(), binary]
             }
         }
     }
@@ -296,15 +285,7 @@ async fn run_revng_cached(args: &Value, action: RevngAction) -> Result<Value> {
     let backend = select_backend(args.get("image").and_then(Value::as_str)).await?;
     let cache_file = cache_file_for(&binary, &backend.cache_key, action, function)?;
     if cache_file.exists() {
-        let output = fs::read_to_string(&cache_file)
-            .with_context(|| format!("could not read {}", cache_file.display()))?;
-        return Ok(revng_output_json(
-            &binary,
-            &backend,
-            &cache_file,
-            true,
-            output,
-        ));
+        return cached_revng_output(&binary, &backend, &cache_file);
     }
 
     if let Some(parent) = cache_file.parent() {
@@ -315,6 +296,11 @@ async fn run_revng_cached(args: &Value, action: RevngAction) -> Result<Value> {
         RevngBackendKind::Container { runtime, image } => {
             run_revng_container(runtime, image, &binary, action, function).await?
         }
+    };
+    let raw_output = if raw_output.trim().is_empty() {
+        empty_revng_output_message(action)
+    } else {
+        raw_output
     };
     let output = function
         .map(|name| extract_revng_function_excerpt(&raw_output, name))
@@ -328,6 +314,19 @@ async fn run_revng_cached(args: &Value, action: RevngAction) -> Result<Value> {
         false,
         output,
     ))
+}
+
+fn cached_revng_output(binary: &Path, backend: &RevngBackend, cache_file: &Path) -> Result<Value> {
+    let output = fs::read_to_string(cache_file)
+        .with_context(|| format!("could not read {}", cache_file.display()))?;
+    Ok(revng_output_json(binary, backend, cache_file, true, output))
+}
+
+fn empty_revng_output_message(action: RevngAction) -> String {
+    format!(
+        "rev.ng completed {} successfully but produced no stdout for this binary. This can happen for stripped or unsupported binaries; use revng.symbols or revng.strings for host-observable facts.",
+        action.cache_name()
+    )
 }
 
 fn revng_output_json(
@@ -418,18 +417,7 @@ async fn run_revng_container(
         .and_then(OsStr::to_str)
         .context("binary file name is not valid UTF-8")?;
     let volume = format!("{}:/input:ro", binary_dir.display());
-    let mut command = Command::new(runtime);
-    command
-        .arg("run")
-        .arg("--rm")
-        .arg("--pull=never")
-        .arg("-v")
-        .arg(volume)
-        .arg(image)
-        .args(action.container_args(binary_name))
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+    let mut command = revng_container_command(runtime, image, &volume, binary_name, action);
     let output = command
         .output()
         .await
@@ -442,6 +430,41 @@ async fn run_revng_container(
         );
     }
     Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+fn revng_container_command(
+    runtime: &str,
+    image: &str,
+    volume: &str,
+    binary_name: &str,
+    action: RevngAction,
+) -> Command {
+    let mut command = Command::new(runtime);
+    command
+        .arg("run")
+        .arg("--rm")
+        .arg("--pull=never")
+        .args(container_platform_args())
+        .arg("-v")
+        .arg(volume)
+        .arg(image)
+        .args(action.container_args(binary_name))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    command
+}
+
+fn container_platform_args() -> Vec<String> {
+    let platform = std::env::var("KUZUSHI_REVNG_CONTAINER_PLATFORM")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_REVNG_CONTAINER_PLATFORM.to_string());
+    if platform.eq_ignore_ascii_case("none") {
+        Vec::new()
+    } else {
+        vec!["--platform".to_string(), platform]
+    }
 }
 
 fn extract_revng_function_excerpt(output: &str, function: &str) -> String {
@@ -670,5 +693,34 @@ mod tests {
     async fn health_reports_missing_runtime_without_panicking() {
         let health = health_summary().await;
         assert!(!health.cache_path.is_empty());
+    }
+
+    #[test]
+    fn container_artifact_args_match_current_revng_cli() {
+        let args = RevngAction::Analyze.container_args("sample.elf");
+        assert_eq!(
+            args,
+            vec![
+                "revng",
+                "artifact",
+                "decompile-to-single-file",
+                "/input/sample.elf"
+            ]
+        );
+        assert!(!args.iter().any(|arg| arg == "--analyze"));
+    }
+
+    #[test]
+    fn native_artifact_args_match_current_revng_cli() {
+        let args = RevngAction::Cfg.native_args(Path::new("/tmp/sample.elf"));
+        assert_eq!(args, vec!["artifact", "render-svg-cfg", "/tmp/sample.elf"]);
+        assert!(!args.iter().any(|arg| arg == "--analyze"));
+    }
+
+    #[test]
+    fn empty_output_message_names_follow_up_tools() {
+        let message = empty_revng_output_message(RevngAction::ListFunctions);
+        assert!(message.contains("revng.symbols"));
+        assert!(message.contains("revng.strings"));
     }
 }

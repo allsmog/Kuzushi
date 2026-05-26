@@ -66,7 +66,7 @@ impl ShellApp {
 
     pub(crate) fn refresh_context_view(&mut self) -> Result<()> {
         let workspace = self.current_workspace()?;
-        let snapshot_path = workspace.root().join(".kuzushi/context-snapshot.json");
+        let snapshot_path = kuzushi_core::context_snapshot_path(workspace.root());
         self.context_view = load_context_snapshot_view(snapshot_path)?;
         Ok(())
     }

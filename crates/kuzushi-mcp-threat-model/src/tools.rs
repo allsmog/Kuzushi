@@ -27,7 +27,9 @@ fn get_descriptor() -> Tool {
 fn threats_descriptor() -> Tool {
     Tool {
         name: "threat_model:threats".to_string(),
-        description: "List threats with an optional severity filter (`critical`, `high`, `medium`, `low`).".to_string(),
+        description:
+            "List threats with an optional severity filter (`critical`, `high`, `medium`, `low`)."
+                .to_string(),
         input_schema: json!({
             "type": "object",
             "properties": {
@@ -40,7 +42,9 @@ fn threats_descriptor() -> Tool {
 fn elements_descriptor() -> Tool {
     Tool {
         name: "threat_model:elements".to_string(),
-        description: "List DFD elements (assets, trust boundaries, actors) recorded in the threat model.".to_string(),
+        description:
+            "List DFD elements (assets, trust boundaries, actors) recorded in the threat model."
+                .to_string(),
         input_schema: json!({"type": "object", "properties": {}}),
     }
 }

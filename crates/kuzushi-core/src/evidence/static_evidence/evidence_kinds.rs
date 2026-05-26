@@ -1,7 +1,5 @@
 use super::*;
 
-pub(crate) const STATIC_EVIDENCE_DB_NAME: &str = "static-evidence.sqlite3";
-
 pub const STATIC_EVIDENCE_NODE_KINDS: &[StaticEvidenceNodeKind] = &[
     StaticEvidenceNodeKind::CodeSpan,
     StaticEvidenceNodeKind::ScannerSignal,

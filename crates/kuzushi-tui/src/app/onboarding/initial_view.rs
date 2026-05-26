@@ -130,7 +130,10 @@ mod tests {
         let mut i = inputs();
         i.skip_onboarding_env = true;
         i.model = None;
-        assert_eq!(initial_onboarding_phase(&i), InitialOnboardingPhase::Catalog);
+        assert_eq!(
+            initial_onboarding_phase(&i),
+            InitialOnboardingPhase::Catalog
+        );
     }
 
     #[test]
@@ -162,7 +165,10 @@ mod tests {
         i.model = Some("local:llama");
         i.provider_has_multiple_auth_methods = false;
         i.provider_auth_ready = false;
-        assert_eq!(initial_onboarding_phase(&i), InitialOnboardingPhase::Catalog);
+        assert_eq!(
+            initial_onboarding_phase(&i),
+            InitialOnboardingPhase::Catalog
+        );
     }
 
     #[test]
@@ -183,7 +189,10 @@ mod tests {
         i.model = Some("anthropic:claude-sonnet-4-6");
         i.provider_auth_ready = true;
         i.any_planning_artifact_missing = false;
-        assert_eq!(initial_onboarding_phase(&i), InitialOnboardingPhase::Catalog);
+        assert_eq!(
+            initial_onboarding_phase(&i),
+            InitialOnboardingPhase::Catalog
+        );
     }
 
     #[test]

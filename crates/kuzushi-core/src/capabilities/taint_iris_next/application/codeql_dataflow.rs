@@ -146,8 +146,10 @@ fn first_standard_codeql_launcher() -> Option<PathBuf> {
 
 /// Standard locations kuzushi expects for an existing CodeQL DB.
 pub(crate) fn codeql_db_path(repo_root: &Path) -> Option<PathBuf> {
-    for relative in [".kuzushi/codeql-db", ".codeql/db"] {
-        let candidate = repo_root.join(relative);
+    for candidate in [
+        crate::workspace::workspace_codeql_db_path(repo_root),
+        crate::workspace::legacy_codeql_db_path(repo_root),
+    ] {
         if candidate.exists() && candidate.is_dir() {
             return Some(candidate);
         }
@@ -815,35 +817,10 @@ mod tests {
     fn run_codeql_flows_invokes_cli_and_parses_sarif() {
         let _guard = env_lock().lock().unwrap();
         let temp = tempdir().unwrap();
-        let db = temp.path().join(".kuzushi/codeql-db");
+        let db = crate::workspace::workspace_codeql_db_path(temp.path());
         std::fs::create_dir_all(db.join("db-cpp")).unwrap();
         std::fs::write(db.join("codeql-database.yml"), "primaryLanguage: cpp\n").unwrap();
-
-        let fake_codeql = temp.path().join("codeql");
-        std::fs::write(
-            &fake_codeql,
-            r#"#!/usr/bin/env bash
-set -euo pipefail
-out=""
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--output" ]; then
-    shift
-    out="$1"
-  fi
-  shift || true
-done
-cat > "$out" <<'JSON'
-{"runs":[{"tool":{"driver":{"rules":[]}},"results":[{"ruleId":"cpp/sql-injection","message":{"text":"sql injection"},"codeFlows":[{"threadFlows":[{"locations":[{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/api.c"},"region":{"startLine":3,"snippet":{"text":"input = arg;"}}}}},{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/db.c"},"region":{"startLine":9,"snippet":{"text":"query(input);"}}}}}]}]}]}]}]}
-JSON
-"#,
-        )
-        .unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&fake_codeql).unwrap().permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&fake_codeql, perms).unwrap();
-        }
+        let fake_codeql = write_fake_codeql_flow_script(temp.path());
 
         let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
         std::env::set_var("KUZUSHI_CODEQL_BIN", &fake_codeql);
@@ -861,6 +838,36 @@ JSON
         assert_eq!(flows[0].taint_class, "sql-injection");
         assert_eq!(flows[0].source_line, 3);
         assert_eq!(flows[0].sink_line, 9);
+    }
+
+    #[cfg(unix)]
+    fn write_fake_codeql_flow_script(root: &Path) -> PathBuf {
+        let fake_codeql = root.join("codeql");
+        std::fs::write(&fake_codeql, fake_codeql_flow_script()).unwrap();
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut perms = std::fs::metadata(&fake_codeql).unwrap().permissions();
+            perms.set_mode(0o755);
+            std::fs::set_permissions(&fake_codeql, perms).unwrap();
+        }
+        fake_codeql
+    }
+
+    fn fake_codeql_flow_script() -> &'static str {
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+out=""
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    shift
+    out="$1"
+  fi
+  shift || true
+done
+cat > "$out" <<'JSON'
+{"runs":[{"tool":{"driver":{"rules":[]}},"results":[{"ruleId":"cpp/sql-injection","message":{"text":"sql injection"},"codeFlows":[{"threadFlows":[{"locations":[{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/api.c"},"region":{"startLine":3,"snippet":{"text":"input = arg;"}}}}},{"location":{"physicalLocation":{"artifactLocation":{"uri":"src/db.c"},"region":{"startLine":9,"snippet":{"text":"query(input);"}}}}}]}]}]}]}]}
+JSON
+"#
     }
 
     #[test]

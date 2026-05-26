@@ -91,10 +91,7 @@ pub fn build_execution_plan(
                 .find(|row| row.id == *task)
                 .map(|row| {
                     row.cli_available
-                        && !matches!(
-                            row.artifact_state,
-                            super::task_row::ArtifactState::Cached
-                        )
+                        && !matches!(row.artifact_state, super::task_row::ArtifactState::Cached)
                 })
                 .unwrap_or(false)
         })
@@ -170,7 +167,12 @@ mod tests {
         let mut selected = BTreeSet::new();
         selected.insert(GatherRepoContext);
         let outcome = toggle_planning_row(GatherRepoContext, &rows, &mut selected);
-        assert_eq!(outcome, ToggleOutcome::Off { task: GatherRepoContext });
+        assert_eq!(
+            outcome,
+            ToggleOutcome::Off {
+                task: GatherRepoContext
+            }
+        );
         assert!(selected.is_empty());
     }
 
@@ -190,18 +192,16 @@ mod tests {
     #[test]
     fn cpg_with_missing_cli_is_blocked() {
         // CPG row without joern-parse on PATH cannot be toggled on.
-        let rows = vec![
-            PlanningTaskRow {
-                id: BuildCodePropertyGraph,
-                label: BuildCodePropertyGraph.label(),
-                tool_name: BuildCodePropertyGraph.tool_name(),
-                artifact_path: PathBuf::from("/dev/null"),
-                artifact_state: ArtifactState::Missing,
-                model_backed: false,
-                required_cli: Some("joern-parse"),
-                cli_available: false,
-            },
-        ];
+        let rows = vec![PlanningTaskRow {
+            id: BuildCodePropertyGraph,
+            label: BuildCodePropertyGraph.label(),
+            tool_name: BuildCodePropertyGraph.tool_name(),
+            artifact_path: PathBuf::from("/dev/null"),
+            artifact_state: ArtifactState::Missing,
+            model_backed: false,
+            required_cli: Some("joern-parse"),
+            cli_available: false,
+        }];
         let mut selected = BTreeSet::new();
         let outcome = toggle_planning_row(BuildCodePropertyGraph, &rows, &mut selected);
         assert_eq!(

@@ -5,6 +5,7 @@ use crate::ShellApp;
 pub(crate) struct ConfigModel {
     pub(crate) backend: String,
     pub(crate) model: String,
+    pub(crate) reasoning: String,
     pub(crate) reasoning_override: Option<String>,
     pub(crate) summary_title: &'static str,
     pub(crate) summary_rows: Vec<ConfigSummaryRow>,
@@ -53,11 +54,12 @@ pub(crate) fn config_model(app: &ShellApp) -> ConfigModel {
     let backend = crate::app::runtime_backend_label(&app.config).to_string();
     let model = active_model_label(app);
     let reasoning_override = app.session_thinking_level.clone();
-    let reasoning = reasoning_override.as_deref().unwrap_or("default");
+    let reasoning = active_reasoning_label(app);
     let summary_rows = config_summary_rows(app, &backend, &model, reasoning);
     ConfigModel {
         backend,
         model,
+        reasoning: reasoning.to_string(),
         reasoning_override,
         summary_title: "CONFIG",
         summary_rows,
@@ -186,6 +188,17 @@ fn active_model_label(app: &ShellApp) -> String {
         .unwrap_or_else(|| "unconfigured".to_string())
 }
 
+fn active_reasoning_label(app: &ShellApp) -> &str {
+    app.session_thinking_level
+        .as_deref()
+        .or_else(|| {
+            crate::app::model_choices()
+                .get(app.selected_model_index)
+                .map(|choice| choice.thinking_level)
+        })
+        .unwrap_or("default")
+}
+
 fn base_url_detail(app: &ShellApp) -> String {
     app.config
         .runtime
@@ -214,19 +227,33 @@ fn onboarding_detail(app: &ShellApp) -> Option<String> {
 }
 
 fn config_model_rows(app: &ShellApp) -> Vec<ConfigModelRow> {
-    crate::app::model_choices()
-        .iter()
-        .enumerate()
-        .map(|(index, choice)| ConfigModelRow {
-            cells: [
-                selected_marker(index == app.selected_model_index).to_string(),
-                choice.index.to_string(),
-                crate::app::model_choice_display_selector(choice),
-                choice.thinking_level.to_string(),
-                model_auth_status(choice),
-            ],
+    let visible_indexes = crate::app::visible_model_choice_indexes(app.config.model.as_deref());
+    let selected_index = visible_selected_model_index(&visible_indexes, app.selected_model_index);
+    visible_indexes
+        .into_iter()
+        .filter_map(|index| {
+            let choice = crate::app::model_choices().get(index)?;
+            Some(ConfigModelRow {
+                cells: [
+                    selected_marker(index == selected_index).to_string(),
+                    choice.index.to_string(),
+                    crate::app::model_choice_display_selector(choice),
+                    choice.thinking_level.to_string(),
+                    model_auth_status(choice),
+                ],
+            })
         })
         .collect()
+}
+
+fn visible_selected_model_index(visible_indexes: &[usize], selected_model_index: usize) -> usize {
+    if visible_indexes.contains(&selected_model_index) {
+        return selected_model_index;
+    }
+    visible_indexes
+        .first()
+        .copied()
+        .unwrap_or(selected_model_index)
 }
 
 fn selected_marker(selected: bool) -> &'static str {

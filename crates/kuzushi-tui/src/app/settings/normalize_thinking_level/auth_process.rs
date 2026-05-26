@@ -55,7 +55,7 @@ pub(in crate::app) fn auth_login_status_message(
                 "{display_provider} OAuth{method_suffix} stored at {}. Next: {}",
                 oauth_credentials_path()
                     .map(|path| path.display().to_string())
-                    .unwrap_or_else(|| "~/.kuzushi/oauth-credentials.json".to_string()),
+                    .unwrap_or_else(default_oauth_credentials_path_display),
                 auth_login_next_step(provider),
             ),
         ),
@@ -79,7 +79,10 @@ pub(in crate::app) fn auth_provider_display_name(provider: &str) -> &str {
 }
 
 pub(in crate::app) fn auth_login_process_provider_arg(provider: &str) -> &str {
-    provider
+    match provider {
+        "openai-codex" => "openai",
+        _ => provider,
+    }
 }
 
 pub(crate) fn normalize_auth_provider(provider: &str) -> std::result::Result<&'static str, String> {
@@ -115,6 +118,9 @@ fn auth_login_next_step(provider: &str) -> String {
     crate::app::model_choices()
         .iter()
         .find(|choice| choice.provider == provider)
-        .map(|choice| format!("model {} ({})", choice.index, choice.id))
+        .map(|choice| {
+            let selector = crate::app::display_model_selector(choice.id);
+            format!("model {} ({selector})", choice.index)
+        })
         .unwrap_or_else(|| "auth status".to_string())
 }

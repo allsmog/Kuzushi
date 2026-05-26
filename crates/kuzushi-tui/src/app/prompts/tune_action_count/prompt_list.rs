@@ -5,7 +5,7 @@ impl ShellApp {
         let Some((module, target)) = self.prompt_list_scope() else {
             return;
         };
-        let dir = target.join(".kuzushi").join("prompts").join(&module);
+        let dir = kuzushi_core::module_prompt_root(target, &module);
         if !dir.exists() {
             self.log_missing_prompt_override_dir(&dir);
             return;

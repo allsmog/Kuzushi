@@ -42,7 +42,9 @@ pub(crate) struct PromptRow {
 pub(crate) fn tune_model(app: &ShellApp, house_rule_limit: usize) -> TuneModel {
     let module = focused_module(app);
     TuneModel {
-        house_rules_path: format!(".kuzushi/house-rules/{module}.md"),
+        house_rules_path: kuzushi_core::relative_house_rule_path(&module)
+            .display()
+            .to_string(),
         actions: tune_action_rows(app),
         house_rules: house_rules(app, house_rule_limit),
         module,
@@ -61,7 +63,9 @@ pub(crate) fn prompts_model(app: &ShellApp) -> PromptsModel {
         .map(|(index, verb)| PromptRow {
             verb,
             source: "none",
-            path: format!(".kuzushi/prompts/{module}/{verb}.md"),
+            path: kuzushi_core::relative_prompt_override_path(&module, verb)
+                .display()
+                .to_string(),
             selected: index == cursor,
         })
         .collect();

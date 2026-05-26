@@ -13,7 +13,7 @@ fn config_model_summarizes_default_runtime_state() {
         cells: ["model".to_string(), "unconfigured".to_string()],
     }));
     assert!(model.summary_rows.contains(&ConfigSummaryRow {
-        cells: ["reasoning".to_string(), "default".to_string()],
+        cells: ["reasoning".to_string(), "xhigh".to_string()],
     }));
     assert!(model
         .summary_rows
@@ -31,10 +31,7 @@ fn config_model_summarizes_default_runtime_state() {
         .iter()
         .flat_map(|row| row.cells.iter())
         .any(|cell| cell.contains("openai-codex") || cell.contains("codex")));
-    assert_eq!(
-        model.model_table.rows[app.selected_model_index].cells[0],
-        ">"
-    );
+    assert!(model.model_table.rows.iter().any(|row| row.cells[0] == ">"));
     assert_eq!(
         model.commands,
         [

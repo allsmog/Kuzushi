@@ -14,7 +14,10 @@ impl ShellApp {
             findings_count,
             &crate::ui_view_models::ci_result_findings_summary(&self.findings, findings_count),
         );
-        self.set_completed_activity("sast:scan", format!("{findings_count} finding(s)"));
+        self.set_completed_activity(
+            "sast:scan",
+            format!("{findings_count} {}", scan_finding_label(findings_count)),
+        );
     }
 
     fn mark_scan_panel_completed(&mut self, run_id: &str, findings_count: usize) {
@@ -57,7 +60,10 @@ impl ShellApp {
             run_id,
             1_000,
             "tool",
-            &format!("completed · {findings_count} finding(s)"),
+            &format!(
+                "completed · {findings_count} {}",
+                scan_finding_label(findings_count)
+            ),
             None,
             None,
         );
@@ -73,7 +79,10 @@ impl ShellApp {
             run_id,
             "sast:scan",
             "completed",
-            format!("sast:scan completed with {findings_count} finding(s)"),
+            format!(
+                "sast:scan completed with {findings_count} {}",
+                scan_finding_label(findings_count)
+            ),
         );
     }
 
@@ -81,9 +90,10 @@ impl ShellApp {
         self.log(
             "scan",
             format!(
-                "completed {} with {} finding(s)",
+                "completed {} with {} {}",
                 short_fingerprint(run_id),
-                findings_count
+                findings_count,
+                scan_finding_label(findings_count),
             ),
         );
     }
@@ -102,5 +112,13 @@ fn mark_active_scan_task_done(row: &mut crate::app::DagTaskRow, now: std::time::
     if matches!(row.state, crate::app::DagTaskState::Active) {
         row.state = crate::app::DagTaskState::Done;
         row.completed_at = Some(now);
+    }
+}
+
+fn scan_finding_label(count: usize) -> &'static str {
+    if count == 1 {
+        "finding"
+    } else {
+        "findings"
     }
 }

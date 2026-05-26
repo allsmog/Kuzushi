@@ -41,7 +41,7 @@ pub(crate) fn activity_plain_pane_header_model(
     let chrome = activity_pane_chrome_model(session);
     ActivityPlainPaneHeaderModel {
         dag: plain_header_cell(&chrome.dag, dag_width),
-        separator: "│",
+        separator: " │ ",
         feed: plain_header_cell(&chrome.feed, feed_width),
     }
 }
@@ -119,7 +119,7 @@ mod tests {
                     text: " ── DAG   ".to_string(),
                     focused: true,
                 },
-                separator: "│",
+                separator: " │ ",
                 feed: ActivityPlainPaneHeaderCell {
                     text: " ── FEED    ".to_string(),
                     focused: false,
@@ -135,7 +135,7 @@ mod tests {
                     text: " ── DA".to_string(),
                     focused: false,
                 },
-                separator: "│",
+                separator: " │ ",
                 feed: ActivityPlainPaneHeaderCell {
                     text: " ── FE".to_string(),
                     focused: true,

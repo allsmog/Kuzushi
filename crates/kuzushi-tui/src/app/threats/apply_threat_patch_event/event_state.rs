@@ -7,7 +7,7 @@ impl ShellApp {
             self.threat_abort_requested = false;
             self.log(
                 "threats",
-                "pi-agent-core response arrived after abort request; discarded",
+                "LangGraph response arrived after abort request; discarded",
             );
             self.set_paused_activity("threat model", "response discarded after abort request");
             return;

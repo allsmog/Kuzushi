@@ -41,7 +41,7 @@ impl ShellApp {
         self.log(
             "model",
             format!(
-                "module {module_id} uses {}{} via pi-agent-core (session only)",
+                "module {module_id} uses {}{} via LangGraph (session only)",
                 model,
                 thinking_level
                     .as_deref()
@@ -62,7 +62,7 @@ impl ShellApp {
         self.log(
             "model",
             format!(
-                "{model}{} via pi-agent-core (session only; no fallback model will be selected)",
+                "{model}{} via LangGraph (session only; no fallback model will be selected)",
                 thinking_level
                     .as_deref()
                     .map(|level| format!(" / {level}"))

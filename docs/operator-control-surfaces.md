@@ -82,7 +82,7 @@ model = "openai:gpt-4.1"
 
 [runtime]
 thinking_level = "high"
-# agent_bridge_command = ["node", "scripts/pi-agent-core-bridge.mjs"]
+# langgraph_bridge_command = ["node", "scripts/langgraph-bridge.mjs"]
 
 [operator]
 session_budget_usd = 2.50
@@ -103,7 +103,7 @@ Ordinary product behavior should not depend on new env vars. Prefer:
 - config for runtime/provider defaults, model, bridge command, thinking level,
   budgets, and approval policy.
 
-Compatibility env vars such as `KUZUSHI_MODEL`, `KUZUSHI_AGENT_BRIDGE`, and
+Compatibility env vars such as `KUZUSHI_MODEL`, `KUZUSHI_LANGGRAPH_BRIDGE`, and
 legacy plugin root variables may still be read at config or adapter boundaries,
 but modules and domain code should receive resolved values instead of reading
 the process environment directly.

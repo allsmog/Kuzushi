@@ -64,7 +64,7 @@ fn push_auth_provider_section(lines: &mut Vec<Line<'static>>, app: &ShellApp, ar
     let providers = auth_provider_rows(app);
     let (backend_rows, provider_rows): (Vec<_>, Vec<_>) = providers
         .iter()
-        .partition(|row| row.cells[0] == "pi-agent-core");
+        .partition(|row| row.cells[0] == "LangGraph");
     if !backend_rows.is_empty() {
         lines.push(divider("BACKEND", area.width));
         for row in &backend_rows {
@@ -82,13 +82,11 @@ fn push_auth_provider_section(lines: &mut Vec<Line<'static>>, app: &ShellApp, ar
 fn push_auth_model_section(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area: Rect) {
     lines.push(divider("MODEL · effective", area.width));
     lines.push(auth_current_model_line(&model.model, &model.backend));
-    if let Some(reasoning) = model.reasoning_override.as_deref() {
-        lines.push(Line::from(vec![
-            Span::raw(" "),
-            Span::styled("reasoning ", theme::muted()),
-            Span::styled(reasoning.to_string(), theme::primary()),
-        ]));
-    }
+    lines.push(Line::from(vec![
+        Span::raw(" "),
+        Span::styled("reasoning ", theme::muted()),
+        Span::styled(model.reasoning.clone(), theme::primary()),
+    ]));
     lines.push(blank());
 }
 

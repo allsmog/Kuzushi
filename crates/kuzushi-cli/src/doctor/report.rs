@@ -105,7 +105,7 @@ fn record_config_checks(config: Option<&kuzushi_core::V2Config>, checks: &mut Ve
             "Fix `kuzushi config show` errors, then rerun `kuzushi doctor`.",
         ));
         checks.push(DoctorCheck::fail(
-            "pi-agent-core bridge",
+            "LangGraph bridge",
             "config did not load; bridge command was not checked",
             "Fix `kuzushi config show` errors, then rerun `kuzushi doctor`.",
         ));

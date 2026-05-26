@@ -43,7 +43,7 @@ pub(crate) fn auth_method_rows(provider: &str) -> Vec<AuthMethodRow> {
                 hint: "set OPENAI_API_KEY in your shell, then Enter",
             },
             AuthMethodRow {
-                label: "Codex OAuth login",
+                label: "OpenAI OAuth login",
                 hint: "opens a browser flow (or headless link in non-TTY)",
             },
         ],
@@ -57,14 +57,17 @@ pub(crate) struct AuthMethodRow {
     pub hint: &'static str,
 }
 
-fn auth_row_line(
-    app: &ShellApp,
-    idx: usize,
-    row: &AuthMethodRow,
-    width: u16,
-) -> Line<'static> {
-    let marker = if idx == app.auth_picker_cursor { ">" } else { " " };
-    let body = format!("  {marker} {label}   ·   {hint}", label = row.label, hint = row.hint);
+fn auth_row_line(app: &ShellApp, idx: usize, row: &AuthMethodRow, width: u16) -> Line<'static> {
+    let marker = if idx == app.auth_picker_cursor {
+        ">"
+    } else {
+        " "
+    };
+    let body = format!(
+        "  {marker} {label}   ·   {hint}",
+        label = row.label,
+        hint = row.hint
+    );
     let style = if idx == app.auth_picker_cursor {
         theme::success().add_modifier(Modifier::BOLD)
     } else {

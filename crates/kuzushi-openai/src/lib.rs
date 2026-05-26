@@ -3,8 +3,8 @@
 pub mod anthropic_oauth;
 pub mod auth;
 pub mod bridge;
+pub mod langgraph_runtime;
 pub mod oauth;
-pub mod pi_agent_core;
 pub mod runtime;
 
 mod messages;
@@ -12,5 +12,5 @@ mod messages;
 mod tests;
 
 pub use anthropic_oauth::{AnthropicOAuthRuntime, AnthropicOAuthRuntimeOptions};
+pub use langgraph_runtime::{default_langgraph_bridge_command, LangGraphRuntime};
 pub use oauth::{probe as probe_anthropic_oauth, OauthReadiness};
-pub use pi_agent_core::{default_bridge_command, PiAgentCoreRuntime};

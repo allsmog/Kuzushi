@@ -56,7 +56,7 @@ pub fn is_supported_attachment_module(module_id: &str) -> bool {
 }
 
 pub fn attachment_store_path(workspace: &WorkspaceTarget) -> PathBuf {
-    workspace.state_dir().join("attachments.json")
+    crate::workspace::workspace_attachments_path(workspace.root())
 }
 
 pub fn list_attachments(workspace: &WorkspaceTarget) -> Result<Vec<AttachmentRecord>> {

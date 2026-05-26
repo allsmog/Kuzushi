@@ -1,7 +1,10 @@
 use crate::command::RunsCommand;
 use crate::presentation::{runs_list_output, runs_show_output, runs_trace_output};
 use anyhow::{bail, Context, Result};
-use kuzushi_core::{list_run_summaries, load_run_summary, RunSummary, WorkspaceTarget};
+use kuzushi_core::run_artifacts::canonical_run_artifact_spec;
+use kuzushi_core::{
+    list_run_summaries, load_run_summary, run_artifact_path, runs_root, RunSummary, WorkspaceTarget,
+};
 use std::fs;
 use std::path::PathBuf;
 
@@ -82,7 +85,7 @@ pub(crate) fn runs_show_command(target: Option<PathBuf>, run_id: &str, json: boo
     let summary = load_run_summary(workspace.root(), run_id).with_context(|| {
         format!(
             "no run summary found for {run_id:?} under {}",
-            workspace.root().join(".kuzushi/runs").display()
+            runs_root(workspace.root()).display()
         )
     })?;
     print!("{}", runs_show_output(&summary, json)?);
@@ -99,10 +102,11 @@ pub(crate) fn runs_trace_command(target: Option<PathBuf>, run_id: &str, json: bo
 }
 
 pub(crate) fn run_trace_path(workspace: &WorkspaceTarget, run_id: &str) -> PathBuf {
-    workspace
-        .root()
-        .join(".kuzushi")
-        .join("runs")
-        .join(run_id)
-        .join("trace.jsonl")
+    run_artifact_path(workspace.root(), run_id, run_trace_artifact_leaf())
+}
+
+fn run_trace_artifact_leaf() -> &'static str {
+    canonical_run_artifact_spec("trace.jsonl")
+        .expect("trace artifact must be in shared canonical spec")
+        .leaf
 }

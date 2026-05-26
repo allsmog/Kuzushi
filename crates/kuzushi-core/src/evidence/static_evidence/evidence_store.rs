@@ -55,7 +55,7 @@ impl StaticEvidenceEdge {
 }
 
 pub fn static_evidence_path(workspace: &WorkspaceTarget) -> PathBuf {
-    workspace.state_dir().join(STATIC_EVIDENCE_DB_NAME)
+    crate::workspace::workspace_static_evidence_db_path(workspace.root())
 }
 
 pub struct StaticEvidenceStore {

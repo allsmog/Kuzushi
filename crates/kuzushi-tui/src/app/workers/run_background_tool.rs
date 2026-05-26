@@ -41,12 +41,12 @@ fn background_agent_runtime(
     tool_name: &str,
     input: &serde_json::Value,
     thinking_level: Option<String>,
-) -> Result<Option<PiAgentCoreRuntime>> {
+) -> Result<Option<LangGraphRuntime>> {
     if !tool_needs_runtime(tool_name, input) {
         return Ok(None);
     }
     Ok(Some(
-        PiAgentCoreRuntime::from_config(config, background_current_dir())?
+        LangGraphRuntime::from_config(config, background_current_dir())?
             .with_thinking_level(thinking_level),
     ))
 }

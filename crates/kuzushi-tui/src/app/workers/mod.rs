@@ -9,7 +9,7 @@ use kuzushi_core::{
     tool_needs_runtime, tool_uses_agent_runtime, AgentQueryRequest, AgentRuntime, FindingStore,
     ModuleRegistry, ScanCancellation, TraceHandle, V2Config, WorkspaceTarget,
 };
-use kuzushi_openai::PiAgentCoreRuntime;
+use kuzushi_openai::LangGraphRuntime;
 pub(crate) use parse_plan_json::*;
 pub(crate) use parse_threat_patch_json::*;
 pub(crate) use run_background_tool::*;
