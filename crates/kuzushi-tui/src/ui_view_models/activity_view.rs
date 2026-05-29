@@ -22,23 +22,38 @@ pub(crate) enum ActivityViewModel<'a> {
 
 pub(crate) struct ActiveActivityViewModel<'a> {
     session: &'a ActivitySession,
+    context_line: String,
 }
 
 pub(crate) fn activity_view_model(app: &ShellApp) -> ActivityViewModel<'_> {
-    app.activity
-        .as_ref()
-        .map(ActiveActivityViewModel::new)
-        .map(ActivityViewModel::Active)
-        .unwrap_or_else(|| ActivityViewModel::Inactive(activity_empty_state_model()))
+    match app.activity.as_ref() {
+        Some(session) => ActivityViewModel::Active(ActiveActivityViewModel {
+            session,
+            context_line: activity_context_line(app),
+        }),
+        None => ActivityViewModel::Inactive(activity_empty_state_model()),
+    }
+}
+
+/// Workspace context for the Activity header (target · ctx · model · findings).
+/// Drops the `mode:`/`view:` segments — redundant inside the Activity view —
+/// so the operator sees model + findings here instead of in a bottom strip.
+fn activity_context_line(app: &ShellApp) -> String {
+    super::context_strip_model(app)
+        .compact_segments()
+        .into_iter()
+        .filter(|segment| !segment.starts_with("mode:") && !segment.starts_with("view:"))
+        .collect::<Vec<_>>()
+        .join("  ·  ")
 }
 
 impl<'a> ActiveActivityViewModel<'a> {
-    fn new(session: &'a ActivitySession) -> Self {
-        Self { session }
-    }
-
     pub(crate) fn header(&self) -> ActivityHeaderModel {
         activity_header_model(self.session)
+    }
+
+    pub(crate) fn context_line(&self) -> &str {
+        &self.context_line
     }
 
     pub(crate) fn frame_layout(&self) -> ActivityFrameLayout {
@@ -130,7 +145,7 @@ mod tests {
             model.header().summary_title,
             "ACTIVITY  run r-activity  ·  0/1 done  ·  0 running"
         );
-        assert_eq!(model.pane_chrome().dag.block_title, "── DAG ──");
+        assert_eq!(model.pane_chrome().dag.block_title, "── TASKS ──");
         assert!(!model.plain_pane_rows(widths, Instant::now()).is_empty());
         assert!(model.footer(80).body.contains("hover [j/k]"));
     }

@@ -26,6 +26,11 @@ pub(crate) fn render_constraints(
 }
 
 pub(crate) fn transcript_height(app: &ShellApp, area: Rect) -> u16 {
+    // The Activity view is a focused full-frame dashboard: its feed pane is the
+    // live output, so the general transcript below it is just noise — drop it.
+    if matches!(app.shell_view, ShellView::Activity) {
+        return 0;
+    }
     transcript_chrome_height(app, area.height)
 }
 
@@ -42,7 +47,12 @@ pub(crate) fn keybind_footer_height(app: &ShellApp, area: Rect) -> u16 {
     }
 }
 
-pub(crate) fn status_footer_height(area: Rect) -> u16 {
+pub(crate) fn status_footer_height(app: &ShellApp, area: Rect) -> u16 {
+    // The Activity view carries target/model/findings in its own header now,
+    // so the bottom status strip would just duplicate it — drop it there.
+    if matches!(app.shell_view, ShellView::Activity) {
+        return 0;
+    }
     if area.height >= 6 {
         1
     } else {

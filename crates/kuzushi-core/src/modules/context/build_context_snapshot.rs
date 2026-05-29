@@ -10,8 +10,14 @@ pub(in crate::modules) fn build_context_snapshot(
     let options = context_build_options(&input)?;
 
     emit_context_build_start(ctx, workspace.root());
+    emit_context_build_step(ctx, "scanning repository files".to_string());
     let file_sample = collect_context_file_sample(workspace.root(), options.sample_limit)?;
+    emit_context_build_step(
+        ctx,
+        format!("indexed {} files · building snapshot", file_sample.files_indexed),
+    );
     let snapshot = context_snapshot_value(workspace.root(), &options, &file_sample)?;
+    emit_context_build_step(ctx, "writing snapshot".to_string());
     let snapshot_path = save_context_snapshot(workspace.root(), &snapshot)?;
     emit_context_build_done(ctx, file_sample.files_indexed);
     let state_dir = workspace.state_dir();
@@ -187,6 +193,15 @@ fn emit_context_build_start(ctx: &ToolExecutionContext<'_>, root: &Path) {
                 format!("context:build start · target={}", root.display()),
             )
             .emit();
+    }
+}
+
+/// Emit an in-progress sub-step so the Activity view shows what context:build
+/// is doing during its otherwise-silent (multi-second) file scan, and so the
+/// task row reflects the current phase instead of just spinning.
+fn emit_context_build_step(ctx: &ToolExecutionContext<'_>, label: String) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace.step("tool-progress", "build", label).emit();
     }
 }
 
