@@ -21,7 +21,11 @@ pub struct OnboardingInputs<'a> {
     pub model: Option<&'a str>,
     pub provider_auth_ready: bool,
     pub provider_has_multiple_auth_methods: bool,
-    pub any_planning_artifact_missing: bool,
+    /// Whether the shell was launched against a real workspace target. The
+    /// phase walker opens at 組 KUMI-KATA · map whenever there is a target to
+    /// act on — it offers reuse-or-rebuild for any cached artifacts rather than
+    /// only appearing when something is missing.
+    pub has_target: bool,
     pub skip_onboarding_env: bool,
 }
 
@@ -32,26 +36,41 @@ impl<'a> OnboardingInputs<'a> {
 }
 
 pub fn initial_onboarding_phase(inputs: &OnboardingInputs<'_>) -> InitialOnboardingPhase {
+    if let Some(phase) = pre_auth_phase(inputs) {
+        return phase;
+    }
+    if let Some(phase) = auth_phase(inputs) {
+        return phase;
+    }
+    if inputs.has_target {
+        InitialOnboardingPhase::PlanningPicker
+    } else {
+        InitialOnboardingPhase::Catalog
+    }
+}
+
+/// Phases that precede auth: an explicit skip, or no model chosen yet.
+fn pre_auth_phase(inputs: &OnboardingInputs<'_>) -> Option<InitialOnboardingPhase> {
     if inputs.skip_onboarding_env {
-        return InitialOnboardingPhase::Catalog;
+        return Some(InitialOnboardingPhase::Catalog);
     }
     if inputs.model.is_none() {
-        return InitialOnboardingPhase::ModelPicker;
+        return Some(InitialOnboardingPhase::ModelPicker);
     }
+    None
+}
+
+/// Auth gating: pick an auth method when several exist and none is wired, or
+/// fall back to the catalog when the chosen provider has no credentials.
+fn auth_phase(inputs: &OnboardingInputs<'_>) -> Option<InitialOnboardingPhase> {
     if inputs.provider_has_multiple_auth_methods && !inputs.provider_auth_ready {
         let provider = inputs
             .provider()
             .map(str::to_string)
             .unwrap_or_else(|| "unknown".to_string());
-        return InitialOnboardingPhase::AuthMethodPicker { provider };
+        return Some(InitialOnboardingPhase::AuthMethodPicker { provider });
     }
-    if !inputs.provider_auth_ready {
-        return InitialOnboardingPhase::Catalog;
-    }
-    if inputs.any_planning_artifact_missing {
-        return InitialOnboardingPhase::PlanningPicker;
-    }
-    InitialOnboardingPhase::Catalog
+    (!inputs.provider_auth_ready).then_some(InitialOnboardingPhase::Catalog)
 }
 
 /// Convenience wrapper that builds `OnboardingInputs` from live config +
@@ -67,34 +86,10 @@ pub fn initial_onboarding_phase_for(
         model: config.model.as_deref(),
         provider_auth_ready: auth_ready,
         provider_has_multiple_auth_methods: has_multiple_auth_methods,
-        any_planning_artifact_missing: target
-            .map(|target| any_planning_artifact_missing(target))
-            .unwrap_or(false),
+        has_target: target.is_some(),
         skip_onboarding_env: skip_onboarding_env(),
     };
     initial_onboarding_phase(&inputs)
-}
-
-pub fn any_planning_artifact_missing(target: &Path) -> bool {
-    PlanningTaskId::ALL.iter().any(|task| {
-        let row = PlanningTaskRow::for_task(*task, target);
-        // Tasks that are forced off by default (PASTA) don't count toward
-        // "any missing" — otherwise the picker would open on every fresh
-        // start even when the operator never wants PASTA.
-        if matches!(task, PlanningTaskId::BuildPastaThreatModel) {
-            return false;
-        }
-        // CPG / CodeQL count only when the operator actually has the CLI
-        // installed, so we don't nag users without those toolchains.
-        if matches!(
-            task,
-            PlanningTaskId::BuildCodePropertyGraph | PlanningTaskId::BuildCodeQlDatabase
-        ) && !row.cli_available
-        {
-            return false;
-        }
-        !matches!(row.artifact_state, ArtifactState::Cached)
-    })
 }
 
 pub fn skip_onboarding_env() -> bool {
@@ -120,7 +115,7 @@ mod tests {
             model: None,
             provider_auth_ready: false,
             provider_has_multiple_auth_methods: false,
-            any_planning_artifact_missing: false,
+            has_target: false,
             skip_onboarding_env: false,
         }
     }
@@ -172,11 +167,11 @@ mod tests {
     }
 
     #[test]
-    fn auth_ready_and_missing_artifacts_opens_planning_picker() {
+    fn auth_ready_with_a_target_opens_the_phase_walker() {
         let mut i = inputs();
         i.model = Some("anthropic:claude-sonnet-4-6");
         i.provider_auth_ready = true;
-        i.any_planning_artifact_missing = true;
+        i.has_target = true;
         assert_eq!(
             initial_onboarding_phase(&i),
             InitialOnboardingPhase::PlanningPicker
@@ -184,11 +179,11 @@ mod tests {
     }
 
     #[test]
-    fn fully_configured_target_lands_on_catalog() {
+    fn auth_ready_without_a_target_lands_on_catalog() {
         let mut i = inputs();
         i.model = Some("anthropic:claude-sonnet-4-6");
         i.provider_auth_ready = true;
-        i.any_planning_artifact_missing = false;
+        i.has_target = false;
         assert_eq!(
             initial_onboarding_phase(&i),
             InitialOnboardingPhase::Catalog

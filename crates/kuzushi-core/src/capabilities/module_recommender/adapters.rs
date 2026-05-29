@@ -7,6 +7,7 @@ use super::*;
 pub(crate) fn execute_module_recommender_tool(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
     available_tools: Vec<String>,
 ) -> Result<Value> {
     let workspace = workspace_for_input(&input, ctx)?;
@@ -27,7 +28,10 @@ pub(crate) fn execute_module_recommender_tool(
             &findings,
         ),
     };
-    let report = build_recommendation_report(request);
+    // Rank with the session model when one is configured and a runtime is
+    // available; otherwise fall back to the deterministic rule catalog.
+    let ranking = ModelRanking::resolve(ctx, runtime, &input, workspace.root());
+    let report = build_recommendation_report_ranked(request, ranking);
     let summary = report.summary.clone();
     let output = recommendation_report_output(&report);
     let data = serde_json::to_value(report).context("Could not serialize module recommendations")?;

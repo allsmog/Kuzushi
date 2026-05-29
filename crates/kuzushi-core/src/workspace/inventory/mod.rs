@@ -23,10 +23,12 @@ mod inspect_source_frameworks;
 mod language_for_path;
 mod repository_inventory;
 mod route_item;
+mod target_kind;
 #[cfg(test)]
 mod tests;
 
 pub use build_repository_inventory::build_repository_inventory;
+pub use target_kind::{classify_target_kind, TargetKind};
 pub use repository_inventory::InventoryEntrypoint;
 pub use repository_inventory::InventoryFile;
 pub use repository_inventory::InventoryFramework;

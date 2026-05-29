@@ -1,5 +1,46 @@
 use super::*;
+use super::model_ranking::ModelRanking;
 use super::rule_catalog::recommendation_rules;
+
+/// Build the report, preferring session-model ranking when available and
+/// falling back to the deterministic rule catalog otherwise (clearly labeled).
+pub(crate) fn build_recommendation_report_ranked(
+    request: RecommenderRequest,
+    ranking: ModelRanking<'_>,
+) -> RecommendationReport {
+    match ranking.rank(&request) {
+        Some(recommendations) => model_report(request, recommendations, ranking.model_label()),
+        None => build_recommendation_report(request),
+    }
+}
+
+fn model_report(
+    request: RecommenderRequest,
+    recommendations: Vec<ModuleRecommendation>,
+    model_label: Option<&str>,
+) -> RecommendationReport {
+    let warnings = warnings_for(&request);
+    let summary = format!(
+        "Recommended {} module tool(s) for {} — ranked by {}.",
+        recommendations.len(),
+        request.target,
+        model_label.unwrap_or("the session model")
+    );
+    RecommendationReport {
+        ok: true,
+        summary,
+        target: request.target,
+        signals: request.signals,
+        capabilities: CapabilitySummary {
+            available_tool_count: request.available_tools.len(),
+            recommended_tool_count: recommendations.len(),
+            skipped_missing_tools: Vec::new(),
+        },
+        recommendations,
+        warnings,
+        errors: Vec::new(),
+    }
+}
 
 pub(crate) fn build_recommendation_report(request: RecommenderRequest) -> RecommendationReport {
     let candidates = recommendation_rules()

@@ -20,6 +20,9 @@ pub enum ArtifactState {
     Cached,
     Invalid,
     Missing,
+    /// The task is a re-runnable action (Hunt/Confirm/Fix scan, triage, patch)
+    /// rather than an artifact build — there is nothing to cache or reuse.
+    Action,
 }
 
 impl ArtifactState {
@@ -28,16 +31,25 @@ impl ArtifactState {
             ArtifactState::Cached => "cached",
             ArtifactState::Invalid => "invalid",
             ArtifactState::Missing => "missing",
+            ArtifactState::Action => "action",
         }
     }
 }
 
 impl PlanningTaskRow {
     pub fn for_task(task: PlanningTaskId, target: &Path) -> Self {
-        let artifact_path = target.join(task.artifact_relative_path());
-        let artifact_state = artifact_state(&artifact_path);
         let required_cli = task.required_cli();
         let cli_available = required_cli.map(cli_is_on_path).unwrap_or(true);
+        let (artifact_path, artifact_state) = match task.artifact_relative_path() {
+            Some(rel) => {
+                let path = target.join(rel);
+                let state = artifact_state(&path);
+                (path, state)
+            }
+            // Action tasks have no cached artifact; the path is a harmless
+            // placeholder under the workspace state dir.
+            None => (target.join(".kuzushi"), ArtifactState::Action),
+        };
         Self {
             id: task,
             label: task.label(),
@@ -51,9 +63,13 @@ impl PlanningTaskRow {
     }
 
     /// Whether this row should be pre-checked when the picker first opens.
-    /// A row is pre-checked when its artifact is missing or invalid AND
-    /// its required CLI binary (if any) is available.
+    /// An artifact-building row is pre-checked when its artifact is missing or
+    /// invalid AND its required CLI is available. Action rows are opt-in here
+    /// (the recommender supplies their preselection in the phase walker).
     pub fn pre_checked(&self) -> bool {
+        if matches!(self.artifact_state, ArtifactState::Action) {
+            return false;
+        }
         self.cli_available
             && !matches!(self.artifact_state, ArtifactState::Cached)
             && !forced_off_by_default(self.id)

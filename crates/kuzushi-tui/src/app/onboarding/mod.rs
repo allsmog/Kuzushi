@@ -8,19 +8,24 @@
 
 mod controls;
 mod dependencies;
+mod failure;
 mod initial_view;
+mod phase;
+mod recommend;
 mod runner;
 mod task_id;
 mod task_row;
 
 pub use controls::{build_execution_plan, toggle_planning_row, ToggleOutcome};
+pub use failure::{FailedPlanningTask, PendingRetry, RetryAdjustment};
+pub use recommend::{model_recommended_in_phase, recommended_tasks_for_phase};
 pub use dependencies::{
     direct_dependencies, direct_dependents, topological_order, transitive_dependencies,
 };
 pub use initial_view::{
-    any_planning_artifact_missing, initial_onboarding_phase, initial_onboarding_phase_for,
-    provider_has_multiple_auth_methods, skip_onboarding_env, InitialOnboardingPhase,
-    OnboardingInputs,
+    initial_onboarding_phase, initial_onboarding_phase_for, provider_has_multiple_auth_methods,
+    skip_onboarding_env, InitialOnboardingPhase, OnboardingInputs,
 };
+pub use phase::WorkflowPhase;
 pub use task_id::PlanningTaskId;
 pub use task_row::{artifact_state, cli_is_on_path, ArtifactState, PlanningTaskRow};

@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 69
 ---
- KUZUSHI mode:module · target:none · ctx:missing · model:unconfigured · 0 findings · view:sast
+ KUZUSHI mode:module · target:none · ctx:not built · model:unconfigured · 0 findings · view:sast
 
  ● /use sast
  · module now using sast · primary tool sast:scan

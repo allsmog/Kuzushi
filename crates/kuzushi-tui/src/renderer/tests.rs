@@ -8,7 +8,7 @@ use ratatui::Terminal;
 
 use crate::commands::{shell_command_specs, shell_help_examples, ShellCommandCategory};
 use crate::ui_view_models::{
-    catalog_model, context_snapshot_relative_path, prompt_text, threat_dfd_model_from_doc,
+    catalog_model, context_snapshot_relative_path, prompt_text,
     threat_model_relative_path, threat_scope_model_from_doc, threat_story_model_from_doc,
     threat_stride_rollup_from_doc, ui_latest_run_path, ui_run_artifact_relative_path, ui_run_dir,
     view_status_segment, ModuleRunStatusKind, RoutingMode, SeverityTone, ThreatStrideTone,
@@ -56,6 +56,30 @@ fn renders_ink_style_shell_without_box_dashboard() {
     assert!(!rendered.contains("command log"));
     assert!(!rendered.contains("┌"));
     assert!(!rendered.contains("v2"));
+}
+
+#[test]
+fn retry_gate_card_renders_failed_tasks_and_fix() {
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.advisory.pending_retry = Some(crate::app::PendingRetry {
+        tasks: vec![crate::app::FailedPlanningTask {
+            task: crate::app::PlanningTaskId::BuildCodePropertyGraph,
+            error: "java heap OOM".to_string(),
+            adjustment: Some(crate::app::RetryAdjustment::RaiseHeap { heap_mb: 12288 }),
+            blocked: vec![crate::app::PlanningTaskId::HuntTaint],
+        }],
+    });
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    // The retry section must paint its own card (correct handler index).
+    assert!(rendered.contains("RETRY"));
+    assert!(rendered.contains("cpg:build"));
+    assert!(rendered.contains("12288"));
+    assert!(rendered.contains("retry"));
 }
 
 #[test]
@@ -1124,51 +1148,6 @@ fn dfd_canonical_lines_render_design_diagram() {
     assert!(texts[3].contains("└────"));
 }
 
-#[test]
-fn threat_dfd_model_from_doc_returns_id_type_zone_triples() {
-    let doc = serde_json::json!({
-        "dfd": {
-            "nodes": [
-                {"id": "actor-user", "type": "external-entity", "name": "User",
-                 "description": "End user", "trustZone": "external"},
-                {"id": "web", "type": "process", "name": "Web app",
-                 "description": "Server", "trustZone": "internal"}
-            ]
-        }
-    });
-    let model = threat_dfd_model_from_doc(&doc).expect("expected non-empty nodes");
-    assert_eq!(model.header, "NODES FROM threat-model.json · 2");
-    assert_eq!(model.rows.len(), 2);
-    assert_eq!(model.rows[0].cells[0], "actor-user");
-    assert_eq!(model.rows[0].cells[1], "external-entity");
-    assert_eq!(model.rows[0].cells[2], "external");
-    assert_eq!(model.rows[1].cells[0], "web");
-    assert_eq!(model.rows[1].cells[2], "internal");
-}
-
-#[test]
-fn threat_dfd_model_from_doc_caps_visible_rows() {
-    let doc = serde_json::json!({
-        "dfd": {
-            "nodes": [
-                {"id": "n1"}, {"id": "n2"}, {"id": "n3"},
-                {"id": "n4"}, {"id": "n5"}, {"id": "n6"},
-                {"id": "n7"}, {"id": "n8"}, {"id": "n9"}
-            ]
-        }
-    });
-    let model = threat_dfd_model_from_doc(&doc).expect("expected non-empty nodes");
-    assert_eq!(model.header, "NODES FROM threat-model.json · 9");
-    assert_eq!(model.rows.len(), 8);
-    assert_eq!(model.rows[7].cells[0], "n8");
-}
-
-#[test]
-fn threat_dfd_model_from_doc_returns_none_when_missing() {
-    assert!(threat_dfd_model_from_doc(&serde_json::json!({})).is_none());
-    assert!(threat_dfd_model_from_doc(&serde_json::json!({"dfd": {}})).is_none());
-    assert!(threat_dfd_model_from_doc(&serde_json::json!({"dfd": {"nodes": []}})).is_none());
-}
 
 #[test]
 fn threats_dfd_view_renders_canonical_diagram_header() {

@@ -8,6 +8,7 @@ use std::collections::BTreeSet;
 pub fn direct_dependencies(task: PlanningTaskId) -> &'static [PlanningTaskId] {
     use PlanningTaskId::*;
     match task {
+        // 組 KUMI-KATA · map — everything starts from repo context.
         GatherRepoContext => &[],
         MapEntryPoints => &[GatherRepoContext],
         BuildXRay => &[GatherRepoContext],
@@ -16,6 +17,22 @@ pub fn direct_dependencies(task: PlanningTaskId) -> &'static [PlanningTaskId] {
         BuildCodePropertyGraph => &[GatherRepoContext],
         BuildCodeQlDatabase => &[GatherRepoContext],
         ThreatIntelCves => &[GatherRepoContext],
+        ReverseEngineerBinary => &[GatherRepoContext],
+        // 崩 KUZUSHI · hunt — some hunts need a Map-phase artifact first.
+        ScanSecrets => &[GatherRepoContext],
+        ScanSemgrep => &[GatherRepoContext],
+        ScanCodeql => &[BuildCodeQlDatabase],
+        ScanAgenticSast => &[GatherRepoContext],
+        HuntTaint => &[BuildCodePropertyGraph],
+        HuntThreatModel => &[BuildStrideThreatModel],
+        HuntSystems => &[GatherRepoContext],
+        HuntUseAfterFree => &[GatherRepoContext],
+        // 作 TSUKURI · confirm — triage then verify the findings.
+        TriageFindings => &[GatherRepoContext],
+        VerifyFindings => &[TriageFindings],
+        // 掛 KAKE · fix — patch verified findings, then report.
+        PatchFindings => &[VerifyFindings],
+        BuildReport => &[GatherRepoContext],
     }
 }
 
@@ -131,8 +148,27 @@ mod tests {
     }
 
     #[test]
-    fn dependents_of_context_is_every_other_task() {
+    fn context_is_a_direct_dependency_of_map_tasks() {
         let dependents = direct_dependents(GatherRepoContext);
-        assert_eq!(dependents.len(), PlanningTaskId::ALL.len() - 1);
+        assert!(dependents.contains(&BuildCodePropertyGraph));
+        assert!(dependents.contains(&MapEntryPoints));
+        // Tasks gated behind another artifact are NOT direct dependents of
+        // context — they hang off their own prerequisite.
+        assert!(!dependents.contains(&ScanCodeql));
+        assert!(!dependents.contains(&HuntTaint));
+    }
+
+    #[test]
+    fn taint_hunt_transitively_requires_cpg_and_context() {
+        let deps = transitive_dependencies(HuntTaint);
+        assert!(deps.contains(&BuildCodePropertyGraph));
+        assert!(deps.contains(&GatherRepoContext));
+    }
+
+    #[test]
+    fn verify_chains_back_through_triage_to_context() {
+        let deps = transitive_dependencies(VerifyFindings);
+        assert!(deps.contains(&TriageFindings));
+        assert!(deps.contains(&GatherRepoContext));
     }
 }

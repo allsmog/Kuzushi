@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 0
 ---
- KUZUSHI mode:shell · target:./runs · ctx:missing · model:unconfigured · 0 findings · view:run-timeline
+ KUZUSHI mode:shell · target:./runs · ctx:not built · model:unconfigured · 0 findings · view:run-timeline
 
  -- RUN TIMELINE -------------------------------------------------------------------------------------------------------
 runId           status          findings   target

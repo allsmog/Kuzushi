@@ -96,12 +96,14 @@ pub use approval::{ConfirmKind, PendingConfirm, PendingPatch};
 pub use live_activity::{LiveActivity, LiveActivityPhase};
 pub use log::LogLine;
 pub use onboarding::{
-    any_planning_artifact_missing, artifact_state as planning_artifact_state, build_execution_plan,
+    artifact_state as planning_artifact_state, build_execution_plan,
     cli_is_on_path, direct_dependencies, direct_dependents, initial_onboarding_phase,
     initial_onboarding_phase_for, provider_has_multiple_auth_methods, skip_onboarding_env,
-    toggle_planning_row, topological_order, transitive_dependencies,
-    ArtifactState as PlanningArtifactState, InitialOnboardingPhase, OnboardingInputs,
-    PlanningTaskId, PlanningTaskRow, ToggleOutcome,
+    model_recommended_in_phase, recommended_tasks_for_phase, toggle_planning_row,
+    topological_order, transitive_dependencies,
+    ArtifactState as PlanningArtifactState, FailedPlanningTask, InitialOnboardingPhase,
+    OnboardingInputs, PendingRetry, PlanningTaskId, PlanningTaskRow, RetryAdjustment,
+    ToggleOutcome, WorkflowPhase,
 };
 pub use prereq_chain::{
     PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqPlanAction, PrereqPlanStep,

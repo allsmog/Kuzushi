@@ -59,33 +59,104 @@ impl ShellApp {
         self.shell_view = ShellView::AuthMethodPicker(provider);
     }
 
+    /// Open the launch picker at the first phase (組 KUMI-KATA · map). The
+    /// session-model ranking is kicked off separately by the interactive launch
+    /// path (`request_model_recommendations`), so constructing an app in tests
+    /// never spawns a background tool here.
     pub(crate) fn open_planning_picker(&mut self) {
-        let target_root = self.target.clone().unwrap_or_else(|| {
-            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
-        });
-        let rows: Vec<PlanningTaskRow> = PlanningTaskId::ALL
-            .iter()
-            .map(|task| PlanningTaskRow::for_task(*task, &target_root))
+        self.open_phase_picker(crate::app::WorkflowPhase::Map);
+    }
+
+    /// Open the picker for one engagement phase: announce the phase, list only
+    /// its tasks, and pre-check the recommended (target-aware) set. Cached
+    /// Map artifacts stay unchecked — reused, not rebuilt, unless the operator
+    /// presses `g` to regenerate.
+    pub(crate) fn open_phase_picker(&mut self, phase: crate::app::WorkflowPhase) {
+        let target_root = self.phase_target_root();
+        let kind = self.ensure_target_kind(&target_root);
+        let rows: Vec<PlanningTaskRow> = PlanningTaskId::in_phase(phase)
+            .into_iter()
+            .map(|task| PlanningTaskRow::for_task(task, &target_root))
             .collect();
-        let mut selected: BTreeSet<PlanningTaskId> = rows
-            .iter()
-            .filter(|row| row.pre_checked())
-            .map(|row| row.id)
-            .collect();
-        // Always include transitive deps of pre-checked rows so the run
-        // plan stays valid.
-        let original: Vec<PlanningTaskId> = selected.iter().copied().collect();
-        for task in original {
-            selected.extend(transitive_dependencies(task));
-        }
+        let mut selected = phase_preselection(phase, kind, &rows);
+        self.merge_model_recommendations(phase, &rows, &mut selected);
+        self.drop_failed_dependents(&mut selected);
         self.planning_tasks = rows;
         self.planning_selected = selected;
+        self.planning_rebuild = BTreeSet::new();
         self.planning_cursor = 0;
+        self.workflow_phase = Some(phase);
         self.shell_view = ShellView::PlanningPicker;
         self.log(
-            "onboarding",
-            "select planning tasks with Space; Enter to run, Esc to skip",
+            "phase",
+            format!(
+                "{} ({} of {}) — {}",
+                phase.label(),
+                phase.position(),
+                crate::app::WorkflowPhase::ORDER.len(),
+                phase.intent()
+            ),
         );
+        self.log(
+            "phase",
+            "Space toggle · g rebuild cached · Enter run · Esc skip phase",
+        );
+    }
+
+    /// Fold this phase's session-model recommendations into the preselection
+    /// (additive — the model can suggest tasks the deterministic rules skipped),
+    /// pulling in their within-phase dependencies too.
+    fn merge_model_recommendations(
+        &self,
+        phase: crate::app::WorkflowPhase,
+        rows: &[PlanningTaskRow],
+        selected: &mut BTreeSet<PlanningTaskId>,
+    ) {
+        let Some(model_tasks) = self.model_recommended_tasks.as_ref() else {
+            return;
+        };
+        let phase_tasks: BTreeSet<PlanningTaskId> = rows.iter().map(|row| row.id).collect();
+        for task in crate::app::model_recommended_in_phase(model_tasks, rows, phase) {
+            selected.insert(task);
+            for dep in transitive_dependencies(task) {
+                if phase_tasks.contains(&dep) {
+                    selected.insert(dep);
+                }
+            }
+        }
+    }
+
+    /// Drop preselections blocked by an earlier-phase failure: a task that
+    /// itself failed, or whose prerequisite failed, shouldn't be auto-checked.
+    fn drop_failed_dependents(&self, selected: &mut BTreeSet<PlanningTaskId>) {
+        if self.planning_failed.is_empty() {
+            return;
+        }
+        let failed: BTreeSet<PlanningTaskId> =
+            self.planning_failed.iter().map(|item| item.task).collect();
+        selected.retain(|task| {
+            !failed.contains(task)
+                && !transitive_dependencies(*task)
+                    .iter()
+                    .any(|dep| failed.contains(dep))
+        });
+    }
+
+    fn phase_target_root(&self) -> std::path::PathBuf {
+        self.target.clone().unwrap_or_else(|| {
+            std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+        })
+    }
+
+    /// Classify the target once and cache it; reused across phase pickers.
+    fn ensure_target_kind(&mut self, target_root: &std::path::Path) -> kuzushi_core::TargetKind {
+        if let Some(kind) = self.target_kind {
+            return kind;
+        }
+        let kind = kuzushi_core::classify_target_kind(target_root);
+        self.target_kind = Some(kind);
+        self.log("phase", format!("target looks like: {}", kind.as_str()));
+        kind
     }
 
     fn compute_initial_onboarding_phase(&self) -> InitialOnboardingPhase {
@@ -113,6 +184,26 @@ impl ShellApp {
             has_multiple_auth,
         )
     }
+}
+
+/// Recommended preselection for a phase plus any within-phase dependencies, so
+/// the checked set is always runnable on its own. Cross-phase prerequisites are
+/// satisfied by earlier phases and excluded here.
+fn phase_preselection(
+    phase: crate::app::WorkflowPhase,
+    kind: kuzushi_core::TargetKind,
+    rows: &[PlanningTaskRow],
+) -> BTreeSet<PlanningTaskId> {
+    let mut selected = crate::app::recommended_tasks_for_phase(phase, kind, rows);
+    let phase_tasks: BTreeSet<PlanningTaskId> = rows.iter().map(|row| row.id).collect();
+    for task in selected.iter().copied().collect::<Vec<_>>() {
+        for dep in transitive_dependencies(task) {
+            if phase_tasks.contains(&dep) {
+                selected.insert(dep);
+            }
+        }
+    }
+    selected
 }
 
 /// Returns true if the operator has credentials wired for `provider` —

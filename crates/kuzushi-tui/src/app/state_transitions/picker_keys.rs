@@ -206,6 +206,10 @@ impl ShellApp {
                 self.clear_planning_selection();
                 true
             }
+            KeyCode::Char('g') | KeyCode::Char('G') => {
+                self.toggle_rebuild_current_row();
+                true
+            }
             KeyCode::Enter => {
                 self.accept_planning_picker();
                 true
@@ -215,6 +219,30 @@ impl ShellApp {
                 true
             }
             _ => false,
+        }
+    }
+
+    /// `g` on a cached Map artifact row toggles it between reuse (default) and
+    /// rebuild. Rebuild marks the row to re-run even though its artifact exists.
+    fn toggle_rebuild_current_row(&mut self) {
+        let Some(row) = self.planning_tasks.get(self.planning_cursor) else {
+            return;
+        };
+        let id = row.id;
+        if !matches!(row.artifact_state, crate::app::PlanningArtifactState::Cached) {
+            self.log(
+                "phase",
+                format!("{} has no cached artifact to rebuild", id.label()),
+            );
+            return;
+        }
+        if self.planning_rebuild.remove(&id) {
+            self.planning_selected.remove(&id);
+            self.log("phase", format!("[reuse] {} (cached)", id.label()));
+        } else {
+            self.planning_rebuild.insert(id);
+            self.planning_selected.insert(id);
+            self.log("phase", format!("[rebuild] {}", id.label()));
         }
     }
 
@@ -301,13 +329,14 @@ impl ShellApp {
     }
 
     fn accept_planning_picker(&mut self) {
-        let plan = build_execution_plan(&self.planning_tasks, &self.planning_selected);
+        let plan = build_execution_plan(
+            &self.planning_tasks,
+            &self.planning_selected,
+            &self.planning_rebuild,
+        );
         if plan.is_empty() {
-            self.log(
-                "planning",
-                "nothing to run (all selected rows are cached or no rows selected)",
-            );
-            self.shell_view = ShellView::Catalog;
+            self.log("phase", "nothing to run this phase — advancing");
+            self.advance_to_next_phase();
             return;
         }
         let labels = plan
@@ -333,10 +362,11 @@ impl ShellApp {
     }
 
     fn defer_planning_picker(&mut self) {
-        self.log(
-            "onboarding",
-            "planning skipped — run /onboarding anytime to revisit",
-        );
-        self.shell_view = ShellView::Catalog;
+        let phase = self
+            .workflow_phase
+            .map(|phase| phase.label())
+            .unwrap_or("planning");
+        self.log("phase", format!("skipped {phase}"));
+        self.advance_to_next_phase();
     }
 }

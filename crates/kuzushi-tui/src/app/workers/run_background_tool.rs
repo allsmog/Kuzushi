@@ -42,13 +42,24 @@ fn background_agent_runtime(
     input: &serde_json::Value,
     thinking_level: Option<String>,
 ) -> Result<Option<LangGraphRuntime>> {
-    if !tool_needs_runtime(tool_name, input) {
+    if !wants_background_runtime(config, tool_name, input) {
         return Ok(None);
     }
     Ok(Some(
         LangGraphRuntime::from_config(config, background_current_dir())?
             .with_thinking_level(thinking_level),
     ))
+}
+
+/// Whether to construct a runtime for a background tool. Required tools always
+/// get one; the recommender opts in *only* when a model is configured, so it
+/// can rank with the session model yet still run deterministically (no runtime)
+/// when no model is set.
+fn wants_background_runtime(config: &V2Config, tool_name: &str, input: &serde_json::Value) -> bool {
+    if tool_needs_runtime(tool_name, input) {
+        return true;
+    }
+    tool_name == "module-recommender:recommend" && config.model.is_some()
 }
 
 fn background_current_dir() -> PathBuf {

@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 162
 ---
- KUZUSHI mode:shell · target:none · ctx:missing · model:unconfigured · 0 findings · view:help
+ KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured · 0 findings · view:help
 
  -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
@@ -25,6 +25,8 @@ back - return to the previous view
   aliases / examples: /back, /b, b
 quickstart - first-run guided setup
   aliases / examples: /quickstart
+onboarding - open the planning-stage multi-select picker
+  aliases / examples: /onboarding, /setup, /planning, /plan-stage
 
 RUN / SCAN — dispatch tools and scans
 scan [target] - run configured scanners
@@ -123,7 +125,7 @@ auth - show env/OAuth status without secrets
   aliases / examples: /auth, auth status
 auth login <provider> [method] - start supported OAuth login flow
   aliases / examples: /auth login openai, /auth login anthropic, /auth login github-copilot
-provider - show langgraph provider choices
+provider - show LangGraph provider choices
   aliases / examples: /provider
 backend - show Rust runtime backend
   aliases / examples: /backend

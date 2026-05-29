@@ -27,6 +27,7 @@ mod catalog;
 mod chrome_layout;
 mod config;
 mod confirm_card;
+mod retry_card;
 mod context_snapshot;
 mod context_strip;
 mod cost;
@@ -60,7 +61,7 @@ mod sast_tasks;
 mod session_story;
 mod severity_tone;
 mod status_footer;
-mod threat_dfd;
+mod threat_dfd_diagram;
 mod threat_impact;
 mod threat_model;
 mod threat_navigation;
@@ -101,6 +102,7 @@ pub(crate) use config::{
     ConfigSummaryRow, PlainConfigModel, PlainConfigModelRow,
 };
 pub(crate) use confirm_card::{confirm_card_model, ConfirmCardModel};
+pub(crate) use retry_card::{retry_card_model, RetryCardModel, RetryCardRow};
 pub(crate) use context_snapshot::{
     context_snapshot_model, context_snapshot_relative_path, context_snapshot_state,
     plain_context_model, ContextSnapshotDetails, ContextSnapshotModel, PlainContextModel,
@@ -186,9 +188,9 @@ pub(crate) use session_story::{
 };
 pub(crate) use severity_tone::SeverityTone;
 pub(crate) use status_footer::status_footer_model;
-pub(crate) use threat_dfd::threat_dfd_model;
-#[cfg(test)]
-pub(crate) use threat_dfd::threat_dfd_model_from_doc;
+pub(crate) use threat_dfd_diagram::{
+    threat_dfd_diagram_feed_rows, threat_dfd_diagram_lines, DfdLineKind,
+};
 pub(crate) use threat_model::{
     threat_model_doc, threat_model_relative_path, threat_summary_review, ThreatSummaryReview,
 };
