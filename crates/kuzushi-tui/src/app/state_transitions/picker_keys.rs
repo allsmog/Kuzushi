@@ -357,7 +357,10 @@ impl ShellApp {
             self.planning_run_queue.clear();
             return;
         };
-        self.shell_view = ShellView::Catalog;
+        // A committed phase run always shows live progress — even when ad-hoc
+        // activity auto-open is disabled — so the operator can see what's
+        // running (and that the queue is waiting on ranking, if it stalls).
+        self.shell_view = ShellView::Activity;
         self.dispatch_next_planning_task(workspace);
     }
 

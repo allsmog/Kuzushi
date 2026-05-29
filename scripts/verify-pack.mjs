@@ -143,7 +143,6 @@ const expectedPackageMetadata = {
 const expectedPackageKeywords = ["sast", "security", "semgrep", "ai", "triage"];
 const expectedOnlyBuiltDependencies = ["better-sqlite3", "esbuild"];
 const expectedPackageDependencies = {
-  "@anthropic-ai/claude-agent-sdk": "^0.2.87",
   "@anthropic-ai/sdk": "^0.81.0",
   "@kuzushi/augur": "^0.1.0",
   "@kuzushi/randori-plugin": "github:allsmog/randori-plugin",
@@ -164,7 +163,6 @@ const expectedPackageDependencies = {
 };
 const expectedPnpmLockfileRootDependencyVersions = {
   dependencies: {
-    "@anthropic-ai/claude-agent-sdk": "0.2.87(@cfworker/json-schema@4.1.1)(zod@4.3.6)",
     "@anthropic-ai/sdk": "0.81.0(zod@4.3.6)",
     "@kuzushi/augur": "0.1.0",
     "@kuzushi/randori-plugin":
