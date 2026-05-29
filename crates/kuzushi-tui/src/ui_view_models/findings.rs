@@ -111,7 +111,7 @@ pub(crate) fn findings_model(app: &ShellApp) -> FindingsModel {
 pub(crate) fn selected_finding_detail_model(app: &ShellApp) -> Option<FindingDetailModel> {
     let finding = app.selected_finding.as_ref()?;
     let alias = stable_finding_alias(&app.findings, &finding.fingerprint);
-    Some(FindingDetailModel::from_finding(finding, alias))
+    Some(FindingDetailModel::from_finding(finding, alias, target_base(app).as_deref()))
 }
 
 fn finding_rows(app: &ShellApp) -> Vec<FindingListRow> {
@@ -119,13 +119,41 @@ fn finding_rows(app: &ShellApp) -> Vec<FindingListRow> {
         .selected_finding
         .as_ref()
         .map(|finding| finding.fingerprint.as_str());
+    let base = target_base(app);
     sorted_finding_aliases(&app.findings)
         .into_iter()
         .enumerate()
         .map(|(index, (alias, finding))| {
-            FindingListRow::from_finding(index, app.findings_cursor, selected, alias, &finding)
+            FindingListRow::from_finding(
+                index,
+                app.findings_cursor,
+                selected,
+                alias,
+                &finding,
+                base.as_deref(),
+            )
         })
         .collect()
+}
+
+/// The canonical absolute target path, used to relativize finding locations so
+/// the list shows `crates/foo.rs:12` instead of a full `/Users/...` path.
+fn target_base(app: &ShellApp) -> Option<String> {
+    let target = app.target.as_ref()?;
+    let canonical = target.canonicalize().unwrap_or_else(|_| target.clone());
+    Some(canonical.to_string_lossy().into_owned())
+}
+
+/// Strip the target prefix from a `path:line` location when present, leaving a
+/// repo-relative path; otherwise return it unchanged.
+fn relativize_location(location: String, base: Option<&str>) -> String {
+    let Some(base) = base else {
+        return location;
+    };
+    match location.strip_prefix(base) {
+        Some(rest) => rest.trim_start_matches('/').to_string(),
+        None => location,
+    }
 }
 
 fn empty_state(context_state: &'static str) -> FindingsEmptyState {
@@ -173,6 +201,7 @@ impl FindingListRow {
         selected: Option<&str>,
         alias: String,
         finding: &Finding,
+        base: Option<&str>,
     ) -> Self {
         let projection = project_finding(finding, Some(alias.clone()));
         Self {
@@ -180,7 +209,7 @@ impl FindingListRow {
             severity_tone: SeverityTone::from_severity(projection.severity),
             severity_label: projection.severity_label,
             title: projection.title,
-            location: projection.location,
+            location: relativize_location(projection.location, base),
             verdict: projection.verdict_label,
             confidence: projection.confidence_label,
             cwe: projection.cwe_label,
@@ -193,14 +222,14 @@ impl FindingListRow {
 }
 
 impl FindingDetailModel {
-    fn from_finding(finding: &Finding, alias: Option<String>) -> Self {
+    fn from_finding(finding: &Finding, alias: Option<String>, base: Option<&str>) -> Self {
         let projection = project_finding(finding, alias);
         Self {
             alias: projection.alias,
             severity_tone: SeverityTone::from_severity(projection.severity),
             severity_label: finding.severity.as_str().to_string(),
             title: projection.title,
-            location: projection.location,
+            location: relativize_location(projection.location, base),
             rule: projection.rule,
             tool: projection.tool,
             fingerprint: projection.fingerprint,

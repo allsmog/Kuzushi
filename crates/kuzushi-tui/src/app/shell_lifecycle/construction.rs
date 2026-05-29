@@ -39,6 +39,7 @@ macro_rules! shell_app_initial_state {
             registry: $registry,
             option_store: $option_store,
             command_history: Vec::new(),
+            history_search: None,
             session_cost_usd: 0.0,
             last_tool_cost_usd: None,
             selected_model_index: $selected_model_index,
@@ -70,6 +71,8 @@ macro_rules! shell_app_initial_state {
             pending_plan: None,
             plan_cursor: 0,
             plan_skipped: BTreeSet::new(),
+            palette_query: String::new(),
+            palette_cursor: 0,
             model_picker_cursor: 0,
             auth_picker_cursor: 0,
             planning_cursor: 0,
@@ -148,11 +151,45 @@ impl ShellApp {
             session_budget_usd,
             trusted_workflow_auto_accept
         );
+        app.announce_startup(selected_model_index, ready_default, option_store_error, target.is_some());
+        app
+    }
+
+    /// Post-construction setup: session model/thinking-level, the startup
+    /// banner logs, persisted history load, and the first-run onboarding phase.
+    fn announce_startup(
+        &mut self,
+        selected_model_index: usize,
+        ready_default: Option<usize>,
+        option_store_error: Option<String>,
+        has_target: bool,
+    ) {
+        self.apply_session_model(selected_model_index, ready_default);
+        self.log("system", "kuzushi shell");
+        self.log("startup", self.startup_summary_line());
+        if let Some(error) = option_store_error {
+            self.log("options", error);
+        }
+        // The first-finding hint is rendered in the catalog body via
+        // `next_action_line` + `first_finding_hint`; keeping a duplicate
+        // copy in the transcript wasted one of only two visible log rows.
+        self.log(
+            "help",
+            "type `scan` to begin · `help` for commands · `?<text>` to ask the agent",
+        );
+        if has_target {
+            self.refresh_findings(false);
+        }
+        self.load_persisted_history();
+        self.apply_initial_onboarding_phase();
+    }
+
+    fn apply_session_model(&mut self, selected_model_index: usize, ready_default: Option<usize>) {
         if let Some(choice) = model_choices().get(selected_model_index) {
-            app.session_thinking_level = Some(choice.thinking_level.to_string());
+            self.session_thinking_level = Some(choice.thinking_level.to_string());
         }
         if let Some(choice) = ready_default.and_then(|index| model_choices().get(index)) {
-            app.log(
+            self.log(
                 "model",
                 format!(
                     "{} / {} ready; using as session default",
@@ -161,23 +198,6 @@ impl ShellApp {
                 ),
             );
         }
-        app.log("system", "kuzushi shell");
-        app.log("startup", app.startup_summary_line());
-        if let Some(error) = option_store_error {
-            app.log("options", error);
-        }
-        // The first-finding hint is rendered in the catalog body via
-        // `next_action_line` + `first_finding_hint`; keeping a duplicate
-        // copy in the transcript wasted one of only two visible log rows.
-        app.log(
-            "help",
-            "type `scan` to begin · `help` for commands · `?<text>` to ask the agent",
-        );
-        if target.is_some() {
-            app.refresh_findings(false);
-        }
-        app.apply_initial_onboarding_phase();
-        app
     }
 }
 

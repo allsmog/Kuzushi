@@ -1,7 +1,7 @@
 use self::{
-    ActorDetailFilter, BudgetHalt, PromptsAction, ShellApp, ShellView, ThreatView,
-    ThrottleAdvisory, CTRL_C_ARM_WINDOW, FINDINGS_PAGE_ROWS, SPINNER_FRAME, THROTTLE_STALE_AFTER,
-    VIEWPORT_PAGE_LINES,
+    ActorDetailFilter, BudgetHalt, Notice, NoticeSeverity, PromptsAction, ShellApp, ShellView,
+    ThreatView, ThrottleAdvisory, CTRL_C_ARM_WINDOW, FINDINGS_PAGE_ROWS, NOTICE_STALE_AFTER,
+    SPINNER_FRAME, THROTTLE_STALE_AFTER, VIEWPORT_PAGE_LINES,
 };
 pub(in crate::app) use super::*;
 use crate::commands::ShellCommand;

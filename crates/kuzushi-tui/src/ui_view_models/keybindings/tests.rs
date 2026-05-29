@@ -55,6 +55,33 @@ fn footer_keybindings_deduplicate_view_bindings() {
     assert_eq!(count_binding(&bindings, "scan", "rescan"), 1);
 }
 
+#[test]
+fn previously_empty_views_now_show_scroll_and_back_in_footer() {
+    for view in [
+        ShellView::Tools,
+        ShellView::History,
+        ShellView::Context,
+        ShellView::KnowledgeBase,
+    ] {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = view.clone();
+        let bindings = footer_keybindings(&app);
+        assert!(
+            bindings.contains(&bind("j/k/g/G", "scroll")),
+            "{view:?} footer should show scroll keys"
+        );
+        assert!(
+            bindings.contains(&bind("Esc", "back")),
+            "{view:?} footer should show Esc back"
+        );
+        assert_eq!(
+            count_binding(&bindings, "Esc", "back"),
+            1,
+            "{view:?} should not duplicate the back hint"
+        );
+    }
+}
+
 fn scan_state(running: bool, abort_requested: bool) -> ScanPanelState {
     ScanPanelState {
         run_id: None,

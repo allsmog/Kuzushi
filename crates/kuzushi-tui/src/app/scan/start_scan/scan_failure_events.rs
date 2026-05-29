@@ -12,7 +12,7 @@ impl ShellApp {
             self.write_scan_failure_artifacts(run_id, &actionable);
         }
         self.log_structured_scan_error(&actionable);
-        self.log("error", actionable);
+        self.set_error_notice("scan", actionable);
         self.log("result", "fail (scan failed) exit_hint=1");
         self.set_refused_activity("sast:scan", "scan failed");
     }

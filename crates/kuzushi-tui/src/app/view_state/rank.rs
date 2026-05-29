@@ -4,6 +4,9 @@ use super::*;
 pub struct AdvisoryState {
     pub throttle: Option<ThrottleAdvisory>,
     pub budget_halt: Option<BudgetHalt>,
+    /// Transient error/warning banner surfaced above the prompt so failures
+    /// and dropped input are visible, not buried in the transcript log.
+    pub notice: Option<Notice>,
     /// Pending operator approval for a tool dispatch that triggered a
     /// confirm gate (network egress, fs:write outside `.kuzushi/`,
     /// destructive verb).  See `design/mockups/confirm-dialog.jsx`.
@@ -15,6 +18,22 @@ pub struct ThrottleAdvisory {
     pub source: String,
     pub message: String,
     pub since: Instant,
+}
+
+/// A transient, auto-clearing banner. `Error` (red) for failures, `Warn`
+/// (amber) for non-fatal notices like a clipped multi-line paste.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Notice {
+    pub source: String,
+    pub message: String,
+    pub severity: NoticeSeverity,
+    pub since: Instant,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NoticeSeverity {
+    Error,
+    Warn,
 }
 
 #[derive(Debug, Clone, PartialEq)]

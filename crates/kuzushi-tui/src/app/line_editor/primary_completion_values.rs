@@ -21,6 +21,14 @@ pub(crate) const NESTED_COMPLETION_PROVIDERS: &[NestedCompletionProvider] = &[
         command: "show",
         candidates: ShellApp::show_completion_candidates,
     },
+    NestedCompletionProvider {
+        command: "threats",
+        candidates: ShellApp::threats_completion_candidates,
+    },
+    NestedCompletionProvider {
+        command: "prompt",
+        candidates: ShellApp::prompt_completion_candidates,
+    },
 ];
 
 pub(crate) const TASK_COMPLETION_RULES: &[SubcommandCompletionRule] = &[
@@ -86,6 +94,16 @@ pub(crate) const AUTH_COMPLETION_RULES: &[SubcommandCompletionRule] = &[
         values: auth_login_completion_values,
     },
 ];
+
+pub(crate) const THREATS_COMPLETION_RULES: &[SubcommandCompletionRule] = &[SubcommandCompletionRule {
+    prefix_words: &["threats"],
+    values: threats_action_completion_values,
+}];
+
+pub(crate) const PROMPT_COMPLETION_RULES: &[SubcommandCompletionRule] = &[SubcommandCompletionRule {
+    prefix_words: &["prompt"],
+    values: prompt_action_completion_values,
+}];
 
 pub(crate) const SHOW_COMPLETION_RULES: &[SubcommandCompletionRule] = &[
     SubcommandCompletionRule {

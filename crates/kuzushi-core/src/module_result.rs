@@ -7,6 +7,64 @@ pub(crate) use envelope::{
     completed_output_result, failed_output_result, partial_output_result, skipped_output_result,
 };
 
+#[cfg(test)]
+mod subprocess_failure_summary_tests;
+
+/// Distill captured subprocess stderr into a single actionable line for an
+/// error message or banner — skipping JVM/stack-frame noise (`at …`,
+/// `… N more`) so the operator sees the cause, not the call stack.
+pub(crate) fn subprocess_failure_summary(stderr: &[u8], fallback: &str) -> String {
+    let text = String::from_utf8_lossy(stderr);
+    let meaningful: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && !is_stack_noise(line))
+        .collect();
+    // Prefer a line that names a specific, actionable cause; then any
+    // failure-ish line; then the last meaningful line; then the caller's hint.
+    meaningful
+        .iter()
+        .find(|line| names_a_failure(line) && !is_generic_wrapper(line))
+        .or_else(|| meaningful.iter().find(|line| names_a_failure(line)))
+        .or_else(|| meaningful.last())
+        .map(|line| strip_log_prefix(line).to_string())
+        .unwrap_or_else(|| fallback.to_string())
+}
+
+fn is_stack_noise(line: &str) -> bool {
+    line.starts_with("at ") || (line.starts_with("...") && line.ends_with("more"))
+}
+
+fn names_a_failure(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    ["error", "not found", "no such", "missing", "cannot", "could not", "failed"]
+        .iter()
+        .any(|needle| lower.contains(needle))
+}
+
+/// Generic exit-code wrappers carry no actionable detail — skip them in favor
+/// of the line that names the real cause (e.g. a missing dependency).
+fn is_generic_wrapper(line: &str) -> bool {
+    let lower = line.to_ascii_lowercase();
+    lower.contains("process exited with code") || lower.contains("externalcommand")
+}
+
+/// Drop a leading `<timestamp> LEVEL Logger` prefix that tools like joern emit,
+/// leaving just the message.
+fn strip_log_prefix(line: &str) -> &str {
+    for level in ["ERROR ", "WARN ", "FATAL ", "SEVERE "] {
+        if let Some(idx) = line.find(level) {
+            let rest = line[idx + level.len()..].trim_start();
+            // Skip the logger name token that usually follows the level.
+            if let Some((_, message)) = rest.split_once("  ") {
+                return message.trim_start();
+            }
+            return rest;
+        }
+    }
+    line
+}
+
 pub(crate) fn normalize_module_result(output: Value) -> Value {
     match output {
         Value::Object(mut object) => {

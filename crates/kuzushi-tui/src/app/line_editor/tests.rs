@@ -57,4 +57,38 @@ mod tests {
         let task_mode = app.completion_candidates("task mode m");
         assert!(task_mode.contains(&"task mode manual".to_string()));
     }
+
+    #[test]
+    fn threats_and_prompt_subverbs_complete() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        let threats = app.completion_candidates("threats s");
+        assert!(threats.contains(&"threats summary".to_string()));
+        assert!(threats.contains(&"threats stride".to_string()));
+
+        let prompt = app.completion_candidates("prompt d");
+        assert!(prompt.contains(&"prompt diff".to_string()));
+    }
+
+    #[test]
+    fn fuzzy_completion_finds_non_prefix_match() {
+        let app = ShellApp::new(V2Config::default(), None);
+        // "sgrep" is a subsequence of "semgrep:*" tool ids but not a prefix.
+        let candidates = app.completion_candidates("run sgrep");
+        assert!(
+            candidates.iter().any(|c| c.contains("semgrep")),
+            "fuzzy matching should surface semgrep from `sgrep`: {candidates:?}"
+        );
+    }
+
+    #[test]
+    fn subverb_listing_matches_completion_for_every_group_verb() {
+        for verb in ["task", "context", "workspace", "auth", "show", "threats", "prompt"] {
+            assert!(
+                subverb_listing(verb).is_some(),
+                "{verb} should expose a sub-verb listing"
+            );
+        }
+        assert!(subverb_listing("scan").is_none());
+    }
 }

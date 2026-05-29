@@ -10,7 +10,9 @@ use crossterm::event::{
     Event,
 };
 use crossterm::execute;
-use crossterm::terminal::{disable_raw_mode, enable_raw_mode, Clear, ClearType};
+use crossterm::terminal::{
+    disable_raw_mode, enable_raw_mode, Clear, ClearType, EnterAlternateScreen, LeaveAlternateScreen,
+};
 use kuzushi_core::{ModuleRegistry, V2Config, WorkspaceTarget};
 use ratatui::backend::CrosstermBackend;
 use ratatui::Terminal;

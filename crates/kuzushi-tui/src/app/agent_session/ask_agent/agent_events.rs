@@ -54,7 +54,7 @@ impl ShellApp {
             self.set_paused_activity("agent", "worker ended after abort request");
             return;
         }
-        self.log("error", error.clone());
+        self.set_error_notice("ask", error.clone());
         self.set_refused_activity("agent", "model request failed");
         self.write_agent_trace_failure(&error, &audit, &state);
     }

@@ -71,8 +71,40 @@ pub(crate) fn model_completion_values(_: &ShellApp) -> Vec<String> {
         .collect()
 }
 
+/// Canonical sub-verb list for a group verb. Single source of truth shared by
+/// Tab-completion and the `<verb> ?` inline lister so they never drift.
+pub(crate) fn subverb_listing(verb: &str) -> Option<&'static [&'static str]> {
+    Some(match verb {
+        "task" => &["block", "allow", "toggle", "mode", "reset"],
+        "context" => &["build", "status", "regen"],
+        "workspace" => &["status", "export"],
+        "auth" => &["status", "login", "openai", "anthropic", "github-copilot"],
+        "show" => &[
+            "modules", "tools", "options", "advanced", "missing", "aliases", "runs", "prompts",
+        ],
+        "threats" => &[
+            "summary", "dfd", "stride", "stories", "scope", "edit", "regen", "apply", "reject",
+            "ask",
+        ],
+        "prompt" => &["edit", "show", "diff", "reset"],
+        _ => return None,
+    })
+}
+
+fn subverb_values(verb: &str) -> Vec<String> {
+    string_values(subverb_listing(verb).unwrap_or(&[]))
+}
+
 pub(crate) fn task_action_completion_values(_: &ShellApp) -> Vec<String> {
-    string_values(&["block", "allow", "toggle", "mode", "reset"])
+    subverb_values("task")
+}
+
+pub(crate) fn threats_action_completion_values(_: &ShellApp) -> Vec<String> {
+    subverb_values("threats")
+}
+
+pub(crate) fn prompt_action_completion_values(_: &ShellApp) -> Vec<String> {
+    subverb_values("prompt")
 }
 
 pub(crate) fn task_mode_completion_values(_: &ShellApp) -> Vec<String> {
@@ -87,7 +119,7 @@ pub(crate) fn sast_task_id_completion_values(_: &ShellApp) -> Vec<String> {
 }
 
 pub(crate) fn context_action_completion_values(_: &ShellApp) -> Vec<String> {
-    string_values(&["build", "status", "regen"])
+    subverb_values("context")
 }
 
 pub(crate) fn context_regen_completion_values(_: &ShellApp) -> Vec<String> {
@@ -95,7 +127,7 @@ pub(crate) fn context_regen_completion_values(_: &ShellApp) -> Vec<String> {
 }
 
 pub(crate) fn workspace_action_completion_values(_: &ShellApp) -> Vec<String> {
-    string_values(&["status", "export"])
+    subverb_values("workspace")
 }
 
 pub(crate) fn workspace_export_completion_values(_: &ShellApp) -> Vec<String> {
@@ -103,7 +135,7 @@ pub(crate) fn workspace_export_completion_values(_: &ShellApp) -> Vec<String> {
 }
 
 pub(crate) fn auth_action_completion_values(_: &ShellApp) -> Vec<String> {
-    string_values(&["status", "login", "openai", "anthropic", "github-copilot"])
+    subverb_values("auth")
 }
 
 pub(crate) fn auth_login_completion_values(_: &ShellApp) -> Vec<String> {
@@ -117,9 +149,7 @@ pub(crate) fn auth_login_completion_values(_: &ShellApp) -> Vec<String> {
 }
 
 pub(crate) fn show_action_completion_values(_: &ShellApp) -> Vec<String> {
-    string_values(&[
-        "modules", "tools", "options", "advanced", "missing", "aliases", "runs", "prompts",
-    ])
+    subverb_values("show")
 }
 
 pub(crate) fn string_values(values: &[&str]) -> Vec<String> {

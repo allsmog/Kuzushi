@@ -65,12 +65,15 @@ impl ContextStripModel {
     }
 
     fn context_state_segment(&self) -> String {
+        // The context snapshot is an optional repo index. Word the empty state
+        // as an action ("not built") rather than an alarm ("missing") — scans
+        // run fine without it; `context build` creates it.
         if self.context_state == "malformed" {
             "ctx:malformed".to_string()
         } else if self.context_present {
-            "ctx:✓ present".to_string()
+            "ctx:✓ built".to_string()
         } else {
-            "ctx:missing".to_string()
+            "ctx:not built".to_string()
         }
     }
 }

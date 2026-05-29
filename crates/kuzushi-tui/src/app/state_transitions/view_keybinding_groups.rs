@@ -2,11 +2,8 @@ use super::view_keybinding_helpers::{bind, bind_char};
 use super::*;
 
 pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
+    // j/k/g/G scroll comes from the shared `scroll_keybindings()` base.
     vec![
-        bind_char('j', "j/k/g/G", "scroll", ViewHotkeyAction::ViewScrollDown),
-        bind_char('k', "j/k/g/G", "scroll", ViewHotkeyAction::ViewScrollUp),
-        bind_char('g', "j/k/g/G", "top", ViewHotkeyAction::ViewScrollTop),
-        bind_char('G', "j/k/g/G", "bottom", ViewHotkeyAction::ViewScrollBottom),
         bind(
             HotkeyTrigger::Tab,
             "Tab",
@@ -93,10 +90,7 @@ pub(super) fn actor_detail_keybindings() -> Vec<ViewKeybinding> {
             "reset filter",
             ViewHotkeyAction::ActorDetailFilterReset,
         ),
-        bind_char('j', "j/k/g/G", "scroll", ViewHotkeyAction::ViewScrollDown),
-        bind_char('k', "j/k/g/G", "scroll", ViewHotkeyAction::ViewScrollUp),
-        bind_char('g', "j/k/g/G", "scroll", ViewHotkeyAction::ViewScrollTop),
-        bind_char('G', "j/k/g/G", "scroll", ViewHotkeyAction::ViewScrollBottom),
+        // j/k/g/G scroll comes from the shared `scroll_keybindings()` base.
     ]
 }
 

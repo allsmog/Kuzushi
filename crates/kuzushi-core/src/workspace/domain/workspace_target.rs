@@ -4,6 +4,7 @@ pub const KUZUSHI_STATE_DIR: &str = ".kuzushi";
 pub const WORKSPACE_STATE_VERSION_DIR: &str = "v2";
 pub const WORKSPACE_CONFIG_FILE: &str = "config.toml";
 pub const WORKSPACE_OPTIONS_FILE: &str = "options.json";
+pub const WORKSPACE_HISTORY_FILE: &str = "shell-history.txt";
 pub const WORKSPACE_FINDINGS_DB_FILE: &str = "findings.sqlite3";
 pub const WORKSPACE_STATIC_EVIDENCE_DB_FILE: &str = "static-evidence.sqlite3";
 pub const WORKSPACE_ARTIFACT_KB_DB_FILE: &str = "artifact-kb.sqlite3";
@@ -27,6 +28,10 @@ pub fn workspace_config_path(root: impl AsRef<Path>) -> PathBuf {
 
 pub fn workspace_options_path(root: impl AsRef<Path>) -> PathBuf {
     workspace_state_dir(root).join(WORKSPACE_OPTIONS_FILE)
+}
+
+pub fn workspace_history_path(root: impl AsRef<Path>) -> PathBuf {
+    workspace_state_dir(root).join(WORKSPACE_HISTORY_FILE)
 }
 
 pub fn workspace_findings_db_path(root: impl AsRef<Path>) -> PathBuf {

@@ -50,7 +50,7 @@ pub(super) fn bind(key: &'static str, label: &'static str) -> FooterKeybinding {
 fn default_keybindings() -> Vec<FooterKeybinding> {
     vec![
         bind("Enter", "run command"),
-        bind("back", "home"),
+        bind("Ctrl+G", "palette"),
         bind("help", "command list"),
         bind("Ctrl+C", "exit"),
     ]

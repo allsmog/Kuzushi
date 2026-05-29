@@ -57,8 +57,19 @@ impl ShellApp {
         self.apply_tool_result(&tool_name, result);
         self.log_failure_context(failure_context);
         self.set_completed_activity(tool_name.clone(), "tool result applied");
+        self.mark_tool_activity_complete(&tool_name);
         self.advance_chain_after_tool(&tool_name);
         self.advance_planning_queue_after_tool(&tool_name);
+    }
+
+    /// Resolve a completed tool's Activity DAG row to `Done` when its producer
+    /// returned without emitting a terminal step (e.g. a scanner that exits
+    /// early because its binary isn't installed). Guarded so tools that already
+    /// reported done don't get a duplicate feed line.
+    fn mark_tool_activity_complete(&mut self, tool_name: &str) {
+        if let Some(session) = self.activity.as_mut() {
+            session.mark_task_done(tool_name);
+        }
     }
 
     fn apply_failed_tool_event(&mut self, state: ToolEventState, tool_name: String, error: String) {
@@ -75,6 +86,7 @@ impl ShellApp {
             &error,
         );
         self.apply_tool_result(&tool_name, result);
+        self.mark_tool_activity_failed(&tool_name, &error);
         self.log_tool_failure(
             &tool_name,
             with_next_step(error, "tools, options <tool>, or model <n>"),
@@ -91,14 +103,33 @@ impl ShellApp {
         }
     }
 
+    /// Flip the failed tool's Activity DAG row to `Failing` so the progress
+    /// pane stops spinning and reflects the error. The tool's producer bails on
+    /// failure before emitting a terminal trace step, so we synthesize one here
+    /// (mirrors `mark_scan_activity_failed` for the scan pipeline).
+    fn mark_tool_activity_failed(&mut self, tool_name: &str, error: &str) {
+        let Some(session) = self.activity.as_mut() else {
+            return;
+        };
+        let (module_id, verb) = tool_name.split_once(':').unwrap_or((tool_name, "run"));
+        session.apply_step(
+            kuzushi_core::RunTraceStep::new(0, "refused", short_label(error, 80))
+                .with_module_id(module_id)
+                .with_verb(verb)
+                .with_severity("danger"),
+        );
+    }
+
     fn log_tool_failure(&mut self, tool_name: &str, message: String, abort_requested: bool) {
         if abort_requested {
+            // The operator asked for the abort — record it, but don't pop an
+            // error banner for an outcome they initiated.
             self.log(
                 "error",
                 format!("{tool_name} ended after abort request: {message}"),
             );
         } else {
-            self.log("error", message);
+            self.set_error_notice("tool", message);
         }
     }
 

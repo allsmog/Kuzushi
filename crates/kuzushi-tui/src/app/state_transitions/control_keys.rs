@@ -23,4 +23,7 @@ const CONTROL_KEY_ACTIONS: &[(char, fn(&mut ShellApp))] = &[
     ('p', ShellApp::history_prev),
     ('n', ShellApp::history_next),
     ('l', ShellApp::clear_conversation_preserving_input),
+    ('r', ShellApp::enter_history_search),
+    // Ctrl+K is kill-to-end, so the palette uses Ctrl+G ("go to command").
+    ('g', ShellApp::open_command_palette),
 ];

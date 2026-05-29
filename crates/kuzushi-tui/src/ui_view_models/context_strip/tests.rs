@@ -22,7 +22,7 @@ fn context_strip_model_reports_idle_shell_state() {
         [
             "mode:shell",
             "target:none",
-            "ctx:missing",
+            "ctx:not built",
             "model:unconfigured",
             "0 findings",
             "view:modules"
@@ -47,7 +47,7 @@ fn context_strip_model_formats_target_model_context_and_cost() {
     assert_eq!(model.cost, Some("$0.42".to_string()));
     assert!(model
         .compact_segments()
-        .contains(&"ctx:✓ present".to_string()));
+        .contains(&"ctx:✓ built".to_string()));
 }
 
 #[test]

@@ -84,6 +84,24 @@ impl ShellApp {
         complete_subcommand_rules(self, SHOW_COMPLETION_RULES, slash, prefix_words, current)
     }
 
+    pub(in crate::app::line_editor) fn threats_completion_candidates(
+        &self,
+        slash: bool,
+        prefix_words: &[&str],
+        current: &str,
+    ) -> Vec<String> {
+        complete_subcommand_rules(self, THREATS_COMPLETION_RULES, slash, prefix_words, current)
+    }
+
+    pub(in crate::app::line_editor) fn prompt_completion_candidates(
+        &self,
+        slash: bool,
+        prefix_words: &[&str],
+        current: &str,
+    ) -> Vec<String> {
+        complete_subcommand_rules(self, PROMPT_COMPLETION_RULES, slash, prefix_words, current)
+    }
+
     pub(in crate::app::line_editor) fn attachment_id_completion_values(&self) -> Vec<String> {
         self.kb_view
             .attachments

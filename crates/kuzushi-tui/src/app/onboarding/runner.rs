@@ -6,7 +6,7 @@
 
 use super::task_id::PlanningTaskId;
 use crate::app::auth_ready_for_provider;
-use crate::ShellApp;
+use crate::{ShellApp, ShellView};
 use kuzushi_core::WorkspaceTarget;
 use serde_json::{json, Value};
 
@@ -57,7 +57,7 @@ impl ShellApp {
         // an MCP wasn't attached.
         self.log_mcp_attachment_plan();
         if self.planning_run_queue.is_empty() {
-            self.log("planning", "planning complete");
+            self.finish_planning_with_recommendations();
             return;
         }
         let Ok(workspace) = self.current_workspace() else {
@@ -69,6 +69,36 @@ impl ShellApp {
             return;
         };
         self.dispatch_next_planning_task(workspace);
+    }
+
+    /// Planning is done. Rather than strand the operator on a finished, empty
+    /// Activity DAG, auto-run the deterministic module recommender and land on
+    /// the Recommend view so they are shown concrete next steps. The recommender
+    /// dispatch deliberately doesn't touch `planning_running_tool`, so its own
+    /// completion won't re-enter this path.
+    fn finish_planning_with_recommendations(&mut self) {
+        self.log("planning", "planning complete");
+        let Ok(workspace) = self.current_workspace() else {
+            self.log(
+                "recommend",
+                "planning complete — run `recommend` for suggested next modules",
+            );
+            return;
+        };
+        // Suppress the activity auto-open flip so we land on Recommend, not the
+        // empty Activity view the operator just finished with.
+        let auto_open = self.auto_open_activity;
+        self.auto_open_activity = false;
+        self.start_background_tool(
+            "module-recommender:recommend".to_string(),
+            json!({}),
+            workspace,
+            "ranking next modules",
+            None,
+        );
+        self.auto_open_activity = auto_open;
+        self.shell_view = ShellView::Recommend;
+        self.log("recommend", "ranking modules for your next move…");
     }
 
     /// Cancel any in-flight planning queue. Does NOT abort the
@@ -89,6 +119,7 @@ impl ShellApp {
     /// Whether a chosen model has all the credentials it needs to run.
     /// Used by the auth picker to decide whether to fall through to the
     /// planning view or stay put until the operator finishes auth.
+    #[allow(dead_code)] // reserved for the auth-picker fall-through path
     pub(crate) fn chosen_provider_auth_ready(&self) -> bool {
         let Some(provider) = self
             .config

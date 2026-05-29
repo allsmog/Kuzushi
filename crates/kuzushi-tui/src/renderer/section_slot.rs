@@ -1,5 +1,7 @@
 use super::*;
-use crate::ui_view_models::{cost_cap_halt_model, throttle_banner_model, transcript_chrome_height};
+use crate::ui_view_models::{
+    cost_cap_halt_model, notice_banner_model, throttle_banner_model, transcript_chrome_height,
+};
 
 pub(crate) fn section_slot(kind: RenderSection, height: u16) -> Option<RenderSectionSlot> {
     (height > 0).then_some(RenderSectionSlot { kind, height })
@@ -45,6 +47,14 @@ pub(crate) fn status_footer_height(area: Rect) -> u16 {
 
 pub(crate) fn throttle_banner_height(app: &ShellApp, area: Rect) -> u16 {
     if throttle_banner_model(app).is_some() && area.height >= 5 {
+        1
+    } else {
+        0
+    }
+}
+
+pub(crate) fn notice_banner_height(app: &ShellApp, area: Rect) -> u16 {
+    if notice_banner_model(app).is_some() && area.height >= 5 {
         1
     } else {
         0

@@ -12,7 +12,7 @@ fn status_footer_model_reports_idle_shell_segments() {
 
     assert_eq!(
         model.left_segments,
-        ["mode:shell", "target:none", "ctx:missing", "modules"]
+        ["mode:shell", "target:none", "ctx:not built", "modules"]
     );
     assert_eq!(model.right_segments, ["0 findings"]);
     assert!(!model.warning);

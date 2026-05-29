@@ -80,6 +80,10 @@ impl ShellApp {
         // guarantees the run is in flight before the view becomes visible.
         if self.auto_open_activity {
             self.shell_view = ShellView::Activity;
+            self.log(
+                "view",
+                "opened activity — Esc/back to leave (disable: setg ui.auto_open_activity false)",
+            );
         }
     }
 

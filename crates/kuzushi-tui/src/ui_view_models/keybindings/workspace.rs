@@ -1,48 +1,50 @@
-use super::{bind, FooterKeybinding};
+use super::{bind, push_view_keybindings, FooterKeybinding};
 use crate::{ShellApp, ShellView};
 
 pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
     match app.shell_view {
-        ShellView::Options(_) => Some(options_keybindings()),
-        ShellView::Context => Some(context_keybindings()),
-        ShellView::Workspace => Some(workspace_status_keybindings()),
-        ShellView::KnowledgeBase => Some(knowledge_base_keybindings()),
+        ShellView::Options(_) => Some(options_keybindings(app)),
+        ShellView::Context => Some(context_keybindings(app)),
+        ShellView::Workspace => Some(workspace_status_keybindings(app)),
+        ShellView::KnowledgeBase => Some(knowledge_base_keybindings(app)),
         _ => None,
     }
 }
 
-fn options_keybindings() -> Vec<FooterKeybinding> {
-    vec![
-        bind("set key value", "session opt"),
-        bind("show advanced", "advanced opts"),
-        bind("show missing", "required"),
-        bind("back", "module"),
-    ]
+// Each builder leads with the live view keybindings (scroll + Esc back) so the
+// footer advertises the real keys, then adds command shortcuts for the view.
+fn options_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let mut bindings = Vec::new();
+    push_view_keybindings(&mut bindings, app);
+    bindings.push(bind("set key value", "session opt"));
+    bindings.push(bind("show advanced", "advanced opts"));
+    bindings.push(bind("show missing", "required"));
+    bindings
 }
 
-fn context_keybindings() -> Vec<FooterKeybinding> {
-    vec![
-        bind("context build", "rebuild"),
-        bind("context status", "summary"),
-        bind("context regen repo", "refresh index"),
-        bind("back", "module"),
-    ]
+fn context_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let mut bindings = Vec::new();
+    push_view_keybindings(&mut bindings, app);
+    bindings.push(bind("context build", "rebuild"));
+    bindings.push(bind("context status", "summary"));
+    bindings.push(bind("context regen repo", "refresh index"));
+    bindings
 }
 
-fn workspace_status_keybindings() -> Vec<FooterKeybinding> {
-    vec![
-        bind("workspace status", "summary"),
-        bind("workspace export", "export findings"),
-        bind("scan <target>", "select target"),
-        bind("back", "module"),
-    ]
+fn workspace_status_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let mut bindings = Vec::new();
+    push_view_keybindings(&mut bindings, app);
+    bindings.push(bind("workspace status", "summary"));
+    bindings.push(bind("workspace export", "export findings"));
+    bindings.push(bind("scan <target>", "select target"));
+    bindings
 }
 
-fn knowledge_base_keybindings() -> Vec<FooterKeybinding> {
-    vec![
-        bind("PgUp/PgDn", "scroll"),
-        bind("attach <path>", "add file"),
-        bind("detach <id>", "remove"),
-        bind("reparse <id>", "refresh"),
-    ]
+fn knowledge_base_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let mut bindings = Vec::new();
+    push_view_keybindings(&mut bindings, app);
+    bindings.push(bind("attach <path>", "add file"));
+    bindings.push(bind("detach <id>", "remove"));
+    bindings.push(bind("reparse <id>", "refresh"));
+    bindings
 }

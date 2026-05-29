@@ -132,10 +132,12 @@ fn target_footer_segment(app: &ShellApp) -> String {
 }
 
 fn context_footer_segment(app: &ShellApp) -> String {
+    // Word the empty state as an action, not an alarm — the context snapshot is
+    // optional and `context build` creates it (see context_strip).
     match context_snapshot_state(app) {
-        "present" => "ctx:present",
+        "present" => "ctx:✓ built",
         "malformed" => "ctx:malformed",
-        _ => "ctx:missing",
+        _ => "ctx:not built",
     }
     .to_string()
 }

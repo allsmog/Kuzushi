@@ -28,6 +28,20 @@ pub(crate) fn fit(value: &str, max_chars: usize) -> String {
     fit_with_ellipsis(value, max_chars)
 }
 
+/// Fit a path-like string by truncating from the LEFT, so the most useful tail
+/// (`…/dir/file.rs:42`) stays visible instead of the repo-root prefix.
+pub(crate) fn fit_path(value: &str, max_chars: usize) -> String {
+    let len = value.chars().count();
+    if max_chars == 0 || len <= max_chars {
+        return value.to_string();
+    }
+    if max_chars <= 3 {
+        return value.chars().skip(len - max_chars).collect();
+    }
+    let tail: String = value.chars().skip(len - (max_chars - 1)).collect();
+    format!("…{tail}")
+}
+
 fn fit_with_ellipsis(value: &str, max_chars: usize) -> String {
     let budget = max_chars.saturating_sub(3);
     let head: String = value.chars().take(budget).collect();
@@ -200,4 +214,22 @@ pub(crate) fn pad(value: &str, width: usize) -> String {
 
 pub(crate) fn value_width(area: Rect, used: usize) -> usize {
     (area.width as usize).saturating_sub(used).max(12)
+}
+
+#[cfg(test)]
+mod fit_path_tests {
+    use super::fit_path;
+
+    #[test]
+    fn keeps_full_path_when_it_fits() {
+        assert_eq!(fit_path("src/a.rs:10", 20), "src/a.rs:10");
+    }
+
+    #[test]
+    fn truncates_from_the_left_keeping_the_tail() {
+        let got = fit_path("crates/core/src/scan/engines/secret_scan/file.rs:13", 24);
+        assert_eq!(got.chars().count(), 24);
+        assert!(got.starts_with('…'));
+        assert!(got.ends_with("file.rs:13"), "kept the useful tail: {got}");
+    }
 }
