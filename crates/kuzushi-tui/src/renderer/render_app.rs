@@ -84,6 +84,7 @@ pub(crate) enum RenderSection {
     Plan,
     ThreatPatch,
     Confirm,
+    Retry,
     PrereqPrompt,
     Transcript,
 }
@@ -105,6 +106,7 @@ const RENDER_SECTION_HANDLERS: &[RenderSectionHandler] = &[
     render_plan_card,
     render_threat_patch_card,
     render_confirm_card,
+    render_retry_card,
     render_prereq_prompt_card,
     render_transcript,
 ];
@@ -122,6 +124,7 @@ pub(crate) fn render_sections(app: &ShellApp, area: Rect) -> Vec<RenderSectionSl
             threat_patch_card_height(app, area),
         ),
         section_slot(RenderSection::Confirm, confirm_card_height(app, area)),
+        section_slot(RenderSection::Retry, retry_card_height(app, area)),
         section_slot(
             RenderSection::PrereqPrompt,
             prereq_prompt_card_height(app, area),

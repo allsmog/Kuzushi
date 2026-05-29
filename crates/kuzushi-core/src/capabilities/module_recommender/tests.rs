@@ -240,6 +240,7 @@ fn executor_reads_workspace_inventory_and_visible_capabilities() {
     let output = execute_module_recommender_tool(
         json!({ "maxRecommendations": 10 }),
         &ctx,
+        None,
         vec![
             "context:build".to_string(),
             "dep-hygiene:check".to_string(),
@@ -350,6 +351,7 @@ fn executor_surfaces_backend_framework_signals() {
     let output = execute_module_recommender_tool(
         json!({ "maxRecommendations": 5 }),
         &ctx,
+        None,
         vec!["context:build".to_string(), "threat-model:build".to_string()],
     )
     .unwrap();
@@ -404,6 +406,7 @@ fn executor_surfaces_grpc_rpc_handler_signals() {
     let output = execute_module_recommender_tool(
         json!({ "maxRecommendations": 5 }),
         &ctx,
+        None,
         vec!["context:build".to_string(), "threat-model:build".to_string()],
     )
     .unwrap();
@@ -438,6 +441,7 @@ fn executor_surfaces_file_upload_attack_surface_signals() {
     let output = execute_module_recommender_tool(
         json!({ "maxRecommendations": 5 }),
         &ctx,
+        None,
         vec!["context:build".to_string(), "threat-model:build".to_string()],
     )
     .unwrap();
@@ -477,6 +481,7 @@ fn executor_surfaces_python_framework_signals_on_threat_model_recommendation() {
     let output = execute_module_recommender_tool(
         json!({ "maxRecommendations": 5 }),
         &ctx,
+        None,
         vec!["context:build".to_string(), "threat-model:build".to_string()],
     )
     .unwrap();
@@ -585,6 +590,7 @@ fn executor_reads_threat_model_dfd_artifact_shape() {
     let output = execute_module_recommender_tool(
         json!({ "maxRecommendations": 10 }),
         &ctx,
+        None,
         vec!["context:build".to_string(), "threat-model:build".to_string()],
     )
     .unwrap();

@@ -89,7 +89,7 @@ impl ShellApp {
         self.mark_tool_activity_failed(&tool_name, &error);
         self.log_tool_failure(
             &tool_name,
-            with_next_step(error, "tools, options <tool>, or model <n>"),
+            with_next_step(error.clone(), "tools, options <tool>, or model <n>"),
             state.abort_requested,
         );
         self.set_refused_activity(
@@ -99,7 +99,9 @@ impl ShellApp {
         self.log_failure_context(failure_context);
         self.abort_pending_chain(&tool_name);
         if self.planning_running_tool.as_deref() == Some(&tool_name) {
-            self.cancel_planning_queue();
+            // Dependency-aware fall-through: skip only the tasks that depended
+            // on this one; keep running the independent rest of the queue.
+            self.fail_planning_task(&tool_name, &error);
         }
     }
 
@@ -159,6 +161,9 @@ impl ShellApp {
             let _ = self.refresh_context_view();
         }
         self.cache_tool_snapshot(tool_name, &result);
+        if tool_name == "module-recommender:recommend" {
+            self.apply_model_recommendations(&result);
+        }
         let rendered = result
             .get("output")
             .and_then(serde_json::Value::as_str)

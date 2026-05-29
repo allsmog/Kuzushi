@@ -56,6 +56,10 @@ pub(crate) fn run_terminal_shell(
     let mut terminal = setup_terminal()?;
     let mut app = ShellApp::with_registry(config, target, registry);
     open_start_view(&mut app);
+    // Interactive launches kick off the one-shot session-model ranking that
+    // refines the walker's preselection. Done here (not in construction) so
+    // headless/test apps never spawn a background tool.
+    app.request_model_recommendations();
     let result = terminal_shell_loop(&mut terminal, &mut app);
     let _ = restore_terminal(&mut terminal);
     result

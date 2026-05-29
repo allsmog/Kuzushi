@@ -11,6 +11,9 @@ pub struct AdvisoryState {
     /// confirm gate (network egress, fs:write outside `.kuzushi/`,
     /// destructive verb).  See `design/mockups/confirm-dialog.jsx`.
     pub pending_confirm: Option<PendingConfirm>,
+    /// End-of-engagement retry gate: offered after 掛 KAKE when planning tasks
+    /// failed. Yes re-runs them (with auto-adjustments); no skips them.
+    pub pending_retry: Option<crate::app::PendingRetry>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

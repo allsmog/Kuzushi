@@ -17,12 +17,14 @@ impl ModuleRegistry {
         name: &str,
         input: &Value,
         ctx: &ToolExecutionContext<'_>,
+        runtime: Option<&dyn AgentRuntime>,
     ) -> ToolDispatchResult {
         match name {
             "module-recommender:recommend" => Some(
                 crate::capabilities::module_recommender::execute_module_recommender_tool(
                     input.clone(),
                     ctx,
+                    runtime,
                     visible_tool_names(self),
                 ),
             ),

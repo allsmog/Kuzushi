@@ -170,10 +170,10 @@ fn execute_module_recommender_tool(
     name: &str,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
-    _runtime: Option<&dyn AgentRuntime>,
+    runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
     dispatch_result(
-        registry.dispatch_module_recommender_tool(name, input, ctx),
+        registry.dispatch_module_recommender_tool(name, input, ctx, runtime),
         name,
     )
 }

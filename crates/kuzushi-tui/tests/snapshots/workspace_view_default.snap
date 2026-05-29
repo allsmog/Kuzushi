@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 253
 ---
- KUZUSHI mode:shell · target:none · ctx:missing · model:unconfigured · 0 findings · view:workspace
+ KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured · 0 findings · view:workspace
 
  -- WORKSPACE ----------------------------------------------------------------------------------------------------------
 status: no active workspace. Next: scan <target> or start shell with --target .

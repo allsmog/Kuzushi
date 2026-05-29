@@ -36,9 +36,9 @@ pub use crate::options::{
     OptionScope, OptionTarget, ToolOptionStore,
 };
 pub use crate::repository_inventory::{
-    build_repository_inventory, InventoryEntrypoint, InventoryFile, InventoryFramework,
-    InventoryLanguage, InventoryPathClassification, InventoryRouteController, InventorySourceFile,
-    RepositoryInventory,
+    build_repository_inventory, classify_target_kind, InventoryEntrypoint, InventoryFile,
+    InventoryFramework, InventoryLanguage, InventoryPathClassification, InventoryRouteController,
+    InventorySourceFile, RepositoryInventory, TargetKind,
 };
 pub use crate::run_artifacts::{
     append_run_trace_step, latest_run_path, list_run_summaries, load_run_summary, new_run_id,

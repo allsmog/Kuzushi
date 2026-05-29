@@ -88,6 +88,27 @@ pub struct ShellApp {
     /// queue, used by `advance_planning_queue_after_tool` to know when
     /// to pop the next entry.
     pub planning_running_tool: Option<String>,
+    /// The engagement phase the walker is currently in (組→崩→作→掛). `None`
+    /// outside the phase-driven launch flow.
+    pub workflow_phase: Option<crate::app::WorkflowPhase>,
+    /// Detected target kind (source / apk / native binary), classified once at
+    /// launch and reused to drive per-phase preselection.
+    pub target_kind: Option<kuzushi_core::TargetKind>,
+    /// Cached artifact tasks the operator explicitly marked for rebuild (`g`),
+    /// overriding the reuse-by-default behavior for this run.
+    pub planning_rebuild: BTreeSet<PlanningTaskId>,
+    /// Tasks that failed in the current engagement, with their error text.
+    /// Drives dependency-aware skipping and the end-of-run retry gate.
+    pub planning_failed: Vec<crate::app::FailedPlanningTask>,
+    /// Per-task input overrides applied on retry (e.g. a larger heap), consumed
+    /// by the planning dispatcher and cleared once the retried task runs.
+    pub planning_adjustments: BTreeMap<PlanningTaskId, crate::app::RetryAdjustment>,
+    /// Tasks the session model recommended for this engagement (mapped from the
+    /// recommender's tool list). Merged into each phase's preselection.
+    pub model_recommended_tasks: Option<BTreeSet<PlanningTaskId>>,
+    /// Whether the one-shot session-model recommendation has been requested this
+    /// engagement (dispatched once at launch, reused across phases).
+    pub recommendation_requested: bool,
     pub tune_cursor: usize,
     pub prompts_cursor: usize,
     pub actor_detail_filter: ActorDetailFilter,

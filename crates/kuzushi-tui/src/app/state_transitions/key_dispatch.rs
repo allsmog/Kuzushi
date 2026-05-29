@@ -90,10 +90,30 @@ impl ShellApp {
 
     fn handle_shared_modal_key(&mut self, key: KeyEvent) -> bool {
         self.handle_confirm_key(key)
+            || self.handle_retry_key(key)
             || self.handle_budget_key(key)
             || self.handle_pending_plan_key(key)
             || self.handle_picker_key(key)
             || self.handle_notice_dismiss_key(key)
+    }
+
+    /// The end-of-engagement retry gate: `y`/Enter retries the failed tasks
+    /// (with auto-adjustments), `n`/Esc skips them.
+    fn handle_retry_key(&mut self, key: KeyEvent) -> bool {
+        if self.advisory.pending_retry.is_none() || !key.modifiers.is_empty() {
+            return false;
+        }
+        match key.code {
+            KeyCode::Char('y') | KeyCode::Char('Y') | KeyCode::Enter => {
+                self.retry_failed_tasks();
+                true
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                self.decline_retry();
+                true
+            }
+            _ => false,
+        }
     }
 
     /// Esc dismisses a visible notice banner. Returns false when no notice is

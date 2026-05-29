@@ -77,11 +77,13 @@ fn toggle_off(task: PlanningTaskId, selected: &mut BTreeSet<PlanningTaskId>) -> 
     ToggleOutcome::Off { task }
 }
 
-/// Build the ordered execution plan from the currently-selected rows.
-/// Cached rows are filtered out (they don't need to be re-run).
+/// Build the ordered execution plan from the currently-selected rows. Cached
+/// artifacts are reused (filtered out) unless the operator marked them for
+/// rebuild — those are kept so they re-run and overwrite the stale artifact.
 pub fn build_execution_plan(
     rows: &[PlanningTaskRow],
     selected: &BTreeSet<PlanningTaskId>,
+    rebuild: &BTreeSet<PlanningTaskId>,
 ) -> Vec<PlanningTaskId> {
     let runnable: BTreeSet<PlanningTaskId> = selected
         .iter()
@@ -89,14 +91,15 @@ pub fn build_execution_plan(
         .filter(|task| {
             rows.iter()
                 .find(|row| row.id == *task)
-                .map(|row| {
-                    row.cli_available
-                        && !matches!(row.artifact_state, super::task_row::ArtifactState::Cached)
-                })
+                .map(|row| row.cli_available && (!is_cached(row) || rebuild.contains(task)))
                 .unwrap_or(false)
         })
         .collect();
     topological_order(&runnable)
+}
+
+fn is_cached(row: &PlanningTaskRow) -> bool {
+    matches!(row.artifact_state, super::task_row::ArtifactState::Cached)
 }
 
 #[cfg(test)]
@@ -185,8 +188,24 @@ mod tests {
         let mut selected = BTreeSet::new();
         selected.insert(GatherRepoContext);
         selected.insert(BuildXRay);
-        let plan = build_execution_plan(&rows, &selected);
+        let plan = build_execution_plan(&rows, &selected, &BTreeSet::new());
         assert_eq!(plan, vec![BuildXRay]);
+    }
+
+    #[test]
+    fn execution_plan_reruns_cached_rows_marked_for_rebuild() {
+        let rows = vec![
+            row(GatherRepoContext, ArtifactState::Cached),
+            row(BuildXRay, ArtifactState::Missing),
+        ];
+        let mut selected = BTreeSet::new();
+        selected.insert(GatherRepoContext);
+        selected.insert(BuildXRay);
+        let mut rebuild = BTreeSet::new();
+        rebuild.insert(GatherRepoContext);
+        let plan = build_execution_plan(&rows, &selected, &rebuild);
+        // context is cached but explicitly rebuilt, so it runs before its dependent.
+        assert_eq!(plan, vec![GatherRepoContext, BuildXRay]);
     }
 
     #[test]

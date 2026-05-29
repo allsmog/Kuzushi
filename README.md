@@ -219,6 +219,40 @@ Piped shell output automatically uses the same strict plain renderer as
 | `/prompts`, `/prompt <verb>`, `/tune`, `/actor <n>`, `/plan <english>` | Prompt, tuning, transcript, and planner surfaces. |
 | `/quit`, `exit`, `/exit`, `/exitj` | Exit. |
 
+## Phase-Driven Workflow (組 → 崩 → 作 → 掛)
+
+Launching the shell against a target opens a guided, four-phase engagement —
+named after the judo throw Kuzushi is named for — instead of a flat task list.
+Each phase opens a picker that announces what it is for and pre-checks a
+dependency-correct task set:
+
+| Phase | | Focus |
+| --- | --- | --- |
+| 組 **KUMI-KATA** | map | establish the grip — context, entry points, threat model, CPG/CodeQL, and reverse-engineering for binary/APK targets |
+| 崩 **KUZUSHI** | hunt | break the target's balance — secrets, semgrep, CodeQL, taint, agentic SAST, threat-model-driven and systems hunts |
+| 作 **TSUKURI** | confirm | commit the entry — triage then verify findings |
+| 掛 **KAKE** | fix | finish the throw — patch and report |
+
+- **Target-aware preselection.** The target is classified (source / JVM /
+  Android APK / native binary) and each phase pre-checks the relevant tasks —
+  e.g. reverse-engineering and `x-ray` are preselected for an APK, not a source
+  tree. When a model is configured, the **session model** ranks the tools and
+  refines the preselection (deterministic rule catalog otherwise; never a
+  silent model fallback).
+- **Reuse, don't rebuild.** Cached artifacts (CPG, CodeQL DB, context snapshot)
+  are detected and reused by default — press `g` on a row to force a rebuild.
+- **Dependency-aware failure.** If a task fails, only the tasks that depended on
+  it are skipped; the independent rest of the queue keeps running.
+- **Retry gate.** After 掛 KAKE, a `y`/`n` gate offers to re-run failed tasks
+  with an auto-adjusted parameter when the cause is known (e.g. a joern
+  `OutOfMemoryError` → re-run `cpg:build` with a larger `-J-Xmx`; see the
+  `heapMb` option), unblocking the dependents that were skipped.
+
+`cpg:build` accepts a `heapMb` option (defaulting to ~75% of physical RAM) and
+classifies heap-exhaustion failures with an actionable message instead of an
+opaque crash. The Activity view's OUTPUT pane renders the threat model's
+data-flow diagram (boxes, trust zones, flows) once a threat model exists.
+
 ## Built-In Modules
 
 `kuzushi modules` is the source of truth for the visible native registry. The
