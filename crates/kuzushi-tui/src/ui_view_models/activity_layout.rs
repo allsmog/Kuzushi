@@ -14,10 +14,12 @@ pub(crate) struct ActivityPaneWidths {
 
 pub(crate) fn activity_frame_layout() -> ActivityFrameLayout {
     ActivityFrameLayout {
-        header_rows: 2,
+        // title + context (model/findings/target) + focus label
+        header_rows: 3,
         footer_rows: 2,
-        dag_percent: 46,
-        feed_percent: 54,
+        // Favor the output pane — it carries the live detail the operator reads.
+        dag_percent: 40,
+        feed_percent: 60,
     }
 }
 
@@ -39,10 +41,10 @@ mod tests {
         assert_eq!(
             activity_frame_layout(),
             ActivityFrameLayout {
-                header_rows: 2,
+                header_rows: 3,
                 footer_rows: 2,
-                dag_percent: 46,
-                feed_percent: 54,
+                dag_percent: 40,
+                feed_percent: 60,
             }
         );
     }
@@ -51,7 +53,7 @@ mod tests {
     fn activity_plain_pane_widths_matches_split_with_minimums() {
         assert_eq!(
             activity_plain_pane_widths(120),
-            ActivityPaneWidths { dag: 53, feed: 64 }
+            ActivityPaneWidths { dag: 46, feed: 71 }
         );
         assert_eq!(
             activity_plain_pane_widths(30),

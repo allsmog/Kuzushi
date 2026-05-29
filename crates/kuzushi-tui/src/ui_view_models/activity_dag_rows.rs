@@ -29,10 +29,7 @@ pub(crate) fn activity_dag_pane_rows(
     let mut rows = session
         .tasks
         .values()
-        .map(|row| ActivityDagPaneRow {
-            text: dag_row_text(row, width, now),
-            tone: dag_row_tone(row.state),
-        })
+        .flat_map(|row| task_pane_rows(row, width, now))
         .collect::<Vec<_>>();
     if let Some(text) = dag_subsystems_row_text(session, width) {
         rows.push(ActivityDagPaneRow {
@@ -87,6 +84,33 @@ fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant) -> String {
         elapsed = elapsed,
     );
     fit(&body, width)
+}
+
+/// A task's row, plus — under a running task — a sub-line showing what it's
+/// doing right now (its latest sub-step), so the operator sees the work inside.
+fn task_pane_rows(row: &DagTaskRow, width: usize, now: Instant) -> Vec<ActivityDagPaneRow> {
+    let mut out = vec![ActivityDagPaneRow {
+        text: dag_row_text(row, width, now),
+        tone: dag_row_tone(row.state),
+    }];
+    if let Some(text) = dag_active_substep_text(row, width) {
+        out.push(ActivityDagPaneRow {
+            text,
+            tone: ActivityDagRowTone::Muted,
+        });
+    }
+    out
+}
+
+fn dag_active_substep_text(row: &DagTaskRow, width: usize) -> Option<String> {
+    if row.state != DagTaskState::Active {
+        return None;
+    }
+    let label = row.last_label.trim();
+    if label.is_empty() {
+        return None;
+    }
+    Some(fit(&format!("     ↳ {label}"), width))
 }
 
 fn dag_subsystems_row_text(session: &ActivitySession, width: usize) -> Option<String> {

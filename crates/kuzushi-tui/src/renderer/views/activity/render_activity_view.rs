@@ -82,6 +82,10 @@ fn activity_header_lines(activity: &ActiveActivityViewModel<'_>) -> Vec<Line<'st
     vec![
         Line::from(vec![Span::styled(model.detailed_title, theme::heading())]),
         Line::from(vec![Span::styled(
+            activity.context_line().to_string(),
+            theme::muted(),
+        )]),
+        Line::from(vec![Span::styled(
             model.focus_label.to_string(),
             theme::accent(),
         )]),

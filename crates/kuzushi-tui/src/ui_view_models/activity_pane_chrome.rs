@@ -27,9 +27,10 @@ pub(crate) struct ActivityPaneTitle {
 }
 
 pub(crate) fn activity_pane_chrome_model(session: &ActivitySession) -> ActivityPaneChromeModel {
+    // "TASKS" / "OUTPUT" read for operators; "DAG"/"FEED" were dev jargon.
     ActivityPaneChromeModel {
-        dag: pane_title("DAG", session.pane_focus == PaneFocus::Left),
-        feed: pane_title("FEED", session.pane_focus == PaneFocus::Right),
+        dag: pane_title("TASKS", session.pane_focus == PaneFocus::Left),
+        feed: pane_title("OUTPUT", session.pane_focus == PaneFocus::Right),
     }
 }
 
@@ -81,8 +82,8 @@ mod tests {
         assert_eq!(
             activity_pane_chrome_model(&session),
             ActivityPaneChromeModel {
-                dag: pane_title("DAG", true),
-                feed: pane_title("FEED", false),
+                dag: pane_title("TASKS", true),
+                feed: pane_title("OUTPUT", false),
             }
         );
 
@@ -90,8 +91,8 @@ mod tests {
         assert_eq!(
             activity_pane_chrome_model(&session),
             ActivityPaneChromeModel {
-                dag: pane_title("DAG", false),
-                feed: pane_title("FEED", true),
+                dag: pane_title("TASKS", false),
+                feed: pane_title("OUTPUT", true),
             }
         );
     }
@@ -99,10 +100,10 @@ mod tests {
     #[test]
     fn activity_pane_title_projects_renderer_copy() {
         assert_eq!(
-            pane_title("DAG", true),
+            pane_title("TASKS", true),
             ActivityPaneTitle {
-                block_title: "── DAG ──".to_string(),
-                plain_header: " ── DAG ".to_string(),
+                block_title: "── TASKS ──".to_string(),
+                plain_header: " ── TASKS ".to_string(),
                 focused: true,
             }
         );
@@ -116,12 +117,12 @@ mod tests {
             activity_plain_pane_header_model(&session, 10, 12),
             ActivityPlainPaneHeaderModel {
                 dag: ActivityPlainPaneHeaderCell {
-                    text: " ── DAG   ".to_string(),
+                    text: " ── TASKS ".to_string(),
                     focused: true,
                 },
                 separator: " │ ",
                 feed: ActivityPlainPaneHeaderCell {
-                    text: " ── FEED    ".to_string(),
+                    text: " ── OUTPUT  ".to_string(),
                     focused: false,
                 },
             }
@@ -132,12 +133,12 @@ mod tests {
             activity_plain_pane_header_model(&session, 6, 6),
             ActivityPlainPaneHeaderModel {
                 dag: ActivityPlainPaneHeaderCell {
-                    text: " ── DA".to_string(),
+                    text: " ── TA".to_string(),
                     focused: false,
                 },
                 separator: " │ ",
                 feed: ActivityPlainPaneHeaderCell {
-                    text: " ── FE".to_string(),
+                    text: " ── OU".to_string(),
                     focused: true,
                 },
             }

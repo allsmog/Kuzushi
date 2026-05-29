@@ -64,8 +64,8 @@ fn verbose_segment(verbose: bool) -> &'static str {
 
 fn pane_focus_label(focus: PaneFocus) -> &'static str {
     match focus {
-        PaneFocus::Left => "[DAG focused]",
-        PaneFocus::Right => "[FEED focused]",
+        PaneFocus::Left => "[tasks focused]",
+        PaneFocus::Right => "[output focused]",
     }
 }
 
@@ -98,7 +98,7 @@ mod tests {
         assert!(model.detailed_title.contains("…d602a576"));
         assert!(model.detailed_title.contains("cost $0.3750"));
         assert!(model.detailed_title.contains("paused"));
-        assert_eq!(model.focus_label, "[FEED focused]");
+        assert_eq!(model.focus_label, "[output focused]");
     }
 
     fn task(id: &str, state: DagTaskState, cost_usd: f64) -> DagTaskRow {
