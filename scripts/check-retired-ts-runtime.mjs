@@ -37,6 +37,7 @@ const retiredUiPaths = [
 ];
 const retiredUiDependencies = ["ink", "react", "react-dom", "@types/react", "@types/react-dom"];
 const retiredUiRuntimePackages = new Set(["ink", "react", "react-dom"]);
+const deletedClaudeCliRuntimePackages = new Set(["@anthropic-ai/claude-agent-sdk"]);
 const retiredRuntimeWordingPatterns = [
   { label: "Ink shell wording", regex: /\bInk\b/ },
   { label: "React shell wording", regex: /\bReact\b/ },
@@ -114,13 +115,18 @@ if (existsSync(path.join(repo, deletedReferenceRoot))) {
   );
 }
 
-failures.push(...tsxSourceFailures(), ...retiredUiDependencyFailures());
+failures.push(
+  ...tsxSourceFailures(),
+  ...retiredUiDependencyFailures(),
+  ...deletedClaudeCliRuntimeDependencyFailures(),
+);
 
 const sourceFiles = sourceRoots.flatMap((root) => walk(root, sourceExtensions));
 failures.push(
   ...retiredRuntimeWordingFailures(sourceFiles),
   ...retiredShellRouterFailures(sourceFiles),
   ...retiredUiImportFailures(sourceFiles),
+  ...deletedClaudeCliRuntimeImportFailures(sourceFiles),
 );
 
 for (const file of sourceFiles) {
@@ -223,6 +229,18 @@ function retiredUiDependencyFailures() {
   );
 }
 
+function deletedClaudeCliRuntimeDependencyFailures() {
+  const pkg = JSON.parse(readFileSync(path.join(repo, "package.json"), "utf8"));
+  return ["dependencies", "devDependencies", "optionalDependencies"].flatMap((section) =>
+    [...deletedClaudeCliRuntimePackages]
+      .filter((name) => Object.hasOwn(pkg[section] ?? {}, name))
+      .map(
+        (name) =>
+          `package.json ${section}.${name} must not reintroduce the deleted Claude CLI subprocess runtime; use the LangGraph bridge.`,
+      ),
+  );
+}
+
 function retiredShellRouterFailures(files) {
   return files.flatMap((file) => {
     const rel = relative(file);
@@ -255,6 +273,19 @@ function retiredUiImportFailures(files) {
     return importSpecifiers(text)
       .filter((specifier) => retiredUiRuntimePackages.has(packageName(specifier)))
       .map((specifier) => `${rel} imports ${specifier}; shell UI belongs in Rust Ratatui.`);
+  });
+}
+
+function deletedClaudeCliRuntimeImportFailures(files) {
+  return files.flatMap((file) => {
+    const rel = relative(file);
+    const text = readFileSync(file, "utf8");
+    return importSpecifiers(text)
+      .filter((specifier) => deletedClaudeCliRuntimePackages.has(packageName(specifier)))
+      .map(
+        (specifier) =>
+          `${rel} imports ${specifier}; the Claude CLI subprocess runtime is deleted and must stay out of LangGraph dispatch.`,
+      );
   });
 }
 
