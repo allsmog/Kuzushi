@@ -9,6 +9,7 @@ const RECOMMENDATION_REPORT_COMMANDS: [&str; 4] =
     ["run <tool> [json]", "trace <run>", "runs", "back"];
 const RECOMMENDATION_EMPTY_COMMANDS: [&str; 3] =
     ["run module-recommender:recommend", "runs", "back"];
+const RECOMMENDATION_RUNNING_COMMANDS: [&str; 3] = ["activity", "runs", "back"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RecommendationModel {
@@ -55,9 +56,15 @@ pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
         summary: report.as_ref().and_then(|view| view.summary.clone()),
         report_headers: RECOMMENDATION_REPORT_HEADERS,
         report_commands: RECOMMENDATION_REPORT_COMMANDS,
-        empty_state: recommendation_empty_state(),
+        empty_state: recommendation_empty_state(recommender_running(app)),
         rows: report.map(|view| view.rows).unwrap_or_default(),
     }
+}
+
+/// True while the deterministic recommender is in flight, so the view can show
+/// a "ranking…" state instead of inviting the operator to (re-)run it.
+fn recommender_running(app: &ShellApp) -> bool {
+    app.tool_running.as_deref() == Some("module-recommender:recommend")
 }
 
 fn recommendation_detail_rows(
@@ -83,7 +90,21 @@ fn recommendation_detail_row(label: &str, value: String) -> RecommendationDetail
     }
 }
 
-fn recommendation_empty_state() -> RecommendationEmptyState {
+fn recommendation_empty_state(running: bool) -> RecommendationEmptyState {
+    if running {
+        return RecommendationEmptyState {
+            title: "ranking modules…",
+            explanations: [
+                "module-recommender:recommend is running for this workspace.",
+                "results will appear here automatically when it finishes.",
+            ],
+            actions: [
+                ("(running)", "no action needed — sit tight"),
+                ("runs", "inspect persisted runs"),
+            ],
+            commands: RECOMMENDATION_RUNNING_COMMANDS,
+        };
+    }
     RecommendationEmptyState {
         title: "no recommendations artifact",
         explanations: [
@@ -360,6 +381,18 @@ mod tests {
         let latest_path = ui_latest_run_path(Some(root));
         fs::create_dir_all(latest_path.parent().unwrap()).unwrap();
         fs::write(latest_path, "\n").unwrap();
+    }
+
+    #[test]
+    fn empty_state_shows_ranking_while_recommender_runs() {
+        let running = recommendation_empty_state(true);
+        assert_eq!(running.title, "ranking modules…");
+        // Must NOT invite a re-run while it's already in flight.
+        assert!(!running.commands.iter().any(|c| c.contains("module-recommender")));
+
+        let idle = recommendation_empty_state(false);
+        assert_eq!(idle.title, "no recommendations artifact");
+        assert!(idle.commands.iter().any(|c| c.contains("module-recommender")));
     }
 
     #[test]

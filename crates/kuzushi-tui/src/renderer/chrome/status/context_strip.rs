@@ -84,10 +84,12 @@ fn push_context_segment(spans: &mut Vec<Span<'static>>, context_state: &'static 
     match context_state {
         "present" => {
             spans.push(Span::styled("✓ ", theme::success()));
-            spans.push(Span::styled("present", theme::primary()));
+            spans.push(Span::styled("built", theme::primary()));
         }
+        // Only a malformed snapshot is a real problem (warn). "Not built" is a
+        // normal optional state — keep it muted so it doesn't read as an error.
         "malformed" => spans.push(Span::styled("malformed", theme::warn())),
-        _ => spans.push(Span::styled("missing", theme::warn())),
+        _ => spans.push(Span::styled("not built", theme::muted())),
     }
     push_separator(spans);
 }

@@ -1,3 +1,11 @@
+// This crate flattens its module tree with pervasive `pub(crate) use mod::*`
+// re-exports and `use super::*` so sibling modules — and especially the
+// `#[cfg(test)]` submodules — share a single namespace. The compiler can't see
+// the test-only uses when linting the lib target, so it reports ~190
+// false-positive `unused_imports`. Removing them (e.g. via `cargo fix`) breaks
+// the test build. Suppress the lint crate-wide rather than churn 100+ files.
+#![allow(unused_imports)]
+
 pub(crate) use app::*;
 pub(crate) use commands::*;
 pub(crate) use renderer::*;

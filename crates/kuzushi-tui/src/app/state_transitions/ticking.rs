@@ -3,33 +3,60 @@ use super::*;
 impl ShellApp {
     pub fn tick(&mut self) -> bool {
         let mut changed = false;
-        if let Some(armed_at) = self.ctrl_c_armed_at {
-            if Instant::now().duration_since(armed_at) > CTRL_C_ARM_WINDOW {
-                self.ctrl_c_armed_at = None;
-                changed = true;
-            }
-        }
-        if let Some(throttle) = &self.advisory.throttle {
-            if Instant::now().duration_since(throttle.since) > THROTTLE_STALE_AFTER {
-                self.advisory.throttle = None;
-                changed = true;
-            }
-        }
-        if self.has_running_work() {
-            let now = Instant::now();
-            let due = self
-                .last_spinner_advance
-                .map(|prev| now.duration_since(prev) >= SPINNER_FRAME)
-                .unwrap_or(true);
-            if due {
-                self.spinner_phase = self.spinner_phase.wrapping_add(1);
-                self.last_spinner_advance = Some(now);
-                changed = true;
-            }
-        } else {
-            self.last_spinner_advance = None;
-        }
+        changed |= self.expire_ctrl_c_arm();
+        changed |= self.expire_stale_advisory(AdvisoryKind::Throttle);
+        changed |= self.expire_stale_advisory(AdvisoryKind::Notice);
+        changed |= self.advance_spinner();
         changed
+    }
+
+    fn expire_ctrl_c_arm(&mut self) -> bool {
+        let Some(armed_at) = self.ctrl_c_armed_at else {
+            return false;
+        };
+        if Instant::now().duration_since(armed_at) <= CTRL_C_ARM_WINDOW {
+            return false;
+        }
+        self.ctrl_c_armed_at = None;
+        true
+    }
+
+    fn expire_stale_advisory(&mut self, kind: AdvisoryKind) -> bool {
+        let Some(since) = kind.since(self) else {
+            return false;
+        };
+        if Instant::now().duration_since(since) <= kind.stale_after() {
+            return false;
+        }
+        kind.clear(self);
+        true
+    }
+
+    fn advance_spinner(&mut self) -> bool {
+        if !self.has_running_work() {
+            return self.reset_spinner();
+        }
+        let now = Instant::now();
+        let due = self
+            .last_spinner_advance
+            .map(|prev| now.duration_since(prev) >= SPINNER_FRAME)
+            .unwrap_or(true);
+        if !due {
+            return false;
+        }
+        self.spinner_phase = self.spinner_phase.wrapping_add(1);
+        self.last_spinner_advance = Some(now);
+        true
+    }
+
+    /// Clear the animation when work finishes so no frozen glyph lingers.
+    fn reset_spinner(&mut self) -> bool {
+        self.last_spinner_advance = None;
+        if self.spinner_phase == 0 {
+            return false;
+        }
+        self.spinner_phase = 0;
+        true
     }
 
     pub fn has_running_work(&self) -> bool {
@@ -69,6 +96,41 @@ impl ShellApp {
         self.advisory.throttle = None;
     }
 
+    /// Surface a transient error banner (red) and keep the transcript record.
+    pub fn set_error_notice(&mut self, source: impl Into<String>, message: impl Into<String>) {
+        self.set_notice(NoticeSeverity::Error, source, message);
+    }
+
+    /// Surface a transient warning banner (amber) and keep the transcript record.
+    pub fn set_warn_notice(&mut self, source: impl Into<String>, message: impl Into<String>) {
+        self.set_notice(NoticeSeverity::Warn, source, message);
+    }
+
+    fn set_notice(
+        &mut self,
+        severity: NoticeSeverity,
+        source: impl Into<String>,
+        message: impl Into<String>,
+    ) {
+        let source = source.into();
+        let message = message.into();
+        let prefix = match severity {
+            NoticeSeverity::Error => "error",
+            NoticeSeverity::Warn => source.as_str(),
+        };
+        self.log(prefix, message.clone());
+        self.advisory.notice = Some(Notice {
+            source,
+            message,
+            severity,
+            since: Instant::now(),
+        });
+    }
+
+    pub fn clear_notice(&mut self) {
+        self.advisory.notice = None;
+    }
+
     pub fn is_budget_halted(&self) -> bool {
         self.advisory.budget_halt.is_some()
     }
@@ -77,5 +139,36 @@ impl ShellApp {
         self.last_tool_cost_usd = Some(cost_usd);
         self.session_cost_usd += cost_usd;
         self.maybe_trigger_budget_halt();
+    }
+}
+
+/// The two transient banners that auto-expire in `tick`. Lets one helper
+/// (`expire_stale_advisory`) drive both without duplicating the timer logic.
+#[derive(Clone, Copy)]
+enum AdvisoryKind {
+    Throttle,
+    Notice,
+}
+
+impl AdvisoryKind {
+    fn since(self, app: &ShellApp) -> Option<Instant> {
+        match self {
+            AdvisoryKind::Throttle => app.advisory.throttle.as_ref().map(|t| t.since),
+            AdvisoryKind::Notice => app.advisory.notice.as_ref().map(|n| n.since),
+        }
+    }
+
+    fn stale_after(self) -> std::time::Duration {
+        match self {
+            AdvisoryKind::Throttle => THROTTLE_STALE_AFTER,
+            AdvisoryKind::Notice => NOTICE_STALE_AFTER,
+        }
+    }
+
+    fn clear(self, app: &mut ShellApp) {
+        match self {
+            AdvisoryKind::Throttle => app.advisory.throttle = None,
+            AdvisoryKind::Notice => app.advisory.notice = None,
+        }
     }
 }

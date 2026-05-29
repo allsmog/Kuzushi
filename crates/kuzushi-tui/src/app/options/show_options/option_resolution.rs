@@ -2,40 +2,53 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn resolve_options_tool(&self, requested: Option<String>) -> Result<String> {
-        if let Some(tool_name) = requested {
-            // `options .` mirrors `run .` — operate on the focused module's
-            // primary tool. The module-view footer hint advertises this
-            // ("help options . · prompts · tune · back") so it must work.
-            if tool_name == "." {
-                if let Some(default) = self.default_tool_for_focused_module() {
-                    return Ok(default);
-                }
-                anyhow::bail!("`options .` requires a focused module. Next: use <module>");
-            }
-            let resolved = self.resolve_focused_tool_name(tool_name.clone());
-            if self.registry.resolve_tool(&resolved).is_some() {
-                return Ok(resolved);
-            }
-            if self.registry.resolve_tool(&tool_name).is_some() {
-                return Ok(tool_name);
-            }
-            anyhow::bail!("unknown tool {tool_name:?}. Next: tools");
+        match requested {
+            Some(tool_name) => self.resolve_requested_options_tool(tool_name),
+            None => self.default_options_tool(),
         }
+    }
 
+    /// The implicit options target when none is named: the open Options view,
+    /// else the focused module's tool, else the SAST umbrella, else any tool.
+    fn default_options_tool(&self) -> Result<String> {
         if let ShellView::Options(view) = &self.shell_view {
             return Ok(view.tool_name.clone());
         }
-        if let Some(tool_name) = self.default_tool_for_focused_module() {
-            return Ok(tool_name);
-        }
-        if self.registry.resolve_tool("sast:scan").is_some() {
-            return Ok("sast:scan".to_string());
-        }
-        self.registry
-            .tools()
-            .next()
-            .map(|tool| tool.name.clone())
+        self.default_tool_for_focused_module()
+            .or_else(|| {
+                self.registry
+                    .resolve_tool("sast:scan")
+                    .map(|_| "sast:scan".to_string())
+            })
+            .or_else(|| self.registry.tools().next().map(|tool| tool.name.clone()))
             .context("no tools are loaded. Next: modules")
+    }
+
+    /// Resolve an explicitly-requested options target: `.` (focused module),
+    /// a tool id (possibly module-prefixed), or a bare module id → its primary
+    /// tool. Operators think in modules, so `options semgrep` must work.
+    fn resolve_requested_options_tool(&self, tool_name: String) -> Result<String> {
+        if tool_name == "." {
+            return self
+                .default_tool_for_focused_module()
+                .context("`options .` requires a focused module. Next: use <module>");
+        }
+        self.lookup_options_tool(&tool_name).with_context(|| {
+            format!("unknown tool {tool_name:?}. Next: `tools` to list, or `options {tool_name}:<verb>`")
+        })
+    }
+
+    /// Map a requested name to a real tool id: module-prefixed form, exact tool
+    /// id, or a bare module id resolved to its primary tool.
+    fn lookup_options_tool(&self, tool_name: &str) -> Option<String> {
+        let resolved = self.resolve_focused_tool_name(tool_name.to_string());
+        if self.registry.resolve_tool(&resolved).is_some() {
+            return Some(resolved);
+        }
+        if self.registry.resolve_tool(tool_name).is_some() {
+            return Some(tool_name.to_string());
+        }
+        self.default_tool_for_module(tool_name)
     }
 
     pub(crate) fn current_options_filter(&self) -> OptionsFilter {

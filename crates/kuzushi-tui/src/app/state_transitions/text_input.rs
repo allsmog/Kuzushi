@@ -75,7 +75,7 @@ impl ShellApp {
             let kept = first_line.chars().count();
             self.insert_str_at_cursor(first_line);
             let dropped_lines = normalised.lines().count().saturating_sub(1);
-            self.log(
+            self.set_warn_notice(
                 "paste",
                 format!(
                     "kept first line ({kept}/{total} chars); dropped {dropped_lines} more line(s). Submit, then paste the next part."

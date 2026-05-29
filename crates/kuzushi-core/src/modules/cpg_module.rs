@@ -1,7 +1,7 @@
 use super::*;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub(in crate::modules) fn cpg_module() -> BuiltinModule {
@@ -47,12 +47,9 @@ pub(in crate::modules) fn run_cpg_build(
         format!("cpg:build start · joern-parse {}", target.display()),
     );
     let started = Instant::now();
-    let status = invoke_joern_parse(&bin, &target, &output_path)?;
-    if !status.success() {
-        anyhow::bail!(
-            "joern-parse exited with status {:?}; check that the target is a parseable source tree",
-            status.code()
-        );
+    let output = invoke_joern_parse(&bin, &target, &output_path)?;
+    if let Some(skip) = joern_outcome(ctx, &target, &output)? {
+        return Ok(skip);
     }
     let elapsed_ms = started.elapsed().as_millis() as u64;
     let bytes = fs::metadata(&output_path).map(|meta| meta.len()).unwrap_or(0);
@@ -115,13 +112,83 @@ fn invoke_joern_parse(
     bin: &Path,
     target: &Path,
     output_path: &Path,
-) -> Result<std::process::ExitStatus> {
+) -> Result<std::process::Output> {
+    // Capture stdout/stderr instead of inheriting them: joern is noisy and,
+    // when kuzushi runs inside the Ratatui alternate screen, inherited child
+    // output corrupts the TUI. The captured stderr is surfaced on failure.
     Command::new(bin)
         .arg(target)
         .arg("--output")
         .arg(output_path)
-        .status()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
         .with_context(|| format!("spawning {}", bin.display()))
+}
+
+/// Interpret a finished joern-parse run: `Ok(None)` on success, `Ok(Some(skip))`
+/// when an incomplete-install (missing astgen) makes a graceful skip the right
+/// call, or an error otherwise.
+fn joern_outcome(
+    ctx: &ToolExecutionContext<'_>,
+    target: &Path,
+    output: &std::process::Output,
+) -> Result<Option<Value>> {
+    if output.status.success() {
+        return Ok(None);
+    }
+    if let Some(skip) = joern_environment_skip(target, &output.stderr) {
+        // Emit a terminal step so the Activity DAG row resolves (not left
+        // spinning) and reads as a clean skip rather than a failure.
+        emit_step(ctx, "done", "build", "cpg:build skipped — joern astgen frontend missing");
+        return Ok(Some(skip));
+    }
+    bail_on_joern_failure(output)?;
+    Ok(None)
+}
+
+fn bail_on_joern_failure(output: &std::process::Output) -> Result<()> {
+    if output.status.success() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "joern-parse exited with status {:?}: {}",
+        output.status.code(),
+        crate::module_result::subprocess_failure_summary(
+            &output.stderr,
+            "check that the target is a parseable source tree"
+        )
+    )
+}
+
+/// A joern install can be on PATH yet incomplete — most commonly its `astgen`
+/// language-frontend helper is missing (Homebrew joern downloads it lazily and
+/// the download can fail). That is a missing optional dependency, not a scan
+/// failure, so skip gracefully with actionable guidance instead of erroring and
+/// cancelling the planning queue.
+fn joern_environment_skip(target: &Path, stderr: &[u8]) -> Option<Value> {
+    let text = String::from_utf8_lossy(stderr).to_ascii_lowercase();
+    let astgen_missing = text.contains("astgen")
+        && (text.contains("not found")
+            || text.contains("does not exist")
+            || text.contains("not executable"));
+    if !astgen_missing {
+        return None;
+    }
+    let output = "cpg:build skipped — Joern is installed but its `astgen` language frontend is \
+         missing, so it cannot parse this target. Reinstall Joern (e.g. `brew reinstall joern`) \
+         or set ASTGEN_BIN to a working astgen binary, then re-run cpg:build."
+        .to_string();
+    Some(crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
+            "target": target.display().to_string(),
+            "skipped": true,
+            "reason": "joern astgen frontend not installed",
+        }),
+    ))
 }
 
 fn skipped_response(target: &Path, missing_bin: &str) -> Value {
@@ -179,5 +246,26 @@ fn now_ms() -> Result<u64> {
 fn emit_step(ctx: &ToolExecutionContext<'_>, kind: &str, verb: &str, label: impl Into<String>) {
     if let Some(trace) = ctx.trace {
         let _ = trace.step(kind, verb, label.into()).emit();
+    }
+}
+
+#[cfg(test)]
+mod joern_skip_tests {
+    use super::joern_environment_skip;
+    use std::path::Path;
+
+    #[test]
+    fn missing_astgen_is_a_graceful_skip() {
+        let stderr = b"ERROR AstGenRunner Local astgen binary not found at '/x/astgen' or is not executable!";
+        let skip = joern_environment_skip(Path::new("/tmp/t"), stderr)
+            .expect("astgen-missing should map to a skip");
+        assert_eq!(skip["data"]["skipped"], true);
+        assert!(skip["output"].as_str().unwrap().contains("astgen"));
+    }
+
+    #[test]
+    fn genuine_parse_error_is_not_skipped() {
+        let stderr = b"java.lang.RuntimeException: could not parse source tree";
+        assert!(joern_environment_skip(Path::new("/tmp/t"), stderr).is_none());
     }
 }

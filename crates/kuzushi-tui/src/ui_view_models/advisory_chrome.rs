@@ -1,9 +1,30 @@
-use crate::{BudgetHalt, ShellApp, ThrottleAdvisory};
+use crate::{BudgetHalt, Notice, NoticeSeverity, ShellApp, ThrottleAdvisory};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ThrottleBannerModel {
     pub(crate) source: String,
     pub(crate) message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NoticeBannerModel {
+    pub(crate) source: String,
+    pub(crate) message: String,
+    pub(crate) severity: NoticeSeverity,
+}
+
+pub(crate) fn notice_banner_model(app: &ShellApp) -> Option<NoticeBannerModel> {
+    app.advisory.notice.as_ref().map(NoticeBannerModel::from_notice)
+}
+
+impl NoticeBannerModel {
+    fn from_notice(notice: &Notice) -> Self {
+        Self {
+            source: notice.source.clone(),
+            message: notice.message.clone(),
+            severity: notice.severity,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

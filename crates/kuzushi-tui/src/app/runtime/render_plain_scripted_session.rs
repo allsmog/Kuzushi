@@ -34,6 +34,10 @@ pub(crate) fn setup_terminal_stdout() -> Result<Stdout> {
 
 fn raw_terminal_stdout() -> Result<Stdout> {
     enable_raw_mode().context("Could not enable raw mode")?;
+    // Enter the alternate screen so the shell owns a dedicated full-screen
+    // buffer: the terminal has no scrollback to drift through, the view stays
+    // locked in place, and rendered frames don't pile into the user's history.
+    execute!(io::stdout(), EnterAlternateScreen).context("Could not enter alternate screen")?;
     reset_terminal_viewport()
 }
 
@@ -76,7 +80,8 @@ pub(crate) fn restore_terminal(terminal: &mut Terminal<CrosstermBackend<Stdout>>
     let _ = execute!(
         terminal.backend_mut(),
         DisableMouseCapture,
-        DisableBracketedPaste
+        DisableBracketedPaste,
+        LeaveAlternateScreen
     );
     disable_raw_mode().context("Could not disable raw mode")?;
     terminal

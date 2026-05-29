@@ -1,5 +1,5 @@
 use super::*;
-use crate::{AdvisoryState, BudgetHalt, ThrottleAdvisory};
+use crate::{AdvisoryState, BudgetHalt, Notice, NoticeSeverity, ThrottleAdvisory};
 use std::time::Instant;
 
 #[test]
@@ -40,4 +40,21 @@ fn advisory_models_are_absent_without_active_advisories() {
 
     assert!(throttle_banner_model(&app).is_none());
     assert!(cost_cap_halt_model(&app).is_none());
+    assert!(notice_banner_model(&app).is_none());
+}
+
+#[test]
+fn notice_banner_model_copies_source_message_and_severity() {
+    let notice = Notice {
+        source: "tool".to_string(),
+        message: "semgrep:scan failed".to_string(),
+        severity: NoticeSeverity::Error,
+        since: Instant::now(),
+    };
+
+    let model = NoticeBannerModel::from_notice(&notice);
+
+    assert_eq!(model.source, "tool");
+    assert_eq!(model.message, "semgrep:scan failed");
+    assert_eq!(model.severity, NoticeSeverity::Error);
 }

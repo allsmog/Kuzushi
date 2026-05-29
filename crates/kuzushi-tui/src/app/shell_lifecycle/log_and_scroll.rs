@@ -66,11 +66,10 @@ impl ShellApp {
         };
         match session.pane_focus {
             PaneFocus::Left => {
-                if amount.is_negative() {
-                    session.task_scroll = session.task_scroll.saturating_sub(amount.unsigned_abs());
-                } else {
-                    session.task_scroll = session.task_scroll.saturating_add(amount as usize);
-                }
+                // Clamp to the row count so a short DAG can't be scrolled into
+                // empty space — there's nothing to reveal past the last task.
+                let max = session.tasks.len().saturating_sub(1);
+                session.task_scroll = shift_clamped(session.task_scroll, amount, max);
             }
             PaneFocus::Right => {
                 // Manual feed scroll unpins live auto-tail so the operator
@@ -78,11 +77,8 @@ impl ShellApp {
                 // is reset by `G` (scroll-to-bottom). `paused` is decoupled
                 // — toggling pause does not unpin the position.
                 session.feed_auto_tail = false;
-                if amount.is_negative() {
-                    session.feed_scroll = session.feed_scroll.saturating_sub(amount.unsigned_abs());
-                } else {
-                    session.feed_scroll = session.feed_scroll.saturating_add(amount as usize);
-                }
+                let max = session.events.len().saturating_sub(1);
+                session.feed_scroll = shift_clamped(session.feed_scroll, amount, max);
             }
         }
     }
@@ -103,6 +99,17 @@ impl ShellApp {
 
     fn push_nav_history(&mut self, view: ShellView) {
         const NAV_HISTORY_DEPTH: usize = 16;
+        // Onboarding pickers are transient — `back` should never drop the user
+        // back into a model/auth/planning picker they already dismissed.
+        if matches!(
+            view,
+            ShellView::CommandPalette
+                | ShellView::ModelPicker
+                | ShellView::AuthMethodPicker(_)
+                | ShellView::PlanningPicker
+        ) {
+            return;
+        }
         if self.nav_history.last() == Some(&view) {
             return;
         }
@@ -111,5 +118,40 @@ impl ShellApp {
             let excess = self.nav_history.len() - NAV_HISTORY_DEPTH;
             self.nav_history.drain(..excess);
         }
+    }
+}
+
+/// Apply a signed scroll delta and clamp the result to `[0, max]`, so a pane
+/// can't be scrolled past its content into empty space.
+fn shift_clamped(current: usize, amount: isize, max: usize) -> usize {
+    let next = if amount.is_negative() {
+        current.saturating_sub(amount.unsigned_abs())
+    } else {
+        current.saturating_add(amount as usize)
+    };
+    next.min(max)
+}
+
+#[cfg(test)]
+mod shift_clamped_tests {
+    use super::shift_clamped;
+
+    #[test]
+    fn cannot_scroll_past_content() {
+        // Short content (max index 1): scrolling down hard stays clamped.
+        assert_eq!(shift_clamped(0, 5, 1), 1);
+        assert_eq!(shift_clamped(1, 3, 1), 1);
+    }
+
+    #[test]
+    fn empty_content_never_scrolls() {
+        assert_eq!(shift_clamped(0, 9, 0), 0);
+    }
+
+    #[test]
+    fn scrolls_up_and_down_within_bounds() {
+        assert_eq!(shift_clamped(3, 2, 10), 5);
+        assert_eq!(shift_clamped(5, -2, 10), 3);
+        assert_eq!(shift_clamped(1, -9, 10), 0);
     }
 }

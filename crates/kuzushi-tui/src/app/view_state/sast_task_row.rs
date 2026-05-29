@@ -123,6 +123,11 @@ pub enum ShellView {
     /// (queued / active / done / failing per task), right shows a tagged
     /// reasoning feed `[module:verb]`. Session state lives on `app.activity`.
     Activity,
+    /// Fuzzy command palette (Ctrl+G). Filters every `SHELL_COMMAND_SPECS`
+    /// entry by `app.palette_query`; Enter loads the selected command's
+    /// canonical head into the prompt (never auto-executes). State lives on
+    /// `app.palette_query` / `app.palette_cursor`.
+    CommandPalette,
     /// First-run model picker. Lists the entries in `MODEL_CHOICES` and
     /// lets the operator pick one with ↑/↓/Enter. Esc falls through to
     /// `Catalog`. Opened only when `config.model.is_none()` at shell
@@ -153,4 +158,12 @@ pub struct CompletionCycle {
     pub prefix: String,
     pub candidates: Vec<String>,
     pub index: usize,
+}
+
+/// Active Ctrl+R reverse-history search. `cursor` indexes into the live match
+/// list (most-recent first) computed from `command_history`.
+#[derive(Debug, Clone, Default)]
+pub struct HistorySearch {
+    pub query: String,
+    pub cursor: usize,
 }

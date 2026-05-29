@@ -38,6 +38,8 @@ pub struct ShellApp {
     pub registry: ModuleRegistry,
     pub option_store: ToolOptionStore,
     pub command_history: Vec<String>,
+    /// Active Ctrl+R reverse-history search, when the operator is searching.
+    pub history_search: Option<HistorySearch>,
     pub session_cost_usd: f64,
     pub last_tool_cost_usd: Option<f64>,
     pub selected_model_index: usize,
@@ -62,6 +64,10 @@ pub struct ShellApp {
     pub pending_plan: Option<PlanProposal>,
     pub plan_cursor: usize,
     pub plan_skipped: BTreeSet<usize>,
+    /// Command-palette (Ctrl+G) fuzzy query and cursor. Persisted on the app
+    /// so typing/arrowing survives re-renders.
+    pub palette_query: String,
+    pub palette_cursor: usize,
     /// First-run model-picker cursor. Persisted on the app so `↑`/`↓`
     /// keep their position across re-renders.
     pub model_picker_cursor: usize,

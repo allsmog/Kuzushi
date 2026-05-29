@@ -62,7 +62,8 @@ impl ShellApp {
             }
             ViewHotkeyAction::FindingsOpen => {
                 if self.findings.is_empty() {
-                    return Some(false);
+                    self.log("findings", "no findings yet — run `scan` first");
+                    return Some(true);
                 }
                 self.open_finding_at_cursor();
                 Some(true)
@@ -77,6 +78,8 @@ impl ShellApp {
             ViewHotkeyAction::ViewScrollDown => self.scroll_down(1),
             ViewHotkeyAction::ViewScrollTop => self.scroll_to_top(),
             ViewHotkeyAction::ViewScrollBottom => self.scroll_to_bottom(),
+            ViewHotkeyAction::ViewPageUp => self.page_up_current_view(),
+            ViewHotkeyAction::ViewPageDown => self.page_down_current_view(),
             _ => return false,
         }
         true
@@ -123,6 +126,7 @@ impl ShellApp {
             ViewHotkeyAction::ResumeScan => {
                 self.handle_command(ShellCommand::Resume(None));
             }
+            ViewHotkeyAction::Back => self.go_back(),
             _ => return false,
         }
         true

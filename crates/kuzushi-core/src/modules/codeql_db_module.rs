@@ -1,7 +1,7 @@
 use super::*;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub(in crate::modules) fn codeql_db_module() -> BuiltinModule {
@@ -46,35 +46,20 @@ pub(in crate::modules) fn run_codeql_create_db(
     let language = resolve_language(input, &target);
     let output_path = resolve_db_output_path(input, &target);
     prepare_db_directory(&output_path)?;
-    emit_step(
-        ctx,
-        "tool",
-        "create-db",
-        format!(
-            "codeql:create-db start · language={} target={}",
-            language,
-            target.display()
-        ),
+    let start_label = format!(
+        "codeql:create-db start · language={language} target={}",
+        target.display()
     );
+    emit_step(ctx, "tool", "create-db", start_label);
     let started = Instant::now();
-    let status = invoke_codeql_create(&bin, &target, &output_path, &language)?;
-    if !status.success() {
-        anyhow::bail!(
-            "`codeql database create` exited with status {:?}; check the language flag and the source-root",
-            status.code()
-        );
-    }
+    let output = invoke_codeql_create(&bin, &target, &output_path, &language)?;
+    bail_on_codeql_failure(&output)?;
     let elapsed_ms = started.elapsed().as_millis() as u64;
-    emit_step(
-        ctx,
-        "done",
-        "create-db",
-        format!(
-            "codeql:create-db complete · {} in {} ms",
-            output_path.display(),
-            elapsed_ms
-        ),
+    let done_label = format!(
+        "codeql:create-db complete · {} in {elapsed_ms} ms",
+        output_path.display()
     );
+    emit_step(ctx, "done", "create-db", done_label);
     let timestamp = now_ms()?;
     Ok(codeql_db_response(
         &target,
@@ -160,7 +145,10 @@ fn invoke_codeql_create(
     target: &Path,
     output_path: &Path,
     language: &str,
-) -> Result<std::process::ExitStatus> {
+) -> Result<std::process::Output> {
+    // Capture stdout/stderr rather than inheriting the terminal — otherwise
+    // codeql's progress output corrupts the Ratatui shell. Stderr is surfaced
+    // on failure.
     Command::new(bin)
         .arg("database")
         .arg("create")
@@ -170,8 +158,25 @@ fn invoke_codeql_create(
         .arg("--source-root")
         .arg(target)
         .arg("--overwrite")
-        .status()
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
         .with_context(|| format!("spawning {}", bin.display()))
+}
+
+fn bail_on_codeql_failure(output: &std::process::Output) -> Result<()> {
+    if output.status.success() {
+        return Ok(());
+    }
+    anyhow::bail!(
+        "`codeql database create` exited with status {:?}: {}",
+        output.status.code(),
+        crate::module_result::subprocess_failure_summary(
+            &output.stderr,
+            "check the language flag and the source-root"
+        )
+    )
 }
 
 fn skipped_response(target: &Path) -> Value {

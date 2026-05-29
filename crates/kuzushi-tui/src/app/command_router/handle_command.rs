@@ -11,26 +11,46 @@ impl ShellApp {
 
     pub fn submit_line(&mut self, raw: &str) {
         let trimmed = raw.trim();
-        // Empty / whitespace-only Enter is a no-op. Logging an empty `>`
-        // bullet just clutters the 2-row transcript with `· ` rows the
-        // operator never asked for.
+        // Empty / whitespace-only Enter is a no-op (P-NEW-3): logging an empty
+        // `>` bullet just clutters the 2-row transcript with rows the operator
+        // never asked for.
         if trimmed.is_empty() {
             return;
         }
         self.log(">", raw.to_string());
         self.remember_command(trimmed);
+        if self.handle_subverb_query(trimmed) {
+            return;
+        }
         if self.handle_editor_local_command(trimmed) {
             return;
         }
         self.handle_command(parse_command(raw));
     }
 
+    /// `<group-verb> ?` lists the verb's sub-verbs inline. Editor-local so it
+    /// adds no `ShellCommand` route; the listing comes from the same
+    /// `subverb_listing` table Tab-completion uses, so they never drift.
+    fn handle_subverb_query(&mut self, trimmed: &str) -> bool {
+        let stripped = trimmed.strip_prefix('/').unwrap_or(trimmed);
+        let mut words = stripped.split_whitespace();
+        let (Some(verb), Some("?"), None) = (words.next(), words.next(), words.next()) else {
+            return false;
+        };
+        let Some(subverbs) = subverb_listing(verb) else {
+            return false;
+        };
+        self.log(verb, format!("sub-verbs: {}", subverbs.join(", ")));
+        true
+    }
+
     fn remember_command(&mut self, trimmed: &str) {
         self.command_history.push(trimmed.to_string());
-        if self.command_history.len() > 200 {
-            let overflow = self.command_history.len() - 200;
+        if self.command_history.len() > COMMAND_HISTORY_CAP {
+            let overflow = self.command_history.len() - COMMAND_HISTORY_CAP;
             self.command_history.drain(0..overflow);
         }
+        self.persist_command_history();
     }
 
     fn handle_editor_local_command(&mut self, trimmed: &str) -> bool {

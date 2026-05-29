@@ -9,6 +9,9 @@ pub(crate) struct PromptModel {
 }
 
 pub(crate) fn prompt_model(app: &ShellApp) -> PromptModel {
+    if let Some(search) = app.history_search.as_ref() {
+        return reverse_search_prompt(app, &search.query);
+    }
     PromptModel {
         prefix: prompt_text(
             prompt_brand(),
@@ -17,6 +20,17 @@ pub(crate) fn prompt_model(app: &ShellApp) -> PromptModel {
         ),
         input: app.input.clone(),
         cursor: app.cursor,
+    }
+}
+
+fn reverse_search_prompt(app: &ShellApp, query: &str) -> PromptModel {
+    let prefix = format!("(reverse-i-search)`{query}': ");
+    let input = app.current_history_match().unwrap_or("").to_string();
+    let cursor = input.chars().count();
+    PromptModel {
+        prefix,
+        input,
+        cursor,
     }
 }
 

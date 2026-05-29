@@ -82,7 +82,9 @@ pub(crate) use activity_plain_rows::{
 };
 pub(crate) use activity_view::{activity_view_model, ActiveActivityViewModel, ActivityViewModel};
 pub(crate) use actor_detail::{actor_detail_model, ActorDetailModel, ActorTranscriptRow};
-pub(crate) use advisory_chrome::{cost_cap_halt_model, throttle_banner_model, CostCapHaltModel};
+pub(crate) use advisory_chrome::{
+    cost_cap_halt_model, notice_banner_model, throttle_banner_model, CostCapHaltModel,
+};
 pub(crate) use agent_chat::{agent_chat_model, AgentChatModel, AgentChatSession, AgentChatTurn};
 pub(crate) use attack_surface::{attack_surface_risk_model, AttackSurfaceRiskModel};
 pub(crate) use auth::{

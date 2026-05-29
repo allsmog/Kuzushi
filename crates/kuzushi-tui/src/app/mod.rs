@@ -38,6 +38,7 @@ mod approval;
 mod artifacts;
 mod background_events;
 mod catalog;
+mod command_palette;
 mod command_router;
 mod findings;
 mod line_editor;
@@ -114,9 +115,9 @@ pub(crate) use settings::{
 pub use shellapp::ShellApp;
 pub use view_state::{
     ActivitySession, ActorDetailFilter, AdvisoryState, AuthLoginView, BudgetHalt, CompletionCycle,
-    ContextSnapshotView, DagTaskRow, DagTaskState, ExploitChain, KnowledgeBaseView, OptionsFilter,
-    OptionsView, PaneFocus, PlanChange, PlanProposal, PromptsAction, PwnView, ReconSnapshot,
-    RecordedTraceEvent, ScanPanelState, ShellView, SubsystemAggregate, ThreatPatch, ThreatView,
-    ThrottleAdvisory, TuneAction, WorkspaceView,
+    ContextSnapshotView, DagTaskRow, DagTaskState, ExploitChain, HistorySearch, KnowledgeBaseView,
+    Notice, NoticeSeverity, OptionsFilter, OptionsView, PaneFocus, PlanChange, PlanProposal,
+    PromptsAction, PwnView, ReconSnapshot, RecordedTraceEvent, ScanPanelState, ShellView,
+    SubsystemAggregate, ThreatPatch, ThreatView, ThrottleAdvisory, TuneAction, WorkspaceView,
 };
 pub(crate) use view_state::{SastTaskMode, SastTaskRow};

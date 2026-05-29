@@ -65,6 +65,7 @@ pub(crate) enum SystemViewRoute<'a> {
     Tools { scroll: usize },
     Options(&'a OptionsView),
     SastTasks,
+    CommandPalette,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -183,6 +184,7 @@ fn system_view_route(app: &ShellApp) -> Option<SystemViewRoute<'_>> {
         }),
         ShellView::Options(view) => Some(SystemViewRoute::Options(view)),
         ShellView::SastTasks => Some(SystemViewRoute::SastTasks),
+        ShellView::CommandPalette => Some(SystemViewRoute::CommandPalette),
         _ => None,
     }
 }

@@ -92,6 +92,7 @@ pub(crate) fn system_view_lines(
         }
         SystemViewRoute::Options(view) => options_lines(app, area, view),
         SystemViewRoute::SastTasks => sast_tasks_lines(app, area),
+        SystemViewRoute::CommandPalette => command_palette_lines(app, area),
     }
 }
 

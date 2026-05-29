@@ -1,6 +1,5 @@
 use super::confirmation_keys::{confirm_key_action, ConfirmKeyAction};
 use super::control_keys::control_key_handler;
-use super::pending_plan_keys::pending_plan_key_handler;
 use super::*;
 
 impl ShellApp {
@@ -28,7 +27,65 @@ impl ShellApp {
     }
 
     pub(super) fn handle_modal_key(&mut self, key: KeyEvent) -> bool {
-        self.handle_prereq_prompt_key(key) || self.handle_shared_modal_key(key)
+        self.handle_prereq_prompt_key(key)
+            || self.handle_overlay_key(key)
+            || self.handle_shared_modal_key(key)
+    }
+
+    /// Command palette and Ctrl+R reverse search both fully capture input while
+    /// active. Checked before the normal key chain; Ctrl+C still falls through.
+    fn handle_overlay_key(&mut self, key: KeyEvent) -> bool {
+        if matches!(self.shell_view, ShellView::CommandPalette) {
+            return self.handle_command_palette_key(key);
+        }
+        if self.history_search.is_some() {
+            return self.handle_history_search_key(key);
+        }
+        false
+    }
+
+    /// Drive Ctrl+R reverse search. Enter accepts, Esc/Ctrl+C cancels, Ctrl+R
+    /// steps to the next match, Backspace/printables edit the query.
+    fn handle_history_search_key(&mut self, key: KeyEvent) -> bool {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        match key.code {
+            KeyCode::Esc => self.cancel_history_search(),
+            KeyCode::Char('c') if ctrl => self.cancel_history_search(),
+            KeyCode::Char('r') if ctrl => self.history_search_next(),
+            KeyCode::Enter => self.accept_history_search(),
+            KeyCode::Backspace => self.history_search_backspace(),
+            KeyCode::Char(ch) if !ctrl && !alt => self.history_search_input(ch),
+            // Any navigation key accepts the match, then the keystroke is
+            // re-dispatched normally (readline behavior).
+            _ => {
+                self.accept_history_search();
+                return false;
+            }
+        }
+        true
+    }
+
+    /// Drive the command palette while it is open. Ctrl+C falls through so the
+    /// quit chord still works; everything else (typing, arrows, Enter, Esc) is
+    /// consumed here.
+    fn handle_command_palette_key(&mut self, key: KeyEvent) -> bool {
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        let alt = key.modifiers.contains(KeyModifiers::ALT);
+        match key.code {
+            KeyCode::Esc => self.close_palette(),
+            KeyCode::Enter => self.accept_palette(),
+            KeyCode::Up => self.palette_move(-1),
+            KeyCode::Down => self.palette_move(1),
+            KeyCode::Char('p') if ctrl => self.palette_move(-1),
+            KeyCode::Char('n') if ctrl => self.palette_move(1),
+            KeyCode::Char('g') if ctrl => self.close_palette(),
+            KeyCode::Char('c') if ctrl => return false,
+            KeyCode::Backspace => self.palette_backspace(),
+            KeyCode::Char(ch) if !ctrl && !alt => self.palette_input(ch),
+            _ => return false,
+        }
+        true
     }
 
     fn handle_shared_modal_key(&mut self, key: KeyEvent) -> bool {
@@ -36,6 +93,20 @@ impl ShellApp {
             || self.handle_budget_key(key)
             || self.handle_pending_plan_key(key)
             || self.handle_picker_key(key)
+            || self.handle_notice_dismiss_key(key)
+    }
+
+    /// Esc dismisses a visible notice banner. Returns false when no notice is
+    /// present so Esc falls through to view-back / draft-restore as usual.
+    fn handle_notice_dismiss_key(&mut self, key: KeyEvent) -> bool {
+        if self.advisory.notice.is_none()
+            || key.code != KeyCode::Esc
+            || !key.modifiers.is_empty()
+        {
+            return false;
+        }
+        self.clear_notice();
+        true
     }
 
     pub(super) fn handle_confirm_key(&mut self, key: KeyEvent) -> bool {

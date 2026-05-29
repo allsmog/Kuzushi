@@ -76,6 +76,7 @@ pub(crate) struct RenderSectionSlot {
 #[derive(Clone, Copy)]
 #[repr(usize)]
 pub(crate) enum RenderSection {
+    Notice,
     Throttle,
     Status,
     Keybind,
@@ -96,6 +97,7 @@ impl RenderSection {
 type RenderSectionHandler = fn(&mut Frame<'_>, Rect, &ShellApp);
 
 const RENDER_SECTION_HANDLERS: &[RenderSectionHandler] = &[
+    render_notice_banner,
     render_throttle_banner,
     render_status_footer,
     render_keybind_footer,
@@ -109,6 +111,7 @@ const RENDER_SECTION_HANDLERS: &[RenderSectionHandler] = &[
 
 pub(crate) fn render_sections(app: &ShellApp, area: Rect) -> Vec<RenderSectionSlot> {
     [
+        section_slot(RenderSection::Notice, notice_banner_height(app, area)),
         section_slot(RenderSection::Throttle, throttle_banner_height(app, area)),
         section_slot(RenderSection::Status, status_footer_height(area)),
         section_slot(RenderSection::Keybind, keybind_footer_height(area)),

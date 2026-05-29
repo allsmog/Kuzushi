@@ -120,6 +120,16 @@ impl ConfigPaths {
             .as_ref()
             .map(crate::workspace::workspace_options_path)
     }
+
+    pub fn global_history_path(&self) -> PathBuf {
+        crate::workspace::workspace_history_path(&self.home_dir)
+    }
+
+    pub fn project_history_path(&self) -> Option<PathBuf> {
+        self.target_dir
+            .as_ref()
+            .map(crate::workspace::workspace_history_path)
+    }
 }
 
 #[derive(Debug, Default, Clone, Deserialize)]

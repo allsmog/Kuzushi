@@ -4,7 +4,7 @@ use crate::modules::ToolExecutionContext;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
 use crate::structured_output::{query_required_structured_json, StructuredJsonContract};
 use crate::whitebox_static::{
-    agentic_hunter_thinking_level, default_whitebox_static_agent_tool_policy,
+    agentic_hunter_thinking_level,
     whitebox_static_policy_for_target,
 };
 use anyhow::{Context, Result};

@@ -2180,6 +2180,21 @@ fn options_dot_resolves_to_focused_module_primary_tool() {
 }
 
 #[test]
+fn options_accepts_bare_module_id() {
+    // Operators type `options semgrep` (a module), not `options semgrep:scan`.
+    let app = ShellApp::new(V2Config::default(), None);
+    let resolved = app
+        .resolve_options_tool(Some("semgrep".to_string()))
+        .expect("a bare module id should resolve to its primary tool");
+    assert_eq!(resolved, "semgrep:scan");
+
+    let err = app
+        .resolve_options_tool(Some("does-not-exist".to_string()))
+        .expect_err("an unknown name should error helpfully");
+    assert!(err.to_string().contains("tools"));
+}
+
+#[test]
 fn tab_cycles_through_completion_candidates() {
     // P3-3: Tab used to commit only the first candidate and then no-op
     // forever. With 35 modules, cycling is the only way to discover the
@@ -3612,6 +3627,228 @@ fn throttle_advisory_expires_via_tick() {
 }
 
 #[test]
+fn scan_failure_sets_error_notice_and_keeps_log() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.apply_scan_failed("semgrep not found".to_string());
+
+    let notice = app.advisory.notice.as_ref().expect("notice surfaced");
+    assert_eq!(notice.severity, crate::NoticeSeverity::Error);
+    assert!(notice.message.contains("semgrep not found"));
+    assert!(
+        app.log.iter().any(|line| line.prefix == "error"),
+        "transcript record must be preserved"
+    );
+}
+
+#[test]
+fn esc_dismisses_notice_before_going_back() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Tools;
+    app.nav_history.push(ShellView::Catalog);
+    app.set_error_notice("tool", "boom");
+
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert!(app.advisory.notice.is_none(), "notice dismissed");
+    assert_eq!(app.shell_view, ShellView::Tools, "back deferred to next Esc");
+}
+
+#[test]
+fn notice_auto_clears_after_stale_window() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_error_notice("tool", "stale");
+    app.advisory.notice.as_mut().unwrap().since =
+        Instant::now() - (NOTICE_STALE_AFTER + Duration::from_secs(1));
+    assert!(app.tick());
+    assert!(app.advisory.notice.is_none());
+}
+
+#[test]
+fn multiline_paste_sets_warn_notice() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.handle_paste("first\nsecond\nthird");
+
+    assert_eq!(app.input, "first", "only the first line is kept");
+    let notice = app.advisory.notice.as_ref().expect("paste notice surfaced");
+    assert_eq!(notice.severity, crate::NoticeSeverity::Warn);
+    assert!(notice.message.contains("dropped 2"));
+}
+
+#[test]
+fn enter_on_empty_findings_logs_guidance() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Findings;
+    assert!(app.findings.is_empty());
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+    assert!(
+        app.log
+            .iter()
+            .any(|line| line.prefix == "findings" && line.body.contains("run `scan`")),
+        "empty-findings Enter should guide the operator"
+    );
+    assert_eq!(app.shell_view, ShellView::Findings, "stay on the view");
+}
+
+#[test]
+fn reverse_search_finds_and_accepts_a_past_command() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.command_history = vec!["scan .".to_string(), "run semgrep:scan".to_string()];
+
+    // Ctrl+R enters search; typing narrows to the matching command.
+    app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::CONTROL));
+    assert!(app.history_search.is_some());
+    for ch in "semgrep".chars() {
+        app.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty()));
+    }
+    assert_eq!(app.current_history_match(), Some("run semgrep:scan"));
+
+    // Enter accepts the match into the prompt and exits search.
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    assert!(app.history_search.is_none());
+    assert_eq!(app.input, "run semgrep:scan");
+}
+
+#[test]
+fn reverse_search_esc_cancels() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.command_history = vec!["scan .".to_string()];
+    app.enter_history_search();
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+    assert!(app.history_search.is_none());
+    assert!(app.input.is_empty());
+}
+
+#[test]
+fn command_palette_opens_filters_and_loads_without_executing() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Catalog;
+
+    // Ctrl+G opens the palette.
+    app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
+    assert_eq!(app.shell_view, ShellView::CommandPalette);
+
+    // Typing filters the specs.
+    for ch in "scan".chars() {
+        app.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty()));
+    }
+    let matches = app.palette_matches();
+    assert!(
+        matches.iter().any(|spec| spec.command.starts_with("scan")),
+        "query `scan` should surface the scan command"
+    );
+
+    // Enter loads the canonical head into the prompt but does NOT execute.
+    let before_log = app.log.len();
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    assert_ne!(app.shell_view, ShellView::CommandPalette, "palette closed");
+    assert!(!app.input.is_empty(), "selected command loaded into prompt");
+    assert!(
+        !app.log.iter().skip(before_log).any(|line| line.prefix == ">"),
+        "accepting must not submit the command"
+    );
+}
+
+#[test]
+fn command_palette_esc_closes_without_loading() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Catalog;
+    app.open_command_palette();
+    assert_eq!(app.shell_view, ShellView::CommandPalette);
+
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_ne!(app.shell_view, ShellView::CommandPalette);
+    assert!(app.input.is_empty(), "Esc cancels without loading a command");
+}
+
+#[test]
+fn subverb_query_lists_subverbs_without_routing_to_unknown() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.submit_line("task ?");
+
+    let listed = app
+        .log
+        .iter()
+        .find(|line| line.prefix == "task")
+        .expect("task sub-verbs listed");
+    assert!(listed.body.contains("block") && listed.body.contains("mode"));
+    assert!(
+        !app.log.iter().any(|line| line.body.contains("unknown command")),
+        "`task ?` must not fall through to the unknown-command path"
+    );
+}
+
+#[test]
+fn command_history_round_trips_to_disk_per_workspace() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
+
+    app.submit_line("modules");
+    app.submit_line("tools");
+
+    let path = tmp.path().join(".kuzushi/v2/shell-history.txt");
+    assert!(path.exists(), "history file should be written");
+    let contents = std::fs::read_to_string(&path).unwrap();
+    assert!(contents.contains("modules") && contents.contains("tools"));
+
+    let mut reopened = ShellApp::new(V2Config::default(), None);
+    reopened.target = Some(tmp.path().to_path_buf());
+    reopened.load_persisted_history();
+    assert_eq!(reopened.command_history, vec!["modules", "tools"]);
+}
+
+#[test]
+fn history_load_caps_at_limit() {
+    let tmp = tempfile::tempdir().unwrap();
+    let path = tmp.path().join(".kuzushi/v2/shell-history.txt");
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    let lines: Vec<String> = (0..(COMMAND_HISTORY_CAP + 50))
+        .map(|i| format!("cmd-{i}"))
+        .collect();
+    std::fs::write(&path, lines.join("\n")).unwrap();
+
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
+    app.load_persisted_history();
+
+    assert_eq!(app.command_history.len(), COMMAND_HISTORY_CAP);
+    assert_eq!(app.command_history.last().unwrap(), "cmd-249");
+}
+
+#[test]
+fn history_without_workspace_stays_in_memory_only() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    assert!(app.target.is_none());
+    app.submit_line("modules");
+    // No panic, no disk write; history is still tracked in memory.
+    assert_eq!(app.command_history, vec!["modules"]);
+}
+
+#[test]
+fn spinner_resets_when_work_completes() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.spinner_phase = 5;
+    assert!(!app.has_running_work());
+    assert!(app.tick(), "completion should force one repaint");
+    assert_eq!(app.spinner_phase, 0);
+}
+
+#[test]
+fn running_work_shows_strip_spinner_off_activity_view() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.tool_running = Some("semgrep:scan".to_string());
+    app.shell_view = ShellView::Catalog;
+
+    let model = crate::ui_view_models::context_strip_model(&app);
+    let run = model.run.expect("a run segment with a spinner");
+    assert!(run.value.contains("semgrep:scan"));
+    assert!(run.value.contains(app.spinner_glyph()));
+}
+
+#[test]
 fn budget_halt_triggers_when_cost_exceeds_cap() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.session_budget_usd = Some(0.10);
@@ -4237,6 +4474,12 @@ fn keybind_advertised_findings_hotkeys_drive_state_transitions() {
                     Some(expected.as_str())
                 );
             }
+            ViewHotkeyAction::Back => {
+                let mut app = app_with_findings(25);
+                app.nav_history.push(ShellView::Catalog);
+                app.handle_key(key_event_for_trigger(binding.trigger));
+                assert_eq!(app.shell_view, ShellView::Catalog);
+            }
             other => panic!("unexpected findings hotkey action: {other:?}"),
         }
     }
@@ -4398,6 +4641,23 @@ fn keybind_advertised_module_run_hotkeys_drive_state_transitions() {
                     Some("paused")
                 );
             }
+            ViewHotkeyAction::ViewScrollUp
+            | ViewHotkeyAction::ViewScrollDown
+            | ViewHotkeyAction::ViewScrollTop
+            | ViewHotkeyAction::ViewScrollBottom
+            | ViewHotkeyAction::ViewPageUp
+            | ViewHotkeyAction::ViewPageDown => {
+                // Shared scroll base — exercise to confirm the key is consumed
+                // without panicking on the ModuleRun view.
+                let (mut app, _) = app_with_module_run_scan(false);
+                app.handle_key(key_event_for_trigger(binding.trigger));
+            }
+            ViewHotkeyAction::Back => {
+                let (mut app, _) = app_with_module_run_scan(false);
+                app.nav_history.push(ShellView::Catalog);
+                app.handle_key(key_event_for_trigger(binding.trigger));
+                assert_eq!(app.shell_view, ShellView::Catalog);
+            }
             other => panic!("unexpected active module-run hotkey action: {other:?}"),
         }
     }
@@ -4422,6 +4682,99 @@ fn keybind_advertised_module_run_hotkeys_drive_state_transitions() {
             Some("running")
         );
     }
+}
+
+#[test]
+fn scrollable_views_advertise_scroll_and_back_hints() {
+    let scrollable = [
+        ShellView::Help,
+        ShellView::Tools,
+        ShellView::History,
+        ShellView::Workspace,
+        ShellView::KnowledgeBase,
+        ShellView::Context,
+        ShellView::Story,
+    ];
+    for view in scrollable {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = view.clone();
+        let advertised = app.view_keybindings();
+        assert!(
+            advertised.iter().any(|binding| binding.hint == "j/k/g/G"),
+            "{view:?} should advertise scroll keys"
+        );
+        assert!(
+            advertised
+                .iter()
+                .any(|binding| binding.action == ViewHotkeyAction::Back),
+            "{view:?} should advertise a back binding"
+        );
+    }
+}
+
+#[test]
+fn esc_goes_back_to_previous_view_when_input_empty() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Tools;
+    app.nav_history.push(ShellView::Catalog);
+
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view, ShellView::Catalog);
+}
+
+#[test]
+fn esc_clears_draft_instead_of_going_back_when_typing() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Tools;
+    app.nav_history.push(ShellView::Catalog);
+    app.input = "scan".to_string();
+    app.cursor = app.input.chars().count();
+
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view, ShellView::Tools, "view must not change");
+    assert!(app.input.is_empty(), "draft should be cleared");
+    assert_eq!(app.last_cleared_input.as_deref(), Some("scan"));
+}
+
+#[test]
+fn esc_restores_stashed_draft_instead_of_going_back() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Tools;
+    app.nav_history.push(ShellView::Catalog);
+    app.last_cleared_input = Some("scan".to_string());
+
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view, ShellView::Tools, "view must not change");
+    assert_eq!(app.input, "scan", "stashed draft should be restored");
+}
+
+#[test]
+fn activity_view_does_not_offer_back_binding() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Activity;
+    assert!(
+        !app.view_keybindings()
+            .iter()
+            .any(|binding| binding.action == ViewHotkeyAction::Back),
+        "Activity owns Esc (cancel run), so it must not bind Esc to back"
+    );
+}
+
+#[test]
+fn picker_views_are_not_recorded_in_nav_history() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::ModelPicker;
+    app.sync_view_change();
+    app.shell_view = ShellView::Catalog;
+    app.sync_view_change();
+
+    assert!(
+        !app.nav_history.contains(&ShellView::ModelPicker),
+        "onboarding pickers must never enter the back stack"
+    );
 }
 
 #[test]
@@ -4853,6 +5206,36 @@ fn background_tool_failure_clears_running_state() {
                 .contains("randori:pasta ended after abort request")
             && line.body.contains("ThreatModelDocument")
     }));
+}
+
+#[test]
+fn tool_failure_marks_activity_dag_row_failing() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.activity = Some(ActivitySession::new("run-1"));
+    app.tool_running = Some("cpg:build".to_string());
+    // Seed the row as the start step would, leaving it Active/running.
+    app.activity.as_mut().unwrap().apply_step(
+        kuzushi_core::RunTraceStep::new(0, "tool", "cpg:build start")
+            .with_module_id("cpg")
+            .with_verb("build"),
+    );
+    assert_eq!(
+        app.activity.as_ref().unwrap().tasks["cpg:build"].state,
+        crate::DagTaskState::Active
+    );
+
+    app.apply_tool_event(ToolEvent::Failed {
+        tool_name: "cpg:build".to_string(),
+        error: "joern-parse exited with status Some(1): astgen not found".to_string(),
+    });
+
+    let row = &app.activity.as_ref().unwrap().tasks["cpg:build"];
+    assert_eq!(
+        row.state,
+        crate::DagTaskState::Failing,
+        "the DAG row must reflect the failure, not keep running"
+    );
+    assert!(row.completed_at.is_some(), "failed row should be terminal");
 }
 
 #[test]

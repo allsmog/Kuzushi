@@ -19,13 +19,20 @@ impl ShellApp {
 
     pub(crate) fn default_tool_for_focused_module(&self) -> Option<String> {
         let module = self.focused_module.as_ref()?;
+        self.default_tool_for_module(module)
+    }
+
+    /// The primary (first non-hidden) tool of a module, e.g. `semgrep` →
+    /// `semgrep:scan`. Lets command surfaces accept a module id where a tool id
+    /// is expected, matching how operators think.
+    pub(crate) fn default_tool_for_module(&self, module: &str) -> Option<String> {
         if module == "verify" && self.registry.resolve_tool("verify:finding").is_some() {
             return Some("verify:finding".to_string());
         }
         if let Some(tool_name) = self
             .registry
             .modules()
-            .find(|entry| entry.metadata().id == *module)
+            .find(|entry| entry.metadata().id == module)
             .and_then(|entry| entry.tools().iter().find(|tool| !tool.hidden))
             .map(|tool| tool.name.clone())
         {

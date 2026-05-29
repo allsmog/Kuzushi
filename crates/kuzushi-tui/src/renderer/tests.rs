@@ -1181,8 +1181,8 @@ fn threats_dfd_view_renders_canonical_diagram_header() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(
-        rendered.contains("DFD · ACME-CHECKOUT"),
-        "expected DFD section header in: {rendered}"
+        rendered.contains("DFD NOTATION") && rendered.contains("ILLUSTRATIVE EXAMPLE"),
+        "expected the diagram labelled as an illustrative example in: {rendered}"
     );
     assert!(rendered.contains("user"));
     assert!(rendered.contains("api edge"));
@@ -4016,4 +4016,51 @@ fn compact_finding_row_renders_alias_severity_and_location() {
     assert!(text.contains("CRITICAL"));
     assert!(text.contains("sql injection via order_id"));
     assert!(text.contains("apps/api/orders.rs:142"));
+}
+
+#[test]
+fn error_notice_banner_renders_above_throttle() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Catalog;
+    app.set_error_notice("tool", "semgrep:scan failed");
+    app.set_throttle("anthropic", "429 retry-after 14s");
+
+    let backend = TestBackend::new(120, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let buffer = terminal.backend().buffer();
+
+    let error_row = banner_row(buffer, "ERROR").expect("ERROR chip present");
+    let rate_row = banner_row(buffer, "RATE LIMIT").expect("RATE LIMIT chip present");
+    assert!(error_row < rate_row, "error notice must sit above throttle");
+}
+
+#[test]
+fn notice_banner_hidden_on_short_terminal() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Catalog;
+    app.set_error_notice("tool", "boom");
+
+    let backend = TestBackend::new(80, 4);
+    let mut terminal = Terminal::new(backend).unwrap();
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let buffer = terminal.backend().buffer();
+
+    assert!(
+        banner_row(buffer, "ERROR").is_none(),
+        "notice banner must be suppressed under the 5-row floor"
+    );
+}
+
+fn banner_row(buffer: &Buffer, needle: &str) -> Option<u16> {
+    for y in 0..buffer.area.height {
+        let mut row = String::new();
+        for x in 0..buffer.area.width {
+            row.push_str(buffer[(x, y)].symbol());
+        }
+        if row.contains(needle) {
+            return Some(y);
+        }
+    }
+    None
 }

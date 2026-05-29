@@ -137,6 +137,28 @@ impl ActivitySession {
     ///   keeps `TracedRuntime`'s per-LLM emissions from cluttering the
     ///   left pane with phantom `<module>:query` / `<module>:next-step`
     ///   rows that never finish.
+    /// Force a tool's DAG row to `Done` on completion — minting it if the
+    /// completion event is processed before the row's start step (a channel
+    /// race), or transitioning it if it's still spinning. Idempotent for rows
+    /// already terminal, and writes no feed event so normal tools that emitted
+    /// their own done step don't get a duplicate line.
+    pub fn mark_task_done(&mut self, tool_name: &str) {
+        let task_id = collapse_doubled_tail(tool_name);
+        let module_id = task_id.split(':').next().unwrap_or(&task_id).to_string();
+        let row = self
+            .tasks
+            .entry(task_id.clone())
+            .or_insert_with(|| DagTaskRow::queued(task_id, module_id, Vec::new()));
+        if matches!(row.state, DagTaskState::Done | DagTaskState::Failing) {
+            return;
+        }
+        row.state = DagTaskState::Done;
+        if row.started_at.is_none() {
+            row.started_at = Some(Instant::now());
+        }
+        row.completed_at = Some(Instant::now());
+    }
+
     pub fn apply_step(&mut self, step: RunTraceStep) {
         let module_id = step.module_id.as_deref().unwrap_or("").to_string();
         if !module_id.is_empty() && is_hidden_module_id(&module_id) {
@@ -164,10 +186,19 @@ impl ActivitySession {
     }
 
     fn apply_visible_module_step(&mut self, module_id: &str, verb: &str, step: &RunTraceStep) {
-        let task_id = format!("{module_id}:{verb}");
+        let task_id = self.resolve_step_task_id(module_id, verb);
         if let Some(row) = self.activity_row_for_step(&task_id, module_id, step) {
             apply_activity_row_step(row, step);
         }
+    }
+
+    /// Map a step's `(module_id, verb)` to a DAG row id. Producers report the
+    /// scan umbrella as `sast:scan` + verb `scan`, which naively composes to
+    /// `sast:scan:scan` and mints a duplicate next to the seeded `sast:scan`
+    /// node. Collapsing a doubled trailing segment fixes it regardless of how
+    /// the tool name split across module_id/verb, and is order-independent.
+    fn resolve_step_task_id(&self, module_id: &str, verb: &str) -> String {
+        collapse_doubled_tail(&format!("{module_id}:{verb}"))
     }
 
     fn activity_row_for_step(
@@ -228,6 +259,18 @@ impl ActivitySession {
     pub fn toggle_paused(&mut self) {
         self.paused = !self.paused;
     }
+}
+
+/// Drop a trailing colon-segment that duplicates the one before it, so a
+/// doubled tool name (`sast:scan:scan`) collapses to `sast:scan`. Leaves normal
+/// `module:verb` ids untouched.
+pub(crate) fn collapse_doubled_tail(task_id: &str) -> String {
+    let segments: Vec<&str> = task_id.split(':').collect();
+    let len = segments.len();
+    if len >= 2 && segments[len - 1] == segments[len - 2] {
+        return segments[..len - 1].join(":");
+    }
+    task_id.to_string()
 }
 
 fn activity_step_mints_row(step: &RunTraceStep) -> bool {
@@ -292,6 +335,40 @@ mod tests {
         let row = session.tasks.get("semgrep:scan").unwrap();
         assert_eq!(row.state, DagTaskState::Active);
         assert_eq!(row.steps_done, 1);
+    }
+
+    #[test]
+    fn step_with_tool_name_as_module_id_updates_seeded_row() {
+        let mut session = ActivitySession::new("r-1");
+        // Seed a node keyed by its tool name (as `seed_from_registry` does).
+        session
+            .tasks
+            .insert("sast:scan".to_string(), DagTaskRow::queued("sast:scan".to_string(), "sast".to_string(), Vec::new()));
+        // Producer reports the full tool name as module_id + verb `scan`.
+        session.apply_step(
+            RunTraceStep::new(1, "tool", "sast:scan start")
+                .with_module_id("sast:scan")
+                .with_verb("scan"),
+        );
+        assert!(
+            !session.tasks.contains_key("sast:scan:scan"),
+            "must not mint a duplicate row"
+        );
+        assert_eq!(session.tasks["sast:scan"].state, DagTaskState::Active);
+    }
+
+    #[test]
+    fn doubled_tool_name_step_collapses_without_a_seeded_row() {
+        // Order-independent: even with no pre-seeded row, a `sast:scan` +
+        // verb `scan` step targets `sast:scan`, never `sast:scan:scan`.
+        let mut session = ActivitySession::new("r-1");
+        session.apply_step(
+            RunTraceStep::new(1, "tool", "sast:scan start")
+                .with_module_id("sast:scan")
+                .with_verb("scan"),
+        );
+        assert!(session.tasks.contains_key("sast:scan"));
+        assert!(!session.tasks.contains_key("sast:scan:scan"));
     }
 
     #[test]

@@ -66,6 +66,12 @@ impl ShellApp {
 
     fn log_scan_start(&mut self, target_root: &PathBuf) {
         self.log("scan", format!("starting {}", target_root.display()));
+        if self.auto_open_activity {
+            self.log(
+                "view",
+                "opened activity — Esc/back to leave (disable: setg ui.auto_open_activity false)",
+            );
+        }
         self.set_live_activity(LiveActivity::new(
             LiveActivityPhase::Searching,
             "sast:scan",
