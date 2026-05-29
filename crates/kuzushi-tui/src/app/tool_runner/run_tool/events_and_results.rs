@@ -55,7 +55,7 @@ impl ShellApp {
             );
         }
         self.apply_tool_result(&tool_name, result);
-        self.log_failure_context(failure_context);
+        self.capture_failure_context(failure_context);
         self.set_completed_activity(tool_name.clone(), "tool result applied");
         self.mark_tool_activity_complete(&tool_name);
         self.advance_chain_after_tool(&tool_name);
@@ -136,6 +136,17 @@ impl ShellApp {
     fn log_failure_context(&mut self, context: Option<FailureToLlmContext>) {
         if let Some(context) = context {
             self.log("failure-context", render_failure_context(&context));
+            self.set_pending_failure_context(context);
+        }
+    }
+
+    /// Capture the structured handoff context (for the failure-handoff view /
+    /// failures.json) WITHOUT echoing it to the transcript. Used on the
+    /// completed path, where a tool returned a usable result with a caveat
+    /// (e.g. a scanner whose binary is missing) — the caveat is already shown
+    /// in the tool's `result` line, so the verbose context would just be noise.
+    fn capture_failure_context(&mut self, context: Option<FailureToLlmContext>) {
+        if let Some(context) = context {
             self.set_pending_failure_context(context);
         }
     }

@@ -29,7 +29,12 @@ pub(crate) fn transcript_height(app: &ShellApp, area: Rect) -> u16 {
     transcript_chrome_height(app, area.height)
 }
 
-pub(crate) fn keybind_footer_height(area: Rect) -> u16 {
+pub(crate) fn keybind_footer_height(app: &ShellApp, area: Rect) -> u16 {
+    // The Activity view renders its own keybind hints in-pane, so the generic
+    // footer is redundant clutter there — drop it.
+    if matches!(app.shell_view, ShellView::Activity) {
+        return 0;
+    }
     if area.height >= 8 {
         2
     } else {

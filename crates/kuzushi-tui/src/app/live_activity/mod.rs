@@ -98,7 +98,10 @@ impl ShellApp {
         subject: impl Into<String>,
         detail: impl Into<String>,
     ) {
-        self.set_live_activity(LiveActivity::new(
+        // Clear the live strip indicator, but don't echo a low-value
+        // "activity completed" line into the transcript — the DAG ✓ and the
+        // tool's own `result` line already convey completion.
+        self.live_activity = Some(LiveActivity::new(
             LiveActivityPhase::Completed,
             subject,
             detail,
