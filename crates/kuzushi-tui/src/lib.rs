@@ -12,6 +12,7 @@ pub(crate) use renderer::*;
 mod app;
 mod commands;
 mod renderer;
+pub mod scene3d;
 mod theme;
 pub mod ui_theme;
 pub mod ui_view_models;

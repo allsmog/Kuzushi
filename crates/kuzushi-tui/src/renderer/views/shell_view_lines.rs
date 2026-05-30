@@ -36,6 +36,7 @@ pub(crate) fn primary_view_lines(
         PrimaryViewRoute::Activity { scroll } => {
             viewport_lines(activity_lines(app, area), area.height, scroll)
         }
+        PrimaryViewRoute::Scene { page } => scene_page_lines(app, area, page),
         PrimaryViewRoute::ModelPicker => model_picker_lines(app, area),
         PrimaryViewRoute::AuthMethodPicker { provider } => {
             auth_method_picker_lines(app, area, provider)

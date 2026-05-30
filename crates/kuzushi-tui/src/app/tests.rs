@@ -3028,7 +3028,11 @@ fn run_command_dispatches_taint_iris_through_langgraph_runtime_bridge_and_persis
     });
     drain_chain_with_auto_reuse(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    // Auto-open lands on the attack-path page once the taint flow is generated.
+    assert_eq!(
+        app.shell_view,
+        ShellView::Scene(crate::scene3d::VizPage::AttackPath)
+    );
     assert!(app
         .log
         .iter()
@@ -3089,7 +3093,11 @@ fn run_command_dispatches_legacy_taint_iris_next_hunt_through_langgraph_runtime_
     });
     drain_chain_with_auto_reuse(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    // Auto-open lands on the attack-path page once the taint flow is generated.
+    assert_eq!(
+        app.shell_view,
+        ShellView::Scene(crate::scene3d::VizPage::AttackPath)
+    );
     assert!(
         app.log.iter().any(|line| {
             line.prefix == "result"
@@ -3447,7 +3455,11 @@ fn run_command_dispatches_threat_model_build_through_langgraph_runtime_bridge() 
     });
     drain_chain_with_auto_reuse(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    // Auto-open lands on the data-flow diagram once the threat model is built.
+    assert_eq!(
+        app.shell_view,
+        ShellView::Scene(crate::scene3d::VizPage::Dfd)
+    );
     assert!(app.log.iter().any(|line| {
         line.prefix == "result" && line.body.contains("threat-model:build complete")
     }));
@@ -5614,7 +5626,7 @@ fn cache_tool_snapshot_populates_pending_patch_for_patch_run() {
 }
 
 #[test]
-fn cache_tool_snapshot_populates_exploit_chain_aliases() {
+fn cache_tool_snapshot_populates_exploit_chain_aliases_and_steps() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let result = serde_json::json!({
         "data": {
@@ -5639,6 +5651,42 @@ fn cache_tool_snapshot_populates_exploit_chain_aliases() {
     assert_eq!(app.chains[0].id, "C-0001");
     assert_eq!(app.chains[0].severity, ChainSeverity::Critical);
     assert_eq!(app.chains[0].title, "Template render chain");
+
+    // Detailed chains (with ordered steps) back the attack-tree visualization.
+    assert_eq!(app.exploit_chains.len(), 1);
+    assert_eq!(app.exploit_chains[0].title, "Template render chain");
+    assert_eq!(app.exploit_chains[0].severity, ChainSeverity::Critical);
+    assert_eq!(app.exploit_chains[0].steps.len(), 1);
+    assert_eq!(app.exploit_chains[0].steps[0].role, "template-input");
+    assert_eq!(app.exploit_chains[0].steps[0].file, "app.js");
+    assert_eq!(app.exploit_chains[0].steps[0].line, 3);
+}
+
+#[test]
+fn cache_tool_snapshot_populates_taint_flow() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let result = serde_json::json!({
+        "data": {
+            "flows": [{
+                "cwe": "CWE-89",
+                "severity": "high",
+                "stages": [
+                    {"message": "source: req.query.id", "filePath": "src/routes.ts", "line": 3},
+                    {"message": "sink: db.query", "filePath": "src/db.ts", "line": 7}
+                ]
+            }]
+        }
+    });
+
+    app.cache_tool_snapshot("taint-iris:hunt", &result);
+
+    let flow = app.taint_flow.as_ref().expect("taint flow snapshot");
+    assert_eq!(flow.cwe, "CWE-89");
+    assert_eq!(flow.severity, "high");
+    assert_eq!(flow.stages.len(), 2);
+    assert_eq!(flow.stages[0].file, "src/routes.ts");
+    assert_eq!(flow.stages[0].line, 3);
+    assert_eq!(flow.stages[1].message, "sink: db.query");
 }
 
 #[test]
@@ -5825,4 +5873,71 @@ fn assert_plain_output_strict_80(output: &str) {
             "plain line exceeded 80 columns: {line:?}"
         );
     }
+}
+
+// ── Security-viz gallery: ungate + auto-open ────────────────────────────────
+
+#[test]
+fn scene_command_opens_gallery_without_a_flag() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.handle_command(ShellCommand::Scene);
+    assert_eq!(app.shell_view, ShellView::Scene(app.scene_page));
+}
+
+#[test]
+fn viz_page_for_tool_maps_artifacts_to_pages() {
+    use crate::scene3d::VizPage;
+    assert_eq!(
+        viz_page_for_tool("taint-iris:hunt"),
+        Some(VizPage::AttackPath)
+    );
+    assert_eq!(
+        viz_page_for_tool("taint-iris-next:hunt"),
+        Some(VizPage::AttackPath)
+    );
+    assert_eq!(
+        viz_page_for_tool("exploit-chain:scan"),
+        Some(VizPage::ExploitChain)
+    );
+    assert_eq!(viz_page_for_tool("threat-model:build"), Some(VizPage::Dfd));
+    assert_eq!(viz_page_for_tool("sast:scan"), None);
+    assert_eq!(viz_page_for_tool("recon:nmap"), None);
+}
+
+#[test]
+fn auto_open_viz_page_switches_view_when_enabled() {
+    use crate::scene3d::VizPage;
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.auto_open_viz = true;
+    app.auto_open_viz_page(VizPage::Dfd);
+    assert_eq!(app.shell_view, ShellView::Scene(VizPage::Dfd));
+    assert_eq!(app.scene_page, VizPage::Dfd);
+}
+
+#[test]
+fn auto_open_viz_page_is_inert_when_disabled() {
+    use crate::scene3d::VizPage;
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.auto_open_viz = false;
+    let before = app.shell_view.clone();
+    app.auto_open_viz_page(VizPage::Dfd);
+    assert_eq!(app.shell_view, before);
+}
+
+#[test]
+fn scan_completion_auto_opens_the_findings_heatmap() {
+    use crate::scene3d::VizPage;
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.auto_open_viz = true;
+    app.apply_scan_finished("run-viz".to_string(), 2);
+    assert_eq!(app.shell_view, ShellView::Scene(VizPage::Heatmap));
+}
+
+#[test]
+fn scan_completion_respects_viz_opt_out() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.auto_open_viz = false;
+    let before = app.shell_view.clone();
+    app.apply_scan_finished("run-viz".to_string(), 2);
+    assert_eq!(app.shell_view, before);
 }

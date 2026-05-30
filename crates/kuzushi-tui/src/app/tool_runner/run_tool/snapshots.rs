@@ -25,6 +25,7 @@ type SnapshotCache = fn(&mut ShellApp, &str, &serde_json::Value) -> bool;
 const SNAPSHOT_CACHES: &[SnapshotCache] = &[
     cache_recon_snapshot,
     cache_exploit_chain_snapshot,
+    cache_taint_flow_snapshot,
     cache_threat_hunt_snapshot,
     cache_agentic_sast_snapshot,
     cache_patch_snapshot,
@@ -53,7 +54,83 @@ fn cache_exploit_chain_snapshot(
         return false;
     }
     app.chains = exploit_chain_aliases(data);
+    app.exploit_chains = exploit_chain_details(data);
     true
+}
+
+/// Detailed chains (with ordered steps) for the attack-tree visualization,
+/// parallel to the minimal `chains` aliases.
+fn exploit_chain_details(data: &serde_json::Value) -> Vec<ExploitChainDetail> {
+    data.get("chains")
+        .and_then(serde_json::Value::as_array)
+        .map(|chains| chains.iter().filter_map(exploit_chain_detail).collect())
+        .unwrap_or_default()
+}
+
+fn exploit_chain_detail(chain: &serde_json::Value) -> Option<ExploitChainDetail> {
+    Some(ExploitChainDetail {
+        id: data_string(chain, "id")?,
+        title: data_string(chain, "name")?,
+        severity: chain_severity(
+            chain
+                .get("overallSeverity")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("high"),
+        ),
+        steps: chain
+            .get("steps")
+            .and_then(serde_json::Value::as_array)
+            .map(|steps| steps.iter().filter_map(exploit_chain_step).collect())
+            .unwrap_or_default(),
+    })
+}
+
+fn exploit_chain_step(step: &serde_json::Value) -> Option<ExploitChainStep> {
+    Some(ExploitChainStep {
+        role: data_string(step, "role").unwrap_or_default(),
+        description: data_string(step, "description").unwrap_or_default(),
+        file: data_string(step, "filePath").unwrap_or_default(),
+        line: step.get("startLine").and_then(serde_json::Value::as_u64).unwrap_or(0) as u32,
+    })
+}
+
+/// Cache the headline source→sink taint flow from `taint-iris` structured output
+/// (`data.flows[]`) for the attack-path visualization.
+fn cache_taint_flow_snapshot(app: &mut ShellApp, tool_name: &str, data: &serde_json::Value) -> bool {
+    if tool_name != "taint-iris:hunt" && tool_name != "taint-iris-next:hunt" {
+        return false;
+    }
+    if let Some(flow) = taint_flow_from_data(data) {
+        app.taint_flow = Some(flow);
+    }
+    true
+}
+
+fn taint_flow_from_data(data: &serde_json::Value) -> Option<TaintFlowSnapshot> {
+    let flow = data.get("flows").and_then(serde_json::Value::as_array)?.first()?;
+    Some(TaintFlowSnapshot {
+        cwe: data_string(flow, "cwe").unwrap_or_else(|| "CWE".to_string()),
+        severity: data_string(flow, "severity").unwrap_or_else(|| "medium".to_string()),
+        stages: flow
+            .get("stages")
+            .and_then(serde_json::Value::as_array)
+            .map(|stages| stages.iter().filter_map(taint_stage).collect())
+            .unwrap_or_default(),
+    })
+}
+
+fn taint_stage(stage: &serde_json::Value) -> Option<TaintStage> {
+    Some(TaintStage {
+        message: data_string(stage, "message").unwrap_or_default(),
+        file: data_string(stage, "filePath")
+            .or_else(|| data_string(stage, "file"))
+            .unwrap_or_default(),
+        line: stage
+            .get("line")
+            .or_else(|| stage.get("startLine"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0) as u32,
+    })
 }
 
 fn exploit_chain_aliases(data: &serde_json::Value) -> Vec<ExploitChain> {

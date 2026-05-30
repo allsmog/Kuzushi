@@ -1,7 +1,7 @@
 use super::*;
 pub(crate) use super::*;
 
-use self::{ShellApp, SPINNER_FRAME};
+use self::{ShellApp, SCENE_FRAME, SPINNER_FRAME};
 use crate::renderer::{render_app, render_plain_app, render_plain_command_result};
 use anyhow::{Context, Result};
 use crossterm::cursor::MoveTo;

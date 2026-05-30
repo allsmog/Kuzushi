@@ -142,6 +142,13 @@ pub enum ShellView {
     /// tasks (context build, x-ray, threat-model variants, CPG, CodeQL
     /// DB, threat intel). State lives on `app.planning_*` fields.
     PlanningPicker,
+    /// Security-visualization gallery, fed real Kuzushi data. One page is a 3D
+    /// attack-surface terrain (half-block framebuffer); the rest are 2D diagrams
+    /// (attack path, DFD, findings heatmap, exploit chain). Auto-opens to the
+    /// relevant page when its artifact is generated (unless
+    /// `KUZUSHI_AUTO_OPEN_VIZ=false`); page + 3D orientation live on
+    /// `app.scene_*`. TTY-only for the 3D page — plain mode shows a summary.
+    Scene(crate::scene3d::VizPage),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -6,7 +6,18 @@ use super::*;
 /// path runs after `ShellApp::new`, so a startup-time env knob is the
 /// simplest way to disable it before the first tool launches).
 fn read_auto_open_activity_pref() -> bool {
-    match std::env::var("KUZUSHI_AUTO_OPEN_ACTIVITY") {
+    read_bool_env("KUZUSHI_AUTO_OPEN_ACTIVITY")
+}
+
+/// Operator preference for auto-opening the relevant security-viz page when its
+/// artifact is generated. Default ON; disable with `KUZUSHI_AUTO_OPEN_VIZ=false`.
+fn read_auto_open_viz_pref() -> bool {
+    read_bool_env("KUZUSHI_AUTO_OPEN_VIZ")
+}
+
+/// A default-true boolean env knob (`0|false|no|off` → false; unset → true).
+fn read_bool_env(key: &str) -> bool {
+    match std::env::var(key) {
         Ok(value) => !matches!(
             value.trim().to_ascii_lowercase().as_str(),
             "0" | "false" | "no" | "off"
@@ -124,6 +135,14 @@ macro_rules! shell_app_initial_state {
             trace_rx: None,
             activity: None,
             auto_open_activity: read_auto_open_activity_pref(),
+            scene_page: crate::scene3d::VizPage::default(),
+            scene_spin: 0.6,
+            scene_pitch: 0.45,
+            scene_paused: false,
+            last_scene_advance: None,
+            auto_open_viz: read_auto_open_viz_pref(),
+            exploit_chains: Vec::new(),
+            taint_flow: None,
         }
     }};
 }

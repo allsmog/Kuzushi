@@ -1,5 +1,25 @@
 use super::*;
-use crate::ui_view_models::uses_activity_frame;
+use crate::ui_view_models::{uses_activity_frame, uses_scene_frame};
+
+/// How the primary body region is painted this frame. Most views are
+/// line-based; Activity and the 3D attack-surface page each own the whole
+/// region with a frame-level layout (split panes / half-block framebuffer).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum PrimaryRenderMode {
+    Lines,
+    Activity,
+    Scene,
+}
+
+fn primary_render_mode(app: &ShellApp) -> PrimaryRenderMode {
+    if uses_scene_frame(app) {
+        PrimaryRenderMode::Scene
+    } else if uses_activity_frame(app) {
+        PrimaryRenderMode::Activity
+    } else {
+        PrimaryRenderMode::Lines
+    }
+}
 
 pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     let area = frame.area();
@@ -14,11 +34,12 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         height: max_view_height,
         ..area
     };
-    // Activity view uses a true Ratatui split-pane (frame-level), not the
-    // shared line-based path. Skip the line computation entirely.
-    let activity_mode = uses_activity_frame(app);
+    // Activity and the 3D playground use a true frame-level layout, not the
+    // shared line-based path. Skip the line computation entirely for them.
+    let mode = primary_render_mode(app);
+    let frame_mode = mode != PrimaryRenderMode::Lines;
     let (view_height, view_lines) =
-        main_view_layout(app, activity_mode, max_view_height, view_area);
+        main_view_layout(app, frame_mode, max_view_height, view_area);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)
@@ -26,7 +47,7 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         .split(area);
 
     let mut index = 0;
-    render_primary_view(frame, chunks[index], app, activity_mode, view_lines);
+    render_primary_view(frame, chunks[index], app, mode, view_lines);
     index += 1;
     index += 1;
     for section in sections {
@@ -38,11 +59,11 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
 
 fn main_view_layout(
     app: &ShellApp,
-    activity_mode: bool,
+    frame_mode: bool,
     max_view_height: u16,
     view_area: Rect,
 ) -> (u16, Vec<Line<'static>>) {
-    if activity_mode {
+    if frame_mode {
         return (max_view_height, Vec::new());
     }
 
@@ -55,13 +76,13 @@ fn render_primary_view(
     frame: &mut Frame<'_>,
     area: Rect,
     app: &ShellApp,
-    activity_mode: bool,
+    mode: PrimaryRenderMode,
     view_lines: Vec<Line<'static>>,
 ) {
-    if activity_mode {
-        render_activity_view(frame, area, app);
-    } else {
-        render_lines(frame, area, view_lines);
+    match mode {
+        PrimaryRenderMode::Scene => render_scene_view(frame, area, app),
+        PrimaryRenderMode::Activity => render_activity_view(frame, area, app),
+        PrimaryRenderMode::Lines => render_lines(frame, area, view_lines),
     }
 }
 

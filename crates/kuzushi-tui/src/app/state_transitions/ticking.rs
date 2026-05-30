@@ -7,7 +7,37 @@ impl ShellApp {
         changed |= self.expire_stale_advisory(AdvisoryKind::Throttle);
         changed |= self.expire_stale_advisory(AdvisoryKind::Notice);
         changed |= self.advance_spinner();
+        changed |= self.advance_scene();
         changed
+    }
+
+    /// True while the security-viz gallery is on the animated 3D attack-surface
+    /// page and not paused — drives both the faster redraw cadence and the
+    /// per-tick camera advance.
+    pub fn scene_animating(&self) -> bool {
+        matches!(self.shell_view, ShellView::Scene(page) if page.is_animated())
+            && !self.scene_paused
+    }
+
+    /// Spin the playground camera, paced by wall-clock so speed is independent
+    /// of the redraw rate. No-op (and clears the baseline) when not animating.
+    fn advance_scene(&mut self) -> bool {
+        if !self.scene_animating() {
+            self.last_scene_advance = None;
+            return false;
+        }
+        let now = Instant::now();
+        let Some(prev) = self.last_scene_advance else {
+            self.last_scene_advance = Some(now);
+            return true;
+        };
+        let elapsed = now.duration_since(prev);
+        if elapsed < SCENE_FRAME {
+            return false;
+        }
+        self.scene_spin = wrap_angle(self.scene_spin + elapsed.as_secs_f32() * SCENE_SPIN_RATE);
+        self.last_scene_advance = Some(now);
+        true
     }
 
     fn expire_ctrl_c_arm(&mut self) -> bool {
@@ -140,6 +170,12 @@ impl ShellApp {
         self.session_cost_usd += cost_usd;
         self.maybe_trigger_budget_halt();
     }
+}
+
+/// Keep an angle within `[0, 2π)` so the camera spin never accumulates an
+/// ever-growing float. `rem_euclid` keeps negative nudges positive too.
+pub(super) fn wrap_angle(angle: f32) -> f32 {
+    angle.rem_euclid(std::f32::consts::TAU)
 }
 
 /// The two transient banners that auto-expire in `tick`. Lets one helper

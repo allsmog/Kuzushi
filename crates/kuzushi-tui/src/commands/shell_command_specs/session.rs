@@ -80,6 +80,12 @@ pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
         description: "discard pending plan",
     },
     ShellCommandSpec {
+        command: "scene",
+        aliases: &["/scene", "/viz", "viz", "/diagram"],
+        category: ShellCommandCategory::Session,
+        description: "security-viz gallery — risk heatmap, attack path/tree, DFD",
+    },
+    ShellCommandSpec {
         command: "quit",
         aliases: &["q", "/q", "exit", "/quit", "/exit", "exitj", "/exitj"],
         category: ShellCommandCategory::Session,

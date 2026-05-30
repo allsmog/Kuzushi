@@ -72,6 +72,7 @@ mod threat_stride;
 mod tools;
 mod transcript;
 mod view_status;
+mod viz_data;
 mod workspace;
 pub(crate) use active_stage::active_stage_label;
 pub(crate) use activity_dag_rows::ActivityDagRowTone;
@@ -167,8 +168,8 @@ pub(crate) use recent_module_activity::{
 pub(crate) use recommendation::{recommendation_model, RecommendationModel, RecommendationRow};
 pub(crate) use routing::{
     plain_render_mode, routing_mode, routing_mode_segment, shell_view_line_route,
-    uses_activity_frame, PlainRenderMode, PrimaryViewRoute, RoutingMode, ShellViewLineRoute,
-    SystemViewRoute, ThreatAndRunViewRoute, WorkspaceSessionViewRoute,
+    uses_activity_frame, uses_scene_frame, PlainRenderMode, PrimaryViewRoute, RoutingMode,
+    ShellViewLineRoute, SystemViewRoute, ThreatAndRunViewRoute, WorkspaceSessionViewRoute,
 };
 pub(crate) use run_paths::{
     ui_latest_run_path, ui_latest_run_relative_path, ui_run_artifact_relative_path, ui_run_dir,
@@ -193,6 +194,11 @@ pub(crate) use threat_dfd_diagram::{
 };
 pub(crate) use threat_model::{
     threat_model_doc, threat_model_relative_path, threat_summary_review, ThreatSummaryReview,
+};
+pub(crate) use viz_data::{
+    attack_tree, dfd_model, findings_heatmap, risk_by_module, taint_flow_path, AttackChain,
+    AttackTree, DfdFlowModel, DfdKind, DfdModel, DfdNodeModel, FindingsHeatmap, ModuleRisk,
+    RiskByModule, TaintFlowPath, TaintStageModel,
 };
 pub(crate) use threat_navigation::{threat_nav_model, threat_panel_model, ThreatPanel};
 pub(crate) use threat_patch::threat_patch_card_model;

@@ -4,6 +4,7 @@ pub(crate) fn taint_iris_report(
     target: &Path,
     cwes: Vec<TaintCweSelection>,
     findings: Vec<Finding>,
+    flows: Vec<TaintFlow>,
     persisted: Option<TaintIrisPersistedRun>,
     degradation: Option<Value>,
 ) -> TaintIrisReport {
@@ -12,6 +13,7 @@ pub(crate) fn taint_iris_report(
         count: findings.len(),
         cwes,
         findings,
+        flows,
         persisted,
         cost_usd: 0.0,
         degradation,
