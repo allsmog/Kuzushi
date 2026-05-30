@@ -63,6 +63,7 @@ pub(crate) const COMMAND_HANDLERS: &[CommandHandler] = &[
     handle_resume_command,
     handle_pause_command,
     handle_story_command,
+    handle_scene_command,
     handle_run_tool_command,
     handle_quit_command,
     handle_empty_command,

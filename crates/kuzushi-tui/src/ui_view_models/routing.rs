@@ -40,6 +40,7 @@ pub(crate) enum PrimaryViewRoute<'a> {
     Finding,
     Pwn { scroll: usize },
     Activity { scroll: usize },
+    Scene { page: crate::scene3d::VizPage },
     ModelPicker,
     AuthMethodPicker { provider: &'a str },
     PlanningPicker,
@@ -116,6 +117,12 @@ pub(crate) fn uses_activity_frame(app: &ShellApp) -> bool {
     matches!(app.shell_view, ShellView::Activity)
 }
 
+/// Frame-level gallery pages (3D terrain + the Canvas graph/tree diagrams) own
+/// the full body region. Attack-path and heatmap use the shared line path.
+pub(crate) fn uses_scene_frame(app: &ShellApp) -> bool {
+    matches!(app.shell_view, ShellView::Scene(page) if page.is_frame_rendered())
+}
+
 pub(crate) fn plain_render_mode(app: &ShellApp) -> PlainRenderMode<'_> {
     match &app.shell_view {
         ShellView::Options(view) => PlainRenderMode::Options(view),
@@ -147,6 +154,7 @@ fn primary_view_route(app: &ShellApp) -> Option<PrimaryViewRoute<'_>> {
         ShellView::Activity => Some(PrimaryViewRoute::Activity {
             scroll: app.scroll_offset as usize,
         }),
+        ShellView::Scene(page) => Some(PrimaryViewRoute::Scene { page: *page }),
         ShellView::ModelPicker => Some(PrimaryViewRoute::ModelPicker),
         ShellView::AuthMethodPicker(provider) => Some(PrimaryViewRoute::AuthMethodPicker {
             provider: provider.as_str(),

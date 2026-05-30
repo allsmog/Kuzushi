@@ -27,17 +27,19 @@ pub(crate) struct DfdDiagramLine {
     pub(crate) kind: DfdLineKind,
 }
 
-struct DfdNode {
-    id: String,
-    name: String,
-    zone: String,
+pub(crate) struct DfdNode {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) zone: String,
+    /// Raw node type from the doc (`process` | `external-entity` | `data-store`).
+    pub(crate) kind: String,
 }
 
-struct DfdFlow {
-    source: String,
-    target: String,
-    label: String,
-    crosses: bool,
+pub(crate) struct DfdFlow {
+    pub(crate) source: String,
+    pub(crate) target: String,
+    pub(crate) label: String,
+    pub(crate) crosses: bool,
 }
 
 /// Render the DFD as role-tagged lines, or `None` when the artifact has no nodes.
@@ -92,7 +94,7 @@ fn line(kind: DfdLineKind, text: String) -> DfdDiagramLine {
     DfdDiagramLine { text, kind }
 }
 
-fn parse_nodes(doc: &serde_json::Value) -> Vec<DfdNode> {
+pub(crate) fn parse_nodes(doc: &serde_json::Value) -> Vec<DfdNode> {
     doc.pointer("/dfd/nodes")
         .and_then(serde_json::Value::as_array)
         .map(|nodes| nodes.iter().filter_map(node_from_value).take(MAX_NODES).collect())
@@ -103,10 +105,11 @@ fn node_from_value(value: &serde_json::Value) -> Option<DfdNode> {
     let id = string_field(value, "id")?;
     let name = string_field(value, "name").unwrap_or_else(|| id.clone());
     let zone = string_field(value, "trustZone").unwrap_or_else(|| "unzoned".to_string());
-    Some(DfdNode { id, name, zone })
+    let kind = string_field(value, "type").unwrap_or_else(|| "process".to_string());
+    Some(DfdNode { id, name, zone, kind })
 }
 
-fn parse_flows(doc: &serde_json::Value, nodes: &[DfdNode]) -> Vec<DfdFlow> {
+pub(crate) fn parse_flows(doc: &serde_json::Value, nodes: &[DfdNode]) -> Vec<DfdFlow> {
     doc.pointer("/dfd/flows")
         .and_then(serde_json::Value::as_array)
         .map(|flows| {
@@ -132,7 +135,7 @@ fn flow_from_value(value: &serde_json::Value, nodes: &[DfdNode]) -> Option<DfdFl
     })
 }
 
-fn zones_in_order(nodes: &[DfdNode]) -> Vec<String> {
+pub(crate) fn zones_in_order(nodes: &[DfdNode]) -> Vec<String> {
     let mut zones: Vec<String> = Vec::new();
     for node in nodes {
         if !zones.iter().any(|zone| zone == &node.zone) {

@@ -90,8 +90,12 @@ impl ShellApp {
             return;
         };
         self.recommendation_requested = true;
+        // Internal recommender run: suppress both view auto-opens so it doesn't
+        // hijack the view, then restore the operator's prefs.
         let auto_open = self.auto_open_activity;
+        let auto_open_viz = self.auto_open_viz;
         self.auto_open_activity = false;
+        self.auto_open_viz = false;
         self.start_background_tool(
             "module-recommender:recommend".to_string(),
             json!({}),
@@ -100,6 +104,7 @@ impl ShellApp {
             None,
         );
         self.auto_open_activity = auto_open;
+        self.auto_open_viz = auto_open_viz;
         self.log(
             "phase",
             "ranking tools for this target with the session model…",
@@ -322,10 +327,12 @@ impl ShellApp {
             );
             return;
         };
-        // Suppress the activity auto-open flip so we land on Recommend, not the
-        // empty Activity view the operator just finished with.
+        // Suppress both view auto-opens so we land on Recommend, not the empty
+        // Activity view (or a stale gallery page) the operator just finished with.
         let auto_open = self.auto_open_activity;
+        let auto_open_viz = self.auto_open_viz;
         self.auto_open_activity = false;
+        self.auto_open_viz = false;
         self.start_background_tool(
             "module-recommender:recommend".to_string(),
             json!({}),
@@ -334,6 +341,7 @@ impl ShellApp {
             None,
         );
         self.auto_open_activity = auto_open;
+        self.auto_open_viz = auto_open_viz;
         self.shell_view = ShellView::Recommend;
         self.log("recommend", "ranking modules for your next move…");
     }

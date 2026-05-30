@@ -72,6 +72,9 @@ pub enum ShellCommand {
     Resume(Option<String>),
     Pause,
     Story,
+    /// Open the security-visualization gallery (risk heatmap, attack path,
+    /// DFD, attack tree, 3D attack-surface terrain). Fed real Kuzushi data.
+    Scene,
     RunTool {
         tool: Option<String>,
         input: Option<String>,

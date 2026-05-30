@@ -155,4 +155,27 @@ pub struct ShellApp {
     /// Operators can opt out via `setg ui.auto_open_activity false` (parsed
     /// in `ShellApp::new`).
     pub auto_open_activity: bool,
+    /// Which page of the security-viz gallery (`ShellView::Scene`) is showing.
+    /// Cycled with `Tab` while the view is open.
+    pub scene_page: crate::scene3d::VizPage,
+    /// Yaw (radians) of the 3D attack-surface camera, advanced each tick while
+    /// it auto-rotates; also nudged by `h`/`l`.
+    pub scene_spin: f32,
+    /// Pitch (radians) of the 3D attack-surface camera, nudged by `j`/`k`.
+    pub scene_pitch: f32,
+    /// When true the 3D attack-surface holds still (toggled with `space`/`p`).
+    pub scene_paused: bool,
+    /// Last spin advance, so rotation speed is wall-clock paced rather than
+    /// tied to the redraw rate.
+    pub last_scene_advance: Option<Instant>,
+    /// When true (default), the relevant gallery page auto-opens when its
+    /// artifact is generated (scan→Heatmap, threat-model→DFD, etc.). Opt out
+    /// with `KUZUSHI_AUTO_OPEN_VIZ=false`. Mirrors `auto_open_activity`.
+    pub auto_open_viz: bool,
+    /// Detailed exploit chains (with ordered steps) for the attack-tree page,
+    /// cached from `exploit-chain:scan`. Parallel to the minimal `chains`.
+    pub exploit_chains: Vec<ExploitChainDetail>,
+    /// Latest source→sink taint flow for the attack-path page, cached from
+    /// `taint-iris:hunt` structured output.
+    pub taint_flow: Option<TaintFlowSnapshot>,
 }

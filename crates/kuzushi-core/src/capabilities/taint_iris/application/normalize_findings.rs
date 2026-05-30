@@ -73,6 +73,56 @@ pub(crate) fn normalize_taint_iris_findings(
     Ok(findings)
 }
 
+/// Extract structured source→sink flows from the raw taint-iris output, parallel
+/// to [`normalize_taint_iris_findings`]. The findings flatten each path into
+/// `Finding.message` text; these preserve the ordered stages so the TUI can draw
+/// the attack-path diagram without re-parsing prose. Additive — the findings are
+/// unchanged.
+pub(crate) fn extract_taint_flows(raw: &Value, max_findings: usize) -> Vec<TaintFlow> {
+    raw_taint_findings(raw)
+        .iter()
+        .take(max_findings)
+        .filter_map(taint_flow_from_finding)
+        .collect()
+}
+
+fn raw_taint_findings(raw: &Value) -> &[Value] {
+    match raw {
+        Value::Object(object) => object
+            .get("findings")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default(),
+        Value::Array(items) => items.as_slice(),
+        _ => &[],
+    }
+}
+
+fn taint_flow_from_finding(item: &Value) -> Option<TaintFlow> {
+    let object = item.as_object()?;
+    let path = read_object_value(object, &["taintPath", "taint_path"])?.as_array()?;
+    let stages: Vec<TaintFlowStage> = path.iter().filter_map(taint_flow_stage).collect();
+    if stages.is_empty() {
+        return None;
+    }
+    Some(TaintFlow {
+        cwe: read_object_string(object, &["cwe", "CWE"]).unwrap_or_else(|| "CWE".to_string()),
+        severity: read_object_string(object, &["severity"])
+            .unwrap_or_else(|| "medium".to_string()),
+        stages,
+    })
+}
+
+fn taint_flow_stage(item: &Value) -> Option<TaintFlowStage> {
+    let step = item.as_object()?;
+    Some(TaintFlowStage {
+        message: read_object_string(step, &["message"]).unwrap_or_default(),
+        file_path: read_object_string(step, &["filePath", "file_path"]).unwrap_or_default(),
+        line: read_object_u64(step, &["line", "startLine", "start_line"]).unwrap_or(0) as u32,
+        snippet: read_object_string(step, &["snippet"]).unwrap_or_default(),
+    })
+}
+
 pub(crate) fn summarize_taint_path(object: &Map<String, Value>) -> Option<String> {
     let path = read_object_value(object, &["taintPath", "taint_path"])?.as_array()?;
     let mut lines = Vec::new();

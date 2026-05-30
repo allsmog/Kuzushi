@@ -55,4 +55,51 @@ mod tests {
         assert!(findings[0].message.contains("Source-to-sink trace"));
         assert!(findings[0].message.contains("src/routes.ts:7"));
     }
+
+    fn raw_taint_finding_with_path() -> Value {
+        json!({
+            "findings": [{
+                "cwe": "CWE-89",
+                "severity": "high",
+                "filePath": "src/routes.ts",
+                "taintPath": [
+                    {"filePath": "src/routes.ts", "line": 3, "message": "source: req.query.id"},
+                    {"filePath": "src/db.ts", "line": 7, "message": "sink: db.query"}
+                ]
+            }]
+        })
+    }
+
+    #[test]
+    fn extracts_structured_taint_flow_parallel_to_findings() {
+        let flows = extract_taint_flows(&raw_taint_finding_with_path(), 10);
+
+        assert_eq!(flows.len(), 1);
+        assert_eq!(flows[0].cwe, "CWE-89");
+        assert_eq!(flows[0].severity, "high");
+        assert_eq!(flows[0].stages.len(), 2);
+        assert_eq!(flows[0].stages[0].file_path, "src/routes.ts");
+        assert_eq!(flows[0].stages[0].line, 3);
+        assert_eq!(flows[0].stages[0].message, "source: req.query.id");
+        assert_eq!(flows[0].stages[1].file_path, "src/db.ts");
+    }
+
+    #[test]
+    fn flows_skip_findings_without_a_taint_path() {
+        let raw = json!({"findings": [{"cwe": "CWE-79", "severity": "medium"}]});
+        assert!(extract_taint_flows(&raw, 10).is_empty());
+    }
+
+    #[test]
+    fn report_serializes_flows_as_camel_case_for_the_tui() {
+        let temp = tempdir().unwrap();
+        let flows = extract_taint_flows(&raw_taint_finding_with_path(), 10);
+        let report = taint_iris_report(temp.path(), Vec::new(), Vec::new(), flows, None, None);
+
+        let value = serde_json::to_value(&report).unwrap();
+        let stage = &value["flows"][0]["stages"][0];
+        assert_eq!(stage["filePath"], "src/routes.ts");
+        assert_eq!(stage["line"], 3);
+        assert_eq!(value["flows"][0]["cwe"], "CWE-89");
+    }
 }

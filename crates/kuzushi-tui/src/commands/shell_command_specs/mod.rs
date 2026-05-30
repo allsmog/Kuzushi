@@ -118,6 +118,7 @@ fn parse_session_command(verb: &str) -> Option<ShellCommand> {
         "quickstart" => Some(ShellCommand::Quickstart),
         "onboarding" | "setup" | "plan-stage" | "planning" => Some(ShellCommand::Onboarding),
         "activity" | "progress" | "a" => Some(ShellCommand::Activity),
+        "scene" | "viz" | "3d" | "diagram" => Some(ShellCommand::Scene),
         "handoff" | "failure" | "failures" => Some(ShellCommand::FailureHandoff),
         _ => None,
     }

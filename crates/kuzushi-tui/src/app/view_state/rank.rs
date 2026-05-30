@@ -59,6 +59,41 @@ pub enum ChainSeverity {
     Medium,
 }
 
+/// Full exploit chain (id/title/severity + ordered steps), cached from
+/// `exploit-chain:scan` output for the attack-tree visualization. Parallel to
+/// the minimal `ExploitChain` (which feeds alias/list views).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExploitChainDetail {
+    pub id: String,
+    pub title: String,
+    pub severity: ChainSeverity,
+    pub steps: Vec<ExploitChainStep>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExploitChainStep {
+    pub role: String,
+    pub description: String,
+    pub file: String,
+    pub line: u32,
+}
+
+/// A source→sink taint flow, cached from `taint-iris:hunt` structured output
+/// for the attack-path visualization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaintFlowSnapshot {
+    pub cwe: String,
+    pub severity: String,
+    pub stages: Vec<TaintStage>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaintStage {
+    pub message: String,
+    pub file: String,
+    pub line: u32,
+}
+
 impl ChainSeverity {
     pub(crate) fn rank(self) -> u8 {
         match self {

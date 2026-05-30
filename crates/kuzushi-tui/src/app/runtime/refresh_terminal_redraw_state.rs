@@ -59,7 +59,9 @@ pub(crate) fn read_and_apply_terminal_event(app: &mut ShellApp) -> Result<bool> 
 }
 
 pub(crate) fn terminal_event_timeout(app: &ShellApp) -> Duration {
-    if app.has_running_work() {
+    if app.scene_animating() {
+        SCENE_FRAME
+    } else if app.has_running_work() {
         SPINNER_FRAME
     } else {
         Duration::from_millis(250)

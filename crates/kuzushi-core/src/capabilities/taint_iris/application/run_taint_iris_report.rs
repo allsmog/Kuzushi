@@ -163,13 +163,27 @@ fn completed_taint_iris_hunt(
     run: &TaintIrisHuntRun<'_>,
     cwes: Vec<TaintCweSelection>,
 ) -> Result<CompletedTaintIrisHunt> {
-    let findings = collect_taint_iris_findings(input, ctx, run, &cwes)?;
-    let finding_count = findings.len();
-    let persisted = persist_taint_iris_findings(&run.target, &findings, ctx)?;
+    let collected = collect_taint_iris_findings(input, ctx, run, &cwes)?;
+    let finding_count = collected.findings.len();
+    let persisted = persist_taint_iris_findings(&run.target, &collected.findings, ctx)?;
     Ok(CompletedTaintIrisHunt {
-        report: taint_iris_report(&run.target, cwes, findings, persisted, None),
+        report: taint_iris_report(
+            &run.target,
+            cwes,
+            collected.findings,
+            collected.flows,
+            persisted,
+            None,
+        ),
         finding_count,
     })
+}
+
+/// Findings plus the parallel structured taint flows extracted from the same
+/// raw agent output (before normalization flattens each path to text).
+struct CollectedTaintIris {
+    findings: Vec<Finding>,
+    flows: Vec<TaintFlow>,
 }
 
 fn collect_taint_iris_findings(
@@ -177,9 +191,11 @@ fn collect_taint_iris_findings(
     ctx: &ToolExecutionContext<'_>,
     run: &TaintIrisHuntRun<'_>,
     cwes: &[TaintCweSelection],
-) -> Result<Vec<Finding>> {
+) -> Result<CollectedTaintIris> {
     let raw = query_taint_iris_with_scope(input, ctx, run, cwes)?;
-    normalized_taint_iris_findings(input, raw, run)
+    let flows = extract_taint_flows(&raw, run.options.max_findings);
+    let findings = normalized_taint_iris_findings(input, raw, run)?;
+    Ok(CollectedTaintIris { findings, flows })
 }
 
 fn query_taint_iris_with_scope(
@@ -281,6 +297,7 @@ pub(crate) fn empty_taint_iris_report(
         target,
         cwes,
         findings,
+        Vec::new(),
         persisted,
         Some(json!({
             "type": "legacy-inconclusive",

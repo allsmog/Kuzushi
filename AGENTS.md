@@ -302,6 +302,44 @@ is expected to behave identically and should be filed as a parity bug.
   transcript, actor-detail view, tune view** — interactive only. They
   live in the Rust Ratatui shell under `crates/kuzushi-tui`; plain/scripted
   output belongs in `crates/kuzushi-tui/src/renderer/plain.rs`.
+- **Security-viz gallery (`/scene`, `/viz`, `/diagram`)** — interactive only
+  (the rendering is TTY-bound), but **ungated and fed real Kuzushi data**. A
+  `Tab`-cycled gallery of five pages (`scene3d::VizPage`). Pure view-model
+  builders in `ui_view_models/viz_data.rs` turn `ShellApp` state into each
+  page's model (`risk_by_module(&app.findings)`, `dfd_model(app)`,
+  `attack_tree(app)`, `taint_flow_path(app)`); each model carries an
+  `empty_hint` so a page with no backing artifact draws one guidance line, never
+  dummy content. Rendered three ways:
+  - **3D attack-surface terrain** — half-block truecolor framebuffer with a
+    z-buffer + Lambert shading (`scene3d::render`); one Gaussian bump per hot
+    module, height = normalized severity-weighted risk score. The only page that
+    animates.
+  - **Box-drawing diagrams** — DFD as a node-link **data-flow graph** (from the
+    persisted threat-model doc) and the exploit chain as an **attack tree** (from
+    `app.exploit_chains`), painted into the `Buffer` with rounded `Block` node
+    boxes + orthogonal connectors (`─ │ ╭ ╮ ╰ ╯` + `▶`/`▼` arrowheads) in
+    `renderer/views/scene/diagram`. Crisp full-cell strokes — deliberately *not*
+    the braille `Canvas` (which read grainy).
+  - **Line diagrams** — attack path (real source→sink stages from
+    `app.taint_flow`) + findings heatmap (per-module risk) as styled box-drawing
+    `Line`s in `renderer/views/scene/diagrams`.
+  **Auto-open:** mirrors `auto_open_activity`. On by default; opt out with
+  `KUZUSHI_AUTO_OPEN_VIZ=false` (read once in `ShellApp::new`). When an artifact
+  lands, the completion hooks switch to its page: `scan` → Heatmap
+  (`apply_scan_finished`), and `viz_page_for_tool(tool_name)` maps
+  `taint-iris*`→AttackPath, `exploit-chain:scan`→ExploitChain,
+  `threat-model*`→Dfd in `apply_finished_tool_event` (fires before chain/queue
+  advance so a follow-up tool's Activity view supersedes it). The snapshot caches
+  in `app/tool_runner/run_tool/snapshots.rs` populate `app.exploit_chains` /
+  `app.taint_flow` from the tool JSON `data` first; `taint-iris` emits structured
+  `data.flows[]` for this (see `taint_iris` `extract_taint_flows`, parallel to
+  the text findings). `VizPage::is_frame_rendered` (terrain + the two box-drawing
+  pages) drives `uses_scene_frame` ⇔ the frame-level path (`render_scene_view`);
+  the line pages and all plain/non-TTY output go through `scene_page_lines`
+  (frame pages show a "renders in a TTY" note there). All geometry and view
+  models are pure and testable off-screen — `scene3d` rasterizer math, the
+  `viz_data` builders, the diagram `Line` builders, and the box-drawing widgets
+  (rendered into a `Buffer` in unit tests).
 - **`--ci` is scan-only.** Single-tool `kuzushi run` uses `--json` for
   machine-readable output; the shell is interactive by definition. Don't
   add `--ci` to `run`.

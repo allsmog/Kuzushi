@@ -58,8 +58,20 @@ impl ShellApp {
         self.capture_failure_context(failure_context);
         self.set_completed_activity(tool_name.clone(), "tool result applied");
         self.mark_tool_activity_complete(&tool_name);
+        self.auto_open_viz_for_tool(&tool_name);
         self.advance_chain_after_tool(&tool_name);
         self.advance_planning_queue_after_tool(&tool_name);
+    }
+
+    /// When a tool that produces a visualizable artifact completes, switch to
+    /// its gallery page (gated on `auto_open_viz`). Runs before chain/queue
+    /// advance so a follow-up tool's Activity view correctly supersedes it;
+    /// the snapshot cache populating `app.taint_flow`/`exploit_chains` ran inside
+    /// `apply_tool_result` above, so the page has real data to draw.
+    fn auto_open_viz_for_tool(&mut self, tool_name: &str) {
+        if let Some(page) = viz_page_for_tool(tool_name) {
+            self.auto_open_viz_page(page);
+        }
     }
 
     /// Resolve a completed tool's Activity DAG row to `Done` when its producer

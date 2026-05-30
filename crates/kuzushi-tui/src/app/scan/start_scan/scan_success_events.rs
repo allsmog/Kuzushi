@@ -18,6 +18,9 @@ impl ShellApp {
             "sast:scan",
             format!("{findings_count} {}", scan_finding_label(findings_count)),
         );
+        // Findings are refreshed above, so the heatmap has real per-module risk
+        // to draw the moment the scan lands (gated on `auto_open_viz`).
+        self.auto_open_viz_page(crate::scene3d::VizPage::Heatmap);
     }
 
     fn mark_scan_panel_completed(&mut self, run_id: &str, findings_count: usize) {
