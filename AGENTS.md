@@ -325,11 +325,16 @@ is expected to behave identically and should be filed as a parity bug.
     `Line`s in `renderer/views/scene/diagrams`.
   **Auto-open:** mirrors `auto_open_activity`. On by default; opt out with
   `KUZUSHI_AUTO_OPEN_VIZ=false` (read once in `ShellApp::new`). When an artifact
-  lands, the completion hooks switch to its page: `scan` → Heatmap
-  (`apply_scan_finished`), and `viz_page_for_tool(tool_name)` maps
-  `taint-iris*`→AttackPath, `exploit-chain:scan`→ExploitChain,
-  `threat-model*`→Dfd in `apply_finished_tool_event` (fires before chain/queue
-  advance so a follow-up tool's Activity view supersedes it). The snapshot caches
+  lands AND has content, the completion hooks switch to its page: `scan` →
+  Heatmap (`apply_scan_finished`, only when findings > 0), and
+  `viz_page_for_tool(tool_name)` maps the artifact-*emitting* verbs exactly —
+  `taint-iris:hunt`→AttackPath, `exploit-chain:scan`→ExploitChain,
+  `threat-model:build`→Dfd — in `apply_finished_tool_event` (fires before
+  chain/queue advance so a follow-up tool's Activity view supersedes it; gated
+  by `viz_page_has_content` so a zero-result run doesn't open an empty page).
+  Prereq/read verbs (`taint-iris-next:catalog`, `threat-model:read`) and
+  `taint-iris-next:hunt` (which flattens its path into finding text, emitting no
+  `flows[]`) are intentionally unmapped. The snapshot caches
   in `app/tool_runner/run_tool/snapshots.rs` populate `app.exploit_chains` /
   `app.taint_flow` from the tool JSON `data` first; `taint-iris` emits structured
   `data.flows[]` for this (see `taint_iris` `extract_taint_flows`, parallel to

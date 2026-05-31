@@ -14,17 +14,18 @@ pub(crate) fn handle_scene_command(app: &mut ShellApp, command: &ShellCommand) -
 }
 
 /// Map a completed tool to the gallery page that visualizes its artifact, if
-/// any. Pure so the auto-open hooks stay testable. `taint-iris*` → attack-path,
-/// `exploit-chain:scan` → attack tree, `threat-model*` → data-flow diagram.
+/// any. Pure so the auto-open hooks stay testable. Matched exactly on the verbs
+/// that actually *emit* the structured artifact the page draws — prereq steps
+/// (`taint-iris-next:catalog`), read/info verbs (`threat-model:read`), and tools
+/// that don't emit structured flows (`taint-iris-next:hunt` flattens its taint
+/// path into finding text, unlike `taint-iris:hunt`) are intentionally absent so
+/// auto-open never lands on an empty page.
 pub(crate) fn viz_page_for_tool(tool_name: &str) -> Option<VizPage> {
-    if tool_name.starts_with("taint-iris") {
-        Some(VizPage::AttackPath)
-    } else if tool_name == "exploit-chain:scan" {
-        Some(VizPage::ExploitChain)
-    } else if tool_name.starts_with("threat-model") {
-        Some(VizPage::Dfd)
-    } else {
-        None
+    match tool_name {
+        "taint-iris:hunt" => Some(VizPage::AttackPath),
+        "exploit-chain:scan" => Some(VizPage::ExploitChain),
+        "threat-model:build" => Some(VizPage::Dfd),
+        _ => None,
     }
 }
 
@@ -50,6 +51,18 @@ impl ShellApp {
     pub(crate) fn auto_open_viz_page(&mut self, page: VizPage) {
         if self.auto_open_viz {
             self.open_scene_to_page(page);
+        }
+    }
+
+    /// Whether `page` has a backing artifact worth showing. Guards auto-open so
+    /// a tool run that produced nothing (clean scan, zero-flow hunt) doesn't
+    /// yank the operator to an empty page that reads "run the tool".
+    pub(crate) fn viz_page_has_content(&self, page: VizPage) -> bool {
+        match page {
+            VizPage::AttackPath => self.taint_flow.is_some(),
+            VizPage::ExploitChain => !self.exploit_chains.is_empty(),
+            VizPage::Dfd => crate::ui_view_models::dfd_model(self).empty_hint.is_none(),
+            VizPage::Heatmap | VizPage::AttackSurface => !self.findings.is_empty(),
         }
     }
 

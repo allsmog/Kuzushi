@@ -49,6 +49,14 @@ fn cell(count: u32, sev: Sev) -> Span<'static> {
     if count == 0 {
         return span(fixed("·", CELL_W), theme::subtle());
     }
-    let blocks = "█".repeat((count as usize).min(4));
-    span(fixed(&format!("{blocks}{count}"), CELL_W), sev.style())
+    // Keep `blocks + label` within CELL_W: a 4-digit count would otherwise make
+    // the cell 8 wide and `fixed` would truncate it to a misleading number
+    // (e.g. 1000 → "100"). Cap the readout at "999+" with one fewer block.
+    let (block_count, label) = if count > 999 {
+        (3, "999+".to_string())
+    } else {
+        ((count as usize).min(4), count.to_string())
+    };
+    let blocks = "█".repeat(block_count);
+    span(fixed(&format!("{blocks}{label}"), CELL_W), sev.style())
 }

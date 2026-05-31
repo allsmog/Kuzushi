@@ -47,7 +47,10 @@ impl Widget for DfdDiagram {
         }
         let zone_count = self.model.zones.len().max(1) as u16;
         let zone_w = (area.width.saturating_sub((zone_count - 1) * GAP)) / zone_count;
-        let zone_h = area.height.saturating_sub(3).clamp(9, 21);
+        // Reserve 4 rows below the panels (1 gap + 2 legend lines + 1 so the
+        // last legend row stays inside the area); otherwise the second legend
+        // line is silently clipped at the common pane heights (≤ 24 rows).
+        let zone_h = area.height.saturating_sub(4).clamp(9, 21);
         let zx = |i: u16| i * (zone_w + GAP);
 
         self.draw_zone_panels(buf, area, zone_w, zone_h, &zx);
