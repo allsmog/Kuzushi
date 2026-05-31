@@ -2322,17 +2322,24 @@ fn model_choice_with_focused_module_and_no_global_sets_global_first() {
 fn config_view_onboards_with_keyboard_model_selection() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Config;
-    app.selected_model_index = 0;
+    // The Config view hides the non-primary OpenAI row (which varies with auth
+    // state), so navigation steps the *visible* set — derive expectations from
+    // it rather than hardcoding an index, and assert the Enter target is exactly
+    // the highlighted (visible) row, not a hidden one.
+    let visible = super::settings::visible_model_choice_indexes(app.config.model.as_deref());
+    let choices = super::settings::model_choices();
+    app.selected_model_index = visible[0];
 
     app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
-    assert_eq!(app.selected_model_index, 1);
+    assert_eq!(app.selected_model_index, visible[1 % visible.len()]);
 
     app.handle_key(KeyEvent::new(KeyCode::Up, KeyModifiers::empty()));
-    assert_eq!(app.selected_model_index, 0);
+    assert_eq!(app.selected_model_index, visible[0]);
 
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
-    assert_eq!(app.config.model.as_deref(), Some("openai:gpt-5.5"));
-    assert_eq!(app.session_thinking_level.as_deref(), Some("xhigh"));
+    let expected = choices[visible[0]];
+    assert_eq!(app.config.model.as_deref(), Some(expected.id));
+    assert_eq!(app.session_thinking_level.as_deref(), Some(expected.thinking_level));
     assert!(app
         .log
         .iter()
@@ -5449,6 +5456,42 @@ fn confirm_gate_detects_fs_write_outside_kuzushi() {
         &allow,
     )
     .is_none());
+
+    // A `..` traversal that escapes .kuzushi/ must still be confirmed, even
+    // though the string starts with `.kuzushi/`.
+    let escape = confirm_gate_for_tool(
+        "fs:write",
+        &serde_json::json!({"path": ".kuzushi/../../etc/passwd"}),
+        &allow,
+    )
+    .expect("traversal escaping .kuzushi/ must be confirmed");
+    assert_eq!(escape.kind, ConfirmKind::FsWriteOutsideKuzushi);
+}
+
+#[test]
+fn move_model_selection_only_visits_visible_rows() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    // The Config view hides the non-primary OpenAI row, so navigation must never
+    // park the selection on a hidden index (which the renderer would collapse to
+    // the first visible row, desyncing the highlight from the Enter target).
+    let visible = super::settings::visible_model_choice_indexes(app.config.model.as_deref());
+    app.selected_model_index = visible[0];
+    for _ in 0..(visible.len() * 2 + 1) {
+        app.move_model_selection(1);
+        assert!(
+            visible.contains(&app.selected_model_index),
+            "forward step escaped visible set {visible:?}: {}",
+            app.selected_model_index
+        );
+    }
+    for _ in 0..(visible.len() * 2 + 1) {
+        app.move_model_selection(-1);
+        assert!(
+            visible.contains(&app.selected_model_index),
+            "back step escaped visible set {visible:?}: {}",
+            app.selected_model_index
+        );
+    }
 }
 
 #[test]
