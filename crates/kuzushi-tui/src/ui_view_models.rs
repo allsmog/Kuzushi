@@ -35,6 +35,7 @@ mod display_text;
 mod failure_handoff;
 mod finding_summary;
 mod findings;
+mod generated_views_feed;
 mod help;
 mod home_cockpit;
 mod keybindings;
