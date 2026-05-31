@@ -1,4 +1,4 @@
-<img src="kuzushi.png" alt="Kuzushi" width="200" />
+<img src="kuzushi-logo.png" alt="Kuzushi" width="200" />
 
 # Kuzushi
 
