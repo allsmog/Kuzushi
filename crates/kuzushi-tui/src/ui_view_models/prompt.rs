@@ -81,10 +81,13 @@ fn binary_stem(path: &str) -> Option<&str> {
 }
 
 fn strip_windows_exe(name: &str) -> &str {
-    if name.len() >= 4 && name[name.len() - 4..].eq_ignore_ascii_case(".exe") {
-        &name[..name.len() - 4]
-    } else {
-        name
+    // `name.get(cut..)` returns None when `cut` is not a char boundary, so a
+    // unicode binary name (e.g. "a€€", where len-4 lands mid-char) yields the
+    // name unchanged instead of panicking on a byte-index slice.
+    let cut = name.len().saturating_sub(4);
+    match name.get(cut..) {
+        Some(suffix) if suffix.eq_ignore_ascii_case(".exe") => &name[..cut],
+        _ => name,
     }
 }
 

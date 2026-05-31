@@ -46,13 +46,22 @@ impl ShellApp {
     }
 
     pub(crate) fn move_model_selection(&mut self, delta: isize) {
-        let len = MODEL_CHOICES.len();
-        if len == 0 {
+        // Step only through the rows the Config view actually shows. Cycling the
+        // full MODEL_CHOICES set could land `selected_model_index` on a hidden
+        // row (the non-primary OpenAI entry), which the renderer collapses to the
+        // first visible row — so the highlight and the Enter-selected model would
+        // disagree. Navigating the visible set keeps them in lockstep.
+        let visible = visible_model_choice_indexes(self.config.model.as_deref());
+        if visible.is_empty() {
             self.selected_model_index = 0;
             return;
         }
-        let current = self.selected_model_index.min(len - 1) as isize;
-        self.selected_model_index = (current + delta).rem_euclid(len as isize) as usize;
+        let current_pos = visible
+            .iter()
+            .position(|&index| index == self.selected_model_index)
+            .unwrap_or(0);
+        let next_pos = (current_pos as isize + delta).rem_euclid(visible.len() as isize) as usize;
+        self.selected_model_index = visible[next_pos];
     }
 
     pub(crate) fn select_current_model_choice(&mut self) {
