@@ -33,7 +33,11 @@ pub(crate) fn render_scene_view(frame: &mut Frame<'_>, area: Rect, app: &ShellAp
         VizPage::ExploitChain => {
             frame.render_widget(TreeDiagram { model: attack_tree(app) }, outer[1])
         }
-        _ => render_terrain_body(frame, outer[1], app),
+        VizPage::AttackSurface => render_terrain_body(frame, outer[1], app),
+        // Line-rendered pages never reach the frame path (guarded by
+        // `uses_scene_frame`); draw nothing rather than the wrong page. Exhaustive
+        // so a future frame-rendered variant forces an explicit decision here.
+        VizPage::AttackPath | VizPage::Heatmap => {}
     }
 }
 

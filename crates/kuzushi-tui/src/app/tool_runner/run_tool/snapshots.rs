@@ -94,10 +94,11 @@ fn exploit_chain_step(step: &serde_json::Value) -> Option<ExploitChainStep> {
     })
 }
 
-/// Cache the headline source→sink taint flow from `taint-iris` structured output
-/// (`data.flows[]`) for the attack-path visualization.
+/// Cache the headline source→sink taint flow from `taint-iris:hunt` structured
+/// output (`data.flows[]`) for the attack-path visualization. Only `taint-iris`
+/// emits `flows[]`; `taint-iris-next` flattens its taint path into finding text.
 fn cache_taint_flow_snapshot(app: &mut ShellApp, tool_name: &str, data: &serde_json::Value) -> bool {
-    if tool_name != "taint-iris:hunt" && tool_name != "taint-iris-next:hunt" {
+    if tool_name != "taint-iris:hunt" {
         return false;
     }
     if let Some(flow) = taint_flow_from_data(data) {

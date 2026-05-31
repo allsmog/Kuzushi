@@ -82,7 +82,7 @@ pub(super) fn vrun(buf: &mut Buffer, area: Rect, x: u16, y0: u16, y1: u16, color
 /// Orthogonal left→right connector (Z-route) with a `▶` arrowhead at `to`.
 pub(super) fn connector_h(buf: &mut Buffer, area: Rect, from: (u16, u16), to: (u16, u16), color: Color) {
     let ((fx, fy), (tx, ty)) = (from, to);
-    if tx <= fx + 1 {
+    if tx <= fx.saturating_add(1) {
         return;
     }
     let tip = tx - 1;
@@ -112,7 +112,7 @@ fn connector_h_zroute(buf: &mut Buffer, area: Rect, from: (u16, u16), to: (u16, 
 /// Orthogonal top→down connector (Z-route) with a `▼` arrowhead at `to`.
 pub(super) fn connector_v(buf: &mut Buffer, area: Rect, from: (u16, u16), to: (u16, u16), color: Color) {
     let ((fx, fy), (tx, ty)) = (from, to);
-    if ty <= fy + 1 {
+    if ty <= fy.saturating_add(1) {
         return;
     }
     let tip = ty - 1;

@@ -19,8 +19,12 @@ impl ShellApp {
             format!("{findings_count} {}", scan_finding_label(findings_count)),
         );
         // Findings are refreshed above, so the heatmap has real per-module risk
-        // to draw the moment the scan lands (gated on `auto_open_viz`).
-        self.auto_open_viz_page(crate::scene3d::VizPage::Heatmap);
+        // to draw the moment the scan lands (gated on `auto_open_viz`). Skip a
+        // clean scan — an empty heatmap reading "run scan" right after scanning
+        // is misleading; a 0-finding scan is a pass, not a thing to visualize.
+        if findings_count > 0 {
+            self.auto_open_viz_page(crate::scene3d::VizPage::Heatmap);
+        }
     }
 
     fn mark_scan_panel_completed(&mut self, run_id: &str, findings_count: usize) {

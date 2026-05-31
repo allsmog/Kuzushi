@@ -3093,11 +3093,10 @@ fn run_command_dispatches_legacy_taint_iris_next_hunt_through_langgraph_runtime_
     });
     drain_chain_with_auto_reuse(&mut app);
 
-    // Auto-open lands on the attack-path page once the taint flow is generated.
-    assert_eq!(
-        app.shell_view,
-        ShellView::Scene(crate::scene3d::VizPage::AttackPath)
-    );
+    // taint-iris-next flattens its taint path into finding text and emits no
+    // structured `data.flows[]`, so there's nothing for the attack-path page to
+    // draw — auto-open correctly leaves the view on Activity.
+    assert_eq!(app.shell_view, ShellView::Activity);
     assert!(
         app.log.iter().any(|line| {
             line.prefix == "result"
@@ -5892,16 +5891,43 @@ fn viz_page_for_tool_maps_artifacts_to_pages() {
         Some(VizPage::AttackPath)
     );
     assert_eq!(
-        viz_page_for_tool("taint-iris-next:hunt"),
-        Some(VizPage::AttackPath)
-    );
-    assert_eq!(
         viz_page_for_tool("exploit-chain:scan"),
         Some(VizPage::ExploitChain)
     );
     assert_eq!(viz_page_for_tool("threat-model:build"), Some(VizPage::Dfd));
     assert_eq!(viz_page_for_tool("sast:scan"), None);
     assert_eq!(viz_page_for_tool("recon:nmap"), None);
+    // Prereq / read-only / non-flow-emitting verbs share a prefix but produce no
+    // structured artifact — they must NOT auto-open, or an empty page flashes.
+    // (`taint-iris-next:hunt` flattens its taint path into finding text and emits
+    // no `data.flows[]`, unlike `taint-iris:hunt`.)
+    assert_eq!(viz_page_for_tool("taint-iris-next:hunt"), None);
+    assert_eq!(viz_page_for_tool("taint-iris-next:catalog"), None);
+    assert_eq!(viz_page_for_tool("taint-iris-next:dataflow-plan"), None);
+    assert_eq!(viz_page_for_tool("threat-model:read"), None);
+    assert_eq!(viz_page_for_tool("threat-model:methodologies"), None);
+}
+
+#[test]
+fn viz_page_has_content_tracks_backing_artifacts() {
+    use crate::scene3d::VizPage;
+    let mut app = ShellApp::new(V2Config::default(), None);
+    // Fresh app: nothing generated yet — every artifact-backed page is empty.
+    assert!(!app.viz_page_has_content(VizPage::AttackPath));
+    assert!(!app.viz_page_has_content(VizPage::ExploitChain));
+    assert!(!app.viz_page_has_content(VizPage::Heatmap));
+    assert!(!app.viz_page_has_content(VizPage::Dfd));
+
+    // A cached taint flow gives the attack-path page something to draw.
+    app.cache_tool_snapshot(
+        "taint-iris:hunt",
+        &serde_json::json!({
+            "data": {"flows": [{"cwe": "CWE-89", "severity": "high", "stages": [
+                {"message": "source", "filePath": "a.ts", "line": 1}
+            ]}]}
+        }),
+    );
+    assert!(app.viz_page_has_content(VizPage::AttackPath));
 }
 
 #[test]
@@ -5940,4 +5966,16 @@ fn scan_completion_respects_viz_opt_out() {
     let before = app.shell_view.clone();
     app.apply_scan_finished("run-viz".to_string(), 2);
     assert_eq!(app.shell_view, before);
+}
+
+#[test]
+fn clean_scan_does_not_auto_open_an_empty_heatmap() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.auto_open_viz = true;
+    let before = app.shell_view.clone();
+    app.apply_scan_finished("run-clean".to_string(), 0);
+    assert_eq!(
+        app.shell_view, before,
+        "a 0-finding scan is a pass, not a heatmap to yank to"
+    );
 }

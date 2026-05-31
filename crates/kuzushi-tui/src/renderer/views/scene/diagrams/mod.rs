@@ -134,6 +134,19 @@ mod tests {
     }
 
     #[test]
+    fn heatmap_caps_huge_counts_without_overflowing_a_cell() {
+        use crate::ui_view_models::{FindingsHeatmap, ModuleRisk};
+        let model = FindingsHeatmap {
+            rows: vec![ModuleRisk { module: "auth".into(), counts: [5000, 12, 1, 0, 0], score: 0.0 }],
+            empty_hint: None,
+        };
+        let text = as_text(&heatmap_lines(72, &model));
+        let widest = text.lines().map(|l| l.chars().count()).max().unwrap_or(0);
+        assert!(widest <= 72, "heatmap overflowed (widest {widest})");
+        assert!(text.contains("999+"), "huge count should be capped to 999+");
+    }
+
+    #[test]
     fn empty_models_render_a_hint() {
         use crate::ui_view_models::{FindingsHeatmap, TaintFlowPath};
         let taint = TaintFlowPath { empty_hint: Some("no taint flow".into()), ..Default::default() };

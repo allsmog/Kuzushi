@@ -65,12 +65,15 @@ impl ShellApp {
 
     /// When a tool that produces a visualizable artifact completes, switch to
     /// its gallery page (gated on `auto_open_viz`). Runs before chain/queue
-    /// advance so a follow-up tool's Activity view correctly supersedes it;
-    /// the snapshot cache populating `app.taint_flow`/`exploit_chains` ran inside
-    /// `apply_tool_result` above, so the page has real data to draw.
+    /// advance so a follow-up tool's Activity view correctly supersedes it. The
+    /// snapshot cache ran inside `apply_tool_result` above, so we can check
+    /// whether it actually produced data — a zero-flow hunt or empty chain run
+    /// shouldn't yank the operator to a "run the tool" empty page.
     fn auto_open_viz_for_tool(&mut self, tool_name: &str) {
         if let Some(page) = viz_page_for_tool(tool_name) {
-            self.auto_open_viz_page(page);
+            if self.viz_page_has_content(page) {
+                self.auto_open_viz_page(page);
+            }
         }
     }
 
