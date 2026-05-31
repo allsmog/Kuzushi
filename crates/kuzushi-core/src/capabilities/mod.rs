@@ -8,6 +8,7 @@ pub mod module_recommender;
 pub mod plugin_adapters;
 pub mod prompt_armor;
 pub mod recon;
+pub mod scene_snapshots;
 pub mod semgrep_rule_synthesis;
 pub mod systems_hunt;
 pub mod taint_iris;
@@ -26,6 +27,7 @@ pub use classifier_gate::*;
 pub use deep_auditor::*;
 pub use full_mode_multi::*;
 pub use recon::*;
+pub use scene_snapshots::*;
 pub use semgrep_rule_synthesis::*;
 pub use systems_hunt::*;
 pub use threat_intel::{

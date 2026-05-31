@@ -29,9 +29,11 @@ pub(crate) fn activity_plain_pane_rows(
     dag_width: usize,
     feed_width: usize,
     now: Instant,
+    extra_feed_rows: &[ActivityFeedPaneRow],
 ) -> Vec<ActivityPlainPaneRow> {
     let dag_rows = activity_dag_pane_rows(session, dag_width, now);
-    let feed_rows = activity_feed_pane_rows(session, feed_width);
+    let mut feed_rows = activity_feed_pane_rows(session, feed_width);
+    feed_rows.extend(extra_feed_rows.iter().cloned());
     let row_count = dag_rows.len().max(feed_rows.len());
     (0..row_count)
         .map(|index| ActivityPlainPaneRow {
@@ -99,7 +101,7 @@ mod tests {
                 .with_started_at_ms(43_000),
         );
 
-        let rows = activity_plain_pane_rows(&session, 12, 20, Instant::now());
+        let rows = activity_plain_pane_rows(&session, 12, 20, Instant::now(), &[]);
 
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].separator, " │ ");
@@ -110,5 +112,18 @@ mod tests {
         assert_eq!(rows[1].dag.text, " ".repeat(12));
         assert_eq!(rows[1].dag.tone, None);
         assert_eq!(rows[1].feed.tone, Some(ActivityFeedRowTone::Success));
+    }
+
+    #[test]
+    fn activity_plain_pane_rows_append_pinned_generated_views() {
+        let session = ActivitySession::new("r-1");
+        let extra = [ActivityFeedPaneRow {
+            text: "ATTACK PATH".to_string(),
+            tone: ActivityFeedRowTone::Success,
+        }];
+
+        let rows = activity_plain_pane_rows(&session, 12, 20, Instant::now(), &extra);
+
+        assert!(rows.iter().any(|row| row.feed.text.contains("ATTACK PATH")));
     }
 }

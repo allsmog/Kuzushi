@@ -1,8 +1,6 @@
 use super::activity_dag_rows::{activity_dag_pane_rows, ActivityDagPaneRow};
 use super::activity_empty_state::{activity_empty_state_model, ActivityEmptyStateModel};
-use super::activity_feed_rows::{
-    activity_feed_pane_rows, ActivityFeedPaneRow, ActivityFeedRowTone,
-};
+use super::activity_feed_rows::{activity_feed_pane_rows, ActivityFeedPaneRow};
 use super::activity_footer::{activity_footer_model, ActivityFooterModel};
 use super::activity_header::{activity_header_model, ActivityHeaderModel};
 use super::activity_layout::{
@@ -14,7 +12,7 @@ use super::activity_pane_chrome::{
 };
 use super::activity_plain_rows::{activity_plain_pane_rows, ActivityPlainPaneRow};
 use super::activity_scroll::{activity_feed_scroll_offset, activity_task_scroll_offset};
-use super::threat_dfd_diagram::threat_dfd_diagram_feed_rows;
+use super::generated_views_feed::generated_views_feed_rows;
 use crate::{ActivitySession, ShellApp};
 use std::time::Instant;
 
@@ -24,31 +22,20 @@ pub(crate) enum ActivityViewModel<'a> {
 }
 
 pub(crate) struct ActiveActivityViewModel<'a> {
+    app: &'a ShellApp,
     session: &'a ActivitySession,
     context_line: String,
-    dfd_doc: Option<serde_json::Value>,
 }
 
 pub(crate) fn activity_view_model(app: &ShellApp) -> ActivityViewModel<'_> {
     match app.activity.as_ref() {
         Some(session) => ActivityViewModel::Active(ActiveActivityViewModel {
+            app,
             session,
             context_line: activity_context_line(app),
-            dfd_doc: activity_dfd_doc(app, session),
         }),
         None => ActivityViewModel::Inactive(activity_empty_state_model()),
     }
-}
-
-/// The persisted threat model, but only once a `threat-model` task is part of
-/// this run — so the DFD only decorates the OUTPUT pane when it's relevant.
-fn activity_dfd_doc(app: &ShellApp, session: &ActivitySession) -> Option<serde_json::Value> {
-    session
-        .tasks
-        .keys()
-        .any(|task_id| task_id.starts_with("threat-model") || task_id.starts_with("threat_model"))
-        .then(|| super::threat_model_doc(app))
-        .flatten()
 }
 
 /// Workspace context for the Activity header (target · ctx · model · findings).
@@ -96,7 +83,8 @@ impl<'a> ActiveActivityViewModel<'a> {
         widths: ActivityPaneWidths,
         now: Instant,
     ) -> Vec<ActivityPlainPaneRow> {
-        activity_plain_pane_rows(self.session, widths.dag, widths.feed, now)
+        let generated = generated_views_feed_rows(self.app, widths.feed);
+        activity_plain_pane_rows(self.session, widths.dag, widths.feed, now, &generated)
     }
 
     pub(crate) fn dag_pane_rows(
@@ -107,27 +95,13 @@ impl<'a> ActiveActivityViewModel<'a> {
         activity_dag_pane_rows(self.session, inner_width, now)
     }
 
+    /// The live event feed, followed by every generated visualization that has
+    /// data (pulled from persistent `ShellApp` state, so the views persist across
+    /// later phases and — via the on-disk snapshots — across sessions).
     pub(crate) fn feed_pane_rows(&self, inner_width: usize) -> Vec<ActivityFeedPaneRow> {
         let mut rows = activity_feed_pane_rows(self.session, inner_width);
-        self.append_dfd_diagram(&mut rows, inner_width);
+        rows.extend(generated_views_feed_rows(self.app, inner_width));
         rows
-    }
-
-    /// After the live feed, draw the target's data-flow diagram so a completed
-    /// `threat-model` run leaves a readable picture in the OUTPUT pane.
-    fn append_dfd_diagram(&self, rows: &mut Vec<ActivityFeedPaneRow>, inner_width: usize) {
-        let Some(doc) = self.dfd_doc.as_ref() else {
-            return;
-        };
-        let diagram = threat_dfd_diagram_feed_rows(doc, inner_width);
-        if diagram.is_empty() {
-            return;
-        }
-        rows.push(ActivityFeedPaneRow {
-            text: String::new(),
-            tone: ActivityFeedRowTone::Subtle,
-        });
-        rows.extend(diagram);
     }
 
     pub(crate) fn task_scroll_offset(&self, rows: usize, viewport_rows: usize) -> usize {
@@ -183,5 +157,35 @@ mod tests {
         assert_eq!(model.pane_chrome().dag.block_title, "── TASKS ──");
         assert!(!model.plain_pane_rows(widths, Instant::now()).is_empty());
         assert!(model.footer(80).body.contains("hover [j/k]"));
+    }
+
+    #[test]
+    fn generated_views_pin_to_feed_regardless_of_session_tasks() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.taint_flow = Some(crate::TaintFlowSnapshot {
+            cwe: "CWE-89".to_string(),
+            severity: "critical".to_string(),
+            stages: vec![crate::TaintStage {
+                message: "order_id".to_string(),
+                file: "orders.rs".to_string(),
+                line: 1,
+            }],
+        });
+        // The active session ran only an unrelated task — no taint-iris and no
+        // threat-model — yet the persisted attack path must still pin to the
+        // OUTPUT feed, since the views now persist across phases from app state.
+        let mut session = ActivitySession::new("r-x");
+        session.tasks.insert(
+            "context:build".to_string(),
+            DagTaskRow::queued("context:build".into(), "context".into(), Vec::new()),
+        );
+        app.activity = Some(session);
+
+        let ActivityViewModel::Active(model) = activity_view_model(&app) else {
+            panic!("expected active activity model");
+        };
+        let rows = model.feed_pane_rows(120);
+        assert!(rows.iter().any(|row| row.text.contains("ATTACK PATH")));
+        assert!(rows.iter().any(|row| row.text.contains("CWE-89")));
     }
 }

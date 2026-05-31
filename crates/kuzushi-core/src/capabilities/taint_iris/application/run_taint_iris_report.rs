@@ -166,6 +166,7 @@ fn completed_taint_iris_hunt(
     let collected = collect_taint_iris_findings(input, ctx, run, &cwes)?;
     let finding_count = collected.findings.len();
     let persisted = persist_taint_iris_findings(&run.target, &collected.findings, ctx)?;
+    persist_taint_iris_flows(&run.target, &collected.flows);
     Ok(CompletedTaintIrisHunt {
         report: taint_iris_report(
             &run.target,
@@ -177,6 +178,17 @@ fn completed_taint_iris_hunt(
         ),
         finding_count,
     })
+}
+
+/// Mirror the structured taint flows to the per-repo state root so the `/scene`
+/// attack-path page stays available across sessions and headless runs.
+/// Best-effort: a write failure must never fail the hunt.
+fn persist_taint_iris_flows(target: &Path, flows: &[TaintFlow]) {
+    if flows.is_empty() {
+        return;
+    }
+    let payload = serde_json::json!({ "flows": flows });
+    let _ = crate::capabilities::save_persistent_taint_flow(target, &payload);
 }
 
 /// Findings plus the parallel structured taint flows extracted from the same

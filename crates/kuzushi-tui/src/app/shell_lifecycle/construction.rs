@@ -177,6 +177,7 @@ impl ShellApp {
             session_budget_usd,
             trusted_workflow_auto_accept
         );
+        app.hydrate_persisted_scene_snapshots(target.map(|target| target.root()));
         app.announce_startup(selected_model_index, ready_default, option_store_error, target.is_some());
         app
     }

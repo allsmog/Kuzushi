@@ -18,6 +18,41 @@ impl ShellApp {
             }
         }
     }
+
+    /// Reload the per-repo taint-flow + exploit-chain viz snapshots a previous
+    /// session wrote, so the `/scene` attack-path and exploit-chain pages — and
+    /// the Activity OUTPUT pinned views — are populated on launch. Findings (the
+    /// heatmap + 3D surface) and the threat model (the DFD) already hydrate from
+    /// their own stores. Best-effort: a missing/unreadable file leaves the page
+    /// empty, exactly as a never-run tool would.
+    pub(crate) fn hydrate_persisted_scene_snapshots(&mut self, root: Option<&std::path::Path>) {
+        let Some(root) = root else {
+            return;
+        };
+        self.hydrate_persisted_taint_flow(root);
+        self.hydrate_persisted_exploit_chains(root);
+    }
+
+    fn hydrate_persisted_taint_flow(&mut self, root: &std::path::Path) {
+        if let Some(flow) = kuzushi_core::capabilities::load_persistent_taint_flow(root)
+            .as_ref()
+            .and_then(taint_flow_from_data)
+        {
+            self.taint_flow = Some(flow);
+        }
+    }
+
+    fn hydrate_persisted_exploit_chains(&mut self, root: &std::path::Path) {
+        let Some(chain_data) = kuzushi_core::capabilities::load_persistent_exploit_chains(root)
+        else {
+            return;
+        };
+        let details = exploit_chain_details(&chain_data);
+        if !details.is_empty() {
+            self.exploit_chains = details;
+            self.chains = exploit_chain_aliases(&chain_data);
+        }
+    }
 }
 
 type SnapshotCache = fn(&mut ShellApp, &str, &serde_json::Value) -> bool;
@@ -223,4 +258,45 @@ fn data_string(data: &serde_json::Value, key: &str) -> Option<String> {
     data.get(key)
         .and_then(serde_json::Value::as_str)
         .map(ToString::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::V2Config;
+    use serde_json::json;
+
+    #[test]
+    fn hydrate_reloads_persisted_taint_and_exploit_snapshots() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        kuzushi_core::capabilities::save_persistent_taint_flow(
+            dir.path(),
+            &json!({ "flows": [{
+                "cwe": "CWE-89", "severity": "critical",
+                "stages": [{ "message": "order_id", "filePath": "orders.rs", "line": 1 }]
+            }] }),
+        )
+        .expect("save taint");
+        kuzushi_core::capabilities::save_persistent_exploit_chains(
+            dir.path(),
+            &json!({ "chains": [{
+                "id": "c1", "name": "SQLi", "overallSeverity": "critical",
+                "steps": [{ "role": "source", "description": "unsanitised id",
+                    "filePath": "a.rs", "startLine": 2 }]
+            }] }),
+        )
+        .expect("save chains");
+
+        // A fresh app (as on a new session) starts empty, then hydrates the
+        // repo's persisted viz snapshots — proving they survive a restart.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        assert!(app.taint_flow.is_none());
+        assert!(app.exploit_chains.is_empty());
+
+        app.hydrate_persisted_scene_snapshots(Some(dir.path()));
+
+        assert_eq!(app.taint_flow.as_ref().expect("taint flow").cwe, "CWE-89");
+        assert_eq!(app.exploit_chains.len(), 1);
+        assert_eq!(app.exploit_chains[0].title, "SQLi");
+    }
 }
