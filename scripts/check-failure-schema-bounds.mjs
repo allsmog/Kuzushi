@@ -63,9 +63,7 @@ export function checkFailureSchemaBounds(root) {
 }
 
 function failureArrayBound(schema, nodePath) {
-  return nodePath
-    .split(".")
-    .reduce((node, segment) => node?.[segment], schema)?.maxItems;
+  return nodePath.split(".").reduce((node, segment) => node?.[segment], schema)?.maxItems;
 }
 
 function failureStringMinLength(schema, nodePath) {

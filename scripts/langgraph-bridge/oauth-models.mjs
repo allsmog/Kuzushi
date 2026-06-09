@@ -1,5 +1,5 @@
 import { AIMessage } from "@langchain/core/messages";
-import { appendStructuredOutputContract, maybeParseJson, messageText } from "./model.mjs";
+import { appendStructuredOutputContract, messageText } from "./model.mjs";
 
 const CLAUDE_CODE_IDENTITY_LINE = "You are Claude Code, Anthropic's official CLI for Claude.";
 

@@ -79,32 +79,11 @@
   },
   "overrides": [
     {
-      "includes": [
-        "src/cli.ts",
-        "src/cli/**",
-        "src/report.ts",
-        "src/logger.ts",
-        "src/ui/demo.tsx",
-        "src/ui/plain-renderer.ts",
-        "scripts/**",
-        "benchmarks/**",
-        "perf/**",
-        "tests/**"
-      ],
+      "includes": ["scripts/**", "benchmarks/**", "perf/**", "tests/**"],
       "linter": {
         "rules": {
           "suspicious": {
             "noConsole": "off"
-          }
-        }
-      }
-    },
-    {
-      "includes": ["src/ui/**", "!src/ui/demo.tsx", "!src/ui/plain-renderer.ts"],
-      "linter": {
-        "rules": {
-          "suspicious": {
-            "noConsole": "error"
           }
         }
       }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const repo = process.cwd();
@@ -217,13 +217,13 @@ const canonicalRunSchemaFileRequirements = [
 
 const artifactSchemaShapeRequirements = [
   "snapshotMarkerShapeSpecs",
-  "properties\", \"runId",
-  "properties\", \"run_id",
-  "properties\", \"status",
-  "properties\", \"runStatus",
-  "properties\", \"summary",
-  "properties\", \"warnings",
-  "properties\", \"errors",
+  'properties", "runId',
+  'properties", "run_id',
+  'properties", "status',
+  'properties", "runStatus',
+  'properties", "summary',
+  'properties", "warnings',
+  'properties", "errors',
   "schemas/run.attack-surface.schema.json",
   "schemas/run.context.schema.json",
   "schemas/run.findings.schema.json",
@@ -235,7 +235,7 @@ const artifactSchemaShapeRequirements = [
   "#/definitions/fileIndex",
   "#/definitions/finding",
   "#/definitions/findingProperties",
-  "definitions\", \"confidence\", \"anyOf",
+  'definitions", "confidence", "anyOf',
   "#/definitions/inputCategories",
   "#/definitions/methodology",
   "#/definitions/narrative",
@@ -443,7 +443,7 @@ const artifactTokenContractRequirements = [
   "tool input writer uses shared artifact spec",
   "tool result writer uses shared artifact spec",
   "failure handoff writer uses shared artifact spec",
-  "optional_run_artifact_spec(\\\"report.sarif\\\")",
+  'optional_run_artifact_spec("report.sarif")',
 ];
 
 const canonicalRunArtifactRequirements = [
@@ -511,7 +511,7 @@ const artifactManifestContractRequirements = [
   "canonical manifest has uncontracted artifact",
   "canonical manifest duplicates artifact",
   "${label} artifact ${expected.path} must have ${field} ${expected[field]}",
-  "\"canonical manifest\"",
+  '"canonical manifest"',
   "requiredRunArtifactSpecs.flatMap",
   "optional run artifact inventory",
   "tool-input artifact inventory",
@@ -541,13 +541,13 @@ const artifactManifestContractRequirements = [
   "report JSONL summary must dispatch events through shared artifact leaf",
   "report JSONL summary must dispatch trace through shared artifact leaf",
   "sharedArtifactSpec",
-  "rustCanonicalRunArtifactSpecs(readFileSync(sourcePath, \"utf8\"), \"CANONICAL_RUN_ARTIFACTS\")",
-  "rustCanonicalRunArtifactSpecs(source, \"OPTIONAL_RUN_ARTIFACTS\")",
-  "rustCanonicalRunArtifactSpecs(source, \"TOOL_RESULT_ARTIFACTS\")",
-  "rustCanonicalRunArtifactSpecs(source, \"TOOL_INPUT_ARTIFACTS\")",
-  "rustStringArrayConstant(source, \"LEGACY_FOLLOW_UP_RUN_FILES\")",
-  "rustStringConstants(source, [\"LEGACY_SUMMARY_FILE\"])",
-  "rustArrayConstantBody(readFileSync(sourcePath, \"utf8\"), \"JSON_SNAPSHOT_FILES\")",
+  'rustCanonicalRunArtifactSpecs(readFileSync(sourcePath, "utf8"), "CANONICAL_RUN_ARTIFACTS")',
+  'rustCanonicalRunArtifactSpecs(source, "OPTIONAL_RUN_ARTIFACTS")',
+  'rustCanonicalRunArtifactSpecs(source, "TOOL_RESULT_ARTIFACTS")',
+  'rustCanonicalRunArtifactSpecs(source, "TOOL_INPUT_ARTIFACTS")',
+  'rustStringArrayConstant(source, "LEGACY_FOLLOW_UP_RUN_FILES")',
+  'rustStringConstants(source, ["LEGACY_SUMMARY_FILE"])',
+  'rustArrayConstantBody(readFileSync(sourcePath, "utf8"), "JSON_SNAPSHOT_FILES")',
   "report reader must derive canonical artifacts from CANONICAL_RUN_ARTIFACTS",
   "report reader must centralize canonical JSON artifact selection",
   "report reader must centralize canonical text artifact selection",
@@ -609,9 +609,9 @@ const artifactManifestContractRequirements = [
   "checkManifestLoaderToolInputMetadata",
   "manifest loader must use tool_input_artifact_spec",
   "manifest loader must match input.json through shared tool-input spec",
-  "sharedArtifactSpec(sharedSpecs, artifact, \"report reader canonical JSON\")",
-  "sharedArtifactSpec(sharedSpecs, artifact, \"report reader canonical text\")",
-  "kind: \"unknown\"",
+  'sharedArtifactSpec(sharedSpecs, artifact, "report reader canonical JSON")',
+  'sharedArtifactSpec(sharedSpecs, artifact, "report reader canonical text")',
+  'kind: "unknown"',
   "LEGACY_SUMMARY_FILE",
   "run metadata writer must use shared run metadata spec",
   "run metadata writer must write run_metadata_artifact_spec().leaf",
@@ -974,14 +974,9 @@ const sastScanArtifactStructRequirements = [
   "dir.join(SAST_VERIFY_JSONL_FILE)",
 ];
 
-const sastScanArtifactWriterRequirements = [
-  "write_sast_scan_input",
-  "artifacts.scan_input",
-];
+const sastScanArtifactWriterRequirements = ["write_sast_scan_input", "artifacts.scan_input"];
 
-const sastScanArtifactOutputRequirements = [
-  '"input": artifacts.scan_input.display().to_string()',
-];
+const sastScanArtifactOutputRequirements = ['"input": artifacts.scan_input.display().to_string()'];
 
 const sastScanArtifactTestRequirements = [
   "/data/artifacts/input",
@@ -989,40 +984,40 @@ const sastScanArtifactTestRequirements = [
 ];
 
 const runTraceViewModelArtifactRequirements = [
-  "canonical_run_artifact_spec(\"run.json\")",
+  'canonical_run_artifact_spec("run.json")',
   "run_metadata_artifact_leaf()",
   "LEGACY_RUN_SUMMARY_FILE",
-  "canonical_run_artifact_spec(\"trace.jsonl\")",
+  'canonical_run_artifact_spec("trace.jsonl")',
   "run_trace_artifact_leaf()",
   "RUN_TRIAGE_FILE",
   "RUN_VERIFY_FILE",
-  "run_artifact_detail(app, run_id, \"trace\", run_trace_artifact_leaf())",
-  "run_artifact_detail(app, run_id, \"triage\", RUN_TRIAGE_FILE)",
-  "run_artifact_detail(app, run_id, \"verify\", RUN_VERIFY_FILE)",
+  'run_artifact_detail(app, run_id, "trace", run_trace_artifact_leaf())',
+  'run_artifact_detail(app, run_id, "triage", RUN_TRIAGE_FILE)',
+  'run_artifact_detail(app, run_id, "verify", RUN_VERIFY_FILE)',
 ];
 
 const runEventArtifactRequirements = [
-  "canonical_run_artifact_spec(\"events.jsonl\")",
+  'canonical_run_artifact_spec("events.jsonl")',
   "run_events_spec().leaf",
 ];
 
 const runTraceArtifactRequirements = [
-  "canonical_run_artifact_spec(\"trace.jsonl\")",
+  'canonical_run_artifact_spec("trace.jsonl")',
   "run_trace_spec().leaf",
 ];
 
 const runTraceAuditArtifactRequirements = [
-  "canonical_run_artifact_spec(\"trace.jsonl\")",
+  'canonical_run_artifact_spec("trace.jsonl")',
   "run_trace_audit_spec().leaf",
 ];
 
 const artifactManifestPathRequirements = [
-  "canonical_run_artifact_spec(\"artifacts.json\")",
+  'canonical_run_artifact_spec("artifacts.json")',
   "manifest_artifact_spec().leaf",
 ];
 
 const docDriftRequirements = [
-  "\"AGENTS.md\"",
+  '"AGENTS.md"',
   '".github"',
   "modelGuidanceFiles.flatMap",
   "staleSplitPathPatterns",
@@ -1253,8 +1248,8 @@ const packagingRequirements = [
   "process.env.KUZUSHI_CLI_NAME ??",
   "allowedLifecycleScripts",
   "lifecycleScriptCommandFailures",
-  "package scripts.${name} must be ${allowedLifecycleScripts[name] ?? \"absent\"}",
-  "postinstall: \"node scripts/check-native-bindings.mjs\"",
+  'package scripts.${name} must be ${allowedLifecycleScripts[name] ?? "absent"}',
+  'postinstall: "node scripts/check-native-bindings.mjs"',
   "package scripts.${name} references unshipped file ${file}",
   "expectedPackageScripts",
   "packageScriptSurfaceFailures",
@@ -1277,10 +1272,11 @@ const packagingRequirements = [
   "node dist/ui/App.js",
   "pnpm build:clean && pnpm build:native",
   "node scripts/check-native-bindings.mjs",
-  "dev: \"cargo run -p kuzushi-cli\"",
-  "\"quality:architecture\": \"node scripts/check-ddd-boundaries.mjs && node scripts/check-ddd-context-docs.mjs && node scripts/check-artifact-contract.mjs && node scripts/check-result-envelope-contract.mjs && node scripts/check-retired-ts-runtime.mjs && node scripts/check-deferred-surface-contract.mjs && node scripts/check-validated-wording.mjs\"",
-  "\"test:rust\": \"cargo test --workspace\"",
-  "codegen: \"tsx scripts/codegen/index.ts\"",
+  'dev: "cargo run -p kuzushi-cli"',
+  '"quality:architecture":',
+  '"node scripts/check-ddd-boundaries.mjs && node scripts/check-ddd-context-docs.mjs && node scripts/check-artifact-contract.mjs && node scripts/check-result-envelope-contract.mjs && node scripts/check-retired-ts-runtime.mjs && node scripts/check-deferred-surface-contract.mjs && node scripts/check-validated-wording.mjs"',
+  '"test:rust": "cargo test --workspace"',
+  'codegen: "tsx scripts/codegen/index.ts"',
   "nativeBindingScriptContentFailures",
   "scripts/check-native-bindings.mjs must mention ${token}",
   "scripts/check-native-bindings.mjs must not mention ${token}",
@@ -1299,17 +1295,17 @@ const packagingRequirements = [
   "process.exit(0)",
   "requiredReleaseScripts",
   "releaseScriptFailuresFor",
-  "prepack: \"pnpm build:clean && pnpm build:native\"",
-  "\"verify:pack\": \"node scripts/verify-pack.mjs\"",
-  "\"publish:npm\": \"bash scripts/publish-npm.sh\"",
-  "\"publish:npm:go\": \"bash scripts/publish-npm.sh --publish\"",
+  'prepack: "pnpm build:clean && pnpm build:native"',
+  '"verify:pack": "node scripts/verify-pack.mjs"',
+  '"publish:npm": "bash scripts/publish-npm.sh"',
+  '"publish:npm:go": "bash scripts/publish-npm.sh --publish"',
   "package scripts.${name} must be ${command}",
   "publishWrapperContentFailures",
   "scripts/publish-npm.sh must mention ${token}",
   "typecheck + tests + clean JS/native build + package verification must pass",
   "git diff --quiet",
   "git diff --cached --quiet",
-  'git rev-parse --abbrev-ref HEAD',
+  "git rev-parse --abbrev-ref HEAD",
   'git rev-parse -q --verify "refs/tags/${TAG}"',
   'git rev-list -n 1 "$TAG"',
   "git rev-parse HEAD",
@@ -1318,17 +1314,17 @@ const packagingRequirements = [
   'npm view "${PUB_NAME}@${VERSION}" version',
   "pnpm exec tsc --noEmit",
   "pnpm exec vitest run",
-  'SKIP_TESTS:-0',
+  "SKIP_TESTS:-0",
   "pnpm run build:clean",
   "pnpm run build:native",
   "pnpm run verify:pack",
   "npm pack --dry-run --ignore-scripts",
   "PUBLISH_ARGS=(publish --access public --ignore-scripts)",
-  'NPM_PROVENANCE:-',
-  'PUBLISH_ARGS+=(--provenance)',
-  'OTP:-',
+  "NPM_PROVENANCE:-",
+  "PUBLISH_ARGS+=(--provenance)",
+  "OTP:-",
   'PUBLISH_ARGS+=(--otp="$OTP")',
-  'read -r reply',
+  "read -r reply",
   'npm "${PUBLISH_ARGS[@]}"',
   "Dry-run complete (would run: npm ${PUBLISH_ARGS[*]})",
   "Pass --publish to actually publish",
@@ -1367,7 +1363,8 @@ const packagingRequirements = [
   "package types-policy allowed fixture is denied ${types}",
   "package types must be a string",
   "package types must stay on built declaration runtime surface: ${target}",
-  'target.startsWith("dist/") && target.endsWith(".d.ts")',
+  'target.startsWith("dist/") &&',
+  'target.endsWith(".d.ts")',
   '"./dist/index.d.ts"',
   '"dist/cli.d.ts"',
   '["sast", "security", "semgrep", "ai", "triage"]',
@@ -1377,10 +1374,10 @@ const packagingRequirements = [
   "package dependencies missing required package",
   "package dependencies has uncontracted package",
   "package dependencies.${name} must be ${spec}",
-  "\"@langchain/langgraph\": \"^1.0.0\"",
-  "\"@kuzushi/randori-plugin\": \"github:allsmog/randori-plugin\"",
-  "\"better-sqlite3\": \"^12.8.0\"",
-  "typescript: \"^5.7.3\"",
+  '"@langchain/langgraph": "^1.0.0"',
+  '"@kuzushi/randori-plugin": "github:allsmog/randori-plugin"',
+  '"better-sqlite3": "^12.8.0"',
+  'typescript: "^5.7.3"',
   "expectedPackageDevDependencies",
   "packageDevDependencyFailures",
   "package devDependencies missing required package",
@@ -1394,10 +1391,10 @@ const packagingRequirements = [
   "https://codeload.github.com/allsmog/vuln-scout/tar.gz/79df9e804c6a87f0af3c779c55d2fcdb4675f49d",
   "https://codeload.github.com/allsmog/promptarmor-plugin/tar.gz/690d60a5b4d2136206ef7dedd516d3fcfddd4db9",
   "https://codeload.github.com/allsmog/shinsa-plugin/tar.gz/74b3737d225970d849f5f6f57095cfe65ee7ccdf",
-  "\"@biomejs/biome\": \"^2.4.12\"",
-  "\"@vitest/coverage-v8\": \"^3.0.5\"",
-  "tsx: \"^4.19.2\"",
-  "vitest: \"^3.0.5\"",
+  '"@biomejs/biome": "^2.4.12"',
+  '"@vitest/coverage-v8": "^3.0.5"',
+  'tsx: "^4.19.2"',
+  'vitest: "^3.0.5"',
   "./artifact-schema-inventory-contract.mjs",
   "./canonical-run-schema-files.mjs",
   "...canonicalRunSchemaFiles",
@@ -1479,10 +1476,10 @@ const packagingRequirements = [
   "deferredAdapterDependencyFailures",
   "package dependencies must not install deferred adapter package ${name}",
   "package optionalDependencies.${name} must be ${spec}",
-  "\"@kuzushi/tob-skills\": \"github:allsmog/tob-security-skills\"",
-  "\"@kuzushi/vuln-scout\": \"github:allsmog/vuln-scout\"",
-  "\"promptarmor-plugin\": \"github:allsmog/promptarmor-plugin\"",
-  "\"shinsa-plugin\": \"github:allsmog/shinsa-plugin\"",
+  '"@kuzushi/tob-skills": "github:allsmog/tob-security-skills"',
+  '"@kuzushi/vuln-scout": "github:allsmog/vuln-scout"',
+  '"promptarmor-plugin": "github:allsmog/promptarmor-plugin"',
+  '"shinsa-plugin": "github:allsmog/shinsa-plugin"',
   "schemaExportFailures",
   "schemaExportedByWildcard",
   "required package file ${file} is not exported by ./schemas/*",
@@ -1532,7 +1529,7 @@ const deferredSurfaceRequirements = [
   "optionalAdapterPackages",
   "optionalDependencies",
   "must not install deferred adapter package",
-  "hidden_module(\\n        \"systems-hunt\"",
+  'hidden_module(\\n        "systems-hunt"',
   "recommenderForbiddenTools",
   "deferredDocNeedles",
   "systems-hunt:*` entries are internal DAG",
@@ -1566,7 +1563,10 @@ const failures = [
     "scripts/artifact-manifest-contract.mjs",
     artifactManifestContractForbiddenNeedles,
   ),
-  ...checkNeedles("scripts/artifact-schema-inventory-contract.mjs", artifactSchemaInventoryRequirements),
+  ...checkNeedles(
+    "scripts/artifact-schema-inventory-contract.mjs",
+    artifactSchemaInventoryRequirements,
+  ),
   ...checkNeedles("scripts/canonical-run-schema-files.mjs", canonicalRunSchemaFileRequirements),
   ...checkNeedles("scripts/artifact-schema-shapes.mjs", artifactSchemaShapeRequirements),
   ...checkNeedles("scripts/check-failure-schema-bounds.mjs", failureSchemaBoundsRequirements),
@@ -1592,7 +1592,10 @@ const failures = [
     "crates/kuzushi-tui/src/ui_view_models/run_trace.rs",
     runTraceViewModelArtifactRequirements,
   ),
-  ...checkNeedles("crates/kuzushi-core/src/run_artifacts/run_events.rs", runEventArtifactRequirements),
+  ...checkNeedles(
+    "crates/kuzushi-core/src/run_artifacts/run_events.rs",
+    runEventArtifactRequirements,
+  ),
   ...checkNeedles(
     "crates/kuzushi-core/src/run_artifacts/write_run_artifact_json.rs",
     runTraceArtifactRequirements,
@@ -1674,7 +1677,10 @@ function checkNoWholesaleCodexSubtree() {
   ];
   return repoFiles()
     .filter((file) => forbiddenRoots.some((root) => file === root || file.startsWith(`${root}/`)))
-    .map((file) => `${file} looks like a wholesale Codex subtree; port small substrate changes instead`);
+    .map(
+      (file) =>
+        `${file} looks like a wholesale Codex subtree; port small substrate changes instead`,
+    );
 }
 
 function repoFiles() {

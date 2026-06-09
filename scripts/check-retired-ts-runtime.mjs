@@ -209,9 +209,9 @@ function relative(file) {
 }
 
 function tsxSourceFailures() {
-  return checkedSourceRoots().flatMap((root) => walk(root, new Set([".tsx"]))).map(
-    (file) => `${relative(file)} is a TSX source file; shell UI belongs in Rust Ratatui.`,
-  );
+  return checkedSourceRoots()
+    .flatMap((root) => walk(root, new Set([".tsx"])))
+    .map((file) => `${relative(file)} is a TSX source file; shell UI belongs in Rust Ratatui.`);
 }
 
 function checkedSourceRoots() {

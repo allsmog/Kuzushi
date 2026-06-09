@@ -4,15 +4,7 @@ import path from "node:path";
 
 const repo = process.cwd();
 
-const roots = [
-  "README.md",
-  "docs",
-  "examples",
-  "recipes",
-  ".github",
-  "AGENTS.md",
-  "RELEASING.md",
-];
+const roots = ["README.md", "docs", "examples", "recipes", ".github", "AGENTS.md", "RELEASING.md"];
 
 const textExtensions = new Set([
   ".md",
@@ -68,7 +60,9 @@ const allowedContext =
   /\b(legacy|historical|removed|unsupported|not current|does not support|does not expose|do not use|do not add|do not resurrect|deleted|reference-only|preserved reference|retained TypeScript\/Ink references|old TypeScript|former TypeScript)\b/i;
 
 const failures = [
-  ...currentGuidanceFiles.flatMap((file) => checkCurrentGuidancePaths(file, staleSplitPathPatterns)),
+  ...currentGuidanceFiles.flatMap((file) =>
+    checkCurrentGuidancePaths(file, staleSplitPathPatterns),
+  ),
   ...modelGuidanceFiles.flatMap((file) => checkCurrentGuidancePaths(file, staleModelPathPatterns)),
 ];
 
