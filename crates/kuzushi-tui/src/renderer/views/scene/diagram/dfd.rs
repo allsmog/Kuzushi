@@ -63,9 +63,25 @@ impl Widget for DfdDiagram {
 
 impl DfdDiagram {
     /// One titled trust-zone panel per zone, laid out across the width.
-    fn draw_zone_panels(&self, buf: &mut Buffer, area: Rect, zone_w: u16, zone_h: u16, zx: &impl Fn(u16) -> u16) {
+    fn draw_zone_panels(
+        &self,
+        buf: &mut Buffer,
+        area: Rect,
+        zone_w: u16,
+        zone_h: u16,
+        zx: &impl Fn(u16) -> u16,
+    ) {
         for (i, zone) in self.model.zones.iter().enumerate() {
-            panel(buf, area, zx(i as u16), 1, zone_w, zone_h, &zone.to_uppercase(), theme::T_SUBTLE);
+            panel(
+                buf,
+                area,
+                zx(i as u16),
+                1,
+                zone_w,
+                zone_h,
+                &zone.to_uppercase(),
+                theme::T_SUBTLE,
+            );
         }
     }
 
@@ -93,7 +109,14 @@ impl DfdDiagram {
             ),
             theme::T_PRIMARY,
         );
-        text(buf, area, 2, legend_y + 1, "amber ▶ = trust-boundary crossing · grey = in-zone", theme::T_MUTED);
+        text(
+            buf,
+            area,
+            2,
+            legend_y + 1,
+            "amber ▶ = trust-boundary crossing · grey = in-zone",
+            theme::T_MUTED,
+        );
     }
 
     /// Draw each zone's node boxes (stacked, vertically centred) and return their
@@ -122,10 +145,27 @@ impl DfdDiagram {
             let mut y = 2 + zone_h.saturating_sub(2).saturating_sub(span) / 2;
             for node in nodes {
                 let color = node_color(node.kind);
-                boxed(buf, area, left, y, nbw, NODE_H, &node_label(node), color, color);
+                boxed(
+                    buf,
+                    area,
+                    left,
+                    y,
+                    nbw,
+                    NODE_H,
+                    &node_label(node),
+                    color,
+                    color,
+                );
                 anchors.insert(
                     node.name.clone(),
-                    Anchor { col: zi, cx, top: y, bottom: y + NODE_H - 1, left, right: left + nbw },
+                    Anchor {
+                        col: zi,
+                        cx,
+                        top: y,
+                        bottom: y + NODE_H - 1,
+                        left,
+                        right: left + nbw,
+                    },
                 );
                 y += NODE_H + NODE_VGAP;
             }
@@ -141,7 +181,9 @@ fn draw_flow(buf: &mut Buffer, area: Rect, a: &Anchor, b: &Anchor, color: Color)
         // Back-flow: draw left→right between the boxes (arrow lands on the
         // right-hand node) — direction is approximate for the rarer reverse flows.
         Greater => connector_h(buf, area, (b.right, b.mid()), (a.left, a.mid()), color),
-        Equal if a.top <= b.top => connector_v(buf, area, (a.cx, a.bottom + 1), (b.cx, b.top), color),
+        Equal if a.top <= b.top => {
+            connector_v(buf, area, (a.cx, a.bottom + 1), (b.cx, b.top), color)
+        }
         Equal => connector_v(buf, area, (b.cx, b.bottom + 1), (a.cx, a.top), color),
     }
 }

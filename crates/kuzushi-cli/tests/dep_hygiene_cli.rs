@@ -1999,8 +1999,7 @@ fn run_agentic_sast_without_model_fails_without_silent_fallback() {
     assert!(!output.status.success());
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("requires an explicit model")
-            || String::from_utf8_lossy(&output.stderr)
-                .contains("requires the langgraph runtime"),
+            || String::from_utf8_lossy(&output.stderr).contains("requires the langgraph runtime"),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -2054,8 +2053,7 @@ fn run_taint_iris_without_model_fails_without_silent_fallback() {
     assert!(!output.status.success());
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("requires an explicit model")
-            || String::from_utf8_lossy(&output.stderr)
-                .contains("requires the langgraph runtime"),
+            || String::from_utf8_lossy(&output.stderr).contains("requires the langgraph runtime"),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -2083,8 +2081,7 @@ fn run_taint_iris_next_without_model_fails_without_silent_fallback() {
     assert!(!output.status.success());
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("requires an explicit model")
-            || String::from_utf8_lossy(&output.stderr)
-                .contains("requires the langgraph runtime"),
+            || String::from_utf8_lossy(&output.stderr).contains("requires the langgraph runtime"),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );

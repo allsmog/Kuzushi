@@ -45,10 +45,7 @@ pub(crate) struct DfdFlow {
 /// The persisted threat model's DFD as role-tagged lines, or `None` when no
 /// parseable artifact with nodes exists. Renderer-facing entry point so views
 /// never load or parse the artifact themselves.
-pub(crate) fn threat_dfd_view(
-    app: &crate::ShellApp,
-    width: usize,
-) -> Option<Vec<DfdDiagramLine>> {
+pub(crate) fn threat_dfd_view(app: &crate::ShellApp, width: usize) -> Option<Vec<DfdDiagramLine>> {
     let doc = super::threat_model_doc(app)?;
     threat_dfd_diagram_lines(&doc, width)
 }
@@ -108,7 +105,13 @@ fn line(kind: DfdLineKind, text: String) -> DfdDiagramLine {
 pub(crate) fn parse_nodes(doc: &serde_json::Value) -> Vec<DfdNode> {
     doc.pointer("/dfd/nodes")
         .and_then(serde_json::Value::as_array)
-        .map(|nodes| nodes.iter().filter_map(node_from_value).take(MAX_NODES).collect())
+        .map(|nodes| {
+            nodes
+                .iter()
+                .filter_map(node_from_value)
+                .take(MAX_NODES)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -117,7 +120,12 @@ fn node_from_value(value: &serde_json::Value) -> Option<DfdNode> {
     let name = string_field(value, "name").unwrap_or_else(|| id.clone());
     let zone = string_field(value, "trustZone").unwrap_or_else(|| "unzoned".to_string());
     let kind = string_field(value, "type").unwrap_or_else(|| "process".to_string());
-    Some(DfdNode { id, name, zone, kind })
+    Some(DfdNode {
+        id,
+        name,
+        zone,
+        kind,
+    })
 }
 
 pub(crate) fn parse_flows(doc: &serde_json::Value, nodes: &[DfdNode]) -> Vec<DfdFlow> {
@@ -228,16 +236,27 @@ fn flow_lines(flows: &[DfdFlow]) -> Vec<DfdDiagramLine> {
         return Vec::new();
     }
     let mut out = vec![line(DfdLineKind::Zone, "FLOWS".to_string())];
-    out.extend(flows.iter().map(|flow| line(DfdLineKind::Flow, flow_text(flow))));
+    out.extend(
+        flows
+            .iter()
+            .map(|flow| line(DfdLineKind::Flow, flow_text(flow))),
+    );
     out
 }
 
 fn flow_text(flow: &DfdFlow) -> String {
-    let arrow = if flow.crosses { "══▶" } else { "──▶" };
+    let arrow = if flow.crosses {
+        "══▶"
+    } else {
+        "──▶"
+    };
     if flow.label.is_empty() {
         format!("  {} {arrow} {}", flow.source, flow.target)
     } else {
-        format!("  {} {arrow} {}  · {}", flow.source, flow.target, flow.label)
+        format!(
+            "  {} {arrow} {}  · {}",
+            flow.source, flow.target, flow.label
+        )
     }
 }
 
@@ -328,14 +347,18 @@ mod tests {
         assert_eq!(lines[0].kind, DfdLineKind::Title);
         assert!(lines[0].text.contains("3 nodes · 2 flows"));
         assert!(kinds.contains(&DfdLineKind::Boundary));
-        assert!(lines.iter().any(|l| l.text.contains("┌") && l.text.contains("┐")));
+        assert!(lines
+            .iter()
+            .any(|l| l.text.contains("┌") && l.text.contains("┐")));
         assert!(lines.iter().any(|l| l.text.contains("│ Browser │")));
         assert!(lines
             .iter()
             .any(|l| l.kind == DfdLineKind::Flow && l.text.contains("Browser ══▶ API server")));
         let summary = lines.last().expect("summary");
         assert_eq!(summary.kind, DfdLineKind::Summary);
-        assert!(summary.text.contains("3 zones · 2 flows · 2 boundary crossings"));
+        assert!(summary
+            .text
+            .contains("3 zones · 2 flows · 2 boundary crossings"));
     }
 
     #[test]
@@ -358,6 +381,9 @@ mod tests {
     fn boxes_wrap_to_width() {
         let names: Vec<String> = (0..6).map(|i| format!("node{i}")).collect();
         let rows = pack_boxes(&names, 30);
-        assert!(rows.len() > 1, "narrow width should wrap boxes onto multiple rows");
+        assert!(
+            rows.len() > 1,
+            "narrow width should wrap boxes onto multiple rows"
+        );
     }
 }

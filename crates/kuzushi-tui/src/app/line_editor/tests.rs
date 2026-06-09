@@ -83,7 +83,15 @@ mod tests {
 
     #[test]
     fn subverb_listing_matches_completion_for_every_group_verb() {
-        for verb in ["task", "context", "workspace", "auth", "show", "threats", "prompt"] {
+        for verb in [
+            "task",
+            "context",
+            "workspace",
+            "auth",
+            "show",
+            "threats",
+            "prompt",
+        ] {
             assert!(
                 subverb_listing(verb).is_some(),
                 "{verb} should expose a sub-verb listing"

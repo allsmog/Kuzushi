@@ -47,7 +47,9 @@ impl WorkflowPhase {
     /// One-line statement of what the phase is for.
     pub fn intent(self) -> &'static str {
         match self {
-            WorkflowPhase::Map => "establish the grip — gather context and build analysis artifacts",
+            WorkflowPhase::Map => {
+                "establish the grip — gather context and build analysis artifacts"
+            }
             WorkflowPhase::Hunt => "break the target's balance — hunt for vulnerabilities",
             WorkflowPhase::Confirm => "commit the entry — triage and verify findings",
             WorkflowPhase::Fix => "finish the throw — patch and report",
