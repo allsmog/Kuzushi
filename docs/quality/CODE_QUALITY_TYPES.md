@@ -1,5 +1,7 @@
 # CODE_QUALITY_TYPES — Type Definition Audit
 
+> Historical audit — archived snapshot, not current operator guidance.
+
 Scope: every `export type | export interface | export enum` and unexported
 sibling under `src/`. Goal: identify *actual* duplicate definitions (same
 concept, same shape) vs. intentional aliasing through a Zod-derived chain.

@@ -1,5 +1,7 @@
 # Circular Dependency Assessment — Kuzushi
 
+> Historical audit — archived snapshot, not current operator guidance.
+
 **Date:** 2026-04-30
 **Branch:** `worktree-agent-a79b220e0c30fe3db`
 **Tool:** `madge` (v8.x via `npx --yes madge`)

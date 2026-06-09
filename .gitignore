@@ -48,6 +48,10 @@ kuzushi-*-prompt.md
 # Agent scratch audit docs
 .tmp-*.md
 
+# Research scratch (PoCs, superseded assets) — keep out of the repo root
+poc_*.py
+pre-*.png
+
 # Joern auto-creates a `workspace/` dir in CWD when its REPL starts —
 # can land anywhere kuzushi spawns joern from. Match it everywhere
 # rather than just the repo root.

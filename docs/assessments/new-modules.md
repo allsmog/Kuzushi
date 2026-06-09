@@ -1,6 +1,6 @@
 # New Built-in Modules — Assessment
 
-_Snapshot: refreshed during the Rust port. Companion to GAPS.md._
+_Snapshot: refreshed during the Rust port. Companion to docs/quality/GAPS.md._
 
 This document audits the current built-in CopilotModule catalog and proposes
 the next batch of modules to ship. The goal is to fill **real product gaps**

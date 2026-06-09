@@ -1,5 +1,7 @@
 # Kuzushi TUI UX Audit
 
+> Historical audit — archived snapshot, not current operator guidance.
+
 **Branch:** `claude/investigate-tui-ux-NqMt1`
 **Method:** tmux-driven black-box + source review.
 **Binary:** `./target/debug/kuzushi shell` (Rust native CLI; the `bin/kuzushi-rs.mjs` wrapper resolves to this binary).

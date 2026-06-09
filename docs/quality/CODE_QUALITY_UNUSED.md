@@ -1,5 +1,7 @@
 # Code Quality — Unused Code Audit
 
+> Historical audit — archived snapshot, not current operator guidance.
+
 ## Tooling
 
 - `pnpm dlx knip@latest` — knip 6 with default config (`knip.json` ignores `tests/**` + `dist/**`).

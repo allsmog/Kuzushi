@@ -1,5 +1,7 @@
 # Kuzushi — Product / Feature Gap Analysis
 
+> Historical audit — archived snapshot, not current operator guidance.
+
 _Snapshot: 2026-04-17 against v0.16.0 on `main`. GAPs 1–6 and 8 have been addressed in this branch; GAP 7 deferred. See the [Status](#status-2026-04-17) section below for per-gap deltas; the original audit follows._
 
 ## Status (2026-04-17)
