@@ -849,6 +849,9 @@ fn init_git_repo(dir: &PathBuf) {
         vec!["init"],
         vec!["config", "user.email", "kuzushi@example.test"],
         vec!["config", "user.name", "Kuzushi Test"],
+        // Stay hermetic against a host git config that forces signing.
+        vec!["config", "commit.gpgsign", "false"],
+        vec!["config", "tag.gpgsign", "false"],
         vec!["add", "."],
         vec!["commit", "-m", "fixture"],
     ] {

@@ -1860,7 +1860,7 @@ fn renders_config_onboarding_without_silent_model_selection() {
     assert!(rendered.contains("onboarding"));
     assert!(rendered.contains("Up/Down"));
     assert!(rendered.contains(">"));
-    assert!(rendered.contains("openai-oauth:gpt-5.4"));
+    assert!(rendered.contains("openai:gpt-5.5"));
     assert!(!rendered.contains("┌"));
 }
 
@@ -1876,7 +1876,7 @@ fn plain_config_onboarding_uses_explicit_model_selection() {
     assert!(rendered.contains("CONFIG"));
     assert!(rendered.contains("model: unconfigured"));
     assert!(rendered.contains("onboarding: model <n> selects an explicit provider:model"));
-    assert!(rendered.contains("openai-oauth:gpt-5.4"));
+    assert!(rendered.contains("openai:gpt-5.5"));
     assert_strict_plain_80(&rendered);
 }
 

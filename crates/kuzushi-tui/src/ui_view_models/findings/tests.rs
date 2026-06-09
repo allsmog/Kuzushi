@@ -88,8 +88,8 @@ fn findings_model_caps_module_preview_rows() {
         .map(|index| {
             Finding::new_tool(
                 "semgrep",
-                &format!("rule-{index}"),
-                &format!("src/file_{index}.rs"),
+                format!("rule-{index}"),
+                format!("src/file_{index}.rs"),
                 index + 1,
                 None,
                 Severity::Low,

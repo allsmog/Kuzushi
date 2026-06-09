@@ -238,7 +238,7 @@ mod tests {
             .iter()
             .map(|artifact| artifact.label.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(labels, vec!["input", "findings", "result"]);
+        assert_eq!(labels, vec!["tool input", "findings", "tool result"]);
         for artifact in &summary.artifacts {
             assert!(
                 std::path::Path::new(&artifact.path).exists(),
@@ -271,7 +271,10 @@ mod tests {
             .iter()
             .map(|artifact| artifact.label.as_str())
             .collect::<Vec<_>>();
-        assert_eq!(failed_labels, vec!["input", "failure handoff", "result"]);
+        assert_eq!(
+            failed_labels,
+            vec!["tool input", "failure handoff", "tool result"]
+        );
         for artifact in &failed_summary.artifacts {
             assert!(
                 std::path::Path::new(&artifact.path).exists(),
