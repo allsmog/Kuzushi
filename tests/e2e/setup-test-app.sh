@@ -224,6 +224,10 @@ CONFIG
   git init -q
   git config user.email "kuzushi-e2e@example.com"
   git config user.name "Kuzushi E2E"
+  # Keep the throwaway repo hermetic against a host git config that forces
+  # commit/tag signing — the smoke test must not depend on a signing key.
+  git config commit.gpgsign false
+  git config tag.gpgsign false
   git add -A
   git commit -q -m "initial: vulnerable test app"
 )
