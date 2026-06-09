@@ -69,9 +69,67 @@ jobs:
             npm publish --access public --ignore-scripts
           fi
 
+  # ── Cross-platform native binaries for the GitHub Release ───────────────
+  # Each leg builds natively on its own runner arch (no cross toolchains).
+  # linux-x64 is proven by CI on every push; the other platforms are
+  # best-effort until they have produced a green tag build — promote them
+  # to hard-blocking by removing `continue-on-error` once they have.
+  native-binaries:
+    needs: ci
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            slug: linux-x64
+            required: true
+          - os: ubuntu-24.04-arm
+            slug: linux-arm64
+            required: false
+          - os: macos-15-intel
+            slug: darwin-x64
+            required: false
+          - os: macos-14
+            slug: darwin-arm64
+            required: false
+          - os: windows-latest
+            slug: win32-x64
+            required: false
+    name: native-${{ matrix.slug }}
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ !matrix.required }}
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build -p kuzushi-cli --release
+      - name: Package binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME}"
+          staging="kuzushi-${version}-${{ matrix.slug }}"
+          mkdir -p "${staging}"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp target/release/kuzushi.exe target/release/kz.exe "${staging}/"
+            7z a "${staging}.zip" "${staging}" > /dev/null
+          else
+            cp target/release/kuzushi target/release/kz "${staging}/"
+            tar -czf "${staging}.tar.gz" "${staging}"
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-native-${{ matrix.slug }}
+          path: |
+            kuzushi-*.tar.gz
+            kuzushi-*.zip
+          if-no-files-found: error
+          retention-days: 7
+
   # ── Create GitHub Release (reuses dist/native artifacts + changelog) ────
   github-release:
-    needs: ci
+    needs: [ci, native-binaries]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -102,6 +160,12 @@ jobs:
       # CI already built dist/ and staged native Rust binaries; skip prepack.
       - run: npm pack --ignore-scripts
 
+      - name: Download cross-platform binaries
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-native-*
+          merge-multiple: true
+
       - name: Generate changelog from commits since previous tag
         run: |
           set -euo pipefail
@@ -126,3 +190,5 @@ jobs:
           body_path: ${{ env.CHANGELOG_PATH }}
           files: |
             kuzushi-*.tgz
+            kuzushi-*.tar.gz
+            kuzushi-*.zip

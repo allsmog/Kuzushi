@@ -4,11 +4,21 @@ on:
   workflow_dispatch:
   schedule:
     - cron: "0 8 * * *"
+  # The benchmark is deterministic (mock Anthropic server + vendored
+  # fixtures), so it can gate merges that touch detection quality.
+  pull_request:
+    branches: [main]
+    paths:
+      - "benchmarks/**"
+      - "crates/kuzushi-core/**"
+      - "src/**"
+      - ".github/workflows/benchmark-regression.yml"
 
-# Scheduled + manual overlap: let both finish instead of cancelling a live run.
+# Scheduled + manual overlap: let both finish instead of cancelling a live
+# run; PR runs cancel superseded pushes on the same ref.
 concurrency:
-  group: benchmark-regression
-  cancel-in-progress: false
+  group: benchmark-regression-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
