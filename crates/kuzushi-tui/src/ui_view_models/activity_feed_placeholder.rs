@@ -61,7 +61,11 @@ fn placeholder_text(hidden_count: usize, verbose_subsystems: bool) -> String {
 }
 
 fn plural_suffix(count: usize) -> &'static str {
-    (count != 1).then_some("s").unwrap_or("")
+    if count != 1 {
+        "s"
+    } else {
+        ""
+    }
 }
 
 #[cfg(test)]

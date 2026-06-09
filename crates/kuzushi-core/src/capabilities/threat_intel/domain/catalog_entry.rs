@@ -99,6 +99,9 @@ pub enum HuntKind {
 }
 
 impl HuntKind {
+    // Infallible by design — unknown values map to `Unsupported`, so this
+    // cannot implement `std::str::FromStr` (which requires an error type).
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(raw: &str) -> Self {
         match raw {
             "uaf-hunt" => Self::UafHunt,

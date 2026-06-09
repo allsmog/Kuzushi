@@ -17,12 +17,12 @@ pub(super) fn push_evidence_graph(
         push_evidence_node(out, node);
     }
     if !edges.is_empty() {
-        out.push_str("\n");
+        out.push('\n');
         for edge in edges {
             push_evidence_edge(out, edge);
         }
     }
-    out.push_str("\n");
+    out.push('\n');
 }
 
 fn push_evidence_node(out: &mut String, node: &StaticEvidenceNode) {
@@ -36,10 +36,10 @@ fn push_evidence_node(out: &mut String, node: &StaticEvidenceNode) {
         if !trimmed.is_empty() {
             out.push_str(" body: `");
             out.push_str(&truncate_for_prompt(trimmed, 80));
-            out.push_str("`");
+            out.push('`');
         }
     }
-    out.push_str("\n");
+    out.push('\n');
 }
 
 fn push_evidence_edge(out: &mut String, edge: &StaticEvidenceEdge) {

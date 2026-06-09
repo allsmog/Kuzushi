@@ -81,7 +81,7 @@ fn package_lock_v2_edges(value: &Value, source: &str) -> Vec<SbomDependencyEdge>
         .and_then(Value::as_object)
         .into_iter()
         .flat_map(|packages| packages.iter())
-        .flat_map(|(key, package)| package_dependencies(key, package, &source))
+        .flat_map(|(key, package)| package_dependencies(key, package, source))
         .collect()
 }
 

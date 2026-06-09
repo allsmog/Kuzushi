@@ -62,7 +62,7 @@ fn static_proof_entry(finding: &Value) -> Option<Value> {
     }))
 }
 
-fn finding_proof_state<'a>(object: &'a Map<String, Value>) -> Option<&'a str> {
+fn finding_proof_state(object: &Map<String, Value>) -> Option<&str> {
     string_field(object, PROOF_STATE_KEYS).or_else(|| {
         object
             .get("properties")

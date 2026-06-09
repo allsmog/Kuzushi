@@ -169,7 +169,7 @@ fn codeql_summary_line(report: &CodeqlScanReport) -> String {
 }
 
 fn plural_suffix(count: usize) -> &'static str {
-    (count != 1).then_some("s").unwrap_or("")
+    if count != 1 { "s" } else { "" }
 }
 
 fn append_codeql_persisted_run(lines: &mut Vec<String>, persisted: Option<&CodeqlPersistedRun>) {

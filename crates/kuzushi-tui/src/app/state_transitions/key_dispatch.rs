@@ -21,9 +21,7 @@ impl ShellApp {
             || self.handle_empty_input_view_key(key, modifiers)
             || self.handle_history_key(key, modifiers)
             || self.handle_text_key(key)
-        {
-            return;
-        }
+        {}
     }
 
     pub(super) fn handle_modal_key(&mut self, key: KeyEvent) -> bool {

@@ -2,6 +2,7 @@ use super::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
+#[derive(Default)]
 pub struct V2Config {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -9,15 +10,6 @@ pub struct V2Config {
     pub operator: OperatorConfig,
 }
 
-impl Default for V2Config {
-    fn default() -> Self {
-        Self {
-            model: None,
-            runtime: RuntimeConfig::default(),
-            operator: OperatorConfig::default(),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields, rename_all = "snake_case")]

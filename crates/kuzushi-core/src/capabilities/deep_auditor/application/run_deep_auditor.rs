@@ -480,7 +480,7 @@ fn summarize_transcript_for_synthesis(transcript: &[LoopHistoryEntry]) -> String
                 });
             }
             LoopHistoryEntry::ToolResult(result) if result.is_error => {
-                lines.push(format!("    -> error"));
+                lines.push("    -> error".to_string());
             }
             LoopHistoryEntry::ToolResult(_) => {}
             LoopHistoryEntry::AssistantText(_) => {}

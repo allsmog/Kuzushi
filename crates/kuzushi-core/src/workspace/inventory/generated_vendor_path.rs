@@ -99,7 +99,7 @@ pub(crate) fn contains_any(haystack: &str, needles: &[&str]) -> bool {
 }
 
 pub(crate) fn trim_detail(line: &str) -> String {
-    line.trim().split_whitespace().collect::<Vec<_>>().join(" ")
+    line.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 pub(crate) fn extract_quoted_after_marker(line: &str, marker: &str) -> Option<String> {

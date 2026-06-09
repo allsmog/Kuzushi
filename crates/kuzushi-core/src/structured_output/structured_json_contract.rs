@@ -204,6 +204,50 @@ fn repair_failure_message(
     )
 }
 
+fn truncation_error(
+    contract: &StructuredJsonContract,
+    response: &AgentQueryResponse,
+    initial_error: &anyhow::Error,
+) -> anyhow::Error {
+    let raw = raw_agent_response(response);
+    let stop_reason = response.stop_reason.as_deref().unwrap_or("length");
+    anyhow::anyhow!(
+        "{tool} response was truncated by the per-call output-token cap \
+         (stopReason: {stop_reason:?}); the partial JSON cannot satisfy \
+         contract `{schema}`. Remediation: raise `AgentQueryRequest::max_output_tokens` \
+         (or set `maxOutputTokens` in the tool input), reduce the requested output \
+         size such as `maxFindings`, or shorten the prompt. \
+         Initial parse/validation failure: {initial_error}\n\
+         Raw partial response (truncated):\n{raw}",
+        tool = contract.tool_name,
+        schema = contract.schema_name,
+    )
+}
+
+pub(crate) fn parse_and_validate<T>(
+    response: &AgentQueryResponse,
+    contract: &StructuredJsonContract,
+    validate: &impl Fn(Value) -> Result<T>,
+) -> Result<T> {
+    let value = structured_json_value(response, contract)?;
+    validate(value)
+}
+
+pub(crate) fn structured_json_value(
+    response: &AgentQueryResponse,
+    contract: &StructuredJsonContract,
+) -> Result<Value> {
+    if let Some(value) = response.structured.clone() {
+        return Ok(value);
+    }
+    parse_json_value_from_agent_text(&response.text).with_context(|| {
+        format!(
+            "{} expected LangGraph to return JSON for `{}`",
+            contract.tool_name, contract.schema_name
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,48 +291,4 @@ mod tests {
         let tokens = runtime.tokens.lock().unwrap().clone();
         assert_eq!(tokens, vec![Some(16_000), Some(16_000), Some(65_535)]);
     }
-}
-
-fn truncation_error(
-    contract: &StructuredJsonContract,
-    response: &AgentQueryResponse,
-    initial_error: &anyhow::Error,
-) -> anyhow::Error {
-    let raw = raw_agent_response(response);
-    let stop_reason = response.stop_reason.as_deref().unwrap_or("length");
-    anyhow::anyhow!(
-        "{tool} response was truncated by the per-call output-token cap \
-         (stopReason: {stop_reason:?}); the partial JSON cannot satisfy \
-         contract `{schema}`. Remediation: raise `AgentQueryRequest::max_output_tokens` \
-         (or set `maxOutputTokens` in the tool input), reduce the requested output \
-         size such as `maxFindings`, or shorten the prompt. \
-         Initial parse/validation failure: {initial_error}\n\
-         Raw partial response (truncated):\n{raw}",
-        tool = contract.tool_name,
-        schema = contract.schema_name,
-    )
-}
-
-pub(crate) fn parse_and_validate<T>(
-    response: &AgentQueryResponse,
-    contract: &StructuredJsonContract,
-    validate: &impl Fn(Value) -> Result<T>,
-) -> Result<T> {
-    let value = structured_json_value(response, contract)?;
-    validate(value)
-}
-
-pub(crate) fn structured_json_value(
-    response: &AgentQueryResponse,
-    contract: &StructuredJsonContract,
-) -> Result<Value> {
-    if let Some(value) = response.structured.clone() {
-        return Ok(value);
-    }
-    parse_json_value_from_agent_text(&response.text).with_context(|| {
-        format!(
-            "{} expected LangGraph to return JSON for `{}`",
-            contract.tool_name, contract.schema_name
-        )
-    })
 }

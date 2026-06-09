@@ -243,7 +243,7 @@ fn has_path_key(object: &Map<String, Value>) -> bool {
         .any(|key| object.get(*key).and_then(Value::as_str).is_some())
 }
 
-fn first_path_string<'a>(object: &'a Map<String, Value>) -> Option<&'a str> {
+fn first_path_string(object: &Map<String, Value>) -> Option<&str> {
     ARTIFACT_PATH_KEYS
         .iter()
         .filter_map(|key| object.get(*key))

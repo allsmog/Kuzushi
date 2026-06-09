@@ -66,9 +66,7 @@ fn cli_tool_trace(run: &PreparedCliToolRun) -> Option<TraceHandle> {
     )
 }
 
-fn active_cli_tool_runtime<'a>(
-    runtime: Option<&'a LangGraphRuntime>,
-) -> Option<&'a dyn AgentRuntime> {
+fn active_cli_tool_runtime(runtime: Option<&LangGraphRuntime>) -> Option<&dyn AgentRuntime> {
     runtime.map(|runtime| runtime as &dyn AgentRuntime)
 }
 

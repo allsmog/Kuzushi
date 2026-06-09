@@ -52,7 +52,7 @@ pub(in crate::code_nav) fn scan_python(body: &str) -> Vec<DefinitionEntry> {
             ("class ", "struct"),
         ] {
             if let Some(rest) = t.strip_prefix(kw) {
-                if let Some(name) = rest.split(|c: char| c == '(' || c == ':').next() {
+                if let Some(name) = rest.split(['(', ':']).next() {
                     let n = name.trim();
                     if !n.is_empty() {
                         out.push(DefinitionEntry {

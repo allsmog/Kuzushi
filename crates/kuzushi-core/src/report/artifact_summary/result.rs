@@ -91,7 +91,7 @@ fn string_at<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
         .find_map(Value::as_str)
 }
 
-fn number_at<'a>(value: &'a Value, keys: &[&str]) -> Option<u64> {
+fn number_at(value: &Value, keys: &[&str]) -> Option<u64> {
     keys.iter()
         .filter_map(|key| value.get(*key))
         .find_map(Value::as_u64)

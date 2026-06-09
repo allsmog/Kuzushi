@@ -7,7 +7,7 @@ use std::path::Path;
 pub(super) fn is_dotnet_project(path: &Path) -> bool {
     path.extension()
         .and_then(|extension| extension.to_str())
-        .is_some_and(|extension| matches_dotnet_project_extension(extension))
+        .is_some_and(matches_dotnet_project_extension)
 }
 
 fn matches_dotnet_project_extension(extension: &str) -> bool {

@@ -110,7 +110,7 @@ const SAFE_IDENT_WRAPPERS: &[&str] = &[
 /// — false positives here LOSE recall (we'd miss real bugs), so the
 /// allow-list is short and intentional.
 fn is_safe_wrapper(name: &str) -> bool {
-    if SAFE_IDENT_WRAPPERS.iter().any(|w| *w == name) {
+    if SAFE_IDENT_WRAPPERS.contains(&name) {
         return true;
     }
     let lower = name.to_ascii_lowercase();
@@ -194,7 +194,7 @@ fn identifier_printf_call<'tree, 'src>(
     let func_node = call.child_by_field_name("function")?;
     let callee_name = callee_name_text(func_node, src);
     let callee_name = callee_name?;
-    if !PRINTF_FAMILY.iter().any(|f| *f == callee_name) {
+    if !PRINTF_FAMILY.contains(&callee_name) {
         return None;
     }
 
@@ -708,7 +708,7 @@ dblink_open(PG_FUNCTION_ARGS)
         // %s after CURSOR FOR (also identifier-position per our list).
         // The CURSOR FOR slot's argument is `sql` — also unwrapped —
         // so it emits too. Both are real concerns.
-        assert!(matches.len() >= 1, "got {matches:?}");
+        assert!(!matches.is_empty(), "got {matches:?}");
         assert!(
             matches
                 .iter()
