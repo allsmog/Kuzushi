@@ -9,6 +9,7 @@ Feature: Conditional MCP attachment plan
     Given a fresh kuzushi workspace
     And a model and auth are configured
     And the env var "KUZUSHI_AUTO_OPEN_ACTIVITY" is set to "false"
+    And the env var "KUZUSHI_SKIP_ONBOARDING" is set to "1"
 
   Scenario: Empty target shows only the constant MCPs
     When I launch the shell

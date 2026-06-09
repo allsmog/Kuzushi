@@ -1,6 +1,6 @@
 //! Optional session-model ranking for the recommender. When a model is
 //! configured and a runtime is available, the model picks/prioritizes from the
-//! *available* tools given the target's signals; its output is validated
+//! *available* tools given the target's signals; its output is checked
 //! against the available set (hallucinated tools are dropped). On any failure
 //! — no model, query error, unparseable output, empty result — the caller
 //! falls back to the deterministic rule catalog. No silent model fallback:

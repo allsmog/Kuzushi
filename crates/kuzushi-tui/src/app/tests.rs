@@ -2342,7 +2342,10 @@ fn config_view_onboards_with_keyboard_model_selection() {
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
     let expected = choices[visible[0]];
     assert_eq!(app.config.model.as_deref(), Some(expected.id));
-    assert_eq!(app.session_thinking_level.as_deref(), Some(expected.thinking_level));
+    assert_eq!(
+        app.session_thinking_level.as_deref(),
+        Some(expected.thinking_level)
+    );
     assert!(app
         .log
         .iter()
@@ -3056,7 +3059,8 @@ fn run_command_dispatches_taint_iris_through_langgraph_runtime_bridge_and_persis
 
 #[cfg(unix)]
 #[test]
-fn run_command_dispatches_legacy_taint_iris_next_hunt_through_langgraph_runtime_bridge_and_persists() {
+fn run_command_dispatches_legacy_taint_iris_next_hunt_through_langgraph_runtime_bridge_and_persists(
+) {
     let tmp = tempfile::tempdir().unwrap();
     fs::create_dir(tmp.path().join("src")).unwrap();
     fs::write(
@@ -3671,7 +3675,11 @@ fn esc_dismisses_notice_before_going_back() {
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
     assert!(app.advisory.notice.is_none(), "notice dismissed");
-    assert_eq!(app.shell_view, ShellView::Tools, "back deferred to next Esc");
+    assert_eq!(
+        app.shell_view,
+        ShellView::Tools,
+        "back deferred to next Esc"
+    );
 }
 
 #[test]
@@ -3766,7 +3774,10 @@ fn command_palette_opens_filters_and_loads_without_executing() {
     assert_ne!(app.shell_view, ShellView::CommandPalette, "palette closed");
     assert!(!app.input.is_empty(), "selected command loaded into prompt");
     assert!(
-        !app.log.iter().skip(before_log).any(|line| line.prefix == ">"),
+        !app.log
+            .iter()
+            .skip(before_log)
+            .any(|line| line.prefix == ">"),
         "accepting must not submit the command"
     );
 }
@@ -3781,7 +3792,10 @@ fn command_palette_esc_closes_without_loading() {
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
     assert_ne!(app.shell_view, ShellView::CommandPalette);
-    assert!(app.input.is_empty(), "Esc cancels without loading a command");
+    assert!(
+        app.input.is_empty(),
+        "Esc cancels without loading a command"
+    );
 }
 
 #[test]
@@ -3796,7 +3810,9 @@ fn subverb_query_lists_subverbs_without_routing_to_unknown() {
         .expect("task sub-verbs listed");
     assert!(listed.body.contains("block") && listed.body.contains("mode"));
     assert!(
-        !app.log.iter().any(|line| line.body.contains("unknown command")),
+        !app.log
+            .iter()
+            .any(|line| line.body.contains("unknown command")),
         "`task ?` must not fall through to the unknown-command path"
     );
 }

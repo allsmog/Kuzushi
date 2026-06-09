@@ -37,9 +37,17 @@ fn is_stack_noise(line: &str) -> bool {
 
 fn names_a_failure(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
-    ["error", "not found", "no such", "missing", "cannot", "could not", "failed"]
-        .iter()
-        .any(|needle| lower.contains(needle))
+    [
+        "error",
+        "not found",
+        "no such",
+        "missing",
+        "cannot",
+        "could not",
+        "failed",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 /// Generic exit-code wrappers carry no actionable detail — skip them in favor

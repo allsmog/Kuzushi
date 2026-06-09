@@ -196,7 +196,10 @@ impl ShellApp {
         if skipped.is_empty() {
             self.log(
                 "phase",
-                format!("{} failed — no queued task depended on it; continuing", failed.tool_name()),
+                format!(
+                    "{} failed — no queued task depended on it; continuing",
+                    failed.tool_name()
+                ),
             );
             return;
         }
@@ -207,7 +210,10 @@ impl ShellApp {
             .join(", ");
         self.log(
             "phase",
-            format!("{} failed — skipping dependents: {names}", failed.tool_name()),
+            format!(
+                "{} failed — skipping dependents: {names}",
+                failed.tool_name()
+            ),
         );
     }
 
@@ -239,6 +245,9 @@ impl ShellApp {
     /// through to next-step recommendations.
     fn finish_engagement(&mut self) {
         self.workflow_phase = None;
+        // The phase walker covered the startup MCP-plan line; re-emit it now
+        // that completed phases may have built new attachable artifacts.
+        self.log_mcp_attachment_plan();
         if self.planning_failed.is_empty() {
             self.finish_planning_with_recommendations();
             return;
@@ -269,7 +278,8 @@ impl ShellApp {
             tasks.insert(item.task);
             tasks.extend(item.blocked.iter().copied());
             if let Some(adjustment) = &item.adjustment {
-                self.planning_adjustments.insert(item.task, adjustment.clone());
+                self.planning_adjustments
+                    .insert(item.task, adjustment.clone());
             }
         }
         let plan = topological_order(&tasks);
@@ -278,7 +288,10 @@ impl ShellApp {
             .map(|task| task.tool_name())
             .collect::<Vec<_>>()
             .join(" → ");
-        self.log("phase", format!("retrying {} task(s): {labels}", plan.len()));
+        self.log(
+            "phase",
+            format!("retrying {} task(s): {labels}", plan.len()),
+        );
         self.planning_run_queue = plan.into_iter().collect();
         match self.current_workspace() {
             Ok(workspace) => {

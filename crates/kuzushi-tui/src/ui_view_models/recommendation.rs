@@ -388,11 +388,17 @@ mod tests {
         let running = recommendation_empty_state(true);
         assert_eq!(running.title, "ranking modules…");
         // Must NOT invite a re-run while it's already in flight.
-        assert!(!running.commands.iter().any(|c| c.contains("module-recommender")));
+        assert!(!running
+            .commands
+            .iter()
+            .any(|c| c.contains("module-recommender")));
 
         let idle = recommendation_empty_state(false);
         assert_eq!(idle.title, "no recommendations artifact");
-        assert!(idle.commands.iter().any(|c| c.contains("module-recommender")));
+        assert!(idle
+            .commands
+            .iter()
+            .any(|c| c.contains("module-recommender")));
     }
 
     #[test]

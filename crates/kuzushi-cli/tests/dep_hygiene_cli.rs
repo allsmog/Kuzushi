@@ -1681,7 +1681,9 @@ fn run_taint_iris_next_hunt_reaches_langgraph_runtime_bridge_and_persists() {
         .arg("run")
         .arg("taint-iris-next:hunt")
         .arg("--input")
-        .arg(r#"{"mode":"hunt","maxCatalogEntries":3,"maxAgentFindings":5,"minEvidenceLevel":"candidate"}"#)
+        .arg(
+            r#"{"mode":"hunt","maxCatalogEntries":3,"maxAgentFindings":5,"minEvidenceLevel":"candidate","mcps":false}"#,
+        )
         .output()
         .unwrap();
 
@@ -1737,6 +1739,11 @@ fn scan_tasks_taint_iris_next_reaches_same_taint_iris_next_executor() {
         "const sql = `SELECT * FROM users WHERE id = ${req.query.id}`;\ndb.query(sql);\n",
     )
     .unwrap();
+    // hunt mode refuses to dispatch without the joern/codeql artifacts; the
+    // bridge is faked, so stub them.
+    std::fs::create_dir_all(repo.join(".kuzushi/codeql-db")).unwrap();
+    std::fs::write(repo.join(".kuzushi/codeql-db/placeholder"), "stub").unwrap();
+    std::fs::write(repo.join(".kuzushi/cpg.bin"), "stub").unwrap();
     let bridge = fake_taint_iris_next_bridge(temp.path());
 
     let output = kuzushi_command(&home)
@@ -1999,8 +2006,7 @@ fn run_agentic_sast_without_model_fails_without_silent_fallback() {
     assert!(!output.status.success());
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("requires an explicit model")
-            || String::from_utf8_lossy(&output.stderr)
-                .contains("requires the langgraph runtime"),
+            || String::from_utf8_lossy(&output.stderr).contains("requires the langgraph runtime"),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -2054,8 +2060,7 @@ fn run_taint_iris_without_model_fails_without_silent_fallback() {
     assert!(!output.status.success());
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("requires an explicit model")
-            || String::from_utf8_lossy(&output.stderr)
-                .contains("requires the langgraph runtime"),
+            || String::from_utf8_lossy(&output.stderr).contains("requires the langgraph runtime"),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -2083,8 +2088,7 @@ fn run_taint_iris_next_without_model_fails_without_silent_fallback() {
     assert!(!output.status.success());
     assert!(
         String::from_utf8_lossy(&output.stderr).contains("requires an explicit model")
-            || String::from_utf8_lossy(&output.stderr)
-                .contains("requires the langgraph runtime"),
+            || String::from_utf8_lossy(&output.stderr).contains("requires the langgraph runtime"),
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
@@ -3069,7 +3073,7 @@ fn run_x_ray_run_reaches_langgraph_runtime_bridge_and_writes_artifacts() {
     assert_eq!(body.get("ok").and_then(Value::as_bool), Some(true));
     assert_eq!(
         body.pointer("/data/runtimeMode").and_then(Value::as_str),
-        Some("langgraph")
+        Some("LangGraph")
     );
     assert_eq!(
         body.pointer("/data/verdict/tier").and_then(Value::as_str),
@@ -3202,6 +3206,9 @@ fn init_git_repo(repo: &std::path::Path) {
         vec!["init"],
         vec!["config", "user.email", "kuzushi@example.test"],
         vec!["config", "user.name", "Kuzushi Test"],
+        // Host git config must not leak into the fixture (e.g. mandatory
+        // commit signing would make `git commit` fail in sandboxes).
+        vec!["config", "commit.gpgsign", "false"],
         vec!["add", "."],
         vec!["commit", "-m", "fixture"],
     ] {

@@ -43,7 +43,9 @@ fn append_active_agent_response(
     } else if agent.abort_requested {
         lines.push(chat_bubble_header(" agent ", theme::success(), width));
         lines.push(indent(
-            muted("Abort requested; waiting for LangGraph to return. Process kill is not confirmed."),
+            muted(
+                "Abort requested; waiting for LangGraph to return. Process kill is not confirmed.",
+            ),
             3,
         ));
     } else {

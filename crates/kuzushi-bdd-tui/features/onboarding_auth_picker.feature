@@ -8,8 +8,6 @@ Feature: Auth-method picker
     When I launch the shell
     And I press "Down"
     And I press "Down"
-    And I press "Down"
-    And I press "Down"
     And I press "Enter"
     Then I see "CHOOSE AUTH METHOD"
     And I see "API key (ANTHROPIC_API_KEY)"
@@ -20,8 +18,6 @@ Feature: Auth-method picker
     Given a fresh kuzushi workspace
     And no model is configured
     When I launch the shell
-    And I press "Down"
-    And I press "Down"
     And I press "Down"
     And I press "Down"
     And I press "Enter"
