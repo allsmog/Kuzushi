@@ -295,6 +295,10 @@ completions, but remain executable by exact tool name for operators who opt
 into them: `carlini-threat-hunt`, `chrome-rce`, `prompt-armor`, `pwn`,
 `recon`, `shinsa`, `tob`, `uaf-hunt`, `vendor-assessment`, and `vuln-scout`.
 
+Per-module operator guides live under `docs/`: [`docs/x-ray.md`](./docs/x-ray.md)
+for repository analysis reports and [`docs/pwn.md`](./docs/pwn.md) for the
+binary-exploitation workflow.
+
 ## External Dependencies
 
 Native deterministic tools run without an LLM: `module-recommender`,
