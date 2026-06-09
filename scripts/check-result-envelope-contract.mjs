@@ -10,15 +10,9 @@ import {
 
 const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
 
-const quotedArtifactPathAliasFields = artifactPathAliasFields.map(
-  (alias) => `"${alias}"`,
-);
-const quotedArtifactLabelAliasFields = artifactLabelAliasFields.map(
-  (alias) => `"${alias}"`,
-);
-const quotedArtifactKindAliasFields = artifactKindAliasFields.map(
-  (alias) => `"${alias}"`,
-);
+const quotedArtifactPathAliasFields = artifactPathAliasFields.map((alias) => `"${alias}"`);
+const quotedArtifactLabelAliasFields = artifactLabelAliasFields.map((alias) => `"${alias}"`);
+const quotedArtifactKindAliasFields = artifactKindAliasFields.map((alias) => `"${alias}"`);
 const canonicalArtifactAliasKeys = ['"label"', '"path"', '"kind"'];
 
 const checks = [
