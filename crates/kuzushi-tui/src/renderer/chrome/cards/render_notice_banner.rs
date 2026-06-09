@@ -16,7 +16,10 @@ pub(crate) fn render_notice_banner(frame: &mut Frame<'_>, area: Rect, app: &Shel
         NoticeSeverity::Warn => (" NOTICE ", theme::warn()),
     };
     let used = chip.len() + notice.source.chars().count() + 8;
-    let message = fit(&notice.message, (area.width as usize).saturating_sub(used).max(8));
+    let message = fit(
+        &notice.message,
+        (area.width as usize).saturating_sub(used).max(8),
+    );
     let line = Line::from(vec![
         Span::raw(" "),
         Span::styled(chip, chip_style),

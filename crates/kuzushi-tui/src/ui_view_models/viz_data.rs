@@ -67,7 +67,11 @@ pub(crate) fn risk_by_module(findings: &[Finding]) -> RiskByModule {
                 .zip(SEVERITY_WEIGHTS)
                 .map(|(count, weight)| *count as f32 * weight)
                 .sum();
-            ModuleRisk { module, counts, score }
+            ModuleRisk {
+                module,
+                counts,
+                score,
+            }
         })
         .collect();
     modules.sort_by(|a, b| {
@@ -217,7 +221,10 @@ pub(crate) fn attack_tree(app: &ShellApp) -> AttackTree {
             steps: chain.steps.iter().take(4).map(step_label).collect(),
         })
         .collect();
-    AttackTree { chains, empty_hint: None }
+    AttackTree {
+        chains,
+        empty_hint: None,
+    }
 }
 
 fn step_label(step: &ExploitChainStep) -> String {
@@ -281,7 +288,15 @@ mod tests {
     use kuzushi_core::Finding;
 
     fn finding(path: &str, severity: Severity) -> Finding {
-        Finding::new_tool("t", "r".to_string(), path.to_string(), 1, None, severity, "m".to_string())
+        Finding::new_tool(
+            "t",
+            "r".to_string(),
+            path.to_string(),
+            1,
+            None,
+            severity,
+            "m".to_string(),
+        )
     }
 
     #[test]
@@ -307,6 +322,8 @@ mod tests {
     #[test]
     fn heatmap_empty_state_when_no_findings() {
         assert!(findings_heatmap(&[]).empty_hint.is_some());
-        assert!(findings_heatmap(&[finding("a/b.rs", Severity::High)]).empty_hint.is_none());
+        assert!(findings_heatmap(&[finding("a/b.rs", Severity::High)])
+            .empty_hint
+            .is_none());
     }
 }

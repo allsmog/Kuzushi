@@ -13,5 +13,4 @@ impl ShellApp {
         }
         self.shell_view = target;
     }
-
 }

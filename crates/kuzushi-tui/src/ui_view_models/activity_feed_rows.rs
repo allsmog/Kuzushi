@@ -74,7 +74,10 @@ fn feed_event_text(
         .unwrap_or_else(now_hh_mm_ss);
     let module_verb = match (event.step.module_id.as_deref(), event.step.verb.as_deref()) {
         (Some(module), Some(verb)) => {
-            format!("[{}]", crate::app::collapse_doubled_tail(&format!("{module}:{verb}")))
+            format!(
+                "[{}]",
+                crate::app::collapse_doubled_tail(&format!("{module}:{verb}"))
+            )
         }
         (Some(module), None) => format!("[{module}]"),
         _ => format!("[{}]", event.step.kind),

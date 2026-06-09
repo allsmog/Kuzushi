@@ -8,10 +8,10 @@ use ratatui::Terminal;
 
 use crate::commands::{shell_command_specs, shell_help_examples, ShellCommandCategory};
 use crate::ui_view_models::{
-    catalog_model, context_snapshot_relative_path, prompt_text,
-    threat_model_relative_path, threat_scope_model_from_doc, threat_story_model_from_doc,
-    threat_stride_rollup_from_doc, ui_latest_run_path, ui_run_artifact_relative_path, ui_run_dir,
-    view_status_segment, ModuleRunStatusKind, RoutingMode, SeverityTone, ThreatStrideTone,
+    catalog_model, context_snapshot_relative_path, prompt_text, threat_model_relative_path,
+    threat_scope_model_from_doc, threat_story_model_from_doc, threat_stride_rollup_from_doc,
+    ui_latest_run_path, ui_run_artifact_relative_path, ui_run_dir, view_status_segment,
+    ModuleRunStatusKind, RoutingMode, SeverityTone, ThreatStrideTone,
 };
 
 use super::*;
@@ -1147,7 +1147,6 @@ fn dfd_canonical_lines_render_design_diagram() {
     assert!(texts[0].contains("┌────"));
     assert!(texts[3].contains("└────"));
 }
-
 
 #[test]
 fn threats_dfd_view_renders_canonical_diagram_header() {

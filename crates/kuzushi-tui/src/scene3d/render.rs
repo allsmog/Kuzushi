@@ -56,7 +56,13 @@ impl Projector {
 
     /// Pixel `(x, y, depth)` for a scene point, or `None` when clipped.
     pub fn pixel(&self, v: Vec3) -> Option<(f32, f32, f32)> {
-        project(self.cam, v).map(|p| (self.cx + p.x * self.scale, self.cy - p.y * self.scale, p.depth))
+        project(self.cam, v).map(|p| {
+            (
+                self.cx + p.x * self.scale,
+                self.cy - p.y * self.scale,
+                p.depth,
+            )
+        })
     }
 }
 
@@ -67,7 +73,12 @@ impl Projector {
 /// opaque thread cores, and finally the node balls on top — so a flow reads as
 /// "balls connected by a glowing edge", not a bare squiggle. Pure, so the exact
 /// pixels are reproducible and unit-testable off-screen.
-pub fn render_to_framebuffer(scene: &Scene, cam: Camera, width: usize, height: usize) -> Framebuffer {
+pub fn render_to_framebuffer(
+    scene: &Scene,
+    cam: Camera,
+    width: usize,
+    height: usize,
+) -> Framebuffer {
     let mut fb = Framebuffer::new(width, height, BACKGROUND);
     let proj = Projector::new(cam, width, height);
     let light = normalize(Vec3::new(0.4, 0.75, 0.55));
@@ -159,7 +170,13 @@ fn draw_thread_glow(fb: &mut Framebuffer, proj: &Projector, edge: &SceneEdge) {
     let (Some(a), Some(b)) = (proj.pixel(edge.from), proj.pixel(edge.to)) else {
         return;
     };
-    fb.glow_segment((a.0, a.1), (b.0, b.1), 3.2, default_palette(edge.color), 0.5);
+    fb.glow_segment(
+        (a.0, a.1),
+        (b.0, b.1),
+        3.2,
+        default_palette(edge.color),
+        0.5,
+    );
 }
 
 fn mul(c: [f32; 3], k: f32) -> [f32; 3] {

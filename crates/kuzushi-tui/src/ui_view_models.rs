@@ -27,7 +27,6 @@ mod catalog;
 mod chrome_layout;
 mod config;
 mod confirm_card;
-mod retry_card;
 mod context_snapshot;
 mod context_strip;
 mod cost;
@@ -53,6 +52,7 @@ mod prompt_tuning;
 mod pwn;
 mod recent_module_activity;
 mod recommendation;
+mod retry_card;
 mod routing;
 mod run_paths;
 mod run_status;
@@ -106,7 +106,6 @@ pub(crate) use config::{
     ConfigSummaryRow, PlainConfigModel, PlainConfigModelRow,
 };
 pub(crate) use confirm_card::{confirm_card_model, ConfirmCardModel};
-pub(crate) use retry_card::{retry_card_model, RetryCardModel, RetryCardRow};
 pub(crate) use context_snapshot::{
     context_snapshot_model, context_snapshot_relative_path, context_snapshot_state,
     plain_context_model, ContextSnapshotDetails, ContextSnapshotModel, PlainContextModel,
@@ -169,6 +168,7 @@ pub(crate) use recent_module_activity::{
     ModuleActivityTone,
 };
 pub(crate) use recommendation::{recommendation_model, RecommendationModel, RecommendationRow};
+pub(crate) use retry_card::{retry_card_model, RetryCardModel, RetryCardRow};
 pub(crate) use routing::{
     plain_render_mode, routing_mode, routing_mode_segment, shell_view_line_route,
     uses_activity_frame, uses_scene_frame, PlainRenderMode, PrimaryViewRoute, RoutingMode,
@@ -198,11 +198,6 @@ pub(crate) use threat_dfd_diagram::{
 pub(crate) use threat_model::{
     threat_model_doc, threat_model_relative_path, threat_summary_review, ThreatSummaryReview,
 };
-pub(crate) use viz_data::{
-    attack_tree, dfd_model, findings_heatmap, risk_by_module, taint_flow_path, AttackChain,
-    AttackTree, DfdFlowModel, DfdKind, DfdModel, DfdNodeModel, FindingsHeatmap, ModuleRisk,
-    RiskByModule, TaintFlowPath, TaintStageModel,
-};
 pub(crate) use threat_navigation::{threat_nav_model, threat_panel_model, ThreatPanel};
 pub(crate) use threat_patch::threat_patch_card_model;
 #[cfg(test)]
@@ -219,6 +214,11 @@ pub(crate) use transcript::{
     plain_command_result_model, transcript_model, PlainCommandResultModel,
 };
 pub(crate) use view_status::view_status_segment;
+pub(crate) use viz_data::{
+    attack_tree, dfd_model, findings_heatmap, risk_by_module, taint_flow_path, AttackChain,
+    AttackTree, DfdFlowModel, DfdKind, DfdModel, DfdNodeModel, FindingsHeatmap, ModuleRisk,
+    RiskByModule, TaintFlowPath, TaintStageModel,
+};
 pub(crate) use workspace::{
     findings_db_relative_path, plain_workspace_model, workspace_model, PlainWorkspaceModel,
     WorkspaceModel, WorkspaceRollupRow,

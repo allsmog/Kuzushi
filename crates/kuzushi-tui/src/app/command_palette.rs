@@ -34,8 +34,8 @@ impl ShellApp {
     /// auto-execute, so the operator reviews (and completes any args) first.
     pub(crate) fn accept_palette(&mut self) {
         if let Some(spec) = self.palette_matches().get(self.palette_cursor) {
-            let head = command_completion_head(spec.command)
-                .unwrap_or_else(|| spec.command.to_string());
+            let head =
+                command_completion_head(spec.command).unwrap_or_else(|| spec.command.to_string());
             self.input = head;
             self.cursor = self.input.chars().count();
         }

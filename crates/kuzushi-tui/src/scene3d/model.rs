@@ -113,7 +113,10 @@ impl VizPage {
     /// graph/tree diagrams) rather than as shared text lines. Attack-path and
     /// the heatmap stay line-based — they read fine as styled text.
     pub fn is_frame_rendered(self) -> bool {
-        matches!(self, VizPage::AttackSurface | VizPage::Dfd | VizPage::ExploitChain)
+        matches!(
+            self,
+            VizPage::AttackSurface | VizPage::Dfd | VizPage::ExploitChain
+        )
     }
 
     /// The 3D page animates (idle spin); the 2D diagrams are static.
