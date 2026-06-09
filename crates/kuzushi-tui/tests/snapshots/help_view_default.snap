@@ -167,5 +167,7 @@ yes - apply pending plan
   aliases / examples: /yes, y
 no - discard pending plan
   aliases / examples: /no, n
+scene - security-viz gallery — risk heatmap, attack path/tree, DFD
+  aliases / examples: /scene, /viz, viz, /diagram
 quit - exit the shell
   aliases / examples: q, /q, exit, /quit, /exit, exitj, /exitj

@@ -2099,7 +2099,7 @@ mod tests {
             tmp.path(),
             run_id,
             "result.json",
-            " result ",
+            " tool result ",
             &serde_json::json!({"ok": true}),
         )
         .unwrap();
@@ -2113,7 +2113,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(json.label, "result");
+        assert_eq!(json.label, "tool result");
         assert_eq!(json.kind, "json");
         assert_eq!(markdown.label, "report");
         assert_eq!(markdown.kind, "markdown");

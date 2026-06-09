@@ -716,7 +716,7 @@ fn report_summarizes_canonical_context_snapshot_shape() {
         temp.path(),
         "run-context",
         "context.json",
-        "context",
+        "context snapshot",
         &json!({
             "filesIndexed": 42,
             "fileIndex": {
@@ -762,7 +762,7 @@ fn report_summarizes_snake_case_context_snapshot_shape() {
         temp.path(),
         "run-context-snake",
         "context.json",
-        "context",
+        "context snapshot",
         &json!({
             "files_indexed": 7,
             "file_index": {
@@ -801,7 +801,7 @@ fn report_summarizes_enveloped_context_snapshot_shape() {
         temp.path(),
         "run-context-envelope",
         "context.json",
-        "context",
+        "context snapshot",
         &json!({
             "status": "completed",
             "data": {
@@ -2427,7 +2427,7 @@ fn report_markdown_summarizes_exploit_chain_result_steps() {
         temp.path(),
         "run-chain",
         "result.json",
-        "result",
+        "tool result",
         &json!({
             "status": "completed",
             "summary": "exploit-chain complete",
@@ -2463,7 +2463,7 @@ fn report_markdown_summarizes_snake_case_exploit_chain_result_steps() {
         temp.path(),
         "run-chain-snake",
         "result.json",
-        "result",
+        "tool result",
         &json!({
             "status": "completed",
             "summary": "exploit-chain complete",
@@ -2499,7 +2499,7 @@ fn report_markdown_summarizes_exploit_chain_step_aliases() {
         temp.path(),
         "run-chain-step-aliases",
         "result.json",
-        "result",
+        "tool result",
         &json!({
             "status": "completed",
             "data": {
