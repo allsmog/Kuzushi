@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { pathToFileURL } from "node:url";
 import { createInterface } from "node:readline";
+import { pathToFileURL } from "node:url";
 
 const [command, specifier, toolName] = process.argv.slice(2);
 
@@ -87,10 +87,14 @@ function normalizeOptions(options) {
 }
 
 async function executeTool(module, name, request) {
-  const tool = arrayField(module.tools, "module.tools").find((candidate) => candidate.name === name);
+  const tool = arrayField(module.tools, "module.tools").find(
+    (candidate) => candidate.name === name,
+  );
   if (!tool) throw new Error(`dynamic module does not expose ${name}`);
   if (tool.requires?.runtime === true && !request.context?.runtime) {
-    throw new Error(`${name} declares requires.runtime=true; Rust runtime callbacks are not available to dynamic modules yet`);
+    throw new Error(
+      `${name} declares requires.runtime=true; Rust runtime callbacks are not available to dynamic modules yet`,
+    );
   }
   if (typeof tool.run !== "function") {
     throw new Error(`${name} does not export a run(input, ctx) function`);
@@ -104,7 +108,8 @@ async function executeToolWithRuntimeProtocol(module, name) {
   const first = await reader.next();
   if (first.done) throw new Error("execute-runtime did not receive an initial request");
   const envelope = JSON.parse(first.value);
-  if (envelope.type !== "request") throw new Error("execute-runtime expected an initial request envelope");
+  if (envelope.type !== "request")
+    throw new Error("execute-runtime expected an initial request envelope");
   const request = envelope.payload;
   const runtime = runtimeProxy(request.context, reader);
   const result = await executeTool(module, name, {
@@ -124,7 +129,9 @@ function runtimeProxy(context, reader) {
     async query(request) {
       const id = nextId++;
       const normalized = normalizeRuntimeQueryRequest(request, context);
-      process.stdout.write(`${JSON.stringify({ type: "runtime.query", id, request: normalized })}\n`);
+      process.stdout.write(
+        `${JSON.stringify({ type: "runtime.query", id, request: normalized })}\n`,
+      );
       const response = await readRuntimeCallbackResponse(reader, id);
       return response.response;
     },
@@ -139,9 +146,12 @@ async function readRuntimeCallbackResponse(reader, id) {
 
 function parseRuntimeCallbackResponse(line, id) {
   const response = JSON.parse(line);
-  if (response.id !== id) throw new Error(`runtime callback id mismatch: expected ${id}, got ${response.id}`);
-  if (response.type === "runtime.error") throw new Error(response.error ?? "runtime callback failed");
-  if (response.type !== "runtime.response") throw new Error(`unexpected runtime callback response ${response.type}`);
+  if (response.id !== id)
+    throw new Error(`runtime callback id mismatch: expected ${id}, got ${response.id}`);
+  if (response.type === "runtime.error")
+    throw new Error(response.error ?? "runtime callback failed");
+  if (response.type !== "runtime.response")
+    throw new Error(`unexpected runtime callback response ${response.type}`);
   return response;
 }
 

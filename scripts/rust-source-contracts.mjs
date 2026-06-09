@@ -21,9 +21,7 @@ export function rustArrayConstantBody(source, name) {
 }
 
 export function rustStringConstants(source, names) {
-  return Object.fromEntries(
-    names.map((name) => [name, rustStringConstant(source, name)]),
-  );
+  return Object.fromEntries(names.map((name) => [name, rustStringConstant(source, name)]));
 }
 
 function rustStringConstant(source, name) {

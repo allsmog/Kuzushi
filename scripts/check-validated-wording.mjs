@@ -39,16 +39,15 @@ function validatedWordFailures(file) {
     .split(/\r?\n/)
     .flatMap((line, index) =>
       /\bvalidated\b/i.test(line) && !isAllowedValidatedLine(line)
-        ? [`${file}:${index + 1} uses "validated" outside proof/verification/input-validation contexts`]
+        ? [
+            `${file}:${index + 1} uses "validated" outside proof/verification/input-validation contexts`,
+          ]
         : [],
     );
 }
 
 function isAllowed(file) {
-  return (
-    allowedFiles.has(file) ||
-    allowedPrefixes.some((prefix) => file.startsWith(prefix))
-  );
+  return allowedFiles.has(file) || allowedPrefixes.some((prefix) => file.startsWith(prefix));
 }
 
 function trackedFiles() {
@@ -106,8 +105,8 @@ function isValidatedPolicyContext(line) {
   return [
     "validated-wording check",
     "`validated` claims",
-    "\"validated\" unless",
-    "using \"validated\" wording",
+    '"validated" unless',
+    'using "validated" wording',
     "check-validated-wording.mjs",
   ].some((allowed) => normalized.includes(allowed));
 }

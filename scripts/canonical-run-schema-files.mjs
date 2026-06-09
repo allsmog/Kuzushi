@@ -17,7 +17,9 @@ export function specialArtifactSchemaReferences() {
 }
 
 export function schemaBackedRunArtifactSpecs() {
-  return requiredRunArtifactSpecs.filter((artifact) => artifact.kind === "json" || artifact.kind === "jsonl");
+  return requiredRunArtifactSpecs.filter(
+    (artifact) => artifact.kind === "json" || artifact.kind === "jsonl",
+  );
 }
 
 export function requiredArtifactSchemaReferences() {
@@ -41,5 +43,8 @@ export function schemaReferenceForArtifact(artifactPath) {
 }
 
 function schemaForArtifact(artifactPath) {
-  return schemaByArtifact[artifactPath] ?? `schemas/run.${artifactPath.replace(/\.jsonl?$/, "")}.schema.json`;
+  return (
+    schemaByArtifact[artifactPath] ??
+    `schemas/run.${artifactPath.replace(/\.jsonl?$/, "")}.schema.json`
+  );
 }

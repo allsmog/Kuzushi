@@ -19,7 +19,10 @@ const FORBIDDEN_MODEL_DEFAULTS = [
 const FORBIDDEN_MODEL_DEFAULT_BLOCKS = [
   [
     "hardcoded multiline model fallback expression",
-    new RegExp(String.raw`(?:\?\?|unwrap_or(?:_else)?|or_else)\s*\([\s\S]{0,240}?["']${MODEL_LITERAL}["']`, "g"),
+    new RegExp(
+      String.raw`(?:\?\?|unwrap_or(?:_else)?|or_else)\s*\([\s\S]{0,240}?["']${MODEL_LITERAL}["']`,
+      "g",
+    ),
   ],
   [
     "hardcoded multiline model field literal",
@@ -42,7 +45,7 @@ const REQUIRED_POLICY_COVERAGE = [
       "validate_model_spec",
       "canonical_model_spec",
       "normalize_model_spec",
-      "format!(\"{provider}:{model_id}\")",
+      'format!("{provider}:{model_id}")',
     ],
   },
   {
@@ -87,7 +90,7 @@ const REQUIRED_POLICY_COVERAGE = [
   {
     label: "exploit-chain tool boundary uses shared no-silent-fallback policy",
     file: "crates/kuzushi-core/src/modules/native_scanners/register_modules.rs",
-    required: ["require_exploit_chain_model", "require_configured_model(\"exploit-chain:scan\""],
+    required: ["require_exploit_chain_model", 'require_configured_model("exploit-chain:scan"'],
   },
   {
     label: "shared runtime requirement policy covers mode parity",
@@ -115,7 +118,8 @@ const REQUIRED_POLICY_COVERAGE = [
     file: "crates/kuzushi-tui/src/app/workers/run_background_tool.rs",
     required: [
       "background_agent_runtime",
-      "if !tool_needs_runtime(tool_name, input)",
+      "wants_background_runtime",
+      "if tool_needs_runtime(tool_name, input)",
       "LangGraphRuntime::from_config",
     ],
   },
@@ -160,9 +164,7 @@ function policyCoverageFailures() {
 function scanFile(file) {
   const source = readFileSync(path.join(root, file), "utf8");
   return [
-    ...source
-      .split(/\r?\n/)
-      .flatMap((line, index) => lineFailures(file, line, index + 1)),
+    ...source.split(/\r?\n/).flatMap((line, index) => lineFailures(file, line, index + 1)),
     ...blockFailures(file, source),
   ];
 }
@@ -175,7 +177,9 @@ function lineFailures(file, line, lineNumber) {
 
 function blockFailures(file, source) {
   return FORBIDDEN_MODEL_DEFAULT_BLOCKS.flatMap(([label, pattern]) =>
-    [...source.matchAll(pattern)].map((match) => `${file}:${lineNumberAt(source, match.index ?? 0)} ${label}`),
+    [...source.matchAll(pattern)].map(
+      (match) => `${file}:${lineNumberAt(source, match.index ?? 0)} ${label}`,
+    ),
   );
 }
 

@@ -4,8 +4,7 @@ import { join } from "node:path";
 import process from "node:process";
 
 const root = process.cwd();
-const exes =
-  process.platform === "win32" ? ["kuzushi.exe", "kz.exe"] : ["kuzushi", "kz"];
+const exes = process.platform === "win32" ? ["kuzushi.exe", "kz.exe"] : ["kuzushi", "kz"];
 const retiredExes =
   process.platform === "win32" ? ["codex.exe", "kuzushi-ts.exe"] : ["codex", "kuzushi-ts"];
 const outDir = join(root, "native", `${process.platform}-${process.arch}`);

@@ -1,7 +1,7 @@
 import {
   canonicalRunSchemaFiles,
-  requiredArtifactSchemaReferences,
   requiredArtifactSchemaFiles,
+  requiredArtifactSchemaReferences,
   schemaBackedRunArtifactSpecs,
   schemaReferenceForArtifact,
   specialArtifactSchemaReferences,
@@ -20,10 +20,26 @@ export function checkArtifactSchemaInventory() {
 }
 
 export function checkArtifactSchemaInventoryHelpers() {
+  return [
+    duplicateHelperDriftFailure(),
+    schemaFilePathHelperDriftFailure(),
+    missingEntryHelperDriftFailure(),
+    artifactPathHelperDriftFailure(),
+  ].filter(Boolean);
+}
+
+function duplicateHelperDriftFailure() {
   const duplicates = duplicateEntries(
     ["run.json", "run.json", "run.json", "events.jsonl", "events.jsonl"],
     "schema inventory duplicate",
   );
+  return duplicates.join("\n") ===
+    "schema inventory duplicate: run.json\nschema inventory duplicate: events.jsonl"
+    ? null
+    : `artifact schema inventory duplicate helper drift: expected unique duplicate paths, got ${duplicates.join(", ")}`;
+}
+
+function schemaFilePathHelperDriftFailure() {
   const pathFailures = schemaFilePathFailures(
     [
       "schemas/run.summary.schema.json",
@@ -33,29 +49,33 @@ export function checkArtifactSchemaInventoryHelpers() {
     ],
     "schema inventory path",
   );
+  return pathFailures.join("\n") ===
+    "schema inventory path: schemas/module.manifest.schema.json\nschema inventory path: run.context.schema.json"
+    ? null
+    : `artifact schema inventory path helper drift: got ${pathFailures.join(", ")}`;
+}
+
+function missingEntryHelperDriftFailure() {
   const missingFailures = missingEntries(
     ["schemas/run.summary.schema.json", "schemas/run.extra.schema.json"],
     ["schemas/run.summary.schema.json"],
     "schema inventory missing-entry",
   );
+  return missingFailures.join("\n") ===
+    "schema inventory missing-entry: schemas/run.extra.schema.json"
+    ? null
+    : `artifact schema inventory missing-entry helper drift: got ${missingFailures.join(", ")}`;
+}
+
+function artifactPathHelperDriftFailure() {
   const artifactPathFailures = schemaArtifactPathFailures(
     ["run.json", "events.jsonl", "nested/run.json", "report.md"],
     "schema inventory artifact path",
   );
-  return [
-    duplicates.join("\n") === "schema inventory duplicate: run.json\nschema inventory duplicate: events.jsonl"
-      ? null
-      : `artifact schema inventory duplicate helper drift: expected unique duplicate paths, got ${duplicates.join(", ")}`,
-    pathFailures.join("\n") === "schema inventory path: schemas/module.manifest.schema.json\nschema inventory path: run.context.schema.json"
-      ? null
-      : `artifact schema inventory path helper drift: got ${pathFailures.join(", ")}`,
-    missingFailures.join("\n") === "schema inventory missing-entry: schemas/run.extra.schema.json"
-      ? null
-      : `artifact schema inventory missing-entry helper drift: got ${missingFailures.join(", ")}`,
-    artifactPathFailures.join("\n") === "schema inventory artifact path: nested/run.json\nschema inventory artifact path: report.md"
-      ? null
-      : `artifact schema inventory artifact-path helper drift: got ${artifactPathFailures.join(", ")}`,
-  ].filter(Boolean);
+  return artifactPathFailures.join("\n") ===
+    "schema inventory artifact path: nested/run.json\nschema inventory artifact path: report.md"
+    ? null
+    : `artifact schema inventory artifact-path helper drift: got ${artifactPathFailures.join(", ")}`;
 }
 
 function requiredSchemaReferenceFailures() {
@@ -81,7 +101,9 @@ function requiredSchemaReferenceFailures() {
 }
 
 function specialSchemaReferenceFailures() {
-  const schemaBackedArtifacts = new Set(schemaBackedRunArtifactSpecs().map((artifact) => artifact.path));
+  const schemaBackedArtifacts = new Set(
+    schemaBackedRunArtifactSpecs().map((artifact) => artifact.path),
+  );
   const references = specialArtifactSchemaReferences();
   return [
     ...schemaArtifactPathFailures(
@@ -102,7 +124,10 @@ function specialSchemaReferenceFailures() {
     ),
     ...references
       .filter(({ artifactPath }) => !schemaBackedArtifacts.has(artifactPath))
-      .map(({ artifactPath }) => `special artifact schema mapping has no required schema-backed artifact: ${artifactPath}`),
+      .map(
+        ({ artifactPath }) =>
+          `special artifact schema mapping has no required schema-backed artifact: ${artifactPath}`,
+      ),
   ];
 }
 
@@ -116,7 +141,9 @@ function specialSchemaMappingFailures() {
 }
 
 function defaultSchemaMappingFailures() {
-  const specialArtifacts = new Set(specialArtifactSchemaReferences().map(({ artifactPath }) => artifactPath));
+  const specialArtifacts = new Set(
+    specialArtifactSchemaReferences().map(({ artifactPath }) => artifactPath),
+  );
   return schemaBackedRunArtifactSpecs()
     .filter((artifact) => !specialArtifacts.has(artifact.path))
     .flatMap((artifact) => {

@@ -255,10 +255,7 @@ function overlapsRanges(block, ranges) {
 
 function changedLineRanges(file) {
   const diff = git(["diff", "--unified=0", "HEAD", "--", file]);
-  return diff
-    .split(/\r?\n/)
-    .map(parseAddedRange)
-    .filter(Boolean);
+  return diff.split(/\r?\n/).map(parseAddedRange).filter(Boolean);
 }
 
 function parseAddedRange(line) {

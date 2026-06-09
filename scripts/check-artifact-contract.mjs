@@ -11,27 +11,50 @@ import {
   runFindingsSchemaFields,
   runProofSchemaFields,
   runRecommendationsSchemaFields,
-  reportJsonlAliasFields,
-  schemaAliasContractFields,
   runSummarySchemaFields,
   runThreatModelSchemaFields,
   runTraceSchemaFields,
+  schemaAliasContractFields,
 } from "./artifact-contract-fields.mjs";
+import {
+  checkArtifactManifestContractHelpers,
+  checkCanonicalManifestInventory,
+  checkCanonicalSnapshotInventory,
+  checkCanonicalSpecialWriterInventory,
+  checkCliRunsPathConsumers,
+  checkContextSnapshotPathHelper,
+  checkFailureFollowUpInventory,
+  checkFailureMissingArtifactInventory,
+  checkHomeCockpitArtifactRail,
+  checkManifestLoaderToolInputMetadata,
+  checkOauthCredentialPathHelper,
+  checkOptionalAndToolResultArtifactInventory,
+  checkPatchWorktreePathHelper,
+  checkPersistentThreatModelPathHelper,
+  checkPromptPathHelpers,
+  checkReportArtifactManifestSummary,
+  checkReportJsonlArtifactSummary,
+  checkReportReaderInventory,
+  checkRunArtifactPathHelpers,
+  checkRunMetadataWriterInventory,
+  checkTaintIrisNextArtifactPathHelpers,
+  checkThreatIntelCatalogPathHelper,
+  checkThreatLeadsPathHelpers,
+  checkTuiAttackSurfaceArtifactLeaf,
+  checkTuiFailureHandoffArtifactLeaf,
+  checkTuiPrereqChainPathHelpers,
+  checkTuiRecommendationArtifactLeaf,
+  checkTuiRunsRootHelper,
+  checkTuiRunTimelineArtifactLeaves,
+  checkTuiThreatModelArtifactLeaf,
+  checkWorkspaceStatePathHelpers,
+} from "./artifact-manifest-contract.mjs";
 import { checkCanonicalRunSchemas } from "./artifact-schema-contract.mjs";
 import {
   checkArtifactSchemaInventory,
   checkArtifactSchemaInventoryHelpers,
 } from "./artifact-schema-inventory-contract.mjs";
-import {
-  requiredArtifactSchemaFiles,
-  requiredArtifactSchemaReferences,
-} from "./canonical-run-schema-files.mjs";
-import {
-  checkArtifactTokenContractInvariants,
-  tokenChecks,
-} from "./artifact-token-contracts.mjs";
-import { checkFailureSchemaBounds } from "./check-failure-schema-bounds.mjs";
-import { rustFunctionBody } from "./rust-source-contracts.mjs";
+import { checkArtifactTokenContractInvariants, tokenChecks } from "./artifact-token-contracts.mjs";
 import {
   checkCanonicalRunArtifactInvariantHelpers,
   checkCanonicalRunArtifactInvariants,
@@ -41,44 +64,31 @@ import {
   toolResultArtifacts,
 } from "./canonical-run-artifacts.mjs";
 import {
-  checkArtifactManifestContractHelpers,
-  checkCanonicalManifestInventory,
-  checkCanonicalSnapshotInventory,
-  checkCanonicalSpecialWriterInventory,
-  checkCliRunsPathConsumers,
-  checkContextSnapshotPathHelper,
-  checkFailureMissingArtifactInventory,
-  checkFailureFollowUpInventory,
-  checkHomeCockpitArtifactRail,
-  checkManifestLoaderToolInputMetadata,
-  checkOptionalAndToolResultArtifactInventory,
-  checkOauthCredentialPathHelper,
-  checkPatchWorktreePathHelper,
-  checkPersistentThreatModelPathHelper,
-  checkPromptPathHelpers,
-  checkRunArtifactPathHelpers,
-  checkReportArtifactManifestSummary,
-  checkReportJsonlArtifactSummary,
-  checkReportReaderInventory,
-  checkRunMetadataWriterInventory,
-  checkTaintIrisNextArtifactPathHelpers,
-  checkThreatIntelCatalogPathHelper,
-  checkThreatLeadsPathHelpers,
-  checkTuiAttackSurfaceArtifactLeaf,
-  checkTuiFailureHandoffArtifactLeaf,
-  checkTuiPrereqChainPathHelpers,
-  checkTuiRecommendationArtifactLeaf,
-  checkTuiRunTimelineArtifactLeaves,
-  checkTuiRunsRootHelper,
-  checkTuiThreatModelArtifactLeaf,
-  checkWorkspaceStatePathHelpers,
-} from "./artifact-manifest-contract.mjs";
+  requiredArtifactSchemaFiles,
+  requiredArtifactSchemaReferences,
+} from "./canonical-run-schema-files.mjs";
+import { checkFailureSchemaBounds } from "./check-failure-schema-bounds.mjs";
 import { checkRustSourceContractParsers } from "./rust-source-contract-checks.mjs";
+import { rustFunctionBody } from "./rust-source-contracts.mjs";
 
 const root = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
 
-const reportAliasFields = ["reportMarkdown", "report_markdown", "data.reportMarkdown", "data.report_markdown", "reportSarif", "report_sarif", "data.reportSarif", "data.report_sarif"];
-const reportSubstrateAliasFields = ["reportMarkdown", "report_markdown", "reportSarif", "report_sarif"];
+const reportAliasFields = [
+  "reportMarkdown",
+  "report_markdown",
+  "data.reportMarkdown",
+  "data.report_markdown",
+  "reportSarif",
+  "report_sarif",
+  "data.reportSarif",
+  "data.report_sarif",
+];
+const reportSubstrateAliasFields = [
+  "reportMarkdown",
+  "report_markdown",
+  "reportSarif",
+  "report_sarif",
+];
 const schemaArchitectureDocChecks = requiredArtifactSchemaReferences().map((reference) => ({
   label: `run schema architecture doc ${reference.artifactPath}`,
   file: "docs/architecture/kuzushi-artifacts.md",
@@ -119,17 +129,34 @@ const checks = [
   {
     label: "artifact architecture doc",
     file: "docs/architecture/kuzushi-artifacts.md",
-    artifacts: [...requiredRunArtifacts, ...optionalRunArtifacts, ...toolInputArtifacts, ...toolResultArtifacts, ...reportAliasFields],
+    artifacts: [
+      ...requiredRunArtifacts,
+      ...optionalRunArtifacts,
+      ...toolInputArtifacts,
+      ...toolResultArtifacts,
+      ...reportAliasFields,
+    ],
   },
   {
     label: "README artifact table",
     file: "README.md",
-    artifacts: [...requiredRunArtifacts, ...optionalRunArtifacts, ...toolInputArtifacts, ...toolResultArtifacts, ...reportAliasFields],
+    artifacts: [
+      ...requiredRunArtifacts,
+      ...optionalRunArtifacts,
+      ...toolInputArtifacts,
+      ...toolResultArtifacts,
+      ...reportAliasFields,
+    ],
   },
   {
     label: "replay trace artifact inventory",
     file: "docs/assessments/replay-trace-audit.md",
-    artifacts: [...requiredRunArtifacts, ...optionalRunArtifacts, ...toolInputArtifacts, ...toolResultArtifacts],
+    artifacts: [
+      ...requiredRunArtifacts,
+      ...optionalRunArtifacts,
+      ...toolInputArtifacts,
+      ...toolResultArtifacts,
+    ],
   },
   {
     label: "run artifact substrate",
@@ -146,7 +173,12 @@ const checks = [
       "crates/kuzushi-core/src/report/application.rs",
       "crates/kuzushi-core/src/artifact_contract.rs",
     ],
-    artifacts: [...requiredRunArtifacts, ...optionalRunArtifacts, ...toolInputArtifacts, ...toolResultArtifacts],
+    artifacts: [
+      ...requiredRunArtifacts,
+      ...optionalRunArtifacts,
+      ...toolInputArtifacts,
+      ...toolResultArtifacts,
+    ],
   },
   {
     label: "run artifact file-existence regression helper",
@@ -336,7 +368,9 @@ function checkedFunctionBodies(check, source) {
     .map((name) => {
       const body = rustFunctionBody(source, name);
       if (body === null) {
-        console.error(`Kuzushi artifact contract check failed:\n- ${check.label}: missing function ${name}`);
+        console.error(
+          `Kuzushi artifact contract check failed:\n- ${check.label}: missing function ${name}`,
+        );
         process.exit(1);
       }
       return body;

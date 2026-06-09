@@ -2,7 +2,6 @@ import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import {
   optionalRunArtifactSpecs,
-  optionalRunArtifacts,
   requiredRunArtifactSpecs,
   requiredRunArtifacts,
   toolInputArtifactSpecs,
@@ -17,12 +16,12 @@ import {
   rustStringConstants,
 } from "./rust-source-contracts.mjs";
 
-const manifestFile = "crates/kuzushi-core/src/run_artifacts/artifact_manifest.rs";
 const artifactContractFile = "crates/kuzushi-core/src/artifact_contract.rs";
 
 export function checkCanonicalManifestInventory(root) {
   const sourcePath = path.join(root, artifactContractFile);
-  if (!existsSync(sourcePath)) return [`canonical manifest inventory: missing ${artifactContractFile}`];
+  if (!existsSync(sourcePath))
+    return [`canonical manifest inventory: missing ${artifactContractFile}`];
   const actualSpecs =
     rustCanonicalRunArtifactSpecs(readFileSync(sourcePath, "utf8"), "CANONICAL_RUN_ARTIFACTS") ??
     [];
@@ -30,7 +29,9 @@ export function checkCanonicalManifestInventory(root) {
   return [
     ...missingEntries(requiredRunArtifacts, actual, "canonical manifest missing required artifact"),
     ...missingEntries(actual, requiredRunArtifacts, "canonical manifest has uncontracted artifact"),
-    ...duplicateEntries(actual).map((artifact) => `canonical manifest duplicates artifact ${artifact}`),
+    ...duplicateEntries(actual).map(
+      (artifact) => `canonical manifest duplicates artifact ${artifact}`,
+    ),
     ...requiredRunArtifactSpecs.flatMap((spec) =>
       specFieldMismatches(actualSpecs, spec, "canonical manifest"),
     ),
@@ -39,7 +40,8 @@ export function checkCanonicalManifestInventory(root) {
 
 export function checkOptionalAndToolResultArtifactInventory(root) {
   const sourcePath = path.join(root, artifactContractFile);
-  if (!existsSync(sourcePath)) return [`optional/tool-result inventory: missing ${artifactContractFile}`];
+  if (!existsSync(sourcePath))
+    return [`optional/tool-result inventory: missing ${artifactContractFile}`];
   const source = readFileSync(sourcePath, "utf8");
   return [
     ...specInventoryFailures(
@@ -70,9 +72,7 @@ export function checkReportReaderInventory(root) {
   return [
     ...reportReaderSourceFailures(source),
     ...reportReaderInventoryFailures(expectedSpecs, actualSpecs),
-    ...expectedSpecs.flatMap((expected) =>
-      reportReaderMismatches(actualSpecs, expected),
-    ),
+    ...expectedSpecs.flatMap((expected) => reportReaderMismatches(actualSpecs, expected)),
   ];
 }
 
@@ -131,7 +131,11 @@ export function checkFailureFollowUpInventory(root) {
     ...failureFollowUpOrderFailures(legacy),
     ...failureFollowUpSourceFailures(source),
     ...failureArtifactPathHelperFailures(source, root),
-    ...missingEntries(legacy, allowedLegacyFailureFollowUpArtifacts(), "failure follow-up has uncontracted artifact"),
+    ...missingEntries(
+      legacy,
+      allowedLegacyFailureFollowUpArtifacts(),
+      "failure follow-up has uncontracted artifact",
+    ),
   ].filter(Boolean);
 }
 
@@ -142,8 +146,12 @@ function failureFollowUpOrderFailures(legacy) {
       expectedFailureFollowUpRequiredOrder(),
       "failure follow-up required order drift",
     ),
-    ...duplicateEntries(legacy).map((artifact) => `failure follow-up duplicates configured artifact ${artifact}`),
-    ...duplicateEntries(failureFollowUpRequiredOrder(legacy)).map((artifact) => `failure follow-up duplicates required artifact ${artifact}`),
+    ...duplicateEntries(legacy).map(
+      (artifact) => `failure follow-up duplicates configured artifact ${artifact}`,
+    ),
+    ...duplicateEntries(failureFollowUpRequiredOrder(legacy)).map(
+      (artifact) => `failure follow-up duplicates required artifact ${artifact}`,
+    ),
   ];
 }
 
@@ -158,7 +166,9 @@ function failureFollowUpSourceFailures(source) {
     source.includes("OPTIONAL_RUN_ARTIFACTS")
       ? null
       : "optional failure follow-up must use OPTIONAL_RUN_ARTIFACTS",
-    source.includes("push_existing_follow_up_path(paths, target, run_id, report_artifact_spec().leaf)")
+    source.includes(
+      "push_existing_follow_up_path(paths, target, run_id, report_artifact_spec().leaf)",
+    )
       ? null
       : "optional failure follow-up must use report_artifact_spec().leaf",
     source.includes("run_artifact_path(target, run_id, failure_artifact_spec().leaf)")
@@ -175,7 +185,9 @@ function failureFollowUpSourceFailures(source) {
 
 function failureArtifactPathHelperFailures(source, root) {
   return [
-    source.includes("pub(crate) fn run_failure_artifact_path(target: &Path, run_id: &str) -> PathBuf")
+    source.includes(
+      "pub(crate) fn run_failure_artifact_path(target: &Path, run_id: &str) -> PathBuf",
+    )
       ? null
       : "failure artifact path helper must stay crate-visible",
     source.includes("run_artifact_path(target, run_id, failure_artifact_spec().leaf)")
@@ -189,7 +201,14 @@ function failureArtifactPathHelperFailures(source, root) {
 }
 
 function failureFollowUpRequiredOrder(legacy) {
-  return ["failures.json", ...toolResultArtifacts, ...toolInputArtifacts, "artifacts.json", "run.json", ...legacy];
+  return [
+    "failures.json",
+    ...toolResultArtifacts,
+    ...toolInputArtifacts,
+    "artifacts.json",
+    "run.json",
+    ...legacy,
+  ];
 }
 
 function reportFailureHandoffPathFailures(root) {
@@ -208,7 +227,14 @@ function reportFailureHandoffPathFailures(root) {
 }
 
 function expectedFailureFollowUpRequiredOrder() {
-  return ["failures.json", ...toolResultArtifacts, ...toolInputArtifacts, "artifacts.json", "run.json", "summary.json"];
+  return [
+    "failures.json",
+    ...toolResultArtifacts,
+    ...toolInputArtifacts,
+    "artifacts.json",
+    "run.json",
+    "summary.json",
+  ];
 }
 
 function allowedLegacyFailureFollowUpArtifacts() {
@@ -239,9 +265,19 @@ export function checkFailureMissingArtifactInventory(root) {
     source.includes("*artifact != failure_artifact")
       ? null
       : "failure missing-artifact inventory must exclude shared failure artifact leaf",
-    ...missingEntries(requiredRunArtifacts, shared, "canonical run artifact leaves missing artifact"),
-    ...missingEntries(shared, requiredRunArtifacts, "canonical run artifact leaves has uncontracted artifact"),
-    ...duplicateEntries(shared).map((artifact) => `canonical run artifact leaves duplicates artifact ${artifact}`),
+    ...missingEntries(
+      requiredRunArtifacts,
+      shared,
+      "canonical run artifact leaves missing artifact",
+    ),
+    ...missingEntries(
+      shared,
+      requiredRunArtifacts,
+      "canonical run artifact leaves has uncontracted artifact",
+    ),
+    ...duplicateEntries(shared).map(
+      (artifact) => `canonical run artifact leaves duplicates artifact ${artifact}`,
+    ),
   ].filter(Boolean);
 }
 
@@ -257,7 +293,9 @@ export function checkCanonicalSnapshotInventory(root) {
   return [
     ...missingEntries(expected, actual, "canonical snapshot writer missing artifact"),
     ...missingEntries(actual, expected, "canonical snapshot writer has uncontracted artifact"),
-    ...duplicateEntries(actual).map((artifact) => `canonical snapshot writer duplicates artifact ${artifact}`),
+    ...duplicateEntries(actual).map(
+      (artifact) => `canonical snapshot writer duplicates artifact ${artifact}`,
+    ),
   ];
 }
 
@@ -271,7 +309,9 @@ export function checkCanonicalSpecialWriterInventory(root) {
   return [
     ...missingEntries(expected, actual, "canonical special writer missing artifact"),
     ...missingEntries(actual, expected, "canonical special writer has uncontracted artifact"),
-    ...duplicateEntries(actual).map((artifact) => `canonical special writer duplicates artifact ${artifact}`),
+    ...duplicateEntries(actual).map(
+      (artifact) => `canonical special writer duplicates artifact ${artifact}`,
+    ),
   ];
 }
 
@@ -324,7 +364,9 @@ export function checkWorkspaceStatePathHelpers(root) {
     ...tuiFindingsDbLabelFailures(root),
     ...tuiKnowledgeBaseAttachmentStorePathFailures(root),
     ...carliniAttachmentRendererPathFailures(root),
-  ].flat().filter(Boolean);
+  ]
+    .flat()
+    .filter(Boolean);
 }
 
 function workspaceStatePathConstantFailures(constants) {
@@ -613,22 +655,30 @@ function tuiWorkspaceStateLabelFailures(root) {
 
 function tuiFindingsDbLabelFailures(root) {
   const workspaceFile = "crates/kuzushi-tui/src/ui_view_models/workspace.rs";
-  const emptyStateFile = "crates/kuzushi-tui/src/renderer/views/findings/findings_lines/empty_state.rs";
+  const emptyStateFile =
+    "crates/kuzushi-tui/src/renderer/views/findings/findings_lines/empty_state.rs";
   const workspacePath = path.join(root, workspaceFile);
   const emptyStatePath = path.join(root, emptyStateFile);
-  if (!existsSync(workspacePath)) return [`TUI workspace findings DB label: missing ${workspaceFile}`];
+  if (!existsSync(workspacePath))
+    return [`TUI workspace findings DB label: missing ${workspaceFile}`];
   if (!existsSync(emptyStatePath)) return [`TUI findings empty state: missing ${emptyStateFile}`];
 
-  const workspaceSource = readFileSync(workspacePath, "utf8");
-  const emptyStateSource = readFileSync(emptyStatePath, "utf8");
-  const workspaceProductionSource = workspaceSource.split("#[cfg(test)]")[0];
-  const emptyStateProductionSource = emptyStateSource.split("#[cfg(test)]")[0];
+  return [
+    ...workspaceFindingsDbLabelChecks(readFileSync(workspacePath, "utf8")),
+    ...emptyStateFindingsDbLabelChecks(readFileSync(emptyStatePath, "utf8")),
+    modulePlaybookFindingsDbLabelFailures(root),
+  ].filter(Boolean);
+}
 
+function workspaceFindingsDbLabelChecks(workspaceSource) {
+  const workspaceProductionSource = workspaceSource.split("#[cfg(test)]")[0];
   return [
     workspaceSource.includes("pub(crate) fn findings_db_relative_path() -> &'static str")
       ? null
       : "TUI workspace findings DB label must expose findings_db_relative_path",
-    workspaceSource.includes("static FINDINGS_DB_RELATIVE_PATH: OnceLock<String> = OnceLock::new();")
+    workspaceSource.includes(
+      "static FINDINGS_DB_RELATIVE_PATH: OnceLock<String> = OnceLock::new();",
+    )
       ? null
       : "TUI workspace findings DB label must cache its derived relative path label",
     workspaceSource.includes('workspace_findings_db_path("")') &&
@@ -644,14 +694,19 @@ function tuiFindingsDbLabelFailures(root) {
     workspaceSource.includes("findings_db_relative_path()")
       ? null
       : "TUI workspace findings DB fallback must use findings_db_relative_path",
+  ];
+}
+
+function emptyStateFindingsDbLabelChecks(emptyStateSource) {
+  const emptyStateProductionSource = emptyStateSource.split("#[cfg(test)]")[0];
+  return [
     emptyStateSource.includes("findings_db_relative_path()")
       ? null
       : "TUI findings empty state must use findings_db_relative_path",
     emptyStateProductionSource.includes(".kuzushi/v2/findings.sqlite3")
       ? "TUI findings empty state must not hardcode .kuzushi/v2/findings.sqlite3"
       : null,
-    modulePlaybookFindingsDbLabelFailures(root),
-  ].filter(Boolean);
+  ];
 }
 
 function modulePlaybookFindingsDbLabelFailures(root) {
@@ -680,7 +735,7 @@ function tuiKnowledgeBaseAttachmentStorePathFailures(root) {
     source.includes("fn attachments_store_relative_path() -> &'static str")
       ? null
       : "TUI KB attachment store label must expose attachments_store_relative_path",
-    source.includes("workspace_attachments_path(\"\")") &&
+    source.includes('workspace_attachments_path("")') &&
     source.includes(".display()") &&
     source.includes(".to_string()")
       ? null
@@ -695,7 +750,8 @@ function tuiKnowledgeBaseAttachmentStorePathFailures(root) {
 }
 
 function carliniAttachmentRendererPathFailures(root) {
-  const file = "crates/kuzushi-core/src/capabilities/carlini_threat_hunt/adapters/render_attachments.rs";
+  const file =
+    "crates/kuzushi-core/src/capabilities/carlini_threat_hunt/adapters/render_attachments.rs";
   const sourcePath = path.join(root, file);
   if (!existsSync(sourcePath)) return [`Carlini attachment renderer path: missing ${file}`];
   const source = readFileSync(sourcePath, "utf8");
@@ -749,7 +805,8 @@ export function checkPatchWorktreePathHelper(root) {
 }
 
 export function checkThreatIntelCatalogPathHelper(root) {
-  const file = "crates/kuzushi-core/src/capabilities/threat_intel/application/catalog_storage_paths.rs";
+  const file =
+    "crates/kuzushi-core/src/capabilities/threat_intel/application/catalog_storage_paths.rs";
   const sourcePath = path.join(root, file);
   if (!existsSync(sourcePath)) return [`threat-intel catalog path helper: missing ${file}`];
   const source = readFileSync(sourcePath, "utf8");
@@ -800,10 +857,9 @@ function threatIntelCatalogPathConsumerFailure(root, file) {
 }
 
 function threatIntelCatalogPathConsumerUsesHelper(source) {
-  return [
-    "threat_intel_catalogs_dir(",
-    "harvested_threat_intel_catalog_path(",
-  ].some((needle) => source.includes(needle));
+  return ["threat_intel_catalogs_dir(", "harvested_threat_intel_catalog_path("].some((needle) =>
+    source.includes(needle),
+  );
 }
 
 function threatIntelCatalogPathConsumerHardcodesPath(source) {
@@ -844,7 +900,8 @@ export function checkPersistentThreatModelPathHelper(root) {
 export function checkOauthCredentialPathHelper(root) {
   const configFile = "crates/kuzushi-core/src/config/config_model.rs";
   const statusFile = "crates/kuzushi-tui/src/app/settings/normalize_thinking_level/oauth_status.rs";
-  const processFile = "crates/kuzushi-tui/src/app/settings/normalize_thinking_level/auth_process.rs";
+  const processFile =
+    "crates/kuzushi-tui/src/app/settings/normalize_thinking_level/auth_process.rs";
   const config = readRequiredSource(root, configFile, "OAuth credential path helper");
   const status = readRequiredSource(root, statusFile, "OAuth credential status path consumer");
   const process = readRequiredSource(root, processFile, "OAuth credential login path consumer");
@@ -992,7 +1049,9 @@ export function checkPromptPathHelpers(root) {
   const helper = readFileSync(helperPath, "utf8");
   const constants = rustStringConstants(helper, ["PROMPTS_DIR", "HOUSE_RULES_DIR"]);
   return [
-    constants.PROMPTS_DIR === "prompts" ? null : "prompt path helper must name PROMPTS_DIR as prompts",
+    constants.PROMPTS_DIR === "prompts"
+      ? null
+      : "prompt path helper must name PROMPTS_DIR as prompts",
     constants.HOUSE_RULES_DIR === "house-rules"
       ? null
       : "prompt path helper must name HOUSE_RULES_DIR as house-rules",
@@ -1003,9 +1062,11 @@ export function checkPromptPathHelpers(root) {
 }
 
 export function checkTaintIrisNextArtifactPathHelpers(root) {
-  const helperFile = "crates/kuzushi-core/src/capabilities/taint_iris_next/application/artifact_paths.rs";
+  const helperFile =
+    "crates/kuzushi-core/src/capabilities/taint_iris_next/application/artifact_paths.rs";
   const helperPath = path.join(root, helperFile);
-  if (!existsSync(helperPath)) return [`taint-iris-next artifact path helper: missing ${helperFile}`];
+  if (!existsSync(helperPath))
+    return [`taint-iris-next artifact path helper: missing ${helperFile}`];
   const helper = readFileSync(helperPath, "utf8");
   const constants = rustStringConstants(helper, [
     "TAINT_IRIS_NEXT_JOERN_CPG_FILE",
@@ -1040,8 +1101,7 @@ export function checkTuiPrereqChainPathHelpers(root) {
     source.includes("prereq_workspace_root(target).join(TAINT_IRIS_NEXT_CATALOG_ARTIFACT)")
       ? null
       : "TUI prereq chain taint catalog step must use shared root helper",
-    productionSource.includes('join(".kuzushi")') ||
-    productionSource.includes('join(".kuzushi/')
+    productionSource.includes('join(".kuzushi")') || productionSource.includes('join(".kuzushi/')
       ? "TUI prereq chain must not hardcode .kuzushi artifact paths"
       : null,
   ].filter(Boolean);
@@ -1148,7 +1208,9 @@ function promptPathHelperFunctionFailures(helper) {
     helper.includes("pub fn module_prompt_root(target: impl AsRef<Path>, module: &str) -> PathBuf")
       ? null
       : "prompt path helper must expose module_prompt_root",
-    helper.includes("pub fn prompt_override_path(target: impl AsRef<Path>, module: &str, verb: &str) -> PathBuf")
+    helper.includes(
+      "pub fn prompt_override_path(target: impl AsRef<Path>, module: &str, verb: &str) -> PathBuf",
+    )
       ? null
       : "prompt path helper must expose prompt_override_path",
     helper.includes("pub fn house_rules_root(target: impl AsRef<Path>) -> PathBuf")
@@ -1196,7 +1258,9 @@ export function checkHomeCockpitArtifactRail(root) {
       : null,
     ...missingEntries(expected, filtered, "home cockpit artifact rail missing artifact"),
     ...missingEntries(filtered, expected, "home cockpit artifact rail has uncontracted artifact"),
-    ...duplicateEntries(filtered).map((artifact) => `home cockpit artifact rail duplicates artifact ${artifact}`),
+    ...duplicateEntries(filtered).map(
+      (artifact) => `home cockpit artifact rail duplicates artifact ${artifact}`,
+    ),
     ...homeCockpitRunMetadataFailures(source),
   ].filter(Boolean);
 }
@@ -1335,7 +1399,8 @@ export function checkTuiFailureHandoffArtifactLeaf(root) {
   const sourcePath = path.join(root, file);
   if (!existsSync(sourcePath)) return [`TUI failure-handoff artifact leaf: missing ${file}`];
   const runPathsPath = path.join(root, runPathsFile);
-  if (!existsSync(runPathsPath)) return [`TUI failure-handoff artifact leaf: missing ${runPathsFile}`];
+  if (!existsSync(runPathsPath))
+    return [`TUI failure-handoff artifact leaf: missing ${runPathsFile}`];
   const source = readFileSync(sourcePath, "utf8");
   const runPaths = readFileSync(runPathsPath, "utf8");
   return [
@@ -1364,7 +1429,7 @@ function tuiFailureHandoffSourceFailures(source) {
     source.includes("ui_run_artifact_relative_path(run_id, failures_artifact_leaf())")
       ? null
       : "TUI failure handoff next path must use shared run artifact helper",
-    source.includes("format!(\".kuzushi/runs/{run_id}/{failures_artifact_leaf()}\")")
+    source.includes('format!(".kuzushi/runs/{run_id}/{failures_artifact_leaf()}")')
       ? "TUI failure handoff next path must not hardcode .kuzushi/runs"
       : null,
     source.includes("failures_artifact_leaf().to_string()")
@@ -1375,7 +1440,9 @@ function tuiFailureHandoffSourceFailures(source) {
 
 function tuiRunArtifactRelativePathFailures(runPaths) {
   return [
-    runPaths.includes("pub(crate) fn ui_run_artifact_relative_path(run_id: &str, leaf: &str) -> String")
+    runPaths.includes(
+      "pub(crate) fn ui_run_artifact_relative_path(run_id: &str, leaf: &str) -> String",
+    )
       ? null
       : "TUI run artifact relative path helper must live in run_paths",
     runPaths.includes("Path::new(ui_runs_root_relative_path())")
@@ -1396,7 +1463,7 @@ export function checkTuiThreatModelArtifactLeaf(root) {
     source.includes('join(".kuzushi")') || source.includes('join(".kuzushi/')
       ? "TUI threat model artifact path must not hardcode .kuzushi joins"
       : null,
-    source.includes("threat_model_artifact_path(\"\")")
+    source.includes('threat_model_artifact_path("")')
       ? null
       : "TUI threat model relative path must derive from persistent artifact path",
     source.includes('format!("malformed {}", threat_model_relative_path())')
@@ -1419,24 +1486,28 @@ function tuiThreatRendererPathFailures(root) {
     {
       file: "crates/kuzushi-tui/src/renderer/views/threat/threat_editor_lines.rs",
       helperMessage: "TUI threat editor artifact label must use threat_model_relative_path",
-      literalMessage: "TUI threat editor artifact label must not hardcode .kuzushi/threat-model.json",
+      literalMessage:
+        "TUI threat editor artifact label must not hardcode .kuzushi/threat-model.json",
     },
     {
       file: "crates/kuzushi-tui/src/renderer/views/threat/threat_lines/summary.rs",
       helperMessage: "TUI threat summary export label must use threat_model_relative_path",
-      literalMessage: "TUI threat summary export label must not hardcode .kuzushi/threat-model.json",
+      literalMessage:
+        "TUI threat summary export label must not hardcode .kuzushi/threat-model.json",
     },
   ];
-  return files.flatMap(({ file, helperMessage, literalMessage }) => {
-    const sourcePath = path.join(root, file);
-    if (!existsSync(sourcePath)) return [`${helperMessage}: missing ${file}`];
-    const source = readFileSync(sourcePath, "utf8");
-    const productionSource = source.split("#[cfg(test)]")[0];
-    return [
-      source.includes("threat_model_relative_path") ? null : helperMessage,
-      productionSource.includes('".kuzushi/threat-model.json"') ? literalMessage : null,
-    ];
-  }).filter(Boolean);
+  return files
+    .flatMap(({ file, helperMessage, literalMessage }) => {
+      const sourcePath = path.join(root, file);
+      if (!existsSync(sourcePath)) return [`${helperMessage}: missing ${file}`];
+      const source = readFileSync(sourcePath, "utf8");
+      const productionSource = source.split("#[cfg(test)]")[0];
+      return [
+        source.includes("threat_model_relative_path") ? null : helperMessage,
+        productionSource.includes('".kuzushi/threat-model.json"') ? literalMessage : null,
+      ];
+    })
+    .filter(Boolean);
 }
 
 function tuiLiveActivityThreatModelPathFailures(root) {
@@ -1450,27 +1521,29 @@ function tuiLiveActivityThreatModelPathFailures(root) {
       marker: "fn plain_live_activity_has_no_ansi_or_box_drawing()",
     },
   ];
-  return files.flatMap(({ file, marker }) => {
-    const sourcePath = path.join(root, file);
-    if (!existsSync(sourcePath)) {
-      return [`TUI live activity threat-model label: missing ${file}`];
-    }
-    const source = readFileSync(sourcePath, "utf8");
-    const markerIndex = source.indexOf(marker);
-    if (markerIndex === -1) {
-      return [`TUI live activity threat-model label: missing ${marker} in ${file}`];
-    }
-    const nextTestIndex = source.indexOf("\n#[test]", markerIndex + marker.length);
-    const block = source.slice(markerIndex, nextTestIndex === -1 ? undefined : nextTestIndex);
-    return [
-      block.includes("threat_model_relative_path")
-        ? null
-        : "TUI live activity threat-model label must use threat_model_relative_path",
-      block.includes(".kuzushi/threat-model.json")
-        ? "TUI live activity threat-model label must not hardcode .kuzushi/threat-model.json"
-        : null,
-    ];
-  }).filter(Boolean);
+  return files
+    .flatMap(({ file, marker }) => {
+      const sourcePath = path.join(root, file);
+      if (!existsSync(sourcePath)) {
+        return [`TUI live activity threat-model label: missing ${file}`];
+      }
+      const source = readFileSync(sourcePath, "utf8");
+      const markerIndex = source.indexOf(marker);
+      if (markerIndex === -1) {
+        return [`TUI live activity threat-model label: missing ${marker} in ${file}`];
+      }
+      const nextTestIndex = source.indexOf("\n#[test]", markerIndex + marker.length);
+      const block = source.slice(markerIndex, nextTestIndex === -1 ? undefined : nextTestIndex);
+      return [
+        block.includes("threat_model_relative_path")
+          ? null
+          : "TUI live activity threat-model label must use threat_model_relative_path",
+        block.includes(".kuzushi/threat-model.json")
+          ? "TUI live activity threat-model label must not hardcode .kuzushi/threat-model.json"
+          : null,
+      ];
+    })
+    .filter(Boolean);
 }
 
 function tuiModulePlaybookPathFailures(root) {
@@ -1480,9 +1553,7 @@ function tuiModulePlaybookPathFailures(root) {
   const source = readFileSync(sourcePath, "utf8");
   const productionSource = source.split("#[cfg(test)]")[0];
   return [
-    source.includes("enum PlaybookText")
-      ? null
-      : "TUI module playbook paths must use PlaybookText",
+    source.includes("enum PlaybookText") ? null : "TUI module playbook paths must use PlaybookText",
     source.includes("ContextSnapshotRun") && source.includes("ContextSnapshotPath")
       ? null
       : "TUI module playbook context rows must use context snapshot playbook variants",
@@ -1643,7 +1714,9 @@ function cliRunsPathConsumerFailure(root, file) {
     ...required
       .filter(({ needle }) => !source.includes(needle))
       .map(({ message }) => `${message}: ${file}`),
-    cliRunsPathHardcodes(source) ? `CLI runs path consumer must not hardcode run paths: ${file}` : null,
+    cliRunsPathHardcodes(source)
+      ? `CLI runs path consumer must not hardcode run paths: ${file}`
+      : null,
   ].filter(Boolean);
 }
 
@@ -1652,14 +1725,14 @@ const cliRunsPathRequirementsByFile = {
     { needle: "runs_root(", message: "CLI runs show must use runs_root" },
     { needle: "run_artifact_path(", message: "CLI runs trace must use run_artifact_path" },
     {
-      needle: "canonical_run_artifact_spec(\"trace.jsonl\")",
+      needle: 'canonical_run_artifact_spec("trace.jsonl")',
       message: "CLI runs trace must use shared trace artifact spec",
     },
   ],
   "crates/kuzushi-cli/src/application/runs_diff.rs": [
     { needle: "run_artifact_path(", message: "CLI runs diff must use run_artifact_path" },
     {
-      needle: "canonical_run_artifact_spec(\"findings.json\")",
+      needle: 'canonical_run_artifact_spec("findings.json")',
       message: "CLI runs diff must use shared findings artifact spec",
     },
   ],
@@ -1697,7 +1770,8 @@ function cliRunsPathHardcodes(source) {
 }
 
 function workspaceArtifactKbDiscoveryPathFailures(root) {
-  const file = "crates/kuzushi-core/src/workspace/artifact_kb/discover_workspace_artifact_records.rs";
+  const file =
+    "crates/kuzushi-core/src/workspace/artifact_kb/discover_workspace_artifact_records.rs";
   const sourcePath = path.join(root, file);
   if (!existsSync(sourcePath)) return [`artifact KB discovery path helpers: missing ${file}`];
   const source = readFileSync(sourcePath, "utf8");
@@ -1721,7 +1795,7 @@ function workspaceArtifactKbDiscoveryPathFailures(root) {
     source.includes("is_run_artifact_source_path(workspace.root(), &source_path)")
       ? null
       : "artifact KB discovery sourceKind must use run artifact source helper",
-    source.includes("strip_prefix(&run_artifact_source_prefix(Path::new(\"\")))")
+    source.includes('strip_prefix(&run_artifact_source_prefix(Path::new("")))')
       ? null
       : "artifact KB discovery run-id parsing must use run artifact source helper",
     productionSource.includes('".kuzushi/context-snapshot.json"') ||
@@ -1745,7 +1819,7 @@ function workspaceArtifactKbFindingsIndexPathFailures(root) {
     source.includes("fn finding_source_path(fingerprint: &str) -> String")
       ? null
       : "artifact KB findings index must centralize finding source paths",
-    source.includes("workspace_findings_db_path(Path::new(\"\"))")
+    source.includes('workspace_findings_db_path(Path::new(""))')
       ? null
       : "artifact KB findings index must derive source path from workspace_findings_db_path",
     source.includes('"{}#finding/{}"')
@@ -1758,7 +1832,13 @@ function workspaceArtifactKbFindingsIndexPathFailures(root) {
 }
 
 export function checkArtifactManifestContractHelpers() {
-  const duplicates = duplicateEntries(["run.json", "run.json", "run.json", "events.jsonl", "events.jsonl"]);
+  const duplicates = duplicateEntries([
+    "run.json",
+    "run.json",
+    "run.json",
+    "events.jsonl",
+    "events.jsonl",
+  ]);
   const equalOrderFailures = arrayOrderMismatch(
     ["failures.json", "result.json", "input.json", "artifacts.json"],
     ["failures.json", "result.json", "input.json", "artifacts.json"],
@@ -1781,7 +1861,8 @@ export function checkArtifactManifestContractHelpers() {
     equalOrderFailures.length === 0
       ? null
       : `artifact manifest array-order equal regression drift: got ${equalOrderFailures.join(", ")}`,
-    mismatchOrderFailures.join("\n") === "artifact manifest array-order mismatch regression: expected failures.json, result.json, input.json"
+    mismatchOrderFailures.join("\n") ===
+    "artifact manifest array-order mismatch regression: expected failures.json, result.json, input.json"
       ? null
       : `artifact manifest array-order mismatch regression drift: got ${mismatchOrderFailures.join(", ")}`,
     missingFailures.join("\n") === "artifact manifest missing-entry regression: unknown.json"
@@ -1853,7 +1934,9 @@ function tuiLatestRunConsumerFailure(root, file) {
   const source = readFileSync(sourcePath, "utf8");
   const productionSource = source.split("#[cfg(test)]")[0];
   return [
-    source.includes("ui_latest_run_path(") ? null : `TUI latest-run consumer must use ui_latest_run_path: ${file}`,
+    source.includes("ui_latest_run_path(")
+      ? null
+      : `TUI latest-run consumer must use ui_latest_run_path: ${file}`,
     source.includes("ui_run_dir(") ? null : `TUI latest-run consumer must use ui_run_dir: ${file}`,
     productionSource.includes('".kuzushi/latest"')
       ? `TUI latest-run consumer must not hardcode .kuzushi/latest: ${file}`
@@ -1871,7 +1954,9 @@ function tuiRunsRootConsumerFailure(root, file) {
     source.includes("kuzushi_core::runs_root(");
   return [
     usesSharedRoot ? null : `TUI runs-root consumer must use shared helper: ${file}`,
-    source.includes(".kuzushi/runs") ? `TUI runs-root consumer must not hardcode .kuzushi/runs: ${file}` : null,
+    source.includes(".kuzushi/runs")
+      ? `TUI runs-root consumer must not hardcode .kuzushi/runs: ${file}`
+      : null,
   ].filter(Boolean);
 }
 
@@ -1920,11 +2005,13 @@ function persistentThreatModelPathCallerFailures(root) {
     const productionSource = source.split("#[cfg(test)]")[0];
     return [
       source.includes("persistent_threat_model_path(")
-      ? []
-      : [`persistent threat-model path caller must use helper: ${file}`],
+        ? []
+        : [`persistent threat-model path caller must use helper: ${file}`],
       file.endsWith("resolve_threat_model_document.rs") &&
       productionSource.includes(".kuzushi/threat-model.json")
-        ? ["Carlini threat-model diagnostic must derive the label from persistent_threat_model_path"]
+        ? [
+            "Carlini threat-model diagnostic must derive the label from persistent_threat_model_path",
+          ]
         : [],
     ].flat();
   });
@@ -1953,7 +2040,11 @@ function moduleRecommenderThreatModelSourceFailures(root) {
   const modFile = "crates/kuzushi-core/src/capabilities/module_recommender/mod.rs";
   const adapterFile = "crates/kuzushi-core/src/capabilities/module_recommender/adapters.rs";
   const modSource = readRequiredSource(root, modFile, "module recommender threat-model source");
-  const adapterSource = readRequiredSource(root, adapterFile, "module recommender threat-model source");
+  const adapterSource = readRequiredSource(
+    root,
+    adapterFile,
+    "module recommender threat-model source",
+  );
   if (Array.isArray(modSource) || Array.isArray(adapterSource)) {
     return [
       ...(Array.isArray(modSource) ? modSource : []),
@@ -2005,26 +2096,36 @@ function carliniContextSnippetPathFailures(root) {
 }
 
 function threatModelDefaultOutputDirFailures(root) {
-  const toolContractFile = "crates/kuzushi-core/src/capabilities/threat_model/domain/tool_contract.rs";
-  const buildInputFile = "crates/kuzushi-core/src/capabilities/threat_model/adapters/build_input.rs";
+  const toolContractFile =
+    "crates/kuzushi-core/src/capabilities/threat_model/domain/tool_contract.rs";
+  const buildInputFile =
+    "crates/kuzushi-core/src/capabilities/threat_model/adapters/build_input.rs";
   const deterministicInputFile =
     "crates/kuzushi-core/src/capabilities/threat_model/application/deterministic_input.rs";
-  const toolContract = readRequiredSource(root, toolContractFile, "threat-model default output dir");
+  const toolContract = readRequiredSource(
+    root,
+    toolContractFile,
+    "threat-model default output dir",
+  );
   const buildInput = readRequiredSource(root, buildInputFile, "threat-model default output dir");
   const deterministicInput = readRequiredSource(
     root,
     deterministicInputFile,
     "threat-model default output dir",
   );
-  const readFailures = [toolContract, buildInput, deterministicInput]
-    .filter(Array.isArray)
-    .flat();
+  const readFailures = [toolContract, buildInput, deterministicInput].filter(Array.isArray).flat();
   if (readFailures.length > 0) return readFailures;
+  return threatModelDefaultOutputDirChecks(toolContract, buildInput, deterministicInput);
+}
+
+function threatModelDefaultOutputDirChecks(toolContract, buildInput, deterministicInput) {
   const productionSources = [toolContract, buildInput, deterministicInput]
     .map((source) => source.split("#[cfg(test)]")[0])
     .join("\n");
   return [
-    toolContract.includes("pub(crate) fn default_output_dir(self, target: &Path, run_id: &str) -> String")
+    toolContract.includes(
+      "pub(crate) fn default_output_dir(self, target: &Path, run_id: &str) -> String",
+    )
       ? null
       : "threat-model default output dir must live on BuildFlavor",
     toolContract.includes("crate::run_artifacts::run_dir(target, run_id)")
@@ -2065,8 +2166,8 @@ function oauthCredentialHelperFailures(source) {
 
 function oauthCredentialConsumerFailures(file, source) {
   return [
-    source.includes("default_oauth_credentials_path")
-      || source.includes("default_oauth_credentials_path_display")
+    source.includes("default_oauth_credentials_path") ||
+    source.includes("default_oauth_credentials_path_display")
       ? null
       : `OAuth credential path consumer must use default_oauth_credentials_path: ${file}`,
     source.includes("oauth-credentials.json") && !source.includes("OAUTH_CREDENTIALS_FILE")
@@ -2168,12 +2269,15 @@ function canonicalSpecialWriterArtifacts(source) {
 }
 
 function reportReaderArtifactSpecs(root, source) {
-  const sharedSpecs = rustCanonicalRunArtifactSpecs(
-    readFileSync(path.join(root, artifactContractFile), "utf8"),
-    "CANONICAL_RUN_ARTIFACTS",
-  ) ?? [];
+  const sharedSpecs =
+    rustCanonicalRunArtifactSpecs(
+      readFileSync(path.join(root, artifactContractFile), "utf8"),
+      "CANONICAL_RUN_ARTIFACTS",
+    ) ?? [];
   const canonicalSpecs = source.includes("CANONICAL_RUN_ARTIFACTS")
-    ? sharedSpecs.filter((spec) => spec.path !== "report.md" && (spec.kind === "json" || spec.kind === "jsonl"))
+    ? sharedSpecs.filter(
+        (spec) => spec.path !== "report.md" && (spec.kind === "json" || spec.kind === "jsonl"),
+      )
     : [
         ...(rustStringArrayConstant(source, "CANONICAL_JSON_FILES") ?? []).map((artifact) =>
           sharedArtifactSpec(sharedSpecs, artifact, "report reader canonical JSON"),
@@ -2220,11 +2324,13 @@ function reportReaderSourceFailures(source) {
 }
 
 function sharedArtifactSpec(specs, artifact, label) {
-  return specs.find((spec) => spec.path === artifact) ?? {
-    path: artifact,
-    label,
-    kind: "unknown",
-  };
+  return (
+    specs.find((spec) => spec.path === artifact) ?? {
+      path: artifact,
+      label,
+      kind: "unknown",
+    }
+  );
 }
 
 function tupleSpecs(body, kind) {
@@ -2250,7 +2356,9 @@ function reportReaderInventoryFailures(expectedSpecs, actualSpecs) {
   const actualPaths = actualSpecs.map((artifact) => artifact.path).sort();
   return [
     ...missingEntries(actualPaths, expectedPaths, "report reader has uncontracted artifact"),
-    ...duplicateEntries(actualPaths).map((artifact) => `report reader duplicates artifact ${artifact}`),
+    ...duplicateEntries(actualPaths).map(
+      (artifact) => `report reader duplicates artifact ${artifact}`,
+    ),
   ];
 }
 

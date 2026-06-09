@@ -1,4 +1,8 @@
-import { failureHandoffFields, forbiddenFailureClaims, reportJsonlAliasFields } from "./artifact-contract-fields.mjs";
+import {
+  failureHandoffFields,
+  forbiddenFailureClaims,
+  reportJsonlAliasFields,
+} from "./artifact-contract-fields.mjs";
 import {
   artifactAliasFields,
   artifactKindAliasFields,
@@ -8,7 +12,11 @@ import {
   toolInputArtifacts,
 } from "./canonical-run-artifacts.mjs";
 
-const failureReportFollowUpRustFields = ["report_artifact_spec().leaf", "failure_artifact_spec().leaf", "OPTIONAL_RUN_ARTIFACTS"];
+const failureReportFollowUpRustFields = [
+  "report_artifact_spec().leaf",
+  "failure_artifact_spec().leaf",
+  "OPTIONAL_RUN_ARTIFACTS",
+];
 const failureReportFollowUpDocFields = ["report.md", "report.sarif"];
 const canonicalArtifactAliasFields = ["label", "path", "kind"];
 const artifactCompatibilityPathAliasFields = ["report_json_path", "prompts_dir"];
@@ -51,13 +59,16 @@ const artifactBoundaryNormalizationTokens = ["RunArtifact::from_declared", "arti
 export function checkArtifactTokenContractInvariants() {
   return [
     ...includedCanonicalArtifactAliases().map(
-      (alias) => `artifact token contract: canonical alias ${alias} must stay out of compatibility alias tokens`,
+      (alias) =>
+        `artifact token contract: canonical alias ${alias} must stay out of compatibility alias tokens`,
     ),
     ...missingGroupedCompatibilityAliases().map(
-      (alias) => `artifact token contract: grouped compatibility alias ${alias} is missing from compatibility alias tokens`,
+      (alias) =>
+        `artifact token contract: grouped compatibility alias ${alias} is missing from compatibility alias tokens`,
     ),
     ...missingArtifactCompatibilityAliases().map(
-      (alias) => `artifact token contract: compatibility alias ${alias} is not in shared artifact aliases`,
+      (alias) =>
+        `artifact token contract: compatibility alias ${alias} is not in shared artifact aliases`,
     ),
     ...duplicateArtifactCompatibilityAliases().map(
       (alias) => `artifact token contract: compatibility alias ${alias} is duplicated`,
@@ -72,12 +83,20 @@ export const tokenChecks = [
   {
     label: "failure handoff Rust substrate",
     file: "crates/kuzushi-core/src/run_artifacts/run_failures.rs",
-    tokens: [...failureHandoffFields, ...failureReportFollowUpRustFields, ...forbiddenFailureClaims],
+    tokens: [
+      ...failureHandoffFields,
+      ...failureReportFollowUpRustFields,
+      ...forbiddenFailureClaims,
+    ],
   },
   {
     label: "report placeholder Rust substrate",
     file: "crates/kuzushi-core/src/run_artifacts/canonical_run_markers.rs",
-    tokens: ["write_missing_report_marker", "missing_report", "No report was recorded for this run."],
+    tokens: [
+      "write_missing_report_marker",
+      "missing_report",
+      "No report was recorded for this run.",
+    ],
   },
   {
     label: "report JSONL compatibility aliases",
@@ -107,17 +126,36 @@ export const tokenChecks = [
   {
     label: "report recommendation envelope aliases",
     file: "crates/kuzushi-core/src/report/artifact_summary/recommendations.rs",
-    tokens: ["recommendationReport", "recommendation_report", "/data/recommendationReport", "/data/recommendation_report", "/data/recommendations"],
+    tokens: [
+      "recommendationReport",
+      "recommendation_report",
+      "/data/recommendationReport",
+      "/data/recommendation_report",
+      "/data/recommendations",
+    ],
   },
   {
     label: "canonical recommendation promotion envelope aliases",
     file: "crates/kuzushi-core/src/run_artifacts/canonical_recommendations.rs",
-    tokens: ["/data", "/recommendationReport", "/recommendation_report", "/data/recommendationReport", "/data/recommendation_report"],
+    tokens: [
+      "/data",
+      "/recommendationReport",
+      "/recommendation_report",
+      "/data/recommendationReport",
+      "/data/recommendation_report",
+    ],
   },
   {
     label: "TUI recommendation view model artifact envelope aliases",
     file: "crates/kuzushi-tui/src/ui_view_models/recommendation.rs",
-    tokens: ["recommendation_report_data", "recommendationReport", "recommendation_report", "/data/recommendationReport", "/data/recommendation_report", "recommendation_model_reads_data_wrapped_latest_artifact"],
+    tokens: [
+      "recommendation_report_data",
+      "recommendationReport",
+      "recommendation_report",
+      "/data/recommendationReport",
+      "/data/recommendation_report",
+      "recommendation_model_reads_data_wrapped_latest_artifact",
+    ],
   },
   {
     label: "report threat-model envelope aliases",
@@ -164,19 +202,24 @@ export const tokenChecks = [
   {
     label: "tool input writer uses shared artifact spec",
     file: "crates/kuzushi-core/src/run_artifacts/tool_run_record.rs",
-    tokens: ["tool_input_artifact_spec(\"input.json\")", "spec.leaf", "spec.label", ...toolInputArtifacts],
+    tokens: [
+      'tool_input_artifact_spec("input.json")',
+      "spec.leaf",
+      "spec.label",
+      ...toolInputArtifacts,
+    ],
   },
   {
     label: "tool result writer uses shared artifact spec",
     file: "crates/kuzushi-core/src/run_artifacts/tool_run_record.rs",
-    tokens: ["tool_result_artifact_spec(\"result.json\")", "spec.leaf", "spec.label"],
+    tokens: ['tool_result_artifact_spec("result.json")', "spec.leaf", "spec.label"],
   },
   {
     label: "failure handoff writer uses shared artifact spec",
     file: "crates/kuzushi-core/src/run_artifacts/run_failures.rs",
     tokens: [
-      "canonical_run_artifact_spec(\"failures.json\")",
-      "canonical_run_artifact_spec(\"report.md\")",
+      'canonical_run_artifact_spec("failures.json")',
+      'canonical_run_artifact_spec("report.md")',
       "failure_artifact_spec",
       "run_artifact_path(target, run_id, failure_artifact_spec().leaf)",
       "report_artifact_spec",
@@ -195,15 +238,15 @@ export const tokenChecks = [
       "recommendations.json",
       "findings.json",
       "proof.json",
-      "write_empty_failures_marker(dir.join(required_artifact_spec(\"failures.json\").leaf)",
+      'write_empty_failures_marker(dir.join(required_artifact_spec("failures.json").leaf)',
       "write_json_if_missing(",
-      "required_artifact_spec(\"artifacts.json\").leaf",
-      "write_text_if_missing(dir.join(required_artifact_spec(\"events.jsonl\").leaf)",
-      "write_text_if_missing(dir.join(required_artifact_spec(\"trace.jsonl\").leaf)",
+      'required_artifact_spec("artifacts.json").leaf',
+      'write_text_if_missing(dir.join(required_artifact_spec("events.jsonl").leaf)',
+      'write_text_if_missing(dir.join(required_artifact_spec("trace.jsonl").leaf)',
       "write_missing_report_marker(",
-      "required_artifact_spec(\"report.md\").leaf",
+      'required_artifact_spec("report.md").leaf',
       "record_canonical_run_artifacts",
-      "optional_run_artifact_spec(\"report.sarif\")",
+      'optional_run_artifact_spec("report.sarif")',
     ],
   },
   {
@@ -212,7 +255,7 @@ export const tokenChecks = [
     tokens: [
       "LEGACY_SUMMARY_FILE",
       "run_metadata_artifact_spec().leaf",
-      "canonical_run_artifact_spec(\"run.json\")",
+      'canonical_run_artifact_spec("run.json")',
       "write_run_summary_file(&dir.join(LEGACY_SUMMARY_FILE)",
       "write_run_summary_file(&dir.join(run_metadata_artifact_spec().leaf)",
       "ensure_canonical_run_files(target, &summary.run_id, &summary.status)",
@@ -297,7 +340,13 @@ export const tokenChecks = [
   {
     label: "run event reader compatibility aliases",
     file: "crates/kuzushi-core/src/run_artifacts/run_events.rs",
-    tokens: ["toolName", "tool_name", "artifactPath", "artifact_path", "deserialize_event_artifact"],
+    tokens: [
+      "toolName",
+      "tool_name",
+      "artifactPath",
+      "artifact_path",
+      "deserialize_event_artifact",
+    ],
   },
   {
     label: "report JSONL alias architecture doc",
@@ -310,7 +359,7 @@ export const tokenChecks = [
     tokens: [
       "record_cli_tool_run_started",
       "record_tool_run_started_with_reproducibility",
-      "ToolRunRecord::new(target, run_id, \"run\", tool)",
+      'ToolRunRecord::new(target, run_id, "run", tool)',
       "cli_tool_run_artifact_target",
     ],
   },
@@ -322,7 +371,7 @@ export const tokenChecks = [
       "fail_cli_tool_run",
       "record_tool_run_complete",
       "record_tool_run_failed",
-      "ToolRunRecord::new(target, run_id, \"run\", tool)",
+      'ToolRunRecord::new(target, run_id, "run", tool)',
     ],
   },
   {
@@ -331,7 +380,7 @@ export const tokenChecks = [
     tokens: [
       "prepare_background_tool_run",
       "record_tool_run_started_with_reproducibility",
-      "ToolRunRecord::new(&target, &run_id, \"tool\", tool_name)",
+      'ToolRunRecord::new(&target, &run_id, "tool", tool_name)',
       "background_tool_trace_handle",
     ],
   },
@@ -343,7 +392,7 @@ export const tokenChecks = [
       "record_tool_run_failed",
       "record_core_tool_run_complete",
       "record_core_tool_run_failed",
-      "ToolRunRecord::new(target, run_id, \"tool\", tool_name)",
+      'ToolRunRecord::new(target, run_id, "tool", tool_name)',
     ],
   },
   {
@@ -372,8 +421,8 @@ function missingArtifactCompatibilityAliases() {
 }
 
 function includedCanonicalArtifactAliases() {
-  return canonicalArtifactAliasFields.filter(
-    (alias) => artifactCompatibilityAliasFields.includes(alias),
+  return canonicalArtifactAliasFields.filter((alias) =>
+    artifactCompatibilityAliasFields.includes(alias),
   );
 }
 
