@@ -42,6 +42,17 @@ pub(crate) struct DfdFlow {
     pub(crate) crosses: bool,
 }
 
+/// The persisted threat model's DFD as role-tagged lines, or `None` when no
+/// parseable artifact with nodes exists. Renderer-facing entry point so views
+/// never load or parse the artifact themselves.
+pub(crate) fn threat_dfd_view(
+    app: &crate::ShellApp,
+    width: usize,
+) -> Option<Vec<DfdDiagramLine>> {
+    let doc = super::threat_model_doc(app)?;
+    threat_dfd_diagram_lines(&doc, width)
+}
+
 /// Render the DFD as role-tagged lines, or `None` when the artifact has no nodes.
 pub(crate) fn threat_dfd_diagram_lines(
     doc: &serde_json::Value,

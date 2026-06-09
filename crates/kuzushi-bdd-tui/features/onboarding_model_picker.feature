@@ -15,7 +15,7 @@ Feature: First-run model picker
     When I launch the shell
     And I press "Down"
     And I press "Down"
-    Then I see "OpenAI OAuth GPT-5.5"
+    Then I see "> Claude Sonnet 4.6"
 
   Scenario: Esc on the model picker falls through to Catalog
     Given a fresh kuzushi workspace
