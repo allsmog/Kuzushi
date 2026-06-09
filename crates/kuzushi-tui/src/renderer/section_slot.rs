@@ -1,6 +1,7 @@
 use super::*;
 use crate::ui_view_models::{
-    cost_cap_halt_model, notice_banner_model, throttle_banner_model, transcript_chrome_height,
+    cost_cap_halt_model, keybind_footer_chrome_height, notice_banner_model,
+    status_footer_chrome_height, throttle_banner_model, transcript_chrome_height,
 };
 
 pub(crate) fn section_slot(kind: RenderSection, height: u16) -> Option<RenderSectionSlot> {
@@ -26,38 +27,15 @@ pub(crate) fn render_constraints(
 }
 
 pub(crate) fn transcript_height(app: &ShellApp, area: Rect) -> u16 {
-    // The Activity view is a focused full-frame dashboard: its feed pane is the
-    // live output, so the general transcript below it is just noise — drop it.
-    if matches!(app.shell_view, ShellView::Activity) {
-        return 0;
-    }
     transcript_chrome_height(app, area.height)
 }
 
 pub(crate) fn keybind_footer_height(app: &ShellApp, area: Rect) -> u16 {
-    // The Activity view renders its own keybind hints in-pane, so the generic
-    // footer is redundant clutter there — drop it.
-    if matches!(app.shell_view, ShellView::Activity) {
-        return 0;
-    }
-    if area.height >= 8 {
-        2
-    } else {
-        0
-    }
+    keybind_footer_chrome_height(app, area.height)
 }
 
 pub(crate) fn status_footer_height(app: &ShellApp, area: Rect) -> u16 {
-    // The Activity view carries target/model/findings in its own header now,
-    // so the bottom status strip would just duplicate it — drop it there.
-    if matches!(app.shell_view, ShellView::Activity) {
-        return 0;
-    }
-    if area.height >= 6 {
-        1
-    } else {
-        0
-    }
+    status_footer_chrome_height(app, area.height)
 }
 
 pub(crate) fn throttle_banner_height(app: &ShellApp, area: Rect) -> u16 {

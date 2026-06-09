@@ -1,7 +1,7 @@
 Feature: Planning-stage multi-select
-  Once model + auth are configured and the target has no foundational
-  artifacts, the planning picker should open with the eight tasks and
-  respect dependency-aware toggling.
+  Once model + auth are configured, the phase walker opens at
+  組 KUMI-KATA · map with that phase's tasks and respects
+  dependency-aware toggling.
 
   Background:
     Given a fresh kuzushi workspace
@@ -9,7 +9,7 @@ Feature: Planning-stage multi-select
 
   Scenario: Default selection covers the model-cheap prereqs plus STRIDE
     When I launch the shell
-    Then I see "PLAN THE WORKSPACE"
+    Then I see "KUMI-KATA"
     And the status segment shows "planning"
     And "Gather repo context" is checked
     And "Map entry points" is checked
@@ -33,6 +33,5 @@ Feature: Planning-stage multi-select
   Scenario: Enter runs the selected set and produces context-snapshot.json
     When I launch the shell
     And I press "Enter"
-    Then the log contains "running"
-    And the file ".kuzushi/context-snapshot.json" eventually exists
+    Then the file ".kuzushi/context-snapshot.json" eventually exists
     And the file ".kuzushi/entry-points.json" eventually exists
