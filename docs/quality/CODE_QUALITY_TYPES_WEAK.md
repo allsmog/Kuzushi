@@ -1,5 +1,7 @@
 # Weak-Type Audit — Kuzushi src/
 
+> Historical audit — archived snapshot, not current operator guidance.
+
 ## Phase 1 — Inventory
 
 Repository-wide grep over `src/` (excluding tests, generated, dist):

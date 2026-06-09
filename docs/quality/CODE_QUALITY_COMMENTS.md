@@ -1,5 +1,7 @@
 # Comment-quality assessment — agent-ad41367c12e474dc8
 
+> Historical audit — archived snapshot, not current operator guidance.
+
 Scope: every `*.ts` / `*.tsx` under `src/` (640 files).
 
 ## Topline counts

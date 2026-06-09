@@ -1,5 +1,7 @@
 # Kuzushi Product Fixes
 
+> Historical audit — archived snapshot, not current operator guidance.
+
 Generated: 2026-05-14
 
 This file is a product-fix ledger for Kuzushi itself. Target-specific security

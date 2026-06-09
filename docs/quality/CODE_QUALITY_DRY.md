@@ -1,5 +1,7 @@
 # Code Quality — DRY Assessment
 
+> Historical audit — archived snapshot, not current operator guidance.
+
 Audit run: 2026-04-30. Branch: `worktree-agent-a79cbc891b388d83d`.
 Scope: `src/` only. Tests untouched in this pass.
 

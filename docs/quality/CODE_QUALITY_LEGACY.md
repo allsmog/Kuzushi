@@ -1,5 +1,7 @@
 # Legacy / Deprecated Code Audit
 
+> Historical audit — archived snapshot, not current operator guidance.
+
 Scope: this branch only. Sibling agents own try/catch (#6), weak types (#5),
 AI-slop comments (#8), unused-code (#3). I stay in legacy/dual-path lane.
 
