@@ -1861,7 +1861,10 @@ fn renders_config_onboarding_without_silent_model_selection() {
     assert!(rendered.contains("onboarding"));
     assert!(rendered.contains("Up/Down"));
     assert!(rendered.contains(">"));
-    assert!(rendered.contains("openai-oauth:gpt-5.4"));
+    // The primary OpenAI slot is auth-aware (API-key model without stored
+    // codex OAuth, OAuth model with it); both are explicit selectors.
+    assert!(rendered.contains("openai:gpt-5.5") || rendered.contains("openai-oauth:gpt-5.4"));
+    assert!(rendered.contains("anthropic:claude-sonnet-4-6"));
     assert!(!rendered.contains("┌"));
 }
 
@@ -1877,7 +1880,9 @@ fn plain_config_onboarding_uses_explicit_model_selection() {
     assert!(rendered.contains("CONFIG"));
     assert!(rendered.contains("model: unconfigured"));
     assert!(rendered.contains("onboarding: model <n> selects an explicit provider:model"));
-    assert!(rendered.contains("openai-oauth:gpt-5.4"));
+    // The primary OpenAI slot is auth-aware; either form is an explicit selector.
+    assert!(rendered.contains("openai:gpt-5.5") || rendered.contains("openai-oauth:gpt-5.4"));
+    assert!(rendered.contains("anthropic:claude-sonnet-4-6"));
     assert_strict_plain_80(&rendered);
 }
 

@@ -98,7 +98,9 @@ pub(crate) use catalog::{
     catalog_default_action_hint, catalog_model, catalog_uses_collapsed_layout, CatalogModel,
     CatalogModuleGroup,
 };
-pub(crate) use chrome_layout::transcript_chrome_height;
+pub(crate) use chrome_layout::{
+    keybind_footer_chrome_height, status_footer_chrome_height, transcript_chrome_height,
+};
 pub(crate) use config::{
     config_model, plain_config_model, ConfigModel, ConfigModelRow, ConfigModelTable,
     ConfigSummaryRow, PlainConfigModel, PlainConfigModelRow,
@@ -191,7 +193,7 @@ pub(crate) use session_story::{
 pub(crate) use severity_tone::SeverityTone;
 pub(crate) use status_footer::status_footer_model;
 pub(crate) use threat_dfd_diagram::{
-    threat_dfd_diagram_feed_rows, threat_dfd_diagram_lines, DfdLineKind,
+    threat_dfd_diagram_feed_rows, threat_dfd_diagram_lines, threat_dfd_view, DfdLineKind,
 };
 pub(crate) use threat_model::{
     threat_model_doc, threat_model_relative_path, threat_summary_review, ThreatSummaryReview,

@@ -42,6 +42,14 @@ pub(crate) struct DfdFlow {
     pub(crate) crosses: bool,
 }
 
+/// Build the DFD diagram for the persisted threat-model artifact, or `None`
+/// when no artifact is loaded or it has no nodes. Renderers consume this so
+/// they never touch the raw threat-model document.
+pub(crate) fn threat_dfd_view(app: &crate::ShellApp, width: usize) -> Option<Vec<DfdDiagramLine>> {
+    let doc = super::threat_model::threat_model_doc(app)?;
+    threat_dfd_diagram_lines(&doc, width)
+}
+
 /// Render the DFD as role-tagged lines, or `None` when the artifact has no nodes.
 pub(crate) fn threat_dfd_diagram_lines(
     doc: &serde_json::Value,
