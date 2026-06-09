@@ -25,6 +25,9 @@ env:
   NODE_VERSION: "22"
   PYTHON_VERSION: "3.12"
   RUST_VERSION: "1.88.0"
+  # Run JS-based actions on Node 24 ahead of the June 2026 default flip
+  # (Node 20 action runtimes are deprecated on GitHub-hosted runners).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
   # ── Shared install: warms the pnpm store cache for dependent jobs ─────────
@@ -52,6 +55,11 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The CRAP-risk gate diffs HEAD^..HEAD on clean checkouts; a depth-1
+          # clone has no HEAD^ and the gate now fails loudly instead of
+          # silently checking 0 files.
+          fetch-depth: 2
       - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v4
         with:
@@ -62,6 +70,9 @@ jobs:
       - run: pnpm quality:identity
       - run: pnpm quality:architecture
       - run: pnpm quality:model-safety
+      # check-port-contract.mjs requires the upstream-codex remote to exist
+      # (sync policy in UPSTREAM_CODEX.md); fresh CI clones only have origin.
+      - run: git remote add upstream-codex https://github.com/openai/codex.git
       - run: pnpm check:docs
       - run: pnpm check
 
@@ -96,6 +107,32 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm check:types
+
+  # ── Rust lint: rustfmt + clippy as a hard gate ───────────────────────────
+  rust-lint:
+    name: rust-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: clippy, rustfmt
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  # ── Dependency advisories, license policy, duplicate bans ────────────────
+  cargo-deny:
+    name: cargo-deny
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories licenses sources
 
   # ── Rust CLI build + tests ───────────────────────────────────────────────
   rust-cli:
@@ -198,9 +235,7 @@ jobs:
   # Uses KUZUSHI_CMD env to point the smoke script at the native wrapper, so
   # the shipped npm path exercises the Rust binary instead of the legacy TS CLI.
   #
-  # Still non-blocking (`continue-on-error: true`) so the historical flakes
-  # have a chance to settle before we make the gate hard. Two of the three
-  # documented sources of flake have now been removed:
+  # Hard-blocking. All three documented sources of flake were removed:
   #
   #   1. `triage:assertions` FK fault — defended in store-worker via the
   #      widened try/catch landed in 55a7c5e; covered by the
@@ -214,15 +249,13 @@ jobs:
   #      `ANTHROPIC_API_KEY=fake-key` before invoking the CLI so credential
   #      preflight passes deterministically (the mock server ignores it).
   #
-  # Once this hardening has produced several consecutive green smoke runs
-  # on main, drop `continue-on-error: true`. Don't drop it on faith — see
-  # the closing remark on field-test issue #54.
+  # If this job fails, treat it as a real regression in the shipped npm
+  # path — do not re-add `continue-on-error` (field-test issue #54).
   e2e:
     name: e2e
     needs: [build, rust-cli]
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
