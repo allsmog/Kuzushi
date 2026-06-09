@@ -2,11 +2,17 @@ use super::*;
 use scan_accumulator::IacScanAccumulator;
 
 #[derive(Debug, Clone)]
-#[derive(Default)]
 pub struct IacScanScanner {
     pub options: IacScanOptions,
 }
 
+impl Default for IacScanScanner {
+    fn default() -> Self {
+        Self {
+            options: IacScanOptions::default(),
+        }
+    }
+}
 
 impl IacScanScanner {
     pub fn from_tool_input(input: &Value) -> Result<Self> {

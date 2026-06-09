@@ -1,5 +1,4 @@
 #[derive(Debug, Clone)]
-#[derive(Default)]
 pub struct CodeqlScanner {
     pub binary: Option<String>,
     pub db_path: Option<String>,
@@ -10,3 +9,16 @@ pub struct CodeqlScanner {
     pub multi_language: bool,
 }
 
+impl Default for CodeqlScanner {
+    fn default() -> Self {
+        Self {
+            binary: None,
+            db_path: None,
+            language: None,
+            suite: None,
+            threads: None,
+            ram: None,
+            multi_language: false,
+        }
+    }
+}

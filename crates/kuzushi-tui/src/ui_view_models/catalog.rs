@@ -216,7 +216,7 @@ fn catalog_groups(
     }
     CATALOG_CATEGORY_ORDER
         .iter()
-        .filter_map(|category| group_from_rows(category, grouped.remove(category)))
+        .filter_map(|category| group_from_rows(*category, grouped.remove(category)))
         .collect()
 }
 

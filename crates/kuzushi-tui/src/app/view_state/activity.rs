@@ -341,10 +341,9 @@ mod tests {
     fn step_with_tool_name_as_module_id_updates_seeded_row() {
         let mut session = ActivitySession::new("r-1");
         // Seed a node keyed by its tool name (as `seed_from_registry` does).
-        session.tasks.insert(
-            "sast:scan".to_string(),
-            DagTaskRow::queued("sast:scan".to_string(), "sast".to_string(), Vec::new()),
-        );
+        session
+            .tasks
+            .insert("sast:scan".to_string(), DagTaskRow::queued("sast:scan".to_string(), "sast".to_string(), Vec::new()));
         // Producer reports the full tool name as module_id + verb `scan`.
         session.apply_step(
             RunTraceStep::new(1, "tool", "sast:scan start")

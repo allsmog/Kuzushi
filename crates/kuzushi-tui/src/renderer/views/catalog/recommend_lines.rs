@@ -28,7 +28,7 @@ fn append_report(
     area: Rect,
 ) -> Vec<Line<'static>> {
     if let Some(summary) = &model.summary {
-        lines.push(muted(&fit(summary, area.width as usize)));
+        lines.push(muted(&fit(&summary, area.width as usize)));
         lines.push(blank());
     }
     lines.push(aligned_header(

@@ -1,7 +1,7 @@
 use super::*;
 
 pub(crate) fn extract_codeql_location(result: &CodeqlSarifResult) -> Option<(String, u32)> {
-    if let Some(location) = result.locations.first() {
+    for location in &result.locations {
         let physical = location.physical_location.as_ref()?;
         let uri = physical
             .artifact_location

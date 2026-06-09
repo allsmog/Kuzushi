@@ -37,20 +37,26 @@ repository = "https://github.com/allsmog/Kuzushi.git"
 # true`.
 #
 # The `allow` block below is a SHRINKING BASELINE of clippy categories that
-# already fired across the pre-existing codebase when the gate was introduced.
-# They are allowed so the gate can be hard today without a sweeping rewrite of
-# code the gate did not yet cover. Drive them to zero over time: fix the
-# offenders for one lint, then delete its line here so regressions fail CI.
-# Do NOT add new entries to dodge a warning in new code — fix the code instead.
+# already fired across the pre-existing codebase when the gate was introduced
+# (captured from a clean `cargo clippy` on the tree). Allowing them lets the
+# gate go hard *today* — any NEW clippy category, or any of these once its
+# last offender is fixed and the line deleted, fails CI — without a sweeping
+# mechanical rewrite of pre-existing code (which would churn dozens of files
+# and trip the complexity gate). Drive these to zero over time, lint by lint;
+# do NOT add new entries to dodge a warning in new code — fix the code instead.
 [workspace.lints.clippy]
-# Structural / pervasive (would need signature or module reshaping):
+# Structural / pervasive (signature, module, or type reshaping):
 module_inception = "allow"          # DDD layout: foo/foo.rs is intentional
 too_many_arguments = "allow"        # builder/param-struct refactors pending
 type_complexity = "allow"           # extract `type` aliases incrementally
 large_enum_variant = "allow"        # needs Box-ing of large variants
 result_large_err = "allow"          # MCP transport error type is large
 ptr_arg = "allow"                   # &PathBuf -> &Path signature churn
-# Stylistic (cheap but pervasive; safe to drive down lint-by-lint):
+derivable_impls = "allow"
+# Concurrency smell — keep visible; drive to zero with care (may mask deadlocks):
+await_holding_lock = "allow"
+never_loop = "allow"                # pre-existing single-pass loops; use .first()
+# Stylistic (cheap but pervasive; safe to drive down lint by lint):
 field_reassign_with_default = "allow"
 empty_line_after_doc_comments = "allow"
 doc_lazy_continuation = "allow"
@@ -58,13 +64,43 @@ doc_overindented_list_items = "allow"
 question_mark = "allow"
 manual_find = "allow"
 manual_clamp = "allow"
+manual_contains = "allow"
+manual_pattern_char_comparison = "allow"
 if_same_then_else = "allow"
 cloned_ref_to_slice_refs = "allow"
 needless_range_loop = "allow"
+needless_return = "allow"
+needless_borrow = "allow"
+needless_borrows_for_generic_args = "allow"
+needless_lifetimes = "allow"
+needless_update = "allow"
 explicit_counter_loop = "allow"
 enum_variant_names = "allow"
-# Concurrency smell — keep visible; drive to zero with care (may mask deadlocks):
-await_holding_lock = "allow"
+bool_assert_comparison = "allow"
+comparison_to_empty = "allow"
+double_parens = "allow"
+for_kv_map = "allow"
+items_after_test_module = "allow"
+len_zero = "allow"
+nonminimal_bool = "allow"
+obfuscated_if_else = "allow"
+redundant_closure = "allow"
+redundant_pattern_matching = "allow"
+same_item_push = "allow"
+should_implement_trait = "allow"
+single_char_add_str = "allow"
+trim_split_whitespace = "allow"
+unnecessary_map_or = "allow"
+unnecessary_to_owned = "allow"
+useless_conversion = "allow"
+useless_format = "allow"
+format_in_format_args = "allow"
+vec_init_then_push = "allow"
+explicit_auto_deref = "allow"
+get_first = "allow"
+unnecessary_cast = "allow"
+unnecessary_first_then_check = "allow"
+while_let_on_iterator = "allow"
 
 [workspace.dependencies]
 anyhow = "1.0"

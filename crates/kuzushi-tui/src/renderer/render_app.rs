@@ -38,7 +38,8 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
     // shared line-based path. Skip the line computation entirely for them.
     let mode = primary_render_mode(app);
     let frame_mode = mode != PrimaryRenderMode::Lines;
-    let (view_height, view_lines) = main_view_layout(app, frame_mode, max_view_height, view_area);
+    let (view_height, view_lines) =
+        main_view_layout(app, frame_mode, max_view_height, view_area);
 
     let chunks = Layout::default()
         .direction(Direction::Vertical)

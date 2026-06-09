@@ -47,12 +47,7 @@ fn viz_pages_cycle_and_wrap() {
 fn only_attack_surface_is_3d_and_animated() {
     assert!(VizPage::AttackSurface.is_3d());
     assert!(VizPage::AttackSurface.is_animated());
-    for page in [
-        VizPage::AttackPath,
-        VizPage::Dfd,
-        VizPage::Heatmap,
-        VizPage::ExploitChain,
-    ] {
+    for page in [VizPage::AttackPath, VizPage::Dfd, VizPage::Heatmap, VizPage::ExploitChain] {
         assert!(!page.is_3d(), "{page:?} should be 2D");
         assert!(!page.is_animated(), "{page:?} should be static");
     }
@@ -61,14 +56,8 @@ fn only_attack_surface_is_3d_and_animated() {
 #[test]
 fn attack_surface_terrain_builds_a_shaded_surface() {
     let scene = attack_surface_scene(&crate::ui_view_models::RiskByModule::default());
-    assert!(
-        scene.splats.len() > 100,
-        "terrain should be a dense surface"
-    );
-    assert!(
-        scene.splats.iter().all(|s| s.normal.is_some()),
-        "surfels are lit"
-    );
+    assert!(scene.splats.len() > 100, "terrain should be a dense surface");
+    assert!(scene.splats.iter().all(|s| s.normal.is_some()), "surfels are lit");
     assert_eq!(scene.title, "ATTACK SURFACE");
     assert!(!scene.subtitle.is_empty());
 }

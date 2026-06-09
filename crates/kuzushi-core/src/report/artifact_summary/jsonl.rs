@@ -208,7 +208,7 @@ fn trace_cost_segment(steps: &[Value]) -> Option<String> {
     (cost > 0.0).then(|| format!("cost ${cost:.6}"))
 }
 
-fn number_at(value: &Value, keys: &[&str]) -> Option<f64> {
+fn number_at<'a>(value: &'a Value, keys: &[&str]) -> Option<f64> {
     keys.iter()
         .filter_map(|key| value.get(*key))
         .find_map(Value::as_f64)

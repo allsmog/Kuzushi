@@ -284,7 +284,7 @@ pub(crate) fn language_from_path(path: &str) -> Option<&'static str> {
 }
 
 pub(crate) fn trim_detail(line: &str) -> String {
-    line.split_whitespace().collect::<Vec<_>>().join(" ")
+    line.trim().split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 pub(crate) fn line_contains_any(haystack: &str, needles: &[&str]) -> bool {

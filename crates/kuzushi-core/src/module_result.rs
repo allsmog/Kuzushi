@@ -37,17 +37,9 @@ fn is_stack_noise(line: &str) -> bool {
 
 fn names_a_failure(line: &str) -> bool {
     let lower = line.to_ascii_lowercase();
-    [
-        "error",
-        "not found",
-        "no such",
-        "missing",
-        "cannot",
-        "could not",
-        "failed",
-    ]
-    .iter()
-    .any(|needle| lower.contains(needle))
+    ["error", "not found", "no such", "missing", "cannot", "could not", "failed"]
+        .iter()
+        .any(|needle| lower.contains(needle))
 }
 
 /// Generic exit-code wrappers carry no actionable detail — skip them in favor
@@ -243,7 +235,7 @@ fn has_path_key(object: &Map<String, Value>) -> bool {
         .any(|key| object.get(*key).and_then(Value::as_str).is_some())
 }
 
-fn first_path_string(object: &Map<String, Value>) -> Option<&str> {
+fn first_path_string<'a>(object: &'a Map<String, Value>) -> Option<&'a str> {
     ARTIFACT_PATH_KEYS
         .iter()
         .filter_map(|key| object.get(*key))

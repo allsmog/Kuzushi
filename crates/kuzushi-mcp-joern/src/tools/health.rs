@@ -56,5 +56,5 @@ async fn probe_server(url: &str) -> bool {
     else {
         return false;
     };
-    client.get(url).send().await.is_ok()
+    matches!(client.get(url).send().await, Ok(_))
 }

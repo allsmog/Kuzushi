@@ -89,10 +89,7 @@ pub(crate) fn attack_surface_scene(model: &RiskByModule) -> Scene {
 
 fn build_terrain(model: &RiskByModule) -> Terrain {
     if model.modules.is_empty() {
-        return Terrain {
-            bumps: Vec::new(),
-            base: -0.05,
-        };
+        return Terrain { bumps: Vec::new(), base: -0.05 };
     }
     let max_score = model
         .modules

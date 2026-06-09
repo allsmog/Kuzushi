@@ -153,7 +153,7 @@ fn matching_line(report: &FindingListReport) -> String {
 }
 
 fn plural_suffix(count: usize) -> &'static str {
-    if count != 1 { "s" } else { "" }
+    (count != 1).then_some("s").unwrap_or("")
 }
 
 pub fn format_finding_alias(index: usize) -> String {

@@ -378,7 +378,7 @@ mod tests {
         assert!(report
             .patterns
             .iter()
-            .all(|pattern| !pattern.original_fingerprint.is_empty()));
+            .all(|pattern| pattern.original_fingerprint != ""));
     }
 
     #[test]

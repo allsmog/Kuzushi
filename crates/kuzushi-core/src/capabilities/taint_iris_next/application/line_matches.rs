@@ -252,11 +252,11 @@ fn shares_subsystem(source_path: &str, sink_path: &str) -> bool {
         return true;
     }
     let source_components: Vec<&str> = source_path
-        .split(['/', '\\'])
+        .split(|c: char| c == '/' || c == '\\')
         .filter(|s| !s.is_empty())
         .collect();
     let sink_components: Vec<&str> = sink_path
-        .split(['/', '\\'])
+        .split(|c: char| c == '/' || c == '\\')
         .filter(|s| !s.is_empty())
         .collect();
     let depth = source_components.len().min(sink_components.len()).min(2);

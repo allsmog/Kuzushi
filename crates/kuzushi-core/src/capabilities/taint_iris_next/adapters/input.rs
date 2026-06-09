@@ -58,7 +58,7 @@ pub(in crate::capabilities::taint_iris_next) fn parse_taint_iris_next_cwe_focus(
         Some(Value::String(value)) => {
             tokens.extend(
                 value
-                    .split([',', ' ', ';'])
+                    .split(|ch: char| ch == ',' || ch == ' ' || ch == ';')
                     .map(str::to_string),
             );
         }

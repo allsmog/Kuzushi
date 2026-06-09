@@ -90,14 +90,11 @@ fn wide_location_width(finding: &FindingListRow, total: usize, wide: bool) -> us
     // Keep at least TITLE_MIN columns for the title so a deep path can't crush
     // it; the path itself left-truncates to keep `file.rs:line` visible.
     const TITLE_MIN: usize = 30;
-    if wide {
-        {
-            let cap = total.saturating_sub(TITLE_MIN + 2).max(8);
-            finding.location.chars().count().min(cap).max(8)
-        }
-    } else {
-        0
-    }
+    wide.then(|| {
+        let cap = total.saturating_sub(TITLE_MIN + 2).max(8);
+        finding.location.chars().count().min(cap).max(8)
+    })
+    .unwrap_or(0)
 }
 
 fn finding_summary_spans(

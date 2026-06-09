@@ -36,7 +36,7 @@ fn append_finding_metadata(
     lines: &mut Vec<Line<'static>>,
 ) {
     if let Some(alias) = &finding.alias {
-        lines.push(detail("alias", alias));
+        lines.push(detail("alias", &alias));
     }
     lines.push(detail("location", &finding.location));
     lines.push(detail("rule", &finding.rule));

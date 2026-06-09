@@ -160,11 +160,11 @@ fn sbom_scan_extracts_bower_dependencies() {
     assert_eq!(report.manifests_scanned, 1);
     assert_eq!(report.by_ecosystem.get("bower"), Some(&3));
     assert!(scoped_names.contains(&("dependencies", "jquery", Some("pkg:generic/jquery@3.7.1"))));
-    assert!(scoped_names.contains(&(
+    assert!(scoped_names.contains(&((
         "dependencies",
         "normalize-css",
         Some("pkg:generic/normalize-css@8.0.1")
-    )));
+    ))));
     assert!(scoped_names.contains(&("devDependencies", "qunit", Some("pkg:generic/qunit"))));
     assert!(report
         .dependencies
@@ -2325,7 +2325,7 @@ recommends 'Optional::Module', '0.1';
         Some("9.36"),
         Some("pkg:cpan/Mojolicious@9.36")
     )));
-    assert!(scoped_names.contains(&("requires", "DBI", None, Some("pkg:cpan/DBI"))));
+    assert!(scoped_names.contains(&(("requires", "DBI", None, Some("pkg:cpan/DBI")))));
     assert!(scoped_names.contains(&(
         "test_requires",
         "Test::More",

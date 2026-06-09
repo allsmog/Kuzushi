@@ -12,7 +12,7 @@ impl ShellApp {
 
         match store.list_findings(200) {
             Ok(findings) => self.replace_findings(findings, announce),
-            Err(error) => self.log_refresh_findings_error(error, announce),
+            Err(error) => self.log_refresh_findings_error(error.into(), announce),
         }
     }
 

@@ -148,15 +148,6 @@ fn queued_scan_panel(target_root: &PathBuf, run_id: &str) -> ScanPanelState {
     }
 }
 
-struct ScanStartRequest {
-    target_root: PathBuf,
-    db_path: PathBuf,
-    input: serde_json::Value,
-    registry: ModuleRegistry,
-    config: V2Config,
-    thinking_level: Option<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -169,4 +160,13 @@ mod tests {
         assert_eq!(panel.run_id.as_deref(), Some("scan-seeded"));
         assert!(panel.running);
     }
+}
+
+struct ScanStartRequest {
+    target_root: PathBuf,
+    db_path: PathBuf,
+    input: serde_json::Value,
+    registry: ModuleRegistry,
+    config: V2Config,
+    thinking_level: Option<String>,
 }

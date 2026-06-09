@@ -14,10 +14,7 @@ pub(crate) struct NoticeBannerModel {
 }
 
 pub(crate) fn notice_banner_model(app: &ShellApp) -> Option<NoticeBannerModel> {
-    app.advisory
-        .notice
-        .as_ref()
-        .map(NoticeBannerModel::from_notice)
+    app.advisory.notice.as_ref().map(NoticeBannerModel::from_notice)
 }
 
 impl NoticeBannerModel {

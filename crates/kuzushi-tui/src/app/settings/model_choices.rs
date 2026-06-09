@@ -58,7 +58,12 @@ pub(crate) fn model_choices() -> &'static [ModelChoice] {
 }
 
 pub(crate) fn visible_model_choice_indexes(configured_model: Option<&str>) -> Vec<usize> {
-    vec![visible_primary_openai_choice(configured_model), 1, 3, 4]
+    vec![
+        visible_primary_openai_choice(configured_model),
+        1,
+        3,
+        4,
+    ]
 }
 
 pub(crate) fn visible_model_choices(configured_model: Option<&str>) -> Vec<&'static ModelChoice> {

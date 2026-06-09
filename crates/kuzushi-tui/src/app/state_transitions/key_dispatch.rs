@@ -21,7 +21,9 @@ impl ShellApp {
             || self.handle_empty_input_view_key(key, modifiers)
             || self.handle_history_key(key, modifiers)
             || self.handle_text_key(key)
-        {}
+        {
+            return;
+        }
     }
 
     pub(super) fn handle_modal_key(&mut self, key: KeyEvent) -> bool {
@@ -117,7 +119,10 @@ impl ShellApp {
     /// Esc dismisses a visible notice banner. Returns false when no notice is
     /// present so Esc falls through to view-back / draft-restore as usual.
     fn handle_notice_dismiss_key(&mut self, key: KeyEvent) -> bool {
-        if self.advisory.notice.is_none() || key.code != KeyCode::Esc || !key.modifiers.is_empty() {
+        if self.advisory.notice.is_none()
+            || key.code != KeyCode::Esc
+            || !key.modifiers.is_empty()
+        {
             return false;
         }
         self.clear_notice();

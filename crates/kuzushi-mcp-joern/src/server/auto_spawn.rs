@@ -166,7 +166,7 @@ async fn probe_reachable(url: &str) -> bool {
     };
     // joern's REST server replies to GET / with a 405 (no GET handler)
     // but the connection itself succeeds, which is what we care about.
-    client.get(url).send().await.is_ok()
+    matches!(client.get(url).send().await, Ok(_))
 }
 
 fn pick_free_port() -> Result<u16> {

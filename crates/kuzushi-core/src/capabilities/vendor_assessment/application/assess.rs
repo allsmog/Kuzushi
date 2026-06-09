@@ -42,7 +42,7 @@ pub(crate) fn assess(
 
 fn write_assessment_prompts(prompts_dir: &Path, scope: &Value) -> Result<Vec<(String, String)>> {
     ensure_assessment_prompt_dir(prompts_dir).and_then(|_| {
-        let prompts = build_prompt_bundle(scope);
+        let prompts = build_prompt_bundle(&scope);
         write_assessment_prompt_files(prompts_dir, &prompts).map(|_| prompts)
     })
 }
@@ -67,8 +67,8 @@ fn build_assessment_report(
     runtime: Option<&dyn AgentRuntime>,
     resolve_model: impl FnOnce() -> Result<String>,
 ) -> Result<Value> {
-    let has_text = scope_has_text(scope);
-    let mut report = build_fallback_report(run_id, scope, run_root, has_text);
+    let has_text = scope_has_text(&scope);
+    let mut report = build_fallback_report(&run_id, &scope, &run_root, has_text);
     if !has_text {
         return Ok(report);
     }

@@ -82,9 +82,9 @@ pub(crate) fn run_taint_iris_next_hunt(
         trace.parent_scope(phase)
     });
     let mut agent = run_taint_iris_next_agent(
-        plan,
-        evidence,
-        agent_prompt,
+        &plan,
+        &evidence,
+        &agent_prompt,
         runtime,
         &model,
         agent_tool_policy,
@@ -96,10 +96,10 @@ pub(crate) fn run_taint_iris_next_hunt(
         mark_whitebox_static_findings(&mut findings, StaticProofState::SourceSinkLinked)?;
         agent.findings = findings;
     }
-    let persisted = persist_taint_iris_next_findings(target, &agent.findings, ctx)?;
-    let output = render_taint_iris_next_output(plan, evidence, Some(&agent));
+    let persisted = persist_taint_iris_next_findings(&target, &agent.findings, ctx)?;
+    let output = render_taint_iris_next_output(&plan, &evidence, Some(&agent));
     let status = taint_iris_next_hunt_status(&agent);
-    let data = taint_iris_next_hunt_data(plan, evidence, status, agent_prompt, &agent);
+    let data = taint_iris_next_hunt_data(&plan, &evidence, status, &agent_prompt, &agent);
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
@@ -114,7 +114,7 @@ pub(crate) fn run_taint_iris_next_hunt(
     }
 
     Ok(taint_iris_next_hunt_report(
-        plan, &agent, status, persisted, output, data,
+        &plan, &agent, status, persisted, output, data,
     ))
 }
 
@@ -168,9 +168,9 @@ pub(crate) fn taint_iris_next_planned_report(
     }
 }
 
-pub(crate) fn require_taint_iris_next_runtime(
-    runtime: Option<&dyn AgentRuntime>,
-) -> Result<&dyn AgentRuntime> {
+pub(crate) fn require_taint_iris_next_runtime<'a>(
+    runtime: Option<&'a dyn AgentRuntime>,
+) -> Result<&'a dyn AgentRuntime> {
     runtime.context(
         "taint-iris-next:hunt requires the LangGraph runtime in hunt mode. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
     )

@@ -99,7 +99,7 @@ fn prepare_carlini_execution_inputs<'a>(
     runtime: Option<&'a dyn AgentRuntime>,
     target: &Path,
 ) -> Result<CarliniExecutionInputs<'a>> {
-    let options = CarliniInput::from_tool_input(input, ctx, target)?;
+    let options = CarliniInput::from_tool_input(input, ctx, &target)?;
     let (runtime, model) = resolve_carlini_runtime_model(runtime, &options)?;
 
     Ok(CarliniExecutionInputs {

@@ -125,21 +125,14 @@ fn exploit_chain_step(step: &serde_json::Value) -> Option<ExploitChainStep> {
         role: data_string(step, "role").unwrap_or_default(),
         description: data_string(step, "description").unwrap_or_default(),
         file: data_string(step, "filePath").unwrap_or_default(),
-        line: step
-            .get("startLine")
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0) as u32,
+        line: step.get("startLine").and_then(serde_json::Value::as_u64).unwrap_or(0) as u32,
     })
 }
 
 /// Cache the headline source→sink taint flow from `taint-iris:hunt` structured
 /// output (`data.flows[]`) for the attack-path visualization. Only `taint-iris`
 /// emits `flows[]`; `taint-iris-next` flattens its taint path into finding text.
-fn cache_taint_flow_snapshot(
-    app: &mut ShellApp,
-    tool_name: &str,
-    data: &serde_json::Value,
-) -> bool {
+fn cache_taint_flow_snapshot(app: &mut ShellApp, tool_name: &str, data: &serde_json::Value) -> bool {
     if tool_name != "taint-iris:hunt" {
         return false;
     }
@@ -150,10 +143,7 @@ fn cache_taint_flow_snapshot(
 }
 
 fn taint_flow_from_data(data: &serde_json::Value) -> Option<TaintFlowSnapshot> {
-    let flow = data
-        .get("flows")
-        .and_then(serde_json::Value::as_array)?
-        .first()?;
+    let flow = data.get("flows").and_then(serde_json::Value::as_array)?.first()?;
     Some(TaintFlowSnapshot {
         cwe: data_string(flow, "cwe").unwrap_or_else(|| "CWE".to_string()),
         severity: data_string(flow, "severity").unwrap_or_else(|| "medium".to_string()),

@@ -172,7 +172,7 @@ fn selected_numbered_lines(raw: &str, start: usize, end: Option<usize>) -> Strin
     raw.lines()
         .enumerate()
         .map(|(idx, line)| (idx + 1, line))
-        .filter(|(line_no, _)| *line_no >= start && end.is_none_or(|limit| *line_no <= limit))
+        .filter(|(line_no, _)| *line_no >= start && end.map_or(true, |limit| *line_no <= limit))
         .take(800)
         .map(|(line_no, line)| format!("{line_no:>5}: {line}"))
         .collect::<Vec<_>>()

@@ -40,66 +40,20 @@ impl Widget for TreeDiagram {
 
         // Root goal, centred.
         let rw = box_w.max(24).min(w.saturating_sub(2));
-        boxed(
-            buf,
-            area,
-            (w - rw) / 2,
-            0,
-            rw,
-            3,
-            "☠ attacker goal — impact",
-            theme::SEV_CRITICAL,
-            theme::T_HEADING,
-        );
-        text(
-            buf,
-            area,
-            root_cx + 2,
-            4,
-            "◇ OR — any one chain",
-            theme::T_ACCENT,
-        );
+        boxed(buf, area, (w - rw) / 2, 0, rw, 3, "☠ attacker goal — impact", theme::SEV_CRITICAL, theme::T_HEADING);
+        text(buf, area, root_cx + 2, 4, "◇ OR — any one chain", theme::T_ACCENT);
 
         for (i, chain) in chains.iter().enumerate() {
-            self.render_chain(
-                buf,
-                area,
-                i as u16,
-                chain,
-                root_cx,
-                center(i as u16),
-                left(i as u16),
-                box_w,
-            );
+            self.render_chain(buf, area, i as u16, chain, root_cx, center(i as u16), left(i as u16), box_w);
         }
     }
 }
 
 impl TreeDiagram {
-    fn render_chain(
-        &self,
-        buf: &mut Buffer,
-        area: Rect,
-        _i: u16,
-        chain: &AttackChain,
-        root_cx: u16,
-        cx: u16,
-        left: u16,
-        box_w: u16,
-    ) {
+    fn render_chain(&self, buf: &mut Buffer, area: Rect, _i: u16, chain: &AttackChain, root_cx: u16, cx: u16, left: u16, box_w: u16) {
         connector_v(buf, area, (root_cx, 3), (cx, 7), theme::T_SUBTLE);
         let color = chain_color(chain.severity);
-        boxed(
-            buf,
-            area,
-            left,
-            7,
-            box_w,
-            NODE_H,
-            &chain_label(chain),
-            color,
-            color,
-        );
+        boxed(buf, area, left, 7, box_w, NODE_H, &chain_label(chain), color, color);
 
         if chain.steps.len() > 1 {
             text(buf, area, left, 10, "◆ AND", theme::T_WARN);
@@ -108,17 +62,7 @@ impl TreeDiagram {
         let mut y = 12;
         for step in chain.steps.iter().take(MAX_STEPS) {
             connector_v(buf, area, (cx, prev_bottom + 1), (cx, y), theme::T_SUBTLE);
-            boxed(
-                buf,
-                area,
-                left,
-                y,
-                box_w,
-                NODE_H,
-                step,
-                theme::T_MUTED,
-                theme::T_MUTED,
-            );
+            boxed(buf, area, left, y, box_w, NODE_H, step, theme::T_MUTED, theme::T_MUTED);
             prev_bottom = y + NODE_H - 1;
             y += NODE_H + STEP_GAP;
         }

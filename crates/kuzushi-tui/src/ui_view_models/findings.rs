@@ -111,11 +111,7 @@ pub(crate) fn findings_model(app: &ShellApp) -> FindingsModel {
 pub(crate) fn selected_finding_detail_model(app: &ShellApp) -> Option<FindingDetailModel> {
     let finding = app.selected_finding.as_ref()?;
     let alias = stable_finding_alias(&app.findings, &finding.fingerprint);
-    Some(FindingDetailModel::from_finding(
-        finding,
-        alias,
-        target_base(app).as_deref(),
-    ))
+    Some(FindingDetailModel::from_finding(finding, alias, target_base(app).as_deref()))
 }
 
 fn finding_rows(app: &ShellApp) -> Vec<FindingListRow> {

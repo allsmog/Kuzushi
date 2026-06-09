@@ -67,7 +67,7 @@ pub(crate) fn run_ripgrep_reference_search(
             cmd.arg("--type").arg(trimmed);
         }
     }
-    cmd.arg("--").arg(symbol).arg(scope_path);
+    cmd.arg("--").arg(symbol).arg(&scope_path);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
     cmd.output().with_context(|| {
@@ -81,7 +81,7 @@ pub(crate) fn run_ripgrep_reference_search(
 pub(crate) fn validate_ripgrep_reference_output(output: &std::process::Output) -> Result<()> {
     if !output.status.success() && output.stdout.is_empty() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        if !stderr.trim().is_empty() && output.status.code().is_none_or(|c| c != 1) {
+        if !stderr.trim().is_empty() && !output.status.code().is_some_and(|c| c == 1) {
             anyhow::bail!("find_references: rg failed: {}", stderr.trim());
         }
     }
@@ -109,7 +109,7 @@ pub(crate) fn parse_reference_hits(
             continue;
         };
         // Relativise file path back to the workspace root for stable output.
-        let path_rel = match Path::new(path_part).strip_prefix(canonical_root) {
+        let path_rel = match Path::new(path_part).strip_prefix(&canonical_root) {
             Ok(rel) => rel.to_string_lossy().into_owned(),
             Err(_) => path_part.to_string(),
         };
