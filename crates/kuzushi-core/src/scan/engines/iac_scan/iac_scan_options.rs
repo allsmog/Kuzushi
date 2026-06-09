@@ -2,18 +2,15 @@ use super::*;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
+#[derive(Default)]
 pub enum IacScanKind {
     Dockerfile,
     GithubActions,
     Terraform,
+    #[default]
     All,
 }
 
-impl Default for IacScanKind {
-    fn default() -> Self {
-        Self::All
-    }
-}
 
 impl IacScanKind {
     pub(crate) fn from_input(value: &str) -> Result<Self> {

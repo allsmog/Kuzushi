@@ -139,5 +139,5 @@ fn assignment_value_end(
 fn assignment_entropy_passes(value: &str, detector: Detector) -> bool {
     detector
         .entropy_threshold
-        .map_or(true, |threshold| shannon_entropy(value) >= threshold)
+        .is_none_or(|threshold| shannon_entropy(value) >= threshold)
 }

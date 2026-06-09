@@ -75,7 +75,7 @@ impl ModuleRegistry {
             .get(name)
             .with_context(|| format!("registered tool or DAG node {name:?} has no Rust executor mapping"))?;
         let result = executor(self, name, &input, ctx, runtime);
-        return result.map(|output| normalize_tool_output_contract(name, output));
+        result.map(|output| normalize_tool_output_contract(name, output))
     }
 }
 

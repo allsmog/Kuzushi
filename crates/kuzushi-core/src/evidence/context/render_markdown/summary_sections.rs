@@ -45,6 +45,6 @@ pub(super) fn push_evidence_limits(out: &mut String, narrative: Option<&StaticFi
     if let Some(narrative) = narrative {
         out.push_str("**Evidence limits:** ");
         out.push_str(&narrative.evidence_limits);
-        out.push_str("\n");
+        out.push('\n');
     }
 }

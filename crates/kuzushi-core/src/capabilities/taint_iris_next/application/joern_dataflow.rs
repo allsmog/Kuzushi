@@ -31,7 +31,7 @@ pub(crate) struct JoernStep {
 pub(crate) fn joern_available() -> bool {
     #[cfg(test)]
     {
-        return joern_launcher_path().is_some();
+        joern_launcher_path().is_some()
     }
     #[cfg(not(test))]
     {

@@ -93,23 +93,23 @@ fn named_manifest_components(
     name: Option<&str>,
 ) -> Result<Option<Vec<SbomComponent>>> {
     let components = match name {
-        Some("package.json") => package_components(target, path, &text),
-        Some("Cargo.toml") => toml_components(target, path, &text, "cargo"),
-        Some("pyproject.toml") => toml_components(target, path, &text, "python"),
-        Some("go.mod") => Ok(go_mod_components(target, path, &text)),
-        Some("composer.json") => composer_components(target, path, &text),
-        Some("Gemfile") => Ok(gemfile_components(target, path, &text)),
-        Some("gleam.toml") => gleam_components(target, path, &text),
-        Some("pom.xml") => maven_pom_components(target, path, &text),
-        Some("mix.exs") => Ok(mix_components(target, path, &text)),
-        Some("build.sbt") => Ok(sbt_components(target, path, &text)),
-        Some("pubspec.yaml") => pubspec_components(target, path, &text),
-        Some("bower.json") => bower_components(target, path, &text),
-        Some("conanfile.txt") => Ok(conanfile_components(target, path, &text)),
-        Some("haxelib.json") => haxelib_components(target, path, &text),
-        Some("vcpkg.json") => vcpkg_components(target, path, &text),
-        Some("deno.json") => deno_components(target, path, &text),
-        Some("import_map.json") => deno_components(target, path, &text),
+        Some("package.json") => package_components(target, path, text),
+        Some("Cargo.toml") => toml_components(target, path, text, "cargo"),
+        Some("pyproject.toml") => toml_components(target, path, text, "python"),
+        Some("go.mod") => Ok(go_mod_components(target, path, text)),
+        Some("composer.json") => composer_components(target, path, text),
+        Some("Gemfile") => Ok(gemfile_components(target, path, text)),
+        Some("gleam.toml") => gleam_components(target, path, text),
+        Some("pom.xml") => maven_pom_components(target, path, text),
+        Some("mix.exs") => Ok(mix_components(target, path, text)),
+        Some("build.sbt") => Ok(sbt_components(target, path, text)),
+        Some("pubspec.yaml") => pubspec_components(target, path, text),
+        Some("bower.json") => bower_components(target, path, text),
+        Some("conanfile.txt") => Ok(conanfile_components(target, path, text)),
+        Some("haxelib.json") => haxelib_components(target, path, text),
+        Some("vcpkg.json") => vcpkg_components(target, path, text),
+        Some("deno.json") => deno_components(target, path, text),
+        Some("import_map.json") => deno_components(target, path, text),
         _ => return Ok(None),
     }?;
     Ok(Some(components))
@@ -122,23 +122,23 @@ fn pattern_manifest_components(
     name: Option<&str>,
 ) -> Result<Vec<SbomComponent>> {
     match name {
-        Some(_) if is_gradle_build(path) => Ok(gradle_build_components(target, path, &text)),
-        Some(_) if is_cabal_file(path) => Ok(cabal_components(target, path, &text)),
-        Some(_) if is_cpanfile(path) => Ok(cpanfile_components(target, path, &text)),
-        Some(_) if is_opam_file(path) => Ok(opam_components(target, path, &text)),
-        Some(_) if is_elm_json(path) => elm_components(target, path, &text),
-        Some(_) if is_helm_chart(path) => helm_chart_components(target, path, &text),
-        Some(_) if is_julia_project(path) => julia_project_components(target, path, &text),
-        Some(_) if is_nimble_file(path) => Ok(nimble_components(target, path, &text)),
-        Some(_) if is_pipfile(path) => pipfile_components(target, path, &text),
-        Some(_) if is_r_description(path) => Ok(r_description_components(target, path, &text)),
-        Some(_) if is_shard_yml(path) => shard_components(target, path, &text),
+        Some(_) if is_gradle_build(path) => Ok(gradle_build_components(target, path, text)),
+        Some(_) if is_cabal_file(path) => Ok(cabal_components(target, path, text)),
+        Some(_) if is_cpanfile(path) => Ok(cpanfile_components(target, path, text)),
+        Some(_) if is_opam_file(path) => Ok(opam_components(target, path, text)),
+        Some(_) if is_elm_json(path) => elm_components(target, path, text),
+        Some(_) if is_helm_chart(path) => helm_chart_components(target, path, text),
+        Some(_) if is_julia_project(path) => julia_project_components(target, path, text),
+        Some(_) if is_nimble_file(path) => Ok(nimble_components(target, path, text)),
+        Some(_) if is_pipfile(path) => pipfile_components(target, path, text),
+        Some(_) if is_r_description(path) => Ok(r_description_components(target, path, text)),
+        Some(_) if is_shard_yml(path) => shard_components(target, path, text),
         Some(name) if is_conda_environment_manifest(name) => {
-            conda_environment_components(target, path, &text)
+            conda_environment_components(target, path, text)
         }
-        Some(_) if is_dotnet_project(path) => dotnet_project_components(target, path, &text),
+        Some(_) if is_dotnet_project(path) => dotnet_project_components(target, path, text),
         Some(name) if is_requirements_manifest(name) => {
-            Ok(requirements_components(target, path, name, &text))
+            Ok(requirements_components(target, path, name, text))
         }
         _ => Ok(Vec::new()),
     }

@@ -2,13 +2,12 @@ use super::*;
 use crate::app::{auth_ready_for_provider, visible_model_choices, ModelChoice};
 
 pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
-    let mut lines: Vec<Line<'static>> = Vec::new();
-    lines.push(divider("CHOOSE A MODEL", area.width));
-    lines.push(blank());
-    lines.push(muted(
-        "Kuzushi does not silently pick a model for you. Select one to continue.",
-    ));
-    lines.push(blank());
+    let mut lines: Vec<Line<'static>> = vec![
+        divider("CHOOSE A MODEL", area.width),
+        blank(),
+        muted("Kuzushi does not silently pick a model for you. Select one to continue."),
+        blank(),
+    ];
     for (idx, choice) in visible_model_choices(app.config.model.as_deref())
         .iter()
         .enumerate()

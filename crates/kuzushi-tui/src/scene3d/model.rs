@@ -70,10 +70,11 @@ pub struct Scene {
 /// first is a 3D attack-surface terrain (rendered into a half-block
 /// framebuffer); the rest are 2D box-drawing diagrams. All dummy data for now,
 /// shaped so real findings / taint-iris / threat-model artifacts drop in.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum VizPage {
     /// 3D shaded terrain — height is severity-weighted risk density; peaks are
     /// where the attack surface is hottest.
+    #[default]
     AttackSurface,
     /// 2D source→sink taint flow as a staged horizontal diagram.
     AttackPath,
@@ -136,11 +137,5 @@ impl VizPage {
     /// Previous page in the cycle, wrapping around.
     pub fn prev(self) -> VizPage {
         Self::ALL[(self.index() + Self::ALL.len() - 1) % Self::ALL.len()]
-    }
-}
-
-impl Default for VizPage {
-    fn default() -> Self {
-        VizPage::AttackSurface
     }
 }

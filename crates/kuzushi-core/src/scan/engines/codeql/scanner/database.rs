@@ -90,7 +90,7 @@ impl CodeqlScanner {
             format!("--source-root={}", target.display()),
         ];
 
-        if is_compiled_codeql_language(&language) {
+        if is_compiled_codeql_language(language) {
             let mut autobuild_args = create_args.clone();
             autobuild_args.push("--build-mode=autobuild".to_string());
             match self.run_codeql_command(binary, &autobuild_args, Some(target), cancel) {

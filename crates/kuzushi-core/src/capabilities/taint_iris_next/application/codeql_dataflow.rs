@@ -115,7 +115,7 @@ fn read_optional_pipe<R: std::io::Read>(pipe: Option<R>) -> Vec<u8> {
 pub(crate) fn codeql_available() -> bool {
     #[cfg(test)]
     {
-        return codeql_launcher_path().is_some();
+        codeql_launcher_path().is_some()
     }
     #[cfg(not(test))]
     {
@@ -459,7 +459,7 @@ fn sarif_result_to_flow(result: &Value, run: &Value) -> Option<CodeqlFlow> {
             .map(|locations| {
                 locations
                     .iter()
-                    .filter_map(|loc| sarif_location_to_step(loc))
+                    .filter_map(sarif_location_to_step)
                     .collect()
             })
             .unwrap_or_default()

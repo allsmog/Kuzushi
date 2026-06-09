@@ -29,9 +29,7 @@ pub(super) fn bounded_marker_height(
     d_sign: f64,
     parabolic_height: f64,
 ) -> f64 {
-    marker_height_is_bounded(estimator, i, parabolic_height)
-        .then_some(parabolic_height)
-        .unwrap_or_else(|| estimator.linear(i, d_sign))
+    if marker_height_is_bounded(estimator, i, parabolic_height) { parabolic_height } else { estimator.linear(i, d_sign) }
 }
 
 fn marker_height_is_bounded(estimator: &QuantileEstimator, i: usize, height: f64) -> bool {

@@ -265,9 +265,9 @@ fn resolve_taint_iris_target(input: &Value, ctx: &ToolExecutionContext<'_>) -> R
     Ok(target)
 }
 
-pub(crate) fn require_taint_iris_runtime<'a>(
-    runtime: Option<&'a dyn AgentRuntime>,
-) -> Result<&'a dyn AgentRuntime> {
+pub(crate) fn require_taint_iris_runtime(
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<&dyn AgentRuntime> {
     runtime.context(
         "taint-iris:hunt requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
     )

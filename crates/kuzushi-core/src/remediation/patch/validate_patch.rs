@@ -197,6 +197,8 @@ mod tests {
         let status = Command::new("git")
             .args(["-c", "user.email=kuzushi@example.invalid"])
             .args(["-c", "user.name=Kuzushi Test"])
+            // Stay hermetic against a host git config that forces signing.
+            .args(["-c", "commit.gpgsign=false"])
             .args(args)
             .current_dir(repo)
             .stdout(Stdio::null())

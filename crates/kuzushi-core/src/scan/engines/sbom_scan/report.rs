@@ -56,5 +56,5 @@ impl SbomScanReport {
 }
 
 fn plural_suffix(count: usize) -> &'static str {
-    (count != 1).then_some("s").unwrap_or("")
+    if count != 1 { "s" } else { "" }
 }

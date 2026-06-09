@@ -33,7 +33,7 @@ fn add_jvm_detector_surfaces(
 ) {
     for detector_group in JVM_LINE_DETECTOR_GROUPS {
         for detector in *detector_group {
-            if detector.matches(&lower) {
+            if detector.matches(lower) {
                 builder.add(detector.surface(source_file, framework, line_number, detail));
             }
         }

@@ -31,6 +31,41 @@ license = "MIT"
 authors = ["Shayaun Nejad"]
 repository = "https://github.com/allsmog/Kuzushi.git"
 
+# Workspace-wide lint policy. CI runs `cargo clippy --workspace --all-targets
+# -- -D warnings`, so every lint that is `warn` here is a hard error in CI and
+# matches a local `cargo clippy`. Each crate opts in with `[lints] workspace =
+# true`.
+#
+# The `allow` block below is a SHRINKING BASELINE of clippy categories that
+# already fired across the pre-existing codebase when the gate was introduced.
+# They are allowed so the gate can be hard today without a sweeping rewrite of
+# code the gate did not yet cover. Drive them to zero over time: fix the
+# offenders for one lint, then delete its line here so regressions fail CI.
+# Do NOT add new entries to dodge a warning in new code — fix the code instead.
+[workspace.lints.clippy]
+# Structural / pervasive (would need signature or module reshaping):
+module_inception = "allow"          # DDD layout: foo/foo.rs is intentional
+too_many_arguments = "allow"        # builder/param-struct refactors pending
+type_complexity = "allow"           # extract `type` aliases incrementally
+large_enum_variant = "allow"        # needs Box-ing of large variants
+result_large_err = "allow"          # MCP transport error type is large
+ptr_arg = "allow"                   # &PathBuf -> &Path signature churn
+# Stylistic (cheap but pervasive; safe to drive down lint-by-lint):
+field_reassign_with_default = "allow"
+empty_line_after_doc_comments = "allow"
+doc_lazy_continuation = "allow"
+doc_overindented_list_items = "allow"
+question_mark = "allow"
+manual_find = "allow"
+manual_clamp = "allow"
+if_same_then_else = "allow"
+cloned_ref_to_slice_refs = "allow"
+needless_range_loop = "allow"
+explicit_counter_loop = "allow"
+enum_variant_names = "allow"
+# Concurrency smell — keep visible; drive to zero with care (may mask deadlocks):
+await_holding_lock = "allow"
+
 [workspace.dependencies]
 anyhow = "1.0"
 async-trait = "0.1"

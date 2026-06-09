@@ -11,7 +11,7 @@ pub(crate) fn confirm_card_height(app: &ShellApp, area: Rect) -> u16 {
     // Header + 3 detail rows (tool, target, rationale/allowlist) + key
     // row.  Up to 6 rows; clamp so very narrow viewports still get a
     // 3-row minimum.
-    6.min(area.height.saturating_sub(8) as u16).max(3)
+    6.min(area.height.saturating_sub(8)).max(3)
 }
 
 pub(crate) fn render_confirm_card(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
