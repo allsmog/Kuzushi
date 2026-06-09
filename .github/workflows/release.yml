@@ -13,6 +13,11 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  # Run JS-based actions on Node 24 ahead of the June 2026 default flip
+  # (Node 20 action runtimes are deprecated on GitHub-hosted runners).
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 jobs:
   # ── Gate: run the full CI suite (which also uploads the dist artifact) ──
   ci:
