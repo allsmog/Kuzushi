@@ -109,7 +109,10 @@ fn pwn_candidate_confirm(
 /// Human-readable summary of a pwn candidate run's attempt budget, for the
 /// confirmation card.
 fn pwn_attempt_rationale(input: &serde_json::Value) -> String {
-    let i64_field = |keys: &[&str]| keys.iter().find_map(|k| input.get(*k).and_then(serde_json::Value::as_i64));
+    let i64_field = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|k| input.get(*k).and_then(serde_json::Value::as_i64))
+    };
     let max_attempts = i64_field(&["maxAttempts", "max_attempts"]).unwrap_or(10);
     let parallelism = i64_field(&["parallelism"]).unwrap_or(1);
     let state_id = input

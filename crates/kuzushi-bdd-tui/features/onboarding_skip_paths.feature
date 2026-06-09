@@ -10,10 +10,13 @@ Feature: Skip paths
     Then the status segment shows "modules"
     And I do not see "CHOOSE A MODEL"
 
-  Scenario: Esc from planning picker falls through
+  Scenario: Esc skips every phase and finishes the engagement
     Given a fresh kuzushi workspace
     And a model and auth are configured
     When I launch the shell
     And I press "Esc"
-    Then the log contains "planning skipped"
-    And the status segment shows "modules"
+    Then I see "phase 2 of 4"
+    When I press "Esc"
+    And I press "Esc"
+    And I press "Esc"
+    Then the status segment shows "recommend"

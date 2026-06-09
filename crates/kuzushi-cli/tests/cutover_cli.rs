@@ -358,6 +358,8 @@ fn plain_flag_forces_line_oriented_shell_output() {
     let tmp = tempfile::tempdir().unwrap();
     let out = stdout(
         kuzushi()
+            // Land on the catalog: first-run pickers render headless on purpose.
+            .env("KUZUSHI_SKIP_ONBOARDING", "1")
             .args(["--plain", "shell", "--target"])
             .arg(tmp.path())
             .output()
@@ -377,6 +379,8 @@ fn plain_env_aliases_are_line_oriented_for_screen_reader_mode() {
     let out = stdout(
         kuzushi()
             .env("KUZUSHI_SCREEN_READER", "1")
+            // Land on the catalog: first-run pickers render headless on purpose.
+            .env("KUZUSHI_SKIP_ONBOARDING", "1")
             .args(["shell", "--target"])
             .arg(tmp.path())
             .output()
@@ -908,7 +912,7 @@ fn doctor_checks_rust_preflight_without_printing_secrets() {
         "codeql",
         "model",
         "auth-env",
-        "langgraph bridge",
+        "LangGraph bridge",
         "Summary:",
     ] {
         assert!(out.contains(expected), "missing {expected:?} in:\n{out}");
@@ -957,7 +961,7 @@ fn doctor_json_reports_named_preflight_checks() {
         "codeql",
         "model",
         "auth-env",
-        "langgraph bridge",
+        "LangGraph bridge",
     ] {
         assert!(
             names.contains(&expected),

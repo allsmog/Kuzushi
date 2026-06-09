@@ -1,24 +1,27 @@
 use super::*;
 
 pub(crate) fn extract_codeql_location(result: &CodeqlSarifResult) -> Option<(String, u32)> {
-    for location in &result.locations {
-        let physical = location.physical_location.as_ref()?;
-        let uri = physical
-            .artifact_location
-            .as_ref()?
-            .uri
-            .as_deref()
-            .and_then(non_empty_string)?;
-        let file_path = normalize_artifact_uri(uri);
-        let start_line = physical
-            .region
-            .as_ref()
-            .and_then(|region| region.start_line)
-            .filter(|line| *line > 0)
-            .unwrap_or(1);
-        return Some((file_path, start_line));
-    }
-    None
+    // Skip locations missing a resolvable path instead of giving up on the
+    // first malformed entry.
+    result.locations.iter().find_map(location_path_and_line)
+}
+
+fn location_path_and_line(location: &CodeqlSarifLocation) -> Option<(String, u32)> {
+    let physical = location.physical_location.as_ref()?;
+    let uri = physical
+        .artifact_location
+        .as_ref()?
+        .uri
+        .as_deref()
+        .and_then(non_empty_string)?;
+    let file_path = normalize_artifact_uri(uri);
+    let start_line = physical
+        .region
+        .as_ref()
+        .and_then(|region| region.start_line)
+        .filter(|line| *line > 0)
+        .unwrap_or(1);
+    Some((file_path, start_line))
 }
 
 pub(crate) fn render_codeql_flow_evidence(result: &CodeqlSarifResult) -> Option<String> {

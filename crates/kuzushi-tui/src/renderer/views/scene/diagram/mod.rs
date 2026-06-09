@@ -38,8 +38,24 @@ pub(super) fn text(buf: &mut Buffer, area: Rect, x: u16, y: u16, s: &str, color:
 }
 
 /// A rounded node box with a left-aligned label on its middle row.
-pub(super) fn boxed(buf: &mut Buffer, area: Rect, x: u16, y: u16, w: u16, h: u16, label: &str, border: Color, label_color: Color) {
-    let rect = Rect { x: area.x + x, y: area.y + y, width: w, height: h }.intersection(area);
+pub(super) fn boxed(
+    buf: &mut Buffer,
+    area: Rect,
+    x: u16,
+    y: u16,
+    w: u16,
+    h: u16,
+    label: &str,
+    border: Color,
+    label_color: Color,
+) {
+    let rect = Rect {
+        x: area.x + x,
+        y: area.y + y,
+        width: w,
+        height: h,
+    }
+    .intersection(area);
     Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
@@ -52,8 +68,23 @@ pub(super) fn boxed(buf: &mut Buffer, area: Rect, x: u16, y: u16, w: u16, h: u16
 }
 
 /// A titled container panel (plain borders) — e.g. a DFD trust zone.
-pub(super) fn panel(buf: &mut Buffer, area: Rect, x: u16, y: u16, w: u16, h: u16, title: &str, color: Color) {
-    let rect = Rect { x: area.x + x, y: area.y + y, width: w, height: h }.intersection(area);
+pub(super) fn panel(
+    buf: &mut Buffer,
+    area: Rect,
+    x: u16,
+    y: u16,
+    w: u16,
+    h: u16,
+    title: &str,
+    color: Color,
+) {
+    let rect = Rect {
+        x: area.x + x,
+        y: area.y + y,
+        width: w,
+        height: h,
+    }
+    .intersection(area);
     Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Plain)
@@ -80,7 +111,13 @@ pub(super) fn vrun(buf: &mut Buffer, area: Rect, x: u16, y0: u16, y1: u16, color
 }
 
 /// Orthogonal left→right connector (Z-route) with a `▶` arrowhead at `to`.
-pub(super) fn connector_h(buf: &mut Buffer, area: Rect, from: (u16, u16), to: (u16, u16), color: Color) {
+pub(super) fn connector_h(
+    buf: &mut Buffer,
+    area: Rect,
+    from: (u16, u16),
+    to: (u16, u16),
+    color: Color,
+) {
     let ((fx, fy), (tx, ty)) = (from, to);
     if tx <= fx.saturating_add(1) {
         return;
@@ -96,7 +133,14 @@ pub(super) fn connector_h(buf: &mut Buffer, area: Rect, from: (u16, u16), to: (u
 
 /// The bent left→right route: out from `from`, down/up the midpoint column, then
 /// into `to`. Corners pick rounded glyphs by direction.
-fn connector_h_zroute(buf: &mut Buffer, area: Rect, from: (u16, u16), to: (u16, u16), tip: u16, color: Color) {
+fn connector_h_zroute(
+    buf: &mut Buffer,
+    area: Rect,
+    from: (u16, u16),
+    to: (u16, u16),
+    tip: u16,
+    color: Color,
+) {
     let ((fx, fy), (tx, ty)) = (from, to);
     let mx = (fx + tx) / 2;
     let down = ty > fy;
@@ -110,7 +154,13 @@ fn connector_h_zroute(buf: &mut Buffer, area: Rect, from: (u16, u16), to: (u16, 
 }
 
 /// Orthogonal top→down connector (Z-route) with a `▼` arrowhead at `to`.
-pub(super) fn connector_v(buf: &mut Buffer, area: Rect, from: (u16, u16), to: (u16, u16), color: Color) {
+pub(super) fn connector_v(
+    buf: &mut Buffer,
+    area: Rect,
+    from: (u16, u16),
+    to: (u16, u16),
+    color: Color,
+) {
     let ((fx, fy), (tx, ty)) = (from, to);
     if ty <= fy.saturating_add(1) {
         return;
@@ -126,7 +176,14 @@ pub(super) fn connector_v(buf: &mut Buffer, area: Rect, from: (u16, u16), to: (u
 
 /// The bent top→down route: down from `from`, across the midpoint row, then down
 /// into `to`. Corners pick rounded glyphs by direction.
-fn connector_v_zroute(buf: &mut Buffer, area: Rect, from: (u16, u16), to: (u16, u16), tip: u16, color: Color) {
+fn connector_v_zroute(
+    buf: &mut Buffer,
+    area: Rect,
+    from: (u16, u16),
+    to: (u16, u16),
+    tip: u16,
+    color: Color,
+) {
     let ((fx, fy), (tx, ty)) = (from, to);
     let my = (fy + ty) / 2;
     let right = tx > fx;
@@ -158,13 +215,35 @@ mod tests {
         DfdModel {
             zones: vec!["internet".into(), "app".into(), "data".into()],
             nodes: vec![
-                DfdNodeModel { name: "user".into(), zone: "internet".into(), kind: DfdKind::Entity },
-                DfdNodeModel { name: "api".into(), zone: "app".into(), kind: DfdKind::Process },
-                DfdNodeModel { name: "db".into(), zone: "data".into(), kind: DfdKind::Store },
+                DfdNodeModel {
+                    name: "user".into(),
+                    zone: "internet".into(),
+                    kind: DfdKind::Entity,
+                },
+                DfdNodeModel {
+                    name: "api".into(),
+                    zone: "app".into(),
+                    kind: DfdKind::Process,
+                },
+                DfdNodeModel {
+                    name: "db".into(),
+                    zone: "data".into(),
+                    kind: DfdKind::Store,
+                },
             ],
             flows: vec![
-                DfdFlowModel { from: "user".into(), to: "api".into(), crosses: true, label: "https".into() },
-                DfdFlowModel { from: "api".into(), to: "db".into(), crosses: true, label: "sql".into() },
+                DfdFlowModel {
+                    from: "user".into(),
+                    to: "api".into(),
+                    crosses: true,
+                    label: "https".into(),
+                },
+                DfdFlowModel {
+                    from: "api".into(),
+                    to: "db".into(),
+                    crosses: true,
+                    label: "sql".into(),
+                },
             ],
             empty_hint: None,
         }
@@ -193,16 +272,40 @@ mod tests {
     #[test]
     fn diagrams_render() {
         for w in [72u16, 100] {
-            println!("\n=== dfd @{w} ===\n{}", render_to_text(DfdDiagram { model: sample_dfd() }, w, 24));
-            println!("\n=== attack_tree @{w} ===\n{}", render_to_text(TreeDiagram { model: sample_tree() }, w, 24));
+            println!(
+                "\n=== dfd @{w} ===\n{}",
+                render_to_text(
+                    DfdDiagram {
+                        model: sample_dfd()
+                    },
+                    w,
+                    24
+                )
+            );
+            println!(
+                "\n=== attack_tree @{w} ===\n{}",
+                render_to_text(
+                    TreeDiagram {
+                        model: sample_tree()
+                    },
+                    w,
+                    24
+                )
+            );
         }
     }
 
     #[test]
     fn empty_models_draw_a_hint_not_a_panic() {
         use crate::ui_view_models::{AttackTree, DfdModel};
-        let dfd = DfdModel { empty_hint: Some("no threat model".into()), ..Default::default() };
-        let tree = AttackTree { empty_hint: Some("no chains".into()), ..Default::default() };
+        let dfd = DfdModel {
+            empty_hint: Some("no threat model".into()),
+            ..Default::default()
+        };
+        let tree = AttackTree {
+            empty_hint: Some("no chains".into()),
+            ..Default::default()
+        };
         let _ = render_to_text(DfdDiagram { model: dfd }, 72, 24);
         let _ = render_to_text(TreeDiagram { model: tree }, 72, 24);
     }

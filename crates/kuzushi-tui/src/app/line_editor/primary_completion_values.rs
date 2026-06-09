@@ -95,15 +95,17 @@ pub(crate) const AUTH_COMPLETION_RULES: &[SubcommandCompletionRule] = &[
     },
 ];
 
-pub(crate) const THREATS_COMPLETION_RULES: &[SubcommandCompletionRule] = &[SubcommandCompletionRule {
-    prefix_words: &["threats"],
-    values: threats_action_completion_values,
-}];
+pub(crate) const THREATS_COMPLETION_RULES: &[SubcommandCompletionRule] =
+    &[SubcommandCompletionRule {
+        prefix_words: &["threats"],
+        values: threats_action_completion_values,
+    }];
 
-pub(crate) const PROMPT_COMPLETION_RULES: &[SubcommandCompletionRule] = &[SubcommandCompletionRule {
-    prefix_words: &["prompt"],
-    values: prompt_action_completion_values,
-}];
+pub(crate) const PROMPT_COMPLETION_RULES: &[SubcommandCompletionRule] =
+    &[SubcommandCompletionRule {
+        prefix_words: &["prompt"],
+        values: prompt_action_completion_values,
+    }];
 
 pub(crate) const SHOW_COMPLETION_RULES: &[SubcommandCompletionRule] = &[
     SubcommandCompletionRule {

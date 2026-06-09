@@ -19,7 +19,10 @@ pub(crate) fn gallery_header_lines(app: &ShellApp) -> Vec<Line<'static>> {
             format!("◆ KUZUSHI VIZ — {}", page.label().to_uppercase()),
             theme::heading(),
         )]),
-        Line::from(vec![Span::styled(page_tagline(page).to_string(), theme::muted())]),
+        Line::from(vec![Span::styled(
+            page_tagline(page).to_string(),
+            theme::muted(),
+        )]),
         Line::from(nav_spans(app, page)),
     ]
 }
@@ -64,7 +67,11 @@ fn nav_spans(app: &ShellApp, page: VizPage) -> Vec<Span<'static>> {
         Span::styled("  ·  Tab cycles".to_string(), theme::muted()),
     ];
     if page.is_3d() {
-        let motion = if app.scene_paused { "paused" } else { "spinning" };
+        let motion = if app.scene_paused {
+            "paused"
+        } else {
+            "spinning"
+        };
         spans.push(Span::styled(
             format!("  ·  {motion} · space pause · hjkl rotate"),
             theme::muted(),

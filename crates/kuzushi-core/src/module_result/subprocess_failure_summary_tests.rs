@@ -10,7 +10,10 @@ fn prefers_the_line_that_names_the_failure_over_stack_frames() {
 
     let summary = subprocess_failure_summary(stderr, "fallback");
 
-    assert!(summary.contains("astgen binary not found"), "got: {summary}");
+    assert!(
+        summary.contains("astgen binary not found"),
+        "got: {summary}"
+    );
     assert!(!summary.contains("at io.joern"));
     assert!(!summary.contains("12 more"));
 }
@@ -18,13 +21,19 @@ fn prefers_the_line_that_names_the_failure_over_stack_frames() {
 #[test]
 fn falls_back_when_no_failure_line_present() {
     let stderr = b"   \n\n";
-    assert_eq!(subprocess_failure_summary(stderr, "use a real target"), "use a real target");
+    assert_eq!(
+        subprocess_failure_summary(stderr, "use a real target"),
+        "use a real target"
+    );
 }
 
 #[test]
 fn uses_last_meaningful_line_when_nothing_names_a_failure() {
     let stderr = b"step one done\nstep two done\n";
-    assert_eq!(subprocess_failure_summary(stderr, "fallback"), "step two done");
+    assert_eq!(
+        subprocess_failure_summary(stderr, "fallback"),
+        "step two done"
+    );
 }
 
 #[test]
@@ -36,7 +45,13 @@ fn skips_generic_exit_wrapper_in_favor_of_real_cause() {
 
     let summary = subprocess_failure_summary(stderr, "fallback");
 
-    assert!(summary.contains("astgen binary not found"), "got: {summary}");
+    assert!(
+        summary.contains("astgen binary not found"),
+        "got: {summary}"
+    );
     assert!(!summary.contains("Process exited with code"));
-    assert!(!summary.contains("ERROR AstGenRunner"), "log prefix stripped: {summary}");
+    assert!(
+        !summary.contains("ERROR AstGenRunner"),
+        "log prefix stripped: {summary}"
+    );
 }

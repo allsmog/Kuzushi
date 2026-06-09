@@ -41,7 +41,10 @@ impl ShellApp {
         self.shell_view = ShellView::Scene(page);
         self.log(
             "scene",
-            format!("security-viz — {} · Tab cycles pages · esc back", page.label()),
+            format!(
+                "security-viz — {} · Tab cycles pages · esc back",
+                page.label()
+            ),
         );
     }
 
