@@ -39,16 +39,15 @@ function validatedWordFailures(file) {
     .split(/\r?\n/)
     .flatMap((line, index) =>
       /\bvalidated\b/i.test(line) && !isAllowedValidatedLine(line)
-        ? [`${file}:${index + 1} uses "validated" outside proof/verification/input-validation contexts`]
+        ? [
+            `${file}:${index + 1} uses "validated" outside proof/verification/input-validation contexts`,
+          ]
         : [],
     );
 }
 
 function isAllowed(file) {
-  return (
-    allowedFiles.has(file) ||
-    allowedPrefixes.some((prefix) => file.startsWith(prefix))
-  );
+  return allowedFiles.has(file) || allowedPrefixes.some((prefix) => file.startsWith(prefix));
 }
 
 function trackedFiles() {
@@ -75,11 +74,13 @@ function scannableFile(file) {
 }
 
 function isProductionOrPublicPolicySurface(file) {
+  // docs/notes/ holds historical working notes, not current policy surface.
+  if (file.startsWith("docs/notes/")) return false;
   return (
     file.startsWith("src/") ||
     (file.startsWith("crates/") && file.includes("/src/")) ||
     file === "README.md" ||
-    file === "PORT_PLAN.md" ||
+    file === "docs/PORT_PLAN.md" ||
     file.startsWith("docs/") ||
     file.startsWith("scripts/")
   );
@@ -106,8 +107,8 @@ function isValidatedPolicyContext(line) {
   return [
     "validated-wording check",
     "`validated` claims",
-    "\"validated\" unless",
-    "using \"validated\" wording",
+    '"validated" unless',
+    'using "validated" wording',
     "check-validated-wording.mjs",
   ].some((allowed) => normalized.includes(allowed));
 }

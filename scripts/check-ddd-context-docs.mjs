@@ -29,7 +29,7 @@ const checks = [
     markerFor: (context) => `| \`${context}\``,
   },
   {
-    file: "PORT_PLAN.md",
+    file: "docs/PORT_PLAN.md",
     markerFor: (context) => `- \`${context}\``,
   },
 ];

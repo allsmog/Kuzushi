@@ -77,7 +77,8 @@ const requiredReleaseScripts = {
 const expectedPackageScripts = {
   setup: "bash scripts/bootstrap.sh",
   doctor: "bash scripts/doctor.sh",
-  "check:docs": "node scripts/check-port-contract.mjs && node scripts/check-public-identity.mjs && node scripts/check-doc-command-drift.mjs && node scripts/check-retired-ts-runtime.mjs",
+  "check:docs":
+    "node scripts/check-port-contract.mjs && node scripts/check-public-identity.mjs && node scripts/check-doc-command-drift.mjs && node scripts/check-retired-ts-runtime.mjs",
   "check:retired-ts-runtime": "node scripts/check-retired-ts-runtime.mjs",
   "export:source": "bash scripts/export-clean-source.sh",
   "setup:benchmarks": "bash scripts/setup-benchmarks.sh",
@@ -102,7 +103,8 @@ const expectedPackageScripts = {
   "test:coverage": "vitest run --coverage",
   "quality:crap-risk": "node scripts/crap-risk-gate.mjs",
   "quality:identity": "node scripts/check-public-identity.mjs",
-  "quality:architecture": "node scripts/check-ddd-boundaries.mjs && node scripts/check-ddd-context-docs.mjs && node scripts/check-artifact-contract.mjs && node scripts/check-result-envelope-contract.mjs && node scripts/check-retired-ts-runtime.mjs && node scripts/check-deferred-surface-contract.mjs && node scripts/check-validated-wording.mjs",
+  "quality:architecture":
+    "node scripts/check-ddd-boundaries.mjs && node scripts/check-ddd-context-docs.mjs && node scripts/check-artifact-contract.mjs && node scripts/check-result-envelope-contract.mjs && node scripts/check-retired-ts-runtime.mjs && node scripts/check-deferred-surface-contract.mjs && node scripts/check-validated-wording.mjs",
   "quality:model-safety": "node scripts/check-model-safety.mjs",
   "verify:pack": "node scripts/verify-pack.mjs",
   "publish:npm": "bash scripts/publish-npm.sh",
@@ -138,7 +140,8 @@ const expectedPackageMetadata = {
   nodeEngine: ">=22",
   author: "Shayaun Nejad",
   license: "MIT",
-  packageManager: "pnpm@10.30.0+sha512.2b5753de015d480eeb88f5b5b61e0051f05b4301808a82ec8b840c9d2adf7748eb352c83f5c1593ca703ff1017295bc3fdd3119abb9686efc96b9fcb18200937",
+  packageManager:
+    "pnpm@10.30.0+sha512.2b5753de015d480eeb88f5b5b61e0051f05b4301808a82ec8b840c9d2adf7748eb352c83f5c1593ca703ff1017295bc3fdd3119abb9686efc96b9fcb18200937",
 };
 const expectedPackageKeywords = ["sast", "security", "semgrep", "ai", "triage"];
 const expectedOnlyBuiltDependencies = ["better-sqlite3", "esbuild"];
@@ -193,7 +196,8 @@ const expectedPnpmLockfileRootDependencyVersions = {
     "@commitlint/config-conventional": "19.8.1",
     "@types/better-sqlite3": "7.6.13",
     "@types/node": "22.19.11",
-    "@vitest/coverage-v8": "3.2.4(vitest@3.2.4(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))",
+    "@vitest/coverage-v8":
+      "3.2.4(vitest@3.2.4(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2))",
     husky: "9.1.7",
     "lint-staged": "15.5.2",
     madge: "8.0.0(typescript@5.9.3)",
@@ -643,7 +647,7 @@ function binWrapperContentFailures() {
   const source = content.source;
   const required = [
     "#!/usr/bin/env node",
-    'spawnSync(binary, process.argv.slice(2)',
+    "spawnSync(binary, process.argv.slice(2)",
     'stdio: "inherit"',
     'join(root, "native", `${process.platform}-${process.arch}`, exe)',
     'join(root, "target", "release", exe)',
@@ -785,8 +789,16 @@ function lifecycleScriptCommandFailures(scripts) {
 
 function packageScriptSurfaceFailures(scripts) {
   return [
-    ...missingSchemaFiles(Object.keys(expectedPackageScripts), Object.keys(scripts), "package scripts missing required command"),
-    ...missingSchemaFiles(Object.keys(scripts), Object.keys(expectedPackageScripts), "package scripts has uncontracted command"),
+    ...missingSchemaFiles(
+      Object.keys(expectedPackageScripts),
+      Object.keys(scripts),
+      "package scripts missing required command",
+    ),
+    ...missingSchemaFiles(
+      Object.keys(scripts),
+      Object.keys(expectedPackageScripts),
+      "package scripts has uncontracted command",
+    ),
     ...Object.entries(expectedPackageScripts)
       .filter(([name, command]) => scripts[name] !== command)
       .map(([name, command]) => `package scripts.${name} must stay ${command}`),
@@ -796,7 +808,10 @@ function packageScriptSurfaceFailures(scripts) {
 function packageScriptRuntimePolicyFailures(scripts) {
   return Object.entries(scripts)
     .filter(([, command]) => scriptCommandViolatesRuntimePolicy(command))
-    .map(([name, command]) => `package scripts.${name} must not invoke retired TypeScript shell runtime: ${command}`);
+    .map(
+      ([name, command]) =>
+        `package scripts.${name} must not invoke retired TypeScript shell runtime: ${command}`,
+    );
 }
 
 function scriptCommandViolatesRuntimePolicy(command) {
@@ -859,7 +874,7 @@ function publishWrapperContentFailures() {
     "typecheck + tests + clean JS/native build + package verification must pass",
     "git diff --quiet",
     "git diff --cached --quiet",
-    'git rev-parse --abbrev-ref HEAD',
+    "git rev-parse --abbrev-ref HEAD",
     'git rev-parse -q --verify "refs/tags/${TAG}"',
     'git rev-list -n 1 "$TAG"',
     "git rev-parse HEAD",
@@ -868,17 +883,17 @@ function publishWrapperContentFailures() {
     'npm view "${PUB_NAME}@${VERSION}" version',
     "pnpm exec tsc --noEmit",
     "pnpm exec vitest run",
-    'SKIP_TESTS:-0',
+    "SKIP_TESTS:-0",
     "pnpm run build:clean",
     "pnpm run build:native",
     "pnpm run verify:pack",
     "npm pack --dry-run --ignore-scripts",
     "PUBLISH_ARGS=(publish --access public --ignore-scripts)",
-    'NPM_PROVENANCE:-',
-    'PUBLISH_ARGS+=(--provenance)',
-    'OTP:-',
+    "NPM_PROVENANCE:-",
+    "PUBLISH_ARGS+=(--provenance)",
+    "OTP:-",
     'PUBLISH_ARGS+=(--otp="$OTP")',
-    'read -r reply',
+    "read -r reply",
     'npm "${PUBLISH_ARGS[@]}"',
     "Dry-run complete (would run: npm ${PUBLISH_ARGS[*]})",
     "Pass --publish to actually publish",
@@ -926,7 +941,9 @@ function packageMetadataFailures(packageManifest) {
 function packageTypesRuntimePolicyFailures(types) {
   if (typeof types !== "string") return ["package types must be a string"];
   const target = normalizeExportTarget(types);
-  return target.startsWith("dist/") && target.endsWith(".d.ts") && !exportTargetViolatesRuntimePolicy(target)
+  return target.startsWith("dist/") &&
+    target.endsWith(".d.ts") &&
+    !exportTargetViolatesRuntimePolicy(target)
     ? []
     : [`package types must stay on built declaration runtime surface: ${target}`];
 }
@@ -951,7 +968,11 @@ function packageVersionFailures(version) {
 
 function semverWithoutBuildMetadata(version) {
   const match = version.match(/^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/);
-  return Boolean(match) && semverNumericIdentifiersAreCanonical(match.slice(1, 4)) && prereleaseIdentifiersAreCanonical(match[4]);
+  return (
+    Boolean(match) &&
+    semverNumericIdentifiersAreCanonical(match.slice(1, 4)) &&
+    prereleaseIdentifiersAreCanonical(match[4])
+  );
 }
 
 function semverNumericIdentifiersAreCanonical(identifiers) {
@@ -962,7 +983,10 @@ function prereleaseIdentifiersAreCanonical(prerelease) {
   return String(prerelease ?? "")
     .split(".")
     .filter(Boolean)
-    .every((identifier) => !/^\d+$/.test(identifier) || identifier === "0" || !identifier.startsWith("0"));
+    .every(
+      (identifier) =>
+        !/^\d+$/.test(identifier) || identifier === "0" || !identifier.startsWith("0"),
+    );
 }
 
 function packagePublishMetadataFailures(packageManifest) {
@@ -1005,7 +1029,12 @@ function publicDocumentContentFailures() {
     },
     {
       file: "UPSTREAM_CODEX.md",
-      tokens: ["https://github.com/openai/codex", "Apache-2.0", "upstream-codex", "No upstream Codex source files are currently vendored wholesale"],
+      tokens: [
+        "https://github.com/openai/codex",
+        "Apache-2.0",
+        "upstream-codex",
+        "No upstream Codex source files are currently vendored wholesale",
+      ],
     },
   ];
   return checks.flatMap(({ file, tokens }) => missingDocumentTokens(file, tokens));
@@ -1024,9 +1053,21 @@ function missingDocumentTokens(file, tokens) {
 function packagedRunSchemaFailures(files) {
   const shippedSchemas = files.filter((file) => /^schemas\/run\..*\.schema\.json$/.test(file));
   return [
-    ...missingSchemaFiles(canonicalRunSchemaFiles, shippedSchemas, "required run schema not shipped"),
-    ...missingSchemaFiles(shippedSchemas, canonicalRunSchemaFiles, "uncontracted run schema shipped"),
-    ...missingSchemaFiles(packagedSchemaFiles(files), requiredPackageFiles, "uncontracted schema shipped"),
+    ...missingSchemaFiles(
+      canonicalRunSchemaFiles,
+      shippedSchemas,
+      "required run schema not shipped",
+    ),
+    ...missingSchemaFiles(
+      shippedSchemas,
+      canonicalRunSchemaFiles,
+      "uncontracted run schema shipped",
+    ),
+    ...missingSchemaFiles(
+      packagedSchemaFiles(files),
+      requiredPackageFiles,
+      "uncontracted schema shipped",
+    ),
   ];
 }
 
@@ -1185,7 +1226,7 @@ function nextPnpmRootImporterState(sections, versions, state, line) {
     return { inRoot: true, foundRootImporter: true, section: null, packageName: null };
   }
   if (!state.inRoot) return state;
-  if (line === "packages:" || /^  [^ ].*:$/.test(line)) {
+  if (line === "packages:" || /^ {2}[^ ].*:$/.test(line)) {
     return { ...state, inRoot: false, section: null, packageName: null };
   }
   return nextPnpmRootDependencyState(sections, versions, state, line);
@@ -1213,21 +1254,21 @@ function recordPnpmRootField(target, packageName, value) {
 }
 
 function pnpmRootSectionName(line) {
-  return line.match(/^    (dependencies|devDependencies|optionalDependencies):$/)?.[1] ?? null;
+  return line.match(/^ {4}(dependencies|devDependencies|optionalDependencies):$/)?.[1] ?? null;
 }
 
 function pnpmRootPackageName(line) {
-  const match = line.match(/^      (.+):$/);
+  const match = line.match(/^ {6}(.+):$/);
   return match ? stripYamlScalar(match[1]) : null;
 }
 
 function pnpmRootSpecifier(line) {
-  const match = line.match(/^        specifier: (.+)$/);
+  const match = line.match(/^ {8}specifier: (.+)$/);
   return match ? stripYamlScalar(match[1]) : null;
 }
 
 function pnpmRootVersion(line) {
-  const match = line.match(/^        version: (.+)$/);
+  const match = line.match(/^ {8}version: (.+)$/);
   return match ? stripYamlScalar(match[1]) : null;
 }
 
@@ -1237,8 +1278,16 @@ function stripYamlScalar(value) {
 
 function packageExportSurfaceFailures(exports) {
   return [
-    ...missingSchemaFiles(Object.keys(expectedPackageExports), Object.keys(exports), "package exports missing required key"),
-    ...missingSchemaFiles(Object.keys(exports), Object.keys(expectedPackageExports), "package exports has uncontracted key"),
+    ...missingSchemaFiles(
+      Object.keys(expectedPackageExports),
+      Object.keys(exports),
+      "package exports missing required key",
+    ),
+    ...missingSchemaFiles(
+      Object.keys(exports),
+      Object.keys(expectedPackageExports),
+      "package exports has uncontracted key",
+    ),
     ...Object.entries(expectedPackageExports)
       .filter(([key, expected]) => JSON.stringify(exports[key]) !== JSON.stringify(expected))
       .map(([key]) => `package exports ${key} must match the Kuzushi public surface`),
@@ -1259,7 +1308,10 @@ function packageExportTargetPolicyFailures(exports) {
   return Object.entries(exports).flatMap(([key, value]) =>
     packageExportTargets(value)
       .filter(exportTargetViolatesRuntimePolicy)
-      .map((target) => `package exports ${key} target must stay on built Kuzushi runtime surface: ${target}`),
+      .map(
+        (target) =>
+          `package exports ${key} target must stay on built Kuzushi runtime surface: ${target}`,
+      ),
   );
 }
 

@@ -4,7 +4,8 @@ import path from "node:path";
 
 const repo = process.cwd();
 
-const registrationFile = "crates/kuzushi-core/src/modules/builtins/with_v2_builtins/builtin_registration.rs";
+const registrationFile =
+  "crates/kuzushi-core/src/modules/builtins/with_v2_builtins/builtin_registration.rs";
 const systemsModuleFile = "crates/kuzushi-core/src/modules/carlini_threat_hunt_module.rs";
 const pluginAdaptersFile = "crates/kuzushi-core/src/modules/plugin_adapters/register_modules.rs";
 const recommenderFile = "crates/kuzushi-core/src/capabilities/module_recommender/rule_catalog.rs";
@@ -12,7 +13,7 @@ const registryTestsFile = "crates/kuzushi-core/src/modules/registry/tests.rs";
 const sastTasksFile = "crates/kuzushi-tui/src/app/sast_tasks/valid_sast_task_ids.rs";
 const packageFile = "package.json";
 const readmeFile = "README.md";
-const portPlanFile = "PORT_PLAN.md";
+const portPlanFile = "docs/PORT_PLAN.md";
 
 const deferredRegistrations = [
   "carlini_threat_hunt_module().deferred()",
@@ -159,19 +160,21 @@ function forbiddenNeedles(file, needles) {
 
 function deferredPackageDependencyFailures() {
   const pkg = JSON.parse(readRepoFile(packageFile));
-  return optionalAdapterPackages.flatMap((name) => [
-    Object.hasOwn(pkg.dependencies ?? {}, name)
-      ? `${packageFile} must not install deferred adapter package ${name} as a default dependency`
-      : null,
-    Object.hasOwn(pkg.optionalDependencies ?? {}, name)
-      ? null
-      : `${packageFile} must keep deferred adapter package ${name} in optionalDependencies`,
-  ]).filter(Boolean);
+  return optionalAdapterPackages
+    .flatMap((name) => [
+      Object.hasOwn(pkg.dependencies ?? {}, name)
+        ? `${packageFile} must not install deferred adapter package ${name} as a default dependency`
+        : null,
+      Object.hasOwn(pkg.optionalDependencies ?? {}, name)
+        ? null
+        : `${packageFile} must keep deferred adapter package ${name} in optionalDependencies`,
+    ])
+    .filter(Boolean);
 }
 
 function systemsHuntTaskFailures() {
   const source = readRepoFile(sastTasksFile);
-  const task = source.match(/SastTaskCapability \{[\s\S]*?id: "systems-hunt",[\s\S]*?\n    \},/);
+  const task = source.match(/SastTaskCapability \{[\s\S]*?id: "systems-hunt",[\s\S]*?\n {4}\},/);
   if (!task) return [`${sastTasksFile} must keep systems-hunt as an explicit task row`];
   return [
     task[0].includes("default_enabled: false")

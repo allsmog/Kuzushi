@@ -37,7 +37,6 @@ const publicSourceForbidden = [
 const renderedUiForbidden = [
   ["legacy Codex wording in rendered TUI snapshot", /\bCodex\b|\bcodex\b|openai-codex/i],
 ];
-const publicOpenAiLoginNeedle = "kuzushi auth login openai, OPENAI_API_KEY";
 const requiredIdentityReferences = [
   {
     label: "public prompt docs",
@@ -52,13 +51,26 @@ const requiredIdentityReferences = [
   },
   {
     label: "port plan identity contract",
-    file: "PORT_PLAN.md",
-    needles: ["binary: `kuzushi`", "alias: `kz`", "prompt: `kuzushi>` or `kz>`", "header: `KUZUSHI`", "state directory: `.kuzushi/`"],
+    file: "docs/PORT_PLAN.md",
+    needles: [
+      "binary: `kuzushi`",
+      "alias: `kz`",
+      "prompt: `kuzushi>` or `kz>`",
+      "header: `KUZUSHI`",
+      "state directory: `.kuzushi/`",
+    ],
   },
   {
     label: "TUI prompt model",
     file: "crates/kuzushi-tui/src/ui_view_models/prompt.rs",
-    needles: ['public_prompt_brand', 'stem.eq_ignore_ascii_case("kz")', 'stem.eq_ignore_ascii_case("kuzushi")', 'cli_name == Some("kz")', 'eq_ignore_ascii_case(".exe")', 'format!("{brand}> ")'],
+    needles: [
+      "public_prompt_brand",
+      'stem.eq_ignore_ascii_case("kz")',
+      'stem.eq_ignore_ascii_case("kuzushi")',
+      'cli_name == Some("kz")',
+      'eq_ignore_ascii_case(".exe")',
+      'format!("{brand}> ")',
+    ],
   },
   {
     label: "TUI cockpit header",
@@ -78,7 +90,7 @@ const requiredIdentityReferences = [
   {
     label: "Rust CLI help identity",
     file: "crates/kuzushi-cli/src/cli/mod.rs",
-    needles: ['#[command(name = "kuzushi")]', 'Kuzushi security-native code agent'],
+    needles: ['#[command(name = "kuzushi")]', "Kuzushi security-native code agent"],
   },
   {
     label: "TUI auth next-step selector identity",
@@ -99,8 +111,8 @@ const requiredIdentityReferences = [
     needles: [
       "public_bridge_bytes(stdout)",
       "bridge_error_detail(&output.stdout, &output.stderr)",
-      ".replace(\"auth login openai-codex\", \"auth login openai\")",
-      ".replace(\"openai-codex\", \"OpenAI OAuth\")",
+      '.replace("auth login openai-codex", "auth login openai")',
+      '.replace("openai-codex", "OpenAI OAuth")',
     ],
   },
   {
@@ -115,13 +127,8 @@ const requiredIdentityReferences = [
   {
     label: "TUI legacy OpenAI auth parser identity",
     file: "crates/kuzushi-tui/src/commands/parse_auth_command.rs",
-    needles: [
-      "legacy_openai_oauth_selector_command",
-      "auth legacy-openai-oauth",
-    ],
-    forbidden: [
-      'format!("auth login {}", args[1])',
-    ],
+    needles: ["legacy_openai_oauth_selector_command", "auth legacy-openai-oauth"],
+    forbidden: ['format!("auth login {}", args[1])'],
   },
   {
     label: "Rust PR comment help identity",
@@ -133,7 +140,7 @@ const requiredIdentityReferences = [
     file: "bin/kuzushi-rs.mjs",
     needles: [
       'invokedName === "kz"',
-      '`${cliName}.exe`',
+      "`${cliName}.exe`",
       "const nativeOverride = process.env.KUZUSHI_NATIVE_BIN",
       "KUZUSHI_CLI_NAME: cliName",
       "statSync(nativeOverride).isFile()",
@@ -218,11 +225,16 @@ function packageIdentityFailures(pkg) {
   return failures;
 }
 
-function requiredIdentityReferenceFailures({ label, file, needles, forbidden: forbiddenNeedles = [] }) {
+function requiredIdentityReferenceFailures({
+  label,
+  file,
+  needles,
+  forbidden: forbiddenNeedles = [],
+}) {
   const source = readFileSync(path.join(root, file), "utf8");
   return [
     ...needles
-    .filter((needle) => !source.includes(needle))
+      .filter((needle) => !source.includes(needle))
       .map((needle) => `${file}: missing ${label} reference ${needle}`),
     ...forbiddenNeedles
       .filter((needle) => source.includes(needle))
@@ -248,7 +260,9 @@ function binShimAliasFailures() {
     failures.push("bin/kuzushi-rs.mjs: shim must pass KUZUSHI_CLI_NAME=kz when invoked as kz");
   }
   if (!binShimRejectsMismatchedNativeOverride()) {
-    failures.push("bin/kuzushi-rs.mjs: shim must reject KUZUSHI_NATIVE_BIN when it points at the wrong public binary");
+    failures.push(
+      "bin/kuzushi-rs.mjs: shim must reject KUZUSHI_NATIVE_BIN when it points at the wrong public binary",
+    );
   }
   return failures;
 }
@@ -289,8 +303,6 @@ function bridgePublicWordingFailures() {
 }
 
 function bridgePublicWordingRules() {
-  const publicLoginPattern =
-    /kuzushi auth login (?:` \+\s*)?"openai, OPENAI_API_KEY|kuzushi auth login openai, ` \+\s*"OPENAI_API_KEY/;
   return [
     {
       passes: (source) => source.includes("ChatOpenAI"),
@@ -303,11 +315,13 @@ function bridgePublicWordingRules() {
     },
     {
       passes: (source) => !source.includes("authorize openai-codex"),
-      message: "scripts/langgraph-bridge.mjs: device login must not ask operators to authorize openai-codex",
+      message:
+        "scripts/langgraph-bridge.mjs: device login must not ask operators to authorize openai-codex",
     },
     {
       passes: (source) => !source.includes("auth login openai-codex, OPENAI_API_KEY"),
-      message: "scripts/langgraph-bridge.mjs: OpenAI credential errors must not expose auth login openai-codex",
+      message:
+        "scripts/langgraph-bridge.mjs: OpenAI credential errors must not expose auth login openai-codex",
     },
   ];
 }
@@ -338,6 +352,12 @@ function isPublicSurface(file) {
 function isIgnored(file) {
   return (
     file === "scripts/check-public-identity.mjs" ||
+    // Historical working notes; they describe the upstream port and old
+    // TypeScript-era state, so identity wording rules do not apply.
+    file.startsWith("docs/notes/") ||
+    // The upstream-port plan legitimately names the upstream project; its
+    // identity contract is still enforced via requiredIdentityReferences.
+    file === "docs/PORT_PLAN.md" ||
     file.startsWith("target/") ||
     file.startsWith("node_modules/") ||
     file.startsWith("dist/") ||
@@ -346,15 +366,15 @@ function isIgnored(file) {
 }
 
 function isPublicDoc(file) {
+  // docs/notes/ holds historical working notes and docs/PORT_PLAN.md is the
+  // upstream-port identity contract; both legitimately mention the upstream
+  // project and are not operator-facing product docs.
+  if (file.startsWith("docs/notes/") || file === "docs/PORT_PLAN.md") return false;
   return file === "README.md" || file.startsWith("docs/");
 }
 
 function isProductionPublicSource(file) {
-  return (
-    file.includes("/src/") &&
-    !file.endsWith("/tests.rs") &&
-    !file.endsWith("_tests.rs")
-  );
+  return file.includes("/src/") && !file.endsWith("/tests.rs") && !file.endsWith("_tests.rs");
 }
 
 function isRenderedTuiSnapshot(file) {
