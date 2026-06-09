@@ -49,7 +49,7 @@ fn consume_escape_sequence(chars: &mut std::iter::Peekable<std::str::Chars<'_>>)
     match chars.peek() {
         Some(&'[') => {
             chars.next();
-            for c in chars.by_ref() {
+            while let Some(c) = chars.next() {
                 if c.is_ascii_alphabetic() || c == '~' {
                     break;
                 }

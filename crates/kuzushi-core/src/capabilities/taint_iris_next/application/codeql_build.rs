@@ -263,7 +263,7 @@ fn write_codeql_build_script(target: &Path, raw: &str) -> Result<PathBuf> {
     let script_dir = script_path
         .parent()
         .context("could not resolve CodeQL build script parent")?;
-    std::fs::create_dir_all(script_dir)
+    std::fs::create_dir_all(&script_dir)
         .with_context(|| format!("could not create {}", script_dir.display()))?;
     let script_body =
         format!("#!/usr/bin/env bash\nset -euo pipefail\ncd \"$(dirname \"$0\")/..\"\n{raw}\n");

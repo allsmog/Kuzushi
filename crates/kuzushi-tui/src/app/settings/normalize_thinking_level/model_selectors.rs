@@ -3,7 +3,7 @@ use super::*;
 pub(crate) fn resolve_model_selector(selector: &str) -> Option<&'static ModelChoice> {
     let key = selector.trim().to_ascii_lowercase().replace('_', "-");
     match key.as_str() {
-        "1" | "gpt-5.5" | "5.5" | "openai:gpt-5.5" => MODEL_CHOICES.first(),
+        "1" | "gpt-5.5" | "5.5" | "openai:gpt-5.5" => MODEL_CHOICES.get(0),
         "2" | "gpt-5.5-mini" | "5.5-mini" | "mini" | "openai:gpt-5.5-mini" => MODEL_CHOICES.get(1),
         "3" | "openai-oauth:gpt-5.4" | "oauth:gpt-5.4" => MODEL_CHOICES.get(2),
         "5" | "sonnet" | "claude-sonnet" | "claude-sonnet-4-6" | "anthropic:claude-sonnet-4-6" => {

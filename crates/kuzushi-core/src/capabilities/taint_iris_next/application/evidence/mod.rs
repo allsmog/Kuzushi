@@ -788,7 +788,7 @@ mod tests {
         for c in &candidates {
             *counts.entry(c.cwe.as_str()).or_insert(0) += 1;
         }
-        for n in counts.values() {
+        for (_, n) in &counts {
             assert!(*n <= per_cwe_cap);
         }
     }

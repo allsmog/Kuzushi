@@ -120,9 +120,13 @@ fn append_forbidden_runtime_claim_issue(claim: &StaticProofClaim, issues: &mut V
 }
 
 fn final_static_proof_state(accepted: bool, requested: StaticProofState) -> StaticProofState {
-    if accepted { requested } else { StaticProofState::NeedsRuntimeEvidence }
+    accepted
+        .then_some(requested)
+        .unwrap_or(StaticProofState::NeedsRuntimeEvidence)
 }
 
 fn final_static_proof_verdict(accepted: bool, requested: StaticProofState) -> TriageVerdict {
-    if accepted && requested == StaticProofState::StaticallyConfirmed { TriageVerdict::TruePositive } else { TriageVerdict::NeedsReview }
+    (accepted && requested == StaticProofState::StaticallyConfirmed)
+        .then_some(TriageVerdict::TruePositive)
+        .unwrap_or(TriageVerdict::NeedsReview)
 }

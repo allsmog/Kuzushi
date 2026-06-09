@@ -81,7 +81,7 @@ pub(crate) fn write_x_ray_artifacts(repo_root: &Path, content: XRayArtifactConte
 
 pub(crate) fn render_x_ray_run_summary(data: &XRayReportData) -> String {
     format!(
-        "x-ray:run complete for {} ({})\n  Runtime:      {}\n  Verdict:      {}{}\n  Entry points: {}\n  Invariants:   {}\n  Cost:         ${:.4}\n\nArtifacts:\n  - {}\n  - {}\n  - {}\n  - {}",
+        "x-ray:run complete for {} ({})\n  Runtime:      {}\n  Verdict:      {}{}\n  Entry points: {}\n  Invariants:   {}\n  Cost:         ${}\n\nArtifacts:\n  - {}\n  - {}\n  - {}\n  - {}",
         data.repo_name,
         data.target,
         data.runtime_mode,
@@ -93,7 +93,7 @@ pub(crate) fn render_x_ray_run_summary(data: &XRayReportData) -> String {
         },
         data.entry_point_counts.total,
         data.invariant_counts.total,
-        data.cost_usd,
+        format!("{:.4}", data.cost_usd),
         data.artifact_paths.x_ray,
         data.artifact_paths.entry_points,
         data.artifact_paths.invariants,

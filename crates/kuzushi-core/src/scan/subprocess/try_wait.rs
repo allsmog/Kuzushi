@@ -111,6 +111,6 @@ pub(in crate::scan) fn configure_scanner_subprocess_env(command: &mut Command) {
 pub(in crate::scan) fn scrubbed_scanner_environment(
 ) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
     env::vars_os()
-        .filter(|(key, _)| key.to_str().is_some_and(is_safe_scanner_env_key))
+        .filter(|(key, _)| key.to_str().is_some_and(|key| is_safe_scanner_env_key(key)))
         .collect()
 }

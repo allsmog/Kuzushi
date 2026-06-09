@@ -1,7 +1,7 @@
 pub(crate) use super::*;
 use kuzushi_core::run_artifacts::FailureToLlmContext;
 
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AgentChatView {
     pub question: String,
     pub answer: Option<String>,
@@ -15,6 +15,23 @@ pub struct AgentChatView {
     pub started_secs: u64,
     pub(crate) failure_context: Option<FailureToLlmContext>,
     pub(crate) pending_failure_context: Option<FailureToLlmContext>,
+}
+
+impl Default for AgentChatView {
+    fn default() -> Self {
+        Self {
+            question: String::new(),
+            answer: None,
+            running: false,
+            abort_requested: false,
+            error: None,
+            history: Vec::new(),
+            run_id: None,
+            started_secs: 0,
+            failure_context: None,
+            pending_failure_context: None,
+        }
+    }
 }
 
 impl AgentChatView {

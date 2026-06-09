@@ -55,7 +55,7 @@ pub(in crate::code_nav) fn scan_rust(body: &str) -> Vec<DefinitionEntry> {
         let t = line.trim_start();
         for kw in ["pub fn ", "fn ", "pub async fn ", "async fn "] {
             if let Some(rest) = t.strip_prefix(kw) {
-                if let Some(name) = rest.split(['<', '(']).next() {
+                if let Some(name) = rest.split(|c: char| c == '<' || c == '(').next() {
                     let n = name.trim();
                     if !n.is_empty() {
                         out.push(DefinitionEntry {

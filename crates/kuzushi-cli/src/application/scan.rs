@@ -65,7 +65,7 @@ fn execute_prepared_scan(
     };
 
     let started = std::time::Instant::now();
-    emit_scan_ci_start(ci, started, target, &config, tasks);
+    emit_scan_ci_start(ci, started, &target, &config, &tasks);
 
     let result = execute_scan_tool(ScanToolExecution {
         registry: &registry,

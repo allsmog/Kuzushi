@@ -70,7 +70,7 @@ pub(crate) fn prompts(root: &Path, update: ScopeUpdate, run_id: Option<String>) 
 
 fn write_prompt_bundle(prompts_dir: &Path, scope: &Value) -> Result<Vec<(String, String)>> {
     ensure_prompt_dir(prompts_dir).and_then(|_| {
-        let prompts = build_prompt_bundle(scope);
+        let prompts = build_prompt_bundle(&scope);
         write_prompt_files(prompts_dir, &prompts).map(|_| prompts)
     })
 }

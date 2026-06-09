@@ -37,7 +37,7 @@ pub(in crate::modules) fn parse_sast_tasks(input: &Value) -> Result<Vec<String>>
     if !matches!(task_mode, "auto" | "manual") {
         anyhow::bail!("sast:scan taskMode must be \"auto\" or \"manual\"");
     }
-    if task_mode == "manual" && requested.as_ref().is_none_or(Vec::is_empty) {
+    if task_mode == "manual" && requested.as_ref().map_or(true, Vec::is_empty) {
         anyhow::bail!("sast:scan taskMode=manual requires a non-empty tasks array");
     }
 

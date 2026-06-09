@@ -229,10 +229,7 @@ impl ShellApp {
             return;
         };
         let id = row.id;
-        if !matches!(
-            row.artifact_state,
-            crate::app::PlanningArtifactState::Cached
-        ) {
+        if !matches!(row.artifact_state, crate::app::PlanningArtifactState::Cached) {
             self.log(
                 "phase",
                 format!("{} has no cached artifact to rebuild", id.label()),

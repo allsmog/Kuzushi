@@ -668,7 +668,10 @@ mod tests {
 
     #[test]
     fn caps_per_marker_to_keep_artifact_compact() {
-        let lines: Vec<&str> = vec!["dlopen(\"libx.so\", 0);"; 50];
+        let mut lines: Vec<&str> = Vec::new();
+        for _ in 0..50 {
+            lines.push("dlopen(\"libx.so\", 0);");
+        }
         let files = vec![fixture("c", &lines, "src/x.c")];
         let result = run_taint_iris_next_source_sink_discovery(&files, 5, &[]);
         let dlopen_count = result.sinks.iter().filter(|s| s.name == "dlopen").count();

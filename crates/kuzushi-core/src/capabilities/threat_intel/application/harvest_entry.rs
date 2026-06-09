@@ -268,7 +268,7 @@ fn collect_string_items(items: &[Value], map: fn(&str) -> String) -> Vec<String>
 
 fn string_field_split(pattern: &Value, key: &str) -> Vec<String> {
     let raw = pattern.get(key).and_then(Value::as_str).unwrap_or("");
-    raw.split([',', ';', '\n'])
+    raw.split(|c: char| matches!(c, ',' | ';' | '\n'))
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .take(8)

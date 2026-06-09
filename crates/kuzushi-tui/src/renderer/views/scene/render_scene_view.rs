@@ -29,18 +29,10 @@ pub(crate) fn render_scene_view(frame: &mut Frame<'_>, area: Rect, app: &ShellAp
         .split(area);
     frame.render_widget(Paragraph::new(gallery_header_lines(app)), outer[0]);
     match app.scene_page {
-        VizPage::Dfd => frame.render_widget(
-            DfdDiagram {
-                model: dfd_model(app),
-            },
-            outer[1],
-        ),
-        VizPage::ExploitChain => frame.render_widget(
-            TreeDiagram {
-                model: attack_tree(app),
-            },
-            outer[1],
-        ),
+        VizPage::Dfd => frame.render_widget(DfdDiagram { model: dfd_model(app) }, outer[1]),
+        VizPage::ExploitChain => {
+            frame.render_widget(TreeDiagram { model: attack_tree(app) }, outer[1])
+        }
         VizPage::AttackSurface => render_terrain_body(frame, outer[1], app),
         // Line-rendered pages never reach the frame path (guarded by
         // `uses_scene_frame`); draw nothing rather than the wrong page. Exhaustive

@@ -149,7 +149,7 @@ fn root_edge(to: String, source: &str) -> SbomDependencyEdge {
 fn tuple_atoms(line: &str) -> Vec<String> {
     line.split("{:")
         .skip(1)
-        .filter_map(atom_name)
+        .filter_map(|tail| atom_name(tail))
         .collect()
 }
 

@@ -77,7 +77,7 @@ fn append_remaining_count(lines: &mut Vec<String>, finding_count: usize) {
 }
 
 fn plural_suffix(count: usize) -> &'static str {
-    if count != 1 { "s" } else { "" }
+    (count != 1).then_some("s").unwrap_or("")
 }
 
 pub(crate) fn run_taint_cwe_select(

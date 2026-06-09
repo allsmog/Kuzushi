@@ -131,7 +131,7 @@ fn threat_model_root(app: &ShellApp) -> PathBuf {
 }
 
 fn read_threat_model_artifact(app: &ShellApp) -> ThreatModelArtifact {
-    let path = threat_model_artifact_path(threat_model_root(app));
+    let path = threat_model_artifact_path(&threat_model_root(app));
     match std::fs::metadata(&path) {
         Ok(metadata) if metadata.is_file() => {}
         Ok(_) => return ThreatModelArtifact::NonFile,

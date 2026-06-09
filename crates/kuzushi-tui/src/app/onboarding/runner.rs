@@ -196,10 +196,7 @@ impl ShellApp {
         if skipped.is_empty() {
             self.log(
                 "phase",
-                format!(
-                    "{} failed — no queued task depended on it; continuing",
-                    failed.tool_name()
-                ),
+                format!("{} failed — no queued task depended on it; continuing", failed.tool_name()),
             );
             return;
         }
@@ -210,10 +207,7 @@ impl ShellApp {
             .join(", ");
         self.log(
             "phase",
-            format!(
-                "{} failed — skipping dependents: {names}",
-                failed.tool_name()
-            ),
+            format!("{} failed — skipping dependents: {names}", failed.tool_name()),
         );
     }
 
@@ -275,8 +269,7 @@ impl ShellApp {
             tasks.insert(item.task);
             tasks.extend(item.blocked.iter().copied());
             if let Some(adjustment) = &item.adjustment {
-                self.planning_adjustments
-                    .insert(item.task, adjustment.clone());
+                self.planning_adjustments.insert(item.task, adjustment.clone());
             }
         }
         let plan = topological_order(&tasks);
@@ -285,10 +278,7 @@ impl ShellApp {
             .map(|task| task.tool_name())
             .collect::<Vec<_>>()
             .join(" → ");
-        self.log(
-            "phase",
-            format!("retrying {} task(s): {labels}", plan.len()),
-        );
+        self.log("phase", format!("retrying {} task(s): {labels}", plan.len()));
         self.planning_run_queue = plan.into_iter().collect();
         match self.current_workspace() {
             Ok(workspace) => {

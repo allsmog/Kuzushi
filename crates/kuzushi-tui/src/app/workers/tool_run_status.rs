@@ -51,7 +51,8 @@ pub(crate) fn run_agent_worker(
     cwd: PathBuf,
     question: String,
 ) -> Result<AgentWorkerAnswer> {
-    let runtime = LangGraphRuntime::from_config(&config, &cwd)?.with_thinking_level(thinking_level);
+    let runtime =
+        LangGraphRuntime::from_config(&config, &cwd)?.with_thinking_level(thinking_level);
     let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
         cwd,

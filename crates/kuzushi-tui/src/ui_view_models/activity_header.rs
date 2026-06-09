@@ -55,19 +55,11 @@ fn compact_activity_run_id(run_id: &str) -> String {
 }
 
 fn paused_segment(paused: bool) -> &'static str {
-    if paused {
-        "  ·  ⏸ paused"
-    } else {
-        ""
-    }
+    paused.then_some("  ·  ⏸ paused").unwrap_or("")
 }
 
 fn verbose_segment(verbose: bool) -> &'static str {
-    if verbose {
-        "  ·  V verbose"
-    } else {
-        ""
-    }
+    verbose.then_some("  ·  V verbose").unwrap_or("")
 }
 
 fn pane_focus_label(focus: PaneFocus) -> &'static str {

@@ -107,7 +107,7 @@ impl ShellApp {
         &mut self,
         command: Vec<String>,
     ) -> Option<Vec<String>> {
-        if !command.is_empty() {
+        if command.first().is_some() {
             return Some(command);
         }
         self.log("error", "LangGraph bridge command is empty");

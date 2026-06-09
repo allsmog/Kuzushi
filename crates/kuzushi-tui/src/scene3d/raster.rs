@@ -82,16 +82,11 @@ impl Framebuffer {
             let diffuse = (nx * LIGHT.0 + ny * LIGHT.1 + nz * LIGHT.2).max(0.0);
             let intensity = 0.25 + 0.75 * diffuse;
             let spec = diffuse.powf(16.0) * 0.5;
-            fb.put(
-                x,
-                y,
-                depth,
-                [
-                    (base[0] * intensity + spec).min(1.0),
-                    (base[1] * intensity + spec).min(1.0),
-                    (base[2] * intensity + spec).min(1.0),
-                ],
-            );
+            fb.put(x, y, depth, [
+                (base[0] * intensity + spec).min(1.0),
+                (base[1] * intensity + spec).min(1.0),
+                (base[2] * intensity + spec).min(1.0),
+            ]);
         });
     }
 
@@ -103,13 +98,7 @@ impl Framebuffer {
         });
     }
 
-    fn for_disc<F: FnMut(&mut Self, i32, i32, f32)>(
-        &mut self,
-        cx: f32,
-        cy: f32,
-        radius: f32,
-        mut f: F,
-    ) {
+    fn for_disc<F: FnMut(&mut Self, i32, i32, f32)>(&mut self, cx: f32, cy: f32, radius: f32, mut f: F) {
         let r = radius.max(0.5);
         let r2 = r * r;
         for y in (cy - r).floor() as i32..=(cy + r).ceil() as i32 {
@@ -128,25 +117,12 @@ impl Framebuffer {
         let steps = segment_steps(a.0, a.1, b.0, b.1);
         for s in 0..=steps {
             let t = s as f32 / steps as f32;
-            self.disc(
-                lerp(a.0, b.0, t),
-                lerp(a.1, b.1, t),
-                lerp(a.2, b.2, t),
-                radius,
-                rgb,
-            );
+            self.disc(lerp(a.0, b.0, t), lerp(a.1, b.1, t), lerp(a.2, b.2, t), radius, rgb);
         }
     }
 
     /// Additive glow swept along a segment (z-ignoring) — hero threads.
-    pub fn glow_segment(
-        &mut self,
-        a: (f32, f32),
-        b: (f32, f32),
-        radius: f32,
-        rgb: [f32; 3],
-        intensity: f32,
-    ) {
+    pub fn glow_segment(&mut self, a: (f32, f32), b: (f32, f32), radius: f32, rgb: [f32; 3], intensity: f32) {
         let steps = segment_steps(a.0, a.1, b.0, b.1);
         for s in 0..=steps {
             let t = s as f32 / steps as f32;

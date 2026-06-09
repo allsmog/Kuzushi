@@ -99,13 +99,19 @@ mod tests {
 
     #[test]
     fn rank_is_stable_for_equal_scores() {
-        let ranked = rank_fuzzy(vec!["alpha".to_string(), "alto".to_string()], "al");
+        let ranked = rank_fuzzy(
+            vec!["alpha".to_string(), "alto".to_string()],
+            "al",
+        );
         assert_eq!(ranked, vec!["alpha".to_string(), "alto".to_string()]);
     }
 
     #[test]
     fn rank_drops_non_matches() {
-        let ranked = rank_fuzzy(vec!["scan".to_string(), "findings".to_string()], "scn");
+        let ranked = rank_fuzzy(
+            vec!["scan".to_string(), "findings".to_string()],
+            "scn",
+        );
         assert_eq!(ranked, vec!["scan".to_string()]);
     }
 }

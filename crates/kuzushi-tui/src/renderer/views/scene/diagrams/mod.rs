@@ -87,12 +87,7 @@ mod tests {
     fn as_text(lines: &[Line<'static>]) -> String {
         lines
             .iter()
-            .map(|l| {
-                l.spans
-                    .iter()
-                    .map(|s| s.content.as_ref())
-                    .collect::<String>()
-            })
+            .map(|l| l.spans.iter().map(|s| s.content.as_ref()).collect::<String>())
             .collect::<Vec<_>>()
             .join("\n")
     }
@@ -103,18 +98,9 @@ mod tests {
             cwe: "CWE-89".into(),
             severity: "critical".into(),
             stages: vec![
-                TaintStageModel {
-                    title: "req.body.id".into(),
-                    location: "order.ts:12".into(),
-                },
-                TaintStageModel {
-                    title: "buildQuery".into(),
-                    location: "order.ts:42".into(),
-                },
-                TaintStageModel {
-                    title: "db.exec()".into(),
-                    location: "db.ts:7".into(),
-                },
+                TaintStageModel { title: "req.body.id".into(), location: "order.ts:12".into() },
+                TaintStageModel { title: "buildQuery".into(), location: "order.ts:42".into() },
+                TaintStageModel { title: "db.exec()".into(), location: "db.ts:7".into() },
             ],
             empty_hint: None,
         }
@@ -124,16 +110,8 @@ mod tests {
         use crate::ui_view_models::{FindingsHeatmap, ModuleRisk};
         FindingsHeatmap {
             rows: vec![
-                ModuleRisk {
-                    module: "auth".into(),
-                    counts: [4, 3, 1, 0, 0],
-                    score: 57.0,
-                },
-                ModuleRisk {
-                    module: "api".into(),
-                    counts: [2, 3, 4, 1, 0],
-                    score: 44.0,
-                },
+                ModuleRisk { module: "auth".into(), counts: [4, 3, 1, 0, 0], score: 57.0 },
+                ModuleRisk { module: "api".into(), counts: [2, 3, 4, 1, 0], score: 44.0 },
             ],
             empty_hint: None,
         }
@@ -159,11 +137,7 @@ mod tests {
     fn heatmap_caps_huge_counts_without_overflowing_a_cell() {
         use crate::ui_view_models::{FindingsHeatmap, ModuleRisk};
         let model = FindingsHeatmap {
-            rows: vec![ModuleRisk {
-                module: "auth".into(),
-                counts: [5000, 12, 1, 0, 0],
-                score: 0.0,
-            }],
+            rows: vec![ModuleRisk { module: "auth".into(), counts: [5000, 12, 1, 0, 0], score: 0.0 }],
             empty_hint: None,
         };
         let text = as_text(&heatmap_lines(72, &model));
@@ -175,14 +149,8 @@ mod tests {
     #[test]
     fn empty_models_render_a_hint() {
         use crate::ui_view_models::{FindingsHeatmap, TaintFlowPath};
-        let taint = TaintFlowPath {
-            empty_hint: Some("no taint flow".into()),
-            ..Default::default()
-        };
-        let heatmap = FindingsHeatmap {
-            rows: Vec::new(),
-            empty_hint: Some("no findings".into()),
-        };
+        let taint = TaintFlowPath { empty_hint: Some("no taint flow".into()), ..Default::default() };
+        let heatmap = FindingsHeatmap { rows: Vec::new(), empty_hint: Some("no findings".into()) };
         assert!(!attack_path_lines(72, &taint).is_empty());
         assert!(!heatmap_lines(72, &heatmap).is_empty());
     }

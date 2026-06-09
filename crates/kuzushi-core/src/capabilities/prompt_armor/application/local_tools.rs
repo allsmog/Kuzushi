@@ -44,7 +44,9 @@ fn config_response(path: &Path, action: &str) -> Value {
 }
 
 fn config_body(path: &Path, exists: bool) -> String {
-    if exists { fs::read_to_string(path).unwrap_or_default() } else { Default::default() }
+    exists
+        .then(|| fs::read_to_string(path).unwrap_or_default())
+        .unwrap_or_default()
 }
 
 fn config_output(path: &Path, action: &str, exists: bool) -> String {
@@ -108,7 +110,7 @@ pub(crate) fn report(target: &Path, output: PathBuf) -> Result<Value> {
 
 fn sorted_artifact_entries(out_dir: &Path) -> Vec<String> {
     let mut entries = Vec::new();
-    if let Ok(read_dir) = fs::read_dir(out_dir) {
+    if let Ok(read_dir) = fs::read_dir(&out_dir) {
         for entry in read_dir.filter_map(|entry| entry.ok()) {
             entries.push(entry.file_name().to_string_lossy().to_string());
         }

@@ -20,10 +20,7 @@ struct Stage {
 
 pub(crate) fn attack_path_lines(width: usize, model: &TaintFlowPath) -> Vec<Line<'static>> {
     if let Some(hint) = &model.empty_hint {
-        return vec![
-            blank(),
-            line(vec![span(format!("  {hint}"), theme::muted())]),
-        ];
+        return vec![blank(), line(vec![span(format!("  {hint}"), theme::muted())])];
     }
     let stages = build_stages(model);
     let box_w = (width.saturating_sub(2 + stages.len().saturating_sub(1) * CONN)
@@ -34,10 +31,7 @@ pub(crate) fn attack_path_lines(width: usize, model: &TaintFlowPath) -> Vec<Line
     let mut lines = vec![
         line(vec![
             span("  taint flow   ", theme::label()),
-            span(
-                format!("{} · {}", model.cwe, model.severity),
-                theme::primary(),
-            ),
+            span(format!("{} · {}", model.cwe, model.severity), theme::primary()),
         ]),
         blank(),
     ];
@@ -46,10 +40,7 @@ pub(crate) fn attack_path_lines(width: usize, model: &TaintFlowPath) -> Vec<Line
     lines.push(line(vec![
         span("  ", theme::muted()),
         span(format!("{} · ", model.cwe), theme::muted()),
-        span(
-            model.severity.to_uppercase(),
-            sev_from_label(&model.severity).style(),
-        ),
+        span(model.severity.to_uppercase(), sev_from_label(&model.severity).style()),
         span(
             format!(" · {}-stage source → sink flow", model.stages.len()),
             theme::muted(),

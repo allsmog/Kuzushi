@@ -30,7 +30,9 @@ fn persistent_threat_model_user_edited(path: &Path) -> bool {
         .and_then(|existing| {
             existing
                 .get("userEdited")
-                .and_then(Value::as_bool)})
+                .and_then(Value::as_bool)
+                .map(bool::from)
+        })
         .unwrap_or(false)
 }
 
@@ -40,7 +42,7 @@ fn write_persistent_threat_model(path: &Path, document: &Value) -> Result<()> {
             .with_context(|| format!("Could not create {}", parent.display()))?;
     }
     fs::write(
-        path,
+        &path,
         format!("{}\n", serde_json::to_string_pretty(document)?),
     )
     .with_context(|| format!("Could not write {}", path.display()))?;

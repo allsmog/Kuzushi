@@ -242,7 +242,7 @@ fn sarif_summary(body: &str) -> String {
     parts.join(", ")
 }
 
-fn sarif_results(runs: &[Value]) -> Vec<&Value> {
+fn sarif_results<'a>(runs: &'a [Value]) -> Vec<&'a Value> {
     runs.iter()
         .filter_map(|run| run.get("results").and_then(Value::as_array))
         .flat_map(|results| results.iter())

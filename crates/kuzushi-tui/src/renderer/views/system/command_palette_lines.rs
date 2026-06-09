@@ -43,11 +43,7 @@ fn push_match_rows(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'static>>) {
     }
 }
 
-fn match_row(
-    spec: &crate::commands::ShellCommandSpec,
-    desc_width: usize,
-    selected: bool,
-) -> Line<'static> {
+fn match_row(spec: &crate::commands::ShellCommandSpec, desc_width: usize, selected: bool) -> Line<'static> {
     let marker = if selected { "▌ " } else { "  " };
     let command = format!("{:<24}", fit(spec.command, 24));
     let description = fit(spec.description, desc_width);

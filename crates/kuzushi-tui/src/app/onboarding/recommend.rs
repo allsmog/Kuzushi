@@ -44,10 +44,7 @@ fn should_preselect(row: &PlanningTaskRow, kind: TargetKind) -> bool {
     use PlanningTaskId::*;
     match row.id {
         // 組 KUMI-KATA · map — foundational artifacts when not already cached.
-        GatherRepoContext
-        | MapEntryPoints
-        | BuildStrideThreatModel
-        | BuildCodePropertyGraph
+        GatherRepoContext | MapEntryPoints | BuildStrideThreatModel | BuildCodePropertyGraph
         | BuildCodeQlDatabase => missing_artifact(row),
         // Reverse-engineering artifacts only matter for binary/APK targets.
         BuildXRay => kind.is_reverse_engineering_target() && missing_artifact(row),

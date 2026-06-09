@@ -235,7 +235,7 @@ fn extract_structural_queries(pattern: &Value) -> Vec<String> {
 }
 
 fn split_pattern_phrase(raw: &str) -> Vec<String> {
-    raw.split([',', ';', '\n', '|'])
+    raw.split(|c: char| matches!(c, ',' | ';' | '\n' | '|'))
         .map(str::trim)
         .filter(|s| s.len() >= 3)
         .map(str::to_string)

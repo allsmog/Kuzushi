@@ -27,7 +27,7 @@ pub(crate) fn unwrap_document(value: Value) -> Result<Value> {
     if let Some(document) = value.get("document") {
         return unwrap_document(document.clone());
     }
-    if value.pointer("/dfd/nodes").is_none() {
+    if !value.pointer("/dfd/nodes").is_some() {
         anyhow::bail!("carlini-threat-hunt threat model document is missing dfd.nodes");
     }
     Ok(value)

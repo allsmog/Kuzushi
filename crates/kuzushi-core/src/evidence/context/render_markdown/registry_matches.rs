@@ -14,7 +14,7 @@ pub(super) fn push_registry_matches(out: &mut String, registry: &[StaticRegistry
         for registry_match in matches.iter().take(8) {
             push_registry_match(out, registry_match);
         }
-        out.push('\n');
+        out.push_str("\n");
     }
 }
 
@@ -29,16 +29,16 @@ fn registry_section_labels() -> [(StaticRegistryKind, &'static str); 4] {
 
 fn push_registry_match(out: &mut String, registry_match: &StaticRegistryMatch) {
     out.push_str("- `");
-    out.push_str(registry_match.entry.pattern);
-    out.push('`');
+    out.push_str(&registry_match.entry.pattern);
+    out.push_str("`");
     if !registry_match.entry.cwe.is_empty() {
         out.push_str(" (");
         out.push_str(&registry_match.entry.cwe.join(", "));
-        out.push(')');
+        out.push_str(")");
     }
     if !registry_match.entry.rationale.is_empty() {
         out.push_str(" - ");
-        out.push_str(registry_match.entry.rationale);
+        out.push_str(&registry_match.entry.rationale);
     }
-    out.push('\n');
+    out.push_str("\n");
 }

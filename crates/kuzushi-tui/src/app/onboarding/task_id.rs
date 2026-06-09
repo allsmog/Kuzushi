@@ -72,15 +72,9 @@ impl PlanningTaskId {
     pub fn phase(self) -> WorkflowPhase {
         use PlanningTaskId::*;
         match self {
-            GatherRepoContext
-            | MapEntryPoints
-            | BuildXRay
-            | BuildStrideThreatModel
-            | BuildPastaThreatModel
-            | BuildCodePropertyGraph
-            | BuildCodeQlDatabase
-            | ThreatIntelCves
-            | ReverseEngineerBinary => WorkflowPhase::Map,
+            GatherRepoContext | MapEntryPoints | BuildXRay | BuildStrideThreatModel
+            | BuildPastaThreatModel | BuildCodePropertyGraph | BuildCodeQlDatabase
+            | ThreatIntelCves | ReverseEngineerBinary => WorkflowPhase::Map,
             ScanSecrets | ScanSemgrep | ScanCodeql | ScanAgenticSast | HuntTaint
             | HuntThreatModel | HuntSystems | HuntUseAfterFree => WorkflowPhase::Hunt,
             TriageFindings | VerifyFindings => WorkflowPhase::Confirm,

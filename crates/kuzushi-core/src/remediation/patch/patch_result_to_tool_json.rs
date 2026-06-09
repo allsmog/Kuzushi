@@ -157,6 +157,37 @@ fn patch_proof_snapshot(fingerprint: &str, result: &PatchResult) -> Value {
     })
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn patch_result_exposes_report_and_proof_snapshots() {
+        let result = PatchResult {
+            patch_run_id: "patch-1".to_string(),
+            fingerprint: "fp-1".to_string(),
+            repo: "repo".to_string(),
+            diff: Some("diff --git a/x b/x".to_string()),
+            status: PatchStatus::Sound,
+            iterations: 1,
+            build_command: Some("cargo build".to_string()),
+            test_command: Some("cargo test".to_string()),
+            worktree_path: None,
+            cost_usd: Some(0.0),
+            validator_log: Some("ok".to_string()),
+            history: Vec::new(),
+            created_at: None,
+            updated_at: None,
+        };
+
+        let output = patch_result_to_tool_json("fp-1", &result, "ok", Some("fixed bounds"));
+
+        assert_eq!(output["status"], json!("completed"));
+        assert_eq!(output["proof"]["patchStatus"], json!("SOUND"));
+        assert!(output["reportMarkdown"].as_str().unwrap().contains("Patch Report"));
+    }
+}
+
 pub(crate) fn synthesize_patch(
     runtime: &dyn AgentRuntime,
     model: &str,
@@ -190,35 +221,4 @@ pub(crate) fn patch_synthesis_schema() -> Value {
             "explanation": {"type": "string"}
         }
     })
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn patch_result_exposes_report_and_proof_snapshots() {
-        let result = PatchResult {
-            patch_run_id: "patch-1".to_string(),
-            fingerprint: "fp-1".to_string(),
-            repo: "repo".to_string(),
-            diff: Some("diff --git a/x b/x".to_string()),
-            status: PatchStatus::Sound,
-            iterations: 1,
-            build_command: Some("cargo build".to_string()),
-            test_command: Some("cargo test".to_string()),
-            worktree_path: None,
-            cost_usd: Some(0.0),
-            validator_log: Some("ok".to_string()),
-            history: Vec::new(),
-            created_at: None,
-            updated_at: None,
-        };
-
-        let output = patch_result_to_tool_json("fp-1", &result, "ok", Some("fixed bounds"));
-
-        assert_eq!(output["status"], json!("completed"));
-        assert_eq!(output["proof"]["patchStatus"], json!("SOUND"));
-        assert!(output["reportMarkdown"].as_str().unwrap().contains("Patch Report"));
-    }
 }

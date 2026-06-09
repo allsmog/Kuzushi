@@ -133,7 +133,7 @@ pub(crate) fn model_to_finding(m: ModelFinding) -> Option<Finding> {
     let severity = parse_severity(&m.severity);
     let mut message = m.rationale.clone();
     if !m.cwe.is_empty() {
-        message.push('\n');
+        message.push_str("\n");
         message.push_str(&m.cwe.join(", "));
     }
     if !m.function.trim().is_empty() {
