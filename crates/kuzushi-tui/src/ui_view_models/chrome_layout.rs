@@ -1,10 +1,36 @@
 use crate::{ShellApp, ShellView};
 
+/// The Activity view is a focused full-frame dashboard: it renders its own
+/// keybind hints and header status in-pane and its feed pane is the live
+/// output, so the generic transcript/footer/status chrome is suppressed there.
+fn chrome_hidden_for_view(app: &ShellApp) -> bool {
+    matches!(app.shell_view, ShellView::Activity)
+}
+
 pub(crate) fn transcript_chrome_height(app: &ShellApp, terminal_height: u16) -> u16 {
-    if matches!(app.shell_view, ShellView::ModuleRun) || terminal_height < 12 {
+    if chrome_hidden_for_view(app)
+        || matches!(app.shell_view, ShellView::ModuleRun)
+        || terminal_height < 12
+    {
         return 0;
     }
     2
+}
+
+pub(crate) fn keybind_footer_chrome_height(app: &ShellApp, terminal_height: u16) -> u16 {
+    if !chrome_hidden_for_view(app) && terminal_height >= 8 {
+        2
+    } else {
+        0
+    }
+}
+
+pub(crate) fn status_footer_chrome_height(app: &ShellApp, terminal_height: u16) -> u16 {
+    if !chrome_hidden_for_view(app) && terminal_height >= 6 {
+        1
+    } else {
+        0
+    }
 }
 
 #[cfg(test)]

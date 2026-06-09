@@ -1,5 +1,5 @@
 use super::*;
-use crate::ui_view_models::{threat_dfd_diagram_lines, threat_model_doc, DfdLineKind};
+use crate::ui_view_models::{threat_dfd_view, DfdLineKind};
 
 pub(super) fn append_dfd_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'static>>) {
     // Lead with the target's actual data-flow diagram drawn from threat-model.json.
@@ -16,10 +16,7 @@ pub(super) fn append_dfd_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Line<
 }
 
 fn append_real_dfd(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'static>>) -> bool {
-    let Some(doc) = threat_model_doc(app) else {
-        return false;
-    };
-    let Some(diagram) = threat_dfd_diagram_lines(&doc, area.width as usize) else {
+    let Some(diagram) = threat_dfd_view(app, area.width as usize) else {
         return false;
     };
     for diagram_line in diagram {
