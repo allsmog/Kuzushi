@@ -21,10 +21,18 @@ function checkNarrativeContainerAliases(relativeFile, schema) {
     hasRef(schema, ["properties", "narrative"], "#/definitions/narrative")
       ? null
       : `${relativeFile}: narrative schema must use definitions/narrative`,
-    hasRef(schema, ["definitions", "narrative", "properties", "inputCategories"], "#/definitions/inputCategories")
+    hasRef(
+      schema,
+      ["definitions", "narrative", "properties", "inputCategories"],
+      "#/definitions/inputCategories",
+    )
       ? null
       : `${relativeFile}: narrative schema must preserve inputCategories`,
-    hasRef(schema, ["definitions", "narrative", "properties", "input_categories"], "#/definitions/inputCategories")
+    hasRef(
+      schema,
+      ["definitions", "narrative", "properties", "input_categories"],
+      "#/definitions/inputCategories",
+    )
       ? null
       : `${relativeFile}: narrative schema must preserve input_categories`,
   ].filter(Boolean);
@@ -32,8 +40,13 @@ function checkNarrativeContainerAliases(relativeFile, schema) {
 
 function checkNarrativeFlowAlias(relativeFile, schema, camel, snake) {
   return [camel, snake]
-    .filter((field) =>
-      !hasRef(schema, ["definitions", "inputCategories", "properties", field], "#/definitions/stringList")
+    .filter(
+      (field) =>
+        !hasRef(
+          schema,
+          ["definitions", "inputCategories", "properties", field],
+          "#/definitions/stringList",
+        ),
     )
     .map((field) => `${relativeFile}: narrative input category schema must preserve ${field}`);
 }

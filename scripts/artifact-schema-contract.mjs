@@ -2,7 +2,6 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { checkFieldShapeSpecs } from "./artifact-schema-shapes.mjs";
 import { checkThreatModelNarrativeFlowAliases } from "./artifact-schema-threat-model.mjs";
-import { canonicalRunSchemaFiles } from "./canonical-run-schema-files.mjs";
 import {
   artifactKindAliasFields,
   artifactLabelAliasFields,
@@ -12,10 +11,15 @@ import {
   toolInputArtifactSpecs,
   toolResultArtifactSpecs,
 } from "./canonical-run-artifacts.mjs";
+import { canonicalRunSchemaFiles } from "./canonical-run-schema-files.mjs";
 
 export { canonicalRunSchemaFiles };
 
-const artifactAliasGroups = [{ path: ["definitions", "artifact"], kind: "allOfAnyOf", fields: artifactLabelAliasFields }, { path: ["definitions", "artifact"], kind: "allOfAnyOf", fields: artifactPathAliasFields }, { path: ["definitions", "artifact"], kind: "allOfAnyOf", fields: artifactKindAliasFields }];
+const artifactAliasGroups = [
+  { path: ["definitions", "artifact"], kind: "allOfAnyOf", fields: artifactLabelAliasFields },
+  { path: ["definitions", "artifact"], kind: "allOfAnyOf", fields: artifactPathAliasFields },
+  { path: ["definitions", "artifact"], kind: "allOfAnyOf", fields: artifactKindAliasFields },
+];
 const reservedArtifactMetadataSpecs = [
   ...requiredRunArtifactSpecs,
   ...optionalRunArtifactSpecs,
@@ -34,16 +38,56 @@ const requiredAliasGroupsBySchema = {
   ],
   "schemas/run.failures.schema.json": [
     { path: [], kind: "anyOf", fields: ["runId", "run_id"] },
-    { path: ["definitions", "failure"], kind: "anyOf", fields: ["agentThreadContext", "agent_thread_context"] },
-    { path: ["definitions", "failureContext"], kind: "allOfAnyOf", fields: ["failedStage", "failed_stage"] },
-    { path: ["definitions", "failureContext"], kind: "allOfAnyOf", fields: ["whatFailed", "what_failed"] },
-    { path: ["definitions", "failureContext"], kind: "allOfAnyOf", fields: ["artifactsAvailable", "artifacts_available"] },
-    { path: ["definitions", "failureContext"], kind: "allOfAnyOf", fields: ["missingArtifacts", "missing_artifacts"] },
-    { path: ["definitions", "failureContext"], kind: "allOfAnyOf", fields: ["allowedProofLevel", "allowed_proof_level"] },
-    { path: ["definitions", "failureContext"], kind: "allOfAnyOf", fields: ["nextFilesOrArtifactsToInspect", "next_files_or_artifacts_to_inspect"] },
-    { path: ["definitions", "failureContext"], kind: "allOfAnyOf", fields: ["recoveryOptions", "recovery_options"] },
-    { path: ["definitions", "failureContext"], kind: "allOfAnyOf", fields: ["fallbackPrompt", "fallback_prompt"] },
-    { path: ["definitions", "failureContext"], kind: "allOfAnyOf", fields: ["claimsForbidden", "claims_forbidden"] },
+    {
+      path: ["definitions", "failure"],
+      kind: "anyOf",
+      fields: ["agentThreadContext", "agent_thread_context"],
+    },
+    {
+      path: ["definitions", "failureContext"],
+      kind: "allOfAnyOf",
+      fields: ["failedStage", "failed_stage"],
+    },
+    {
+      path: ["definitions", "failureContext"],
+      kind: "allOfAnyOf",
+      fields: ["whatFailed", "what_failed"],
+    },
+    {
+      path: ["definitions", "failureContext"],
+      kind: "allOfAnyOf",
+      fields: ["artifactsAvailable", "artifacts_available"],
+    },
+    {
+      path: ["definitions", "failureContext"],
+      kind: "allOfAnyOf",
+      fields: ["missingArtifacts", "missing_artifacts"],
+    },
+    {
+      path: ["definitions", "failureContext"],
+      kind: "allOfAnyOf",
+      fields: ["allowedProofLevel", "allowed_proof_level"],
+    },
+    {
+      path: ["definitions", "failureContext"],
+      kind: "allOfAnyOf",
+      fields: ["nextFilesOrArtifactsToInspect", "next_files_or_artifacts_to_inspect"],
+    },
+    {
+      path: ["definitions", "failureContext"],
+      kind: "allOfAnyOf",
+      fields: ["recoveryOptions", "recovery_options"],
+    },
+    {
+      path: ["definitions", "failureContext"],
+      kind: "allOfAnyOf",
+      fields: ["fallbackPrompt", "fallback_prompt"],
+    },
+    {
+      path: ["definitions", "failureContext"],
+      kind: "allOfAnyOf",
+      fields: ["claimsForbidden", "claims_forbidden"],
+    },
     ...artifactAliasGroups,
   ],
   "schemas/run.summary.schema.json": [
@@ -51,22 +95,55 @@ const requiredAliasGroupsBySchema = {
     { path: [], kind: "allOfAnyOf", fields: ["startedAtUnix", "started_at_unix"] },
     { path: [], kind: "declared", fields: ["traceMalformedLines", "trace_malformed_lines"] },
     { path: ["definitions", "llmCall"], kind: "anyOf", fields: ["promptHash", "prompt_hash"] },
-    { path: ["definitions", "llmCall"], kind: "declared", fields: ["latencyMs", "latency_ms", "costUsd", "cost_usd"] },
+    {
+      path: ["definitions", "llmCall"],
+      kind: "declared",
+      fields: ["latencyMs", "latency_ms", "costUsd", "cost_usd"],
+    },
     ...artifactAliasGroups,
   ],
-  "schemas/run.trace.schema.json": [{ path: [], kind: "declared", fields: ["latencyMs", "latency_ms", "costUsd", "cost_usd", "moduleId", "module_id", "parentStep", "parent_step", "startedAtMs", "started_at_ms", "promptHash", "prompt_hash"] }],
+  "schemas/run.trace.schema.json": [
+    {
+      path: [],
+      kind: "declared",
+      fields: [
+        "latencyMs",
+        "latency_ms",
+        "costUsd",
+        "cost_usd",
+        "moduleId",
+        "module_id",
+        "parentStep",
+        "parent_step",
+        "startedAtMs",
+        "started_at_ms",
+        "promptHash",
+        "prompt_hash",
+      ],
+    },
+  ],
 };
 
 const snapshotEnvelopeFieldsBySchema = {
   "schemas/run.context.schema.json": ["context", "contextSnapshot", "context_snapshot"],
   "schemas/run.findings.schema.json": ["coreFindings", "core_findings", "findings"],
   "schemas/run.proof.schema.json": ["proof", "proofs", "verification"],
-  "schemas/run.recommendations.schema.json": ["data", "recommendationReport", "recommendation_report"],
+  "schemas/run.recommendations.schema.json": [
+    "data",
+    "recommendationReport",
+    "recommendation_report",
+  ],
 };
 
 const routePatternBySchema = {
-  "schemas/run.attack-surface.schema.json": [["properties", "route"], ["definitions", "surface", "properties", "route"]],
-  "schemas/run.context.schema.json": [["definitions", "appRoute", "properties", "path"], ["definitions", "appRoute", "properties", "route"]],
+  "schemas/run.attack-surface.schema.json": [
+    ["properties", "route"],
+    ["definitions", "surface", "properties", "route"],
+  ],
+  "schemas/run.context.schema.json": [
+    ["definitions", "appRoute", "properties", "path"],
+    ["definitions", "appRoute", "properties", "route"],
+  ],
 };
 
 const proofStateEnumBySchema = {
@@ -91,7 +168,23 @@ const proofStateRefBySchema = {
   ],
 };
 
-const expectedProofStates = ["signal_only", "code_cited", "source_sink_linked", "sanitizer_checked", "statically_confirmed", "statically_rejected", "needs_runtime_evidence", "execution_confirmed", "runtime_confirmed", "dynamic_confirmed", "exploit_confirmed", "poc_confirmed", "runtime_reviewed", "execution_attempted", "execution_rejected"];
+const expectedProofStates = [
+  "signal_only",
+  "code_cited",
+  "source_sink_linked",
+  "sanitizer_checked",
+  "statically_confirmed",
+  "statically_rejected",
+  "needs_runtime_evidence",
+  "execution_confirmed",
+  "runtime_confirmed",
+  "dynamic_confirmed",
+  "exploit_confirmed",
+  "poc_confirmed",
+  "runtime_reviewed",
+  "execution_attempted",
+  "execution_rejected",
+];
 
 const findingEnumSpecs = [
   {
@@ -112,73 +205,237 @@ const attackSurfaceEnumSpecs = [
   {
     name: "surfaceKind",
     path: ["definitions", "surfaceKind"],
-    values: ["http_route", "rpc_handler", "cli_entrypoint", "background_job", "deserialization_point", "file_upload_parse_path", "external_service_client", "auth_boundary", "session_state_boundary", "request_trust_boundary", "tenant_isolation_boundary", "db_query_boundary", "command_execution_boundary"],
-    refs: [["properties", "kind"], ["definitions", "surface", "properties", "kind"]],
+    values: [
+      "http_route",
+      "rpc_handler",
+      "cli_entrypoint",
+      "background_job",
+      "deserialization_point",
+      "file_upload_parse_path",
+      "external_service_client",
+      "auth_boundary",
+      "session_state_boundary",
+      "request_trust_boundary",
+      "tenant_isolation_boundary",
+      "db_query_boundary",
+      "command_execution_boundary",
+    ],
+    refs: [
+      ["properties", "kind"],
+      ["definitions", "surface", "properties", "kind"],
+    ],
   },
   {
     name: "riskTier",
     path: ["definitions", "riskTier"],
     values: ["critical", "high", "medium", "low"],
-    refs: [["properties", "tier"], ["definitions", "risk", "properties", "tier"]],
+    refs: [
+      ["properties", "tier"],
+      ["definitions", "risk", "properties", "tier"],
+    ],
   },
 ];
 
-const artifactKindSpec = (refs) => ({ name: "artifactKind", path: ["definitions", "artifactKind"], values: ["json", "jsonl", "markdown", "sarif", "directory", "artifact"], refs });
-const runStatusSpec = (refs) => ({ name: "runStatus", path: ["definitions", "runStatus"], values: ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"], refs });
-const runSummaryStatusSpec = { name: "runSummaryStatus", path: ["properties", "status"], values: ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"], refs: [] };
+const artifactKindSpec = (refs) => ({
+  name: "artifactKind",
+  path: ["definitions", "artifactKind"],
+  values: ["json", "jsonl", "markdown", "sarif", "directory", "artifact"],
+  refs,
+});
+const runStatusSpec = (refs) => ({
+  name: "runStatus",
+  path: ["definitions", "runStatus"],
+  values: ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"],
+  refs,
+});
+const runSummaryStatusSpec = {
+  name: "runSummaryStatus",
+  path: ["properties", "status"],
+  values: ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"],
+  refs: [],
+};
 const routeMethodSpec = (refs) => ({
   name: "routeMethod",
   path: ["definitions", "routeMethod"],
-  values: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD", "TRACE", "CONNECT", "ANY", "USE"],
+  values: [
+    "GET",
+    "POST",
+    "PUT",
+    "PATCH",
+    "DELETE",
+    "OPTIONS",
+    "HEAD",
+    "TRACE",
+    "CONNECT",
+    "ANY",
+    "USE",
+  ],
   refs,
 });
-const proofVerdictValues = ["confirmed", "exploited", "not_reproduced", "harness_failed_to_build", "infrastructure_error", "language_unsupported_yet", "insufficient_finding_detail", "needs-runtime-evidence"];
-const proofKindValues = ["verification", "llm-exploitability-review", "empirical-verification", "verification-outcome", "patch-validation"];
+const proofVerdictValues = [
+  "confirmed",
+  "exploited",
+  "not_reproduced",
+  "harness_failed_to_build",
+  "infrastructure_error",
+  "language_unsupported_yet",
+  "insufficient_finding_detail",
+  "needs-runtime-evidence",
+];
+const proofKindValues = [
+  "verification",
+  "llm-exploitability-review",
+  "empirical-verification",
+  "verification-outcome",
+  "patch-validation",
+];
 const proofLevelValues = ["runtime-and-static", "static-signal-only"];
 const traceKindValues = ["tool", "reasoning", "tool-progress", "done", "refused"];
 
 const schemaEnumSpecs = {
-  "schemas/run.artifacts.schema.json": [artifactKindSpec([["definitions", "artifact", "properties", "kind"], ["definitions", "artifact", "properties", "type"]])],
+  "schemas/run.artifacts.schema.json": [
+    artifactKindSpec([
+      ["definitions", "artifact", "properties", "kind"],
+      ["definitions", "artifact", "properties", "type"],
+    ]),
+  ],
   "schemas/run.attack-surface.schema.json": attackSurfaceEnumSpecs,
-  "schemas/run.context.schema.json": [routeMethodSpec([["definitions", "appRoute", "properties", "method"]])],
+  "schemas/run.context.schema.json": [
+    routeMethodSpec([["definitions", "appRoute", "properties", "method"]]),
+  ],
   "schemas/run.failures.schema.json": [
-    artifactKindSpec([["definitions", "artifact", "properties", "kind"], ["definitions", "artifact", "properties", "type"]]),
-    runStatusSpec([["properties", "status"], ["definitions", "failure", "properties", "status"]]),
+    artifactKindSpec([
+      ["definitions", "artifact", "properties", "kind"],
+      ["definitions", "artifact", "properties", "type"],
+    ]),
+    runStatusSpec([
+      ["properties", "status"],
+      ["definitions", "failure", "properties", "status"],
+    ]),
   ],
   "schemas/run.findings.schema.json": findingEnumSpecs,
-  "schemas/run.recommendations.schema.json": [{ name: "priority", path: ["definitions", "priority"], values: ["high", "medium", "low"], refs: [["definitions", "recommendation", "properties", "priority"]] }],
+  "schemas/run.recommendations.schema.json": [
+    {
+      name: "priority",
+      path: ["definitions", "priority"],
+      values: ["high", "medium", "low"],
+      refs: [["definitions", "recommendation", "properties", "priority"]],
+    },
+  ],
   "schemas/run.events.schema.json": [
-    { name: "eventKind", path: ["definitions", "eventKind"], values: ["tool"], refs: [["properties", "kind"]] },
-    { name: "eventStatus", path: ["definitions", "eventStatus"], values: ["started", "running", "completed", "failed", "partial", "skipped", "paused"], refs: [["properties", "status"]] },
-    artifactKindSpec([["definitions", "artifact", "properties", "kind"], ["definitions", "artifact", "properties", "type"]]),
+    {
+      name: "eventKind",
+      path: ["definitions", "eventKind"],
+      values: ["tool"],
+      refs: [["properties", "kind"]],
+    },
+    {
+      name: "eventStatus",
+      path: ["definitions", "eventStatus"],
+      values: ["started", "running", "completed", "failed", "partial", "skipped", "paused"],
+      refs: [["properties", "status"]],
+    },
+    artifactKindSpec([
+      ["definitions", "artifact", "properties", "kind"],
+      ["definitions", "artifact", "properties", "type"],
+    ]),
   ],
   "schemas/run.trace.schema.json": [
-    { name: "traceKind", path: ["definitions", "traceKind"], values: traceKindValues, refs: [["properties", "kind"]] },
-    { name: "traceSeverity", path: ["definitions", "traceSeverity"], values: ["info", "warn", "danger"], refs: [["properties", "severity"]] },
+    {
+      name: "traceKind",
+      path: ["definitions", "traceKind"],
+      values: traceKindValues,
+      refs: [["properties", "kind"]],
+    },
+    {
+      name: "traceSeverity",
+      path: ["definitions", "traceSeverity"],
+      values: ["info", "warn", "danger"],
+      refs: [["properties", "severity"]],
+    },
   ],
   "schemas/run.summary.schema.json": [
     runSummaryStatusSpec,
-    { name: "runKind", path: ["definitions", "runKind"], values: ["run", "tool", "scan", "shell"], refs: [["properties", "kind"]] },
-    { name: "llmCallKind", path: ["definitions", "llmCallKind"], values: traceKindValues, refs: [["definitions", "llmCall", "properties", "kind"]] },
-    artifactKindSpec([["definitions", "artifact", "properties", "kind"], ["definitions", "artifact", "properties", "type"]]),
+    {
+      name: "runKind",
+      path: ["definitions", "runKind"],
+      values: ["run", "tool", "scan", "shell"],
+      refs: [["properties", "kind"]],
+    },
+    {
+      name: "llmCallKind",
+      path: ["definitions", "llmCallKind"],
+      values: traceKindValues,
+      refs: [["definitions", "llmCall", "properties", "kind"]],
+    },
+    artifactKindSpec([
+      ["definitions", "artifact", "properties", "kind"],
+      ["definitions", "artifact", "properties", "type"],
+    ]),
   ],
-  "schemas/run.threat-model.schema.json": [{ name: "methodology", path: ["definitions", "methodology"], values: ["pasta", "stride", "dread"], refs: [["properties", "methodology"]] }],
+  "schemas/run.threat-model.schema.json": [
+    {
+      name: "methodology",
+      path: ["definitions", "methodology"],
+      values: ["pasta", "stride", "dread"],
+      refs: [["properties", "methodology"]],
+    },
+  ],
   "schemas/run.proof.schema.json": [
-    { name: "proofKind", path: ["definitions", "proofKind"], values: proofKindValues, refs: [["properties", "kind"]] },
-    { name: "proofLevel", path: ["definitions", "proofLevel", "anyOf", 0], values: proofLevelValues, refs: [["properties", "proofLevel"], ["properties", "proof_level"]] },
-    { name: "proofVerdict", path: ["definitions", "proofVerdict"], values: proofVerdictValues, refs: [["properties", "proofVerdict"], ["properties", "proof_verdict"]] },
+    {
+      name: "proofKind",
+      path: ["definitions", "proofKind"],
+      values: proofKindValues,
+      refs: [["properties", "kind"]],
+    },
+    {
+      name: "proofLevel",
+      path: ["definitions", "proofLevel", "anyOf", 0],
+      values: proofLevelValues,
+      refs: [
+        ["properties", "proofLevel"],
+        ["properties", "proof_level"],
+      ],
+    },
+    {
+      name: "proofVerdict",
+      path: ["definitions", "proofVerdict"],
+      values: proofVerdictValues,
+      refs: [
+        ["properties", "proofVerdict"],
+        ["properties", "proof_verdict"],
+      ],
+    },
   ],
 };
 
-for (const file of ["schemas/run.attack-surface.schema.json", "schemas/run.context.schema.json", "schemas/run.findings.schema.json", "schemas/run.proof.schema.json", "schemas/run.recommendations.schema.json", "schemas/run.threat-model.schema.json"]) {
-  requiredAliasGroupsBySchema[file] = [{ path: [], kind: "declared", fields: ["runId", "run_id", "status", "runStatus"] }];
-  schemaEnumSpecs[file] = [...(schemaEnumSpecs[file] ?? []), runStatusSpec([["properties", "status"], ["properties", "runStatus"]])];
+for (const file of [
+  "schemas/run.attack-surface.schema.json",
+  "schemas/run.context.schema.json",
+  "schemas/run.findings.schema.json",
+  "schemas/run.proof.schema.json",
+  "schemas/run.recommendations.schema.json",
+  "schemas/run.threat-model.schema.json",
+]) {
+  requiredAliasGroupsBySchema[file] = [
+    { path: [], kind: "declared", fields: ["runId", "run_id", "status", "runStatus"] },
+  ];
+  schemaEnumSpecs[file] = [
+    ...(schemaEnumSpecs[file] ?? []),
+    runStatusSpec([
+      ["properties", "status"],
+      ["properties", "runStatus"],
+    ]),
+  ];
 }
 for (const [file, fields] of Object.entries(snapshotEnvelopeFieldsBySchema)) {
   requiredAliasGroupsBySchema[file].push({ path: [], kind: "declared", fields });
 }
 schemaEnumSpecs["schemas/run.attack-surface.schema.json"].push(
-  routeMethodSpec([["properties", "method"], ["definitions", "surface", "properties", "method"]]),
+  routeMethodSpec([
+    ["properties", "method"],
+    ["definitions", "surface", "properties", "method"],
+  ]),
 );
 
 export function checkCanonicalRunSchemas(root) {
@@ -236,14 +493,52 @@ function checkSchemaDocument(relativeFile, schema) {
     ...checkRoutePatterns(relativeFile, schema),
     ...checkProofStateEnums(relativeFile, schema),
     ...checkProofStateRefs(relativeFile, schema),
-    ...(relativeFile === "schemas/run.proof.schema.json" && ((schemaNode(schema, ["definitions", "proofLevel", "anyOf", 1])?.type !== "integer") || schemaNode(schema, ["definitions", "proofLevel", "anyOf", 1])?.minimum !== 1 || schemaNode(schema, ["definitions", "proofLevel", "anyOf", 1])?.maximum !== 4) ? [`${relativeFile}: proofLevel numeric branch must constrain integer 1..4`] : []),
-    ...(relativeFile === "schemas/run.threat-model.schema.json" && (schemaNode(schema, ["properties", "dfd"])?.$ref !== "#/definitions/dfd" || !schemaNode(schema, ["definitions", "dfd", "properties", "trustBoundaries"]) || !schemaNode(schema, ["definitions", "dfd", "properties", "trust_boundaries"])) ? [`${relativeFile}: DFD schema must preserve trust-boundary aliases`] : []),
-    ...(relativeFile === "schemas/run.threat-model.schema.json" && (schemaNode(schema, ["properties", "relatedCwe"])?.$ref !== "#/definitions/stringList" || schemaNode(schema, ["properties", "related_cwe"])?.$ref !== "#/definitions/stringList" || schemaNode(schema, ["properties", "cwe"])?.$ref !== "#/definitions/stringList" || schemaNode(schema, ["properties", "threats", "items"])?.$ref !== "#/definitions/threat" || schemaNode(schema, ["definitions", "threat", "properties", "relatedCwe"])?.$ref !== "#/definitions/stringList" || schemaNode(schema, ["definitions", "threat", "properties", "related_cwe"])?.$ref !== "#/definitions/stringList" || schemaNode(schema, ["definitions", "threat", "properties", "cwe"])?.$ref !== "#/definitions/stringList") ? [`${relativeFile}: threat schema must preserve related-CWE aliases`] : []),
+    ...checkProofLevelNumericBranch(relativeFile, schema),
+    ...checkThreatModelStructuralAliases(relativeFile, schema),
     ...checkThreatModelNarrativeFlowAliases(relativeFile, schema),
     ...checkFieldShapeSpecs(relativeFile, schema, schemaNode),
     ...checkRunArtifactManifestReservedMetadata(relativeFile, schema),
     ...checkNamedEnums(relativeFile, schema),
   ].filter(Boolean);
+}
+
+function checkProofLevelNumericBranch(relativeFile, schema) {
+  if (relativeFile !== "schemas/run.proof.schema.json") return [];
+  const branch = schemaNode(schema, ["definitions", "proofLevel", "anyOf", 1]);
+  return branch?.type === "integer" && branch?.minimum === 1 && branch?.maximum === 4
+    ? []
+    : [`${relativeFile}: proofLevel numeric branch must constrain integer 1..4`];
+}
+
+function checkThreatModelStructuralAliases(relativeFile, schema) {
+  if (relativeFile !== "schemas/run.threat-model.schema.json") return [];
+  return [
+    ...checkThreatModelDfdAliases(relativeFile, schema),
+    ...checkThreatModelCweAliases(relativeFile, schema),
+  ];
+}
+
+function checkThreatModelDfdAliases(relativeFile, schema) {
+  return schemaNode(schema, ["properties", "dfd"])?.$ref === "#/definitions/dfd" &&
+    schemaNode(schema, ["definitions", "dfd", "properties", "trustBoundaries"]) &&
+    schemaNode(schema, ["definitions", "dfd", "properties", "trust_boundaries"])
+    ? []
+    : [`${relativeFile}: DFD schema must preserve trust-boundary aliases`];
+}
+
+function checkThreatModelCweAliases(relativeFile, schema) {
+  const stringListRefs = [
+    schemaNode(schema, ["properties", "relatedCwe"]),
+    schemaNode(schema, ["properties", "related_cwe"]),
+    schemaNode(schema, ["properties", "cwe"]),
+    schemaNode(schema, ["definitions", "threat", "properties", "relatedCwe"]),
+    schemaNode(schema, ["definitions", "threat", "properties", "related_cwe"]),
+    schemaNode(schema, ["definitions", "threat", "properties", "cwe"]),
+  ];
+  return stringListRefs.every((node) => node?.$ref === "#/definitions/stringList") &&
+    schemaNode(schema, ["properties", "threats", "items"])?.$ref === "#/definitions/threat"
+    ? []
+    : [`${relativeFile}: threat schema must preserve related-CWE aliases`];
 }
 
 function schemaAcceptsObject(schema) {
@@ -263,7 +558,8 @@ function checkRequiredAliasGroups(relativeFile, schema) {
 
 function checkRequiredAliasGroup(relativeFile, schema, group) {
   const node = schemaNode(schema, group.path);
-  if (!isPlainObject(node)) return [`${relativeFile}: missing alias schema node ${group.path.join(".")}`];
+  if (!isPlainObject(node))
+    return [`${relativeFile}: missing alias schema node ${group.path.join(".")}`];
   return [
     aliasGroupIsRequired(node, group)
       ? null
@@ -273,7 +569,11 @@ function checkRequiredAliasGroup(relativeFile, schema, group) {
 }
 
 function aliasGroupIsRequired(schema, group) {
-  return group.kind === "declared" ? true : group.kind === "anyOf" ? anyOfRequiresFields(schema.anyOf, group.fields) : allOfContainsAnyOfRequirement(schema.allOf, group.fields);
+  return group.kind === "declared"
+    ? true
+    : group.kind === "anyOf"
+      ? anyOfRequiresFields(schema.anyOf, group.fields)
+      : allOfContainsAnyOfRequirement(schema.allOf, group.fields);
 }
 
 function schemaNode(schema, nodePath) {
@@ -288,7 +588,10 @@ function allOfContainsAnyOfRequirement(allOf, fields) {
 }
 
 function anyOfRequiresFields(anyOf, fields) {
-  return Array.isArray(anyOf) && fields.every((field) => anyOf.some((entry) => requiredFields(entry).includes(field)));
+  return (
+    Array.isArray(anyOf) &&
+    fields.every((field) => anyOf.some((entry) => requiredFields(entry).includes(field)))
+  );
 }
 
 function missingDeclaredAliasFields(relativeFile, schema, group) {
@@ -307,14 +610,17 @@ function requiredFields(schema) {
 function checkRoutePatterns(relativeFile, schema) {
   return (routePatternBySchema[relativeFile] ?? []).flatMap((nodePath) => {
     const node = schemaNode(schema, nodePath);
-    return node?.pattern === "^(\\/|\\*)" ? [] : [`${relativeFile}: missing route path pattern at ${nodePath.join(".")}`];
+    return node?.pattern === "^(\\/|\\*)"
+      ? []
+      : [`${relativeFile}: missing route path pattern at ${nodePath.join(".")}`];
   });
 }
 
 function checkProofStateEnums(relativeFile, schema) {
   return (proofStateEnumBySchema[relativeFile] ?? []).flatMap((nodePath) => {
     const node = schemaNode(schema, nodePath);
-    if (!Array.isArray(node?.enum)) return [`${relativeFile}: missing proof-state enum at ${nodePath.join(".")}`];
+    if (!Array.isArray(node?.enum))
+      return [`${relativeFile}: missing proof-state enum at ${nodePath.join(".")}`];
     return missingEntries(expectedProofStates, node.enum, `${relativeFile}: missing proof-state`);
   });
 }
@@ -330,7 +636,8 @@ function checkProofStateRefs(relativeFile, schema) {
 
 function checkEnumValues(relativeFile, schema, spec) {
   const node = schemaNode(schema, spec.path);
-  if (!Array.isArray(node?.enum)) return [`${relativeFile}: missing ${spec.name} enum at ${spec.path.join(".")}`];
+  if (!Array.isArray(node?.enum))
+    return [`${relativeFile}: missing ${spec.name} enum at ${spec.path.join(".")}`];
   return missingEntries(spec.values, node.enum, `${relativeFile}: missing ${spec.name}`);
 }
 
@@ -357,7 +664,9 @@ function checkRunArtifactManifestReservedMetadata(relativeFile, schema) {
     return [`${relativeFile}: missing canonical artifact metadata rules`];
   }
   return reservedArtifactMetadataSpecs.flatMap((spec) => {
-    const rule = rules.find((candidate) => ruleMatchesPathAlias(candidate, "path", artifactPathPattern(spec.path)));
+    const rule = rules.find((candidate) =>
+      ruleMatchesPathAlias(candidate, "path", artifactPathPattern(spec.path)),
+    );
     if (!rule) return [`${relativeFile}: missing reserved metadata rule for ${spec.path}`];
     return [
       ...missingArtifactPathAliasRules(relativeFile, rule, spec),
@@ -374,9 +683,14 @@ function missingArtifactPathAliasRules(relativeFile, rule, spec) {
 }
 
 function ruleMatchesPathAlias(rule, alias, pattern) {
-  return Array.isArray(rule?.if?.anyOf) && rule.if.anyOf.some((branch) => {
-    return requiredFields(branch).includes(alias) && branch?.properties?.[alias]?.pattern === pattern;
-  });
+  return (
+    Array.isArray(rule?.if?.anyOf) &&
+    rule.if.anyOf.some((branch) => {
+      return (
+        requiredFields(branch).includes(alias) && branch?.properties?.[alias]?.pattern === pattern
+      );
+    })
+  );
 }
 
 function missingArtifactMetadataConsts(relativeFile, rule, spec) {

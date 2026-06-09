@@ -4,15 +4,7 @@ import path from "node:path";
 
 const repo = process.cwd();
 
-const roots = [
-  "README.md",
-  "docs",
-  "examples",
-  "recipes",
-  ".github",
-  "AGENTS.md",
-  "RELEASING.md",
-];
+const roots = ["README.md", "docs", "examples", "recipes", ".github", "AGENTS.md", "RELEASING.md"];
 
 const textExtensions = new Set([
   ".md",
@@ -68,7 +60,9 @@ const allowedContext =
   /\b(legacy|historical|removed|unsupported|not current|does not support|does not expose|do not use|do not add|do not resurrect|deleted|reference-only|preserved reference|retained TypeScript\/Ink references|old TypeScript|former TypeScript)\b/i;
 
 const failures = [
-  ...currentGuidanceFiles.flatMap((file) => checkCurrentGuidancePaths(file, staleSplitPathPatterns)),
+  ...currentGuidanceFiles.flatMap((file) =>
+    checkCurrentGuidancePaths(file, staleSplitPathPatterns),
+  ),
   ...modelGuidanceFiles.flatMap((file) => checkCurrentGuidancePaths(file, staleModelPathPatterns)),
 ];
 
@@ -122,8 +116,18 @@ if (failures.length > 0) {
 console.log("doc command drift check passed");
 
 function walk(root) {
+  if (isHistoricalDoc(root)) return [];
   const abs = path.join(repo, root);
-  const stats = safeStat(abs);
+  return walkEntry(root, abs, safeStat(abs));
+}
+
+// docs/notes/ holds historical working notes and docs/PORT_PLAN.md is the
+// upstream-port ledger; neither is current operator guidance.
+function isHistoricalDoc(root) {
+  return root === "docs/notes" || root.startsWith("docs/notes/") || root === "docs/PORT_PLAN.md";
+}
+
+function walkEntry(root, abs, stats) {
   if (stats === null) return [];
   if (stats.isFile()) return scannedFile(abs);
   if (!stats.isDirectory()) return [];

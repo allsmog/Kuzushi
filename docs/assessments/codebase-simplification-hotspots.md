@@ -28,7 +28,7 @@ primary operator path and because the largest files are now Rust modules.
 
 ## Existing Quality Reports
 
-The root `CODE_QUALITY_*.md` reports remain useful, but several findings are
+The `docs/notes/CODE_QUALITY_*.md` reports remain useful, but several findings are
 partially stale after the Rust TUI migration. Treat them as background:
 
 - `CODE_QUALITY_DRY.md`: good patterns for avoiding cosmetic DRY work.
