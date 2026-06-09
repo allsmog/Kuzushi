@@ -40,7 +40,7 @@ const checks = [
     file: "crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution.rs",
     tokens: [
       "use super::output_contract::normalize_tool_output_contract;",
-      "return result.map(|output| normalize_tool_output_contract(name, output));",
+      "result.map(|output| normalize_tool_output_contract(name, output))",
       "registered tool or DAG node {name:?} has no Rust executor mapping",
     ],
   },
