@@ -48,14 +48,33 @@ impl PlayTransport for SandboxCurlTransport {
             read_only_mounts: Vec::new(),
             read_write_mounts: Vec::new(),
         };
-        let result = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|err| format!("offense transport could not start a tokio runtime: {err}"))?
-            .block_on(sandbox_exec(self.backend, options))
-            .map_err(|err| err.to_string())?;
+        let result = block_on_sandbox_exec(self.backend, options)?;
         parse_curl_response(&result.stdout, result.duration_ms)
     }
+}
+
+/// Run the async `sandbox_exec` to completion from this synchronous trait
+/// method. A dedicated thread with its own current-thread runtime is used so
+/// this works whether or not the caller is already inside a tokio runtime
+/// (the CLI dispatches tools from within one — building a runtime there and
+/// blocking would panic with "Cannot start a runtime from within a runtime").
+fn block_on_sandbox_exec(
+    backend: SandboxBackend,
+    options: SandboxExecOptions,
+) -> Result<kuzushi_sandbox::SandboxExecResult, String> {
+    std::thread::scope(|scope| {
+        scope
+            .spawn(|| {
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .map_err(|err| format!("offense transport could not start a runtime: {err}"))?
+                    .block_on(sandbox_exec(backend, options))
+                    .map_err(|err| err.to_string())
+            })
+            .join()
+            .map_err(|_| "offense transport worker thread panicked".to_string())?
+    })
 }
 
 /// The URL a request targets: `scheme://host[:port]/path`.
@@ -124,8 +143,14 @@ fn parse_curl_response(stdout: &str, elapsed_ms: u64) -> Result<PlayResponse, St
     })
 }
 
+/// Index of the last status line. Only `HTTP/` at a line start counts, so a
+/// `Server: BaseHTTP/0.6 …` header value is not mistaken for the status line.
 fn last_status_block_start(normalized: &str) -> Option<usize> {
-    normalized.rmatch_indices("HTTP/").map(|(idx, _)| idx).next()
+    normalized
+        .match_indices("HTTP/")
+        .filter(|(idx, _)| *idx == 0 || normalized.as_bytes()[idx - 1] == b'\n')
+        .map(|(idx, _)| idx)
+        .last()
 }
 
 fn parse_status_line(line: &str) -> Result<u16, String> {
@@ -196,5 +221,15 @@ mod tests {
     #[test]
     fn missing_status_line_is_an_error() {
         assert!(parse_curl_response("garbage output", 1).is_err());
+    }
+
+    #[test]
+    fn server_header_containing_http_does_not_fool_the_parser() {
+        // A `Server` value with `HTTP/` in it (e.g. Python's BaseHTTP/0.6)
+        // must not be mistaken for the status line.
+        let raw = "HTTP/1.0 200 OK\r\nServer: BaseHTTP/0.6 Python/3.11\r\n\r\nuid=0(root)";
+        let response = parse_curl_response(raw, 3).unwrap();
+        assert_eq!(response.status, 200);
+        assert!(response.contains("uid=0(root)"));
     }
 }

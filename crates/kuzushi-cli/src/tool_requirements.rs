@@ -74,6 +74,7 @@ pub(crate) const FINDING_STORE_TOOL_PREFIXES: &[&str] = &[
     "findings:",
     "module-recommender:",
     "chrome-rce:",
+    "offense:",
     "variant:",
     "systems-hunt:",
     "uaf-hunt:",
