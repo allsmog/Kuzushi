@@ -11,7 +11,8 @@ use super::play_context::PlayContext;
 use super::transport::PlayTransport;
 
 /// What a play observed and concluded.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PlayOutcome {
     /// The play that produced this (e.g. `http-probe`).
     pub play: String,

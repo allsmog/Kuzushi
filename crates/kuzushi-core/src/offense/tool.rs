@@ -1,0 +1,154 @@
+//! The `offense:chain` operator tool.
+//!
+//! Resolves a chain run from input + the workspace, runs it against the live
+//! target through the sandbox-routed transport, and returns a result envelope
+//! carrying the per-hop [`ChainOutcome`]. The scope gate inside `run_chain` is
+//! the only door: a target the engagement scope denies never reaches the
+//! transport, and the tool reports the denial instead.
+
+use super::chain::{run_chain, ChainOutcome};
+use super::engagement::{prepare_chain_run, PreparedChainRun};
+use super::sandbox_curl::SandboxCurlTransport;
+use super::transport::PlayTransport;
+use serde_json::{json, Value};
+use std::path::Path;
+use std::time::{SystemTime, UNIX_EPOCH};
+
+const DEFAULT_PLAY_TIMEOUT_MS: u64 = 15_000;
+
+/// Run `offense:chain` with the default sandbox-routed curl transport.
+pub fn execute_offense_chain(input: &Value, workspace_root: &Path) -> Value {
+    let timeout_ms = input
+        .get("timeoutMs")
+        .or_else(|| input.get("timeout_ms"))
+        .and_then(Value::as_u64)
+        .unwrap_or(DEFAULT_PLAY_TIMEOUT_MS);
+    let transport = SandboxCurlTransport::detect(timeout_ms);
+    run_offense_chain(input, workspace_root, &transport, now_unix())
+}
+
+/// Inner runner, transport- and clock-injected for tests.
+fn run_offense_chain(
+    input: &Value,
+    workspace_root: &Path,
+    transport: &dyn PlayTransport,
+    now_unix: u64,
+) -> Value {
+    let prepared = match prepare_chain_run(input, workspace_root) {
+        Ok(prepared) => prepared,
+        Err(reason) => return failure("offense:chain could not start", reason),
+    };
+    let run_id = input
+        .get("runId")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("offense-{now_unix}"));
+
+    match run_prepared(&prepared, &run_id, transport, now_unix) {
+        Ok(outcome) => success(outcome),
+        Err(reason) => failure("offense:chain refused or failed", reason),
+    }
+}
+
+fn run_prepared(
+    prepared: &PreparedChainRun,
+    run_id: &str,
+    transport: &dyn PlayTransport,
+    now_unix: u64,
+) -> Result<ChainOutcome, String> {
+    run_chain(
+        &prepared.scope,
+        &prepared.target_host,
+        now_unix,
+        run_id,
+        &prepared.chain,
+        transport,
+    )
+}
+
+fn success(outcome: ChainOutcome) -> Value {
+    let output = format!("{} :: {}", outcome.chain, outcome.summary);
+    crate::module_result::completed_output_result(output.clone(), output, json!(outcome))
+}
+
+fn failure(summary: &str, reason: String) -> Value {
+    let output = format!("[-] {summary}: {reason}");
+    crate::module_result::failed_output_result(summary, output, json!({ "reason": reason }))
+}
+
+fn now_unix() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::offense::engagement_scope::ScopeTarget;
+    use crate::offense::transport::{PlayRequest, PlayResponse};
+
+    struct StubTransport {
+        status: u16,
+        body: String,
+    }
+    impl PlayTransport for StubTransport {
+        fn send(&self, _t: &ScopeTarget, _r: &PlayRequest) -> Result<PlayResponse, String> {
+            Ok(PlayResponse {
+                status: self.status,
+                headers: Vec::new(),
+                body: self.body.clone(),
+                elapsed_ms: 1,
+            })
+        }
+    }
+
+    fn input() -> Value {
+        json!({
+            "target": "10.0.0.5",
+            "scope": {"authorized": true, "authorizationRef": "HTB:lab", "inScope": ["10.0.0.5"]},
+            "chain": {"name": "probe", "plays": [
+                {"name": "admin", "path": "/admin", "expectStatus": 200, "expectSignals": ["root"]}
+            ]}
+        })
+    }
+
+    #[test]
+    fn completed_chain_returns_a_completed_envelope() {
+        let transport = StubTransport {
+            status: 200,
+            body: "root shell".to_string(),
+        };
+        let result = run_offense_chain(&input(), Path::new("/tmp/ws"), &transport, 1);
+        assert_eq!(result["status"], json!("completed"));
+        assert_eq!(result["data"]["completed"], json!(true));
+        assert_eq!(result["data"]["chain"], json!("probe"));
+    }
+
+    #[test]
+    fn denied_target_returns_a_failed_envelope_and_never_sends() {
+        let mut input = input();
+        input["target"] = json!("10.9.9.9");
+        let transport = StubTransport {
+            status: 200,
+            body: "root".to_string(),
+        };
+        let result = run_offense_chain(&input, Path::new("/tmp/ws"), &transport, 1);
+        assert_eq!(result["status"], json!("failed"));
+        assert!(result["data"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("refused"));
+    }
+
+    #[test]
+    fn missing_scope_and_target_fails_cleanly() {
+        let transport = StubTransport {
+            status: 200,
+            body: String::new(),
+        };
+        let result = run_offense_chain(&json!({}), Path::new("/tmp/ws"), &transport, 1);
+        assert_eq!(result["status"], json!("failed"));
+    }
+}

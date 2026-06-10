@@ -93,6 +93,7 @@ fn specialist_executor_for_tool(name: &str) -> Option<ToolExecutor> {
         "uaf-hunt:hunt" => Some(execute_uaf_hunt_tool_mapping),
         "pwn:profile-binary" | "pwn:reverse" | "pwn:state" | "pwn:calibrate-local"
         | "pwn:run-candidates" | "pwn:auto-solve" => Some(execute_pwn_tool_mapping),
+        "offense:chain" => Some(execute_offense_tool_mapping),
         "threat-intel:discover"
         | "threat-intel:list"
         | "threat-intel:apply"
@@ -238,6 +239,16 @@ fn execute_pwn_tool_mapping(
     dispatch_result(dispatch_pwn_tool(name, input, ctx, runtime), name)
 }
 
+fn execute_offense_tool_mapping(
+    _registry: &ModuleRegistry,
+    name: &str,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    _runtime: Option<&dyn AgentRuntime>,
+) -> Result<Value> {
+    dispatch_result(dispatch_offense_tool(name, input, ctx), name)
+}
+
 fn execute_threat_intel_tool_mapping(
     registry: &ModuleRegistry,
     name: &str,
@@ -335,6 +346,7 @@ fn register_security_modules(registry: &mut ModuleRegistry) {
     registry.register(systems_hunt_module());
     registry.register(uaf_hunt_module().deferred());
     registry.register(pwn_module().deferred());
+    registry.register(offense_module().deferred());
     registry.register(threat_intel_module());
     registry.register(triage_module());
     registry.register(verify_module());

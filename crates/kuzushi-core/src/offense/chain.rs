@@ -19,6 +19,15 @@ pub struct AttackChain {
     plays: Vec<Box<dyn Play>>,
 }
 
+impl std::fmt::Debug for AttackChain {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("AttackChain")
+            .field("name", &self.name)
+            .field("plays", &self.plays.len())
+            .finish()
+    }
+}
+
 impl AttackChain {
     pub fn new(name: impl Into<String>, plays: Vec<Box<dyn Play>>) -> Self {
         Self {
@@ -42,7 +51,8 @@ impl AttackChain {
 
 /// The recorded result of running a chain: every hop's outcome, and whether
 /// the full chain completed (every link landed).
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ChainOutcome {
     pub chain: String,
     pub target: String,
