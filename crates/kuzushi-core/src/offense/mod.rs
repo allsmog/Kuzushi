@@ -8,13 +8,17 @@
 //! enforcement gate that refuses by default — so no live play can fire at a
 //! host that was not explicitly put in scope.
 
+pub mod chain;
 pub mod engagement_scope;
 pub mod executor;
 pub mod http_probe;
 pub mod play;
 pub mod play_context;
+pub mod sandbox_curl;
 pub mod transport;
 
+pub use chain::{run_chain, AttackChain, ChainOutcome};
+pub use sandbox_curl::SandboxCurlTransport;
 pub use engagement_scope::{EngagementScope, ScopeDecision, ScopeEntry, ScopeTarget, ScopeWindow};
 pub use executor::run_play;
 pub use http_probe::HttpProbePlay;

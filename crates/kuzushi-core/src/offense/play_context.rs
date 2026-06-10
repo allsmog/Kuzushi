@@ -54,11 +54,12 @@ impl EngagementScope {
 }
 
 /// Everything a play needs: the authorized target plus the run id it reports
-/// evidence under.
+/// evidence under, and any evidence captured by earlier links in the chain.
 #[derive(Debug, Clone)]
 pub struct PlayContext {
     authorized: AuthorizedTarget,
     run_id: String,
+    preconditions: Vec<String>,
 }
 
 impl PlayContext {
@@ -66,7 +67,15 @@ impl PlayContext {
         Self {
             authorized,
             run_id: run_id.into(),
+            preconditions: Vec::new(),
         }
+    }
+
+    /// Seed the context with evidence captured by earlier chain links so a
+    /// play can build on it (e.g. reuse a token an auth-bypass step landed).
+    pub fn with_preconditions(mut self, preconditions: Vec<String>) -> Self {
+        self.preconditions = preconditions;
+        self
     }
 
     pub fn target(&self) -> &ScopeTarget {
@@ -79,5 +88,10 @@ impl PlayContext {
 
     pub fn run_id(&self) -> &str {
         &self.run_id
+    }
+
+    /// Evidence accumulated by earlier plays in the chain.
+    pub fn preconditions(&self) -> &[String] {
+        &self.preconditions
     }
 }
