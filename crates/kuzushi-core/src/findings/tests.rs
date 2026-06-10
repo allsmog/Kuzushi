@@ -59,6 +59,24 @@ mod tests {
     }
 
     #[test]
+    fn root_cause_key_groups_call_sites_the_dedup_key_separates() {
+        // Two call sites of one CWE-89 defect, far enough apart that the
+        // line-bucketed dedup key keeps them distinct...
+        let near = compute_dedup_key("src/db.rs", 10, Some("CWE-89"));
+        let far = compute_dedup_key("src/db.rs", 200, Some("CWE-89"));
+        assert_ne!(near, far, "distant lines get separate dedup keys");
+
+        // ...but they share one root cause.
+        let root_a = compute_root_cause_key("src/db.rs", Some("CWE-89"));
+        let root_b = compute_root_cause_key("./src/db.rs", Some("cwe-89"));
+        assert_eq!(root_a, root_b, "path prefix and CWE formatting normalize");
+
+        // Different CWE or different file is a different root cause.
+        assert_ne!(root_a, compute_root_cause_key("src/db.rs", Some("CWE-79")));
+        assert_ne!(root_a, compute_root_cause_key("src/api.rs", Some("CWE-89")));
+    }
+
+    #[test]
     fn finding_projection_centralizes_common_labels() {
         let finding = Finding::new_tool(
             "semgrep",

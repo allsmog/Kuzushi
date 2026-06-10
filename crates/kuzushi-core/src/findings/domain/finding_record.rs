@@ -147,6 +147,21 @@ pub fn compute_dedup_key(file: &str, line: u32, cwe: Option<&str>) -> String {
     format!("{normalised_file}:{bucket}:{cwe_part}")
 }
 
+/// Coarse root-cause key for the qualitative dedup pass.
+///
+/// Where [`compute_dedup_key`] merges near-identical findings (it buckets by
+/// line so the same defect reported twice collapses), this drops the line
+/// bucket: `(normalized_file, normalized_cwe)`. Multiple call sites of one
+/// missing validation in a file share a root cause and group together, which
+/// lets reporting say "12 findings across 7 root causes" instead of treating
+/// every call site as an independent problem. Deliberately coarser than the
+/// dedup key and used only for grouping/clustering — never to drop findings.
+pub fn compute_root_cause_key(file: &str, cwe: Option<&str>) -> String {
+    let normalised_file = file.trim_start_matches("./");
+    let cwe_part = cwe.map(normalize_cwe).unwrap_or_else(|| "*".to_string());
+    format!("{normalised_file}:{cwe_part}")
+}
+
 pub fn normalize_cwe(value: &str) -> String {
     let lower = value.trim().to_ascii_lowercase();
     let stripped = lower

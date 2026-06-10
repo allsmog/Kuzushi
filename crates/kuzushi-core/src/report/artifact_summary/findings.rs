@@ -35,6 +35,7 @@ fn finding_segments(findings: &[Value]) -> Vec<String> {
     ));
     parts.extend(named_segment("confidence", confidence_summary(findings)));
     parts.extend(named_segment("CWEs", cwe_summary(findings)));
+    parts.extend(named_segment("root causes", root_cause_summary(findings)));
     parts.extend(named_segment("tools", finding_unique_summary(findings, &["tool"])));
     parts.extend(named_segment(
         "rules",
@@ -135,6 +136,33 @@ fn confidence_bucket(value: Option<&Value>) -> Option<String> {
         .and_then(Value::as_str)
         .map(canonical_confidence)
         .or_else(|| value.and_then(Value::as_f64).map(numeric_confidence))
+}
+
+/// Qualitative root-cause grouping: how many distinct underlying problems
+/// the findings represent, clustering by `(file, normalized CWE)` so multiple
+/// call sites of one defect count once. Only emitted when clustering actually
+/// collapses findings (root causes < findings) so it reads as a noise signal
+/// — "12 finding(s), ... root causes 7" — and stays silent otherwise.
+fn root_cause_summary(findings: &[Value]) -> Option<String> {
+    let mut keys = std::collections::BTreeSet::new();
+    for (index, finding) in findings.iter().enumerate() {
+        keys.insert(finding_root_cause_key(finding, index));
+    }
+    let root_causes = keys.len();
+    (root_causes < findings.len() && root_causes > 0).then(|| root_causes.to_string())
+}
+
+/// A finding clusters by `(file, CWE)` only when it has a file path; a
+/// finding with no location is unidentifiable and counts as its own root
+/// cause (a per-index sentinel) rather than collapsing with other fileless
+/// findings on an empty key.
+fn finding_root_cause_key(finding: &Value, index: usize) -> String {
+    match string_alias(finding, &["filePath", "file_path"]) {
+        Some(file) => {
+            crate::findings::compute_root_cause_key(file, finding_cwes(finding).into_iter().next())
+        }
+        None => format!("#fileless-{index}"),
+    }
 }
 
 fn cwe_summary(findings: &[Value]) -> Option<String> {
