@@ -74,28 +74,14 @@ fn model_picker_row(
 }
 
 fn auth_hint_for(choice: &ModelChoice) -> String {
-    match choice.provider {
-        "anthropic" => {
-            if auth_ready_for_provider("anthropic") {
-                "auth ready".to_string()
-            } else {
-                "auth required".to_string()
-            }
-        }
-        "openai" => {
-            if auth_ready_for_provider("openai") {
-                "API key ready".to_string()
-            } else {
-                "needs OPENAI_API_KEY or OAuth".to_string()
-            }
-        }
-        "openai-codex" => {
-            if auth_ready_for_provider("openai-codex") {
-                "OAuth stored".to_string()
-            } else {
-                "needs OpenAI OAuth login".to_string()
-            }
-        }
-        other => format!("provider {other}"),
+    let ready = auth_ready_for_provider(choice.provider);
+    match (choice.provider, ready) {
+        ("anthropic", true) => "auth ready".to_string(),
+        ("anthropic", false) => "auth required".to_string(),
+        ("openai", true) => "API key ready".to_string(),
+        ("openai", false) => "needs OPENAI_API_KEY or OAuth".to_string(),
+        ("openai-codex", true) => "OAuth stored".to_string(),
+        ("openai-codex", false) => "needs OpenAI OAuth login".to_string(),
+        (other, _) => format!("provider {other}"),
     }
 }
