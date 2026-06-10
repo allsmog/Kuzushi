@@ -56,16 +56,19 @@ fn activity_run_outcome(app: &ShellApp, session: &ActivitySession) -> Option<Act
     })
 }
 
-/// Workspace context for the Activity header (target · ctx · model · findings).
-/// Drops the `mode:`/`view:` segments — redundant inside the Activity view —
-/// so the operator sees model + findings here instead of in a bottom strip.
+/// Workspace context for the Activity header (target · ctx · model ·
+/// findings). Composed explicitly — the Activity view suppresses the bottom
+/// status bar, so findings must travel here even though the general top
+/// strip no longer carries them.
 fn activity_context_line(app: &ShellApp) -> String {
-    super::context_strip_model(app)
-        .compact_segments()
-        .into_iter()
-        .filter(|segment| !segment.starts_with("mode:") && !segment.starts_with("view:"))
-        .collect::<Vec<_>>()
-        .join("  ·  ")
+    let model = super::context_strip_model(app);
+    [
+        format!("target:{}", model.target),
+        model.context_state_segment(),
+        format!("model:{}", model.model),
+        model.findings.clone(),
+    ]
+    .join("  ·  ")
 }
 
 impl<'a> ActiveActivityViewModel<'a> {

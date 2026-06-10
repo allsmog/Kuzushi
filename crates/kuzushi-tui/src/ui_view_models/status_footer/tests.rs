@@ -10,10 +10,9 @@ fn status_footer_model_reports_idle_shell_segments() {
 
     let model = status_footer_model(&app);
 
-    assert_eq!(
-        model.left_segments,
-        ["mode:shell", "target:none", "ctx:not built", "modules"]
-    );
+    // Routing + view only: target/ctx/model are the top cockpit strip's job,
+    // so each session fact is stated once per screen.
+    assert_eq!(model.left_segments, ["mode:shell", "modules"]);
     assert_eq!(model.right_segments, ["0 findings"]);
     assert!(!model.warning);
 }
@@ -30,16 +29,16 @@ fn status_footer_model_surfaces_ctrl_c_warning() {
 }
 
 #[test]
-fn status_footer_model_reports_malformed_context_snapshot() {
+fn malformed_context_snapshot_surfaces_in_the_cockpit_strip() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.context_view.status = "malformed context snapshot. Next: context build".to_string();
 
-    let model = status_footer_model(&app);
-
-    assert_eq!(
-        model.left_segments,
-        ["mode:shell", "target:none", "ctx:malformed", "modules"]
-    );
+    // The bottom bar no longer carries ctx; the malformed signal must still
+    // reach the operator through the top cockpit strip.
+    let strip = crate::ui_view_models::context_strip_model(&app);
+    assert!(strip
+        .compact_segments()
+        .contains(&"ctx:malformed".to_string()));
 }
 
 #[test]

@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 57
 ---
- KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured · 0 findings · view:threats:summary
+ KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
 
 1 DFD  2 STRIDE  3 STORIES  4 SCOPE  5 SUMMARY
 
