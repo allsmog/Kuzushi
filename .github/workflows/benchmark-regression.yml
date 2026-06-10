@@ -105,6 +105,9 @@ jobs:
 
       - run: pnpm benchmark:regression --results benchmarks/govwa/results/metrics-ci.json
 
+      - name: Render detection scoreboard
+        run: pnpm benchmark:scoreboard --results benchmarks/govwa/results/metrics-ci.json --output benchmarks/govwa/results/SCOREBOARD.md --mock
+
       - name: Stop mock Anthropic server
         if: always()
         run: |

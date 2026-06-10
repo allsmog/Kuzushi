@@ -71,6 +71,7 @@
     "benchmark:freeze": "tsx benchmarks/freeze-baseline.ts",
     "benchmark:diff": "tsx benchmarks/sarif-diff.ts",
     "benchmark:regression": "tsx benchmarks/regression-check.ts",
+    "benchmark:scoreboard": "tsx benchmarks/scoreboard.ts",
     "eval:kuzushi-whitebox-static": "node --import tsx evals/kuzushi-whitebox-static/run.ts",
     "perf": "tsx perf/harness.ts",
     "check:circular": "madge --ts-config tsconfig.json --extensions ts --circular src/",
