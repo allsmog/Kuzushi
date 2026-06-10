@@ -118,6 +118,38 @@ pub(crate) fn check_container_runtime() -> DoctorCheck {
     )
 }
 
+/// Whether live `offense:chain` traffic can be namespace-isolated. The
+/// transport prefers bwrap, then podman; without either it falls back to the
+/// unsandboxed Plain backend (fine for loopback labs, warned for other
+/// targets).
+pub(crate) fn check_offense_sandbox() -> DoctorCheck {
+    let path = env::var_os("PATH");
+    let cwd = current_dir_for_doctor();
+    if let Some(found) = resolve_executable("bwrap", path.as_deref(), &cwd) {
+        return DoctorCheck::ok(
+            "offense-sandbox",
+            format!(
+                "found bwrap at {}; live offense:chain traffic is namespace-isolated",
+                found.display()
+            ),
+        );
+    }
+    if let Some(found) = resolve_executable("podman", path.as_deref(), &cwd) {
+        return DoctorCheck::ok(
+            "offense-sandbox",
+            format!(
+                "found podman at {}; live offense:chain traffic is isolated",
+                found.display()
+            ),
+        );
+    }
+    DoctorCheck::warn(
+        "offense-sandbox",
+        "no isolating sandbox backend (bwrap/podman) on PATH; live offense:chain uses the Plain backend (no host isolation) and warns for non-loopback targets",
+        "Install bubblewrap (`apt-get install bubblewrap` / `brew install bubblewrap`) or Podman to isolate offensive traffic from your host.",
+    )
+}
+
 pub(crate) fn check_revng_image() -> DoctorCheck {
     let runtime = resolve_executable(
         "podman",

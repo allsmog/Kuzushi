@@ -1,7 +1,7 @@
 use super::{
     check_auth_env, check_container_runtime, check_findings_db, check_model_config,
-    check_revng_image, check_scanner_binary, deterministic_capability_checks, DoctorCheck,
-    DoctorReport,
+    check_offense_sandbox, check_revng_image, check_scanner_binary,
+    deterministic_capability_checks, DoctorCheck, DoctorReport,
 };
 use kuzushi_core::{load_config_for_target, WorkspaceTarget};
 use std::fs;
@@ -17,6 +17,7 @@ pub(crate) fn build_doctor_report(target: PathBuf) -> DoctorReport {
     checks.push(check_scanner_binary("codeql"));
     checks.extend(deterministic_capability_checks());
     checks.push(check_container_runtime());
+    checks.push(check_offense_sandbox());
     checks.push(check_revng_image());
 
     record_config_checks(config.as_ref(), &mut checks);
