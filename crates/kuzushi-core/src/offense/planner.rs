@@ -14,6 +14,7 @@
 //! query whose output is a [`PlaySpec`].
 
 use super::chain::ChainOutcome;
+use super::observer::HopObserver;
 use super::play::PlayOutcome;
 use super::play_context::PlayContext;
 use super::spec::PlaySpec;
@@ -60,12 +61,15 @@ pub fn run_planned_chain(
     workspace_root: &std::path::Path,
     transport: &dyn PlayTransport,
     budget: PlannerBudget,
+    observer: &dyn HopObserver,
 ) -> Result<ChainOutcome> {
     let mut steps: Vec<PlayOutcome> = Vec::new();
     let mut observations: Vec<String> = Vec::new();
     let mut stopped_by_planner = false;
+    observer.on_chain_start(chain_name, &ctx.target().to_string());
 
     for _ in 0..budget.max_steps.max(1) {
+        observer.on_planning(steps.len());
         let decision = plan_next_step(goal, &observations, runtime, model, workspace_root)?;
         if decision.done {
             stopped_by_planner = true;
@@ -76,6 +80,7 @@ pub fn run_planned_chain(
             break;
         };
         let outcome = execute_planned_step(&spec, ctx, transport)?;
+        observer.on_hop(steps.len(), &outcome);
         observations.push(observation_line(&outcome));
         let landed = outcome.exploited;
         steps.push(outcome);
@@ -184,6 +189,7 @@ fn planner_step_schema() -> Value {
 mod tests {
     use super::*;
     use super::super::engagement_scope::{EngagementScope, ScopeEntry, ScopeTarget};
+    use super::super::observer::NoopObserver;
     use super::super::transport::{PlayRequest, PlayResponse};
     use crate::findings::TriageOutcome;
     use crate::runtime::{AgentQueryResponse, AgentRuntime, TriageRequest};
@@ -264,6 +270,7 @@ mod tests {
             Path::new("/tmp/ws"),
             &OkTransport,
             PlannerBudget { max_steps: 10 },
+            &NoopObserver,
         )
         .unwrap();
         assert_eq!(outcome.steps.len(), 2);
@@ -288,6 +295,7 @@ mod tests {
             Path::new("/tmp/ws"),
             &OkTransport,
             PlannerBudget { max_steps: 2 },
+            &NoopObserver,
         )
         .unwrap();
         assert_eq!(outcome.steps.len(), 2);
@@ -306,6 +314,7 @@ mod tests {
             Path::new("/tmp/ws"),
             &OkTransport,
             PlannerBudget { max_steps: 5 },
+            &NoopObserver,
         )
         .unwrap();
         assert!(outcome.steps.is_empty());

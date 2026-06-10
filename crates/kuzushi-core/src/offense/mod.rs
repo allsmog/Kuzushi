@@ -13,6 +13,7 @@ pub mod engagement;
 pub mod engagement_scope;
 pub mod executor;
 pub mod http_probe;
+pub mod observer;
 pub mod persistence;
 pub mod planner;
 pub mod play;
@@ -24,6 +25,7 @@ pub mod tool;
 pub mod transport;
 
 pub use chain::{run_chain, AttackChain, ChainOutcome};
+pub use observer::{HopObserver, NoopObserver};
 pub use planner::{run_planned_chain, PlannerBudget, PlannerStep};
 pub use engagement::{prepare_chain_run, PreparedChainRun};
 pub use persistence::persist_chain_finding;

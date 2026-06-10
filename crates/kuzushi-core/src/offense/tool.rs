@@ -11,6 +11,7 @@ use super::engagement::{prepare_chain_run, resolve_engagement, PreparedChainRun}
 use super::persistence::{persist_chain_finding, persisted_backend};
 use super::planner::{run_planned_chain, PlannerBudget};
 use super::engagement_scope::ScopeTarget;
+use super::observer::HopObserver;
 use super::play_context::PlayContext;
 use super::sandbox_curl::SandboxCurlTransport;
 use super::transport::PlayTransport;
@@ -29,6 +30,7 @@ pub fn execute_offense_chain(
     input: &Value,
     workspace_root: &Path,
     store: Option<&FindingStore>,
+    observer: &dyn HopObserver,
 ) -> Value {
     let timeout_ms = input
         .get("timeoutMs")
@@ -37,7 +39,7 @@ pub fn execute_offense_chain(
         .unwrap_or(DEFAULT_PLAY_TIMEOUT_MS);
     let transport = SandboxCurlTransport::detect(timeout_ms);
     let backend = persisted_backend(transport.backend());
-    run_offense_chain(input, workspace_root, &transport, backend, store, now_unix())
+    run_offense_chain(input, workspace_root, &transport, backend, store, now_unix(), observer)
 }
 
 /// Run `offense:chain` in autonomous (LLM-planned) mode: the model proposes
@@ -50,6 +52,7 @@ pub fn execute_offense_planned(
     runtime: &dyn AgentRuntime,
     model: &str,
     goal: &str,
+    observer: &dyn HopObserver,
 ) -> Value {
     let timeout_ms = input
         .get("timeoutMs")
@@ -68,6 +71,7 @@ pub fn execute_offense_planned(
         transport: &transport,
         backend,
         now_unix: now_unix(),
+        observer,
     })
 }
 
@@ -81,6 +85,7 @@ struct PlannedRun<'a> {
     transport: &'a dyn PlayTransport,
     backend: PersistedSandboxBackend,
     now_unix: u64,
+    observer: &'a dyn HopObserver,
 }
 
 fn run_planned(run: PlannedRun<'_>) -> Value {
@@ -94,26 +99,21 @@ fn run_planned(run: PlannedRun<'_>) -> Value {
             return failure("offense:chain refused", format!("refused {target_host}: {reason}"))
         }
     };
-    let run_id = input_run_id(run.input, run.now_unix);
-    let ctx = PlayContext::new(authorized, run_id);
-    let budget = PlannerBudget {
-        max_steps: planned_max_steps(run.input),
-    };
-    let chain_name = run
-        .input
-        .get("chainName")
-        .and_then(Value::as_str)
-        .unwrap_or("planned");
-    match run_planned_chain(
-        chain_name,
+    let ctx = PlayContext::new(authorized, input_run_id(run.input, run.now_unix));
+    let result = run_planned_chain(
+        chain_name(run.input),
         run.goal,
         &ctx,
         run.runtime,
         run.model,
         run.workspace_root,
         run.transport,
-        budget,
-    ) {
+        PlannerBudget {
+            max_steps: planned_max_steps(run.input),
+        },
+        run.observer,
+    );
+    match result {
         Ok(outcome) => {
             let finding_id =
                 persist_outcome(run.store, run.workspace_root, &target_host, run.backend, &outcome);
@@ -122,6 +122,13 @@ fn run_planned(run: PlannedRun<'_>) -> Value {
         }
         Err(err) => failure("offense:chain planning failed", err.to_string()),
     }
+}
+
+fn chain_name(input: &Value) -> &str {
+    input
+        .get("chainName")
+        .and_then(Value::as_str)
+        .unwrap_or("planned")
 }
 
 fn planned_max_steps(input: &Value) -> u32 {
@@ -149,6 +156,7 @@ fn run_offense_chain(
     backend: PersistedSandboxBackend,
     store: Option<&FindingStore>,
     now_unix: u64,
+    observer: &dyn HopObserver,
 ) -> Value {
     let prepared = match prepare_chain_run(input, workspace_root) {
         Ok(prepared) => prepared,
@@ -160,7 +168,7 @@ fn run_offense_chain(
         .map(str::to_string)
         .unwrap_or_else(|| format!("offense-{now_unix}"));
 
-    let outcome = match run_prepared(&prepared, &run_id, transport, now_unix) {
+    let outcome = match run_prepared(&prepared, &run_id, transport, now_unix, observer) {
         Ok(outcome) => outcome,
         Err(reason) => return failure("offense:chain refused or failed", reason),
     };
@@ -190,6 +198,7 @@ fn run_prepared(
     run_id: &str,
     transport: &dyn PlayTransport,
     now_unix: u64,
+    observer: &dyn HopObserver,
 ) -> Result<ChainOutcome, String> {
     run_chain(
         &prepared.scope,
@@ -198,6 +207,7 @@ fn run_prepared(
         run_id,
         &prepared.chain,
         transport,
+        observer,
     )
 }
 
@@ -261,6 +271,7 @@ mod tests {
     use super::*;
     use crate::findings::TriageOutcome;
     use crate::offense::engagement_scope::ScopeTarget;
+    use crate::offense::observer::NoopObserver;
     use crate::offense::transport::{PlayRequest, PlayResponse};
     use crate::runtime::{AgentQueryRequest, AgentQueryResponse, TriageRequest};
     use std::sync::atomic::{AtomicUsize, Ordering};
@@ -328,6 +339,7 @@ mod tests {
             transport: &transport,
             backend: PersistedSandboxBackend::Plain,
             now_unix: 1,
+            observer: &NoopObserver,
         });
         assert_eq!(result["status"], json!("failed"));
         assert!(result["data"]["reason"].as_str().unwrap().contains("refused"));
@@ -352,6 +364,7 @@ mod tests {
             PersistedSandboxBackend::Plain,
             store,
             1,
+            &NoopObserver,
         )
     }
 
