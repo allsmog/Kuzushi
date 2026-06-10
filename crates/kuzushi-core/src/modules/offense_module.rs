@@ -89,6 +89,7 @@ fn run_offense_chain(
     let workspace = ctx.workspace.context(
         "offense:chain needs an active workspace for the engagement scope. Pass --target <dir> or start the shell with --target.",
     )?;
+    let observer = TraceHopObserver { trace: ctx.trace };
     let goal = input
         .get("goal")
         .and_then(Value::as_str)
@@ -100,6 +101,7 @@ fn run_offense_chain(
             input,
             workspace.root(),
             ctx.findings_store,
+            &observer,
         ));
     };
 
@@ -114,5 +116,45 @@ fn run_offense_chain(
         runtime,
         &model,
         goal,
+        &observer,
     ))
+}
+
+/// Streams chain progress into the Activity view: a parent `start` step for
+/// the chain, a `reasoning` step when the planner is thinking, and a `done`
+/// step per hop (severity-tagged so a landed hop stands out).
+struct TraceHopObserver<'a> {
+    trace: Option<&'a crate::run_artifacts::TraceHandle>,
+}
+
+impl crate::offense::HopObserver for TraceHopObserver<'_> {
+    fn on_chain_start(&self, chain: &str, target: &str) {
+        if let Some(trace) = self.trace {
+            let _ = trace
+                .step("tool", "chain", format!("offense:chain start · {chain} → {target}"))
+                .emit();
+        }
+    }
+
+    fn on_planning(&self, step_index: usize) {
+        if let Some(trace) = self.trace {
+            let _ = trace
+                .step("reasoning", "chain", format!("planning hop {}", step_index + 1))
+                .emit();
+        }
+    }
+
+    fn on_hop(&self, step_index: usize, outcome: &crate::offense::PlayOutcome) {
+        let Some(trace) = self.trace else {
+            return;
+        };
+        let verdict = if outcome.exploited { "landed" } else { "miss" };
+        let _ = trace
+            .step(
+                "done",
+                "chain",
+                format!("hop {} · {} · {}", step_index + 1, outcome.play, verdict),
+            )
+            .emit();
+    }
 }

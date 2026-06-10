@@ -9,6 +9,7 @@
 //! cannot pivot past a hop that failed.
 
 use super::engagement_scope::{EngagementScope, ScopeTarget};
+use super::observer::HopObserver;
 use super::play::{Play, PlayOutcome};
 use super::play_context::PlayContext;
 use super::transport::PlayTransport;
@@ -72,11 +73,14 @@ pub fn run_chain(
     run_id: impl Into<String>,
     chain: &AttackChain,
     transport: &dyn PlayTransport,
+    observer: &dyn HopObserver,
 ) -> Result<ChainOutcome, String> {
     let authorized = scope
         .authorize(ScopeTarget::parse(target_host), now_unix)
         .map_err(|reason| format!("{}: refused {target_host}: {reason}", chain.name()))?;
     let run_id = run_id.into();
+    let target = authorized_target_string(&authorized);
+    observer.on_chain_start(chain.name(), &target);
 
     let mut steps = Vec::with_capacity(chain.plays.len());
     let mut evidence = Vec::new();
@@ -84,6 +88,7 @@ pub fn run_chain(
         let ctx = PlayContext::new(authorized.clone(), run_id.clone())
             .with_preconditions(evidence.clone());
         let outcome = play.execute(&ctx, transport)?;
+        observer.on_hop(steps.len(), &outcome);
         let landed = outcome.exploited;
         evidence.extend(outcome.evidence.clone());
         steps.push(outcome);
@@ -92,7 +97,7 @@ pub fn run_chain(
         }
     }
 
-    Ok(finish_chain(chain, &authorized_target_string(&authorized), steps))
+    Ok(finish_chain(chain, &target, steps))
 }
 
 fn authorized_target_string(authorized: &super::play_context::AuthorizedTarget) -> String {
@@ -125,6 +130,7 @@ fn finish_chain(chain: &AttackChain, target: &str, steps: Vec<PlayOutcome>) -> C
 mod tests {
     use super::*;
     use super::super::engagement_scope::ScopeEntry;
+    use super::super::observer::NoopObserver;
     use super::super::play_context::PlayContext;
     use super::super::transport::{PlayRequest, PlayResponse};
 
@@ -204,7 +210,7 @@ mod tests {
             ],
         );
         let outcome =
-            run_chain(&scope("10.0.0.5"), "10.0.0.5", 1, "run-1", &chain, &NullTransport).unwrap();
+            run_chain(&scope("10.0.0.5"), "10.0.0.5", 1, "run-1", &chain, &NullTransport, &NoopObserver).unwrap();
         assert!(outcome.completed);
         assert_eq!(outcome.steps.len(), 3);
         assert!(outcome.summary.contains("3/3"));
@@ -221,7 +227,7 @@ mod tests {
             ],
         );
         let outcome =
-            run_chain(&scope("10.0.0.5"), "10.0.0.5", 1, "run-1", &chain, &NullTransport).unwrap();
+            run_chain(&scope("10.0.0.5"), "10.0.0.5", 1, "run-1", &chain, &NullTransport, &NoopObserver).unwrap();
         assert!(!outcome.completed);
         // Third play never ran — the chain broke at link 2.
         assert_eq!(outcome.steps.len(), 2);
@@ -229,9 +235,46 @@ mod tests {
     }
 
     #[test]
+    fn observer_sees_start_and_every_hop() {
+        use std::cell::RefCell;
+        struct Spy {
+            events: RefCell<Vec<String>>,
+        }
+        impl HopObserver for Spy {
+            fn on_chain_start(&self, chain: &str, target: &str) {
+                self.events.borrow_mut().push(format!("start:{chain}:{target}"));
+            }
+            fn on_hop(&self, index: usize, outcome: &PlayOutcome) {
+                self.events
+                    .borrow_mut()
+                    .push(format!("hop:{index}:{}", outcome.play));
+            }
+        }
+        let spy = Spy {
+            events: RefCell::new(Vec::new()),
+        };
+        let chain = AttackChain::new(
+            "c",
+            vec![
+                play("a", true, "t", None),
+                play("b", false, "", Some("t")),
+                play("c", true, "x", None),
+            ],
+        );
+        run_chain(&scope("10.0.0.5"), "10.0.0.5", 1, "run-1", &chain, &NullTransport, &spy).unwrap();
+        let events = spy.events.borrow();
+        // Start, then two hops (the chain broke at the second, so the third
+        // never ran — and the observer never saw it).
+        assert_eq!(events[0], "start:c:10.0.0.5");
+        assert_eq!(events[1], "hop:0:a");
+        assert_eq!(events[2], "hop:1:b");
+        assert_eq!(events.len(), 3);
+    }
+
+    #[test]
     fn denied_target_runs_no_links() {
         let chain = AttackChain::new("probe", vec![play("auth-bypass", true, "t", None)]);
-        let result = run_chain(&scope("10.0.0.5"), "10.9.9.9", 1, "run-1", &chain, &NullTransport);
+        let result = run_chain(&scope("10.0.0.5"), "10.9.9.9", 1, "run-1", &chain, &NullTransport, &NoopObserver);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("refused"));
     }
