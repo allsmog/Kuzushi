@@ -66,5 +66,9 @@ fn run_offense_chain(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Va
     let workspace = ctx.workspace.context(
         "offense:chain needs an active workspace for the engagement scope. Pass --target <dir> or start the shell with --target.",
     )?;
-    Ok(crate::offense::execute_offense_chain(input, workspace.root()))
+    Ok(crate::offense::execute_offense_chain(
+        input,
+        workspace.root(),
+        ctx.findings_store,
+    ))
 }
