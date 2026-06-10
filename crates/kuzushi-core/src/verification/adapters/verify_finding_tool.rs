@@ -34,23 +34,48 @@ pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> 
     let model =
         crate::runtime::require_configured_model("verify:finding", request.configured_model)?;
     let prompt = build_verify_prompt(&finding, input.prompt_template.as_deref())?;
-    let result = query_required_structured_json(
+
+    // Each pass is an independent adversarial verifier with no shared
+    // context; a strict majority must agree before a finding is confirmed
+    // exploitable (see verify_consensus). passes == 1 is the single-pass
+    // default and skips the consensus machinery entirely.
+    let mut passes = Vec::with_capacity(input.passes as usize);
+    for _ in 0..input.passes {
+        passes.push(run_one_verify_pass(
+            runtime,
+            &model,
+            request.workspace_root,
+            &prompt,
+            &finding.fingerprint,
+        )?);
+    }
+    let result = super::verify_consensus::combine_verify_passes(passes);
+
+    Ok(verify_finding_response(result))
+}
+
+fn run_one_verify_pass(
+    runtime: &dyn AgentRuntime,
+    model: &str,
+    workspace_root: &Path,
+    prompt: &str,
+    fingerprint: &str,
+) -> Result<Value> {
+    query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
             model,
-            request.workspace_root.to_path_buf(),
+            workspace_root.to_path_buf(),
             VERIFY_SYSTEM_PROMPT.to_string(),
-            prompt,
+            prompt.to_string(),
         ),
         StructuredJsonContract::new(
             "verify:finding",
             "VerificationResult",
             verification_result_schema(),
         ),
-        |raw| normalize_verification_result(raw, &finding.fingerprint),
-    )?;
-
-    Ok(verify_finding_response(result))
+        |raw| normalize_verification_result(raw, fingerprint),
+    )
 }
 
 fn missing_finding_response(fingerprint: &str) -> Value {
