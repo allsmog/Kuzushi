@@ -70,7 +70,7 @@ impl Play for HttpProbePlay {
         let response = transport.send(ctx.target(), &self.request)?;
         let target = ctx.target().to_string();
         let (landed, evidence) = self.classify(&response);
-        let outcome = PlayOutcome::new(self.name(), target);
+        let outcome = PlayOutcome::new(self.name(), target).with_observation(response.observe(280));
         if landed {
             Ok(outcome.exploited(
                 format!("{} {} -> {}", self.request.method, self.request.path, response.status),

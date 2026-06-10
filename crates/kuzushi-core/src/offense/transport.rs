@@ -64,6 +64,18 @@ impl PlayResponse {
                 .iter()
                 .any(|(_, value)| value.contains(needle))
     }
+
+    /// A compact `status + body excerpt` summary for the audit trail and for
+    /// feeding an LLM planner the hop's result without the full body.
+    pub fn observe(&self, max_body: usize) -> String {
+        let body: String = self.body.chars().take(max_body).collect();
+        let truncated = if self.body.chars().count() > max_body {
+            "…"
+        } else {
+            ""
+        };
+        format!("status={} body={body}{truncated}", self.status)
+    }
 }
 
 /// Sends a request at an (already authorized) target and returns what came

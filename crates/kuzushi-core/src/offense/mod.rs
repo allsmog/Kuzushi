@@ -14,6 +14,7 @@ pub mod engagement_scope;
 pub mod executor;
 pub mod http_probe;
 pub mod persistence;
+pub mod planner;
 pub mod play;
 pub mod play_context;
 pub mod prompt_injection;
@@ -23,6 +24,7 @@ pub mod tool;
 pub mod transport;
 
 pub use chain::{run_chain, AttackChain, ChainOutcome};
+pub use planner::{run_planned_chain, PlannerBudget, PlannerStep};
 pub use engagement::{prepare_chain_run, PreparedChainRun};
 pub use persistence::persist_chain_finding;
 pub use sandbox_curl::SandboxCurlTransport;
