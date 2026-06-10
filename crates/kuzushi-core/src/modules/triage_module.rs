@@ -91,6 +91,14 @@ pub(crate) fn verify_module() -> BuiltinModule {
                         "Prompt text or path override for verification.",
                     )
                     .advanced(),
+                    opt(
+                        "VERIFY_PASSES",
+                        OptionType::Int,
+                        "Independent adversarial verifier passes to run and combine by majority vote (1-7). Higher trades model spend for precision.",
+                    )
+                    .aliases(&["passes"])
+                    .default(json!(1))
+                    .advanced(),
                     model_option(),
                 ],
             ),
