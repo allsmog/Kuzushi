@@ -22,7 +22,13 @@ benchmarks/*/results/
 benchmarks/*-results.json
 iris.pdf
 .playwright-mcp/
-.claude/
+# Ignore local .claude state, but keep the committed SessionStart hook that
+# ensures the isolating offense sandbox backend is installed in web sessions.
+.claude/*
+!.claude/hooks/
+.claude/hooks/*
+!.claude/hooks/session-start.sh
+!.claude/settings.json
 cc-repo/
 vendor/
 .codex
