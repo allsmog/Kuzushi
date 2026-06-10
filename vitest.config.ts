@@ -7,6 +7,7 @@ export default defineConfig({
       "tests/modules/define.test.ts",
       "tests/modules/loader.test.ts",
       "tests/modules/host-handles.test.ts",
+      "tests/langgraph-bridge/mcp-plan.test.ts",
     ],
     exclude: [
       "**/node_modules/**",

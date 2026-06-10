@@ -21,9 +21,57 @@ function agentMcpsEnabled(request) {
   return value === "1" || value === "true";
 }
 
-function mcpServerConfig(request) {
+export function mcpServerConfig(request) {
   const cwd = mcpCwdFor(request);
   const env = { ...process.env, ...mcpEnvironment(request) };
+  const plan = attachmentPlan(request);
+  if (plan.length > 0) return plannedServerConfig(plan, cwd, env);
+  return defaultServerConfig(cwd, env);
+}
+
+// The artifact-gated plan computed by `mcp_attachment_plan_for_target`
+// (kuzushi-core). When present it is authoritative: only the listed
+// servers attach, so a missing CPG or CodeQL DB never queues a server
+// that would fail at first tool call.
+function attachmentPlan(request) {
+  const raw = request?.toolPolicy?.mcpsAttached ?? request?.toolPolicy?.mcps_attached;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((entry) => typeof entry?.name === "string" && entry.name.length > 0);
+}
+
+function plannedServerConfig(plan, cwd, env) {
+  const servers = {};
+  for (const attachment of plan) {
+    servers[attachment.name] = plannedServer(attachment, cwd, env);
+  }
+  return servers;
+}
+
+function plannedServer(attachment, cwd, env) {
+  const token = attachment.name.toUpperCase().replaceAll("-", "_");
+  return {
+    transport: "stdio",
+    command: process.env[`KUZUSHI_MCP_${token}_BIN`] || `kuzushi-mcp-${attachment.name}`,
+    args: [],
+    cwd,
+    env: { ...env, ...artifactEnv(attachment, token) },
+  };
+}
+
+// Artifact-backed servers read their input path from
+// `KUZUSHI_MCP_<NAME>_ARTIFACT`; the joern server predates that
+// convention and reads `KUZUSHI_JOERN_CPG`.
+function artifactEnv(attachment, token) {
+  const path = attachment.artifactPath ?? attachment.artifact_path;
+  if (typeof path !== "string" || path.length === 0) return {};
+  const env = { [`KUZUSHI_MCP_${token}_ARTIFACT`]: path };
+  if (attachment.name === "joern") env.KUZUSHI_JOERN_CPG = path;
+  return env;
+}
+
+// Legacy surface for callers that only set `toolPolicy.mcps = true`
+// (or force `KUZUSHI_AGENT_MCPS=1`) without an attachment plan.
+function defaultServerConfig(cwd, env) {
   return {
     treesitter: stdioServer("KUZUSHI_MCP_TREESITTER_BIN", "kuzushi-mcp-treesitter", cwd, env),
     joern: stdioServer("KUZUSHI_MCP_JOERN_BIN", "kuzushi-mcp-joern", cwd, env),
