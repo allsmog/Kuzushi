@@ -23,9 +23,7 @@ pub struct PreparedChainRun {
 
 /// Resolve a chain run from tool input rooted at `workspace_root`.
 pub fn prepare_chain_run(input: &Value, workspace_root: &Path) -> Result<PreparedChainRun, String> {
-    let target_host = string_field(input, &["target", "targetHost", "target_host"])
-        .ok_or_else(|| "offense:chain requires a target host".to_string())?;
-    let scope = resolve_scope(input, workspace_root)?;
+    let (scope, target_host) = resolve_engagement(input, workspace_root)?;
     let spec = resolve_chain_spec(input, workspace_root)?;
     let chain = spec.build()?;
     Ok(PreparedChainRun {
@@ -33,6 +31,18 @@ pub fn prepare_chain_run(input: &Value, workspace_root: &Path) -> Result<Prepare
         target_host,
         chain,
     })
+}
+
+/// Resolve just the engagement scope and target host — the floor both the
+/// declarative chain and the LLM-planned loop need before authorizing.
+pub fn resolve_engagement(
+    input: &Value,
+    workspace_root: &Path,
+) -> Result<(EngagementScope, String), String> {
+    let target_host = string_field(input, &["target", "targetHost", "target_host"])
+        .ok_or_else(|| "offense:chain requires a target host".to_string())?;
+    let scope = resolve_scope(input, workspace_root)?;
+    Ok((scope, target_host))
 }
 
 fn resolve_scope(input: &Value, workspace_root: &Path) -> Result<EngagementScope, String> {
