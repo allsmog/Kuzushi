@@ -117,7 +117,8 @@ fn run_planned(run: PlannedRun<'_>) -> Value {
         Ok(outcome) => {
             let finding_id =
                 persist_outcome(run.store, run.workspace_root, &target_host, run.backend, &outcome);
-            success(outcome, finding_id)
+            let warnings = isolation_warnings(run.backend, &target_host);
+            success(outcome, finding_id, warnings)
         }
         Err(err) => failure("offense:chain planning failed", err.to_string()),
     }
@@ -164,7 +165,8 @@ fn run_offense_chain(
         Err(reason) => return failure("offense:chain refused or failed", reason),
     };
     let finding_id = persist_outcome(store, workspace_root, &prepared.target_host, backend, &outcome);
-    success(outcome, finding_id)
+    let warnings = isolation_warnings(backend, &prepared.target_host);
+    success(outcome, finding_id, warnings)
 }
 
 /// Persist the outcome when a store is present; a persistence failure must not
@@ -199,13 +201,47 @@ fn run_prepared(
     )
 }
 
-fn success(outcome: ChainOutcome, finding_id: Option<i64>) -> Value {
-    let output = format!("{} :: {}", outcome.chain, outcome.summary);
+fn success(outcome: ChainOutcome, finding_id: Option<i64>, warnings: Vec<String>) -> Value {
+    let mut output = format!("{} :: {}", outcome.chain, outcome.summary);
+    for warning in &warnings {
+        output.push_str(&format!("\n[!] {warning}"));
+    }
+    let data = success_data(outcome, finding_id, &warnings);
+    crate::module_result::completed_output_result(output.clone(), output, data)
+}
+
+fn success_data(outcome: ChainOutcome, finding_id: Option<i64>, warnings: &[String]) -> Value {
     let mut data = json!(outcome);
-    if let (Some(object), Some(id)) = (data.as_object_mut(), finding_id) {
+    let Some(object) = data.as_object_mut() else {
+        return data;
+    };
+    if let Some(id) = finding_id {
         object.insert("findingId".to_string(), json!(id));
     }
-    crate::module_result::completed_output_result(output.clone(), output, data)
+    if !warnings.is_empty() {
+        object.insert("warnings".to_string(), json!(warnings));
+    }
+    data
+}
+
+/// Warn when live traffic goes through the unsandboxed `Plain` backend at a
+/// target that is not loopback — the operator's host is not isolated from a
+/// host they don't control. Loopback (a local lab) is fine; anything else
+/// should run under bwrap/podman.
+fn isolation_warnings(backend: PersistedSandboxBackend, target_host: &str) -> Vec<String> {
+    if backend == PersistedSandboxBackend::Plain && !is_loopback_target(target_host) {
+        return vec![format!(
+            "live traffic to {target_host} ran through the unsandboxed Plain backend (no bwrap/podman on PATH); install one to isolate offensive traffic from your host"
+        )];
+    }
+    Vec::new()
+}
+
+fn is_loopback_target(host: &str) -> bool {
+    if let Ok(ip) = host.parse::<std::net::IpAddr>() {
+        return ip.is_loopback();
+    }
+    host.eq_ignore_ascii_case("localhost") || host.to_ascii_lowercase().ends_with(".localhost")
 }
 
 fn failure(summary: &str, reason: String) -> Value {
@@ -372,5 +408,38 @@ mod tests {
         };
         let result = run(&json!({}), &transport, None);
         assert_eq!(result["status"], json!("failed"));
+    }
+
+    #[test]
+    fn loopback_target_under_plain_backend_warns_nothing() {
+        assert!(isolation_warnings(PersistedSandboxBackend::Plain, "127.0.0.1").is_empty());
+        assert!(isolation_warnings(PersistedSandboxBackend::Plain, "localhost").is_empty());
+        assert!(isolation_warnings(PersistedSandboxBackend::Plain, "::1").is_empty());
+    }
+
+    #[test]
+    fn non_loopback_under_plain_backend_warns() {
+        let warnings = isolation_warnings(PersistedSandboxBackend::Plain, "10.0.0.5");
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("unsandboxed Plain backend"));
+    }
+
+    #[test]
+    fn isolating_backend_never_warns() {
+        assert!(isolation_warnings(PersistedSandboxBackend::Bwrap, "10.0.0.5").is_empty());
+        assert!(isolation_warnings(PersistedSandboxBackend::Podman, "box.htb").is_empty());
+    }
+
+    #[test]
+    fn non_loopback_plain_chain_surfaces_the_warning_in_the_envelope() {
+        let transport = StubTransport {
+            status: 200,
+            body: "root shell".to_string(),
+        };
+        // The `run` helper uses the Plain backend; input() targets 10.0.0.5.
+        let result = run(&input(), &transport, None);
+        assert_eq!(result["status"], json!("completed"));
+        let warnings = result["data"]["warnings"].as_array().expect("warnings");
+        assert!(warnings[0].as_str().unwrap().contains("Plain backend"));
     }
 }
