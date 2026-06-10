@@ -13,6 +13,7 @@ pub mod engagement;
 pub mod engagement_scope;
 pub mod executor;
 pub mod http_probe;
+pub mod persistence;
 pub mod play;
 pub mod play_context;
 pub mod sandbox_curl;
@@ -22,6 +23,7 @@ pub mod transport;
 
 pub use chain::{run_chain, AttackChain, ChainOutcome};
 pub use engagement::{prepare_chain_run, PreparedChainRun};
+pub use persistence::persist_chain_finding;
 pub use sandbox_curl::SandboxCurlTransport;
 pub use spec::{ChainSpec, PlaySpec};
 pub use tool::execute_offense_chain;

@@ -29,6 +29,10 @@ impl SandboxCurlTransport {
     pub fn detect(timeout_ms: u64) -> Self {
         Self::new(detect_backend(None), timeout_ms)
     }
+
+    pub fn backend(&self) -> SandboxBackend {
+        self.backend
+    }
 }
 
 impl PlayTransport for SandboxCurlTransport {

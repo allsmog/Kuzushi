@@ -8,30 +8,40 @@
 
 use super::chain::{run_chain, ChainOutcome};
 use super::engagement::{prepare_chain_run, PreparedChainRun};
+use super::persistence::{persist_chain_finding, persisted_backend};
 use super::sandbox_curl::SandboxCurlTransport;
 use super::transport::PlayTransport;
+use crate::findings::{FindingStore, PersistedSandboxBackend};
 use serde_json::{json, Value};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_PLAY_TIMEOUT_MS: u64 = 15_000;
 
-/// Run `offense:chain` with the default sandbox-routed curl transport.
-pub fn execute_offense_chain(input: &Value, workspace_root: &Path) -> Value {
+/// Run `offense:chain` with the default sandbox-routed curl transport,
+/// persisting a landed chain into `store` when one is available.
+pub fn execute_offense_chain(
+    input: &Value,
+    workspace_root: &Path,
+    store: Option<&FindingStore>,
+) -> Value {
     let timeout_ms = input
         .get("timeoutMs")
         .or_else(|| input.get("timeout_ms"))
         .and_then(Value::as_u64)
         .unwrap_or(DEFAULT_PLAY_TIMEOUT_MS);
     let transport = SandboxCurlTransport::detect(timeout_ms);
-    run_offense_chain(input, workspace_root, &transport, now_unix())
+    let backend = persisted_backend(transport.backend());
+    run_offense_chain(input, workspace_root, &transport, backend, store, now_unix())
 }
 
-/// Inner runner, transport- and clock-injected for tests.
+/// Inner runner, transport-, backend-, store-, and clock-injected for tests.
 fn run_offense_chain(
     input: &Value,
     workspace_root: &Path,
     transport: &dyn PlayTransport,
+    backend: PersistedSandboxBackend,
+    store: Option<&FindingStore>,
     now_unix: u64,
 ) -> Value {
     let prepared = match prepare_chain_run(input, workspace_root) {
@@ -44,9 +54,27 @@ fn run_offense_chain(
         .map(str::to_string)
         .unwrap_or_else(|| format!("offense-{now_unix}"));
 
-    match run_prepared(&prepared, &run_id, transport, now_unix) {
-        Ok(outcome) => success(outcome),
-        Err(reason) => failure("offense:chain refused or failed", reason),
+    let outcome = match run_prepared(&prepared, &run_id, transport, now_unix) {
+        Ok(outcome) => outcome,
+        Err(reason) => return failure("offense:chain refused or failed", reason),
+    };
+    let finding_id = persist_outcome(store, workspace_root, &prepared.target_host, backend, &outcome);
+    success(outcome, finding_id)
+}
+
+/// Persist the outcome when a store is present; a persistence failure must not
+/// lose the chain result, so it is recorded as a note rather than an error.
+fn persist_outcome(
+    store: Option<&FindingStore>,
+    workspace_root: &Path,
+    target_host: &str,
+    backend: PersistedSandboxBackend,
+    outcome: &ChainOutcome,
+) -> Option<i64> {
+    let store = store?;
+    match persist_chain_finding(store, workspace_root, target_host, backend, outcome) {
+        Ok(finding_id) => finding_id,
+        Err(_) => None,
     }
 }
 
@@ -66,9 +94,13 @@ fn run_prepared(
     )
 }
 
-fn success(outcome: ChainOutcome) -> Value {
+fn success(outcome: ChainOutcome, finding_id: Option<i64>) -> Value {
     let output = format!("{} :: {}", outcome.chain, outcome.summary);
-    crate::module_result::completed_output_result(output.clone(), output, json!(outcome))
+    let mut data = json!(outcome);
+    if let (Some(object), Some(id)) = (data.as_object_mut(), finding_id) {
+        object.insert("findingId".to_string(), json!(id));
+    }
+    crate::module_result::completed_output_result(output.clone(), output, data)
 }
 
 fn failure(summary: &str, reason: String) -> Value {
@@ -114,32 +146,60 @@ mod tests {
         })
     }
 
+    fn run(input: &Value, transport: &dyn PlayTransport, store: Option<&FindingStore>) -> Value {
+        run_offense_chain(
+            input,
+            Path::new("/tmp/ws"),
+            transport,
+            PersistedSandboxBackend::Plain,
+            store,
+            1,
+        )
+    }
+
     #[test]
     fn completed_chain_returns_a_completed_envelope() {
         let transport = StubTransport {
             status: 200,
             body: "root shell".to_string(),
         };
-        let result = run_offense_chain(&input(), Path::new("/tmp/ws"), &transport, 1);
+        let result = run(&input(), &transport, None);
         assert_eq!(result["status"], json!("completed"));
         assert_eq!(result["data"]["completed"], json!(true));
         assert_eq!(result["data"]["chain"], json!("probe"));
     }
 
     #[test]
+    fn completed_chain_persists_a_finding_and_reports_its_id() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let transport = StubTransport {
+            status: 200,
+            body: "root shell".to_string(),
+        };
+        let result = run(&input(), &transport, Some(&store));
+        assert_eq!(result["status"], json!("completed"));
+        assert!(result["data"]["findingId"].is_number());
+        // The chain landed as a durable finding.
+        assert_eq!(store.list_findings(10).unwrap().len(), 1);
+    }
+
+    #[test]
     fn denied_target_returns_a_failed_envelope_and_never_sends() {
         let mut input = input();
         input["target"] = json!("10.9.9.9");
+        let store = FindingStore::open_in_memory().unwrap();
         let transport = StubTransport {
             status: 200,
             body: "root".to_string(),
         };
-        let result = run_offense_chain(&input, Path::new("/tmp/ws"), &transport, 1);
+        let result = run(&input, &transport, Some(&store));
         assert_eq!(result["status"], json!("failed"));
         assert!(result["data"]["reason"]
             .as_str()
             .unwrap()
             .contains("refused"));
+        // A denied target writes no finding.
+        assert!(store.list_findings(10).unwrap().is_empty());
     }
 
     #[test]
@@ -148,7 +208,7 @@ mod tests {
             status: 200,
             body: String::new(),
         };
-        let result = run_offense_chain(&json!({}), Path::new("/tmp/ws"), &transport, 1);
+        let result = run(&json!({}), &transport, None);
         assert_eq!(result["status"], json!("failed"));
     }
 }
