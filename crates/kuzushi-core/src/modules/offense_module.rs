@@ -26,7 +26,7 @@ fn offense_chain_tool() -> ToolDescriptor {
             opt(
                 "chain",
                 OptionType::Json,
-                "Inline chain spec: {name, plays:[{name, method?, path, headers?, body?, expectStatus?, expectSignals?}]}.",
+                "Inline chain spec: {name, plays:[{name, kind?(http-probe|prompt-injection), method?, path, headers?, body?, expectStatus?, expectSignals?, canary?, refusalSignals?}]}.",
             ),
             opt(
                 "chainFile",
