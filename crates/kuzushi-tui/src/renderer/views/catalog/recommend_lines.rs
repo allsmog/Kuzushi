@@ -37,7 +37,7 @@ fn append_report(
     ));
     let take = (area.height.saturating_sub(10) as usize).max(4);
     for recommendation in model.rows.iter().take(take) {
-        lines.push(recommendation_row(recommendation, area.width));
+        lines.extend(recommendation_lines(recommendation, area.width));
     }
     lines.push(blank());
     lines.push(command_list_line(
@@ -62,14 +62,30 @@ fn append_empty_recommendations(
     lines
 }
 
-fn recommendation_row(recommendation: &RecommendationRow, width: u16) -> Line<'static> {
+/// One recommendation. The reason explains WHY the tool is worth running —
+/// truncating it defeats the view — so a reason that overflows its column
+/// continues on indented follow-up lines instead of ending in an ellipsis.
+fn recommendation_lines(recommendation: &RecommendationRow, width: u16) -> Vec<Line<'static>> {
+    const REASON_COLUMN: usize = 8 + 26 + 8 + 34 + 8;
     let [priority, tool, runtime, signal, reason] = &recommendation.cells;
-    let reason_width = (width as usize).saturating_sub(84).max(24);
-    row(&[
+    let reason_width = (width as usize).saturating_sub(REASON_COLUMN).max(24);
+    let mut chunks = wrap_text(reason, reason_width);
+    if chunks.is_empty() {
+        chunks.push(String::new());
+    }
+    let mut lines = vec![row(&[
         pad(priority, 8),
         pad(tool, 26),
         pad(runtime, 8),
         pad(signal, 34),
-        fit(reason, reason_width),
-    ])
+        chunks[0].clone(),
+    ])];
+    for chunk in chunks.iter().skip(1) {
+        lines.push(muted(&format!(
+            "{:indent$}{chunk}",
+            "",
+            indent = REASON_COLUMN
+        )));
+    }
+    lines
 }

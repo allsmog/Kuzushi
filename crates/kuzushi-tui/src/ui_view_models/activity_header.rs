@@ -7,15 +7,45 @@ pub(crate) struct ActivityHeaderModel {
     pub(crate) focus_label: &'static str,
 }
 
-pub(crate) fn activity_header_model(session: &ActivitySession) -> ActivityHeaderModel {
+/// Terminal outcome of the run behind the Activity view. While work is in
+/// flight there is no outcome; once it ends, a failure replaces the
+/// done/running counters so the operator never stares at an eternal
+/// "0/30 done · 0 running" wall wondering whether anything is still alive.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ActivityRunOutcome {
+    Failed { subject: String },
+}
+
+pub(crate) fn activity_header_model(
+    session: &ActivitySession,
+    outcome: Option<ActivityRunOutcome>,
+) -> ActivityHeaderModel {
     let total = session.tasks.len();
     let done = task_count(session, DagTaskState::Done);
     let running = task_count(session, DagTaskState::Active);
     let cost_usd = session.tasks.values().map(|row| row.cost_usd).sum::<f64>();
+    let progress = progress_segment(&outcome, total, done, running);
     ActivityHeaderModel {
-        detailed_title: detailed_title(session, total, done, running, cost_usd),
-        summary_title: summary_title(&session.run_id, total, done, running),
+        detailed_title: detailed_title(session, &progress, cost_usd),
+        summary_title: format!(
+            "ACTIVITY  run {run_id}  ·  {progress}",
+            run_id = session.run_id
+        ),
         focus_label: pane_focus_label(session.pane_focus),
+    }
+}
+
+fn progress_segment(
+    outcome: &Option<ActivityRunOutcome>,
+    total: usize,
+    done: usize,
+    running: usize,
+) -> String {
+    match outcome {
+        Some(ActivityRunOutcome::Failed { subject }) => {
+            format!("✗ run failed — {subject} · see error banner")
+        }
+        None => format!("{done}/{total} done  ·  {running} running"),
     }
 }
 
@@ -27,23 +57,13 @@ fn task_count(session: &ActivitySession, state: DagTaskState) -> usize {
         .count()
 }
 
-fn detailed_title(
-    session: &ActivitySession,
-    total: usize,
-    done: usize,
-    running: usize,
-    cost_usd: f64,
-) -> String {
+fn detailed_title(session: &ActivitySession, progress: &str, cost_usd: f64) -> String {
     format!(
-        "ACTIVITY  run {run}  ·  {done}/{total} done  ·  {running} running  ·  cost ${cost_usd:.4}{paused}{verbose}",
+        "ACTIVITY  run {run}  ·  {progress}  ·  cost ${cost_usd:.4}{paused}{verbose}",
         run = compact_activity_run_id(&session.run_id),
         paused = paused_segment(session.paused),
         verbose = verbose_segment(session.verbose_subsystems),
     )
-}
-
-fn summary_title(run_id: &str, total: usize, done: usize, running: usize) -> String {
-    format!("ACTIVITY  run {run_id}  ·  {done}/{total} done  ·  {running} running")
 }
 
 fn compact_activity_run_id(run_id: &str) -> String {
@@ -89,7 +109,7 @@ mod tests {
         session.verbose_subsystems = true;
         session.pane_focus = PaneFocus::Right;
 
-        let model = activity_header_model(&session);
+        let model = activity_header_model(&session, None);
 
         assert_eq!(
             model.summary_title,
@@ -99,6 +119,31 @@ mod tests {
         assert!(model.detailed_title.contains("cost $0.3750"));
         assert!(model.detailed_title.contains("paused"));
         assert_eq!(model.focus_label, "[output focused]");
+    }
+
+    #[test]
+    fn failed_run_replaces_progress_counters_with_the_failure() {
+        let mut session = ActivitySession::new("run-1");
+        session.tasks.insert(
+            "semgrep:scan".to_string(),
+            task("semgrep:scan", DagTaskState::Queued, 0.0),
+        );
+
+        let model = activity_header_model(
+            &session,
+            Some(ActivityRunOutcome::Failed {
+                subject: "sast:scan".to_string(),
+            }),
+        );
+
+        assert!(
+            model.detailed_title.contains("✗ run failed — sast:scan"),
+            "{}",
+            model.detailed_title
+        );
+        assert!(model.detailed_title.contains("see error banner"));
+        assert!(!model.detailed_title.contains("done"));
+        assert!(model.summary_title.contains("✗ run failed"));
     }
 
     fn task(id: &str, state: DagTaskState, cost_usd: f64) -> DagTaskRow {

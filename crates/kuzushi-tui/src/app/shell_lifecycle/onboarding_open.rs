@@ -81,6 +81,7 @@ impl ShellApp {
         let mut selected = phase_preselection(phase, kind, &rows);
         self.merge_model_recommendations(phase, &rows, &mut selected);
         self.drop_failed_dependents(&mut selected);
+        self.drop_model_backed_without_model(&rows, &mut selected);
         self.planning_tasks = rows;
         self.planning_selected = selected;
         self.planning_rebuild = BTreeSet::new();
@@ -124,6 +125,26 @@ impl ShellApp {
                 }
             }
         }
+    }
+
+    /// With no session model, a model-backed task can only fail — preselecting
+    /// it walks the operator straight into a guaranteed error. Leave those rows
+    /// unchecked (the picker labels them "needs model"); they stay one Space
+    /// away once a model is configured.
+    fn drop_model_backed_without_model(
+        &self,
+        rows: &[PlanningTaskRow],
+        selected: &mut BTreeSet<PlanningTaskId>,
+    ) {
+        if self.config.model.is_some() {
+            return;
+        }
+        let model_backed: BTreeSet<PlanningTaskId> = rows
+            .iter()
+            .filter(|row| row.model_backed)
+            .map(|row| row.id)
+            .collect();
+        selected.retain(|task| !model_backed.contains(task));
     }
 
     /// Drop preselections blocked by an earlier-phase failure: a task that

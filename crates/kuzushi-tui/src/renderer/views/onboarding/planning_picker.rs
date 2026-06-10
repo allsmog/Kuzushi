@@ -86,10 +86,19 @@ fn planning_row_line(
         label = row.label,
         tool = row.tool_name,
         state = state,
-        cost = row.cost_hint(),
+        cost = planning_cost_note(app, row),
     );
     let style = planning_row_style(app, idx, row, checked);
     Line::styled(fit(&body, width as usize), style)
+}
+
+/// The row's cost column. A model-backed task with no session model can only
+/// fail, so say that — and how to fix it — instead of the generic cost label.
+fn planning_cost_note(app: &ShellApp, row: &PlanningTaskRow) -> String {
+    if row.model_backed && app.config.model.is_none() {
+        return "needs model — run /model first".to_string();
+    }
+    row.cost_hint()
 }
 
 fn planning_row_style(app: &ShellApp, idx: usize, row: &PlanningTaskRow, checked: bool) -> Style {
