@@ -1942,8 +1942,70 @@ fn report_summarizes_canonical_findings_distribution() {
     let report = build_run_report(temp.path(), Some("run-findings")).unwrap();
 
     assert!(report.report_markdown.contains(
-        "findings.json: present - 5 finding(s), severity critical=1, high=2, medium=2, proof code_cited=2, execution_confirmed=1, runtime_reviewed=1, signal_only=1, tools codeql:scan=1, semgrep:scan=2, rules sqli=1, xss=2, files app/db.ts=1, app/routes.ts=2"
+        "findings.json: present - 5 finding(s), severity critical=1, high=2, medium=2, proof code_cited=2, execution_confirmed=1, runtime_reviewed=1, signal_only=1, root causes 4, tools codeql:scan=1, semgrep:scan=2, rules sqli=1, xss=2, files app/db.ts=1, app/routes.ts=2"
     ));
+}
+
+#[test]
+fn report_clusters_same_file_same_cwe_findings_into_one_root_cause() {
+    let temp = tempdir().unwrap();
+    let source = completed_summary(temp.path(), "run-root-cause", "sast:scan");
+    write_run_summary(temp.path(), &source).unwrap();
+    write_run_artifact_json(
+        temp.path(),
+        "run-root-cause",
+        "findings.json",
+        "findings",
+        &json!([
+            // Three call sites of one CWE-89 defect in db.ts → one root cause.
+            {"id": "F-1", "severity": "high", "cwe": "CWE-89", "filePath": "app/db.ts"},
+            {"id": "F-2", "severity": "high", "cwe": "CWE-89", "filePath": "app/db.ts"},
+            {"id": "F-3", "severity": "high", "cwe": "CWE-89", "filePath": "app/db.ts"},
+            // A distinct defect → its own root cause.
+            {"id": "F-4", "severity": "medium", "cwe": "CWE-79", "filePath": "app/view.ts"},
+        ]),
+    )
+    .unwrap();
+
+    let report = build_run_report(temp.path(), Some("run-root-cause")).unwrap();
+
+    // 4 findings, but only 2 underlying problems.
+    assert!(
+        report.report_markdown.contains("4 finding(s)"),
+        "report: {}",
+        report.report_markdown
+    );
+    assert!(
+        report.report_markdown.contains("root causes 2"),
+        "report: {}",
+        report.report_markdown
+    );
+}
+
+#[test]
+fn report_omits_root_cause_segment_when_no_findings_cluster() {
+    let temp = tempdir().unwrap();
+    let source = completed_summary(temp.path(), "run-no-cluster", "sast:scan");
+    write_run_summary(temp.path(), &source).unwrap();
+    write_run_artifact_json(
+        temp.path(),
+        "run-no-cluster",
+        "findings.json",
+        "findings",
+        &json!([
+            {"id": "F-1", "severity": "high", "cwe": "CWE-89", "filePath": "app/db.ts"},
+            {"id": "F-2", "severity": "high", "cwe": "CWE-79", "filePath": "app/view.ts"},
+        ]),
+    )
+    .unwrap();
+
+    let report = build_run_report(temp.path(), Some("run-no-cluster")).unwrap();
+
+    assert!(
+        !report.report_markdown.contains("root causes"),
+        "no two findings share a root cause: {}",
+        report.report_markdown
+    );
 }
 
 #[test]

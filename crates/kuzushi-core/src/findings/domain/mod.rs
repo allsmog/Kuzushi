@@ -14,7 +14,9 @@ mod static_proof_state;
 mod triage_outcome;
 
 pub use extract_cwe::extract_cwe;
-pub use finding_record::{compute_dedup_key, normalize_cwe, Finding, FindingEvidence};
+pub use finding_record::{
+    compute_dedup_key, compute_root_cause_key, normalize_cwe, Finding, FindingEvidence,
+};
 pub use from_semgrep::{Severity, VulnSource};
 pub(crate) use now_isoish::now_isoish;
 pub use patch_status::PatchStatus;

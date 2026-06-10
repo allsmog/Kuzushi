@@ -17,8 +17,9 @@ pub(crate) use application::{
 };
 pub(crate) use domain::is_runtime_proof_state;
 pub use domain::{
-    compute_dedup_key, extract_cwe, normalize_cwe, Finding, FindingEvidence, PatchAttempt,
-    PatchResult, PatchStatus, PersistedProofVerdict, PersistedSandboxBackend,
+    compute_dedup_key, compute_root_cause_key, extract_cwe, normalize_cwe, Finding,
+    FindingEvidence, PatchAttempt, PatchResult, PatchStatus, PersistedProofVerdict,
+    PersistedSandboxBackend,
     PersistedVerification, Severity, StaticProofState, TriageOutcome, TriageVerdict, VulnSource,
 };
 pub use persistence::FindingStore;
