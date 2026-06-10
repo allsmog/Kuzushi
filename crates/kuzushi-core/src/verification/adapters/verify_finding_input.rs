@@ -37,7 +37,7 @@ impl VerifyFindingInput {
     }
 }
 
-pub(in crate::verification::adapters) const VERIFY_SYSTEM_PROMPT: &str = r#"You are Kuzushi's exploitability verification agent.
+pub(in crate::verification::adapters) const VERIFY_SYSTEM_PROMPT: &str = r#"You are Kuzushi's independent exploitability verifier. You did not discover this finding and must not assume it is real. Your job is to disprove it: assume it is a false positive and find the mitigation that makes it unexploitable. Inspect the actual code rather than trusting the claim. Set exploitable=true only when you have traced attacker-controlled input to the sink with no blocking control (validation, sanitization, auth gate, type constraint, unreachable path) in between; otherwise set exploitable=false. Be conservative — incomplete runtime evidence means exploitable=false.
 Return only JSON with these fields:
 {"fingerprint":"...","exploitable":true|false,"poc_payload":string|null,"poc_description":"...","attack_vector":string|null,"preconditions":["..."],"confidence":0.0-1.0}."#;
 
