@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 162
 ---
- KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured · 0 findings · view:help
+ KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
 
  -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.

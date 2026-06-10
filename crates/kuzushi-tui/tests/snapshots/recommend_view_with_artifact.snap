@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 0
 ---
- KUZUSHI mode:shell · target:./recommend · ctx:not built · model:unconfigured · 0 findings · view:recommend
+ KUZUSHI mode:shell · target:./recommend · ctx:not built · model:unconfigured
 
  -- RECOMMEND ----------------------------------------------------------------------------------------------------------
 recommendations    target/kuzushi-tui-snapshots/recommend/.kuzushi/runs/run-rec/recommendations.json
