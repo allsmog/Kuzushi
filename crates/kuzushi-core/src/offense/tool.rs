@@ -7,16 +7,21 @@
 //! transport, and the tool reports the denial instead.
 
 use super::chain::{run_chain, ChainOutcome};
-use super::engagement::{prepare_chain_run, PreparedChainRun};
+use super::engagement::{prepare_chain_run, resolve_engagement, PreparedChainRun};
 use super::persistence::{persist_chain_finding, persisted_backend};
+use super::planner::{run_planned_chain, PlannerBudget};
+use super::engagement_scope::ScopeTarget;
+use super::play_context::PlayContext;
 use super::sandbox_curl::SandboxCurlTransport;
 use super::transport::PlayTransport;
 use crate::findings::{FindingStore, PersistedSandboxBackend};
+use crate::runtime::AgentRuntime;
 use serde_json::{json, Value};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const DEFAULT_PLAY_TIMEOUT_MS: u64 = 15_000;
+const DEFAULT_MAX_PLANNED_STEPS: u32 = 8;
 
 /// Run `offense:chain` with the default sandbox-routed curl transport,
 /// persisting a landed chain into `store` when one is available.
@@ -33,6 +38,106 @@ pub fn execute_offense_chain(
     let transport = SandboxCurlTransport::detect(timeout_ms);
     let backend = persisted_backend(transport.backend());
     run_offense_chain(input, workspace_root, &transport, backend, store, now_unix())
+}
+
+/// Run `offense:chain` in autonomous (LLM-planned) mode: the model proposes
+/// each next play toward `goal`. Authorizes the target through the scope gate
+/// before any step, then persists a landed chain like the declarative path.
+pub fn execute_offense_planned(
+    input: &Value,
+    workspace_root: &Path,
+    store: Option<&FindingStore>,
+    runtime: &dyn AgentRuntime,
+    model: &str,
+    goal: &str,
+) -> Value {
+    let timeout_ms = input
+        .get("timeoutMs")
+        .or_else(|| input.get("timeout_ms"))
+        .and_then(Value::as_u64)
+        .unwrap_or(DEFAULT_PLAY_TIMEOUT_MS);
+    let transport = SandboxCurlTransport::detect(timeout_ms);
+    let backend = persisted_backend(transport.backend());
+    run_planned(PlannedRun {
+        input,
+        workspace_root,
+        store,
+        runtime,
+        model,
+        goal,
+        transport: &transport,
+        backend,
+        now_unix: now_unix(),
+    })
+}
+
+struct PlannedRun<'a> {
+    input: &'a Value,
+    workspace_root: &'a Path,
+    store: Option<&'a FindingStore>,
+    runtime: &'a dyn AgentRuntime,
+    model: &'a str,
+    goal: &'a str,
+    transport: &'a dyn PlayTransport,
+    backend: PersistedSandboxBackend,
+    now_unix: u64,
+}
+
+fn run_planned(run: PlannedRun<'_>) -> Value {
+    let (scope, target_host) = match resolve_engagement(run.input, run.workspace_root) {
+        Ok(resolved) => resolved,
+        Err(reason) => return failure("offense:chain could not start", reason),
+    };
+    let authorized = match scope.authorize(ScopeTarget::parse(&target_host), run.now_unix) {
+        Ok(authorized) => authorized,
+        Err(reason) => {
+            return failure("offense:chain refused", format!("refused {target_host}: {reason}"))
+        }
+    };
+    let run_id = input_run_id(run.input, run.now_unix);
+    let ctx = PlayContext::new(authorized, run_id);
+    let budget = PlannerBudget {
+        max_steps: planned_max_steps(run.input),
+    };
+    let chain_name = run
+        .input
+        .get("chainName")
+        .and_then(Value::as_str)
+        .unwrap_or("planned");
+    match run_planned_chain(
+        chain_name,
+        run.goal,
+        &ctx,
+        run.runtime,
+        run.model,
+        run.workspace_root,
+        run.transport,
+        budget,
+    ) {
+        Ok(outcome) => {
+            let finding_id =
+                persist_outcome(run.store, run.workspace_root, &target_host, run.backend, &outcome);
+            success(outcome, finding_id)
+        }
+        Err(err) => failure("offense:chain planning failed", err.to_string()),
+    }
+}
+
+fn planned_max_steps(input: &Value) -> u32 {
+    input
+        .get("maxSteps")
+        .or_else(|| input.get("max_steps"))
+        .and_then(Value::as_u64)
+        .map(|steps| steps.clamp(1, 24) as u32)
+        .unwrap_or(DEFAULT_MAX_PLANNED_STEPS)
+}
+
+fn input_run_id(input: &Value, now_unix: u64) -> String {
+    input
+        .get("runId")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| format!("offense-{now_unix}"))
 }
 
 /// Inner runner, transport-, backend-, store-, and clock-injected for tests.
@@ -118,8 +223,11 @@ fn now_unix() -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::findings::TriageOutcome;
     use crate::offense::engagement_scope::ScopeTarget;
     use crate::offense::transport::{PlayRequest, PlayResponse};
+    use crate::runtime::{AgentQueryRequest, AgentQueryResponse, TriageRequest};
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct StubTransport {
         status: u16,
@@ -134,6 +242,60 @@ mod tests {
                 elapsed_ms: 1,
             })
         }
+    }
+
+    /// Counts how many times the model was queried, so a test can prove a
+    /// denied target never reaches the planner.
+    struct CountingRuntime {
+        queries: AtomicUsize,
+    }
+    impl AgentRuntime for CountingRuntime {
+        fn query_blocking(
+            &self,
+            _request: AgentQueryRequest,
+        ) -> anyhow::Result<AgentQueryResponse> {
+            self.queries.fetch_add(1, Ordering::SeqCst);
+            Ok(AgentQueryResponse {
+                structured: Some(json!({"done": true})),
+                ..Default::default()
+            })
+        }
+        fn triage_finding_blocking(
+            &self,
+            _request: TriageRequest,
+        ) -> anyhow::Result<TriageOutcome> {
+            unreachable!("offense planner does not triage")
+        }
+    }
+
+    #[test]
+    fn planned_mode_refuses_a_denied_target_before_querying_the_model() {
+        let runtime = CountingRuntime {
+            queries: AtomicUsize::new(0),
+        };
+        let transport = StubTransport {
+            status: 200,
+            body: String::new(),
+        };
+        let input = json!({
+            "target": "10.9.9.9",
+            "scope": {"authorized": true, "authorizationRef": "HTB:lab", "inScope": ["10.0.0.5"]},
+        });
+        let test_model_id = "openai:gpt-test";
+        let result = run_planned(PlannedRun {
+            input: &input,
+            workspace_root: Path::new("/tmp/ws"),
+            store: None,
+            runtime: &runtime,
+            model: test_model_id,
+            goal: "get admin",
+            transport: &transport,
+            backend: PersistedSandboxBackend::Plain,
+            now_unix: 1,
+        });
+        assert_eq!(result["status"], json!("failed"));
+        assert!(result["data"]["reason"].as_str().unwrap().contains("refused"));
+        assert_eq!(runtime.queries.load(Ordering::SeqCst), 0, "scope gate must precede planning");
     }
 
     fn input() -> Value {

@@ -244,9 +244,9 @@ fn execute_offense_tool_mapping(
     name: &str,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
-    _runtime: Option<&dyn AgentRuntime>,
+    runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    dispatch_result(dispatch_offense_tool(name, input, ctx), name)
+    dispatch_result(dispatch_offense_tool(name, input, ctx, runtime), name)
 }
 
 fn execute_threat_intel_tool_mapping(

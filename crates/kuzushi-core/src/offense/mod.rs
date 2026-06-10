@@ -29,7 +29,7 @@ pub use engagement::{prepare_chain_run, PreparedChainRun};
 pub use persistence::persist_chain_finding;
 pub use sandbox_curl::SandboxCurlTransport;
 pub use spec::{ChainSpec, PlaySpec};
-pub use tool::execute_offense_chain;
+pub use tool::{execute_offense_chain, execute_offense_planned};
 pub use engagement_scope::{EngagementScope, ScopeDecision, ScopeEntry, ScopeTarget, ScopeWindow};
 pub use executor::run_play;
 pub use http_probe::HttpProbePlay;
