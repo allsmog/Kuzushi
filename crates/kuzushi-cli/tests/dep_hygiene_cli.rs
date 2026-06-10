@@ -606,7 +606,7 @@ JSON
 {"ok":true,"structured":{"verdict":"true_positive","confidence":0.93,"rationale":"mock cli bridge"}}
 JSON
     ;;
-  *"exploitability verification agent"*)
+  *"exploitability verifier"*)
     cat <<'JSON'
 {"ok":true,"structured":{"exploitable":true,"poc_payload":"curl -X POST /admin","poc_description":"POST reaches admin sink","attack_vector":"curl POST /admin","preconditions":["network access"],"confidence":0.84,"proof_level":3,"proof_verdict":"exploited"}}
 JSON
