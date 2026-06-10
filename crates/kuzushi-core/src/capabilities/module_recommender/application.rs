@@ -1,6 +1,6 @@
-use super::*;
 use super::model_ranking::ModelRanking;
 use super::rule_catalog::recommendation_rules;
+use super::*;
 
 /// Build the report, preferring session-model ranking when available and
 /// falling back to the deterministic rule catalog otherwise (clearly labeled).
@@ -19,6 +19,7 @@ fn model_report(
     recommendations: Vec<ModuleRecommendation>,
     model_label: Option<&str>,
 ) -> RecommendationReport {
+    let recommendations = demote_blocked_scanners(&request, recommendations);
     let warnings = warnings_for(&request);
     let summary = format!(
         "Recommended {} module tool(s) for {} — ranked by {}.",
@@ -48,11 +49,12 @@ pub(crate) fn build_recommendation_report(request: RecommenderRequest) -> Recomm
         .filter(|rule| (rule.condition)(&request.signals))
         .collect::<Vec<_>>();
     let skipped_missing_tools = missing_tool_names(&request, &candidates);
-    let mut recommendations = candidates
+    let recommendations = candidates
         .into_iter()
         .filter(|rule| request.available_tools.contains(rule.tool))
         .map(|rule| recommendation_from_rule(rule, &request))
         .collect::<Vec<_>>();
+    let mut recommendations = demote_blocked_scanners(&request, recommendations);
     recommendations.sort_by_key(recommendation_sort_key);
     recommendations.truncate(request.max_recommendations);
     let warnings = warnings_for(&request);
@@ -87,6 +89,32 @@ fn recommendation_from_rule(
         requires_runtime: crate::modules::tool_needs_runtime(rule.tool, &next_input),
         next_input,
     }
+}
+
+/// A recommendation whose scanner binary is missing can only fail as
+/// dispatched. Keep it visible (installing the binary is a legitimate next
+/// move) but sink it to Low and lead the reason with the blocker, so the
+/// operator is never ranked straight into a "binary not found" error.
+fn demote_blocked_scanners(
+    request: &RecommenderRequest,
+    recommendations: Vec<ModuleRecommendation>,
+) -> Vec<ModuleRecommendation> {
+    recommendations
+        .into_iter()
+        .map(|mut recommendation| {
+            if request
+                .tools_missing_binaries
+                .contains(&recommendation.tool)
+            {
+                recommendation.priority = RecommendationPriority::Low;
+                recommendation.reason = format!(
+                    "blocked: scanner binary not on PATH — install it first. {}",
+                    recommendation.reason
+                );
+            }
+            recommendation
+        })
+        .collect()
 }
 
 fn recommendation_sort_key(recommendation: &ModuleRecommendation) -> (u8, String) {
