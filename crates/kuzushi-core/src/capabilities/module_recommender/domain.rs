@@ -5,6 +5,11 @@ pub(crate) struct RecommenderRequest {
     pub(crate) target: String,
     pub(crate) max_recommendations: usize,
     pub(crate) available_tools: BTreeSet<String>,
+    /// Tools whose external scanner binary is absent from PATH (probed by the
+    /// adapter). The tool is still registered and recommendable, but ranking
+    /// demotes it and the reason names the blocker instead of inviting a
+    /// guaranteed "binary not found" failure.
+    pub(crate) tools_missing_binaries: BTreeSet<String>,
     pub(crate) signals: RepositorySignals,
 }
 

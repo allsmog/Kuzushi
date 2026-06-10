@@ -130,7 +130,9 @@ impl ShellApp {
         };
         let (module_id, verb) = tool_name.split_once(':').unwrap_or((tool_name, "run"));
         session.apply_step(
-            kuzushi_core::RunTraceStep::new(0, "refused", short_label(error, 80))
+            // 320 keeps the full remedy available to the Activity feed (which
+            // wraps error rows); the on-disk trace artifact keeps its own cap.
+            kuzushi_core::RunTraceStep::new(0, "refused", short_label(error, 320))
                 .with_module_id(module_id)
                 .with_verb(verb)
                 .with_severity("danger"),

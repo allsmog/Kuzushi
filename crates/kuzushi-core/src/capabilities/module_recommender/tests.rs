@@ -1,7 +1,7 @@
-use super::*;
 use super::threat_model_signals::{
     threat_model_dfd_count, threat_model_related_cwes, threat_signal_count,
 };
+use super::*;
 use crate::config::V2Config;
 use crate::modules::{ModuleRegistry, ToolExecutionContext};
 use crate::workspace::WorkspaceTarget;
@@ -11,10 +11,51 @@ use std::fs;
 use tempfile::tempdir;
 
 #[test]
+fn missing_scanner_binary_demotes_the_recommendation_and_names_the_blocker() {
+    let mut tools_missing_binaries = BTreeSet::new();
+    tools_missing_binaries.insert("semgrep:scan".to_string());
+    let request = RecommenderRequest {
+        target: "/repo".to_string(),
+        max_recommendations: 10,
+        tools_missing_binaries,
+        available_tools: tool_set(&["secret-scan:scan", "semgrep:scan"]),
+        signals: rich_signals(),
+    };
+
+    let report = build_recommendation_report(request);
+
+    let semgrep = report
+        .recommendations
+        .iter()
+        .find(|recommendation| recommendation.tool == "semgrep:scan")
+        .expect("blocked tool stays visible so the operator can install the binary");
+    assert_eq!(semgrep.priority, RecommendationPriority::Low);
+    assert!(
+        semgrep
+            .reason
+            .starts_with("blocked: scanner binary not on PATH"),
+        "{}",
+        semgrep.reason
+    );
+    // The demotion happens before sorting, so the blocked tool sinks below
+    // runnable recommendations instead of being ranked into a failure.
+    let semgrep_rank = report
+        .recommendations
+        .iter()
+        .position(|recommendation| recommendation.tool == "semgrep:scan");
+    let secret_rank = report
+        .recommendations
+        .iter()
+        .position(|recommendation| recommendation.tool == "secret-scan:scan");
+    assert!(secret_rank < semgrep_rank);
+}
+
+#[test]
 fn recommends_installed_tools_from_combined_signals() {
     let request = RecommenderRequest {
         target: "/repo".to_string(),
         max_recommendations: 10,
+        tools_missing_binaries: BTreeSet::new(),
         available_tools: tool_set(&[
             "context:build",
             "dep-hygiene:check",
@@ -74,6 +115,7 @@ fn omits_deferred_ai_tools_from_default_recommendations() {
     let request = RecommenderRequest {
         target: "/repo".to_string(),
         max_recommendations: 20,
+        tools_missing_binaries: BTreeSet::new(),
         available_tools: tool_set(&[
             "carlini-threat-hunt:run",
             "context:build",
@@ -103,6 +145,7 @@ fn omits_recommendations_for_missing_capabilities() {
     let request = RecommenderRequest {
         target: "/repo".to_string(),
         max_recommendations: 10,
+        tools_missing_binaries: BTreeSet::new(),
         available_tools: tool_set(&["context:build", "semgrep:scan"]),
         signals: rich_signals(),
     };
@@ -132,6 +175,7 @@ fn codeql_recommendation_mentions_threat_model_related_cwes() {
     let request = RecommenderRequest {
         target: "/repo".to_string(),
         max_recommendations: 10,
+        tools_missing_binaries: BTreeSet::new(),
         available_tools: tool_set(&["codeql:scan"]),
         signals,
     };
@@ -156,6 +200,7 @@ fn recommends_cargo_audit_for_rust_dependency_signals() {
     let request = RecommenderRequest {
         target: "/repo".to_string(),
         max_recommendations: 10,
+        tools_missing_binaries: BTreeSet::new(),
         available_tools: tool_set(&["cargo-audit:scan"]),
         signals,
     };
@@ -164,9 +209,9 @@ fn recommends_cargo_audit_for_rust_dependency_signals() {
 
     assert!(report.recommendations.iter().any(|recommendation| {
         recommendation.tool == "cargo-audit:scan"
-            && recommendation.signals.contains(
-                &"Rust project with 2 dependency manifest(s)".to_string()
-            )
+            && recommendation
+                .signals
+                .contains(&"Rust project with 2 dependency manifest(s)".to_string())
     }));
 }
 
@@ -352,23 +397,36 @@ fn executor_surfaces_backend_framework_signals() {
         json!({ "maxRecommendations": 5 }),
         &ctx,
         None,
-        vec!["context:build".to_string(), "threat-model:build".to_string()],
+        vec![
+            "context:build".to_string(),
+            "threat-model:build".to_string(),
+        ],
     )
     .unwrap();
 
     let report = &output["data"];
     assert_eq!(
         report["signals"]["frameworks"],
-        json!(["ASP.NET Core", "Django", "Laravel", "Next.js", "Rails", "Spring"])
+        json!([
+            "ASP.NET Core",
+            "Django",
+            "Laravel",
+            "Next.js",
+            "Rails",
+            "Spring"
+        ])
     );
     assert_eq!(report["signals"]["routes"], json!(7));
-    assert!(report["recommendations"].as_array().unwrap().iter().any(|item| {
-        item["tool"] == json!("context:build")
-            && item["signals"]
-                .as_array()
-                .unwrap()
-                .contains(&json!("frameworks: ASP.NET Core, Django, Laravel, Next.js, Rails, Spring"))
-    }));
+    assert!(report["recommendations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| {
+            item["tool"] == json!("context:build")
+                && item["signals"].as_array().unwrap().contains(&json!(
+                    "frameworks: ASP.NET Core, Django, Laravel, Next.js, Rails, Spring"
+                ))
+        }));
 }
 
 #[test]
@@ -407,17 +465,26 @@ fn executor_surfaces_grpc_rpc_handler_signals() {
         json!({ "maxRecommendations": 5 }),
         &ctx,
         None,
-        vec!["context:build".to_string(), "threat-model:build".to_string()],
+        vec![
+            "context:build".to_string(),
+            "threat-model:build".to_string(),
+        ],
     )
     .unwrap();
 
     let report = &output["data"];
     assert_eq!(report["signals"]["frameworks"], json!(["Tonic", "gRPC"]));
-    assert_eq!(report["signals"]["attackSurfaceKinds"]["rpc_handler"], json!(2));
-    assert!(report["recommendations"].as_array().unwrap().iter().any(|item| {
-        item["tool"] == json!("threat-model:build")
-            && signal_contains(item, "rpc_handler=2")
-    }));
+    assert_eq!(
+        report["signals"]["attackSurfaceKinds"]["rpc_handler"],
+        json!(2)
+    );
+    assert!(report["recommendations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| {
+            item["tool"] == json!("threat-model:build") && signal_contains(item, "rpc_handler=2")
+        }));
 }
 
 #[test]
@@ -442,7 +509,10 @@ fn executor_surfaces_file_upload_attack_surface_signals() {
         json!({ "maxRecommendations": 5 }),
         &ctx,
         None,
-        vec!["context:build".to_string(), "threat-model:build".to_string()],
+        vec![
+            "context:build".to_string(),
+            "threat-model:build".to_string(),
+        ],
     )
     .unwrap();
 
@@ -451,10 +521,14 @@ fn executor_surfaces_file_upload_attack_surface_signals() {
         report["signals"]["attackSurfaceKinds"]["file_upload_parse_path"],
         json!(1)
     );
-    assert!(report["recommendations"].as_array().unwrap().iter().any(|item| {
-        item["tool"] == json!("threat-model:build")
-            && signal_contains(item, "file_upload_parse_path=1")
-    }));
+    assert!(report["recommendations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| {
+            item["tool"] == json!("threat-model:build")
+                && signal_contains(item, "file_upload_parse_path=1")
+        }));
 }
 
 #[test]
@@ -482,7 +556,10 @@ fn executor_surfaces_python_framework_signals_on_threat_model_recommendation() {
         json!({ "maxRecommendations": 5 }),
         &ctx,
         None,
-        vec!["context:build".to_string(), "threat-model:build".to_string()],
+        vec![
+            "context:build".to_string(),
+            "threat-model:build".to_string(),
+        ],
     )
     .unwrap();
 
@@ -492,22 +569,26 @@ fn executor_surfaces_python_framework_signals_on_threat_model_recommendation() {
         json!(["Falcon", "Litestar", "Sanic"])
     );
     assert_eq!(report["signals"]["routes"], json!(3));
-    assert!(report["recommendations"].as_array().unwrap().iter().any(|item| {
-        item["tool"] == json!("threat-model:build")
-            && signal_contains(item, "frameworks: Falcon, Litestar, Sanic")
-    }));
+    assert!(report["recommendations"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|item| {
+            item["tool"] == json!("threat-model:build")
+                && signal_contains(item, "frameworks: Falcon, Litestar, Sanic")
+        }));
 }
 
 fn signal_contains(item: &Value, needle: &str) -> bool {
-    item["signals"]
-        .as_array()
-        .is_some_and(|signals| signals.iter().any(|signal| signal_text_contains(signal, needle)))
+    item["signals"].as_array().is_some_and(|signals| {
+        signals
+            .iter()
+            .any(|signal| signal_text_contains(signal, needle))
+    })
 }
 
 fn signal_text_contains(signal: &Value, needle: &str) -> bool {
-    signal
-        .as_str()
-        .is_some_and(|text| text.contains(needle))
+    signal.as_str().is_some_and(|text| text.contains(needle))
 }
 
 fn rich_signals() -> RepositorySignals {
@@ -591,7 +672,10 @@ fn executor_reads_threat_model_dfd_artifact_shape() {
         json!({ "maxRecommendations": 10 }),
         &ctx,
         None,
-        vec!["context:build".to_string(), "threat-model:build".to_string()],
+        vec![
+            "context:build".to_string(),
+            "threat-model:build".to_string(),
+        ],
     )
     .unwrap();
 
@@ -611,7 +695,10 @@ fn executor_reads_threat_model_dfd_artifact_shape() {
     assert_eq!(report["signals"]["threatModelDfdNodes"], json!(2));
     assert_eq!(report["signals"]["threatModelDfdFlows"], json!(1));
     assert_eq!(report["signals"]["threatModelTrustBoundaries"], json!(1));
-    assert_eq!(report["signals"]["threatModelRelatedCwes"]["CWE-20"], json!(2));
+    assert_eq!(
+        report["signals"]["threatModelRelatedCwes"]["CWE-20"],
+        json!(2)
+    );
     assert_eq!(
         report["signals"]["threatModelRelatedCwes"]["CWE-862"],
         json!(1)
@@ -620,7 +707,10 @@ fn executor_reads_threat_model_dfd_artifact_shape() {
         report["signals"]["threatModelRelatedCwes"]["CWE-863"],
         json!(1)
     );
-    assert_eq!(report["signals"]["threatModelRelatedCwes"]["CWE-918"], json!(1));
+    assert_eq!(
+        report["signals"]["threatModelRelatedCwes"]["CWE-918"],
+        json!(1)
+    );
 }
 
 #[test]
@@ -647,7 +737,10 @@ fn registry_recommender_returns_completed_result_envelope() {
         )
         .unwrap();
 
-    assert_eq!(result.get("status").and_then(Value::as_str), Some("completed"));
+    assert_eq!(
+        result.get("status").and_then(Value::as_str),
+        Some("completed")
+    );
     assert!(result
         .get("summary")
         .and_then(Value::as_str)

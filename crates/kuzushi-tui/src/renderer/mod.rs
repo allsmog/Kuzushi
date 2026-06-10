@@ -17,7 +17,7 @@ pub(in crate::renderer) use shared::*;
 pub(in crate::renderer) use views::*;
 mod chrome;
 mod plain;
-mod shared;
+pub(crate) mod shared;
 mod views;
 
 mod render_app;

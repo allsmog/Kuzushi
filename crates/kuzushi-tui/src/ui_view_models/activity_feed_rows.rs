@@ -26,7 +26,7 @@ pub(crate) fn activity_feed_pane_rows(
     let mut rows = session
         .events
         .iter()
-        .filter_map(|event| feed_event_row(event, session.verbose_subsystems, width))
+        .flat_map(|event| feed_event_rows(event, session.verbose_subsystems, width))
         .collect::<Vec<_>>();
     if let Some(model) = activity_feed_pause_model(session) {
         rows.insert(
@@ -46,22 +46,43 @@ pub(crate) fn activity_feed_pane_rows(
     rows
 }
 
-fn feed_event_row(
+/// One event, one or more pane rows. Error rows (danger severity, refusals)
+/// carry the remedy the operator must read, so they wrap onto indented
+/// continuation rows; routine progress events stay single-line. The scroll
+/// model counts produced rows, so multi-row events tail and clamp correctly.
+fn feed_event_rows(
     event: &RecordedTraceEvent,
     verbose_subsystems: bool,
     width: usize,
-) -> Option<ActivityFeedPaneRow> {
-    feed_event_text(event, verbose_subsystems, width).map(|text| ActivityFeedPaneRow {
-        text,
-        tone: feed_event_tone(event),
-    })
+) -> Vec<ActivityFeedPaneRow> {
+    let Some(text) = feed_event_text(event, verbose_subsystems) else {
+        return Vec::new();
+    };
+    let tone = feed_event_tone(event);
+    if !matches!(
+        tone,
+        ActivityFeedRowTone::Danger | ActivityFeedRowTone::Warn
+    ) {
+        return vec![ActivityFeedPaneRow {
+            text: fit(&text, width),
+            tone,
+        }];
+    }
+    crate::renderer::shared::text::wrap_text(&text, width.max(16))
+        .into_iter()
+        .enumerate()
+        .map(|(index, chunk)| ActivityFeedPaneRow {
+            text: if index == 0 {
+                chunk
+            } else {
+                format!("    {chunk}")
+            },
+            tone,
+        })
+        .collect()
 }
 
-fn feed_event_text(
-    event: &RecordedTraceEvent,
-    verbose_subsystems: bool,
-    width: usize,
-) -> Option<String> {
+fn feed_event_text(event: &RecordedTraceEvent, verbose_subsystems: bool) -> Option<String> {
     let module_id = event.step.module_id.as_deref().unwrap_or("");
     if !verbose_subsystems && !module_id.is_empty() && crate::app::is_hidden_module_id(module_id) {
         return None;
@@ -74,7 +95,10 @@ fn feed_event_text(
         .unwrap_or_else(now_hh_mm_ss);
     let module_verb = match (event.step.module_id.as_deref(), event.step.verb.as_deref()) {
         (Some(module), Some(verb)) => {
-            format!("[{}]", crate::app::collapse_doubled_tail(&format!("{module}:{verb}")))
+            format!(
+                "[{}]",
+                crate::app::collapse_doubled_tail(&format!("{module}:{verb}"))
+            )
         }
         (Some(module), None) => format!("[{module}]"),
         _ => format!("[{}]", event.step.kind),
@@ -84,15 +108,14 @@ fn feed_event_text(
     } else {
         " "
     };
-    let body = format!(
+    Some(format!(
         "{ts} {indent}{glyph} {tag} {label}",
         ts = timestamp,
         indent = indent,
         glyph = feed_event_glyph(event),
         tag = module_verb,
         label = event.step.label
-    );
-    Some(fit(&body, width))
+    ))
 }
 
 fn feed_event_glyph(event: &RecordedTraceEvent) -> &'static str {
