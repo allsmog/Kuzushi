@@ -3,28 +3,45 @@ use super::json_fields::{
     read_object_bool, read_object_f64, read_object_nullable_string, read_object_string,
     read_object_string_array, read_object_u64, string_or_null,
 };
-use crate::findings::{Finding, TriageOutcome};
+use crate::findings::Finding;
 use anyhow::{Context, Result};
 use serde_json::{json, Map, Value};
 
+/// Build the prompt for the independent exploitability verifier.
+///
+/// Deliberately context-isolated: the verifier receives only the *claim*
+/// (vuln class, location, evidence) and the codebase — never the
+/// discovery/triage agent's verdict or rationale. Feeding the verifier
+/// the finder's reasoning makes it agree instead of testing the claim,
+/// which is the dominant source of non-exploitable findings slipping
+/// through. The default framing is adversarial: assume false positive,
+/// hunt for the mitigation, confirm only when it cannot be disproved.
 pub(in crate::verification::adapters) fn build_verify_prompt(
     finding: &Finding,
-    triage: &TriageOutcome,
     template: Option<&str>,
 ) -> Result<String> {
-    let finding_json =
-        serde_json::to_string_pretty(finding).context("Could not serialize finding")?;
-    let triage_json = serde_json::to_string_pretty(triage).context("Could not serialize triage")?;
+    let claim_json = serde_json::to_string_pretty(&independent_finding_claim(finding)?)
+        .context("Could not serialize finding claim")?;
     let prefix = template
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or(
-            "Verify exploitability for this triaged finding. Be conservative and return non-exploitable when runtime evidence is incomplete.",
+            "Treat this finding as a false positive until proven otherwise. Read the actual code at the cited location, then search for a reason it CANNOT be exploited — input validation, sanitization, an authentication or authorization gate, a type or length constraint, unreachable code, or no attacker control over the tainted input. Return exploitable=true only when attacker-controlled input reaches the sink with no blocking control in between; return exploitable=false when the evidence is incomplete.",
         );
-    Ok(format!(
-        "{prefix}\n\nFinding JSON:\n{finding_json}\n\nTriage JSON:\n{triage_json}"
-    ))
+    Ok(format!("{prefix}\n\nClaimed finding:\n{claim_json}"))
 }
+
+/// Strip the discovery/triage reasoning (and any prior verification) from
+/// a finding so the verifier sees the claim without the argument for it.
+fn independent_finding_claim(finding: &Finding) -> Result<Value> {
+    let mut value = serde_json::to_value(finding).context("Could not serialize finding")?;
+    if let Value::Object(object) = &mut value {
+        object.remove("triage");
+        object.remove("verification");
+    }
+    Ok(value)
+}
+
 
 pub(in crate::verification::adapters) fn normalize_verification_result(
     raw: Value,
@@ -88,7 +105,7 @@ pub(in crate::verification::adapters) fn normalize_verification_result(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::findings::Severity;
+    use crate::findings::{Severity, TriageOutcome};
 
     #[test]
     fn normalizes_verification_result_aliases_and_clamps_confidence() {
@@ -132,8 +149,42 @@ mod tests {
     }
 
     #[test]
-    fn builds_prompt_with_template_and_payloads() {
-        let finding = Finding::new_tool(
+    fn builds_prompt_with_template_and_claim() {
+        let finding = sql_injection_finding();
+
+        let prompt = build_verify_prompt(&finding, Some("Custom verify")).unwrap();
+
+        assert!(prompt.starts_with("Custom verify"));
+        assert!(prompt.contains("SQL injection"));
+    }
+
+    #[test]
+    fn prompt_withholds_triage_reasoning_from_the_verifier() {
+        let mut finding = sql_injection_finding();
+        finding.triage = Some(TriageOutcome {
+            rationale: "discovery agent says definitely exploitable".to_string(),
+            ..Default::default()
+        });
+
+        let prompt = build_verify_prompt(&finding, None).unwrap();
+
+        // The verifier sees the claim (so it knows what to check)...
+        assert!(prompt.contains("SQL injection"));
+        // ...but never the discovery/triage agent's argument for it.
+        assert!(!prompt.contains("discovery agent says definitely exploitable"));
+        assert!(!prompt.contains("\"triage\""));
+    }
+
+    #[test]
+    fn default_prompt_is_adversarial() {
+        let prompt = build_verify_prompt(&sql_injection_finding(), None).unwrap();
+
+        assert!(prompt.contains("false positive"));
+        assert!(prompt.contains("CANNOT be exploited"));
+    }
+
+    fn sql_injection_finding() -> Finding {
+        Finding::new_tool(
             "semgrep",
             "demo.rule",
             "src/db.rs",
@@ -141,16 +192,6 @@ mod tests {
             None,
             Severity::High,
             "SQL injection",
-        );
-        let triage = TriageOutcome {
-            rationale: "confirmed".to_string(),
-            ..Default::default()
-        };
-
-        let prompt = build_verify_prompt(&finding, &triage, Some("Custom verify")).unwrap();
-
-        assert!(prompt.starts_with("Custom verify"));
-        assert!(prompt.contains("SQL injection"));
-        assert!(prompt.contains("confirmed"));
+        )
     }
 }

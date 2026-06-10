@@ -22,14 +22,18 @@ pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> 
     let Some(finding) = request.store.get_finding_by_reference(&input.fingerprint)? else {
         return Ok(missing_finding_response(&input.fingerprint));
     };
-    let Some(triage) = finding.triage.clone() else {
+    // Require a triage verdict to exist before spending a verify pass, but
+    // deliberately do NOT forward the triage reasoning to the verifier — it
+    // must reach its own verdict from the claim and the code (see
+    // build_verify_prompt).
+    if finding.triage.is_none() {
         return Ok(untriaged_finding_response(&finding.fingerprint));
-    };
+    }
 
     let runtime = require_verify_finding_runtime(request.runtime)?;
     let model =
         crate::runtime::require_configured_model("verify:finding", request.configured_model)?;
-    let prompt = build_verify_prompt(&finding, &triage, input.prompt_template.as_deref())?;
+    let prompt = build_verify_prompt(&finding, input.prompt_template.as_deref())?;
     let result = query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
