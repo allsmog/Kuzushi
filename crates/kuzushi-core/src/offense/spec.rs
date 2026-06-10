@@ -73,14 +73,16 @@ impl ChainSpec {
         }
         let mut plays: Vec<Box<dyn Play>> = Vec::with_capacity(self.plays.len());
         for spec in &self.plays {
-            plays.push(spec.build()?);
+            plays.push(spec.build_play()?);
         }
         Ok(AttackChain::new(self.name.clone(), plays))
     }
 }
 
 impl PlaySpec {
-    fn build(&self) -> Result<Box<dyn Play>, String> {
+    /// Build the executable play for this spec (used by the declarative chain
+    /// builder and the LLM planner when it proposes a single play).
+    pub(in crate::offense) fn build_play(&self) -> Result<Box<dyn Play>, String> {
         match self.kind.as_deref().unwrap_or("http-probe") {
             "http-probe" => self.build_http_probe(),
             "prompt-injection" => self.build_prompt_injection(),

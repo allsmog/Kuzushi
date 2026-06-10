@@ -25,6 +25,10 @@ pub struct PlayOutcome {
     pub summary: String,
     /// Signals that fired (matched needles, status classifications, …).
     pub evidence: Vec<String>,
+    /// Compact summary of what the target returned (status + body excerpt).
+    /// Fed to an LLM planner so it can choose the next hop from the result.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub observation: Option<String>,
 }
 
 impl PlayOutcome {
@@ -35,7 +39,13 @@ impl PlayOutcome {
             exploited: false,
             summary: String::new(),
             evidence: Vec::new(),
+            observation: None,
         }
+    }
+
+    pub fn with_observation(mut self, observation: impl Into<String>) -> Self {
+        self.observation = Some(observation.into());
+        self
     }
 
     pub fn exploited(mut self, summary: impl Into<String>, evidence: Vec<String>) -> Self {

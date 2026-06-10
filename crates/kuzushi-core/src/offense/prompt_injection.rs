@@ -99,7 +99,8 @@ impl Play for PromptInjectionPlay {
     ) -> Result<PlayOutcome, String> {
         let response = transport.send(ctx.target(), &self.request)?;
         let (landed, evidence) = self.classify(&response);
-        let outcome = PlayOutcome::new(self.name(), ctx.target().to_string());
+        let outcome =
+            PlayOutcome::new(self.name(), ctx.target().to_string()).with_observation(response.observe(280));
         if landed {
             return Ok(outcome.exploited(
                 format!("injection landed on {}", self.request.path),
