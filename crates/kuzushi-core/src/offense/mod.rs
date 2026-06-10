@@ -9,7 +9,15 @@
 //! host that was not explicitly put in scope.
 
 pub mod engagement_scope;
+pub mod executor;
+pub mod http_probe;
+pub mod play;
+pub mod play_context;
+pub mod transport;
 
-pub use engagement_scope::{
-    EngagementScope, ScopeDecision, ScopeEntry, ScopeTarget, ScopeWindow,
-};
+pub use engagement_scope::{EngagementScope, ScopeDecision, ScopeEntry, ScopeTarget, ScopeWindow};
+pub use executor::run_play;
+pub use http_probe::HttpProbePlay;
+pub use play::{Play, PlayOutcome};
+pub use play_context::{AuthorizedTarget, PlayContext};
+pub use transport::{PlayRequest, PlayResponse, PlayTransport};
