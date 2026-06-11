@@ -92,7 +92,7 @@ jobs:
 
       - name: Post PR comment
         if: github.event_name == 'pull_request' && hashFiles('kuzushi-report.md') != ''
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           header: kuzushi-scan
           path: kuzushi-report.md
