@@ -25,9 +25,9 @@ jobs:
     permissions:
       contents: read
 
-  # ── Publish to npm (reuses dist + native artifacts produced by CI gate) ─
+  # ── Publish to npm (stages every platform binary built by this release) ─
   publish-npm:
-    needs: ci
+    needs: [ci, native-binaries]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
@@ -48,11 +48,32 @@ jobs:
         with:
           name: dist
           path: dist/
-      - name: Download native artifact from CI
+      - name: Download cross-platform binaries
         uses: actions/download-artifact@v4
         with:
-          name: native-linux-x64
-          path: native/
+          pattern: release-native-*
+          merge-multiple: true
+      - name: Stage native binaries for every built platform
+        # Each matrix leg uploads kuzushi-<tag>-<slug>.{tar.gz,zip}; extract
+        # them into native/<slug>/ so the npm tarball works on every platform
+        # that produced a green build (previously: linux-x64 only).
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for archive in kuzushi-*.tar.gz; do
+            slug="${archive#kuzushi-${GITHUB_REF_NAME}-}"; slug="${slug%.tar.gz}"
+            mkdir -p "native/${slug}"
+            tar -xzf "${archive}" --strip-components=1 -C "native/${slug}"
+            chmod 755 "native/${slug}"/kuzushi*
+            rm -f "${archive}"
+          done
+          for archive in kuzushi-*.zip; do
+            slug="${archive#kuzushi-${GITHUB_REF_NAME}-}"; slug="${slug%.zip}"
+            mkdir -p "native/${slug}"
+            unzip -j -o "${archive}" -d "native/${slug}" > /dev/null
+            rm -f "${archive}"
+          done
+          ls -la native/*/
       - run: pnpm verify:pack
       # Opt-in provenance: set repo variable NPM_PROVENANCE=true to enable.
       # Requires npm ≥9.5 and a public repository. See docs/devex/02-cicd-assessment.md.
@@ -91,7 +112,7 @@ jobs:
             required: false
           - os: macos-14
             slug: darwin-arm64
-            required: false
+            required: true
           - os: windows-latest
             slug: win32-x64
             required: false
@@ -111,11 +132,13 @@ jobs:
           version="${GITHUB_REF_NAME}"
           staging="kuzushi-${version}-${{ matrix.slug }}"
           mkdir -p "${staging}"
+          # One binary per platform: `kz` is an argv0 alias of `kuzushi`
+          # (the npm wrapper dispatches; manual installs can symlink).
           if [ "${{ runner.os }}" = "Windows" ]; then
-            cp target/release/kuzushi.exe target/release/kz.exe "${staging}/"
+            cp target/release/kuzushi.exe "${staging}/"
             7z a "${staging}.zip" "${staging}" > /dev/null
           else
-            cp target/release/kuzushi target/release/kz "${staging}/"
+            cp target/release/kuzushi "${staging}/"
             tar -czf "${staging}.tar.gz" "${staging}"
           fi
       - uses: actions/upload-artifact@v4
@@ -149,22 +172,37 @@ jobs:
         with:
           name: dist
           path: dist/
-      - name: Download native artifact from CI
-        uses: actions/download-artifact@v4
-        with:
-          name: native-linux-x64
-          path: native/
-      - run: pnpm verify:pack
-
-      # Pack the tarball for users who want to install from the release.
-      # CI already built dist/ and staged native Rust binaries; skip prepack.
-      - run: npm pack --ignore-scripts
-
       - name: Download cross-platform binaries
         uses: actions/download-artifact@v4
         with:
           pattern: release-native-*
           merge-multiple: true
+
+      - name: Stage native binaries for every built platform
+        # Same staging as publish-npm so the .tgz attached to the GitHub
+        # Release is multi-platform too. The original archives are kept in
+        # the workspace — the release step attaches them below.
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for archive in kuzushi-*.tar.gz; do
+            slug="${archive#kuzushi-${GITHUB_REF_NAME}-}"; slug="${slug%.tar.gz}"
+            mkdir -p "native/${slug}"
+            tar -xzf "${archive}" --strip-components=1 -C "native/${slug}"
+            chmod 755 "native/${slug}"/kuzushi*
+          done
+          for archive in kuzushi-*.zip; do
+            slug="${archive#kuzushi-${GITHUB_REF_NAME}-}"; slug="${slug%.zip}"
+            mkdir -p "native/${slug}"
+            unzip -j -o "${archive}" -d "native/${slug}" > /dev/null
+          done
+          ls -la native/*/
+
+      - run: pnpm verify:pack
+
+      # Pack the tarball for users who want to install from the release.
+      # CI already built dist/; native/ was staged above; skip prepack.
+      - run: npm pack --ignore-scripts
 
       - name: Generate changelog from commits since previous tag
         run: |
