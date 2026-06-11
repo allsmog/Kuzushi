@@ -112,7 +112,6 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.81.0",
     "@kuzushi/augur": "^0.1.0",
-    "@kuzushi/randori-plugin": "github:allsmog/randori-plugin",
     "@langchain/anthropic": "^1.0.0",
     "@langchain/core": "^1.0.0",
     "@langchain/langgraph": "^1.0.0",

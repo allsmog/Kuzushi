@@ -114,6 +114,7 @@ const expectedPackageScripts = {
   "benchmark:freeze": "tsx benchmarks/freeze-baseline.ts",
   "benchmark:diff": "tsx benchmarks/sarif-diff.ts",
   "benchmark:regression": "tsx benchmarks/regression-check.ts",
+  "benchmark:scoreboard": "tsx benchmarks/scoreboard.ts",
   "eval:kuzushi-whitebox-static": "node --import tsx evals/kuzushi-whitebox-static/run.ts",
   perf: "tsx perf/harness.ts",
   "check:circular": "madge --ts-config tsconfig.json --extensions ts --circular src/",
@@ -148,7 +149,6 @@ const expectedOnlyBuiltDependencies = ["better-sqlite3", "esbuild"];
 const expectedPackageDependencies = {
   "@anthropic-ai/sdk": "^0.81.0",
   "@kuzushi/augur": "^0.1.0",
-  "@kuzushi/randori-plugin": "github:allsmog/randori-plugin",
   "@langchain/anthropic": "^1.0.0",
   "@langchain/core": "^1.0.0",
   "@langchain/langgraph": "^1.0.0",
@@ -168,8 +168,6 @@ const expectedPnpmLockfileRootDependencyVersions = {
   dependencies: {
     "@anthropic-ai/sdk": "0.81.0(zod@4.3.6)",
     "@kuzushi/augur": "0.1.0",
-    "@kuzushi/randori-plugin":
-      "https://codeload.github.com/allsmog/randori-plugin/tar.gz/ddf7dd72e0032988e7a47746842a324c9f8219aa",
     "@langchain/anthropic":
       "1.4.0(@langchain/core@1.1.48(openai@6.39.0(ws@8.20.1)(zod@4.3.6))(ws@8.20.1))",
     "@langchain/core": "1.1.48(openai@6.39.0(ws@8.20.1)(zod@4.3.6))(ws@8.20.1)",
