@@ -14,9 +14,6 @@ importers:
       '@kuzushi/augur':
         specifier: ^0.1.0
         version: 0.1.0
-      '@kuzushi/randori-plugin':
-        specifier: github:allsmog/randori-plugin
-        version: https://codeload.github.com/allsmog/randori-plugin/tar.gz/ddf7dd72e0032988e7a47746842a324c9f8219aa
       '@langchain/anthropic':
         specifier: ^1.0.0
         version: 1.4.0(@langchain/core@1.1.48(openai@6.39.0(ws@8.20.1)(zod@4.3.6))(ws@8.20.1))
@@ -483,10 +480,6 @@ packages:
 
   '@kuzushi/augur@0.1.0':
     resolution: {integrity: sha512-YFLJ3N9J5nFzWMEIDFyqE7M/an/fzYyswRJvY5HTPQPXSLl+6OLad+RJvEOwpWgK8Z9up9teUSwsTdL8b8rZcQ==}
-
-  '@kuzushi/randori-plugin@https://codeload.github.com/allsmog/randori-plugin/tar.gz/ddf7dd72e0032988e7a47746842a324c9f8219aa':
-    resolution: {tarball: https://codeload.github.com/allsmog/randori-plugin/tar.gz/ddf7dd72e0032988e7a47746842a324c9f8219aa}
-    version: 1.0.0
 
   '@kuzushi/tob-skills@https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2':
     resolution: {tarball: https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2}
@@ -2838,8 +2831,6 @@ snapshots:
       '@jridgewell/sourcemap-codec': 1.5.5
 
   '@kuzushi/augur@0.1.0': {}
-
-  '@kuzushi/randori-plugin@https://codeload.github.com/allsmog/randori-plugin/tar.gz/ddf7dd72e0032988e7a47746842a324c9f8219aa': {}
 
   '@kuzushi/tob-skills@https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2':
     optional: true

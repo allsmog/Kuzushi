@@ -1375,7 +1375,7 @@ const packagingRequirements = [
   "package dependencies has uncontracted package",
   "package dependencies.${name} must be ${spec}",
   '"@langchain/langgraph": "^1.0.0"',
-  '"@kuzushi/randori-plugin": "github:allsmog/randori-plugin"',
+  '"@kuzushi/augur": "^0.1.0"',
   '"better-sqlite3": "^12.8.0"',
   'typescript: "^5.7.3"',
   "expectedPackageDevDependencies",
