@@ -13,5 +13,6 @@ pub(crate) mod runs;
 pub(crate) mod runs_diff;
 pub(crate) mod runs_prune;
 pub(crate) mod scan;
+pub(crate) mod scan_gate;
 pub(crate) mod scan_prepare;
 pub(crate) mod suppressions;

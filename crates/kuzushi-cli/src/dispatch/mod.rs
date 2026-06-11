@@ -34,7 +34,13 @@ pub(crate) async fn dispatch_command(
             budget,
             since,
             include_worktree,
+            fail_on,
+            sarif,
         } => {
+            let gate = crate::application::scan_gate::ScanGatePolicy {
+                fail_on: fail_on.map(crate::command::FailOnArg::as_severity),
+                sarif,
+            };
             scan_command(
                 target,
                 mode,
@@ -45,6 +51,7 @@ pub(crate) async fn dispatch_command(
                 budget,
                 since,
                 include_worktree,
+                gate,
             )
             .await
         }
