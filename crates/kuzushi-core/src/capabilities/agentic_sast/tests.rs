@@ -294,7 +294,9 @@ mod tests {
             "Shared lock is dropped too early.\n\nEvidence: the first shared holder calls unlock and clears the shared state while another shared holder can still be active.",
         );
 
-        assert_ne!(first.fingerprint, review.fingerprint);
+        // v2 identity excludes the message: same rule/file/line with different
+        // phrasing is the same finding, so the fingerprints now match.
+        assert_eq!(first.fingerprint, review.fingerprint);
 
         let merged = merge_agentic_sast_findings(vec![first], vec![review], 8);
 

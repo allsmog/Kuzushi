@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use super::super::domain::fingerprint_parts;
     use super::super::persistence::merge_tool_list;
     use super::super::*;
     use serde_json::json;
@@ -942,5 +943,81 @@ mod tests {
         );
         let finding_id = store.insert_finding("run-v3", &finding).unwrap();
         assert!(store.get_latest_verification(finding_id).unwrap().is_none());
+    }
+
+    #[test]
+    fn legacy_fingerprints_migrate_to_stable_v2_identity() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-legacy", Path::new("/tmp"), "running")
+            .unwrap();
+        // Two legacy rows for the same rule/file/line whose 16-char
+        // DefaultHasher fingerprints differed only because the message was
+        // hashed: under v2 identity they are the same finding.
+        for (legacy_fp, message) in [
+            ("00000000aaaaaaaa", "SQLi reachable from request param"),
+            ("00000000bbbbbbbb", "SQLi reachable (review pass wording)"),
+        ] {
+            store
+                .conn
+                .execute(
+                    "insert into findings(scan_id, fingerprint, rule_id, title, severity,
+                        file_path, start_line, message, tool, created_at)
+                     values('run-legacy', ?1, 'demo.sqli', 'SQLi', 'high',
+                        'src/db.rs', 42, ?2, 'semgrep', 'now')",
+                    rusqlite::params![legacy_fp, message],
+                )
+                .unwrap();
+        }
+
+        // Re-running init applies the one-time migration.
+        store.init().unwrap();
+
+        let findings = store.list_findings_for_scan_id("run-legacy").unwrap();
+        assert_eq!(findings.len(), 1, "colliding legacy rows must collapse");
+        let migrated = &findings[0].fingerprint;
+        assert_eq!(migrated.len(), 32, "v2 fingerprints are 32 hex chars");
+        assert_eq!(
+            *migrated,
+            fingerprint_parts("demo.sqli", "src/db.rs", 42),
+            "migrated identity must match what new_tool computes today"
+        );
+    }
+
+    #[test]
+    fn fingerprint_is_stable_and_message_independent() {
+        let one = Finding::new_tool(
+            "semgrep",
+            "demo.sqli",
+            "src/db.rs",
+            42,
+            None,
+            Severity::High,
+            "first wording",
+        );
+        let two = Finding::new_tool(
+            "semgrep",
+            "demo.sqli",
+            "src/db.rs",
+            42,
+            None,
+            Severity::High,
+            "completely different wording",
+        );
+        assert_eq!(one.fingerprint, two.fingerprint);
+        assert_eq!(
+            one.fingerprint,
+            fingerprint_parts("demo.sqli", "src/db.rs", 42)
+        );
+        let other_line = Finding::new_tool(
+            "semgrep",
+            "demo.sqli",
+            "src/db.rs",
+            43,
+            None,
+            Severity::High,
+            "first wording",
+        );
+        assert_ne!(one.fingerprint, other_line.fingerprint);
     }
 }
