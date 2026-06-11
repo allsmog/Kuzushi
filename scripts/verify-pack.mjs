@@ -251,10 +251,10 @@ const forbiddenPackageMetadataFields = [
   "cpu",
 ];
 const expectedOptionalAdapterDependencies = {
-  "@kuzushi/tob-skills": "github:allsmog/tob-security-skills",
-  "@kuzushi/vuln-scout": "github:allsmog/vuln-scout",
-  "promptarmor-plugin": "github:allsmog/promptarmor-plugin",
-  "shinsa-plugin": "github:allsmog/shinsa-plugin",
+  "@kuzushi/tob-skills": "github:allsmog/tob-security-skills#98dda39a53eb74b90d60f305c8523e47552a9fb2",
+  "@kuzushi/vuln-scout": "github:allsmog/vuln-scout#79df9e804c6a87f0af3c779c55d2fcdb4675f49d",
+  "promptarmor-plugin": "github:allsmog/promptarmor-plugin#690d60a5b4d2136206ef7dedd516d3fcfddd4db9",
+  "shinsa-plugin": "github:allsmog/shinsa-plugin#74b3737d225970d849f5f6f57095cfe65ee7ccdf",
 };
 
 const denied = [

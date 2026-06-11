@@ -92,16 +92,16 @@ importers:
         version: 3.2.4(@types/node@22.19.11)(jiti@2.6.1)(tsx@4.21.0)(yaml@2.8.2)
     optionalDependencies:
       '@kuzushi/tob-skills':
-        specifier: github:allsmog/tob-security-skills
+        specifier: github:allsmog/tob-security-skills#98dda39a53eb74b90d60f305c8523e47552a9fb2
         version: https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2
       '@kuzushi/vuln-scout':
-        specifier: github:allsmog/vuln-scout
+        specifier: github:allsmog/vuln-scout#79df9e804c6a87f0af3c779c55d2fcdb4675f49d
         version: https://codeload.github.com/allsmog/vuln-scout/tar.gz/79df9e804c6a87f0af3c779c55d2fcdb4675f49d
       promptarmor-plugin:
-        specifier: github:allsmog/promptarmor-plugin
+        specifier: github:allsmog/promptarmor-plugin#690d60a5b4d2136206ef7dedd516d3fcfddd4db9
         version: https://codeload.github.com/allsmog/promptarmor-plugin/tar.gz/690d60a5b4d2136206ef7dedd516d3fcfddd4db9
       shinsa-plugin:
-        specifier: github:allsmog/shinsa-plugin
+        specifier: github:allsmog/shinsa-plugin#74b3737d225970d849f5f6f57095cfe65ee7ccdf
         version: https://codeload.github.com/allsmog/shinsa-plugin/tar.gz/74b3737d225970d849f5f6f57095cfe65ee7ccdf
 
 packages:
