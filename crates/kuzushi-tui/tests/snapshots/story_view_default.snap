@@ -7,7 +7,7 @@ assertion_line: 289
  -- SESSION STORY · event log (refresh with /story) --------------------------------------------------------------------
 
 system      kuzushi shell
-startup     ready: 39 modules, 55 tools, target none
+startup     ready: 41 modules, 67 tools, target none
 help        type `scan` to begin · `help` for commands · `?<text>` to ask the agent
 
 ▸ try: Ctrl+O toggle · /history commands · /show runs · /replay <runId> · /trace <runId>

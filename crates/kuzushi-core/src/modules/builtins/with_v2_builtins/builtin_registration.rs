@@ -54,7 +54,9 @@ fn executor_for_tool(name: &str) -> Option<ToolExecutor> {
 
 fn foundation_executor_for_tool(name: &str) -> Option<ToolExecutor> {
     match name {
-        "catalog:modules" | "catalog:tools" => Some(execute_catalog_tool),
+        "catalog:modules" | "catalog:tools" | "bounty:import-har" | "bounty:import-burp" => {
+            Some(execute_catalog_tool)
+        }
         "module-recommender:recommend" => Some(execute_module_recommender_tool),
         "context:build" | "context-lite:index" | "config:show" | "router:show"
         | "workspace:status" | "workspace:export-findings" | "findings:list" | "report:build"
@@ -67,7 +69,11 @@ fn security_executor_for_tool(name: &str) -> Option<ToolExecutor> {
     match name {
         "dep-hygiene:check" | "secret-scan:scan" | "semgrep:scan" | "codeql:scan"
         | "iac-scan:scan" | "cargo-audit:scan" | "license-scan:scan" | "sbom-scan:scan"
-        | "exploit-chain:scan" | "sast:scan" | "cpg:build" | "codeql:create-db" => {
+        | "exploit-chain:scan" | "sast:scan" | "cpg:build" | "codeql:create-db"
+        | "android-apk:check-env" | "android-apk:prepare" | "android-apk:manifest-scan"
+        | "android-apk:network-security-config" | "android-apk:fileprovider-scan"
+        | "android-apk:code-scan" | "android-apk:sast-handoff" | "android-apk:native-libs"
+        | "android-apk:hybrid-detect" | "android-apk:scan" => {
             Some(execute_native_security_tool)
         }
         "agentic-sast:scan" | "variant:lift-pattern" | "variant:hunt" | "ndiff:fetch-cve"
@@ -92,7 +98,8 @@ fn specialist_executor_for_tool(name: &str) -> Option<ToolExecutor> {
         | "systems-hunt:systems-trigger-synth" => Some(execute_systems_hunt_tool_mapping),
         "uaf-hunt:hunt" => Some(execute_uaf_hunt_tool_mapping),
         "pwn:profile-binary" | "pwn:reverse" | "pwn:state" | "pwn:calibrate-local"
-        | "pwn:run-candidates" | "pwn:auto-solve" => Some(execute_pwn_tool_mapping),
+        | "pwn:run-candidates" | "pwn:auto-solve" | "pwn:menu-probe" | "pwn:exploit-run"
+        | "pwn:heap-uaf-scan" => Some(execute_pwn_tool_mapping),
         "offense:chain" => Some(execute_offense_tool_mapping),
         "threat-intel:discover"
         | "threat-intel:list"
@@ -372,4 +379,5 @@ fn register_security_modules(registry: &mut ModuleRegistry) {
 fn register_deferred_adapter_modules(registry: &mut ModuleRegistry) {
     registry.register(prompt_armor::module().deferred());
     registry.register(recon_module().deferred());
+    registry.register(bounty_module());
 }

@@ -40,7 +40,7 @@ impl VulnSource {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FindingEvidence {
     pub kind: String,
@@ -49,6 +49,14 @@ pub struct FindingEvidence {
     pub snippet: String,
     pub rationale: String,
     pub confidence: u8,
+    /// Raw HTTP request blob when `kind == "http-request"` — populated by
+    /// the Burp / HAR import adapters (M2 §2.3). `None` for code-location
+    /// evidence kinds.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub request_blob: Option<String>,
+    /// Raw HTTP response blob when `kind == "http-request"`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub response_blob: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

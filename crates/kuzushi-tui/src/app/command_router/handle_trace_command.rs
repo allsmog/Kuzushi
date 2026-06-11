@@ -104,6 +104,14 @@ pub(crate) fn handle_onboarding_command(app: &mut ShellApp, command: &ShellComma
     true
 }
 
+pub(crate) fn handle_logs_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Logs = command else {
+        return false;
+    };
+    app.show_logs();
+    true
+}
+
 pub(crate) fn handle_target_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
     let ShellCommand::Target(path) = command else {
         return false;

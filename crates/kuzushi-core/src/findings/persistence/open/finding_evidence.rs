@@ -14,9 +14,10 @@ impl FindingStore {
             self.conn.execute(
                 r#"
                 insert into finding_evidence(
-                  finding_id, ordinal, kind, file_path, line, snippet, rationale, confidence
+                  finding_id, ordinal, kind, file_path, line, snippet, rationale, confidence,
+                  request_blob, response_blob
                 )
-                values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                 "#,
                 params![
                     finding_id,
@@ -27,6 +28,8 @@ impl FindingStore {
                     &item.snippet,
                     &item.rationale,
                     item.confidence,
+                    &item.request_blob,
+                    &item.response_blob,
                 ],
             )?;
         }
@@ -54,7 +57,8 @@ impl FindingStore {
     fn finding_evidence(&self, finding_id: i64) -> Result<Vec<FindingEvidence>> {
         let mut stmt = self.conn.prepare(
             r#"
-            select kind, file_path, line, snippet, rationale, confidence
+            select kind, file_path, line, snippet, rationale, confidence,
+                   request_blob, response_blob
               from finding_evidence
              where finding_id = ?1
              order by ordinal asc
@@ -69,6 +73,8 @@ impl FindingStore {
                 snippet: row.get(3)?,
                 rationale: row.get(4)?,
                 confidence: confidence.clamp(0, u8::MAX as i64) as u8,
+                request_blob: row.get(6)?,
+                response_blob: row.get(7)?,
             })
         })?;
         rows.collect::<rusqlite::Result<Vec<_>>>()

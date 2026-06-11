@@ -6,14 +6,18 @@ use kuzushi_core::{
 };
 
 pub(crate) fn workspace_for_target(target: Option<&PathBuf>) -> Result<WorkspaceTarget> {
-    let target = target.cloned().unwrap_or_else(|| PathBuf::from("."));
-    WorkspaceTarget::new(target)
+    // No silent cwd fallback. Bug-bounty operators need scope discipline,
+    // so the dangerous `Some(PathBuf::from("."))` default has been replaced
+    // with an actionable error. To intentionally operate on the current
+    // directory pass `--target .` at launch or run `target .` in the shell.
+    explicit_workspace_for_target(target)
 }
 
 pub(crate) fn explicit_workspace_for_target(target: Option<&PathBuf>) -> Result<WorkspaceTarget> {
     let Some(target) = target else {
         anyhow::bail!(
-            "workspace export requires an active workspace. Next: scan <target> or start shell with --target ."
+            "no target set. Next: `target <path>` (or `target .` to use the current directory). \
+             From the CLI pass `--target <path>` (or `--target .`)."
         );
     };
     WorkspaceTarget::new(target)

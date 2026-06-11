@@ -4,7 +4,7 @@ assertion_line: 33
 ---
  KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured · 0 findings · view:modules
 
-KUZUSHI · MODULES · 39 modules
+KUZUSHI · MODULES · 41 modules
 
 ▸ NEXT Run sast — Full SAST pipeline: context, scanners, AI triage, verification, patch, and report
 
@@ -25,6 +25,7 @@ KUZUSHI · MODULES · 39 modules
   variant                 Lift exploit patterns from confirmed findings and hunt sibling variants.
 
 -- INTEL build context, recon, and threat model the operator reads first -----------------------------------------------
+  bounty                  Bug-bounty intake: import Burp Suite XML and HAR captures into the findings ledger as...
   codeql-db               Create a CodeQL database (.kuzushi/codeql-db/) for downstream taint and security queries.
   context                 Build and persist repository context snapshots for scanner and shell use.
   cpg                     Build a Joern Code Property Graph (.kuzushi/cpg.bin) for downstream taint analyses.
@@ -46,6 +47,7 @@ KUZUSHI · MODULES · 39 modules
   smoke                   Diagnostic flows that exercise the bridge end-to-end without paying for a real scan.
 
 -- DEFENSE triage, verify, and patch emitted findings ------------------------------------------------------------------
+  android-apk             Unpack, decompile, and analyze Android APKs so Kuzushi's existing Java/Kotlin SAST engines...
   classifier-gate         Cheap LLM classifier with adaptive p80 quantile gate. Score one finding to decide whether...
   deep-audit              Tool-augmented LLM auditor — uses code-nav primitives to verify a finding's triggerability.
   exploit-chain           LLM-driven analyzer that connects vulnerability primitives into likely exploit paths and...

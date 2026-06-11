@@ -35,12 +35,24 @@ fn active_status_footer_segments(app: &ShellApp, activity: FooterActivity) -> Ve
 }
 
 fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
-    vec![
+    let mut segments = vec![
         routing_mode_segment(app),
         target_footer_segment(app),
-        context_footer_segment(app),
-        view_status_segment(app),
-    ]
+    ];
+    if let Some(chip) = scope_footer_segment(app) {
+        segments.push(chip);
+    }
+    segments.push(context_footer_segment(app));
+    segments.push(view_status_segment(app));
+    segments
+}
+
+fn scope_footer_segment(app: &ShellApp) -> Option<String> {
+    let scope = app.program_scope.as_ref()?;
+    if scope.is_empty() {
+        return None;
+    }
+    Some("scope: on".to_string())
 }
 
 fn status_footer_right_segments(app: &ShellApp, warning: bool) -> Vec<String> {
@@ -120,15 +132,26 @@ fn model_footer_segment(app: &ShellApp) -> String {
 }
 
 fn target_footer_segment(app: &ShellApp) -> String {
-    app.target
-        .as_ref()
-        .map(|path| {
-            format!(
-                "target:{}",
-                compact_target_path(&path.display().to_string())
-            )
-        })
-        .unwrap_or_else(|| "target:none".to_string())
+    let Some(path) = app.target.as_ref() else {
+        return "target:none".to_string();
+    };
+    if target_is_cwd(path) {
+        return "target:cwd (.)".to_string();
+    }
+    format!("target:{}", compact_target_path(&path.display().to_string()))
+}
+
+fn target_is_cwd(path: &std::path::Path) -> bool {
+    let Ok(cwd) = std::env::current_dir() else {
+        return false;
+    };
+    let Ok(cwd_canonical) = std::fs::canonicalize(&cwd) else {
+        return false;
+    };
+    let Ok(target_canonical) = std::fs::canonicalize(path) else {
+        return false;
+    };
+    cwd_canonical == target_canonical
 }
 
 fn context_footer_segment(app: &ShellApp) -> String {

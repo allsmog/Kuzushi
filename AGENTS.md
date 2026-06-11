@@ -422,7 +422,9 @@ The command source of truth is `SHELL_COMMAND_SPECS` in
 `crates/kuzushi-tui/src/commands.rs`. Do not maintain a second TypeScript
 router. Common verbs include:
 
-- Navigation: `help`, `modules`, `tools`, `use <module>`, `back`.
+- Navigation: `help`, `modules`, `tools`, `use <module>`, `back`, `logs`
+  (alias `log` / `transcript` — full-screen scrollable transcript with
+  j/k/g/G/PgUp/PgDn).
 - Run/scan: `scan [target]`, `run <tool> [json]`, `ask <question>`.
 - Options/tasks: `options [tool]`, `set`, `setg`, `unset`, `tasks`,
   `task <verb>`.
@@ -433,6 +435,35 @@ router. Common verbs include:
   `/progress`).
 - Auth/config/model/session: `auth`, `provider`, `backend`, `model`, `cost`,
   `config`, `load`, `resume`, `history`, `clear`, `story`, `quit`.
+
+### Bug-bounty workflow surfaces (PR #64)
+
+- **Explicit targets.** `workspace_for_target` no longer falls back to
+  cwd. `kuzushi findings`, `kuzushi finding`, and `kuzushi shell` all
+  require `--target <path>` (or `--target .` to opt into cwd). The TUI
+  surfaces `target:cwd (.)` in the status footer when the active
+  target is the process cwd.
+- **Program scope.** Drop a `<workspace>/.kuzushi/scope.toml` with
+  `[in_scope] hosts = […] cidrs = […]` and (optionally) `[out_of_scope]`
+  to deny rules. Recon dispatch and the bounty importers refuse
+  `OutOfScope` targets with an actionable error; the status footer
+  shows a `scope: on` chip when the file is loaded.
+- **Exports.** `workspace:export-findings` accepts
+  `format=json|jsonl|sarif|csv|markdown-bundle`. SARIF emits one
+  `runs[]` per `Finding.tool`; the markdown bundle is a directory
+  (README.md from `build_pr_comment`, per-finding files, manifest.json).
+- **Recon intake.** `recon:import {"tool": "amass|httpx|nuclei|nmap-xml",
+  "path": "<file>"}` materialises the named export into the recon
+  store. `doctor` warns when any of the optional binaries is missing.
+- **Burp / HAR intake.** `bounty:import-har` and `bounty:import-burp`
+  parse the corresponding capture into one `Finding` per request with
+  `kind="http-request"` evidence (raw `request_blob` + `response_blob`
+  carried on `finding_evidence`). Both gate on `scope.toml`.
+- **Theme overrides.** `KUZUSHI_THEME=high-contrast` flips the palette
+  to bright white + bold; `KUZUSHI_REDUCED_MOTION=1` pauses the spinner
+  advance.
+- **Adaptive footer.** Terminals below 70 columns wrap the keybind row
+  to two lines instead of truncating behind a `+more` chip.
 
 ### Live Module Progress (Activity view)
 

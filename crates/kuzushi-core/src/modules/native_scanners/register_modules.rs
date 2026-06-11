@@ -8,6 +8,7 @@ pub(in crate::modules) fn register_modules(registry: &mut ModuleRegistry) {
     registry.register(license_scan_module());
     registry.register(sbom_scan_module());
     registry.register(exploit_chain_module());
+    registry.register(android_apk_module());
 }
 
 pub(in crate::modules) fn execute_tool(
@@ -24,6 +25,16 @@ pub(in crate::modules) fn execute_tool(
         "license-scan:scan" => run_license_scan(input, ctx),
         "sbom-scan:scan" => run_sbom_scan(input, ctx),
         "exploit-chain:scan" => run_exploit_chain_scan(input, ctx, runtime),
+        "android-apk:check-env" => run_android_apk_check_env(input, ctx),
+        "android-apk:prepare" => run_android_apk_prepare(input, ctx),
+        "android-apk:manifest-scan" => run_manifest_scan(input, ctx),
+        "android-apk:network-security-config" => run_network_security_config_scan(input, ctx),
+        "android-apk:fileprovider-scan" => run_fileprovider_scan(input, ctx),
+        "android-apk:code-scan" => run_code_scan(input, ctx),
+        "android-apk:sast-handoff" => run_sast_handoff(input, ctx),
+        "android-apk:native-libs" => run_native_libs_scan(input, ctx),
+        "android-apk:hybrid-detect" => run_hybrid_detect(input, ctx),
+        "android-apk:scan" => run_android_apk_scan(input, ctx),
         other => anyhow::bail!("native scanner tool {other:?} has no executor mapping"),
     }
 }

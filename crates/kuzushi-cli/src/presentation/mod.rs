@@ -1,3 +1,4 @@
+pub(crate) mod android_apk_report;
 pub(crate) mod runs_output;
 pub(crate) mod safe_text;
 pub(crate) mod scan_ci;

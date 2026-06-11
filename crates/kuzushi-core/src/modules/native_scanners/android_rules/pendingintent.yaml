@@ -1,0 +1,31 @@
+rules:
+  - id: android-pendingintent-mutable
+    message: |
+      PendingIntent constructed with FLAG_MUTABLE or no flag (pre-API 31)
+      lets an attacker app fill in fields on the wrapped Intent before it
+      fires (CVE-2020-0294 family, CWE-927). Use FLAG_IMMUTABLE except
+      when you specifically need fill-in semantics (e.g. RemoteViews
+      with custom data).
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-927
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: PendingIntent.getActivity($CTX, $RC, $INT, PendingIntent.FLAG_MUTABLE)
+          - pattern: PendingIntent.getBroadcast($CTX, $RC, $INT, PendingIntent.FLAG_MUTABLE)
+          - pattern: PendingIntent.getService($CTX, $RC, $INT, PendingIntent.FLAG_MUTABLE)
+
+  - id: android-pendingintent-empty-base-intent
+    message: |
+      PendingIntent built from `new Intent()` with no component/action set
+      and FLAG_MUTABLE allows attackers to redirect it to arbitrary
+      components (CWE-927). Even without FLAG_MUTABLE the empty base
+      Intent makes capability laundering easy.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      cwe: CWE-927
+      category: security
+    pattern: PendingIntent.getActivity($CTX, $RC, new Intent(), ...)

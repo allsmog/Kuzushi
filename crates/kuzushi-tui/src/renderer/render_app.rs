@@ -107,6 +107,10 @@ pub(crate) enum RenderSection {
     Retry,
     PrereqPrompt,
     Transcript,
+    /// Completion popup (M3 §3.3). Sits just above the prompt when a
+    /// completion cycle is active, showing up to 6 candidates with the
+    /// selected one highlighted.
+    CompletionPopup,
 }
 
 impl RenderSection {
@@ -129,6 +133,7 @@ const RENDER_SECTION_HANDLERS: &[RenderSectionHandler] = &[
     render_retry_card,
     render_prereq_prompt_card,
     render_transcript,
+    render_completion_popup,
 ];
 
 pub(crate) fn render_sections(app: &ShellApp, area: Rect) -> Vec<RenderSectionSlot> {
@@ -150,6 +155,10 @@ pub(crate) fn render_sections(app: &ShellApp, area: Rect) -> Vec<RenderSectionSl
             prereq_prompt_card_height(app, area),
         ),
         section_slot(RenderSection::Transcript, transcript_height(app, area)),
+        section_slot(
+            RenderSection::CompletionPopup,
+            completion_popup_height(app, area),
+        ),
     ]
     .into_iter()
     .flatten()

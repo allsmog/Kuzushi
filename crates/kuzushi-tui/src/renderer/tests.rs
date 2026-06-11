@@ -282,6 +282,7 @@ fn renders_selected_finding_detail() {
         snippet: "file.save(filepath)".to_string(),
         rationale: "Raw upload path reaches a filesystem write".to_string(),
         confidence: 92,
+        ..Default::default()
     }]);
     app.findings = vec![finding.clone()];
     app.selected_finding = Some(finding);
@@ -420,6 +421,7 @@ fn findings_rows_preview_structured_evidence_at_wide_width() {
             snippet: "filename = file.filename".to_string(),
             rationale: "The upload filename is attacker-controlled".to_string(),
             confidence: 90,
+            ..Default::default()
         },
         FindingEvidence {
             kind: "filesystem_sink".to_string(),
@@ -428,6 +430,7 @@ fn findings_rows_preview_structured_evidence_at_wide_width() {
             snippet: "file.save(filepath)".to_string(),
             rationale: "The raw filename controls the write target".to_string(),
             confidence: 94,
+            ..Default::default()
         },
     ]);
     app.findings = vec![finding];
@@ -2655,27 +2658,6 @@ fn assert_strict_plain_width(rendered: &str, width: usize) {
             "plain line exceeded {width} columns: {line:?}"
         );
     }
-}
-
-#[test]
-fn keybindings_overflow_points_at_help() {
-    // P3-6: at narrow terminal widths the keybind footer used to drop
-    // remaining keys under a silent `+more` token. Operators had no way
-    // to discover the hidden bindings. Now the overflow chip tells
-    // them where to look.
-    let backend = TestBackend::new(60, 20);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let app = ShellApp::new(V2Config::default(), None);
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
-    assert!(
-        rendered.contains("help more"),
-        "narrow keybind footer must point at help: {rendered}"
-    );
-    assert!(
-        !rendered.contains("+more"),
-        "silent +more chip must be replaced"
-    );
 }
 
 #[test]

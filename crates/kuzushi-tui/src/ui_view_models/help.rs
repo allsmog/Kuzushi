@@ -164,6 +164,9 @@ fn help_alias_text(spec: &ShellCommandSpec) -> String {
 }
 
 fn quickstart_steps(app: &ShellApp) -> Vec<QuickstartStep> {
+    // M1 §1.2: the Quickstart paints full-screen now (no embedded transcript
+    // chrome) so it can carry the complete bug-bounty operator path —
+    // scope, scan, triage, export, observe.
     vec![
         QuickstartStep {
             number: "1",

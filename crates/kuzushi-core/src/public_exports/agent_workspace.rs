@@ -56,11 +56,12 @@ pub use crate::runtime::{
     ToolResult, TracedRuntime, TriageRequest, MCP_ARTIFACT_TABLE, MCP_CONSTANT_NAMES,
 };
 pub use crate::workspace::{
-    artifact_state, export_workspace_findings, legacy_codeql_db_path,
+    artifact_state, export_workspace_findings, legacy_codeql_db_path, load_program_scope,
     workspace_artifact_kb_db_path, workspace_codeql_db_path, workspace_config_path,
     workspace_findings_db_path, workspace_models_path, workspace_options_path, workspace_state_dir,
     workspace_state_root, workspace_static_evidence_db_path, workspace_status_for_target,
-    ArtifactState, WorkspaceExportFormat, WorkspaceFindingsExport, WorkspaceStatus,
+    ArtifactState, HostPattern, ProgramScope, ProgramScopeFile, ProgramScopeList, ScopeVerdict,
+    WorkspaceExportFormat, WorkspaceFindingsExport, WorkspaceStatus,
     WorkspaceTarget, KUZUSHI_STATE_DIR, LEGACY_CODEQL_DB_DIR, LEGACY_CODEQL_STATE_DIR,
     WORKSPACE_ARTIFACT_KB_DB_FILE, WORKSPACE_CODEQL_DB_DIR, WORKSPACE_CONFIG_FILE,
     WORKSPACE_FINDINGS_DB_FILE, WORKSPACE_MODELS_FILE, WORKSPACE_OPTIONS_FILE,

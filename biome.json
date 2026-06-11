@@ -99,7 +99,11 @@
       }
     },
     {
-      "includes": ["scripts/langgraph-bridge.mjs", "scripts/langgraph-bridge/**/*.mjs"],
+      "includes": [
+        "scripts/langgraph-bridge.mjs",
+        "scripts/langgraph-bridge/**/*.mjs",
+        "scripts/check-ddd-boundaries.mjs"
+      ],
       "formatter": {
         "enabled": false
       }

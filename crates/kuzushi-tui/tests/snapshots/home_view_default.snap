@@ -8,7 +8,7 @@ assertion_line: 89
 target             none
 latest run         none
 run status         no run.json
-modules            39
+modules            41
 findings           0
 
 ▸ NEXT Run `scan .` to scan the current directory and create the first run artifacts.

@@ -125,6 +125,10 @@ pub struct ShellApp {
     pub modules_scroll: usize,
     pub history_scroll: usize,
     pub kb_scroll: usize,
+    /// Scroll offset in the `ShellView::Logs` (full-screen transcript) view.
+    /// M1 §1.1 — operators page through the complete log buffer here instead
+    /// of relying on the truncated embedded transcript strip.
+    pub logs_scroll: usize,
     pub last_char_at: Option<Instant>,
     pub scroll_offset: u16,
     pub spinner_phase: u8,
@@ -178,4 +182,9 @@ pub struct ShellApp {
     /// Latest source→sink taint flow for the attack-path page, cached from
     /// `taint-iris:hunt` structured output.
     pub taint_flow: Option<TaintFlowSnapshot>,
+    /// Bug-bounty program scope loaded from `<target>/.kuzushi/scope.toml`
+    /// when the target is set (M2 §2.1). Cached on the app so the footer
+    /// chip and any in-shell validators don't hit disk every frame.
+    /// `None` means no scope file is present.
+    pub program_scope: Option<kuzushi_core::ProgramScope>,
 }

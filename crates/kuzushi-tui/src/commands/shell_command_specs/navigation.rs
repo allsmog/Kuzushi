@@ -55,4 +55,10 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         category: ShellCommandCategory::Navigation,
         description: "open the planning-stage multi-select picker",
     },
+    ShellCommandSpec {
+        command: "logs",
+        aliases: &["/logs", "log", "transcript", "/transcript"],
+        category: ShellCommandCategory::Navigation,
+        description: "scrollable full-screen transcript",
+    },
 ];

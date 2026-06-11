@@ -99,6 +99,7 @@ mod tests {
             snippet: "query(user_input)".to_string(),
             rationale: "user input reaches SQL".to_string(),
             confidence: 90,
+            ..Default::default()
         }];
         let input = PrCommentInput {
             findings: vec![finding],

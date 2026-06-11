@@ -7,9 +7,12 @@ use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::run_artifacts::{
     record_tool_run_failed, record_tool_run_started_with_reproducibility, ToolRunRecord,
 };
-use kuzushi_core::{config_hash, AgentRuntime, ModuleRegistry, ToolOptionStore, WorkspaceTarget};
+use kuzushi_core::{
+    config_hash, load_config_for_target, AgentRuntime, FindingStore, ModuleRegistry,
+    ToolOptionStore, WorkspaceTarget,
+};
 use kuzushi_openai::LangGraphRuntime;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub(crate) async fn scan_command(
     target: PathBuf,
@@ -22,6 +25,9 @@ pub(crate) async fn scan_command(
     since: Option<String>,
     include_worktree: bool,
 ) -> Result<()> {
+    if is_apk_file(&target) {
+        return scan_apk_command(target, json, ci).await;
+    }
     execute_prepared_scan(
         prepare_scan_command(
             &target,
@@ -205,6 +211,55 @@ pub(crate) fn scan_worktree_suffix(include_worktree: bool) -> &'static str {
     } else {
         ""
     }
+}
+
+fn is_apk_file(target: &Path) -> bool {
+    if !target.is_file() {
+        return false;
+    }
+    target
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| ext.eq_ignore_ascii_case("apk"))
+        .unwrap_or(false)
+}
+
+async fn scan_apk_command(apk: PathBuf, json: bool, ci: bool) -> Result<()> {
+    let workspace_dir = apk
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
+    let workspace = WorkspaceTarget::new(&workspace_dir)?;
+    let config = load_config_for_target(Some(workspace.root()))?;
+    let store = FindingStore::open(workspace.findings_db_path())?;
+    let registry = ModuleRegistry::with_v2_builtins();
+    let input = registry.prepare_tool_input(
+        "android-apk:scan",
+        apk_scan_tool_input(&apk, &workspace_dir),
+        None,
+    )?;
+    let ctx = ToolExecutionContext {
+        config: &config,
+        workspace: Some(&workspace),
+        findings_store: Some(&store),
+        trace: None,
+    };
+    let started = std::time::Instant::now();
+    emit_scan_ci_start(ci, started, &apk, &config, &Vec::new());
+    let result =
+        registry.execute_tool_with_runtime("android-apk:scan", input, &ctx, None);
+    let elapsed = started.elapsed();
+    let result = scan_result_or_report_ci_error(result, ci, started, elapsed)?;
+    emit_scan_output(&workspace, &result, json, ci, started, elapsed)
+}
+
+fn apk_scan_tool_input(apk: &Path, workspace: &Path) -> serde_json::Value {
+    serde_json::json!({
+        "apk": apk.display().to_string(),
+        "target": workspace.display().to_string(),
+        "decompiler": "both",
+    })
 }
 
 pub(crate) fn scan_tool_input(

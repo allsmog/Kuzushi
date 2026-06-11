@@ -27,6 +27,8 @@ quickstart - first-run guided setup
   aliases / examples: /quickstart
 onboarding - open the planning-stage multi-select picker
   aliases / examples: /onboarding, /setup, /planning, /plan-stage
+logs - scrollable full-screen transcript
+  aliases / examples: /logs, log, transcript, /transcript
 
 RUN / SCAN — dispatch tools and scans
 scan [target] - run configured scanners

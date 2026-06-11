@@ -81,6 +81,8 @@ fn step_evidence(step: &PlayOutcome, target_host: &str) -> FindingEvidence {
         snippet: step.summary.clone(),
         rationale: step.evidence.join(", "),
         confidence: 100,
+        request_blob: None,
+        response_blob: None,
     }
 }
 

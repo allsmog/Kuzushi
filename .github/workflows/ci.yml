@@ -213,31 +213,32 @@ jobs:
   # Uses KUZUSHI_CMD env to point the smoke script at the native wrapper, so
   # the shipped npm path exercises the Rust binary instead of the legacy TS CLI.
   #
-  # Still non-blocking (`continue-on-error: true`) so the historical flakes
-  # have a chance to settle before we make the gate hard. Two of the three
-  # documented sources of flake have now been removed:
+  # M1 §1.5: this job is now a hard gate (no `continue-on-error`). The three
+  # historical sources of flake are all defended:
   #
-  #   1. `triage:assertions` FK fault — defended in store-worker via the
-  #      widened try/catch landed in 55a7c5e; covered by the
-  #      `swallows triage:assertions FK failures …` regression in
-  #      tests/bus/store-worker.test.ts.
-  #   2. Semgrep registry reachability — `tests/e2e/run-smoke.sh` now
-  #      points the scanner at the vendored ruleset under
+  #   1. `triage:assertions` FK fault — the legacy TS `store-worker` is gone
+  #      and the FK invariant on the `triage(finding_id)` column is covered
+  #      by the Rust regressions
+  #      `save_triage_against_missing_finding_id_returns_clean_fk_error` and
+  #      `save_triage_after_finding_insert_succeeds_with_dedup_safe_id` in
+  #      `crates/kuzushi-core/src/findings/tests.rs`. SQLite enforces the
+  #      constraint, so any future caller that races the inserts surfaces a
+  #      clean Err instead of silently corrupting state.
+  #   2. Semgrep registry reachability — `tests/e2e/run-smoke.sh` points the
+  #      scanner at the vendored ruleset under
   #      `tests/e2e/fixtures/semgrep-rules/` instead of `--config auto`,
   #      so the run does not depend on the public registry being up.
   #   3. ANTHROPIC_API_KEY precondition — the smoke script now exports
   #      `ANTHROPIC_API_KEY=fake-key` before invoking the CLI so credential
   #      preflight passes deterministically (the mock server ignores it).
   #
-  # Once this hardening has produced several consecutive green smoke runs
-  # on main, drop `continue-on-error: true`. Don't drop it on faith — see
-  # the closing remark on field-test issue #54.
+  # If this job goes red, treat it as a real regression — investigate before
+  # re-introducing `continue-on-error: true`.
   e2e:
     name: e2e
     needs: [build, rust-cli]
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4

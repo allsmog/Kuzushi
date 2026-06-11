@@ -1,5 +1,14 @@
 use anyhow::{Context, Result};
 use serde_json::Value;
+use std::path::PathBuf;
+
+/// Extract a required `path` field from a tool input, returning a PathBuf.
+/// Used by the recon and bounty import adapters (M2 §2.2 / §2.3) so each
+/// importer surfaces the same "<tool> needs a `path` field" error shape.
+pub(crate) fn required_path(input: &Value, key: &str, message: &str) -> Result<PathBuf> {
+    let raw = required_string(input, key, message)?;
+    Ok(PathBuf::from(raw))
+}
 
 pub(crate) fn required_string(input: &Value, key: &str, message: &str) -> Result<String> {
     input
