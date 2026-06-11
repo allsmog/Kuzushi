@@ -96,6 +96,12 @@ pub enum ShellView {
     Trace(String),
     Help,
     Quickstart,
+    /// Full-screen scrollable transcript. M1 §1.1 — the embedded
+    /// transcript at the bottom of every view only shows the last few
+    /// lines; long recon output and Quickstart instructions scroll off
+    /// before the operator can read them. `logs` switches into this view
+    /// and `j`/`k`/`g`/`G`/`PgUp`/`PgDn` page through the buffer.
+    Logs,
     Config,
     Tools,
     Options(OptionsView),

@@ -2,6 +2,9 @@ use super::*;
 use crate::ui_view_models::SeverityTone;
 use ratatui::prelude::{Color, Modifier, Style};
 
+mod config;
+pub use config::{active_theme, ThemeConfig};
+
 pub const STATUS_SEPARATOR: &str = " · ";
 pub const RULE_CHAR: &str = "─";
 
@@ -23,18 +26,30 @@ pub const SEV_MEDIUM: Color = T_WARN;
 pub const SEV_LOW: Color = T_ACCENT;
 
 pub fn primary() -> Style {
+    if active_theme().high_contrast {
+        return Style::default().fg(T_HEADING).add_modifier(Modifier::BOLD);
+    }
     Style::default().fg(T_PRIMARY)
 }
 
 pub fn muted() -> Style {
+    if active_theme().high_contrast {
+        return Style::default().fg(T_PRIMARY);
+    }
     Style::default().fg(T_MUTED)
 }
 
 pub fn subtle() -> Style {
+    if active_theme().high_contrast {
+        return Style::default().fg(T_MUTED);
+    }
     Style::default().fg(T_SUBTLE)
 }
 
 pub fn label() -> Style {
+    if active_theme().high_contrast {
+        return Style::default().fg(T_HEADING).add_modifier(Modifier::BOLD);
+    }
     Style::default().fg(T_LABEL).add_modifier(Modifier::BOLD)
 }
 
@@ -43,19 +58,34 @@ pub fn heading() -> Style {
 }
 
 pub fn accent() -> Style {
+    if active_theme().high_contrast {
+        return Style::default().fg(T_HEADING).add_modifier(Modifier::BOLD);
+    }
     Style::default().fg(T_ACCENT)
 }
 
 pub fn success() -> Style {
-    Style::default().fg(T_SUCCESS)
+    Style::default().fg(T_SUCCESS).add_modifier(if active_theme().high_contrast {
+        Modifier::BOLD
+    } else {
+        Modifier::empty()
+    })
 }
 
 pub fn warn() -> Style {
-    Style::default().fg(T_WARN)
+    Style::default().fg(T_WARN).add_modifier(if active_theme().high_contrast {
+        Modifier::BOLD
+    } else {
+        Modifier::empty()
+    })
 }
 
 pub fn danger() -> Style {
-    Style::default().fg(T_DANGER)
+    Style::default().fg(T_DANGER).add_modifier(if active_theme().high_contrast {
+        Modifier::BOLD
+    } else {
+        Modifier::empty()
+    })
 }
 
 pub fn selection() -> Style {

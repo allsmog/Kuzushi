@@ -1,0 +1,73 @@
+rules:
+  - id: android-hostname-verifier-allow-all
+    message: |
+      HostnameVerifier.verify() returns true unconditionally (CWE-295,
+      CWE-297). MITM attacker presenting any valid cert is accepted as
+      the target host. Common pattern when integrating against
+      self-signed staging environments and forgotten in production.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-295
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: |
+              new HostnameVerifier() {
+                ...
+                public boolean verify($H, $S) {
+                  return true;
+                }
+                ...
+              }
+          - pattern: |
+              public boolean verify($H, $S) {
+                return true;
+              }
+
+  - id: android-x509-trust-manager-empty
+    message: |
+      X509TrustManager that accepts every certificate (CWE-295). Both
+      checkClientTrusted and checkServerTrusted are no-ops, so any cert
+      from any CA is trusted — MITM-trivial. Frequently appears in
+      "debug HTTPS" code paths that leak to release.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-295
+      category: security
+    patterns:
+      - pattern: |
+          new X509TrustManager() {
+            ...
+            public void checkServerTrusted($CHAIN, $AUTH) {
+            }
+            ...
+          }
+
+  - id: android-trust-all-ssl-context
+    message: |
+      SSLContext.init() with a TrustManager array that contains a
+      TrustManager returning empty getAcceptedIssuers() (CWE-295).
+    severity: WARNING
+    languages: [java]
+    metadata:
+      cwe: CWE-295
+      category: security
+    pattern: |
+      $CTX.init(null, new TrustManager[]{...}, null);
+
+  - id: android-okhttp-no-pinning-with-cleartext
+    message: |
+      OkHttpClient configured with a custom HostnameVerifier that
+      returns true bypasses both cert pinning and hostname validation
+      (CWE-295). Look for sslSocketFactory() + hostnameVerifier()
+      followed by a Builder.build().
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-295
+      category: security
+    patterns:
+      - pattern: |
+          $B.hostnameVerifier((hostname, session) -> true)

@@ -87,4 +87,12 @@ jobs:
 
       - name: Propagate Kuzushi exit code
         if: always()
-        run: exit "${{ steps.kuzushi.outputs.status || 1 }}"
+        # shellcheck SC2242 fires because the static analyser cannot
+        # verify the GitHub expression collapses to a 0–255 integer.
+        # Guard with a numeric check; default to 1 on anything else.
+        run: |
+          status="${{ steps.kuzushi.outputs.status || 1 }}"
+          case "$status" in
+            ''|*[!0-9]*) status=1 ;;
+          esac
+          exit "$status"

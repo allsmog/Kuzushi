@@ -6,7 +6,7 @@ mod subdomain;
 mod tool;
 
 pub(crate) use http_fingerprint::{HttpFingerprintInput, ReconHttpFingerprinter};
-pub(crate) use input::{optional_string, optional_u64, required_string};
+pub(crate) use input::{optional_string, optional_u64, required_path, required_string};
 pub(crate) use nmap::{NmapInput, ReconNmapScanner};
 pub(crate) use process::run_subprocess;
 pub(crate) use subdomain::{ReconSubdomainEnumerator, SubdomainInput};

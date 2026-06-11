@@ -1,0 +1,54 @@
+rules:
+  - id: android-cipher-ecb-mode
+    message: |
+      Cipher.getInstance("AES/ECB/...") leaks repeated-block structure
+      (CWE-327). For session tokens or credentials this is catastrophic.
+      Use AES/GCM/NoPadding or AES/CBC with HMAC.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-327
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: Cipher.getInstance("AES/ECB/$P")
+          - pattern: Cipher.getInstance("DES/ECB/$P")
+          - pattern: Cipher.getInstance("DESede/ECB/$P")
+
+  - id: android-md5-for-auth
+    message: |
+      MessageDigest.getInstance("MD5") used for authentication / integrity
+      (CWE-327). Switch to SHA-256 (or PBKDF2/Argon2 for passwords).
+    severity: WARNING
+    languages: [java]
+    metadata:
+      cwe: CWE-327
+      category: security
+    pattern: MessageDigest.getInstance("MD5")
+
+  - id: android-sha1-for-auth
+    message: |
+      MessageDigest.getInstance("SHA-1") used for cryptographic purposes
+      (CWE-327). SHA-1 is broken for collision resistance; do not use it
+      for signatures or password hashing.
+    severity: WARNING
+    languages: [java]
+    metadata:
+      cwe: CWE-327
+      category: security
+    pattern: MessageDigest.getInstance("SHA-1")
+
+  - id: android-static-iv-aes
+    message: |
+      AES IvParameterSpec built from a constant or hardcoded byte array
+      (CWE-329). Static IVs defeat CBC/GCM security; generate a random
+      IV per encryption.
+    severity: ERROR
+    languages: [java]
+    metadata:
+      cwe: CWE-329
+      category: security
+    patterns:
+      - pattern-either:
+          - pattern: new IvParameterSpec("$STR".getBytes())
+          - pattern: new IvParameterSpec(new byte[]{...})

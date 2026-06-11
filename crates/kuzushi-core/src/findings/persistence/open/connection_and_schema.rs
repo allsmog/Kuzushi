@@ -27,6 +27,7 @@ impl FindingStore {
         migrate_findings_columns(&self.conn)?;
         create_findings_indexes(&self.conn)?;
         migrate_triage_columns(&self.conn)?;
+        migrate_finding_evidence_columns(&self.conn)?;
         Ok(())
     }
 }
@@ -59,6 +60,24 @@ fn migrate_triage_columns(conn: &Connection) -> Result<()> {
         "triage",
         "cost_usd",
         "alter table triage add column cost_usd real not null default 0.0",
+    )
+}
+
+// M2 §2.3: HTTP-evidence kind. Imported Burp/HAR captures store the full
+// request/response as nullable text blobs on finding_evidence rows. Additive
+// migration — existing rows keep request_blob and response_blob NULL.
+fn migrate_finding_evidence_columns(conn: &Connection) -> Result<()> {
+    ensure_column(
+        conn,
+        "finding_evidence",
+        "request_blob",
+        "alter table finding_evidence add column request_blob text",
+    )?;
+    ensure_column(
+        conn,
+        "finding_evidence",
+        "response_blob",
+        "alter table finding_evidence add column response_blob text",
     )
 }
 
@@ -153,6 +172,8 @@ create table if not exists finding_evidence (
   snippet text not null,
   rationale text not null,
   confidence integer not null,
+  request_blob text,
+  response_blob text,
   primary key (finding_id, ordinal)
 );
 create index if not exists idx_finding_evidence_finding

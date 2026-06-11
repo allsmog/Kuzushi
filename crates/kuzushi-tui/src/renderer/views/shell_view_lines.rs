@@ -87,6 +87,9 @@ pub(crate) fn system_view_lines(
         SystemViewRoute::Quickstart { scroll } => {
             viewport_lines(quickstart_lines(app, area), area.height, scroll)
         }
+        SystemViewRoute::Logs { scroll } => {
+            viewport_lines(logs_lines(app, area), area.height, scroll)
+        }
         SystemViewRoute::Config => config_lines(app, area),
         SystemViewRoute::Tools { scroll } => {
             viewport_lines(tools_lines(app, area), area.height, scroll)

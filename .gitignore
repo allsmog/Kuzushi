@@ -60,7 +60,8 @@ pre-*.png
 
 # Joern auto-creates a `workspace/` dir in CWD when its REPL starts —
 # can land anywhere kuzushi spawns joern from. Match it everywhere
-# rather than just the repo root.
+# rather than just the repo root, but keep the source-tree
+# `crates/*/src/workspace/` modules tracked.
 workspace/
-!crates/kuzushi-core/src/workspace/
-!crates/kuzushi-core/src/workspace/**
+!crates/*/src/workspace/
+!crates/*/src/workspace/**

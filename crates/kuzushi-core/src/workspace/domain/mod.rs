@@ -3,8 +3,12 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod program_scope;
 mod workspace_target;
 
+pub use program_scope::{
+    HostPattern, ProgramScope, ProgramScopeFile, ProgramScopeList, ScopeVerdict,
+};
 pub use workspace_target::{
     legacy_codeql_db_path, workspace_artifact_kb_db_path, workspace_attachments_path,
     workspace_codeql_db_path, workspace_config_path, workspace_findings_db_path,

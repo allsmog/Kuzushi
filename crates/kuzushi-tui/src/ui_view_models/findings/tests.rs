@@ -130,6 +130,7 @@ fn selected_finding_detail_model_bounds_evidence_and_message() {
         snippet: "file.save(filepath)".to_string(),
         rationale: "Raw upload path reaches a filesystem write".to_string(),
         confidence: 92,
+        ..Default::default()
     }]);
     app.findings = vec![finding.clone()];
     app.selected_finding = Some(finding);

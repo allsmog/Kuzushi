@@ -2,6 +2,7 @@ use self::support::resolve_tool_target;
 use crate::findings::FindingStore;
 use crate::runtime::AgentRuntime;
 use anyhow::{Context, Result};
+pub(in crate::modules) use bounty_module::*;
 pub(in crate::modules) use carlini_threat_hunt_module::*;
 pub(in crate::modules) use codeql_db_module::*;
 pub(in crate::modules) use cpg_module::*;
@@ -71,6 +72,7 @@ mod vendor_assessment;
 mod verify;
 mod workspace_tools;
 
+mod bounty_module;
 mod carlini_threat_hunt_module;
 mod codeql_db_module;
 mod cpg_module;

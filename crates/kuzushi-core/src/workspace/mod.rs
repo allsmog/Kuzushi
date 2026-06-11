@@ -11,7 +11,9 @@ pub mod source_span;
 #[cfg(test)]
 mod tests;
 
-pub use application::{export_workspace_findings, workspace_status_for_target, WorkspaceStatus};
+pub use application::{
+    export_workspace_findings, load_program_scope, workspace_status_for_target, WorkspaceStatus,
+};
 pub use artifact_kb::*;
 pub use artifacts::{artifact_state, ArtifactState};
 pub use attack_surface::*;
@@ -21,7 +23,8 @@ pub use domain::{
     workspace_codeql_db_path, workspace_config_path, workspace_findings_db_path,
     workspace_history_path, workspace_models_path, workspace_options_path, workspace_state_dir,
     workspace_state_root,
-    workspace_static_evidence_db_path, WorkspaceExportFormat, WorkspaceFindingsExport,
+    workspace_static_evidence_db_path, HostPattern, ProgramScope, ProgramScopeFile,
+    ProgramScopeList, ScopeVerdict, WorkspaceExportFormat, WorkspaceFindingsExport,
     WorkspaceTarget, KUZUSHI_STATE_DIR, LEGACY_CODEQL_DB_DIR, LEGACY_CODEQL_STATE_DIR,
     WORKSPACE_ARTIFACT_KB_DB_FILE, WORKSPACE_ATTACHMENTS_FILE, WORKSPACE_CODEQL_DB_DIR,
     WORKSPACE_CONFIG_FILE, WORKSPACE_FINDINGS_DB_FILE, WORKSPACE_MODELS_FILE,

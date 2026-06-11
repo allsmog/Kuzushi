@@ -114,6 +114,8 @@ macro_rules! shell_app_initial_state {
             modules_scroll: 0,
             history_scroll: 0,
             kb_scroll: 0,
+            logs_scroll: 0,
+            program_scope: None,
             last_char_at: None,
             scroll_offset: 0,
             spinner_phase: 0,
@@ -178,6 +180,7 @@ impl ShellApp {
             trusted_workflow_auto_accept
         );
         app.hydrate_persisted_scene_snapshots(target.map(|target| target.root()));
+        app.refresh_program_scope();
         app.announce_startup(
             selected_model_index,
             ready_default,
