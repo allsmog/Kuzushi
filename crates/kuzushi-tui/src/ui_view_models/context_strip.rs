@@ -49,8 +49,6 @@ impl ContextStripModel {
             format!("target:{}", self.target),
             self.context_state_segment(),
             format!("model:{}", self.model),
-            self.findings.clone(),
-            format!("view:{}", self.view),
         ];
         if let Some(activity) = &self.compact_activity {
             segments.push(format!("activity:{activity}"));
@@ -64,7 +62,7 @@ impl ContextStripModel {
         segments
     }
 
-    fn context_state_segment(&self) -> String {
+    pub(super) fn context_state_segment(&self) -> String {
         // The context snapshot is an optional repo index. Word the empty state
         // as an action ("not built") rather than an alarm ("missing") — scans
         // run fine without it; `context build` creates it.

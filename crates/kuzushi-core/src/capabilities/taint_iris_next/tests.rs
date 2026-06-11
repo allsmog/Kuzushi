@@ -134,7 +134,6 @@ mod tests {
                     }],
                     "notes": []
                 })),
-                ..Default::default()
             })
         }
 
@@ -716,7 +715,7 @@ mod tests {
         let options =
             TaintIrisNextInput::from_tool_input(&json!({"mode": "plan", "maxCatalogEntries": 5}))
                 .unwrap();
-        let mut plan = build_taint_iris_next_plan(&temp.path().to_path_buf(), options).unwrap();
+        let mut plan = build_taint_iris_next_plan(temp.path(), options).unwrap();
 
         // `auto` resolves to either "rg" or "inproc" depending on PATH; force
         // both modes here so we always exercise both backends regardless of

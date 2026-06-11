@@ -9,7 +9,8 @@
 use super::*;
 use crate::runtime::{resolve_explicit_model, AgentQueryRequest, AgentRuntime};
 
-const RECOMMENDER_SYSTEM_PROMPT: &str = "You are a security-tooling planner for the Kuzushi agent. \
+const RECOMMENDER_SYSTEM_PROMPT: &str =
+    "You are a security-tooling planner for the Kuzushi agent. \
 Given a target's signals and the list of AVAILABLE tools, choose the tools most worth running and \
 rank them. Only choose tools from the AVAILABLE list. Reply with ONLY a JSON array of objects: \
 [{\"tool\":\"<module:action>\",\"priority\":\"high|medium|low\",\"reason\":\"<one sentence>\"}]. \
@@ -169,6 +170,7 @@ mod tests {
         RecommenderRequest {
             target: "/tmp/t".to_string(),
             max_recommendations: 5,
+            tools_missing_binaries: Default::default(),
             available_tools: tools.iter().map(|t| t.to_string()).collect(),
             signals: signals_stub(),
         }
@@ -219,9 +221,21 @@ mod tests {
     #[test]
     fn build_drops_hallucinated_tools_and_dedups() {
         let picks = vec![
-            ModelPick { tool: "semgrep:scan".into(), priority: "high".into(), reason: "x".into() },
-            ModelPick { tool: "not-a-real:tool".into(), priority: "".into(), reason: "".into() },
-            ModelPick { tool: "semgrep:scan".into(), priority: "low".into(), reason: "dup".into() },
+            ModelPick {
+                tool: "semgrep:scan".into(),
+                priority: "high".into(),
+                reason: "x".into(),
+            },
+            ModelPick {
+                tool: "not-a-real:tool".into(),
+                priority: "".into(),
+                reason: "".into(),
+            },
+            ModelPick {
+                tool: "semgrep:scan".into(),
+                priority: "low".into(),
+                reason: "dup".into(),
+            },
         ];
         let recs = build_model_recommendations(&picks, &request(&["semgrep:scan", "triage:run"]));
         assert_eq!(recs.len(), 1);

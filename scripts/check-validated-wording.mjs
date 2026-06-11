@@ -74,11 +74,13 @@ function scannableFile(file) {
 }
 
 function isProductionOrPublicPolicySurface(file) {
+  // docs/notes/ holds historical working notes, not current policy surface.
+  if (file.startsWith("docs/notes/")) return false;
   return (
     file.startsWith("src/") ||
     (file.startsWith("crates/") && file.includes("/src/")) ||
     file === "README.md" ||
-    file === "PORT_PLAN.md" ||
+    file === "docs/PORT_PLAN.md" ||
     file.startsWith("docs/") ||
     file.startsWith("scripts/")
   );

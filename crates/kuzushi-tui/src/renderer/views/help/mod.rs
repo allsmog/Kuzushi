@@ -20,35 +20,79 @@ pub(crate) fn help_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
             area.width as usize,
         )));
     }
-    let widths = help_table_widths(area.width);
     for category in &model.categories {
         lines.push(blank());
         lines.push(category_divider(category.label, category.blurb, area.width));
         for row in &category.commands {
-            lines.push(help_command_line(row, &widths));
+            lines.extend(help_command_lines(row, area.width));
         }
     }
     lines
 }
 
-fn help_command_line(row: &HelpCommandRow, widths: &[usize]) -> Line<'static> {
-    let command = fit(
-        &row.cells[HELP_COMMAND_COLUMN],
-        widths.get(HELP_COMMAND_COLUMN).copied().unwrap_or(18),
-    );
-    let aliases = fit(
-        &row.cells[HELP_ALIASES_COLUMN],
-        widths.get(HELP_ALIASES_COLUMN).copied().unwrap_or(18),
-    );
-    if widths.len() == 2 {
-        table_row(&[&command, &aliases], widths)
+/// One command as one or more lines. Wide terminals keep the three-column
+/// grid and wrap an overflowing description onto indented continuation
+/// lines; narrow terminals stack the aliases on their own subtle line so
+/// neither the aliases nor the description is ever cut to an ellipsis.
+fn help_command_lines(row: &HelpCommandRow, width: u16) -> Vec<Line<'static>> {
+    let total = width as usize;
+    if total >= 96 {
+        wide_help_command_lines(row, total)
     } else {
-        let description = fit(
-            &row.cells[HELP_DESCRIPTION_COLUMN],
-            widths.get(HELP_DESCRIPTION_COLUMN).copied().unwrap_or(20),
-        );
-        table_row(&[&command, &aliases, &description], widths)
+        stacked_help_command_lines(row, total)
     }
+}
+
+fn wide_help_command_lines(row: &HelpCommandRow, total: usize) -> Vec<Line<'static>> {
+    const COMMAND_WIDTH: usize = 28;
+    const ALIASES_WIDTH: usize = 32;
+    let description_indent = COMMAND_WIDTH + 2 + ALIASES_WIDTH + 2;
+    let description_width = total.saturating_sub(description_indent).max(20);
+    let chunks = wrap_text(&row.cells[HELP_DESCRIPTION_COLUMN], description_width);
+    let mut lines = vec![table_row(
+        &[
+            &fit(&row.cells[HELP_COMMAND_COLUMN], COMMAND_WIDTH),
+            &fit(&row.cells[HELP_ALIASES_COLUMN], ALIASES_WIDTH),
+            chunks.first().map(String::as_str).unwrap_or(""),
+        ],
+        &[COMMAND_WIDTH, ALIASES_WIDTH, description_width],
+    )];
+    for chunk in chunks.iter().skip(1) {
+        lines.push(muted(&format!(
+            "{:indent$}{chunk}",
+            "",
+            indent = description_indent
+        )));
+    }
+    lines
+}
+
+fn stacked_help_command_lines(row: &HelpCommandRow, total: usize) -> Vec<Line<'static>> {
+    let command = &row.cells[HELP_COMMAND_COLUMN];
+    let column = command.chars().count().max(24);
+    let description_width = total.saturating_sub(column + 2).max(16);
+    let chunks = wrap_text(&row.cells[HELP_DESCRIPTION_COLUMN], description_width);
+    let mut lines = vec![table_row(
+        &[
+            command.as_str(),
+            chunks.first().map(String::as_str).unwrap_or(""),
+        ],
+        &[column, description_width],
+    )];
+    for chunk in chunks.iter().skip(1) {
+        lines.push(muted(&format!(
+            "{:indent$}{chunk}",
+            "",
+            indent = column + 2
+        )));
+    }
+    for alias_chunk in wrap_text(
+        &format!("aliases / examples: {}", row.cells[HELP_ALIASES_COLUMN]),
+        total.saturating_sub(2).max(16),
+    ) {
+        lines.push(Line::styled(format!("  {alias_chunk}"), theme::subtle()));
+    }
+    lines
 }
 
 pub(crate) fn quickstart_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -108,18 +152,4 @@ pub(crate) fn logs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ));
     }
     lines
-}
-
-pub(crate) fn help_table_widths(width: u16) -> Vec<usize> {
-    let total = width as usize;
-    if total < 72 {
-        let command = total.min(if total < 48 { 14 } else { 18 });
-        let aliases = total.saturating_sub(command + 2);
-        return vec![command, aliases];
-    }
-
-    let command = if total < 96 { 22 } else { 28 };
-    let aliases = if total < 96 { 24 } else { 32 };
-    let description = total.saturating_sub(command + aliases + 4);
-    vec![command, aliases, description]
 }

@@ -620,7 +620,9 @@ OUT
             vec!["init"],
             vec!["config", "user.email", "kuzushi@example.test"],
             vec!["config", "user.name", "Kuzushi Test"],
+            // Stay hermetic against a host git config that forces signing.
             vec!["config", "commit.gpgsign", "false"],
+            vec!["config", "tag.gpgsign", "false"],
             vec!["add", "."],
             vec!["commit", "-m", "fixture"],
         ] {
@@ -892,7 +894,7 @@ OUT
             .unwrap();
         assert!(output.status.success());
         let output = Command::new("git")
-            .args(["commit", "-m", "hot path"])
+            .args(["-c", "commit.gpgsign=false", "commit", "-m", "hot path"])
             .current_dir(temp.path())
             .output()
             .unwrap();
@@ -3390,7 +3392,10 @@ OUT
             r#"{"dependencies":{"lodash":"latest","express":"latest"}}"#,
         )
         .unwrap();
-        for args in [vec!["add", "."], vec!["commit", "-m", "pr"]] {
+        for args in [
+            vec!["add", "."],
+            vec!["-c", "commit.gpgsign=false", "commit", "-m", "pr"],
+        ] {
             let output = Command::new("git")
                 .args(args)
                 .current_dir(temp.path())

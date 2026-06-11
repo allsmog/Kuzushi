@@ -1,7 +1,7 @@
 Feature: Planning-stage multi-select
-  Once model + auth are configured and the target has no foundational
-  artifacts, the planning picker should open with the eight tasks and
-  respect dependency-aware toggling.
+  Once model + auth are configured, the phase walker opens at
+  組 KUMI-KATA · map with that phase's tasks and respects
+  dependency-aware toggling.
 
   Background:
     Given a fresh kuzushi workspace

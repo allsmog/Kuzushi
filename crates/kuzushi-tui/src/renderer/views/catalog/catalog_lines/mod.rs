@@ -28,8 +28,10 @@ pub(crate) fn catalog_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 }
 
 fn append_modules_header(lines: &mut Vec<Line<'static>>, module_count: usize) {
+    // View title only — the cockpit strip directly above already carries the
+    // KUZUSHI brand, so repeating it here was pure noise.
     lines.push(Line::from(vec![
-        Span::styled("KUZUSHI · MODULES", theme::heading()),
+        Span::styled("MODULES", theme::heading()),
         Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
         Span::styled(format!("{module_count} modules"), theme::muted()),
     ]));

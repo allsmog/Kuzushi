@@ -1,7 +1,7 @@
 ---
 view: auth
 ---
- KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured · 0 findings · view:auth
+ KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
 
  -- BACKEND ------------------------------------------------------------------------------------------------------------
   ✗  LangGraph       missing    OPENAI_API_KEY=missing
