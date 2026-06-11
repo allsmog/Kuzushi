@@ -133,7 +133,8 @@ pub(crate) fn save_store(workspace: &WorkspaceTarget, store: &AttachmentStoreFil
     workspace.ensure_state_dir()?;
     let path = attachment_store_path(workspace);
     let body = format!("{}\n", serde_json::to_string_pretty(store)?);
-    fs::write(&path, body).with_context(|| format!("Could not write {}", path.display()))
+    crate::fs_atomic::write_atomic(&path, &body)
+        .with_context(|| format!("Could not write {}", path.display()))
 }
 
 pub(crate) fn upsert_record(

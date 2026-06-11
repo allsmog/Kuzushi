@@ -135,7 +135,8 @@ fn readable_run_metadata_exists(path: &Path, label: &str) -> Result<bool> {
 fn write_run_summary_file(path: &Path, summary: &RunSummary) -> Result<PathBuf> {
     reject_non_file_target(path, "Run metadata target")?;
     let body = format!("{}\n", serde_json::to_string_pretty(summary)?);
-    fs::write(path, body).with_context(|| format!("Could not write {}", path.display()))?;
+    crate::fs_atomic::write_atomic(path, &body)
+        .with_context(|| format!("Could not write {}", path.display()))?;
     Ok(path.to_path_buf())
 }
 

@@ -142,7 +142,7 @@ fn bridge_transport_error(error: anyhow::Error, final_attempt: bool) -> Result<B
     )))
 }
 
-fn retry_delay_ms(attempt: usize) -> u64 {
+pub(super) fn retry_delay_ms(attempt: usize) -> u64 {
     match attempt {
         0 | 1 => 250,
         2 => 500,
@@ -150,7 +150,7 @@ fn retry_delay_ms(attempt: usize) -> u64 {
     }
 }
 
-fn is_transient_bridge_error(message: &str) -> bool {
+pub(super) fn is_transient_bridge_error(message: &str) -> bool {
     let lower = message.to_ascii_lowercase();
     [
         "websocket closed 1006",

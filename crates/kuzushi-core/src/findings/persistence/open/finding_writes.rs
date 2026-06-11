@@ -2,6 +2,17 @@ use super::*;
 
 impl FindingStore {
     pub fn insert_finding(&self, scan_id: &str, finding: &Finding) -> Result<i64> {
+        // The collision-check → upsert → evidence-replace sequence must be
+        // atomic: a crash or concurrent writer between statements could leave
+        // a finding without its evidence rows. SQLite transactions are
+        // connection-scoped, so the helper statements below participate.
+        let tx = self.conn.unchecked_transaction()?;
+        let id = self.insert_finding_statements(scan_id, finding)?;
+        tx.commit()?;
+        Ok(id)
+    }
+
+    fn insert_finding_statements(&self, scan_id: &str, finding: &Finding) -> Result<i64> {
         // Cross-channel dedup: when a finding with the same dedup_key but a
         // different fingerprint already exists in this scan, merge instead
         // of inserting a duplicate row. Higher severity wins; tools merge
