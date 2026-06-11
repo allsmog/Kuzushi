@@ -32,6 +32,16 @@ Roadmap surfaces such as binary exploitation, broad pentest automation,
 governance packs, and defensive operations should reinforce that evidence
 workflow before they become primary product surfaces.
 
+## Privacy & Data Flow
+
+Kuzushi is local-first and ships **no telemetry**. Findings, evidence, run
+artifacts, and suppressions live under `.kuzushi/` in your workspace and never
+leave your machine. The only bytes that go anywhere are the prompts sent to
+the model provider **you** configure (and nothing is sent at all until you
+configure one — the deterministic scanners run fully offline). Model and
+runtime selection is explicit: Kuzushi never silently falls back to a
+different provider or model.
+
 ## Install
 
 ```bash

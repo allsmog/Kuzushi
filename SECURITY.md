@@ -22,4 +22,5 @@ This policy covers the Kuzushi codebase and its official npm package. It does no
 
 | Version | Supported |
 | ------- | --------- |
-| 0.1.x   | Yes       |
+| 0.24.x (latest published 0.x) | Yes |
+| older 0.x | No — upgrade to the latest release |

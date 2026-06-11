@@ -64,7 +64,7 @@ Notable changes to Kuzushi. Release procedure lives in
   `KUZUSHI_SCREEN_READER=1`, or `KUZUSHI_LOW_BANDWIDTH=1` force strict
   line-oriented shell output with no ANSI escapes, animation, or box drawing.
 
-## v1.0.0 — Clean Code major refactor
+## v0.21.0-dev — Clean Code major refactor (never published as v1.0.0; folded into v0.24.0-alpha.0)
 
 **Breaking:**
 
