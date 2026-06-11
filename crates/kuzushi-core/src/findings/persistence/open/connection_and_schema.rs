@@ -29,8 +29,50 @@ impl FindingStore {
         create_findings_indexes(&self.conn)?;
         migrate_triage_columns(&self.conn)?;
         migrate_finding_evidence_columns(&self.conn)?;
+        migrate_legacy_fingerprints(&self.conn)?;
         Ok(())
     }
+}
+
+/// One-time rewrite of legacy fingerprints. The old identity hashed the
+/// message with `DefaultHasher` (16 hex chars): unstable across Rust releases
+/// and duplicated by LLM phrasing drift. Recompute every legacy row with the
+/// stable v2 identity (32 hex chars). Rows that collapse onto an existing v2
+/// fingerprint are duplicates by definition — the canonical row survives and
+/// the duplicate is removed (evidence/triage/verifications cascade via FK).
+fn migrate_legacy_fingerprints(conn: &Connection) -> Result<()> {
+    let legacy: Vec<(i64, String, String, String, u32)> = conn
+        .prepare(
+            "select id, fingerprint, rule_id, file_path, start_line
+               from findings where length(fingerprint) = 16",
+        )?
+        .query_map([], |row| {
+            Ok((
+                row.get(0)?,
+                row.get(1)?,
+                row.get(2)?,
+                row.get(3)?,
+                row.get(4)?,
+            ))
+        })?
+        .collect::<std::result::Result<_, _>>()?;
+    for (id, old_fingerprint, rule_id, file_path, start_line) in legacy {
+        let new_fingerprint = fingerprint_parts(&rule_id, &file_path, start_line);
+        let updated = conn.execute(
+            "update or ignore findings set fingerprint = ?1 where id = ?2",
+            params![new_fingerprint, id],
+        )?;
+        if updated == 0 {
+            // unique(scan_id, fingerprint) collision: this row duplicates an
+            // already-migrated finding under the v2 identity.
+            conn.execute("delete from findings where id = ?1", params![id])?;
+        }
+        conn.execute(
+            "update patch_results set fingerprint = ?1 where fingerprint = ?2",
+            params![new_fingerprint, old_fingerprint],
+        )?;
+    }
+    Ok(())
 }
 
 /// Concurrency posture for the findings DB. Scan workers, the shell, and MCP

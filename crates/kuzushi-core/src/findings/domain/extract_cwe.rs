@@ -39,7 +39,7 @@ impl Finding {
         let rule_id = rule_id.into();
         let file_path = file_path.into();
         let message = message.into();
-        let fingerprint = fingerprint_parts(&rule_id, &file_path, start_line, &message);
+        let fingerprint = fingerprint_parts(&rule_id, &file_path, start_line);
         let title = finding_title(&message, &rule_id);
         let cwe = extract_cwe(&rule_id, &title, &message);
         let dedup_key = finding_dedup_key(&file_path, start_line, cwe.as_deref());
