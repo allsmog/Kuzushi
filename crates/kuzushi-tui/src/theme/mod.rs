@@ -23,7 +23,9 @@ pub const TERM_BG: Color = Color::Rgb(0x0b, 0x0d, 0x10);
 pub const SEV_CRITICAL: Color = T_DANGER;
 pub const SEV_HIGH: Color = Color::Rgb(0xff, 0x8b, 0x8b);
 pub const SEV_MEDIUM: Color = T_WARN;
-pub const SEV_LOW: Color = T_ACCENT;
+// A calm slate distinct from T_ACCENT — low-severity text used to share the
+// accent blue, so a selected low row (fg accent on bg accent) was unreadable.
+pub const SEV_LOW: Color = Color::Rgb(0x8a, 0xa6, 0xc4);
 
 pub fn primary() -> Style {
     if active_theme().high_contrast {

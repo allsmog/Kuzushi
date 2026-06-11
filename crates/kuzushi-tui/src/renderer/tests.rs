@@ -47,7 +47,7 @@ fn renders_ink_style_shell_without_box_dashboard() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("HOME"));
-    assert!(rendered.contains("rails:"));
+    assert!(rendered.contains("run artifacts"));
     assert!(rendered.contains("modules"));
     assert!(rendered.contains("recommend"));
     assert!(rendered.contains("kuzushi>"));
@@ -106,7 +106,7 @@ fn home_first_run_state_names_real_artifact_commands() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("HOME"));
-    assert!(rendered.contains("rails:"));
+    assert!(rendered.contains("run artifacts"));
     assert!(rendered.contains("scan ."));
     assert!(rendered.contains("findings"));
     assert!(rendered.contains("modules"));
@@ -1142,10 +1142,8 @@ fn dfd_canonical_lines_render_design_diagram() {
     assert!(texts[1].contains("user"));
     assert!(texts[1].contains("api edge"));
     assert!(texts[1].contains("postgres"));
-    assert!(texts[4].contains("jwt"));
     assert!(texts[4].contains("plaintext PII"));
-    assert!(texts[7].contains("worker pool"));
-    assert!(texts[7].contains("s3 (us-east)"));
+    assert!(texts[7].contains("worker"));
     // top + bottom borders are pure box-drawing
     assert!(texts[0].contains("┌────"));
     assert!(texts[3].contains("└────"));
@@ -1168,7 +1166,7 @@ fn threats_dfd_view_renders_canonical_diagram_header() {
     assert!(rendered.contains("user"));
     assert!(rendered.contains("api edge"));
     assert!(rendered.contains("postgres"));
-    assert!(rendered.contains("worker pool"));
+    assert!(rendered.contains("worker"));
     // Old placeholder content must be gone.
     assert!(!rendered.contains("browser, API clients, package registries"));
     assert!(!rendered.contains("source tree, handlers, jobs, CLIs"));

@@ -21,9 +21,9 @@ fn context_strip_model_reports_idle_shell_state() {
         model.compact_segments(),
         [
             "mode:shell",
+            "model:unconfigured",
             "target:none",
-            "ctx:not built",
-            "model:unconfigured"
+            "ctx:not built"
         ]
     );
 }

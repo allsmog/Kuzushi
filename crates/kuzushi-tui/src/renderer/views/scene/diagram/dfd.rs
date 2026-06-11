@@ -39,6 +39,7 @@ impl Anchor {
 impl Widget for DfdDiagram {
     fn render(self, area: Rect, buf: &mut Buffer) {
         if area.width < 24 {
+            text(buf, area, 1, 0, "widen terminal (≥24 cols) for the diagram", theme::T_MUTED);
             return;
         }
         if let Some(hint) = &self.model.empty_hint {

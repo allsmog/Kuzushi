@@ -5,6 +5,14 @@ pub(super) fn append_dfd_lines(app: &ShellApp, area: Rect, lines: &mut Vec<Line<
     // Lead with the target's actual data-flow diagram drawn from threat-model.json.
     if append_real_dfd(app, area, lines) {
         lines.push(blank());
+    } else {
+        // No artifact yet: say so plainly, otherwise the realistic-looking
+        // notation legend below reads as a real topology and contradicts the
+        // Summary tab's "no threat model artifact".
+        lines.push(muted(
+            "no threat model built yet — run `threat-model:build` to map this target.",
+        ));
+        lines.push(blank());
     }
     // The boxes below are an illustrative legend of DFD notation, not the
     // target's topology — labelled clearly so it is never mistaken for it.

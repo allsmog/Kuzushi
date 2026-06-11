@@ -60,7 +60,7 @@ fn findings_model_describes_context_prereq_when_empty() {
     assert!(model.rows.is_empty());
     assert_eq!(
         model.empty.context_cta,
-        Some(("context build", "build the snapshot first if you have time"))
+        Some(("context build", "optional: index the repo first for richer analysis."))
     );
 }
 

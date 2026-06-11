@@ -32,15 +32,15 @@ fn append_post_success_next(
         return;
     }
     let next_hint = if findings.rows.is_empty() {
-        "▸ NEXT  no findings recorded — try `recommend`, `tasks`, or `use <other-module>`"
+        "▸ NEXT no findings recorded — try `recommend`, `tasks`, or `use <other-module>`"
             .to_string()
     } else if let Some(top) = findings.rows.first() {
         format!(
-            "▸ NEXT  `open {}` (highest severity) · `findings` · `workspace export findings <path>.json`",
+            "▸ NEXT `open {}` (highest severity) · `findings` · `workspace export findings <path>.json`",
             top.alias
         )
     } else {
-        "▸ NEXT  `findings` to review, `workspace export findings` to share".to_string()
+        "▸ NEXT `findings` to review, `workspace export findings` to share".to_string()
     };
     lines.push(blank());
     lines.push(Line::styled(next_hint, theme::warn()));

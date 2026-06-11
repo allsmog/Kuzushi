@@ -174,7 +174,7 @@ fn home_cockpit_model_surfaces_invalid_latest_pointer() {
     assert!(model
         .summary_rows
         .iter()
-        .any(|row| { row.cells[0] == "run status" && row.cells[1] == "no run.json" }));
+        .any(|row| { row.cells[0] == "run status" && row.cells[1] == "no runs yet" }));
 }
 
 #[test]

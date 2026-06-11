@@ -199,7 +199,7 @@ fn run_status_label(run_dir: &Path) -> String {
         Ok(metadata) if metadata.is_file() => {}
         Ok(_) => return format!("{} is not a file", run_metadata_artifact_leaf()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return format!("no {}", run_metadata_artifact_leaf());
+            return "no runs yet".to_string();
         }
         Err(_) => return malformed_run_metadata_label(),
     }
