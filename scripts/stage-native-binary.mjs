@@ -4,9 +4,13 @@ import { join } from "node:path";
 import process from "node:process";
 
 const root = process.cwd();
-const exes = process.platform === "win32" ? ["kuzushi.exe", "kz.exe"] : ["kuzushi", "kz"];
+// One binary per platform: the wrapper resolves `kz` to the `kuzushi` binary
+// and sets argv0, so shipping a duplicate ~25MB kz would be pure tarball waste.
+const exes = process.platform === "win32" ? ["kuzushi.exe"] : ["kuzushi"];
 const retiredExes =
-  process.platform === "win32" ? ["codex.exe", "kuzushi-ts.exe"] : ["codex", "kuzushi-ts"];
+  process.platform === "win32"
+    ? ["codex.exe", "kuzushi-ts.exe", "kz.exe"]
+    : ["codex", "kuzushi-ts", "kz"];
 const outDir = join(root, "native", `${process.platform}-${process.arch}`);
 
 for (const exe of exes) {

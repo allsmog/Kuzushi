@@ -694,7 +694,9 @@ fn npm_wrapper_kz_alias_reaches_the_compact_rust_binary() {
 }
 
 #[test]
-fn npm_wrapper_kz_alias_rejects_mismatched_native_override() {
+fn npm_wrapper_kz_alias_accepts_the_single_kuzushi_binary_override() {
+    // The npm package ships one binary per platform: `kz` resolves to the
+    // `kuzushi` binary and argv0 names the usage line.
     let tmp = tempfile::tempdir().unwrap();
     let alias_path = tmp.path().join("kz");
     fs::copy(repo_root().join("bin/kuzushi-rs.mjs"), &alias_path).unwrap();
@@ -705,14 +707,33 @@ fn npm_wrapper_kz_alias_rejects_mismatched_native_override() {
         .arg("--help")
         .output()
         .unwrap();
+    let out = stdout(output);
+
+    assert!(out.contains("Kuzushi security-native code agent"));
+    assert!(out.contains("Usage: kz"), "argv0 must name the alias: {out}");
+    assert!(!out.contains("Usage: kuzushi"));
+}
+
+#[test]
+fn npm_wrapper_rejects_unrelated_native_override_name() {
+    let tmp = tempfile::tempdir().unwrap();
+    let unrelated = tmp.path().join("not-kuzushi");
+    fs::copy(repo_root().join("bin/kuzushi-rs.mjs"), &unrelated).unwrap();
+
+    let output = Command::new("node")
+        .current_dir(repo_root())
+        .env("KUZUSHI_NATIVE_BIN", &unrelated)
+        .args(["bin/kuzushi-rs.mjs", "--help"])
+        .output()
+        .unwrap();
 
     assert!(
         !output.status.success(),
-        "mismatched native override should fail"
+        "unrelated-named override should fail"
     );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("KUZUSHI_NATIVE_BIN must point to a kz binary when invoked as kz"),
+        stderr.contains("KUZUSHI_NATIVE_BIN must point to a kuzushi or kz binary"),
         "{stderr}"
     );
 }

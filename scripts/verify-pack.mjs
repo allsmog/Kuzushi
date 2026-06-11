@@ -661,7 +661,8 @@ function binWrapperContentFailures() {
     "isNativeBinaryFile",
     "candidates.find(isNativeBinaryFile)",
     "KUZUSHI_NATIVE_BIN must point to a file",
-    "KUZUSHI_NATIVE_BIN must point to a ${exe} binary when invoked as ${cliName}",
+    "KUZUSHI_NATIVE_BIN must point to a kuzushi or kz binary",
+    "argv0: cliName",
     "Could not find the Kuzushi native binary.",
     "process.exit(127)",
     "result.error",
@@ -705,8 +706,10 @@ function nativePlatformDirs(files) {
 }
 
 function missingNativeBinaries(files, dir) {
+  // One shipped binary per platform: the bin wrapper resolves `kz` to the
+  // `kuzushi` binary via argv0 dispatch.
   const windows = dir.startsWith("native/win32-");
-  const names = windows ? ["kuzushi.exe", "kz.exe"] : ["kuzushi", "kz"];
+  const names = windows ? ["kuzushi.exe"] : ["kuzushi"];
   return names
     .map((name) => `${dir}/${name}`)
     .filter((file) => !files.includes(file))
@@ -723,7 +726,7 @@ function extraNativePayloadFailures(files, dir) {
 
 function expectedNativeBinaries(dir) {
   const windows = dir.startsWith("native/win32-");
-  const names = windows ? ["kuzushi.exe", "kz.exe"] : ["kuzushi", "kz"];
+  const names = windows ? ["kuzushi.exe"] : ["kuzushi"];
   return names.map((name) => `${dir}/${name}`);
 }
 
@@ -742,10 +745,9 @@ function stageNativeScriptContentFailures() {
   const content = readPackageContractText("scripts/stage-native-binary.mjs");
   const source = content.source;
   const required = [
-    '["kuzushi.exe", "kz.exe"]',
-    '["kuzushi", "kz"]',
-    '["codex.exe", "kuzushi-ts.exe"]',
-    '["codex", "kuzushi-ts"]',
+    '["kuzushi.exe"] : ["kuzushi"]',
+    '["codex.exe", "kuzushi-ts.exe", "kz.exe"]',
+    '["codex", "kuzushi-ts", "kz"]',
     'join(root, "target", "release", exe)',
     'join(root, "native", `${process.platform}-${process.arch}`)',
     "cargo build -p kuzushi-cli --release",

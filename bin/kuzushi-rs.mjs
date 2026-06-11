@@ -22,17 +22,22 @@ if (nativeOverride) {
     process.stderr.write(`KUZUSHI_NATIVE_BIN must point to a file: ${nativeOverride}\n`);
     process.exit(127);
   }
-  if (overrideName !== cliName) {
+  if (overrideName !== "kuzushi" && overrideName !== "kz") {
     process.stderr.write(
-      `KUZUSHI_NATIVE_BIN must point to a ${exe} binary when invoked as ${cliName}; got ${nativeOverride}.\n`,
+      `KUZUSHI_NATIVE_BIN must point to a kuzushi or kz binary; got ${nativeOverride}.\n`,
     );
     process.exit(127);
   }
 }
 
+// The npm package ships one binary per platform (`kuzushi`); `kz` resolves to
+// it and the displayed usage name comes from argv0 (clap derives it from the
+// invocation). Cargo build outputs still provide a real `kz` for checkouts.
+const fallbackExe = process.platform === "win32" ? "kuzushi.exe" : "kuzushi";
 const candidates = [
   nativeOverride,
   join(root, "native", `${process.platform}-${process.arch}`, exe),
+  join(root, "native", `${process.platform}-${process.arch}`, fallbackExe),
   join(root, "target", "release", exe),
   join(root, "target", "debug", exe),
 ].filter(Boolean);
@@ -47,6 +52,7 @@ if (!binary) {
 
 const result = spawnSync(binary, process.argv.slice(2), {
   stdio: "inherit",
+  argv0: cliName,
   env: { ...process.env, KUZUSHI_CLI_NAME: cliName },
 });
 
