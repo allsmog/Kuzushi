@@ -37,7 +37,7 @@ quick-xml = "0.41"
 # dependency via tree-sitter; declare it explicitly so the discovery
 # crate isn't relying on an indirect feature.
 regex = "1"
-roxmltree = "0.20"
+roxmltree = "0.21"
 # goblin parses the ELF .so files shipped inside an APK's lib/<abi>/
 # directories so android-apk:native-libs can enumerate dynamic imports
 # (system/exec/dlopen), exports (JNI Java_* methods), and the
