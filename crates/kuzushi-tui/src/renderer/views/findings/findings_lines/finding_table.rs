@@ -18,13 +18,38 @@ pub(super) fn append_finding_table(
         return;
     }
     let row_height = if area.width >= 100 { 2 } else { 3 };
-    let visible_rows = (body_height / row_height).max(1);
+    // Reserve one row for the "N above/below" hint whenever the list is windowed
+    // so the operator knows the off-screen findings exist and are reachable.
+    let windowed = model.total > (body_height / row_height).max(1);
+    let rows_budget = if windowed {
+        body_height.saturating_sub(1)
+    } else {
+        body_height
+    };
+    let visible_rows = (rows_budget / row_height).max(1);
     let start_row = viewport_start_for_cursor(model.total, visible_rows, model.cursor);
     lines.extend(
         body.into_iter()
             .skip(start_row * row_height)
-            .take(body_height),
+            .take(visible_rows * row_height),
     );
+    if windowed {
+        let above = start_row;
+        let below = model.total.saturating_sub(start_row + visible_rows);
+        lines.push(more_findings_hint(above, below));
+    }
+}
+
+fn more_findings_hint(above: usize, below: usize) -> Line<'static> {
+    let mut parts = Vec::new();
+    if above > 0 {
+        parts.push(format!("▴ {above} above"));
+    }
+    if below > 0 {
+        parts.push(format!("▾ {below} below"));
+    }
+    parts.push("j/k to move".to_string());
+    indent(muted(&parts.join(" · ")), 2)
 }
 
 fn append_finding_row(area: Rect, row: &FindingListRow, body: &mut Vec<Line<'static>>) {

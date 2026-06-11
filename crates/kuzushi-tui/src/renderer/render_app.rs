@@ -27,7 +27,7 @@ pub fn render_app(frame: &mut Frame<'_>, app: &ShellApp) {
         return;
     }
 
-    let sections = render_sections(app, area);
+    let sections = fit_sections_to_height(render_sections(app, area), area.height);
     let fixed_height = fixed_chrome_height(&sections);
     let max_view_height = area.height.saturating_sub(fixed_height).max(1);
     let view_area = Rect {

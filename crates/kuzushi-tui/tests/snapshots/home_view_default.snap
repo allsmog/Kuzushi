@@ -7,21 +7,12 @@ assertion_line: 89
  -- HOME ---------------------------------------------------------------------------------------------------------------
 target             none
 latest run         none
-run status         no run.json
+run status         no runs yet
 modules            41
 findings           0
 
 ▸ NEXT Run `scan .` to scan the current directory and create the first run artifacts.
 
-rails: ✓ recorded · ○ placeholder · ◆ partial · ⚠ failed/malformed · ■ missing
-■    ctx           missing       .kuzushi/runs/latest/context.json
-■    surface       missing       .kuzushi/runs/latest/attack-surface.json
-■    threat        missing       .kuzushi/runs/latest/threat-model.json
-■    recommend     missing       .kuzushi/runs/latest/recommendations.json
-■    findings      missing       .kuzushi/runs/latest/findings.json
-■    proof         missing       .kuzushi/runs/latest/proof.json
-■    failures      missing       .kuzushi/runs/latest/failures.json
-■    report        missing       .kuzushi/runs/latest/report.md
-■    manifest      missing       .kuzushi/runs/latest/artifacts.json
+run artifacts   0/9 produced — run `scan .` to populate the proof rails
 
 ▸ try: modules · recommend · quickstart · scan . · findings · runs

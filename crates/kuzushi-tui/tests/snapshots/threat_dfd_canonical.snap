@@ -6,14 +6,16 @@ assertion_line: 45
 
 1 DFD  2 STRIDE  3 STORIES  4 SCOPE  5 SUMMARY
 
+no threat model built yet — run `threat-model:build` to map this target.
+
  -- DFD NOTATION · ILLUSTRATIVE EXAMPLE --------------------------------------------------------------------------------
-     +------------+         +-------------+         +--------------+
-     |   user    |  https  |  api edge  |   sql   |   postgres   |
-     |   browser | ------► |   nginx    | ------► |   primary db |
-     +------------+         +------+------+         +------+-------+
-                                       | jwt                    | plaintext PII
-                                       ▼                       ▼
-                              +--------------+         +--------------+
-                              |  worker pool  |  amqp   |  s3 (us-east) |
-                              |  rabbitmq cli | ------► |  invoices/    |
-                              +--------------+         +--------------+
+   +----------+         +----------+         +----------+
+   |   user   |  -http-►| api edge |   -sql-►| postgres |
+   |(browser) |         | (nginx)  |         |(primary) |
+   +----------+         +----+-----+         +----------+
+                             | plaintext PII
+                             ▼
+                        +----------+
+                        |  worker  |
+                        |(rabbitmq)|
+                        +----------+

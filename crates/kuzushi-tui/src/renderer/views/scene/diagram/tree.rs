@@ -24,6 +24,7 @@ impl Widget for TreeDiagram {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let w = area.width;
         if w < 24 {
+            text(buf, area, 1, 0, "widen terminal (≥24 cols) for the diagram", theme::T_MUTED);
             return;
         }
         if let Some(hint) = &self.model.empty_hint {

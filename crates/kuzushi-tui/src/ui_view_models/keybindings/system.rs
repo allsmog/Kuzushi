@@ -7,8 +7,52 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         ShellView::Story => Some(story_keybindings(app)),
         ShellView::Help => Some(help_keybindings(app)),
         ShellView::Tools => Some(tools_keybindings(app)),
+        ShellView::Scene(_) => Some(scene_keybindings()),
+        ShellView::SastTasks => Some(sast_tasks_keybindings(app)),
+        // First-run pickers print their controls to the log only — surface them
+        // in the footer so the very first screen is operable without guessing.
+        ShellView::PlanningPicker => Some(planning_picker_keybindings()),
+        ShellView::ModelPicker | ShellView::AuthMethodPicker(_) => Some(choice_picker_keybindings()),
         _ => None,
     }
+}
+
+fn planning_picker_keybindings() -> Vec<FooterKeybinding> {
+    vec![
+        bind("j/k", "move"),
+        bind("Space", "toggle"),
+        bind("a/n", "all/none"),
+        bind("g", "rebuild"),
+        bind("Enter", "run"),
+        bind("Esc", "skip"),
+    ]
+}
+
+fn choice_picker_keybindings() -> Vec<FooterKeybinding> {
+    vec![bind("j/k", "move"), bind("Enter", "select"), bind("Esc", "skip")]
+}
+
+// The security-viz gallery is fully interactive but its controls live only in
+// the key handler; surface them so Tab/orbit/pause are discoverable.
+fn scene_keybindings() -> Vec<FooterKeybinding> {
+    vec![
+        bind("Tab", "next page"),
+        bind("h/l/j/k", "orbit 3D"),
+        bind("space", "pause"),
+        bind("r", "reset"),
+        bind("back", "leave"),
+    ]
+}
+
+// SAST Tasks looks like a multi-select but is command-driven — advertise the
+// verbs so the checkbox UI doesn't imply Space/Enter toggles that do nothing.
+fn sast_tasks_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let mut bindings = Vec::new();
+    push_view_keybindings(&mut bindings, app);
+    bindings.push(bind("task toggle <id>", "flip"));
+    bindings.push(bind("task block <id>", "skip"));
+    bindings.push(bind("task allow <id>", "enable"));
+    bindings
 }
 
 // Each builder leads with the live view keybindings (scroll + Esc back) so the

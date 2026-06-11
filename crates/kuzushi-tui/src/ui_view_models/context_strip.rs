@@ -44,11 +44,15 @@ pub(crate) fn context_strip_model(app: &ShellApp) -> ContextStripModel {
 
 impl ContextStripModel {
     pub(crate) fn compact_segments(&self) -> Vec<String> {
+        // Order by decision-relevance, not layout: on a narrow terminal the
+        // strip is `fit()`-truncated from the right, so the model (the
+        // no-silent-fallback safety fact) must precede the lower-stakes
+        // target/ctx — which are also surfaced on the Home cockpit.
         let mut segments = vec![
             self.mode.clone(),
+            format!("model:{}", self.model),
             format!("target:{}", self.target),
             self.context_state_segment(),
-            format!("model:{}", self.model),
         ];
         if let Some(activity) = &self.compact_activity {
             segments.push(format!("activity:{activity}"));

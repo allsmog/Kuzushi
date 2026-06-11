@@ -29,7 +29,12 @@ pub(crate) fn primary_view_lines(
         PrimaryViewRoute::Module => module_lines(app, area),
         PrimaryViewRoute::ModuleRun => module_run_lines(app, area),
         PrimaryViewRoute::Findings => findings_lines(app, area),
-        PrimaryViewRoute::Finding => finding_detail_lines(app, area),
+        // Finding detail can run long (evidence, proof ladder, triage, patch
+        // history); window it so `j/k/g/G` (which already drive `scroll_offset`)
+        // reveal the tail instead of it being clipped off the bottom.
+        PrimaryViewRoute::Finding => {
+            viewport_lines(finding_detail_lines(app, area), area.height, app.scroll_offset as usize)
+        }
         PrimaryViewRoute::Pwn { scroll } => {
             viewport_lines(pwn_lines(app, area), area.height, scroll)
         }
@@ -65,7 +70,11 @@ pub(crate) fn threat_and_run_view_lines(
 ) -> Vec<Line<'static>> {
     match route {
         ThreatAndRunViewRoute::Tune => tune_lines(app, area),
-        ThreatAndRunViewRoute::Threat(view) => threat_lines(app, area, view),
+        // STRIDE rollups and story lists run past the fold on short terminals;
+        // window them so the existing scroll keys reach the tail.
+        ThreatAndRunViewRoute::Threat(view) => {
+            viewport_lines(threat_lines(app, area, view), area.height, app.scroll_offset as usize)
+        }
         ThreatAndRunViewRoute::ThreatEditor => threat_editor_lines(app, area),
         ThreatAndRunViewRoute::PromptsEditor => prompts_lines(app, area),
         ThreatAndRunViewRoute::ActorDetail(index) => actor_detail_lines(app, area, index),

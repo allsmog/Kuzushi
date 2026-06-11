@@ -370,7 +370,8 @@ fn plain_flag_forces_line_oriented_shell_output() {
     assert!(out.contains("KUZUSHI"));
     assert!(out.contains("mode:shell"));
     assert!(out.contains("HOME"));
-    assert!(out.contains("rails:"));
+    // Fresh workspace collapses the per-artifact rail into a one-line summary.
+    assert!(out.contains("run artifacts"));
     assert_strict_plain("--plain shell", &out);
 }
 

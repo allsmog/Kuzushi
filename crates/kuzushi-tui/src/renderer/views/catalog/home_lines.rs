@@ -29,6 +29,21 @@ fn append_home_summary(lines: &mut Vec<Line<'static>>, model: &HomeCockpitModel,
 }
 
 fn append_home_rail(lines: &mut Vec<Line<'static>>, model: &HomeCockpitModel, area: Rect) {
+    // On a fresh workspace every artifact is "missing" — which is the expected
+    // initial state, not a failure. Collapse the nine-row wall into one calm
+    // summary line so the first screen reads as "ready to run", not "broken".
+    let produced = model
+        .artifacts
+        .iter()
+        .filter(|artifact| artifact.cells[2] != "missing")
+        .count();
+    let total = model.artifacts.len();
+    if produced == 0 && total > 0 {
+        lines.push(muted(&format!(
+            "run artifacts   0/{total} produced — run `scan .` to populate the proof rails"
+        )));
+        return;
+    }
     lines.push(muted(model.rail_legend));
     for artifact in &model.artifacts {
         lines.push(rail_row(artifact, area.width));

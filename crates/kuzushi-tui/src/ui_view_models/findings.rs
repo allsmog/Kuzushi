@@ -171,8 +171,8 @@ fn empty_state(context_state: &'static str) -> FindingsEmptyState {
             context_cta: Some(("context build", "rewrite the malformed snapshot first")),
         },
         _ => FindingsEmptyState {
-            hint: "dispatches the umbrella scanner once a context snapshot exists.",
-            context_cta: Some(("context build", "build the snapshot first if you have time")),
+            hint: "runs the umbrella scanner over the target.",
+            context_cta: Some(("context build", "optional: index the repo first for richer analysis.")),
         },
     }
 }

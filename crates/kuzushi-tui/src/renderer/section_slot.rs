@@ -12,6 +12,26 @@ pub(crate) fn fixed_chrome_height(sections: &[RenderSectionSlot]) -> u16 {
     PROMPT_HEIGHT + sections.iter().map(|section| section.height).sum::<u16>()
 }
 
+/// Smallest primary-view height we refuse to drop below. Without this, a pile-up
+/// of simultaneously-active chrome cards (notice + plan + confirm + transcript…)
+/// on a short terminal collapses the main view to a single row and Ratatui then
+/// clips the prompt and lower cards. `render_sections` orders slots
+/// most-critical-first, so shedding from the tail drops the least important
+/// (completion popup, transcript) before the footers and approval gates.
+const MIN_PRIMARY_VIEW_HEIGHT: u16 = 3;
+
+pub(crate) fn fit_sections_to_height(
+    mut sections: Vec<RenderSectionSlot>,
+    area_height: u16,
+) -> Vec<RenderSectionSlot> {
+    while !sections.is_empty()
+        && fixed_chrome_height(&sections).saturating_add(MIN_PRIMARY_VIEW_HEIGHT) > area_height
+    {
+        sections.pop();
+    }
+    sections
+}
+
 pub(crate) fn render_constraints(
     view_height: u16,
     sections: &[RenderSectionSlot],
