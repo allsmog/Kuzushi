@@ -1660,6 +1660,7 @@ fn run_taint_iris_next_hunt_reaches_langgraph_runtime_bridge_and_persists() {
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
     std::fs::create_dir_all(repo.join("src")).unwrap();
+    seed_taint_iris_next_mcp_artifacts(&repo);
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(
         repo.join("package.json"),
@@ -1728,6 +1729,7 @@ fn scan_tasks_taint_iris_next_reaches_same_taint_iris_next_executor() {
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
     std::fs::create_dir_all(repo.join("src")).unwrap();
+    seed_taint_iris_next_mcp_artifacts(&repo);
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(
         repo.join("package.json"),
@@ -3200,15 +3202,27 @@ fn seed_triaged_finding(repo: &std::path::Path) -> Finding {
     finding
 }
 
+fn seed_taint_iris_next_mcp_artifacts(repo: &std::path::Path) {
+    // The taint-iris-next MCP gate refuses to dispatch unless the joern CPG
+    // (`.kuzushi/cpg.bin`) and CodeQL DB (`.kuzushi/codeql-db/`) artifacts
+    // exist — the precondition `/planning` builds. The fake bridge does not
+    // read them, so non-empty placeholders satisfy the gate.
+    let kuzushi = repo.join(".kuzushi");
+    std::fs::create_dir_all(kuzushi.join("codeql-db")).unwrap();
+    std::fs::write(kuzushi.join("codeql-db").join("db.placeholder"), "stub").unwrap();
+    std::fs::write(kuzushi.join("cpg.bin"), "cpg-stub").unwrap();
+}
+
 #[cfg(unix)]
 fn init_git_repo(repo: &std::path::Path) {
     for args in [
         vec!["init"],
         vec!["config", "user.email", "kuzushi@example.test"],
         vec!["config", "user.name", "Kuzushi Test"],
-        // Host git config must not leak into the fixture (e.g. mandatory
-        // commit signing would make `git commit` fail in sandboxes).
+        // Keep the fixture repo hermetic against a host/global git config that
+        // forces commit signing — tests must not depend on a signing key.
         vec!["config", "commit.gpgsign", "false"],
+        vec!["config", "tag.gpgsign", "false"],
         vec!["add", "."],
         vec!["commit", "-m", "fixture"],
     ] {

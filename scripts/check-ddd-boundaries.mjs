@@ -109,6 +109,8 @@ const rules = [
       /\b(crate::(?:scan|scanners|runtime|modules|verification)|AgentRuntime|Command::new|std::process)\b/,
   },
   {
+    // Model-backed ranking (AgentRuntime queries) is allowed in the adapter
+    // files; executing modules/tools is never allowed anywhere in the boundary.
     name: "recommender plans modules but does not execute them",
     // AgentRuntime is allowed here: model-ranked preselection queries the
     // session model to rank modules, which is planning. Executing tools is not.

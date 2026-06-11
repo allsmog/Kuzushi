@@ -13,7 +13,7 @@ const registryTestsFile = "crates/kuzushi-core/src/modules/registry/tests.rs";
 const sastTasksFile = "crates/kuzushi-tui/src/app/sast_tasks/valid_sast_task_ids.rs";
 const packageFile = "package.json";
 const readmeFile = "README.md";
-const portPlanFile = "PORT_PLAN.md";
+const portPlanFile = "docs/PORT_PLAN.md";
 
 const deferredRegistrations = [
   "carlini_threat_hunt_module().deferred()",

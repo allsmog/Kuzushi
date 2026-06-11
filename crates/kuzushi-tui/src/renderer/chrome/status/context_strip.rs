@@ -10,7 +10,8 @@ pub(crate) fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     // - segment label: muted
     // - segment value: primary
     // - `✓` ctx checkmark when context snapshot exists: success
-    // - view segment mirrors the bottom status view label from `view_status_segment`
+    // Session config only — view and findings live in the bottom status bar
+    // (and the view divider), so each fact is stated once per screen.
     let spans = context_strip_spans(&model);
 
     if spans_overflow(&spans, area.width) {
@@ -30,8 +31,6 @@ fn context_strip_spans(model: &ContextStripModel) -> Vec<Span<'static>> {
     push_segment(&mut spans, "target", model.target.clone(), theme::primary());
     push_context_segment(&mut spans, model.context_state);
     push_segment(&mut spans, "model", model.model.clone(), theme::primary());
-    push_self_labeled_segment(&mut spans, model.findings.clone(), theme::primary());
-    push_segment(&mut spans, "view", model.view.clone(), theme::accent());
     push_activity_or_run_segment(&mut spans, model);
     push_stage_segment(&mut spans, model.stage.as_ref());
     push_cost_or_trim(&mut spans, model.cost.clone());
@@ -60,11 +59,6 @@ fn compact_context_strip_line(model: &ContextStripModel, area: Rect) -> Vec<Line
 }
 
 fn push_prefixed_segment(spans: &mut Vec<Span<'static>>, value: String, style: Style) {
-    spans.push(Span::styled(value, style));
-    push_separator(spans);
-}
-
-fn push_self_labeled_segment(spans: &mut Vec<Span<'static>>, value: String, style: Style) {
     spans.push(Span::styled(value, style));
     push_separator(spans);
 }

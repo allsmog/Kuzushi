@@ -1,6 +1,6 @@
 use super::{
-    compact_target_path, context_snapshot_state, routing_mode_segment, scan_status,
-    status_footer_findings_summary, view_status_segment, ShellApp,
+    routing_mode_segment, scan_status, status_footer_findings_summary, view_status_segment,
+    ShellApp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,15 +34,18 @@ fn active_status_footer_segments(app: &ShellApp, activity: FooterActivity) -> Ve
     ]
 }
 
+/// Idle bottom bar: routing + current view (live orientation). Target, ctx,
+/// and model live in the top cockpit strip — each session fact is stated
+/// once per screen.
 fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
-    let mut segments = vec![
-        routing_mode_segment(app),
-        target_footer_segment(app),
-    ];
+    // WCQ "one fact, one home": target/ctx/model live in the top cockpit
+    // strip, so the bottom bar stays routing + view. The bug-bounty scope
+    // chip (M2 §2.1) is kept here — it's live gating state, not a session
+    // fact, so it belongs with routing/view rather than the cockpit strip.
+    let mut segments = vec![routing_mode_segment(app)];
     if let Some(chip) = scope_footer_segment(app) {
         segments.push(chip);
     }
-    segments.push(context_footer_segment(app));
     segments.push(view_status_segment(app));
     segments
 }
@@ -129,40 +132,6 @@ fn model_footer_segment(app: &ShellApp) -> String {
         .model
         .clone()
         .unwrap_or_else(|| "unconfigured".to_string())
-}
-
-fn target_footer_segment(app: &ShellApp) -> String {
-    let Some(path) = app.target.as_ref() else {
-        return "target:none".to_string();
-    };
-    if target_is_cwd(path) {
-        return "target:cwd (.)".to_string();
-    }
-    format!("target:{}", compact_target_path(&path.display().to_string()))
-}
-
-fn target_is_cwd(path: &std::path::Path) -> bool {
-    let Ok(cwd) = std::env::current_dir() else {
-        return false;
-    };
-    let Ok(cwd_canonical) = std::fs::canonicalize(&cwd) else {
-        return false;
-    };
-    let Ok(target_canonical) = std::fs::canonicalize(path) else {
-        return false;
-    };
-    cwd_canonical == target_canonical
-}
-
-fn context_footer_segment(app: &ShellApp) -> String {
-    // Word the empty state as an action, not an alarm — the context snapshot is
-    // optional and `context build` creates it (see context_strip).
-    match context_snapshot_state(app) {
-        "present" => "ctx:✓ built",
-        "malformed" => "ctx:malformed",
-        _ => "ctx:not built",
-    }
-    .to_string()
 }
 
 #[cfg(test)]

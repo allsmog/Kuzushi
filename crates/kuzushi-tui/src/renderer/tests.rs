@@ -193,7 +193,7 @@ fn catalog_default_is_grouped_at_normal_width() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("KUZUSHI · MODULES"));
+    assert!(rendered.contains("MODULES"));
     assert!(rendered.contains("▸ NEXT"));
     assert!(rendered.contains("OFFENSE"));
     assert!(rendered.contains("INTEL"));
@@ -214,7 +214,7 @@ fn catalog_default_keeps_quickstart_fallback_on_tight_width() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("KUZUSHI · MODULES"));
+    assert!(rendered.contains("MODULES"));
     assert!(rendered.contains("Start here"));
     assert!(rendered.contains("context build"));
     assert!(rendered.contains("scan ."));
@@ -650,7 +650,7 @@ fn expanded_catalog_uses_design_sections_without_dag_column() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("KUZUSHI · MODULES"));
+    assert!(rendered.contains("MODULES"));
     assert!(rendered.contains("▸ NEXT"));
     assert!(rendered.contains("OFFENSE"));
     assert!(rendered.contains("sast"));
@@ -2528,7 +2528,7 @@ fn renders_shell_module_plan_and_run_routing_modes() {
 fn renders_all_ink_parity_shell_surfaces() {
     let cases = vec![
         (ShellView::Home, "HOME"),
-        (ShellView::Catalog, "KUZUSHI · MODULES"),
+        (ShellView::Catalog, "MODULES"),
         (ShellView::Recommend, "RECOMMEND"),
         (ShellView::Module, "MODULE DETAIL"),
         (ShellView::ModuleRun, "TRANSCRIPT"),

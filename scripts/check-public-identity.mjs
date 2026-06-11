@@ -51,7 +51,7 @@ const requiredIdentityReferences = [
   },
   {
     label: "port plan identity contract",
-    file: "PORT_PLAN.md",
+    file: "docs/PORT_PLAN.md",
     needles: [
       "binary: `kuzushi`",
       "alias: `kz`",
@@ -352,6 +352,12 @@ function isPublicSurface(file) {
 function isIgnored(file) {
   return (
     file === "scripts/check-public-identity.mjs" ||
+    // Historical working notes; they describe the upstream port and old
+    // TypeScript-era state, so identity wording rules do not apply.
+    file.startsWith("docs/notes/") ||
+    // The upstream-port plan legitimately names the upstream project; its
+    // identity contract is still enforced via requiredIdentityReferences.
+    file === "docs/PORT_PLAN.md" ||
     file.startsWith("target/") ||
     file.startsWith("node_modules/") ||
     file.startsWith("dist/") ||
@@ -362,7 +368,9 @@ function isIgnored(file) {
 function isPublicDoc(file) {
   // docs/quality/ holds archived point-in-time audits that quote
   // historical UI wording verbatim; they are not public-facing docs.
-  if (file.startsWith("docs/quality/")) return false;
+  // docs/PORT_PLAN.md is the upstream-port identity contract and
+  // legitimately names the upstream project, so it is not operator-facing.
+  if (file.startsWith("docs/quality/") || file === "docs/PORT_PLAN.md") return false;
   return file === "README.md" || file.startsWith("docs/");
 }
 

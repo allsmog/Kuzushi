@@ -34,7 +34,9 @@ mod tests {
             vec!["init"],
             vec!["config", "user.email", "kuzushi@example.test"],
             vec!["config", "user.name", "Kuzushi Test"],
+            // Stay hermetic against a host git config that forces signing.
             vec!["config", "commit.gpgsign", "false"],
+            vec!["config", "tag.gpgsign", "false"],
             vec!["add", "."],
             vec!["commit", "-m", "base"],
         ] {
@@ -74,7 +76,7 @@ mod tests {
             .unwrap();
         assert!(output.status.success());
         let output = Command::new("git")
-            .args(["commit", "-m", "change"])
+            .args(["-c", "commit.gpgsign=false", "commit", "-m", "change"])
             .current_dir(temp.path())
             .output()
             .unwrap();
@@ -145,7 +147,7 @@ mod tests {
             .unwrap();
         assert!(output.status.success());
         let output = Command::new("git")
-            .args(["commit", "-m", "pr"])
+            .args(["-c", "commit.gpgsign=false", "commit", "-m", "pr"])
             .current_dir(temp.path())
             .output()
             .unwrap();
@@ -188,7 +190,7 @@ mod tests {
         )
         .unwrap();
 
-        assert_eq!(report.no_remote_provider_required, true);
+        assert!(report.no_remote_provider_required);
         assert_eq!(report.summary.changed_files, 2);
         assert!(report
             .changed_files

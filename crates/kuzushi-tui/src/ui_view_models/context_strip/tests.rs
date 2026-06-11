@@ -23,9 +23,7 @@ fn context_strip_model_reports_idle_shell_state() {
             "mode:shell",
             "target:none",
             "ctx:not built",
-            "model:unconfigured",
-            "0 findings",
-            "view:modules"
+            "model:unconfigured"
         ]
     );
 }

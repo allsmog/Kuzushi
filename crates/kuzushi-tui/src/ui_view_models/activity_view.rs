@@ -2,7 +2,7 @@ use super::activity_dag_rows::{activity_dag_pane_rows, ActivityDagPaneRow};
 use super::activity_empty_state::{activity_empty_state_model, ActivityEmptyStateModel};
 use super::activity_feed_rows::{activity_feed_pane_rows, ActivityFeedPaneRow};
 use super::activity_footer::{activity_footer_model, ActivityFooterModel};
-use super::activity_header::{activity_header_model, ActivityHeaderModel};
+use super::activity_header::{activity_header_model, ActivityHeaderModel, ActivityRunOutcome};
 use super::activity_layout::{
     activity_frame_layout, activity_plain_pane_widths, ActivityFrameLayout, ActivityPaneWidths,
 };
@@ -38,21 +38,42 @@ pub(crate) fn activity_view_model(app: &ShellApp) -> ActivityViewModel<'_> {
     }
 }
 
-/// Workspace context for the Activity header (target · ctx · model · findings).
-/// Drops the `mode:`/`view:` segments — redundant inside the Activity view —
-/// so the operator sees model + findings here instead of in a bottom strip.
+/// The Activity run's terminal failure, if any. Sourced from the live
+/// activity card (set by both scan refusals and tool failures) and only once
+/// nothing is still running, so an in-flight session never reads as failed.
+fn activity_run_outcome(app: &ShellApp, session: &ActivitySession) -> Option<ActivityRunOutcome> {
+    use crate::app::{DagTaskState, LiveActivityPhase};
+    let still_running = session
+        .tasks
+        .values()
+        .any(|row| row.state == DagTaskState::Active);
+    if still_running {
+        return None;
+    }
+    let activity = app.live_activity.as_ref()?;
+    matches!(activity.phase, LiveActivityPhase::Refused).then(|| ActivityRunOutcome::Failed {
+        subject: activity.subject.clone(),
+    })
+}
+
+/// Workspace context for the Activity header (target · ctx · model ·
+/// findings). Composed explicitly — the Activity view suppresses the bottom
+/// status bar, so findings must travel here even though the general top
+/// strip no longer carries them.
 fn activity_context_line(app: &ShellApp) -> String {
-    super::context_strip_model(app)
-        .compact_segments()
-        .into_iter()
-        .filter(|segment| !segment.starts_with("mode:") && !segment.starts_with("view:"))
-        .collect::<Vec<_>>()
-        .join("  ·  ")
+    let model = super::context_strip_model(app);
+    [
+        format!("target:{}", model.target),
+        model.context_state_segment(),
+        format!("model:{}", model.model),
+        model.findings.clone(),
+    ]
+    .join("  ·  ")
 }
 
 impl<'a> ActiveActivityViewModel<'a> {
     pub(crate) fn header(&self) -> ActivityHeaderModel {
-        activity_header_model(self.session)
+        activity_header_model(self.session, activity_run_outcome(self.app, self.session))
     }
 
     pub(crate) fn context_line(&self) -> &str {

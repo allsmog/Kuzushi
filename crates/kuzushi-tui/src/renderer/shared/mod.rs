@@ -21,5 +21,5 @@ mod prompt;
 mod render;
 mod status;
 mod tables;
-mod text;
+pub(crate) mod text;
 mod threat_model;

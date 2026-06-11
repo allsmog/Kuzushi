@@ -358,7 +358,8 @@ fn plain_flag_forces_line_oriented_shell_output() {
     let tmp = tempfile::tempdir().unwrap();
     let out = stdout(
         kuzushi()
-            // Land on the catalog: first-run pickers render headless on purpose.
+            // Skip first-run onboarding so the shell lands on the home view
+            // this test exercises, not the no-model-configured model picker.
             .env("KUZUSHI_SKIP_ONBOARDING", "1")
             .args(["--plain", "shell", "--target"])
             .arg(tmp.path())
@@ -379,7 +380,8 @@ fn plain_env_aliases_are_line_oriented_for_screen_reader_mode() {
     let out = stdout(
         kuzushi()
             .env("KUZUSHI_SCREEN_READER", "1")
-            // Land on the catalog: first-run pickers render headless on purpose.
+            // Skip first-run onboarding so the shell lands on the home view
+            // this test exercises, not the no-model-configured model picker.
             .env("KUZUSHI_SKIP_ONBOARDING", "1")
             .args(["shell", "--target"])
             .arg(tmp.path())
@@ -606,20 +608,14 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
     let report: Value = serde_json::from_str(&raw).unwrap();
     assert_eq!(report["alias"], "F-0001");
     assert_eq!(report["finding"]["fingerprint"], fingerprint);
-    assert_eq!(
-        report["proofState"]
-            .as_str()
-            .unwrap()
-            .starts_with("source_sink_linked"),
-        true
-    );
-    assert_eq!(
-        report["runtimeValidation"]
-            .as_str()
-            .unwrap()
-            .starts_with("execution_confirmed"),
-        true
-    );
+    assert!(report["proofState"]
+        .as_str()
+        .unwrap()
+        .starts_with("source_sink_linked"));
+    assert!(report["runtimeValidation"]
+        .as_str()
+        .unwrap()
+        .starts_with("execution_confirmed"));
     assert_eq!(report["nextAction"], "patch");
     assert_eq!(report["patchResults"].as_array().unwrap().len(), 1);
 }

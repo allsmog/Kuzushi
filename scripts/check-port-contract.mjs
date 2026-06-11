@@ -7,7 +7,7 @@ const repo = process.cwd();
 
 const requiredDocs = [
   {
-    file: "PORT_PLAN.md",
+    file: "docs/PORT_PLAN.md",
     needles: ["upstream-codex", "docs/architecture/kuzushi-boundaries.md", "Phase Ledger"],
   },
   {

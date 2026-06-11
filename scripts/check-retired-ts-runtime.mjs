@@ -72,6 +72,7 @@ const docRoots = [
   "RELEASING.md",
 ];
 const historicalDocPrefixes = [
+  "docs/notes/",
   "docs/assessments/",
   "docs/data-model/",
   "docs/devex/",

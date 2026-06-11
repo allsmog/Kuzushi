@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 239
 ---
-KUZUSHI mode:run · target:none · ctx:not built · model:unconfigured · 1 finding (1 critical) · view:run · stage:⠿...
+ KUZUSHI mode:run · target:none · ctx:not built · model:unconfigured · stage:⠿ searching
 
 ⠿ ./acme-checkout · running: agentic-sast tracing · 1 finding · run run-abc1
 

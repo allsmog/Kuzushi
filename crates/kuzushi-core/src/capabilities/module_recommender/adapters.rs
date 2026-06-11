@@ -19,6 +19,7 @@ pub(crate) fn execute_module_recommender_tool(
         target: workspace.root().display().to_string(),
         max_recommendations: max_recommendations(&input),
         available_tools: available_tools.into_iter().collect(),
+        tools_missing_binaries: tools_missing_binaries(),
         signals: repository_signals(
             workspace.root(),
             &inventory,
@@ -34,10 +35,35 @@ pub(crate) fn execute_module_recommender_tool(
     let report = build_recommendation_report_ranked(request, ranking);
     let summary = report.summary.clone();
     let output = recommendation_report_output(&report);
-    let data = serde_json::to_value(report).context("Could not serialize module recommendations")?;
+    let data =
+        serde_json::to_value(report).context("Could not serialize module recommendations")?;
     Ok(crate::module_result::completed_output_result(
         summary, output, data,
     ))
+}
+
+/// Recommendable tools that shell out to an external scanner, paired with the
+/// binary they need. Probed here (adapter boundary) so the ranking logic only
+/// sees resolved facts, never PATH.
+const SCANNER_BINARY_REQUIREMENTS: &[(&str, &str)] = &[
+    ("semgrep:scan", "semgrep"),
+    ("codeql:scan", "codeql"),
+    ("cargo-audit:scan", "cargo-audit"),
+];
+
+fn tools_missing_binaries() -> std::collections::BTreeSet<String> {
+    SCANNER_BINARY_REQUIREMENTS
+        .iter()
+        .filter(|(_, binary)| !binary_on_path(binary))
+        .map(|(tool, _)| tool.to_string())
+        .collect()
+}
+
+fn binary_on_path(name: &str) -> bool {
+    let Some(path_var) = std::env::var_os("PATH") else {
+        return false;
+    };
+    std::env::split_paths(&path_var).any(|dir| dir.join(name).is_file())
 }
 
 fn workspace_for_input(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<WorkspaceTarget> {
@@ -92,7 +118,13 @@ fn max_recommendations(input: &Value) -> usize {
 fn recommendation_report_output(report: &RecommendationReport) -> String {
     let mut lines = vec![report.summary.clone()];
     if !report.recommendations.is_empty() {
-        lines.extend(report.recommendations.iter().take(5).map(recommendation_line));
+        lines.extend(
+            report
+                .recommendations
+                .iter()
+                .take(5)
+                .map(recommendation_line),
+        );
     }
     lines.join("\n")
 }

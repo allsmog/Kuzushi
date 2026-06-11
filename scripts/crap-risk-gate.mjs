@@ -71,7 +71,21 @@ function changedFilesFromGit() {
   ];
   if (files.length > 0) return files;
   const base = process.env.KUZUSHI_CRAP_RISK_BASE_REF ?? "HEAD^";
+  requireResolvableBase(base);
   return gitLines(["diff", "--name-only", "--diff-filter=ACMR", base, "HEAD"]);
+}
+
+function requireResolvableBase(base) {
+  if (gitRefResolves(base)) return;
+  console.error(
+    `CRAP-risk gate cannot resolve diff base "${base}" — the gate would silently check 0 files. ` +
+      "Fetch more history (checkout with fetch-depth: 2 or 0) or set KUZUSHI_CRAP_RISK_BASE_REF.",
+  );
+  process.exit(1);
+}
+
+function gitRefResolves(ref) {
+  return git(["rev-parse", "--verify", "--quiet", `${ref}^{commit}`]).trim().length > 0;
 }
 
 function functionBlocks(file, source) {

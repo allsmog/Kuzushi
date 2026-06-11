@@ -9,6 +9,9 @@ Feature: Conditional MCP attachment plan
     Given a fresh kuzushi workspace
     And a model and auth are configured
     And the env var "KUZUSHI_AUTO_OPEN_ACTIVITY" is set to "false"
+    # Land on the catalog so the startup MCP-plan log line stays inside the
+    # two-line transcript strip instead of scrolling out behind the phase
+    # picker's own announcement lines.
     And the env var "KUZUSHI_SKIP_ONBOARDING" is set to "1"
 
   Scenario: Empty target shows only the constant MCPs

@@ -116,8 +116,18 @@ if (failures.length > 0) {
 console.log("doc command drift check passed");
 
 function walk(root) {
+  if (isHistoricalDoc(root)) return [];
   const abs = path.join(repo, root);
-  const stats = safeStat(abs);
+  return walkEntry(root, abs, safeStat(abs));
+}
+
+// docs/notes/ holds historical working notes and docs/PORT_PLAN.md is the
+// upstream-port ledger; neither is current operator guidance.
+function isHistoricalDoc(root) {
+  return root === "docs/notes" || root.startsWith("docs/notes/") || root === "docs/PORT_PLAN.md";
+}
+
+function walkEntry(root, abs, stats) {
   if (stats === null) return [];
   if (stats.isFile()) return scannedFile(abs);
   if (!stats.isDirectory()) return [];

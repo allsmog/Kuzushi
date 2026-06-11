@@ -75,7 +75,10 @@ impl PlanningTaskRow {
             && !forced_off_by_default(self.id)
     }
 
-    /// One-line hint shown next to the row (cost + missing dep info).
+    /// One-line hint shown next to the row (cost + missing dep info). When the
+    /// required CLI is absent the row can't run at all, so the blocker IS the
+    /// hint — prefixing it with cost info only pushed the actionable part past
+    /// the column budget where it got truncated.
     pub fn cost_hint(&self) -> String {
         let base = if self.model_backed {
             "model-backed"
@@ -83,9 +86,7 @@ impl PlanningTaskRow {
             "no model cost"
         };
         match self.required_cli {
-            Some(cli) if !self.cli_available => {
-                format!("{base} (requires {cli} — not on PATH)")
-            }
+            Some(cli) if !self.cli_available => format!("requires {cli} — not on PATH"),
             Some(cli) => format!("{base} (requires {cli})"),
             None => base.to_string(),
         }

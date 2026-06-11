@@ -6,6 +6,8 @@ export default defineConfig({
       "tests/modules/public-surface.test.ts",
       "tests/modules/define.test.ts",
       "tests/modules/loader.test.ts",
+      "tests/modules/loader-import.test.ts",
+      "tests/modules/registry-resolution.test.ts",
       "tests/modules/host-handles.test.ts",
       "tests/langgraph-bridge/mcp-plan.test.ts",
     ],
@@ -31,17 +33,17 @@ export default defineConfig({
       // the original scanner / store / bus / agent / strategy code now
       // lives in `crates/kuzushi-*` and the remaining TypeScript is
       // the module-loading host (loader, schema, errors, types,
-      // host-handles, define, dag-*). The 70% bar from before the
-      // migration is unreachable until the module host gets a richer
-      // test surface; the current floor (lines/statements ~55,
-      // functions ~28, branches ~76) is encoded here so a regression
-      // below the floor still fails CI. Raise these numbers when you
-      // add tests; don't lower them. PR #60 documents the migration.
+      // host-handles, define, registry, dag-*). The floors below are set
+      // just under the measured coverage so a regression fails CI; the
+      // module-host suite lifted them after registry-resolution and
+      // loader-import tests landed (lines/statements ~68, branches ~78,
+      // functions ~44). Raise these numbers when you add tests; don't
+      // lower them. PR #60 documents the migration.
       thresholds: {
-        lines: 50,
-        statements: 50,
-        branches: 70,
-        functions: 25,
+        lines: 65,
+        statements: 65,
+        branches: 76,
+        functions: 40,
       },
     },
   },
