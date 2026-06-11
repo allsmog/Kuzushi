@@ -19,17 +19,9 @@ impl ToolOptionStore {
     }
 
     pub fn save_to_path(&self, path: &Path) -> Result<()> {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).with_context(|| {
-                format!(
-                    "Could not create option store directory {}",
-                    parent.display()
-                )
-            })?;
-        }
         let body =
             serde_json::to_string_pretty(self).context("Could not serialize option store")?;
-        fs::write(path, body)
+        crate::fs_atomic::write_atomic(path, &body)
             .with_context(|| format!("Could not write option store {}", path.display()))
     }
 

@@ -1,9 +1,10 @@
 use anyhow::{Context, Result};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+use std::process::{Child, Command, ExitStatus, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use super::bridge_payloads::{
     BridgeRequest, BridgeResponse, NextStepBridgeRequest, NextStepBridgeResponse,
@@ -74,10 +75,81 @@ where
         .with_context(|| format!("could not start {label} {}", command[0]))?;
 
     write_bridge_request(&mut child, request, label)?;
-    let output = child
-        .wait_with_output()
-        .with_context(|| format!("could not read {label} output"))?;
+    let output = wait_with_output_deadline(child, label, bridge_timeout())?;
     parse_bridge_output(output, label)
+}
+
+/// Hard wall-clock ceiling for one bridge invocation. A wedged Node process
+/// (MCP server hang, stdin deadlock, provider stall) previously blocked the
+/// caller forever via `wait_with_output()`; every bridge call now surfaces as
+/// a timeout error instead. Generous default: a single invocation can span a
+/// long agent step with MCP tool calls.
+const DEFAULT_BRIDGE_TIMEOUT: Duration = Duration::from_secs(600);
+
+fn bridge_timeout() -> Duration {
+    std::env::var("KUZUSHI_BRIDGE_TIMEOUT_MS")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u64>().ok())
+        .filter(|ms| *ms > 0)
+        .map(Duration::from_millis)
+        .unwrap_or(DEFAULT_BRIDGE_TIMEOUT)
+}
+
+/// `wait_with_output` with a deadline: drains stdout/stderr on reader threads
+/// (so a full pipe can't deadlock the child), polls for exit, and kills the
+/// process when the deadline passes.
+fn wait_with_output_deadline(mut child: Child, label: &str, timeout: Duration) -> Result<Output> {
+    // Match `wait_with_output` semantics: close the child's stdin so a bridge
+    // reading until EOF sees the request end instead of blocking forever.
+    drop(child.stdin.take());
+    let stdout = spawn_pipe_reader(child.stdout.take());
+    let stderr = spawn_pipe_reader(child.stderr.take());
+    let status = wait_status_deadline(&mut child, label, timeout)?;
+    Ok(Output {
+        status,
+        stdout: join_pipe_reader(stdout),
+        stderr: join_pipe_reader(stderr),
+    })
+}
+
+fn spawn_pipe_reader<R: Read + Send + 'static>(
+    pipe: Option<R>,
+) -> Option<std::thread::JoinHandle<Vec<u8>>> {
+    pipe.map(|mut pipe| {
+        std::thread::spawn(move || {
+            let mut buffer = Vec::new();
+            let _ = pipe.read_to_end(&mut buffer);
+            buffer
+        })
+    })
+}
+
+fn join_pipe_reader(handle: Option<std::thread::JoinHandle<Vec<u8>>>) -> Vec<u8> {
+    handle
+        .and_then(|handle| handle.join().ok())
+        .unwrap_or_default()
+}
+
+fn wait_status_deadline(child: &mut Child, label: &str, timeout: Duration) -> Result<ExitStatus> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        if let Some(status) = child
+            .try_wait()
+            .with_context(|| format!("could not poll {label} process"))?
+        {
+            return Ok(status);
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            anyhow::bail!(
+                "{label} timed out after {}s and was killed; raise KUZUSHI_BRIDGE_TIMEOUT_MS \
+                 only if the call is legitimately long-running",
+                timeout.as_secs()
+            );
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
 }
 
 fn configured_bridge_command(command: &[String]) -> Command {

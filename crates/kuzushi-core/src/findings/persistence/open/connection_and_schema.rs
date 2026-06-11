@@ -23,6 +23,7 @@ impl FindingStore {
     }
 
     pub fn init(&self) -> Result<()> {
+        configure_connection(&self.conn)?;
         create_schema(&self.conn)?;
         migrate_findings_columns(&self.conn)?;
         create_findings_indexes(&self.conn)?;
@@ -30,6 +31,17 @@ impl FindingStore {
         migrate_finding_evidence_columns(&self.conn)?;
         Ok(())
     }
+}
+
+/// Concurrency posture for the findings DB. Scan workers, the shell, and MCP
+/// servers can all touch `.kuzushi/v2/` at once: WAL lets readers coexist
+/// with a writer, and the busy timeout makes a second writer wait instead of
+/// failing with "database is locked". In-memory stores report
+/// `journal_mode=memory` — that's expected; the pragma result is informational.
+fn configure_connection(conn: &Connection) -> Result<()> {
+    let _journal_mode: String = conn.query_row("pragma journal_mode = wal", [], |row| row.get(0))?;
+    conn.busy_timeout(std::time::Duration::from_millis(5_000))?;
+    Ok(())
 }
 
 fn create_schema(conn: &Connection) -> Result<()> {

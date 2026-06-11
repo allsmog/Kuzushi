@@ -19,6 +19,7 @@ public_modules!(
 );
 
 pub(crate) mod artifact_contract;
+pub(crate) mod fs_atomic;
 pub(crate) mod module_result;
 pub(crate) mod structured_output;
 

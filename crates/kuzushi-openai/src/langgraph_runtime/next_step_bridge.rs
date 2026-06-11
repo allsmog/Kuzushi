@@ -14,8 +14,30 @@ pub(crate) fn next_step_blocking(
     history: &[LoopHistoryEntry],
 ) -> Result<AgentLoopStep> {
     let bridge_request = next_step_bridge_request(runtime, request, history);
-    let response = run_next_step_bridge(&runtime.command, &bridge_request)?;
-    ensure_next_step_response_ok(response)
+    // Same transient-retry policy as query_blocking: without it, one 429 or
+    // dropped socket kills an entire multi-step agent loop mid-flight. A
+    // next-step call is a pure model query, so retrying is safe.
+    const ATTEMPTS: usize = 3;
+    let mut last_error: Option<anyhow::Error> = None;
+    for attempt in 1..=ATTEMPTS {
+        match run_next_step_bridge(&runtime.command, &bridge_request)
+            .and_then(ensure_next_step_response_ok)
+        {
+            Ok(step) => return Ok(step),
+            Err(error) => {
+                if attempt == ATTEMPTS
+                    || !super::runtime_impl::is_transient_bridge_error(&error.to_string())
+                {
+                    return Err(error);
+                }
+                last_error = Some(error);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(
+            super::runtime_impl::retry_delay_ms(attempt),
+        ));
+    }
+    Err(last_error.unwrap_or_else(|| anyhow::anyhow!("next-step bridge failed")))
 }
 
 pub(crate) fn preflight_tool_loop_blocking(
