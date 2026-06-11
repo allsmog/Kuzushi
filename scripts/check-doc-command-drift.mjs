@@ -22,7 +22,8 @@ const textExtensions = new Set([
 
 const banned = [
   { label: "--preset", regex: /--preset\b/g, needsKuzushiContext: true },
-  { label: "--sarif", regex: /--sarif\b/g, needsKuzushiContext: true },
+  // --sarif was retired with the TS CLI and banned here; it is a real flag
+  // again as of `kuzushi scan --sarif <path>` (Rust CLI), so it is allowed.
   { label: "--verify", regex: /--verify\b/g, needsKuzushiContext: true },
   { label: "--junit", regex: /--junit\b/g, needsKuzushiContext: true },
   { label: "--output", regex: /--output\b/g, needsKuzushiContext: true },
