@@ -5,7 +5,7 @@ mod pr_comment_args;
 mod subcommands;
 pub(crate) use pr_comment_args::PrCommentArgs;
 pub(crate) use subcommands::{
-    AuthCommand, ConfigCommand, McpBackend, McpCommand, RunsCommand, ScanModeArg,
+    AuthCommand, ConfigCommand, FailOnArg, McpBackend, McpCommand, RunsCommand, ScanModeArg,
 };
 
 #[derive(Debug, Subcommand)]
@@ -42,6 +42,15 @@ pub(crate) enum Command {
         /// When `--since` is set, also include uncommitted (working-tree) changes.
         #[arg(long, requires = "since")]
         include_worktree: bool,
+        /// Exit with code 3 when any finding at or above this severity is
+        /// recorded by the scan. Lets CI block a PR on findings; without it
+        /// the scan exits 0 regardless of what it found.
+        #[arg(long, value_enum)]
+        fail_on: Option<FailOnArg>,
+        /// Write a SARIF 2.1.0 export of this workspace's findings to the
+        /// given path after the scan (for GitHub Code Scanning upload etc.).
+        #[arg(long)]
+        sarif: Option<PathBuf>,
     },
     /// List persisted findings.
     Findings {

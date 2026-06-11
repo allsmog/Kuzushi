@@ -1,3 +1,4 @@
+use super::scan_gate::{apply_scan_gate_policy, ScanGatePolicy};
 use super::scan_prepare::{prepare_scan_command, PreparedScanCommand, SCAN_TOOL};
 use crate::command::ScanModeArg;
 use crate::presentation::{emit_scan_ci_start, emit_scan_output, scan_result_or_report_ci_error};
@@ -24,9 +25,10 @@ pub(crate) async fn scan_command(
     budget: Option<String>,
     since: Option<String>,
     include_worktree: bool,
+    gate: ScanGatePolicy,
 ) -> Result<()> {
     if is_apk_file(&target) {
-        return scan_apk_command(target, json, ci).await;
+        return scan_apk_command(target, json, ci, gate).await;
     }
     execute_prepared_scan(
         prepare_scan_command(
@@ -44,6 +46,7 @@ pub(crate) async fn scan_command(
         &tasks,
         json,
         ci,
+        gate,
     )
 }
 
@@ -53,6 +56,7 @@ fn execute_prepared_scan(
     tasks: &[String],
     json: bool,
     ci: bool,
+    gate: ScanGatePolicy,
 ) -> Result<()> {
     let PreparedScanCommand {
         workspace,
@@ -84,7 +88,17 @@ fn execute_prepared_scan(
     });
     let elapsed = started.elapsed();
     let result = scan_result_or_report_ci_error(result, ci, started, elapsed)?;
-    emit_scan_output(&workspace, &result, json, ci, started, elapsed)
+    emit_scan_output(&workspace, &result, json, ci, started, elapsed)?;
+    apply_scan_gate_policy(&workspace, &store, scan_gate_id(&result, &run_id), &gate)
+}
+
+/// Findings persist under the scan tool's own run id (`data.runId`), which can
+/// differ from the CLI-minted run id; prefer the tool's, fall back to ours.
+fn scan_gate_id<'a>(result: &'a serde_json::Value, fallback: &'a str) -> &'a str {
+    result
+        .pointer("/data/runId")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(fallback)
 }
 
 struct ScanToolExecution<'a> {
@@ -224,7 +238,7 @@ fn is_apk_file(target: &Path) -> bool {
         .unwrap_or(false)
 }
 
-async fn scan_apk_command(apk: PathBuf, json: bool, ci: bool) -> Result<()> {
+async fn scan_apk_command(apk: PathBuf, json: bool, ci: bool, gate: ScanGatePolicy) -> Result<()> {
     let workspace_dir = apk
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -251,7 +265,8 @@ async fn scan_apk_command(apk: PathBuf, json: bool, ci: bool) -> Result<()> {
         registry.execute_tool_with_runtime("android-apk:scan", input, &ctx, None);
     let elapsed = started.elapsed();
     let result = scan_result_or_report_ci_error(result, ci, started, elapsed)?;
-    emit_scan_output(&workspace, &result, json, ci, started, elapsed)
+    emit_scan_output(&workspace, &result, json, ci, started, elapsed)?;
+    apply_scan_gate_policy(&workspace, &store, scan_gate_id(&result, ""), &gate)
 }
 
 fn apk_scan_tool_input(apk: &Path, workspace: &Path) -> serde_json::Value {

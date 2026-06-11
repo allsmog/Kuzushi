@@ -16,6 +16,27 @@ impl ScanModeArg {
     }
 }
 
+/// Severity threshold for `scan --fail-on`. Findings with unknown severity
+/// never trip the gate (see `scan_gate::severity_gate_rank`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub(crate) enum FailOnArg {
+    Low,
+    Medium,
+    High,
+    Critical,
+}
+
+impl FailOnArg {
+    pub(crate) fn as_severity(self) -> kuzushi_core::Severity {
+        match self {
+            Self::Low => kuzushi_core::Severity::Low,
+            Self::Medium => kuzushi_core::Severity::Medium,
+            Self::High => kuzushi_core::Severity::High,
+            Self::Critical => kuzushi_core::Severity::Critical,
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 pub(crate) enum McpCommand {
     /// Run an MCP server over stdio. Speaks JSON-RPC 2.0 newline-delimited.

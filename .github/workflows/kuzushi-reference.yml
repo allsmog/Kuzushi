@@ -45,12 +45,23 @@ jobs:
       - name: Run Kuzushi scan
         id: kuzushi
         shell: bash
+        # Exit codes: 0 = clean, 3 = findings at/above --fail-on (the gate),
+        # anything else = scanner failure. Tune --fail-on to your policy.
         run: |
           set +e
-          kuzushi scan . --mode standard --ci | tee kuzushi-scan.log
+          kuzushi scan . --mode standard --ci \
+            --fail-on high \
+            --sarif kuzushi.sarif | tee kuzushi-scan.log
           KUZUSHI_STATUS=${PIPESTATUS[0]}
           set -e
           echo "status=${KUZUSHI_STATUS}" >> "${GITHUB_OUTPUT}"
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always() && hashFiles('kuzushi.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: kuzushi.sarif
+          category: kuzushi
 
       - name: Export findings JSON
         if: always()
@@ -76,6 +87,7 @@ jobs:
             kuzushi-scan.log
             kuzushi-findings.json
             kuzushi-report.md
+            kuzushi.sarif
           if-no-files-found: warn
 
       - name: Post PR comment
