@@ -1091,8 +1091,11 @@ const ciRequirements = [
 
 const releaseRequirements = [
   "name: dist",
-  "name: native-linux-x64",
-  "path: native/",
+  // Release jobs stage every green matrix build into native/<slug>/ so the
+  // npm tarball and the release .tgz are multi-platform.
+  "pattern: release-native-*",
+  "merge-multiple: true",
+  "Stage native binaries for every built platform",
   "pnpm verify:pack",
   "npm publish --access public --provenance --ignore-scripts",
   "npm publish --access public --ignore-scripts",
@@ -1109,10 +1112,10 @@ const publishScriptRequirements = [
 ];
 
 const stageNativeRequirements = [
-  '["kuzushi.exe", "kz.exe"]',
-  '["kuzushi", "kz"]',
-  '["codex.exe", "kuzushi-ts.exe"]',
-  '["codex", "kuzushi-ts"]',
+  // One shipped binary per platform; kz is an argv0 alias of kuzushi.
+  '["kuzushi.exe"] : ["kuzushi"]',
+  '["codex.exe", "kuzushi-ts.exe", "kz.exe"]',
+  '["codex", "kuzushi-ts", "kz"]',
   "readdirSync(outDir)",
   "allowedExes",
   "removed uncontracted native payload",
@@ -1234,7 +1237,8 @@ const packagingRequirements = [
   "isNativeBinaryFile",
   "candidates.find(isNativeBinaryFile)",
   "KUZUSHI_NATIVE_BIN must point to a file",
-  "KUZUSHI_NATIVE_BIN must point to a ${exe} binary when invoked as ${cliName}",
+  "KUZUSHI_NATIVE_BIN must point to a kuzushi or kz binary",
+  "argv0: cliName",
   "Could not find the Kuzushi native binary.",
   "process.exit(127)",
   "result.error",
@@ -1476,10 +1480,11 @@ const packagingRequirements = [
   "deferredAdapterDependencyFailures",
   "package dependencies must not install deferred adapter package ${name}",
   "package optionalDependencies.${name} must be ${spec}",
-  '"@kuzushi/tob-skills": "github:allsmog/tob-security-skills"',
-  '"@kuzushi/vuln-scout": "github:allsmog/vuln-scout"',
-  '"promptarmor-plugin": "github:allsmog/promptarmor-plugin"',
-  '"shinsa-plugin": "github:allsmog/shinsa-plugin"',
+  // Optional plugin deps are SHA-pinned for supply-chain integrity.
+  '"@kuzushi/tob-skills": "github:allsmog/tob-security-skills#',
+  '"@kuzushi/vuln-scout": "github:allsmog/vuln-scout#',
+  '"promptarmor-plugin": "github:allsmog/promptarmor-plugin#',
+  '"shinsa-plugin": "github:allsmog/shinsa-plugin#',
   "schemaExportFailures",
   "schemaExportedByWildcard",
   "required package file ${file} is not exported by ./schemas/*",
