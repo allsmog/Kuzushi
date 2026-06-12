@@ -46,28 +46,37 @@ fn render_active_activity_view(
     activity: &ActiveActivityViewModel<'_>,
 ) {
     let layout = activity.frame_layout();
+    // Footer height tracks the wrapped hint rows so narrow terminals get a
+    // second hint line instead of keys clipped off the right edge.
+    let footer = activity.footer(area.width);
+    let footer_rows = (1 + footer.hint_rows.len().max(1)) as u16;
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(layout.header_rows),
             Constraint::Min(0),
-            Constraint::Length(layout.footer_rows),
+            Constraint::Length(footer_rows),
         ])
         .split(area);
 
     render_header(frame, outer[0], activity);
 
-    let panes = Layout::default()
-        .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Percentage(layout.dag_percent),
-            Constraint::Percentage(layout.feed_percent),
-        ])
-        .split(outer[1]);
-
     let pane_chrome = activity.pane_chrome();
-    render_dag_pane_widget(frame, panes[0], activity, &pane_chrome.dag);
-    render_feed_pane_widget(frame, panes[1], activity, &pane_chrome.feed);
+    if activity.collapse_dag_pane() {
+        // No DAG tasks (single-tool run): the TASKS pane would only say
+        // "(no DAG tasks yet)" forever — give the OUTPUT pane full width.
+        render_feed_pane_widget(frame, outer[1], activity, &pane_chrome.feed);
+    } else {
+        let panes = Layout::default()
+            .direction(Direction::Horizontal)
+            .constraints([
+                Constraint::Percentage(layout.dag_percent),
+                Constraint::Percentage(layout.feed_percent),
+            ])
+            .split(outer[1]);
+        render_dag_pane_widget(frame, panes[0], activity, &pane_chrome.dag);
+        render_feed_pane_widget(frame, panes[1], activity, &pane_chrome.feed);
+    }
 
     render_focus_footer(frame, outer[2], activity);
 }
@@ -181,10 +190,14 @@ fn render_focus_footer(frame: &mut Frame<'_>, area: Rect, activity: &ActiveActiv
 
 fn focus_footer_lines(width: u16, activity: &ActiveActivityViewModel<'_>) -> Vec<Line<'static>> {
     let footer = activity.footer(width);
-    vec![
-        Line::from(vec![Span::styled(footer.body_line, theme::label())]),
-        Line::from(key_hint_spans(footer.hints)),
-    ]
+    let mut lines = vec![Line::from(vec![Span::styled(
+        footer.body_line,
+        theme::label(),
+    )])];
+    for row in &footer.hint_rows {
+        lines.push(Line::from(key_hint_spans(row)));
+    }
+    lines
 }
 
 fn key_hint_spans(hints: &[ActivityFooterHint]) -> Vec<Span<'static>> {

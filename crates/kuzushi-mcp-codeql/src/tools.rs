@@ -199,7 +199,7 @@ async fn run_codeql_and_parse(db: &Path, selector: &str, limit: usize) -> Result
     if let Some(cached) = lookup_memo(db, selector, limit) {
         return Ok(cached);
     }
-    let codeql = locate_codeql_binary().context("could not find the codeql binary")?;
+    let codeql = locate_codeql_binary()?.context("could not find the codeql binary")?;
     let sarif = tempfile::NamedTempFile::new()?;
     let mut command = Command::new(&codeql);
     command
@@ -326,6 +326,36 @@ fn sarif_step(location: &Value) -> Option<Value> {
 /// task; failures are logged to stderr and ignored — pre-warm is an
 /// optimisation, not a correctness gate.
 pub(crate) async fn spawn_prewarm() {
+    let Some(codeql) = codeql_binary_for_prewarm() else {
+        return;
+    };
+    let selectors = prewarm_selectors();
+    eprintln!(
+        "[kuzushi-mcp-codeql] prewarm: compiling {} pack/CWE pairs in background",
+        selectors.len()
+    );
+    for selector in selectors {
+        log_prewarm_outcome(&selector, run_prewarm_compile(&codeql, &selector));
+        tokio::task::yield_now().await;
+    }
+    eprintln!("[kuzushi-mcp-codeql] prewarm: complete");
+}
+
+fn codeql_binary_for_prewarm() -> Option<PathBuf> {
+    match locate_codeql_binary() {
+        Ok(Some(codeql)) => Some(codeql),
+        Ok(None) => {
+            eprintln!("[kuzushi-mcp-codeql] prewarm skipped: codeql binary not found");
+            None
+        }
+        Err(error) => {
+            eprintln!("[kuzushi-mcp-codeql] prewarm skipped: {error}");
+            None
+        }
+    }
+}
+
+fn prewarm_selectors() -> Vec<String> {
     const COMMON_CWES: &[&str] = &[
         "CWE-022", "CWE-078", "CWE-079", "CWE-089", "CWE-120", "CWE-190", "CWE-416", "CWE-918",
     ];
@@ -336,56 +366,79 @@ pub(crate) async fn spawn_prewarm() {
         "codeql/java-queries",
         "codeql/go-queries",
     ];
-    let Some(codeql) = locate_codeql_binary() else {
-        eprintln!("[kuzushi-mcp-codeql] prewarm skipped: codeql binary not found");
-        return;
-    };
-    eprintln!(
-        "[kuzushi-mcp-codeql] prewarm: compiling {} pack/CWE pairs in background",
-        PACKS.len() * COMMON_CWES.len()
-    );
-    for pack in PACKS {
-        for cwe in COMMON_CWES {
-            let selector = format!("{pack}:Security/CWE/{cwe}");
-            let mut command = Command::new(&codeql);
-            command.arg("query").arg("compile").arg(&selector);
-            if let Some(cache) = codeql_cache_dir() {
-                command.arg(format!("--common-caches={}", cache.display()));
-            }
-            let outcome = command
-                .stdin(std::process::Stdio::null())
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status();
-            match outcome {
-                Ok(status) if status.success() => {
-                    eprintln!("[kuzushi-mcp-codeql] prewarm ok: {selector}");
-                }
-                Ok(status) => {
-                    eprintln!("[kuzushi-mcp-codeql] prewarm skipped (exit {status}): {selector}");
-                }
-                Err(err) => {
-                    eprintln!("[kuzushi-mcp-codeql] prewarm error: {selector}: {err}");
-                }
-            }
-            tokio::task::yield_now().await;
-        }
-    }
-    eprintln!("[kuzushi-mcp-codeql] prewarm: complete");
+    PACKS
+        .iter()
+        .flat_map(|pack| {
+            COMMON_CWES
+                .iter()
+                .map(move |cwe| format!("{pack}:Security/CWE/{cwe}"))
+        })
+        .collect()
 }
 
-fn locate_codeql_binary() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("KUZUSHI_CODEQL_BIN") {
-        let candidate = PathBuf::from(path);
-        if candidate.is_file() {
-            return Some(candidate);
+fn run_prewarm_compile(codeql: &Path, selector: &str) -> std::io::Result<std::process::ExitStatus> {
+    let mut command = Command::new(codeql);
+    command.arg("query").arg("compile").arg(selector);
+    if let Some(cache) = codeql_cache_dir() {
+        command.arg(format!("--common-caches={}", cache.display()));
+    }
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+}
+
+fn log_prewarm_outcome(selector: &str, outcome: std::io::Result<std::process::ExitStatus>) {
+    match outcome {
+        Ok(status) if status.success() => {
+            eprintln!("[kuzushi-mcp-codeql] prewarm ok: {selector}");
+        }
+        Ok(status) => {
+            eprintln!("[kuzushi-mcp-codeql] prewarm skipped (exit {status}): {selector}");
+        }
+        Err(err) => {
+            eprintln!("[kuzushi-mcp-codeql] prewarm error: {selector}: {err}");
         }
     }
-    for candidate in [
+}
+
+fn locate_codeql_binary() -> Result<Option<PathBuf>> {
+    if let Some(configured) = configured_codeql_binary()? {
+        return Ok(Some(configured));
+    }
+    Ok(find_executable_on_path("codeql").or_else(standard_codeql_binary))
+}
+
+fn configured_codeql_binary() -> Result<Option<PathBuf>> {
+    let Some(path) = std::env::var_os("KUZUSHI_CODEQL_BIN") else {
+        return Ok(None);
+    };
+    let candidate = PathBuf::from(path);
+    if candidate.is_file() {
+        return Ok(Some(candidate));
+    }
+    anyhow::bail!(
+        "KUZUSHI_CODEQL_BIN points to a missing CodeQL binary: {}",
+        candidate.display()
+    )
+}
+
+fn standard_codeql_binary() -> Option<PathBuf> {
+    [
+        PathBuf::from("/opt/homebrew/bin/codeql"),
         PathBuf::from("/opt/codeql/codeql/codeql"),
         PathBuf::from("/usr/local/bin/codeql"),
         PathBuf::from("/usr/bin/codeql"),
-    ] {
+    ]
+    .into_iter()
+    .find(|candidate| candidate.is_file())
+}
+
+fn find_executable_on_path(name: &str) -> Option<PathBuf> {
+    let paths = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&paths) {
+        let candidate = dir.join(name);
         if candidate.is_file() {
             return Some(candidate);
         }
@@ -612,5 +665,56 @@ fi
         spawn_prewarm().await;
 
         restore_env("KUZUSHI_CODEQL_BIN", previous);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn locate_codeql_binary_uses_valid_override() {
+        let _guard = env_lock().lock().unwrap();
+        let temp = tempdir().unwrap();
+        let fake = fake_codeql(&temp);
+        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
+        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake);
+
+        let resolved = locate_codeql_binary().unwrap().unwrap();
+
+        restore_env("KUZUSHI_CODEQL_BIN", previous);
+        assert_eq!(resolved, fake);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn locate_codeql_binary_rejects_invalid_override_without_path_fallback() {
+        let _guard = env_lock().lock().unwrap();
+        let temp = tempdir().unwrap();
+        let fake = fake_codeql(&temp);
+        let previous_bin = std::env::var_os("KUZUSHI_CODEQL_BIN");
+        let previous_path = std::env::var_os("PATH");
+        std::env::set_var("KUZUSHI_CODEQL_BIN", temp.path().join("missing-codeql"));
+        std::env::set_var("PATH", fake.parent().unwrap());
+
+        let error = locate_codeql_binary().unwrap_err().to_string();
+
+        restore_env("KUZUSHI_CODEQL_BIN", previous_bin);
+        restore_env("PATH", previous_path);
+        assert!(error.contains("KUZUSHI_CODEQL_BIN points to a missing CodeQL binary"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn locate_codeql_binary_falls_back_to_path_when_override_unset() {
+        let _guard = env_lock().lock().unwrap();
+        let temp = tempdir().unwrap();
+        let fake = fake_codeql(&temp);
+        let previous_bin = std::env::var_os("KUZUSHI_CODEQL_BIN");
+        let previous_path = std::env::var_os("PATH");
+        std::env::remove_var("KUZUSHI_CODEQL_BIN");
+        std::env::set_var("PATH", fake.parent().unwrap());
+
+        let resolved = locate_codeql_binary().unwrap().unwrap();
+
+        restore_env("KUZUSHI_CODEQL_BIN", previous_bin);
+        restore_env("PATH", previous_path);
+        assert_eq!(resolved, fake);
     }
 }

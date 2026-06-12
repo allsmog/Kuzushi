@@ -56,6 +56,14 @@ pub(crate) fn run_terminal_shell(
     let mut terminal = setup_terminal()?;
     let mut app = ShellApp::with_registry(config, target, registry);
     open_start_view(&mut app);
+    // Bare interactive launch (no --target): open the target picker so the
+    // front door lands in the same guided journey as `shell --target .`.
+    // Done here (not in construction) so headless/test apps keep their
+    // targetless default, and the explicit-target rule stays intact — the
+    // operator picks, nothing silently falls back to cwd.
+    if app.target.is_none() && !crate::app::skip_onboarding_env() {
+        app.open_target_picker();
+    }
     // Interactive launches kick off the one-shot session-model ranking that
     // refines the walker's preselection. Done here (not in construction) so
     // headless/test apps never spawn a background tool.
@@ -71,7 +79,10 @@ pub(crate) fn open_start_view(app: &mut ShellApp) {
     // would be clobbered the moment the terminal shell loop boots.
     if matches!(
         app.shell_view,
-        ShellView::ModelPicker | ShellView::AuthMethodPicker(_) | ShellView::PlanningPicker
+        ShellView::ModelPicker
+            | ShellView::AuthMethodPicker(_)
+            | ShellView::PlanningPicker
+            | ShellView::TargetPicker
     ) {
         return;
     }

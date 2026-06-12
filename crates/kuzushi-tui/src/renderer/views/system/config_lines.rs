@@ -16,12 +16,14 @@ fn push_config_summary(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area
     lines.push(blank());
     lines.push(divider(model.summary_title, area.width));
     for row in &model.summary_rows {
-        lines.push(config_summary_row(row));
+        lines.extend(config_summary_row(row, area.width));
     }
 }
 
-fn config_summary_row(row: &ConfigSummaryRow) -> Line<'static> {
-    detail(&row.cells[0], &row.cells[1])
+fn config_summary_row(row: &ConfigSummaryRow, width: u16) -> Vec<Line<'static>> {
+    // Several config values run long (auth env summary, oauth status,
+    // build provenance) — wrap them under the key column.
+    detail_wrapped(&row.cells[0], &row.cells[1], width)
 }
 
 fn push_config_model_table(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area: Rect) {

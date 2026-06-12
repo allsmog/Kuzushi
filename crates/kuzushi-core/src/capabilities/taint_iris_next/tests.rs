@@ -721,20 +721,10 @@ mod tests {
         // both modes here so we always exercise both backends regardless of
         // the host environment.
         plan.backend.structural_tool = "rg".to_string();
-        let rg_ids: BTreeSet<String> = extract_taint_iris_next_evidence(&plan)
-            .unwrap()
-            .candidates
-            .into_iter()
-            .map(|candidate| candidate.id)
-            .collect();
+        let rg_ids = structural_candidate_ids(&plan);
 
         plan.backend.structural_tool = "inproc".to_string();
-        let inproc_ids: BTreeSet<String> = extract_taint_iris_next_evidence(&plan)
-            .unwrap()
-            .candidates
-            .into_iter()
-            .map(|candidate| candidate.id)
-            .collect();
+        let inproc_ids = structural_candidate_ids(&plan);
 
         assert!(
             !rg_ids.is_empty(),
@@ -744,6 +734,16 @@ mod tests {
             rg_ids, inproc_ids,
             "rg-derived and in-process candidate ids should match"
         );
+    }
+
+    fn structural_candidate_ids(plan: &TaintIrisNextPlan) -> BTreeSet<String> {
+        extract_taint_iris_next_evidence(plan)
+            .unwrap()
+            .candidates
+            .into_iter()
+            .filter(|candidate| candidate.source == "structural")
+            .map(|candidate| candidate.id)
+            .collect()
     }
 
     fn which_rg() -> Option<()> {

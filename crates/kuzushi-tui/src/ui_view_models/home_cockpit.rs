@@ -1,4 +1,7 @@
-use super::{attack_surface_risk_model, ui_latest_run_path, ui_run_dir, AttackSurfaceRiskModel};
+use super::{
+    attack_surface_risk_model, journey_model, ui_latest_run_path, ui_run_dir,
+    AttackSurfaceRiskModel, JourneyModel,
+};
 use crate::ShellApp;
 use kuzushi_core::run_artifacts::{
     canonical_run_artifact_spec, canonical_run_artifact_specs, RunArtifactSpec,
@@ -15,6 +18,10 @@ const HOME_COMMANDS: [&str; 6] = [
     "findings",
     "runs",
 ];
+/// With an active engagement, `next` (continue the journey) replaces the
+/// first-run `quickstart` slot.
+const HOME_JOURNEY_COMMANDS: [&str; 6] =
+    ["next", "scan .", "findings", "modules", "recommend", "runs"];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HomeCockpitModel {
@@ -29,6 +36,9 @@ pub struct HomeCockpitModel {
     pub rail_summary: Option<String>,
     pub command_labels: [&'static str; 6],
     pub artifacts: Vec<HomeArtifactRow>,
+    /// The engagement spine (組 map → 崩 hunt → 作 confirm → 掛 fix), derived
+    /// from workspace state. `None` without a target.
+    pub journey: Option<JourneyModel>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,6 +59,7 @@ pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
     let module_count = app.registry.modules().count();
     let finding_count = app.findings.len();
     let artifacts = home_artifact_rows(&run.run_dir);
+    let journey = journey_model(app);
     HomeCockpitModel {
         title: "HOME",
         summary_rows: home_summary_rows(
@@ -59,12 +70,21 @@ pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
             finding_count,
         ),
         attack_surface: attack_surface_risk_model(&run.run_dir),
-        next_action: home_next_action(app),
+        next_action: home_next_action(journey.as_ref()),
         rail_legend:
             "rails: ✓ recorded · ○ placeholder · ◆ partial · ⚠ failed/malformed · ■ missing",
         rail_summary: home_rail_summary(&artifacts),
-        command_labels: HOME_COMMANDS,
+        command_labels: home_command_labels(journey.as_ref()),
         artifacts,
+        journey,
+    }
+}
+
+fn home_command_labels(journey: Option<&JourneyModel>) -> [&'static str; 6] {
+    if journey.is_some() {
+        HOME_JOURNEY_COMMANDS
+    } else {
+        HOME_COMMANDS
     }
 }
 
@@ -111,18 +131,11 @@ fn target_label(app: &ShellApp) -> String {
         .unwrap_or_else(|| "none".to_string())
 }
 
-fn home_next_action(app: &ShellApp) -> String {
-    if app.target.is_none() {
-        return "Run `scan .` to scan the current directory and create the first run artifacts."
-            .to_string();
+fn home_next_action(journey: Option<&JourneyModel>) -> String {
+    if let Some(journey) = journey {
+        return journey.next_action.clone();
     }
-    if app.findings.is_empty() {
-        return format!(
-            "Run {} to populate findings and proof rails.",
-            app.first_finding_scan_command()
-        );
-    }
-    "Open findings, recommend, or runs to continue from recorded artifacts.".to_string()
+    "Run `scan .` to scan the current directory and create the first run artifacts.".to_string()
 }
 
 fn home_artifact_rows(run_dir: &Path) -> Vec<HomeArtifactRow> {

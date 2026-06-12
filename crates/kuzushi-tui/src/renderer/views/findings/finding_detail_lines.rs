@@ -66,11 +66,13 @@ fn append_finding_evidence(
     } else {
         lines.push(divider("EVIDENCE", area.width));
     }
+    // Evidence is the core read of this view — wrap long message lines
+    // instead of clipping them ("…" on the payload defeats the purpose).
+    let budget = (area.width.saturating_sub(2) as usize).max(8);
     for line in &finding.message_lines {
-        lines.push(indent(
-            Line::raw(fit(line, area.width.saturating_sub(2) as usize)),
-            2,
-        ));
+        for part in wrap_text(line, budget) {
+            lines.push(indent(Line::raw(part), 2));
+        }
     }
 }
 
@@ -78,14 +80,16 @@ fn append_triage_summary(finding: &FindingDetailModel, area: Rect, lines: &mut V
     if let Some(triage) = &finding.triage {
         lines.push(blank());
         lines.push(divider("TRIAGE", area.width));
-        append_triage_lines(triage, lines);
+        append_triage_lines(triage, area, lines);
     }
 }
 
-fn append_triage_lines(triage: &TriageSummaryModel, lines: &mut Vec<Line<'static>>) {
+fn append_triage_lines(triage: &TriageSummaryModel, area: Rect, lines: &mut Vec<Line<'static>>) {
     lines.push(detail("verdict", &triage.verdict));
     lines.push(detail("confidence", &triage.confidence));
-    lines.push(detail("rationale", &triage.rationale));
+    // The model's reasoning is prose and routinely exceeds one row — wrap
+    // it; a clipped rationale defeats the triage read.
+    lines.extend(detail_wrapped("rationale", &triage.rationale, area.width));
 }
 
 fn append_finding_commands(area: Rect, lines: &mut Vec<Line<'static>>) {

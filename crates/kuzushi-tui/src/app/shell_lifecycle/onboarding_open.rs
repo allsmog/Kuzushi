@@ -67,6 +67,23 @@ impl ShellApp {
         self.open_phase_picker(crate::app::WorkflowPhase::Map);
     }
 
+    /// Launch-time target picker for a bare interactive `kuzushi` (no
+    /// `--target`). Offers cwd + nearby repos / previous kuzushi targets;
+    /// selection re-enters `apply_initial_onboarding_phase` so the chain
+    /// continues into the model/auth/planning pickers. Called only from
+    /// the interactive terminal path — never construction — so headless
+    /// and test apps keep their targetless default.
+    pub(crate) fn open_target_picker(&mut self) {
+        let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
+        self.target_candidates = crate::app::discover_target_candidates(&cwd);
+        self.target_picker_cursor = 0;
+        self.shell_view = ShellView::TargetPicker;
+        self.log(
+            "onboarding",
+            "no target set — pick what to scan with ↑/↓/Enter (Esc to browse without one)",
+        );
+    }
+
     /// Open the picker for one engagement phase: announce the phase, list only
     /// its tasks, and pre-check the recommended (target-aware) set. Cached
     /// Map artifacts stay unchecked — reused, not rebuilt, unless the operator
@@ -235,7 +252,10 @@ pub(crate) fn auth_ready_for_provider(provider: &str) -> bool {
             std::env::var_os("ANTHROPIC_API_KEY").is_some()
                 || oauth_provider_status("anthropic").starts_with("stored")
         }
-        "openai" => std::env::var_os("OPENAI_API_KEY").is_some(),
+        "openai" => {
+            std::env::var_os("OPENAI_API_KEY").is_some()
+                || oauth_provider_status("openai-codex").starts_with("stored")
+        }
         "openai-codex" => oauth_provider_status("openai-codex").starts_with("stored"),
         _ => true,
     }

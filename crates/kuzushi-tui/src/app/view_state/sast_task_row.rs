@@ -144,6 +144,12 @@ pub enum ShellView {
     /// (anthropic, openai). The string is the provider id; this stays
     /// on the variant so the renderer + key handler stay stateless.
     AuthMethodPicker(String),
+    /// Launch-time target picker. Opens when an interactive shell starts
+    /// with no `--target` (bare `kuzushi`), offering cwd + child repos /
+    /// previous kuzushi targets so the front door lands in the same guided
+    /// journey as `kuzushi shell --target .`. Explicit-target consent
+    /// (PR #64) is preserved — the operator picks; nothing defaults.
+    TargetPicker,
     /// Claude-Code-style multi-select that drives the eight planning
     /// tasks (context build, x-ray, threat-model variants, CPG, CodeQL
     /// DB, threat intel). State lives on `app.planning_*` fields.

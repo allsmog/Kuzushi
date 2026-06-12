@@ -158,6 +158,9 @@ fn config_summary_rows(
     reasoning: &str,
 ) -> Vec<ConfigSummaryRow> {
     let mut rows = vec![
+        // Which binary is this? Published release and working-tree builds
+        // share a version string; the sha/dirty/profile cell tells them apart.
+        config_summary_row("build", crate::build_provenance::build_summary()),
         config_summary_row("backend", backend),
         config_summary_row("provider", app.provider_label()),
         config_summary_row("model", model),

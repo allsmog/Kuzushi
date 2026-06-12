@@ -1,11 +1,16 @@
 use super::*;
-use crate::ui_view_models::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
+use crate::ui_view_models::{
+    home_cockpit_model, HomeArtifactRow, HomeCockpitModel, JourneyModel, JourneyPhaseState,
+};
 
 pub(crate) fn home_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let model = home_cockpit_model(app);
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider(model.title, area.width));
+    if let Some(journey) = &model.journey {
+        lines.push(journey_rail_line(journey));
+    }
     append_home_summary(&mut lines, &model, area.width);
     lines.push(blank());
     lines.push(next_action_line(&model.next_action, area.width as usize));
@@ -17,6 +22,32 @@ pub(crate) fn home_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         area.width as usize,
     ));
     lines
+}
+
+/// The engagement spine: `組 map ✓ · 崩 hunt ● · 作 confirm ○ · 掛 fix ○`.
+/// Always one line — four short words fit any terminal the footer fits.
+fn journey_rail_line(journey: &JourneyModel) -> Line<'static> {
+    let mut spans = vec![Span::raw(" ")];
+    for (index, status) in journey.phases.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" · ", theme::subtle()));
+        }
+        let style = journey_phase_style(status.state);
+        spans.push(Span::styled(
+            format!("{} {} ", status.phase.kanji(), status.phase.word()),
+            style,
+        ));
+        spans.push(Span::styled(status.state.glyph().to_string(), style));
+    }
+    Line::from(spans)
+}
+
+fn journey_phase_style(state: JourneyPhaseState) -> Style {
+    match state {
+        JourneyPhaseState::Done => theme::success(),
+        JourneyPhaseState::Current => theme::warn(),
+        JourneyPhaseState::Pending => theme::subtle(),
+    }
 }
 
 fn append_home_summary(lines: &mut Vec<Line<'static>>, model: &HomeCockpitModel, width: u16) {

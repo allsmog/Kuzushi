@@ -5,6 +5,9 @@ pub(crate) struct ActivityFooterModel {
     pub(crate) body: String,
     pub(crate) body_line: String,
     pub(crate) hints: &'static [ActivityFooterHint],
+    /// Hints wrapped to the pane width — one row per inner Vec, so narrow
+    /// terminals get a second hint line instead of keys clipped to "[c".
+    pub(crate) hint_rows: Vec<Vec<ActivityFooterHint>>,
     pub(crate) plain_hints: Vec<(&'static str, &'static str)>,
 }
 
@@ -46,15 +49,45 @@ const NARROW_HINTS: &[ActivityFooterHint] = &[
     footer_hint!("c", "cancel"),
 ];
 
-pub(crate) fn activity_footer_model(session: &ActivitySession, width: u16) -> ActivityFooterModel {
+pub(crate) fn activity_footer_model(
+    session: &ActivitySession,
+    width: u16,
+    running_tool: Option<&str>,
+) -> ActivityFooterModel {
     let hints = footer_hints(width);
-    let body = focus_body(session);
+    let body = focus_body(session, running_tool);
     ActivityFooterModel {
         body_line: fit(&body, width as usize),
         body,
         hints,
+        hint_rows: wrap_hints(hints, width as usize),
         plain_hints: plain_hint_pairs(hints),
     }
+}
+
+/// Greedy-wrap hints into rows that fit `width`; every key stays visible.
+fn wrap_hints(hints: &[ActivityFooterHint], width: usize) -> Vec<Vec<ActivityFooterHint>> {
+    let mut rows: Vec<Vec<ActivityFooterHint>> = Vec::new();
+    let mut row: Vec<ActivityFooterHint> = Vec::new();
+    let mut used = 1usize; // leading space
+    for hint in hints {
+        let cell = hint_display_width(hint);
+        if !row.is_empty() && used + cell > width {
+            rows.push(std::mem::take(&mut row));
+            used = 1;
+        }
+        used += cell;
+        row.push(*hint);
+    }
+    if !row.is_empty() {
+        rows.push(row);
+    }
+    rows
+}
+
+fn hint_display_width(hint: &ActivityFooterHint) -> usize {
+    // Rendered as `[key hint] ` — bracketed pair plus one separator space.
+    hint.full_key_text.chars().count() + 1 + hint.full_hint_text.chars().count() + 1
 }
 
 fn plain_hint_pairs(hints: &[ActivityFooterHint]) -> Vec<(&'static str, &'static str)> {
@@ -64,10 +97,22 @@ fn plain_hint_pairs(hints: &[ActivityFooterHint]) -> Vec<(&'static str, &'static
         .collect()
 }
 
-fn focus_body(session: &ActivitySession) -> String {
+fn focus_body(session: &ActivitySession, running_tool: Option<&str>) -> String {
+    // Taskless (single-tool) runs have nothing to focus — "hover to
+    // inspect a task" would point at a pane that isn't on screen.
+    if session.tasks.is_empty() {
+        return taskless_body(running_tool);
+    }
     match session.focus_task.as_ref() {
         Some(task_id) => focused_task_body(session, task_id),
         None => " ▸ FOCUS  hover [j/k] to inspect a task".to_string(),
+    }
+}
+
+fn taskless_body(running_tool: Option<&str>) -> String {
+    match running_tool {
+        Some(tool) => format!(" ▸ RUNNING  {tool} — output streams above · c cancels"),
+        None => " ▸ FOCUS  no DAG tasks this run".to_string(),
     }
 }
 
@@ -123,7 +168,7 @@ mod tests {
         session.focus_task = Some(row.task_id.clone());
         session.tasks.insert(row.task_id.clone(), row);
 
-        let model = activity_footer_model(&session, 120);
+        let model = activity_footer_model(&session, 120, None);
 
         assert_eq!(
             model.body,
@@ -145,24 +190,55 @@ mod tests {
     }
 
     #[test]
+    fn hints_wrap_to_extra_rows_on_narrow_terminals_without_losing_keys() {
+        let session = ActivitySession::new("r-1");
+        let wide = activity_footer_model(&session, 120, None);
+        assert_eq!(wide.hint_rows.len(), 1, "wide terminals keep one row");
+
+        let narrow = activity_footer_model(&session, 40, None);
+        assert!(narrow.hint_rows.len() > 1, "narrow terminals wrap");
+        let total: usize = narrow.hint_rows.iter().map(Vec::len).sum();
+        assert_eq!(total, narrow.hints.len(), "every key survives the wrap");
+    }
+
+    #[test]
+    fn taskless_footer_names_the_running_tool_or_states_the_absence() {
+        // Never tell the operator to inspect tasks that don't exist.
+        let session = ActivitySession::new("r-1");
+        assert_eq!(
+            activity_footer_model(&session, 80, Some("threat-model:build")).body,
+            " ▸ RUNNING  threat-model:build — output streams above · c cancels"
+        );
+        assert_eq!(
+            activity_footer_model(&session, 80, None).body,
+            " ▸ FOCUS  no DAG tasks this run"
+        );
+    }
+
+    #[test]
     fn activity_footer_model_handles_empty_and_missing_focus() {
         let mut session = ActivitySession::new("r-1");
+        // With tasks present, the hover hint and focus drill return.
+        session.tasks.insert(
+            "triage:run".to_string(),
+            DagTaskRow::queued("triage:run".into(), "triage".into(), Vec::new()),
+        );
         assert_eq!(
-            activity_footer_model(&session, 80).body,
+            activity_footer_model(&session, 80, None).body,
             " ▸ FOCUS  hover [j/k] to inspect a task"
         );
         assert_eq!(
-            activity_footer_model(&session, 18).body_line,
+            activity_footer_model(&session, 18, None).body_line,
             " ▸ FOCUS  hover […"
         );
 
         session.focus_task = Some("patch:finding".to_string());
         assert_eq!(
-            activity_footer_model(&session, 80).body,
+            activity_footer_model(&session, 80, None).body,
             " ▸ FOCUS  patch:finding  (not yet recorded)"
         );
         assert_eq!(
-            activity_footer_model(&session, 80)
+            activity_footer_model(&session, 80, None)
                 .hints
                 .iter()
                 .map(|hint| hint.plain_key_text)
@@ -170,7 +246,7 @@ mod tests {
             vec!["j/k", "Tab", "V", "p", "R", "c"]
         );
         assert_eq!(
-            activity_footer_model(&session, 80).plain_hints,
+            activity_footer_model(&session, 80, None).plain_hints,
             vec![
                 ("j/k", "scroll"),
                 ("Tab", "pane"),

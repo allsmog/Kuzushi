@@ -3,6 +3,12 @@ use crate::ui_view_models::{
     auth_login_model, auth_provider_rows, config_model, cost_model, AuthLoginModel, ConfigModel,
     CostBudgetStatus, CostModel, CostTone,
 };
+use ratatui::style::Style;
+
+/// Label column for the auth view's kv rows. Inline rows pad the first
+/// label to this width so values align down a section; stacked rows (the
+/// narrow-terminal fallback) pad every label to it.
+const KV_LABEL_WIDTH: usize = 10;
 
 pub(crate) fn auth_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
@@ -18,6 +24,100 @@ pub(crate) fn auth_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines
 }
 
+/// One `label value` cell of a kv row. Rows render inline
+/// (`label value · label value`) when they fit the panel width and fall
+/// back to one stacked line per pair so narrow terminals never clip a
+/// value mid-word.
+struct AuthKv {
+    label: &'static str,
+    value: String,
+    style: Style,
+}
+
+fn kv(label: &'static str, value: impl Into<String>, style: Style) -> AuthKv {
+    AuthKv {
+        label,
+        value: value.into(),
+        style,
+    }
+}
+
+fn kv_row(pairs: &[AuthKv], width: u16) -> Vec<Line<'static>> {
+    let inline = kv_inline_line(pairs);
+    if inline.width() <= width as usize {
+        return vec![inline];
+    }
+    pairs
+        .iter()
+        .map(|pair| kv_stacked_line(pair, width))
+        .collect()
+}
+
+fn kv_inline_line(pairs: &[AuthKv]) -> Line<'static> {
+    let mut spans = vec![Span::raw(" ")];
+    for (index, pair) in pairs.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" · ", theme::subtle()));
+        }
+        spans.push(Span::styled(
+            kv_inline_label(pair.label, index),
+            theme::muted(),
+        ));
+        spans.push(Span::styled(pair.value.clone(), pair.style));
+    }
+    Line::from(spans)
+}
+
+fn kv_inline_label(label: &str, index: usize) -> String {
+    if index == 0 {
+        kv_label_col(label)
+    } else {
+        format!("{label} ")
+    }
+}
+
+fn kv_label_col(label: &str) -> String {
+    format!("{label:<width$}", width = KV_LABEL_WIDTH)
+}
+
+fn kv_stacked_line(pair: &AuthKv, width: u16) -> Line<'static> {
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(kv_label_col(pair.label), theme::muted()),
+        Span::styled(fit(&pair.value, kv_value_budget(width)), pair.style),
+    ])
+}
+
+fn kv_value_budget(width: u16) -> usize {
+    (width as usize).saturating_sub(KV_LABEL_WIDTH + 1).max(8)
+}
+
+/// Push a kv row whose value is prose (may run long): wrap it across
+/// continuation lines under the label column instead of clipping.
+fn push_wrapped_kv(
+    lines: &mut Vec<Line<'static>>,
+    label: &'static str,
+    value: &str,
+    style: Style,
+    width: u16,
+) {
+    for (index, part) in wrap_text(value, kv_value_budget(width))
+        .into_iter()
+        .enumerate()
+    {
+        let lead = if index == 0 {
+            kv_label_col(label)
+        } else {
+            " ".repeat(KV_LABEL_WIDTH)
+        };
+        lines.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(lead, theme::muted()),
+            Span::styled(part, style),
+        ]));
+    }
+}
+
 fn push_auth_login_section(
     lines: &mut Vec<Line<'static>>,
     model: Option<&AuthLoginModel>,
@@ -27,29 +127,43 @@ fn push_auth_login_section(
         return;
     };
     lines.push(divider("OAUTH · latest flow", area.width));
-    lines.push(Line::from(vec![
+    lines.extend(kv_row(
+        &[
+            kv("provider", login.provider.clone(), theme::primary()),
+            kv("method", login.method.clone(), theme::primary()),
+            kv(
+                "status",
+                login.status.clone(),
+                auth_login_status_style(&login.status),
+            ),
+        ],
+        area.width,
+    ));
+    push_wrapped_kv(lines, "flow", &login.flow, theme::primary(), area.width);
+    lines.push(auth_store_line(login, area.width));
+    lines.push(blank());
+}
+
+fn auth_store_line(login: &AuthLoginModel, width: u16) -> Line<'static> {
+    let inline = Line::from(vec![
         Span::raw(" "),
-        Span::styled("provider  ", theme::muted()),
-        Span::styled(login.provider.clone(), theme::primary()),
-        Span::styled(" · ", theme::subtle()),
-        Span::styled("method ", theme::muted()),
-        Span::styled(login.method.clone(), theme::primary()),
-        Span::styled(" · ", theme::subtle()),
-        Span::styled("status ", theme::muted()),
-        Span::styled(login.status.clone(), auth_login_status_style(&login.status)),
-    ]));
-    lines.push(Line::from(vec![
-        Span::raw(" "),
-        Span::styled("flow      ", theme::muted()),
-        Span::styled(login.flow.clone(), theme::primary()),
-    ]));
-    lines.push(Line::from(vec![
-        Span::raw(" "),
-        Span::styled("store     ", theme::muted()),
+        Span::styled(kv_label_col("store"), theme::muted()),
         Span::styled(login.store_path.clone(), theme::primary()),
         Span::styled(" · values hidden", theme::muted()),
-    ]));
-    lines.push(blank());
+    ]);
+    if inline.width() <= width as usize {
+        return inline;
+    }
+    // Narrow: drop the suffix and keep the tail of the path — the file
+    // name is the useful part, not the home-dir prefix.
+    Line::from(vec![
+        Span::raw(" "),
+        Span::styled(kv_label_col("store"), theme::muted()),
+        Span::styled(
+            fit_path(&login.store_path, kv_value_budget(width)),
+            theme::primary(),
+        ),
+    ])
 }
 
 fn auth_login_status_style(status: &str) -> ratatui::style::Style {
@@ -72,17 +186,25 @@ fn push_auth_rotate_section(lines: &mut Vec<Line<'static>>, area: Rect) {
         "clear oauth: `auth login anthropic` or `auth login openai` to refresh",
         "switch model: `model <provider:id>` (e.g. `model anthropic:claude-opus-4-7`)",
     ] {
-        lines.push(Line::from(vec![
-            Span::raw(" "),
-            Span::styled("• ", theme::muted()),
-            Span::styled(
-                fit(hint, area.width.saturating_sub(3) as usize),
-                theme::primary(),
-            ),
-        ]));
+        push_bullet_hint(lines, hint, area.width);
     }
     lines.push(blank());
 }
+
+/// Bullet hints wrap to continuation lines under the bullet — an
+/// ellipsized shell command is useless, a wrapped one still pastes.
+fn push_bullet_hint(lines: &mut Vec<Line<'static>>, hint: &str, width: u16) {
+    let budget = (width as usize).saturating_sub(3).max(8);
+    for (index, part) in wrap_text(hint, budget).into_iter().enumerate() {
+        let lead = if index == 0 { "• " } else { "  " };
+        lines.push(Line::from(vec![
+            Span::raw(" "),
+            Span::styled(lead.to_string(), theme::muted()),
+            Span::styled(part, theme::primary()),
+        ]));
+    }
+}
+
 fn push_auth_provider_section(lines: &mut Vec<Line<'static>>, app: &ShellApp, area: Rect) {
     let providers = auth_provider_rows(app);
     let (backend_rows, provider_rows): (Vec<_>, Vec<_>) = providers
@@ -91,74 +213,80 @@ fn push_auth_provider_section(lines: &mut Vec<Line<'static>>, app: &ShellApp, ar
     if !backend_rows.is_empty() {
         lines.push(divider("BACKEND", area.width));
         for row in &backend_rows {
-            lines.push(auth_provider_line(row));
+            lines.extend(auth_provider_lines(row, area.width));
         }
         lines.push(blank());
     }
     lines.push(divider("PROVIDERS", area.width));
     for row in &provider_rows {
-        lines.push(auth_provider_line(row));
+        lines.extend(auth_provider_lines(row, area.width));
     }
     lines.push(blank());
 }
 
 fn push_auth_model_section(lines: &mut Vec<Line<'static>>, model: &ConfigModel, area: Rect) {
     lines.push(divider("MODEL · effective", area.width));
-    lines.push(auth_current_model_line(&model.model, &model.backend));
-    lines.push(Line::from(vec![
-        Span::raw(" "),
-        Span::styled("reasoning ", theme::muted()),
-        Span::styled(model.reasoning.clone(), theme::primary()),
-    ]));
+    lines.extend(kv_row(
+        &[
+            kv("current", model.model.clone(), theme::primary()),
+            kv("backend", model.backend.clone(), theme::primary()),
+            kv("routing", "direct", theme::primary()),
+        ],
+        area.width,
+    ));
+    lines.extend(kv_row(
+        &[kv("reasoning", model.reasoning.clone(), theme::primary())],
+        area.width,
+    ));
     lines.push(blank());
-}
-
-fn auth_current_model_line(model: &str, backend: &str) -> Line<'static> {
-    Line::from(vec![
-        Span::raw(" "),
-        Span::styled("current  ", theme::muted()),
-        Span::styled(model.to_string(), theme::primary()),
-        Span::styled(" · ", theme::subtle()),
-        Span::styled("backend ", theme::muted()),
-        Span::styled(backend.to_string(), theme::primary()),
-        Span::styled(" · ", theme::subtle()),
-        Span::styled("routing ", theme::muted()),
-        Span::styled("direct", theme::primary()),
-    ])
 }
 
 fn push_auth_spend_section(lines: &mut Vec<Line<'static>>, model: &CostModel, area: Rect) {
     lines.push(divider("SPEND · this session", area.width));
-    lines.push(auth_spend_line(
-        model.auth_spend_cells[0].clone(),
-        model.auth_spend_cells[1].clone(),
+    lines.extend(kv_row(
+        &[
+            kv(
+                "session",
+                model.auth_spend_cells[0].clone(),
+                theme::primary(),
+            ),
+            kv(
+                "last tool",
+                model.auth_spend_cells[1].clone(),
+                theme::primary(),
+            ),
+        ],
+        area.width,
     ));
     if let Some(budget) = &model.budget_status {
-        lines.push(auth_budget_line(budget));
+        lines.extend(auth_budget_lines(budget, area.width));
     }
     lines.push(blank());
 }
 
-fn auth_spend_line(session_cost: String, last_tool: String) -> Line<'static> {
-    Line::from(vec![
-        Span::raw(" "),
-        Span::styled("session   ", theme::muted()),
-        Span::styled(session_cost, theme::primary()),
-        Span::styled("   · ", theme::subtle()),
-        Span::styled("last tool ", theme::muted()),
-        Span::styled(last_tool, theme::primary()),
-    ])
-}
-
-fn auth_budget_line(budget: &CostBudgetStatus) -> Line<'static> {
+fn auth_budget_lines(budget: &CostBudgetStatus, width: u16) -> Vec<Line<'static>> {
     let pct_style = auth_budget_tone_style(budget.tone);
-    Line::from(vec![
+    let inline = Line::from(vec![
         Span::raw(" "),
-        Span::styled("budget    ", theme::muted()),
+        Span::styled(kv_label_col("budget"), theme::muted()),
         Span::styled(budget.cells[0].clone(), theme::primary()),
-        Span::styled("   · ", theme::subtle()),
+        Span::styled(" · ", theme::subtle()),
         Span::styled(budget.cells[1].clone(), pct_style),
-    ])
+    ]);
+    if inline.width() <= width as usize {
+        return vec![inline];
+    }
+    vec![
+        kv_stacked_line(
+            &kv("budget", budget.cells[0].clone(), theme::primary()),
+            width,
+        ),
+        Line::from(vec![
+            Span::raw(" "),
+            Span::raw(" ".repeat(KV_LABEL_WIDTH)),
+            Span::styled(fit(&budget.cells[1], kv_value_budget(width)), pct_style),
+        ]),
+    ]
 }
 
 fn auth_budget_tone_style(tone: CostTone) -> ratatui::style::Style {
@@ -169,7 +297,7 @@ fn auth_budget_tone_style(tone: CostTone) -> ratatui::style::Style {
 }
 
 fn push_auth_commands(lines: &mut Vec<Line<'static>>, area: Rect) {
-    lines.push(command_list_line(
+    lines.extend(command_list_lines(
         &[
             "auth login openai browser",
             "auth login openai headless",

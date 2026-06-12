@@ -3413,6 +3413,198 @@ fn auth_view_renders_latest_oauth_flow_state() {
 }
 
 #[test]
+fn auth_view_stacks_and_wraps_on_narrow_terminals() {
+    // Narrow panes (tmux splits, mobile sshd) used to hard-clip every
+    // ` label value · label value` row mid-word ("method brows",
+    // "backe") and ellipsize the rotate commands into unusable
+    // fragments. The view must reflow instead: kv rows stack, prose and
+    // hints wrap, the store path keeps its tail, and every recovery
+    // command survives.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Auth;
+    app.auth_login = Some(AuthLoginView {
+        provider: "openai".to_string(),
+        method: "browser".to_string(),
+        status: "connected".to_string(),
+        detail: "credentials saved; validated against the provider".to_string(),
+        store_path: "/Users/operator/.kuzushi/oauth-credentials.json".to_string(),
+    });
+
+    let width: u16 = 36;
+    let area = ratatui::layout::Rect::new(0, 0, width, 50);
+    let lines = auth_lines(&app, area);
+    let texts: Vec<String> = lines.iter().map(line_text).collect();
+    let rendered = texts.join("\n");
+
+    for text in &texts {
+        assert!(
+            text.trim_end().chars().count() <= width as usize,
+            "line overflows {width} cols and would clip: {text:?}"
+        );
+    }
+    // kv values stack as whole words instead of clipping mid-word.
+    assert!(rendered.contains("method    browser"));
+    assert!(rendered.contains("status    connected"));
+    // Prose wraps; the tail of the message is still readable.
+    assert!(rendered.contains("provider"));
+    assert!(rendered.contains("validated against"));
+    // The store path keeps its useful tail, not the home-dir prefix.
+    assert!(rendered.contains("oauth-credentials.json"));
+    // Rotate hints wrap — the pasteable command survives in full.
+    assert!(rendered.contains("re-launch kuzushi"));
+    // Every recovery command is reachable; none hide behind an ellipsis.
+    for command in [
+        "auth login openai browser",
+        "auth login github-copilot",
+        "model <provider:id>",
+        "back",
+    ] {
+        assert!(rendered.contains(command), "missing command: {command}");
+    }
+}
+
+#[test]
+fn home_view_shows_journey_rail_and_phase_chip_with_target() {
+    // The engagement spine must be ambient: the home view carries the
+    // 組 map → 崩 hunt → 作 confirm → 掛 fix rail and the idle footer a
+    // compact `phase:<word> n/4` chip whenever a target is active.
+    let dir = tempfile::tempdir().expect("temp target");
+    let backend = TestBackend::new(120, 34);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(dir.path().to_path_buf());
+    app.shell_view = ShellView::Home;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("組 map"), "rail shows map phase");
+    assert!(rendered.contains("崩 hunt"), "rail shows hunt phase");
+    assert!(rendered.contains("掛 fix"), "rail shows fix phase");
+    assert!(rendered.contains("phase:map 1/4"), "footer phase chip");
+    assert!(
+        rendered.contains("Run next"),
+        "NEXT action speaks the journey verb"
+    );
+}
+
+#[test]
+fn activity_view_collapses_tasks_pane_for_taskless_runs() {
+    // A single-tool run registers no DAG tasks; the 40% TASKS pane would
+    // only ever say "(no DAG tasks yet)" while the OUTPUT pane clips its
+    // content. Collapse to a full-width OUTPUT pane instead.
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.activity = Some(ActivitySession::new("tool-1"));
+    app.shell_view = ShellView::Activity;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(!rendered.contains("no DAG tasks yet"));
+    assert!(!rendered.contains("TASKS"));
+    assert!(rendered.contains("OUTPUT"));
+    assert!(rendered.contains("no DAG tasks — streaming tool output"));
+    assert!(rendered.contains("[output focused]"));
+}
+
+#[test]
+fn activity_view_names_the_running_tool_everywhere_it_matters() {
+    // The audit complaint: a taskless run showed an anonymous
+    // "(waiting for trace events…)" against a static gallery and the
+    // operator couldn't tell whether anything was happening. The header
+    // must name the tool with a ticking elapsed counter, the feed must
+    // explain the silence, and the footer must offer the cancel path.
+    let backend = TestBackend::new(90, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.tool_running = Some("threat-model:build".to_string());
+    app.activity = Some(ActivitySession::new("tool-7b7fa744"));
+    app.shell_view = ShellView::Activity;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("threat-model:build · running"));
+    assert!(rendered.contains("threat-model:build is working — waiting for its first trace"));
+    assert!(rendered.contains("▸ RUNNING  threat-model:build"));
+    assert!(!rendered.contains("waiting for trace events"));
+    assert!(!rendered.contains("hover [j/k] to inspect a task"));
+}
+
+#[test]
+fn target_picker_renders_candidates_with_cursor_and_hints() {
+    let backend = TestBackend::new(120, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target_candidates = vec![
+        crate::app::TargetCandidate {
+            path: std::path::PathBuf::from("/work/acme"),
+            label: ".".to_string(),
+            hint: "git repo",
+        },
+        crate::app::TargetCandidate {
+            path: std::path::PathBuf::from("/work/acme/api"),
+            label: "api".to_string(),
+            hint: "previous kuzushi target",
+        },
+    ];
+    app.target_picker_cursor = 1;
+    app.shell_view = ShellView::TargetPicker;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("CHOOSE A TARGET"));
+    assert!(rendered.contains("git repo"));
+    assert!(rendered.contains("> api"), "cursor marks the selected row");
+    assert!(rendered.contains("previous kuzushi target"));
+    assert!(
+        rendered.contains("target <path>"),
+        "manual-path escape hatch"
+    );
+}
+
+#[test]
+fn home_view_without_target_has_no_journey_rail() {
+    // No target → no engagement; home keeps the first-run guidance and
+    // the rail stays out of the way.
+    let backend = TestBackend::new(120, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Home;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(!rendered.contains("組 map"));
+    assert!(!rendered.contains("phase:"));
+    assert!(rendered.contains("quickstart"));
+}
+
+#[test]
+fn auth_provider_rows_drop_detail_to_second_line_when_narrow() {
+    // At full width the detail cell rides the same row; when the row
+    // would overflow, the detail drops to an indented second line
+    // instead of vanishing off the right edge.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Auth;
+
+    let area = ratatui::layout::Rect::new(0, 0, 36, 50);
+    let rendered = auth_lines(&app, area)
+        .iter()
+        .map(line_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    // The anthropic detail ("ANTHROPIC_API_KEY=…; oauth …") cannot fit
+    // beside the 16-col name + 11-col status at width 36 — it must
+    // appear on its own line rather than being clipped away.
+    assert!(rendered.contains("ANTHROPIC_API_KEY="));
+}
+
+#[test]
 fn transcript_log_line_renders_wall_clock_timestamp_when_present() {
     // `design/mockups/_shared.jsx::logLine` paints each transcript row
     // with a leading `HH:MM:SS` in c-subtle.  Verify the dated path

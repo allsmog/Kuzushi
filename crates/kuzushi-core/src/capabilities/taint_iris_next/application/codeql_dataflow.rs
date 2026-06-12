@@ -745,13 +745,7 @@ fn truncate(value: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     fn codeql_dataflow_test_plan(scan_root: PathBuf) -> TaintIrisNextPlan {
         TaintIrisNextPlan {
@@ -815,7 +809,7 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn run_codeql_flows_invokes_cli_and_parses_sarif() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = crate::test_env::codeql_bin_env_lock();
         let temp = tempdir().unwrap();
         let db = crate::workspace::workspace_codeql_db_path(temp.path());
         std::fs::create_dir_all(db.join("db-cpp")).unwrap();

@@ -81,14 +81,22 @@ impl ShellApp {
         if !modifiers.plain || !matches!(self.shell_view, ShellView::Scene(_)) {
             return false;
         }
+        // Gallery hotkeys yield to the prompt the moment the operator starts
+        // typing — otherwise `back`/`home` are untypeable on the 3D page
+        // (h/j/k/l would orbit the camera instead of reaching the prompt).
+        if !self.input.is_empty() {
+            return false;
+        }
         // Orbit keys only apply on the 3D attack-surface page; on 2D pages they
-        // fall through. Tab/space/r work on every page.
+        // fall through. Tab/space/r/Esc/q work on every page.
         let is_3d = matches!(self.shell_view, ShellView::Scene(page) if page.is_3d());
         match key.code {
             KeyCode::Tab | KeyCode::Char('n') => self.cycle_scene(1),
             KeyCode::BackTab | KeyCode::Char('N') => self.cycle_scene(-1),
             KeyCode::Char(' ') | KeyCode::Char('p') => self.scene_paused = !self.scene_paused,
             KeyCode::Char('r') => self.reset_scene_orientation(),
+            // Explicit exits: the gallery is a leaf view, never a trap.
+            KeyCode::Esc | KeyCode::Char('q') => self.go_back(),
             KeyCode::Char('h') if is_3d => self.nudge_scene_yaw(-1.0),
             KeyCode::Char('l') if is_3d => self.nudge_scene_yaw(1.0),
             KeyCode::Char('k') if is_3d => self.nudge_scene_pitch(1.0),

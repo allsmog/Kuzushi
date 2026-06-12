@@ -73,6 +73,14 @@ pub struct ShellApp {
     pub model_picker_cursor: usize,
     /// Auth-method picker cursor (0 = API key row, 1 = OAuth row).
     pub auth_picker_cursor: usize,
+    /// Per-task duration history for ETA forecasting in the ambient
+    /// progress chip. Loaded from `<target>/.kuzushi/task-durations.json`.
+    pub(crate) task_durations: crate::app::TaskDurationStore,
+    /// Launch-time target picker cursor (index into `target_candidates`).
+    pub target_picker_cursor: usize,
+    /// Candidates shown by the target picker; populated by
+    /// `open_target_picker` from cwd + child repos/previous targets.
+    pub target_candidates: Vec<crate::app::TargetCandidate>,
     /// Planning-picker cursor (index into `planning_tasks`).
     pub planning_cursor: usize,
     /// Set of planning-task ids currently checked. Mirrors the

@@ -4,7 +4,9 @@ use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
 #[command(name = "kuzushi")]
-#[command(about = "Kuzushi security-native code agent", version)]
+// Provenance-bearing version (`0.24.0 (sha+dirty · profile)`) so a published
+// release binary and a working-tree build are distinguishable at a glance.
+#[command(about = "Kuzushi security-native code agent", version = kuzushi_tui::build_version_static())]
 pub(crate) struct Cli {
     #[arg(long, global = true)]
     pub(crate) target: Option<PathBuf>,

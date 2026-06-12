@@ -14,16 +14,17 @@ fn findings_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     push_view_keybindings(&mut bindings, app);
     bindings.extend([
         bind("scan", "rescan"),
-        bind("back", "home"),
+        bind("Esc", "home"),
         bind("Ctrl+C", "exit"),
     ]);
     bindings
 }
 
 fn finding_detail_keybindings() -> Vec<FooterKeybinding> {
+    // Esc is the key that actually returns to the list — advertising the
+    // typed `findings` verb as if it were a key misled operators.
     vec![
-        bind("back", "findings"),
-        bind("findings", "list"),
+        bind("Esc", "back to list"),
         bind("scan", "rescan"),
         bind("Ctrl+C", "exit"),
     ]

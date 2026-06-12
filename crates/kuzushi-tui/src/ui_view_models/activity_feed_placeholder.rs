@@ -7,6 +7,7 @@ pub(crate) struct ActivityFeedPlaceholderModel {
 
 pub(crate) fn activity_feed_placeholder_model(
     session: &ActivitySession,
+    running_tool: Option<&str>,
 ) -> Option<ActivityFeedPlaceholderModel> {
     if session.paused || has_visible_feed_events(session) {
         return None;
@@ -15,6 +16,7 @@ pub(crate) fn activity_feed_placeholder_model(
         text: placeholder_text(
             hidden_subsystem_event_count(session),
             session.verbose_subsystems,
+            running_tool,
         ),
     })
 }
@@ -50,14 +52,24 @@ fn hidden_event_module(module_id: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
-fn placeholder_text(hidden_count: usize, verbose_subsystems: bool) -> String {
-    if hidden_count == 0 || verbose_subsystems {
-        return " (waiting for trace events…)".to_string();
+fn placeholder_text(
+    hidden_count: usize,
+    verbose_subsystems: bool,
+    running_tool: Option<&str>,
+) -> String {
+    if hidden_count > 0 && !verbose_subsystems {
+        return format!(
+            " ({hidden_count} hidden subsystem event{plural} — press V to show)",
+            plural = plural_suffix(hidden_count)
+        );
     }
-    format!(
-        " ({hidden_count} hidden subsystem event{plural} — press V to show)",
-        plural = plural_suffix(hidden_count)
-    )
+    // An anonymous "(waiting…)" leaves the operator unsure anything is
+    // happening — name the tool when one is live, and be honest when the
+    // run simply produced no events.
+    match running_tool {
+        Some(tool) => format!(" ({tool} is working — waiting for its first trace event…)"),
+        None => " (no trace events recorded for this run)".to_string(),
+    }
 }
 
 fn plural_suffix(count: usize) -> &'static str {
@@ -74,8 +86,14 @@ mod tests {
         let session = ActivitySession::new("r-1");
 
         assert_eq!(
-            activity_feed_placeholder_model(&session).map(|model| model.text),
-            Some(" (waiting for trace events…)".to_string())
+            activity_feed_placeholder_model(&session, Some("threat-model:build")).map(|m| m.text),
+            Some(
+                " (threat-model:build is working — waiting for its first trace event…)".to_string()
+            )
+        );
+        assert_eq!(
+            activity_feed_placeholder_model(&session, None).map(|m| m.text),
+            Some(" (no trace events recorded for this run)".to_string())
         );
     }
 
@@ -87,7 +105,7 @@ mod tests {
             .apply_step(RunTraceStep::new(2, "reasoning", "slice").with_module_id("context-lite"));
 
         assert_eq!(
-            activity_feed_placeholder_model(&session).map(|model| model.text),
+            activity_feed_placeholder_model(&session, None).map(|model| model.text),
             Some(" (2 hidden subsystem events — press V to show)".to_string())
         );
     }
@@ -96,10 +114,10 @@ mod tests {
     fn activity_feed_placeholder_model_skips_visible_or_paused_feed() {
         let mut session = ActivitySession::new("r-1");
         session.apply_step(RunTraceStep::new(1, "reasoning", "triage").with_module_id("triage"));
-        assert!(activity_feed_placeholder_model(&session).is_none());
+        assert!(activity_feed_placeholder_model(&session, None).is_none());
 
         session.events.clear();
         session.paused = true;
-        assert!(activity_feed_placeholder_model(&session).is_none());
+        assert!(activity_feed_placeholder_model(&session, None).is_none());
     }
 }

@@ -2,7 +2,9 @@ use super::activity_dag_rows::{activity_dag_pane_rows, ActivityDagPaneRow};
 use super::activity_empty_state::{activity_empty_state_model, ActivityEmptyStateModel};
 use super::activity_feed_rows::{activity_feed_pane_rows, ActivityFeedPaneRow};
 use super::activity_footer::{activity_footer_model, ActivityFooterModel};
-use super::activity_header::{activity_header_model, ActivityHeaderModel, ActivityRunOutcome};
+use super::activity_header::{
+    activity_header_model, ActivityHeaderModel, ActivityLiveTool, ActivityRunOutcome,
+};
 use super::activity_layout::{
     activity_frame_layout, activity_plain_pane_widths, ActivityFrameLayout, ActivityPaneWidths,
 };
@@ -73,7 +75,21 @@ fn activity_context_line(app: &ShellApp) -> String {
 
 impl<'a> ActiveActivityViewModel<'a> {
     pub(crate) fn header(&self) -> ActivityHeaderModel {
-        activity_header_model(self.session, activity_run_outcome(self.app, self.session))
+        activity_header_model(
+            self.session,
+            activity_run_outcome(self.app, self.session),
+            self.live_tool().as_ref(),
+        )
+    }
+
+    /// The tool executing behind this run, with the spinner + elapsed
+    /// counter the header ticks for taskless runs. `None` once it ends.
+    fn live_tool(&self) -> Option<ActivityLiveTool> {
+        Some(ActivityLiveTool {
+            name: self.app.running_tool_name()?.to_string(),
+            spinner: self.app.spinner_glyph(),
+            elapsed_secs: self.session.started_at.elapsed().as_secs(),
+        })
     }
 
     pub(crate) fn context_line(&self) -> &str {
@@ -82,6 +98,13 @@ impl<'a> ActiveActivityViewModel<'a> {
 
     pub(crate) fn frame_layout(&self) -> ActivityFrameLayout {
         activity_frame_layout()
+    }
+
+    /// Single-tool runs register no DAG tasks (scans pre-seed theirs from
+    /// the registry), so an empty task map means the TASKS pane would only
+    /// ever say "(no DAG tasks yet)" — give its 40% to the OUTPUT pane.
+    pub(crate) fn collapse_dag_pane(&self) -> bool {
+        self.session.tasks.is_empty()
     }
 
     pub(crate) fn pane_chrome(&self) -> ActivityPaneChromeModel {
@@ -105,7 +128,14 @@ impl<'a> ActiveActivityViewModel<'a> {
         now: Instant,
     ) -> Vec<ActivityPlainPaneRow> {
         let generated = generated_views_feed_rows(self.app, widths.feed);
-        activity_plain_pane_rows(self.session, widths.dag, widths.feed, now, &generated)
+        activity_plain_pane_rows(
+            self.session,
+            widths.dag,
+            widths.feed,
+            now,
+            &generated,
+            self.app.running_tool_name(),
+        )
     }
 
     pub(crate) fn dag_pane_rows(
@@ -120,7 +150,8 @@ impl<'a> ActiveActivityViewModel<'a> {
     /// data (pulled from persistent `ShellApp` state, so the views persist across
     /// later phases and — via the on-disk snapshots — across sessions).
     pub(crate) fn feed_pane_rows(&self, inner_width: usize) -> Vec<ActivityFeedPaneRow> {
-        let mut rows = activity_feed_pane_rows(self.session, inner_width);
+        let mut rows =
+            activity_feed_pane_rows(self.session, inner_width, self.app.running_tool_name());
         rows.extend(generated_views_feed_rows(self.app, inner_width));
         rows
     }
@@ -134,7 +165,7 @@ impl<'a> ActiveActivityViewModel<'a> {
     }
 
     pub(crate) fn footer(&self, width: u16) -> ActivityFooterModel {
-        activity_footer_model(self.session, width)
+        activity_footer_model(self.session, width, self.app.running_tool_name())
     }
 }
 

@@ -13,6 +13,7 @@ import {
   toolMessageForOutput,
   usageFromMessage,
 } from "./langgraph-bridge/model.mjs";
+import { parseOauthLoginArgs, runOauthLogin } from "./langgraph-bridge/oauth-login.mjs";
 import { bridgeToolsForNextStep } from "./langgraph-bridge/schema.mjs";
 
 async function readStdin() {
@@ -176,6 +177,13 @@ async function dispatch(request) {
 }
 
 async function main() {
+  // `--oauth-login <provider> [method]` runs an interactive auth flow over the
+  // inherited terminal and never reads the JSON request envelope from stdin.
+  const oauthArgs = parseOauthLoginArgs(process.argv.slice(2));
+  if (oauthArgs) {
+    process.exitCode = await runOauthLogin(oauthArgs);
+    return;
+  }
   const request = JSON.parse(await readStdin());
   process.stdout.write(JSON.stringify(await dispatch(request)));
 }

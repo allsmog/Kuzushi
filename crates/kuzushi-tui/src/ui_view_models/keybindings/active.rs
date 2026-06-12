@@ -12,7 +12,7 @@ fn active_scan_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
     scan.running.then(|| {
         let mut bindings = vec![abort_binding(scan.abort_requested)];
         push_view_keybindings(&mut bindings, app);
-        bindings.extend([bind("findings", "list"), bind("back", "home")]);
+        bindings.extend([bind("findings", "list"), bind("Esc", "home")]);
         bindings
     })
 }
@@ -21,7 +21,7 @@ fn active_agentic_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
     has_agentic_work(app).then(|| {
         vec![
             abort_binding(agentic_abort_requested(app)),
-            bind("back", "home"),
+            bind("Esc", "home"),
             bind("history", "events"),
             bind("model", "runtime"),
         ]
@@ -33,7 +33,7 @@ fn active_tool_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         vec![
             abort_binding(app.tool_abort_requested()),
             bind("findings", "list"),
-            bind("back", "home"),
+            bind("Esc", "home"),
             bind("history", "events"),
         ]
     })

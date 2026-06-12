@@ -35,12 +35,7 @@ impl ShellApp {
 
     pub fn scroll_to_top(&mut self) {
         if matches!(self.shell_view, ShellView::Activity) {
-            if let Some(session) = self.activity.as_mut() {
-                match session.pane_focus {
-                    PaneFocus::Left => session.task_scroll = 0,
-                    PaneFocus::Right => session.feed_scroll = 0,
-                }
-            }
+            self.activity.as_mut().map(focused_pane_to_top);
             return;
         }
         if matches!(self.shell_view, ShellView::Logs) {
@@ -52,17 +47,7 @@ impl ShellApp {
 
     pub fn scroll_to_bottom(&mut self) {
         if matches!(self.shell_view, ShellView::Activity) {
-            if let Some(session) = self.activity.as_mut() {
-                match session.pane_focus {
-                    PaneFocus::Left => session.task_scroll = usize::MAX,
-                    PaneFocus::Right => {
-                        session.feed_scroll = usize::MAX;
-                        // G on the feed pane unpins manual scroll so the
-                        // operator returns to live auto-tail.
-                        session.feed_auto_tail = true;
-                    }
-                }
-            }
+            self.activity.as_mut().map(focused_pane_to_bottom);
             return;
         }
         if matches!(self.shell_view, ShellView::Logs) {
@@ -80,7 +65,7 @@ impl ShellApp {
         let Some(session) = self.activity.as_mut() else {
             return;
         };
-        match session.pane_focus {
+        match session.effective_pane_focus() {
             PaneFocus::Left => {
                 // Clamp to the row count so a short DAG can't be scrolled into
                 // empty space — there's nothing to reveal past the last task.
@@ -123,6 +108,7 @@ impl ShellApp {
                 | ShellView::ModelPicker
                 | ShellView::AuthMethodPicker(_)
                 | ShellView::PlanningPicker
+                | ShellView::TargetPicker
         ) {
             return;
         }
@@ -133,6 +119,25 @@ impl ShellApp {
         if self.nav_history.len() > NAV_HISTORY_DEPTH {
             let excess = self.nav_history.len() - NAV_HISTORY_DEPTH;
             self.nav_history.drain(..excess);
+        }
+    }
+}
+
+fn focused_pane_to_top(session: &mut ActivitySession) {
+    match session.effective_pane_focus() {
+        PaneFocus::Left => session.task_scroll = 0,
+        PaneFocus::Right => session.feed_scroll = 0,
+    }
+}
+
+fn focused_pane_to_bottom(session: &mut ActivitySession) {
+    match session.effective_pane_focus() {
+        PaneFocus::Left => session.task_scroll = usize::MAX,
+        PaneFocus::Right => {
+            session.feed_scroll = usize::MAX;
+            // G on the feed pane unpins manual scroll so the operator
+            // returns to live auto-tail.
+            session.feed_auto_tail = true;
         }
     }
 }

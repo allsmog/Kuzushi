@@ -54,16 +54,23 @@ class AnthropicOAuthChatModel {
 }
 
 class OpenAiCodexOAuthChatModel {
-  constructor(modelName, token, request, tools = []) {
+  constructor(modelName, token, request, tools = [], toolBindings = undefined) {
     this.modelName = modelName;
     this.token = token;
     this.request = request;
     this.tools = tools;
+    this.toolBindings = toolBindings ?? openAiToolBindings(tools);
     this.authMode = "oauth-file";
   }
 
   bindTools(tools) {
-    return new OpenAiCodexOAuthChatModel(this.modelName, this.token, this.request, tools);
+    return new OpenAiCodexOAuthChatModel(
+      this.modelName,
+      this.token,
+      this.request,
+      tools,
+      openAiToolBindings(tools),
+    );
   }
 
   async invoke(messages) {
@@ -77,7 +84,7 @@ class OpenAiCodexOAuthChatModel {
     });
     const text = await response.text();
     if (!response.ok) throw new Error(`OpenAI Codex OAuth API ${response.status}: ${text.slice(0, 500)}`);
-    return openAiMessageFromSse(text);
+    return openAiMessageFromSse(text, this.openAiToolNameMap());
   }
 
   body(messages) {
@@ -85,14 +92,30 @@ class OpenAiCodexOAuthChatModel {
     const body = {
       model: this.modelName,
       instructions: instructions || "You are a concise assistant.",
-      input: openAiInput(messages),
+      input: openAiInput(messages, this.originalToSafeToolNameMap()),
       store: false,
       stream: true,
     };
-    if (this.tools.length) body.tools = this.tools.map(openAiToolDefinition);
+    if (this.tools.length) body.tools = this.openAiToolDefinitions();
     const temperature = numericTemperature(this.request);
     if (temperature !== undefined) body.temperature = temperature;
     return body;
+  }
+
+  openAiToolBindings() {
+    return this.toolBindings;
+  }
+
+  openAiToolDefinitions() {
+    return this.openAiToolBindings().definitions;
+  }
+
+  openAiToolNameMap() {
+    return this.openAiToolBindings().safeToOriginal;
+  }
+
+  originalToSafeToolNameMap() {
+    return this.openAiToolBindings().originalToSafe;
   }
 }
 
@@ -103,9 +126,9 @@ function anthropicMessageFromResponse(parsed) {
   return aiMessage(text, toolCalls, anthropicUsage(parsed.usage), parsed.stop_reason);
 }
 
-function openAiMessageFromSse(text) {
+function openAiMessageFromSse(text, safeToOriginal = new Map()) {
   const events = sseJsonEvents(text);
-  const toolCalls = events.flatMap(openAiToolCallsFromEvent);
+  const toolCalls = events.flatMap((event) => openAiToolCallsFromEvent(event, safeToOriginal));
   const finalText = outputTextFromEvents(events);
   const usage = events.findLast?.((event) => event?.response?.usage)?.response?.usage;
   return aiMessage(finalText, toolCalls, openAiUsage(usage), undefined);
@@ -146,13 +169,13 @@ function outputTextFromEvents(events) {
     .join("");
 }
 
-function openAiToolCallsFromEvent(event) {
+function openAiToolCallsFromEvent(event, safeToOriginal = new Map()) {
   const item = event?.item;
   if (event?.type !== "response.output_item.done" || item?.type !== "function_call") return [];
   return [
     {
       id: item.call_id ?? item.id ?? `call_${Date.now()}`,
-      name: item.name,
+      name: safeToOriginal.get(item.name) ?? item.name,
       args: parseArguments(item.arguments),
       type: "tool_call",
     },
@@ -185,17 +208,35 @@ function anthropicToolResultMessage(message) {
   };
 }
 
-function openAiInput(messages) {
-  const input = messages.filter((message) => message?._getType?.() !== "system").map(openAiInputMessage);
+function openAiInput(messages, originalToSafe = new Map()) {
+  const input = messages
+    .filter((message) => message?._getType?.() !== "system")
+    .flatMap((message) => openAiInputMessage(message, originalToSafe));
   return input.length ? input : [{ role: "user", content: "ok" }];
 }
 
-function openAiInputMessage(message) {
-  if (message?._getType?.() === "ai") return { role: "assistant", content: messageText(message) };
-  if (message?._getType?.() === "tool") {
-    return { type: "function_call_output", call_id: message.tool_call_id, output: messageText(message) };
+function openAiInputMessage(message, originalToSafe = new Map()) {
+  if (message?._getType?.() === "ai") {
+    const calls = Array.isArray(message.tool_calls)
+      ? message.tool_calls.map((call) => openAiFunctionCallInput(call, originalToSafe))
+      : [];
+    const text = messageText(message);
+    const assistant = text ? [{ role: "assistant", content: text }] : [];
+    return [...assistant, ...calls];
   }
-  return { role: "user", content: messageText(message) };
+  if (message?._getType?.() === "tool") {
+    return [{ type: "function_call_output", call_id: message.tool_call_id, output: messageText(message) }];
+  }
+  return [{ role: "user", content: messageText(message) }];
+}
+
+function openAiFunctionCallInput(call, originalToSafe = new Map()) {
+  return {
+    type: "function_call",
+    call_id: call.id ?? call.callId ?? call.name,
+    name: originalToSafe.get(call.name) ?? safeOpenAiBaseName(call.name),
+    arguments: JSON.stringify(call.args ?? {}),
+  };
 }
 
 function systemText(messages) {
@@ -245,6 +286,36 @@ function openAiToolDefinition(tool) {
     description: tool.description ?? "",
     parameters: tool.schema ?? tool.input_schema ?? tool.inputSchema ?? { type: "object" },
   };
+}
+
+function openAiToolBindings(tools) {
+  const used = new Set();
+  const safeToOriginal = new Map();
+  const originalToSafe = new Map();
+  const definitions = tools.map((tool) => {
+    const safeName = safeOpenAiToolName(tool.name, used);
+    safeToOriginal.set(safeName, tool.name);
+    originalToSafe.set(tool.name, safeName);
+    return openAiToolDefinition({ ...tool, name: safeName });
+  });
+  return { definitions, safeToOriginal, originalToSafe };
+}
+
+function safeOpenAiToolName(name, used) {
+  const base = safeOpenAiBaseName(name);
+  let candidate = base;
+  let counter = 2;
+  while (used.has(candidate)) {
+    const suffix = `_${counter++}`;
+    candidate = `${base.slice(0, Math.max(1, 64 - suffix.length))}${suffix}`;
+  }
+  used.add(candidate);
+  return candidate;
+}
+
+function safeOpenAiBaseName(name) {
+  const raw = String(name ?? "tool").replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 64);
+  return raw || "tool";
 }
 
 function isAnthropicToolUse(block) {

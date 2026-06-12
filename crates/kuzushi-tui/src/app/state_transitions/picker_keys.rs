@@ -5,16 +5,41 @@ use crate::app::{
 };
 
 impl ShellApp {
+    /// The first-run model/auth/planning pickers are modal selection screens.
+    pub(crate) fn is_picker_view(&self) -> bool {
+        matches!(
+            self.shell_view,
+            ShellView::ModelPicker
+                | ShellView::AuthMethodPicker(_)
+                | ShellView::PlanningPicker
+                | ShellView::TargetPicker
+        )
+    }
+
     pub(super) fn handle_picker_key(&mut self, key: KeyEvent) -> bool {
-        if !self.input.is_empty() || !key.modifiers.is_empty() {
+        // Let Ctrl/Alt chords (quit, palette, story) escape the picker.
+        if picker_shell_chord(key.modifiers) || !self.is_picker_view() {
             return false;
         }
         match &self.shell_view {
-            ShellView::ModelPicker => self.handle_model_picker_key(key.code),
-            ShellView::AuthMethodPicker(_) => self.handle_auth_picker_key(key.code),
-            ShellView::PlanningPicker => self.handle_planning_picker_key(key.code),
-            _ => false,
-        }
+            ShellView::ModelPicker => {
+                self.handle_model_picker_key(key.code);
+            }
+            ShellView::AuthMethodPicker(_) => {
+                self.handle_auth_picker_key(key.code);
+            }
+            ShellView::PlanningPicker => {
+                self.handle_planning_picker_key(key.code);
+            }
+            ShellView::TargetPicker => {
+                self.handle_target_picker_key(key.code);
+            }
+            _ => {}
+        };
+        // Treat a picker as a true modal: swallow every other non-Ctrl/Alt
+        // keystroke so stray input cannot divert later navigation into the
+        // prompt and make the picker feel frozen.
+        true
     }
 
     fn handle_model_picker_key(&mut self, code: KeyCode) -> bool {
@@ -84,6 +109,66 @@ impl ShellApp {
         } else {
             self.shell_view = ShellView::Catalog;
         }
+    }
+
+    fn handle_target_picker_key(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.move_target_picker_cursor(-1);
+                true
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.move_target_picker_cursor(1);
+                true
+            }
+            KeyCode::Enter => {
+                self.accept_target_picker_choice();
+                true
+            }
+            KeyCode::Esc | KeyCode::Char('q') => {
+                self.defer_target_picker();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn move_target_picker_cursor(&mut self, delta: isize) {
+        let len = self.target_candidates.len();
+        if len == 0 {
+            return;
+        }
+        let current = (self.target_picker_cursor.min(len - 1)) as isize;
+        self.target_picker_cursor = (current + delta).rem_euclid(len as isize) as usize;
+    }
+
+    fn accept_target_picker_choice(&mut self) {
+        let Some(candidate) = self.target_candidates.get(self.target_picker_cursor) else {
+            self.log("error", "no target candidates available");
+            return;
+        };
+        let path = candidate.path.display().to_string();
+        // Same wiring as the `target <path>` verb: workspace root, state
+        // dir, findings, and program scope all refresh together.
+        self.handle_target_command(Some(&path));
+        if self.target.is_none() {
+            // Invalid pick (already logged) — stay in the picker.
+            return;
+        }
+        // Continue the first-run chain now that a target exists: model →
+        // auth → planning, exactly as if the shell had launched with it.
+        self.apply_initial_onboarding_phase();
+        if self.shell_view == ShellView::TargetPicker {
+            self.shell_view = ShellView::Home;
+        }
+    }
+
+    fn defer_target_picker(&mut self) {
+        self.log(
+            "onboarding",
+            "browsing without a target — set one later with `target <path>`",
+        );
+        self.shell_view = ShellView::Home;
     }
 
     fn defer_model_picker(&mut self) {
@@ -163,7 +248,10 @@ impl ShellApp {
             ),
         );
         self.handle_auth_login_command(Some(provider.to_string()));
-        if auth_ready_for_provider(provider) {
+        // OAuth credentials land under the storage provider key
+        // (openai → openai-codex), so check readiness there, not under the
+        // picker's display provider, or a successful login would look unmet.
+        if auth_ready_for_provider(oauth_credential_provider(provider)) {
             self.transition_after_auth_ready();
         }
     }
@@ -374,5 +462,19 @@ impl ShellApp {
             .unwrap_or("planning");
         self.log("phase", format!("skipped {phase}"));
         self.advance_to_next_phase();
+    }
+}
+
+fn picker_shell_chord(modifiers: KeyModifiers) -> bool {
+    modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::ALT)
+}
+
+/// Maps a picker's display provider to the key its OAuth credentials are
+/// stored under in `oauth-credentials.json` (`openai` shares the
+/// `openai-codex` ChatGPT credential).
+fn oauth_credential_provider(provider: &str) -> &str {
+    match provider {
+        "openai" | "openai-codex" => "openai-codex",
+        other => other,
     }
 }

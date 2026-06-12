@@ -1,6 +1,6 @@
 use super::{
-    routing_mode_segment, scan_status, status_footer_findings_summary, view_status_segment,
-    ShellApp,
+    journey_footer_segment, routing_mode_segment, scan_status, status_footer_findings_summary,
+    view_status_segment, ShellApp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +43,12 @@ fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
     // chip (M2 §2.1) is kept here — it's live gating state, not a session
     // fact, so it belongs with routing/view rather than the cockpit strip.
     let mut segments = vec![routing_mode_segment(app)];
+    // Engagement orientation (M-journey): `phase:hunt 2/4` keeps "where am
+    // I in the map→hunt→confirm→fix journey" visible on every view, not
+    // just inside the launch walker.
+    if let Some(chip) = journey_footer_segment(app) {
+        segments.push(chip);
+    }
     if let Some(chip) = scope_footer_segment(app) {
         segments.push(chip);
     }
@@ -67,7 +73,10 @@ fn status_footer_right_segments(app: &ShellApp, warning: bool) -> Vec<String> {
 }
 
 fn status_footer_activity(app: &ShellApp) -> Option<FooterActivity> {
-    live_footer_activity(app)
+    // The rich chip (task · elapsed · n/m · ETA) wins whenever an activity
+    // session is live; the per-worker labels below cover everything else.
+    ambient_chip_activity(app)
+        .or_else(|| live_footer_activity(app))
         .or_else(|| scan_footer_activity(app))
         .or_else(|| tool_footer_activity(app))
         .or_else(|| agent_footer_activity(app))
@@ -77,6 +86,10 @@ fn status_footer_activity(app: &ShellApp) -> Option<FooterActivity> {
 
 struct FooterActivity {
     label: String,
+}
+
+fn ambient_chip_activity(app: &ShellApp) -> Option<FooterActivity> {
+    super::ambient_progress_chip(app).map(|label| FooterActivity { label })
 }
 
 fn live_footer_activity(app: &ShellApp) -> Option<FooterActivity> {

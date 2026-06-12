@@ -13,6 +13,7 @@ mod initial_view;
 mod phase;
 mod recommend;
 mod runner;
+mod target_candidates;
 mod task_id;
 mod task_row;
 
@@ -27,5 +28,6 @@ pub use initial_view::{
 };
 pub use phase::WorkflowPhase;
 pub use recommend::{model_recommended_in_phase, recommended_tasks_for_phase};
+pub use target_candidates::{discover_target_candidates, TargetCandidate};
 pub use task_id::PlanningTaskId;
 pub use task_row::{artifact_state, cli_is_on_path, ArtifactState, PlanningTaskRow};

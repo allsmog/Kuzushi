@@ -78,6 +78,7 @@ mod session;
 mod settings;
 mod state;
 pub(crate) mod state_transitions;
+mod task_durations;
 mod threats;
 mod tool_runner;
 mod view_state;
@@ -97,12 +98,12 @@ pub use live_activity::{LiveActivity, LiveActivityPhase};
 pub use log::LogLine;
 pub use onboarding::{
     artifact_state as planning_artifact_state, build_execution_plan, cli_is_on_path,
-    direct_dependencies, direct_dependents, initial_onboarding_phase, initial_onboarding_phase_for,
-    model_recommended_in_phase, provider_has_multiple_auth_methods, recommended_tasks_for_phase,
-    skip_onboarding_env, toggle_planning_row, topological_order, transitive_dependencies,
-    ArtifactState as PlanningArtifactState, FailedPlanningTask, InitialOnboardingPhase,
-    OnboardingInputs, PendingRetry, PlanningTaskId, PlanningTaskRow, RetryAdjustment,
-    ToggleOutcome, WorkflowPhase,
+    direct_dependencies, direct_dependents, discover_target_candidates, initial_onboarding_phase,
+    initial_onboarding_phase_for, model_recommended_in_phase, provider_has_multiple_auth_methods,
+    recommended_tasks_for_phase, skip_onboarding_env, toggle_planning_row, topological_order,
+    transitive_dependencies, ArtifactState as PlanningArtifactState, FailedPlanningTask,
+    InitialOnboardingPhase, OnboardingInputs, PendingRetry, PlanningTaskId, PlanningTaskRow,
+    RetryAdjustment, TargetCandidate, ToggleOutcome, WorkflowPhase,
 };
 pub use prereq_chain::{
     PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqPlanAction, PrereqPlanStep,
@@ -114,6 +115,8 @@ pub(crate) use settings::{
     validate_shell_model_id, ModelChoice,
 };
 pub use shellapp::ShellApp;
+pub(crate) use task_durations::compact_secs;
+pub use task_durations::TaskDurationStore;
 pub use view_state::{
     ActivitySession, ActorDetailFilter, AdvisoryState, AuthLoginView, BudgetHalt, CompletionCycle,
     ContextSnapshotView, DagTaskRow, DagTaskState, ExploitChain, HistorySearch, KnowledgeBaseView,

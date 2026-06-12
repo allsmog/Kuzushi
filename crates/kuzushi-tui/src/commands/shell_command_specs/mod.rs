@@ -117,6 +117,7 @@ fn parse_session_command(verb: &str) -> Option<ShellCommand> {
         "story" => Some(ShellCommand::Story),
         "quickstart" => Some(ShellCommand::Quickstart),
         "onboarding" | "setup" | "plan-stage" | "planning" => Some(ShellCommand::Onboarding),
+        "next" | "continue" => Some(ShellCommand::Next),
         "logs" | "log" | "transcript" => Some(ShellCommand::Logs),
         "activity" | "progress" | "a" => Some(ShellCommand::Activity),
         "scene" | "viz" | "3d" | "diagram" => Some(ShellCommand::Scene),

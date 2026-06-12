@@ -4,6 +4,35 @@ use kuzushi_core::V2Config;
 use std::path::PathBuf;
 
 #[test]
+fn unmapped_leaf_views_advertise_the_exit_path() {
+    // Auth/Cost/Patch/FailureHandoff fall through to the default footer —
+    // which must lead with Esc so no view ever reads as a dead-end.
+    for view in [
+        ShellView::Auth,
+        ShellView::Cost,
+        ShellView::Patch("F-0001".to_string()),
+        ShellView::FailureHandoff,
+    ] {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = view.clone();
+        let bindings = footer_keybindings(&app);
+        assert!(
+            bindings.contains(&bind("Esc", "back")),
+            "{view:?} must advertise Esc back: {bindings:?}"
+        );
+    }
+}
+
+#[test]
+fn finding_detail_advertises_esc_not_a_typed_verb() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Finding;
+    let bindings = footer_keybindings(&app);
+    assert!(bindings.contains(&bind("Esc", "back to list")));
+    assert!(!bindings.contains(&bind("findings", "list")));
+}
+
+#[test]
 fn footer_keybindings_include_shell_completion_prefix() {
     let app = ShellApp::new(V2Config::default(), None);
 

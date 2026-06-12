@@ -44,6 +44,26 @@ impl WorkflowPhase {
         }
     }
 
+    /// Judo glyph alone — for compact chrome (phase rail, footer chip).
+    pub fn kanji(self) -> &'static str {
+        match self {
+            WorkflowPhase::Map => "組",
+            WorkflowPhase::Hunt => "崩",
+            WorkflowPhase::Confirm => "作",
+            WorkflowPhase::Fix => "掛",
+        }
+    }
+
+    /// Plain one-word name — for compact chrome (phase rail, footer chip).
+    pub fn word(self) -> &'static str {
+        match self {
+            WorkflowPhase::Map => "map",
+            WorkflowPhase::Hunt => "hunt",
+            WorkflowPhase::Confirm => "confirm",
+            WorkflowPhase::Fix => "fix",
+        }
+    }
+
     /// One-line statement of what the phase is for.
     pub fn intent(self) -> &'static str {
         match self {

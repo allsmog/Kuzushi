@@ -52,7 +52,9 @@ struct ScopedHome {
 impl ScopedHome {
     fn empty() -> Self {
         static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
-        let guard = HOME_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let guard = HOME_LOCK
+            .lock()
+            .unwrap_or_else(|poison| poison.into_inner());
         let previous = std::env::var_os("HOME");
         let dir = tempfile::tempdir().expect("temp HOME");
         std::env::set_var("HOME", dir.path());

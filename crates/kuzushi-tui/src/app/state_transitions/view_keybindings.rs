@@ -58,6 +58,7 @@ impl ShellApp {
                 | ShellView::ModelPicker
                 | ShellView::AuthMethodPicker(_)
                 | ShellView::PlanningPicker
+                | ShellView::TargetPicker
         )
     }
 
