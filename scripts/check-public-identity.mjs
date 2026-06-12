@@ -149,7 +149,7 @@ const requiredIdentityReferences = [
       "isNativeBinaryFile",
       "candidates.find(isNativeBinaryFile)",
       "KUZUSHI_NATIVE_BIN must point to a file",
-      "overrideName !== \"kuzushi\" && overrideName !== \"kz\"",
+      'overrideName !== "kuzushi" && overrideName !== "kz"',
       "KUZUSHI_NATIVE_BIN must point to a",
       "native/<platform>-<arch>/kz",
       "Could not find the Kuzushi native binary",
