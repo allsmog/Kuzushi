@@ -19,6 +19,7 @@ impl ShellApp {
     /// No-op when the queue is empty or another tool is already running.
     pub(crate) fn dispatch_next_planning_task(&mut self, workspace: WorkspaceTarget) {
         if self.tool_running.is_some() {
+            self.log_planning_queue_stalled();
             return;
         }
         let Some(task) = self.planning_run_queue.pop_front() else {
@@ -31,10 +32,8 @@ impl ShellApp {
         self.log(
             "planning",
             format!(
-                "running planning step {} ({}/{} remaining)",
-                tool_name,
-                self.planning_run_queue.len() + 1,
-                self.planning_run_queue.len() + 1,
+                "running planning step {tool_name} · {} queued after it",
+                self.planning_run_queue.len(),
             ),
         );
         self.start_background_tool(
@@ -43,6 +42,24 @@ impl ShellApp {
             workspace,
             "planning queue task in flight",
             self.session_thinking_level.clone(),
+        );
+    }
+
+    /// The queue cannot start while another tool holds the single background
+    /// slot (e.g. the session-model recommender). The operator just confirmed
+    /// a plan — without this line they would silently watch an unrelated tool
+    /// run and never learn why their plan hasn't started.
+    fn log_planning_queue_stalled(&mut self) {
+        if self.planning_run_queue.is_empty() {
+            return;
+        }
+        let running = self.tool_running.clone().unwrap_or_default();
+        self.log(
+            "planning",
+            format!(
+                "plan queued ({} step(s)) — waiting for {running} to finish first",
+                self.planning_run_queue.len()
+            ),
         );
     }
 
@@ -105,10 +122,37 @@ impl ShellApp {
         );
         self.auto_open_activity = auto_open;
         self.auto_open_viz = auto_open_viz;
+        self.mark_running_tool_ambient();
         self.log(
             "phase",
             "ranking tools for this target with the session model…",
         );
+    }
+
+    /// Tag the recommender as shell-initiated background work so progress
+    /// surfaces label it "(background)" instead of presenting it as the thing
+    /// the operator triggered. Guarded on `tool_running` actually being the
+    /// recommender: when its dispatch was rejected (another tool already held
+    /// the slot), the operator's own tool must not get the ambient tag.
+    fn mark_running_tool_ambient(&mut self) {
+        if self.tool_running.as_deref() == Some("module-recommender:recommend") {
+            self.ambient_tool = self.tool_running.clone();
+        }
+    }
+
+    /// Steps of a confirmed plan waiting behind a non-plan tool. Zero while
+    /// the plan itself is executing or when nothing is queued.
+    pub(crate) fn stalled_planning_steps(&self) -> usize {
+        if self.planning_running_tool.is_some() {
+            return 0;
+        }
+        self.planning_run_queue.len()
+    }
+
+    /// Whether `name` is the shell-initiated background tool (vs an
+    /// operator-triggered run).
+    pub(crate) fn tool_is_ambient(&self, name: &str) -> bool {
+        self.ambient_tool.as_deref() == Some(name)
     }
 
     /// Completion hook for the recommender: map its tool picks to planning
@@ -355,6 +399,7 @@ impl ShellApp {
         );
         self.auto_open_activity = auto_open;
         self.auto_open_viz = auto_open_viz;
+        self.mark_running_tool_ambient();
         self.shell_view = ShellView::Recommend;
         self.log("recommend", "ranking modules for your next move…");
     }

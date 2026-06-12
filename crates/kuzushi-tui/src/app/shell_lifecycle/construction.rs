@@ -134,6 +134,7 @@ macro_rules! shell_app_initial_state {
             scan_cancel: None,
             tool_rx: None,
             tool_running: None,
+            ambient_tool: None,
             tool_run_id: None,
             tool_abort_requested: false,
             agent_rx: None,

@@ -10,8 +10,13 @@ use crate::{ActivitySession, DagTaskState, ShellApp};
 pub(crate) fn ambient_progress_chip(app: &ShellApp) -> Option<String> {
     let session = app.activity.as_ref()?;
     let subject = live_subject(app, session)?;
+    let background = if app.tool_is_ambient(&subject.name) {
+        " (background)"
+    } else {
+        ""
+    };
     let mut segments = vec![
-        format!("{} {}", app.spinner_glyph(), subject.name),
+        format!("{} {}{}", app.spinner_glyph(), subject.name, background),
         compact_secs(subject.elapsed_secs),
     ];
     if let Some(progress) = task_progress(session) {
@@ -118,6 +123,22 @@ mod tests {
         app.tool_running = Some("threat-model:build".to_string());
         let chip = ambient_progress_chip(&app).expect("chip while a tool runs");
         assert!(chip.contains("threat-model:build"), "{chip}");
+        assert!(!chip.contains("(background)"), "{chip}");
+    }
+
+    #[test]
+    fn chip_labels_shell_initiated_work_as_background() {
+        // The recommender is shell work, not operator work — the chip says so
+        // instead of presenting it like a run the operator started.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.activity = Some(ActivitySession::new("tool-1"));
+        app.tool_running = Some("module-recommender:recommend".to_string());
+        app.ambient_tool = Some("module-recommender:recommend".to_string());
+        let chip = ambient_progress_chip(&app).expect("chip while a tool runs");
+        assert!(
+            chip.contains("module-recommender:recommend (background)"),
+            "{chip}"
+        );
     }
 
     #[test]

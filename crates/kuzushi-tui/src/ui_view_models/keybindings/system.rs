@@ -42,9 +42,9 @@ fn choice_picker_keybindings() -> Vec<FooterKeybinding> {
 // the key handler; surface them so Tab/orbit/pause are discoverable.
 fn scene_keybindings() -> Vec<FooterKeybinding> {
     vec![
-        bind("Tab", "next page"),
+        bind("Tab/S-Tab", "page"),
         bind("h/l/j/k", "orbit 3D"),
-        bind("space", "pause"),
+        bind("space/p", "pause"),
         bind("r", "reset"),
         bind("Esc/q", "leave"),
     ]

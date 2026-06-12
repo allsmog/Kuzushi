@@ -40,9 +40,11 @@ const FULL_HINTS: &[ActivityFooterHint] = &[
     footer_hint!("c", "cancel"),
 ];
 
-const NARROW_HINTS: &[ActivityFooterHint] = &[
+/// Taskless (single-tool) runs collapse the TASKS pane, which pins focus to
+/// OUTPUT: `Tab` (pane toggle) and `Enter` (focus a task) would silently
+/// no-op, so the footer must not advertise them.
+const TASKLESS_HINTS: &[ActivityFooterHint] = &[
     footer_hint!("j/k", "scroll"),
-    footer_hint!("Tab", "pane"),
     footer_hint!("V", "verbose"),
     footer_hint!("p", "pause"),
     footer_hint!("R", "reset"),
@@ -54,7 +56,7 @@ pub(crate) fn activity_footer_model(
     width: u16,
     running_tool: Option<&str>,
 ) -> ActivityFooterModel {
-    let hints = footer_hints(width);
+    let hints = footer_hints(session);
     let body = focus_body(session, running_tool);
     ActivityFooterModel {
         body_line: fit(&body, width as usize),
@@ -134,9 +136,12 @@ fn focused_task_row_body(row: &crate::DagTaskRow) -> String {
     )
 }
 
-fn footer_hints(width: u16) -> &'static [ActivityFooterHint] {
-    if width < 100 {
-        return NARROW_HINTS;
+/// Hint selection follows what the keys can actually do (narrow widths are
+/// handled by `wrap_hints`, which keeps every key visible): with no DAG tasks
+/// the pane-focus keys are inert and disappear from the hints.
+fn footer_hints(session: &ActivitySession) -> &'static [ActivityFooterHint] {
+    if session.tasks.is_empty() {
+        return TASKLESS_HINTS;
     }
     FULL_HINTS
 }
@@ -202,6 +207,33 @@ mod tests {
     }
 
     #[test]
+    fn taskless_runs_do_not_advertise_the_inert_pane_focus_keys() {
+        // With no DAG tasks the TASKS pane is collapsed and focus is pinned to
+        // OUTPUT — Tab and Enter would silently no-op, so they must not appear.
+        let taskless = ActivitySession::new("r-1");
+        let keys: Vec<&str> = activity_footer_model(&taskless, 120, None)
+            .plain_hints
+            .iter()
+            .map(|(key, _)| *key)
+            .collect();
+        assert!(!keys.contains(&"Tab"), "{keys:?}");
+        assert!(!keys.contains(&"Enter"), "{keys:?}");
+
+        let mut with_tasks = ActivitySession::new("r-2");
+        with_tasks.tasks.insert(
+            "triage:run".to_string(),
+            DagTaskRow::queued("triage:run".into(), "triage".into(), Vec::new()),
+        );
+        let keys: Vec<&str> = activity_footer_model(&with_tasks, 120, None)
+            .plain_hints
+            .iter()
+            .map(|(key, _)| *key)
+            .collect();
+        assert!(keys.contains(&"Tab"), "{keys:?}");
+        assert!(keys.contains(&"Enter"), "{keys:?}");
+    }
+
+    #[test]
     fn taskless_footer_names_the_running_tool_or_states_the_absence() {
         // Never tell the operator to inspect tasks that don't exist.
         let session = ActivitySession::new("r-1");
@@ -243,7 +275,7 @@ mod tests {
                 .iter()
                 .map(|hint| hint.plain_key_text)
                 .collect::<Vec<_>>(),
-            vec!["j/k", "Tab", "V", "p", "R", "c"]
+            vec!["j/k", "Tab", "V", "p", "R", "Enter", "c"]
         );
         assert_eq!(
             activity_footer_model(&session, 80, None).plain_hints,
@@ -253,6 +285,7 @@ mod tests {
                 ("V", "verbose"),
                 ("p", "pause"),
                 ("R", "reset"),
+                ("Enter", "focus"),
                 ("c", "cancel"),
             ]
         );

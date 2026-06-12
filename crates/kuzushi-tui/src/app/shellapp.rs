@@ -150,6 +150,12 @@ pub struct ShellApp {
     pub(crate) scan_cancel: Option<ScanCancellation>,
     pub(crate) tool_rx: Option<Receiver<ToolEvent>>,
     pub(crate) tool_running: Option<String>,
+    /// Name of a background tool the shell dispatched for itself (the
+    /// session-model recommender) rather than from an operator action. The
+    /// Activity header and ambient chip label it "(background)" so it is never
+    /// mistaken for the plan/tool the operator just confirmed. Cleared with
+    /// `tool_running` when the tool's terminal event arrives.
+    pub(crate) ambient_tool: Option<String>,
     pub(crate) tool_run_id: Option<String>,
     pub(crate) tool_abort_requested: bool,
     pub(crate) agent_rx: Option<Receiver<AgentEvent>>,

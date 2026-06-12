@@ -26,9 +26,9 @@ pub(crate) fn target_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stati
     lines.push(muted("any other directory: Esc, then `target <path>`"));
     lines.push(blank());
     lines.push(keybind_hint_line(&[
-        ("↑/↓", "move"),
+        ("↑/↓/j/k", "move"),
         ("Enter", "select"),
-        ("Esc", "browse without a target"),
+        ("Esc/q", "browse without a target"),
     ]));
     lines
 }

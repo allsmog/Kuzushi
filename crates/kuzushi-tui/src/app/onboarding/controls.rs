@@ -77,6 +77,49 @@ fn toggle_off(task: PlanningTaskId, selected: &mut BTreeSet<PlanningTaskId>) -> 
     ToggleOutcome::Off { task }
 }
 
+/// What confirming the picker will actually do with a row. The checkbox glyph
+/// renders from this, so `[x]` can never mean both "will run" and "cached,
+/// reused without running" at the same time.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RowDisposition {
+    /// Checked and runnable: Enter includes it in the execution plan.
+    WillRun,
+    /// Checked but its cached artifact is reused — Enter does NOT run it
+    /// (press `g` to rebuild).
+    Reused,
+    /// Unchecked: not part of this phase's plan.
+    Off,
+    /// Required CLI missing: cannot run regardless of selection.
+    Unavailable,
+}
+
+impl RowDisposition {
+    pub fn checkbox(self) -> &'static str {
+        match self {
+            RowDisposition::WillRun => "[x]",
+            RowDisposition::Reused => "[~]",
+            RowDisposition::Off | RowDisposition::Unavailable => "[ ]",
+        }
+    }
+}
+
+pub fn row_disposition(
+    row: &PlanningTaskRow,
+    selected: &BTreeSet<PlanningTaskId>,
+    rebuild: &BTreeSet<PlanningTaskId>,
+) -> RowDisposition {
+    if !row.cli_available {
+        return RowDisposition::Unavailable;
+    }
+    if !selected.contains(&row.id) {
+        return RowDisposition::Off;
+    }
+    if is_cached(row) && !rebuild.contains(&row.id) {
+        return RowDisposition::Reused;
+    }
+    RowDisposition::WillRun
+}
+
 /// Build the ordered execution plan from the currently-selected rows. Cached
 /// artifacts are reused (filtered out) unless the operator marked them for
 /// rebuild — those are kept so they re-run and overwrite the stale artifact.
@@ -206,6 +249,59 @@ mod tests {
         let plan = build_execution_plan(&rows, &selected, &rebuild);
         // context is cached but explicitly rebuilt, so it runs before its dependent.
         assert_eq!(plan, vec![GatherRepoContext, BuildXRay]);
+    }
+
+    #[test]
+    fn disposition_separates_will_run_from_reused() {
+        // The seed disconnect: a checked cached row used to render the same
+        // `[x]` as a row that will actually run. The disposition keeps the
+        // two states (and their glyphs) distinct.
+        let cached = row(GatherRepoContext, ArtifactState::Cached);
+        let missing = row(BuildXRay, ArtifactState::Missing);
+        let selected: BTreeSet<PlanningTaskId> =
+            [GatherRepoContext, BuildXRay].into_iter().collect();
+        let rebuild = BTreeSet::new();
+        assert_eq!(
+            row_disposition(&cached, &selected, &rebuild),
+            RowDisposition::Reused
+        );
+        assert_eq!(
+            row_disposition(&missing, &selected, &rebuild),
+            RowDisposition::WillRun
+        );
+        assert_ne!(
+            RowDisposition::Reused.checkbox(),
+            RowDisposition::WillRun.checkbox()
+        );
+    }
+
+    #[test]
+    fn disposition_promotes_rebuilt_cached_rows_to_will_run() {
+        let cached = row(GatherRepoContext, ArtifactState::Cached);
+        let selected: BTreeSet<PlanningTaskId> = [GatherRepoContext].into_iter().collect();
+        let rebuild: BTreeSet<PlanningTaskId> = [GatherRepoContext].into_iter().collect();
+        assert_eq!(
+            row_disposition(&cached, &selected, &rebuild),
+            RowDisposition::WillRun
+        );
+    }
+
+    #[test]
+    fn disposition_marks_unselected_and_unavailable_rows_off() {
+        let unselected = row(GatherRepoContext, ArtifactState::Missing);
+        let mut no_cli = row(BuildCodePropertyGraph, ArtifactState::Missing);
+        no_cli.cli_available = false;
+        let selected = BTreeSet::new();
+        let rebuild = BTreeSet::new();
+        assert_eq!(
+            row_disposition(&unselected, &selected, &rebuild),
+            RowDisposition::Off
+        );
+        assert_eq!(
+            row_disposition(&no_cli, &selected, &rebuild),
+            RowDisposition::Unavailable
+        );
+        assert_eq!(RowDisposition::Off.checkbox(), "[ ]");
     }
 
     #[test]

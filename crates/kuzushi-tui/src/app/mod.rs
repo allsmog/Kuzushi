@@ -100,10 +100,11 @@ pub use onboarding::{
     artifact_state as planning_artifact_state, build_execution_plan, cli_is_on_path,
     direct_dependencies, direct_dependents, discover_target_candidates, initial_onboarding_phase,
     initial_onboarding_phase_for, model_recommended_in_phase, provider_has_multiple_auth_methods,
-    recommended_tasks_for_phase, skip_onboarding_env, toggle_planning_row, topological_order,
-    transitive_dependencies, ArtifactState as PlanningArtifactState, FailedPlanningTask,
-    InitialOnboardingPhase, OnboardingInputs, PendingRetry, PlanningTaskId, PlanningTaskRow,
-    RetryAdjustment, TargetCandidate, ToggleOutcome, WorkflowPhase,
+    recommended_tasks_for_phase, row_disposition, skip_onboarding_env, toggle_planning_row,
+    topological_order, transitive_dependencies, ArtifactState as PlanningArtifactState,
+    FailedPlanningTask, InitialOnboardingPhase, OnboardingInputs, PendingRetry, PlanningTaskId,
+    PlanningTaskRow, RetryAdjustment, RowDisposition, TargetCandidate, ToggleOutcome,
+    WorkflowPhase,
 };
 pub use prereq_chain::{
     PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqPlanAction, PrereqPlanStep,
