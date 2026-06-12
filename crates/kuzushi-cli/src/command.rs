@@ -143,6 +143,12 @@ pub(crate) enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Scan a vendored vulnerable fixture offline — no API key, no model,
+    /// no external scanners. A real finding with evidence in seconds.
+    Demo {
+        #[arg(long)]
+        json: bool,
+    },
     /// Execute a native tool descriptor-backed command. Use an explicit
     /// `module:tool`; shell-only `run .` needs focused module state.
     Run {

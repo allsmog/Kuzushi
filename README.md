@@ -70,6 +70,10 @@ This is the golden path. It is the workflow new operators should try before
 touching advanced modules or deferred plugin-backed tools.
 
 ```bash
+# 90-second offline proof: scan a vendored vulnerable fixture with the
+# deterministic engines. No API key, no model, no external scanners.
+kuzushi demo
+
 # Check config, local state, scanners, and the LangGraph bridge.
 kuzushi doctor --target .
 
@@ -125,6 +129,7 @@ inside the TUI and your terminal still gives you a selection modifier.
 | Command | Purpose |
 | --- | --- |
 | `kuzushi shell [--target <repo>]` | Start the Ratatui shell. |
+| `kuzushi demo` | Scan a vendored vulnerable fixture offline — no API key, no model, no external scanners. The fastest way to see a real finding with evidence. |
 | `kuzushi scan <repo> [--mode standard\|whitebox-static] [--tasks a,b] [--triage] [--json] [--ci] [--fail-on low\|medium\|high\|critical] [--sarif out.sarif]` | Run the Rust SAST umbrella executor and persist findings. `--fail-on` exits 3 when findings at/above the severity exist (CI gating); `--sarif` writes a SARIF 2.1.0 export for Code Scanning upload. |
 | `kuzushi findings --target <repo> [--severity high,critical] [--verdict true_positive] [--name text] [--file-path path] [--limit 50] [--json]` | List persisted findings. |
 | `kuzushi finding <F-0001\|fingerprint-prefix> --target <repo> [--json]` | Inspect one finding's evidence, proof state, verification summary, patch result, and next action. |

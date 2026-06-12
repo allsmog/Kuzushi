@@ -13,7 +13,30 @@ mod tests {
     /// how every Linux container with the joern-cli debian package
     /// is configured.
     fn joern_locatable() -> bool {
-        locate_joern_binary("joern").is_some() || locate_joern_binary("joern-parse").is_some()
+        locate_joern_binary("joern").is_some()
+            || locate_joern_binary("joern-parse").is_some()
+            || joern_server_reachable()
+    }
+
+    /// The "joern missing" tests must also skip when an operator-managed (or
+    /// stale auto-spawned) `joern --server` is listening: the tool path
+    /// consults the server URL before the binary, so a live server makes the
+    /// call succeed even with no joern on PATH.
+    fn joern_server_reachable() -> bool {
+        let url = std::env::var("JOERN_SERVER_URL")
+            .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
+        let Some(address) = url
+            .strip_prefix("http://")
+            .or_else(|| url.strip_prefix("https://"))
+            .map(|rest| rest.trim_end_matches('/').to_string())
+        else {
+            return false;
+        };
+        let Ok(parsed) = address.parse() else {
+            return false;
+        };
+        std::net::TcpStream::connect_timeout(&parsed, std::time::Duration::from_millis(200))
+            .is_ok()
     }
 
     #[test]

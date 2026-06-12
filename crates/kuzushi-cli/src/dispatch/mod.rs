@@ -108,6 +108,7 @@ async fn dispatch_non_scan_command(
             run_command::dispatch_run_command(command, default_target, load, allow_untrusted_module)
         }
         Command::Mcp { command } => mcp_command(command).await,
+        Command::Demo { json } => crate::application::demo::demo_command(json).await,
         Command::Shell { .. } | Command::Scan { .. } => unreachable!("handled before dispatch"),
     }
 }
