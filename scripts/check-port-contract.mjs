@@ -1227,8 +1227,6 @@ const packagingRequirements = [
   'join(root, "target", "release", exe)',
   'join(root, "target", "debug", exe)',
   'invokedName === "kz" ? "kz" : "kuzushi"',
-  "KUZUSHI_NATIVE_BIN",
-  "KUZUSHI_CLI_NAME",
   "KUZUSHI_CLI_NAME: cliName",
   "native/<platform>-<arch>/kuzushi",
   "kuzushi doctor --target .",
@@ -1480,11 +1478,12 @@ const packagingRequirements = [
   "deferredAdapterDependencyFailures",
   "package dependencies must not install deferred adapter package ${name}",
   "package optionalDependencies.${name} must be ${spec}",
-  // Optional plugin deps are SHA-pinned for supply-chain integrity.
-  '"@kuzushi/tob-skills": "github:allsmog/tob-security-skills#',
-  '"@kuzushi/vuln-scout": "github:allsmog/vuln-scout#',
-  '"promptarmor-plugin": "github:allsmog/promptarmor-plugin#',
-  '"shinsa-plugin": "github:allsmog/shinsa-plugin#',
+  // Optional plugin deps are SHA-pinned for supply-chain integrity. Match the
+  // value only (the key may wrap onto its own line under biome formatting).
+  '"github:allsmog/tob-security-skills#',
+  '"github:allsmog/vuln-scout#',
+  '"github:allsmog/promptarmor-plugin#',
+  '"github:allsmog/shinsa-plugin#',
   "schemaExportFailures",
   "schemaExportedByWildcard",
   "required package file ${file} is not exported by ./schemas/*",
