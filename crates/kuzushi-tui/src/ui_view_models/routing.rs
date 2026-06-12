@@ -37,7 +37,7 @@ pub(crate) enum PrimaryViewRoute<'a> {
     Module,
     ModuleRun,
     Findings,
-    Finding,
+    Finding { scroll: usize },
     Pwn { scroll: usize },
     Activity { scroll: usize },
     Scene { page: crate::scene3d::VizPage },
@@ -49,7 +49,7 @@ pub(crate) enum PrimaryViewRoute<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ThreatAndRunViewRoute<'a> {
     Tune,
-    Threat(ThreatView),
+    Threat { view: ThreatView, scroll: usize },
     ThreatEditor,
     PromptsEditor,
     ActorDetail(usize),
@@ -148,7 +148,9 @@ fn primary_view_route(app: &ShellApp) -> Option<PrimaryViewRoute<'_>> {
         ShellView::Module => Some(PrimaryViewRoute::Module),
         ShellView::ModuleRun => Some(PrimaryViewRoute::ModuleRun),
         ShellView::Findings => Some(PrimaryViewRoute::Findings),
-        ShellView::Finding => Some(PrimaryViewRoute::Finding),
+        ShellView::Finding => Some(PrimaryViewRoute::Finding {
+            scroll: app.scroll_offset as usize,
+        }),
         ShellView::Pwn => Some(PrimaryViewRoute::Pwn {
             scroll: app.scroll_offset as usize,
         }),
@@ -168,7 +170,10 @@ fn primary_view_route(app: &ShellApp) -> Option<PrimaryViewRoute<'_>> {
 fn threat_and_run_view_route(app: &ShellApp) -> Option<ThreatAndRunViewRoute<'_>> {
     match &app.shell_view {
         ShellView::Tune => Some(ThreatAndRunViewRoute::Tune),
-        ShellView::Threat(view) => Some(ThreatAndRunViewRoute::Threat(*view)),
+        ShellView::Threat(view) => Some(ThreatAndRunViewRoute::Threat {
+            view: *view,
+            scroll: app.scroll_offset as usize,
+        }),
         ShellView::ThreatEditor => Some(ThreatAndRunViewRoute::ThreatEditor),
         ShellView::PromptsEditor => Some(ThreatAndRunViewRoute::PromptsEditor),
         ShellView::ActorDetail(index) => Some(ThreatAndRunViewRoute::ActorDetail(*index)),

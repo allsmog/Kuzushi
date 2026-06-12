@@ -23,6 +23,10 @@ pub struct HomeCockpitModel {
     pub attack_surface: Option<AttackSurfaceRiskModel>,
     pub next_action: String,
     pub rail_legend: &'static str,
+    /// One-line replacement for the per-artifact rail on a fresh workspace
+    /// (every artifact still missing). `Some` collapses the nine-row wall into
+    /// a calm summary; `None` renders the full legend + rows.
+    pub rail_summary: Option<String>,
     pub command_labels: [&'static str; 6],
     pub artifacts: Vec<HomeArtifactRow>,
 }
@@ -44,6 +48,7 @@ pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
     let run_status = run_status_label(&run.run_dir);
     let module_count = app.registry.modules().count();
     let finding_count = app.findings.len();
+    let artifacts = home_artifact_rows(&run.run_dir);
     HomeCockpitModel {
         title: "HOME",
         summary_rows: home_summary_rows(
@@ -57,9 +62,24 @@ pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
         next_action: home_next_action(app),
         rail_legend:
             "rails: ✓ recorded · ○ placeholder · ◆ partial · ⚠ failed/malformed · ■ missing",
+        rail_summary: home_rail_summary(&artifacts),
         command_labels: HOME_COMMANDS,
-        artifacts: home_artifact_rows(&run.run_dir),
+        artifacts,
     }
+}
+
+/// On a fresh workspace every artifact is "missing" — the expected initial
+/// state, not a failure. Collapse the per-artifact rail into one calm summary
+/// line; once any artifact is produced, the full rail returns.
+fn home_rail_summary(artifacts: &[HomeArtifactRow]) -> Option<String> {
+    let total = artifacts.len();
+    let produced = artifacts
+        .iter()
+        .filter(|artifact| artifact.cells[2] != "missing")
+        .count();
+    (produced == 0 && total > 0).then(|| {
+        format!("run artifacts   0/{total} produced — run `scan .` to populate the proof rails")
+    })
 }
 
 fn home_summary_rows(
