@@ -24,6 +24,13 @@ pub(crate) struct ActivityLiveTool {
     pub(crate) name: String,
     pub(crate) spinner: &'static str,
     pub(crate) elapsed_secs: u64,
+    /// Shell-initiated background work (the session-model recommender), not
+    /// something the operator triggered — the header labels it so the view
+    /// never presents ambient work as the operator's run.
+    pub(crate) ambient: bool,
+    /// Steps of a confirmed planning queue waiting for this tool to finish.
+    /// Non-zero exactly when the operator's plan is stalled behind it.
+    pub(crate) queued_plan_steps: usize,
 }
 
 pub(crate) fn activity_header_model(
@@ -67,11 +74,33 @@ fn progress_segment(
 fn taskless_progress(live_tool: Option<&ActivityLiveTool>) -> String {
     match live_tool {
         Some(tool) => format!(
-            "{} {} · running {}s",
-            tool.spinner, tool.name, tool.elapsed_secs
+            "{} {}{} · running {}s{}",
+            tool.spinner,
+            tool.name,
+            ambient_marker(tool),
+            tool.elapsed_secs,
+            queued_plan_segment(tool),
         ),
         None => "no DAG tasks — streaming tool output".to_string(),
     }
+}
+
+fn ambient_marker(tool: &ActivityLiveTool) -> &'static str {
+    if tool.ambient {
+        " (background)"
+    } else {
+        ""
+    }
+}
+
+fn queued_plan_segment(tool: &ActivityLiveTool) -> String {
+    if tool.queued_plan_steps == 0 {
+        return String::new();
+    }
+    format!(
+        " · your plan ({} step(s)) starts after it",
+        tool.queued_plan_steps
+    )
 }
 
 fn task_count(session: &ActivitySession, state: DagTaskState) -> usize {
@@ -168,12 +197,45 @@ mod tests {
             name: "threat-model:build".to_string(),
             spinner: "⠷",
             elapsed_secs: 42,
+            ambient: false,
+            queued_plan_steps: 0,
         };
         let model = activity_header_model(&session, None, Some(&live));
         assert!(model
             .summary_title
             .contains("⠷ threat-model:build · running 42s"));
         assert!(!model.summary_title.contains("no DAG tasks"));
+        assert!(!model.summary_title.contains("(background)"));
+    }
+
+    #[test]
+    fn ambient_tool_is_labelled_background_with_the_stalled_plan() {
+        // Seed disconnect: the recommender ran in the Activity view exactly as
+        // if it were the plan the operator just confirmed. The header must say
+        // it's ambient and that the plan is queued behind it.
+        let session = ActivitySession::new("tool-1");
+        let live = ActivityLiveTool {
+            name: "module-recommender:recommend".to_string(),
+            spinner: "⠷",
+            elapsed_secs: 3,
+            ambient: true,
+            queued_plan_steps: 4,
+        };
+        let model = activity_header_model(&session, None, Some(&live));
+        assert!(
+            model
+                .summary_title
+                .contains("module-recommender:recommend (background)"),
+            "{}",
+            model.summary_title
+        );
+        assert!(
+            model
+                .summary_title
+                .contains("your plan (4 step(s)) starts after it"),
+            "{}",
+            model.summary_title
+        );
     }
 
     #[test]

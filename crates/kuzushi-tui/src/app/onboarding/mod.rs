@@ -17,7 +17,9 @@ mod target_candidates;
 mod task_id;
 mod task_row;
 
-pub use controls::{build_execution_plan, toggle_planning_row, ToggleOutcome};
+pub use controls::{
+    build_execution_plan, row_disposition, toggle_planning_row, RowDisposition, ToggleOutcome,
+};
 pub use dependencies::{
     direct_dependencies, direct_dependents, topological_order, transitive_dependencies,
 };

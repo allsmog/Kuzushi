@@ -20,4 +20,4 @@ house rules        .kuzushi/house-rules/sast.md
     delete the house-rules file and revert to defaults
 
 no house rules set — choose `edit house rules` above to add one
- Up/Down move   Enter activate   show/set/reset direct   back home
+ ↑/↓/j/k move   Enter activate   show/set/reset direct   back home

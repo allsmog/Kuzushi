@@ -426,8 +426,7 @@ impl ShellApp {
             &self.planning_rebuild,
         );
         if plan.is_empty() {
-            self.log("phase", "nothing to run this phase — advancing");
-            self.advance_to_next_phase();
+            self.explain_empty_planning_confirm();
             return;
         }
         let labels = plan
@@ -453,6 +452,30 @@ impl ShellApp {
         // running (and that the queue is waiting on ranking, if it stalls).
         self.shell_view = ShellView::Activity;
         self.dispatch_next_planning_task(workspace);
+    }
+
+    /// Enter built an empty plan. Checked-but-cached rows are reused without
+    /// running, so confirming an all-cached selection used to silently advance
+    /// the phase — say what happened instead, and only advance when the
+    /// operator selected nothing at all (an explicit "skip this phase").
+    fn explain_empty_planning_confirm(&mut self) {
+        if self.planning_selected.is_empty() {
+            let phase = self
+                .workflow_phase
+                .map(|phase| phase.label())
+                .unwrap_or("planning");
+            self.log("phase", format!("nothing selected — skipping {phase}"));
+            self.advance_to_next_phase();
+            return;
+        }
+        self.log(
+            "phase",
+            format!(
+                "nothing to run — all {} checked task(s) are cached and will be reused; \
+                 press g to rebuild one, or Esc to skip this phase",
+                self.planning_selected.len()
+            ),
+        );
     }
 
     fn defer_planning_picker(&mut self) {

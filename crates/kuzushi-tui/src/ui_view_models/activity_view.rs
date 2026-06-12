@@ -85,8 +85,11 @@ impl<'a> ActiveActivityViewModel<'a> {
     /// The tool executing behind this run, with the spinner + elapsed
     /// counter the header ticks for taskless runs. `None` once it ends.
     fn live_tool(&self) -> Option<ActivityLiveTool> {
+        let name = self.app.running_tool_name()?.to_string();
         Some(ActivityLiveTool {
-            name: self.app.running_tool_name()?.to_string(),
+            ambient: self.app.tool_is_ambient(&name),
+            queued_plan_steps: self.app.stalled_planning_steps(),
+            name,
             spinner: self.app.spinner_glyph(),
             elapsed_secs: self.session.started_at.elapsed().as_secs(),
         })

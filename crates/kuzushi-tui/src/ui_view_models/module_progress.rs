@@ -42,7 +42,7 @@ pub(crate) fn module_progress_model(
         if let Some(progress) = app.scan_progress.as_ref() {
             return ModuleProgressModel {
                 section: ModuleProgressSection::RealScan {
-                    rows: real_scan_rows(progress, summary.findings),
+                    rows: real_scan_rows(app, progress, summary.findings),
                 },
             };
         }
@@ -69,6 +69,7 @@ fn selected_sast_tasks_are_visible(
 }
 
 fn real_scan_rows(
+    app: &ShellApp,
     progress: &kuzushi_core::ScanProgress,
     findings: usize,
 ) -> Vec<ModuleProgressRow> {
@@ -77,7 +78,7 @@ fn real_scan_rows(
         .iter()
         .map(|(task_id, (done, total))| progress_row(task_id, *done, *total))
         .collect::<Vec<_>>();
-    rows.push(triage_row(findings));
+    rows.push(triage_row(app, findings));
     rows
 }
 
@@ -88,7 +89,7 @@ fn selected_sast_rows(app: &ShellApp, summary: &ModuleRunSummary) -> Vec<ModuleP
         .filter(|row| row.selected)
         .map(|row| selected_sast_row(row.task_id, summary.scan_done))
         .collect::<Vec<_>>();
-    rows.push(triage_row(summary.findings));
+    rows.push(triage_row(app, summary.findings));
     rows
 }
 
@@ -137,22 +138,42 @@ fn selected_sast_row(label: &'static str, scan_done: bool) -> ModuleProgressRow 
     }
 }
 
-fn triage_row(findings: usize) -> ModuleProgressRow {
-    let has_findings = findings > 0;
+/// The triage pipeline row, fed by real workspace state: `done` counts
+/// findings that carry a triage outcome, and the status follows what is
+/// actually happening (running / done / queued) instead of a hardcoded
+/// "0 queued after scan" that survived triage completing.
+fn triage_row(app: &ShellApp, findings: usize) -> ModuleProgressRow {
+    let done = app
+        .findings
+        .iter()
+        .filter(|finding| finding.triage.is_some())
+        .count()
+        .min(findings);
+    let (kind, status) = triage_state(done, findings, triage_is_running(app));
     ModuleProgressRow {
         label: "triage".to_string(),
-        done: 0,
+        done,
         total: findings.max(1),
-        status: if has_findings {
-            "queued after scan"
-        } else {
-            "waiting for findings"
-        },
-        kind: if has_findings {
-            ModuleProgressKind::Active
-        } else {
-            ModuleProgressKind::Queued
-        },
+        status,
+        kind,
+    }
+}
+
+fn triage_is_running(app: &ShellApp) -> bool {
+    app.running_tool_name() == Some("triage:run")
+}
+
+fn triage_state(done: usize, findings: usize, running: bool) -> (ModuleProgressKind, &'static str) {
+    if running {
+        (ModuleProgressKind::Active, "running…")
+    } else if findings == 0 {
+        (ModuleProgressKind::Queued, "waiting for findings")
+    } else if done >= findings {
+        (ModuleProgressKind::Done, "done")
+    } else if done > 0 {
+        (ModuleProgressKind::Queued, "partially triaged")
+    } else {
+        (ModuleProgressKind::Queued, "queued after scan")
     }
 }
 
@@ -215,6 +236,57 @@ mod tests {
         };
         assert!(rows.iter().any(|row| row.label == "triage"));
         assert!(rows.iter().any(|row| row.status == "running…"));
+    }
+
+    #[test]
+    fn triage_row_reports_completed_triage_instead_of_queued() {
+        // Regression: the row hardcoded done=0/"queued after scan", so a fully
+        // triaged workspace still claimed triage hadn't started.
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.findings = vec![triaged_finding(), triaged_finding()];
+        let row = triage_row(&app, 2);
+        assert_eq!(row.done, 2);
+        assert_eq!(row.status, "done");
+        assert_eq!(row.kind, ModuleProgressKind::Done);
+    }
+
+    #[test]
+    fn triage_row_shows_running_while_triage_tool_is_in_flight() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.findings = vec![triaged_finding()];
+        app.tool_running = Some("triage:run".to_string());
+        let row = triage_row(&app, 3);
+        assert_eq!(row.status, "running…");
+        assert_eq!(row.kind, ModuleProgressKind::Active);
+        assert_eq!(row.done, 1);
+    }
+
+    #[test]
+    fn triage_row_states_queued_and_partial_truthfully() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        assert_eq!(triage_row(&app, 0).status, "waiting for findings");
+        assert_eq!(triage_row(&app, 4).status, "queued after scan");
+        assert_eq!(triage_row(&app, 4).kind, ModuleProgressKind::Queued);
+        app.findings = vec![triaged_finding()];
+        let partial = triage_row(&app, 4);
+        assert_eq!(partial.status, "partially triaged");
+        assert_eq!(partial.done, 1);
+    }
+
+    fn triaged_finding() -> kuzushi_core::Finding {
+        let mut finding = kuzushi_core::Finding::new_semgrep(
+            "rule.demo",
+            "src/lib.rs",
+            1,
+            None,
+            kuzushi_core::Severity::Medium,
+            "demo",
+        );
+        finding.triage = Some(kuzushi_core::TriageOutcome {
+            verdict: kuzushi_core::TriageVerdict::TruePositive,
+            ..Default::default()
+        });
+        finding
     }
 
     fn scan_panel(running: bool, findings_count: usize) -> ScanPanelState {

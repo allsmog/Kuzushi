@@ -6304,3 +6304,165 @@ fn clean_scan_does_not_auto_open_an_empty_heatmap() {
         "a 0-finding scan is a pass, not a heatmap to yank to"
     );
 }
+
+// --- planning picker confirm honesty (signifier↔state↔intent audit) -------
+
+fn planning_test_row(id: PlanningTaskId, state: PlanningArtifactState) -> PlanningTaskRow {
+    PlanningTaskRow {
+        id,
+        label: id.label(),
+        tool_name: id.tool_name(),
+        artifact_path: std::path::PathBuf::from("/dev/null"),
+        artifact_state: state,
+        model_backed: id.is_model_backed(),
+        required_cli: None,
+        cli_available: true,
+    }
+}
+
+fn open_test_planning_picker(app: &mut ShellApp, rows: Vec<PlanningTaskRow>) {
+    app.planning_selected = rows.iter().map(|row| row.id).collect();
+    app.planning_tasks = rows;
+    app.planning_rebuild = std::collections::BTreeSet::new();
+    app.workflow_phase = Some(WorkflowPhase::Map);
+    app.shell_view = ShellView::PlanningPicker;
+}
+
+#[test]
+fn confirming_an_all_cached_selection_explains_instead_of_silently_advancing() {
+    // Seed disconnect: Enter on a selection whose every row is cached built an
+    // empty plan and quietly advanced the phase. It must stay in the picker
+    // and say why nothing will run.
+    let dir = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(dir.path().to_path_buf());
+    open_test_planning_picker(
+        &mut app,
+        vec![planning_test_row(
+            PlanningTaskId::GatherRepoContext,
+            PlanningArtifactState::Cached,
+        )],
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view, ShellView::PlanningPicker, "stays put");
+    assert_eq!(
+        app.workflow_phase,
+        Some(WorkflowPhase::Map),
+        "no phase jump"
+    );
+    assert!(
+        app.log
+            .iter()
+            .any(|line| line.body.contains("cached and will be reused")),
+        "explains the no-op"
+    );
+}
+
+#[test]
+fn confirming_with_nothing_selected_names_the_skipped_phase() {
+    let dir = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(dir.path().to_path_buf());
+    open_test_planning_picker(
+        &mut app,
+        vec![planning_test_row(
+            PlanningTaskId::GatherRepoContext,
+            PlanningArtifactState::Missing,
+        )],
+    );
+    app.planning_selected.clear();
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+    assert!(
+        app.log
+            .iter()
+            .any(|line| line.body.contains("nothing selected — skipping")),
+        "names the skip"
+    );
+    assert_ne!(
+        app.workflow_phase,
+        Some(WorkflowPhase::Map),
+        "an explicit empty selection still advances"
+    );
+}
+
+#[test]
+fn confirmed_plan_stalled_behind_running_tool_is_announced() {
+    // Seed disconnect: Enter while the recommender held the background slot
+    // queued the plan and returned silently — the operator watched an
+    // unrelated tool run with no hint their plan was waiting.
+    let dir = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(dir.path().to_path_buf());
+    app.tool_running = Some("module-recommender:recommend".to_string());
+    open_test_planning_picker(
+        &mut app,
+        vec![planning_test_row(
+            PlanningTaskId::GatherRepoContext,
+            PlanningArtifactState::Missing,
+        )],
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+    assert_eq!(
+        app.planning_run_queue.len(),
+        1,
+        "the confirmed step stays queued"
+    );
+    assert!(
+        app.log.iter().any(|line| line
+            .body
+            .contains("waiting for module-recommender:recommend to finish")),
+        "announces the stall: {:?}",
+        app.log.iter().map(|l| &l.body).collect::<Vec<_>>()
+    );
+    assert_eq!(
+        app.stalled_planning_steps(),
+        1,
+        "the Activity header sees the stalled plan"
+    );
+}
+
+#[test]
+fn planning_picker_uppercase_aliases_match_their_advertised_lowercase_keys() {
+    // a/A, n/N, g/G, Esc/q: the shifted variants are deliberate caps-lock
+    // forgiveness. This pins them to the advertised lowercase behavior so a
+    // future handler edit can't make an unadvertised key diverge.
+    let dir = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(dir.path().to_path_buf());
+    open_test_planning_picker(
+        &mut app,
+        vec![
+            planning_test_row(
+                PlanningTaskId::GatherRepoContext,
+                PlanningArtifactState::Missing,
+            ),
+            planning_test_row(PlanningTaskId::BuildXRay, PlanningArtifactState::Cached),
+        ],
+    );
+    app.planning_selected.clear();
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT));
+    assert_eq!(app.planning_selected.len(), 2, "A selects all like a");
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT));
+    assert!(app.planning_selected.is_empty(), "N clears like n");
+
+    app.planning_cursor = 1; // the cached row
+    app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
+    assert!(
+        app.planning_rebuild.contains(&PlanningTaskId::BuildXRay),
+        "G marks rebuild like g"
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()));
+    assert!(
+        app.log.iter().any(|line| line.body.contains("skipped")),
+        "q defers the phase like Esc"
+    );
+}

@@ -11,7 +11,7 @@ pub(crate) fn tune_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     append_tune_actions(&mut lines, &model.actions, area.width);
     append_house_rules(&mut lines, &model.house_rules, area);
     lines.push(keybind_hint_line(&[
-        ("Up/Down", "move"),
+        ("↑/↓/j/k", "move"),
         ("Enter", "activate"),
         ("show/set/reset", "direct"),
         ("back", "home"),
@@ -86,7 +86,7 @@ pub(crate) fn prompts_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     append_prompt_rows(&mut lines, &model.rows, area);
     lines.push(blank());
     lines.push(keybind_hint_line(&[
-        ("Up/Down", "row"),
+        ("↑/↓/j/k", "row"),
         ("e", "edit"),
         ("s", "show"),
         ("d", "diff"),

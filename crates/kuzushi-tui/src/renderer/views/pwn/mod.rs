@@ -35,9 +35,10 @@ pub(crate) fn pwn_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         "pwn profile · pwn reverse [function] · pwn auto · pwn state · pwn candidates <target>",
     ));
     lines.push(keybind_hint_line(&[
-        ("j/k", "scroll"),
+        ("j/k/g/G", "scroll"),
         ("pwn auto", "observe and replan"),
         ("pwn candidates", "review approval gate"),
+        ("Esc", "back"),
     ]));
     lines
 }

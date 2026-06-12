@@ -30,6 +30,7 @@ impl ShellApp {
             target: self.target.clone(),
         };
         self.tool_running = None;
+        self.ambient_tool = None;
         self.tool_abort_requested = false;
         state
     }
