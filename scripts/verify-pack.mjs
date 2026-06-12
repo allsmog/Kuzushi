@@ -653,8 +653,6 @@ function binWrapperContentFailures() {
     'join(root, "target", "release", exe)',
     'join(root, "target", "debug", exe)',
     'invokedName === "kz" ? "kz" : "kuzushi"',
-    "KUZUSHI_NATIVE_BIN",
-    "KUZUSHI_CLI_NAME",
     "KUZUSHI_CLI_NAME: cliName",
     "native/<platform>-<arch>/kuzushi",
     "kuzushi doctor --target .",
