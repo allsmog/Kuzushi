@@ -96,6 +96,10 @@ same_item_push = "allow"
 should_implement_trait = "allow"
 single_char_add_str = "allow"
 trim_split_whitespace = "allow"
+# Purely stylistic and toolchain-version-sensitive (1.88 flags cases 1.95
+# does not); the codebase mixes inlined and positional format args. Allow it
+# so CI clippy is stable across the pinned and local toolchains.
+uninlined_format_args = "allow"
 unnecessary_map_or = "allow"
 unnecessary_to_owned = "allow"
 useless_conversion = "allow"

@@ -7,8 +7,8 @@ view: auth
   ✗  LangGraph       missing    OPENAI_API_KEY=missing
 
  -- PROVIDERS ----------------------------------------------------------------------------------------------------------
-  !  anthropic       expired    ANTHROPIC_API_KEY=missing; oauth expired; will refresh on next call
-  !  openai          expired    oauth expired; will refresh on next call
+  ✗  anthropic       missing    ANTHROPIC_API_KEY=missing; oauth missing
+  ✗  openai          missing    oauth missing
   ✗  github-copilot  missing    oauth missing
 
  -- MODEL · effective --------------------------------------------------------------------------------------------------
