@@ -10,7 +10,10 @@ use std::path::PathBuf;
 pub(crate) async fn demo_command(json: bool) -> Result<()> {
     let demo_dir = prepare_demo_fixture()?;
     if !json {
-        eprintln!("demo: scanning a vendored vulnerable fixture at {}", demo_dir.display());
+        eprintln!(
+            "demo: scanning a vendored vulnerable fixture at {}",
+            demo_dir.display()
+        );
         eprintln!("demo: deterministic engines only — nothing leaves this machine.\n");
     }
     scan_command(

@@ -137,9 +137,8 @@ pub(crate) fn logs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
     lines.push(divider("LOGS", area.width));
     let total = app.log.len();
-    let hint = format!(
-        "{total} log lines · j/k scroll · g/G jump · PgUp/PgDn page · back to return"
-    );
+    let hint =
+        format!("{total} log lines · j/k scroll · g/G jump · PgUp/PgDn page · back to return");
     lines.push(muted(&fit(&hint, area.width as usize)));
     lines.push(blank());
     let model = transcript_model_from_log_index(app, 0);

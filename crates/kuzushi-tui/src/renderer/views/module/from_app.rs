@@ -15,7 +15,7 @@ pub(crate) fn module_run_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
     lines.push(blank());
     lines.push(divider("TRANSCRIPT", area.width));
     let body_budget = area.height.saturating_sub(lines.len() as u16) as usize;
-    let transcript = transcript_lines(app, body_budget.saturating_sub(1).max(0));
+    let transcript = transcript_lines(app, body_budget.saturating_sub(1));
     lines.extend(transcript);
     if (summary.scan_running || summary.tool_is_running()) && body_budget > 0 {
         lines.push(streaming_cursor_line());

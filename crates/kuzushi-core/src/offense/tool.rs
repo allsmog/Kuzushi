@@ -187,10 +187,7 @@ fn persist_outcome(
     outcome: &ChainOutcome,
 ) -> Option<i64> {
     let store = store?;
-    match persist_chain_finding(store, workspace_root, target_host, backend, outcome) {
-        Ok(finding_id) => finding_id,
-        Err(_) => None,
-    }
+    persist_chain_finding(store, workspace_root, target_host, backend, outcome).unwrap_or_default()
 }
 
 fn run_prepared(

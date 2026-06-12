@@ -27,7 +27,10 @@ fn ten_thousand_log_calls_stay_inside_the_500_line_cap_without_panicking() {
     let start = Instant::now();
     let mut app = ShellApp::new(V2Config::default(), None);
     for index in 0..LARGE_LOG_LINES {
-        app.log("scan", format!("synthetic entry {index}: large transcript stress"));
+        app.log(
+            "scan",
+            format!("synthetic entry {index}: large transcript stress"),
+        );
     }
     let elapsed_ms = start.elapsed().as_millis();
     assert_eq!(app.log.len(), TRANSCRIPT_CAP);
@@ -107,7 +110,7 @@ fn one_thousand_findings_render_findings_view_without_panic() {
     app.findings = findings;
     app.shell_view = ShellView::Findings;
 
-    let rendered = render_plain_app(&mut app, RENDER_WIDTH);
+    let rendered = render_plain_app(&app, RENDER_WIDTH);
     let elapsed_ms = start.elapsed().as_millis();
     assert!(!rendered.is_empty(), "Findings view must produce output");
     assert!(

@@ -185,7 +185,7 @@ fn target_or_static_taint_iris_next_catalog(
 fn sorted_taint_iris_next_catalog(
     mut entries: Vec<TaintIrisNextRankedCatalogEntry>,
 ) -> Vec<TaintIrisNextRankedCatalogEntry> {
-    entries.sort_by(|a, b| b.score.cmp(&a.score));
+    entries.sort_by_key(|entry| std::cmp::Reverse(entry.score));
     entries
 }
 
@@ -454,7 +454,7 @@ fn boost_catalog_with_discovered_signals(
         dedup_signal_list(&mut entry.source_signals);
         dedup_signal_list(&mut entry.sink_signals);
     }
-    catalog.sort_by(|a, b| b.score.cmp(&a.score));
+    catalog.sort_by_key(|entry| std::cmp::Reverse(entry.score));
     catalog
 }
 
@@ -586,7 +586,7 @@ fn boost_catalog_with_attack_surface_hints(
             .score
             .saturating_add(attack_surface_bonus(entry, &indexes));
     }
-    catalog.sort_by(|a, b| b.score.cmp(&a.score));
+    catalog.sort_by_key(|entry| std::cmp::Reverse(entry.score));
     catalog
 }
 
@@ -763,7 +763,7 @@ fn supplement_catalog_with_phantom_focus_entries(
             )],
         });
     }
-    catalog.sort_by(|a, b| b.score.cmp(&a.score));
+    catalog.sort_by_key(|entry| std::cmp::Reverse(entry.score));
     catalog
 }
 

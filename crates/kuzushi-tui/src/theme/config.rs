@@ -99,9 +99,7 @@ mod tests {
                 "expected {value:?} to enable reduced_motion"
             );
             match prior {
-                Some(prior) => unsafe {
-                    std::env::set_var("KUZUSHI_REDUCED_MOTION", prior)
-                },
+                Some(prior) => unsafe { std::env::set_var("KUZUSHI_REDUCED_MOTION", prior) },
                 None => unsafe { std::env::remove_var("KUZUSHI_REDUCED_MOTION") },
             }
         }

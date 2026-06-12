@@ -24,18 +24,9 @@ pub(crate) fn format_android_apk_scan_plain(envelope: &Value) -> Option<String> 
 }
 
 fn format_header(envelope: &Value, totals: &Value) -> String {
-    let findings = totals
-        .get("findings")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let stages = totals
-        .get("stagesRun")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
-    let skipped = totals
-        .get("skipped")
-        .and_then(Value::as_u64)
-        .unwrap_or(0);
+    let findings = totals.get("findings").and_then(Value::as_u64).unwrap_or(0);
+    let stages = totals.get("stagesRun").and_then(Value::as_u64).unwrap_or(0);
+    let skipped = totals.get("skipped").and_then(Value::as_u64).unwrap_or(0);
     let apk = envelope
         .get("data")
         .and_then(|d| d.get("apk"))
@@ -118,7 +109,7 @@ fn format_top_findings(stages: &[Value]) -> Option<String> {
         return None;
     }
     let mut ranked: Vec<FindingSummary> = counts.into_values().collect();
-    ranked.sort_by(|a, b| severity_rank(&a.severity).cmp(&severity_rank(&b.severity)));
+    ranked.sort_by_key(|a| severity_rank(&a.severity));
     let mut out = String::from("top findings:\n");
     for (idx, summary) in ranked.iter().take(10).enumerate() {
         out.push_str(&format_finding_row(idx + 1, summary));

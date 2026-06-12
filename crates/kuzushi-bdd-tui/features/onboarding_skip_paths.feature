@@ -27,4 +27,8 @@ Feature: Skip paths
     And I press "Esc"
     And I press "Esc"
     And I press "Esc"
-    Then the log contains "ranking modules"
+    # Assert the stable handoff (the Recommend view header), not the transient
+    # "ranking modules" transcript line — the 2-row strip scrolls it away as
+    # soon as the background recommender logs again, which races the poller
+    # on slow CI runners.
+    Then I see "RECOMMEND"

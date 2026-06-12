@@ -67,27 +67,33 @@ pub fn accent() -> Style {
 }
 
 pub fn success() -> Style {
-    Style::default().fg(T_SUCCESS).add_modifier(if active_theme().high_contrast {
-        Modifier::BOLD
-    } else {
-        Modifier::empty()
-    })
+    Style::default()
+        .fg(T_SUCCESS)
+        .add_modifier(if active_theme().high_contrast {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        })
 }
 
 pub fn warn() -> Style {
-    Style::default().fg(T_WARN).add_modifier(if active_theme().high_contrast {
-        Modifier::BOLD
-    } else {
-        Modifier::empty()
-    })
+    Style::default()
+        .fg(T_WARN)
+        .add_modifier(if active_theme().high_contrast {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        })
 }
 
 pub fn danger() -> Style {
-    Style::default().fg(T_DANGER).add_modifier(if active_theme().high_contrast {
-        Modifier::BOLD
-    } else {
-        Modifier::empty()
-    })
+    Style::default()
+        .fg(T_DANGER)
+        .add_modifier(if active_theme().high_contrast {
+            Modifier::BOLD
+        } else {
+            Modifier::empty()
+        })
 }
 
 pub fn selection() -> Style {

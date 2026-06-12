@@ -9,7 +9,10 @@ use std::path::{Path, PathBuf};
 /// truncated or corrupt state file — the previous content survives instead.
 /// Rename is atomic because the temp sibling lives on the same filesystem.
 pub(crate) fn write_atomic(path: &Path, contents: &str) -> Result<()> {
-    if let Some(parent) = path.parent().filter(|parent| !parent.as_os_str().is_empty()) {
+    if let Some(parent) = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+    {
         fs::create_dir_all(parent)
             .with_context(|| format!("Could not create {}", parent.display()))?;
     }
@@ -17,8 +20,7 @@ pub(crate) fn write_atomic(path: &Path, contents: &str) -> Result<()> {
     fs::write(&temp, contents).with_context(|| format!("Could not write {}", temp.display()))?;
     if let Err(error) = fs::rename(&temp, path) {
         let _ = fs::remove_file(&temp);
-        return Err(error)
-            .with_context(|| format!("Could not move {} into place", path.display()));
+        return Err(error).with_context(|| format!("Could not move {} into place", path.display()));
     }
     Ok(())
 }

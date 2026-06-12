@@ -5,7 +5,39 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+## v0.24.0-alpha.4 — CI gating, offline demo, multi-platform packaging, reliability
+
+First release where the npm package ships the documented Rust CLI on every
+green-built platform.
+
+**Additive:**
+
+- `kuzushi scan --fail-on low|medium|high|critical` exits 3 when blocking
+  findings exist (CI gating); `--sarif <path>` writes SARIF 2.1.0 straight
+  from the CLI. The reference workflow gates on high and uploads to
+  GitHub Code Scanning.
+- `kuzushi demo`: offline first-wow — scans a vendored vulnerable fixture
+  with the deterministic engines; no API key, model, or external scanners.
+- The npm publish pipeline stages every green platform build
+  (linux-x64/arm64, darwin-x64/arm64, win32-x64); darwin-arm64 is now a
+  required release build. One binary per platform — `kz` is an argv0 alias.
+
 **Fixed:**
+
+- Finding identity is stable and message-independent (FNV-1a v2
+  fingerprints + one-time migration): LLM rephrasing no longer duplicates
+  findings, and Rust toolchain bumps can no longer resurrect history.
+- Reliability triad: the Node bridge runs under a wall-clock deadline with
+  kill+retry (no indefinite hangs; transient 429s no longer kill agent
+  loops); the findings store uses WAL + busy-timeout + transactional
+  inserts; state JSON writes are atomic (temp+rename).
+- Supply chain: the required `github:` dependency on randori-plugin is gone
+  (it was a Claude Code plugin, not runtime code); optional plugin deps are
+  SHA-pinned.
+- Trust kit: descending CHANGELOG, honest SECURITY.md versions, and a
+  stated privacy promise (local-first, zero telemetry).
+
+**Fixed (pre-release, via the consolidation/quality merges):**
 
 - CI is hard-blocking again end to end: the DDD boundary regressions from the
   phase-workflow/security-viz work are resolved (model-ranked recommendation is

@@ -172,7 +172,10 @@ fn empty_state(context_state: &'static str) -> FindingsEmptyState {
         },
         _ => FindingsEmptyState {
             hint: "runs the umbrella scanner over the target.",
-            context_cta: Some(("context build", "optional: index the repo first for richer analysis.")),
+            context_cta: Some((
+                "context build",
+                "optional: index the repo first for richer analysis.",
+            )),
         },
     }
 }

@@ -97,16 +97,15 @@ fn inspect_source_path(
     findings: &mut Vec<LicenseScanFinding>,
 ) -> Result<()> {
     match source_spdx_license(path)? {
-        Some(header) => {
-            if declared.is_some_and(|license| normalize_license_id(&header) != license) {
-                findings.push(spdx_header_mismatch_finding(
-                    target,
-                    path,
-                    declared.unwrap_or_default(),
-                    &header,
-                ));
-            }
+        Some(header) if declared.is_some_and(|license| normalize_license_id(&header) != license) => {
+            findings.push(spdx_header_mismatch_finding(
+                target,
+                path,
+                declared.unwrap_or_default(),
+                &header,
+            ));
         }
+        Some(_) => {}
         None if require_source_spdx_headers => {
             findings.push(missing_spdx_header_finding(target, path));
         }

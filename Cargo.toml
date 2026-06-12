@@ -24,7 +24,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.24.0-alpha.0"
+version = "0.24.0-alpha.4"
 edition = "2021"
 rust-version = "1.88"
 license = "MIT"
@@ -44,6 +44,12 @@ repository = "https://github.com/allsmog/Kuzushi.git"
 # mechanical rewrite of pre-existing code (which would churn dozens of files
 # and trip the complexity gate). Drive these to zero over time, lint by lint;
 # do NOT add new entries to dodge a warning in new code — fix the code instead.
+[workspace.lints.rust]
+# The clippy allow-list below names lints that newer toolchains know but the
+# CI-pinned compiler may not; without this, -D warnings turns "unknown lint"
+# into a hard error on version skew.
+unknown_lints = "allow"
+
 [workspace.lints.clippy]
 # Structural / pervasive (signature, module, or type reshaping):
 module_inception = "allow"          # DDD layout: foo/foo.rs is intentional

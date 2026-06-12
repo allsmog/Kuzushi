@@ -75,7 +75,10 @@ fn push_auth_rotate_section(lines: &mut Vec<Line<'static>>, area: Rect) {
         lines.push(Line::from(vec![
             Span::raw(" "),
             Span::styled("• ", theme::muted()),
-            Span::styled(fit(hint, area.width.saturating_sub(3) as usize), theme::primary()),
+            Span::styled(
+                fit(hint, area.width.saturating_sub(3) as usize),
+                theme::primary(),
+            ),
         ]));
     }
     lines.push(blank());
