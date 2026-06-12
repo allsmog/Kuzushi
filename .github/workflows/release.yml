@@ -45,12 +45,12 @@ jobs:
           registry-url: https://registry.npmjs.org
       - run: pnpm install --frozen-lockfile
       - name: Download dist artifact from CI
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
       - name: Download cross-platform binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: release-native-*
           merge-multiple: true
@@ -171,12 +171,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Download dist artifact from CI
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
       - name: Download cross-platform binaries
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: release-native-*
           merge-multiple: true
