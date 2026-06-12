@@ -26,7 +26,7 @@ mod config_lines;
 mod cost_lines;
 mod tools_lines;
 pub(crate) use auth_lines::auth_lines;
-pub(crate) use auth_provider_rows::auth_provider_line;
+pub(crate) use auth_provider_rows::{auth_provider_line, auth_provider_lines};
 pub(crate) use command_palette_lines::command_palette_lines;
 pub(crate) use config_lines::config_lines;
 pub(crate) use cost_lines::cost_budget_bar;

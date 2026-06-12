@@ -104,6 +104,24 @@ pub(crate) fn handle_onboarding_command(app: &mut ShellApp, command: &ShellComma
     true
 }
 
+/// `next` / `continue` — resume the engagement wherever the workspace
+/// actually is: the live walker phase when one is open, otherwise the
+/// phase derived from artifacts + findings + confirmation state.
+pub(crate) fn handle_next_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Next = command else {
+        return false;
+    };
+    let Some(journey) = crate::ui_view_models::journey_model(app) else {
+        app.log(
+            "journey",
+            "no active workspace target; set one with `target <path>` first",
+        );
+        return true;
+    };
+    app.open_phase_picker(journey.current);
+    true
+}
+
 pub(crate) fn handle_logs_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
     let ShellCommand::Logs = command else {
         return false;

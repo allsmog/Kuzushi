@@ -483,7 +483,6 @@ mod tests {
     use crate::config::V2Config;
     use crate::findings::TriageOutcome;
     use crate::runtime::TriageRequest;
-    use std::sync::{Mutex, OnceLock};
     use tempfile::tempdir;
 
     struct BuildPlanRuntime;
@@ -505,11 +504,6 @@ mod tests {
         fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
             anyhow::bail!("not used by codeql build tests")
         }
-    }
-
-    fn env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
     }
 
     #[test]
@@ -556,11 +550,27 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn run_codeql_build_report_drives_agent_plan_and_codeql_cli() {
-        let _guard = env_lock().lock().unwrap();
+        let _guard = crate::test_env::codeql_bin_env_lock();
         let temp = tempdir().unwrap();
         std::fs::write(temp.path().join("main.c"), "int main(void) { return 0; }\n").unwrap();
+        let previous = set_codeql_bin_for_test(&write_fake_codeql_build_script(temp.path()));
+        let config = codeql_build_test_config();
+        let ctx = codeql_build_test_context(&config);
 
-        let fake_codeql = temp.path().join("codeql");
+        let report = run_codeql_build_report(
+            &json!({"target": temp.path().display().to_string()}),
+            &ctx,
+            Some(&BuildPlanRuntime),
+        )
+        .unwrap();
+
+        restore_codeql_bin(previous);
+        assert_codeql_build_report(report);
+    }
+
+    #[cfg(unix)]
+    fn write_fake_codeql_build_script(root: &Path) -> PathBuf {
+        let fake_codeql = root.join("codeql");
         std::fs::write(
             &fake_codeql,
             r#"#!/usr/bin/env bash
@@ -578,31 +588,38 @@ printf 'fake warning\n' >&2
             perms.set_mode(0o755);
             std::fs::set_permissions(&fake_codeql, perms).unwrap();
         }
+        fake_codeql
+    }
 
+    fn set_codeql_bin_for_test(fake_codeql: &Path) -> Option<std::ffi::OsString> {
         let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
-        std::env::set_var("KUZUSHI_CODEQL_BIN", &fake_codeql);
+        std::env::set_var("KUZUSHI_CODEQL_BIN", fake_codeql);
+        previous
+    }
 
+    fn codeql_build_test_config() -> V2Config {
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-4.1".to_string());
-        let ctx = ToolExecutionContext {
-            config: &config,
+        config
+    }
+
+    fn codeql_build_test_context(config: &V2Config) -> ToolExecutionContext<'_> {
+        ToolExecutionContext {
+            config,
             workspace: None,
             findings_store: None,
             trace: None,
-        };
+        }
+    }
 
-        let report = run_codeql_build_report(
-            &json!({"target": temp.path().display().to_string()}),
-            &ctx,
-            Some(&BuildPlanRuntime),
-        )
-        .unwrap();
-
+    fn restore_codeql_bin(previous: Option<std::ffi::OsString>) {
         match previous {
             Some(value) => std::env::set_var("KUZUSHI_CODEQL_BIN", value),
             None => std::env::remove_var("KUZUSHI_CODEQL_BIN"),
         }
+    }
 
+    fn assert_codeql_build_report(report: CodeqlBuildReport) {
         assert!(report.ok);
         assert_eq!(report.status, "built");
         assert_eq!(report.language, "cpp");

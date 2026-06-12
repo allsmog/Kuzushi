@@ -219,6 +219,17 @@ impl ActivitySession {
         self.pane_focus = self.pane_focus.toggle();
     }
 
+    /// Focus that accounts for the collapsed TASKS pane: with no DAG tasks
+    /// the OUTPUT pane is the only one on screen, so scrolling and the
+    /// header label act on it regardless of the stored toggle state.
+    pub fn effective_pane_focus(&self) -> PaneFocus {
+        if self.tasks.is_empty() {
+            PaneFocus::Right
+        } else {
+            self.pane_focus
+        }
+    }
+
     /// Pre-populate `tasks` with `Queued` rows for every visible DAG node in
     /// the registry, plus seed `subsystem_aggregate.total_count` from hidden
     /// modules. Used at scan start so the DAG pane has rows from the first

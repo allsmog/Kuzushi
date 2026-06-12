@@ -75,7 +75,7 @@ impl ShellApp {
         self.log(
             "model",
             format!(
-                "{} / {} selected via onboarding (session only; no fallback model will be selected)",
+                "{} / {} selected (session only; no fallback model) — showing config, Esc to go back",
                 model_choice_display_selector(choice),
                 choice.thinking_level
             ),

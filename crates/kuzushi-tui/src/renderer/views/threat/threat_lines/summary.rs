@@ -5,7 +5,7 @@ pub(super) fn append_summary_lines(app: &ShellApp, area: Rect, lines: &mut Vec<L
     let review = crate::ui_view_models::threat_summary_review(app);
 
     lines.push(section_header_line("THREAT MODEL REVIEW", area.width));
-    append_review_summary(lines, &review);
+    append_review_summary(lines, &review, area.width);
     lines.push(blank());
 
     lines.push(section_header_line("SURFACE", area.width));
@@ -35,9 +35,9 @@ pub(super) fn append_summary_lines(app: &ShellApp, area: Rect, lines: &mut Vec<L
     append_review_list(lines, "limit", &review.limitations);
 }
 
-fn append_review_summary(lines: &mut Vec<Line<'static>>, review: &ThreatSummaryReview) {
+fn append_review_summary(lines: &mut Vec<Line<'static>>, review: &ThreatSummaryReview, width: u16) {
     lines.push(detail("status", &review.status));
-    lines.push(detail("summary", &review.summary));
+    lines.extend(detail_wrapped("summary", &review.summary, width));
     lines.push(detail("threats", &review.threats));
 }
 

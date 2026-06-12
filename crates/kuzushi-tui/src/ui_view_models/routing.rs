@@ -44,6 +44,7 @@ pub(crate) enum PrimaryViewRoute<'a> {
     ModelPicker,
     AuthMethodPicker { provider: &'a str },
     PlanningPicker,
+    TargetPicker,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,6 +164,7 @@ fn primary_view_route(app: &ShellApp) -> Option<PrimaryViewRoute<'_>> {
             provider: provider.as_str(),
         }),
         ShellView::PlanningPicker => Some(PrimaryViewRoute::PlanningPicker),
+        ShellView::TargetPicker => Some(PrimaryViewRoute::TargetPicker),
         _ => None,
     }
 }

@@ -66,10 +66,3 @@ pub(in crate::scan) fn codeql_language_rule_matches(
     rule.exact.iter().any(|exact| exact == &value)
         || rule.contains.iter().any(|needle| value.contains(needle))
 }
-
-pub(in crate::scan) fn is_compiled_codeql_language(language: &str) -> bool {
-    matches!(
-        language,
-        "go" | "java" | "cpp" | "csharp" | "swift" | "rust"
-    )
-}

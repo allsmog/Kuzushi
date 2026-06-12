@@ -27,6 +27,8 @@ quickstart - first-run guided setup
   aliases / examples: /quickstart
 onboarding - open the planning-stage multi-select picker
   aliases / examples: /onboarding, /setup, /planning, /plan-stage
+next - continue the engagement — open the current phase's picker
+  aliases / examples: /next
 logs - scrollable full-screen transcript
   aliases / examples: /logs, log, transcript, /transcript
 

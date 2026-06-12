@@ -19,9 +19,12 @@ public_modules!(
 );
 
 pub(crate) mod artifact_contract;
+pub(crate) mod codeql_build_mode;
 pub(crate) mod fs_atomic;
 pub(crate) mod module_result;
 pub(crate) mod structured_output;
+#[cfg(test)]
+pub(crate) mod test_env;
 
 mod code_index;
 mod public_exports;

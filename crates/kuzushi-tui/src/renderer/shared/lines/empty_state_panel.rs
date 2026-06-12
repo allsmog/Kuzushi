@@ -58,6 +58,70 @@ pub(crate) fn command_list_line(commands: &[&str], width: usize) -> Line<'static
     Line::from(spans)
 }
 
+/// Wrapping variant of [`command_list_line`]: commands that don't fit the
+/// width flow onto continuation lines (hanging indent under the prefix)
+/// instead of disappearing behind an ellipsis. Use it when every command
+/// matters — e.g. the auth view's recovery commands.
+pub(crate) fn command_list_lines(commands: &[&str], width: usize) -> Vec<Line<'static>> {
+    let mut builder = CommandListBuilder::new(width);
+    for cmd in commands {
+        builder.push(cmd);
+    }
+    builder.finish()
+}
+
+struct CommandListBuilder {
+    width: usize,
+    indent: usize,
+    lines: Vec<Line<'static>>,
+    spans: Vec<Span<'static>>,
+    used: usize,
+}
+
+impl CommandListBuilder {
+    fn new(width: usize) -> Self {
+        let prefix = "▸ try: ";
+        let indent = prefix.chars().count();
+        Self {
+            width,
+            indent,
+            lines: Vec::new(),
+            spans: vec![Span::styled(prefix.to_string(), theme::muted())],
+            used: indent,
+        }
+    }
+
+    fn push(&mut self, cmd: &str) {
+        let cmd_chars = cmd.chars().count();
+        if self.row_has_command() && self.used + 3 + cmd_chars > self.width {
+            self.wrap_row();
+        }
+        if self.row_has_command() {
+            self.spans
+                .push(Span::styled(" · ".to_string(), theme::subtle()));
+            self.used += 3;
+        }
+        self.spans
+            .push(Span::styled(cmd.to_string(), theme::accent()));
+        self.used += cmd_chars;
+    }
+
+    fn row_has_command(&self) -> bool {
+        self.spans.len() > 1
+    }
+
+    fn wrap_row(&mut self) {
+        self.lines.push(Line::from(std::mem::take(&mut self.spans)));
+        self.spans.push(Span::raw(" ".repeat(self.indent)));
+        self.used = self.indent;
+    }
+
+    fn finish(mut self) -> Vec<Line<'static>> {
+        self.lines.push(Line::from(self.spans));
+        self.lines
+    }
+}
+
 pub(crate) fn indent(line: Line<'static>, spaces: usize) -> Line<'static> {
     let mut spans = vec![Span::raw(" ".repeat(spaces))];
     spans.extend(line.spans);

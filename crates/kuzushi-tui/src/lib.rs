@@ -10,6 +10,7 @@ pub(crate) use app::*;
 pub(crate) use commands::*;
 pub(crate) use renderer::*;
 mod app;
+mod build_provenance;
 mod commands;
 mod renderer;
 pub mod scene3d;
@@ -21,6 +22,9 @@ pub mod ui_views;
 pub use app::{
     run_shell, run_shell_with_plain, ActivitySession, ChatTurn, OptionsFilter, OptionsView,
     PaneFocus, ReconSnapshot, ScanPanelState, ShellApp, ShellView, ThreatView,
+};
+pub use build_provenance::{
+    build_provenance, build_summary, build_version, build_version_static, BuildProvenance,
 };
 pub use commands::{parse_command, ShellCommand};
 pub use kuzushi_core::ScanProgress;

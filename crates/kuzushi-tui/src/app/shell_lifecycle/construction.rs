@@ -37,6 +37,9 @@ macro_rules! shell_app_initial_state {
             completion_cycle: None,
             log: Vec::new(),
             target: ($target).map(|target| target.root().to_path_buf()),
+            task_durations: crate::app::TaskDurationStore::load(
+                ($target).map(|target| target.root()),
+            ),
             focused_module: None,
             shell_view: ShellView::Catalog,
             prev_shell_view: None,
@@ -86,6 +89,8 @@ macro_rules! shell_app_initial_state {
             palette_cursor: 0,
             model_picker_cursor: 0,
             auth_picker_cursor: 0,
+            target_picker_cursor: 0,
+            target_candidates: Vec::new(),
             planning_cursor: 0,
             planning_selected: BTreeSet::new(),
             planning_tasks: Vec::new(),

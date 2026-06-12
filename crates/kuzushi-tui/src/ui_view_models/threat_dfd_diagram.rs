@@ -81,6 +81,22 @@ pub(crate) fn threat_dfd_diagram_feed_rows(
     }
 }
 
+/// Title + summary only — for panes too narrow to draw the node boxes.
+/// A clipped box diagram reads as noise; the counts still orient.
+pub(crate) fn threat_dfd_summary_feed_rows(
+    doc: &serde_json::Value,
+    width: usize,
+) -> Vec<ActivityFeedPaneRow> {
+    match threat_dfd_diagram_lines(doc, width) {
+        Some(lines) => lines
+            .into_iter()
+            .filter(|line| matches!(line.kind, DfdLineKind::Title | DfdLineKind::Summary))
+            .map(diagram_feed_row)
+            .collect(),
+        None => Vec::new(),
+    }
+}
+
 fn diagram_feed_row(line: DfdDiagramLine) -> ActivityFeedPaneRow {
     ActivityFeedPaneRow {
         text: line.text,
@@ -365,6 +381,18 @@ mod tests {
     fn diagram_lines_none_without_nodes() {
         assert!(threat_dfd_diagram_lines(&json!({}), 70).is_none());
         assert!(threat_dfd_diagram_lines(&json!({"dfd": {"nodes": []}}), 70).is_none());
+    }
+
+    #[test]
+    fn summary_feed_rows_keep_only_title_and_counts() {
+        let rows = threat_dfd_summary_feed_rows(&sample_doc(), 30);
+        assert_eq!(rows.len(), 2, "title + summary only: {rows:?}");
+        assert!(rows[0].text.contains("DATA-FLOW DIAGRAM"));
+        assert!(rows[1].text.contains("3 zones · 2 flows"));
+        assert!(
+            !rows.iter().any(|row| row.text.contains('┌')),
+            "no clipped box drawings in the compact form"
+        );
     }
 
     #[test]

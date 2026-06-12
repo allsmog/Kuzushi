@@ -12,15 +12,16 @@ view: auth
   ✗  github-copilot  missing    oauth missing
 
  -- MODEL · effective --------------------------------------------------------------------------------------------------
- current  unconfigured · backend LangGraph · routing direct
+ current   unconfigured · backend LangGraph · routing direct
  reasoning xhigh
 
  -- SPEND · this session -----------------------------------------------------------------------------------------------
- session   $0.0000   · last tool —
+ session   $0.0000 · last tool —
 
  -- ROTATE · clear & re-auth -------------------------------------------------------------------------------------------
  • unset env: `unset ANTHROPIC_API_KEY` (host shell) then re-launch kuzushi
  • clear oauth: `auth login anthropic` or `auth login openai` to refresh
  • switch model: `model <provider:id>` (e.g. `model anthropic:claude-opus-4-7`)
 
-▸ try: auth login openai browser · auth login openai headless · auth login anthropic · auth login github-copilot · …
+▸ try: auth login openai browser · auth login openai headless · auth login anthropic · auth login github-copilot
+       model <provider:id> · config · back

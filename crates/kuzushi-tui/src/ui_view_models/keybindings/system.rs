@@ -12,7 +12,7 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         // First-run pickers print their controls to the log only — surface them
         // in the footer so the very first screen is operable without guessing.
         ShellView::PlanningPicker => Some(planning_picker_keybindings()),
-        ShellView::ModelPicker | ShellView::AuthMethodPicker(_) => {
+        ShellView::ModelPicker | ShellView::AuthMethodPicker(_) | ShellView::TargetPicker => {
             Some(choice_picker_keybindings())
         }
         _ => None,
@@ -46,7 +46,7 @@ fn scene_keybindings() -> Vec<FooterKeybinding> {
         bind("h/l/j/k", "orbit 3D"),
         bind("space", "pause"),
         bind("r", "reset"),
-        bind("back", "leave"),
+        bind("Esc/q", "leave"),
     ]
 }
 

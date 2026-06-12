@@ -55,6 +55,14 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         category: ShellCommandCategory::Navigation,
         description: "open the planning-stage multi-select picker",
     },
+    // `continue` stays a typed alias (parser) only — listing `/continue`
+    // here would shadow `/context` in Tab completion for `/con…`.
+    ShellCommandSpec {
+        command: "next",
+        aliases: &["/next"],
+        category: ShellCommandCategory::Navigation,
+        description: "continue the engagement — open the current phase's picker",
+    },
     ShellCommandSpec {
         command: "logs",
         aliases: &["/logs", "log", "transcript", "/transcript"],

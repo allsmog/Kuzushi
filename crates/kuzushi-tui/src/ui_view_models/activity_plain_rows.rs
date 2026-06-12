@@ -30,9 +30,10 @@ pub(crate) fn activity_plain_pane_rows(
     feed_width: usize,
     now: Instant,
     extra_feed_rows: &[ActivityFeedPaneRow],
+    running_tool: Option<&str>,
 ) -> Vec<ActivityPlainPaneRow> {
     let dag_rows = activity_dag_pane_rows(session, dag_width, now);
-    let mut feed_rows = activity_feed_pane_rows(session, feed_width);
+    let mut feed_rows = activity_feed_pane_rows(session, feed_width, running_tool);
     feed_rows.extend(extra_feed_rows.iter().cloned());
     let row_count = dag_rows.len().max(feed_rows.len());
     (0..row_count)
@@ -101,7 +102,7 @@ mod tests {
                 .with_started_at_ms(43_000),
         );
 
-        let rows = activity_plain_pane_rows(&session, 12, 20, Instant::now(), &[]);
+        let rows = activity_plain_pane_rows(&session, 12, 20, Instant::now(), &[], None);
 
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].separator, " │ ");
@@ -122,7 +123,7 @@ mod tests {
             tone: ActivityFeedRowTone::Success,
         }];
 
-        let rows = activity_plain_pane_rows(&session, 12, 20, Instant::now(), &extra);
+        let rows = activity_plain_pane_rows(&session, 12, 20, Instant::now(), &extra, None);
 
         assert!(rows.iter().any(|row| row.feed.text.contains("ATTACK PATH")));
     }

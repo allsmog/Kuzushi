@@ -58,6 +58,7 @@ impl ShellApp {
         self.capture_failure_context(failure_context);
         self.set_completed_activity(tool_name.clone(), "tool result applied");
         self.mark_tool_activity_complete(&tool_name);
+        self.record_tool_duration_and_notify(&tool_name);
         self.auto_open_viz_for_tool(&tool_name);
         self.advance_chain_after_tool(&tool_name);
         self.advance_planning_queue_after_tool(&tool_name);
@@ -85,6 +86,38 @@ impl ShellApp {
         if let Some(session) = self.activity.as_mut() {
             session.mark_task_done(tool_name);
         }
+    }
+
+    /// Feed the ETA history and — when the operator is on another view —
+    /// raise the green completion banner so background work announces
+    /// itself instead of finishing silently (ambient-progress story).
+    fn record_tool_duration_and_notify(&mut self, tool_name: &str) {
+        let Some(secs) = self.completed_tool_secs(tool_name) else {
+            return;
+        };
+        self.task_durations.record_secs(tool_name, secs);
+        if matches!(self.shell_view, ShellView::Activity) {
+            return;
+        }
+        self.set_success_notice(
+            "run",
+            format!(
+                "✓ {tool_name} finished in {} — `/a` for the run feed",
+                crate::app::compact_secs(secs)
+            ),
+        );
+    }
+
+    /// Wall-clock for the finished tool: its DAG row when the run traced
+    /// one, otherwise the whole session (single-tool runs).
+    fn completed_tool_secs(&self, tool_name: &str) -> Option<u64> {
+        let session = self.activity.as_ref()?;
+        let row_secs = session.tasks.get(tool_name).and_then(|row| {
+            let started = row.started_at?;
+            let completed = row.completed_at?;
+            Some(completed.saturating_duration_since(started).as_secs())
+        });
+        Some(row_secs.unwrap_or_else(|| session.started_at.elapsed().as_secs()))
     }
 
     fn apply_failed_tool_event(&mut self, state: ToolEventState, tool_name: String, error: String) {

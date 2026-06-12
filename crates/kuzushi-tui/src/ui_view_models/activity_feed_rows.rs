@@ -22,6 +22,7 @@ pub(crate) struct ActivityFeedPaneRow {
 pub(crate) fn activity_feed_pane_rows(
     session: &ActivitySession,
     width: usize,
+    running_tool: Option<&str>,
 ) -> Vec<ActivityFeedPaneRow> {
     let mut rows = session
         .events
@@ -37,7 +38,10 @@ pub(crate) fn activity_feed_pane_rows(
             },
         );
     }
-    if let (true, Some(model)) = (rows.is_empty(), activity_feed_placeholder_model(session)) {
+    if let (true, Some(model)) = (
+        rows.is_empty(),
+        activity_feed_placeholder_model(session, running_tool),
+    ) {
         rows.push(ActivityFeedPaneRow {
             text: model.text,
             tone: ActivityFeedRowTone::Muted,
@@ -197,13 +201,13 @@ mod tests {
                 .with_started_at_ms(3_661_000),
         );
 
-        let rows = activity_feed_pane_rows(&session, 80);
+        let rows = activity_feed_pane_rows(&session, 80, None);
         assert_eq!(rows.len(), 1);
         assert!(rows[0].text.contains("hidden subsystem event"));
         assert_eq!(rows[0].tone, ActivityFeedRowTone::Muted);
 
         session.verbose_subsystems = true;
-        let rows = activity_feed_pane_rows(&session, 80);
+        let rows = activity_feed_pane_rows(&session, 80, None);
         assert_eq!(rows.len(), 1);
         assert!(rows[0].text.contains("[pipeline]"));
         assert_eq!(rows[0].tone, ActivityFeedRowTone::Muted);
@@ -220,7 +224,7 @@ mod tests {
                 .with_started_at_ms(42_000),
         );
 
-        let rows = activity_feed_pane_rows(&session, 80);
+        let rows = activity_feed_pane_rows(&session, 80, None);
 
         assert_eq!(rows[0].tone, ActivityFeedRowTone::Warn);
         assert!(rows[0].text.contains("paused"));

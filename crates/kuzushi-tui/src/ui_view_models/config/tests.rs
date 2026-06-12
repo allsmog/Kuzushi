@@ -19,6 +19,13 @@ fn config_model_summarizes_default_runtime_state() {
         .summary_rows
         .iter()
         .any(|row| row.cells[0] == "onboarding"));
+    // Build provenance row: published vs working-tree builds must be
+    // distinguishable. Value is compile-time (sha · profile) — assert the
+    // version prefix only.
+    assert!(model
+        .summary_rows
+        .iter()
+        .any(|row| row.cells[0] == "build" && row.cells[1].starts_with(env!("CARGO_PKG_VERSION"))));
     assert_eq!(model.model_table.title, "MODELS");
     assert_eq!(
         model.model_table.headers,

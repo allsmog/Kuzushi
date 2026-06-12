@@ -10,7 +10,7 @@
 //! backing artifact contributes nothing rather than a placeholder.
 
 use super::activity_feed_rows::{ActivityFeedPaneRow, ActivityFeedRowTone};
-use super::threat_dfd_diagram::threat_dfd_diagram_feed_rows;
+use super::threat_dfd_diagram::{threat_dfd_diagram_feed_rows, threat_dfd_summary_feed_rows};
 use super::threat_model_doc;
 use super::viz_data::{
     attack_tree, findings_heatmap, risk_by_module, taint_flow_path, AttackTree, FindingsHeatmap,
@@ -103,11 +103,29 @@ fn attack_path_rows(model: &TaintFlowPath, _width: usize) -> Vec<ActivityFeedPan
 
 // ── data-flow diagram (reuses the existing projection) ──
 
+/// Below this many columns the DFD's node boxes degrade into clipped "…"
+/// noise — show the title + counts and point at /scene instead.
+const DFD_DIAGRAM_MIN_WIDTH: usize = 56;
+
 fn dfd_rows(app: &ShellApp, width: usize) -> Vec<ActivityFeedPaneRow> {
     match threat_model_doc(app) {
-        Some(doc) => threat_dfd_diagram_feed_rows(&doc, width),
+        Some(doc) => dfd_rows_for_doc(&doc, width),
         None => Vec::new(),
     }
+}
+
+fn dfd_rows_for_doc(doc: &serde_json::Value, width: usize) -> Vec<ActivityFeedPaneRow> {
+    if width >= DFD_DIAGRAM_MIN_WIDTH {
+        return threat_dfd_diagram_feed_rows(doc, width);
+    }
+    let mut rows = threat_dfd_summary_feed_rows(doc, width);
+    if !rows.is_empty() {
+        rows.push(row(
+            "  open /scene for the full diagram".to_string(),
+            ActivityFeedRowTone::Subtle,
+        ));
+    }
+    rows
 }
 
 // ── findings heatmap (severity × module) ──
@@ -237,6 +255,36 @@ fn clip(text: String, width: usize) -> String {
 mod tests {
     use super::super::viz_data::{AttackChain, TaintStageModel};
     use super::*;
+
+    fn dfd_doc() -> serde_json::Value {
+        serde_json::json!({
+            "dfd": {
+                "nodes": [
+                    {"id": "user", "name": "Browser", "trustZone": "internet"},
+                    {"id": "api", "name": "API server", "trustZone": "app-tier"}
+                ],
+                "flows": [
+                    {"id": "f1", "sourceId": "user", "targetId": "api", "description": "https"}
+                ]
+            }
+        })
+    }
+
+    #[test]
+    fn dfd_rows_draw_full_diagram_when_the_pane_is_wide() {
+        let rows = dfd_rows_for_doc(&dfd_doc(), 80);
+        assert!(rows.iter().any(|row| row.text.contains('┌')));
+    }
+
+    #[test]
+    fn dfd_rows_compact_to_summary_in_narrow_panes() {
+        // A box diagram clipped to "…" every row is noise; narrow panes get
+        // the counts and a pointer to the full-width /scene page instead.
+        let rows = dfd_rows_for_doc(&dfd_doc(), DFD_DIAGRAM_MIN_WIDTH - 1);
+        assert!(!rows.iter().any(|row| row.text.contains('┌')));
+        assert!(rows.iter().any(|row| row.text.contains("zones")));
+        assert!(rows.iter().any(|row| row.text.contains("/scene")));
+    }
 
     #[test]
     fn heatmap_rows_hidden_without_findings() {

@@ -42,6 +42,9 @@ pub enum ShellCommand {
     PlanDiscard,
     Quickstart,
     Onboarding,
+    /// Continue the engagement: open the phase picker at the journey's
+    /// current phase (derived from workspace state when no walker is live).
+    Next,
     Logs,
     Target(Option<String>),
     Ask(String),

@@ -37,6 +37,7 @@ fn notice_banner_lines(app: &ShellApp, width: u16, max_lines: usize) -> Vec<Line
     let (chip, chip_style) = match notice.severity {
         NoticeSeverity::Error => (" ERROR ", theme::danger()),
         NoticeSeverity::Warn => (" NOTICE ", theme::warn()),
+        NoticeSeverity::Success => (" DONE ", theme::success()),
     };
     let prefix_width = 1 + chip.len() + 2 + notice.source.chars().count() + 3;
     let budget = (width as usize)

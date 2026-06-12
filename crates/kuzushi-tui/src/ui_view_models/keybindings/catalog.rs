@@ -44,7 +44,7 @@ fn recommend_keybindings() -> Vec<FooterKeybinding> {
     vec![
         bind("run <tool>", "dispatch"),
         bind("runs", "ledger"),
-        bind("back", "home"),
+        bind("Esc", "home"),
         bind("?", "help"),
     ]
 }

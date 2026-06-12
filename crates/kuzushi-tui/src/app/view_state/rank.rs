@@ -37,6 +37,9 @@ pub struct Notice {
 pub enum NoticeSeverity {
     Error,
     Warn,
+    /// Background work finished while the operator was elsewhere — green
+    /// banner with the result and the verb that opens it.
+    Success,
 }
 
 #[derive(Debug, Clone, PartialEq)]

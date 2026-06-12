@@ -47,6 +47,7 @@ pub(crate) fn primary_view_lines(
             auth_method_picker_lines(app, area, provider)
         }
         PrimaryViewRoute::PlanningPicker => planning_picker_lines(app, area),
+        PrimaryViewRoute::TargetPicker => target_picker_lines(app, area),
     }
 }
 

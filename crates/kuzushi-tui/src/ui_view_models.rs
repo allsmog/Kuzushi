@@ -21,6 +21,7 @@ mod activity_view;
 mod actor_detail;
 mod advisory_chrome;
 mod agent_chat;
+mod ambient_progress;
 mod attack_surface;
 mod auth;
 mod catalog;
@@ -37,6 +38,7 @@ mod findings;
 mod generated_views_feed;
 mod help;
 mod home_cockpit;
+mod journey;
 mod keybindings;
 mod knowledge_base;
 mod live_activity;
@@ -89,6 +91,7 @@ pub(crate) use advisory_chrome::{
     cost_cap_halt_model, notice_banner_model, throttle_banner_model, CostCapHaltModel,
 };
 pub(crate) use agent_chat::{agent_chat_model, AgentChatModel, AgentChatSession, AgentChatTurn};
+pub(crate) use ambient_progress::ambient_progress_chip;
 pub(crate) use attack_surface::{attack_surface_risk_model, AttackSurfaceRiskModel};
 pub(crate) use auth::{
     auth_env_summary, auth_login_model, auth_provider_rows, model_auth_status, oauth_summary,
@@ -127,6 +130,9 @@ pub(crate) use help::{
     PlainHelpModel,
 };
 pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
+pub(crate) use journey::{
+    journey_footer_segment, journey_model, JourneyModel, JourneyPhaseState, JourneyPhaseStatus,
+};
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use knowledge_base::{
     knowledge_base_model, plain_knowledge_base_model, KnowledgeBaseArtifactRow,

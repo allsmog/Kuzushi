@@ -18,6 +18,8 @@ impl ShellApp {
             "sast:scan",
             format!("{findings_count} {}", scan_finding_label(findings_count)),
         );
+        self.record_scan_task_durations();
+        self.notify_scan_completion(findings_count);
         // Findings are refreshed above, so the heatmap has real per-module risk
         // to draw the moment the scan lands (gated on `auto_open_viz`). Skip a
         // clean scan — an empty heatmap reading "run scan" right after scanning
@@ -54,6 +56,34 @@ impl ShellApp {
         for row in session.tasks.values_mut() {
             mark_active_scan_task_done(row, now);
         }
+    }
+
+    /// Feed the ETA history with every task this scan completed, so the
+    /// ambient chip can forecast the next run.
+    fn record_scan_task_durations(&mut self) {
+        let durations: Vec<(String, u64)> = self
+            .activity
+            .as_ref()
+            .map(completed_task_durations)
+            .unwrap_or_default();
+        for (task_id, secs) in durations {
+            self.task_durations.record_secs(&task_id, secs);
+        }
+    }
+
+    /// Green completion banner when the scan lands while the operator is
+    /// on another view (ambient-progress story).
+    fn notify_scan_completion(&mut self, findings_count: usize) {
+        if matches!(self.shell_view, ShellView::Activity) {
+            return;
+        }
+        self.set_success_notice(
+            "scan",
+            format!(
+                "✓ scan finished — {findings_count} {} · `findings` to review",
+                scan_finding_label(findings_count)
+            ),
+        );
     }
 
     fn record_scan_completion_artifacts(
@@ -113,6 +143,21 @@ impl ShellApp {
             format!("{verdict} ({findings_summary}) exit_hint={exit_hint}"),
         );
     }
+}
+
+fn completed_task_durations(session: &crate::app::ActivitySession) -> Vec<(String, u64)> {
+    session
+        .tasks
+        .values()
+        .filter_map(|row| {
+            let started = row.started_at?;
+            let completed = row.completed_at?;
+            Some((
+                row.task_id.clone(),
+                completed.saturating_duration_since(started).as_secs(),
+            ))
+        })
+        .collect()
 }
 
 fn mark_active_scan_task_done(row: &mut crate::app::DagTaskRow, now: std::time::Instant) {

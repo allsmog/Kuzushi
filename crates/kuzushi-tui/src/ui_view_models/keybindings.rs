@@ -18,9 +18,13 @@ pub(crate) fn footer_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         return bindings;
     }
     let mut bindings = idle_keybindings(app);
-    let tab = bind("Tab", "complete");
-    if !bindings.contains(&tab) {
-        bindings.insert(0, tab);
+    // Modal pickers swallow Tab (no completion), so advertising "Tab complete"
+    // there is a lie that contradicts the picker's own hint row.
+    if !app.is_picker_view() {
+        let tab = bind("Tab", "complete");
+        if !bindings.contains(&tab) {
+            bindings.insert(0, tab);
+        }
     }
     bindings
 }
@@ -48,7 +52,10 @@ pub(super) fn bind(key: &'static str, label: &'static str) -> FooterKeybinding {
 }
 
 fn default_keybindings() -> Vec<FooterKeybinding> {
+    // Every unmapped view gets the exit path first — a leaf view (auth,
+    // cost, patch, failure-handoff, …) must never read as a dead-end.
     vec![
+        bind("Esc", "back"),
         bind("Enter", "run command"),
         bind("Ctrl+G", "palette"),
         bind("help", "command list"),

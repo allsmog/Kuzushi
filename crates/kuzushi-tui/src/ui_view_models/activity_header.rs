@@ -16,22 +16,33 @@ pub(crate) enum ActivityRunOutcome {
     Failed { subject: String },
 }
 
+/// The tool currently executing behind a taskless (single-tool) run, with
+/// the liveness signals the header shows in place of DAG counters: the
+/// shared spinner glyph and a ticking elapsed-seconds counter.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ActivityLiveTool {
+    pub(crate) name: String,
+    pub(crate) spinner: &'static str,
+    pub(crate) elapsed_secs: u64,
+}
+
 pub(crate) fn activity_header_model(
     session: &ActivitySession,
     outcome: Option<ActivityRunOutcome>,
+    live_tool: Option<&ActivityLiveTool>,
 ) -> ActivityHeaderModel {
     let total = session.tasks.len();
     let done = task_count(session, DagTaskState::Done);
     let running = task_count(session, DagTaskState::Active);
     let cost_usd = session.tasks.values().map(|row| row.cost_usd).sum::<f64>();
-    let progress = progress_segment(&outcome, total, done, running);
+    let progress = progress_segment(&outcome, total, done, running, live_tool);
     ActivityHeaderModel {
         detailed_title: detailed_title(session, &progress, cost_usd),
         summary_title: format!(
             "ACTIVITY  run {run_id}  ·  {progress}",
             run_id = session.run_id
         ),
-        focus_label: pane_focus_label(session.pane_focus),
+        focus_label: pane_focus_label(session.effective_pane_focus()),
     }
 }
 
@@ -40,12 +51,26 @@ fn progress_segment(
     total: usize,
     done: usize,
     running: usize,
+    live_tool: Option<&ActivityLiveTool>,
 ) -> String {
     match outcome {
         Some(ActivityRunOutcome::Failed { subject }) => {
             format!("✗ run failed — {subject} · see error banner")
         }
+        // "0/0 done · 0 running" reads as a broken pipeline; a single-tool
+        // run has no DAG tasks — name the tool and tick instead.
+        None if total == 0 => taskless_progress(live_tool),
         None => format!("{done}/{total} done  ·  {running} running"),
+    }
+}
+
+fn taskless_progress(live_tool: Option<&ActivityLiveTool>) -> String {
+    match live_tool {
+        Some(tool) => format!(
+            "{} {} · running {}s",
+            tool.spinner, tool.name, tool.elapsed_secs
+        ),
+        None => "no DAG tasks — streaming tool output".to_string(),
     }
 }
 
@@ -109,7 +134,7 @@ mod tests {
         session.verbose_subsystems = true;
         session.pane_focus = PaneFocus::Right;
 
-        let model = activity_header_model(&session, None);
+        let model = activity_header_model(&session, None, None);
 
         assert_eq!(
             model.summary_title,
@@ -119,6 +144,36 @@ mod tests {
         assert!(model.detailed_title.contains("cost $0.3750"));
         assert!(model.detailed_title.contains("paused"));
         assert_eq!(model.focus_label, "[output focused]");
+    }
+
+    #[test]
+    fn taskless_run_says_so_instead_of_zero_over_zero() {
+        // Single-tool runs never register DAG tasks; "0/0 done · 0 running"
+        // reads as a broken pipeline rather than a normal tool run.
+        let session = ActivitySession::new("tool-1");
+        let model = activity_header_model(&session, None, None);
+        assert!(model
+            .summary_title
+            .contains("no DAG tasks — streaming tool output"));
+        assert!(!model.summary_title.contains("0/0 done"));
+        // With no TASKS pane on screen the stored Left focus is meaningless;
+        // the label must follow the only visible pane.
+        assert_eq!(model.focus_label, "[output focused]");
+    }
+
+    #[test]
+    fn taskless_run_with_live_tool_ticks_spinner_name_and_elapsed() {
+        let session = ActivitySession::new("tool-1");
+        let live = ActivityLiveTool {
+            name: "threat-model:build".to_string(),
+            spinner: "⠷",
+            elapsed_secs: 42,
+        };
+        let model = activity_header_model(&session, None, Some(&live));
+        assert!(model
+            .summary_title
+            .contains("⠷ threat-model:build · running 42s"));
+        assert!(!model.summary_title.contains("no DAG tasks"));
     }
 
     #[test]
@@ -134,6 +189,7 @@ mod tests {
             Some(ActivityRunOutcome::Failed {
                 subject: "sast:scan".to_string(),
             }),
+            None,
         );
 
         assert!(

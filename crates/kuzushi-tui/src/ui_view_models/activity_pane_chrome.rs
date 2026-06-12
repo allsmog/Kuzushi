@@ -29,8 +29,8 @@ pub(crate) struct ActivityPaneTitle {
 pub(crate) fn activity_pane_chrome_model(session: &ActivitySession) -> ActivityPaneChromeModel {
     // "TASKS" / "OUTPUT" read for operators; "DAG"/"FEED" were dev jargon.
     ActivityPaneChromeModel {
-        dag: pane_title("TASKS", session.pane_focus == PaneFocus::Left),
-        feed: pane_title("OUTPUT", session.pane_focus == PaneFocus::Right),
+        dag: pane_title("TASKS", session.effective_pane_focus() == PaneFocus::Left),
+        feed: pane_title("OUTPUT", session.effective_pane_focus() == PaneFocus::Right),
     }
 }
 
@@ -76,9 +76,24 @@ fn fit_or_pad(value: &str, width: usize) -> String {
 mod tests {
     use super::*;
 
+    /// These tests exercise the stored-focus projection, which only applies
+    /// while the TASKS pane is on screen — i.e. when DAG tasks exist
+    /// (taskless sessions collapse to OUTPUT-only and force Right focus).
+    fn seed_task(session: &mut ActivitySession) {
+        session.tasks.insert(
+            "context:build".to_string(),
+            crate::DagTaskRow::queued(
+                "context:build".to_string(),
+                "context".to_string(),
+                Vec::new(),
+            ),
+        );
+    }
+
     #[test]
     fn activity_pane_chrome_model_projects_focus() {
         let mut session = ActivitySession::new("r-1");
+        seed_task(&mut session);
         assert_eq!(
             activity_pane_chrome_model(&session),
             ActivityPaneChromeModel {
@@ -112,6 +127,7 @@ mod tests {
     #[test]
     fn activity_plain_pane_header_model_projects_padded_cells() {
         let mut session = ActivitySession::new("r-1");
+        seed_task(&mut session);
 
         assert_eq!(
             activity_plain_pane_header_model(&session, 10, 12),

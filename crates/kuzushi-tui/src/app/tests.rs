@@ -68,6 +68,7 @@ fn missing_model_backed_prereqs_block_without_auto_accept_or_model_fallback() {
     fs::write(tmp.path().join("src/app.ts"), "res.send(req.query.name)\n").unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.config.model = None;
 
     app.handle_command(ShellCommand::Use("offense-review".to_string()));
     app.handle_command(ShellCommand::RunTool {
@@ -2416,10 +2417,66 @@ fn config_view_onboards_with_keyboard_model_selection() {
         app.session_thinking_level.as_deref(),
         Some(expected.thinking_level)
     );
-    assert!(app
-        .log
-        .iter()
-        .any(|line| line.prefix == "model" && line.body.contains("selected via onboarding")));
+    assert!(
+        app.log
+            .iter()
+            .any(|line| line.prefix == "model"
+                && line.body.contains("showing config, Esc to go back"))
+    );
+}
+
+#[test]
+fn auth_picker_navigation_keys_work_with_text_in_prompt() {
+    // Regression: the picker used to bail whenever the input buffer was
+    // non-empty, so a stray character silently stole j/k/Enter. As a true
+    // modal it now captures navigation regardless of prompt contents.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::AuthMethodPicker("openai".to_string());
+    app.auth_picker_cursor = 0;
+    app.input = "leftover".to_string();
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+    assert_eq!(app.auth_picker_cursor, 1, "j must move the picker cursor");
+    assert_eq!(app.input, "leftover", "navigation must not edit the prompt");
+}
+
+#[test]
+fn auth_picker_swallows_typed_characters() {
+    // Printable keys are consumed by the modal so they never leak into the
+    // prompt and quietly disarm the navigation keys.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::AuthMethodPicker("anthropic".to_string());
+    app.input.clear();
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::empty()));
+    assert!(app.input.is_empty(), "picker must swallow typed characters");
+}
+
+#[test]
+fn auth_picker_swallows_shifted_typed_characters() {
+    // Some terminals deliver uppercase printables as Char + SHIFT. Those are
+    // still plain picker input, not shell chords.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::AuthMethodPicker("openai".to_string());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
+    assert!(
+        app.input.is_empty(),
+        "picker must swallow shifted printable characters"
+    );
+}
+
+#[test]
+fn picker_footer_omits_tab_complete_hint() {
+    // Tab does nothing in a modal picker, so the footer must not claim it
+    // completes — that contradicted the picker's own hint row.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::AuthMethodPicker("openai".to_string());
+    let bindings = crate::ui_view_models::footer_keybindings(&app);
+    assert!(
+        !bindings.iter().any(|binding| binding.key == "Tab"),
+        "picker footer must not advertise Tab complete"
+    );
 }
 
 #[test]
@@ -3976,6 +4033,142 @@ fn shell_uses_operator_budget_and_trusted_workflow_from_config() {
 
     assert_eq!(app.session_budget_usd, Some(1.25));
     assert!(app.trusted_workflow_auto_accept);
+}
+
+#[test]
+fn next_command_opens_phase_picker_at_derived_phase() {
+    // `next` resumes the engagement wherever the workspace actually is —
+    // fresh target lands in 組 map, map artifacts move it to 崩 hunt,
+    // unconfirmed findings to 作 confirm, fully confirmed to 掛 fix.
+    let dir = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(dir.path().to_path_buf());
+
+    app.handle_command(ShellCommand::Next);
+    assert_eq!(app.shell_view, ShellView::PlanningPicker);
+    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Map));
+
+    std::fs::create_dir_all(dir.path().join(".kuzushi")).expect("kuzushi dir");
+    std::fs::write(dir.path().join(".kuzushi/context-snapshot.json"), "{}")
+        .expect("context snapshot");
+    app.workflow_phase = None;
+    app.handle_command(ShellCommand::Next);
+    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Hunt));
+
+    app.findings = vec![make_finding(Severity::High, "fp-journey", "Unconfirmed")];
+    app.workflow_phase = None;
+    app.handle_command(ShellCommand::Next);
+    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Confirm));
+
+    app.findings[0].triage = Some(TriageOutcome {
+        verdict: TriageVerdict::TruePositive,
+        confidence: 0.9,
+        rationale: "confirmed".to_string(),
+        cost_usd: 0.0,
+    });
+    app.workflow_phase = None;
+    app.handle_command(ShellCommand::Next);
+    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Fix));
+}
+
+#[test]
+fn target_picker_enter_applies_candidate_and_leaves_the_picker() {
+    // Bare interactive `kuzushi` opens the target picker; Enter must wire
+    // the chosen directory exactly like the `target <path>` verb and then
+    // continue the first-run chain (never staying in the picker).
+    let dir = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target_candidates = vec![crate::app::TargetCandidate {
+        path: dir.path().to_path_buf(),
+        label: ".".to_string(),
+        hint: "current directory",
+    }];
+    app.target_picker_cursor = 0;
+    app.shell_view = ShellView::TargetPicker;
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+    assert!(app.target.is_some(), "target applied from the picker");
+    assert_ne!(app.shell_view, ShellView::TargetPicker);
+}
+
+#[test]
+fn target_picker_esc_defers_to_home_without_a_target() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target_candidates = Vec::new();
+    app.shell_view = ShellView::TargetPicker;
+
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view, ShellView::Home);
+    assert!(app.target.is_none());
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.body.contains("browsing without a target")));
+}
+
+#[test]
+fn scan_completion_raises_success_banner_when_operator_is_elsewhere() {
+    // Ambient-progress story: background work must announce itself when it
+    // lands while the operator is on another view — and stay quiet when
+    // they're already watching the Activity feed.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.activity = Some(ActivitySession::new("r-scan"));
+    app.shell_view = ShellView::Findings;
+    app.apply_scan_finished("r-scan".to_string(), 3);
+    let notice = app.advisory.notice.clone().expect("completion banner");
+    assert_eq!(notice.severity, NoticeSeverity::Success);
+    assert!(notice.message.contains("3 findings"), "{}", notice.message);
+    assert!(notice.message.contains("`findings`"), "{}", notice.message);
+
+    app.advisory.notice = None;
+    app.activity = Some(ActivitySession::new("r-scan2"));
+    app.shell_view = ShellView::Activity;
+    app.apply_scan_finished("r-scan2".to_string(), 1);
+    assert!(
+        app.advisory.notice.is_none(),
+        "no banner while watching the feed"
+    );
+}
+
+#[test]
+fn scene_view_is_never_a_trap() {
+    // /scene used to eat h/j/k/l (camera orbit) even mid-word, making
+    // `back` and `home` untypeable on the default 3D page, and Esc with a
+    // half-typed prompt toggled clear/restore forever. The gallery must
+    // always be exitable: Esc and q leave directly, and typing yields the
+    // hotkeys to the prompt.
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Findings;
+    app.handle_command(ShellCommand::Scene);
+    app.sync_view_change();
+    assert!(matches!(app.shell_view, ShellView::Scene(_)));
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+    assert!(!matches!(app.shell_view, ShellView::Scene(_)), "Esc exits");
+
+    app.handle_command(ShellCommand::Scene);
+    app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()));
+    assert!(!matches!(app.shell_view, ShellView::Scene(_)), "q exits");
+
+    // Typing a command containing orbit keys must reach the prompt intact.
+    app.handle_command(ShellCommand::Scene);
+    for ch in "back".chars() {
+        app.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty()));
+    }
+    assert_eq!(app.input, "back", "orbit keys yield to a non-empty prompt");
+}
+
+#[test]
+fn next_command_without_target_logs_guidance() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let view_before = app.shell_view.clone();
+    app.handle_command(ShellCommand::Next);
+    assert_eq!(app.shell_view, view_before);
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.body.contains("no active workspace target")));
 }
 
 fn make_finding(severity: Severity, fp: &str, title: &str) -> Finding {

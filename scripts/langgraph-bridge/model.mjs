@@ -69,7 +69,7 @@ function oauthCredentialProvider(provider) {
   return provider === "openai" ? "openai-codex" : provider;
 }
 
-function oauthCredentialBag() {
+export function oauthCredentialBag() {
   try {
     return JSON.parse(readFileSync(oauthCredentialsPath(), "utf8"));
   } catch {
@@ -136,7 +136,7 @@ function anthropicCredentialFromRefreshResponse(raw, priorRefresh) {
   }
 }
 
-function writeOauthCredentialBag(bag) {
+export function writeOauthCredentialBag(bag) {
   const credentialsPath = oauthCredentialsPath();
   mkdirSync(path.dirname(credentialsPath), { recursive: true, mode: 0o700 });
   const tmp = `${credentialsPath}.tmp.${process.pid}`;
@@ -146,7 +146,7 @@ function writeOauthCredentialBag(bag) {
   chmodSync(credentialsPath, 0o600);
 }
 
-function oauthCredentialsPath() {
+export function oauthCredentialsPath() {
   const pathFromEnv = process.env.KUZUSHI_OAUTH_CREDENTIALS;
   return pathFromEnv || path.join(homedir(), ".kuzushi", "oauth-credentials.json");
 }
