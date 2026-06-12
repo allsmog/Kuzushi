@@ -7,8 +7,8 @@ const BOX_W: usize = 12; // ┌ + 10 interior + ┐
 const B1: usize = 3;
 const B2: usize = B1 + BOX_W + 9; // 24
 const B3: usize = B2 + BOX_W + 9; // 45
-// Flow drops from box 2's centre — must equal the ┬ column in `junction_border`
-// (└ + (inner/2 - 1) dashes + ┬), i.e. B2 + 1 + (inner/2 - 1) = B2 + inner/2.
+                                  // Flow drops from box 2's centre — must equal the ┬ column in `junction_border`
+                                  // (└ + (inner/2 - 1) dashes + ┬), i.e. B2 + 1 + (inner/2 - 1) = B2 + inner/2.
 const JUNCTION: usize = B2 + (BOX_W - 2) / 2;
 
 pub(crate) fn dfd_canonical_lines() -> Vec<Line<'static>> {
@@ -18,7 +18,11 @@ pub(crate) fn dfd_canonical_lines() -> Vec<Line<'static>> {
     let warn = theme::warn();
     vec![
         // Top row of three boxes: external entity ──► process ──► data store.
-        placed(&[(B1, top_border(), sub), (B2, top_border(), sub), (B3, top_border(), sub)]),
+        placed(&[
+            (B1, top_border(), sub),
+            (B2, top_border(), sub),
+            (B3, top_border(), sub),
+        ]),
         placed(&[
             (B1, boxed_cell("user"), sub_named(sub, acc)),
             (B1 + BOX_W + 2, "─http─►".into(), sub),
@@ -37,7 +41,10 @@ pub(crate) fn dfd_canonical_lines() -> Vec<Line<'static>> {
             (B3, bottom_border(), sub),
         ]),
         // Flow down from box 2 across the trust boundary to the worker pool.
-        placed(&[(JUNCTION, "│".into(), sub), (JUNCTION + 2, "plaintext PII".into(), warn)]),
+        placed(&[
+            (JUNCTION, "│".into(), sub),
+            (JUNCTION + 2, "plaintext PII".into(), warn),
+        ]),
         placed(&[(JUNCTION, "▼".into(), sub)]),
         placed(&[(B2, top_border(), sub)]),
         placed(&[(B2, boxed_cell("worker"), sub_named(sub, acc))]),

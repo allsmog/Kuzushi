@@ -35,8 +35,7 @@ mod tests {
         let Ok(parsed) = address.parse() else {
             return false;
         };
-        std::net::TcpStream::connect_timeout(&parsed, std::time::Duration::from_millis(200))
-            .is_ok()
+        std::net::TcpStream::connect_timeout(&parsed, std::time::Duration::from_millis(200)).is_ok()
     }
 
     #[test]

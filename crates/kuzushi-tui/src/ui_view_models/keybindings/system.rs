@@ -12,7 +12,9 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         // First-run pickers print their controls to the log only — surface them
         // in the footer so the very first screen is operable without guessing.
         ShellView::PlanningPicker => Some(planning_picker_keybindings()),
-        ShellView::ModelPicker | ShellView::AuthMethodPicker(_) => Some(choice_picker_keybindings()),
+        ShellView::ModelPicker | ShellView::AuthMethodPicker(_) => {
+            Some(choice_picker_keybindings())
+        }
         _ => None,
     }
 }
@@ -29,7 +31,11 @@ fn planning_picker_keybindings() -> Vec<FooterKeybinding> {
 }
 
 fn choice_picker_keybindings() -> Vec<FooterKeybinding> {
-    vec![bind("j/k", "move"), bind("Enter", "select"), bind("Esc", "skip")]
+    vec![
+        bind("j/k", "move"),
+        bind("Enter", "select"),
+        bind("Esc", "skip"),
+    ]
 }
 
 // The security-viz gallery is fully interactive but its controls live only in

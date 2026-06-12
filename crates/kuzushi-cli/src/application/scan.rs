@@ -261,8 +261,7 @@ async fn scan_apk_command(apk: PathBuf, json: bool, ci: bool, gate: ScanGatePoli
     };
     let started = std::time::Instant::now();
     emit_scan_ci_start(ci, started, &apk, &config, &Vec::new());
-    let result =
-        registry.execute_tool_with_runtime("android-apk:scan", input, &ctx, None);
+    let result = registry.execute_tool_with_runtime("android-apk:scan", input, &ctx, None);
     let elapsed = started.elapsed();
     let result = scan_result_or_report_ci_error(result, ci, started, elapsed)?;
     emit_scan_output(&workspace, &result, json, ci, started, elapsed)?;

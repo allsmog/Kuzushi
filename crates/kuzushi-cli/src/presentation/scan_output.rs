@@ -33,8 +33,7 @@ pub(crate) fn emit_scan_output(
     }
     if json {
         println!("{}", scan_json_output(workspace, &data));
-    } else if let Some(android) = super::android_apk_report::format_android_apk_scan_plain(result)
-    {
+    } else if let Some(android) = super::android_apk_report::format_android_apk_scan_plain(result) {
         print!("{}", super::safe_text::sanitize_for_terminal(&android));
     } else if let Some(output) = result.get("output").and_then(serde_json::Value::as_str) {
         // Tool/agent output passes through LLMs and scanned source —

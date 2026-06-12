@@ -90,17 +90,21 @@ fn workspace_export_findings_writes_valid_sarif() {
     let body = std::fs::read_to_string(&output_path).expect("SARIF file readable");
     let document: serde_json::Value =
         serde_json::from_str(&body).expect("SARIF body parses as JSON");
-    assert_eq!(document["version"], "2.1.0", "SARIF version pinned to 2.1.0");
-    let runs = document["runs"]
-        .as_array()
-        .expect("runs[] present");
+    assert_eq!(
+        document["version"], "2.1.0",
+        "SARIF version pinned to 2.1.0"
+    );
+    let runs = document["runs"].as_array().expect("runs[] present");
     assert!(!runs.is_empty(), "SARIF should contain at least one run");
     let results = runs[0]["results"]
         .as_array()
         .expect("results[] present in first run");
     assert!(!results.is_empty(), "SARIF results[] should not be empty");
     let first = &results[0];
-    assert_eq!(first["level"], "error", "High severity → SARIF level 'error'");
+    assert_eq!(
+        first["level"], "error",
+        "High severity → SARIF level 'error'"
+    );
     assert_eq!(first["ruleId"], "e2e/sql-injection");
     assert!(first["locations"][0]["physicalLocation"]["region"]["startLine"].is_number());
 }
@@ -145,7 +149,10 @@ fn findings_command_without_target_surfaces_actionable_error() {
         .env("KUZUSHI_DISABLE_OPERATOR_PERSISTENCE", "1")
         .output()
         .expect("kuzushi runs");
-    assert!(!output.status.success(), "missing target must exit non-zero");
+    assert!(
+        !output.status.success(),
+        "missing target must exit non-zero"
+    );
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
         stderr.contains("no target set"),

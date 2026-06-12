@@ -28,7 +28,10 @@ impl ParserState {
             "uses-sdk" => self.read_uses_sdk(element),
             "application" => self.read_application(element),
             "uses-permission" => self.read_uses_permission(element),
-            "intent-filter" => Ok(self.current_filter = Some(IntentFilter::default())),
+            "intent-filter" => {
+                self.current_filter = Some(IntentFilter::default());
+                Ok(())
+            }
             "action" => self.read_filter_value(element, FilterField::Action),
             "category" => self.read_filter_value(element, FilterField::Category),
             "data" => self.read_filter_data(element),

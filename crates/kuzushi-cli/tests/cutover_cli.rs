@@ -699,13 +699,19 @@ fn demo_scans_offline_fixture_and_persists_findings() {
     // external scanner binaries.
     let output = kuzushi().arg("demo").output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(output.status.success(), "demo must succeed offline: {stderr}");
+    assert!(
+        output.status.success(),
+        "demo must succeed offline: {stderr}"
+    );
     assert!(stderr.contains("vendored vulnerable fixture"), "{stderr}");
     assert!(stderr.contains("kuzushi finding F-0001"), "{stderr}");
     let stdout = String::from_utf8_lossy(&output.stdout);
     let combined = format!("{stdout}{stderr}");
     assert!(combined.contains("finding(s)"), "{combined}");
-    assert!(!combined.contains("0 finding(s)"), "demo fixture must fire findings: {combined}");
+    assert!(
+        !combined.contains("0 finding(s)"),
+        "demo fixture must fire findings: {combined}"
+    );
 }
 
 #[test]
@@ -725,7 +731,10 @@ fn npm_wrapper_kz_alias_accepts_the_single_kuzushi_binary_override() {
     let out = stdout(output);
 
     assert!(out.contains("Kuzushi security-native code agent"));
-    assert!(out.contains("Usage: kz"), "argv0 must name the alias: {out}");
+    assert!(
+        out.contains("Usage: kz"),
+        "argv0 must name the alias: {out}"
+    );
     assert!(!out.contains("Usage: kuzushi"));
 }
 

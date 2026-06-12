@@ -25,7 +25,12 @@ pub(crate) fn render_completion_popup(frame: &mut Frame<'_>, area: Rect, app: &S
     let mut lines: Vec<Line<'static>> = Vec::with_capacity(visible + 1);
     lines.push(title);
     for (offset, candidate) in popup_rows(cycle).take(visible).enumerate() {
-        lines.push(popup_row_line(candidate, offset, cycle, area.width as usize));
+        lines.push(popup_row_line(
+            candidate,
+            offset,
+            cycle,
+            area.width as usize,
+        ));
     }
     render_lines(frame, area, lines);
 }
@@ -64,9 +69,8 @@ fn popup_rows(cycle: &CompletionCycle) -> impl Iterator<Item = PopupRow<'_>> {
 }
 
 fn popup_title_line(total: usize, prefix: &str, width: usize) -> Line<'static> {
-    let label = format!(
-        " {total} options matching `{prefix}` — Tab cycles · Enter selects · Esc restores"
-    );
+    let label =
+        format!(" {total} options matching `{prefix}` — Tab cycles · Enter selects · Esc restores");
     Line::styled(fit(&label, width), theme::muted())
 }
 

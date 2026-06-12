@@ -41,10 +41,7 @@ impl ShellApp {
             Ok(scope) => self.program_scope = scope,
             Err(error) => {
                 self.program_scope = None;
-                self.log(
-                    "error",
-                    format!("scope.toml load failed: {error}"),
-                );
+                self.log("error", format!("scope.toml load failed: {error}"));
             }
         }
     }
