@@ -1,6 +1,7 @@
 pub(crate) mod auth;
 pub(crate) mod catalog;
 pub(crate) mod config;
+pub(crate) mod demo;
 pub(crate) mod doctor;
 pub(crate) mod findings;
 pub(crate) mod permissions;
