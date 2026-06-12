@@ -238,6 +238,9 @@ jobs:
         with:
           name: native-linux-x64
           path: native/
+      # download-artifact does not preserve the executable bit; verify:pack
+      # asserts the shipped binary is executable, so restore it.
+      - run: chmod -R +x native/
       - run: pnpm verify:pack
 
   # ── E2E smoke against native artifact ────────────────────────────────────

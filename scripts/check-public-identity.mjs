@@ -85,7 +85,9 @@ const requiredIdentityReferences = [
   {
     label: "native staging alias identity",
     file: "scripts/stage-native-binary.mjs",
-    needles: ['["kuzushi.exe", "kz.exe"]', '["kuzushi", "kz"]'],
+    // One shipped binary per platform; kz is an argv0 alias of kuzushi and is
+    // retired from the staged payload (the wrapper dispatches it).
+    needles: ['["kuzushi.exe"] : ["kuzushi"]', '"kuzushi-ts", "kz"]'],
   },
   {
     label: "Rust CLI help identity",
@@ -147,7 +149,7 @@ const requiredIdentityReferences = [
       "isNativeBinaryFile",
       "candidates.find(isNativeBinaryFile)",
       "KUZUSHI_NATIVE_BIN must point to a file",
-      "overrideName !== cliName",
+      "overrideName !== \"kuzushi\" && overrideName !== \"kz\"",
       "KUZUSHI_NATIVE_BIN must point to a",
       "native/<platform>-<arch>/kz",
       "Could not find the Kuzushi native binary",
@@ -282,7 +284,7 @@ function binShimRejectsMismatchedNativeOverride() {
     source.includes("isNativeBinaryFile") &&
     source.includes("candidates.find(isNativeBinaryFile)") &&
     source.includes("KUZUSHI_NATIVE_BIN must point to a file") &&
-    source.includes("overrideName !== cliName") &&
+    source.includes(`overrideName !== "kuzushi" && overrideName !== "kz"`) &&
     source.includes("KUZUSHI_NATIVE_BIN must point to a")
   );
 }
