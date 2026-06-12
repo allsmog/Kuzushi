@@ -39,6 +39,40 @@ fn fresh_app() -> ShellApp {
     app
 }
 
+/// RAII override of `$HOME` to an empty temp dir, restored on drop. Used to
+/// make host-credential-reading views (Auth) render deterministically. Holds
+/// a process-global mutex while active so the env mutation can't race other
+/// tests in the binary, and keeps the temp dir alive for the scope.
+struct ScopedHome {
+    previous: Option<std::ffi::OsString>,
+    _dir: tempfile::TempDir,
+    _guard: std::sync::MutexGuard<'static, ()>,
+}
+
+impl ScopedHome {
+    fn empty() -> Self {
+        static HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let guard = HOME_LOCK.lock().unwrap_or_else(|poison| poison.into_inner());
+        let previous = std::env::var_os("HOME");
+        let dir = tempfile::tempdir().expect("temp HOME");
+        std::env::set_var("HOME", dir.path());
+        Self {
+            previous,
+            _dir: dir,
+            _guard: guard,
+        }
+    }
+}
+
+impl Drop for ScopedHome {
+    fn drop(&mut self) {
+        match self.previous.take() {
+            Some(value) => std::env::set_var("HOME", value),
+            None => std::env::remove_var("HOME"),
+        }
+    }
+}
+
 fn reset_snapshot_target(name: &str) -> PathBuf {
     let root = PathBuf::from("target")
         .join("kuzushi-tui-snapshots")
@@ -482,6 +516,13 @@ fn auth_view_default_with_rotate_section() {
     // sections, and a ROTATE hint block so operators can recover from a
     // bad key without leaving the shell. This snapshot pins the layout
     // so future tweaks don't silently drop the rotate hints.
+    //
+    // The provider rows read `$HOME/.kuzushi/oauth-credentials.json`, so
+    // point HOME at an empty temp dir — otherwise a machine with stored
+    // (or expired) oauth tokens renders "expired" instead of "missing" and
+    // this snapshot becomes host-dependent (it was failing on CI runners
+    // that carried an expired credential file).
+    let _home = ScopedHome::empty();
     let mut app = fresh_app();
     app.shell_view = ShellView::Auth;
     assert_plain_snapshot("auth_view_default", &render_at_120(&mut app));
