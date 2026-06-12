@@ -144,7 +144,7 @@ jobs:
             cp target/release/kuzushi "${staging}/"
             tar -czf "${staging}.tar.gz" "${staging}"
           fi
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: release-native-${{ matrix.slug }}
           path: |
