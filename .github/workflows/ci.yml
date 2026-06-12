@@ -229,12 +229,12 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Download dist artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
       - name: Download native artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: native-linux-x64
           path: native/
@@ -288,12 +288,12 @@ jobs:
       - name: Install semgrep (pip, cached)
         run: python -m pip install --upgrade pip && pip install -r .github/requirements-ci.txt
       - name: Download dist artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
       - name: Download native artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: native-linux-x64
           path: native/
