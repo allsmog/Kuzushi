@@ -45,7 +45,7 @@ for (const dataset of datasets) {
 
   execFileSync(
     process.execPath,
-    [cliPath, "scan", repoDir, "--sarif", sarifPath, "--fresh", "--scanners", "semgrep,agentic"],
+    [cliPath, "scan", repoDir, "--tasks", "semgrep", "--sarif", sarifPath],
     {
       stdio: "inherit",
       encoding: "utf-8",

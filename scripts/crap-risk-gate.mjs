@@ -268,7 +268,13 @@ function overlapsRanges(block, ranges) {
 }
 
 function changedLineRanges(file) {
-  const diff = git(["diff", "--unified=0", "HEAD", "--", file]);
+  let diff = git(["diff", "--unified=0", "HEAD", "--", file]);
+  if (!diff.trim() && !explicitFileListUsed() && !isUntrackedFile(file)) {
+    const base = process.env.KUZUSHI_CRAP_RISK_BASE_REF ?? "HEAD^";
+    if (gitRefResolves(base)) {
+      diff = git(["diff", "--unified=0", base, "HEAD", "--", file]);
+    }
+  }
   return diff.split(/\r?\n/).map(parseAddedRange).filter(Boolean);
 }
 
