@@ -91,8 +91,8 @@ function runKuzushiScan(
   sarifOutputPath: string,
   configOverrides?: string,
 ): { durationMs: number } {
-  const cliPath = resolve(__dirname, "../src/cli.ts");
-  const cmdArgs = [cliPath, "scan", repoDir, "--sarif", sarifOutputPath, "--fresh"];
+  const cliPath = resolve(__dirname, "../bin/kuzushi-rs.mjs");
+  const cmdArgs = ["scan", repoDir, "--sarif", sarifOutputPath, "--fresh"];
 
   if (configOverrides) {
     try {
@@ -121,10 +121,12 @@ function runKuzushiScan(
     }
   }
 
-  console.log(chalk.blue(`Running: npx tsx ${redactCommandArgs(cmdArgs).join(" ")}`));
+  console.log(
+    chalk.blue(`Running: ${redactCommandArgs([process.execPath, cliPath, ...cmdArgs]).join(" ")}`),
+  );
   const start = performance.now();
 
-  execFileSync("npx", ["tsx", ...cmdArgs], {
+  execFileSync(process.execPath, [cliPath, ...cmdArgs], {
     stdio: "inherit",
     encoding: "utf-8",
     timeout: 600_000,
