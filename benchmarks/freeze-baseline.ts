@@ -41,20 +41,11 @@ for (const dataset of datasets) {
 
   const sarifPath = join(resultsDir, `${dataset}.sarif`);
   const metricsPath = join(resultsDir, `${dataset}.json`);
+  const cliPath = resolve("bin/kuzushi-rs.mjs");
 
   execFileSync(
-    "npx",
-    [
-      "tsx",
-      "src/cli.ts",
-      "scan",
-      repoDir,
-      "--sarif",
-      sarifPath,
-      "--fresh",
-      "--scanners",
-      "semgrep,agentic",
-    ],
+    process.execPath,
+    [cliPath, "scan", repoDir, "--sarif", sarifPath, "--fresh", "--scanners", "semgrep,agentic"],
     {
       stdio: "inherit",
       encoding: "utf-8",
