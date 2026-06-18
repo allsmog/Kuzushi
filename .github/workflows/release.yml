@@ -61,14 +61,14 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           for archive in kuzushi-*.tar.gz; do
-            slug="${archive#kuzushi-${GITHUB_REF_NAME}-}"; slug="${slug%.tar.gz}"
+            slug="${archive#"kuzushi-${GITHUB_REF_NAME}-"}"; slug="${slug%.tar.gz}"
             mkdir -p "native/${slug}"
             tar -xzf "${archive}" --strip-components=1 -C "native/${slug}"
             chmod 755 "native/${slug}"/kuzushi*
             rm -f "${archive}"
           done
           for archive in kuzushi-*.zip; do
-            slug="${archive#kuzushi-${GITHUB_REF_NAME}-}"; slug="${slug%.zip}"
+            slug="${archive#"kuzushi-${GITHUB_REF_NAME}-"}"; slug="${slug%.zip}"
             mkdir -p "native/${slug}"
             unzip -j -o "${archive}" -d "native/${slug}" > /dev/null
             rm -f "${archive}"
@@ -186,13 +186,13 @@ jobs:
           set -euo pipefail
           shopt -s nullglob
           for archive in kuzushi-*.tar.gz; do
-            slug="${archive#kuzushi-${GITHUB_REF_NAME}-}"; slug="${slug%.tar.gz}"
+            slug="${archive#"kuzushi-${GITHUB_REF_NAME}-"}"; slug="${slug%.tar.gz}"
             mkdir -p "native/${slug}"
             tar -xzf "${archive}" --strip-components=1 -C "native/${slug}"
             chmod 755 "native/${slug}"/kuzushi*
           done
           for archive in kuzushi-*.zip; do
-            slug="${archive#kuzushi-${GITHUB_REF_NAME}-}"; slug="${slug%.zip}"
+            slug="${archive#"kuzushi-${GITHUB_REF_NAME}-"}"; slug="${slug%.zip}"
             mkdir -p "native/${slug}"
             unzip -j -o "${archive}" -d "native/${slug}" > /dev/null
           done

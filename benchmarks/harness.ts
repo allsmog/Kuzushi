@@ -6,7 +6,7 @@
  * Usage:
  *   tsx benchmarks/harness.ts --dataset benchmarks/owasp-benchmark --sarif results.sarif
  *   tsx benchmarks/harness.ts --dataset benchmarks/owasp-benchmark --run
- *   tsx benchmarks/harness.ts --dataset benchmarks/owasp-benchmark --run --config '{"model":"anthropic:claude-sonnet-4-6"}'
+ *   tsx benchmarks/harness.ts --dataset benchmarks/owasp-benchmark --run --config '{"tasks":"semgrep"}'
  */
 
 import { execFileSync } from "node:child_process";
@@ -28,6 +28,13 @@ import type {
   SarifLog,
   SarifResult,
 } from "./types.js";
+
+const CONFIG_ARG_FLAGS = [
+  ["mode", "--mode"],
+  ["tasks", "--tasks"],
+  ["failOn", "--fail-on"],
+  ["budget", "--budget"],
+] as const;
 
 // ── CLI argument parsing ──
 
@@ -92,34 +99,15 @@ function runKuzushiScan(
   configOverrides?: string,
 ): { durationMs: number } {
   const cliPath = resolve(__dirname, "../bin/kuzushi-rs.mjs");
-  const cmdArgs = ["scan", repoDir, "--sarif", sarifOutputPath, "--fresh"];
-
-  if (configOverrides) {
-    try {
-      const overrides = JSON.parse(configOverrides) as Record<string, unknown>;
-      if (overrides["scanners"]) {
-        cmdArgs.push("--scanners", String(overrides["scanners"]));
-      }
-      if (overrides["model"]) {
-        cmdArgs.push("--model", String(overrides["model"]));
-      }
-      if (overrides["severity"]) {
-        cmdArgs.push("--severity", String(overrides["severity"]));
-      }
-      if (overrides["baseUrl"]) {
-        cmdArgs.push("--base-url", String(overrides["baseUrl"]));
-      }
-      if (overrides["max"]) {
-        cmdArgs.push("--max", String(overrides["max"]));
-      }
-      if (overrides["apiKey"]) {
-        cmdArgs.push("--api-key", String(overrides["apiKey"]));
-      }
-    } catch {
-      console.error(chalk.red("Invalid --config JSON"));
-      process.exit(1);
-    }
-  }
+  const cmdArgs = [
+    "scan",
+    repoDir,
+    "--tasks",
+    "semgrep",
+    "--sarif",
+    sarifOutputPath,
+    ...configArgs(configOverrides),
+  ];
 
   console.log(
     chalk.blue(`Running: ${redactCommandArgs([process.execPath, cliPath, ...cmdArgs]).join(" ")}`),
@@ -133,6 +121,23 @@ function runKuzushiScan(
   });
 
   return { durationMs: performance.now() - start };
+}
+
+function configArgs(configOverrides?: string): string[] {
+  if (!configOverrides) return [];
+  const overrides = parseConfigOverrides(configOverrides);
+  return CONFIG_ARG_FLAGS.flatMap(([key, flag]) =>
+    overrides[key] === undefined ? [] : [flag, String(overrides[key])],
+  );
+}
+
+function parseConfigOverrides(configOverrides: string): Record<string, unknown> {
+  try {
+    return JSON.parse(configOverrides) as Record<string, unknown>;
+  } catch {
+    console.error(chalk.red("Invalid --config JSON"));
+    process.exit(1);
+  }
 }
 
 function redactCommandArgs(args: string[]): string[] {

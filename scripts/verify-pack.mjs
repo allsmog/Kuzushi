@@ -86,6 +86,8 @@ const expectedPackageScripts = {
   postinstall: "node scripts/check-native-bindings.mjs",
   dev: "cargo run -p kuzushi-cli",
   "dev:rust": "cargo run -p kuzushi-cli",
+  "link:local": "node scripts/link-local.mjs",
+  "link:local:restore": "node scripts/link-local.mjs --restore",
   "clean:dist": "node -e \"require('node:fs').rmSync('dist',{recursive:true,force:true})\"",
   build: "tsc",
   "build:rust": "cargo build --workspace",
