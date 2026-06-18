@@ -132,6 +132,7 @@ pub(crate) use help::{
 pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
 pub(crate) use journey::{
     journey_footer_segment, journey_model, JourneyModel, JourneyPhaseState, JourneyPhaseStatus,
+    JourneyPhaseTone,
 };
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use knowledge_base::{

@@ -1,6 +1,6 @@
 use super::*;
 use crate::ui_view_models::{
-    home_cockpit_model, HomeArtifactRow, HomeCockpitModel, JourneyModel, JourneyPhaseState,
+    home_cockpit_model, HomeArtifactRow, HomeCockpitModel, JourneyModel, JourneyPhaseTone,
 };
 
 pub(crate) fn home_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -32,21 +32,18 @@ fn journey_rail_line(journey: &JourneyModel) -> Line<'static> {
         if index > 0 {
             spans.push(Span::styled(" · ", theme::subtle()));
         }
-        let style = journey_phase_style(status.state);
-        spans.push(Span::styled(
-            format!("{} {} ", status.phase.kanji(), status.phase.word()),
-            style,
-        ));
-        spans.push(Span::styled(status.state.glyph().to_string(), style));
+        let style = journey_phase_tone_style(status.tone);
+        spans.push(Span::styled(status.phase_label, style));
+        spans.push(Span::styled(status.state_symbol.to_string(), style));
     }
     Line::from(spans)
 }
 
-fn journey_phase_style(state: JourneyPhaseState) -> Style {
-    match state {
-        JourneyPhaseState::Done => theme::success(),
-        JourneyPhaseState::Current => theme::warn(),
-        JourneyPhaseState::Pending => theme::subtle(),
+fn journey_phase_tone_style(tone: JourneyPhaseTone) -> Style {
+    match tone {
+        JourneyPhaseTone::Success => theme::success(),
+        JourneyPhaseTone::Warn => theme::warn(),
+        JourneyPhaseTone::Subtle => theme::subtle(),
     }
 }
 

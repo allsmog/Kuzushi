@@ -29,14 +29,14 @@ pub(crate) fn auth_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 /// back to one stacked line per pair so narrow terminals never clip a
 /// value mid-word.
 struct AuthKv {
-    label: &'static str,
+    key: &'static str,
     value: String,
     style: Style,
 }
 
-fn kv(label: &'static str, value: impl Into<String>, style: Style) -> AuthKv {
+fn kv(key: &'static str, value: impl Into<String>, style: Style) -> AuthKv {
     AuthKv {
-        label,
+        key,
         value: value.into(),
         style,
     }
@@ -60,7 +60,7 @@ fn kv_inline_line(pairs: &[AuthKv]) -> Line<'static> {
             spans.push(Span::styled(" · ", theme::subtle()));
         }
         spans.push(Span::styled(
-            kv_inline_label(pair.label, index),
+            kv_inline_label(pair.key, index),
             theme::muted(),
         ));
         spans.push(Span::styled(pair.value.clone(), pair.style));
@@ -83,7 +83,7 @@ fn kv_label_col(label: &str) -> String {
 fn kv_stacked_line(pair: &AuthKv, width: u16) -> Line<'static> {
     Line::from(vec![
         Span::raw(" "),
-        Span::styled(kv_label_col(pair.label), theme::muted()),
+        Span::styled(kv_label_col(pair.key), theme::muted()),
         Span::styled(fit(&pair.value, kv_value_budget(width)), pair.style),
     ])
 }

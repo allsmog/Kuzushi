@@ -24,6 +24,9 @@ pub struct JourneyModel {
 pub struct JourneyPhaseStatus {
     pub phase: WorkflowPhase,
     pub state: JourneyPhaseState,
+    pub phase_label: &'static str,
+    pub state_symbol: &'static str,
+    pub tone: JourneyPhaseTone,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,6 +42,23 @@ impl JourneyPhaseState {
             JourneyPhaseState::Done => "✓",
             JourneyPhaseState::Current => "●",
             JourneyPhaseState::Pending => "○",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JourneyPhaseTone {
+    Success,
+    Warn,
+    Subtle,
+}
+
+impl JourneyPhaseTone {
+    fn from_state(state: JourneyPhaseState) -> Self {
+        match state {
+            JourneyPhaseState::Done => JourneyPhaseTone::Success,
+            JourneyPhaseState::Current => JourneyPhaseTone::Warn,
+            JourneyPhaseState::Pending => JourneyPhaseTone::Subtle,
         }
     }
 }
@@ -117,11 +137,26 @@ fn any_map_artifact_exists(target: &Path) -> bool {
 fn phase_statuses(current: WorkflowPhase) -> Vec<JourneyPhaseStatus> {
     WorkflowPhase::ORDER
         .iter()
-        .map(|&phase| JourneyPhaseStatus {
-            phase,
-            state: phase_state(phase, current),
+        .map(|&phase| {
+            let state = phase_state(phase, current);
+            JourneyPhaseStatus {
+                phase,
+                state,
+                phase_label: phase_rail_label(phase),
+                state_symbol: state.glyph(),
+                tone: JourneyPhaseTone::from_state(state),
+            }
         })
         .collect()
+}
+
+fn phase_rail_label(phase: WorkflowPhase) -> &'static str {
+    match phase {
+        WorkflowPhase::Map => "組 map ",
+        WorkflowPhase::Hunt => "崩 hunt ",
+        WorkflowPhase::Confirm => "作 confirm ",
+        WorkflowPhase::Fix => "掛 fix ",
+    }
 }
 
 fn phase_state(phase: WorkflowPhase, current: WorkflowPhase) -> JourneyPhaseState {
