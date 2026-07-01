@@ -45,6 +45,7 @@ impl ShellApp {
         self.scan_cancel = Some(cancel);
         self.findings.clear();
         self.selected_finding = None;
+        self.active_model_override = active_model_override_from_input(&request.input, &self.config);
         self.activity = Some(self.pending_scan_activity(&run_id));
         self.shell_view = self.scan_shell_view();
         self.log_scan_start(&request.target_root);
@@ -69,7 +70,7 @@ impl ShellApp {
         if self.auto_open_activity {
             self.log(
                 "view",
-                "opened activity — Esc/back to leave (disable: setg ui.auto_open_activity false)",
+                "opened activity — c cancels run; type `back` to leave (disable: setg ui.auto_open_activity false)",
             );
         }
         self.set_live_activity(LiveActivity::new(

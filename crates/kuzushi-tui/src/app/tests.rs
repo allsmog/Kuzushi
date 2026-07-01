@@ -1102,7 +1102,9 @@ fn findings_command_loads_store_rows() {
     app.handle_command(ShellCommand::Findings);
 
     assert_eq!(app.findings.len(), 1);
-    assert_eq!(app.shell_view, ShellView::Findings);
+    // `findings` now lands on the Workbench command center (FINDINGS pane).
+    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.workbench_focus, WorkbenchPane::Findings);
 }
 
 #[test]
@@ -1126,7 +1128,9 @@ fn open_command_accepts_deterministic_finding_alias() {
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.handle_command(ShellCommand::Open("F-0001".to_string()));
 
-    assert_eq!(app.shell_view, ShellView::Finding);
+    // A selected finding now reads in the Workbench DETAILS pane.
+    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.workbench_focus, WorkbenchPane::Details);
     assert_eq!(
         app.selected_finding
             .as_ref()
@@ -1152,7 +1156,7 @@ fn open_command_resolves_alias_from_stable_sorted_mapping() {
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.handle_command(ShellCommand::Open("F-0001".to_string()));
 
-    assert_eq!(app.shell_view, ShellView::Finding);
+    assert_eq!(app.shell_view, ShellView::Workbench);
     assert_eq!(
         app.selected_finding
             .as_ref()
@@ -1910,6 +1914,34 @@ fn setg_and_unsetg_apply_global_shell_options() {
 }
 
 #[test]
+fn auto_open_prefs_respect_shell_options() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    assert!(app.auto_open_activity);
+    assert!(app.auto_open_viz);
+
+    app.handle_command(ShellCommand::SetOption {
+        global: false,
+        name: "ui.auto_open_activity".to_string(),
+        value: "false".to_string(),
+    });
+    app.handle_command(ShellCommand::SetOption {
+        global: false,
+        name: "ui.auto_open_viz".to_string(),
+        value: "off".to_string(),
+    });
+
+    assert!(!app.auto_open_activity);
+    assert!(!app.auto_open_viz);
+    assert_eq!(
+        app.option_store
+            .values_for(OptionScope::Session, &OptionTarget::All)
+            .unwrap()
+            .get("ui.auto_open_activity"),
+        Some(&serde_json::json!(false))
+    );
+}
+
+#[test]
 fn unknown_option_reports_closest_names_and_next_command() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.handle_command(ShellCommand::Options {
@@ -2506,7 +2538,7 @@ fn ask_requires_explicit_model_and_unknown_prose_stays_deterministic() {
 
 #[test]
 fn exit_and_unknown_command_feedback_is_actionable() {
-    for command in ["/exit", "exit", "/exitj"] {
+    for command in ["/exit", "exit"] {
         let mut app = ShellApp::new(V2Config::default(), None);
 
         app.submit_line(command);
@@ -2521,6 +2553,15 @@ fn exit_and_unknown_command_feedback_is_actionable() {
             line.prefix == "system" && line.body.contains("exit requested; closing shell")
         }));
     }
+
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Home;
+    app.submit_line("/exitj");
+
+    assert!(!app.should_quit);
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "error" && line.body.contains("unknown command \"/exitj\"")
+    }));
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Home;
@@ -3707,7 +3748,9 @@ fn threat_digit_hotkeys_switch_views_without_entering_input() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Threat(ThreatView::Summary);
 
-    app.handle_key(KeyEvent::new(KeyCode::Char('2'), KeyModifiers::empty()));
+    // DFD moved to the Workbench; the remaining tabs renumber from 1, so
+    // `1` is now STRIDE.
+    app.handle_key(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::empty()));
 
     assert_eq!(app.shell_view, ShellView::Threat(ThreatView::Stride));
     assert!(app.input.is_empty());
@@ -3833,7 +3876,8 @@ fn multiline_paste_sets_warn_notice() {
 #[test]
 fn enter_on_empty_findings_logs_guidance() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Findings;
+    app.shell_view = ShellView::Workbench;
+    app.workbench_focus = WorkbenchPane::Findings;
     assert!(app.findings.is_empty());
 
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
@@ -3844,7 +3888,31 @@ fn enter_on_empty_findings_logs_guidance() {
             .any(|line| line.prefix == "findings" && line.body.contains("run `scan`")),
         "empty-findings Enter should guide the operator"
     );
-    assert_eq!(app.shell_view, ShellView::Findings, "stay on the view");
+    assert_eq!(app.shell_view, ShellView::Workbench, "stay on the view");
+}
+
+#[test]
+fn open_start_view_lands_on_the_workbench_by_default() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Catalog;
+    open_start_view(&mut app);
+    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.workbench_focus, WorkbenchPane::Findings);
+}
+
+#[test]
+fn open_start_view_preserves_an_active_onboarding_picker() {
+    // The launch landing must never clobber a first-run gate.
+    for picker in [
+        ShellView::ModelPicker,
+        ShellView::TargetPicker,
+        ShellView::PlanningPicker,
+    ] {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = picker.clone();
+        open_start_view(&mut app);
+        assert_eq!(app.shell_view, picker, "picker was clobbered");
+    }
 }
 
 #[test]
@@ -3874,6 +3942,24 @@ fn reverse_search_esc_cancels() {
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
     assert!(app.history_search.is_none());
     assert!(app.input.is_empty());
+}
+
+#[test]
+fn ctrl_c_in_reverse_search_still_cancels_running_tool() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let cancel = ScanCancellation::default();
+    app.command_history = vec!["run triage:run".to_string()];
+    app.enter_history_search();
+    app.tool_running = Some("triage:run".to_string());
+    app.tool_cancel = Some(cancel.clone());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+    assert!(app.history_search.is_none());
+    assert!(app.tool_abort_requested);
+    assert!(cancel.is_cancelled());
+    assert!(app.ctrl_c_armed());
+    assert!(!app.should_quit);
 }
 
 #[test]
@@ -4072,6 +4158,56 @@ fn next_command_opens_phase_picker_at_derived_phase() {
 }
 
 #[test]
+fn hunt_phase_hides_systems_rows_for_plain_source_targets() {
+    let dir = tempfile::tempdir().expect("temp target");
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("src/app.ts"), "export const ok = true;\n").unwrap();
+    let workspace = WorkspaceTarget::new(dir.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.open_phase_picker(WorkflowPhase::Hunt);
+
+    let tasks: BTreeSet<PlanningTaskId> = app.planning_tasks.iter().map(|row| row.id).collect();
+    assert!(tasks.contains(&PlanningTaskId::ScanAgenticSast));
+    assert!(!tasks.contains(&PlanningTaskId::HuntSystems));
+    assert!(!tasks.contains(&PlanningTaskId::HuntUseAfterFree));
+}
+
+#[test]
+fn hunt_phase_keeps_systems_hunt_for_rust_but_hides_c_uaf() {
+    let dir = tempfile::tempdir().expect("temp target");
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(dir.path().join("src/lib.rs"), "pub fn ok() {}\n").unwrap();
+    let workspace = WorkspaceTarget::new(dir.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.open_phase_picker(WorkflowPhase::Hunt);
+
+    let tasks: BTreeSet<PlanningTaskId> = app.planning_tasks.iter().map(|row| row.id).collect();
+    assert!(tasks.contains(&PlanningTaskId::HuntSystems));
+    assert!(!tasks.contains(&PlanningTaskId::HuntUseAfterFree));
+}
+
+#[test]
+fn hunt_phase_keeps_c_family_specific_hunts_for_cpp_source() {
+    let dir = tempfile::tempdir().expect("temp target");
+    fs::create_dir_all(dir.path().join("src")).unwrap();
+    fs::write(
+        dir.path().join("src/main.cpp"),
+        "int main() { return 0; }\n",
+    )
+    .unwrap();
+    let workspace = WorkspaceTarget::new(dir.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.open_phase_picker(WorkflowPhase::Hunt);
+
+    let tasks: BTreeSet<PlanningTaskId> = app.planning_tasks.iter().map(|row| row.id).collect();
+    assert!(tasks.contains(&PlanningTaskId::HuntSystems));
+    assert!(tasks.contains(&PlanningTaskId::HuntUseAfterFree));
+}
+
+#[test]
 fn target_picker_enter_applies_candidate_and_leaves_the_picker() {
     // Bare interactive `kuzushi` opens the target picker; Enter must wire
     // the chosen directory exactly like the `target <path>` verb and then
@@ -4115,7 +4251,7 @@ fn scan_completion_raises_success_banner_when_operator_is_elsewhere() {
     // they're already watching the Activity feed.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.activity = Some(ActivitySession::new("r-scan"));
-    app.shell_view = ShellView::Findings;
+    app.shell_view = ShellView::Workbench;
     app.apply_scan_finished("r-scan".to_string(), 3);
     let notice = app.advisory.notice.clone().expect("completion banner");
     assert_eq!(notice.severity, NoticeSeverity::Success);
@@ -4137,10 +4273,10 @@ fn scene_view_is_never_a_trap() {
     // /scene used to eat h/j/k/l (camera orbit) even mid-word, making
     // `back` and `home` untypeable on the default 3D page, and Esc with a
     // half-typed prompt toggled clear/restore forever. The gallery must
-    // always be exitable: Esc and q leave directly, and typing yields the
+    // always be exitable: Esc, q, and o leave directly, and typing yields the
     // hotkeys to the prompt.
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Findings;
+    app.shell_view = ShellView::Workbench;
     app.handle_command(ShellCommand::Scene);
     app.sync_view_change();
     assert!(matches!(app.shell_view, ShellView::Scene(_)));
@@ -4151,12 +4287,25 @@ fn scene_view_is_never_a_trap() {
     app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()));
     assert!(!matches!(app.shell_view, ShellView::Scene(_)), "q exits");
 
+    app.handle_command(ShellCommand::Scene);
+    app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()));
+    assert!(!matches!(app.shell_view, ShellView::Scene(_)), "o exits");
+
     // Typing a command containing orbit keys must reach the prompt intact.
     app.handle_command(ShellCommand::Scene);
     for ch in "back".chars() {
         app.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty()));
     }
     assert_eq!(app.input, "back", "orbit keys yield to a non-empty prompt");
+
+    app.input.clear();
+    app.cursor = 0;
+    app.handle_command(ShellCommand::Scene);
+    app.input = "/".to_string();
+    app.cursor = 1;
+    app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()));
+    assert!(matches!(app.shell_view, ShellView::Scene(_)));
+    assert_eq!(app.input, "/o", "o yields to a non-empty prompt");
 }
 
 #[test]
@@ -4220,6 +4369,8 @@ fn non_char_hotkey_code(trigger: HotkeyTrigger) -> KeyCode {
         (HotkeyTrigger::PageDown, KeyCode::PageDown),
         (HotkeyTrigger::Up, KeyCode::Up),
         (HotkeyTrigger::Down, KeyCode::Down),
+        (HotkeyTrigger::Left, KeyCode::Left),
+        (HotkeyTrigger::Right, KeyCode::Right),
     ];
     NON_CHAR_CODES
         .iter()
@@ -4229,7 +4380,8 @@ fn non_char_hotkey_code(trigger: HotkeyTrigger) -> KeyCode {
 
 fn app_with_findings(count: usize) -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Findings;
+    app.shell_view = ShellView::Workbench;
+    app.workbench_focus = WorkbenchPane::Findings;
     app.findings = (0..count)
         .map(|i| make_finding(Severity::High, &format!("fp-{i:04}"), "x"))
         .collect();
@@ -4471,7 +4623,8 @@ fn multi_line_paste_keeps_first_line_and_warns() {
 #[test]
 fn vi_cursor_navigates_findings_list() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Findings;
+    app.shell_view = ShellView::Workbench;
+    app.workbench_focus = WorkbenchPane::Findings;
     app.findings = vec![
         make_finding(Severity::High, "f1", "a"),
         make_finding(Severity::High, "f2", "b"),
@@ -4490,6 +4643,22 @@ fn vi_cursor_navigates_findings_list() {
     assert_eq!(app.findings_cursor, 0);
     app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
     assert_eq!(app.findings_cursor, 2);
+}
+
+#[test]
+fn findings_cursor_follows_selected_fingerprint_in_alias_order() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let selected = make_finding(Severity::High, "fp-high", "selected");
+    app.findings = vec![
+        selected.clone(),
+        make_finding(Severity::Critical, "fp-critical", "first"),
+    ];
+    app.selected_finding = Some(selected);
+    app.findings_cursor = 0;
+
+    app.sync_findings_cursor_to_selected();
+
+    assert_eq!(app.findings_cursor, 1);
 }
 
 #[test]
@@ -4684,7 +4853,8 @@ fn tick_advances_spinner_only_when_running() {
 #[test]
 fn pgdown_pgup_paginate_findings_cursor() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Findings;
+    app.shell_view = ShellView::Workbench;
+    app.workbench_focus = WorkbenchPane::Findings;
     app.findings = (0..25)
         .map(|i| make_finding(Severity::High, &format!("fp-{i}"), "x"))
         .collect();
@@ -4701,7 +4871,8 @@ fn pgdown_pgup_paginate_findings_cursor() {
 #[test]
 fn viewport_enter_opens_cursor_finding_from_visible_list() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Findings;
+    app.shell_view = ShellView::Workbench;
+    app.workbench_focus = WorkbenchPane::Findings;
     app.findings = vec![
         make_finding(Severity::High, "fp-0000", "first"),
         make_finding(Severity::High, "fp-0001", "second"),
@@ -4710,7 +4881,9 @@ fn viewport_enter_opens_cursor_finding_from_visible_list() {
 
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
-    assert_eq!(app.shell_view, ShellView::Finding);
+    // Enter selects the cursored finding; the Workbench DETAILS pane shows it.
+    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.workbench_focus, WorkbenchPane::Details);
     assert_eq!(
         app.selected_finding
             .as_ref()
@@ -4720,53 +4893,50 @@ fn viewport_enter_opens_cursor_finding_from_visible_list() {
 }
 
 #[test]
-fn keybind_advertised_findings_hotkeys_drive_state_transitions() {
+fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
     let app = app_with_findings(25);
     let advertised = app.view_keybindings();
+    assert!(advertised.iter().any(|binding| binding.hint == "Tab"));
     assert!(advertised
         .iter()
         .any(|binding| binding.hint.contains("j/k")));
-    assert!(advertised.iter().any(|binding| binding.hint == "PgUp/PgDn"));
     assert!(advertised.iter().any(|binding| binding.hint == "Enter"));
 
     for binding in advertised {
         let mut app = app_with_findings(25);
         match binding.action {
-            ViewHotkeyAction::FindingsNext => {
+            ViewHotkeyAction::WorkbenchCyclePane => {
+                // app_with_findings starts on the FINDINGS pane; Tab advances
+                // to DETAILS (Source → Center → Findings → Details → Source).
+                app.handle_key(key_event_for_trigger(binding.trigger));
+                assert_eq!(app.workbench_focus, WorkbenchPane::Details);
+            }
+            ViewHotkeyAction::WorkbenchScrollNext => {
                 app.findings_cursor = 0;
                 app.handle_key(key_event_for_trigger(binding.trigger));
                 assert_eq!(app.findings_cursor, 1);
             }
-            ViewHotkeyAction::FindingsPrevious => {
+            ViewHotkeyAction::WorkbenchScrollPrev => {
                 app.findings_cursor = 1;
                 app.handle_key(key_event_for_trigger(binding.trigger));
                 assert_eq!(app.findings_cursor, 0);
             }
-            ViewHotkeyAction::FindingsFirst => {
+            ViewHotkeyAction::WorkbenchScrollFirst => {
                 app.findings_cursor = 7;
                 app.handle_key(key_event_for_trigger(binding.trigger));
                 assert_eq!(app.findings_cursor, 0);
             }
-            ViewHotkeyAction::FindingsLast => {
+            ViewHotkeyAction::WorkbenchScrollLast => {
                 app.findings_cursor = 7;
                 app.handle_key(key_event_for_trigger(binding.trigger));
                 assert_eq!(app.findings_cursor, 24);
             }
-            ViewHotkeyAction::FindingsPageDown => {
-                app.findings_cursor = 0;
-                app.handle_key(key_event_for_trigger(binding.trigger));
-                assert_eq!(app.findings_cursor, 10);
-            }
-            ViewHotkeyAction::FindingsPageUp => {
-                app.findings_cursor = 10;
-                app.handle_key(key_event_for_trigger(binding.trigger));
-                assert_eq!(app.findings_cursor, 0);
-            }
-            ViewHotkeyAction::FindingsOpen => {
+            ViewHotkeyAction::WorkbenchOpen => {
                 app.findings_cursor = 2;
                 let expected = app.findings[2].fingerprint.clone();
                 app.handle_key(key_event_for_trigger(binding.trigger));
-                assert_eq!(app.shell_view, ShellView::Finding);
+                assert_eq!(app.shell_view, ShellView::Workbench);
+                assert_eq!(app.workbench_focus, WorkbenchPane::Details);
                 assert_eq!(
                     app.selected_finding
                         .as_ref()
@@ -4780,7 +4950,7 @@ fn keybind_advertised_findings_hotkeys_drive_state_transitions() {
                 app.handle_key(key_event_for_trigger(binding.trigger));
                 assert_eq!(app.shell_view, ShellView::Catalog);
             }
-            other => panic!("unexpected findings hotkey action: {other:?}"),
+            other => panic!("unexpected workbench hotkey action: {other:?}"),
         }
     }
 }
@@ -4822,12 +4992,12 @@ fn bare_verbs_only_intercepted_in_prompts_editor_view() {
 #[test]
 fn ctrl_o_toggles_story_overlay_back_to_origin() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Findings;
+    app.shell_view = ShellView::Workbench;
     app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
     assert_eq!(app.shell_view, ShellView::Story);
-    assert_eq!(app.story_return_view, Some(ShellView::Findings));
+    assert_eq!(app.story_return_view, Some(ShellView::Workbench));
     app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL));
-    assert_eq!(app.shell_view, ShellView::Findings);
+    assert_eq!(app.shell_view, ShellView::Workbench);
     assert!(app.story_return_view.is_none());
 }
 
@@ -5064,6 +5234,32 @@ fn activity_view_does_not_offer_back_binding() {
 }
 
 #[test]
+fn taskless_activity_task_keys_log_why_they_do_not_focus() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Activity;
+    app.activity = Some(ActivitySession::new("run-1"));
+
+    app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+    assert!(
+        app.input.is_empty(),
+        "task hotkeys must not leak into prompt"
+    );
+    let explanations = app
+        .log
+        .iter()
+        .filter(|line| {
+            line.prefix == "activity"
+                && line
+                    .body
+                    .contains("no DAG tasks to focus; output is already full width")
+        })
+        .count();
+    assert_eq!(explanations, 2);
+}
+
+#[test]
 fn picker_views_are_not_recorded_in_nav_history() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::ModelPicker;
@@ -5234,7 +5430,7 @@ fn budget_halt_c_continues_a_aborts() {
 }
 
 #[test]
-fn ctrl_c_during_active_scan_requests_abort_without_arming() {
+fn ctrl_c_during_active_scan_requests_abort_and_arms_exit() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.scan = Some(ScanPanelState {
         run_id: Some("run-x".to_string()),
@@ -5247,13 +5443,17 @@ fn ctrl_c_during_active_scan_requests_abort_without_arming() {
     });
     app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
     assert!(!app.should_quit);
-    assert!(!app.ctrl_c_armed(), "scan-cancel path must not arm exit");
+    assert!(
+        app.ctrl_c_armed(),
+        "scan-cancel path should arm forced exit"
+    );
     assert!(app.scan.as_ref().is_some_and(|scan| scan.abort_requested));
 }
 
 #[test]
-fn second_ctrl_c_after_scan_abort_request_arms_exit() {
+fn second_ctrl_c_after_scan_abort_request_exits_while_scan_runs() {
     let mut app = ShellApp::new(V2Config::default(), None);
+    let cancel = ScanCancellation::default();
     app.scan = Some(ScanPanelState {
         run_id: Some("run-x".to_string()),
         target: PathBuf::from("."),
@@ -5263,11 +5463,12 @@ fn second_ctrl_c_after_scan_abort_request_arms_exit() {
         abort_requested: false,
         error: None,
     });
+    app.scan_cancel = Some(cancel.clone());
     app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
     app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
-    assert!(!app.should_quit);
-    assert!(app.ctrl_c_armed());
+    assert!(app.should_quit);
+    assert!(cancel.is_cancelled());
 }
 
 #[test]
@@ -5290,7 +5491,7 @@ fn ctrl_c_during_agent_chat_requests_abort_without_claiming_kill() {
     app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
     assert!(!app.should_quit);
-    assert!(!app.ctrl_c_armed());
+    assert!(app.ctrl_c_armed());
     assert!(app
         .agent_chat
         .as_ref()
@@ -5448,14 +5649,21 @@ fn scan_failure_event_records_bounded_failure_handoff() {
 #[test]
 fn ctrl_c_during_plan_and_threat_workers_requests_honest_abort() {
     let mut app = ShellApp::new(V2Config::default(), None);
+    let plan_cancel = ScanCancellation::default();
+    let threat_cancel = ScanCancellation::default();
     app.planner_running = true;
+    app.plan_cancel = Some(plan_cancel.clone());
     app.threat_worker_running = true;
+    app.threat_cancel = Some(threat_cancel.clone());
 
     app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
     assert!(app.plan_abort_requested);
     assert!(app.threat_abort_requested);
+    assert!(plan_cancel.is_cancelled());
+    assert!(threat_cancel.is_cancelled());
     assert!(!app.should_quit);
+    assert!(app.ctrl_c_armed());
     assert!(app.log.iter().any(|line| {
         line.prefix == "plan"
             && line.body.contains("abort requested")
@@ -5471,18 +5679,98 @@ fn ctrl_c_during_plan_and_threat_workers_requests_honest_abort() {
 #[test]
 fn ctrl_c_during_background_tool_requests_honest_abort_without_exiting() {
     let mut app = ShellApp::new(V2Config::default(), None);
+    let cancel = ScanCancellation::default();
     app.tool_running = Some("context:build".to_string());
+    app.tool_cancel = Some(cancel.clone());
 
     app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
     assert!(app.tool_abort_requested);
-    assert!(!app.ctrl_c_armed());
+    assert!(cancel.is_cancelled());
+    assert!(app.ctrl_c_armed());
     assert!(!app.should_quit);
     assert!(app.log.iter().any(|line| {
         line.prefix == "tool"
-            && line.body.contains("context:build abort requested")
-            && line.body.contains("not confirmed")
+            && line.body.contains("context:build cancel requested")
+            && line.body.contains("worker to stop")
     }));
+}
+
+#[test]
+fn second_ctrl_c_during_background_tool_exits_after_cancelling_worker() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let cancel = ScanCancellation::default();
+    app.tool_running = Some("triage:run".to_string());
+    app.tool_cancel = Some(cancel.clone());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+    app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
+
+    assert!(app.tool_abort_requested);
+    assert!(cancel.is_cancelled());
+    assert!(app.should_quit);
+}
+
+#[test]
+fn activity_c_cancels_background_tool_without_leaving_tui() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let cancel = ScanCancellation::default();
+    app.shell_view = ShellView::Activity;
+    app.activity = Some(ActivitySession::new("tool-x"));
+    app.tool_running = Some("triage:run".to_string());
+    app.tool_cancel = Some(cancel.clone());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+
+    assert!(app.tool_abort_requested);
+    assert!(cancel.is_cancelled());
+    assert_eq!(app.shell_view, ShellView::Activity);
+    assert!(!app.should_quit);
+}
+
+#[test]
+fn activity_c_cancels_scan_and_background_tool_when_both_are_marked_running() {
+    let tmp = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let scan_cancel = ScanCancellation::default();
+    let tool_cancel = ScanCancellation::default();
+    app.shell_view = ShellView::Activity;
+    app.activity = Some(ActivitySession::new("tool-x"));
+    app.scan = Some(ScanPanelState {
+        run_id: Some("scan-run".to_string()),
+        target: tmp.path().to_path_buf(),
+        stage: "running".to_string(),
+        findings_count: 0,
+        running: true,
+        abort_requested: false,
+        error: None,
+    });
+    app.scan_cancel = Some(scan_cancel.clone());
+    app.tool_running = Some("triage:run".to_string());
+    app.tool_cancel = Some(tool_cancel.clone());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
+
+    assert!(app.scan.as_ref().is_some_and(|scan| scan.abort_requested));
+    assert!(scan_cancel.is_cancelled());
+    assert!(app.tool_abort_requested);
+    assert!(tool_cancel.is_cancelled());
+    assert_eq!(app.shell_view, ShellView::Activity);
+    assert!(!app.should_quit);
+}
+
+#[test]
+fn cancel_command_cancels_background_tool_without_exiting() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let cancel = ScanCancellation::default();
+    app.tool_running = Some("triage:run".to_string());
+    app.tool_cancel = Some(cancel.clone());
+
+    app.handle_command(ShellCommand::Cancel);
+
+    assert!(app.tool_abort_requested);
+    assert!(cancel.is_cancelled());
+    assert!(!app.should_quit);
 }
 
 #[test]
@@ -6143,6 +6431,115 @@ fn activity_view_pause_verbose_reset_keys() {
 }
 
 #[test]
+fn activity_view_left_right_keys_cycle_deck_pages() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.handle_command(ShellCommand::Activity);
+    assert!(!app.view_keybindings().iter().any(|binding| {
+        binding.trigger == HotkeyTrigger::Char('n') || binding.trigger == HotkeyTrigger::Char('N')
+    }));
+
+    app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::empty()));
+    assert_eq!(
+        app.activity.as_ref().unwrap().deck_page,
+        super::view_state::ActivityDeckPage::AttackSurface
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::empty()));
+    assert_eq!(
+        app.activity.as_ref().unwrap().deck_page,
+        super::view_state::ActivityDeckPage::Findings
+    );
+}
+
+#[test]
+fn activity_left_right_keys_edit_prompt_when_draft_exists() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.handle_command(ShellCommand::Activity);
+    app.input = "scan ./target".to_string();
+    app.cursor = app.input.chars().count();
+
+    app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::empty()));
+
+    assert_eq!(
+        app.activity.as_ref().unwrap().deck_page,
+        super::view_state::ActivityDeckPage::Findings
+    );
+    assert_eq!(app.cursor, "scan ./target".chars().count() - 1);
+}
+
+#[test]
+fn activity_findings_key_opens_workbench_review() {
+    let temp = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.handle_command(ShellCommand::Activity);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.workbench_focus, WorkbenchPane::Findings);
+    assert!(app
+        .log
+        .iter()
+        .any(|line| { line.prefix == "activity" && line.body.contains("opened findings review") }));
+}
+
+#[test]
+fn activity_open_key_on_findings_opens_workbench_review() {
+    let temp = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.handle_command(ShellCommand::Activity);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.workbench_focus, WorkbenchPane::Findings);
+}
+
+#[test]
+fn activity_open_key_on_visualization_returns_to_activity_with_o() {
+    use crate::scene3d::VizPage;
+
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.handle_command(ShellCommand::Activity);
+    app.activity
+        .as_mut()
+        .unwrap()
+        .set_deck_page(super::view_state::ActivityDeckPage::Dfd);
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()));
+    assert_eq!(app.shell_view, ShellView::Scene(VizPage::Dfd));
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()));
+    assert_eq!(app.shell_view, ShellView::Activity);
+}
+
+#[test]
+fn activity_enter_on_artifact_task_switches_output_deck() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.handle_command(ShellCommand::Activity);
+    let session = app.activity.as_mut().unwrap();
+    session.tasks.clear();
+    session.task_scroll = 0;
+    session.tasks.insert(
+        "threat-model:build".to_string(),
+        DagTaskRow::queued(
+            "threat-model:build".to_string(),
+            "threat-model".to_string(),
+            Vec::new(),
+        ),
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+    let session = app.activity.as_ref().unwrap();
+    assert_eq!(session.focus_task.as_deref(), Some("threat-model:build"));
+    assert_eq!(session.deck_page, super::view_state::ActivityDeckPage::Dfd);
+    assert_eq!(session.pane_focus, PaneFocus::Right);
+}
+
+#[test]
 fn activity_view_renders_dag_rows_and_feed_events() {
     use kuzushi_core::RunTraceStep;
 
@@ -6285,6 +6682,22 @@ fn scan_completion_auto_opens_the_findings_heatmap() {
 }
 
 #[test]
+fn scan_completion_focuses_activity_findings_when_watching_activity() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.auto_open_viz = true;
+    app.activity = Some(ActivitySession::new("run-viz"));
+    app.shell_view = ShellView::Activity;
+
+    app.apply_scan_finished("run-viz".to_string(), 2);
+
+    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(
+        app.activity.as_ref().unwrap().deck_page,
+        super::view_state::ActivityDeckPage::Findings
+    );
+}
+
+#[test]
 fn scan_completion_respects_viz_opt_out() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.auto_open_viz = false;
@@ -6391,13 +6804,13 @@ fn confirming_with_nothing_selected_names_the_skipped_phase() {
 
 #[test]
 fn confirmed_plan_stalled_behind_running_tool_is_announced() {
-    // Seed disconnect: Enter while the recommender held the background slot
-    // queued the plan and returned silently — the operator watched an
-    // unrelated tool run with no hint their plan was waiting.
+    // Seed disconnect: Enter while another tool held the background slot queued
+    // the plan and returned silently — the operator watched unrelated work run
+    // with no hint their plan was waiting.
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.target = Some(dir.path().to_path_buf());
-    app.tool_running = Some("module-recommender:recommend".to_string());
+    app.tool_running = Some("semgrep:scan".to_string());
     open_test_planning_picker(
         &mut app,
         vec![planning_test_row(
@@ -6414,9 +6827,9 @@ fn confirmed_plan_stalled_behind_running_tool_is_announced() {
         "the confirmed step stays queued"
     );
     assert!(
-        app.log.iter().any(|line| line
-            .body
-            .contains("waiting for module-recommender:recommend to finish")),
+        app.log
+            .iter()
+            .any(|line| line.body.contains("waiting for semgrep:scan to finish")),
         "announces the stall: {:?}",
         app.log.iter().map(|l| &l.body).collect::<Vec<_>>()
     );
@@ -6428,10 +6841,36 @@ fn confirmed_plan_stalled_behind_running_tool_is_announced() {
 }
 
 #[test]
+fn planning_completion_returns_to_workbench_without_auto_recommender() {
+    let dir = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(dir.path().to_path_buf());
+    app.shell_view = ShellView::Activity;
+    app.workflow_phase = None;
+
+    app.advance_to_next_phase();
+
+    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.workbench_focus, WorkbenchPane::Findings);
+    assert_eq!(app.tool_running.as_deref(), None);
+    assert!(
+        !app.log
+            .iter()
+            .any(|line| line.body.contains("module-recommender:recommend")),
+        "completion must not auto-run recommender: {:?}",
+        app.log.iter().map(|l| &l.body).collect::<Vec<_>>()
+    );
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.prefix == "recommend" && line.body.contains("run `recommend`")));
+}
+
+#[test]
 fn planning_picker_uppercase_aliases_match_their_advertised_lowercase_keys() {
-    // a/A, n/N, g/G, Esc/q: the shifted variants are deliberate caps-lock
-    // forgiveness. This pins them to the advertised lowercase behavior so a
-    // future handler edit can't make an unadvertised key diverge.
+    // a/A, n/N, Esc/q: the shifted variants are deliberate caps-lock
+    // forgiveness. `G` is intentionally not a rebuild alias, preserving
+    // the shell-wide g/G navigation convention for scrollable views.
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.target = Some(dir.path().to_path_buf());
@@ -6454,11 +6893,23 @@ fn planning_picker_uppercase_aliases_match_their_advertised_lowercase_keys() {
     assert!(app.planning_selected.is_empty(), "N clears like n");
 
     app.planning_cursor = 1; // the cached row
-    app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
+    app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
     assert!(
         app.planning_rebuild.contains(&PlanningTaskId::BuildXRay),
-        "G marks rebuild like g"
+        "g marks cached rows for rebuild"
     );
+    app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
+    assert!(
+        !app.planning_rebuild.contains(&PlanningTaskId::BuildXRay),
+        "second g returns cached rows to reuse"
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
+    assert!(
+        !app.planning_rebuild.contains(&PlanningTaskId::BuildXRay),
+        "G is not an unadvertised rebuild alias"
+    );
+    assert!(app.input.is_empty(), "modal picker swallows inert G");
 
     app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()));
     assert!(

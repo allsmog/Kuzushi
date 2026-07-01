@@ -1,6 +1,6 @@
 use super::activity_dag_rows::{activity_dag_pane_rows, ActivityDagPaneRow};
 use super::activity_empty_state::{activity_empty_state_model, ActivityEmptyStateModel};
-use super::activity_feed_rows::{activity_feed_pane_rows, ActivityFeedPaneRow};
+use super::activity_feed_rows::ActivityFeedPaneRow;
 use super::activity_footer::{activity_footer_model, ActivityFooterModel};
 use super::activity_header::{
     activity_header_model, ActivityHeaderModel, ActivityLiveTool, ActivityRunOutcome,
@@ -14,7 +14,7 @@ use super::activity_pane_chrome::{
 };
 use super::activity_plain_rows::{activity_plain_pane_rows, ActivityPlainPaneRow};
 use super::activity_scroll::{activity_feed_scroll_offset, activity_task_scroll_offset};
-use super::generated_views_feed::generated_views_feed_rows;
+use super::generated_views_feed::{activity_deck_plain_extra_rows, activity_deck_rows};
 use crate::{ActivitySession, ShellApp};
 use std::time::Instant;
 
@@ -103,11 +103,13 @@ impl<'a> ActiveActivityViewModel<'a> {
         activity_frame_layout()
     }
 
-    /// Single-tool runs register no DAG tasks (scans pre-seed theirs from
-    /// the registry), so an empty task map means the TASKS pane would only
-    /// ever say "(no DAG tasks yet)" — give its 40% to the OUTPUT pane.
+    /// Single-tool runs can still have live trace events. Keep TASKS visible
+    /// whenever there is activity to show; collapse only for a fully empty
+    /// session so OUTPUT can own the frame.
     pub(crate) fn collapse_dag_pane(&self) -> bool {
         self.session.tasks.is_empty()
+            && self.session.events.is_empty()
+            && self.app.running_tool_name().is_none()
     }
 
     pub(crate) fn pane_chrome(&self) -> ActivityPaneChromeModel {
@@ -130,13 +132,13 @@ impl<'a> ActiveActivityViewModel<'a> {
         widths: ActivityPaneWidths,
         now: Instant,
     ) -> Vec<ActivityPlainPaneRow> {
-        let generated = generated_views_feed_rows(self.app, widths.feed);
+        let output_rows = activity_deck_plain_extra_rows(self.app, self.session, widths.feed);
         activity_plain_pane_rows(
             self.session,
             widths.dag,
             widths.feed,
             now,
-            &generated,
+            &output_rows,
             self.app.running_tool_name(),
         )
     }
@@ -146,17 +148,20 @@ impl<'a> ActiveActivityViewModel<'a> {
         inner_width: usize,
         now: Instant,
     ) -> Vec<ActivityDagPaneRow> {
-        activity_dag_pane_rows(self.session, inner_width, now)
+        activity_dag_pane_rows(self.session, inner_width, now, self.app.running_tool_name())
     }
 
-    /// The live event feed, followed by every generated visualization that has
-    /// data (pulled from persistent `ShellApp` state, so the views persist across
-    /// later phases and — via the on-disk snapshots — across sessions).
+    /// The right pane is an output strip: one selected artifact/review page at
+    /// a time. Live trace rows are integrated into the TASKS pane. Pages are pulled
+    /// from persistent `ShellApp` state, so they persist across later phases and
+    /// — via the on-disk snapshots — across sessions.
     pub(crate) fn feed_pane_rows(&self, inner_width: usize) -> Vec<ActivityFeedPaneRow> {
-        let mut rows =
-            activity_feed_pane_rows(self.session, inner_width, self.app.running_tool_name());
-        rows.extend(generated_views_feed_rows(self.app, inner_width));
-        rows
+        activity_deck_rows(
+            self.app,
+            self.session,
+            inner_width,
+            self.app.running_tool_name(),
+        )
     }
 
     pub(crate) fn task_scroll_offset(&self, rows: usize, viewport_rows: usize) -> usize {
@@ -186,8 +191,10 @@ mod tests {
             panic!("expected inactive activity model");
         };
 
-        assert_eq!(empty.title, "ACTIVITY");
-        assert!(empty.body.contains("no run active"));
+        assert_eq!(empty.title, "ACTIVITY · idle");
+        assert_eq!(empty.glyph_label, "no active run");
+        assert!(empty.explanations.iter().any(|line| line.contains("logs")));
+        assert!(empty.ctas.iter().any(|(command, _)| *command == "scan"));
     }
 
     #[test]
@@ -215,7 +222,7 @@ mod tests {
     }
 
     #[test]
-    fn generated_views_pin_to_feed_regardless_of_session_tasks() {
+    fn activity_deck_shows_selected_artifact_regardless_of_session_tasks() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.taint_flow = Some(crate::TaintFlowSnapshot {
             cwe: "CWE-89".to_string(),
@@ -235,6 +242,10 @@ mod tests {
             DagTaskRow::queued("context:build".into(), "context".into(), Vec::new()),
         );
         app.activity = Some(session);
+        app.activity
+            .as_mut()
+            .unwrap()
+            .set_deck_page(crate::ActivityDeckPage::AttackPath);
 
         let ActivityViewModel::Active(model) = activity_view_model(&app) else {
             panic!("expected active activity model");

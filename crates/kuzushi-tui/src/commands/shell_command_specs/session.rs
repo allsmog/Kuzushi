@@ -26,6 +26,12 @@ pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
         description: "document live-control absence",
     },
     ShellCommandSpec {
+        command: "cancel",
+        aliases: &["/cancel", "c", "/c", "stop", "/stop"],
+        category: ShellCommandCategory::Session,
+        description: "cancel the active scan/tool/agent without leaving the shell",
+    },
+    ShellCommandSpec {
         command: "resume [runId]",
         aliases: &["/resume [runId]"],
         category: ShellCommandCategory::Session,
@@ -87,7 +93,7 @@ pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "quit",
-        aliases: &["q", "/q", "exit", "/quit", "/exit", "exitj", "/exitj"],
+        aliases: &["q", "/q", "exit", "/quit", "/exit"],
         category: ShellCommandCategory::Session,
         description: "exit the shell",
     },

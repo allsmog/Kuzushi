@@ -84,8 +84,14 @@ pub enum ShellView {
     Recommend,
     Module,
     ModuleRun,
-    Findings,
-    Finding,
+    /// Split-pane command center and the shell's default landing surface
+    /// (Claude Design layout 1a). A multi-pane body —
+    /// `[SOURCE tree | CENTER context | FINDINGS + DETAILS]` — under a
+    /// `Kuzushi · Project · Target · LIVE · phase` top bar, with the shared
+    /// prompt/keybind footer acting as its command bar. Folds the old standalone
+    /// findings, finding-detail, and threat-DFD surfaces into one frame view.
+    /// Pane focus lives on `app.workbench_focus`.
+    Workbench,
     Tune,
     Threat(ThreatView),
     ThreatEditor,
@@ -165,11 +171,35 @@ pub enum ShellView {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreatView {
-    Dfd,
     Stride,
     Stories,
     Scope,
     Summary,
+}
+
+/// Which pane the operator's keyboard focus is on inside the Workbench command
+/// center. `Tab` cycles `Source → Center → Findings → Details → Source`; `j`/`k`
+/// move within the focused pane; `Enter` opens the cursored finding when
+/// `Findings` is focused. Defaults to `Findings` — the list is the primary
+/// interaction, and opening a finding moves focus to `Details` for reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkbenchPane {
+    Source,
+    Center,
+    Findings,
+    Details,
+}
+
+impl WorkbenchPane {
+    /// Advance focus to the next pane in `Source → Center → Findings → Details` order.
+    pub fn next(self) -> Self {
+        match self {
+            WorkbenchPane::Source => WorkbenchPane::Center,
+            WorkbenchPane::Center => WorkbenchPane::Findings,
+            WorkbenchPane::Findings => WorkbenchPane::Details,
+            WorkbenchPane::Details => WorkbenchPane::Source,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

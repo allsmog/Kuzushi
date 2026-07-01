@@ -3,9 +3,10 @@ mod tests {
     use super::super::*;
     use kuzushi_core::{
         AgentQueryRequest, AgentRuntime, AgentRuntimeOptions, Finding, RuntimeConfig, RuntimeKind,
-        Severity, TriageRequest,
+        ScanCancellation, Severity, TriageRequest,
     };
     use std::collections::BTreeMap;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn uses_configured_bridge_command() {
@@ -64,6 +65,77 @@ printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234
         assert_eq!(response.text, "done");
         assert_eq!(response.structured.unwrap()["ok"], serde_json::json!(true));
         assert!((response.cost_usd - 0.1234).abs() < 1e-9);
+    }
+
+    #[test]
+    fn query_bridge_cancellation_kills_running_child() {
+        let tmp = tempfile::tempdir().unwrap();
+        let started = tmp.path().join("started");
+        let bridge = tmp.path().join("bridge.sh");
+        std::fs::write(
+            &bridge,
+            format!(
+                r#"#!/bin/sh
+printf started > {started}
+while :; do :; done
+"#,
+                started = started.display()
+            ),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bridge, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let runtime = RuntimeConfig {
+            kind: RuntimeKind::LangGraph,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            thinking_level: None,
+            langgraph_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
+            anthropic_oauth: None,
+        };
+        let cancel = ScanCancellation::default();
+        let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".")
+            .unwrap()
+            .with_cancellation(cancel.clone());
+        let handle = std::thread::spawn(move || {
+            bridge
+                .query_blocking(AgentQueryRequest::new(
+                    "openai:gpt-5.5",
+                    ".",
+                    "sys",
+                    "prompt",
+                ))
+                .unwrap_err()
+                .to_string()
+        });
+
+        wait_for_file(&started, Duration::from_secs(2));
+        let cancelled_at = Instant::now();
+        cancel.cancel();
+
+        let error = handle.join().unwrap();
+
+        assert!(
+            cancelled_at.elapsed() < Duration::from_secs(2),
+            "cancel should not wait for the bridge timeout"
+        );
+        assert!(error.contains("cancelled"));
+    }
+
+    fn wait_for_file(path: &std::path::Path, timeout: Duration) {
+        let deadline = Instant::now() + timeout;
+        while !path.exists() {
+            assert!(
+                Instant::now() < deadline,
+                "timed out waiting for {}",
+                path.display()
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]

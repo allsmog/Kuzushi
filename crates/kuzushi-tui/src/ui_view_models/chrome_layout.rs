@@ -22,9 +22,16 @@ pub(crate) fn transcript_chrome_height(app: &ShellApp, terminal_height: u16) -> 
     2
 }
 
-pub(crate) fn keybind_footer_chrome_height(app: &ShellApp, terminal_height: u16) -> u16 {
+pub(crate) fn keybind_footer_chrome_height(
+    app: &ShellApp,
+    terminal_height: u16,
+    terminal_width: u16,
+) -> u16 {
     if activity_supplies_own_chrome(app) || terminal_height < 8 {
         return 0;
+    }
+    if terminal_width < 70 && terminal_height >= 9 {
+        return 3;
     }
     2
 }
@@ -86,7 +93,7 @@ mod tests {
         let app = app_in_view(ShellView::Activity);
 
         assert_eq!(transcript_chrome_height(&app, 24), 0);
-        assert_eq!(keybind_footer_chrome_height(&app, 24), 0);
+        assert_eq!(keybind_footer_chrome_height(&app, 24, 80), 0);
         assert_eq!(status_footer_chrome_height(&app, 24), 0);
     }
 
@@ -94,8 +101,16 @@ mod tests {
     fn keybind_footer_chrome_height_requires_room() {
         let app = ShellApp::new(V2Config::default(), None);
 
-        assert_eq!(keybind_footer_chrome_height(&app, 7), 0);
-        assert_eq!(keybind_footer_chrome_height(&app, 8), 2);
+        assert_eq!(keybind_footer_chrome_height(&app, 7, 80), 0);
+        assert_eq!(keybind_footer_chrome_height(&app, 8, 80), 2);
+    }
+
+    #[test]
+    fn keybind_footer_wraps_below_70_cols_when_there_is_room() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        assert_eq!(keybind_footer_chrome_height(&app, 24, 69), 3);
+        assert_eq!(keybind_footer_chrome_height(&app, 24, 70), 2);
     }
 
     #[test]

@@ -30,11 +30,12 @@ fn legacy_openai_oauth_selector_command() -> ShellCommand {
 
 pub(crate) fn parse_threat_command(args: &[&str]) -> ShellCommand {
     match args.first().copied() {
-        None | Some("summary") | Some("5") => ShellCommand::Threat(ThreatView::Summary),
-        Some("dfd") | Some("1") => ShellCommand::Threat(ThreatView::Dfd),
-        Some("stride") | Some("2") => ShellCommand::Threat(ThreatView::Stride),
-        Some("stories") | Some("3") => ShellCommand::Threat(ThreatView::Stories),
-        Some("scope") | Some("4") => ShellCommand::Threat(ThreatView::Scope),
+        None | Some("summary") | Some("4") => ShellCommand::Threat(ThreatView::Summary),
+        // The DFD now lives in the Workbench command center's center pane.
+        Some("dfd") => ShellCommand::Workbench(WorkbenchPane::Center),
+        Some("stride") | Some("1") => ShellCommand::Threat(ThreatView::Stride),
+        Some("stories") | Some("2") => ShellCommand::Threat(ThreatView::Stories),
+        Some("scope") | Some("3") => ShellCommand::Threat(ThreatView::Scope),
         Some("edit") => ShellCommand::ThreatEditor,
         Some("regen") => ShellCommand::ThreatRegen,
         Some("apply") => ShellCommand::ThreatApply,

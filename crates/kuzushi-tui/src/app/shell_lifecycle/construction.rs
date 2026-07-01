@@ -1,18 +1,71 @@
 use super::*;
 
+pub(crate) const UI_AUTO_OPEN_ACTIVITY_OPTION: &str = "ui.auto_open_activity";
+pub(crate) const UI_AUTO_OPEN_VIZ_OPTION: &str = "ui.auto_open_viz";
+
 /// Operator preference for the Activity view's auto-open behaviour at
-/// scan/tool start. Default ON. Override via the env var
-/// `KUZUSHI_AUTO_OPEN_ACTIVITY=false` (the option-store-backed `setg`
-/// path runs after `ShellApp::new`, so a startup-time env knob is the
-/// simplest way to disable it before the first tool launches).
-fn read_auto_open_activity_pref() -> bool {
-    read_bool_env("KUZUSHI_AUTO_OPEN_ACTIVITY")
+/// scan/tool start. Default ON. `setg ui.auto_open_activity false` wins over
+/// the compatibility env var `KUZUSHI_AUTO_OPEN_ACTIVITY=false`.
+fn read_auto_open_activity_pref(option_store: &ToolOptionStore) -> bool {
+    read_bool_pref(
+        option_store,
+        UI_AUTO_OPEN_ACTIVITY_OPTION,
+        "KUZUSHI_AUTO_OPEN_ACTIVITY",
+    )
 }
 
-/// Operator preference for auto-opening the relevant security-viz page when its
-/// artifact is generated. Default ON; disable with `KUZUSHI_AUTO_OPEN_VIZ=false`.
-fn read_auto_open_viz_pref() -> bool {
-    read_bool_env("KUZUSHI_AUTO_OPEN_VIZ")
+/// Operator preference for auto-opening the relevant security-viz page when
+/// its artifact is generated. Default ON. `setg ui.auto_open_viz false` wins
+/// over the compatibility env var `KUZUSHI_AUTO_OPEN_VIZ=false`.
+fn read_auto_open_viz_pref(option_store: &ToolOptionStore) -> bool {
+    read_bool_pref(
+        option_store,
+        UI_AUTO_OPEN_VIZ_OPTION,
+        "KUZUSHI_AUTO_OPEN_VIZ",
+    )
+}
+
+pub(crate) fn refresh_auto_open_prefs_from_store(app: &mut ShellApp) {
+    app.auto_open_activity = read_auto_open_activity_pref(&app.option_store);
+    app.auto_open_viz = read_auto_open_viz_pref(&app.option_store);
+}
+
+fn read_bool_pref(option_store: &ToolOptionStore, option_name: &str, env_key: &str) -> bool {
+    stored_bool_pref(option_store, option_name).unwrap_or_else(|| read_bool_env(env_key))
+}
+
+fn stored_bool_pref(option_store: &ToolOptionStore, option_name: &str) -> Option<bool> {
+    option_store
+        .effective_stored_values("kuzushi:ui")
+        .get(option_name)
+        .and_then(json_bool)
+}
+
+pub(crate) fn json_bool(value: &serde_json::Value) -> Option<bool> {
+    match value {
+        serde_json::Value::Bool(value) => Some(*value),
+        serde_json::Value::String(value) => parse_bool_pref(value),
+        _ => None,
+    }
+}
+
+pub(crate) fn parse_bool_pref(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+pub(crate) fn active_model_override_from_input(
+    input: &serde_json::Value,
+    config: &V2Config,
+) -> Option<String> {
+    let model = input.get("model")?.as_str()?.trim();
+    if model.is_empty() || Some(model) == config.model.as_deref() {
+        return None;
+    }
+    Some(model.to_string())
 }
 
 /// A default-true boolean env knob (`0|false|no|off` → false; unset → true).
@@ -51,7 +104,7 @@ macro_rules! shell_app_initial_state {
             confirm_denylist: std::collections::BTreeSet::new(),
             config: $config,
             registry: $registry,
-            option_store: $option_store,
+            option_store: $option_store.clone(),
             command_history: Vec::new(),
             history_search: None,
             session_cost_usd: 0.0,
@@ -73,6 +126,7 @@ macro_rules! shell_app_initial_state {
             session_thinking_level: None,
             findings: Vec::new(),
             selected_finding: None,
+            workbench_focus: crate::app::WorkbenchPane::Findings,
             scan: None,
             should_quit: false,
             ctrl_c_armed_at: None,
@@ -102,7 +156,6 @@ macro_rules! shell_app_initial_state {
             planning_failed: Vec::new(),
             planning_adjustments: std::collections::BTreeMap::new(),
             model_recommended_tasks: None,
-            recommendation_requested: false,
             tune_cursor: 0,
             prompts_cursor: 0,
             actor_detail_filter: ActorDetailFilter::All,
@@ -134,21 +187,26 @@ macro_rules! shell_app_initial_state {
             scan_cancel: None,
             tool_rx: None,
             tool_running: None,
+            tool_cancel: None,
             ambient_tool: None,
             tool_run_id: None,
+            active_model_override: None,
             tool_abort_requested: false,
             agent_rx: None,
+            agent_cancel: None,
             plan_rx: None,
+            plan_cancel: None,
             threat_rx: None,
+            threat_cancel: None,
             trace_rx: None,
             activity: None,
-            auto_open_activity: read_auto_open_activity_pref(),
+            auto_open_activity: read_auto_open_activity_pref(&$option_store),
             scene_page: crate::scene3d::VizPage::default(),
             scene_spin: 0.6,
             scene_pitch: 0.45,
             scene_paused: false,
             last_scene_advance: None,
-            auto_open_viz: read_auto_open_viz_pref(),
+            auto_open_viz: read_auto_open_viz_pref(&$option_store),
             exploit_chains: Vec::new(),
             taint_flow: None,
         }

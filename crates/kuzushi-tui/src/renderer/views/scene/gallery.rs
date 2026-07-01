@@ -77,7 +77,10 @@ fn nav_spans(app: &ShellApp, page: VizPage) -> Vec<Span<'static>> {
             theme::muted(),
         ));
     }
-    spans.push(Span::styled("  ·  esc back".to_string(), theme::muted()));
+    spans.push(Span::styled(
+        "  ·  o return · esc back".to_string(),
+        theme::muted(),
+    ));
     spans
 }
 

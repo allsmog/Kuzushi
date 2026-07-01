@@ -55,6 +55,7 @@ Legend: ✓ = present, ✗ = absent, ◐ = partial / opt-in, N/A = not applicabl
 | Threat model (`.kuzushi/threat-model.json`)                   | ✓    | ✓     | ◐   | shell + scan call `loadPersistentThreatModel(repoRoot)` directly; in run mode it works only if the executed tool itself reads the file. |
 | Alias generation (F-NNNN, C-NN)                               | ◐    | ✓     | ✗   | `computeFindingAliases` runs in shell; scan reports embed them through the report layer; run never aliases. |
 | Replay / trace (`/replay <runId>`, `/trace <runId>`)          | N/A  | ✓     | N/A | shell-only operator surface, but consumes shared run artefacts. |
+| Workbench command center (default landing surface)            | N/A  | ✓     | N/A | shell-only frame view (`[SOURCE \| DFD \| FINDINGS + DETAILS]`); degrades to text via `workbench_lines` for plain/non-TTY. |
 | Two-stage Ctrl+C at idle                                      | N/A  | ✓     | N/A | intentionally shell-only. |
 | `--ci` flag (one-line-per-event stream)                       | ✓    | N/A   | ✗   | shell is interactive; run currently has no machine-readable transition stream. |
 | Governance enforcer (scope/budget/tier)                       | ◐    | ◐     | ◐   | `CopilotCore` accepts an `enforcer` opt; **no caller wires one in any mode today**. |
@@ -135,6 +136,16 @@ Legend: ✓ = present, ✗ = absent, ◐ = partial / opt-in, N/A = not applicabl
   design. They live in the Rust Ratatui shell under `crates/kuzushi-tui`;
   plain/scripted output belongs in
   `crates/kuzushi-tui/src/renderer/plain.rs`.
+- **Workbench command center (`workbench`/`studio`/`cc`) is the shell's
+  default landing surface.** A frame-rendered 3-column split
+  (`[SOURCE tree | DFD graph | FINDINGS + DETAILS]`) under a
+  `Kuzushi · project · target · LIVE · phase` top bar, with the shared
+  prompt/keybind footer as its command bar. Interactive-only fidelity (bordered
+  Ratatui panes + box-drawing DFD), but it degrades to useful text via
+  `crates/kuzushi-tui/src/renderer/views/workbench/render_workbench_view.rs::workbench_lines`
+  for plain/non-TTY output. The `findings`, `open <id>`, and `threats dfd`
+  verbs route here (focusing the FINDINGS or DFD pane); the onboarding / target
+  / model pickers still take precedence at launch.
 - **`--ci` is scan-only.** Single-tool runs use `--json` for
   machine-readable output. Shell is interactive; CI mode is meaningless.
 - **`/replay <runId>` and `/trace <runId>` are shell-only operator

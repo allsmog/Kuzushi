@@ -1,6 +1,8 @@
 use super::*;
 use crate::scene3d::VizPage;
 
+const AUTO_OPEN_INTERACTION_GRACE: std::time::Duration = std::time::Duration::from_secs(4);
+
 /// `/scene` (`/viz`, `/diagram`) opens the security-viz gallery, keeping
 /// whatever page was last shown. Pages are fed real Kuzushi data and show an
 /// empty-state hint until the backing artifact (findings, threat model, exploit
@@ -37,12 +39,15 @@ impl ShellApp {
 
     /// Open the gallery focused on a specific page (manual nav and auto-open).
     pub fn open_scene_to_page(&mut self, page: VizPage) {
+        if !matches!(self.shell_view, ShellView::Scene(_)) {
+            self.push_nav_history(self.shell_view.clone());
+        }
         self.scene_page = page;
         self.shell_view = ShellView::Scene(page);
         self.log(
             "scene",
             format!(
-                "security-viz — {} · Tab cycles pages · esc back",
+                "security-viz — {} · Tab cycles pages · o returns · esc back",
                 page.label()
             ),
         );
@@ -52,9 +57,38 @@ impl ShellApp {
     /// operator opted out via `KUZUSHI_AUTO_OPEN_VIZ=false`. Mirrors
     /// `auto_open_activity`.
     pub(crate) fn auto_open_viz_page(&mut self, page: VizPage) {
-        if self.auto_open_viz {
-            self.open_scene_to_page(page);
+        if let Some(session) = self.activity.as_mut() {
+            session.set_deck_scene_page(page);
         }
+        if !self.auto_open_viz {
+            return;
+        }
+        if self.can_auto_open_viz_now() {
+            self.open_scene_to_page(page);
+        } else {
+            self.log(
+                "scene",
+                format!("{} ready — use `scene` to view", page.label()),
+            );
+        }
+    }
+
+    fn can_auto_open_viz_now(&self) -> bool {
+        if self
+            .last_char_at
+            .is_some_and(|at| at.elapsed() <= AUTO_OPEN_INTERACTION_GRACE)
+        {
+            return false;
+        }
+        !matches!(
+            self.shell_view,
+            ShellView::Workbench
+                | ShellView::PromptsEditor
+                | ShellView::AgentChat
+                | ShellView::Story
+                | ShellView::Trace(_)
+                | ShellView::Replay(_)
+        )
     }
 
     /// Whether `page` has a backing artifact worth showing. Guards auto-open so

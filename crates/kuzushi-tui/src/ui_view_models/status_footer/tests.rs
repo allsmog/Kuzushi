@@ -94,3 +94,18 @@ fn status_footer_model_prefers_active_scan_status() {
         ["mode:run", "openai:gpt-5.2", "running: semgrep"]
     );
 }
+
+#[test]
+fn status_footer_model_reflects_active_tool_model_override() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.config.model = Some("anthropic:claude-default".to_string());
+    app.set_running_tool_for_test("triage:run");
+    app.active_model_override = Some("openai:gpt-tool".to_string());
+
+    let model = status_footer_model(&app);
+
+    assert_eq!(
+        model.left_segments,
+        ["mode:run", "openai:gpt-tool (tool)", "triage:run: active"]
+    );
+}

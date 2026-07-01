@@ -64,6 +64,7 @@ fn prompt_model_projects_prompt_and_editor_state() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.focused_module = Some("sast".to_string());
     app.shell_view = ShellView::ModuleRun;
+    app.set_running_tool_for_test("sast:scan");
     app.input = "scan ./demo".to_string();
     app.cursor = 4;
 
@@ -72,4 +73,8 @@ fn prompt_model_projects_prompt_and_editor_state() {
     assert!(model.prefix.ends_with("/sast/run> "));
     assert_eq!(model.input, "scan ./demo");
     assert_eq!(model.cursor, 4);
+
+    app.tool_running = None;
+    let model = prompt_model(&app);
+    assert!(model.prefix.ends_with("/sast> "));
 }

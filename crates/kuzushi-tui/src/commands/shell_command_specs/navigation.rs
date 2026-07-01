@@ -14,6 +14,12 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         description: "show grouped shell help",
     },
     ShellCommandSpec {
+        command: "workbench",
+        aliases: &["/workbench", "/studio", "/cc", "workbench"],
+        category: ShellCommandCategory::Navigation,
+        description: "open the split-pane command center",
+    },
+    ShellCommandSpec {
         command: "modules",
         aliases: &["/modules", "/m", "m", "show modules"],
         category: ShellCommandCategory::Navigation,

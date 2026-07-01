@@ -10,6 +10,8 @@ pub(crate) enum HotkeyTrigger {
     PageDown,
     Up,
     Down,
+    Left,
+    Right,
 }
 
 impl HotkeyTrigger {
@@ -36,6 +38,8 @@ impl HotkeyTrigger {
             (Self::PageDown, KeyCode::PageDown) => true,
             (Self::Up, KeyCode::Up) => true,
             (Self::Down, KeyCode::Down) => true,
+            (Self::Left, KeyCode::Left) => true,
+            (Self::Right, KeyCode::Right) => true,
             _ => false,
         }
     }
@@ -47,13 +51,12 @@ impl HotkeyTrigger {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewHotkeyAction {
-    FindingsNext,
-    FindingsPrevious,
-    FindingsFirst,
-    FindingsLast,
-    FindingsPageDown,
-    FindingsPageUp,
-    FindingsOpen,
+    WorkbenchCyclePane,
+    WorkbenchScrollNext,
+    WorkbenchScrollPrev,
+    WorkbenchScrollFirst,
+    WorkbenchScrollLast,
+    WorkbenchOpen,
     ThreatView(ThreatView),
     ActorDetail(usize),
     PauseScan,
@@ -78,6 +81,10 @@ pub(crate) enum ViewHotkeyAction {
     ActivityTogglePause,
     ActivityReset,
     ActivityFocusSelected,
+    ActivityDeckNext,
+    ActivityDeckPrev,
+    ActivityOpenDeckArtifact,
+    ActivityOpenFindings,
     ActivityCancelRunning,
 }
 
@@ -164,6 +171,13 @@ mod tests {
     fn esc_and_tab_match() {
         assert!(HotkeyTrigger::Esc.matches(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)));
         assert!(HotkeyTrigger::Tab.matches(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE)));
+    }
+
+    #[test]
+    fn arrow_keys_match_without_modifiers() {
+        assert!(HotkeyTrigger::Left.matches(KeyEvent::new(KeyCode::Left, KeyModifiers::NONE)));
+        assert!(HotkeyTrigger::Right.matches(KeyEvent::new(KeyCode::Right, KeyModifiers::NONE)));
+        assert!(!HotkeyTrigger::Right.matches(KeyEvent::new(KeyCode::Right, KeyModifiers::ALT)));
     }
 
     #[test]

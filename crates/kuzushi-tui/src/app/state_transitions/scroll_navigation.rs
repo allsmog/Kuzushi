@@ -70,7 +70,7 @@ impl ShellApp {
     }
 
     fn page_findings_down(&mut self) -> bool {
-        if self.shell_view != ShellView::Findings {
+        if !self.workbench_findings_paging() {
             return false;
         }
         if !self.findings.is_empty() {
@@ -81,11 +81,18 @@ impl ShellApp {
     }
 
     fn page_findings_up(&mut self) -> bool {
-        if self.shell_view != ShellView::Findings {
+        if !self.workbench_findings_paging() {
             return false;
         }
         self.findings_cursor = self.findings_cursor.saturating_sub(FINDINGS_PAGE_ROWS);
         true
+    }
+
+    /// PgUp/PgDn page the FINDINGS list only while the Workbench has that pane
+    /// focused; otherwise paging falls through to line/section scrolling.
+    fn workbench_findings_paging(&self) -> bool {
+        matches!(self.shell_view, ShellView::Workbench)
+            && self.workbench_focus == crate::app::WorkbenchPane::Findings
     }
 
     fn add_page_scroll(&mut self, kind: PageScrollKind, step: usize) {
@@ -135,7 +142,7 @@ impl ShellApp {
             | ShellView::Tune
             | ShellView::ActorDetail(_)
             | ShellView::ModuleRun
-            | ShellView::Finding => true,
+            | ShellView::Workbench => true,
             _ => false,
         }
     }

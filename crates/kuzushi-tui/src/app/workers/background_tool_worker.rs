@@ -83,7 +83,15 @@ pub(crate) fn background_tool_worker(
     thinking_level: Option<String>,
     tx: Sender<ToolEvent>,
     trace_handle: Option<TraceHandle>,
+    cancel: ScanCancellation,
 ) {
+    if cancel.is_cancelled() {
+        let _ = tx.send(ToolEvent::Failed {
+            tool_name,
+            error: "tool run cancelled before start".to_string(),
+        });
+        return;
+    }
     let result = run_background_tool(
         registry,
         config,
@@ -93,6 +101,7 @@ pub(crate) fn background_tool_worker(
         &run_id,
         thinking_level,
         trace_handle,
+        cancel.clone(),
     );
     let event = match result {
         Ok(result) => ToolEvent::Finished { tool_name, result },

@@ -22,9 +22,18 @@ fn routing_mode_prioritizes_run_over_plan_and_module() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.focused_module = Some("sast".to_string());
     app.planner_running = true;
-    app.shell_view = ShellView::ModuleRun;
+    app.set_running_tool_for_test("triage:run");
 
     assert_eq!(routing_mode(&app), RoutingMode::Run);
+}
+
+#[test]
+fn module_run_transcript_does_not_count_as_live_activity() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::ModuleRun;
+
+    assert!(!has_run_activity(&app));
+    assert_eq!(routing_mode(&app), RoutingMode::Shell);
 }
 
 #[test]

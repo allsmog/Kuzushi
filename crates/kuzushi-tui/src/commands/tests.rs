@@ -30,7 +30,7 @@ mod tests {
             ShellCommand::Threat(ThreatView::Stride)
         );
         assert_eq!(
-            parse_command("/threats 5"),
+            parse_command("/threats 4"),
             ShellCommand::Threat(ThreatView::Summary)
         );
         assert_eq!(parse_command("/threats regen"), ShellCommand::ThreatRegen);
@@ -223,6 +223,10 @@ mod tests {
         );
         assert_eq!(parse_command("/load"), ShellCommand::Load(None));
         assert_eq!(parse_command("/pause"), ShellCommand::Pause);
+        assert_eq!(parse_command("/cancel"), ShellCommand::Cancel);
+        assert_eq!(parse_command("c"), ShellCommand::Cancel);
+        assert_eq!(parse_command("/c"), ShellCommand::Cancel);
+        assert_eq!(parse_command("stop"), ShellCommand::Cancel);
         assert_eq!(parse_command("/resume"), ShellCommand::Resume(None));
         assert_eq!(
             parse_command("/resume run-123"),
@@ -376,8 +380,14 @@ mod tests {
             ShellCommand::Scan(Some(PathBuf::from("./repo")))
         );
         assert_eq!(parse_command("q"), ShellCommand::Quit);
-        assert_eq!(parse_command("exitj"), ShellCommand::Quit);
-        assert_eq!(parse_command("/exitj"), ShellCommand::Quit);
+        assert_eq!(
+            parse_command("exitj"),
+            ShellCommand::Unknown("exitj".into())
+        );
+        assert_eq!(
+            parse_command("/exitj"),
+            ShellCommand::Unknown("/exitj".into())
+        );
     }
 
     #[test]
@@ -432,6 +442,7 @@ mod tests {
             "auth-login",
             "back",
             "backend",
+            "cancel",
             "clear",
             "config",
             "context",
@@ -487,6 +498,7 @@ mod tests {
             "tune",
             "unset-option",
             "use",
+            "workbench",
             "workspace",
         ]);
 
@@ -528,6 +540,7 @@ mod tests {
             ShellCommand::Modules => "modules",
             ShellCommand::Recommend => "recommend",
             ShellCommand::Tools => "tools",
+            ShellCommand::Workbench(_) => "workbench",
             ShellCommand::Findings => "findings",
             ShellCommand::Open(_) => "open",
             ShellCommand::Scan(_) => "scan",
@@ -583,6 +596,7 @@ mod tests {
             ShellCommand::Load(_) => "load",
             ShellCommand::Resume(_) => "resume",
             ShellCommand::Pause => "pause",
+            ShellCommand::Cancel => "cancel",
             ShellCommand::Story => "story",
             ShellCommand::Scene => "scene",
             ShellCommand::RunTool { .. } => "run-tool",
@@ -617,7 +631,7 @@ mod tests {
                 "[module]" => "context".to_string(),
                 "[prefix]" => "F-00".to_string(),
                 "[id]" => "semgrep".to_string(),
-                "[1-5]" => "5".to_string(),
+                "[1-4]" => "4".to_string(),
                 "[choice]" => "1".to_string(),
                 "[runId]" => "run-123".to_string(),
                 "auto|manual|toggle" => "auto".to_string(),

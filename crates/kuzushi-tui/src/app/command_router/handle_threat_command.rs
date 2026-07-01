@@ -98,7 +98,7 @@ pub(crate) fn handle_since_command(app: &mut ShellApp, command: &ShellCommand) -
     let ShellCommand::Since(reference) = command else {
         return false;
     };
-    app.shell_view = ShellView::Findings;
+    app.open_workbench(crate::app::WorkbenchPane::Findings);
     app.log("since", reference);
     true
 }

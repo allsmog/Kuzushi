@@ -18,4 +18,15 @@ export { SectionHeader, type SectionHeaderProps } from "./SectionHeader";
 export { LogLine, type LogLineProps } from "./LogLine";
 export { Footer, type FooterProps, type Keybind } from "./Footer";
 export { SeverityBadge, type SeverityBadgeProps } from "./SeverityBadge";
-export { type Tone, type LogKind, type Severity, toneClass, LOG_GLYPH } from "./tokens";
+export {
+  DEFAULT_THEME_TOKENS,
+  HIGH_CONTRAST_THEME_TOKENS,
+  LOG_GLYPH,
+  THEME_TOKENS,
+  type LogKind,
+  type Severity,
+  type ThemeName,
+  type ThemeTokenName,
+  type Tone,
+  toneClass,
+} from "./tokens";

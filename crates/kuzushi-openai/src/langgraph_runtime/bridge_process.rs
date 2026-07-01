@@ -13,20 +13,38 @@ use super::bridge_payloads::{
 pub(crate) fn run_next_step_bridge(
     command: &[String],
     request: &NextStepBridgeRequest,
+    cancellation: Option<&kuzushi_core::ScanCancellation>,
 ) -> Result<NextStepBridgeResponse> {
-    run_json_bridge(command, request, "next-step bridge", &[])
+    run_json_bridge(command, request, "next-step bridge", &[], cancellation)
 }
 
 pub(crate) fn run_next_step_preflight_bridge(
     command: &[String],
     request: &NextStepBridgeRequest,
+    cancellation: Option<&kuzushi_core::ScanCancellation>,
 ) -> Result<NextStepBridgeResponse> {
-    run_json_bridge(command, request, "next-step preflight bridge", &[])
+    run_json_bridge(
+        command,
+        request,
+        "next-step preflight bridge",
+        &[],
+        cancellation,
+    )
 }
 
-pub(crate) fn run_bridge(command: &[String], request: &BridgeRequest) -> Result<BridgeResponse> {
+pub(crate) fn run_bridge(
+    command: &[String],
+    request: &BridgeRequest,
+    cancellation: Option<&kuzushi_core::ScanCancellation>,
+) -> Result<BridgeResponse> {
     let extra_env = mcp_artifact_env_for_attachments(&request.tool_policy.mcps_attached);
-    run_json_bridge(command, request, "LangGraph bridge", &extra_env)
+    run_json_bridge(
+        command,
+        request,
+        "LangGraph bridge",
+        &extra_env,
+        cancellation,
+    )
 }
 
 /// Build `KUZUSHI_MCP_<NAME>_ARTIFACT=<path>` env pairs from the
@@ -61,6 +79,7 @@ fn run_json_bridge<T, R>(
     request: &T,
     label: &str,
     extra_env: &[(String, String)],
+    cancellation: Option<&kuzushi_core::ScanCancellation>,
 ) -> Result<R>
 where
     T: Serialize,
@@ -75,7 +94,7 @@ where
         .with_context(|| format!("could not start {label} {}", command[0]))?;
 
     write_bridge_request(&mut child, request, label)?;
-    let output = wait_with_output_deadline(child, label, bridge_timeout())?;
+    let output = wait_with_output_deadline(child, label, bridge_timeout(), cancellation)?;
     parse_bridge_output(output, label)
 }
 
@@ -98,13 +117,18 @@ fn bridge_timeout() -> Duration {
 /// `wait_with_output` with a deadline: drains stdout/stderr on reader threads
 /// (so a full pipe can't deadlock the child), polls for exit, and kills the
 /// process when the deadline passes.
-fn wait_with_output_deadline(mut child: Child, label: &str, timeout: Duration) -> Result<Output> {
+fn wait_with_output_deadline(
+    mut child: Child,
+    label: &str,
+    timeout: Duration,
+    cancellation: Option<&kuzushi_core::ScanCancellation>,
+) -> Result<Output> {
     // Match `wait_with_output` semantics: close the child's stdin so a bridge
     // reading until EOF sees the request end instead of blocking forever.
     drop(child.stdin.take());
     let stdout = spawn_pipe_reader(child.stdout.take());
     let stderr = spawn_pipe_reader(child.stderr.take());
-    let status = wait_status_deadline(&mut child, label, timeout)?;
+    let status = wait_status_deadline(&mut child, label, timeout, cancellation)?;
     Ok(Output {
         status,
         stdout: join_pipe_reader(stdout),
@@ -130,26 +154,61 @@ fn join_pipe_reader(handle: Option<std::thread::JoinHandle<Vec<u8>>>) -> Vec<u8>
         .unwrap_or_default()
 }
 
-fn wait_status_deadline(child: &mut Child, label: &str, timeout: Duration) -> Result<ExitStatus> {
+fn wait_status_deadline(
+    child: &mut Child,
+    label: &str,
+    timeout: Duration,
+    cancellation: Option<&kuzushi_core::ScanCancellation>,
+) -> Result<ExitStatus> {
     let deadline = Instant::now() + timeout;
     loop {
-        if let Some(status) = child
-            .try_wait()
-            .with_context(|| format!("could not poll {label} process"))?
-        {
+        if let Some(status) = poll_bridge_status(child, label)? {
             return Ok(status);
         }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            anyhow::bail!(
-                "{label} timed out after {}s and was killed; raise KUZUSHI_BRIDGE_TIMEOUT_MS \
-                 only if the call is legitimately long-running",
-                timeout.as_secs()
-            );
-        }
+        kill_cancelled_bridge(child, label, cancellation)?;
+        kill_expired_bridge(child, label, deadline, timeout)?;
         std::thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn poll_bridge_status(child: &mut Child, label: &str) -> Result<Option<ExitStatus>> {
+    child
+        .try_wait()
+        .with_context(|| format!("could not poll {label} process"))
+}
+
+fn kill_cancelled_bridge(
+    child: &mut Child,
+    label: &str,
+    cancellation: Option<&kuzushi_core::ScanCancellation>,
+) -> Result<()> {
+    if cancellation.is_some_and(kuzushi_core::ScanCancellation::is_cancelled) {
+        kill_child(child);
+        anyhow::bail!("{label} cancelled and was killed");
+    }
+    Ok(())
+}
+
+fn kill_expired_bridge(
+    child: &mut Child,
+    label: &str,
+    deadline: Instant,
+    timeout: Duration,
+) -> Result<()> {
+    if Instant::now() < deadline {
+        return Ok(());
+    }
+    kill_child(child);
+    anyhow::bail!(
+        "{label} timed out after {}s and was killed; raise KUZUSHI_BRIDGE_TIMEOUT_MS \
+         only if the call is legitimately long-running",
+        timeout.as_secs()
+    );
+}
+
+fn kill_child(child: &mut Child) {
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn configured_bridge_command(command: &[String]) -> Command {

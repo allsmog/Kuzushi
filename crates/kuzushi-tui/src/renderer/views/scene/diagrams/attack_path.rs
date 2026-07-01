@@ -20,10 +20,11 @@ struct Stage {
 
 pub(crate) fn attack_path_lines(width: usize, model: &TaintFlowPath) -> Vec<Line<'static>> {
     if let Some(hint) = &model.empty_hint {
-        return vec![
-            blank(),
-            line(vec![span(format!("  {hint}"), theme::muted())]),
-        ];
+        return scene_empty_state_lines(
+            "no taint flow",
+            hint,
+            &[("taint-iris:hunt", "generate a source-to-sink path")],
+        );
     }
     let stages = build_stages(model);
     let box_w = (width.saturating_sub(2 + stages.len().saturating_sub(1) * CONN)

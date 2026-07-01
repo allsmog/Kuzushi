@@ -199,9 +199,73 @@ fn assess_tool(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
     let root = root(&input, ctx)?;
-    vendor_assessment_capability::assess(&root, scope_update_from_input(&input), runtime, || {
+    let parent_step = emit_vendor_assessment_start(ctx, &root);
+    emit_vendor_assessment_progress(ctx, parent_step, "scope · load documents and prompts");
+    let _assessment_scope = begin_vendor_assessment_scope(ctx, parent_step);
+    let result =
+        vendor_assessment_capability::assess(&root, scope_update_from_input(&input), runtime, || {
         resolve_tool_model("vendor-assessment:assess", &input, ctx)
+        })?;
+    drop(_assessment_scope);
+    emit_vendor_assessment_progress(ctx, parent_step, "artifacts · write report");
+    emit_vendor_assessment_done(ctx, &result);
+    Ok(result)
+}
+
+fn emit_vendor_assessment_start(ctx: &ToolExecutionContext<'_>, root: &Path) -> Option<usize> {
+    ctx.trace.map(|trace| {
+        trace
+            .step(
+                "tool",
+                "assess",
+                format!("vendor-assessment:assess start · target={}", root.display()),
+            )
+            .emit()
     })
+}
+
+fn emit_vendor_assessment_progress(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    label: impl Into<String>,
+) {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return;
+    };
+    let _ = trace
+        .child(parent)
+        .step("tool-progress", "assess", label.into())
+        .emit();
+}
+
+fn begin_vendor_assessment_scope(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+) -> Option<crate::run_artifacts::ParentScope> {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return None;
+    };
+    let phase = trace
+        .child(parent)
+        .step("reasoning", "assess", "document review · risk assessment")
+        .emit();
+    Some(trace.parent_scope(phase))
+}
+
+fn emit_vendor_assessment_done(ctx: &ToolExecutionContext<'_>, result: &Value) {
+    if let Some(trace) = ctx.trace {
+        let risk = result
+            .pointer("/data/report/overallRisk")
+            .and_then(Value::as_str)
+            .unwrap_or("complete");
+        let _ = trace
+            .step(
+                "done",
+                "assess",
+                format!("vendor-assessment:assess complete · {risk}"),
+            )
+            .emit();
+    }
 }
 
 fn root(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {

@@ -97,14 +97,14 @@ pub use approval::{ConfirmKind, PendingConfirm, PendingPatch};
 pub use live_activity::{LiveActivity, LiveActivityPhase};
 pub use log::LogLine;
 pub use onboarding::{
-    artifact_state as planning_artifact_state, build_execution_plan, cli_is_on_path,
-    direct_dependencies, direct_dependents, discover_target_candidates, initial_onboarding_phase,
-    initial_onboarding_phase_for, model_recommended_in_phase, provider_has_multiple_auth_methods,
-    recommended_tasks_for_phase, row_disposition, skip_onboarding_env, toggle_planning_row,
-    topological_order, transitive_dependencies, ArtifactState as PlanningArtifactState,
-    FailedPlanningTask, InitialOnboardingPhase, OnboardingInputs, PendingRetry, PlanningTaskId,
-    PlanningTaskRow, RetryAdjustment, RowDisposition, TargetCandidate, ToggleOutcome,
-    WorkflowPhase,
+    applicable_tasks_for_phase, artifact_state as planning_artifact_state, build_execution_plan,
+    cli_is_on_path, direct_dependencies, direct_dependents, discover_target_candidates,
+    initial_onboarding_phase, initial_onboarding_phase_for, model_recommended_in_phase,
+    provider_has_multiple_auth_methods, recommended_tasks_for_phase, row_disposition,
+    skip_onboarding_env, toggle_planning_row, topological_order, transitive_dependencies,
+    ArtifactState as PlanningArtifactState, FailedPlanningTask, InitialOnboardingPhase,
+    OnboardingInputs, PendingRetry, PlanningTaskId, PlanningTaskRow, RetryAdjustment,
+    RowDisposition, TargetCandidate, TargetProfile, ToggleOutcome, WorkflowPhase,
 };
 pub use prereq_chain::{
     PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqPlanAction, PrereqPlanStep,
@@ -112,7 +112,8 @@ pub use prereq_chain::{
 };
 pub use runtime::{run_shell, run_shell_with_plain};
 pub(crate) use settings::{
-    bridge_command_status, model_choices, oauth_provider_status, runtime_backend_label,
+    api_key_model_choice_for_provider, bridge_command_status, display_model_selector,
+    model_choices, oauth_model_choice_for_provider, oauth_provider_status, runtime_backend_label,
     validate_shell_model_id, ModelChoice,
 };
 pub use shellapp::ShellApp;
@@ -120,9 +121,10 @@ pub(crate) use task_durations::compact_secs;
 pub use task_durations::TaskDurationStore;
 pub use view_state::{
     ActivitySession, ActorDetailFilter, AdvisoryState, AuthLoginView, BudgetHalt, CompletionCycle,
-    ContextSnapshotView, DagTaskRow, DagTaskState, ExploitChain, HistorySearch, KnowledgeBaseView,
-    Notice, NoticeSeverity, OptionsFilter, OptionsView, PaneFocus, PlanChange, PlanProposal,
-    PromptsAction, PwnView, ReconSnapshot, RecordedTraceEvent, ScanPanelState, ShellView,
-    SubsystemAggregate, ThreatPatch, ThreatView, ThrottleAdvisory, TuneAction, WorkspaceView,
+    ContextSnapshotView, DagTaskDetail, DagTaskDetailState, DagTaskRow, DagTaskState, ExploitChain,
+    HistorySearch, KnowledgeBaseView, Notice, NoticeSeverity, OptionsFilter, OptionsView,
+    PaneFocus, PlanChange, PlanProposal, PromptsAction, PwnView, ReconSnapshot, RecordedTraceEvent,
+    ScanPanelState, ShellView, SubsystemAggregate, ThreatPatch, ThreatView, ThrottleAdvisory,
+    TuneAction, WorkbenchPane, WorkspaceView,
 };
 pub(crate) use view_state::{SastTaskMode, SastTaskRow};

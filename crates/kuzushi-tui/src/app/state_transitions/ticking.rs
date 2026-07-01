@@ -17,6 +17,7 @@ impl ShellApp {
     pub fn scene_animating(&self) -> bool {
         matches!(self.shell_view, ShellView::Scene(page) if page.is_animated())
             && !self.scene_paused
+            && !crate::theme::active_theme().reduced_motion
     }
 
     /// Spin the playground camera, paced by wall-clock so speed is independent
@@ -63,6 +64,9 @@ impl ShellApp {
     }
 
     fn advance_spinner(&mut self) -> bool {
+        if crate::theme::active_theme().reduced_motion {
+            return self.reset_spinner();
+        }
         if !self.has_running_work() {
             return self.reset_spinner();
         }

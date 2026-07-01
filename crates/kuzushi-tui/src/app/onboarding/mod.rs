@@ -29,7 +29,10 @@ pub use initial_view::{
     skip_onboarding_env, InitialOnboardingPhase, OnboardingInputs,
 };
 pub use phase::WorkflowPhase;
-pub use recommend::{model_recommended_in_phase, recommended_tasks_for_phase};
+pub use recommend::{
+    applicable_tasks_for_phase, model_recommended_in_phase, recommended_tasks_for_phase,
+    TargetProfile,
+};
 pub use target_candidates::{discover_target_candidates, TargetCandidate};
 pub use task_id::PlanningTaskId;
 pub use task_row::{artifact_state, cli_is_on_path, ArtifactState, PlanningTaskRow};

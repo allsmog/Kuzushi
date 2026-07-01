@@ -52,6 +52,9 @@ pub struct ShellApp {
     pub session_thinking_level: Option<String>,
     pub findings: Vec<Finding>,
     pub selected_finding: Option<Finding>,
+    /// Which Workbench pane (`Source`/`Center`/`Findings`/`Details`) currently has keyboard
+    /// focus. `Tab` cycles it; `j`/`k` move within it. Defaults to `Findings`.
+    pub workbench_focus: WorkbenchPane,
     pub scan: Option<ScanPanelState>,
     pub should_quit: bool,
     pub ctrl_c_armed_at: Option<Instant>,
@@ -111,12 +114,10 @@ pub struct ShellApp {
     /// Per-task input overrides applied on retry (e.g. a larger heap), consumed
     /// by the planning dispatcher and cleared once the retried task runs.
     pub planning_adjustments: BTreeMap<PlanningTaskId, crate::app::RetryAdjustment>,
-    /// Tasks the session model recommended for this engagement (mapped from the
-    /// recommender's tool list). Merged into each phase's preselection.
+    /// Tasks an explicit module-recommender run suggested for this engagement
+    /// (mapped from the recommender's tool list). Merged into each phase's
+    /// preselection.
     pub model_recommended_tasks: Option<BTreeSet<PlanningTaskId>>,
-    /// Whether the one-shot session-model recommendation has been requested this
-    /// engagement (dispatched once at launch, reused across phases).
-    pub recommendation_requested: bool,
     pub tune_cursor: usize,
     pub prompts_cursor: usize,
     pub actor_detail_filter: ActorDetailFilter,
@@ -150,6 +151,7 @@ pub struct ShellApp {
     pub(crate) scan_cancel: Option<ScanCancellation>,
     pub(crate) tool_rx: Option<Receiver<ToolEvent>>,
     pub(crate) tool_running: Option<String>,
+    pub(crate) tool_cancel: Option<ScanCancellation>,
     /// Name of a background tool the shell dispatched for itself (the
     /// session-model recommender) rather than from an operator action. The
     /// Activity header and ambient chip label it "(background)" so it is never
@@ -157,10 +159,14 @@ pub struct ShellApp {
     /// `tool_running` when the tool's terminal event arrives.
     pub(crate) ambient_tool: Option<String>,
     pub(crate) tool_run_id: Option<String>,
+    pub(crate) active_model_override: Option<String>,
     pub(crate) tool_abort_requested: bool,
     pub(crate) agent_rx: Option<Receiver<AgentEvent>>,
+    pub(crate) agent_cancel: Option<ScanCancellation>,
     pub(crate) plan_rx: Option<Receiver<PlanEvent>>,
+    pub(crate) plan_cancel: Option<ScanCancellation>,
     pub(crate) threat_rx: Option<Receiver<ThreatPatchEvent>>,
+    pub(crate) threat_cancel: Option<ScanCancellation>,
     /// Live trace step stream from the active tool/scan run. Populated when a
     /// `BroadcastSink` is attached at run start; drained each tick into
     /// `app.activity` so the Activity view can render the latest events.

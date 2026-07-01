@@ -8,6 +8,10 @@ pub enum ShellCommand {
     Modules,
     Recommend,
     Tools,
+    /// Open the Workbench command center with the given pane focused. The
+    /// shell's default landing surface; `findings`/`open`/`threats dfd` also
+    /// route here with the appropriate pane focus / selection.
+    Workbench(WorkbenchPane),
     Findings,
     Open(String),
     Scan(Option<PathBuf>),
@@ -75,6 +79,7 @@ pub enum ShellCommand {
     Load(Option<String>),
     Resume(Option<String>),
     Pause,
+    Cancel,
     Story,
     /// Open the security-visualization gallery (risk heatmap, attack path,
     /// DFD, attack tree, 3D attack-surface terrain). Fed real Kuzushi data.

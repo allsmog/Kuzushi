@@ -57,6 +57,24 @@ pub(crate) fn model_choices() -> &'static [ModelChoice] {
     MODEL_CHOICES
 }
 
+pub(crate) fn oauth_model_choice_for_provider(provider: &str) -> Option<&'static ModelChoice> {
+    match provider {
+        "openai" | "openai-codex" => MODEL_CHOICES
+            .iter()
+            .find(|choice| choice.provider == "openai-codex"),
+        _ => None,
+    }
+}
+
+pub(crate) fn api_key_model_choice_for_provider(provider: &str) -> Option<&'static ModelChoice> {
+    match provider {
+        "openai-codex" => MODEL_CHOICES
+            .iter()
+            .find(|choice| choice.provider == "openai"),
+        _ => None,
+    }
+}
+
 pub(crate) fn visible_model_choice_indexes(configured_model: Option<&str>) -> Vec<usize> {
     vec![visible_primary_openai_choice(configured_model), 1, 3, 4]
 }

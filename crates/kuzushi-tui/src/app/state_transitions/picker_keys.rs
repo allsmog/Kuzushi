@@ -1,6 +1,7 @@
 use super::*;
 use crate::app::{
-    auth_ready_for_provider, build_execution_plan, provider_has_multiple_auth_methods,
+    api_key_model_choice_for_provider, auth_ready_for_provider, build_execution_plan,
+    display_model_selector, oauth_model_choice_for_provider, provider_has_multiple_auth_methods,
     toggle_planning_row, visible_model_choices, ToggleOutcome,
 };
 
@@ -220,15 +221,17 @@ impl ShellApp {
     }
 
     fn accept_auth_api_key_choice(&mut self, provider: &str) {
-        if auth_ready_for_provider(provider) {
+        let api_key_provider = api_key_auth_provider(provider);
+        if auth_ready_for_provider(api_key_provider) {
+            self.select_api_key_model_for_provider(provider);
             self.log(
                 "onboarding",
-                format!("{provider} API key already set; continuing"),
+                format!("{api_key_provider} API key already set; continuing"),
             );
             self.transition_after_auth_ready();
             return;
         }
-        let env_var = match provider {
+        let env_var = match api_key_provider {
             "anthropic" => "ANTHROPIC_API_KEY",
             _ => "OPENAI_API_KEY",
         };
@@ -241,6 +244,16 @@ impl ShellApp {
     }
 
     fn accept_auth_oauth_choice(&mut self, provider: &str) {
+        let oauth_provider = oauth_credential_provider(provider);
+        if auth_ready_for_provider(oauth_provider) {
+            self.select_oauth_model_for_provider(provider);
+            self.log(
+                "onboarding",
+                format!("{provider} OAuth already stored; continuing"),
+            );
+            self.transition_after_auth_ready();
+            return;
+        }
         self.log(
             "onboarding",
             format!(
@@ -251,9 +264,39 @@ impl ShellApp {
         // OAuth credentials land under the storage provider key
         // (openai → openai-codex), so check readiness there, not under the
         // picker's display provider, or a successful login would look unmet.
-        if auth_ready_for_provider(oauth_credential_provider(provider)) {
+        if auth_ready_for_provider(oauth_provider) {
+            self.select_oauth_model_for_provider(provider);
             self.transition_after_auth_ready();
         }
+    }
+
+    fn select_api_key_model_for_provider(&mut self, provider: &str) {
+        let Some(choice) = api_key_model_choice_for_provider(provider) else {
+            return;
+        };
+        self.select_auth_model_choice(choice, "API key");
+    }
+
+    fn select_oauth_model_for_provider(&mut self, provider: &str) {
+        let Some(choice) = oauth_model_choice_for_provider(provider) else {
+            return;
+        };
+        self.select_auth_model_choice(choice, "OAuth");
+    }
+
+    fn select_auth_model_choice(&mut self, choice: &ModelChoice, auth_method: &str) {
+        if self.config.model.as_deref() == Some(choice.id) {
+            return;
+        }
+        self.config.model = Some(choice.id.to_string());
+        self.session_thinking_level = Some(choice.thinking_level.to_string());
+        self.log(
+            "model",
+            format!(
+                "{} selected for {auth_method} (session only; no fallback model)",
+                display_model_selector(choice.id)
+            ),
+        );
     }
 
     fn defer_auth_picker(&mut self) {
@@ -294,7 +337,7 @@ impl ShellApp {
                 self.clear_planning_selection();
                 true
             }
-            KeyCode::Char('g') | KeyCode::Char('G') => {
+            KeyCode::Char('g') => {
                 self.toggle_rebuild_current_row();
                 true
             }
@@ -499,5 +542,44 @@ fn oauth_credential_provider(provider: &str) -> &str {
     match provider {
         "openai" | "openai-codex" => "openai-codex",
         other => other,
+    }
+}
+
+fn api_key_auth_provider(provider: &str) -> &str {
+    match provider {
+        "openai-codex" => "openai",
+        other => other,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selecting_openai_oauth_auth_method_selects_oauth_model() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.config.model = Some("openai:gpt-5.5".to_string());
+
+        app.select_oauth_model_for_provider("openai");
+
+        assert_eq!(app.config.model.as_deref(), Some("openai-codex:gpt-5.4"));
+        assert_eq!(app.session_thinking_level.as_deref(), Some("xhigh"));
+        assert!(app.log.iter().any(|line| {
+            line.prefix == "model"
+                && line.body.contains("openai-oauth:gpt-5.4")
+                && !line.body.contains("openai-codex")
+        }));
+    }
+
+    #[test]
+    fn selecting_openai_api_key_auth_method_selects_api_key_model() {
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.config.model = Some("openai-codex:gpt-5.4".to_string());
+
+        app.select_api_key_model_for_provider("openai-codex");
+
+        assert_eq!(app.config.model.as_deref(), Some("openai:gpt-5.5"));
+        assert_eq!(app.session_thinking_level.as_deref(), Some("xhigh"));
     }
 }

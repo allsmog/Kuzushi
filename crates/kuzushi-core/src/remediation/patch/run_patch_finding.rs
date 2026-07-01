@@ -7,14 +7,17 @@ pub fn run_patch_finding(
 ) -> Result<Value> {
     let resources = patch_resources(ctx)?;
     let input = PatchFindingInput::from_tool_input(&input)?;
-    emit_patch_start(ctx, &input);
+    let parent_step = emit_patch_start(ctx, &input);
+    emit_patch_progress(ctx, parent_step, "finding · confirm patch candidate");
     let candidate = match confirmed_patch_candidate(resources.store, &input)? {
         PatchCandidateLookup::Ready(candidate) => candidate,
         PatchCandidateLookup::Refused(response) => return Ok(response),
     };
+    emit_patch_progress(ctx, parent_step, "execution · detect validation plan");
     let execution = patch_execution(ctx, runtime, resources.workspace.root(), &input)?;
     let attempts = run_patch_attempts(
         ctx,
+        parent_step,
         resources.workspace.root(),
         &execution,
         &candidate,
@@ -23,6 +26,7 @@ pub fn run_patch_finding(
     let validator_log = patch_validator_log(&attempts.history);
     let final_explanation = attempts.final_explanation.clone();
     let result = patch_result(&candidate, &execution, attempts, validator_log.clone());
+    emit_patch_progress(ctx, parent_step, "persist · save patch result");
     resources.store.insert_patch_result(&result)?;
     emit_patch_done(ctx, &result);
     Ok(patch_result_to_tool_json(
@@ -48,16 +52,30 @@ fn patch_resources<'a>(ctx: &'a ToolExecutionContext<'a>) -> Result<PatchResourc
     Ok(PatchResources { workspace, store })
 }
 
-fn emit_patch_start(ctx: &ToolExecutionContext<'_>, input: &PatchFindingInput) {
-    if let Some(trace) = ctx.trace {
-        let _ = trace
+fn emit_patch_start(ctx: &ToolExecutionContext<'_>, input: &PatchFindingInput) -> Option<usize> {
+    ctx.trace.map(|trace| {
+        trace
             .step(
                 "tool",
                 "finding",
                 format!("patch:finding start · fp={}", input.fingerprint),
             )
-            .emit();
-    }
+            .emit()
+    })
+}
+
+fn emit_patch_progress(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    label: impl Into<String>,
+) {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return;
+    };
+    let _ = trace
+        .child(parent)
+        .step("tool-progress", "finding", label.into())
+        .emit();
 }
 
 struct ConfirmedPatchFinding {
@@ -144,40 +162,91 @@ struct PatchAttemptOutcome {
 
 fn run_patch_attempts(
     ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
     repo_root: &Path,
     execution: &PatchExecution<'_>,
     candidate: &ConfirmedPatchFinding,
     input: &PatchFindingInput,
 ) -> Result<PatchAttemptOutcome> {
-    let mut history = Vec::new();
-    let mut final_status = PatchStatus::Unknown;
-    let mut final_diff = None;
-    let mut final_explanation = None;
-
+    let mut state = PatchAttemptState::default();
     for attempt in 1..=input.max_iterations {
-        let attempt_result =
-            run_single_patch_attempt(ctx, repo_root, execution, candidate, &history, attempt)?;
-
-        history.push(PatchAttempt {
+        if run_and_record_patch_attempt(
+            ctx,
+            parent_step,
+            repo_root,
+            execution,
+            candidate,
+            &mut state,
             attempt,
-            diff: attempt_result.diff.clone(),
-            status: attempt_result.status,
-            output: attempt_result.output.clone(),
-        });
-        final_status = attempt_result.status;
-        final_diff = Some(attempt_result.diff);
-        final_explanation = Some(attempt_result.explanation);
-        if attempt_result.status == PatchStatus::Sound {
+        )? {
             break;
         }
     }
+    Ok(state.into_outcome())
+}
 
-    Ok(PatchAttemptOutcome {
-        history,
-        final_status,
-        final_diff,
-        final_explanation,
-    })
+struct PatchAttemptState {
+    history: Vec<PatchAttempt>,
+    final_status: PatchStatus,
+    final_diff: Option<String>,
+    final_explanation: Option<String>,
+}
+
+impl Default for PatchAttemptState {
+    fn default() -> Self {
+        Self {
+            history: Vec::new(),
+            final_status: PatchStatus::Unknown,
+            final_diff: None,
+            final_explanation: None,
+        }
+    }
+}
+
+impl PatchAttemptState {
+    fn into_outcome(self) -> PatchAttemptOutcome {
+        PatchAttemptOutcome {
+            history: self.history,
+            final_status: self.final_status,
+            final_diff: self.final_diff,
+            final_explanation: self.final_explanation,
+        }
+    }
+}
+
+fn run_and_record_patch_attempt(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    repo_root: &Path,
+    execution: &PatchExecution<'_>,
+    candidate: &ConfirmedPatchFinding,
+    state: &mut PatchAttemptState,
+    attempt: usize,
+) -> Result<bool> {
+    let result = run_single_patch_attempt(
+        ctx,
+        parent_step,
+        repo_root,
+        execution,
+        candidate,
+        &state.history,
+        attempt,
+    )?;
+    let sound = result.status == PatchStatus::Sound;
+    record_patch_attempt(state, attempt, result);
+    Ok(sound)
+}
+
+fn record_patch_attempt(state: &mut PatchAttemptState, attempt: usize, result: SinglePatchAttempt) {
+    state.history.push(PatchAttempt {
+        attempt,
+        diff: result.diff.clone(),
+        status: result.status,
+        output: result.output.clone(),
+    });
+    state.final_status = result.status;
+    state.final_diff = Some(result.diff);
+    state.final_explanation = Some(result.explanation);
 }
 
 struct SinglePatchAttempt {
@@ -189,15 +258,23 @@ struct SinglePatchAttempt {
 
 fn run_single_patch_attempt(
     ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
     repo_root: &Path,
     execution: &PatchExecution<'_>,
     candidate: &ConfirmedPatchFinding,
     history: &[PatchAttempt],
     attempt: usize,
 ) -> Result<SinglePatchAttempt> {
-    let synthesis =
-        synthesize_patch_with_scope(ctx, repo_root, execution, candidate, history, attempt)?;
-    emit_patch_guardrail_check(ctx, attempt);
+    let synthesis = synthesize_patch_with_scope(
+        ctx,
+        parent_step,
+        repo_root,
+        execution,
+        candidate,
+        history,
+        attempt,
+    )?;
+    emit_patch_guardrail_check(ctx, parent_step, attempt);
     let validation = validate_patch_in_worktree(repo_root, &synthesis.diff, &execution.plan)?;
     Ok(SinglePatchAttempt {
         diff: synthesis.diff,
@@ -209,6 +286,7 @@ fn run_single_patch_attempt(
 
 fn synthesize_patch_with_scope(
     ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
     repo_root: &Path,
     execution: &PatchExecution<'_>,
     candidate: &ConfirmedPatchFinding,
@@ -217,16 +295,20 @@ fn synthesize_patch_with_scope(
 ) -> Result<PatchSynthesis> {
     // Phase scope so each attempt's LLM calls (rationale + diff-draft +
     // tests-author) appear under a per-attempt header in the feed.
-    let attempt_scope = ctx.trace.map(|trace| {
-        let phase = trace
-            .step(
-                "reasoning",
-                "finding",
-                format!("rationale · diff-draft (attempt {})", attempt),
-            )
-            .emit();
-        (trace.parent_scope(phase), phase)
-    });
+    let attempt_scope = match (ctx.trace, parent_step) {
+        (Some(trace), Some(parent)) => {
+            let phase = trace
+                .child(parent)
+                .step(
+                    "reasoning",
+                    "finding",
+                    format!("rationale · diff-draft (attempt {})", attempt),
+                )
+                .emit();
+            Some((trace.parent_scope(phase), phase))
+        }
+        _ => None,
+    };
     let synthesis = synthesize_patch(
         execution.runtime,
         &execution.model,
@@ -240,10 +322,15 @@ fn synthesize_patch_with_scope(
     Ok(synthesis)
 }
 
-fn emit_patch_guardrail_check(ctx: &ToolExecutionContext<'_>, attempt: usize) {
+fn emit_patch_guardrail_check(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    attempt: usize,
+) {
     // Validation phase doesn't make LLM calls but logs a checkpoint.
-    if let Some(trace) = ctx.trace {
+    if let (Some(trace), Some(parent)) = (ctx.trace, parent_step) {
         let _ = trace
+            .child(parent)
             .step(
                 "reasoning",
                 "finding",

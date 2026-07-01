@@ -19,7 +19,7 @@ impl ShellApp {
     fn replace_findings(&mut self, findings: Vec<Finding>, announce: bool) {
         self.findings = findings;
         self.reselect_current_finding();
-        self.clamp_findings_cursor();
+        self.sync_findings_cursor_to_selected();
         if announce {
             let count = self.findings.len();
             self.log(
@@ -42,6 +42,7 @@ impl ShellApp {
             .iter()
             .find(|finding| finding.fingerprint == selected.fingerprint)
             .cloned();
+        self.sync_findings_cursor_to_selected();
     }
 
     fn log_refresh_findings_error(&mut self, error: anyhow::Error, announce: bool) {

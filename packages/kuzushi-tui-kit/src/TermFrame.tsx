@@ -1,4 +1,5 @@
 import type { CSSProperties, ReactNode } from "react";
+import type { ThemeName } from "./tokens";
 
 export interface TermFrameProps {
   /** Title shown in the window chrome (e.g. `kuzushi · sast`). */
@@ -11,6 +12,8 @@ export interface TermFrameProps {
   cols?: number;
   /** Hide the macOS traffic-light window chrome. */
   chromeless?: boolean;
+  /** Optional token set selector; defaults to the standard Rust TUI theme. */
+  theme?: ThemeName;
   /** Terminal content — {@link Row}, {@link StatusStrip}, {@link LogLine}, etc. */
   children: ReactNode;
 }
@@ -28,7 +31,7 @@ export interface TermFrameProps {
  *   <LogLine kind="ok" time="14:31:55"> semgrep · 612/612 · done</LogLine>
  * </TermFrame>
  */
-export function TermFrame({ title, cols, chromeless, children }: TermFrameProps) {
+export function TermFrame({ title, cols, chromeless, theme, children }: TermFrameProps) {
   const fluid = cols == null;
   // The body is border-box with 14px of horizontal padding each side; add it
   // back so the content grid is exactly `cols` monospace cells wide and a
@@ -36,7 +39,10 @@ export function TermFrame({ title, cols, chromeless, children }: TermFrameProps)
   const bodyStyle: CSSProperties | undefined =
     cols != null ? { width: `calc(${cols}ch + 28px)` } : undefined;
   return (
-    <div className={fluid ? "kz-frame kz-frame--fluid" : "kz-frame"}>
+    <div
+      className={fluid ? "kz-frame kz-frame--fluid" : "kz-frame"}
+      data-kz-theme={theme}
+    >
       {!chromeless && (
         <div className="kz-chrome">
           <div className="kz-dot kz-dot--r" />

@@ -2,16 +2,28 @@
 mod tests {
     use super::super::*;
 
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
     use crate::config::V2Config;
     use crate::findings::{FindingStore, TriageOutcome};
+    use crate::run_artifacts::{RunTraceStep, TraceHandle, TraceSink};
     use crate::runtime::{AgentQueryRequest, AgentQueryResponse, TriageRequest};
     use crate::workspace::WorkspaceTarget;
     use tempfile::tempdir;
 
     struct TaintNextRuntime {
         queries: Mutex<Vec<AgentQueryRequest>>,
+    }
+
+    #[derive(Default)]
+    struct VecTraceSink {
+        steps: Mutex<Vec<RunTraceStep>>,
+    }
+
+    impl TraceSink for VecTraceSink {
+        fn record(&self, step: &RunTraceStep) {
+            self.steps.lock().unwrap().push(step.clone());
+        }
     }
 
     impl TaintNextRuntime {
@@ -435,6 +447,51 @@ mod tests {
             .and_then(Value::as_str)
             .is_some_and(|prompt| prompt.contains("CWE Candidate Catalog")));
         assert_eq!(store.list_findings(10).unwrap().len(), 0);
+    }
+
+    #[test]
+    fn plan_mode_streams_planning_and_evidence_steps() {
+        let temp = tempdir().unwrap();
+        write_js_taint_fixture(temp.path());
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let config = V2Config::default();
+        let sink = Arc::new(VecTraceSink::default());
+        let trace = TraceHandle::new(sink.clone()).for_tool("taint-iris-next:hunt");
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: Some(&trace),
+        };
+
+        run_taint_iris_next_report(
+            &json!({"mode": "plan", "maxCatalogEntries": 1}),
+            &ctx,
+            None,
+        )
+        .unwrap();
+
+        let steps = sink.steps.lock().unwrap();
+        let labels = steps
+            .iter()
+            .map(|step| step.label.as_str())
+            .collect::<Vec<_>>();
+        assert!(labels.iter().any(|label| label.contains("plan · load")));
+        assert!(labels.iter().any(|label| label.contains("plan ·")));
+        assert!(labels
+            .iter()
+            .any(|label| label.contains("evidence · collect")));
+        assert!(labels.iter().any(|label| label.contains("agent · compose")));
+        assert!(labels.iter().any(|label| label.contains("planned")));
+        let start_step = steps[0].n;
+        assert!(steps
+            .iter()
+            .filter(|step| step.kind == "tool-progress")
+            .all(|step| step.parent_step == Some(start_step)));
+        assert!(steps
+            .iter()
+            .all(|step| step.module_id.as_deref() == Some("taint-iris-next")));
     }
 
     #[test]
