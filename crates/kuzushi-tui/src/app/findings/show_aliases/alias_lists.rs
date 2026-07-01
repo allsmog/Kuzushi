@@ -21,6 +21,9 @@ impl ShellApp {
     pub(crate) fn open_workbench(&mut self, pane: crate::app::WorkbenchPane) {
         self.shell_view = ShellView::Workbench;
         self.workbench_focus = pane;
+        if pane == crate::app::WorkbenchPane::Center {
+            self.selected_finding = None;
+        }
         self.refresh_findings(true);
         self.clamp_findings_cursor();
         if self.findings.is_empty() {

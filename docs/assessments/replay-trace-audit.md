@@ -26,6 +26,7 @@ past runs from disk alone?**
 | `attack-surface.json` | canonical snapshot promotion        | run start / producer output | **yes** |
 | `threat-model.json` | canonical snapshot promotion          | run start / producer output | **yes** |
 | `recommendations.json` | canonical snapshot promotion       | run start / producer output | **yes** |
+| `strategy.json`   | canonical strategy snapshot promotion  | run start / producer output | **yes** |
 | `findings.json`   | canonical snapshot promotion            | run start / producer output | **yes** |
 | `proof.json`      | canonical snapshot promotion            | run start / producer output | **yes** |
 | `failures.json`   | Rust failure handoff writer             | run start / failed tool output | **yes** |

@@ -118,9 +118,10 @@ fn top_bar_model(app: &ShellApp) -> WorkbenchTopBar {
 }
 
 fn project_label(app: &ShellApp) -> String {
-    match app.target.as_deref() {
-        Some(path) => compact_target_path(&path.to_string_lossy()),
-        None => "no target".to_string(),
+    if app.target.is_some() {
+        super::scoped_target_path_label(app)
+    } else {
+        "no target".to_string()
     }
 }
 
@@ -136,12 +137,22 @@ fn phase_chip(app: &ShellApp) -> Option<String> {
 }
 
 fn center_model(app: &ShellApp) -> WorkbenchCenter {
-    if let Some(code) = selected_finding_code_model(app) {
-        return WorkbenchCenter {
-            title: code.title.clone(),
-            body: WorkbenchCenterBody::Code(code),
-        };
+    if app.workbench_focus != WorkbenchPane::Center {
+        if let Some(center) = code_center_model(app) {
+            return center;
+        }
     }
+    dfd_center_model(app)
+}
+
+fn code_center_model(app: &ShellApp) -> Option<WorkbenchCenter> {
+    selected_finding_code_model(app).map(|code| WorkbenchCenter {
+        title: code.title.clone(),
+        body: WorkbenchCenterBody::Code(code),
+    })
+}
+
+fn dfd_center_model(app: &ShellApp) -> WorkbenchCenter {
     WorkbenchCenter {
         title: "DFD".to_string(),
         body: WorkbenchCenterBody::Dfd {
@@ -267,6 +278,46 @@ mod tests {
         assert_eq!(model.state, WorkbenchState::FindingDetail);
         assert!(model.right_detail.is_some());
         assert!(matches!(model.center.body, WorkbenchCenterBody::Code(_)));
+    }
+
+    #[test]
+    fn detail_preview_follows_cursor_before_pinned_selection() {
+        let mut app = app();
+        let mut first = finding(Severity::High);
+        first.fingerprint = "a-first".to_string();
+        first.title = "first selected".to_string();
+        let mut second = finding(Severity::High);
+        second.fingerprint = "b-second".to_string();
+        second.title = "second cursor".to_string();
+        app_with_findings_cursor(&mut app, first.clone(), second.clone());
+
+        let model = workbench_view_model(&app);
+
+        assert_eq!(model.right_detail.unwrap().title, "second cursor");
+        match model.center.body {
+            WorkbenchCenterBody::Code(code) => {
+                assert!(code.title.contains("F-0002"), "{:?}", code.title);
+            }
+            WorkbenchCenterBody::Dfd { .. } => panic!("expected code preview"),
+        }
+    }
+
+    #[test]
+    fn center_focus_shows_dfd_even_with_selected_finding() {
+        let mut app = app();
+        app.findings = vec![finding(Severity::High)];
+        app.selected_finding = Some(app.findings[0].clone());
+        app.workbench_focus = WorkbenchPane::Center;
+
+        let model = workbench_view_model(&app);
+
+        assert!(matches!(model.center.body, WorkbenchCenterBody::Dfd { .. }));
+    }
+
+    fn app_with_findings_cursor(app: &mut ShellApp, first: Finding, second: Finding) {
+        app.findings = vec![first.clone(), second];
+        app.selected_finding = Some(first);
+        app.findings_cursor = 1;
     }
 
     #[test]

@@ -5,20 +5,16 @@
 
 use super::activity_feed_rows::{ActivityFeedPaneRow, ActivityFeedRowTone};
 use super::findings::{findings_model, FindingListRow};
-#[cfg(test)]
-use super::threat_dfd_diagram::{threat_dfd_diagram_feed_rows, threat_dfd_summary_feed_rows};
-#[cfg(test)]
-use super::threat_model_doc;
 use super::viz_data::{
     attack_tree, dfd_model, findings_heatmap, risk_by_module, taint_flow_path, AttackTree,
     DfdFlowModel, DfdModel, FindingsHeatmap, ModuleRisk, RiskByModule, TaintFlowPath,
 };
 use super::SeverityTone;
-use crate::{ActivityDeckPage, ActivitySession, ChainSeverity, ShellApp};
+use crate::{
+    ActivityDeckPage, ActivitySession, ChainSeverity, DagTaskDetailState, DagTaskRow, DagTaskState,
+    ShellApp,
+};
 
-#[cfg(test)]
-#[allow(dead_code)]
-const HEADER: &str = "generated views · always available for this repo";
 const DECK_WINDOW_ROWS: usize = 7;
 
 /// The Activity right pane as a navigable view strip. Every page renders one
@@ -32,9 +28,8 @@ pub(crate) fn activity_deck_rows(
 ) -> Vec<ActivityFeedPaneRow> {
     let mut rows = activity_deck_header_rows(app, session, width);
     rows.extend(match session.deck_page {
-        ActivityDeckPage::Feed | ActivityDeckPage::Findings => {
-            findings_deck_rows(app, session.deck_cursor, width)
-        }
+        ActivityDeckPage::Task => task_deck_rows(session, width),
+        ActivityDeckPage::Findings => findings_deck_rows(app, session.deck_cursor, width),
         ActivityDeckPage::AttackSurface => {
             attack_surface_deck_rows(&risk_by_module(&app.findings), session.deck_cursor, width)
         }
@@ -61,9 +56,8 @@ pub(crate) fn activity_deck_plain_extra_rows(
 ) -> Vec<ActivityFeedPaneRow> {
     let mut rows = activity_deck_header_rows(app, session, width);
     rows.extend(match session.deck_page {
-        ActivityDeckPage::Feed | ActivityDeckPage::Findings => {
-            findings_deck_rows(app, session.deck_cursor, width)
-        }
+        ActivityDeckPage::Task => task_deck_rows(session, width),
+        ActivityDeckPage::Findings => findings_deck_rows(app, session.deck_cursor, width),
         ActivityDeckPage::AttackSurface => {
             attack_surface_deck_rows(&risk_by_module(&app.findings), session.deck_cursor, width)
         }
@@ -112,7 +106,7 @@ fn deck_tabs(app: &ShellApp, active: ActivityDeckPage) -> String {
 
 fn deck_tab(app: &ShellApp, page: ActivityDeckPage, active: ActivityDeckPage) -> String {
     let mut label = page.label().to_string();
-    if page != ActivityDeckPage::Feed && !deck_page_has_content(app, page) {
+    if page != ActivityDeckPage::Task && !deck_page_has_content(app, page) {
         label.push('·');
     }
     if page == active {
@@ -124,7 +118,8 @@ fn deck_tab(app: &ShellApp, page: ActivityDeckPage, active: ActivityDeckPage) ->
 
 fn deck_page_has_content(app: &ShellApp, page: ActivityDeckPage) -> bool {
     match page {
-        ActivityDeckPage::Feed | ActivityDeckPage::Findings => !app.findings.is_empty(),
+        ActivityDeckPage::Task => true,
+        ActivityDeckPage::Findings => !app.findings.is_empty(),
         ActivityDeckPage::AttackSurface | ActivityDeckPage::Heatmap => !app.findings.is_empty(),
         ActivityDeckPage::Dfd => dfd_model(app).empty_hint.is_none(),
         ActivityDeckPage::AttackPath => app.taint_flow.is_some(),
@@ -134,7 +129,10 @@ fn deck_page_has_content(app: &ShellApp, page: ActivityDeckPage) -> bool {
 
 fn deck_hint(page: ActivityDeckPage, width: usize) -> String {
     let hint = match page {
-        ActivityDeckPage::Findings | ActivityDeckPage::Feed => {
+        ActivityDeckPage::Task => {
+            "Tab tasks/output · j/k task or item · Enter task detail · o open artifact"
+        }
+        ActivityDeckPage::Findings => {
             "←/→ views · j/k item · o open findings · dots mean no artifact"
         }
         _ => "←/→ views · j/k item · f findings · o open · dots mean no artifact",
@@ -143,6 +141,166 @@ fn deck_hint(page: ActivityDeckPage, width: usize) -> String {
 }
 
 // ── Activity artifact pages ───────────────────────────────────────────────
+
+fn task_deck_rows(session: &ActivitySession, width: usize) -> Vec<ActivityFeedPaneRow> {
+    let Some(task) = selected_task_row(session) else {
+        return empty_deck_rows("TASK", "no DAG task selected yet", width);
+    };
+    let mut rows = task_header_rows(task, width);
+    rows.extend(task_dependency_rows(task, width));
+    rows.extend(task_detail_rows(task, width));
+    rows.extend(task_event_rows(session, task, width));
+    rows
+}
+
+fn selected_task_row<'a>(session: &'a ActivitySession) -> Option<&'a DagTaskRow> {
+    let task_id = session.selected_task_id()?;
+    session.tasks.get(task_id)
+}
+
+fn task_header_rows(task: &DagTaskRow, width: usize) -> Vec<ActivityFeedPaneRow> {
+    vec![
+        row(rule("TASK", width), ActivityFeedRowTone::Success),
+        row(
+            format!(
+                "  {} · {} · {} steps · {}",
+                task.task_id,
+                task_state_label(task.state),
+                task.steps_done,
+                task_cost_label(task)
+            ),
+            task_state_tone(task.state),
+        ),
+        row(
+            format!(
+                "  last: {}",
+                truncate(task.last_label.trim(), width.saturating_sub(8))
+            ),
+            ActivityFeedRowTone::Muted,
+        ),
+    ]
+}
+
+fn task_dependency_rows(task: &DagTaskRow, width: usize) -> Vec<ActivityFeedPaneRow> {
+    if task.depends_on.is_empty() {
+        return Vec::new();
+    }
+    vec![row(
+        format!(
+            "  needs: {}",
+            truncate(&task.depends_on.join(", "), width.saturating_sub(9))
+        ),
+        ActivityFeedRowTone::Subtle,
+    )]
+}
+
+fn task_detail_rows(task: &DagTaskRow, width: usize) -> Vec<ActivityFeedPaneRow> {
+    if task.details.is_empty() {
+        return vec![row(
+            "  details: waiting for task steps".to_string(),
+            ActivityFeedRowTone::Subtle,
+        )];
+    }
+    let mut rows = vec![row("  DETAILS".to_string(), ActivityFeedRowTone::Primary)];
+    rows.extend(task.details.iter().rev().take(6).rev().map(|detail| {
+        row(
+            format!(
+                "    {} {}{}",
+                detail_state_label(detail.state),
+                truncate(&detail.label, width.saturating_sub(12)),
+                detail.meta
+            ),
+            task_detail_tone(detail.state),
+        )
+    }));
+    rows
+}
+
+fn task_event_rows(
+    session: &ActivitySession,
+    task: &DagTaskRow,
+    width: usize,
+) -> Vec<ActivityFeedPaneRow> {
+    let events = session
+        .events
+        .iter()
+        .rev()
+        .filter(|event| step_belongs_to_task(session, event.step.n, &task.task_id))
+        .take(6)
+        .collect::<Vec<_>>();
+    if events.is_empty() {
+        return Vec::new();
+    }
+    let mut rows = vec![row(
+        "  LAST STEPS".to_string(),
+        ActivityFeedRowTone::Primary,
+    )];
+    rows.extend(events.into_iter().rev().map(|event| {
+        row(
+            format!(
+                "    {} · {}",
+                event.step.kind,
+                truncate(&event.step.label, width.saturating_sub(12))
+            ),
+            ActivityFeedRowTone::Muted,
+        )
+    }));
+    rows
+}
+
+fn step_belongs_to_task(session: &ActivitySession, step_n: usize, task_id: &str) -> bool {
+    session
+        .step_task_ids
+        .get(&step_n)
+        .is_some_and(|candidate| candidate == task_id)
+}
+
+fn task_state_label(state: DagTaskState) -> &'static str {
+    match state {
+        DagTaskState::Queued => "queued",
+        DagTaskState::Active => "running",
+        DagTaskState::Done => "done",
+        DagTaskState::Failing => "failed",
+        DagTaskState::Canceled => "canceled",
+        DagTaskState::Skipped => "not run",
+    }
+}
+
+fn task_state_tone(state: DagTaskState) -> ActivityFeedRowTone {
+    match state {
+        DagTaskState::Done => ActivityFeedRowTone::Success,
+        DagTaskState::Active => ActivityFeedRowTone::Primary,
+        DagTaskState::Queued => ActivityFeedRowTone::Muted,
+        DagTaskState::Failing | DagTaskState::Canceled => ActivityFeedRowTone::Danger,
+        DagTaskState::Skipped => ActivityFeedRowTone::Muted,
+    }
+}
+
+fn task_cost_label(task: &DagTaskRow) -> String {
+    if task.cost_usd > 0.0 {
+        format!("${:.4}", task.cost_usd)
+    } else {
+        "$0".to_string()
+    }
+}
+
+fn detail_state_label(state: DagTaskDetailState) -> &'static str {
+    match state {
+        DagTaskDetailState::Active => "↳",
+        DagTaskDetailState::Done => "✓",
+        DagTaskDetailState::Failing => "!",
+        DagTaskDetailState::Canceled => "×",
+    }
+}
+
+fn task_detail_tone(state: DagTaskDetailState) -> ActivityFeedRowTone {
+    match state {
+        DagTaskDetailState::Active => ActivityFeedRowTone::Primary,
+        DagTaskDetailState::Done => ActivityFeedRowTone::Success,
+        DagTaskDetailState::Failing => ActivityFeedRowTone::Danger,
+        DagTaskDetailState::Canceled => ActivityFeedRowTone::Warn,
+    }
+}
 
 fn findings_deck_rows(app: &ShellApp, cursor: usize, width: usize) -> Vec<ActivityFeedPaneRow> {
     let model = findings_model(app);
@@ -517,203 +675,6 @@ fn chain_list_tone(severity: ChainSeverity, active: bool) -> ActivityFeedRowTone
     }
 }
 
-/// All generated visualizations that currently have data, as Activity OUTPUT feed
-/// rows. Empty when nothing has been generated yet, so the live feed stands alone.
-#[cfg(test)]
-#[allow(dead_code)]
-pub(crate) fn generated_views_feed_rows(app: &ShellApp, width: usize) -> Vec<ActivityFeedPaneRow> {
-    let sections = [
-        attack_surface_rows(app, width),
-        attack_path_rows(&taint_flow_path(app), width),
-        dfd_rows(app, width),
-        heatmap_rows(&findings_heatmap(&app.findings), width),
-        exploit_chain_rows(&attack_tree(app), width),
-    ];
-    assemble(sections, width)
-        .into_iter()
-        .map(|paned| row(clip(paned.text, width), paned.tone))
-        .collect()
-}
-
-/// Join the present (non-empty) sections under a single header, blank-separated.
-#[cfg(test)]
-#[allow(dead_code)]
-fn assemble(sections: [Vec<ActivityFeedPaneRow>; 5], width: usize) -> Vec<ActivityFeedPaneRow> {
-    let present: Vec<Vec<ActivityFeedPaneRow>> = sections
-        .into_iter()
-        .filter(|section| !section.is_empty())
-        .collect();
-    if present.is_empty() {
-        return Vec::new();
-    }
-    let mut out = vec![
-        row(String::new(), ActivityFeedRowTone::Subtle),
-        row(rule(HEADER, width), ActivityFeedRowTone::Primary),
-    ];
-    for (index, mut section) in present.into_iter().enumerate() {
-        if index > 0 {
-            out.push(row(String::new(), ActivityFeedRowTone::Subtle));
-        }
-        out.append(&mut section);
-    }
-    out
-}
-
-// ── 3D attack surface (one-line summary; the framebuffer can't draw in a feed) ──
-
-#[cfg(test)]
-#[allow(dead_code)]
-fn attack_surface_rows(app: &ShellApp, width: usize) -> Vec<ActivityFeedPaneRow> {
-    let risk = risk_by_module(&app.findings);
-    let Some(hottest) = risk.modules.first() else {
-        return Vec::new();
-    };
-    let total: u32 = risk.modules.iter().map(module_total).sum();
-    vec![
-        row(rule("ATTACK SURFACE", width), ActivityFeedRowTone::Success),
-        row(
-            format!(
-                "  risk relief · {total} findings · {} modules · hottest {}",
-                risk.modules.len(),
-                hottest.module
-            ),
-            ActivityFeedRowTone::Muted,
-        ),
-    ]
-}
-
-// ── attack path (taint source → sink) ──
-
-#[cfg(test)]
-fn attack_path_rows(model: &TaintFlowPath, _width: usize) -> Vec<ActivityFeedPaneRow> {
-    if model.empty_hint.is_some() {
-        return Vec::new();
-    }
-    let chain = model
-        .stages
-        .iter()
-        .map(|stage| stage.title.clone())
-        .collect::<Vec<_>>()
-        .join(" ─▶ ");
-    vec![
-        row(rule("ATTACK PATH", _width), ActivityFeedRowTone::Success),
-        row(
-            format!("  {} · {}", model.cwe, model.severity),
-            ActivityFeedRowTone::Warn,
-        ),
-        row(format!("  {chain}"), ActivityFeedRowTone::Muted),
-    ]
-}
-
-// ── data-flow diagram (reuses the existing projection) ──
-
-/// Below this many columns the DFD's node boxes degrade into clipped "…"
-/// noise — show the title + counts and point at /scene instead.
-#[cfg(test)]
-const DFD_DIAGRAM_MIN_WIDTH: usize = 56;
-
-#[cfg(test)]
-#[allow(dead_code)]
-fn dfd_rows(app: &ShellApp, width: usize) -> Vec<ActivityFeedPaneRow> {
-    match threat_model_doc(app) {
-        Some(doc) => dfd_rows_for_doc(&doc, width),
-        None => Vec::new(),
-    }
-}
-
-#[cfg(test)]
-fn dfd_rows_for_doc(doc: &serde_json::Value, width: usize) -> Vec<ActivityFeedPaneRow> {
-    if width >= DFD_DIAGRAM_MIN_WIDTH {
-        return threat_dfd_diagram_feed_rows(doc, width);
-    }
-    let mut rows = threat_dfd_summary_feed_rows(doc, width);
-    if !rows.is_empty() {
-        rows.push(row(
-            "  open /scene for the full diagram".to_string(),
-            ActivityFeedRowTone::Subtle,
-        ));
-    }
-    rows
-}
-
-// ── findings heatmap (severity × module) ──
-
-#[cfg(test)]
-fn heatmap_rows(model: &FindingsHeatmap, width: usize) -> Vec<ActivityFeedPaneRow> {
-    if model.empty_hint.is_some() {
-        return Vec::new();
-    }
-    let total: u32 = model.rows.iter().map(module_total).sum();
-    let mut rows = vec![
-        row(
-            rule("FINDINGS HEATMAP", width),
-            ActivityFeedRowTone::Success,
-        ),
-        row(
-            format!(
-                "  {total} findings across {} modules · CRIT HIGH MED LOW INFO",
-                model.rows.len()
-            ),
-            ActivityFeedRowTone::Subtle,
-        ),
-    ];
-    rows.extend(
-        model
-            .rows
-            .iter()
-            .map(|module| row(heatmap_cells(module), ActivityFeedRowTone::Muted)),
-    );
-    rows
-}
-
-#[cfg(test)]
-fn heatmap_cells(module: &ModuleRisk) -> String {
-    let cells: String = module
-        .counts
-        .iter()
-        .map(|count| format!(" {}", cell(*count)))
-        .collect();
-    format!("  {:<16}{cells}", truncate(&module.module, 16))
-}
-
-#[cfg(test)]
-fn cell(count: u32) -> String {
-    if count == 0 {
-        "·".to_string()
-    } else {
-        format!("{}{count}", "█".repeat((count as usize).min(3)))
-    }
-}
-
-// ── exploit chain / attack tree ──
-
-#[cfg(test)]
-fn exploit_chain_rows(model: &AttackTree, width: usize) -> Vec<ActivityFeedPaneRow> {
-    if model.empty_hint.is_some() {
-        return Vec::new();
-    }
-    let mut rows = vec![
-        row(rule("EXPLOIT CHAIN", width), ActivityFeedRowTone::Success),
-        row(
-            format!("  ☠ attacker goal — {} chains", model.chains.len()),
-            ActivityFeedRowTone::Danger,
-        ),
-    ];
-    for chain in &model.chains {
-        rows.push(row(
-            format!("  ◇ {} · {}", chain.title, severity_label(chain.severity)),
-            chain_tone(chain.severity),
-        ));
-        rows.extend(
-            chain
-                .steps
-                .iter()
-                .map(|step| row(format!("      → {step}"), ActivityFeedRowTone::Subtle)),
-        );
-    }
-    rows
-}
-
 fn severity_label(severity: ChainSeverity) -> &'static str {
     match severity {
         ChainSeverity::Critical => "CRIT",
@@ -979,114 +940,4 @@ fn clip(text: String, width: usize) -> String {
         .take(width.saturating_sub(1))
         .chain(std::iter::once('…'))
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::viz_data::{AttackChain, TaintStageModel};
-    use super::*;
-
-    fn dfd_doc() -> serde_json::Value {
-        serde_json::json!({
-            "dfd": {
-                "nodes": [
-                    {"id": "user", "name": "Browser", "trustZone": "internet"},
-                    {"id": "api", "name": "API server", "trustZone": "app-tier"}
-                ],
-                "flows": [
-                    {"id": "f1", "sourceId": "user", "targetId": "api", "description": "https"}
-                ]
-            }
-        })
-    }
-
-    #[test]
-    fn dfd_rows_draw_full_diagram_when_the_pane_is_wide() {
-        let rows = dfd_rows_for_doc(&dfd_doc(), 80);
-        assert!(rows.iter().any(|row| row.text.contains('┌')));
-    }
-
-    #[test]
-    fn dfd_rows_compact_to_summary_in_narrow_panes() {
-        // A box diagram clipped to "…" every row is noise; narrow panes get
-        // the counts and a pointer to the full-width /scene page instead.
-        let rows = dfd_rows_for_doc(&dfd_doc(), DFD_DIAGRAM_MIN_WIDTH - 1);
-        assert!(!rows.iter().any(|row| row.text.contains('┌')));
-        assert!(rows.iter().any(|row| row.text.contains("zones")));
-        assert!(rows.iter().any(|row| row.text.contains("/scene")));
-    }
-
-    #[test]
-    fn heatmap_rows_hidden_without_findings() {
-        let model = FindingsHeatmap {
-            rows: Vec::new(),
-            empty_hint: Some("none".into()),
-        };
-        assert!(heatmap_rows(&model, 80).is_empty());
-    }
-
-    #[test]
-    fn heatmap_rows_render_title_and_modules() {
-        let model = FindingsHeatmap {
-            rows: vec![ModuleRisk {
-                module: "auth".into(),
-                counts: [1, 2, 0, 0, 0],
-                score: 0.0,
-            }],
-            empty_hint: None,
-        };
-        let rows = heatmap_rows(&model, 80);
-        assert!(rows.iter().any(|r| r.text.contains("FINDINGS HEATMAP")));
-        assert!(rows.iter().any(|r| r.text.contains("auth")));
-    }
-
-    #[test]
-    fn attack_path_rows_show_cwe_and_chained_stages() {
-        let model = TaintFlowPath {
-            cwe: "CWE-89".into(),
-            severity: "critical".into(),
-            stages: vec![
-                TaintStageModel {
-                    title: "order_id".into(),
-                    location: "a:1".into(),
-                },
-                TaintStageModel {
-                    title: "db.query".into(),
-                    location: "b:2".into(),
-                },
-            ],
-            empty_hint: None,
-        };
-        let rows = attack_path_rows(&model, 80);
-        assert!(rows.iter().any(|r| r.text.contains("CWE-89")));
-        assert!(rows.iter().any(|r| r.text.contains("order_id ─▶ db.query")));
-    }
-
-    #[test]
-    fn attack_path_rows_hidden_when_empty() {
-        let model = TaintFlowPath {
-            cwe: String::new(),
-            severity: String::new(),
-            stages: Vec::new(),
-            empty_hint: Some("none".into()),
-        };
-        assert!(attack_path_rows(&model, 80).is_empty());
-    }
-
-    #[test]
-    fn exploit_chain_rows_list_chains_and_steps() {
-        let model = AttackTree {
-            chains: vec![AttackChain {
-                title: "SQLi /orders".into(),
-                severity: ChainSeverity::Critical,
-                steps: vec!["unsanitised id".into()],
-            }],
-            empty_hint: None,
-        };
-        let rows = exploit_chain_rows(&model, 80);
-        assert!(rows
-            .iter()
-            .any(|r| r.text.contains("SQLi /orders") && r.text.contains("CRIT")));
-        assert!(rows.iter().any(|r| r.text.contains("unsanitised id")));
-    }
 }

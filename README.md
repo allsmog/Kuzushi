@@ -378,6 +378,7 @@ not silently succeed and they do not substitute a different model.
 | `.kuzushi/runs/<runId>/attack-surface.json` | run-scoped attack-surface snapshot or explicit skipped marker |
 | `.kuzushi/runs/<runId>/threat-model.json` | run-scoped threat-model snapshot or explicit skipped marker |
 | `.kuzushi/runs/<runId>/recommendations.json` | run-scoped recommendation snapshot or explicit skipped marker |
+| `.kuzushi/runs/<runId>/strategy.json` | run-scoped strategy proposal snapshot or explicit skipped marker |
 | `.kuzushi/runs/<runId>/findings.json` | normalized finding snapshot or explicit skipped marker |
 | `.kuzushi/runs/<runId>/proof.json` | proof-state snapshot or explicit skipped marker |
 | `.kuzushi/runs/<runId>/failures.json` | bounded failure handoff context, empty when no failure is recorded |

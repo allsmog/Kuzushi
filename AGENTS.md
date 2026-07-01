@@ -4,52 +4,67 @@ This guide is for AI/code agents (Claude, Codex, etc.) working in Kuzushi.
 
 ## Module system
 
-For the full module-authoring guide — manifest, `defineModule`/`defineTool`
-helpers, `ExecutionContext` reference, load specifiers, testing, MCP
-bridging — see **[docs/modules.md](./docs/modules.md)**. What follows is
-the minimum an agent editing this repo needs to know.
+For the longer module and operator contract, see
+**[docs/modules.md](./docs/modules.md)**. What follows is the minimum an agent
+editing this repo needs to know.
 
 ### Mental model
 
-Kuzushi has one runtime core and three execution modes:
+Kuzushi has one live Rust dispatch boundary and three execution modes:
 
-1. **scan mode** (`kuzushi scan`) — DAG pipeline execution.
-2. **shell mode** (`kuzushi`) — conversational agent + tool dispatch.
+1. **scan mode** (`kuzushi scan`) — scan orchestration and selected scan-engine
+   execution.
+2. **shell mode** (`kuzushi`) — Rust Ratatui operator shell plus background
+   tool dispatch.
 3. **run mode** (`kuzushi run`) — headless single-tool execution.
 
-All three converge on `CopilotCore.executeTool(...)` and the
-`CopilotModule` / `ModuleTool` contract.
+All three should converge on `ModuleRegistry::prepare_tool_input(...)` followed
+by `dispatch_prepared_tool_with_runtime(...)` in
+`crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution.rs`. That
+boundary owns descriptor-driven option validation, stored-option merging, trace
+scoping, runtime wrapping, and output normalization. Mode-specific code may
+prepare workspace/runtime/cancellation context, but it should not duplicate
+tool policy or option parsing.
 
-**One authoring surface.** Every capability is a `CopilotModule` that
-exposes one or more `ModuleTool`s. DAG participants are `DagTool`s — a
-narrow extension of `ModuleTool` with a `dag` block (`outputKind`,
-`dependsOn`, optional `condition`/`promptMode`/`toolPolicy`/
-`triageAgentConfig`). `DagTool` is the DAG execution contract: scan-mode
-registration stores module-owned `DagTool`s in `DagRegistry`, and workers call
-`DagTool.run(input, ExecutionContext)` with `ctx.dag` populated.
+**Live built-ins are Rust descriptors plus Rust executors.** A capability is
+registered as a `BuiltinModule` with `ToolDescriptor` values (`name`,
+`description`, `headless`, `hidden`, `runtime_requirement`, `options`) and an
+executor mapping under `crates/kuzushi-core/src/modules/`. `OptionSpec` is the
+canonical input surface for user-facing knobs and aliases. DAG descriptors are
+currently scan/progress metadata unless the owning executor consumes them
+explicitly; do not assume `depends_on` alone changes execution order.
+
+The TypeScript `src/modules` SDK remains as a compatibility/export surface for
+third-party module authors and tests. It is not the runtime for built-in shell,
+scan, or run behavior. When changing live product behavior, edit the Rust
+descriptor/executor path first.
 
 ### Key files
 
-- `src/modules/types.ts` — `CopilotModule`, `ModuleTool`, `DagTool`,
-  `ExecutionContext`, `DagContext`.
-- `src/modules/host-handles.ts` — narrow handles (`HostUiHandle`,
-  `ToolOptionStore`, `WorkspaceHandle`, `ModuleEventScope`, `ToolLogger`,
-  `HostInfo`) exposed via `ExecutionContext`.
-- `src/modules/define.ts` — `defineModule`/`defineTool`/`defineDagTool`
-  authoring helpers with compile-time tool-name-prefix enforcement.
-- `src/modules/dag-registry.ts` — native `DagTool` registry and DAG ordering.
-- `src/modules/hidden-dag-node.ts` — helper for hidden built-in DAG nodes.
-- `src/modules/errors.ts` — `ModuleLoadError` with `code` discriminator.
-- `src/modules/loader.ts` — Zod-backed manifest validation + shape checks;
-  enforces tool-name prefix and duplicate-name rejection.
-- `src/modules/registry.ts` — lifecycle + tool resolution; validates
-  `configSchema` against `moduleConfig` before `init()`.
-- `src/modules/core-sast.ts` — canonical reference implementation; every
-  pattern you'd want to copy lives here.
-- `src/modules/mcp-bridge.ts` — MCP-server → `CopilotModule` adapter.
-- `src/copilot/core.ts` — loader entrypoints + `ctx.host` injection.
-- `src/testing/index.ts` — `kuzushi/testing` mocks.
-- `schemas/module.manifest.schema.json` — published JSON schema.
+- `crates/kuzushi-core/src/modules/descriptor/descriptor_model.rs` —
+  `ToolDescriptor`, `OptionSpec`, `RuntimeRequirement`, and option metadata.
+- `crates/kuzushi-core/src/modules/builtins/with_v2_builtins/` — Rust builtin
+  registration, lookup, execution, DAG descriptors, and output normalization.
+- `crates/kuzushi-core/src/modules/registry/` — registry facade and dispatch
+  helpers used by CLI, TUI, and direct tool execution.
+- `crates/kuzushi-core/src/modules/options/` — descriptor-backed option
+  validation, coercion, defaults, aliases, and unknown-key rejection.
+- `crates/kuzushi-core/src/modules/runtime_requirements.rs` — shared
+  runtime-requirement policy consumed by CLI/TUI dispatch preparation.
+- `crates/kuzushi-core/src/modules/dynamic_loader.rs` and
+  `scripts/kuzushi-dynamic-module-host.mjs` — dynamic module bridge protocol.
+- `crates/kuzushi-core/src/modules/application/sast_scan/` — SAST umbrella
+  orchestration and post-scan triage/verify/patch continuation.
+- `crates/kuzushi-cli/src/application/` — CLI scan/run/findings application
+  services and mode-specific context preparation.
+- `crates/kuzushi-tui/src/app/` — Rust shell state, command routing,
+  background workers, and app services.
+- `crates/kuzushi-tui/src/ui_view_models/` and
+  `crates/kuzushi-tui/src/renderer/` — presentation DTOs and Ratatui/plain
+  rendering.
+- `src/modules/types.ts`, `src/modules/define.ts`, and `src/testing/index.ts`
+  — retained TypeScript SDK/testing surface for external module authors.
+- `schemas/module.manifest.schema.json` — published module manifest schema.
 
 ### Rust-native MCP servers (agent-callable)
 
@@ -90,29 +105,34 @@ with `KUZUSHI_AGENT_MCPS=1`. Useful env vars when debugging:
 
 ### Load specifiers
 
-`parseModuleSpecifier()` supports `builtin:<id>`, `file://<abs-path>`,
-`package:<npm-name>`, `mcp:<server-spec>`. Bare strings default to builtin.
+The retained TypeScript SDK exposes `parseModuleSpecifier()` for
+`builtin:<id>`, `file://<abs-path>`, `package:<npm-name>`, and
+`mcp:<server-spec>` forms. Rust built-ins are loaded from the Rust registry;
+dynamic `file://`/`package:` loading goes through the Rust dynamic loader and
+host script. Treat that bridge as a compatibility boundary and test it through
+the real `ModuleRegistry` path before documenting new behavior.
 
 ### Guardrails for agents editing this repo
 
-- Do not break `CopilotModule`/`ModuleTool`/`DagTool` contracts without a
-  migration plan (add a section to `RELEASING.md` + update
-  `core-sast.ts` to stay exemplary).
-- Preserve the `<moduleId>:<action>` tool-name convention — it's enforced
-  at load time.
+- Do not break public module/manifest contracts without a migration plan (add
+  a section to `RELEASING.md`, update `docs/modules.md`, and keep the Rust
+  descriptor/executor path exemplary).
+- Preserve the `<moduleId>:<action>` tool-name convention. Rust built-ins,
+  dynamic modules, command help, and visibility filtering all depend on it.
 - Prefer adding behavior in the module/tool layer before touching
   orchestrator internals.
 - Keep `headless` truthful: shell-only behavior should not be marked
   headless. `hidden: true` is for DAG-internal nodes that should not
   surface in `/use` or the LLM tool list.
-- When adding fields to `ExecutionContext`, prefer narrow handles in
-  `src/modules/host-handles.ts` over leaking internal host classes.
-- If you add DAG-participating modules, include tests around dependency
-  ordering (see `tests/modules/` + `tests/bus/orchestrator.test.ts`).
-- Scan-mode bootstrap lives in `src/agents/index.ts`
-  (`createDefaultDagRegistry`). New built-in modules that contribute DAG
-  nodes must be added to that factory's module list so the scan CLI sees
-  their tasks without needing full CopilotCore init.
+- Add user-facing options to `ToolDescriptor.options` first; then consume the
+  prepared/canonical input in the executor. Do not add a CLI-only, TUI-only, or
+  env-only behavior path for ordinary product knobs.
+- If a tool needs runtime/model/findings/workspace/cancellation behavior, keep
+  that policy declarative and shared. Do not add per-mode allowlists unless the
+  shared registry surface cannot express the behavior yet.
+- If you add DAG metadata, include tests proving whether it is display metadata
+  or execution-ordering input. Do not document `depends_on` as ordering unless
+  the Rust executor consumes it.
 
 ### Clean Code / Uncle Bob baseline
 
@@ -276,24 +296,28 @@ is expected to behave identically and should be filed as a parity bug.
 
 ### Shared by all three modes
 
-- `CopilotCore.executeTool(...)` is the single tool-dispatch path. `scan`
-  also reaches it indirectly via bus workers; the contract (input
-  validation, governance enforcer, audit-trail, runtime activity tee,
-  capability probe, `resolveOption` fallback) is the same.
-- `ExecutionContext.host`, `ctx.config`, `ctx.cwd`, `ctx.target`,
-  `ctx.runtime`, `ctx.bus` are populated identically.
-- Adaptive concurrency (`scheduler/configureRateLimitRegistry`) is seeded
-  from `config.triageConcurrency` in **all three** modes (shell + run
-  added in the parity audit; scan was the seed implementation).
-- Prompt overrides in `.kuzushi/prompts/<moduleId>/<verb>.md` are
-  auto-loaded by `core.executeTool`'s `resolveOption` fallback. Order:
-  `Datastore` (shell-only) → `taskConfig[moduleId][KEY]` →
-  on-disk file. So shell `set TRIAGE_PROMPT ./mine.md`,
-  `kuzushi run` with `--input '{"TRIAGE_PROMPT":"…"}'`, and a checked-in
-  `.kuzushi/prompts/triage/run.md` all reach the same tool the same way.
-- `dataDir` resolution prefers `<target>/.kuzushi` when `--target`
-  resolves to a directory (scan, run); shell falls back to
-  `process.cwd()/.kuzushi` because its workspace lifecycle anchors there.
+- Tool execution should pass through
+  `ModuleRegistry::prepare_tool_input(...)` and
+  `dispatch_prepared_tool_with_runtime(...)`. The CLI, shell, and scan
+  application code may differ in how they create workspace/runtime/cancellation
+  context, but descriptor-backed option validation and output normalization live
+  in the shared Rust registry path.
+- `ToolExecutionContext` carries the same core Rust handles where they are
+  available: `config`, optional `workspace`, optional `findings_store`, and
+  optional `trace`. Tools must treat optional handles as optional and fail with
+  explicit messages when a required capability is absent.
+- Runtime/model policy is shared through Rust runtime helpers such as
+  `runtime_requirements.rs`, `resolve_tool_model`, and no-silent-fallback
+  validation. New agentic tools should derive the model from resolved tool
+  input or `ctx.config.model`, never from hardcoded fallbacks.
+- Prompt override files are not implicitly discovered for every tool call.
+  A tool reaches an override when its descriptor exposes the prompt option and
+  the prepared input carries inline prompt text or a path-like value. The TUI
+  prompt editor can inspect project prompt files, but dispatch should not claim
+  a hidden auto-load tier unless it is implemented in the shared registry path.
+- Workspace state resolves from the active target root when a target-backed
+  workspace exists; mode-specific fallbacks must be documented as intentional
+  asymmetries.
 
 ### Intentional asymmetries
 
@@ -301,13 +325,16 @@ is expected to behave identically and should be filed as a parity bug.
   views, finding alias drill, replay/trace, cost-cap halt card, module-run
   transcript, actor-detail view, tune view** — interactive only. They
   live in the Rust Ratatui shell under `crates/kuzushi-tui`; plain/scripted
-  output belongs in `crates/kuzushi-tui/src/renderer/plain.rs`.
+  output belongs in `crates/kuzushi-tui/src/renderer/plain/`.
 - **Workbench command center (`ShellView::Workbench`, verbs
   `workbench`/`studio`/`cc`)** — the shell's default landing surface (set in
   `run_shell::open_start_view`, after the onboarding/target/model gates). A
-  frame-rendered 3-column split `[SOURCE tree | DFD graph | FINDINGS + DETAILS]`
-  under a `Kuzushi · project · target · LIVE · phase` top bar; `Tab` cycles pane
-  focus, `j/k` move the focused pane, `Enter` selects a finding. It folds the
+  frame-rendered cockpit: wide terminals show
+  `[SOURCE tree | CODE/DFD | FINDINGS | DETAILS]`; compact terminals collapse
+  toward the review path so findings and detail text stay readable under the
+  `Kuzushi · project · target · LIVE · phase` top bar. `Tab` cycles pane focus,
+  `Shift+Tab` reverses it, `j/k` move the focused pane, and `Enter` pins or
+  opens the focused finding. It folds the
   old standalone findings, finding-detail, and threat-DFD-tab surfaces — the
   `findings`, `open <id>`, and `threats dfd` verbs route here. Interactive-only
   fidelity (bordered panes), but degrades to text via
@@ -323,14 +350,15 @@ is expected to behave identically and should be filed as a parity bug.
   test apps keep the targetless default; `KUZUSHI_SKIP_ONBOARDING` skips
   it. Explicit-target consent (PR #64) is preserved — nothing silently
   falls back to cwd.
-- **Engagement journey spine (`next`, phase rail, `phase:` footer chip)** —
+- **Engagement journey spine (`next`, phase rail, phase chip)** —
   shell-only operator orientation. `ui_view_models/journey.rs` derives the
   current 組 map → 崩 hunt → 作 confirm → 掛 fix phase from workspace reality
-  (map artifacts on disk, findings, triage/verification state; a live walker
-  phase takes precedence). Home renders the rail + a phase-driven `▸ NEXT`
-  line, the idle status footer shows `phase:<word> n/4`, and `next` (typed
-  alias `continue`) reopens the phase walker at the derived phase. All of it
-  is target-gated: no `--target`, no journey chrome.
+  (map artifacts on disk, findings, triage/verification state) and reconciles
+  the live walker against that reality instead of forging completion. Home
+  renders the rail + a phase-driven `▸ NEXT` line, status surfaces use the
+  compact `組 map 1/4` style chip, and `next` (typed alias `continue`) reopens
+  the phase walker at the derived phase. All of it is target-gated: no
+  `--target`, no journey chrome.
 - **Security-viz gallery (`/scene`, `/viz`, `/diagram`)** — interactive only
   (the rendering is TTY-bound), but **ungated and fed real Kuzushi data**. A
   `Tab`-cycled gallery of five pages (`scene3d::VizPage`). Pure view-model
@@ -353,9 +381,11 @@ is expected to behave identically and should be filed as a parity bug.
     `app.taint_flow`) + findings heatmap (per-module risk) as styled box-drawing
     `Line`s in `renderer/views/scene/diagrams`.
   **Auto-open:** mirrors `auto_open_activity`. On by default; opt out with
-  `KUZUSHI_AUTO_OPEN_VIZ=false` (read once in `ShellApp::new`). When an artifact
-  lands AND has content, the completion hooks switch to its page: `scan` →
-  Heatmap (`apply_scan_finished`, only when findings > 0), and
+  `setg ui.auto_open_viz false` (the compatibility env var
+  `KUZUSHI_AUTO_OPEN_VIZ=false` is still honored at the adapter boundary). When
+  an artifact lands AND has content, the completion hooks switch the Activity
+  output deck if it has not been manually pinned, and open/log the gallery page:
+  `scan` → Heatmap (`apply_scan_finished`, only when findings > 0), and
   `viz_page_for_tool(tool_name)` maps the artifact-*emitting* verbs exactly —
   `taint-iris:hunt`→AttackPath, `exploit-chain:scan`→ExploitChain,
   `threat-model:build`→Dfd — in `apply_finished_tool_event` (fires before
@@ -408,9 +438,9 @@ is expected to behave identically and should be filed as a parity bug.
 1. Decide which mode(s) it belongs in. Default: all three.
 2. If shell-only, gate it on `process.stdout.isTTY` and add a one-liner
    to the "Intentional asymmetries" list above.
-3. If shared, add it to `core.ts` (or a helper consumed by `executeRun`,
-   `startShell`, and `runPipeline`) — never duplicate config plumbing
-   per mode.
+3. If shared, add it to the Rust descriptor/executor path consumed by CLI,
+   TUI, and scan application services. Keep config, option, runtime, and
+   findings-store policy in shared helpers rather than duplicating it per mode.
 4. Update the matrix in `docs/assessments/mode-parity.md`.
 
 ---
@@ -426,15 +456,19 @@ any TypeScript/React/Ink path.
 
 ### Key Rust Files
 
-- `crates/kuzushi-tui/src/app.rs` - `ShellApp`, `ShellView`, command handling,
+- `crates/kuzushi-tui/src/app/` - `ShellApp`, `ShellView`, command handling,
   background events, view state, and tests for shell behavior.
-- `crates/kuzushi-tui/src/app/state_transitions.rs` - extracted view
+- `crates/kuzushi-tui/src/app/state_transitions/` - extracted view
   transitions, scrolling, key handling, mouse handling, and spinner cadence.
-- `crates/kuzushi-tui/src/commands.rs` - slash-command parser, aliases, and
-  grouped help metadata.
-- `crates/kuzushi-tui/src/renderer.rs` - Ratatui renderer and view-specific
+- `crates/kuzushi-tui/src/commands/` - slash-command parser, aliases, and
+  grouped help metadata; command specs live under
+  `commands/shell_command_specs/`.
+- `crates/kuzushi-tui/src/renderer/` - Ratatui renderer and view-specific
   layout tests.
-- `crates/kuzushi-tui/src/renderer/plain.rs` - non-TTY/scripted plain output.
+- `crates/kuzushi-tui/src/renderer/plain/` - non-TTY/scripted plain output.
+- `crates/kuzushi-tui/src/ui_view_models/routing.rs` and
+  `crates/kuzushi-tui/src/ui_view_models/screen_context.rs` - view routing
+  signals and screen-context projections consumed by renderer chrome.
 - `crates/kuzushi-tui/src/theme/mod.rs` - semantic terminal styles.
 
 ### Shell Views
@@ -448,8 +482,8 @@ any TypeScript/React/Ink path.
 ### Operator Verbs
 
 The command source of truth is `SHELL_COMMAND_SPECS` in
-`crates/kuzushi-tui/src/commands.rs`. Do not maintain a second TypeScript
-router. Common verbs include:
+`crates/kuzushi-tui/src/commands/shell_command_specs/`. Do not maintain a
+second TypeScript router. Common verbs include:
 
 - Navigation: `help`, `modules`, `tools`, `use <module>`, `back`, `logs`
   (alias `log` / `transcript` — full-screen scrollable transcript with
@@ -470,8 +504,7 @@ router. Common verbs include:
 - **Explicit targets.** `workspace_for_target` no longer falls back to
   cwd. `kuzushi findings`, `kuzushi finding`, and `kuzushi shell` all
   require `--target <path>` (or `--target .` to opt into cwd). The TUI
-  surfaces `target:cwd (.)` in the status footer when the active
-  target is the process cwd.
+  surfaces the active target in the top/status chrome.
 - **Program scope.** Drop a `<workspace>/.kuzushi/scope.toml` with
   `[in_scope] hosts = […] cidrs = […]` and (optionally) `[out_of_scope]`
   to deny rules. Recon dispatch and the bounty importers refuse
@@ -498,9 +531,10 @@ router. Common verbs include:
 
 The `/activity` view (auto-opened on `scan` and `kuzushi run`, or via the
 slash command) is a split-pane dashboard showing every running module's
-DAG status on the left and a streaming `[module:verb]` reasoning feed on
-the right. It is fed by `ctx.trace.step(kind, verb, label).emit()` calls
-in producer code, plumbed through `ToolExecutionContext.trace`.
+DAG status plus an ACTIONS strip on the left, and an OUTPUT deck on the right
+with task detail, findings, and generated security artifacts. The feed rows are
+fed by `ctx.trace.step(kind, verb, label).emit()` calls in producer code,
+plumbed through `ToolExecutionContext.trace`.
 
 - **Producer authoring**: see `docs/modules.md` §7.1. Every DAG-participating
   Rust module emits at least `start` + `done` steps; multi-phase modules
@@ -517,22 +551,26 @@ in producer code, plumbed through `ToolExecutionContext.trace`.
   events into an `mpsc::Sender<RunTraceStep>` consumed by
   `ShellApp::drain_trace_events` and applied to `ActivitySession` via
   `apply_step`.
-- **Keys**: `j`/`k`/`g`/`G` scroll, `Tab` toggles pane focus, `V` toggles
-  verbose, `p` toggles pause, `R` resets, `Enter` focuses a task in the
-  footer.
+- **Keys**: `j`/`k`/`g`/`G` scroll the focused pane, `Tab` toggles pane focus,
+  `←`/`→` switch output pages, `V` toggles verbose subsystem events, `p`
+  freezes/resumes the feed, `R` resets presentation state, `Enter` focuses the
+  selected task, `o` opens the selected output artifact, and uppercase `C`
+  arms cancellation before aborting live work.
 
 When adding a new producer module, follow the pattern in
 `crates/kuzushi-core/src/modules/native_scanners/register_modules.rs::run_semgrep_scan`
 (simple) or
-`crates/kuzushi-core/src/modules/agentic_sast/run_agentic_sast_report.rs::run_agentic_sast_report`
+`crates/kuzushi-core/src/capabilities/agentic_sast/application/run_agentic_sast_report.rs::run_agentic_sast_report`
 (parent_step + child sub-steps).
 
 ### Live Module Progress — auto-tracing every LLM call
 
 Producers don't have to manually log per-LLM-call events. The dispatch
-wrapper (`src/modules/registry/with_v2_builtins/execution.rs`) wraps the
+wrapper
+(`crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution.rs`) wraps the
 incoming `AgentRuntime` in a `TracedRuntime` (from
-`src/runtime/traced_runtime.rs`) whenever `ctx.trace.is_some()`. Every
+`crates/kuzushi-core/src/runtime/traced_runtime.rs`) whenever
+`ctx.trace.is_some()`. Every
 `runtime.query_blocking`, `next_step_blocking`,
 `triage_finding_blocking`, or `spawn_subagent_blocking` call auto-emits
 a `reasoning`/`tool-progress`/`done` step with `latency_ms` and
@@ -566,30 +604,35 @@ Canonical references: `triage:run`, `verify:finding`,
 `ShellApp.auto_open_activity` defaults to `true`. Both
 `start_background_tool` and `start_scan` set
 `shell_view = ShellView::Activity` when the toggle is on. Operators can
-opt out by exporting `KUZUSHI_AUTO_OPEN_ACTIVITY=false` before launching
-the shell — the value is read in `ShellApp::new`. The view honours
-independent pane scroll: `Tab` toggles focus between DAG/feed, `j`/`k`
-operates on the focused pane, and manually scrolling the feed pauses
-auto-tail until `p` (resume) or scroll-to-bottom.
+opt out with `setg ui.auto_open_activity false`; the compatibility env var
+`KUZUSHI_AUTO_OPEN_ACTIVITY=false` is still honored at the adapter boundary.
+The view honours independent pane scroll: `Tab` toggles focus between
+TASKS/OUTPUT, `j`/`k` operates on the focused pane, and manually scrolling the
+feed pauses auto-tail until `p` resumes the feed or `G` jumps to the bottom.
 
 ### Plain And CI Output
 
-Plain output for the Rust shell belongs in `crates/kuzushi-tui/src/renderer/plain.rs`.
-Retained TypeScript files under `src/ui` are non-visual helpers for migration,
-reference tests, summary/report formatting, and line-oriented scan output. They
-must not grow a second interactive TUI.
+Plain output for the Rust shell belongs in `crates/kuzushi-tui/src/renderer/plain/`.
+Retained TypeScript files under `src/modules` and `src/testing` are SDK and
+testing compatibility surfaces. They must not grow a second interactive TUI.
 
 ### Adding A Shell View
 
-1. Add the view variant and state to `crates/kuzushi-tui/src/app.rs`.
-2. Add parser/help behavior in `crates/kuzushi-tui/src/commands.rs`.
-3. Add reducer/key handling in `crates/kuzushi-tui/src/app/state_transitions.rs`
+1. Add the view variant and state under `crates/kuzushi-tui/src/app/`.
+2. Add parser/help behavior under `crates/kuzushi-tui/src/commands/`, including
+   `commands/shell_command_specs/` when it is operator-facing.
+3. Add reducer/key handling under `crates/kuzushi-tui/src/app/state_transitions/`
    when the view has custom navigation.
-4. Add Ratatui rendering in `crates/kuzushi-tui/src/renderer.rs`.
+4. Add Ratatui rendering under `crates/kuzushi-tui/src/renderer/views/` and
+   route it through `renderer/views/shell_view_lines.rs` or the frame renderer
+   as appropriate.
 5. Add or update plain/scripted output in
-   `crates/kuzushi-tui/src/renderer/plain.rs`.
-6. Add focused Rust tests in `crates/kuzushi-tui/src/app.rs`,
-   `crates/kuzushi-tui/src/renderer.rs`, or `crates/kuzushi-tui/tests/`.
+   `crates/kuzushi-tui/src/renderer/plain/`.
+6. Update routing/context projections in `ui_view_models/routing.rs` or
+   `ui_view_models/screen_context.rs` when top bars, footers, or plain output
+   need to know about the new screen.
+7. Add focused Rust tests in `crates/kuzushi-tui/src/app/tests.rs`,
+   `crates/kuzushi-tui/src/renderer/tests.rs`, or `crates/kuzushi-tui/tests/`.
 
 ### Guardrails
 

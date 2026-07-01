@@ -70,6 +70,10 @@ fn render_compact_body(
     app: &ShellApp,
     model: &WorkbenchViewModel,
 ) {
+    if area.height < 22 {
+        render_short_review_body(frame, area, app, model);
+        return;
+    }
     let rows = Layout::default()
         .direction(Direction::Vertical)
         .constraints(compact_constraints(model))
@@ -83,6 +87,25 @@ fn render_compact_body(
         model.focus == WorkbenchPane::Findings,
     );
     render_detail_pane(frame, rows[3], app, model);
+}
+
+fn render_short_review_body(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+) {
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
+        .split(area);
+    render_findings_pane(
+        frame,
+        rows[0],
+        &model.right_list,
+        model.focus == WorkbenchPane::Findings,
+    );
+    render_detail_pane(frame, rows[1], app, model);
 }
 
 fn compact_constraints(model: &WorkbenchViewModel) -> [Constraint; 4] {
@@ -142,12 +165,8 @@ fn wide_pane_widths(total: u16) -> WidePaneWidths {
     }
 }
 
-fn pane_scroll(app: &ShellApp, model: &WorkbenchViewModel, pane: WorkbenchPane) -> u16 {
-    if model.focus == pane {
-        app.scroll_offset
-    } else {
-        0
-    }
+fn pane_scroll(app: &ShellApp, _model: &WorkbenchViewModel, pane: WorkbenchPane) -> u16 {
+    app.workbench_scroll.get(pane)
 }
 
 fn render_pane(
@@ -161,6 +180,7 @@ fn render_pane(
     let block = bordered_block(title, focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
+    let scroll = clamped_paragraph_scroll(scroll, lines.len(), inner.height);
     let para = Paragraph::new(lines)
         .scroll((scroll, 0))
         .wrap(Wrap { trim: false });
@@ -189,7 +209,11 @@ fn render_center(frame: &mut Frame<'_>, area: Rect, app: &ShellApp, model: &Work
     let inner = block.inner(area);
     frame.render_widget(block, area);
     let lines = center_pane_lines(app, &model.center, inner.width as usize);
-    let scroll = if focused { app.scroll_offset } else { 0 };
+    let scroll = clamped_paragraph_scroll(
+        pane_scroll(app, model, WorkbenchPane::Center),
+        lines.len(),
+        inner.height,
+    );
     let para = Paragraph::new(lines)
         .scroll((scroll, 0))
         .wrap(Wrap { trim: false });
@@ -226,6 +250,12 @@ fn render_findings_pane(frame: &mut Frame<'_>, area: Rect, model: &FindingsModel
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(findings_pane_lines(model, inner)), inner);
+}
+
+fn clamped_paragraph_scroll(scroll: u16, line_count: usize, viewport_height: u16) -> u16 {
+    let visible = viewport_height as usize;
+    let max_scroll = line_count.saturating_sub(visible);
+    scroll.min(max_scroll.min(u16::MAX as usize) as u16)
 }
 
 // ── top bar ────────────────────────────────────────────────────────────────

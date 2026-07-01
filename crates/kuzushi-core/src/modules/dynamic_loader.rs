@@ -222,11 +222,80 @@ pub(super) fn dynamic_host_command<const N: usize>(args: [&str; N]) -> Result<Co
 }
 
 fn dynamic_host_script() -> Result<PathBuf> {
+    if let Some(path) = configured_dynamic_host_script()? {
+        return Ok(path);
+    }
+    if let Some(path) = dynamic_host_script_in_source_checkout() {
+        return Ok(path);
+    }
+    if let Some(path) = dynamic_host_script_near_current_exe() {
+        return Ok(path);
+    }
+    anyhow::bail!(
+        "could not locate scripts/kuzushi-dynamic-module-host.mjs. Set KUZUSHI_DYNAMIC_MODULE_HOST to the host script path."
+    )
+}
+
+fn configured_dynamic_host_script() -> Result<Option<PathBuf>> {
+    let Some(path) = std::env::var_os("KUZUSHI_DYNAMIC_MODULE_HOST") else {
+        return Ok(None);
+    };
+    let path = PathBuf::from(path);
+    if path.is_file() {
+        return Ok(Some(path));
+    }
+    anyhow::bail!(
+        "KUZUSHI_DYNAMIC_MODULE_HOST points to a missing dynamic module host script: {}",
+        path.display()
+    )
+}
+
+fn dynamic_host_script_in_source_checkout() -> Option<PathBuf> {
     let core_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let script = core_dir
+    core_dir
         .parent()
         .and_then(Path::parent)
         .map(|root| root.join("scripts").join("kuzushi-dynamic-module-host.mjs"))
-        .context("could not resolve repository root for dynamic module host")?;
-    Ok(script)
+        .filter(|script| script.is_file())
+}
+
+fn dynamic_host_script_near_current_exe() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    dynamic_host_script_candidates_above(exe.parent()?.to_path_buf())
+        .into_iter()
+        .find(|script| script.is_file())
+}
+
+fn dynamic_host_script_candidates_above(mut dir: PathBuf) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    for _ in 0..6 {
+        candidates.push(dir.join("scripts").join("kuzushi-dynamic-module-host.mjs"));
+        if !dir.pop() {
+            break;
+        }
+    }
+    candidates
+}
+
+#[cfg(test)]
+mod dynamic_loader_tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn dynamic_host_candidates_cover_native_package_layout() {
+        let package = tempfile::tempdir().unwrap();
+        let native_dir = package.path().join("native").join("darwin-arm64");
+        let script = package
+            .path()
+            .join("scripts")
+            .join("kuzushi-dynamic-module-host.mjs");
+        fs::create_dir_all(&native_dir).unwrap();
+        fs::create_dir_all(script.parent().unwrap()).unwrap();
+        fs::write(&script, "host").unwrap();
+
+        let candidates = dynamic_host_script_candidates_above(native_dir);
+
+        assert!(candidates.contains(&script));
+    }
 }

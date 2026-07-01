@@ -15,7 +15,7 @@ flowchart LR
 
   subgraph Shell["Interactive shell mode"]
     TuiApp["Ratatui shell app<br/>crates/kuzushi-tui/src/app/"]
-    Commands["Rust command parser<br/>crates/kuzushi-tui/src/commands.rs"]
+    Commands["Rust command parser<br/>crates/kuzushi-tui/src/commands/"]
     Renderer["Ratatui renderer<br/>crates/kuzushi-tui/src/renderer/"]
     ShellViews["Catalog, module, run,<br/>findings, threats, prompts"]
   end

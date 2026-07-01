@@ -98,17 +98,17 @@ impl ShellApp {
         match mouse.kind {
             MouseEventKind::ScrollUp => {
                 if self.mouse_scrolls_findings() {
-                    self.findings_cursor = self.findings_cursor.saturating_sub(3);
+                    self.findings_cursor = self.findings_cursor.saturating_sub(1);
                 } else {
-                    self.scroll_up(3);
+                    self.scroll_up(1);
                 }
             }
             MouseEventKind::ScrollDown => {
                 if self.mouse_scrolls_findings() {
                     self.findings_cursor =
-                        (self.findings_cursor + 3).min(self.findings.len().saturating_sub(1));
+                        (self.findings_cursor + 1).min(self.findings.len().saturating_sub(1));
                 } else {
-                    self.scroll_down(3);
+                    self.scroll_down(1);
                 }
             }
             _ => {}

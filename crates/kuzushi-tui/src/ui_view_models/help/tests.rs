@@ -39,6 +39,11 @@ fn plain_help_model_projects_plain_rows() {
         .iter()
         .flat_map(|category| category.rows.iter())
         .any(|row| row.starts_with("  aliases / examples:") && row.contains("/h")));
+    assert!(model
+        .categories
+        .iter()
+        .flat_map(|category| category.rows.iter())
+        .any(|row| row.starts_with("target rev <ref> -")));
 }
 
 #[test]

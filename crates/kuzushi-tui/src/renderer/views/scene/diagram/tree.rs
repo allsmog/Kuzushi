@@ -30,12 +30,12 @@ impl Widget for TreeDiagram {
                 1,
                 0,
                 "widen terminal (≥24 cols) for the diagram",
-                theme::T_MUTED,
+                diagram_muted(),
             );
             return;
         }
         if let Some(hint) = &self.model.empty_hint {
-            text(buf, area, 2, 1, hint, theme::T_MUTED);
+            text(buf, area, 2, 1, hint, diagram_muted());
             return;
         }
         let chains = &self.model.chains;
@@ -98,7 +98,7 @@ impl TreeDiagram {
         left: u16,
         box_w: u16,
     ) {
-        connector_v(buf, area, (root_cx, 3), (cx, 7), theme::T_SUBTLE);
+        connector_v(buf, area, (root_cx, 3), (cx, 7), diagram_subtle());
         let color = chain_color(chain.severity);
         boxed(
             buf,
@@ -124,7 +124,7 @@ fn render_steps(buf: &mut Buffer, area: Rect, chain: &AttackChain, cx: u16, left
     let mut prev_bottom = 7 + NODE_H - 1; // chain box bottom (= 9)
     let mut y = 12;
     for step in chain.steps.iter().take(MAX_STEPS) {
-        connector_v(buf, area, (cx, prev_bottom + 1), (cx, y), theme::T_SUBTLE);
+        connector_v(buf, area, (cx, prev_bottom + 1), (cx, y), diagram_subtle());
         boxed(
             buf,
             area,
@@ -133,8 +133,8 @@ fn render_steps(buf: &mut Buffer, area: Rect, chain: &AttackChain, cx: u16, left
             box_w,
             NODE_H,
             step,
-            theme::T_MUTED,
-            theme::T_MUTED,
+            diagram_muted(),
+            diagram_muted(),
         );
         prev_bottom = y + NODE_H - 1;
         y += NODE_H + STEP_GAP;

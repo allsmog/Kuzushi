@@ -6,7 +6,7 @@ impl ShellApp {
         if raw.is_empty() {
             self.log(
                 "prompt",
-                "verbs: edit <name> | show <name> | diff <name> | reset <name> | set <name> \"value\"",
+                "verbs: edit/show/diff/reset/set/list | mutate <name> \"value\" | approve <id> | reject <id>",
             );
             return;
         }
@@ -20,9 +20,12 @@ impl ShellApp {
             "reset" => self.prompt_reset(rest),
             "set" => self.prompt_set(rest),
             "list" => self.prompt_list(),
+            "mutate" | "mutation" => self.prompt_mutate(rest),
+            "approve" => self.prompt_approve_mutation(rest),
+            "reject" => self.prompt_reject_mutation(rest),
             other => self.log(
                 "prompt",
-                format!("unknown prompt verb {other:?}; try edit/show/diff/reset/set/list"),
+                format!("unknown prompt verb {other:?}; try edit/show/diff/reset/set/list/mutate/approve/reject"),
             ),
         }
     }

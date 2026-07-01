@@ -1,6 +1,7 @@
 use super::{
     active_stage_label, compact_target_path, context_snapshot_state, findings_count_summary,
-    format_session_cost, routing_mode_segment, view_status_segment, ShellApp,
+    format_session_cost, routing_mode_segment, scoped_target_path_label, view_status_segment,
+    ShellApp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -81,10 +82,11 @@ impl ContextStripModel {
 }
 
 fn target_segment_value(app: &ShellApp) -> String {
-    app.target
-        .as_ref()
-        .map(|path| compact_target_path(&path.display().to_string()))
-        .unwrap_or_else(|| "none".to_string())
+    if app.target.is_some() {
+        scoped_target_path_label(app)
+    } else {
+        "none".to_string()
+    }
 }
 
 fn model_segment_value(app: &ShellApp) -> String {

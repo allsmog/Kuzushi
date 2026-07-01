@@ -87,6 +87,9 @@ impl ShellApp {
     /// Map artifacts stay unchecked — reused, not rebuilt, unless the operator
     /// presses `g` to regenerate.
     pub(crate) fn open_phase_picker(&mut self, phase: crate::app::WorkflowPhase) {
+        if self.phase_blocked_by_config(phase) {
+            return;
+        }
         let target_root = self.phase_target_root();
         let kind = self.ensure_target_kind(&target_root);
         let target = crate::app::TargetProfile::detect(&target_root, kind);
@@ -118,6 +121,30 @@ impl ShellApp {
             "phase",
             "Space toggle · g rebuild cached · Enter run · Esc skip phase",
         );
+    }
+
+    fn phase_blocked_by_config(&mut self, phase: crate::app::WorkflowPhase) -> bool {
+        let Some(stop_after) = self
+            .config
+            .phases
+            .stop_after
+            .map(guided_phase_to_workflow_phase)
+        else {
+            return false;
+        };
+        if phase <= stop_after {
+            return false;
+        }
+        self.workflow_phase = Some(stop_after);
+        self.log(
+            "phase",
+            format!(
+                "{} stopped by config phases.stop_after={}",
+                phase.word(),
+                stop_after.word()
+            ),
+        );
+        true
     }
 
     /// Fold this phase's session-model recommendations into the preselection
@@ -220,6 +247,15 @@ impl ShellApp {
             auth_ready,
             has_multiple_auth,
         )
+    }
+}
+
+fn guided_phase_to_workflow_phase(phase: kuzushi_core::GuidedPhase) -> crate::app::WorkflowPhase {
+    match phase {
+        kuzushi_core::GuidedPhase::Map => crate::app::WorkflowPhase::Map,
+        kuzushi_core::GuidedPhase::Hunt => crate::app::WorkflowPhase::Hunt,
+        kuzushi_core::GuidedPhase::Confirm => crate::app::WorkflowPhase::Confirm,
+        kuzushi_core::GuidedPhase::Fix => crate::app::WorkflowPhase::Fix,
     }
 }
 

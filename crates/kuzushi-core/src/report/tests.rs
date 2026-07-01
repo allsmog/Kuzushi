@@ -880,7 +880,7 @@ fn report_summarizes_run_metadata_and_artifact_manifest() {
         report.report_markdown
     );
     assert!(report.report_markdown.contains(
-        "artifacts.json: present - 13 artifact(s), kinds json=10, jsonl=2, markdown=1, canonical 12"
+        "artifacts.json: present - 14 artifact(s), kinds json=11, jsonl=2, markdown=1, canonical 13"
     ));
     assert!(report
         .report_markdown

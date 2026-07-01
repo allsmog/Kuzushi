@@ -27,11 +27,11 @@ pub(in crate::modules) fn persist_triage_outcome(
     finding: Finding,
     outcome: TriageOutcome,
 ) {
-    let Some(finding_id) = finding.id else {
+    let Some(_finding_id) = finding.id else {
         stats.record_unpersisted_outcome(finding, outcome);
         return;
     };
-    if let Err(error) = store.save_triage(finding_id, &outcome) {
+    if let Err(error) = store.save_triage_for_fingerprint(&finding.fingerprint, &outcome) {
         eprintln!(
             "[triage:run] could not persist triage for finding {}: {error}",
             finding.fingerprint
@@ -99,7 +99,6 @@ fn triage_response_data(
         "byDesign": stats.by_design,
         "costUsd": stats.total_cost,
         "missingFingerprints": missing_fingerprints,
-        "batchSize": input.batch_size,
         "concurrency": input.concurrency,
         "stage2Tier": triage_tier_label(input.stage2_tier),
         "costCapUsd": input.cost_cap_usd,

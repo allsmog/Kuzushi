@@ -1,6 +1,6 @@
 use super::{
-    journey_footer_segment, routing_mode_segment, scan_status, status_footer_findings_summary,
-    view_status_segment, ShellApp,
+    active_project_scope_label, journey_footer_segment, routing_mode_segment, scan_status,
+    status_footer_findings_summary, view_status_segment, ShellApp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -52,6 +52,9 @@ fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
     if let Some(chip) = scope_footer_segment(app) {
         segments.push(chip);
     }
+    if let Some(chip) = project_scope_footer_segment(app) {
+        segments.push(chip);
+    }
     segments.push(view_status_segment(app));
     segments
 }
@@ -62,6 +65,10 @@ fn scope_footer_segment(app: &ShellApp) -> Option<String> {
         return None;
     }
     Some("scope: on".to_string())
+}
+
+fn project_scope_footer_segment(app: &ShellApp) -> Option<String> {
+    active_project_scope_label(app).map(|scope| format!("project-scope:{scope}"))
 }
 
 fn status_footer_right_segments(app: &ShellApp, warning: bool) -> Vec<String> {

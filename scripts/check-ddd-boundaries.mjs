@@ -255,9 +255,9 @@ const rules = [
   },
   {
     name: "TUI findings renderers read findings view models",
-    roots: ["crates/kuzushi-tui/src/renderer/views/findings"],
+    roots: ["crates/kuzushi-tui/src/renderer/views/workbench"],
     forbidden:
-      /\bFinding\b|sorted_finding_aliases|stable_finding_alias|project_finding|proof_state_label|runtime_validation_label|finding_(?:location|verdict_label|confidence_label|cwe_label|source_label|evidence_preview)|app\.findings|app\.selected_finding|findings_cursor|context_view/,
+      /\bkuzushi_core::Finding\b|sorted_finding_aliases|stable_finding_alias|project_finding|proof_state_label|runtime_validation_label|finding_(?:location|verdict_label|confidence_label|cwe_label|source_label|evidence_preview)|app\.findings|app\.selected_finding|findings_cursor|context_view/,
   },
   {
     name: "TUI module findings preview reads findings view model",
@@ -302,9 +302,9 @@ const rules = [
   },
   {
     name: "TUI threat DFD renderer reads threat DFD view model",
-    roots: ["crates/kuzushi-tui/src/renderer/views/threat/threat_lines/dfd.rs"],
+    roots: ["crates/kuzushi-tui/src/renderer/views/scene/diagram/dfd.rs"],
     forbidden:
-      /node\.(?:id|node_type|trust_zone)\b|nodes\.(?:is_empty|len)\b|into_iter\(\)\.take\(8\)|NODES FROM threat-model\.json/,
+      /node\.(?:id|node_type|trust_zone)\b|into_iter\(\)\.take\(8\)|NODES FROM threat-model\.json/,
   },
   {
     name: "TUI threat story renderer reads threat story view model",

@@ -7,7 +7,7 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         ShellView::Story => Some(story_keybindings(app)),
         ShellView::Help => Some(help_keybindings(app)),
         ShellView::Tools => Some(tools_keybindings(app)),
-        ShellView::Scene(_) => Some(scene_keybindings()),
+        ShellView::Scene(page) => Some(scene_keybindings(page)),
         ShellView::SastTasks => Some(sast_tasks_keybindings(app)),
         // First-run pickers print their controls to the log only — surface them
         // in the footer so the very first screen is operable without guessing.
@@ -40,15 +40,20 @@ fn choice_picker_keybindings() -> Vec<FooterKeybinding> {
 
 // The security-viz gallery is fully interactive but its controls live only in
 // the key handler; surface them so Tab/orbit/pause are discoverable.
-fn scene_keybindings() -> Vec<FooterKeybinding> {
-    vec![
-        bind("Tab/S-Tab", "page"),
-        bind("h/l/j/k", "orbit 3D"),
-        bind("space/p", "pause"),
-        bind("r", "reset"),
-        bind("o", "return"),
-        bind("Esc/q", "leave"),
-    ]
+fn scene_keybindings(page: crate::scene3d::VizPage) -> Vec<FooterKeybinding> {
+    let mut bindings = vec![
+        bind("Tab/n", "next page"),
+        bind("S-Tab/N", "prev page"),
+        bind("o/Esc/q", "leave"),
+    ];
+    if page.is_3d() {
+        bindings.extend([
+            bind("h/l/j/k", "orbit 3D"),
+            bind("space/p", "pause"),
+            bind("r", "reset"),
+        ]);
+    }
+    bindings
 }
 
 // SAST Tasks looks like a multi-select but is command-driven — advertise the

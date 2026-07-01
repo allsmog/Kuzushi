@@ -10,6 +10,9 @@ pub struct ShellApp {
     pub completion_cycle: Option<CompletionCycle>,
     pub log: Vec<LogLine>,
     pub target: Option<PathBuf>,
+    /// Active nested project scope inside `target`, when the operator enters
+    /// a submodule/vendored/dependency root from the picker.
+    pub active_scope: Option<crate::app::TargetCandidateScope>,
     pub focused_module: Option<String>,
     pub shell_view: ShellView,
     pub prev_shell_view: Option<ShellView>,
@@ -55,9 +58,15 @@ pub struct ShellApp {
     /// Which Workbench pane (`Source`/`Center`/`Findings`/`Details`) currently has keyboard
     /// focus. `Tab` cycles it; `j`/`k` move within it. Defaults to `Findings`.
     pub workbench_focus: WorkbenchPane,
+    /// Pane-local scroll positions for non-list Workbench panes. The findings
+    /// pane uses `findings_cursor` instead, so switching panes preserves the
+    /// operator's reading position without confusing the list cursor.
+    pub workbench_scroll: WorkbenchPaneScroll,
+    pub(crate) workbench_cache: std::cell::RefCell<WorkbenchCache>,
     pub scan: Option<ScanPanelState>,
     pub should_quit: bool,
     pub ctrl_c_armed_at: Option<Instant>,
+    pub activity_cancel_armed_at: Option<Instant>,
     pub session_budget_usd: Option<f64>,
     pub advisory: AdvisoryState,
     pub live_activity: Option<LiveActivity>,
@@ -111,6 +120,7 @@ pub struct ShellApp {
     /// Tasks that failed in the current engagement, with their error text.
     /// Drives dependency-aware skipping and the end-of-run retry gate.
     pub planning_failed: Vec<crate::app::FailedPlanningTask>,
+    pub planning_skipped_phases: BTreeSet<crate::app::WorkflowPhase>,
     /// Per-task input overrides applied on retry (e.g. a larger heap), consumed
     /// by the planning dispatcher and cleared once the retried task runs.
     pub planning_adjustments: BTreeMap<PlanningTaskId, crate::app::RetryAdjustment>,
@@ -194,7 +204,7 @@ pub struct ShellApp {
     pub last_scene_advance: Option<Instant>,
     /// When true (default), the relevant gallery page auto-opens when its
     /// artifact is generated (scan→Heatmap, threat-model→DFD, etc.). Opt out
-    /// with `KUZUSHI_AUTO_OPEN_VIZ=false`. Mirrors `auto_open_activity`.
+    /// with `setg ui.auto_open_viz false`. Mirrors `auto_open_activity`.
     pub auto_open_viz: bool,
     /// Detailed exploit chains (with ordered steps) for the attack-tree page,
     /// cached from `exploit-chain:scan`. Parallel to the minimal `chains`.

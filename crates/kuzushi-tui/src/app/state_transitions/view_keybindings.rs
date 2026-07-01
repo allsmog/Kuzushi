@@ -44,8 +44,8 @@ impl ShellApp {
             && !matches!(self.shell_view, ShellView::Catalog | ShellView::Workbench)
     }
 
-    /// Esc goes back everywhere except views that already own Esc (Activity
-    /// cancels a run; pickers/modals intercept Esc earlier) and while a
+    /// Esc goes back everywhere except views that already own Esc
+    /// (pickers/modals intercept Esc earlier) and while a
     /// cleared draft is stashed (Esc restores it — see `esc_clear_or_restore`).
     fn view_offers_back(&self) -> bool {
         self.last_cleared_input.is_none() && !self.view_owns_esc()
@@ -54,8 +54,7 @@ impl ShellApp {
     fn view_owns_esc(&self) -> bool {
         matches!(
             self.shell_view,
-            ShellView::Activity
-                | ShellView::CommandPalette
+            ShellView::CommandPalette
                 | ShellView::ModelPicker
                 | ShellView::AuthMethodPicker(_)
                 | ShellView::PlanningPicker

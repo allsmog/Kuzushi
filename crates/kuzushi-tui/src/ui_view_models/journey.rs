@@ -4,11 +4,10 @@
 //! than from the launch walker's transient state. The walker finishing
 //! doesn't end the journey — the workspace always *is* somewhere.
 
-use std::path::Path;
-
-use crate::app::{PlanningTaskId, WorkflowPhase};
+use crate::app::WorkflowPhase;
 use crate::ShellApp;
-use kuzushi_core::Finding;
+use kuzushi_core::{Finding, TriageVerdict};
+use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JourneyModel {
@@ -33,6 +32,8 @@ pub struct JourneyPhaseStatus {
 pub enum JourneyPhaseState {
     Done,
     Current,
+    Failed,
+    Skipped,
     Pending,
 }
 
@@ -41,6 +42,8 @@ impl JourneyPhaseState {
         match self {
             JourneyPhaseState::Done => "✓",
             JourneyPhaseState::Current => "●",
+            JourneyPhaseState::Failed => "!",
+            JourneyPhaseState::Skipped => "⊘",
             JourneyPhaseState::Pending => "○",
         }
     }
@@ -50,6 +53,8 @@ impl JourneyPhaseState {
 pub(crate) enum JourneyPhaseTone {
     Success,
     Warn,
+    Danger,
+    Muted,
     Subtle,
 }
 
@@ -58,6 +63,8 @@ impl JourneyPhaseTone {
         match state {
             JourneyPhaseState::Done => JourneyPhaseTone::Success,
             JourneyPhaseState::Current => JourneyPhaseTone::Warn,
+            JourneyPhaseState::Failed => JourneyPhaseTone::Danger,
+            JourneyPhaseState::Skipped => JourneyPhaseTone::Muted,
             JourneyPhaseState::Pending => JourneyPhaseTone::Subtle,
         }
     }
@@ -70,7 +77,10 @@ impl JourneyPhaseTone {
 pub struct JourneyProgress {
     pub map_artifacts_built: bool,
     pub finding_total: usize,
-    /// Findings with a triage outcome or an empirical verification.
+    /// Findings dispositioned by triage or empirical verification. A
+    /// `needs_review` triage result still belongs in 作 confirm.
+    pub reviewed_findings: usize,
+    /// Findings that should flow into 掛 fix work.
     pub confirmed_findings: usize,
 }
 
@@ -81,7 +91,7 @@ impl JourneyProgress {
     /// fully confirmed workspace sits in fix until patches/reports ship.
     pub fn current_phase(self) -> WorkflowPhase {
         if self.finding_total > 0 {
-            return if self.confirmed_findings < self.finding_total {
+            return if self.reviewed_findings < self.finding_total {
                 WorkflowPhase::Confirm
             } else {
                 WorkflowPhase::Fix
@@ -94,51 +104,89 @@ impl JourneyProgress {
         }
     }
 
-    pub fn unconfirmed_findings(self) -> usize {
-        self.finding_total.saturating_sub(self.confirmed_findings)
+    pub fn unreviewed_findings(self) -> usize {
+        self.finding_total.saturating_sub(self.reviewed_findings)
     }
 }
 
 /// Derive the journey for the active workspace. `None` without a target —
-/// there is no engagement to walk. A live walker phase takes precedence so
-/// the rail tracks the picker the operator is actually inside.
+/// there is no engagement to walk. A live walker phase can be highlighted, but
+/// previous phases only become `Done` when workspace evidence proves progress.
 pub fn journey_model(app: &ShellApp) -> Option<JourneyModel> {
     let target = app.target.as_deref()?;
-    let progress = journey_progress(target, &app.findings);
-    let current = app
-        .workflow_phase
-        .unwrap_or_else(|| progress.current_phase());
+    let progress = journey_progress_from_parts(
+        app.workbench_cache
+            .borrow_mut()
+            .map_artifacts_built(Some(target)),
+        &app.findings,
+    );
+    let derived_current = progress.current_phase();
+    let current = app.workflow_phase.unwrap_or(derived_current);
+    let failed_phases = failed_phase_set(app);
     Some(JourneyModel {
-        phases: phase_statuses(current),
+        phases: phase_statuses(
+            current,
+            derived_current,
+            &app.planning_skipped_phases,
+            &failed_phases,
+        ),
         current,
         next_action: phase_next_action(current, progress),
     })
 }
 
-pub fn journey_progress(target: &Path, findings: &[Finding]) -> JourneyProgress {
+fn journey_progress_from_parts(map_artifacts_built: bool, findings: &[Finding]) -> JourneyProgress {
     JourneyProgress {
-        map_artifacts_built: any_map_artifact_exists(target),
+        map_artifacts_built,
         finding_total: findings.len(),
+        reviewed_findings: findings.iter().filter(|f| is_reviewed(f)).count(),
         confirmed_findings: findings.iter().filter(|f| is_confirmed(f)).count(),
     }
 }
 
+fn is_reviewed(finding: &Finding) -> bool {
+    finding.verification.is_some()
+        || finding.triage.as_ref().is_some_and(|triage| {
+            matches!(
+                triage.verdict,
+                TriageVerdict::TruePositive
+                    | TriageVerdict::FalsePositive
+                    | TriageVerdict::ByDesign
+            )
+        })
+}
+
 fn is_confirmed(finding: &Finding) -> bool {
-    finding.triage.is_some() || finding.verification.is_some()
+    finding.verification.is_some()
+        || finding
+            .triage
+            .as_ref()
+            .is_some_and(|triage| triage.verdict == TriageVerdict::TruePositive)
 }
 
-fn any_map_artifact_exists(target: &Path) -> bool {
-    PlanningTaskId::in_phase(WorkflowPhase::Map)
-        .into_iter()
-        .filter_map(PlanningTaskId::artifact_relative_path)
-        .any(|relative| target.join(relative).exists())
+fn failed_phase_set(app: &ShellApp) -> BTreeSet<WorkflowPhase> {
+    app.planning_failed
+        .iter()
+        .map(|failed| failed.task.phase())
+        .collect()
 }
 
-fn phase_statuses(current: WorkflowPhase) -> Vec<JourneyPhaseStatus> {
+fn phase_statuses(
+    current: WorkflowPhase,
+    derived_current: WorkflowPhase,
+    skipped_phases: &BTreeSet<WorkflowPhase>,
+    failed_phases: &BTreeSet<WorkflowPhase>,
+) -> Vec<JourneyPhaseStatus> {
     WorkflowPhase::ORDER
         .iter()
         .map(|&phase| {
-            let state = phase_state(phase, current);
+            let state = phase_state(
+                phase,
+                current,
+                derived_current,
+                skipped_phases,
+                failed_phases,
+            );
             JourneyPhaseStatus {
                 phase,
                 state,
@@ -159,10 +207,20 @@ fn phase_rail_label(phase: WorkflowPhase) -> &'static str {
     }
 }
 
-fn phase_state(phase: WorkflowPhase, current: WorkflowPhase) -> JourneyPhaseState {
-    if phase == current {
+fn phase_state(
+    phase: WorkflowPhase,
+    current: WorkflowPhase,
+    derived_current: WorkflowPhase,
+    skipped_phases: &BTreeSet<WorkflowPhase>,
+    failed_phases: &BTreeSet<WorkflowPhase>,
+) -> JourneyPhaseState {
+    if failed_phases.contains(&phase) {
+        JourneyPhaseState::Failed
+    } else if skipped_phases.contains(&phase) {
+        JourneyPhaseState::Skipped
+    } else if phase == current {
         JourneyPhaseState::Current
-    } else if phase < current {
+    } else if phase < derived_current {
         JourneyPhaseState::Done
     } else {
         JourneyPhaseState::Pending
@@ -180,13 +238,13 @@ fn phase_next_action(current: WorkflowPhase, progress: JourneyProgress) -> Strin
                 .to_string()
         }
         WorkflowPhase::Confirm => format!(
-            "Run next to triage & verify — {} of {} findings unconfirmed (作 confirm, 3 of 4).",
-            progress.unconfirmed_findings(),
+            "Run next to triage & verify — {} of {} findings need review (作 confirm, 3 of 4).",
+            progress.unreviewed_findings(),
             progress.finding_total
         ),
         WorkflowPhase::Fix => format!(
-            "Run next to patch & report — {} findings confirmed (掛 fix, 4 of 4).",
-            progress.confirmed_findings
+            "Run next to patch & report — {} confirmed, {} reviewed (掛 fix, 4 of 4).",
+            progress.confirmed_findings, progress.reviewed_findings
         ),
     }
 }
@@ -212,33 +270,91 @@ pub fn journey_footer_segment(app: &ShellApp) -> Option<String> {
 mod tests {
     use super::*;
 
-    fn progress(map: bool, total: usize, confirmed: usize) -> JourneyProgress {
+    fn progress(map: bool, total: usize, reviewed: usize, confirmed: usize) -> JourneyProgress {
         JourneyProgress {
             map_artifacts_built: map,
             finding_total: total,
+            reviewed_findings: reviewed,
             confirmed_findings: confirmed,
         }
     }
 
     #[test]
     fn fresh_workspace_is_in_map() {
-        assert_eq!(progress(false, 0, 0).current_phase(), WorkflowPhase::Map);
+        assert_eq!(progress(false, 0, 0, 0).current_phase(), WorkflowPhase::Map);
     }
 
     #[test]
     fn artifacts_without_findings_is_hunt() {
-        assert_eq!(progress(true, 0, 0).current_phase(), WorkflowPhase::Hunt);
+        assert_eq!(progress(true, 0, 0, 0).current_phase(), WorkflowPhase::Hunt);
     }
 
     #[test]
-    fn unconfirmed_findings_is_confirm() {
-        assert_eq!(progress(true, 5, 2).current_phase(), WorkflowPhase::Confirm);
-        assert_eq!(progress(true, 5, 2).unconfirmed_findings(), 3);
+    fn unreviewed_findings_is_confirm() {
+        assert_eq!(
+            progress(true, 5, 2, 1).current_phase(),
+            WorkflowPhase::Confirm
+        );
+        assert_eq!(progress(true, 5, 2, 1).unreviewed_findings(), 3);
     }
 
     #[test]
-    fn fully_confirmed_findings_is_fix() {
-        assert_eq!(progress(true, 5, 5).current_phase(), WorkflowPhase::Fix);
+    fn fully_reviewed_findings_is_fix() {
+        assert_eq!(progress(true, 5, 5, 3).current_phase(), WorkflowPhase::Fix);
+    }
+
+    #[test]
+    fn needs_review_triage_does_not_count_as_reviewed() {
+        use kuzushi_core::{Severity, TriageOutcome};
+
+        let mut finding = Finding::new_tool(
+            "demo",
+            "demo.rule",
+            "src/lib.rs",
+            7,
+            None,
+            Severity::Medium,
+            "needs human review",
+        );
+        finding.triage = Some(TriageOutcome {
+            verdict: TriageVerdict::NeedsReview,
+            confidence: 0.4,
+            rationale: "unclear".to_string(),
+            cost_usd: 0.0,
+        });
+
+        let progress = journey_progress_from_parts(true, &[finding]);
+
+        assert_eq!(progress.reviewed_findings, 0);
+        assert_eq!(progress.confirmed_findings, 0);
+        assert_eq!(progress.current_phase(), WorkflowPhase::Confirm);
+    }
+
+    #[test]
+    fn dismissed_findings_are_reviewed_but_not_confirmed() {
+        use kuzushi_core::{Severity, TriageOutcome};
+
+        let mut finding = Finding::new_tool(
+            "demo",
+            "demo.rule",
+            "src/lib.rs",
+            7,
+            None,
+            Severity::Medium,
+            "dismissed finding",
+        );
+        finding.triage = Some(TriageOutcome {
+            verdict: TriageVerdict::FalsePositive,
+            confidence: 0.92,
+            rationale: "guarded".to_string(),
+            cost_usd: 0.0,
+        });
+
+        let progress = journey_progress_from_parts(true, &[finding]);
+
+        assert_eq!(progress.reviewed_findings, 1);
+        assert_eq!(progress.confirmed_findings, 0);
+        assert_eq!(progress.current_phase(), WorkflowPhase::Fix);
     }
 
     #[test]
@@ -246,14 +362,19 @@ mod tests {
         // An imported-findings workspace (e.g. bounty HAR intake) skipped
         // map entirely; the journey must not strand it there.
         assert_eq!(
-            progress(false, 3, 0).current_phase(),
+            progress(false, 3, 0, 0).current_phase(),
             WorkflowPhase::Confirm
         );
     }
 
     #[test]
     fn phase_statuses_mark_done_current_pending() {
-        let statuses = phase_statuses(WorkflowPhase::Confirm);
+        let statuses = phase_statuses(
+            WorkflowPhase::Confirm,
+            WorkflowPhase::Confirm,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        );
         assert_eq!(statuses[0].state, JourneyPhaseState::Done);
         assert_eq!(statuses[1].state, JourneyPhaseState::Done);
         assert_eq!(statuses[2].state, JourneyPhaseState::Current);
@@ -261,8 +382,36 @@ mod tests {
     }
 
     #[test]
-    fn next_action_counts_unconfirmed_findings() {
-        let action = phase_next_action(WorkflowPhase::Confirm, progress(true, 4, 1));
-        assert!(action.contains("3 of 4 findings unconfirmed"));
+    fn walker_ahead_of_progress_does_not_forge_done_marks() {
+        let statuses = phase_statuses(
+            WorkflowPhase::Confirm,
+            WorkflowPhase::Map,
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+        );
+        assert_eq!(statuses[0].state, JourneyPhaseState::Pending);
+        assert_eq!(statuses[1].state, JourneyPhaseState::Pending);
+        assert_eq!(statuses[2].state, JourneyPhaseState::Current);
+    }
+
+    #[test]
+    fn skipped_and_failed_phases_have_distinct_states() {
+        let skipped = BTreeSet::from([WorkflowPhase::Map]);
+        let failed = BTreeSet::from([WorkflowPhase::Hunt]);
+        let statuses = phase_statuses(
+            WorkflowPhase::Confirm,
+            WorkflowPhase::Map,
+            &skipped,
+            &failed,
+        );
+        assert_eq!(statuses[0].state, JourneyPhaseState::Skipped);
+        assert_eq!(statuses[1].state, JourneyPhaseState::Failed);
+        assert_eq!(statuses[2].state, JourneyPhaseState::Current);
+    }
+
+    #[test]
+    fn next_action_counts_unreviewed_findings() {
+        let action = phase_next_action(WorkflowPhase::Confirm, progress(true, 4, 1, 1));
+        assert!(action.contains("3 of 4 findings need review"));
     }
 }

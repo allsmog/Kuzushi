@@ -3,6 +3,11 @@ use super::threat_model_signals::{
     threat_signal_count,
 };
 use super::*;
+use crate::strategy::{
+    apply_strategy_corrections, load_strategy_queue, save_strategy_queue, StrategyPhase,
+    StrategyPreflight, StrategyPreflightStatus, StrategyProposal, StrategyProposalStatus,
+    StrategyResourceRisk,
+};
 
 pub(crate) fn execute_module_recommender_tool(
     input: Value,
@@ -33,6 +38,8 @@ pub(crate) fn execute_module_recommender_tool(
     // available; otherwise fall back to the deterministic rule catalog.
     let ranking = ModelRanking::resolve(ctx, runtime, &input, workspace.root());
     let report = build_recommendation_report_ranked(request, ranking);
+    let strategy_proposals = persist_strategy_proposals(&workspace, &report, ctx.run_id())?;
+    write_strategy_run_artifact(ctx, &strategy_proposals)?;
     let summary = report.summary.clone();
     let output = recommendation_report_output(&report);
     let data =
@@ -40,6 +47,159 @@ pub(crate) fn execute_module_recommender_tool(
     Ok(crate::module_result::completed_output_result(
         summary, output, data,
     ))
+}
+
+fn persist_strategy_proposals(
+    workspace: &WorkspaceTarget,
+    report: &RecommendationReport,
+    run_id: Option<String>,
+) -> Result<Vec<StrategyProposal>> {
+    let mut existing = load_strategy_queue(workspace)?;
+    let now = strategy_now_ms();
+    let mut generated_ids = Vec::new();
+    let mut generated = Vec::new();
+    for recommendation in &report.recommendations {
+        let proposal = strategy_proposal_from_recommendation(recommendation, run_id.clone(), now);
+        generated_ids.push(proposal.id.clone());
+        generated.push(proposal);
+    }
+    apply_strategy_corrections(workspace, run_id.as_deref(), &mut generated)?;
+    for proposal in generated {
+        merge_strategy_proposal(&mut existing, proposal);
+    }
+    save_strategy_queue(workspace, &existing)?;
+    Ok(existing
+        .into_iter()
+        .filter(|proposal| generated_ids.contains(&proposal.id))
+        .collect())
+}
+
+fn write_strategy_run_artifact(
+    ctx: &ToolExecutionContext<'_>,
+    proposals: &[StrategyProposal],
+) -> Result<()> {
+    let Some((target, run_id)) = ctx.run_artifact_location() else {
+        return Ok(());
+    };
+    let value = serde_json::json!({
+        "source": "module-recommender:recommend",
+        "strategyProposals": proposals,
+    });
+    crate::run_artifacts::write_run_artifact_json(
+        target,
+        &run_id,
+        "strategy.json",
+        "strategy proposals",
+        &value,
+    )?;
+    Ok(())
+}
+
+fn merge_strategy_proposal(
+    proposals: &mut Vec<StrategyProposal>,
+    mut next: StrategyProposal,
+) {
+    if let Some(existing) = proposals
+        .iter_mut()
+        .find(|proposal| proposal.id == next.id)
+    {
+        next.status = existing.status;
+        next.created_at_ms = existing.created_at_ms;
+        *existing = next;
+    } else {
+        proposals.push(next);
+    }
+}
+
+fn strategy_proposal_from_recommendation(
+    recommendation: &ModuleRecommendation,
+    run_id: Option<String>,
+    now: u64,
+) -> StrategyProposal {
+    let blocked = recommendation.reason.starts_with("blocked:");
+    StrategyProposal {
+        id: format!("review-{}", strategy_tool_slug(&recommendation.tool)),
+        phase: StrategyPhase::Review,
+        base_strategy: "module recommender defaults".to_string(),
+        recommended_strategy: format!("run {}", recommendation.tool),
+        corrected_strategy: None,
+        applied_corrections: Vec::new(),
+        rationale: recommendation.reason.clone(),
+        expected_cost_usd: None,
+        expected_runtime: Some(strategy_runtime_estimate(recommendation).to_string()),
+        preflight: strategy_preflight(recommendation, blocked),
+        resource_risk: strategy_resource_risk(recommendation, blocked),
+        status: StrategyProposalStatus::Proposed,
+        source_run_id: run_id,
+        tool: Some(recommendation.tool.clone()),
+        next_input: Some(recommendation.next_input.clone()),
+        created_at_ms: now,
+        updated_at_ms: now,
+    }
+}
+
+fn strategy_preflight(
+    recommendation: &ModuleRecommendation,
+    blocked: bool,
+) -> StrategyPreflight {
+    if blocked {
+        return StrategyPreflight {
+            status: StrategyPreflightStatus::Blocked,
+            notes: vec![recommendation.reason.clone()],
+        };
+    }
+    StrategyPreflight {
+        status: StrategyPreflightStatus::Ready,
+        notes: recommendation.signals.iter().take(3).cloned().collect(),
+    }
+}
+
+fn strategy_resource_risk(
+    recommendation: &ModuleRecommendation,
+    blocked: bool,
+) -> StrategyResourceRisk {
+    if blocked {
+        return StrategyResourceRisk::Blocked;
+    }
+    if recommendation.requires_runtime {
+        return StrategyResourceRisk::Medium;
+    }
+    match recommendation.priority {
+        RecommendationPriority::High => StrategyResourceRisk::Medium,
+        RecommendationPriority::Medium => StrategyResourceRisk::Low,
+        RecommendationPriority::Low => StrategyResourceRisk::Low,
+    }
+}
+
+fn strategy_runtime_estimate(recommendation: &ModuleRecommendation) -> &'static str {
+    if recommendation.requires_runtime {
+        "model-assisted pass"
+    } else {
+        "local pass"
+    }
+}
+
+fn strategy_tool_slug(tool: &str) -> String {
+    tool.chars()
+        .map(|value| {
+            if value.is_ascii_alphanumeric() {
+                value.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+fn strategy_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
+        .unwrap_or_default()
 }
 
 /// Recommendable tools that shell out to an external scanner, paired with the

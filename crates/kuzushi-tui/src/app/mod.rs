@@ -104,7 +104,8 @@ pub use onboarding::{
     skip_onboarding_env, toggle_planning_row, topological_order, transitive_dependencies,
     ArtifactState as PlanningArtifactState, FailedPlanningTask, InitialOnboardingPhase,
     OnboardingInputs, PendingRetry, PlanningTaskId, PlanningTaskRow, RetryAdjustment,
-    RowDisposition, TargetCandidate, TargetProfile, ToggleOutcome, WorkflowPhase,
+    RowDisposition, TargetCandidate, TargetCandidateScope, TargetProfile, ToggleOutcome,
+    WorkflowPhase,
 };
 pub use prereq_chain::{
     PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqPlanAction, PrereqPlanStep,
@@ -125,6 +126,6 @@ pub use view_state::{
     HistorySearch, KnowledgeBaseView, Notice, NoticeSeverity, OptionsFilter, OptionsView,
     PaneFocus, PlanChange, PlanProposal, PromptsAction, PwnView, ReconSnapshot, RecordedTraceEvent,
     ScanPanelState, ShellView, SubsystemAggregate, ThreatPatch, ThreatView, ThrottleAdvisory,
-    TuneAction, WorkbenchPane, WorkspaceView,
+    TuneAction, WorkbenchPane, WorkbenchPaneScroll, WorkspaceView,
 };
 pub(crate) use view_state::{SastTaskMode, SastTaskRow};

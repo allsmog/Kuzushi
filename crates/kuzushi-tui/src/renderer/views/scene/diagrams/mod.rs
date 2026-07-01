@@ -1,4 +1,4 @@
-//! The gallery's 2D diagrams — pure presentation that turns dummy security data
+//! The gallery's 2D diagrams — pure presentation that turns Kuzushi view models
 //! into styled box-drawing `Line`s. Each module owns one diagram; this file
 //! holds the small shared vocabulary (severity tones, span/line helpers).
 

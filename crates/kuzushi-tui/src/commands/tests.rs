@@ -19,10 +19,22 @@ mod tests {
         assert_eq!(parse_command("/findings"), ShellCommand::Findings);
         assert_eq!(parse_command("/f"), ShellCommand::Findings);
         assert_eq!(
+            parse_command("findings filter state:new rank:high run:scan-1"),
+            ShellCommand::FindingsFilter("state:new rank:high run:scan-1".to_string())
+        );
+        assert_eq!(
             parse_command("findings export /tmp/findings.json"),
             ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
                 output: PathBuf::from("/tmp/findings.json")
             })
+        );
+        assert_eq!(parse_command("runs"), ShellCommand::ShowRuns);
+        assert_eq!(
+            parse_command("runs diff run-left run-right"),
+            ShellCommand::RunDiff {
+                left: "run-left".to_string(),
+                right: "run-right".to_string()
+            }
         );
         assert_eq!(parse_command("/back"), ShellCommand::Back);
         assert_eq!(
@@ -46,12 +58,20 @@ mod tests {
             ShellCommand::Prompt("show run".to_string())
         );
         assert_eq!(
+            parse_command("/prompt mutate triage \"focus authz\""),
+            ShellCommand::Prompt("mutate triage \"focus authz\"".to_string())
+        );
+        assert_eq!(
             parse_command("/open abc123"),
             ShellCommand::Open("abc123".to_string())
         );
         assert_eq!(
             parse_command("/scan ./repo"),
             ShellCommand::Scan(Some(PathBuf::from("./repo")))
+        );
+        assert_eq!(
+            parse_command("/target rev abcdef1"),
+            ShellCommand::TargetRevision("abcdef1".to_string())
         );
         assert_eq!(parse_command("/pwn"), ShellCommand::Pwn(PwnCommand::Show));
         assert_eq!(
@@ -281,6 +301,38 @@ mod tests {
             parse_command("/context regen repo"),
             ShellCommand::Context(ContextCommand::Regen("repo".to_string()))
         );
+        assert_eq!(parse_command("project model"), ShellCommand::ProjectModel);
+        assert_eq!(
+            parse_command("strategy"),
+            ShellCommand::Strategy(StrategyCommand::Show)
+        );
+        assert_eq!(
+            parse_command("strategies"),
+            ShellCommand::Strategy(StrategyCommand::Show)
+        );
+        assert_eq!(
+            parse_command("strategy queue"),
+            ShellCommand::Strategy(StrategyCommand::Show)
+        );
+        assert_eq!(
+            parse_command("strategy approve review-codeql-scan"),
+            ShellCommand::Strategy(StrategyCommand::Approve("review-codeql-scan".to_string()))
+        );
+        assert_eq!(
+            parse_command("strategy reject review-codeql-scan"),
+            ShellCommand::Strategy(StrategyCommand::Reject("review-codeql-scan".to_string()))
+        );
+        assert_eq!(
+            parse_command(
+                "strategy correct review-codeql-scan run codeql:scan with authz focus --workspace --reason tighten authz paths"
+            ),
+            ShellCommand::Strategy(StrategyCommand::Correct {
+                id: "review-codeql-scan".to_string(),
+                to_strategy: "run codeql:scan with authz focus".to_string(),
+                reason: Some("tighten authz paths".to_string()),
+                scope: StrategyCorrectionCommandScope::Workspace,
+            })
+        );
         assert_eq!(
             parse_command("/workspace"),
             ShellCommand::Workspace(WorkspaceCommand::Status)
@@ -450,6 +502,7 @@ mod tests {
             "detach",
             "failure-handoff",
             "findings",
+            "findings-filter",
             "help",
             "home",
             "history",
@@ -470,12 +523,14 @@ mod tests {
             "prompts",
             "prompt",
             "provider",
+            "project-model",
             "quickstart",
             "recommend",
             "quit",
             "reparse",
             "replay",
             "resume",
+            "run-diff",
             "run-tool",
             "scan",
             "scene",
@@ -484,7 +539,9 @@ mod tests {
             "show-runs",
             "since",
             "story",
+            "strategy",
             "target",
+            "target-revision",
             "task",
             "tasks",
             "threat",
@@ -542,6 +599,7 @@ mod tests {
             ShellCommand::Tools => "tools",
             ShellCommand::Workbench(_) => "workbench",
             ShellCommand::Findings => "findings",
+            ShellCommand::FindingsFilter(_) => "findings-filter",
             ShellCommand::Open(_) => "open",
             ShellCommand::Scan(_) => "scan",
             ShellCommand::Model(_) => "model",
@@ -552,6 +610,7 @@ mod tests {
             ShellCommand::Cost => "cost",
             ShellCommand::Config => "config",
             ShellCommand::Permissions => "permissions",
+            ShellCommand::ProjectModel => "project-model",
             ShellCommand::Use(_) => "use",
             ShellCommand::Tune => "tune",
             ShellCommand::Threat(_) => "threat",
@@ -564,6 +623,7 @@ mod tests {
             ShellCommand::Prompt(_) => "prompt",
             ShellCommand::Actor(_) => "actor",
             ShellCommand::ShowRuns => "show-runs",
+            ShellCommand::RunDiff { .. } => "run-diff",
             ShellCommand::ShowAliases(_) => "show-aliases",
             ShellCommand::Since(_) => "since",
             ShellCommand::Replay(_) => "replay",
@@ -578,6 +638,7 @@ mod tests {
             ShellCommand::Next => "next",
             ShellCommand::Logs => "logs",
             ShellCommand::Target(_) => "target",
+            ShellCommand::TargetRevision(_) => "target-revision",
             ShellCommand::Ask(_) => "ask",
             ShellCommand::Options { .. } => "options",
             ShellCommand::SetOption { .. } => "set-option",
@@ -586,6 +647,7 @@ mod tests {
             ShellCommand::Task(_) => "task",
             ShellCommand::Context(_) => "context",
             ShellCommand::Workspace(_) => "workspace",
+            ShellCommand::Strategy(_) => "strategy",
             ShellCommand::Pwn(_) => "pwn",
             ShellCommand::KnowledgeBase(_) => "kb",
             ShellCommand::Attach(_) => "attach",

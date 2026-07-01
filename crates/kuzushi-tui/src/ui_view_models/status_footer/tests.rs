@@ -74,6 +74,27 @@ fn status_footer_shows_scope_chip_when_program_scope_loaded() {
 }
 
 #[test]
+fn status_footer_shows_active_project_scope_chip() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.active_scope = Some(crate::app::TargetCandidateScope {
+        id: "submodule-libs-parser".to_string(),
+        kind: kuzushi_core::NestedProjectKind::Submodule,
+        rel_path: "libs/parser".to_string(),
+    });
+
+    let model = status_footer_model(&app);
+
+    assert!(
+        model
+            .left_segments
+            .iter()
+            .any(|segment| segment == "project-scope:libs/parser"),
+        "expected active project scope chip, got {:?}",
+        model.left_segments
+    );
+}
+
+#[test]
 fn status_footer_model_prefers_active_scan_status() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.config.model = Some("openai:gpt-5.2".to_string());

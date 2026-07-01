@@ -1,7 +1,7 @@
 //! Pure scene→framebuffer rasterizer: perspective projection to pixels,
 //! z-buffered discs, Lambert-shaded surfels, depth fog and additive-glow
-//! threads. No ratatui and no theme dependency — so the exact pixel output is
-//! reproducible off-screen (see `examples/scene_preview.rs`) and unit-testable.
+//! threads. No ratatui dependency; the palette follows the active terminal
+//! theme so high-contrast mode also covers frame-rendered scenes.
 
 use crate::scene3d::{
     dot, normalize, project, view_space, Camera, EdgeKind, Framebuffer, Scene, SceneColor,
@@ -31,6 +31,23 @@ pub fn default_palette(color: SceneColor) -> [f32; 3] {
         SceneColor::Info => [0.651, 0.804, 1.0],
         SceneColor::Success => [0.341, 0.769, 0.475],
         SceneColor::Muted => [0.490, 0.529, 0.580],
+    }
+}
+
+pub fn active_palette(color: SceneColor) -> [f32; 3] {
+    if crate::theme::active_theme().high_contrast {
+        return high_contrast_palette(color);
+    }
+    default_palette(color)
+}
+
+fn high_contrast_palette(color: SceneColor) -> [f32; 3] {
+    match color {
+        SceneColor::Wire | SceneColor::Muted => [0.81, 0.84, 0.88],
+        SceneColor::Accent | SceneColor::Low | SceneColor::Info => [1.0, 1.0, 1.0],
+        SceneColor::Critical | SceneColor::High => [1.0, 0.43, 0.43],
+        SceneColor::Medium => [1.0, 0.86, 0.30],
+        SceneColor::Success => [0.42, 0.92, 0.58],
     }
 }
 
@@ -126,7 +143,7 @@ fn draw_wire(fb: &mut Framebuffer, proj: &Projector, edge: &SceneEdge) {
     let (Some(a), Some(b)) = (proj.pixel(edge.from), proj.pixel(edge.to)) else {
         return;
     };
-    let color = fog(default_palette(edge.color), (a.2 + b.2) / 2.0);
+    let color = fog(active_palette(edge.color), (a.2 + b.2) / 2.0);
     fb.segment(a, b, 0.6, color);
 }
 
@@ -138,14 +155,14 @@ fn draw_splat(fb: &mut Framebuffer, proj: &Projector, splat: &Splat, cam: Camera
         // Surface samples: flat-shaded facet at a steady radius so a surface
         // fills without holes.
         Some(n) => {
-            let lit = mul(default_palette(splat.color), shading(Some(n), cam, light));
+            let lit = mul(active_palette(splat.color), shading(Some(n), cam, light));
             let radius = (splat.size * proj.scale).max(0.6);
             fb.disc(px, py, depth, radius, fog(lit, depth));
         }
         // Free-floating node: a glossy 3D ball with perspective size.
         None => {
             let radius = (splat.size * proj.scale * (0.6 + 0.6 * depth)).max(0.9);
-            let base = fog(default_palette(splat.color), depth);
+            let base = fog(active_palette(splat.color), depth);
             fb.shaded_ball(px, py, depth, radius, base);
         }
     }
@@ -163,20 +180,14 @@ fn draw_thread_core(fb: &mut Framebuffer, proj: &Projector, edge: &SceneEdge) {
     let (Some(a), Some(b)) = (proj.pixel(edge.from), proj.pixel(edge.to)) else {
         return;
     };
-    fb.segment(a, b, 1.2, brighten(default_palette(edge.color)));
+    fb.segment(a, b, 1.2, brighten(active_palette(edge.color)));
 }
 
 fn draw_thread_glow(fb: &mut Framebuffer, proj: &Projector, edge: &SceneEdge) {
     let (Some(a), Some(b)) = (proj.pixel(edge.from), proj.pixel(edge.to)) else {
         return;
     };
-    fb.glow_segment(
-        (a.0, a.1),
-        (b.0, b.1),
-        3.2,
-        default_palette(edge.color),
-        0.5,
-    );
+    fb.glow_segment((a.0, a.1), (b.0, b.1), 3.2, active_palette(edge.color), 0.5);
 }
 
 fn mul(c: [f32; 3], k: f32) -> [f32; 3] {

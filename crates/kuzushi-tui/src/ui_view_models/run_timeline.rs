@@ -1,9 +1,10 @@
 use super::{scan_status, ui_runs_root};
 use crate::{ScanPanelState, ShellApp};
 use kuzushi_core::run_artifacts::canonical_run_artifact_spec;
+use kuzushi_core::RunTargetGitMetadata;
 use std::path::{Path, PathBuf};
 
-const RUN_TIMELINE_COLUMN_COUNT: usize = 4;
+const RUN_TIMELINE_COLUMN_COUNT: usize = 5;
 const RUN_ID_CELL: usize = 0;
 const LEGACY_RUN_SUMMARY_FILE: &str = "summary.json";
 
@@ -23,6 +24,7 @@ struct PastRun {
     run_id: String,
     status_kind: PastRunStatus,
     findings: Option<u64>,
+    revision: String,
     target: String,
 }
 
@@ -72,10 +74,17 @@ fn active_scan_row(scan: &ScanPanelState) -> RunTimelineRow {
                 .unwrap_or_else(pending_id),
             scan_status(scan),
             scan.findings_count.to_string(),
+            active_scan_revision_label(scan),
             scan.target.display().to_string(),
         ],
         tone: active_scan_status(scan),
     }
+}
+
+fn active_scan_revision_label(scan: &ScanPanelState) -> String {
+    kuzushi_core::workspace::target_git_metadata(&scan.target)
+        .map(|git| target_git_revision_label(&git))
+        .unwrap_or_else(|| "rev:unknown".to_string())
 }
 
 fn active_scan_status(scan: &ScanPanelState) -> PastRunStatus {
@@ -109,6 +118,7 @@ fn past_run_row(past: &PastRun) -> RunTimelineRow {
             short_id(&past.run_id),
             past.status_label().to_string(),
             finding_count_label(past.findings),
+            past.revision.clone(),
             past.target.clone(),
         ],
         tone: past.status_kind,
@@ -151,16 +161,17 @@ fn past_run_from_entry(entry: std::fs::DirEntry) -> Option<PastRun> {
         return None;
     }
     let run_id = entry.file_name().to_string_lossy().to_string();
-    let (status_kind, findings, target) = read_past_run_metadata(&entry.path());
+    let (status_kind, findings, revision, target) = read_past_run_metadata(&entry.path());
     Some(PastRun {
         run_id,
         status_kind,
         findings,
+        revision,
         target,
     })
 }
 
-fn read_past_run_metadata(run_dir: &Path) -> (PastRunStatus, Option<u64>, String) {
+fn read_past_run_metadata(run_dir: &Path) -> (PastRunStatus, Option<u64>, String, String) {
     let metadata_leaf = run_metadata_artifact_leaf();
     let value = match read_run_artifact_json(&run_dir.join(metadata_leaf)) {
         JsonArtifactRead::Present(value) => Some(value),
@@ -189,12 +200,32 @@ fn read_past_run_metadata(run_dir: &Path) -> (PastRunStatus, Option<u64>, String
             .map(parse_past_run_status)
             .unwrap_or(PastRunStatus::Unknown),
         value.get("findings").and_then(serde_json::Value::as_u64),
+        run_revision_label(&value),
         value
             .get("target")
             .and_then(serde_json::Value::as_str)
             .map(ToString::to_string)
             .unwrap_or_default(),
     )
+}
+
+fn run_revision_label(value: &serde_json::Value) -> String {
+    value
+        .get("targetGit")
+        .or_else(|| value.get("target_git"))
+        .and_then(|git| serde_json::from_value::<RunTargetGitMetadata>(git.clone()).ok())
+        .map(|git| target_git_revision_label(&git))
+        .unwrap_or_else(|| "rev:unknown".to_string())
+}
+
+fn target_git_revision_label(git: &RunTargetGitMetadata) -> String {
+    let short = git.sha.chars().take(7).collect::<String>();
+    let dirty = if git.dirty { "*" } else { "" };
+    if short.is_empty() {
+        "rev:unknown".to_string()
+    } else {
+        format!("rev:{short}{dirty}")
+    }
 }
 
 fn run_metadata_artifact_leaf() -> &'static str {
@@ -230,18 +261,29 @@ fn read_run_artifact_json(path: &Path) -> JsonArtifactRead {
     }
 }
 
-fn empty_past_run_metadata() -> (PastRunStatus, Option<u64>, String) {
-    (PastRunStatus::Unknown, None, String::new())
+fn empty_past_run_metadata() -> (PastRunStatus, Option<u64>, String, String) {
+    (
+        PastRunStatus::Unknown,
+        None,
+        "rev:unknown".to_string(),
+        String::new(),
+    )
 }
 
-fn malformed_past_run_metadata(file: &str) -> (PastRunStatus, Option<u64>, String) {
-    (PastRunStatus::Malformed, None, format!("malformed {file}"))
-}
-
-fn non_file_past_run_metadata(file: &str) -> (PastRunStatus, Option<u64>, String) {
+fn malformed_past_run_metadata(file: &str) -> (PastRunStatus, Option<u64>, String, String) {
     (
         PastRunStatus::Malformed,
         None,
+        "rev:unknown".to_string(),
+        format!("malformed {file}"),
+    )
+}
+
+fn non_file_past_run_metadata(file: &str) -> (PastRunStatus, Option<u64>, String, String) {
+    (
+        PastRunStatus::Malformed,
+        None,
+        "rev:unknown".to_string(),
         format!("{file} is not a file"),
     )
 }

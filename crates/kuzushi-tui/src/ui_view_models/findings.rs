@@ -1,10 +1,13 @@
+use super::workspace::findings_db_relative_path;
 use super::{context_snapshot_state, SeverityCounts, SeverityTone};
 use crate::ShellApp;
 use kuzushi_core::{
-    finding_source_label, project_finding, sorted_finding_aliases, stable_finding_alias, Finding,
+    finding_source_label, project_finding, Finding, RunSummary, RunTargetGitMetadata,
 };
+use std::collections::BTreeMap;
 
 const FINDINGS_PREVIEW_LIMIT: usize = 8;
+const FINDING_DETAIL_SECTION_LIMIT: usize = 8;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FindingsModel {
@@ -15,6 +18,7 @@ pub(crate) struct FindingsModel {
     pub(crate) header: String,
     pub(crate) cursor: usize,
     pub(crate) empty: FindingsEmptyState,
+    pub(crate) selected_out_of_window: Option<String>,
     pub(crate) rows: Vec<FindingListRow>,
     pub(crate) preview: FindingsPreviewModel,
 }
@@ -22,6 +26,7 @@ pub(crate) struct FindingsModel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FindingsEmptyState {
     pub(crate) hint: &'static str,
+    pub(crate) ledger: String,
     pub(crate) context_cta: Option<(&'static str, &'static str)>,
 }
 
@@ -46,6 +51,8 @@ pub(crate) struct FindingListRow {
     pub(crate) severity_label: String,
     pub(crate) title: String,
     pub(crate) location: String,
+    pub(crate) run_label: String,
+    pub(crate) revision_label: String,
     pub(crate) verdict: String,
     pub(crate) confidence: String,
     pub(crate) cwe: String,
@@ -69,6 +76,8 @@ pub(crate) struct FindingDetailModel {
     pub(crate) runtime_verification: String,
     pub(crate) evidence: Vec<FindingEvidenceRow>,
     pub(crate) message_lines: Vec<String>,
+    pub(crate) message_overflow: usize,
+    pub(crate) evidence_overflow: usize,
     pub(crate) triage: Option<TriageSummaryModel>,
 }
 
@@ -88,6 +97,7 @@ pub(crate) struct TriageSummaryModel {
 
 pub(crate) fn findings_model(app: &ShellApp) -> FindingsModel {
     let rows = finding_rows(app);
+    let selected_out_of_window = selected_out_of_window_notice(app, &rows);
     let total = app.findings.len();
     let triaged = app
         .findings
@@ -103,18 +113,57 @@ pub(crate) fn findings_model(app: &ShellApp) -> FindingsModel {
         header: format!("FINDINGS · {total} · {triaged} triaged · {pending} pending"),
         cursor: app.findings_cursor.min(total.saturating_sub(1)),
         empty: empty_state(context_snapshot_state(app)),
+        selected_out_of_window,
         preview: findings_preview(total, triaged, pending, &rows),
         rows,
     }
 }
 
 pub(crate) fn selected_finding_detail_model(app: &ShellApp) -> Option<FindingDetailModel> {
-    let finding = app.selected_finding.as_ref()?;
-    let alias = stable_finding_alias(&app.findings, &finding.fingerprint);
+    let (alias, finding) = current_finding_for_detail(app)?;
     Some(FindingDetailModel::from_finding(
-        finding,
+        &finding,
         alias,
         target_base(app).as_deref(),
+    ))
+}
+
+pub(crate) fn current_finding_for_detail(app: &ShellApp) -> Option<(Option<String>, Finding)> {
+    let sorted = cached_sorted_finding_alias_indices(app);
+    if let Some(finding) = selected_outside_loaded_findings(app, &sorted) {
+        let alias = cached_alias_for_fingerprint(app, &finding.fingerprint);
+        return Some((alias, finding));
+    }
+    if let Some((alias, index)) = sorted.get(app.findings_cursor) {
+        return app
+            .findings
+            .get(*index)
+            .cloned()
+            .map(|finding| (Some(alias.clone()), finding));
+    }
+    let finding = app.selected_finding.clone()?;
+    let alias = cached_alias_for_fingerprint(app, &finding.fingerprint);
+    Some((alias, finding))
+}
+
+fn selected_outside_loaded_findings(app: &ShellApp, sorted: &[(String, usize)]) -> Option<Finding> {
+    let selected = app.selected_finding.as_ref()?;
+    let selected_is_loaded = sorted.iter().any(|(_, index)| {
+        app.findings
+            .get(*index)
+            .is_some_and(|finding| finding.fingerprint == selected.fingerprint)
+    });
+    (!selected_is_loaded).then_some(selected.clone())
+}
+
+fn selected_out_of_window_notice(app: &ShellApp, rows: &[FindingListRow]) -> Option<String> {
+    let selected = app.selected_finding.as_ref()?;
+    if rows.iter().any(|row| row.selected) {
+        return None;
+    }
+    Some(format!(
+        "opened finding is outside the loaded list · {}",
+        selected.fingerprint
     ))
 }
 
@@ -124,29 +173,50 @@ fn finding_rows(app: &ShellApp) -> Vec<FindingListRow> {
         .as_ref()
         .map(|finding| finding.fingerprint.as_str());
     let base = target_base(app);
-    sorted_finding_aliases(&app.findings)
+    let runs = run_summary_index(app);
+    cached_sorted_finding_alias_indices(app)
         .into_iter()
         .enumerate()
-        .map(|(index, (alias, finding))| {
-            FindingListRow::from_finding(
-                index,
+        .filter_map(|(row_index, (alias, finding_index))| {
+            let finding = app.findings.get(finding_index)?;
+            let provenance = finding_run_provenance(&finding, &runs);
+            Some(FindingListRow::from_finding(
+                row_index,
                 app.findings_cursor,
                 selected,
                 alias,
-                &finding,
+                finding,
                 base.as_deref(),
-            )
+                provenance,
+            ))
         })
         .collect()
+}
+
+pub(crate) fn cached_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
+    app.workbench_cache
+        .borrow_mut()
+        .sorted_finding_alias_indices(&app.findings)
+}
+
+fn cached_alias_for_fingerprint(app: &ShellApp, fingerprint: &str) -> Option<String> {
+    cached_sorted_finding_alias_indices(app)
+        .into_iter()
+        .find_map(|(alias, index)| {
+            app.findings
+                .get(index)
+                .is_some_and(|finding| finding.fingerprint == fingerprint)
+                .then_some(alias)
+        })
 }
 
 /// The canonical absolute target path, used to relativize finding locations so
 /// the list shows `crates/foo.rs:12` instead of a full `/Users/...` path. Shared
 /// with the Workbench SOURCE tree so both surfaces relativize identically.
 pub(crate) fn target_base(app: &ShellApp) -> Option<String> {
-    let target = app.target.as_ref()?;
-    let canonical = target.canonicalize().unwrap_or_else(|_| target.clone());
-    Some(canonical.to_string_lossy().into_owned())
+    app.workbench_cache
+        .borrow_mut()
+        .target_base(app.target.as_deref())
 }
 
 /// Strip the target prefix from a `path:line` location when present, leaving a
@@ -165,14 +235,17 @@ fn empty_state(context_state: &'static str) -> FindingsEmptyState {
     match context_state {
         "present" => FindingsEmptyState {
             hint: "runs configured scanners against the active target.",
+            ledger: format!("ledger: {}", findings_db_relative_path()),
             context_cta: None,
         },
         "malformed" => FindingsEmptyState {
             hint: "context snapshot is malformed; rebuild it before scanning.",
+            ledger: format!("ledger: {}", findings_db_relative_path()),
             context_cta: Some(("context build", "rewrite the malformed snapshot first")),
         },
         _ => FindingsEmptyState {
             hint: "runs the umbrella scanner over the target.",
+            ledger: format!("ledger: {}", findings_db_relative_path()),
             context_cta: Some((
                 "context build",
                 "optional: index the repo first for richer analysis.",
@@ -210,6 +283,7 @@ impl FindingListRow {
         alias: String,
         finding: &Finding,
         base: Option<&str>,
+        provenance: FindingRunProvenance,
     ) -> Self {
         let projection = project_finding(finding, Some(alias.clone()));
         Self {
@@ -218,6 +292,8 @@ impl FindingListRow {
             severity_label: projection.severity_label,
             title: projection.title,
             location: relativize_location(projection.location, base),
+            run_label: provenance.run_label,
+            revision_label: provenance.revision_label,
             verdict: projection.verdict_label,
             confidence: projection.confidence_label,
             cwe: projection.cwe_label,
@@ -229,9 +305,94 @@ impl FindingListRow {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct FindingRunProvenance {
+    run_label: String,
+    revision_label: String,
+}
+
+fn run_summary_index(app: &ShellApp) -> BTreeMap<String, RunSummary> {
+    app.workbench_cache
+        .borrow_mut()
+        .run_summary_index(app.target.as_deref(), finding_scan_ids(app))
+}
+
+fn finding_scan_ids(app: &ShellApp) -> Vec<String> {
+    app.findings
+        .iter()
+        .filter_map(|finding| finding.scan_id.as_deref())
+        .filter(|scan_id| !scan_id.is_empty())
+        .map(ToString::to_string)
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+fn finding_run_provenance(
+    finding: &Finding,
+    runs: &BTreeMap<String, RunSummary>,
+) -> FindingRunProvenance {
+    let Some(run_id) = finding
+        .scan_id
+        .as_deref()
+        .filter(|run_id| !run_id.is_empty())
+    else {
+        return FindingRunProvenance {
+            run_label: "run:unknown".to_string(),
+            revision_label: "rev:unknown".to_string(),
+        };
+    };
+    FindingRunProvenance {
+        run_label: format!("run:{}", compact_run_id(run_id)),
+        revision_label: runs
+            .get(run_id)
+            .and_then(run_revision_label)
+            .unwrap_or_else(|| "rev:unknown".to_string()),
+    }
+}
+
+fn run_revision_label(summary: &RunSummary) -> Option<String> {
+    summary.target_git.as_ref().map(target_git_revision_label)
+}
+
+fn target_git_revision_label(git: &RunTargetGitMetadata) -> String {
+    format!(
+        "rev:{}{}",
+        compact_git_sha(&git.sha),
+        if git.dirty { "*" } else { "" }
+    )
+}
+
+fn compact_run_id(run_id: &str) -> String {
+    compact_middle(run_id, 6, 4, 14)
+}
+
+fn compact_git_sha(sha: &str) -> String {
+    sha.chars().take(7).collect()
+}
+
+fn compact_middle(value: &str, head: usize, tail: usize, max_len: usize) -> String {
+    let chars = value.chars().collect::<Vec<_>>();
+    if chars.len() <= max_len {
+        return value.to_string();
+    }
+    let prefix = chars.iter().take(head).collect::<String>();
+    let suffix = chars
+        .iter()
+        .skip(chars.len().saturating_sub(tail))
+        .collect::<String>();
+    format!("{prefix}..{suffix}")
+}
+
 impl FindingDetailModel {
     fn from_finding(finding: &Finding, alias: Option<String>, base: Option<&str>) -> Self {
         let projection = project_finding(finding, alias);
+        let message_lines = finding
+            .message
+            .lines()
+            .take(FINDING_DETAIL_SECTION_LIMIT)
+            .map(str::to_string)
+            .collect::<Vec<_>>();
         Self {
             alias: projection.alias,
             severity_tone: SeverityTone::from_severity(projection.severity),
@@ -244,12 +405,16 @@ impl FindingDetailModel {
             proof_state: projection.proof_state,
             runtime_verification: projection.runtime_validation,
             evidence: evidence_rows(finding),
-            message_lines: finding
+            message_overflow: finding
                 .message
                 .lines()
-                .take(8)
-                .map(str::to_string)
-                .collect(),
+                .count()
+                .saturating_sub(message_lines.len()),
+            evidence_overflow: finding
+                .evidence
+                .len()
+                .saturating_sub(FINDING_DETAIL_SECTION_LIMIT),
+            message_lines,
             triage: finding.triage.as_ref().map(TriageSummaryModel::from_triage),
         }
     }
@@ -282,7 +447,7 @@ fn evidence_rows(finding: &Finding) -> Vec<FindingEvidenceRow> {
     finding
         .evidence
         .iter()
-        .take(8)
+        .take(FINDING_DETAIL_SECTION_LIMIT)
         .map(FindingEvidenceRow::from_evidence)
         .collect()
 }

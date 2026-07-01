@@ -7,9 +7,9 @@ pub(crate) fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider("RUN TIMELINE", area.width));
-    let widths = [14usize, 14, 9, value_width(area, 42)];
+    let widths = [14usize, 12, 9, 13, value_width(area, 34)];
     lines.push(aligned_header(
-        &["runId", "status", "findings", "target"],
+        &["runId", "status", "findings", "revision", "target"],
         &widths,
     ));
 
@@ -23,15 +23,16 @@ pub(crate) fn runs_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
 fn append_run_timeline_rows(
     lines: &mut Vec<Line<'static>>,
     rows: &[RunTimelineRow],
-    widths: &[usize; 4],
+    widths: &[usize; 5],
 ) {
     for row in rows {
-        let [run_id, status, findings, target] = &row.cells;
+        let [run_id, status, findings, revision, target] = &row.cells;
         lines.push(runs_row(
             run_id,
             status,
             run_timeline_status_style(row.tone),
             findings,
+            revision,
             target,
             widths,
         ));
@@ -49,7 +50,13 @@ fn append_runs_footer(lines: &mut Vec<Line<'static>>, emitted: usize, area: Rect
     }
     lines.push(blank());
     lines.push(command_list_line(
-        &["replay <runId>", "trace <runId>", "findings", "back"],
+        &[
+            "runs diff <left> <right>",
+            "replay <runId>",
+            "trace <runId>",
+            "findings",
+            "back",
+        ],
         area.width as usize,
     ));
 }

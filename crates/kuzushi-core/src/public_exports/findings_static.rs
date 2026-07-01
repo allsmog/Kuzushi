@@ -3,11 +3,12 @@ pub use crate::findings::{
     finding_evidence_preview, finding_location, finding_source_label, finding_verdict_label,
     format_finding_alias, normalize_cwe, parse_finding_alias, project_finding, proof_ladder_state,
     proof_state_label, resolve_finding_alias, runtime_validation_label, severity_badge,
-    severity_icon, sorted_finding_aliases, stable_finding_alias, Finding, FindingDetailReport,
-    FindingEvidence, FindingListFilter, FindingListReport, FindingNextAction, FindingProjection,
-    FindingStore, FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus,
-    PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, ProofLadderState,
-    Severity, StaticProofState, TriageOutcome, TriageVerdict, VulnSource,
+    severity_icon, sorted_finding_alias_indices, sorted_finding_aliases, stable_finding_alias,
+    Finding, FindingDetailReport, FindingEvidence, FindingListFilter, FindingListReport,
+    FindingNextAction, FindingProjection, FindingStore, FindingVerdictFilter, PatchAttempt,
+    PatchResult, PatchStatus, PersistedProofVerdict, PersistedSandboxBackend,
+    PersistedVerification, ProofLadderState, Severity, StaticProofState, TriageOutcome,
+    TriageVerdict, VulnSource,
 };
 pub use crate::pr_comment::{
     build_pr_comment, PrCommentChain, PrCommentChainStep, PrCommentInput, PrCommentPhaseCost,

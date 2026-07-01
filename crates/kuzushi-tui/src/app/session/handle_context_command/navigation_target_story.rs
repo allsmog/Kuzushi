@@ -68,11 +68,69 @@ impl ShellApp {
                     );
                 } else {
                     self.log("target", format!("set {}", root.display()));
+                    if let Some(tree) = self.refresh_nested_project_scopes(&root) {
+                        self.active_scope = active_scope_from_tree(&tree, None);
+                    }
                 }
                 self.refresh_findings(false);
                 self.refresh_program_scope();
             }
             Err(error) => self.log("error", format!("invalid target {raw:?}: {error}")),
+        }
+    }
+
+    pub fn handle_target_revision_command(&mut self, reference: &str) {
+        let Some(target) = self.target.clone() else {
+            self.log(
+                "target",
+                "revision switch requires an active target; run target <path> first",
+            );
+            return;
+        };
+        match kuzushi_core::switch_target_revision(&target, reference) {
+            Ok(outcome) => {
+                *self.workbench_cache.borrow_mut() = WorkbenchCache::default();
+                let preferred_scope = self.active_scope.as_ref().map(|scope| scope.id.clone());
+                if let Some(tree) = self.refresh_nested_project_scopes(&target) {
+                    self.active_scope = active_scope_from_tree(&tree, preferred_scope.as_deref());
+                }
+                self.refresh_findings(false);
+                self.refresh_program_scope();
+                self.log(
+                    "target",
+                    format!(
+                        "switched revision {} -> {}",
+                        short_revision(&outcome.previous.sha),
+                        short_revision(&outcome.current.sha)
+                    ),
+                );
+            }
+            Err(error) => self.log(
+                "target",
+                format!("revision switch blocked for {reference:?}: {error}"),
+            ),
+        }
+    }
+
+    fn refresh_nested_project_scopes(
+        &mut self,
+        root: &std::path::Path,
+    ) -> Option<kuzushi_core::NestedProjectScopeTree> {
+        match kuzushi_core::discover_and_save_nested_project_scopes(root) {
+            Ok(tree) => {
+                let nested_count = tree.scopes.len().saturating_sub(1);
+                if nested_count > 0 {
+                    self.log(
+                        "target",
+                        format!("project scopes refreshed: {nested_count} nested scope(s)"),
+                    );
+                }
+                Some(tree)
+            }
+            Err(error) => {
+                self.log("target", format!("project scope discovery failed: {error}"));
+                None
+            }
         }
     }
 
@@ -95,4 +153,18 @@ impl ShellApp {
             self.show_story();
         }
     }
+}
+
+fn short_revision(sha: &str) -> String {
+    sha.chars().take(7).collect()
+}
+
+fn active_scope_from_tree(
+    tree: &kuzushi_core::NestedProjectScopeTree,
+    preferred_id: Option<&str>,
+) -> Option<TargetCandidateScope> {
+    preferred_id
+        .and_then(|id| tree.scopes.iter().find(|scope| scope.id == id))
+        .or_else(|| tree.root_scope())
+        .map(TargetCandidateScope::from)
 }

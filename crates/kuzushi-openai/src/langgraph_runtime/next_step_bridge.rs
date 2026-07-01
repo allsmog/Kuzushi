@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use kuzushi_core::{AgentLoopStep, AgentToolLoopRequest, LoopHistoryEntry, ToolCall};
 
-use super::bridge_payloads::{BridgeTool, NextStepBridgeRequest, NextStepBridgeResponse};
+use super::bridge_payloads::{
+    BridgeTool, NextStepBridgeRequest, NextStepBridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
+};
 use super::bridge_process::{
     public_bridge_error, run_next_step_bridge, run_next_step_preflight_bridge,
 };
@@ -77,6 +79,7 @@ fn next_step_bridge_request(
     history: &[LoopHistoryEntry],
 ) -> NextStepBridgeRequest {
     NextStepBridgeRequest {
+        protocol_version: LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
         envelope_type: "next-step",
         model: request.model.clone(),
         cwd: request.cwd.display().to_string(),

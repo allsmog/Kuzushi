@@ -56,6 +56,33 @@ pub(crate) const OPTIONS_TASK_COMMANDS: &[ShellCommandSpec] = &[
         description: "choose SAST scanner tasks",
     },
     ShellCommandSpec {
+        command: "strategy",
+        aliases: &["/strategy", "strategies", "strategy queue"],
+        category: ShellCommandCategory::OptionsTasks,
+        description: "show proposed phase strategies",
+    },
+    ShellCommandSpec {
+        command: "strategy approve <id>",
+        aliases: &["/strategy approve <id>"],
+        category: ShellCommandCategory::OptionsTasks,
+        description: "approve a queued strategy proposal",
+    },
+    ShellCommandSpec {
+        command: "strategy reject <id>",
+        aliases: &["/strategy reject <id>"],
+        category: ShellCommandCategory::OptionsTasks,
+        description: "reject a queued strategy proposal",
+    },
+    ShellCommandSpec {
+        command: "strategy correct <id> <strategy>",
+        aliases: &[
+            "/strategy correct <id> <strategy>",
+            "strategy correct <id> <strategy> --workspace",
+        ],
+        category: ShellCommandCategory::OptionsTasks,
+        description: "record a strategy correction",
+    },
+    ShellCommandSpec {
         command: "task block <id>",
         aliases: &["task deny <id>", "/task block <id>"],
         category: ShellCommandCategory::OptionsTasks,

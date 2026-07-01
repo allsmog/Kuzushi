@@ -111,6 +111,7 @@ pub(crate) fn handle_next_command(app: &mut ShellApp, command: &ShellCommand) ->
     let ShellCommand::Next = command else {
         return false;
     };
+    app.workbench_cache.borrow_mut().invalidate_map_artifacts();
     let Some(journey) = crate::ui_view_models::journey_model(app) else {
         app.log(
             "journey",
@@ -135,6 +136,14 @@ pub(crate) fn handle_target_command(app: &mut ShellApp, command: &ShellCommand) 
         return false;
     };
     app.handle_target_command(path.as_deref());
+    true
+}
+
+pub(crate) fn handle_target_revision_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::TargetRevision(reference) = command else {
+        return false;
+    };
+    app.handle_target_revision_command(reference);
     true
 }
 

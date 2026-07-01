@@ -9,7 +9,7 @@ pub(crate) fn activity_feed_pause_model(
     session: &ActivitySession,
 ) -> Option<ActivityFeedPauseModel> {
     session.paused.then_some(ActivityFeedPauseModel {
-        text: "⏸ paused — press p to resume",
+        text: "⏸ feed paused — press p to resume",
     })
 }
 
@@ -26,7 +26,7 @@ mod tests {
         assert_eq!(
             activity_feed_pause_model(&session),
             Some(ActivityFeedPauseModel {
-                text: "⏸ paused — press p to resume",
+                text: "⏸ feed paused — press p to resume",
             })
         );
     }

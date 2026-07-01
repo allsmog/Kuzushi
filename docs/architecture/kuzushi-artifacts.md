@@ -25,6 +25,7 @@ Every run should converge on these files:
 | `attack-surface.json` | Attack-surface map used by scanners, threat modeling, and recommender. |
 | `threat-model.json` | Threat model snapshot or deterministic absence marker. |
 | `recommendations.json` | Module recommender output or deterministic absence marker. |
+| `strategy.json` | Strategy proposal snapshot or deterministic absence marker. |
 | `findings.json` | Findings emitted or referenced by this run. |
 | `proof.json` | Proof state and verification outcomes referenced by this run. |
 | `failures.json` | Empty success marker or bounded failure-to-LLM handoff for partial/failed runs. |
@@ -105,6 +106,11 @@ tools, priorities, runtime requirements, and next-input hints. It also
 documents full-report envelopes under `data`, `recommendationReport`, and
 `recommendation_report`, plus nested `data.recommendationReport` and
 `data.recommendation_report` producer envelopes.
+`schemas/run.strategy.schema.json` is the machine-readable contract for
+`strategy.json`, covering the deterministic absence marker plus strategy
+proposal snapshots, phase, base/recommended/corrected strategy lineage,
+preflight status, resource risk, proposal status, source run id, next input,
+and applied correction metadata.
 `schemas/run.findings.schema.json` is the machine-readable contract for
 `findings.json`, covering the deterministic absence marker plus finding arrays
 with location, severity, confidence, CWE/evidence, proof-state aliases, and
@@ -149,6 +155,7 @@ The current Rust substrate already writes:
 - `.kuzushi/runs/<runId>/attack-surface.json`
 - `.kuzushi/runs/<runId>/threat-model.json`
 - `.kuzushi/runs/<runId>/recommendations.json`
+- `.kuzushi/runs/<runId>/strategy.json`
 - `.kuzushi/runs/<runId>/findings.json`
 - `.kuzushi/runs/<runId>/proof.json`
 - `.kuzushi/runs/<runId>/failures.json`
@@ -162,7 +169,7 @@ The current Rust substrate already writes:
 
 This is sufficient for current run replay and failure handoff, but it is not
 the final canonical contract. Context, attack-surface, threat-model,
-recommendation, findings, proof, and report files may be deterministic
+recommendation, strategy, findings, proof, and report files may be deterministic
 placeholder markers until producer modules return rich snapshot fields. The run
 recorder promotes known result fields into canonical files and records them in
 `artifacts.json`; module-specific producers should prefer those fields over

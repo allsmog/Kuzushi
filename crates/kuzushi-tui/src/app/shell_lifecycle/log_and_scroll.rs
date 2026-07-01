@@ -14,6 +14,9 @@ impl ShellApp {
             self.scroll_active_activity_pane(-(amount as isize));
             return;
         }
+        if self.scroll_focused_workbench_pane(-(amount as i32)) {
+            return;
+        }
         if matches!(self.shell_view, ShellView::Logs) {
             self.logs_scroll = self.logs_scroll.saturating_sub(amount as usize);
             return;
@@ -24,6 +27,9 @@ impl ShellApp {
     pub fn scroll_down(&mut self, amount: u16) {
         if matches!(self.shell_view, ShellView::Activity) {
             self.scroll_active_activity_pane(amount as isize);
+            return;
+        }
+        if self.scroll_focused_workbench_pane(amount as i32) {
             return;
         }
         if matches!(self.shell_view, ShellView::Logs) {
@@ -38,6 +44,9 @@ impl ShellApp {
             self.activity.as_mut().map(focused_pane_to_top);
             return;
         }
+        if self.set_focused_workbench_pane_scroll(0) {
+            return;
+        }
         if matches!(self.shell_view, ShellView::Logs) {
             self.logs_scroll = 0;
             return;
@@ -47,7 +56,10 @@ impl ShellApp {
 
     pub fn scroll_to_bottom(&mut self) {
         if matches!(self.shell_view, ShellView::Activity) {
-            self.activity.as_mut().map(focused_pane_to_bottom);
+            self.focused_activity_pane_to_bottom();
+            return;
+        }
+        if self.set_focused_workbench_pane_scroll(u16::MAX) {
             return;
         }
         if matches!(self.shell_view, ShellView::Logs) {
@@ -62,27 +74,97 @@ impl ShellApp {
     /// by manually scrolling the feed pane: once the operator scrolls up
     /// from the bottom, auto-tail is paused for that session.
     fn scroll_active_activity_pane(&mut self, amount: isize) {
+        let deck_cursor_max = self.activity_deck_cursor_max();
         let Some(session) = self.activity.as_mut() else {
             return;
         };
         match session.effective_pane_focus() {
-            PaneFocus::Left => {
-                // Clamp to the row count so a short DAG can't be scrolled into
-                // empty space — there's nothing to reveal past the last task.
-                let max = session.tasks.len().saturating_sub(1);
-                session.task_scroll = shift_clamped(session.task_scroll, amount, max);
-            }
+            PaneFocus::Left => session.shift_task_cursor(amount),
             PaneFocus::Right => {
                 session.feed_auto_tail = false;
-                session.deck_cursor = shift_clamped(session.deck_cursor, amount, usize::MAX / 2);
+                session.deck_cursor = shift_clamped(session.deck_cursor, amount, deck_cursor_max);
             }
         }
+    }
+
+    fn focused_activity_pane_to_bottom(&mut self) {
+        let deck_cursor_max = self.activity_deck_cursor_max();
+        let Some(session) = self.activity.as_mut() else {
+            return;
+        };
+        match session.effective_pane_focus() {
+            PaneFocus::Left => session.move_task_cursor_to_bottom(),
+            PaneFocus::Right => {
+                session.deck_cursor = deck_cursor_max;
+                session.feed_auto_tail = false;
+            }
+        }
+    }
+
+    fn activity_deck_cursor_max(&self) -> usize {
+        let Some(session) = self.activity.as_ref() else {
+            return 0;
+        };
+        match session.deck_page {
+            ActivityDeckPage::Task => 0,
+            ActivityDeckPage::Findings => self.findings.len().saturating_sub(1),
+            ActivityDeckPage::AttackSurface => {
+                crate::ui_view_models::risk_by_module(&self.findings)
+                    .modules
+                    .len()
+                    .saturating_sub(1)
+            }
+            ActivityDeckPage::Dfd => {
+                let model = crate::ui_view_models::dfd_model(self);
+                let selectable = if model.flows.is_empty() {
+                    model.nodes.len()
+                } else {
+                    model.flows.len()
+                };
+                selectable.saturating_sub(1)
+            }
+            ActivityDeckPage::Heatmap => crate::ui_view_models::findings_heatmap(&self.findings)
+                .rows
+                .len()
+                .saturating_sub(1),
+            ActivityDeckPage::AttackPath => crate::ui_view_models::taint_flow_path(self)
+                .stages
+                .len()
+                .saturating_sub(1),
+            ActivityDeckPage::ExploitChain => crate::ui_view_models::attack_tree(self)
+                .chains
+                .len()
+                .saturating_sub(1),
+        }
+    }
+
+    fn scroll_focused_workbench_pane(&mut self, amount: i32) -> bool {
+        if !matches!(self.shell_view, ShellView::Workbench) {
+            return false;
+        }
+        if matches!(self.workbench_focus, WorkbenchPane::Findings) {
+            return false;
+        }
+        self.workbench_scroll.shift(self.workbench_focus, amount);
+        true
+    }
+
+    fn set_focused_workbench_pane_scroll(&mut self, value: u16) -> bool {
+        if !matches!(self.shell_view, ShellView::Workbench) {
+            return false;
+        }
+        if matches!(self.workbench_focus, WorkbenchPane::Findings) {
+            return false;
+        }
+        self.workbench_scroll.set(self.workbench_focus, value);
+        true
     }
 
     pub(crate) fn sync_view_change(&mut self) -> bool {
         let current = Some(self.shell_view.clone());
         if self.prev_shell_view != current {
             self.scroll_offset = 0;
+            self.last_cleared_input = None;
             if let Some(prev) = self.prev_shell_view.take() {
                 self.push_nav_history(prev);
             }
@@ -120,18 +202,8 @@ impl ShellApp {
 
 fn focused_pane_to_top(session: &mut ActivitySession) {
     match session.effective_pane_focus() {
-        PaneFocus::Left => session.task_scroll = 0,
+        PaneFocus::Left => session.move_task_cursor_to_top(),
         PaneFocus::Right => session.deck_cursor = 0,
-    }
-}
-
-fn focused_pane_to_bottom(session: &mut ActivitySession) {
-    match session.effective_pane_focus() {
-        PaneFocus::Left => session.task_scroll = usize::MAX,
-        PaneFocus::Right => {
-            session.deck_cursor = usize::MAX / 2;
-            session.feed_auto_tail = false;
-        }
     }
 }
 

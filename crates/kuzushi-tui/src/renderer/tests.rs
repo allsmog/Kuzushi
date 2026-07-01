@@ -83,6 +83,27 @@ fn retry_gate_card_renders_failed_tasks_and_fix() {
 }
 
 #[test]
+fn plain_retry_gate_explains_y_n_intercept() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.advisory.pending_retry = Some(crate::app::PendingRetry {
+        tasks: vec![crate::app::FailedPlanningTask {
+            task: crate::app::PlanningTaskId::BuildCodePropertyGraph,
+            error: "java heap OOM".to_string(),
+            adjustment: Some(crate::app::RetryAdjustment::RaiseHeap { heap_mb: 12288 }),
+            blocked: vec![crate::app::PlanningTaskId::HuntTaint],
+        }],
+    });
+
+    let rendered = render_plain_app(&app, 100);
+
+    assert!(rendered.contains("RETRY"));
+    assert!(rendered.contains("y/Enter retry"));
+    assert!(rendered.contains("n/Esc skip"));
+    assert!(rendered.contains("cpg:build"));
+    assert!(rendered.contains("12288"));
+}
+
+#[test]
 fn compact_alias_uses_kz_prompt_brand() {
     assert_eq!(prompt_text("kz", RoutingMode::Shell, None), "kz> ");
     assert_eq!(
@@ -2315,6 +2336,13 @@ fn renders_all_ink_parity_shell_surfaces() {
         (ShellView::PromptsEditor, "PROMPTS"),
         (ShellView::ActorDetail(1), "ACTOR 1"),
         (ShellView::Runs, "RUN TIMELINE"),
+        (
+            ShellView::RunDiff {
+                left: "run-left".to_string(),
+                right: "run-right".to_string(),
+            },
+            "RUN DIFF",
+        ),
         (ShellView::Replay("run-1".to_string()), "REPLAY"),
         (ShellView::Trace("run-1".to_string()), "TRACE"),
         (ShellView::Help, "HELP"),
@@ -2329,6 +2357,8 @@ fn renders_all_ink_parity_shell_surfaces() {
         ),
         (ShellView::SastTasks, "SAST TASKS"),
         (ShellView::Context, "CONTEXT"),
+        (ShellView::ProjectModel, "PROJECT MODEL"),
+        (ShellView::StrategyQueue, "STRATEGY QUEUE"),
         (ShellView::Workspace, "WORKSPACE"),
         (ShellView::KnowledgeBase, "KB ATTACHMENTS"),
         (ShellView::FailureHandoff, "FAILURE HANDOFF"),
@@ -2988,6 +3018,69 @@ fn runs_view_lists_past_runs_from_run_json_with_summary_fallback() {
 }
 
 #[test]
+fn run_diff_view_renders_added_removed_findings_and_revisions() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_run_diff_fixture(
+        tmp.path(),
+        "run-left",
+        "abcdef123456",
+        serde_json::json!([
+            {"fingerprint":"same","title":"shared","severity":"high","filePath":"src/lib.rs","startLine":10,"tool":"semgrep"},
+            {"fingerprint":"removed","title":"removed item","severity":"medium","filePath":"src/old.rs","startLine":20,"tool":"codeql"}
+        ]),
+    );
+    write_run_diff_fixture(
+        tmp.path(),
+        "run-right",
+        "123456789abc",
+        serde_json::json!([
+            {"fingerprint":"same","title":"shared","severity":"high","filePath":"src/lib.rs","startLine":10,"tool":"semgrep"},
+            {"fingerprint":"added","title":"added item","severity":"critical","filePath":"src/new.rs","startLine":30,"tool":"joern"}
+        ]),
+    );
+    let backend = TestBackend::new(120, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
+    app.shell_view = ShellView::RunDiff {
+        left: "run-left".to_string(),
+        right: "run-right".to_string(),
+    };
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("RUN DIFF"));
+    assert!(rendered.contains("rev:abcdef1"));
+    assert!(rendered.contains("rev:1234567"));
+    assert!(rendered.contains("ADDED IN RIGHT"));
+    assert!(rendered.contains("added item"));
+    assert!(rendered.contains("REMOVED FROM RIGHT"));
+    assert!(rendered.contains("removed item"));
+}
+
+fn write_run_diff_fixture(
+    root: &std::path::Path,
+    run_id: &str,
+    sha: &str,
+    findings: serde_json::Value,
+) {
+    let run_dir = ui_run_dir(Some(root), run_id);
+    std::fs::create_dir_all(&run_dir).unwrap();
+    std::fs::write(
+        run_dir.join("run.json"),
+        serde_json::json!({
+            "status": "completed",
+            "targetGit": {"sha": sha, "branch": "main", "dirty": false},
+            "target": root.display().to_string()
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(run_dir.join("findings.json"), findings.to_string()).unwrap();
+}
+
+#[test]
 fn catalog_j_k_moves_row_cursor_and_highlights_row() {
     // `design/mockups/catalog.jsx` advertises `j/k row` and shows the
     // focused row with `▌` accent + c-sel background.  Verify that
@@ -3299,11 +3392,19 @@ fn target_picker_renders_candidates_with_cursor_and_hints() {
             path: std::path::PathBuf::from("/work/acme"),
             label: ".".to_string(),
             hint: "git repo",
+            scope: None,
         },
         crate::app::TargetCandidate {
             path: std::path::PathBuf::from("/work/acme/api"),
             label: "api".to_string(),
             hint: "previous kuzushi target",
+            scope: None,
+        },
+        crate::app::TargetCandidate {
+            path: std::path::PathBuf::from("/work/acme/libs/parser"),
+            label: "libs/parser".to_string(),
+            hint: "git submodule",
+            scope: None,
         },
     ];
     app.target_picker_cursor = 1;
@@ -3316,6 +3417,7 @@ fn target_picker_renders_candidates_with_cursor_and_hints() {
     assert!(rendered.contains("git repo"));
     assert!(rendered.contains("> api"), "cursor marks the selected row");
     assert!(rendered.contains("previous kuzushi target"));
+    assert!(rendered.contains("git submodule"));
     assert!(
         rendered.contains("target <path>"),
         "manual-path escape hatch"
@@ -3510,6 +3612,31 @@ fn module_detail_lists_prompt_overrides_from_disk() {
     assert!(rendered.contains("PROMPTS"));
     assert!(rendered.contains("system"));
     assert!(rendered.contains("triage"));
+}
+
+#[test]
+fn prompts_editor_renders_selected_prompt_stack() {
+    let tmp = tempfile::tempdir().unwrap();
+    let override_path = kuzushi_core::prompt_override_path(tmp.path(), "sast", "triage");
+    std::fs::create_dir_all(override_path.parent().unwrap()).unwrap();
+    std::fs::write(&override_path, "triage prompt body").unwrap();
+
+    let backend = TestBackend::new(120, 32);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
+    app.focused_module = Some("sast".to_string());
+    app.prompts_cursor = 1;
+    app.shell_view = ShellView::PromptsEditor;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("PROMPT STACK"));
+    assert!(rendered.contains("triage"));
+    assert!(rendered.contains("project override"));
+    assert!(rendered.contains("override active"));
+    assert!(rendered.contains("sha256:"));
 }
 
 #[test]
@@ -4002,13 +4129,15 @@ fn workbench_renders_pane_borders_at_wide_and_narrow_widths() {
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
 
-        // Bordered panes are drawn (box-drawing), and the SOURCE / FINDINGS
-        // pane titles are present — at both a wide and a narrow terminal.
+        // Bordered panes are drawn (box-drawing). Wide terminals keep SOURCE;
+        // short terminals collapse to the review path so FINDINGS stays usable.
         assert!(rendered.contains("┌"), "no pane border at {width}x{height}");
-        assert!(
-            rendered.contains("SOURCE"),
-            "no SOURCE pane at {width}x{height}"
-        );
+        if height >= 22 {
+            assert!(
+                rendered.contains("SOURCE"),
+                "no SOURCE pane at {width}x{height}"
+            );
+        }
         assert!(
             rendered.contains("FINDINGS"),
             "no FINDINGS pane at {width}x{height}"
@@ -4021,16 +4150,16 @@ fn workbench_lines_plain_shows_top_bar_findings_and_dfd_empty_hint() {
     let app = workbench_app_with_findings();
     let rendered = render_plain_app(&app, 110);
 
-    // Top bar identity, a findings row, the DFD section, and — with no threat
-    // model on disk — the DFD empty hint (never invented topology).
+    // Top bar identity, a findings row, and the cursor-following code/detail
+    // preview. DFD is still available by focusing the center pane explicitly.
     assert!(rendered.contains("Kuzushi"), "{rendered}");
     assert!(rendered.contains("F-0001"), "{rendered}");
     assert!(
         rendered.contains("sql injection via order_id"),
         "{rendered}"
     );
-    assert!(rendered.contains("DFD"), "{rendered}");
-    assert!(rendered.contains("no threat model yet"), "{rendered}");
+    assert!(rendered.contains("CODE · F-0001"), "{rendered}");
+    assert!(rendered.contains("source unavailable"), "{rendered}");
 }
 
 #[test]

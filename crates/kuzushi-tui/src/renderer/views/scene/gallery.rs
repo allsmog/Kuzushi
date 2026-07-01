@@ -6,7 +6,7 @@ use super::diagrams::{attack_path_lines, heatmap_lines};
 use super::*;
 use crate::scene3d::VizPage;
 use crate::theme;
-use crate::ui_view_models::{findings_heatmap, taint_flow_path};
+use crate::ui_view_models::{dfd_model, findings_heatmap, taint_flow_path, DfdKind, DfdModel};
 use ratatui::layout::Rect;
 use ratatui::prelude::{Line, Span};
 
@@ -44,9 +44,76 @@ fn page_body_lines(app: &ShellApp, area: Rect, page: VizPage) -> Vec<Line<'stati
         // Frame-rendered pages (3D terrain + box-drawing graph/tree) can't draw
         // in the line/plain path; show a short note instead.
         VizPage::AttackSurface => frame_only_lines("3D relief"),
-        VizPage::Dfd => frame_only_lines("node-link data-flow graph"),
+        VizPage::Dfd => dfd_plain_lines(width, &dfd_model(app)),
         VizPage::ExploitChain => frame_only_lines("attack tree"),
     }
+}
+
+fn dfd_plain_lines(width: usize, model: &DfdModel) -> Vec<Line<'static>> {
+    if let Some(hint) = &model.empty_hint {
+        return vec![Line::from(vec![Span::styled(
+            fit_plain(hint, width),
+            theme::muted(),
+        )])];
+    }
+    let mut lines = vec![Line::from(vec![Span::styled(
+        format!(
+            "DFD · {} nodes · {} flows · {} zones",
+            model.nodes.len(),
+            model.flows.len(),
+            model.zones.len()
+        ),
+        theme::accent(),
+    )])];
+    append_dfd_node_lines(&mut lines, width, model);
+    append_dfd_flow_lines(&mut lines, width, model);
+    lines
+}
+
+fn append_dfd_node_lines(lines: &mut Vec<Line<'static>>, width: usize, model: &DfdModel) {
+    lines.push(Line::from(vec![Span::styled("NODES", theme::heading())]));
+    for zone in &model.zones {
+        lines.push(Line::from(vec![Span::styled(
+            fit_plain(&format!("  [{zone}]"), width),
+            theme::muted(),
+        )]));
+        for node in model.nodes.iter().filter(|node| &node.zone == zone) {
+            lines.push(Line::from(vec![Span::raw(fit_plain(
+                &format!("    - {} · {}", node.name, dfd_kind_label(node.kind)),
+                width,
+            ))]));
+        }
+    }
+}
+
+fn append_dfd_flow_lines(lines: &mut Vec<Line<'static>>, width: usize, model: &DfdModel) {
+    lines.push(Line::from(vec![Span::styled("FLOWS", theme::heading())]));
+    for flow in &model.flows {
+        let boundary = if flow.crosses {
+            " · crosses boundary"
+        } else {
+            ""
+        };
+        lines.push(Line::from(vec![Span::raw(fit_plain(
+            &format!(
+                "  {} -> {} · {}{}",
+                flow.from, flow.to, flow.label, boundary
+            ),
+            width,
+        ))]));
+    }
+}
+
+fn dfd_kind_label(kind: DfdKind) -> &'static str {
+    match kind {
+        DfdKind::Entity => "entity",
+        DfdKind::Process => "process",
+        DfdKind::Store => "store",
+    }
+}
+
+fn fit_plain(value: &str, width: usize) -> String {
+    crate::renderer::shared::text::fit(value, width)
 }
 
 fn page_tagline(page: VizPage) -> &'static str {
@@ -69,8 +136,10 @@ fn nav_spans(app: &ShellApp, page: VizPage) -> Vec<Span<'static>> {
     if page.is_3d() {
         let motion = if app.scene_paused {
             "paused"
-        } else {
+        } else if app.scene_animating() {
             "spinning"
+        } else {
+            "static"
         };
         spans.push(Span::styled(
             format!("  ·  {motion} · space pause · hjkl rotate"),
@@ -91,4 +160,67 @@ fn frame_only_lines(kind: &str) -> Vec<Line<'static>> {
         format!("the {kind} renders only in an interactive truecolor terminal."),
         theme::muted(),
     )])]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::{save_persistent_threat_model, V2Config, WorkspaceTarget};
+    use serde_json::json;
+
+    #[test]
+    fn dfd_page_plain_lines_list_nodes_and_edges() {
+        let temp = tempfile::tempdir().expect("temp target");
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        save_persistent_threat_model(temp.path(), &sample_dfd_doc(), true).unwrap();
+        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        let lines = scene_page_lines(&app, Rect::new(0, 0, 80, 24), VizPage::Dfd);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("DFD · 3 nodes · 2 flows · 3 zones"));
+        assert!(text.contains("Browser · entity"));
+        assert!(text.contains("API server · process"));
+        assert!(text.contains("Browser -> API server · https · crosses boundary"));
+    }
+
+    #[test]
+    fn attack_surface_nav_reports_static_when_scene_is_not_animating() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        let text = spans_text(nav_spans(&app, VizPage::AttackSurface));
+
+        assert!(text.contains("static"), "{text}");
+        assert!(!text.contains("spinning"), "{text}");
+    }
+
+    fn sample_dfd_doc() -> serde_json::Value {
+        json!({
+            "dfd": {
+                "nodes": [
+                    {"id": "user", "name": "Browser", "type": "external entity", "trustZone": "internet"},
+                    {"id": "api", "name": "API server", "type": "process", "trustZone": "app-tier"},
+                    {"id": "db", "name": "Postgres", "type": "data store", "trustZone": "data-tier"}
+                ],
+                "flows": [
+                    {"id": "f1", "sourceId": "user", "targetId": "api", "description": "https"},
+                    {"id": "f2", "sourceId": "api", "targetId": "db", "description": "sql"}
+                ]
+            }
+        })
+    }
+
+    fn line_text(line: &Line<'static>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect::<String>()
+    }
+
+    fn spans_text(spans: Vec<Span<'static>>) -> String {
+        spans
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect::<String>()
+    }
 }

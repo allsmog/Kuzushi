@@ -1,11 +1,18 @@
 use super::*;
 
 pub fn sorted_finding_aliases(findings: &[Finding]) -> Vec<(String, Finding)> {
-    let mut indexed: Vec<&Finding> = findings.iter().collect();
+    sorted_finding_alias_indices(findings)
+        .into_iter()
+        .map(|(alias, index)| (alias, findings[index].clone()))
+        .collect()
+}
+
+pub fn sorted_finding_alias_indices(findings: &[Finding]) -> Vec<(String, usize)> {
+    let mut indexed: Vec<(usize, &Finding)> = findings.iter().enumerate().collect();
     indexed.sort_by(|a, b| {
-        let by_severity = severity_rank(a.severity).cmp(&severity_rank(b.severity));
+        let by_severity = severity_rank(a.1.severity).cmp(&severity_rank(b.1.severity));
         if by_severity == std::cmp::Ordering::Equal {
-            a.fingerprint.cmp(&b.fingerprint)
+            a.1.fingerprint.cmp(&b.1.fingerprint)
         } else {
             by_severity
         }
@@ -13,7 +20,7 @@ pub fn sorted_finding_aliases(findings: &[Finding]) -> Vec<(String, Finding)> {
     indexed
         .into_iter()
         .enumerate()
-        .map(|(index, finding)| (format_finding_alias(index), finding.clone()))
+        .map(|(alias_index, (finding_index, _))| (format_finding_alias(alias_index), finding_index))
         .collect()
 }
 

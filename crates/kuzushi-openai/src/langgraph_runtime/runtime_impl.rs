@@ -5,7 +5,7 @@ use kuzushi_core::{
     LoopHistoryEntry, TriageOutcome, TriageRequest, TriageVerdict,
 };
 
-use super::bridge_payloads::{BridgeRequest, BridgeResponse};
+use super::bridge_payloads::{BridgeRequest, BridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION};
 use super::bridge_process::{public_bridge_error, run_bridge};
 use super::next_step_bridge::next_step_blocking as run_next_step_blocking;
 use super::next_step_bridge::preflight_tool_loop_blocking as run_preflight_tool_loop_blocking;
@@ -27,6 +27,7 @@ impl AgentRuntime for LangGraphRuntime {
             .thinking_level
             .or_else(|| self.thinking_level.clone());
         let bridge_request = BridgeRequest {
+            protocol_version: LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
             model: request.model,
             cwd: request.cwd.display().to_string(),
             system_prompt: request.system_prompt,

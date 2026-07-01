@@ -50,6 +50,7 @@ mod options;
 mod patch_review;
 mod plan_card;
 mod prereq_prompt;
+mod project_model;
 mod prompt;
 mod prompt_tuning;
 mod pwn;
@@ -57,15 +58,18 @@ mod recent_module_activity;
 mod recommendation;
 mod retry_card;
 mod routing;
+mod run_diff;
 mod run_paths;
 mod run_status;
 mod run_timeline;
 mod run_trace;
 mod sast_tasks;
+mod screen_context;
 mod session_story;
 mod severity_tone;
 mod source_tree;
 mod status_footer;
+mod strategy_queue;
 mod threat_dfd_diagram;
 mod threat_impact;
 mod threat_model;
@@ -120,7 +124,9 @@ pub(crate) use context_snapshot::{
 };
 pub(crate) use context_strip::{context_strip_model, ContextStripModel, ContextStripSegment};
 pub(crate) use cost::{cost_model, CostBudgetRow, CostBudgetStatus, CostModel, CostTone};
-pub(crate) use display_text::{compact_target_path, format_session_cost};
+pub(crate) use display_text::{
+    active_project_scope_label, compact_target_path, format_session_cost, scoped_target_path_label,
+};
 pub(crate) use failure_handoff::{failure_handoff_model, FailureHandoffModel};
 pub(crate) use finding_summary::{
     ci_result_findings_summary, findings_count_summary, status_footer_findings_summary,
@@ -168,9 +174,11 @@ pub(crate) use prereq_prompt::{
     plain_prereq_plan_model, prereq_prompt_model, PlainPrereqPlanModel, PrereqPromptModel,
     PrereqPromptStepModel,
 };
+pub(crate) use project_model::{project_model, ProjectModel, ProjectModelOrigin, ProjectModelRow};
 pub(crate) use prompt::{prompt_model, prompt_text};
 pub(crate) use prompt_tuning::{
-    prompts_model, tune_model, PromptRow, TuneActionRow, TuneHouseRules, TuneModel,
+    prompts_model, tune_model, PromptRow, PromptStackLayer, PromptStackModel, TuneActionRow,
+    TuneHouseRules, TuneModel,
 };
 pub(crate) use pwn::{
     pwn_dashboard_model, PwnDashboardModel, PwnPrimitiveRow, PwnReverseObservationRow, PwnRoundRow,
@@ -187,6 +195,7 @@ pub(crate) use routing::{
     RoutingMode, ShellViewLineRoute, SystemViewRoute, ThreatAndRunViewRoute,
     WorkspaceSessionViewRoute,
 };
+pub(crate) use run_diff::{run_diff_model, RunDiffFindingRow, RunDiffModel};
 pub(crate) use run_paths::{
     ui_latest_run_path, ui_latest_run_relative_path, ui_run_artifact_relative_path, ui_run_dir,
     ui_runs_root, ui_runs_root_relative_path,
@@ -200,14 +209,17 @@ pub(crate) use run_trace::{
 pub(crate) use sast_tasks::{
     plain_sast_tasks_model, sast_tasks_model, PlainSastTaskRow, PlainSastTasksModel, SastTasksModel,
 };
+pub(crate) use screen_context::{screen_context_model, ScreenContext};
 pub(crate) use session_story::{
     session_history_model, session_story_model, CommandHistoryModel, SessionStoryModel,
 };
 pub(crate) use severity_tone::SeverityTone;
 pub(crate) use source_tree::{source_tree_model, SourceTreeModel, SourceTreeRow};
 pub(crate) use status_footer::status_footer_model;
-#[cfg(test)]
-pub(crate) use threat_dfd_diagram::{threat_dfd_diagram_feed_rows, threat_dfd_summary_feed_rows};
+pub(crate) use strategy_queue::{
+    strategy_queue_model, StrategyQueueDetailRow, StrategyQueueEmptyState, StrategyQueueModel,
+    StrategyQueueRow,
+};
 pub(crate) use threat_dfd_diagram::{
     threat_dfd_diagram_lines, threat_dfd_present, threat_dfd_view, DfdDiagramLine, DfdLineKind,
 };

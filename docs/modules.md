@@ -292,7 +292,7 @@ pub struct ToolExecutionContext<'a> {
 
 When the shell starts a tool or scan it constructs a `TraceHandle` that
 wraps a `BroadcastSink` (file + mpsc channel). The dispatch wrapper in
-`src/modules/registry/with_v2_builtins/execution.rs` auto-stamps the
+`crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution.rs` auto-stamps the
 handle with the calling tool's `module_id` derived from the qualified tool
 name (`semgrep:scan` → `semgrep`), so producer code only needs:
 
@@ -339,9 +339,9 @@ so cross-module categorization stays consistent):
 
 Beyond the explicit `ctx.trace.step(...)` boundaries above, **every LLM
 call is auto-traced**. The dispatch wrapper at
-`src/modules/registry/with_v2_builtins/execution.rs` wraps the incoming
+`crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution.rs` wraps the incoming
 `AgentRuntime` in a `TracedRuntime` (defined in
-`src/runtime/traced_runtime.rs`) whenever `ctx.trace.is_some()`. Each
+`crates/kuzushi-core/src/runtime/traced_runtime.rs`) whenever `ctx.trace.is_some()`. Each
 call to `runtime.query_blocking`, `runtime.next_step_blocking`,
 `runtime.triage_finding_blocking`, or `runtime.spawn_subagent_blocking`
 emits a `kind="reasoning"` (or `tool-progress` / `done` for loop

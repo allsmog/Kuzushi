@@ -14,6 +14,8 @@ pub(crate) enum PlainRenderMode<'a> {
     Options(&'a OptionsView),
     SastTasks,
     Context,
+    ProjectModel,
+    StrategyQueue,
     Workspace,
     KnowledgeBase,
     Config,
@@ -49,11 +51,19 @@ pub(crate) enum PrimaryViewRoute<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ThreatAndRunViewRoute<'a> {
     Tune,
-    Threat { view: ThreatView, scroll: usize },
+    Threat {
+        view: ThreatView,
+        scroll: usize,
+    },
     ThreatEditor,
     PromptsEditor,
     ActorDetail(usize),
     Runs,
+    RunDiff {
+        left: &'a str,
+        right: &'a str,
+        scroll: usize,
+    },
     Replay(&'a str),
     Trace(&'a str),
 }
@@ -73,6 +83,8 @@ pub(crate) enum SystemViewRoute<'a> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum WorkspaceSessionViewRoute<'a> {
     Context,
+    ProjectModel,
+    StrategyQueue,
     Workspace,
     KnowledgeBase { scroll: usize },
     FailureHandoff,
@@ -136,6 +148,8 @@ pub(crate) fn plain_render_mode(app: &ShellApp) -> PlainRenderMode<'_> {
         ShellView::Options(view) => PlainRenderMode::Options(view),
         ShellView::SastTasks => PlainRenderMode::SastTasks,
         ShellView::Context => PlainRenderMode::Context,
+        ShellView::ProjectModel => PlainRenderMode::ProjectModel,
+        ShellView::StrategyQueue => PlainRenderMode::StrategyQueue,
         ShellView::Workspace => PlainRenderMode::Workspace,
         ShellView::KnowledgeBase => PlainRenderMode::KnowledgeBase,
         ShellView::Config => PlainRenderMode::Config,
@@ -183,6 +197,11 @@ fn threat_and_run_view_route(app: &ShellApp) -> Option<ThreatAndRunViewRoute<'_>
         ShellView::PromptsEditor => Some(ThreatAndRunViewRoute::PromptsEditor),
         ShellView::ActorDetail(index) => Some(ThreatAndRunViewRoute::ActorDetail(*index)),
         ShellView::Runs => Some(ThreatAndRunViewRoute::Runs),
+        ShellView::RunDiff { left, right } => Some(ThreatAndRunViewRoute::RunDiff {
+            left,
+            right,
+            scroll: app.scroll_offset as usize,
+        }),
         ShellView::Replay(run_id) => Some(ThreatAndRunViewRoute::Replay(run_id)),
         ShellView::Trace(run_id) => Some(ThreatAndRunViewRoute::Trace(run_id)),
         _ => None,
@@ -214,6 +233,8 @@ fn system_view_route(app: &ShellApp) -> Option<SystemViewRoute<'_>> {
 fn workspace_session_route(app: &ShellApp) -> WorkspaceSessionViewRoute<'_> {
     match &app.shell_view {
         ShellView::Context => WorkspaceSessionViewRoute::Context,
+        ShellView::ProjectModel => WorkspaceSessionViewRoute::ProjectModel,
+        ShellView::StrategyQueue => WorkspaceSessionViewRoute::StrategyQueue,
         ShellView::Workspace => WorkspaceSessionViewRoute::Workspace,
         ShellView::KnowledgeBase => WorkspaceSessionViewRoute::KnowledgeBase {
             scroll: app.kb_scroll,

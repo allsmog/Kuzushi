@@ -9,6 +9,7 @@ impl ShellApp {
         }
 
         self.update_quit_chord_arm(key);
+        self.update_activity_cancel_arm(key);
         if self.handle_story_toggle_key(key) {
             return;
         }
@@ -169,6 +170,12 @@ impl ShellApp {
     pub(super) fn update_quit_chord_arm(&mut self, key: KeyEvent) {
         if !is_quit_chord(key) {
             self.ctrl_c_armed_at = None;
+        }
+    }
+
+    pub(super) fn update_activity_cancel_arm(&mut self, key: KeyEvent) {
+        if !is_activity_cancel_key(key) {
+            self.activity_cancel_armed_at = None;
         }
     }
 

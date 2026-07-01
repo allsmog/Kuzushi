@@ -13,6 +13,7 @@ pub enum ShellCommand {
     /// route here with the appropriate pane focus / selection.
     Workbench(WorkbenchPane),
     Findings,
+    FindingsFilter(String),
     Open(String),
     Scan(Option<PathBuf>),
     Model(Option<String>),
@@ -35,6 +36,10 @@ pub enum ShellCommand {
     Prompt(String),
     Actor(usize),
     ShowRuns,
+    RunDiff {
+        left: String,
+        right: String,
+    },
     ShowAliases(Option<String>),
     Since(String),
     Replay(String),
@@ -51,6 +56,7 @@ pub enum ShellCommand {
     Next,
     Logs,
     Target(Option<String>),
+    TargetRevision(String),
     Ask(String),
     Options {
         tool: Option<String>,
@@ -68,6 +74,8 @@ pub enum ShellCommand {
     Tasks,
     Task(SastTaskCommand),
     Context(ContextCommand),
+    ProjectModel,
+    Strategy(StrategyCommand),
     Workspace(WorkspaceCommand),
     Pwn(PwnCommand),
     KnowledgeBase(Option<String>),

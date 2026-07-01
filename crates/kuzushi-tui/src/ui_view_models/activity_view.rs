@@ -15,7 +15,7 @@ use super::activity_pane_chrome::{
 use super::activity_plain_rows::{activity_plain_pane_rows, ActivityPlainPaneRow};
 use super::activity_scroll::{activity_feed_scroll_offset, activity_task_scroll_offset};
 use super::generated_views_feed::{activity_deck_plain_extra_rows, activity_deck_rows};
-use crate::{ActivitySession, ShellApp};
+use crate::{ActivitySession, DagTaskState, ShellApp};
 use std::time::Instant;
 
 pub(crate) enum ActivityViewModel<'a> {
@@ -31,6 +31,9 @@ pub(crate) struct ActiveActivityViewModel<'a> {
 
 pub(crate) fn activity_view_model(app: &ShellApp) -> ActivityViewModel<'_> {
     match app.activity.as_ref() {
+        Some(session) if manual_activity_session_is_idle(app, session) => {
+            ActivityViewModel::Inactive(activity_empty_state_model())
+        }
         Some(session) => ActivityViewModel::Active(ActiveActivityViewModel {
             app,
             session,
@@ -38,6 +41,18 @@ pub(crate) fn activity_view_model(app: &ShellApp) -> ActivityViewModel<'_> {
         }),
         None => ActivityViewModel::Inactive(activity_empty_state_model()),
     }
+}
+
+fn manual_activity_session_is_idle(app: &ShellApp, session: &ActivitySession) -> bool {
+    session.run_id.starts_with("manual-")
+        && app.running_tool_name().is_none()
+        && !app.scan.as_ref().is_some_and(|scan| scan.running)
+        && session.events.is_empty()
+        && session
+            .tasks
+            .values()
+            .all(|row| row.state == DagTaskState::Queued)
+        && session.subsystem_aggregate.hidden_task_states.is_empty()
 }
 
 /// The Activity run's terminal failure, if any. Sourced from the live

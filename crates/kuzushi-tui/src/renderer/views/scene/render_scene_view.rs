@@ -8,7 +8,7 @@ use super::gallery::gallery_header_lines;
 use super::scene_color::to_color;
 use super::*;
 use crate::scene3d::{
-    attack_surface_scene, brighten, default_palette, render_to_framebuffer, Camera, Projector,
+    active_palette, attack_surface_scene, brighten, render_to_framebuffer, Camera, Projector,
     SceneLabel, VizPage, BACKGROUND,
 };
 use crate::ui_view_models::{attack_tree, dfd_model, risk_by_module};
@@ -104,7 +104,7 @@ fn stamp_labels(cells: &mut [Vec<Cell>], proj: &Projector, labels: &[SceneLabel]
         };
         let cy = (py * 0.5).round() as i32;
         let cx = px.round() as i32 + 1;
-        let fg = to_color(brighten(default_palette(lbl.color)));
+        let fg = to_color(brighten(active_palette(lbl.color)));
         stamp(cells, cx, cy, &lbl.text, fg, bg_color);
     }
 }

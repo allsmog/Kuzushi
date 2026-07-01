@@ -1,4 +1,5 @@
 use super::*;
+use crate::scene3d::VizPage;
 use crate::{ScanPanelState, ShellView};
 use kuzushi_core::V2Config;
 use std::path::PathBuf;
@@ -91,7 +92,10 @@ fn previously_empty_views_now_show_scroll_and_back_in_footer() {
         ShellView::Tools,
         ShellView::History,
         ShellView::Context,
+        ShellView::StrategyQueue,
         ShellView::KnowledgeBase,
+        ShellView::AgentChat,
+        ShellView::PromptsEditor,
     ] {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.shell_view = view.clone();
@@ -110,6 +114,43 @@ fn previously_empty_views_now_show_scroll_and_back_in_footer() {
             "{view:?} should not duplicate the back hint"
         );
     }
+}
+
+#[test]
+fn footers_do_not_relabel_back_as_home() {
+    for view in [
+        ShellView::Recommend,
+        ShellView::Threat(crate::ThreatView::Summary),
+        ShellView::ModuleRun,
+        ShellView::AgentChat,
+    ] {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = view.clone();
+        let bindings = footer_keybindings(&app);
+        assert!(
+            !bindings.contains(&bind("Esc", "home")),
+            "{view:?} should not advertise Esc as home: {bindings:?}"
+        );
+    }
+}
+
+#[test]
+fn scene_footer_advertises_3d_controls_only_on_3d_page() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Scene(VizPage::Dfd);
+
+    let dfd_bindings = footer_keybindings(&app);
+    assert!(dfd_bindings.contains(&bind("Tab/n", "next page")));
+    assert!(dfd_bindings.contains(&bind("S-Tab/N", "prev page")));
+    assert!(!dfd_bindings.contains(&bind("h/l/j/k", "orbit 3D")));
+    assert!(!dfd_bindings.contains(&bind("space/p", "pause")));
+    assert!(!dfd_bindings.contains(&bind("r", "reset")));
+
+    app.shell_view = ShellView::Scene(VizPage::AttackSurface);
+    let terrain_bindings = footer_keybindings(&app);
+    assert!(terrain_bindings.contains(&bind("h/l/j/k", "orbit 3D")));
+    assert!(terrain_bindings.contains(&bind("space/p", "pause")));
+    assert!(terrain_bindings.contains(&bind("r", "reset")));
 }
 
 fn scan_state(running: bool, abort_requested: bool) -> ScanPanelState {

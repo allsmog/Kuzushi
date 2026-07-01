@@ -10,6 +10,7 @@ export default defineConfig({
       "tests/modules/registry-resolution.test.ts",
       "tests/modules/host-handles.test.ts",
       "tests/langgraph-bridge/mcp-plan.test.ts",
+      "tests/langgraph-bridge/schema.test.ts",
       "tests/langgraph-bridge/oauth-models.test.ts",
       "tests/langgraph-bridge/oauth-login.test.ts",
     ],

@@ -8,6 +8,15 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "open persisted findings",
     },
     ShellCommandSpec {
+        command: "findings filter <expr>",
+        aliases: &[
+            "findings filter state:new rank:high",
+            "/findings filter <expr>",
+        ],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "open filtered findings in the Workbench",
+    },
+    ShellCommandSpec {
         command: "open <id>",
         aliases: &["open F-0001", "/open <id>"],
         category: ShellCommandCategory::FindingsEvidence,
@@ -24,6 +33,12 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         aliases: &["/show runs", "runs", "/runs"],
         category: ShellCommandCategory::FindingsEvidence,
         description: "recent run artifacts",
+    },
+    ShellCommandSpec {
+        command: "runs diff <left> <right>",
+        aliases: &["runs diff <runA> <runB>", "runs compare <runA> <runB>"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "compare findings snapshots from two runs",
     },
     ShellCommandSpec {
         command: "replay <run>",

@@ -26,7 +26,7 @@ impl PaneFocus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivityDeckPage {
-    Feed,
+    Task,
     Findings,
     AttackSurface,
     Dfd,
@@ -36,7 +36,8 @@ pub enum ActivityDeckPage {
 }
 
 impl ActivityDeckPage {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
+        Self::Task,
         Self::Findings,
         Self::AttackSurface,
         Self::Dfd,
@@ -47,7 +48,7 @@ impl ActivityDeckPage {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Feed => "feed",
+            Self::Task => "task",
             Self::Findings => "findings",
             Self::AttackSurface => "surface",
             Self::Dfd => "dfd",
@@ -59,7 +60,7 @@ impl ActivityDeckPage {
 
     pub fn scene_page(self) -> Option<crate::scene3d::VizPage> {
         match self {
-            Self::Feed | Self::Findings => None,
+            Self::Task | Self::Findings => None,
             Self::AttackSurface => Some(crate::scene3d::VizPage::AttackSurface),
             Self::Dfd => Some(crate::scene3d::VizPage::Dfd),
             Self::Heatmap => Some(crate::scene3d::VizPage::Heatmap),
@@ -98,6 +99,7 @@ pub enum DagTaskState {
     Done,
     Failing,
     Canceled,
+    Skipped,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,8 +216,11 @@ pub struct ActivitySession {
     pub paused: bool,
     pub feed_scroll: usize,
     pub task_scroll: usize,
+    pub task_cursor: usize,
     pub deck_page: ActivityDeckPage,
     pub deck_cursor: usize,
+    pub deck_page_pinned_by_user: bool,
+    pub paused_event_count: Option<usize>,
     /// True while the feed renderer should auto-scroll to the latest event.
     /// Becomes false the moment the operator manually scrolls the feed; reset
     /// to true on `G` (scroll-to-bottom). Decoupled from `paused` so toggling
@@ -243,8 +248,11 @@ impl ActivitySession {
             paused: false,
             feed_scroll: 0,
             task_scroll: 0,
-            deck_page: ActivityDeckPage::Findings,
+            task_cursor: 0,
+            deck_page: ActivityDeckPage::Task,
             deck_cursor: 0,
+            deck_page_pinned_by_user: false,
+            paused_event_count: None,
             feed_auto_tail: false,
         }
     }
@@ -276,7 +284,10 @@ impl ActivitySession {
             .tasks
             .entry(task_id.clone())
             .or_insert_with(|| DagTaskRow::queued(task_id, module_id, Vec::new()));
-        if matches!(row.state, DagTaskState::Done | DagTaskState::Failing) {
+        if matches!(
+            row.state,
+            DagTaskState::Done | DagTaskState::Failing | DagTaskState::Skipped
+        ) {
             return;
         }
         row.state = DagTaskState::Done;
@@ -383,23 +394,80 @@ impl ActivitySession {
         self.pane_focus = self.pane_focus.toggle();
     }
 
+    pub fn selected_task_id(&self) -> Option<&str> {
+        self.focus_task
+            .as_deref()
+            .filter(|task_id| self.tasks.contains_key(*task_id))
+            .or_else(|| self.task_id_at_cursor())
+    }
+
+    pub fn task_id_at_cursor(&self) -> Option<&str> {
+        self.tasks
+            .values()
+            .nth(self.task_cursor.min(self.task_cursor_max()))
+            .map(|row| row.task_id.as_str())
+    }
+
+    pub fn focus_task_at_cursor(&mut self) -> Option<String> {
+        let task_id = self.task_id_at_cursor()?.to_string();
+        self.focus_task = Some(task_id.clone());
+        Some(task_id)
+    }
+
+    pub fn shift_task_cursor(&mut self, amount: isize) {
+        let next = shift_index(self.task_cursor, amount, self.task_cursor_max());
+        self.set_task_cursor(next);
+    }
+
+    pub fn move_task_cursor_to_top(&mut self) {
+        self.set_task_cursor(0);
+    }
+
+    pub fn move_task_cursor_to_bottom(&mut self) {
+        self.set_task_cursor(self.task_cursor_max());
+    }
+
+    fn set_task_cursor(&mut self, index: usize) {
+        self.task_cursor = index.min(self.task_cursor_max());
+        self.task_scroll = self.task_cursor;
+    }
+
+    fn task_cursor_max(&self) -> usize {
+        self.tasks.len().saturating_sub(1)
+    }
+
     pub fn next_deck_page(&mut self) {
-        self.set_deck_page(self.deck_page.next());
+        self.set_deck_page_by_user(self.deck_page.next());
     }
 
     pub fn prev_deck_page(&mut self) {
-        self.set_deck_page(self.deck_page.prev());
+        self.set_deck_page_by_user(self.deck_page.prev());
     }
 
     pub fn set_deck_page(&mut self, page: ActivityDeckPage) {
+        self.apply_deck_page(page, false);
+    }
+
+    pub fn set_deck_page_by_user(&mut self, page: ActivityDeckPage) {
+        self.apply_deck_page(page, true);
+    }
+
+    fn apply_deck_page(&mut self, page: ActivityDeckPage, pinned_by_user: bool) {
         self.deck_page = page;
         self.deck_cursor = 0;
         self.feed_scroll = 0;
         self.feed_auto_tail = false;
+        if pinned_by_user {
+            self.deck_page_pinned_by_user = true;
+        }
     }
 
     pub fn set_deck_scene_page(&mut self, page: crate::scene3d::VizPage) {
         self.set_deck_page(ActivityDeckPage::from_scene_page(page));
+    }
+
+    pub fn can_auto_switch_deck(&self) -> bool {
+        !self.deck_page_pinned_by_user
     }
 
     /// Focus that accounts for the collapsed TASKS pane: with no DAG tasks
@@ -432,7 +500,25 @@ impl ActivitySession {
     }
 
     pub fn toggle_paused(&mut self) {
-        self.paused = !self.paused;
+        if self.paused {
+            self.paused = false;
+            self.paused_event_count = None;
+        } else {
+            self.paused = true;
+            self.paused_event_count = Some(self.events.len());
+        }
+    }
+
+    pub fn reset_presentation_state(&mut self) {
+        self.focus_task = None;
+        self.pane_focus = PaneFocus::Left;
+        self.feed_scroll = 0;
+        self.task_scroll = 0;
+        self.task_cursor = 0;
+        self.deck_page = ActivityDeckPage::Task;
+        self.deck_cursor = 0;
+        self.deck_page_pinned_by_user = false;
+        self.feed_auto_tail = false;
     }
 
     pub fn mark_active_tasks_canceled(&mut self) {
@@ -773,6 +859,7 @@ fn next_activity_row_state(
         (_, "done" | "tool-complete", _) if !rolled_up_child => DagTaskState::Done,
         (_, _, DagTaskState::Queued) => DagTaskState::Active,
         (_, _, DagTaskState::Canceled) => DagTaskState::Canceled,
+        (_, _, DagTaskState::Skipped) => DagTaskState::Skipped,
         (_, _, state) => state,
     }
 }
@@ -789,7 +876,7 @@ fn mark_activity_row_times(row: &mut DagTaskRow) {
 fn activity_row_is_terminal(row: &DagTaskRow) -> bool {
     matches!(
         row.state,
-        DagTaskState::Done | DagTaskState::Failing | DagTaskState::Canceled
+        DagTaskState::Done | DagTaskState::Failing | DagTaskState::Canceled | DagTaskState::Skipped
     )
 }
 
@@ -890,6 +977,14 @@ fn sync_or_mark_empty_subsystems_canceled(aggregate: &mut SubsystemAggregate) {
         return;
     }
     sync_subsystem_aggregate(aggregate);
+}
+
+fn shift_index(current: usize, amount: isize, max: usize) -> usize {
+    if amount.is_negative() {
+        current.saturating_sub(amount.unsigned_abs())
+    } else {
+        current.saturating_add(amount as usize).min(max)
+    }
 }
 
 #[cfg(test)]
@@ -1038,14 +1133,14 @@ mod tests {
 
         session.next_deck_page();
 
-        assert_eq!(session.deck_page, ActivityDeckPage::AttackSurface);
+        assert_eq!(session.deck_page, ActivityDeckPage::Findings);
         assert_eq!(session.deck_cursor, 0);
         assert_eq!(session.feed_scroll, 0);
         assert!(!session.feed_auto_tail);
 
         session.prev_deck_page();
 
-        assert_eq!(session.deck_page, ActivityDeckPage::Findings);
+        assert_eq!(session.deck_page, ActivityDeckPage::Task);
         assert!(!session.feed_auto_tail);
     }
 

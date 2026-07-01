@@ -20,6 +20,26 @@ pub(crate) struct PartialOperatorConfig {
     pub(crate) trusted_modules: Option<Vec<String>>,
 }
 
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) struct PartialGuidedPhaseConfig {
+    pub(crate) stop_after: Option<Option<GuidedPhase>>,
+    pub(crate) map: Option<PartialPhaseTemplateConfig>,
+    pub(crate) hunt: Option<PartialPhaseTemplateConfig>,
+    pub(crate) confirm: Option<PartialPhaseTemplateConfig>,
+    pub(crate) fix: Option<PartialPhaseTemplateConfig>,
+}
+
+#[derive(Debug, Default, Clone, Deserialize)]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) struct PartialPhaseTemplateConfig {
+    pub(crate) budget_usd: Option<Option<f64>>,
+    pub(crate) concurrency: Option<Option<usize>>,
+    pub(crate) strategy_cap: Option<Option<usize>>,
+    pub(crate) confirmation_depth: Option<Option<String>>,
+    pub(crate) prompt_variant: Option<Option<String>>,
+}
+
 pub fn load_config_for_target(target: Option<&Path>) -> Result<V2Config> {
     load_config(ConfigPaths::from_target(target)?)
 }
@@ -190,6 +210,9 @@ pub(crate) fn merge_config(config: &mut V2Config, patch: PartialConfig) {
     if let Some(operator) = patch.operator {
         merge_operator_config(&mut config.operator, operator);
     }
+    if let Some(phases) = patch.phases {
+        merge_guided_phase_config(&mut config.phases, phases);
+    }
 }
 
 fn merge_runtime_config(config: &mut RuntimeConfig, patch: PartialRuntimeConfig) {
@@ -218,6 +241,28 @@ fn merge_operator_config(config: &mut OperatorConfig, patch: PartialOperatorConf
         patch.trusted_workflow_auto_accept,
     );
     apply_patch_field(&mut config.trusted_modules, patch.trusted_modules);
+}
+
+fn merge_guided_phase_config(config: &mut GuidedPhaseConfig, patch: PartialGuidedPhaseConfig) {
+    apply_patch_field(&mut config.stop_after, patch.stop_after);
+    merge_phase_template_config(&mut config.map, patch.map);
+    merge_phase_template_config(&mut config.hunt, patch.hunt);
+    merge_phase_template_config(&mut config.confirm, patch.confirm);
+    merge_phase_template_config(&mut config.fix, patch.fix);
+}
+
+fn merge_phase_template_config(
+    config: &mut PhaseTemplateConfig,
+    patch: Option<PartialPhaseTemplateConfig>,
+) {
+    let Some(patch) = patch else {
+        return;
+    };
+    apply_patch_field(&mut config.budget_usd, patch.budget_usd);
+    apply_patch_field(&mut config.concurrency, patch.concurrency);
+    apply_patch_field(&mut config.strategy_cap, patch.strategy_cap);
+    apply_patch_field(&mut config.confirmation_depth, patch.confirmation_depth);
+    apply_patch_field(&mut config.prompt_variant, patch.prompt_variant);
 }
 
 fn apply_patch_field<T>(target: &mut T, patch: Option<T>) {

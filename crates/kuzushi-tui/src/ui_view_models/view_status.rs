@@ -31,6 +31,7 @@ fn threat_view_status(app: &ShellApp) -> Option<String> {
         ShellView::PromptsEditor => Some("prompts".to_string()),
         ShellView::ActorDetail(index) => Some(format!("actor:{}", index + 1)),
         ShellView::Runs => Some("run-timeline".to_string()),
+        ShellView::RunDiff { .. } => Some("run-diff".to_string()),
         ShellView::Replay(_) => Some("replay".to_string()),
         ShellView::Trace(_) => Some("trace".to_string()),
         ShellView::Activity => Some("activity".to_string()),
@@ -54,6 +55,8 @@ fn system_view_status(app: &ShellApp) -> Option<String> {
 fn workspace_view_status(app: &ShellApp) -> String {
     match &app.shell_view {
         ShellView::Context => "context".to_string(),
+        ShellView::ProjectModel => "project-model".to_string(),
+        ShellView::StrategyQueue => "strategy-queue".to_string(),
         ShellView::Workspace => "workspace".to_string(),
         ShellView::KnowledgeBase => "kb".to_string(),
         ShellView::FailureHandoff => "failure-handoff".to_string(),

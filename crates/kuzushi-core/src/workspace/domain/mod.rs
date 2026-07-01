@@ -4,8 +4,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 mod program_scope;
+mod nested_scope;
 mod workspace_target;
 
+pub use nested_scope::{
+    discover_and_save_nested_project_scopes, discover_nested_project_scopes,
+    load_nested_project_scopes, project_model_dir, project_model_scopes_path,
+    save_nested_project_scopes, NestedProjectKind, NestedProjectScope, NestedProjectScopeTree,
+    PROJECT_MODEL_DIR, PROJECT_MODEL_SCOPES_FILE, ROOT_SCOPE_ID,
+};
 pub use program_scope::{
     HostPattern, ProgramScope, ProgramScopeFile, ProgramScopeList, ScopeVerdict,
 };

@@ -4,7 +4,7 @@ impl ShellApp {
     pub(crate) fn apply_scan_finished(&mut self, run_id: String, findings_count: usize) {
         self.mark_scan_panel_completed(&run_id, findings_count);
         self.mark_scan_activity_run_id(&run_id);
-        self.mark_active_scan_tasks_done();
+        self.mark_scan_tasks_terminal();
         let target_label = self.scan_target_label();
         self.record_scan_completion_artifacts(&run_id, findings_count, &target_label);
         self.refresh_findings(false);
@@ -20,16 +20,29 @@ impl ShellApp {
         );
         self.record_scan_task_durations();
         self.notify_scan_completion(findings_count);
-        // Findings are refreshed above, so the Activity output can show the
-        // actual review list immediately. If the operator is elsewhere, keep
-        // the existing heatmap auto-open behavior; while watching Activity,
-        // stay in place and switch the output view to findings.
-        if findings_count > 0 {
-            if let Some(session) = self.activity.as_mut() {
+        self.maybe_open_scan_findings_output(findings_count);
+    }
+
+    fn maybe_open_scan_findings_output(&mut self, findings_count: usize) {
+        // Findings are refreshed above. If the operator allows viz auto-open,
+        // the Activity output can switch to the review list when it has not
+        // been manually pinned; otherwise leave their page alone.
+        if findings_count == 0 {
+            return;
+        }
+        self.maybe_switch_activity_deck_to_findings();
+        if !matches!(self.shell_view, ShellView::Activity) {
+            self.auto_open_viz_page(crate::scene3d::VizPage::Heatmap);
+        }
+    }
+
+    fn maybe_switch_activity_deck_to_findings(&mut self) {
+        if !self.auto_open_viz {
+            return;
+        }
+        if let Some(session) = self.activity.as_mut() {
+            if session.can_auto_switch_deck() {
                 session.set_deck_page(crate::ActivityDeckPage::Findings);
-            }
-            if !matches!(self.shell_view, ShellView::Activity) {
-                self.auto_open_viz_page(crate::scene3d::VizPage::Heatmap);
             }
         }
     }
@@ -54,13 +67,13 @@ impl ShellApp {
         session.run_id = run_id.to_string();
     }
 
-    fn mark_active_scan_tasks_done(&mut self) {
+    fn mark_scan_tasks_terminal(&mut self) {
         let Some(session) = self.activity.as_mut() else {
             return;
         };
         let now = std::time::Instant::now();
         for row in session.tasks.values_mut() {
-            mark_active_scan_task_done(row, now);
+            mark_scan_task_terminal(row, now);
         }
     }
 
@@ -166,10 +179,18 @@ fn completed_task_durations(session: &crate::app::ActivitySession) -> Vec<(Strin
         .collect()
 }
 
-fn mark_active_scan_task_done(row: &mut crate::app::DagTaskRow, now: std::time::Instant) {
-    if matches!(row.state, crate::app::DagTaskState::Active) {
-        row.state = crate::app::DagTaskState::Done;
-        row.completed_at = Some(now);
+fn mark_scan_task_terminal(row: &mut crate::app::DagTaskRow, now: std::time::Instant) {
+    match row.state {
+        crate::app::DagTaskState::Active => {
+            row.state = crate::app::DagTaskState::Done;
+            row.completed_at = Some(now);
+        }
+        crate::app::DagTaskState::Queued => {
+            row.state = crate::app::DagTaskState::Skipped;
+            row.completed_at = Some(now);
+            row.last_label = "not run in this scan".to_string();
+        }
+        _ => {}
     }
 }
 

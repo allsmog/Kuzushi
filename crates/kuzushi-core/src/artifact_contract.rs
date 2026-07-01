@@ -27,7 +27,7 @@ pub(crate) struct CanonicalRunArtifactSpec {
     pub(crate) kind: &'static str,
 }
 
-pub(crate) const CANONICAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 12] = [
+pub(crate) const CANONICAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 13] = [
     CanonicalRunArtifactSpec {
         leaf: "run.json",
         label: "run metadata",
@@ -61,6 +61,11 @@ pub(crate) const CANONICAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 12] = [
     CanonicalRunArtifactSpec {
         leaf: "recommendations.json",
         label: "recommendations",
+        kind: "json",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "strategy.json",
+        label: "strategy proposals",
         kind: "json",
     },
     CanonicalRunArtifactSpec {

@@ -5,6 +5,7 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
     match app.shell_view {
         ShellView::Options(_) => Some(options_keybindings(app)),
         ShellView::Context => Some(context_keybindings(app)),
+        ShellView::StrategyQueue => Some(strategy_queue_keybindings(app)),
         ShellView::Workspace => Some(workspace_status_keybindings(app)),
         ShellView::KnowledgeBase => Some(knowledge_base_keybindings(app)),
         _ => None,
@@ -37,6 +38,16 @@ fn workspace_status_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     bindings.push(bind("workspace status", "summary"));
     bindings.push(bind("workspace export", "export findings"));
     bindings.push(bind("scan <target>", "select target"));
+    bindings
+}
+
+fn strategy_queue_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let mut bindings = Vec::new();
+    push_view_keybindings(&mut bindings, app);
+    bindings.push(bind("strategy approve <id>", "approve"));
+    bindings.push(bind("strategy reject <id>", "reject"));
+    bindings.push(bind("strategy correct <id>", "correct"));
+    bindings.push(bind("recommend", "refresh proposals"));
     bindings
 }
 

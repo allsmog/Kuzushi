@@ -145,7 +145,7 @@ fn target_input(request: &RecommenderRequest) -> Value {
 }
 
 fn triage_input(_: &RecommenderRequest) -> Value {
-    json!({ "batchSize": 20 })
+    json!({})
 }
 
 fn verify_input(request: &RecommenderRequest) -> Value {

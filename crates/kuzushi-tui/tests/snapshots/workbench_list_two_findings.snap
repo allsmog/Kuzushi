@@ -12,16 +12,32 @@ apps/  · 2
   web/  · 1
     server.ts  · 1
 
- -- DFD ----------------------------------------------------------------------------------------------------------------
-       ∅  no data-flow diagram
-       no threat model yet — run `threat-model:build` to map this target's data flows.
+ -- CODE · F-0001 · apps/api/orders.rs:142 -----------------------------------------------------------------------------
+       ∅  source unavailable
+       could not read source file apps/api/orders.rs: No such file or directory (os error 2)
 
-       ▸ threat-model:build    map trust zones and flows
+       ▸ open <id>             select another finding with source context
 
  -- FINDINGS · 2 · 1 triaged · 1 pending -------------------------------------------------------------------------------
 all:2  crit:1  high:1  med:0  low:0
-▌ F-0001  CRIT  sql injection via order_id concatenation
-  F-0002  HIGH  path traversal in /assets/<file>
+▌ F-0001  CRIT  sql injection via order_id concatenation tp 91%    apps/api/orders.rs:142 run:unknown    rev:unknown
+  F-0002  HIGH  path traversal in /assets/<file> untriaged apps/web/server.ts:301 run:unknown    rev:unknown
 
  -- DETAILS ------------------------------------------------------------------------------------------------------------
-no finding selected — press Enter on a FINDINGS row to inspect it.
+F-0001 · CRITICAL
+sql injection via order_id concatenation
+
+location: apps/api/orders.rs:142
+rule: demo.sqli
+tool: semgrep
+proof: signal_only - Scanner signal only; source-grounded evidence is not recorded
+verification: not attempted
+MESSAGE
+  sql injection via order_id concatenation
+TRIAGE
+  true_positive · confidence 0.91
+  concatenated input
+EVIDENCE
+  no evidence rows recorded
+FINGERPRINT
+  2289b7586b0fd07896fc43d80bdb025d

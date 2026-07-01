@@ -1,8 +1,8 @@
 use super::*;
 use crate::ui_view_models::{
     plain_command_result_model, plain_live_activity_model, plain_prereq_plan_model,
-    plain_render_mode, PlainCommandResultModel, PlainLiveActivityModel, PlainPrereqPlanModel,
-    PlainRenderMode,
+    plain_render_mode, retry_card_model, PlainCommandResultModel, PlainLiveActivityModel,
+    PlainPrereqPlanModel, PlainRenderMode, RetryCardModel,
 };
 
 pub fn render_plain_app(app: &ShellApp, width: usize) -> String {
@@ -34,6 +34,8 @@ pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
         PlainRenderMode::Options(view) => plain_options_lines(app, width, view),
         PlainRenderMode::SastTasks => plain_sast_tasks_lines(app, width),
         PlainRenderMode::Context => plain_context_lines(app, width),
+        PlainRenderMode::ProjectModel => plain_project_model_lines(app, width),
+        PlainRenderMode::StrategyQueue => plain_strategy_queue_lines(app, width),
         PlainRenderMode::Workspace => plain_workspace_lines(app, width),
         PlainRenderMode::KnowledgeBase => plain_knowledge_base_lines(app, width),
         PlainRenderMode::Config => plain_config_lines(app, width),
@@ -87,6 +89,10 @@ fn plain_prereq_plan_lines(plan: PlainPrereqPlanModel, width: usize) -> Vec<Stri
 
 fn prepend_plain_activity_lines(app: &ShellApp, width: usize, lines: Vec<String>) -> Vec<String> {
     let mut prefix = Vec::new();
+    if let Some(model) = retry_card_model(app) {
+        prefix.extend(plain_retry_card_lines(model, width));
+        prefix.push(String::new());
+    }
     if let Some(model) = plain_live_activity_model(app) {
         prefix.extend(plain_live_activity_lines(model, width));
         prefix.push(String::new());
@@ -99,6 +105,22 @@ fn prepend_plain_activity_lines(app: &ShellApp, width: usize, lines: Vec<String>
         return lines;
     }
     prefix.into_iter().chain(lines).collect()
+}
+
+fn plain_retry_card_lines(model: RetryCardModel, width: usize) -> Vec<String> {
+    let mut lines = vec![plain_section_divider("RETRY", width)];
+    lines.push(format!(
+        "{} task(s) failed. y/Enter retry with fixes; n/Esc skip.",
+        model.failed_count
+    ));
+    lines.extend(model.rows.into_iter().map(|row| {
+        let adjustment = row
+            .adjustment
+            .map(|adjustment| format!(" ({adjustment})"))
+            .unwrap_or_default();
+        format!("- {}: {}{}", row.tool, row.error, adjustment)
+    }));
+    lines
 }
 
 fn plain_live_activity_lines(model: PlainLiveActivityModel, width: usize) -> Vec<String> {

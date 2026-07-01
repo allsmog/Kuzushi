@@ -1,0 +1,131 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://kuzushi.dev/schemas/run.strategy.schema.json",
+  "title": "Kuzushi Run Strategy Snapshot",
+  "description": "Canonical schema for .kuzushi/runs/<runId>/strategy.json. Rich producer snapshots record proposed phase strategies; deterministic absence markers use the shared run snapshot marker fields.",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "runId": { "type": "string" },
+    "run_id": { "type": "string" },
+    "status": { "$ref": "#/definitions/runStatus" },
+    "runStatus": { "$ref": "#/definitions/runStatus" },
+    "summary": { "type": "string" },
+    "artifacts": { "type": "array" },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "errors": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "source": { "type": "string" },
+    "strategyProposals": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/strategyProposal" }
+    },
+    "strategy_proposals": {
+      "type": "array",
+      "items": { "$ref": "#/definitions/strategyProposal" }
+    }
+  },
+  "definitions": {
+    "runStatus": {
+      "type": "string",
+      "enum": ["running", "completed", "failed", "interrupted", "partial", "skipped", "paused"]
+    },
+    "strategyProposal": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "phase": { "$ref": "#/definitions/phase" },
+        "baseStrategy": { "type": "string" },
+        "base_strategy": { "type": "string" },
+        "recommendedStrategy": { "type": "string" },
+        "recommended_strategy": { "type": "string" },
+        "correctedStrategy": { "type": ["string", "null"] },
+        "corrected_strategy": { "type": ["string", "null"] },
+        "appliedCorrections": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/appliedCorrection" }
+        },
+        "applied_corrections": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/appliedCorrection" }
+        },
+        "rationale": { "type": "string" },
+        "expectedCostUsd": { "type": ["number", "null"], "minimum": 0 },
+        "expected_cost_usd": { "type": ["number", "null"], "minimum": 0 },
+        "expectedRuntime": { "type": ["string", "null"] },
+        "expected_runtime": { "type": ["string", "null"] },
+        "preflight": { "$ref": "#/definitions/preflight" },
+        "resourceRisk": { "$ref": "#/definitions/resourceRisk" },
+        "resource_risk": { "$ref": "#/definitions/resourceRisk" },
+        "status": { "$ref": "#/definitions/proposalStatus" },
+        "sourceRunId": { "type": ["string", "null"] },
+        "source_run_id": { "type": ["string", "null"] },
+        "tool": { "type": ["string", "null"] },
+        "nextInput": { "type": ["object", "null"] },
+        "next_input": { "type": ["object", "null"] },
+        "createdAtMs": { "type": "integer", "minimum": 0 },
+        "created_at_ms": { "type": "integer", "minimum": 0 },
+        "updatedAtMs": { "type": "integer", "minimum": 0 },
+        "updated_at_ms": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "preflight": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "status": { "$ref": "#/definitions/preflightStatus" },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "appliedCorrection": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "id": { "type": "string" },
+        "scope": { "$ref": "#/definitions/correctionScope" },
+        "author": { "type": "string" },
+        "reason": { "type": "string" },
+        "fromStrategy": { "type": "string" },
+        "from_strategy": { "type": "string" },
+        "toStrategy": { "type": "string" },
+        "to_strategy": { "type": "string" }
+      }
+    },
+    "phase": {
+      "type": "string",
+      "enum": [
+        "context",
+        "project-model",
+        "review",
+        "classification",
+        "confirmation",
+        "report-follow-up"
+      ]
+    },
+    "preflightStatus": {
+      "type": "string",
+      "enum": ["ready", "warning", "blocked", "unknown"]
+    },
+    "proposalStatus": {
+      "type": "string",
+      "enum": ["proposed", "approved", "rejected"]
+    },
+    "resourceRisk": {
+      "type": "string",
+      "enum": ["low", "medium", "high", "blocked", "unknown"]
+    },
+    "correctionScope": {
+      "type": "string",
+      "enum": ["run", "workspace"]
+    }
+  }
+}

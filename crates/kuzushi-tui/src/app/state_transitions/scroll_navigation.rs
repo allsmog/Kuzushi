@@ -125,11 +125,14 @@ impl ShellApp {
             | ShellView::Tools
             | ShellView::Options(_)
             | ShellView::Runs
+            | ShellView::RunDiff { .. }
             | ShellView::Replay(_)
             | ShellView::Trace(_)
             | ShellView::Activity
             | ShellView::SastTasks
             | ShellView::Context
+            | ShellView::ProjectModel
+            | ShellView::StrategyQueue
             | ShellView::Workspace
             | ShellView::KnowledgeBase
             | ShellView::AgentChat

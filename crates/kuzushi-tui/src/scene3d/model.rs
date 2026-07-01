@@ -68,8 +68,8 @@ pub struct Scene {
 
 /// The pages of the security-visualization gallery, cycled with `Tab`. The
 /// first is a 3D attack-surface terrain (rendered into a half-block
-/// framebuffer); the rest are 2D box-drawing diagrams. All dummy data for now,
-/// shaped so real findings / taint-iris / threat-model artifacts drop in.
+/// framebuffer); the rest are 2D box-drawing diagrams fed by findings,
+/// taint-flow, exploit-chain, and threat-model artifacts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum VizPage {
     /// 3D shaded terrain — height is severity-weighted risk density; peaks are

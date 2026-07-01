@@ -20,13 +20,13 @@ pub(crate) use domain::is_runtime_proof_state;
 pub use domain::{
     compute_dedup_key, compute_root_cause_key, extract_cwe, normalize_cwe, Finding,
     FindingEvidence, PatchAttempt, PatchResult, PatchStatus, PersistedProofVerdict,
-    PersistedSandboxBackend,
-    PersistedVerification, Severity, StaticProofState, TriageOutcome, TriageVerdict, VulnSource,
+    PersistedSandboxBackend, PersistedVerification, Severity, StaticProofState, TriageOutcome,
+    TriageVerdict, VulnSource,
 };
 pub use persistence::FindingStore;
 pub use presentation::{
     format_finding_alias, parse_finding_alias, proof_ladder_state, proof_state_label,
-    resolve_finding_alias, runtime_validation_label, sorted_finding_aliases, stable_finding_alias,
-    FindingDetailReport, FindingListFilter, FindingListReport, FindingNextAction,
-    FindingVerdictFilter, ProofLadderState,
+    resolve_finding_alias, runtime_validation_label, sorted_finding_alias_indices,
+    sorted_finding_aliases, stable_finding_alias, FindingDetailReport, FindingListFilter,
+    FindingListReport, FindingNextAction, FindingVerdictFilter, ProofLadderState,
 };

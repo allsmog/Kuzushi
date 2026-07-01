@@ -152,7 +152,7 @@ finding severity ranking, TUI command parsing, scanner JSON parsing.
 
 Owner files:
 `crates/kuzushi-tui/src/app/`,
-`crates/kuzushi-tui/src/commands.rs`,
+`crates/kuzushi-tui/src/commands/`,
 `crates/kuzushi-tui/src/renderer/`,
 `crates/kuzushi-tui/src/renderer/plain/`, and
 `crates/kuzushi-tui/src/theme/mod.rs`.

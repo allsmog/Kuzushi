@@ -25,6 +25,26 @@ pub enum WorkspaceCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StrategyCommand {
+    Show,
+    Approve(String),
+    Reject(String),
+    Correct {
+        id: String,
+        to_strategy: String,
+        reason: Option<String>,
+        scope: StrategyCorrectionCommandScope,
+    },
+    Unsupported(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StrategyCorrectionCommandScope {
+    Run,
+    Workspace,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PwnCommand {
     Show,
     Target(PathBuf),

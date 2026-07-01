@@ -26,6 +26,30 @@ pub(super) fn put(buf: &mut Buffer, area: Rect, x: u16, y: u16, ch: &str, color:
     }
 }
 
+pub(super) fn diagram_primary() -> Color {
+    if crate::theme::active_theme().high_contrast {
+        crate::theme::T_HEADING
+    } else {
+        crate::theme::T_PRIMARY
+    }
+}
+
+pub(super) fn diagram_muted() -> Color {
+    if crate::theme::active_theme().high_contrast {
+        crate::theme::T_PRIMARY
+    } else {
+        crate::theme::T_MUTED
+    }
+}
+
+pub(super) fn diagram_subtle() -> Color {
+    if crate::theme::active_theme().high_contrast {
+        crate::theme::T_MUTED
+    } else {
+        crate::theme::T_SUBTLE
+    }
+}
+
 /// Write a label, truncated to fit within `area`.
 pub(super) fn text(buf: &mut Buffer, area: Rect, x: u16, y: u16, s: &str, color: Color) {
     let (ax, ay) = (area.x + x, area.y + y);

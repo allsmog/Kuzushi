@@ -6,7 +6,9 @@
 use std::sync::mpsc;
 use std::sync::Arc;
 
-use kuzushi_core::{BroadcastSink, JsonlSink, RunTraceStep, TraceHandle, TraceSink, V2Config};
+use kuzushi_core::{
+    BroadcastSink, Finding, JsonlSink, RunTraceStep, Severity, TraceHandle, TraceSink, V2Config,
+};
 use kuzushi_tui::{render_plain_app, ShellApp, ShellCommand, ShellView};
 
 #[test]
@@ -44,7 +46,9 @@ fn fake_scan_dag_renders_with_module_tags_and_subsystems_collapse() {
         .emit();
 
     let triage = handle.for_module("triage");
-    let triage_start = triage.step("tool", "run", "triage start (batch=10)").emit();
+    let triage_start = triage
+        .step("tool", "run", "triage start (concurrency=10)")
+        .emit();
     let _ = triage
         .child(triage_start)
         .step("reasoning", "run", "evidence-collect · stage1 kept 14/14")
@@ -180,8 +184,10 @@ fn auto_open_disabled_does_not_open_activity() {
 fn pane_focus_routes_jk_to_focused_scroll_offset() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.handle_command(ShellCommand::Activity);
+    app.findings = sample_findings(10);
     {
         let session = app.activity.as_mut().unwrap();
+        session.next_deck_page();
         // Seed enough events that scrolling makes sense.
         for i in 0..50 {
             session.apply_step(
@@ -223,7 +229,9 @@ fn pause_toggle_preserves_pinned_output_cursor() {
     use kuzushi_tui::ActivitySession;
     let mut app = ShellApp::new(V2Config::default(), None);
     app.handle_command(ShellCommand::Activity);
+    app.findings = sample_findings(10);
     let session: &mut ActivitySession = app.activity.as_mut().unwrap();
+    session.next_deck_page();
     for i in 0..40 {
         session.apply_step(
             RunTraceStep::new(i, "tool", format!("event {i}"))
@@ -261,7 +269,7 @@ fn pause_toggle_preserves_pinned_output_cursor() {
     let _ = session;
     app.scroll_to_bottom();
     let session = app.activity.as_ref().unwrap();
-    assert_eq!(session.deck_cursor, usize::MAX / 2);
+    assert_eq!(session.deck_cursor, 9);
     assert!(
         !session.feed_auto_tail,
         "OUTPUT bottom should not reset live auto-tail"
@@ -313,9 +321,13 @@ fn cancel_hotkey_in_activity_emits_visible_signal() {
     });
     assert!(matches!(app.shell_view, ShellView::Activity));
 
-    // Press 'c' on the Activity view.
+    // Press 'C' twice on the Activity view; the first key arms cancellation.
     app.handle_key(crossterm::event::KeyEvent::new(
-        crossterm::event::KeyCode::Char('c'),
+        crossterm::event::KeyCode::Char('C'),
+        crossterm::event::KeyModifiers::empty(),
+    ));
+    app.handle_key(crossterm::event::KeyEvent::new(
+        crossterm::event::KeyCode::Char('C'),
         crossterm::event::KeyModifiers::empty(),
     ));
 
@@ -330,13 +342,43 @@ fn cancel_hotkey_in_activity_emits_visible_signal() {
     });
     assert!(
         log_has_signal,
-        "c hotkey should produce a visible signal in the transcript; \
+        "C hotkey should produce a visible signal in the transcript; \
          got log: {:?}",
         app.log
             .iter()
             .map(|l| format!("{}: {}", l.prefix, l.body))
             .collect::<Vec<_>>()
     );
+}
+
+fn sample_findings(count: usize) -> Vec<Finding> {
+    (0..count)
+        .map(|index| Finding {
+            id: None,
+            scan_id: None,
+            fingerprint: format!("fp-{index}"),
+            rule_id: "test/rule".to_string(),
+            title: format!("finding {index}"),
+            severity: Severity::High,
+            file_path: "src/x.rs".to_string(),
+            start_line: (index + 1) as u32,
+            end_line: None,
+            message: String::new(),
+            tool: "test".to_string(),
+            actor_fingerprint: None,
+            static_proof_state: None,
+            triage: None,
+            verification: None,
+            created_at: String::new(),
+            vuln_source: None,
+            dedup_key: None,
+            suppressed: false,
+            snoozed_until: None,
+            remediation: None,
+            references: Vec::new(),
+            evidence: Vec::new(),
+        })
+        .collect()
 }
 
 #[test]

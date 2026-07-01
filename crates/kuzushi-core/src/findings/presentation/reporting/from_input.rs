@@ -38,12 +38,31 @@ impl FindingVerdictFilter {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FindingTriageStateFilter {
+    Untriaged,
+    Triaged,
+}
+
+impl FindingTriageStateFilter {
+    pub fn from_input(value: &str) -> Result<Self> {
+        match value.trim() {
+            "new" | "pending" | "untriaged" => Ok(Self::Untriaged),
+            "triaged" | "classified" => Ok(Self::Triaged),
+            other => anyhow::bail!("unknown findings:list state filter {other:?}"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FindingListFilter {
     pub severity: Vec<Severity>,
     pub verdict: Vec<FindingVerdictFilter>,
+    pub triage_state: Vec<FindingTriageStateFilter>,
     pub name: Option<String>,
+    pub text_terms: Vec<String>,
     pub file_path: Option<String>,
+    pub run_id: Vec<String>,
     /// Filter by discovery channel(s). Empty = no filter.
     pub vuln_source: Vec<VulnSource>,
     pub limit: usize,
@@ -54,8 +73,11 @@ impl Default for FindingListFilter {
         Self {
             severity: Vec::new(),
             verdict: Vec::new(),
+            triage_state: Vec::new(),
             name: None,
+            text_terms: Vec::new(),
             file_path: None,
+            run_id: Vec::new(),
             vuln_source: Vec::new(),
             limit: 50,
         }

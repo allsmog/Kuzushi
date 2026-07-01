@@ -118,12 +118,7 @@ impl Finding {
 }
 
 fn finding_title(message: &str, rule_id: &str) -> String {
-    message
-        .lines()
-        .next()
-        .unwrap_or(rule_id)
-        .trim()
-        .to_string()
+    message.lines().next().unwrap_or(rule_id).trim().to_string()
 }
 
 fn finding_dedup_key(file_path: &str, start_line: u32, cwe: Option<&str>) -> Option<String> {

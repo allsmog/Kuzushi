@@ -18,11 +18,88 @@ pub(crate) fn parse_nested_shell_command(
         "unsetg" => parse_unset_command(true, args.to_vec()),
         "task" => parse_task_command(args.to_vec()),
         "context" => parse_context_command(args.to_vec()),
+        "project" => parse_project_command(args),
+        "runs" => parse_runs_command(args),
+        "strategy" | "strategies" => parse_strategy_command(args),
         "workspace" => parse_workspace_command(args.to_vec()),
         "pwn" => parse_pwn_command(args),
         _ => return None,
     };
     Some(command)
+}
+
+fn parse_runs_command(args: &[&str]) -> ShellCommand {
+    match args {
+        [] => ShellCommand::ShowRuns,
+        ["diff", left, right] | ["compare", left, right] => ShellCommand::RunDiff {
+            left: (*left).to_string(),
+            right: (*right).to_string(),
+        },
+        ["diff" | "compare", ..] => ShellCommand::Unknown("runs diff".to_string()),
+        [other, ..] => ShellCommand::Unknown(format!("runs {other}")),
+    }
+}
+
+fn parse_project_command(args: &[&str]) -> ShellCommand {
+    match args.first().copied() {
+        None | Some("model") => ShellCommand::ProjectModel,
+        Some(other) => ShellCommand::Unknown(format!("project {other}")),
+    }
+}
+
+fn parse_strategy_command(args: &[&str]) -> ShellCommand {
+    match args.first().copied() {
+        None | Some("queue") => ShellCommand::Strategy(StrategyCommand::Show),
+        Some("approve") | Some("accept") => args
+            .get(1)
+            .map(|id| ShellCommand::Strategy(StrategyCommand::Approve((*id).to_string())))
+            .unwrap_or_else(|| {
+                ShellCommand::Strategy(StrategyCommand::Unsupported("strategy approve".to_string()))
+            }),
+        Some("reject") | Some("deny") => args
+            .get(1)
+            .map(|id| ShellCommand::Strategy(StrategyCommand::Reject((*id).to_string())))
+            .unwrap_or_else(|| {
+                ShellCommand::Strategy(StrategyCommand::Unsupported("strategy reject".to_string()))
+            }),
+        Some("correct") | Some("correction") => parse_strategy_correction_command(args),
+        Some(other) => {
+            ShellCommand::Strategy(StrategyCommand::Unsupported(format!("strategy {other}")))
+        }
+    }
+}
+
+fn parse_strategy_correction_command(args: &[&str]) -> ShellCommand {
+    let Some(id) = args.get(1) else {
+        return ShellCommand::Strategy(StrategyCommand::Unsupported(
+            "strategy correct".to_string(),
+        ));
+    };
+    let mut scope = StrategyCorrectionCommandScope::Run;
+    let mut before_reason = Vec::new();
+    let mut reason = Vec::new();
+    let mut reading_reason = false;
+    for token in args.iter().skip(2) {
+        match *token {
+            "--workspace" => scope = StrategyCorrectionCommandScope::Workspace,
+            "--run" => scope = StrategyCorrectionCommandScope::Run,
+            "--reason" => reading_reason = true,
+            value if reading_reason => reason.push(value),
+            value => before_reason.push(value),
+        }
+    }
+    let to_strategy = before_reason.join(" ");
+    if to_strategy.trim().is_empty() {
+        return ShellCommand::Strategy(StrategyCommand::Unsupported(
+            "strategy correct".to_string(),
+        ));
+    }
+    ShellCommand::Strategy(StrategyCommand::Correct {
+        id: (*id).to_string(),
+        to_strategy,
+        reason: (!reason.is_empty()).then(|| reason.join(" ")),
+        scope,
+    })
 }
 
 pub(crate) fn options_command(args: &[&str], filter: OptionsFilter) -> ShellCommand {
@@ -34,6 +111,14 @@ pub(crate) fn options_command(args: &[&str], filter: OptionsFilter) -> ShellComm
 
 pub(crate) fn parse_findings_command(args: &[&str]) -> ShellCommand {
     match args.first().copied() {
+        Some("filter") => {
+            let expression = args.get(1..).unwrap_or_default().join(" ");
+            if expression.trim().is_empty() {
+                ShellCommand::Unknown("findings filter".to_string())
+            } else {
+                ShellCommand::FindingsFilter(expression)
+            }
+        }
         Some("export") => args
             .get(1)
             .map(|path| {

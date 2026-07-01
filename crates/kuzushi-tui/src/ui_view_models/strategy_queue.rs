@@ -1,0 +1,318 @@
+use crate::ShellApp;
+use kuzushi_core::{
+    load_strategy_queue, strategy_queue_path, StrategyPhase, StrategyPreflightStatus,
+    StrategyProposal, StrategyProposalStatus, StrategyResourceRisk, WorkspaceTarget,
+};
+use std::path::Path;
+
+const STRATEGY_QUEUE_HEADERS: [&str; 8] = [
+    "status",
+    "phase",
+    "id",
+    "strategy",
+    "preflight",
+    "cost",
+    "runtime",
+    "risk",
+];
+const STRATEGY_QUEUE_COMMANDS: [&str; 6] = [
+    "strategy approve <id>",
+    "strategy reject <id>",
+    "strategy correct <id> <strategy>",
+    "recommend",
+    "prompts",
+    "back",
+];
+const STRATEGY_QUEUE_EMPTY_COMMANDS: [&str; 3] = ["recommend", "runs", "back"];
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StrategyQueueModel {
+    pub(crate) title: &'static str,
+    pub(crate) detail_rows: Vec<StrategyQueueDetailRow>,
+    pub(crate) summary: String,
+    pub(crate) headers: [&'static str; 8],
+    pub(crate) commands: [&'static str; 6],
+    pub(crate) empty_state: StrategyQueueEmptyState,
+    pub(crate) rows: Vec<StrategyQueueRow>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StrategyQueueDetailRow {
+    pub(crate) cells: [String; 2],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StrategyQueueEmptyState {
+    pub(crate) title: &'static str,
+    pub(crate) explanations: [&'static str; 2],
+    pub(crate) actions: [(&'static str, &'static str); 2],
+    pub(crate) commands: [&'static str; 3],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct StrategyQueueRow {
+    pub(crate) id: String,
+    pub(crate) cells: [String; 8],
+    pub(crate) rationale: String,
+    pub(crate) lineage: String,
+    pub(crate) source_run: String,
+}
+
+pub(crate) fn strategy_queue_model(app: &ShellApp) -> StrategyQueueModel {
+    let source = StrategyQueueSource::from_app(app);
+    let rows = source
+        .workspace
+        .as_ref()
+        .map(load_strategy_rows)
+        .unwrap_or_default();
+    let detail_rows = strategy_queue_detail_rows(&source);
+    StrategyQueueModel {
+        title: "STRATEGY QUEUE",
+        detail_rows,
+        summary: strategy_queue_summary(&rows, &source),
+        headers: STRATEGY_QUEUE_HEADERS,
+        commands: STRATEGY_QUEUE_COMMANDS,
+        empty_state: strategy_queue_empty_state(source.workspace.is_some()),
+        rows,
+    }
+}
+
+fn load_strategy_rows(workspace: &WorkspaceTarget) -> Vec<StrategyQueueRow> {
+    match load_strategy_queue(workspace) {
+        Ok(proposals) => strategy_rows_from_proposals(proposals),
+        Err(error) => vec![StrategyQueueRow {
+            id: "queue-read-error".to_string(),
+            cells: [
+                "blocked".to_string(),
+                "review".to_string(),
+                "queue-read-error".to_string(),
+                "repair queue artifact".to_string(),
+                "blocked".to_string(),
+                "unknown".to_string(),
+                "unknown".to_string(),
+                "blocked".to_string(),
+            ],
+            rationale: error.to_string(),
+            lineage: "base -> recommended".to_string(),
+            source_run: "-".to_string(),
+        }],
+    }
+}
+
+fn strategy_rows_from_proposals(mut proposals: Vec<StrategyProposal>) -> Vec<StrategyQueueRow> {
+    proposals.sort_by_key(strategy_proposal_sort_key);
+    proposals
+        .into_iter()
+        .map(strategy_row_from_proposal)
+        .collect()
+}
+
+fn strategy_proposal_sort_key(proposal: &StrategyProposal) -> (u8, &'static str, String, String) {
+    (
+        strategy_status_order(proposal.status),
+        proposal.phase.label(),
+        proposal.effective_strategy().to_string(),
+        proposal.id.clone(),
+    )
+}
+
+fn strategy_status_order(status: StrategyProposalStatus) -> u8 {
+    match status {
+        StrategyProposalStatus::Proposed => 0,
+        StrategyProposalStatus::Approved => 1,
+        StrategyProposalStatus::Rejected => 2,
+    }
+}
+
+fn strategy_row_from_proposal(proposal: StrategyProposal) -> StrategyQueueRow {
+    let strategy = proposal.effective_strategy().to_string();
+    let lineage = strategy_lineage(&proposal);
+    StrategyQueueRow {
+        id: proposal.id.clone(),
+        cells: [
+            status_label(proposal.status).to_string(),
+            phase_label(proposal.phase).to_string(),
+            proposal.id.clone(),
+            strategy,
+            preflight_label(proposal.preflight.status).to_string(),
+            cost_label(proposal.expected_cost_usd),
+            proposal
+                .expected_runtime
+                .unwrap_or_else(|| "unknown".to_string()),
+            risk_label(proposal.resource_risk).to_string(),
+        ],
+        rationale: strategy_rationale(
+            proposal.rationale,
+            proposal.preflight.notes,
+            &proposal.applied_corrections,
+        ),
+        lineage,
+        source_run: proposal.source_run_id.unwrap_or_else(|| "-".to_string()),
+    }
+}
+
+fn strategy_rationale(
+    rationale: String,
+    notes: Vec<String>,
+    corrections: &[kuzushi_core::AppliedStrategyCorrection],
+) -> String {
+    let notes = notes
+        .into_iter()
+        .filter(|note| !note.trim().is_empty())
+        .take(3)
+        .collect::<Vec<_>>();
+    let mut segments = vec![rationale];
+    if !notes.is_empty() {
+        segments.push(format!("preflight: {}", notes.join("; ")));
+    }
+    segments.extend(corrections.iter().map(|correction| {
+        format!(
+            "correction:{} by {}: {}",
+            correction.scope.label(),
+            correction.author,
+            correction.reason
+        )
+    }));
+    segments.join(" | ")
+}
+
+fn strategy_lineage(proposal: &StrategyProposal) -> String {
+    match proposal.corrected_strategy.as_deref() {
+        Some(corrected) => format!(
+            "{} -> {} -> {}",
+            proposal.base_strategy, proposal.recommended_strategy, corrected
+        ),
+        None => format!(
+            "{} -> {}",
+            proposal.base_strategy, proposal.recommended_strategy
+        ),
+    }
+}
+
+fn cost_label(cost: Option<f64>) -> String {
+    cost.map(|value| format!("${value:.4}"))
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
+fn status_label(status: StrategyProposalStatus) -> &'static str {
+    match status {
+        StrategyProposalStatus::Proposed => "proposed",
+        StrategyProposalStatus::Approved => "approved",
+        StrategyProposalStatus::Rejected => "rejected",
+    }
+}
+
+fn phase_label(phase: StrategyPhase) -> &'static str {
+    phase.label()
+}
+
+fn preflight_label(status: StrategyPreflightStatus) -> &'static str {
+    status.label()
+}
+
+fn risk_label(risk: StrategyResourceRisk) -> &'static str {
+    risk.label()
+}
+
+fn strategy_queue_summary(rows: &[StrategyQueueRow], source: &StrategyQueueSource) -> String {
+    if source.workspace.is_none() {
+        return "no target selected; strategy queue is target-scoped".to_string();
+    }
+    if rows.is_empty() {
+        return "no queued strategy proposals".to_string();
+    }
+    let proposed = rows.iter().filter(|row| row.cells[0] == "proposed").count();
+    let approved = rows.iter().filter(|row| row.cells[0] == "approved").count();
+    let rejected = rows.iter().filter(|row| row.cells[0] == "rejected").count();
+    let corrected = rows
+        .iter()
+        .filter(|row| row.lineage.matches(" -> ").count() >= 2)
+        .count();
+    format!(
+        "{} proposals: {} proposed, {} approved, {} rejected, {} corrected",
+        rows.len(),
+        proposed,
+        approved,
+        rejected,
+        corrected
+    )
+}
+
+fn strategy_queue_detail_rows(source: &StrategyQueueSource) -> Vec<StrategyQueueDetailRow> {
+    vec![
+        strategy_queue_detail_row("scope", source.scope_label.clone()),
+        strategy_queue_detail_row("queue", source.queue_label.clone()),
+    ]
+}
+
+fn strategy_queue_detail_row(label: &str, value: String) -> StrategyQueueDetailRow {
+    StrategyQueueDetailRow {
+        cells: [label.to_string(), value],
+    }
+}
+
+fn strategy_queue_empty_state(target_selected: bool) -> StrategyQueueEmptyState {
+    if !target_selected {
+        return StrategyQueueEmptyState {
+            title: "no target selected",
+            explanations: [
+                "strategy proposals are stored under the selected target.",
+                "choose a target before asking the recommender to propose review work.",
+            ],
+            actions: [("target <path>", "select a target"), ("back", "return")],
+            commands: ["target <path>", "runs", "back"],
+        };
+    }
+    StrategyQueueEmptyState {
+        title: "no queued proposals",
+        explanations: [
+            "strategy queue reads .kuzushi/v2/strategy-queue.jsonl.",
+            "run the recommender to materialize review proposals before execution.",
+        ],
+        actions: [
+            ("recommend", "rank modules and write strategy proposals"),
+            ("runs", "inspect persisted runs"),
+        ],
+        commands: STRATEGY_QUEUE_EMPTY_COMMANDS,
+    }
+}
+
+struct StrategyQueueSource {
+    workspace: Option<WorkspaceTarget>,
+    scope_label: String,
+    queue_label: String,
+}
+
+impl StrategyQueueSource {
+    fn from_app(app: &ShellApp) -> Self {
+        let Some(target) = app.target.as_deref() else {
+            return Self {
+                workspace: None,
+                scope_label: "no target selected".to_string(),
+                queue_label: "unavailable".to_string(),
+            };
+        };
+        match WorkspaceTarget::new(target) {
+            Ok(workspace) => {
+                let queue = strategy_queue_path(&workspace);
+                Self {
+                    scope_label: scope_label(target),
+                    queue_label: queue.display().to_string(),
+                    workspace: Some(workspace),
+                }
+            }
+            Err(error) => Self {
+                workspace: None,
+                scope_label: scope_label(target),
+                queue_label: format!("unavailable: {error}"),
+            },
+        }
+    }
+}
+
+fn scope_label(target: &Path) -> String {
+    target.display().to_string()
+}
+
+#[cfg(test)]
+mod tests;

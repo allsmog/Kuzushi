@@ -24,9 +24,14 @@ pub(crate) fn activity_feed_pane_rows(
     width: usize,
     running_tool: Option<&str>,
 ) -> Vec<ActivityFeedPaneRow> {
+    let visible_events = session
+        .paused_event_count
+        .map(|count| count.min(session.events.len()))
+        .unwrap_or(session.events.len());
     let mut rows = session
         .events
         .iter()
+        .take(visible_events)
         .flat_map(|event| feed_event_rows(event, session.verbose_subsystems, width))
         .collect::<Vec<_>>();
     if let Some(model) = activity_feed_pause_model(session) {

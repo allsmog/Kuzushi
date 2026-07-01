@@ -655,8 +655,7 @@ function tuiWorkspaceStateLabelFailures(root) {
 
 function tuiFindingsDbLabelFailures(root) {
   const workspaceFile = "crates/kuzushi-tui/src/ui_view_models/workspace.rs";
-  const emptyStateFile =
-    "crates/kuzushi-tui/src/renderer/views/findings/findings_lines/empty_state.rs";
+  const emptyStateFile = "crates/kuzushi-tui/src/ui_view_models/findings.rs";
   const workspacePath = path.join(root, workspaceFile);
   const emptyStatePath = path.join(root, emptyStateFile);
   if (!existsSync(workspacePath))
