@@ -41,11 +41,29 @@
   --kz-sev-high:       #ff8b8b;
   --kz-sev-medium:     #e2c14a;
   --kz-sev-low:        #8aa6c4;
+  --kz-sev-info:       #8aa6c4;
+  --kz-sev-unknown:    #7d8794;
 
   /* Grid metrics */
   --kz-font: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
   --kz-font-size: 12.5px;
   --kz-line-height: 1.28;
+}
+
+[data-kz-theme="high-contrast"],
+.kz-theme--high-contrast {
+  --kz-primary:        #ffffff;
+  --kz-muted:          #cfd6e0;
+  --kz-subtle:         #7d8794;
+  --kz-accent:         #ffffff;
+  --kz-label:          #ffffff;
+  --kz-heading:        #ffffff;
+  --kz-sev-critical:   #e25c5c;
+  --kz-sev-high:       #e25c5c;
+  --kz-sev-medium:     #e2c14a;
+  --kz-sev-low:        #ffffff;
+  --kz-sev-info:       #ffffff;
+  --kz-sev-unknown:    #cfd6e0;
 }
 
 /* ── Terminal window ─────────────────────────────────────────────── */
@@ -126,6 +144,23 @@
 .kz-tone-high     { color: var(--kz-sev-high); }
 .kz-tone-medium   { color: var(--kz-sev-medium); }
 .kz-tone-low      { color: var(--kz-sev-low); }
+.kz-tone-info     { color: var(--kz-sev-info); }
+.kz-tone-unknown  { color: var(--kz-sev-unknown); }
+
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-primary,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-accent,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-label,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-heading,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-success,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-warn,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-danger,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-critical,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-high,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-medium,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-low,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-info {
+  font-weight: 700;
+}
 
 /* ── Severity / status chip ──────────────────────────────────────── */
 

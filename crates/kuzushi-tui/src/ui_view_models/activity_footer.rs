@@ -31,8 +31,11 @@ macro_rules! footer_hint {
 }
 
 const FULL_HINTS: &[ActivityFooterHint] = &[
-    footer_hint!("j/k", "scroll"),
+    footer_hint!("j/k/g/G", "scroll"),
     footer_hint!("Tab", "pane"),
+    footer_hint!("←/→", "views"),
+    footer_hint!("f", "findings"),
+    footer_hint!("o", "open"),
     footer_hint!("V", "verbose"),
     footer_hint!("p", "pause"),
     footer_hint!("R", "reset"),
@@ -41,10 +44,13 @@ const FULL_HINTS: &[ActivityFooterHint] = &[
 ];
 
 /// Taskless (single-tool) runs collapse the TASKS pane, which pins focus to
-/// OUTPUT: `Tab` (pane toggle) and `Enter` (focus a task) would silently
-/// no-op, so the footer must not advertise them.
+/// OUTPUT: `Tab` (pane toggle) and `Enter` (focus a task) have no task target,
+/// so the footer must not advertise them.
 const TASKLESS_HINTS: &[ActivityFooterHint] = &[
-    footer_hint!("j/k", "scroll"),
+    footer_hint!("j/k/g/G", "scroll"),
+    footer_hint!("←/→", "views"),
+    footer_hint!("f", "findings"),
+    footer_hint!("o", "open"),
     footer_hint!("V", "verbose"),
     footer_hint!("p", "pause"),
     footer_hint!("R", "reset"),
@@ -105,6 +111,12 @@ fn focus_body(session: &ActivitySession, running_tool: Option<&str>) -> String {
     if session.tasks.is_empty() {
         return taskless_body(running_tool);
     }
+    if session.effective_pane_focus() == crate::PaneFocus::Right {
+        return format!(
+            " ▸ OUTPUT  {} · j/k item · f findings · o open",
+            session.deck_page.label()
+        );
+    }
     match session.focus_task.as_ref() {
         Some(task_id) => focused_task_body(session, task_id),
         None => " ▸ FOCUS  hover [j/k] to inspect a task".to_string(),
@@ -161,7 +173,7 @@ fn fit(value: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DagTaskRow, DagTaskState};
+    use crate::{DagTaskRow, DagTaskState, PaneFocus};
 
     #[test]
     fn activity_footer_model_projects_focused_task() {
@@ -186,7 +198,7 @@ mod tests {
         );
         assert_eq!(
             model.hints.first().map(|hint| hint.full_key_text),
-            Some("[j/k")
+            Some("[j/k/g/G")
         );
         assert_eq!(
             model.hints.first().map(|hint| hint.full_hint_text),
@@ -209,7 +221,7 @@ mod tests {
     #[test]
     fn taskless_runs_do_not_advertise_the_inert_pane_focus_keys() {
         // With no DAG tasks the TASKS pane is collapsed and focus is pinned to
-        // OUTPUT — Tab and Enter would silently no-op, so they must not appear.
+        // OUTPUT — Tab and Enter are task controls, so they must not appear.
         let taskless = ActivitySession::new("r-1");
         let keys: Vec<&str> = activity_footer_model(&taskless, 120, None)
             .plain_hints
@@ -248,6 +260,26 @@ mod tests {
     }
 
     #[test]
+    fn artifact_deck_footer_names_right_pane_navigation() {
+        let mut session = ActivitySession::new("r-1");
+        session.tasks.insert(
+            "threat-model:build".to_string(),
+            DagTaskRow::queued(
+                "threat-model:build".into(),
+                "threat-model".into(),
+                Vec::new(),
+            ),
+        );
+        session.set_deck_page(crate::ActivityDeckPage::Dfd);
+        session.pane_focus = PaneFocus::Right;
+
+        assert_eq!(
+            activity_footer_model(&session, 100, None).body,
+            " ▸ OUTPUT  dfd · j/k item · f findings · o open"
+        );
+    }
+
+    #[test]
     fn activity_footer_model_handles_empty_and_missing_focus() {
         let mut session = ActivitySession::new("r-1");
         // With tasks present, the hover hint and focus drill return.
@@ -275,13 +307,26 @@ mod tests {
                 .iter()
                 .map(|hint| hint.plain_key_text)
                 .collect::<Vec<_>>(),
-            vec!["j/k", "Tab", "V", "p", "R", "Enter", "c"]
+            vec!["j/k/g/G", "Tab", "←/→", "f", "o", "V", "p", "R", "Enter", "c"]
         );
+    }
+
+    #[test]
+    fn activity_footer_model_exposes_deck_hint_pairs() {
+        let mut session = ActivitySession::new("r-1");
+        session.tasks.insert(
+            "triage:run".to_string(),
+            DagTaskRow::queued("triage:run".into(), "triage".into(), Vec::new()),
+        );
+
         assert_eq!(
             activity_footer_model(&session, 80, None).plain_hints,
             vec![
-                ("j/k", "scroll"),
+                ("j/k/g/G", "scroll"),
                 ("Tab", "pane"),
+                ("←/→", "views"),
+                ("f", "findings"),
+                ("o", "open"),
                 ("V", "verbose"),
                 ("p", "pause"),
                 ("R", "reset"),

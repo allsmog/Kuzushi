@@ -35,76 +35,112 @@ impl ShellApp {
     }
 
     pub(crate) fn drain_tool_events(&mut self) -> bool {
-        let mut tool_events = Vec::new();
-        if let Some(rx) = &self.tool_rx {
-            while let Ok(event) = rx.try_recv() {
-                tool_events.push(event);
-            }
-        }
-
+        let tool_events = self.collect_tool_events();
         let changed = !tool_events.is_empty();
         for event in tool_events {
             self.apply_tool_event(event);
         }
-
-        if self.tool_running.is_none() {
-            self.tool_rx = None;
-            self.tool_abort_requested = false;
-        }
+        self.clear_finished_tool_channel();
         changed
     }
 
-    pub(crate) fn drain_agent_events(&mut self) -> bool {
-        let mut agent_events = Vec::new();
-        if let Some(rx) = &self.agent_rx {
+    fn collect_tool_events(&self) -> Vec<ToolEvent> {
+        let mut events = Vec::new();
+        if let Some(rx) = &self.tool_rx {
             while let Ok(event) = rx.try_recv() {
-                agent_events.push(event);
+                events.push(event);
             }
         }
+        events
+    }
 
+    fn clear_finished_tool_channel(&mut self) {
+        if self.tool_running.is_none() {
+            self.tool_rx = None;
+            self.tool_cancel = None;
+            self.tool_abort_requested = false;
+        }
+    }
+
+    pub(crate) fn drain_agent_events(&mut self) -> bool {
+        let agent_events = self.collect_agent_events();
         let changed = !agent_events.is_empty();
         for event in agent_events {
             self.apply_agent_event(event);
         }
-
-        if self.agent_chat.as_ref().is_some_and(|agent| !agent.running) {
-            self.agent_rx = None;
-        }
+        self.clear_finished_agent_channel();
         changed
     }
 
-    pub(crate) fn drain_plan_events(&mut self) -> bool {
-        let mut plan_events = Vec::new();
-        if let Some(rx) = &self.plan_rx {
+    fn collect_agent_events(&self) -> Vec<AgentEvent> {
+        let mut events = Vec::new();
+        if let Some(rx) = &self.agent_rx {
             while let Ok(event) = rx.try_recv() {
-                plan_events.push(event);
+                events.push(event);
             }
         }
+        events
+    }
+
+    fn clear_finished_agent_channel(&mut self) {
+        if self.agent_chat.as_ref().is_some_and(|agent| !agent.running) {
+            self.agent_rx = None;
+            self.agent_cancel = None;
+        }
+    }
+
+    pub(crate) fn drain_plan_events(&mut self) -> bool {
+        let plan_events = self.collect_plan_events();
         let changed = !plan_events.is_empty();
         for event in plan_events {
             self.apply_plan_event(event);
         }
-        if !self.planner_running {
-            self.plan_rx = None;
-        }
+        self.clear_finished_plan_channel();
         changed
     }
 
-    pub(crate) fn drain_threat_events(&mut self) -> bool {
-        let mut threat_events = Vec::new();
-        if let Some(rx) = &self.threat_rx {
+    fn collect_plan_events(&self) -> Vec<PlanEvent> {
+        let mut events = Vec::new();
+        if let Some(rx) = &self.plan_rx {
             while let Ok(event) = rx.try_recv() {
-                threat_events.push(event);
+                events.push(event);
             }
         }
+        events
+    }
+
+    fn clear_finished_plan_channel(&mut self) {
+        if !self.planner_running {
+            self.plan_rx = None;
+            self.plan_cancel = None;
+        }
+    }
+
+    pub(crate) fn drain_threat_events(&mut self) -> bool {
+        let threat_events = self.collect_threat_events();
         let changed = !threat_events.is_empty();
         for event in threat_events {
             self.apply_threat_patch_event(event);
         }
+        self.clear_finished_threat_channel();
+        changed
+    }
+
+    fn collect_threat_events(&self) -> Vec<ThreatPatchEvent> {
+        let mut events = Vec::new();
+        if let Some(rx) = &self.threat_rx {
+            while let Ok(event) = rx.try_recv() {
+                events.push(event);
+            }
+        }
+        events
+    }
+
+    fn clear_finished_threat_channel(&mut self) {
         if !self.threat_worker_running {
             self.threat_rx = None;
+            self.threat_cancel = None;
         }
-        changed
     }
 
     pub(crate) fn drain_trace_events(&mut self) -> bool {

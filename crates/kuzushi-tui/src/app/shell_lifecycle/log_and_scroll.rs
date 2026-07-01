@@ -73,13 +73,8 @@ impl ShellApp {
                 session.task_scroll = shift_clamped(session.task_scroll, amount, max);
             }
             PaneFocus::Right => {
-                // Manual feed scroll unpins live auto-tail so the operator
-                // stays at the position they navigated to. `feed_auto_tail`
-                // is reset by `G` (scroll-to-bottom). `paused` is decoupled
-                // — toggling pause does not unpin the position.
                 session.feed_auto_tail = false;
-                let max = session.events.len().saturating_sub(1);
-                session.feed_scroll = shift_clamped(session.feed_scroll, amount, max);
+                session.deck_cursor = shift_clamped(session.deck_cursor, amount, usize::MAX / 2);
             }
         }
     }
@@ -98,7 +93,7 @@ impl ShellApp {
         }
     }
 
-    fn push_nav_history(&mut self, view: ShellView) {
+    pub(crate) fn push_nav_history(&mut self, view: ShellView) {
         const NAV_HISTORY_DEPTH: usize = 16;
         // Onboarding pickers are transient — `back` should never drop the user
         // back into a model/auth/planning picker they already dismissed.
@@ -126,7 +121,7 @@ impl ShellApp {
 fn focused_pane_to_top(session: &mut ActivitySession) {
     match session.effective_pane_focus() {
         PaneFocus::Left => session.task_scroll = 0,
-        PaneFocus::Right => session.feed_scroll = 0,
+        PaneFocus::Right => session.deck_cursor = 0,
     }
 }
 
@@ -134,10 +129,8 @@ fn focused_pane_to_bottom(session: &mut ActivitySession) {
     match session.effective_pane_focus() {
         PaneFocus::Left => session.task_scroll = usize::MAX,
         PaneFocus::Right => {
-            session.feed_scroll = usize::MAX;
-            // G on the feed pane unpins manual scroll so the operator
-            // returns to live auto-tail.
-            session.feed_auto_tail = true;
+            session.deck_cursor = usize::MAX / 2;
+            session.feed_auto_tail = false;
         }
     }
 }

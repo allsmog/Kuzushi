@@ -1,8 +1,9 @@
 //! Draws the threat model's data-flow diagram as ASCII boxes grouped by trust
 //! zone, with the flows listed as labelled arrows below. Pure projection over
-//! the persisted `threat-model.json` (`/dfd/{nodes,flows}`); both the Activity
-//! OUTPUT pane and the Threat view's DFD tab render the same lines.
+//! the persisted `threat-model.json` (`/dfd/{nodes,flows}`); Threat and
+//! Workbench consume the same role-tagged lines.
 
+#[cfg(test)]
 use super::activity_feed_rows::{ActivityFeedPaneRow, ActivityFeedRowTone};
 
 const MAX_NODES: usize = 18;
@@ -50,6 +51,15 @@ pub(crate) fn threat_dfd_view(app: &crate::ShellApp, width: usize) -> Option<Vec
     threat_dfd_diagram_lines(&doc, width)
 }
 
+/// Whether the persisted threat model has at least one DFD node. Width-
+/// independent, so the Workbench center pane can decide between drawing the
+/// diagram and showing one empty-hint line without a render width in hand.
+pub(crate) fn threat_dfd_present(app: &crate::ShellApp) -> bool {
+    super::threat_model_doc(app)
+        .map(|doc| !parse_nodes(&doc).is_empty())
+        .unwrap_or(false)
+}
+
 /// Render the DFD as role-tagged lines, or `None` when the artifact has no nodes.
 pub(crate) fn threat_dfd_diagram_lines(
     doc: &serde_json::Value,
@@ -71,6 +81,7 @@ pub(crate) fn threat_dfd_diagram_lines(
 }
 
 /// The same diagram, mapped to Activity OUTPUT-pane feed rows.
+#[cfg(test)]
 pub(crate) fn threat_dfd_diagram_feed_rows(
     doc: &serde_json::Value,
     width: usize,
@@ -83,6 +94,7 @@ pub(crate) fn threat_dfd_diagram_feed_rows(
 
 /// Title + summary only — for panes too narrow to draw the node boxes.
 /// A clipped box diagram reads as noise; the counts still orient.
+#[cfg(test)]
 pub(crate) fn threat_dfd_summary_feed_rows(
     doc: &serde_json::Value,
     width: usize,
@@ -97,6 +109,7 @@ pub(crate) fn threat_dfd_summary_feed_rows(
     }
 }
 
+#[cfg(test)]
 fn diagram_feed_row(line: DfdDiagramLine) -> ActivityFeedPaneRow {
     ActivityFeedPaneRow {
         text: line.text,
@@ -104,6 +117,7 @@ fn diagram_feed_row(line: DfdDiagramLine) -> ActivityFeedPaneRow {
     }
 }
 
+#[cfg(test)]
 fn diagram_tone(kind: DfdLineKind) -> ActivityFeedRowTone {
     match kind {
         DfdLineKind::Title => ActivityFeedRowTone::Primary,

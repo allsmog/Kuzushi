@@ -263,193 +263,11 @@ fn quickstart_follows_doctor_context_scan_findings_report_path() {
 }
 
 #[test]
-fn renders_selected_finding_detail() {
-    let backend = TestBackend::new(100, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
-    let finding = Finding::new_semgrep(
-        "demo.rule",
-        "src/app.ts",
-        8,
-        Some(8),
-        Severity::High,
-        "dangerous sink",
-    )
-    .with_evidence(vec![FindingEvidence {
-        kind: "filesystem_sink".to_string(),
-        file_path: "src/app.ts".to_string(),
-        line: 8,
-        snippet: "file.save(filepath)".to_string(),
-        rationale: "Raw upload path reaches a filesystem write".to_string(),
-        confidence: 92,
-        ..Default::default()
-    }]);
-    app.findings = vec![finding.clone()];
-    app.selected_finding = Some(finding);
-    app.shell_view = ShellView::Finding;
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
-
-    assert!(rendered.contains("dangerous sink"));
-    assert!(rendered.contains("alias"));
-    assert!(rendered.contains("F-0001"));
-    assert!(rendered.contains("fingerprint"));
-    assert!(rendered.contains("STRUCTURED EVIDENCE"));
-    assert!(rendered.contains("filesystem_sink"));
-    assert!(rendered.contains("src/app.ts:8"));
-    assert!(rendered.contains("file.save(filepath)"));
-}
-
-#[test]
-fn finding_detail_surfaces_proof_state_and_report_commands_at_80_columns() {
-    let backend = TestBackend::new(80, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
-    let finding = Finding::new_semgrep(
-        "demo.rule",
-        "src/app.ts",
-        8,
-        Some(8),
-        Severity::High,
-        "dangerous sink\nEvidence: request parameter reaches query builder",
-    )
-    .with_static_proof_state(StaticProofState::SourceSinkLinked);
-    app.findings = vec![finding.clone()];
-    app.selected_finding = Some(finding);
-    app.shell_view = ShellView::Finding;
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
-
-    assert!(rendered.contains("proof state"), "{rendered}");
-    assert!(rendered.contains("source_sink_linked"), "{rendered}");
-    assert!(rendered.contains("runtime verification"), "{rendered}");
-    assert!(rendered.contains("Evidence: request parameter reaches query builder"));
-    assert!(rendered.contains("workspace export findings"));
-    assert!(rendered.contains("kuzushi pr-comment"));
-    assert!(!rendered.contains("┌"));
-}
-
-#[test]
-fn renders_dense_findings_rows_at_80_columns() {
-    let backend = TestBackend::new(80, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
-    let mut confirmed = Finding::new_semgrep(
-            "typescript.express.sql-injection",
-            "src/controllers/admin_search.ts",
-            117,
-            Some(119),
-            Severity::High,
-            "SQL injection in admin search\nEvidence: req.query.q flows into db.query without a guard\nCWE: CWE-89",
-        );
-    confirmed.triage = Some(TriageOutcome {
-        verdict: TriageVerdict::TruePositive,
-        confidence: 0.91,
-        rationale: "source and sink are linked in the same handler".to_string(),
-        cost_usd: 0.0,
-    });
-    let untriaged = Finding::new_tool(
-        "codeql",
-        "js/path-injection",
-        "src/files.ts",
-        22,
-        None,
-        Severity::Medium,
-        "Path traversal candidate\nEvidence: filename reaches fs.readFile",
-    );
-    app.findings = vec![confirmed, untriaged];
-    app.shell_view = ShellView::Findings;
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let buffer = terminal.backend().buffer();
-    let rendered = format!("{:?}", buffer);
-
-    for expected in [
-        // Section header replaces the old column-name row.
-        "FINDINGS",
-        "1 TRIAGED",
-        "1 PENDING",
-        // Severity chips uppercase per design.
-        "F-0001",
-        "HIGH",
-        "F-0002",
-        "MEDIUM",
-        // Compact row 1 carries title + location.
-        "SQL injection in admin search",
-        "src/controllers/admin_search.ts:117-119",
-        // Compact row 2 detail line.
-        "tp",
-        "91%",
-        "CWE-89",
-        "semgrep",
-        "untriaged",
-        "codeql",
-    ] {
-        assert!(rendered.contains(expected), "missing {expected}");
-    }
-    for y in 0..24 {
-        let row = buffer_row_text(buffer, 80, y);
-        assert!(
-            row.chars().count() <= 80,
-            "row exceeded 80 columns: {row:?}"
-        );
-    }
-    assert!(!rendered.contains("┌"));
-}
-
-#[test]
-fn findings_rows_preview_structured_evidence_at_wide_width() {
-    let backend = TestBackend::new(120, 18);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
-    let finding = Finding::new_tool(
-        "exploit-chain",
-        "exploit-chain/path-traversal-to-parser-abuse",
-        "app.py",
-        62,
-        None,
-        Severity::Critical,
-        "Path traversal reaches a parser import boundary",
-    )
-    .with_evidence(vec![
-        FindingEvidence {
-            kind: "attacker_input".to_string(),
-            file_path: "app.py".to_string(),
-            line: 48,
-            snippet: "filename = file.filename".to_string(),
-            rationale: "The upload filename is attacker-controlled".to_string(),
-            confidence: 90,
-            ..Default::default()
-        },
-        FindingEvidence {
-            kind: "filesystem_sink".to_string(),
-            file_path: "app.py".to_string(),
-            line: 63,
-            snippet: "file.save(filepath)".to_string(),
-            rationale: "The raw filename controls the write target".to_string(),
-            confidence: 94,
-            ..Default::default()
-        },
-    ]);
-    app.findings = vec![finding];
-    app.shell_view = ShellView::Findings;
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
-
-    assert!(rendered.contains("evidence 2 anchors"), "{rendered}");
-    assert!(rendered.contains("attacker_input app.py:48"), "{rendered}");
-}
-
-#[test]
 fn renders_actionable_empty_states_at_80_columns() {
     // Each empty-state surface advertises a concrete next step,
     // matching `design/mockups/empty-states.jsx::panel` (`∅` glyph
     // + label + indented muted explanation + `▸` CTA rows).
     for (view, expected) in [
-        (ShellView::Findings, "no findings yet"),
         (ShellView::Runs, "no run timeline entries"),
         (ShellView::Workspace, "no workspace selected"),
     ] {
@@ -457,7 +275,6 @@ fn renders_actionable_empty_states_at_80_columns() {
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
         let runs_target = tempfile::tempdir().unwrap();
-        let is_dfd = matches!(view, ShellView::Threat(ThreatView::Dfd));
         let is_runs = matches!(view, ShellView::Runs);
         app.shell_view = view;
         if is_runs {
@@ -471,11 +288,9 @@ fn renders_actionable_empty_states_at_80_columns() {
         if is_runs {
             assert!(rendered.contains(".kuzushi/runs/<id>"), "{rendered}");
         }
-        // Box-drawing is reserved for the DFD diagram; every other view
-        // must remain free of nested boxes (no Ink-style boxed dashboard).
-        if !is_dfd {
-            assert!(!rendered.contains("┌"), "{expected} drew a box");
-        }
+        // These line-based empty states must stay free of nested boxes (the
+        // bordered command center is the only box-drawing primary surface).
+        assert!(!rendered.contains("┌"), "{expected} drew a box");
     }
 }
 
@@ -523,7 +338,7 @@ fn keeps_command_log_directly_above_bottom_prompt_at_80_columns() {
 
 #[test]
 fn renders_exit_commands_before_closing() {
-    for command in ["/exit", "exit", "/exitj"] {
+    for command in ["/exit", "exit"] {
         let backend = TestBackend::new(80, 12);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
@@ -1129,47 +944,6 @@ fn threats_scope_view_renders_criticality_buckets() {
     assert!(rendered.contains("OUT OF SCOPE"));
     // Old placeholders gone
     assert!(!rendered.contains("auth, request parsing"));
-}
-
-#[test]
-fn dfd_canonical_lines_render_design_diagram() {
-    let lines = dfd_canonical_lines();
-    assert_eq!(lines.len(), 10, "expected 10 rows in canonical DFD");
-    let texts: Vec<String> = lines
-        .iter()
-        .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
-        .collect();
-    assert!(texts[1].contains("user"));
-    assert!(texts[1].contains("api edge"));
-    assert!(texts[1].contains("postgres"));
-    assert!(texts[4].contains("plaintext PII"));
-    assert!(texts[7].contains("worker"));
-    // top + bottom borders are pure box-drawing
-    assert!(texts[0].contains("┌────"));
-    assert!(texts[3].contains("└────"));
-}
-
-#[test]
-fn threats_dfd_view_renders_canonical_diagram_header() {
-    let backend = TestBackend::new(120, 28);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Threat(ThreatView::Dfd);
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
-
-    assert!(
-        rendered.contains("DFD NOTATION") && rendered.contains("ILLUSTRATIVE EXAMPLE"),
-        "expected the diagram labelled as an illustrative example in: {rendered}"
-    );
-    assert!(rendered.contains("user"));
-    assert!(rendered.contains("api edge"));
-    assert!(rendered.contains("postgres"));
-    assert!(rendered.contains("worker"));
-    // Old placeholder content must be gone.
-    assert!(!rendered.contains("browser, API clients, package registries"));
-    assert!(!rendered.contains("source tree, handlers, jobs, CLIs"));
 }
 
 #[test]
@@ -2010,7 +1784,7 @@ fn viewport_help_remains_navigable_at_24_rows() {
     app.help_scroll = usize::MAX;
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let last_page = format!("{:?}", terminal.backend().buffer());
-    assert!(last_page.contains("SESSION"));
+    assert!(last_page.contains("quit"), "{last_page}");
     assert!(last_page.contains("PgUp/PgDn scroll"), "{last_page}");
     assert!(!last_page.contains("┌"));
 }
@@ -2066,11 +1840,12 @@ fn viewport_expanded_modules_remain_navigable_at_24_rows() {
 }
 
 #[test]
-fn viewport_findings_keeps_cursor_visible_at_24_rows() {
+fn workbench_findings_pane_windows_cursor_into_view() {
     let backend = TestBackend::new(100, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Findings;
+    app.shell_view = ShellView::Workbench;
+    app.workbench_focus = WorkbenchPane::Findings;
     app.findings_cursor = 29;
     app.findings = (0..30)
         .map(|index| {
@@ -2090,21 +1865,18 @@ fn viewport_findings_keeps_cursor_visible_at_24_rows() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
+    // The FINDINGS pane windows around the cursor: the last alias is visible,
+    // the first has scrolled off.
     assert!(rendered.contains("F-0030"));
-    assert!(rendered.contains("title-29"));
     assert!(!rendered.contains("F-0001"));
-    assert!(rendered.contains("j/k/g/G move"));
-    assert!(rendered.contains("PgUp/PgDn page"));
-    assert!(rendered.contains("Enter open"));
-    assert!(!rendered.contains("┌"));
 }
 
 #[test]
-fn keybind_footer_advertises_findings_navigation_keys_at_80_columns() {
+fn keybind_footer_advertises_workbench_navigation_keys_at_80_columns() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Findings;
+    app.shell_view = ShellView::Workbench;
     app.findings = vec![Finding::new_semgrep(
         "demo.rule",
         "src/app.rs",
@@ -2117,10 +1889,9 @@ fn keybind_footer_advertises_findings_navigation_keys_at_80_columns() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("j/k/g/G move"));
-    assert!(rendered.contains("PgUp/PgDn page"));
-    assert!(rendered.contains("Enter open"));
-    assert!(!rendered.contains("[open <id>]"));
+    assert!(rendered.contains("Tab"), "{rendered}");
+    assert!(rendered.contains("j/k"), "{rendered}");
+    assert!(rendered.contains("Enter"), "{rendered}");
 }
 
 #[test]
@@ -2486,6 +2257,13 @@ fn renders_shell_module_plan_and_run_routing_modes() {
             let mut app = ShellApp::new(V2Config::default(), None);
             app.focused_module = Some("context".to_string());
             app.shell_view = ShellView::ModuleRun;
+            (app, "mode:module", "kuzushi/context>")
+        },
+        {
+            let mut app = ShellApp::new(V2Config::default(), None);
+            app.focused_module = Some("context".to_string());
+            app.set_running_tool_for_test("context:build");
+            app.shell_view = ShellView::ModuleRun;
             (app, "mode:run", "kuzushi/context/run>")
         },
     ];
@@ -2530,9 +2308,8 @@ fn renders_all_ink_parity_shell_surfaces() {
         (ShellView::Recommend, "RECOMMEND"),
         (ShellView::Module, "MODULE DETAIL"),
         (ShellView::ModuleRun, "TRANSCRIPT"),
-        (ShellView::Findings, "filters"),
+        (ShellView::Workbench, "FINDINGS"),
         (ShellView::Tune, "TUNE"),
-        (ShellView::Threat(ThreatView::Dfd), "DFD"),
         (ShellView::Threat(ThreatView::Stories), "STORIES"),
         (ShellView::ThreatEditor, "THREAT MODEL EDIT"),
         (ShellView::PromptsEditor, "PROMPTS"),
@@ -2569,16 +2346,16 @@ fn renders_all_ink_parity_shell_surfaces() {
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
         app.focused_module = Some("semgrep".to_string());
-        let is_dfd = matches!(view, ShellView::Threat(ThreatView::Dfd));
+        // The Workbench command center is the one box-drawing primary surface
+        // (bordered panes); every other view stays line-based.
+        let is_workbench = matches!(view, ShellView::Workbench);
         app.shell_view = view;
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains(expected), "missing {expected}");
-        // DFD diagram intentionally uses box-drawing; suppress the
-        // no-Ink-dashboard guard for that one view.
-        if !is_dfd {
+        if !is_workbench {
             assert!(!rendered.contains("┌"), "{expected} drew a box");
         }
     }
@@ -2761,8 +2538,8 @@ fn view_status_segment_reflects_actual_view_not_focused_module() {
     app.shell_view = ShellView::Tools;
     assert_eq!(view_status_segment(&app), "tools");
 
-    app.shell_view = ShellView::Findings;
-    assert_eq!(view_status_segment(&app), "findings");
+    app.shell_view = ShellView::Workbench;
+    assert_eq!(view_status_segment(&app), "workbench");
 
     app.shell_view = ShellView::Threat(ThreatView::Stride);
     assert_eq!(view_status_segment(&app), "threats:stride");
@@ -3242,28 +3019,6 @@ fn catalog_j_k_moves_row_cursor_and_highlights_row() {
 }
 
 #[test]
-fn findings_empty_state_uses_panel_pattern_per_mockup() {
-    // `design/mockups/empty-states.jsx::panel` paints empty-state
-    // panels with: `· empty` divider, `∅` glyph + label, muted
-    // explanations, and `▸` CTA rows with accent commands.
-    let backend = TestBackend::new(120, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Findings;
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
-
-    assert!(rendered.contains("FINDINGS · empty"));
-    assert!(rendered.contains("∅"));
-    assert!(rendered.contains("no findings yet"));
-    assert!(rendered.contains(".kuzushi/v2/findings.sqlite3"));
-    assert!(rendered.contains("▸"));
-    assert!(rendered.contains("scan"));
-    assert!(!rendered.contains("load gh"));
-}
-
-#[test]
 fn catalog_enter_runs_use_for_cursor_row() {
     // Pressing Enter on the catalog with empty input dispatches
     // `use <module>` for whatever row j/k put the cursor on, per
@@ -3467,7 +3222,7 @@ fn auth_view_stacks_and_wraps_on_narrow_terminals() {
 fn home_view_shows_journey_rail_and_phase_chip_with_target() {
     // The engagement spine must be ambient: the home view carries the
     // 組 map → 崩 hunt → 作 confirm → 掛 fix rail and the idle footer a
-    // compact `phase:<word> n/4` chip whenever a target is active.
+    // compact journey chip whenever a target is active.
     let dir = tempfile::tempdir().expect("temp target");
     let backend = TestBackend::new(120, 34);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -3481,7 +3236,7 @@ fn home_view_shows_journey_rail_and_phase_chip_with_target() {
     assert!(rendered.contains("組 map"), "rail shows map phase");
     assert!(rendered.contains("崩 hunt"), "rail shows hunt phase");
     assert!(rendered.contains("掛 fix"), "rail shows fix phase");
-    assert!(rendered.contains("phase:map 1/4"), "footer phase chip");
+    assert!(rendered.contains("組 map 1/4"), "footer phase chip");
     assert!(
         rendered.contains("Run next"),
         "NEXT action speaks the journey verb"
@@ -3527,7 +3282,8 @@ fn activity_view_names_the_running_tool_everywhere_it_matters() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("threat-model:build · running"));
-    assert!(rendered.contains("threat-model:build is working — waiting for its first trace"));
+    assert!(rendered.contains("ACTIONS"));
+    assert!(rendered.contains("threat-model:build is"));
     assert!(rendered.contains("▸ RUNNING  threat-model:build"));
     assert!(!rendered.contains("waiting for trace events"));
     assert!(!rendered.contains("hover [j/k] to inspect a task"));
@@ -4218,4 +3974,153 @@ fn banner_row(buffer: &Buffer, needle: &str) -> Option<u16> {
         }
     }
     None
+}
+
+// ── Workbench command center ─────────────────────────────────────────────────
+
+fn workbench_app_with_findings() -> ShellApp {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.findings = vec![Finding::new_semgrep(
+        "demo.sqli",
+        "apps/api/orders.rs",
+        12,
+        Some(14),
+        Severity::High,
+        "sql injection via order_id",
+    )];
+    app
+}
+
+#[test]
+fn workbench_renders_pane_borders_at_wide_and_narrow_widths() {
+    for (width, height) in [(120, 30), (48, 18)] {
+        let backend = TestBackend::new(width, height);
+        let mut terminal = Terminal::new(backend).unwrap();
+        let app = workbench_app_with_findings();
+
+        terminal.draw(|frame| render_app(frame, &app)).unwrap();
+        let rendered = format!("{:?}", terminal.backend().buffer());
+
+        // Bordered panes are drawn (box-drawing), and the SOURCE / FINDINGS
+        // pane titles are present — at both a wide and a narrow terminal.
+        assert!(rendered.contains("┌"), "no pane border at {width}x{height}");
+        assert!(
+            rendered.contains("SOURCE"),
+            "no SOURCE pane at {width}x{height}"
+        );
+        assert!(
+            rendered.contains("FINDINGS"),
+            "no FINDINGS pane at {width}x{height}"
+        );
+    }
+}
+
+#[test]
+fn workbench_lines_plain_shows_top_bar_findings_and_dfd_empty_hint() {
+    let app = workbench_app_with_findings();
+    let rendered = render_plain_app(&app, 110);
+
+    // Top bar identity, a findings row, the DFD section, and — with no threat
+    // model on disk — the DFD empty hint (never invented topology).
+    assert!(rendered.contains("Kuzushi"), "{rendered}");
+    assert!(rendered.contains("F-0001"), "{rendered}");
+    assert!(
+        rendered.contains("sql injection via order_id"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("DFD"), "{rendered}");
+    assert!(rendered.contains("no threat model yet"), "{rendered}");
+}
+
+#[test]
+fn workbench_selected_finding_gets_readable_details_pane() {
+    let backend = TestBackend::new(180, 42);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let source_path = temp.path().join("src/main/java/Demo.java");
+    std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+    let source = (1..=50)
+        .map(|line| {
+            if line == 42 {
+                "String sql = \"SELECT * FROM accounts WHERE id=\" + request.getParameter(\"id\");"
+                    .to_string()
+            } else {
+                format!("// filler line {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&source_path, source).unwrap();
+    let mut finding = Finding::new_semgrep(
+        "demo.sqli",
+        "src/main/java/Demo.java",
+        42,
+        Some(42),
+        Severity::High,
+        "Request parameter is concatenated into an SQL query string before prepareStatement(), so the prepared statement does not prevent SQL injection.",
+    );
+    finding.message = "The request parameter is attacker-controlled and is concatenated into the SQL text before prepareStatement is called.".to_string();
+    finding.evidence = vec![FindingEvidence {
+        kind: "source-sink".to_string(),
+        file_path: finding.file_path.clone(),
+        line: 42,
+        snippet: "String sql = \"SELECT * FROM accounts WHERE id=\" + request.getParameter(\"id\");".to_string(),
+        rationale: "Attacker-controlled source reaches SQL construction before the prepared statement boundary.".to_string(),
+        confidence: 95,
+        request_blob: None,
+        response_blob: None,
+    }];
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.workbench_focus = WorkbenchPane::Details;
+    app.target = Some(temp.path().to_path_buf());
+    app.findings = vec![finding.clone()];
+    app.selected_finding = Some(finding);
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("CODE"), "{rendered}");
+    assert!(rendered.contains("Demo.java:42"), "{rendered}");
+    assert!(rendered.contains("▶"), "{rendered}");
+    assert!(rendered.contains("SELECT * FROM accounts"), "{rendered}");
+    assert!(!rendered.contains("DFD"), "{rendered}");
+    assert!(rendered.contains("DETAILS"), "{rendered}");
+    assert!(rendered.contains("prepareStatement"), "{rendered}");
+    assert!(rendered.contains("EVIDENCE"), "{rendered}");
+    assert!(rendered.contains("source-sink"), "{rendered}");
+    assert!(
+        rendered.contains("Attacker-controlled source"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn workbench_center_renders_dfd_title_when_artifact_present() {
+    let temp = tempfile::tempdir().unwrap();
+    let doc = serde_json::json!({
+        "dfd": {
+            "nodes": [
+                {"id": "user", "name": "Browser", "trustZone": "internet"},
+                {"id": "api", "name": "API server", "trustZone": "app-tier"}
+            ],
+            "flows": [
+                {"id": "f1", "sourceId": "user", "targetId": "api", "description": "https"}
+            ]
+        }
+    });
+    let path = kuzushi_core::capabilities::persistent_threat_model_path(temp.path());
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, serde_json::to_string(&doc).unwrap()).unwrap();
+
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.target = Some(temp.path().to_path_buf());
+
+    let rendered = render_plain_app(&app, 120);
+
+    // The real data-flow diagram replaces the empty hint.
+    assert!(rendered.contains("DATA-FLOW DIAGRAM"), "{rendered}");
+    assert!(!rendered.contains("no threat model yet"), "{rendered}");
 }

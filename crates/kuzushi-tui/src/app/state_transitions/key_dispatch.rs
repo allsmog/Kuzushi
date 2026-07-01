@@ -17,8 +17,8 @@ impl ShellApp {
         self.reset_completion_cycle_for_key(key);
 
         if self.handle_control_key(key, modifiers)
-            || self.handle_cursor_key(key, modifiers)
             || self.handle_empty_input_view_key(key, modifiers)
+            || self.handle_cursor_key(key, modifiers)
             || self.handle_history_key(key, modifiers)
             || self.handle_text_key(key)
         {
@@ -51,7 +51,13 @@ impl ShellApp {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         match key.code {
             KeyCode::Esc => self.cancel_history_search(),
-            KeyCode::Char('c') if ctrl => self.cancel_history_search(),
+            KeyCode::Char('c') if ctrl => {
+                let work_running = self.has_running_work();
+                self.cancel_history_search();
+                if work_running {
+                    return false;
+                }
+            }
             KeyCode::Char('r') if ctrl => self.history_search_next(),
             KeyCode::Enter => self.accept_history_search(),
             KeyCode::Backspace => self.history_search_backspace(),

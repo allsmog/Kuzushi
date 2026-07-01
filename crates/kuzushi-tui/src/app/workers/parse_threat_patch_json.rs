@@ -164,7 +164,7 @@ pub(crate) fn run_registry_scan_worker(
     thinking_level: Option<String>,
 ) -> Result<()> {
     let invocation =
-        prepare_registry_scan_invocation(target, db_path, input, config, thinking_level)?;
+        prepare_registry_scan_invocation(target, db_path, input, config, thinking_level, cancel)?;
     let _ = tx.send(ScanEvent::Stage("running sast:scan".to_string()));
     let result = invocation.execute(registry)?;
     send_registry_scan_result(cancel, tx, result)
@@ -208,9 +208,10 @@ fn prepare_registry_scan_invocation(
     input: serde_json::Value,
     config: V2Config,
     thinking_level: Option<String>,
+    cancel: &ScanCancellation,
 ) -> Result<RegistryScanInvocation> {
     let (workspace, store) = registry_scan_workspace_store(target, db_path)?;
-    let runtime = registry_scan_runtime(&input, &config, thinking_level)?;
+    let runtime = registry_scan_runtime(&input, &config, thinking_level, cancel)?;
     Ok(RegistryScanInvocation {
         workspace,
         store,
@@ -249,13 +250,15 @@ fn registry_scan_runtime(
     input: &serde_json::Value,
     config: &V2Config,
     thinking_level: Option<String>,
+    cancel: &ScanCancellation,
 ) -> Result<Option<LangGraphRuntime>> {
     if !kuzushi_core::modules::wants_sast_runtime(input) {
         return Ok(None);
     }
     Ok(Some(
         LangGraphRuntime::from_config(config, scan_worker_runtime_cwd())?
-            .with_thinking_level(thinking_level),
+            .with_thinking_level(thinking_level)
+            .with_cancellation(cancel.clone()),
     ))
 }
 

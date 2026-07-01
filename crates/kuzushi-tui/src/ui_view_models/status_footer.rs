@@ -43,9 +43,9 @@ fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
     // chip (M2 §2.1) is kept here — it's live gating state, not a session
     // fact, so it belongs with routing/view rather than the cockpit strip.
     let mut segments = vec![routing_mode_segment(app)];
-    // Engagement orientation (M-journey): `phase:hunt 2/4` keeps "where am
-    // I in the map→hunt→confirm→fix journey" visible on every view, not
-    // just inside the launch walker.
+    // Engagement orientation (M-journey): the same `組 map 1/4` phase chip used
+    // by the Workbench keeps the current journey step visible on every view,
+    // not just inside the launch walker.
     if let Some(chip) = journey_footer_segment(app) {
         segments.push(chip);
     }
@@ -141,6 +141,9 @@ fn active_or_abort_label(name: &str, abort_requested: bool) -> String {
 }
 
 fn model_footer_segment(app: &ShellApp) -> String {
+    if let Some(model) = app.active_model_override.as_deref() {
+        return format!("{model} (tool)");
+    }
     app.config
         .model
         .clone()

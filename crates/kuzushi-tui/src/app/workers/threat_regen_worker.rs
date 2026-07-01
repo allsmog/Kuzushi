@@ -7,8 +7,10 @@ pub(crate) fn threat_regen_worker(
     cwd: PathBuf,
     existing: serde_json::Value,
     tx: Sender<ThreatPatchEvent>,
+    cancel: ScanCancellation,
 ) {
-    let event = match run_threat_regen_worker(config, model, thinking_level, cwd, existing) {
+    let event = match run_threat_regen_worker(config, model, thinking_level, cwd, existing, cancel)
+    {
         Ok(patch) => ThreatPatchEvent::Proposed(patch),
         Err(error) => ThreatPatchEvent::Failed {
             error: error.to_string(),
@@ -23,8 +25,9 @@ pub(crate) fn run_threat_regen_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     existing: serde_json::Value,
+    cancel: ScanCancellation,
 ) -> Result<ThreatPatch> {
-    let runtime = worker_runtime(&config, &cwd, thinking_level)?;
+    let runtime = worker_runtime(&config, &cwd, thinking_level, cancel)?;
     let prompt = threat_regen_prompt(&existing);
     let body = worker_response_text(
         runtime,
@@ -53,9 +56,17 @@ pub(crate) fn threat_ask_worker(
     existing: serde_json::Value,
     question: String,
     tx: Sender<ThreatPatchEvent>,
+    cancel: ScanCancellation,
 ) {
-    let event = match run_threat_ask_worker(config, model, thinking_level, cwd, existing, &question)
-    {
+    let event = match run_threat_ask_worker(
+        config,
+        model,
+        thinking_level,
+        cwd,
+        existing,
+        &question,
+        cancel,
+    ) {
         Ok(answer) => ThreatPatchEvent::Answer { text: answer },
         Err(error) => ThreatPatchEvent::Failed {
             error: error.to_string(),
@@ -71,8 +82,9 @@ pub(crate) fn run_threat_ask_worker(
     cwd: PathBuf,
     existing: serde_json::Value,
     question: &str,
+    cancel: ScanCancellation,
 ) -> Result<String> {
-    let runtime = worker_runtime(&config, &cwd, thinking_level)?;
+    let runtime = worker_runtime(&config, &cwd, thinking_level, cancel)?;
     let prompt = threat_ask_prompt(question, &existing);
     let answer = worker_response_text(
         runtime,
@@ -100,8 +112,11 @@ fn worker_runtime(
     config: &V2Config,
     cwd: &PathBuf,
     thinking_level: Option<String>,
+    cancel: ScanCancellation,
 ) -> Result<LangGraphRuntime> {
-    Ok(LangGraphRuntime::from_config(config, cwd)?.with_thinking_level(thinking_level))
+    Ok(LangGraphRuntime::from_config(config, cwd)?
+        .with_thinking_level(thinking_level)
+        .with_cancellation(cancel))
 }
 
 fn worker_response_text(

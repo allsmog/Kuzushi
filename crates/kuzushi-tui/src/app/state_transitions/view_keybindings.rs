@@ -1,6 +1,6 @@
 use super::view_keybinding_groups::{
-    activity_keybindings, actor_detail_keybindings, findings_keybindings,
-    prompts_editor_keybindings, threat_keybindings, tune_keybindings,
+    activity_keybindings, actor_detail_keybindings, prompts_editor_keybindings, threat_keybindings,
+    tune_keybindings, workbench_keybindings,
 };
 use super::view_keybinding_helpers::{
     back_keybinding, bind, pause_scan_keybindings, resume_scan_keybindings, scroll_keybindings,
@@ -25,7 +25,7 @@ impl ShellApp {
 
     fn view_specific_keybindings(&self) -> Vec<ViewKeybinding> {
         match self.shell_view {
-            ShellView::Findings => findings_keybindings(),
+            ShellView::Workbench => workbench_keybindings(),
             ShellView::Threat(_) => threat_keybindings(),
             ShellView::ModuleRun => self.module_run_keybindings(),
             ShellView::ActorDetail(_) => actor_detail_keybindings(),
@@ -37,10 +37,11 @@ impl ShellApp {
     }
 
     /// Generic `j/k/g/G` scrolling applies to scrollable views except those
-    /// that drive a bespoke row cursor (Catalog, Findings own their keys).
+    /// that drive a bespoke cursor (Catalog and the Workbench's pane-aware
+    /// focus own their keys).
     fn view_uses_scroll_base(&self) -> bool {
         self.is_scrollable_view()
-            && !matches!(self.shell_view, ShellView::Catalog | ShellView::Findings)
+            && !matches!(self.shell_view, ShellView::Catalog | ShellView::Workbench)
     }
 
     /// Esc goes back everywhere except views that already own Esc (Activity

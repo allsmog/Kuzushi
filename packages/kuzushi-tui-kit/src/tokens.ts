@@ -22,7 +22,9 @@ export type Tone =
   | "critical"
   | "high"
   | "medium"
-  | "low";
+  | "low"
+  | "info"
+  | "unknown";
 
 /** Console line kinds — each maps to a leading glyph and a tone. */
 export type LogKind =
@@ -36,7 +38,56 @@ export type LogKind =
   | "log"; // ambient, low-signal
 
 /** Severity level for {@link SeverityBadge} and severity-toned text. */
-export type Severity = "critical" | "high" | "medium" | "low";
+export type Severity = "critical" | "high" | "medium" | "low" | "info" | "unknown";
+
+/** Default token set, matching crates/kuzushi-tui/src/theme/mod.rs. */
+export const DEFAULT_THEME_TOKENS = {
+  termBg: "#0b0d10",
+  termBgElev: "#0f1115",
+  chromeBg: "#15181d",
+  primary: "#cfd6e0",
+  muted: "#7d8794",
+  subtle: "#3d4654",
+  accent: "#7fb8ff",
+  label: "#a6cdff",
+  heading: "#ffffff",
+  success: "#57c479",
+  warn: "#e2c14a",
+  danger: "#e25c5c",
+  selectionFg: "#0b0d10",
+  selectionBg: "#7fb8ff",
+  sevCritical: "#e25c5c",
+  sevHigh: "#ff8b8b",
+  sevMedium: "#e2c14a",
+  sevLow: "#8aa6c4",
+  sevInfo: "#8aa6c4",
+  sevUnknown: "#7d8794",
+} as const;
+
+/** High-contrast token set, matching Rust's high_contrast style branches. */
+export const HIGH_CONTRAST_THEME_TOKENS = {
+  ...DEFAULT_THEME_TOKENS,
+  primary: "#ffffff",
+  muted: "#cfd6e0",
+  subtle: "#7d8794",
+  accent: "#ffffff",
+  label: "#ffffff",
+  heading: "#ffffff",
+  sevCritical: "#e25c5c",
+  sevHigh: "#e25c5c",
+  sevMedium: "#e2c14a",
+  sevLow: "#ffffff",
+  sevInfo: "#ffffff",
+  sevUnknown: "#cfd6e0",
+} as const;
+
+export const THEME_TOKENS = {
+  default: DEFAULT_THEME_TOKENS,
+  "high-contrast": HIGH_CONTRAST_THEME_TOKENS,
+} as const;
+
+export type ThemeName = keyof typeof THEME_TOKENS;
+export type ThemeTokenName = keyof typeof DEFAULT_THEME_TOKENS;
 
 /** Resolve a {@link Tone} to its stylesheet class. */
 export function toneClass(tone?: Tone): string | undefined {

@@ -191,16 +191,21 @@ fn phase_next_action(current: WorkflowPhase, progress: JourneyProgress) -> Strin
     }
 }
 
-/// Compact `phase:hunt 2/4` chip for the idle status footer — ambient
-/// orientation on every view, not just home.
+pub(crate) fn journey_phase_segment(phase: WorkflowPhase) -> String {
+    format!(
+        "{} {} {}/{}",
+        phase.kanji(),
+        phase.word(),
+        phase.position(),
+        WorkflowPhase::ORDER.len()
+    )
+}
+
+/// Compact journey chip for the idle status footer — ambient orientation on
+/// every view, not just home.
 pub fn journey_footer_segment(app: &ShellApp) -> Option<String> {
     let journey = journey_model(app)?;
-    Some(format!(
-        "phase:{} {}/{}",
-        journey.current.word(),
-        journey.current.position(),
-        WorkflowPhase::ORDER.len()
-    ))
+    Some(journey_phase_segment(journey.current))
 }
 
 #[cfg(test)]

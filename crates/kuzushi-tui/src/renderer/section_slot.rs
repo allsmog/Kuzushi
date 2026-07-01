@@ -51,7 +51,7 @@ pub(crate) fn transcript_height(app: &ShellApp, area: Rect) -> u16 {
 }
 
 pub(crate) fn keybind_footer_height(app: &ShellApp, area: Rect) -> u16 {
-    keybind_footer_chrome_height(app, area.height)
+    keybind_footer_chrome_height(app, area.height, area.width)
 }
 
 pub(crate) fn status_footer_height(app: &ShellApp, area: Rect) -> u16 {

@@ -1,14 +1,16 @@
 use super::*;
-use crate::ui_view_models::{uses_activity_frame, uses_scene_frame};
+use crate::ui_view_models::{uses_activity_frame, uses_scene_frame, uses_workbench_frame};
 
 /// How the primary body region is painted this frame. Most views are
-/// line-based; Activity and the 3D attack-surface page each own the whole
-/// region with a frame-level layout (split panes / half-block framebuffer).
+/// line-based; Activity, the Workbench command center, and the 3D
+/// attack-surface page each own the whole region with a frame-level layout
+/// (split panes / half-block framebuffer).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PrimaryRenderMode {
     Lines,
     Activity,
     Scene,
+    Workbench,
 }
 
 fn primary_render_mode(app: &ShellApp) -> PrimaryRenderMode {
@@ -16,6 +18,8 @@ fn primary_render_mode(app: &ShellApp) -> PrimaryRenderMode {
         PrimaryRenderMode::Scene
     } else if uses_activity_frame(app) {
         PrimaryRenderMode::Activity
+    } else if uses_workbench_frame(app) {
+        PrimaryRenderMode::Workbench
     } else {
         PrimaryRenderMode::Lines
     }
@@ -81,6 +85,7 @@ fn render_primary_view(
     match mode {
         PrimaryRenderMode::Scene => render_scene_view(frame, area, app),
         PrimaryRenderMode::Activity => render_activity_view(frame, area, app),
+        PrimaryRenderMode::Workbench => render_workbench_view(frame, area, app),
         PrimaryRenderMode::Lines => render_lines(frame, area, view_lines),
     }
 }

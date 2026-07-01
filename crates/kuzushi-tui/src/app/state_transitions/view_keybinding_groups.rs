@@ -3,7 +3,7 @@ use super::*;
 
 pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
     // j/k/g/G scroll comes from the shared `scroll_keybindings()` base.
-    vec![
+    let mut bindings = vec![
         bind(
             HotkeyTrigger::Tab,
             "Tab",
@@ -13,6 +13,9 @@ pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
         bind_char('V', "V", "verbose", ViewHotkeyAction::ActivityToggleVerbose),
         bind_char('p', "p", "pause", ViewHotkeyAction::ActivityTogglePause),
         bind_char('R', "R", "reset", ViewHotkeyAction::ActivityReset),
+    ];
+    bindings.extend(activity_deck_keybindings());
+    bindings.extend([
         bind(
             HotkeyTrigger::Enter,
             "Enter",
@@ -31,49 +34,64 @@ pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
             "cancel run",
             ViewHotkeyAction::ActivityCancelRunning,
         ),
+    ]);
+    bindings
+}
+
+fn activity_deck_keybindings() -> Vec<ViewKeybinding> {
+    vec![
+        bind(
+            HotkeyTrigger::Right,
+            "←/→",
+            "views",
+            ViewHotkeyAction::ActivityDeckNext,
+        ),
+        bind(
+            HotkeyTrigger::Left,
+            "←/→",
+            "views",
+            ViewHotkeyAction::ActivityDeckPrev,
+        ),
+        bind_char(']', "←/→", "views", ViewHotkeyAction::ActivityDeckNext),
+        bind_char('[', "←/→", "views", ViewHotkeyAction::ActivityDeckPrev),
+        bind_char('f', "f", "findings", ViewHotkeyAction::ActivityOpenFindings),
+        bind_char('o', "o", "open", ViewHotkeyAction::ActivityOpenDeckArtifact),
     ]
 }
 
-pub(super) fn findings_keybindings() -> Vec<ViewKeybinding> {
+pub(super) fn workbench_keybindings() -> Vec<ViewKeybinding> {
     vec![
-        bind_char('j', "j/k/g/G", "move", ViewHotkeyAction::FindingsNext),
-        bind_char('k', "j/k/g/G", "move", ViewHotkeyAction::FindingsPrevious),
-        bind_char('g', "j/k/g/G", "move", ViewHotkeyAction::FindingsFirst),
-        bind_char('G', "j/k/g/G", "move", ViewHotkeyAction::FindingsLast),
         bind(
-            HotkeyTrigger::PageDown,
-            "PgUp/PgDn",
-            "page",
-            ViewHotkeyAction::FindingsPageDown,
+            HotkeyTrigger::Tab,
+            "Tab",
+            "cycle pane",
+            ViewHotkeyAction::WorkbenchCyclePane,
         ),
-        bind(
-            HotkeyTrigger::PageUp,
-            "PgUp/PgDn",
-            "page",
-            ViewHotkeyAction::FindingsPageUp,
-        ),
+        bind_char('j', "j/k", "move", ViewHotkeyAction::WorkbenchScrollNext),
+        bind_char('k', "j/k", "move", ViewHotkeyAction::WorkbenchScrollPrev),
+        bind_char('g', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollFirst),
+        bind_char('G', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollLast),
         bind(
             HotkeyTrigger::Enter,
             "Enter",
-            "open",
-            ViewHotkeyAction::FindingsOpen,
+            "open finding",
+            ViewHotkeyAction::WorkbenchOpen,
         ),
     ]
 }
 
 pub(super) fn threat_keybindings() -> Vec<ViewKeybinding> {
     [
-        ('1', ThreatView::Dfd),
-        ('2', ThreatView::Stride),
-        ('3', ThreatView::Stories),
-        ('4', ThreatView::Scope),
-        ('5', ThreatView::Summary),
+        ('1', ThreatView::Stride),
+        ('2', ThreatView::Stories),
+        ('3', ThreatView::Scope),
+        ('4', ThreatView::Summary),
     ]
     .into_iter()
     .map(|(key, view)| {
         bind_char(
             key,
-            "1..5",
+            "1..4",
             "switch threat view",
             ViewHotkeyAction::ThreatView(view),
         )

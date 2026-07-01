@@ -112,6 +112,13 @@ pub fn cursor_block() -> Style {
 }
 
 pub(crate) fn severity_tone(tone: SeverityTone) -> Style {
+    severity_tone_for_config(tone, active_theme())
+}
+
+fn severity_tone_for_config(tone: SeverityTone, config: ThemeConfig) -> Style {
+    if config.high_contrast {
+        return high_contrast_severity_tone(tone);
+    }
     match tone {
         SeverityTone::Critical => Style::default()
             .fg(SEV_CRITICAL)
@@ -119,6 +126,45 @@ pub(crate) fn severity_tone(tone: SeverityTone) -> Style {
         SeverityTone::High => Style::default().fg(SEV_HIGH),
         SeverityTone::Medium => Style::default().fg(SEV_MEDIUM),
         SeverityTone::Low | SeverityTone::Info => Style::default().fg(SEV_LOW),
-        SeverityTone::Unknown => muted(),
+        SeverityTone::Unknown => Style::default().fg(T_MUTED),
+    }
+}
+
+fn high_contrast_severity_tone(tone: SeverityTone) -> Style {
+    match tone {
+        SeverityTone::Critical | SeverityTone::High => {
+            Style::default().fg(T_DANGER).add_modifier(Modifier::BOLD)
+        }
+        SeverityTone::Medium => Style::default().fg(T_WARN).add_modifier(Modifier::BOLD),
+        SeverityTone::Low | SeverityTone::Info => {
+            Style::default().fg(T_HEADING).add_modifier(Modifier::BOLD)
+        }
+        SeverityTone::Unknown => Style::default().fg(T_PRIMARY),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn high_contrast_severity_tones_do_not_use_dim_default_palette() {
+        let config = ThemeConfig {
+            high_contrast: true,
+            reduced_motion: false,
+        };
+
+        assert_eq!(
+            severity_tone_for_config(SeverityTone::Low, config),
+            Style::default().fg(T_HEADING).add_modifier(Modifier::BOLD)
+        );
+        assert_eq!(
+            severity_tone_for_config(SeverityTone::Info, config),
+            Style::default().fg(T_HEADING).add_modifier(Modifier::BOLD)
+        );
+        assert_eq!(
+            severity_tone_for_config(SeverityTone::High, config),
+            Style::default().fg(T_DANGER).add_modifier(Modifier::BOLD)
+        );
     }
 }

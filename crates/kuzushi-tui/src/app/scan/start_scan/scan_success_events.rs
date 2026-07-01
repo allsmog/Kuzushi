@@ -20,12 +20,17 @@ impl ShellApp {
         );
         self.record_scan_task_durations();
         self.notify_scan_completion(findings_count);
-        // Findings are refreshed above, so the heatmap has real per-module risk
-        // to draw the moment the scan lands (gated on `auto_open_viz`). Skip a
-        // clean scan — an empty heatmap reading "run scan" right after scanning
-        // is misleading; a 0-finding scan is a pass, not a thing to visualize.
+        // Findings are refreshed above, so the Activity output can show the
+        // actual review list immediately. If the operator is elsewhere, keep
+        // the existing heatmap auto-open behavior; while watching Activity,
+        // stay in place and switch the output view to findings.
         if findings_count > 0 {
-            self.auto_open_viz_page(crate::scene3d::VizPage::Heatmap);
+            if let Some(session) = self.activity.as_mut() {
+                session.set_deck_page(crate::ActivityDeckPage::Findings);
+            }
+            if !matches!(self.shell_view, ShellView::Activity) {
+                self.auto_open_viz_page(crate::scene3d::VizPage::Heatmap);
+            }
         }
     }
 
@@ -39,6 +44,7 @@ impl ShellApp {
         scan.running = false;
         scan.abort_requested = false;
         scan.error = None;
+        self.active_model_override = None;
     }
 
     fn mark_scan_activity_run_id(&mut self, run_id: &str) {

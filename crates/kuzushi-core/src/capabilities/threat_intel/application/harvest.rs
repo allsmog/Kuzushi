@@ -34,7 +34,7 @@ pub fn harvest_threat_intel_catalog(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
-    mut dispatch_tool: impl FnMut(
+    dispatch_tool: impl FnMut(
         &str,
         Value,
         &ToolExecutionContext<'_>,
@@ -43,34 +43,135 @@ pub fn harvest_threat_intel_catalog(
 ) -> Result<Value> {
     let cves = parse_cve_list(input)?;
     let output_path = resolve_output_path(input, ctx)?;
+    let parent_step = emit_threat_intel_harvest_start(ctx, &output_path, cves.len());
     let gate = harvest_gate_config(input, ctx);
-    let mut per_cve = Vec::with_capacity(cves.len());
-    let mut new_entries = Vec::new();
-    let mut stats = HarvestStats::default();
+    let harvest = harvest_cves_into_catalog(
+        &cves,
+        ctx,
+        runtime,
+        dispatch_tool,
+        &gate,
+        parent_step,
+    );
+    emit_threat_intel_harvest_progress(
+        ctx,
+        parent_step,
+        format!("catalog · write {} new entries", harvest.new_entries.len()),
+    );
+    let toml_text = render_catalog_toml(&harvest.new_entries, &output_path)?;
+    write_catalog_with_append(&output_path, &toml_text)?;
+    emit_threat_intel_harvest_done(ctx, &harvest.stats);
 
-    for cve in &cves {
+    Ok(harvest_result(
+        &output_path,
+        harvest.per_cve,
+        cves.len(),
+        &harvest.stats,
+        &gate,
+    ))
+}
+
+struct HarvestedCatalog {
+    per_cve: Vec<Value>,
+    new_entries: Vec<HarvestedCatalogEntry>,
+    stats: HarvestStats,
+}
+
+fn harvest_cves_into_catalog(
+    cves: &[String],
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    mut dispatch_tool: impl FnMut(
+        &str,
+        Value,
+        &ToolExecutionContext<'_>,
+        Option<&dyn AgentRuntime>,
+    ) -> Result<Value>,
+    gate: &HarvestGateConfig,
+    parent_step: Option<usize>,
+) -> HarvestedCatalog {
+    let mut harvest = HarvestedCatalog {
+        per_cve: Vec::with_capacity(cves.len()),
+        new_entries: Vec::new(),
+        stats: HarvestStats::default(),
+    };
+    let _dispatch_scope = begin_threat_intel_harvest_scope(ctx, parent_step);
+    for cve in cves {
+        emit_threat_intel_harvest_progress(ctx, parent_step, format!("cve · harvest {cve}"));
         harvest_cve_into_catalog(
             cve,
             ctx,
             runtime,
             &mut dispatch_tool,
-            &gate,
-            &mut stats,
-            &mut per_cve,
-            &mut new_entries,
+            gate,
+            &mut harvest.stats,
+            &mut harvest.per_cve,
+            &mut harvest.new_entries,
         );
     }
+    harvest
+}
 
-    let toml_text = render_catalog_toml(&new_entries, &output_path)?;
-    write_catalog_with_append(&output_path, &toml_text)?;
+fn emit_threat_intel_harvest_start(
+    ctx: &ToolExecutionContext<'_>,
+    output_path: &Path,
+    cve_count: usize,
+) -> Option<usize> {
+    ctx.trace.map(|trace| {
+        trace
+            .step(
+                "tool",
+                "harvest",
+                format!(
+                    "threat-intel:harvest start · {cve_count} CVEs · output={}",
+                    output_path.display()
+                ),
+            )
+            .emit()
+    })
+}
 
-    Ok(harvest_result(
-        &output_path,
-        per_cve,
-        cves.len(),
-        &stats,
-        &gate,
-    ))
+fn emit_threat_intel_harvest_progress(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    label: impl Into<String>,
+) {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return;
+    };
+    let _ = trace
+        .child(parent)
+        .step("tool-progress", "harvest", label.into())
+        .emit();
+}
+
+fn begin_threat_intel_harvest_scope(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+) -> Option<crate::run_artifacts::ParentScope> {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return None;
+    };
+    let phase = trace
+        .child(parent)
+        .step("reasoning", "harvest", "fetch CVE · extract fix pattern")
+        .emit();
+    Some(trace.parent_scope(phase))
+}
+
+fn emit_threat_intel_harvest_done(ctx: &ToolExecutionContext<'_>, stats: &HarvestStats) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "harvest",
+                format!(
+                    "threat-intel:harvest complete · {} harvested · {} skipped · {} failed",
+                    stats.harvested, stats.skipped, stats.failed
+                ),
+            )
+            .emit();
+    }
 }
 
 fn harvest_gate_config(input: &Value, ctx: &ToolExecutionContext<'_>) -> HarvestGateConfig {

@@ -13,6 +13,8 @@ home - open Kuzushi cockpit home
   aliases / examples: /home, /
 help - show grouped shell help
   aliases / examples: /help, /h, h, ?
+workbench - open the split-pane command center
+  aliases / examples: /workbench, /studio, /cc
 modules - browse native Rust modules
   aliases / examples: /modules, /m, m, show modules
 recommend - open latest module recommendations
@@ -111,8 +113,8 @@ handoff - latest bounded failure handoff
   aliases / examples: /handoff, failure, /failure
 since <ref> - scope findings to a git ref
   aliases / examples: /since <ref>
-threats [1-5] - threat model views
-  aliases / examples: /threats [1-5], threats summary, threats dfd, threats stride, threats stories, threats scope
+threats [1-4] - threat model views
+  aliases / examples: /threats [1-4], threats summary, threats dfd, threats stride, threats stories, threats scope
 threats edit - open the editable threat model view
   aliases / examples: /threats edit
 threats regen - Haiku-driven threat-model patch; review then /threats apply
@@ -153,6 +155,8 @@ load <specifier> - static registry status or load error
   aliases / examples: /load <specifier>
 pause - document live-control absence
   aliases / examples: /pause
+cancel - cancel the active scan/tool/agent without leaving the shell
+  aliases / examples: /cancel, c, /c, stop, /stop
 resume [runId] - document checkpoint-resume absence
   aliases / examples: /resume [runId]
 story - show session story replacements
@@ -174,4 +178,4 @@ no - discard pending plan
 scene - security-viz gallery — risk heatmap, attack path/tree, DFD
   aliases / examples: /scene, /viz, viz, /diagram
 quit - exit the shell
-  aliases / examples: q, /q, exit, /quit, /exit, exitj, /exitj
+  aliases / examples: q, /q, exit, /quit, /exit

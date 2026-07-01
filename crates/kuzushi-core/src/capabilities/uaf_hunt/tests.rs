@@ -4,16 +4,28 @@ use super::application::run_uaf_hunt_report;
 use crate::config::V2Config;
 use crate::findings::TriageOutcome;
 use crate::modules::ToolExecutionContext;
+use crate::run_artifacts::{RunTraceStep, TraceHandle, TraceSink};
 use crate::runtime::{
     AgentLoopStep, AgentRuntime, AgentToolLoopRequest, LoopHistoryEntry, ToolCall, TriageRequest,
 };
 use anyhow::Result;
 use serde_json::json;
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use tempfile::tempdir;
 
 struct ScriptedUafRuntime {
     steps: Mutex<Vec<AgentLoopStep>>,
+}
+
+#[derive(Default)]
+struct VecTraceSink {
+    steps: Mutex<Vec<RunTraceStep>>,
+}
+
+impl TraceSink for VecTraceSink {
+    fn record(&self, step: &RunTraceStep) {
+        self.steps.lock().unwrap().push(step.clone());
+    }
 }
 
 impl ScriptedUafRuntime {
@@ -388,11 +400,13 @@ done
     ]);
     let mut config = V2Config::default();
     config.model = Some("anthropic:claude-haiku-4-5".to_string());
+    let sink = Arc::new(VecTraceSink::default());
+    let trace = TraceHandle::new(sink.clone()).for_tool("uaf-hunt:hunt");
     let ctx = ToolExecutionContext {
         config: &config,
         workspace: None,
         findings_store: None,
-        trace: None,
+        trace: Some(&trace),
     };
 
     let report = run_uaf_hunt_report(&json!({"target": dir.path()}), &ctx, Some(&runtime)).unwrap();
@@ -407,4 +421,19 @@ done
     assert_eq!(report.steps_used, 5);
     assert_eq!(report.cost_usd, 0.03);
     assert!(report.first_clang_error.is_none());
+
+    let steps = sink.steps.lock().unwrap();
+    let labels = steps
+        .iter()
+        .map(|step| step.label.as_str())
+        .collect::<Vec<_>>();
+    assert!(labels.iter().any(|label| label.contains("agent · preflight")));
+    assert!(labels.iter().any(|label| label.contains("clang · spawn")));
+    assert!(labels.iter().any(|label| label.contains("agent-loop")));
+    assert!(labels.iter().any(|label| label.contains("complete · 1 findings")));
+    let start_step = steps[0].n;
+    assert!(steps
+        .iter()
+        .filter(|step| step.kind == "tool-progress")
+        .all(|step| step.parent_step == Some(start_step)));
 }

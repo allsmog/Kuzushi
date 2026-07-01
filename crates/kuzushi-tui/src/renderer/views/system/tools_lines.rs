@@ -9,6 +9,16 @@ pub(crate) fn tools_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(divider("TOOLS", area.width));
     lines.push(aligned_header(&["tool", "description"], &widths));
     push_tool_rows(&mut lines, &widths, &model.rows);
+    lines.push(blank());
+    lines.push(command_list_line(
+        &[
+            "j/k/g/G scroll",
+            "PgUp/PgDn scroll",
+            "use <id>",
+            "options <tool>",
+        ],
+        area.width as usize,
+    ));
     lines
 }
 

@@ -4,7 +4,7 @@ assertion_line: 45
 ---
  KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
 
-1 DFD  2 STRIDE  3 STORIES  4 SCOPE  5 SUMMARY
+1 STRIDE  2 STORIES  3 SCOPE  4 SUMMARY
 
  -- STRIDE ROLLUP · 8 ISSUES -------------------------------------------------------------------------------------------
     S  Spoofing        2 issues  · jwt without aud-claim, mailgun cname dangling

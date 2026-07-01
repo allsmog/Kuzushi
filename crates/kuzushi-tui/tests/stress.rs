@@ -108,11 +108,11 @@ fn one_thousand_findings_render_findings_view_without_panic() {
     );
     let mut app = ShellApp::new(V2Config::default(), None);
     app.findings = findings;
-    app.shell_view = ShellView::Findings;
+    app.shell_view = ShellView::Workbench;
 
     let rendered = render_plain_app(&app, RENDER_WIDTH);
     let elapsed_ms = start.elapsed().as_millis();
-    assert!(!rendered.is_empty(), "Findings view must produce output");
+    assert!(!rendered.is_empty(), "Workbench view must produce output");
     assert!(
         elapsed_ms < STRESS_BUDGET_MS,
         "1k findings round-trip took {elapsed_ms}ms (budget {STRESS_BUDGET_MS}ms)"

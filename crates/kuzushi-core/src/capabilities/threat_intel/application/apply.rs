@@ -23,7 +23,7 @@ pub fn apply_threat_intel_catalog(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
     dispatch_live: bool,
-    mut dispatch_tool: impl FnMut(
+    dispatch_tool: impl FnMut(
         &str,
         Value,
         &ToolExecutionContext<'_>,
@@ -31,27 +31,137 @@ pub fn apply_threat_intel_catalog(
     ) -> Result<Value>,
 ) -> Result<Value> {
     let entries = load_catalog_from_path(catalog_path)?;
-    let mut results = Vec::with_capacity(entries.len());
-    let mut stats = ThreatIntelApplyStats::default();
+    let parent_step = emit_threat_intel_apply_start(ctx, catalog_path, entries.len(), dispatch_live);
+    let applied = apply_threat_intel_entries(
+        &entries,
+        ctx,
+        runtime,
+        dispatch_live,
+        dispatch_tool,
+        parent_step,
+    );
+    emit_threat_intel_apply_done(ctx, &applied.stats);
+    Ok(threat_intel_apply_response(
+        catalog_path,
+        entries.len(),
+        applied.results,
+        applied.stats,
+        !dispatch_live,
+    ))
+}
 
-    for entry in &entries {
+struct ThreatIntelApplyResult {
+    results: Vec<Value>,
+    stats: ThreatIntelApplyStats,
+}
+
+fn apply_threat_intel_entries(
+    entries: &[crate::capabilities::threat_intel::domain::CatalogEntry],
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    dispatch_live: bool,
+    mut dispatch_tool: impl FnMut(
+        &str,
+        Value,
+        &ToolExecutionContext<'_>,
+        Option<&dyn AgentRuntime>,
+    ) -> Result<Value>,
+    parent_step: Option<usize>,
+) -> ThreatIntelApplyResult {
+    let mut applied = ThreatIntelApplyResult {
+        results: Vec::with_capacity(entries.len()),
+        stats: ThreatIntelApplyStats::default(),
+    };
+    let _dispatch_scope = begin_threat_intel_apply_scope(ctx, parent_step);
+    for entry in entries {
+        emit_threat_intel_apply_entry(ctx, parent_step, entry);
         apply_threat_intel_entry(
             entry,
             ctx,
             runtime,
             dispatch_live,
             &mut dispatch_tool,
-            &mut stats,
-            &mut results,
+            &mut applied.stats,
+            &mut applied.results,
         );
     }
-    Ok(threat_intel_apply_response(
-        catalog_path,
-        entries.len(),
-        results,
-        stats,
-        !dispatch_live,
-    ))
+    applied
+}
+
+fn emit_threat_intel_apply_entry(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    entry: &crate::capabilities::threat_intel::domain::CatalogEntry,
+) {
+    emit_threat_intel_apply_progress(
+        ctx,
+        parent_step,
+        format!("entry · {} · {}", entry.id, entry.hunt.as_str()),
+    );
+}
+
+fn emit_threat_intel_apply_start(
+    ctx: &ToolExecutionContext<'_>,
+    catalog_path: &Path,
+    entry_count: usize,
+    dispatch_live: bool,
+) -> Option<usize> {
+    ctx.trace.map(|trace| {
+        let mode = if dispatch_live { "live" } else { "dry-run" };
+        trace
+            .step(
+                "tool",
+                "apply",
+                format!(
+                    "threat-intel:apply start · {entry_count} entries · {mode} · {}",
+                    catalog_path.display()
+                ),
+            )
+            .emit()
+    })
+}
+
+fn emit_threat_intel_apply_progress(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    label: impl Into<String>,
+) {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return;
+    };
+    let _ = trace
+        .child(parent)
+        .step("tool-progress", "apply", label.into())
+        .emit();
+}
+
+fn begin_threat_intel_apply_scope(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+) -> Option<crate::run_artifacts::ParentScope> {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return None;
+    };
+    let phase = trace
+        .child(parent)
+        .step("reasoning", "apply", "dispatch catalog hunts")
+        .emit();
+    Some(trace.parent_scope(phase))
+}
+
+fn emit_threat_intel_apply_done(ctx: &ToolExecutionContext<'_>, stats: &ThreatIntelApplyStats) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "apply",
+                format!(
+                    "threat-intel:apply complete · {} dispatched · {} skipped · {} failed",
+                    stats.dispatched, stats.skipped, stats.failed
+                ),
+            )
+            .emit();
+    }
 }
 
 #[derive(Default)]

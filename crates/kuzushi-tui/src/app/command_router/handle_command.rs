@@ -122,6 +122,16 @@ pub(crate) fn handle_back_command(app: &mut ShellApp, command: &ShellCommand) ->
     true
 }
 
+pub(crate) fn handle_cancel_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Cancel = command else {
+        return false;
+    };
+    if !app.request_active_abort() {
+        app.log("cancel", "no active scan/tool/agent to cancel");
+    }
+    true
+}
+
 pub(crate) fn handle_modules_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
     let ShellCommand::Modules = command else {
         return false;
@@ -163,6 +173,14 @@ pub(crate) fn handle_tools_command(app: &mut ShellApp, command: &ShellCommand) -
             if count == 1 { "tool" } else { "tools" }
         ),
     );
+    true
+}
+
+pub(crate) fn handle_workbench_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Workbench(pane) = command else {
+        return false;
+    };
+    app.open_workbench(*pane);
     true
 }
 

@@ -21,7 +21,7 @@ pub mod ui_views;
 
 pub use app::{
     run_shell, run_shell_with_plain, ActivitySession, ChatTurn, OptionsFilter, OptionsView,
-    PaneFocus, ReconSnapshot, ScanPanelState, ShellApp, ShellView, ThreatView,
+    PaneFocus, ReconSnapshot, ScanPanelState, ShellApp, ShellView, ThreatView, WorkbenchPane,
 };
 pub use build_provenance::{
     build_provenance, build_summary, build_version, build_version_static, BuildProvenance,

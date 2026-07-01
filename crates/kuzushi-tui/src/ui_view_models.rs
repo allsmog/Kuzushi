@@ -26,6 +26,7 @@ mod attack_surface;
 mod auth;
 mod catalog;
 mod chrome_layout;
+mod code_context;
 mod config;
 mod confirm_card;
 mod context_snapshot;
@@ -63,6 +64,7 @@ mod run_trace;
 mod sast_tasks;
 mod session_story;
 mod severity_tone;
+mod source_tree;
 mod status_footer;
 mod threat_dfd_diagram;
 mod threat_impact;
@@ -76,9 +78,11 @@ mod tools;
 mod transcript;
 mod view_status;
 mod viz_data;
+mod workbench;
 mod workspace;
 pub(crate) use active_stage::active_stage_label;
 pub(crate) use activity_dag_rows::ActivityDagRowTone;
+pub(crate) use activity_empty_state::ActivityEmptyStateModel;
 pub(crate) use activity_feed_rows::ActivityFeedRowTone;
 pub(crate) use activity_footer::ActivityFooterHint;
 pub(crate) use activity_pane_chrome::{ActivityPaneTitle, ActivityPlainPaneHeaderCell};
@@ -104,6 +108,7 @@ pub(crate) use catalog::{
 pub(crate) use chrome_layout::{
     keybind_footer_chrome_height, status_footer_chrome_height, transcript_chrome_height,
 };
+pub(crate) use code_context::{selected_finding_code_model, CodePaneModel, CodePaneRow};
 pub(crate) use config::{
     config_model, plain_config_model, ConfigModel, ConfigModelRow, ConfigModelTable,
     ConfigSummaryRow, PlainConfigModel, PlainConfigModelRow,
@@ -131,8 +136,8 @@ pub(crate) use help::{
 };
 pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
 pub(crate) use journey::{
-    journey_footer_segment, journey_model, JourneyModel, JourneyPhaseState, JourneyPhaseStatus,
-    JourneyPhaseTone,
+    journey_footer_segment, journey_model, journey_phase_segment, JourneyModel, JourneyPhaseState,
+    JourneyPhaseStatus, JourneyPhaseTone,
 };
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use knowledge_base::{
@@ -177,9 +182,10 @@ pub(crate) use recent_module_activity::{
 pub(crate) use recommendation::{recommendation_model, RecommendationModel, RecommendationRow};
 pub(crate) use retry_card::{retry_card_model, RetryCardModel, RetryCardRow};
 pub(crate) use routing::{
-    plain_render_mode, routing_mode, routing_mode_segment, shell_view_line_route,
-    uses_activity_frame, uses_scene_frame, PlainRenderMode, PrimaryViewRoute, RoutingMode,
-    ShellViewLineRoute, SystemViewRoute, ThreatAndRunViewRoute, WorkspaceSessionViewRoute,
+    has_run_activity, plain_render_mode, routing_mode, routing_mode_segment, shell_view_line_route,
+    uses_activity_frame, uses_scene_frame, uses_workbench_frame, PlainRenderMode, PrimaryViewRoute,
+    RoutingMode, ShellViewLineRoute, SystemViewRoute, ThreatAndRunViewRoute,
+    WorkspaceSessionViewRoute,
 };
 pub(crate) use run_paths::{
     ui_latest_run_path, ui_latest_run_relative_path, ui_run_artifact_relative_path, ui_run_dir,
@@ -198,9 +204,12 @@ pub(crate) use session_story::{
     session_history_model, session_story_model, CommandHistoryModel, SessionStoryModel,
 };
 pub(crate) use severity_tone::SeverityTone;
+pub(crate) use source_tree::{source_tree_model, SourceTreeModel, SourceTreeRow};
 pub(crate) use status_footer::status_footer_model;
+#[cfg(test)]
+pub(crate) use threat_dfd_diagram::{threat_dfd_diagram_feed_rows, threat_dfd_summary_feed_rows};
 pub(crate) use threat_dfd_diagram::{
-    threat_dfd_diagram_feed_rows, threat_dfd_diagram_lines, threat_dfd_view, DfdLineKind,
+    threat_dfd_diagram_lines, threat_dfd_present, threat_dfd_view, DfdDiagramLine, DfdLineKind,
 };
 pub(crate) use threat_model::{
     threat_model_doc, threat_model_relative_path, threat_summary_review, ThreatSummaryReview,
@@ -226,6 +235,10 @@ pub(crate) use viz_data::{
     attack_tree, dfd_model, findings_heatmap, risk_by_module, taint_flow_path, AttackChain,
     AttackTree, DfdFlowModel, DfdKind, DfdModel, DfdNodeModel, FindingsHeatmap, ModuleRisk,
     RiskByModule, TaintFlowPath, TaintStageModel,
+};
+pub(crate) use workbench::{
+    workbench_view_model, WorkbenchCenter, WorkbenchCenterBody, WorkbenchHint, WorkbenchState,
+    WorkbenchTopBar, WorkbenchViewModel,
 };
 pub(crate) use workspace::{
     findings_db_relative_path, plain_workspace_model, workspace_model, PlainWorkspaceModel,

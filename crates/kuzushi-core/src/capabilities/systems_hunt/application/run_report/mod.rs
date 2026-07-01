@@ -17,6 +17,7 @@ pub fn run_systems_hunt_report(
 
 struct SystemsHuntRun<'a> {
     target: PathBuf,
+    parent_step: Option<usize>,
     options: SystemsHuntInput,
     context: SystemsContextOutput,
     runtime: &'a dyn AgentRuntime,
@@ -33,12 +34,20 @@ fn prepare_systems_hunt_run<'a>(
 ) -> Result<SystemsHuntRun<'a>> {
     let target = systems_hunt_target(input, ctx)?;
     let options = SystemsHuntInput::from_tool_input(input)?;
-    emit_systems_hunt_start(ctx, &target);
+    let parent_step = emit_systems_hunt_start(ctx, &target);
+    emit_systems_hunt_progress(ctx, parent_step, "context · gather systems surfaces");
     let context = gather_systems_context(&target, &options)?;
     ensure_systems_hunt_surfaces(ctx, &target, &options, &context)?;
+    emit_systems_hunt_progress(
+        ctx,
+        parent_step,
+        format!("context · {} surfaces selected", context.surfaces.len()),
+    );
     let execution = resolve_systems_hunt_execution(input, ctx, &options, runtime, &target)?;
+    emit_systems_hunt_progress(ctx, parent_step, "agent · runtime/model resolved");
     Ok(SystemsHuntRun {
         target,
+        parent_step,
         options,
         context,
         runtime: execution.runtime,
@@ -121,8 +130,8 @@ fn query_systems_hunt_with_scope(
     run: &SystemsHuntRun<'_>,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<CostedSystemsHuntRaw> {
-    let _llm_scope = begin_systems_hunt_scope(ctx);
-    emit_selected_systems_surfaces(ctx, &run.context);
+    let _llm_scope = begin_systems_hunt_scope(ctx, run.parent_step);
+    emit_selected_systems_surfaces(ctx, run.parent_step, &run.context);
     let raw = query_systems_hunt_findings(
         run.runtime,
         &run.model,
@@ -138,13 +147,16 @@ fn query_systems_hunt_with_scope(
 
 fn begin_systems_hunt_scope(
     ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
 ) -> Option<crate::run_artifacts::ParentScope> {
-    ctx.trace.map(|trace| {
-        let phase = trace
-            .step("reasoning", "systems-hunt", "invariants · triggers · hunt")
-            .emit();
-        trace.parent_scope(phase)
-    })
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return None;
+    };
+    let phase = trace
+        .child(parent)
+        .step("reasoning", "systems-hunt", "invariants · triggers · hunt")
+        .emit();
+    Some(trace.parent_scope(phase))
 }
 
 fn finalize_systems_hunt_report(
@@ -183,16 +195,30 @@ fn apply_systems_hunt_whitebox_profile(
     Ok(())
 }
 
-fn emit_systems_hunt_start(ctx: &ToolExecutionContext<'_>, target: &Path) {
-    if let Some(trace) = ctx.trace {
-        let _ = trace
+fn emit_systems_hunt_start(ctx: &ToolExecutionContext<'_>, target: &Path) -> Option<usize> {
+    ctx.trace.map(|trace| {
+        trace
             .step(
                 "tool",
                 "systems-hunt",
                 format!("systems-hunt start · target={}", target.display()),
             )
-            .emit();
-    }
+            .emit()
+    })
+}
+
+fn emit_systems_hunt_progress(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    label: impl Into<String>,
+) {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return;
+    };
+    let _ = trace
+        .child(parent)
+        .step("tool-progress", "systems-hunt", label.into())
+        .emit();
 }
 
 fn emit_systems_hunt_refused(ctx: &ToolExecutionContext<'_>) {
@@ -219,16 +245,12 @@ fn emit_systems_hunt_done(ctx: &ToolExecutionContext<'_>, finding_count: usize) 
     }
 }
 
-fn emit_selected_systems_surfaces(ctx: &ToolExecutionContext<'_>, context: &SystemsContextOutput) {
-    if let Some(trace) = ctx.trace {
-        let _ = trace
-            .step(
-                "tool-progress",
-                "systems-hunt",
-                selected_surfaces_trace_label(context),
-            )
-            .emit();
-    }
+fn emit_selected_systems_surfaces(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    context: &SystemsContextOutput,
+) {
+    emit_systems_hunt_progress(ctx, parent_step, selected_surfaces_trace_label(context));
 }
 
 fn selected_surfaces_trace_label(context: &SystemsContextOutput) -> String {

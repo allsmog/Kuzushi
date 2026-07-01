@@ -86,17 +86,25 @@ impl ShellApp {
         self.insert_str_at_cursor(&normalised);
     }
 
+    /// The wheel moves the FINDINGS cursor only when the Workbench has that
+    /// pane focused and there are findings; everywhere else it scrolls lines.
+    fn mouse_scrolls_findings(&self) -> bool {
+        matches!(self.shell_view, ShellView::Workbench)
+            && self.workbench_focus == crate::app::WorkbenchPane::Findings
+            && !self.findings.is_empty()
+    }
+
     pub fn handle_mouse(&mut self, mouse: MouseEvent) {
         match mouse.kind {
             MouseEventKind::ScrollUp => {
-                if matches!(self.shell_view, ShellView::Findings) && !self.findings.is_empty() {
+                if self.mouse_scrolls_findings() {
                     self.findings_cursor = self.findings_cursor.saturating_sub(3);
                 } else {
                     self.scroll_up(3);
                 }
             }
             MouseEventKind::ScrollDown => {
-                if matches!(self.shell_view, ShellView::Findings) && !self.findings.is_empty() {
+                if self.mouse_scrolls_findings() {
                     self.findings_cursor =
                         (self.findings_cursor + 3).min(self.findings.len().saturating_sub(1));
                 } else {

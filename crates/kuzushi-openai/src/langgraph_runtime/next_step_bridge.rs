@@ -20,8 +20,13 @@ pub(crate) fn next_step_blocking(
     const ATTEMPTS: usize = 3;
     let mut last_error: Option<anyhow::Error> = None;
     for attempt in 1..=ATTEMPTS {
-        match run_next_step_bridge(&runtime.command, &bridge_request)
-            .and_then(ensure_next_step_response_ok)
+        ensure_not_cancelled(runtime)?;
+        match run_next_step_bridge(
+            &runtime.command,
+            &bridge_request,
+            runtime.cancellation.as_ref(),
+        )
+        .and_then(ensure_next_step_response_ok)
         {
             Ok(step) => return Ok(step),
             Err(error) => {
@@ -33,6 +38,7 @@ pub(crate) fn next_step_blocking(
                 last_error = Some(error);
             }
         }
+        ensure_not_cancelled(runtime)?;
         std::thread::sleep(std::time::Duration::from_millis(
             super::runtime_impl::retry_delay_ms(attempt),
         ));
@@ -46,8 +52,23 @@ pub(crate) fn preflight_tool_loop_blocking(
 ) -> Result<()> {
     let mut bridge_request = next_step_bridge_request(runtime, request, &[]);
     bridge_request.envelope_type = "next-step-preflight";
-    let response = run_next_step_preflight_bridge(&runtime.command, &bridge_request)?;
+    let response = run_next_step_preflight_bridge(
+        &runtime.command,
+        &bridge_request,
+        runtime.cancellation.as_ref(),
+    )?;
     ensure_next_step_preflight_ok(response)
+}
+
+fn ensure_not_cancelled(runtime: &LangGraphRuntime) -> Result<()> {
+    if runtime
+        .cancellation
+        .as_ref()
+        .is_some_and(kuzushi_core::ScanCancellation::is_cancelled)
+    {
+        anyhow::bail!("LangGraph next-step bridge cancelled");
+    }
+    Ok(())
 }
 
 fn next_step_bridge_request(

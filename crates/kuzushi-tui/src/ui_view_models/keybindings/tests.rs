@@ -24,12 +24,13 @@ fn unmapped_leaf_views_advertise_the_exit_path() {
 }
 
 #[test]
-fn finding_detail_advertises_esc_not_a_typed_verb() {
+fn workbench_footer_advertises_esc_back_and_run_path() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Finding;
+    app.shell_view = ShellView::Workbench;
     let bindings = footer_keybindings(&app);
-    assert!(bindings.contains(&bind("Esc", "back to list")));
-    assert!(!bindings.contains(&bind("findings", "list")));
+    assert!(bindings.contains(&bind("Esc", "back")));
+    assert!(bindings.contains(&bind("scan", "rescan")));
+    assert!(bindings.contains(&bind("Ctrl+C", "exit")));
 }
 
 #[test]
@@ -68,7 +69,7 @@ fn footer_keybindings_show_arm_exit_after_abort_request() {
 #[test]
 fn footer_keybindings_deduplicate_view_bindings() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Findings;
+    app.shell_view = ShellView::Workbench;
     app.findings = vec![kuzushi_core::Finding::new_semgrep(
         "demo.rule",
         "src/app.rs",
@@ -80,7 +81,7 @@ fn footer_keybindings_deduplicate_view_bindings() {
 
     let bindings = footer_keybindings(&app);
 
-    assert_eq!(count_binding(&bindings, "j/k/g/G", "move"), 1);
+    assert_eq!(count_binding(&bindings, "j/k", "move"), 1);
     assert_eq!(count_binding(&bindings, "scan", "rescan"), 1);
 }
 

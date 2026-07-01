@@ -1,7 +1,6 @@
 use super::*;
 use crate::ui_view_models::{threat_panel_model, ThreatPanel};
 
-mod dfd;
 mod scope;
 mod stories;
 mod stride;
@@ -14,7 +13,6 @@ pub(crate) fn threat_lines(app: &ShellApp, area: Rect, view: ThreatView) -> Vec<
     lines.push(blank());
 
     match threat_panel_model(view) {
-        ThreatPanel::Dfd => dfd::append_dfd_lines(app, area, &mut lines),
         ThreatPanel::Stride => stride::append_stride_lines(app, area, &mut lines),
         ThreatPanel::Stories => stories::append_story_lines(app, area, &mut lines),
         ThreatPanel::Scope => scope::append_scope_lines(app, area, &mut lines),

@@ -9,9 +9,10 @@ pub(crate) fn run_background_tool(
     run_id: &str,
     thinking_level: Option<String>,
     trace_handle: Option<TraceHandle>,
+    cancel: ScanCancellation,
 ) -> Result<serde_json::Value> {
     let store = background_findings_store(tool_name, workspace)?;
-    let runtime = background_agent_runtime(&config, tool_name, &input, thinking_level)?;
+    let runtime = background_agent_runtime(&config, tool_name, &input, thinking_level, cancel)?;
     let trace = trace_handle
         .unwrap_or_else(|| TraceHandle::jsonl(workspace.root(), run_id))
         .for_tool(tool_name)
@@ -41,13 +42,15 @@ fn background_agent_runtime(
     tool_name: &str,
     input: &serde_json::Value,
     thinking_level: Option<String>,
+    cancel: ScanCancellation,
 ) -> Result<Option<LangGraphRuntime>> {
     if !wants_background_runtime(config, tool_name, input) {
         return Ok(None);
     }
     Ok(Some(
         LangGraphRuntime::from_config(config, background_current_dir())?
-            .with_thinking_level(thinking_level),
+            .with_thinking_level(thinking_level)
+            .with_cancellation(cancel),
     ))
 }
 

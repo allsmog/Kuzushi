@@ -42,7 +42,11 @@ impl AgentRuntime for LangGraphRuntime {
             temperature: request.temperature,
         };
 
-        let response = run_bridge_with_transport_retries(&self.command, bridge_request)?;
+        let response = run_bridge_with_transport_retries(
+            &self.command,
+            bridge_request,
+            self.cancellation.as_ref(),
+        )?;
 
         Ok(AgentQueryResponse {
             text: response.text.unwrap_or_default(),
@@ -89,17 +93,30 @@ impl AgentRuntime for LangGraphRuntime {
 fn run_bridge_with_transport_retries(
     command: &[String],
     request: BridgeRequest,
+    cancellation: Option<&kuzushi_core::ScanCancellation>,
 ) -> Result<BridgeResponse> {
     const ATTEMPTS: usize = 3;
     let mut last_error: Option<anyhow::Error> = None;
     for attempt in 1..=ATTEMPTS {
-        match bridge_attempt_outcome(run_bridge(command, &request), attempt == ATTEMPTS)? {
+        ensure_not_cancelled(cancellation)?;
+        match bridge_attempt_outcome(
+            run_bridge(command, &request, cancellation),
+            attempt == ATTEMPTS,
+        )? {
             BridgeAttempt::Success(response) => return Ok(response),
             BridgeAttempt::Retry(error) => last_error = Some(error),
         }
+        ensure_not_cancelled(cancellation)?;
         thread::sleep(Duration::from_millis(retry_delay_ms(attempt)));
     }
     Err(last_error.unwrap_or_else(|| anyhow::anyhow!("LangGraph bridge failed")))
+}
+
+fn ensure_not_cancelled(cancellation: Option<&kuzushi_core::ScanCancellation>) -> Result<()> {
+    if cancellation.is_some_and(kuzushi_core::ScanCancellation::is_cancelled) {
+        anyhow::bail!("LangGraph bridge cancelled");
+    }
+    Ok(())
 }
 
 enum BridgeAttempt {

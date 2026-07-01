@@ -39,27 +39,37 @@ impl ShellApp {
             &tool_name,
             &input,
         );
-        let BackgroundToolDispatch {
-            registry,
-            config,
-            tx,
-            rx,
-            trace_rx,
-            run,
-        } = dispatch;
-        self.attach_background_tool_run(&run, rx, trace_rx, &tool_name, status, activity);
-        start_prepared_background_worker(
-            registry,
-            config,
-            tx,
-            run,
+        self.launch_prepared_background_tool(
+            dispatch,
             workspace,
             tool_name,
             input,
             thinking_level,
+            status,
+            activity,
         );
-
         self.open_activity_for_started_background_tool();
+    }
+
+    fn launch_prepared_background_tool(
+        &mut self,
+        dispatch: BackgroundToolDispatch,
+        workspace: WorkspaceTarget,
+        tool_name: String,
+        input: serde_json::Value,
+        thinking_level: Option<String>,
+        status: &str,
+        activity: Option<LiveActivity>,
+    ) {
+        let model_override = active_model_override_from_input(&input, &dispatch.config);
+        BackgroundToolWorkerLaunch::from_dispatch(
+            dispatch,
+            workspace,
+            tool_name,
+            input,
+            thinking_level,
+        )
+        .attach_and_start(self, status, activity, model_override);
     }
 
     fn reject_background_tool_overlap(&mut self, tool_name: &str) -> bool {
@@ -82,7 +92,7 @@ impl ShellApp {
             self.shell_view = ShellView::Activity;
             self.log(
                 "view",
-                "opened activity — Esc/back to leave (disable: setg ui.auto_open_activity false)",
+                "opened activity — c cancels run; type `back` to leave (disable: setg ui.auto_open_activity false)",
             );
         }
     }
@@ -92,16 +102,20 @@ impl ShellApp {
         run: &BackgroundToolRun,
         rx: Receiver<ToolEvent>,
         trace_rx: Receiver<RunTraceStep>,
+        cancel: ScanCancellation,
         tool_name: &str,
         status: &str,
         activity: Option<LiveActivity>,
+        model_override: Option<String>,
     ) {
         self.target = Some(run.target.clone());
         self.tool_rx = Some(rx);
         self.trace_rx = Some(trace_rx);
         self.activity = Some(ActivitySession::new(run.run_id.clone()));
         self.tool_running = Some(tool_name.to_string());
+        self.tool_cancel = Some(cancel);
         self.tool_run_id = Some(run.run_id.clone());
+        self.active_model_override = model_override;
         self.tool_abort_requested = false;
         self.log(
             "tool",
@@ -121,6 +135,7 @@ fn start_prepared_background_worker(
     config: V2Config,
     tx: mpsc::Sender<ToolEvent>,
     run: BackgroundToolRun,
+    cancel: ScanCancellation,
     workspace: WorkspaceTarget,
     tool_name: String,
     input: serde_json::Value,
@@ -136,6 +151,7 @@ fn start_prepared_background_worker(
         thinking_level,
         tx,
         run.trace_handle,
+        cancel,
     );
 }
 
@@ -153,6 +169,125 @@ struct BackgroundToolDispatch {
     rx: mpsc::Receiver<ToolEvent>,
     trace_rx: mpsc::Receiver<RunTraceStep>,
     run: BackgroundToolRun,
+    cancel: ScanCancellation,
+}
+
+struct BackgroundToolWorkerLaunch {
+    registry: ModuleRegistry,
+    config: V2Config,
+    tx: mpsc::Sender<ToolEvent>,
+    rx: mpsc::Receiver<ToolEvent>,
+    trace_rx: mpsc::Receiver<RunTraceStep>,
+    run: BackgroundToolRun,
+    cancel: ScanCancellation,
+    workspace: WorkspaceTarget,
+    tool_name: String,
+    input: serde_json::Value,
+    thinking_level: Option<String>,
+}
+
+impl BackgroundToolWorkerLaunch {
+    fn from_dispatch(
+        dispatch: BackgroundToolDispatch,
+        workspace: WorkspaceTarget,
+        tool_name: String,
+        input: serde_json::Value,
+        thinking_level: Option<String>,
+    ) -> Self {
+        let BackgroundToolDispatch {
+            registry,
+            config,
+            tx,
+            rx,
+            trace_rx,
+            run,
+            cancel,
+        } = dispatch;
+        Self {
+            registry,
+            config,
+            tx,
+            rx,
+            trace_rx,
+            run,
+            cancel,
+            workspace,
+            tool_name,
+            input,
+            thinking_level,
+        }
+    }
+
+    fn attach_and_start(
+        self,
+        app: &mut ShellApp,
+        status: &str,
+        activity: Option<LiveActivity>,
+        model_override: Option<String>,
+    ) {
+        self.attach(app, status, activity, model_override).start();
+    }
+
+    fn attach(
+        self,
+        app: &mut ShellApp,
+        status: &str,
+        activity: Option<LiveActivity>,
+        model_override: Option<String>,
+    ) -> BackgroundToolWorkerStart {
+        let rx = self.rx;
+        let trace_rx = self.trace_rx;
+        let start = BackgroundToolWorkerStart {
+            registry: self.registry,
+            config: self.config,
+            tx: self.tx,
+            run: self.run,
+            cancel: self.cancel,
+            workspace: self.workspace,
+            tool_name: self.tool_name,
+            input: self.input,
+            thinking_level: self.thinking_level,
+        };
+        app.attach_background_tool_run(
+            &start.run,
+            rx,
+            trace_rx,
+            start.cancel.clone(),
+            &start.tool_name,
+            status,
+            activity,
+            model_override,
+        );
+        start
+    }
+}
+
+struct BackgroundToolWorkerStart {
+    registry: ModuleRegistry,
+    config: V2Config,
+    tx: mpsc::Sender<ToolEvent>,
+    run: BackgroundToolRun,
+    cancel: ScanCancellation,
+    workspace: WorkspaceTarget,
+    tool_name: String,
+    input: serde_json::Value,
+    thinking_level: Option<String>,
+}
+
+impl BackgroundToolWorkerStart {
+    fn start(self) {
+        start_prepared_background_worker(
+            self.registry,
+            self.config,
+            self.tx,
+            self.run,
+            self.cancel,
+            self.workspace,
+            self.tool_name,
+            self.input,
+            self.thinking_level,
+        );
+    }
 }
 
 fn prepare_background_tool_dispatch(
@@ -166,6 +301,7 @@ fn prepare_background_tool_dispatch(
     let config = config.clone();
     let (tx, rx) = mpsc::channel();
     let (trace_tx, trace_rx) = mpsc::channel::<RunTraceStep>();
+    let cancel = ScanCancellation::default();
     let loaded_modules = registry.loaded_module_specifiers();
     let run = prepare_background_tool_run(
         workspace,
@@ -182,6 +318,7 @@ fn prepare_background_tool_dispatch(
         rx,
         trace_rx,
         run,
+        cancel,
     }
 }
 
@@ -235,6 +372,7 @@ fn spawn_background_tool_worker(
     thinking_level: Option<String>,
     tx: std::sync::mpsc::Sender<ToolEvent>,
     trace_handle: TraceHandle,
+    cancel: ScanCancellation,
 ) {
     thread::spawn(move || {
         background_tool_worker(
@@ -247,6 +385,7 @@ fn spawn_background_tool_worker(
             thinking_level,
             tx,
             Some(trace_handle),
+            cancel,
         )
     });
 }

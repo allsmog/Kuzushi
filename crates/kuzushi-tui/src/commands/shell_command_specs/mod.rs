@@ -88,7 +88,7 @@ fn parse_navigation_command(verb: &str) -> Option<ShellCommand> {
         "" | "home" => Some(ShellCommand::Home),
         "help" | "h" | "?" => Some(ShellCommand::Help),
         "back" | "b" => Some(ShellCommand::Back),
-        "quit" | "exit" | "q" | "exitj" => Some(ShellCommand::Quit),
+        "quit" | "exit" | "q" => Some(ShellCommand::Quit),
         _ => None,
     }
 }
@@ -107,6 +107,7 @@ fn parse_catalog_command(verb: &str) -> Option<ShellCommand> {
 
 fn parse_session_command(verb: &str) -> Option<ShellCommand> {
     match verb {
+        "workbench" | "studio" | "cc" => Some(ShellCommand::Workbench(WorkbenchPane::Findings)),
         "cost" => Some(ShellCommand::Cost),
         "config" => Some(ShellCommand::Config),
         "permissions" => Some(ShellCommand::Permissions),
@@ -114,6 +115,7 @@ fn parse_session_command(verb: &str) -> Option<ShellCommand> {
         "history" => Some(ShellCommand::History),
         "clear" => Some(ShellCommand::Clear),
         "pause" => Some(ShellCommand::Pause),
+        "cancel" | "c" | "stop" => Some(ShellCommand::Cancel),
         "story" => Some(ShellCommand::Story),
         "quickstart" => Some(ShellCommand::Quickstart),
         "onboarding" | "setup" | "plan-stage" | "planning" => Some(ShellCommand::Onboarding),

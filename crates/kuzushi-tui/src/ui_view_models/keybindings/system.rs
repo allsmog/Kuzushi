@@ -46,6 +46,7 @@ fn scene_keybindings() -> Vec<FooterKeybinding> {
         bind("h/l/j/k", "orbit 3D"),
         bind("space/p", "pause"),
         bind("r", "reset"),
+        bind("o", "return"),
         bind("Esc/q", "leave"),
     ]
 }

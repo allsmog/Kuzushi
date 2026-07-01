@@ -1,0 +1,27 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+assertion_line: 164
+---
+Kuzushi · no target · target:all modules · ○ idle
+ scan rescan target   options tune scanners   ask ask the agent
+
+ -- SOURCE · 2 files ---------------------------------------------------------------------------------------------------
+apps/  · 2
+  api/  · 1
+    orders.rs  · 1
+  web/  · 1
+    server.ts  · 1
+
+ -- DFD ----------------------------------------------------------------------------------------------------------------
+       ∅  no data-flow diagram
+       no threat model yet — run `threat-model:build` to map this target's data flows.
+
+       ▸ threat-model:build    map trust zones and flows
+
+ -- FINDINGS · 2 · 1 triaged · 1 pending -------------------------------------------------------------------------------
+all:2  crit:1  high:1  med:0  low:0
+▌ F-0001  CRIT  sql injection via order_id concatenation
+  F-0002  HIGH  path traversal in /assets/<file>
+
+ -- DETAILS ------------------------------------------------------------------------------------------------------------
+no finding selected — press Enter on a FINDINGS row to inspect it.

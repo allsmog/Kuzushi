@@ -1,14 +1,27 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+assertion_line: 89
+---
  KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
 
  -- ACTIVITY  run r-snapshot  ·  2/3 done  ·  1 running ----------------------------------------------------------------
  -- TASKS                                      |  -- OUTPUT
- ✓ context:build                          <1ms | 22:13:20  ⏵ [context:build] context:build start
- ✓ semgrep:scan                           <1ms | 22:13:20  ✓ [context:build] context:build complete · 412 files
- ⠋ triage:run                             <1ms | 22:13:20  ⏵ [semgrep:scan] semgrep start
-     ↳ verdict=likely-tp severity=high         | 22:13:20  ✓ [semgrep:scan] semgrep complete · 14 findings
- ⤳ subsystems (1)  task-selector ran           | 22:13:20  ⏵ [triage:run] triage start
-                                               | 22:13:20   ↳ … [triage:run] evidence-collect · stage1 kept 14/14
-                                               | 22:13:20   ↳ … [triage:run] verdict=likely-tp severity=high
+ ✓ context:build                          <1ms | views  [findings·]  surface·   dfd·   heatmap·   path·   chain·
+ ✓ semgrep:scan                           <1ms |   ←/→ views · j/k item · o open findings · dots mean no artifact
+ ⠋ triage:run                             <1ms |
+     ✓ triage start                            | -- FINDINGS ------------------------------------------------
+     ✓ evidence-collect                        |   runs the umbrella scanner over the target.
+     ✓ stage1 kept 14/14                       |
+     ↳ verdict=likely-tp severity=high         |
+ ⤳ subsystems (1)  active task-selector ran    |
+  ACTIONS                                      |
+     22:13:20  ⏵ [context:build] context:buil… |
+     22:13:20  ✓ [context:build] context:buil… |
+     22:13:20  ⏵ [semgrep:scan] semgrep start  |
+     22:13:20  ✓ [semgrep:scan] semgrep compl… |
+     22:13:20  ⏵ [triage:run] triage start     |
+     22:13:20   ↳ … [triage:run] evidence-col… |
+     22:13:20   ↳ … [triage:run] verdict=like… |
 
  ▸ FOCUS  hover [j/k] to inspect a task
- j/k scroll   Tab pane   V verbose   p pause   R reset   Enter focus   c cancel
+ j/k/g/G scroll   Tab pane   ←/→ views   f findings   o open   V verbose   p pause   R reset   Enter focus   c cancel

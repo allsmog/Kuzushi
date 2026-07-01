@@ -6,16 +6,31 @@ pub(crate) fn run_deep_audit_tool(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
     let run = prepare_deep_audit(&input, ctx, runtime)?;
+    let parent_step = emit_deep_audit_start(ctx, &run);
+    emit_deep_audit_progress(ctx, parent_step, "router · load deep-auditor role model");
     let routed = deep_audit_routed_runtime(run.runtime, ctx, run.workspace.root())?;
+    emit_deep_audit_progress(ctx, parent_step, "spend · open audit budget");
     let spend = deep_audit_spend_limiter(ctx, run.workspace)?;
     let cfg = deep_audit_config(run.workspace, &run.options);
+    emit_deep_audit_progress(
+        ctx,
+        parent_step,
+        format!(
+            "agent · {} pass(es) · {} max steps",
+            cfg.passes, cfg.max_steps
+        ),
+    );
+    let _agent_scope = begin_deep_audit_agent_scope(ctx, parent_step);
     let outcome = crate::capabilities::deep_auditor::run_deep_auditor(
         &routed,
         Some(&spend),
         &cfg,
         &run.finding,
     )?;
+    drop(_agent_scope);
+    emit_deep_audit_progress(ctx, parent_step, "persist · triage outcome and evidence");
     persist_deep_audit_outcome(&run, &outcome)?;
+    emit_deep_audit_done(ctx, &outcome);
     Ok(deep_audit_response(&run.finding, outcome))
 }
 
@@ -32,6 +47,58 @@ struct DeepAuditOptions {
     deposit_usd: f64,
     temperature: f32,
     passes: u32,
+}
+
+fn emit_deep_audit_start(ctx: &ToolExecutionContext<'_>, run: &DeepAuditRun<'_>) -> Option<usize> {
+    ctx.trace.map(|trace| {
+        trace
+            .step(
+                "tool",
+                "run",
+                format!("deep-audit:run start · fp={}", run.finding.fingerprint),
+            )
+            .emit()
+    })
+}
+
+fn emit_deep_audit_progress(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    label: impl Into<String>,
+) {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return;
+    };
+    let _ = trace.child(parent).step("tool-progress", "run", label.into()).emit();
+}
+
+fn begin_deep_audit_agent_scope(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+) -> Option<crate::run_artifacts::ParentScope> {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return None;
+    };
+    let phase = trace
+        .child(parent)
+        .step("reasoning", "run", "code-nav · exploitability verdict")
+        .emit();
+    Some(trace.parent_scope(phase))
+}
+
+fn emit_deep_audit_done(
+    ctx: &ToolExecutionContext<'_>,
+    outcome: &crate::capabilities::deep_auditor::DeepAuditOutcome,
+) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "run",
+                format!("deep-audit:run complete · {}", outcome.triage.verdict.as_str()),
+            )
+            .emit();
+    }
 }
 
 fn prepare_deep_audit<'a>(

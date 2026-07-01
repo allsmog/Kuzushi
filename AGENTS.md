@@ -302,6 +302,18 @@ is expected to behave identically and should be filed as a parity bug.
   transcript, actor-detail view, tune view** — interactive only. They
   live in the Rust Ratatui shell under `crates/kuzushi-tui`; plain/scripted
   output belongs in `crates/kuzushi-tui/src/renderer/plain.rs`.
+- **Workbench command center (`ShellView::Workbench`, verbs
+  `workbench`/`studio`/`cc`)** — the shell's default landing surface (set in
+  `run_shell::open_start_view`, after the onboarding/target/model gates). A
+  frame-rendered 3-column split `[SOURCE tree | DFD graph | FINDINGS + DETAILS]`
+  under a `Kuzushi · project · target · LIVE · phase` top bar; `Tab` cycles pane
+  focus, `j/k` move the focused pane, `Enter` selects a finding. It folds the
+  old standalone findings, finding-detail, and threat-DFD-tab surfaces — the
+  `findings`, `open <id>`, and `threats dfd` verbs route here. Interactive-only
+  fidelity (bordered panes), but degrades to text via
+  `renderer/views/workbench/render_workbench_view.rs::workbench_lines` for
+  plain/non-TTY. `LIVE` lights only on real run activity (same `has_run_activity`
+  signal as the routing mode); pane focus lives on `app.workbench_focus`.
 - **Launch-time target picker (`ShellView::TargetPicker`)** — interactive
   only. A bare `kuzushi` (no `--target`) on a real TTY opens a picker
   (cwd + child repos/previous `.kuzushi` targets, via

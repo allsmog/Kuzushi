@@ -141,8 +141,9 @@ fn finding_rows(app: &ShellApp) -> Vec<FindingListRow> {
 }
 
 /// The canonical absolute target path, used to relativize finding locations so
-/// the list shows `crates/foo.rs:12` instead of a full `/Users/...` path.
-fn target_base(app: &ShellApp) -> Option<String> {
+/// the list shows `crates/foo.rs:12` instead of a full `/Users/...` path. Shared
+/// with the Workbench SOURCE tree so both surfaces relativize identically.
+pub(crate) fn target_base(app: &ShellApp) -> Option<String> {
     let target = app.target.as_ref()?;
     let canonical = target.canonicalize().unwrap_or_else(|_| target.clone());
     Some(canonical.to_string_lossy().into_owned())
@@ -150,7 +151,7 @@ fn target_base(app: &ShellApp) -> Option<String> {
 
 /// Strip the target prefix from a `path:line` location when present, leaving a
 /// repo-relative path; otherwise return it unchanged.
-fn relativize_location(location: String, base: Option<&str>) -> String {
+pub(crate) fn relativize_location(location: String, base: Option<&str>) -> String {
     let Some(base) = base else {
         return location;
     };

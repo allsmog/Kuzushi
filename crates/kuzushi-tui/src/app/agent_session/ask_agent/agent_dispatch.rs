@@ -76,6 +76,7 @@ impl ShellApp {
     ) -> AgentDispatch {
         let failure_context = self.take_pending_failure_context();
         let (tx, rx) = mpsc::channel();
+        let cancel = ScanCancellation::default();
         let (run_id, started_secs) = next_agent_run_id();
         let agent_prompt =
             agent_question_with_failure_context(&operator_question, failure_context.as_ref());
@@ -86,6 +87,7 @@ impl ShellApp {
         next.failure_context = failure_context.clone();
         self.agent_chat = Some(next);
         self.agent_rx = Some(rx);
+        self.agent_cancel = Some(cancel.clone());
         self.shell_view = ShellView::AgentChat;
         AgentDispatch {
             config: self.config.clone(),
@@ -97,6 +99,7 @@ impl ShellApp {
             run_id,
             attached_failure_context: failure_context.is_some(),
             tx,
+            cancel,
         }
     }
 
@@ -172,6 +175,7 @@ struct AgentDispatch {
     run_id: String,
     attached_failure_context: bool,
     tx: mpsc::Sender<AgentEvent>,
+    cancel: ScanCancellation,
 }
 
 fn spawn_agent_dispatch(dispatch: AgentDispatch) {
@@ -183,6 +187,7 @@ fn spawn_agent_dispatch(dispatch: AgentDispatch) {
             dispatch.cwd,
             dispatch.agent_prompt,
             dispatch.tx,
+            dispatch.cancel,
         )
     });
 }

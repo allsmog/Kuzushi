@@ -8,6 +8,6 @@ use self::{
 use crate::capabilities::vendor_assessment as vendor_assessment_capability;
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 mod module;
 pub(in crate::modules) use module::{execute_tool, module};

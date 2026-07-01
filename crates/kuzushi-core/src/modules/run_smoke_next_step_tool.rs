@@ -8,10 +8,13 @@ pub(crate) fn run_smoke_next_step_tool(
     let runtime = smoke_runtime(runtime)?;
     let phrase = smoke_phrase(&input);
     let request = smoke_request(ctx, &phrase)?;
+    let parent_step = emit_smoke_next_step_start(ctx);
 
     let mut toolbox = smoke_toolbox();
 
+    let _loop_scope = begin_smoke_next_step_scope(ctx, parent_step);
     let outcome = crate::runtime::run_tool_loop(runtime, &request, &mut toolbox)?;
+    drop(_loop_scope);
     let echoed = outcome.text.contains(&phrase);
 
     let summary = format!("smoke:next-step completed in {} step{}", outcome.steps_used, if outcome.steps_used == 1 { "" } else { "s" });
@@ -25,7 +28,42 @@ pub(crate) fn run_smoke_next_step_tool(
     });
     let mut result = crate::module_result::completed_output_result(summary.clone(), summary, data);
     result["costUsd"] = json!(outcome.cost_usd);
+    emit_smoke_next_step_done(ctx, outcome.steps_used);
     Ok(result)
+}
+
+fn emit_smoke_next_step_start(ctx: &ToolExecutionContext<'_>) -> Option<usize> {
+    ctx.trace.map(|trace| {
+        trace
+            .step("tool", "next-step", "smoke:next-step start")
+            .emit()
+    })
+}
+
+fn begin_smoke_next_step_scope(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+) -> Option<crate::run_artifacts::ParentScope> {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return None;
+    };
+    let phase = trace
+        .child(parent)
+        .step("reasoning", "next-step", "tool-loop · echo")
+        .emit();
+    Some(trace.parent_scope(phase))
+}
+
+fn emit_smoke_next_step_done(ctx: &ToolExecutionContext<'_>, steps_used: u32) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                "next-step",
+                format!("smoke:next-step complete · {steps_used} steps"),
+            )
+            .emit();
+    }
 }
 
 fn smoke_phrase(input: &Value) -> String {

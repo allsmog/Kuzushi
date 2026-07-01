@@ -109,7 +109,7 @@ fn bridge_stderr_failure_rewrites_internal_provider_tokens() {
             .to_string(),
     ];
 
-    let error = run_next_step_bridge(&command, &request)
+    let error = run_next_step_bridge(&command, &request, None)
         .unwrap_err()
         .to_string();
 
@@ -127,7 +127,7 @@ fn bridge_parse_failure_rewrites_internal_provider_tokens() {
         "printf '%s' 'malformed openai-codex response'".to_string(),
     ];
 
-    let error = run_next_step_bridge(&command, &request)
+    let error = run_next_step_bridge(&command, &request, None)
         .unwrap_err()
         .to_string();
 

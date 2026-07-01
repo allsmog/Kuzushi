@@ -13,9 +13,11 @@ pub(crate) fn run_agentic_sast_report(
     let runtime = required_agentic_sast_runtime(runtime)?;
     let run = AgenticSastRun::from_input(input, ctx)?;
     let parent_step = emit_agentic_sast_start(ctx, &run);
+    emit_agentic_sast_inventory_count(ctx, parent_step, run.inventory.len());
     let mut result = collect_agentic_sast_findings(runtime, &run, ctx, parent_step)?;
     apply_agentic_sast_whitebox_profile(&run, &mut result.value)?;
     let persisted = persist_agentic_sast_findings(&run.target, &result.value, ctx)?;
+    emit_agentic_sast_persisted(ctx, parent_step, result.value.len(), persisted.as_ref());
     emit_agentic_sast_done(ctx, result.value.len());
     Ok(agentic_sast_report(
         &run,
@@ -45,7 +47,11 @@ fn query_agentic_sast_with_scope(
     ctx: &ToolExecutionContext<'_>,
     parent_step: Option<usize>,
 ) -> Result<CostedStructuredJson<Vec<Finding>>> {
-    let _llm_scope = begin_agentic_sast_child_scope(ctx, parent_step, "agent-call");
+    let _llm_scope = begin_agentic_sast_child_scope(
+        ctx,
+        parent_step,
+        "inventory-review · vulnerability-hunt · json-findings",
+    );
     let findings = query_agentic_sast_findings_with_cost(runtime, run, None)?;
     drop(_llm_scope);
     Ok(findings)
@@ -65,7 +71,7 @@ fn review_agentic_sast_with_scope(
         });
     }
     let _validation_scope =
-        begin_agentic_sast_child_scope(ctx, parent_step, "static-validation review-loop");
+        begin_agentic_sast_child_scope(ctx, parent_step, "static-validation · review-loop");
     let review_context = summarize_agentic_findings_for_review(&findings);
     let review = query_agentic_sast_findings_with_cost(runtime, run, Some(&review_context))?;
     let findings = merge_agentic_sast_findings(findings, review.value, run.options.max_findings);
@@ -117,6 +123,23 @@ fn emit_agentic_sast_start(ctx: &ToolExecutionContext<'_>, run: &AgenticSastRun)
     })
 }
 
+fn emit_agentic_sast_inventory_count(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    inventory_count: usize,
+) {
+    if let (Some(trace), Some(parent)) = (ctx.trace, parent_step) {
+        let _ = trace
+            .child(parent)
+            .step(
+                "tool-progress",
+                "scan",
+                format!("inventory loaded: {inventory_count} file snippets"),
+            )
+            .emit();
+    }
+}
+
 fn emit_agentic_sast_validation_count(
     ctx: &ToolExecutionContext<'_>,
     parent_step: Option<usize>,
@@ -128,8 +151,26 @@ fn emit_agentic_sast_validation_count(
             .step(
                 "reasoning",
                 "scan",
-                format!("static-validation · {finding_count} candidate findings"),
+                format!("static-validation: {finding_count} candidate findings"),
             )
+            .emit();
+    }
+}
+
+fn emit_agentic_sast_persisted(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    finding_count: usize,
+    persisted: Option<&AgenticSastPersistedRun>,
+) {
+    if let (Some(trace), Some(parent)) = (ctx.trace, parent_step) {
+        let label = match persisted {
+            Some(run) => format!("persist findings: {finding_count} saved to {}", run.findings_db),
+            None => "persist findings: skipped without workspace store".to_string(),
+        };
+        let _ = trace
+            .child(parent)
+            .step("tool-progress", "scan", label)
             .emit();
     }
 }

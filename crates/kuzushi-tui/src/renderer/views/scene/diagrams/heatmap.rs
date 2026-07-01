@@ -12,10 +12,11 @@ const COLUMNS: [Sev; 5] = [Sev::Critical, Sev::High, Sev::Medium, Sev::Low, Sev:
 
 pub(crate) fn heatmap_lines(_width: usize, model: &FindingsHeatmap) -> Vec<Line<'static>> {
     if let Some(hint) = &model.empty_hint {
-        return vec![
-            blank(),
-            line(vec![span(format!("  {hint}"), theme::muted())]),
-        ];
+        return scene_empty_state_lines(
+            "no heatmap data",
+            hint,
+            &[("scan", "populate findings by module and severity")],
+        );
     }
     let mut lines = vec![header_row(), blank_grid_row()];
     lines.extend(model.rows.iter().map(data_row));

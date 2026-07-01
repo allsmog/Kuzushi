@@ -9,22 +9,10 @@ pub(crate) fn run_x_ray(
         "x-ray:run requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
     )?;
     let input = parse_run_input(&input, ctx)?;
-    if let Some(trace) = ctx.trace {
-        let _ = trace
-            .step(
-                "tool",
-                "run",
-                format!("x-ray:run start · target={}", input.target.display()),
-            )
-            .emit();
-    }
+    let parent_step = emit_x_ray_start(ctx, &input);
+    emit_x_ray_progress(ctx, parent_step, "prompt · build repository x-ray request");
     let prompt = build_x_ray_prompt(&input);
-    let _agent_scope = ctx.trace.map(|trace| {
-        let phase = trace
-            .step("reasoning", "run", "inventory · agent-pass")
-            .emit();
-        trace.parent_scope(phase)
-    });
+    let _agent_scope = begin_x_ray_agent_scope(ctx, parent_step);
     let content = query_required_structured_json(
         runtime,
         AgentQueryRequest::new(
@@ -37,7 +25,7 @@ pub(crate) fn run_x_ray(
         XRayArtifactContent::from_value_owned,
     )?;
     drop(_agent_scope);
-    finish_x_ray_run(&input, ctx, content)
+    finish_x_ray_run(&input, ctx, parent_step, content)
 }
 
 pub(crate) fn read_x_ray(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
@@ -67,15 +55,58 @@ fn x_ray_response(output: String, data: Value, report: &XRayReportData) -> Value
 fn finish_x_ray_run(
     input: &XRayRunInput,
     ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
     content: XRayArtifactContent,
 ) -> Result<Value> {
+    emit_x_ray_progress(ctx, parent_step, "artifacts · write x-ray report");
     write_x_ray_artifacts(&input.target, content)?;
     let data =
         read_x_ray_report_artifacts(&input.target, Some(&input.repo_name), "LangGraph", 0.0)?;
-    if let Some(trace) = ctx.trace {
-        let _ = trace.step("done", "run", "x-ray:run complete").emit();
-    }
+    emit_x_ray_done(ctx);
     let mut data_json = json!(data);
     data_json["kbContext"] = json!(&input.kb_context);
     Ok(x_ray_response(render_x_ray_run_summary(&data), data_json, &data))
+}
+
+fn emit_x_ray_start(ctx: &ToolExecutionContext<'_>, input: &XRayRunInput) -> Option<usize> {
+    ctx.trace.map(|trace| {
+        trace
+            .step(
+                "tool",
+                "run",
+                format!("x-ray:run start · target={}", input.target.display()),
+            )
+            .emit()
+    })
+}
+
+fn emit_x_ray_progress(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    label: impl Into<String>,
+) {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return;
+    };
+    let _ = trace.child(parent).step("tool-progress", "run", label.into()).emit();
+}
+
+fn begin_x_ray_agent_scope(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+) -> Option<crate::run_artifacts::ParentScope> {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return None;
+    };
+    let phase = trace
+        .child(parent)
+        .step("reasoning", "run", "inventory · agent-pass")
+        .emit();
+    Some(trace.parent_scope(phase))
+}
+
+fn emit_x_ray_done(ctx: &ToolExecutionContext<'_>) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace.step("done", "run", "x-ray:run complete").emit();
+    }
 }

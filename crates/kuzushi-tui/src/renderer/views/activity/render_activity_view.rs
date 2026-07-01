@@ -33,8 +33,13 @@ pub(crate) fn render_activity_view(frame: &mut Frame<'_>, area: Rect, app: &Shel
     match activity_view_model(app) {
         ActivityViewModel::Active(activity) => render_active_activity_view(frame, area, &activity),
         ActivityViewModel::Inactive(empty) => {
-            let body = Paragraph::new(Line::from(vec![Span::styled(empty.body, theme::muted())]))
-                .alignment(Alignment::Left);
+            let mut lines = vec![divider(empty.title, area.width)];
+            lines.extend(empty_state_panel(
+                empty.glyph_label,
+                empty.explanations,
+                empty.ctas,
+            ));
+            let body = Paragraph::new(lines).alignment(Alignment::Left);
             frame.render_widget(body, area);
         }
     }

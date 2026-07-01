@@ -212,13 +212,6 @@ fn threat_scope_view_with_canonical_fixture() {
 }
 
 #[test]
-fn threat_dfd_view_canonical_diagram() {
-    let mut app = fresh_app();
-    app.shell_view = ShellView::Threat(ThreatView::Dfd);
-    assert_plain_snapshot("threat_dfd_canonical", &render_at_120(&mut app));
-}
-
-#[test]
 fn threat_stride_view_with_canonical_fixture() {
     let mut app = fresh_app();
     app.shell_view = ShellView::Threat(ThreatView::Stride);
@@ -262,14 +255,14 @@ fn help_view_default() {
 }
 
 #[test]
-fn findings_empty_view_default() {
+fn workbench_empty_view_default() {
     let mut app = fresh_app();
-    app.shell_view = ShellView::Findings;
-    assert_plain_snapshot("findings_empty_view_default", &render_at_120(&mut app));
+    app.shell_view = ShellView::Workbench;
+    assert_plain_snapshot("workbench_empty_view_default", &render_at_120(&mut app));
 }
 
 #[test]
-fn findings_list_view_with_two_findings() {
+fn workbench_list_view_with_two_findings() {
     let mut app = fresh_app();
     let mut critical = Finding::new_semgrep(
         "demo.sqli",
@@ -295,8 +288,8 @@ fn findings_list_view_with_two_findings() {
         "path traversal in /assets/<file>",
     );
     app.findings = vec![critical, untriaged];
-    app.shell_view = ShellView::Findings;
-    assert_plain_snapshot("findings_list_two_findings", &render_at_120(&mut app));
+    app.shell_view = ShellView::Workbench;
+    assert_plain_snapshot("workbench_list_two_findings", &render_at_120(&mut app));
 }
 
 #[test]
@@ -560,11 +553,9 @@ fn every_shell_view_produces_non_empty_plain_output() {
         ("recommend", ShellView::Recommend),
         ("module", ShellView::Module),
         ("module_run", ShellView::ModuleRun),
-        ("findings", ShellView::Findings),
-        ("finding", ShellView::Finding),
+        ("workbench", ShellView::Workbench),
         ("tune", ShellView::Tune),
         ("threat_summary", ShellView::Threat(ThreatView::Summary)),
-        ("threat_dfd", ShellView::Threat(ThreatView::Dfd)),
         ("threat_stride", ShellView::Threat(ThreatView::Stride)),
         ("threat_stories", ShellView::Threat(ThreatView::Stories)),
         ("threat_scope", ShellView::Threat(ThreatView::Scope)),

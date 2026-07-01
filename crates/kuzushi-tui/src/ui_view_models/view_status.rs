@@ -14,8 +14,7 @@ fn primary_view_status(app: &ShellApp) -> Option<String> {
         ShellView::Recommend => Some("recommend".to_string()),
         ShellView::Module => Some(focused_or_default(app, "module")),
         ShellView::ModuleRun => Some(module_run_status(app)),
-        ShellView::Findings => Some("findings".to_string()),
-        ShellView::Finding => Some("finding".to_string()),
+        ShellView::Workbench => Some("workbench".to_string()),
         ShellView::ModelPicker => Some("model-picker".to_string()),
         ShellView::TargetPicker => Some("target-picker".to_string()),
         ShellView::AuthMethodPicker(provider) => Some(format!("auth-picker:{provider}")),
@@ -84,7 +83,6 @@ fn module_run_status(app: &ShellApp) -> String {
 
 fn threat_view_slug(view: ThreatView) -> &'static str {
     match view {
-        ThreatView::Dfd => "dfd",
         ThreatView::Stride => "stride",
         ThreatView::Stories => "stories",
         ThreatView::Scope => "scope",

@@ -7,26 +7,26 @@ pub(crate) fn run_taint_iris_next_report(
 ) -> Result<TaintIrisNextReport> {
     let target = taint_iris_next_target(input, ctx)?;
     let options = TaintIrisNextInput::from_tool_input(input)?;
-    if let Some(trace) = ctx.trace {
-        let _ = trace
-            .step(
-                "tool",
-                "hunt",
-                format!("taint-iris-next:hunt start · target={}", target.display()),
-            )
-            .emit();
-    }
-    let plan = build_taint_iris_next_plan(&target, options)?;
+    let parent_step = emit_taint_iris_next_start(ctx, &target);
+    let plan = traced_taint_iris_next_plan(ctx, parent_step, &target, options)?;
 
     if !taint_iris_next_has_required_context(&plan) {
+        emit_taint_iris_next_child(
+            ctx,
+            parent_step,
+            "refused",
+            "missing context or threat-model artifact",
+        );
         return Ok(taint_iris_next_missing_context_report(&plan));
     }
 
-    let evidence = extract_taint_iris_next_evidence(&plan)?;
+    let evidence = traced_taint_iris_next_evidence(ctx, parent_step, &plan)?;
+    emit_taint_iris_next_progress(ctx, parent_step, "agent · compose prompt");
     let agent_prompt = build_taint_iris_next_agent_prompt(&plan, &evidence);
 
     if plan.mode == TaintIrisNextMode::Plan {
-        return Ok(taint_iris_next_planned_report(
+        return Ok(planned_taint_iris_next_report(
+            ctx,
             &plan,
             &evidence,
             &agent_prompt,
@@ -41,7 +41,51 @@ pub(crate) fn run_taint_iris_next_report(
         &plan,
         &evidence,
         &agent_prompt,
+        parent_step,
     )
+}
+
+fn traced_taint_iris_next_plan(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    target: &Path,
+    options: TaintIrisNextInput,
+) -> Result<TaintIrisNextPlan> {
+    emit_taint_iris_next_progress(ctx, parent_step, "plan · load context/catalog/discovery");
+    let plan = build_taint_iris_next_plan(target, options)?;
+    emit_taint_iris_next_progress(ctx, parent_step, taint_iris_next_plan_trace_label(&plan));
+    Ok(plan)
+}
+
+fn traced_taint_iris_next_evidence(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    plan: &TaintIrisNextPlan,
+) -> Result<TaintIrisNextEvidenceResult> {
+    emit_taint_iris_next_progress(ctx, parent_step, "evidence · collect source/sink candidates");
+    let evidence = extract_taint_iris_next_evidence(plan)?;
+    emit_taint_iris_next_progress(
+        ctx,
+        parent_step,
+        taint_iris_next_evidence_trace_label(&evidence),
+    );
+    Ok(evidence)
+}
+
+fn planned_taint_iris_next_report(
+    ctx: &ToolExecutionContext<'_>,
+    plan: &TaintIrisNextPlan,
+    evidence: &TaintIrisNextEvidenceResult,
+    agent_prompt: &str,
+) -> TaintIrisNextReport {
+    emit_taint_iris_next_done(
+        ctx,
+        format!(
+            "taint-iris-next:hunt planned · {} candidates",
+            evidence.candidates.len()
+        ),
+    );
+    taint_iris_next_planned_report(plan, evidence, agent_prompt)
 }
 
 pub(crate) fn taint_iris_next_target(
@@ -66,56 +110,148 @@ pub(crate) fn run_taint_iris_next_hunt(
     plan: &TaintIrisNextPlan,
     evidence: &TaintIrisNextEvidenceResult,
     agent_prompt: &str,
+    parent_step: Option<usize>,
 ) -> Result<TaintIrisNextReport> {
-    let runtime = require_taint_iris_next_runtime(runtime)?;
-    let model = require_taint_iris_next_model(input, ctx)?;
-    let runtime_options = taint_iris_next_runtime_options(input, &plan.backend.selected);
-    let agent_tool_policy = build_taint_iris_next_tool_policy(input, target)?;
-    let _trace_scope = ctx.trace.map(|trace| {
-        let phase = trace
-            .step(
-                "reasoning",
-                "hunt",
-                "source-discovery · sink-discovery · taint-trace",
-            )
-            .emit();
-        trace.parent_scope(phase)
-    });
+    let execution =
+        prepare_taint_iris_next_agent_execution(input, ctx, runtime, target, plan, parent_step)?;
+    let _trace_scope = begin_taint_iris_next_agent_scope(ctx, parent_step);
     let mut agent = run_taint_iris_next_agent(
         &plan,
         &evidence,
         &agent_prompt,
-        runtime,
-        &model,
-        agent_tool_policy,
-        runtime_options,
+        execution.runtime,
+        &execution.model,
+        execution.agent_tool_policy,
+        execution.runtime_options,
     )?;
     drop(_trace_scope);
-    let mut findings = agent.findings.clone();
-    if whitebox_static_profile_requested(input)? {
-        mark_whitebox_static_findings(&mut findings, StaticProofState::SourceSinkLinked)?;
-        agent.findings = findings;
-    }
+    apply_taint_iris_next_whitebox_profile(input, &mut agent)?;
     let persisted = persist_taint_iris_next_findings(&target, &agent.findings, ctx)?;
     let output = render_taint_iris_next_output(&plan, &evidence, Some(&agent));
     let status = taint_iris_next_hunt_status(&agent);
     let data = taint_iris_next_hunt_data(&plan, &evidence, status, &agent_prompt, &agent);
-    if let Some(trace) = ctx.trace {
-        let _ = trace
-            .step(
-                "done",
-                "hunt",
-                format!(
-                    "taint-iris-next:hunt complete · {} findings",
-                    agent.findings.len()
-                ),
-            )
-            .emit();
-    }
+    emit_taint_iris_next_done(
+        ctx,
+        format!(
+            "taint-iris-next:hunt complete · {} findings",
+            agent.findings.len()
+        ),
+    );
 
     Ok(taint_iris_next_hunt_report(
         &plan, &agent, status, persisted, output, data,
     ))
+}
+
+struct TaintIrisNextAgentExecution<'a> {
+    runtime: &'a dyn AgentRuntime,
+    model: String,
+    agent_tool_policy: AgentToolPolicy,
+    runtime_options: Option<AgentRuntimeOptions>,
+}
+
+fn prepare_taint_iris_next_agent_execution<'a>(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&'a dyn AgentRuntime>,
+    target: &Path,
+    plan: &TaintIrisNextPlan,
+    parent_step: Option<usize>,
+) -> Result<TaintIrisNextAgentExecution<'a>> {
+    let runtime = require_taint_iris_next_runtime(runtime)?;
+    let model = require_taint_iris_next_model(input, ctx)?;
+    emit_taint_iris_next_progress(ctx, parent_step, "agent · resolve runtime/model");
+    let runtime_options = taint_iris_next_runtime_options(input, &plan.backend.selected);
+    emit_taint_iris_next_progress(ctx, parent_step, "agent · configure runtime options");
+    let agent_tool_policy = build_taint_iris_next_tool_policy(input, target)?;
+    emit_taint_iris_next_progress(ctx, parent_step, "agent · attach analysis tools");
+    Ok(TaintIrisNextAgentExecution {
+        runtime,
+        model,
+        agent_tool_policy,
+        runtime_options,
+    })
+}
+
+fn apply_taint_iris_next_whitebox_profile(
+    input: &Value,
+    agent: &mut TaintIrisNextAgentResult,
+) -> Result<()> {
+    if !whitebox_static_profile_requested(input)? {
+        return Ok(());
+    }
+    mark_whitebox_static_findings(&mut agent.findings, StaticProofState::SourceSinkLinked)
+}
+
+fn emit_taint_iris_next_start(ctx: &ToolExecutionContext<'_>, target: &Path) -> Option<usize> {
+    ctx.trace.map(|trace| {
+        trace
+            .step(
+                "tool",
+                "hunt",
+                format!("taint-iris-next:hunt start · target={}", target.display()),
+            )
+            .emit()
+    })
+}
+
+fn emit_taint_iris_next_progress(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    label: impl Into<String>,
+) {
+    emit_taint_iris_next_child(ctx, parent_step, "tool-progress", label);
+}
+
+fn emit_taint_iris_next_child(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    kind: &str,
+    label: impl Into<String>,
+) {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return;
+    };
+    let _ = trace.child(parent).step(kind, "hunt", label.into()).emit();
+}
+
+fn begin_taint_iris_next_agent_scope(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+) -> Option<crate::run_artifacts::ParentScope> {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return None;
+    };
+    let phase = trace
+        .child(parent)
+        .step("reasoning", "hunt", "source-discovery · sink-discovery · taint-trace")
+        .emit();
+    Some(trace.parent_scope(phase))
+}
+
+fn emit_taint_iris_next_done(ctx: &ToolExecutionContext<'_>, label: String) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace.step("done", "hunt", label).emit();
+    }
+}
+
+fn taint_iris_next_plan_trace_label(plan: &TaintIrisNextPlan) -> String {
+    format!(
+        "plan · {} languages · {} catalog entries · {} structural queries · backend {}",
+        plan.languages.len(),
+        plan.catalog.len(),
+        plan.structural_queries.len(),
+        plan.backend.selected
+    )
+}
+
+fn taint_iris_next_evidence_trace_label(evidence: &TaintIrisNextEvidenceResult) -> String {
+    format!(
+        "evidence · {} candidates · {} linked stories · {} backend paths",
+        evidence.candidates.len(),
+        evidence.linked_story_count,
+        evidence.backend_path_count
+    )
 }
 
 pub(crate) fn taint_iris_next_missing_context_report(

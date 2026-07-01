@@ -28,13 +28,7 @@ pub(crate) fn primary_view_lines(
         PrimaryViewRoute::Recommend => recommend_lines(app, area),
         PrimaryViewRoute::Module => module_lines(app, area),
         PrimaryViewRoute::ModuleRun => module_run_lines(app, area),
-        PrimaryViewRoute::Findings => findings_lines(app, area),
-        // Finding detail can run long (evidence, proof ladder, triage, patch
-        // history); window it so `j/k/g/G` (which drive the route's scroll)
-        // reveal the tail instead of it being clipped off the bottom.
-        PrimaryViewRoute::Finding { scroll } => {
-            viewport_lines(finding_detail_lines(app, area), area.height, scroll)
-        }
+        PrimaryViewRoute::Workbench => workbench_lines(app, area),
         PrimaryViewRoute::Pwn { scroll } => {
             viewport_lines(pwn_lines(app, area), area.height, scroll)
         }

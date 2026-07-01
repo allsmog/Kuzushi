@@ -36,8 +36,7 @@ pub(crate) enum PrimaryViewRoute<'a> {
     Recommend,
     Module,
     ModuleRun,
-    Findings,
-    Finding { scroll: usize },
+    Workbench,
     Pwn { scroll: usize },
     Activity { scroll: usize },
     Scene { page: crate::scene3d::VizPage },
@@ -119,6 +118,13 @@ pub(crate) fn uses_activity_frame(app: &ShellApp) -> bool {
     matches!(app.shell_view, ShellView::Activity)
 }
 
+/// The Workbench command center owns the full body region with a frame-level
+/// multi-pane split (SOURCE / CENTER / FINDINGS+DETAILS), like Activity and the
+/// scene gallery. The shared line path is used only for plain/non-TTY output.
+pub(crate) fn uses_workbench_frame(app: &ShellApp) -> bool {
+    matches!(app.shell_view, ShellView::Workbench)
+}
+
 /// Frame-level gallery pages (3D terrain + the Canvas graph/tree diagrams) own
 /// the full body region. Attack-path and heatmap use the shared line path.
 pub(crate) fn uses_scene_frame(app: &ShellApp) -> bool {
@@ -148,10 +154,7 @@ fn primary_view_route(app: &ShellApp) -> Option<PrimaryViewRoute<'_>> {
         ShellView::Recommend => Some(PrimaryViewRoute::Recommend),
         ShellView::Module => Some(PrimaryViewRoute::Module),
         ShellView::ModuleRun => Some(PrimaryViewRoute::ModuleRun),
-        ShellView::Findings => Some(PrimaryViewRoute::Findings),
-        ShellView::Finding => Some(PrimaryViewRoute::Finding {
-            scroll: app.scroll_offset as usize,
-        }),
+        ShellView::Workbench => Some(PrimaryViewRoute::Workbench),
         ShellView::Pwn => Some(PrimaryViewRoute::Pwn {
             scroll: app.scroll_offset as usize,
         }),
@@ -237,10 +240,8 @@ fn routing_state(app: &ShellApp) -> (bool, bool, bool, bool) {
     )
 }
 
-fn has_run_activity(app: &ShellApp) -> bool {
-    app.scan.as_ref().is_some_and(|scan| scan.running)
-        || app.running_tool_name().is_some()
-        || matches!(app.shell_view, ShellView::ModuleRun)
+pub(crate) fn has_run_activity(app: &ShellApp) -> bool {
+    app.scan.as_ref().is_some_and(|scan| scan.running) || app.running_tool_name().is_some()
 }
 
 fn has_agent_activity(app: &ShellApp) -> bool {

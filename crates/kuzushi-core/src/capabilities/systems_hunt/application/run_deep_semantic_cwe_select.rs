@@ -5,36 +5,98 @@ pub(crate) fn run_deep_semantic_cwe_select(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<DeepSemanticCweOutput> {
+    let run = prepare_deep_semantic_cwe_select(input, ctx, runtime)?;
+    let raw = query_deep_semantic_cwe_select(input, ctx, &run)?;
+    Ok(deep_semantic_cwe_output(ctx, &run, raw))
+}
+
+struct DeepSemanticCweSelectRun<'a> {
+    target: PathBuf,
+    options: SystemsHuntInput,
+    runtime: &'a dyn AgentRuntime,
+    model: String,
+    inventory: Vec<(String, String)>,
+    parent_step: Option<usize>,
+}
+
+fn prepare_deep_semantic_cwe_select<'a>(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&'a dyn AgentRuntime>,
+) -> Result<DeepSemanticCweSelectRun<'a>> {
     let target = resolve_target(input, ctx)?;
     let options = SystemsHuntInput::from_tool_input(input)?;
-    let runtime = runtime.context(
-        "systems-hunt:deep-semantic-cwe-select requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
-    )?;
+    let parent_step = emit_deep_semantic_start(
+        ctx,
+        "deep-semantic-cwe-select",
+        format!("target={}", target.display()),
+    );
+    let runtime = deep_semantic_cwe_runtime(runtime)?;
     let model = resolve_model(
         "systems-hunt:deep-semantic-cwe-select",
         input,
         ctx,
         &options,
     )?;
-    let inventory = collect_inventory(&target, 80, 2048)?;
-    let _llm_scope = ctx.trace.map(|trace| {
-        let phase = trace
-            .step("reasoning", "deep-semantic-cwe-select", "cwe-select")
-            .emit();
-        trace.parent_scope(phase)
-    });
-    let raw = query_required_structured_json(
+    let inventory = collect_deep_semantic_cwe_inventory(ctx, parent_step, &target)?;
+    Ok(DeepSemanticCweSelectRun {
+        target,
+        options,
         runtime,
+        model,
+        inventory,
+        parent_step,
+    })
+}
+
+fn deep_semantic_cwe_runtime(
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<&dyn AgentRuntime> {
+    runtime.context(
+        "systems-hunt:deep-semantic-cwe-select requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
+    )
+}
+
+fn collect_deep_semantic_cwe_inventory(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    target: &Path,
+) -> Result<Vec<(String, String)>> {
+    emit_deep_semantic_progress(
+        ctx,
+        parent_step,
+        "deep-semantic-cwe-select",
+        "inventory · collect native-code snippets",
+    );
+    let inventory = collect_inventory(&target, 80, 2048)?;
+    emit_deep_semantic_progress(
+        ctx,
+        parent_step,
+        "deep-semantic-cwe-select",
+        format!("inventory · {} snippets loaded", inventory.len()),
+    );
+    Ok(inventory)
+}
+
+fn query_deep_semantic_cwe_select(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    run: &DeepSemanticCweSelectRun<'_>,
+) -> Result<Value> {
+    let _llm_scope =
+        begin_deep_semantic_child_scope(ctx, run.parent_step, "cwe-select", "cwe-select");
+    let raw = query_required_structured_json(
+        run.runtime,
         AgentQueryRequest::new(
-            model,
-            target.clone(),
+            run.model.clone(),
+            run.target.clone(),
             DEEP_SEMANTIC_CWE_SYSTEM_PROMPT.to_string(),
             format!(
             "Select relevant native-code CWE classes for this repository. Return JSON with cwes[].\n\n{}",
-            format_inventory(&inventory)
+            format_inventory(&run.inventory)
         ),
         )
-        .with_tool_policy(whitebox_static_policy_for_target(&target))
+        .with_tool_policy(whitebox_static_policy_for_target(&run.target))
         .with_thinking_level(agentic_hunter_thinking_level(input)),
         StructuredJsonContract::new(
             "systems-hunt:deep-semantic-cwe-select",
@@ -44,12 +106,26 @@ pub(crate) fn run_deep_semantic_cwe_select(
         require_json_object,
     )?;
     drop(_llm_scope);
-    Ok(DeepSemanticCweOutput {
+    Ok(raw)
+}
+
+fn deep_semantic_cwe_output(
+    ctx: &ToolExecutionContext<'_>,
+    run: &DeepSemanticCweSelectRun<'_>,
+    raw: Value,
+) -> DeepSemanticCweOutput {
+    let output = DeepSemanticCweOutput {
         cwes: parse_cwe_selections(&raw)
             .into_iter()
-            .take(options.max_cwe_classes)
+            .take(run.options.max_cwe_classes)
             .collect(),
-    })
+    };
+    emit_deep_semantic_done(
+        ctx,
+        "deep-semantic-cwe-select",
+        format!("{} CWE classes", output.cwes.len()),
+    );
+    output
 }
 
 pub(crate) fn run_deep_semantic_hunt_report(
@@ -65,6 +141,7 @@ pub(crate) fn run_deep_semantic_hunt_report(
 
 struct DeepSemanticHuntRun<'a> {
     target: PathBuf,
+    parent_step: Option<usize>,
     options: SystemsHuntInput,
     runtime: &'a dyn AgentRuntime,
     model: String,
@@ -76,9 +153,15 @@ fn prepare_deep_semantic_hunt<'a>(
     runtime: Option<&'a dyn AgentRuntime>,
 ) -> Result<DeepSemanticHuntRun<'a>> {
     let target = resolve_target(input, ctx)?;
+    let parent_step = emit_deep_semantic_start(
+        ctx,
+        "deep-semantic-hunt",
+        format!("target={}", target.display()),
+    );
     let execution = resolve_deep_semantic_execution(input, ctx, runtime)?;
     Ok(DeepSemanticHuntRun {
         target,
+        parent_step,
         options: execution.options,
         runtime: execution.runtime,
         model: execution.model,
@@ -139,9 +222,21 @@ fn finish_deep_semantic_hunt(
     run: &DeepSemanticHuntRun<'_>,
     cwes: &[DeepSemanticCweSelection],
 ) -> Result<SystemsHuntReport> {
+    emit_deep_semantic_progress(
+        ctx,
+        run.parent_step,
+        "deep-semantic-hunt",
+        "cwe-select · choose classes",
+    );
     let (findings, artifacts) = collect_deep_semantic_hunt_findings(input, ctx, run, cwes)?;
     let persisted = persist_systems_findings(&run.target, &findings, ctx)?;
-    Ok(deep_semantic_report(run, findings, persisted, artifacts))
+    let report = deep_semantic_report(run, findings, persisted, artifacts);
+    emit_deep_semantic_done(
+        ctx,
+        "deep-semantic-hunt",
+        format!("{} findings", report.count),
+    );
+    Ok(report)
 }
 
 fn collect_deep_semantic_hunt_findings(
@@ -176,22 +271,72 @@ fn query_deep_semantic_with_scope(
     run: &DeepSemanticHuntRun<'_>,
     cwes: &[DeepSemanticCweSelection],
 ) -> Result<Value> {
-    let _llm_scope = begin_deep_semantic_scope(ctx);
+    let _llm_scope = begin_deep_semantic_child_scope(
+        ctx,
+        run.parent_step,
+        "deep-semantic-hunt",
+        "deep-semantic-hunt",
+    );
     let raw =
         query_deep_semantic_findings(run.runtime, run.model.clone(), input, &run.target, cwes)?;
     drop(_llm_scope);
     Ok(raw)
 }
 
-fn begin_deep_semantic_scope(
+fn emit_deep_semantic_start(
     ctx: &ToolExecutionContext<'_>,
-) -> Option<crate::run_artifacts::ParentScope> {
+    verb: &str,
+    label: impl Into<String>,
+) -> Option<usize> {
     ctx.trace.map(|trace| {
-        let phase = trace
-            .step("reasoning", "deep-semantic-hunt", "deep-semantic-hunt")
-            .emit();
-        trace.parent_scope(phase)
+        trace
+            .step(
+                "tool",
+                verb,
+                format!("systems-hunt:{verb} start · {}", label.into()),
+            )
+            .emit()
     })
+}
+
+fn emit_deep_semantic_progress(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    verb: &str,
+    label: impl Into<String>,
+) {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return;
+    };
+    let _ = trace
+        .child(parent)
+        .step("tool-progress", verb, label.into())
+        .emit();
+}
+
+fn begin_deep_semantic_child_scope(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    verb: &str,
+    label: &str,
+) -> Option<crate::run_artifacts::ParentScope> {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return None;
+    };
+    let phase = trace.child(parent).step("reasoning", verb, label).emit();
+    Some(trace.parent_scope(phase))
+}
+
+fn emit_deep_semantic_done(ctx: &ToolExecutionContext<'_>, verb: &str, summary: String) {
+    if let Some(trace) = ctx.trace {
+        let _ = trace
+            .step(
+                "done",
+                verb,
+                format!("systems-hunt:{verb} complete · {summary}"),
+            )
+            .emit();
+    }
 }
 
 fn normalized_deep_semantic_hunt(

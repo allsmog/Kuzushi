@@ -2,8 +2,8 @@ use super::dag_pane::dag_row_style;
 use super::feed_pane::feed_row_style;
 use super::*;
 use crate::ui_view_models::{
-    activity_view_model, ActivityPlainDagCell, ActivityPlainFeedCell, ActivityPlainPaneHeaderCell,
-    ActivityPlainPaneRow, ActivityViewModel,
+    activity_view_model, ActiveActivityViewModel, ActivityEmptyStateModel, ActivityPlainDagCell,
+    ActivityPlainFeedCell, ActivityPlainPaneHeaderCell, ActivityPlainPaneRow, ActivityViewModel,
 };
 use std::time::Instant;
 
@@ -15,14 +15,31 @@ pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
 
-    let activity = match activity_view_model(app) {
-        ActivityViewModel::Active(activity) => activity,
-        ActivityViewModel::Inactive(empty) => {
-            push_inactive_activity_lines(&mut lines, area.width, empty.title, empty.body);
-            return lines;
-        }
-    };
+    match activity_view_model(app) {
+        ActivityViewModel::Active(activity) => active_activity_lines(lines, area, activity),
+        ActivityViewModel::Inactive(empty) => inactive_activity_lines(lines, area.width, empty),
+    }
+}
 
+fn inactive_activity_lines(
+    mut lines: Vec<Line<'static>>,
+    width: u16,
+    empty: ActivityEmptyStateModel,
+) -> Vec<Line<'static>> {
+    lines.push(divider(empty.title, width));
+    lines.extend(empty_state_panel(
+        empty.glyph_label,
+        empty.explanations,
+        empty.ctas,
+    ));
+    lines
+}
+
+fn active_activity_lines(
+    mut lines: Vec<Line<'static>>,
+    area: Rect,
+    activity: ActiveActivityViewModel<'_>,
+) -> Vec<Line<'static>> {
     let header = activity.header();
     lines.push(divider(&header.summary_title, area.width));
 
@@ -48,16 +65,6 @@ pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     )]));
     lines.push(keybind_hint_line(&footer.plain_hints));
     lines
-}
-
-fn push_inactive_activity_lines(
-    lines: &mut Vec<Line<'static>>,
-    width: u16,
-    title: &'static str,
-    body: &'static str,
-) {
-    lines.push(divider(title, width));
-    lines.push(muted(body));
 }
 
 fn activity_pane_line(row: ActivityPlainPaneRow) -> Line<'static> {

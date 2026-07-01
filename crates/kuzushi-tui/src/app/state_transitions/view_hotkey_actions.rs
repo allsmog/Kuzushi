@@ -18,58 +18,90 @@ impl ShellApp {
     }
 
     pub(super) fn apply_view_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
-        if let Some(handled) = self.apply_findings_hotkey(action) {
+        if let Some(handled) = self.apply_workbench_hotkey(action) {
             return handled;
         }
-        if self.apply_scroll_hotkey(action) {
-            return true;
-        }
-        if self.apply_prompt_or_tune_hotkey(action) {
-            return true;
-        }
-        if self.apply_actor_hotkey(action) {
-            return true;
-        }
-        self.apply_shell_hotkey(action)
+        self.apply_focused_view_hotkey(action)
     }
 
-    fn apply_findings_hotkey(&mut self, action: ViewHotkeyAction) -> Option<bool> {
+    /// The `bool`-returning handlers, tried in order; each mutates and reports
+    /// whether it claimed the action (short-circuit, like the `if` chain).
+    fn apply_focused_view_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
+        self.apply_scroll_hotkey(action)
+            || self.apply_prompt_or_tune_hotkey(action)
+            || self.apply_actor_hotkey(action)
+            || self.apply_shell_hotkey(action)
+    }
+
+    /// Pane-aware Workbench navigation: `Tab` cycles focus, `j/k/g/G` move
+    /// within the focused pane (FINDINGS cursor, or SOURCE/CENTER/DETAILS scroll),
+    /// and `Enter` selects the cursored finding when the FINDINGS pane is focused.
+    fn apply_workbench_hotkey(&mut self, action: ViewHotkeyAction) -> Option<bool> {
         match action {
-            ViewHotkeyAction::FindingsNext => {
-                let max = self.findings.len().saturating_sub(1);
-                self.findings_cursor = (self.findings_cursor + 1).min(max);
-                Some(true)
+            ViewHotkeyAction::WorkbenchCyclePane => {
+                self.workbench_focus = self.workbench_focus.next();
+                self.scroll_offset = 0;
             }
-            ViewHotkeyAction::FindingsPrevious => {
-                self.findings_cursor = self.findings_cursor.saturating_sub(1);
-                Some(true)
-            }
-            ViewHotkeyAction::FindingsFirst => {
-                self.findings_cursor = 0;
-                Some(true)
-            }
-            ViewHotkeyAction::FindingsLast => {
-                self.findings_cursor = self.findings.len().saturating_sub(1);
-                Some(true)
-            }
-            ViewHotkeyAction::FindingsPageDown => {
-                self.page_down_current_view();
-                Some(true)
-            }
-            ViewHotkeyAction::FindingsPageUp => {
-                self.page_up_current_view();
-                Some(true)
-            }
-            ViewHotkeyAction::FindingsOpen => {
-                if self.findings.is_empty() {
-                    self.log("findings", "no findings yet — run `scan` first");
-                    return Some(true);
-                }
-                self.open_finding_at_cursor();
-                Some(true)
-            }
-            _ => None,
+            ViewHotkeyAction::WorkbenchScrollNext => self.workbench_move(1),
+            ViewHotkeyAction::WorkbenchScrollPrev => self.workbench_move(-1),
+            ViewHotkeyAction::WorkbenchScrollFirst => self.workbench_jump(true),
+            ViewHotkeyAction::WorkbenchScrollLast => self.workbench_jump(false),
+            ViewHotkeyAction::WorkbenchOpen => self.workbench_open_focused(),
+            _ => return None,
         }
+        Some(true)
+    }
+
+    fn workbench_move(&mut self, delta: isize) {
+        match self.workbench_focus {
+            WorkbenchPane::Findings => self.step_findings_cursor(delta),
+            WorkbenchPane::Source | WorkbenchPane::Center | WorkbenchPane::Details => {
+                if delta >= 0 {
+                    self.scroll_down(1);
+                } else {
+                    self.scroll_up(1);
+                }
+            }
+        }
+    }
+
+    fn step_findings_cursor(&mut self, delta: isize) {
+        if delta >= 0 {
+            let max = self.findings.len().saturating_sub(1);
+            self.findings_cursor = (self.findings_cursor + 1).min(max);
+        } else {
+            self.findings_cursor = self.findings_cursor.saturating_sub(1);
+        }
+    }
+
+    fn workbench_jump(&mut self, to_start: bool) {
+        match self.workbench_focus {
+            WorkbenchPane::Findings => {
+                self.findings_cursor = if to_start {
+                    0
+                } else {
+                    self.findings.len().saturating_sub(1)
+                };
+            }
+            WorkbenchPane::Source | WorkbenchPane::Center | WorkbenchPane::Details => {
+                if to_start {
+                    self.scroll_to_top();
+                } else {
+                    self.scroll_to_bottom();
+                }
+            }
+        }
+    }
+
+    fn workbench_open_focused(&mut self) {
+        if self.workbench_focus != WorkbenchPane::Findings {
+            return;
+        }
+        if self.findings.is_empty() {
+            self.log("findings", "no findings yet — run `scan` first");
+            return;
+        }
+        self.open_finding_at_cursor();
     }
 
     fn apply_scroll_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
@@ -138,6 +170,9 @@ impl ShellApp {
         }
         match action {
             ViewHotkeyAction::ActivityReset => self.activity = None,
+            ViewHotkeyAction::ActivityFocusSelected => self.open_or_focus_activity_task(),
+            ViewHotkeyAction::ActivityOpenDeckArtifact => self.open_activity_deck_artifact(),
+            ViewHotkeyAction::ActivityOpenFindings => self.open_activity_findings_review(),
             ViewHotkeyAction::ActivityCancelRunning => self.cancel_activity_run(),
             _ => return false,
         }
@@ -145,6 +180,18 @@ impl ShellApp {
     }
 
     fn apply_activity_session_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
+        if matches!(action, ViewHotkeyAction::ActivityTabPaneFocus)
+            && self
+                .activity
+                .as_ref()
+                .is_some_and(|session| session.tasks.is_empty())
+        {
+            self.log(
+                "activity",
+                "no DAG tasks to focus; output is already full width",
+            );
+            return true;
+        }
         let Some(session) = self.activity.as_mut() else {
             return false;
         };
@@ -156,13 +203,77 @@ impl ShellApp {
     }
 
     fn cancel_activity_run(&mut self) {
-        // Try scan first, then single-tool. Both are no-ops if nothing
-        // is running, so the order doesn't matter much; scan abort
-        // first matches the operator mental model when both fire.
-        let aborted = self.request_scan_abort() || self.request_tool_abort();
+        let aborted = self.request_active_abort();
         if !aborted {
             self.log("activity", "no running tool or scan to cancel");
         }
+    }
+
+    fn open_activity_deck_artifact(&mut self) {
+        let Some(page) = self.activity.as_ref().map(|session| session.deck_page) else {
+            self.log("activity", "no active run output to open");
+            return;
+        };
+        match page {
+            ActivityDeckPage::Feed | ActivityDeckPage::Findings => {
+                self.open_activity_findings_review()
+            }
+            page => match page.scene_page() {
+                Some(scene_page) => self.open_scene_to_page(scene_page),
+                None => self.log("activity", "this output view has no full visualization"),
+            },
+        }
+    }
+
+    fn open_activity_findings_review(&mut self) {
+        self.open_workbench(WorkbenchPane::Findings);
+        self.log(
+            "activity",
+            "opened findings review from Activity; use back to return to the run",
+        );
+    }
+
+    fn open_or_focus_activity_task(&mut self) {
+        let Some(task_id) = self.focus_activity_task_at_cursor() else {
+            self.log_activity_focus_unavailable();
+            return;
+        };
+        let Some(page) = activity_task_deck_page(&task_id) else {
+            return;
+        };
+        let Some(session) = self.activity.as_mut() else {
+            return;
+        };
+        session.set_deck_page(page);
+        session.pane_focus = PaneFocus::Right;
+        self.log(
+            "activity",
+            format!("showing {task_id} output in the {} view", page.label()),
+        );
+    }
+
+    fn log_activity_focus_unavailable(&mut self) {
+        let message = match self.activity.as_ref() {
+            None => "no active run to focus",
+            Some(session) if session.tasks.is_empty() => {
+                "no DAG tasks to focus; output is already full width"
+            }
+            Some(_) => "no visible task at the current cursor",
+        };
+        self.log("activity", message);
+    }
+
+    fn focus_activity_task_at_cursor(&mut self) -> Option<String> {
+        let session = self.activity.as_mut()?;
+        if session.tasks.is_empty() {
+            return None;
+        }
+        let cursor = session
+            .task_scroll
+            .min(session.tasks.len().saturating_sub(1));
+        let task_id = visible_activity_task_id(session, cursor)?;
+        session.focus_task = Some(task_id.clone());
+        Some(task_id)
     }
 }
 
@@ -183,23 +294,17 @@ fn activity_session_action(action: ViewHotkeyAction) -> Option<ActivitySessionAc
             crate::app::ActivitySession::toggle_paused,
         ),
         (
-            ViewHotkeyAction::ActivityFocusSelected,
-            focus_visible_activity_task,
+            ViewHotkeyAction::ActivityDeckNext,
+            crate::app::ActivitySession::next_deck_page,
+        ),
+        (
+            ViewHotkeyAction::ActivityDeckPrev,
+            crate::app::ActivitySession::prev_deck_page,
         ),
     ];
     ACTIONS
         .iter()
         .find_map(|(candidate, apply)| (*candidate == action).then_some(*apply))
-}
-
-fn focus_visible_activity_task(session: &mut crate::app::ActivitySession) {
-    if session.tasks.is_empty() {
-        return;
-    }
-    let cursor = session
-        .task_scroll
-        .min(session.tasks.len().saturating_sub(1));
-    session.focus_task = visible_activity_task_id(session, cursor);
 }
 
 fn visible_activity_task_id(
@@ -211,4 +316,24 @@ fn visible_activity_task_id(
         .values()
         .nth(cursor)
         .map(|row| row.task_id.clone())
+}
+
+fn activity_task_deck_page(task_id: &str) -> Option<ActivityDeckPage> {
+    if let Some(page) = viz_page_for_tool(task_id) {
+        return Some(ActivityDeckPage::from_scene_page(page));
+    }
+    if task_produces_findings(task_id) {
+        return Some(ActivityDeckPage::Findings);
+    }
+    None
+}
+
+fn task_produces_findings(task_id: &str) -> bool {
+    let normalized = task_id.to_ascii_lowercase();
+    normalized == "sast:scan"
+        || normalized == "agentic-sast:scan"
+        || normalized.ends_with(":scan")
+        || normalized.contains("triage")
+        || normalized.contains("verify")
+        || normalized.contains("finding")
 }

@@ -23,9 +23,10 @@ pub(crate) fn agent_worker(
     cwd: PathBuf,
     question: String,
     tx: Sender<AgentEvent>,
+    cancel: ScanCancellation,
 ) {
     let audit = AgentCallAudit::for_prompt(&model, ASK_SYSTEM_PROMPT, &question);
-    let result = run_agent_worker(config, model, thinking_level, cwd, question);
+    let result = run_agent_worker(config, model, thinking_level, cwd, question, cancel);
     let event = match result {
         Ok(answer) => AgentEvent::Answered {
             text: answer.text,
@@ -50,8 +51,11 @@ pub(crate) fn run_agent_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     question: String,
+    cancel: ScanCancellation,
 ) -> Result<AgentWorkerAnswer> {
-    let runtime = LangGraphRuntime::from_config(&config, &cwd)?.with_thinking_level(thinking_level);
+    let runtime = LangGraphRuntime::from_config(&config, &cwd)?
+        .with_thinking_level(thinking_level)
+        .with_cancellation(cancel);
     let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
         cwd,
@@ -97,8 +101,9 @@ pub(crate) fn planner_worker(
     cwd: PathBuf,
     goal: String,
     tx: Sender<PlanEvent>,
+    cancel: ScanCancellation,
 ) {
-    let event = match run_planner_worker(config, model, thinking_level, cwd, &goal) {
+    let event = match run_planner_worker(config, model, thinking_level, cwd, &goal, cancel) {
         Ok(plan) => PlanEvent::Proposed(plan),
         Err(error) => PlanEvent::Failed {
             error: error.to_string(),
@@ -113,8 +118,9 @@ pub(crate) fn run_planner_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     goal: &str,
+    cancel: ScanCancellation,
 ) -> Result<PlanProposal> {
-    let runtime = planner_runtime(&config, &cwd, thinking_level)?;
+    let runtime = planner_runtime(&config, &cwd, thinking_level, cancel)?;
     let body = planner_response_text(runtime, model, cwd, goal)?;
     parse_plan_json(goal, &body)
 }
@@ -123,8 +129,11 @@ fn planner_runtime(
     config: &V2Config,
     cwd: &PathBuf,
     thinking_level: Option<String>,
+    cancel: ScanCancellation,
 ) -> Result<LangGraphRuntime> {
-    Ok(LangGraphRuntime::from_config(config, cwd)?.with_thinking_level(thinking_level))
+    Ok(LangGraphRuntime::from_config(config, cwd)?
+        .with_thinking_level(thinking_level)
+        .with_cancellation(cancel))
 }
 
 fn planner_response_text(

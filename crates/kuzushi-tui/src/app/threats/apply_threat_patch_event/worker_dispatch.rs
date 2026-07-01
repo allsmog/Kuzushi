@@ -9,10 +9,10 @@ impl ShellApp {
         let existing = persistent_threat_model_or_null(&cwd);
         let config = self.config.clone();
         let thinking_level = self.session_thinking_level.clone();
-        let tx = self.start_threat_worker_channel("regenerating threat-model patch");
+        let (tx, cancel) = self.start_threat_worker_channel("regenerating threat-model patch");
 
         thread::spawn(move || {
-            threat_regen_worker(config, model, thinking_level, cwd, existing, tx)
+            threat_regen_worker(config, model, thinking_level, cwd, existing, tx, cancel)
         });
     }
 
@@ -27,10 +27,19 @@ impl ShellApp {
         let existing = persistent_threat_model_or_null(&cwd);
         let config = self.config.clone();
         let thinking_level = self.session_thinking_level.clone();
-        let tx = self.start_threat_worker_channel(format!("asking: {question}"));
+        let (tx, cancel) = self.start_threat_worker_channel(format!("asking: {question}"));
 
         thread::spawn(move || {
-            threat_ask_worker(config, model, thinking_level, cwd, existing, question, tx)
+            threat_ask_worker(
+                config,
+                model,
+                thinking_level,
+                cwd,
+                existing,
+                question,
+                tx,
+                cancel,
+            )
         });
     }
 
@@ -95,9 +104,11 @@ impl ShellApp {
     fn start_threat_worker_channel(
         &mut self,
         message: impl Into<String>,
-    ) -> mpsc::Sender<ThreatPatchEvent> {
+    ) -> (mpsc::Sender<ThreatPatchEvent>, ScanCancellation) {
         let (tx, rx) = mpsc::channel();
+        let cancel = ScanCancellation::default();
         self.threat_rx = Some(rx);
+        self.threat_cancel = Some(cancel.clone());
         self.threat_worker_running = true;
         self.threat_abort_requested = false;
         let message = message.into();
@@ -107,7 +118,7 @@ impl ShellApp {
             "threat model",
             message,
         ));
-        tx
+        (tx, cancel)
     }
 }
 

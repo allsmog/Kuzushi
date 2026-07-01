@@ -56,9 +56,9 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "scope findings to a git ref",
     },
     ShellCommandSpec {
-        command: "threats [1-5]",
+        command: "threats [1-4]",
         aliases: &[
-            "/threats [1-5]",
+            "/threats [1-4]",
             "threats summary",
             "threats dfd",
             "threats stride",

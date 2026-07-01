@@ -64,10 +64,6 @@ pub(crate) fn run_terminal_shell(
     if app.target.is_none() && !crate::app::skip_onboarding_env() {
         app.open_target_picker();
     }
-    // Interactive launches kick off the one-shot session-model ranking that
-    // refines the walker's preselection. Done here (not in construction) so
-    // headless/test apps never spawn a background tool.
-    app.request_model_recommendations();
     let result = terminal_shell_loop(&mut terminal, &mut app);
     let _ = restore_terminal(&mut terminal);
     result
@@ -86,7 +82,12 @@ pub(crate) fn open_start_view(app: &mut ShellApp) {
     ) {
         return;
     }
-    app.shell_view = ShellView::Home;
+    // The Workbench command center is the default landing surface (both the
+    // interactive shell and the plain front door route through here). The
+    // onboarding/target/model pickers above still take precedence — nothing
+    // here clobbers a first-run gate.
+    app.shell_view = ShellView::Workbench;
+    app.workbench_focus = WorkbenchPane::Findings;
 }
 
 pub(crate) fn terminal_shell_loop(

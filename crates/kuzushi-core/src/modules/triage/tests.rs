@@ -158,6 +158,42 @@ mod tests {
         assert!(message.contains("provider:model"));
     }
 
+    struct CancelledRuntime {
+        calls: std::sync::Mutex<usize>,
+    }
+
+    impl AgentRuntime for CancelledRuntime {
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            *self.calls.lock().unwrap() += 1;
+            anyhow::bail!("LangGraph bridge cancelled and was killed");
+        }
+    }
+
+    #[test]
+    fn triage_stage2_stops_on_runtime_cancellation() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let runtime = CancelledRuntime {
+            calls: std::sync::Mutex::new(0),
+        };
+        let input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+        let config = TriageExecutionConfig::new(
+            PathBuf::from("/repo"),
+            "openai-codex:gpt-5.4".to_string(),
+        );
+        let findings = vec![
+            finding_with(Severity::High, "semgrep", "sql injection"),
+            finding_with(Severity::High, "semgrep", "xss"),
+        ];
+
+        let err = match run_triage_stage2(&store, &runtime, &input, &config, findings) {
+            Ok(_) => panic!("cancelled triage should fail the run"),
+            Err(error) => error,
+        };
+
+        assert!(format!("{err:#}").contains("triage:run cancelled"));
+        assert_eq!(*runtime.calls.lock().unwrap(), 1);
+    }
+
     #[test]
     fn triage_response_exposes_canonical_findings_snapshot() {
         let input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();

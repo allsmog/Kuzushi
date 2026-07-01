@@ -59,10 +59,8 @@ impl ShellApp {
         self.shell_view = ShellView::AuthMethodPicker(provider);
     }
 
-    /// Open the launch picker at the first phase (組 KUMI-KATA · map). The
-    /// session-model ranking is kicked off separately by the interactive launch
-    /// path (`request_model_recommendations`), so constructing an app in tests
-    /// never spawns a background tool here.
+    /// Open the launch picker at the first phase (組 KUMI-KATA · map).
+    /// Constructing an app in tests never spawns a background tool here.
     pub(crate) fn open_planning_picker(&mut self) {
         self.open_phase_picker(crate::app::WorkflowPhase::Map);
     }
@@ -91,11 +89,12 @@ impl ShellApp {
     pub(crate) fn open_phase_picker(&mut self, phase: crate::app::WorkflowPhase) {
         let target_root = self.phase_target_root();
         let kind = self.ensure_target_kind(&target_root);
-        let rows: Vec<PlanningTaskRow> = PlanningTaskId::in_phase(phase)
+        let target = crate::app::TargetProfile::detect(&target_root, kind);
+        let rows: Vec<PlanningTaskRow> = crate::app::applicable_tasks_for_phase(phase, target)
             .into_iter()
             .map(|task| PlanningTaskRow::for_task(task, &target_root))
             .collect();
-        let mut selected = phase_preselection(phase, kind, &rows);
+        let mut selected = phase_preselection(phase, target, &rows);
         self.merge_model_recommendations(phase, &rows, &mut selected);
         self.drop_failed_dependents(&mut selected);
         self.drop_model_backed_without_model(&rows, &mut selected);
@@ -229,10 +228,10 @@ impl ShellApp {
 /// satisfied by earlier phases and excluded here.
 fn phase_preselection(
     phase: crate::app::WorkflowPhase,
-    kind: kuzushi_core::TargetKind,
+    target: crate::app::TargetProfile,
     rows: &[PlanningTaskRow],
 ) -> BTreeSet<PlanningTaskId> {
-    let mut selected = crate::app::recommended_tasks_for_phase(phase, kind, rows);
+    let mut selected = crate::app::recommended_tasks_for_phase(phase, target, rows);
     let phase_tasks: BTreeSet<PlanningTaskId> = rows.iter().map(|row| row.id).collect();
     for task in selected.iter().copied().collect::<Vec<_>>() {
         for dep in transitive_dependencies(task) {
@@ -248,15 +247,48 @@ fn phase_preselection(
 /// either via environment variables or via the stored OAuth credentials.
 pub(crate) fn auth_ready_for_provider(provider: &str) -> bool {
     match provider {
-        "anthropic" => {
-            std::env::var_os("ANTHROPIC_API_KEY").is_some()
-                || oauth_provider_status("anthropic").starts_with("stored")
+        "anthropic" => provider_auth_ready(
+            provider,
+            std::env::var_os("ANTHROPIC_API_KEY").is_some(),
+            &oauth_provider_status("anthropic"),
+        ),
+        "openai" => provider_auth_ready(
+            provider,
+            std::env::var_os("OPENAI_API_KEY").is_some(),
+            &oauth_provider_status("openai-codex"),
+        ),
+        "openai-codex" => {
+            provider_auth_ready(provider, false, &oauth_provider_status("openai-codex"))
         }
-        "openai" => {
-            std::env::var_os("OPENAI_API_KEY").is_some()
-                || oauth_provider_status("openai-codex").starts_with("stored")
-        }
-        "openai-codex" => oauth_provider_status("openai-codex").starts_with("stored"),
         _ => true,
+    }
+}
+
+fn provider_auth_ready(provider: &str, api_key_ready: bool, oauth_status: &str) -> bool {
+    match provider {
+        "anthropic" => api_key_ready || oauth_status.starts_with("stored"),
+        "openai" => api_key_ready,
+        "openai-codex" => oauth_status.starts_with("stored"),
+        _ => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openai_oauth_does_not_satisfy_plain_openai_api_key_auth() {
+        assert!(!provider_auth_ready(
+            "openai",
+            false,
+            "stored; value hidden"
+        ));
+        assert!(provider_auth_ready(
+            "openai-codex",
+            false,
+            "stored; value hidden"
+        ));
+        assert!(provider_auth_ready("openai", true, "missing"));
     }
 }

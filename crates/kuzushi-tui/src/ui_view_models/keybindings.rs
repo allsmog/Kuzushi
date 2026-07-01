@@ -1,7 +1,7 @@
 mod active;
 mod catalog;
-mod finding;
 mod system;
+mod workbench;
 mod workflow;
 mod workspace;
 
@@ -31,7 +31,7 @@ pub(crate) fn footer_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 
 fn idle_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     catalog::keybindings(app)
-        .or_else(|| finding::keybindings(app))
+        .or_else(|| workbench::keybindings(app))
         .or_else(|| workflow::keybindings(app))
         .or_else(|| workspace::keybindings(app))
         .or_else(|| system::keybindings(app))

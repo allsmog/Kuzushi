@@ -52,25 +52,6 @@ impl ShellApp {
         true
     }
 
-    pub(super) fn handle_findings_view_key(
-        &mut self,
-        key: KeyEvent,
-        modifiers: KeyModifierState,
-    ) -> bool {
-        if !modifiers.plain || !matches!(self.shell_view, ShellView::Findings) {
-            return false;
-        }
-        match key.code {
-            KeyCode::Up => self.findings_cursor = self.findings_cursor.saturating_sub(1),
-            KeyCode::Down => {
-                self.findings_cursor =
-                    (self.findings_cursor + 1).min(self.findings.len().saturating_sub(1));
-            }
-            _ => return false,
-        }
-        true
-    }
-
     /// 3D playground controls (active only while `ShellView::Scene` is open and
     /// the prompt is empty): cycle scenes, pause, reset, and orbit by keyboard.
     pub(super) fn handle_scene_view_key(
@@ -88,7 +69,7 @@ impl ShellApp {
             return false;
         }
         // Orbit keys only apply on the 3D attack-surface page; on 2D pages they
-        // fall through. Tab/space/r/Esc/q work on every page.
+        // fall through. Tab/space/r/o/Esc/q work on every page.
         let is_3d = matches!(self.shell_view, ShellView::Scene(page) if page.is_3d());
         match key.code {
             KeyCode::Tab | KeyCode::Char('n') => self.cycle_scene(1),
@@ -96,7 +77,7 @@ impl ShellApp {
             KeyCode::Char(' ') | KeyCode::Char('p') => self.scene_paused = !self.scene_paused,
             KeyCode::Char('r') => self.reset_scene_orientation(),
             // Explicit exits: the gallery is a leaf view, never a trap.
-            KeyCode::Esc | KeyCode::Char('q') => self.go_back(),
+            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('o') => self.go_back(),
             KeyCode::Char('h') if is_3d => self.nudge_scene_yaw(-1.0),
             KeyCode::Char('l') if is_3d => self.nudge_scene_yaw(1.0),
             KeyCode::Char('k') if is_3d => self.nudge_scene_pitch(1.0),
@@ -156,7 +137,6 @@ type ViewKeyHandler = fn(&mut ShellApp, KeyEvent, KeyModifierState) -> bool;
 /// last so view-specific keys take precedence. Add a view by appending here.
 const EMPTY_INPUT_VIEW_KEY_HANDLERS: &[ViewKeyHandler] = &[
     ShellApp::handle_config_view_key,
-    ShellApp::handle_findings_view_key,
     ShellApp::handle_scene_view_key,
     ShellApp::handle_view_hotkey_fallback,
 ];

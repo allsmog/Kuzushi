@@ -92,54 +92,6 @@ impl ShellApp {
         self.dispatch_next_planning_task(workspace);
     }
 
-    /// Kick off the one-shot session-model ranking for this engagement. Runs
-    /// once (reused across phases), only when a model is configured, and keeps
-    /// the current view (the phase picker stays up while it ranks in the
-    /// background). No model configured → silently stays deterministic.
-    pub(crate) fn request_model_recommendations(&mut self) {
-        if self.recommendation_requested
-            || self.config.model.is_none()
-            || !matches!(self.shell_view, ShellView::PlanningPicker)
-        {
-            return;
-        }
-        let Ok(workspace) = self.current_workspace() else {
-            return;
-        };
-        self.recommendation_requested = true;
-        // Internal recommender run: suppress both view auto-opens so it doesn't
-        // hijack the view, then restore the operator's prefs.
-        let auto_open = self.auto_open_activity;
-        let auto_open_viz = self.auto_open_viz;
-        self.auto_open_activity = false;
-        self.auto_open_viz = false;
-        self.start_background_tool(
-            "module-recommender:recommend".to_string(),
-            json!({}),
-            workspace,
-            "ranking tools for this target",
-            None,
-        );
-        self.auto_open_activity = auto_open;
-        self.auto_open_viz = auto_open_viz;
-        self.mark_running_tool_ambient();
-        self.log(
-            "phase",
-            "ranking tools for this target with the session model…",
-        );
-    }
-
-    /// Tag the recommender as shell-initiated background work so progress
-    /// surfaces label it "(background)" instead of presenting it as the thing
-    /// the operator triggered. Guarded on `tool_running` actually being the
-    /// recommender: when its dispatch was rejected (another tool already held
-    /// the slot), the operator's own tool must not get the ambient tag.
-    fn mark_running_tool_ambient(&mut self) {
-        if self.tool_running.as_deref() == Some("module-recommender:recommend") {
-            self.ambient_tool = self.tool_running.clone();
-        }
-    }
-
     /// Steps of a confirmed plan waiting behind a non-plan tool. Zero while
     /// the plan itself is executing or when nothing is queued.
     pub(crate) fn stalled_planning_steps(&self) -> usize {
@@ -285,15 +237,15 @@ impl ShellApp {
     }
 
     /// End of the engagement (past 掛 KAKE). When tasks failed, offer a yes/no
-    /// retry gate (auto-adjusted where the cause is known); otherwise fall
-    /// through to next-step recommendations.
+    /// retry gate (auto-adjusted where the cause is known); otherwise return to
+    /// the Workbench cockpit.
     fn finish_engagement(&mut self) {
         self.workflow_phase = None;
         // The phase walker covered the startup MCP-plan line; re-emit it now
         // that completed phases may have built new attachable artifacts.
         self.log_mcp_attachment_plan();
         if self.planning_failed.is_empty() {
-            self.finish_planning_with_recommendations();
+            self.finish_planning();
             return;
         }
         self.open_retry_gate();
@@ -355,7 +307,7 @@ impl ShellApp {
         self.planning_failed.clear();
         self.planning_adjustments.clear();
         self.log("phase", "retry skipped");
-        self.finish_planning_with_recommendations();
+        self.finish_planning();
     }
 
     /// Tool input for a planning task, with any retry adjustment applied (e.g.
@@ -370,38 +322,15 @@ impl ShellApp {
         input
     }
 
-    /// Planning is done. Rather than strand the operator on a finished, empty
-    /// Activity DAG, auto-run the deterministic module recommender and land on
-    /// the Recommend view so they are shown concrete next steps. The recommender
-    /// dispatch deliberately doesn't touch `planning_running_tool`, so its own
-    /// completion won't re-enter this path.
-    fn finish_planning_with_recommendations(&mut self) {
+    /// Planning is done. Return to the Workbench cockpit and leave the module
+    /// recommender as an explicit operator action.
+    fn finish_planning(&mut self) {
         self.log("planning", "planning complete");
-        let Ok(workspace) = self.current_workspace() else {
-            self.log(
-                "recommend",
-                "planning complete — run `recommend` for suggested next modules",
-            );
-            return;
-        };
-        // Suppress both view auto-opens so we land on Recommend, not the empty
-        // Activity view (or a stale gallery page) the operator just finished with.
-        let auto_open = self.auto_open_activity;
-        let auto_open_viz = self.auto_open_viz;
-        self.auto_open_activity = false;
-        self.auto_open_viz = false;
-        self.start_background_tool(
-            "module-recommender:recommend".to_string(),
-            json!({}),
-            workspace,
-            "ranking next modules",
-            None,
+        self.open_workbench(crate::app::WorkbenchPane::Findings);
+        self.log(
+            "recommend",
+            "run `recommend` when you want suggested next modules",
         );
-        self.auto_open_activity = auto_open;
-        self.auto_open_viz = auto_open_viz;
-        self.mark_running_tool_ambient();
-        self.shell_view = ShellView::Recommend;
-        self.log("recommend", "ranking modules for your next move…");
     }
 
     /// Whether a chosen model has all the credentials it needs to run.
