@@ -3,6 +3,12 @@ import { createInterface } from "node:readline";
 import { pathToFileURL } from "node:url";
 
 const [command, specifier, toolName] = process.argv.slice(2);
+const OPTION_TYPES_BY_JSON_SCHEMA_TYPE = {
+  string: "string",
+  boolean: "bool",
+  integer: "int",
+  number: "float",
+};
 
 try {
   if (!command || !specifier) {
@@ -61,13 +67,14 @@ function describeTool(moduleId, tool) {
   if (!name.startsWith(`${moduleId}:`)) {
     throw new Error(`dynamic tool ${name} must start with module id ${moduleId}`);
   }
+  const options = tool.options ?? optionsFromInputSchema(tool.inputSchema, name);
   return {
     name,
     description: tool.description ?? name,
     headless: tool.headless ?? true,
     hidden: tool.hidden ?? false,
     runtime_requirement: tool.requires?.runtime === true ? "always" : "never",
-    options: normalizeOptions(tool.options ?? []),
+    options: normalizeOptions(options),
   };
 }
 
@@ -86,6 +93,70 @@ function normalizeOptions(options) {
   }));
 }
 
+function optionsFromInputSchema(schema, toolName) {
+  if (schema === undefined) return [];
+  assertObjectInputSchema(schema, toolName);
+  const properties = schema.properties;
+  if (properties === undefined) return [];
+  assertSchemaProperties(properties, toolName);
+  const required = new Set(Array.isArray(schema.required) ? schema.required : []);
+  return Object.entries(properties).map(([name, property]) =>
+    optionFromSchemaProperty(name, property, required.has(name)),
+  );
+}
+
+function assertObjectInputSchema(schema, toolName) {
+  if (!isPlainObject(schema)) {
+    throw new Error(`${toolName} inputSchema must be an object schema`);
+  }
+  if (schema.type !== undefined && schema.type !== "object") {
+    throw new Error(`${toolName} inputSchema top-level type must be object`);
+  }
+}
+
+function assertSchemaProperties(properties, toolName) {
+  if (!isPlainObject(properties)) {
+    throw new Error(`${toolName} inputSchema.properties must be an object`);
+  }
+}
+
+function optionFromSchemaProperty(name, property, required) {
+  const schema = isPlainObject(property) ? property : {};
+  const choices = schemaEnumValues(schema.enum);
+  const type = choices.length > 0 ? "enum" : optionTypeFromSchema(schema);
+  return {
+    name,
+    type,
+    description: typeof schema.description === "string" ? schema.description : name,
+    required,
+    advanced: false,
+    evasion: false,
+    ...(schema.default === undefined ? {} : { default: schema.default }),
+    choices,
+    aliases: [],
+    deprecatedAliases: [],
+  };
+}
+
+function optionTypeFromSchema(schema) {
+  const type = nonNullSchemaType(schema.type);
+  return OPTION_TYPES_BY_JSON_SCHEMA_TYPE[type] ?? arrayOptionType(schema, type) ?? "json";
+}
+
+function nonNullSchemaType(type) {
+  return Array.isArray(type) ? type.find((value) => value !== "null") : type;
+}
+
+function arrayOptionType(schema, type) {
+  return type === "array" && schema.items?.type === "string" ? "string-list" : null;
+}
+
+function schemaEnumValues(values) {
+  return Array.isArray(values)
+    ? values.filter((value) => typeof value === "string")
+    : [];
+}
+
 async function executeTool(module, name, request) {
   const tool = arrayField(module.tools, "module.tools").find(
     (candidate) => candidate.name === name,
@@ -96,10 +167,13 @@ async function executeTool(module, name, request) {
       `${name} declares requires.runtime=true; Rust runtime callbacks are not available to dynamic modules yet`,
     );
   }
-  if (typeof tool.run !== "function") {
-    throw new Error(`${name} does not export a run(input, ctx) function`);
-  }
-  return await tool.run(request.input, request.context);
+  return await toolExecutor(tool, name)(request.input, request.context);
+}
+
+function toolExecutor(tool, name) {
+  if (typeof tool.run === "function") return tool.run.bind(tool);
+  if (typeof tool.execute === "function") return tool.execute.bind(tool);
+  throw new Error(`${name} does not export run(input, ctx) or execute(input, ctx)`);
 }
 
 async function executeToolWithRuntimeProtocol(module, name) {
@@ -214,6 +288,10 @@ function normalizeOptionType(type) {
     json: "json",
   };
   return map[compact] ?? "json";
+}
+
+function isPlainObject(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function stringField(value, label) {

@@ -729,6 +729,18 @@ mod tests {
     }
 
     #[test]
+    fn run_strategy_schema_covers_marker_and_rich_snapshot_keys() {
+        let schema = run_strategy_schema();
+        let marker = representative_missing_strategy_snapshot();
+        let rich = representative_rich_strategy_snapshot();
+
+        assert_snapshot_marker_fields_are_declared(&schema);
+        assert_serialized_fields_are_declared(&schema, &marker);
+        assert_serialized_fields_are_declared(&schema, &rich);
+        assert_strategy_proposal_entries_match_schema(&schema, &rich);
+    }
+
+    #[test]
     fn run_findings_schema_covers_marker_and_rich_snapshot_keys() {
         let schema = run_findings_schema();
         let marker = representative_missing_findings_snapshot();
@@ -2537,6 +2549,7 @@ mod tests {
             "attack-surface.json",
             "threat-model.json",
             "recommendations.json",
+            "strategy.json",
             "findings.json",
             "proof.json",
         ] {
@@ -2560,6 +2573,7 @@ mod tests {
             "attack-surface.json",
             "threat-model.json",
             "recommendations.json",
+            "strategy.json",
             "findings.json",
             "proof.json",
             "failures.json",
@@ -3944,6 +3958,10 @@ mod tests {
         .unwrap()
     }
 
+    fn run_strategy_schema() -> serde_json::Value {
+        serde_json::from_str(include_str!("../../../../schemas/run.strategy.schema.json")).unwrap()
+    }
+
     fn run_findings_schema() -> serde_json::Value {
         serde_json::from_str(include_str!(
             "../../../../schemas/run.findings.schema.json"
@@ -4313,6 +4331,53 @@ mod tests {
             "status": "completed",
             "runStatus": "completed",
             "data": representative_rich_recommendations_snapshot()
+        })
+    }
+
+    fn representative_missing_strategy_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "runId": "run-strategy",
+            "status": "skipped",
+            "runStatus": "completed",
+            "summary": "No strategy proposals were recorded for this run.",
+            "artifacts": [],
+            "warnings": ["No strategy proposals were recorded for this run."],
+            "errors": []
+        })
+    }
+
+    fn representative_rich_strategy_snapshot() -> serde_json::Value {
+        serde_json::json!({
+            "source": "module-recommender:recommend",
+            "strategyProposals": [{
+                "id": "review-codeql-scan",
+                "phase": "review",
+                "baseStrategy": "module recommender defaults",
+                "recommendedStrategy": "run codeql:scan",
+                "correctedStrategy": "run codeql:scan with authz focus",
+                "appliedCorrections": [{
+                    "id": "correction-review-1-authz",
+                    "scope": "workspace",
+                    "author": "operator",
+                    "reason": "tighten review phase",
+                    "fromStrategy": "run codeql:scan",
+                    "toStrategy": "run codeql:scan with authz focus"
+                }],
+                "rationale": "small enough repository with CodeQL language coverage",
+                "expectedCostUsd": null,
+                "expectedRuntime": "local pass",
+                "preflight": {
+                    "status": "ready",
+                    "notes": ["language: TypeScript"]
+                },
+                "resourceRisk": "low",
+                "status": "proposed",
+                "sourceRunId": "run-recommend",
+                "tool": "codeql:scan",
+                "nextInput": {"target": "/repo"},
+                "createdAtMs": 1,
+                "updatedAtMs": 2
+            }]
         })
     }
 
@@ -4735,6 +4800,34 @@ mod tests {
                     recommendation_schema.contains_key(field),
                     "recommendation schema missing field {field}"
                 );
+            }
+        }
+    }
+
+    fn assert_strategy_proposal_entries_match_schema(
+        schema: &serde_json::Value,
+        value: &serde_json::Value,
+    ) {
+        let proposal_schema = schema["definitions"]["strategyProposal"]["properties"]
+            .as_object()
+            .unwrap();
+        for proposal in value["strategyProposals"].as_array().unwrap() {
+            for field in proposal.as_object().unwrap().keys() {
+                assert!(
+                    proposal_schema.contains_key(field),
+                    "strategy proposal schema missing field {field}"
+                );
+            }
+            let correction_schema = schema["definitions"]["appliedCorrection"]["properties"]
+                .as_object()
+                .unwrap();
+            for correction in proposal["appliedCorrections"].as_array().unwrap() {
+                for field in correction.as_object().unwrap().keys() {
+                    assert!(
+                        correction_schema.contains_key(field),
+                        "applied strategy correction schema missing field {field}"
+                    );
+                }
             }
         }
     }

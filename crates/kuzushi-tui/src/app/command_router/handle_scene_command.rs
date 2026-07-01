@@ -54,23 +54,42 @@ impl ShellApp {
     }
 
     /// Auto-switch to a gallery page when its artifact lands, unless the
-    /// operator opted out via `KUZUSHI_AUTO_OPEN_VIZ=false`. Mirrors
+    /// operator opted out via `setg ui.auto_open_viz false`. Mirrors
     /// `auto_open_activity`.
     pub(crate) fn auto_open_viz_page(&mut self, page: VizPage) {
-        if let Some(session) = self.activity.as_mut() {
-            session.set_deck_scene_page(page);
-        }
         if !self.auto_open_viz {
             return;
         }
+        if self.activity_deck_is_pinned() {
+            self.log_scene_ready(page, "output page unchanged");
+            return;
+        }
+        self.sync_activity_deck_to_scene_page(page);
+        self.open_or_log_scene_ready(page);
+    }
+
+    fn activity_deck_is_pinned(&self) -> bool {
+        self.activity
+            .as_ref()
+            .is_some_and(|session| !session.can_auto_switch_deck())
+    }
+
+    fn sync_activity_deck_to_scene_page(&mut self, page: VizPage) {
+        if let Some(session) = self.activity.as_mut() {
+            session.set_deck_scene_page(page);
+        }
+    }
+
+    fn open_or_log_scene_ready(&mut self, page: VizPage) {
         if self.can_auto_open_viz_now() {
             self.open_scene_to_page(page);
         } else {
-            self.log(
-                "scene",
-                format!("{} ready — use `scene` to view", page.label()),
-            );
+            self.log_scene_ready(page, "use `scene` to view");
         }
+    }
+
+    fn log_scene_ready(&mut self, page: VizPage, message: &str) {
+        self.log("scene", format!("{} ready — {message}", page.label()));
     }
 
     fn can_auto_open_viz_now(&self) -> bool {

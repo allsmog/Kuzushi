@@ -63,7 +63,13 @@ pub fn build_pr_comment(input: &PrCommentInput) -> String {
         .cloned()
         .collect();
 
-    let mut sections = header_sections(input, &repo_name, &sorted, new_in_pr.len(), changed.is_some());
+    let mut sections = header_sections(
+        input,
+        &repo_name,
+        &sorted,
+        new_in_pr.len(),
+        changed.is_some(),
+    );
     append_chain_sections(&mut sections, input);
     append_new_in_pr_sections(&mut sections, input, changed.is_some(), &new_in_pr);
 

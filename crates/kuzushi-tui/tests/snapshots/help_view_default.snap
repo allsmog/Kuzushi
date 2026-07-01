@@ -61,6 +61,14 @@ unsetg <key> - clear a global option
   aliases / examples: /unsetg <key>
 tasks - choose SAST scanner tasks
   aliases / examples: /tasks
+strategy - show proposed phase strategies
+  aliases / examples: /strategy, strategies, strategy queue
+strategy approve <id> - approve a queued strategy proposal
+  aliases / examples: /strategy approve <id>
+strategy reject <id> - reject a queued strategy proposal
+  aliases / examples: /strategy reject <id>
+strategy correct <id> <strategy> - record a strategy correction
+  aliases / examples: /strategy correct <id> <strategy>, strategy correct <id> <strategy> --workspace
 task block <id> - block a SAST task
   aliases / examples: task deny <id>, /task block <id>
 task allow <id> - allow a SAST task
@@ -81,6 +89,8 @@ context status - show context status
   aliases / examples: /context status
 context regen <slice> - rebuild all, repo, or app-model
   aliases / examples: /context regen <slice>
+project - show the aggregated project model
+  aliases / examples: /project, project model, project-model
 kb [module] - show local KB attachments
   aliases / examples: attachments, /kb [module]
 attach <path-or-url> - record local file or URL metadata
@@ -97,12 +107,16 @@ workspace export findings <path> - export findings JSON or JSONL
 FINDINGS / EVIDENCE — browse findings, evidence, and report output
 findings - open persisted findings
   aliases / examples: /f, f, /findings
+findings filter <expr> - open filtered findings in the Workbench
+  aliases / examples: findings filter state:new rank:high, /findings filter <expr>
 open <id> - open a finding alias or fingerprint
   aliases / examples: open F-0001, /open <id>
 show aliases [prefix] - list finding aliases
   aliases / examples: /show aliases [prefix]
 show runs - recent run artifacts
   aliases / examples: /show runs, runs, /runs
+runs diff <left> <right> - compare findings snapshots from two runs
+  aliases / examples: runs diff <runA> <runB>, runs compare <runA> <runB>
 replay <run> - render a run summary
   aliases / examples: /replay <run>
 trace <run> - stream run events
@@ -145,6 +159,8 @@ permissions - show approval and sandbox policy
   aliases / examples: /permissions, show permissions
 target [path] - switch scan target without restart
   aliases / examples: /target [path]
+target rev <ref> - switch target git revision when worktree is clean
+  aliases / examples: /target rev <sha>, target revision <ref>
 
 SESSION — history, cost, lifecycle
 history - show command history
@@ -176,6 +192,6 @@ yes - apply pending plan
 no - discard pending plan
   aliases / examples: /no, n
 scene - security-viz gallery — risk heatmap, attack path/tree, DFD
-  aliases / examples: /scene, /viz, viz, /diagram
+  aliases / examples: /scene, /viz, viz, 3d, /3d, /diagram
 quit - exit the shell
   aliases / examples: q, /q, exit, /quit, /exit

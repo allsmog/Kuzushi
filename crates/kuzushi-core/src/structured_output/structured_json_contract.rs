@@ -48,14 +48,6 @@ pub(crate) fn query_required_structured_json_with_cost<T>(
 ) -> Result<CostedStructuredJson<T>> {
     let request = request.with_structured_output(contract.runtime_contract());
     let response = runtime.query_blocking(request.clone())?;
-    let response = if response.truncated {
-        match retry_with_higher_output_budget(runtime, &request) {
-            Ok(retry_response) => retry_response,
-            Err(_) => response,
-        }
-    } else {
-        response
-    };
     parse_or_repair_required_structured_json_with_cost(
         response,
         contract,
@@ -65,20 +57,6 @@ pub(crate) fn query_required_structured_json_with_cost<T>(
             runtime.query_blocking(repair_request)
         },
     )
-}
-
-fn retry_with_higher_output_budget(
-    runtime: &dyn AgentRuntime,
-    request: &AgentQueryRequest,
-) -> Result<AgentQueryResponse> {
-    const RETRY_FLOOR: u32 = 16_000;
-    const RETRY_CEILING: u32 = 65_535;
-    let next_budget = match request.max_output_tokens {
-        Some(cap) if cap >= RETRY_CEILING => cap,
-        Some(cap) => cap.saturating_mul(2).clamp(RETRY_FLOOR, RETRY_CEILING),
-        None => RETRY_FLOOR,
-    };
-    runtime.query_blocking(request.clone().with_max_output_tokens(next_budget))
 }
 
 pub(crate) fn repair_request_from(
@@ -202,51 +180,6 @@ fn repair_failure_message(
         tool = contract.tool_name,
         schema = contract.schema_name,
     )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::findings::TriageOutcome;
-    use crate::runtime::TriageRequest;
-    use std::sync::Mutex;
-
-    struct CapturingRuntime {
-        tokens: Mutex<Vec<Option<u32>>>,
-    }
-
-    impl CapturingRuntime {
-        fn new() -> Self {
-            Self {
-                tokens: Mutex::new(Vec::new()),
-            }
-        }
-    }
-
-    impl AgentRuntime for CapturingRuntime {
-        fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
-            self.tokens.lock().unwrap().push(request.max_output_tokens);
-            Ok(AgentQueryResponse::default())
-        }
-
-        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
-            anyhow::bail!("not used by structured output tests")
-        }
-    }
-
-    #[test]
-    fn retry_budget_raises_missing_small_and_capped_requests() {
-        let runtime = CapturingRuntime::new();
-        let base = AgentQueryRequest::new("model", ".", "system", "prompt");
-
-        retry_with_higher_output_budget(&runtime, &base).unwrap();
-        retry_with_higher_output_budget(&runtime, &base.clone().with_max_output_tokens(4_000))
-            .unwrap();
-        retry_with_higher_output_budget(&runtime, &base.with_max_output_tokens(65_535)).unwrap();
-
-        let tokens = runtime.tokens.lock().unwrap().clone();
-        assert_eq!(tokens, vec![Some(16_000), Some(16_000), Some(65_535)]);
-    }
 }
 
 fn truncation_error(

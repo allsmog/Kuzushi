@@ -50,6 +50,7 @@ const allowedPackageEntries = [
   "native",
   "scripts/langgraph-bridge.mjs",
   "scripts/langgraph-bridge",
+  "scripts/kuzushi-dynamic-module-host.mjs",
   "scripts/check-native-bindings.mjs",
   "schemas",
   "assets/ascii",

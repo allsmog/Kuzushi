@@ -1,4 +1,5 @@
 use super::*;
+use crate::renderer::views::runs::run_diff_lines;
 use crate::ui_view_models::{
     shell_view_line_route, PrimaryViewRoute, ShellViewLineRoute, SystemViewRoute,
     ThreatAndRunViewRoute, WorkspaceSessionViewRoute,
@@ -74,6 +75,11 @@ pub(crate) fn threat_and_run_view_lines(
         ThreatAndRunViewRoute::PromptsEditor => prompts_lines(app, area),
         ThreatAndRunViewRoute::ActorDetail(index) => actor_detail_lines(app, area, index),
         ThreatAndRunViewRoute::Runs => runs_lines(app, area),
+        ThreatAndRunViewRoute::RunDiff {
+            left,
+            right,
+            scroll,
+        } => viewport_lines(run_diff_lines(app, area, left, right), area.height, scroll),
         ThreatAndRunViewRoute::Replay(run_id) => replay_lines(app, area, run_id),
         ThreatAndRunViewRoute::Trace(run_id) => trace_lines(app, area, run_id),
     }
@@ -111,6 +117,8 @@ pub(crate) fn workspace_and_session_view_lines(
 ) -> Vec<Line<'static>> {
     match route {
         WorkspaceSessionViewRoute::Context => context_lines(app, area),
+        WorkspaceSessionViewRoute::ProjectModel => project_model_lines(app, area),
+        WorkspaceSessionViewRoute::StrategyQueue => strategy_queue_lines(app, area),
         WorkspaceSessionViewRoute::Workspace => workspace_lines(app, area),
         WorkspaceSessionViewRoute::KnowledgeBase { scroll } => {
             viewport_lines(knowledge_base_lines(app, area), area.height, scroll)

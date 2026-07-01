@@ -143,9 +143,7 @@ async fn wait_for_spawned_server(
         if probe_reachable(&url).await {
             *guard = Some(handle);
             // Override JOERN_SERVER_URL for downstream callers in this
-            // process so existing http_query::joern_server_url() picks
-            // up the spawned port. Safe because env mutation is
-            // process-local.
+            // process. Safe because env mutation is process-local.
             std::env::set_var("JOERN_SERVER_URL", &url);
             return Ok(url);
         }

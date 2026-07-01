@@ -159,7 +159,7 @@ fn planning_row_style(
     disposition: RowDisposition,
 ) -> Style {
     if disposition == RowDisposition::Unavailable {
-        return theme::muted().add_modifier(Modifier::DIM);
+        return theme::disabled();
     }
     let base = planning_row_base_style(row, disposition);
     if idx == app.planning_cursor {

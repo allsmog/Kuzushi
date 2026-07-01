@@ -65,7 +65,8 @@ pub fn runtime_validation_label(verification: Option<&PersistedVerification>) ->
             "execution_rejected - Runtime verification was blocked by infrastructure".to_string()
         }
         PersistedProofVerdict::LanguageUnsupportedYet => {
-            "execution_rejected - Runtime verification does not support this language yet".to_string()
+            "execution_rejected - Runtime verification does not support this language yet"
+                .to_string()
         }
         PersistedProofVerdict::InsufficientFindingDetail => {
             "execution_rejected - Finding lacks enough detail for runtime verification".to_string()

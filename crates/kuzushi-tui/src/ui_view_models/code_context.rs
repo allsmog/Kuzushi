@@ -1,8 +1,8 @@
 //! Source-code context for the Workbench center pane when a finding is selected.
 
-use super::findings::{relativize_location, target_base};
+use super::findings::{current_finding_for_detail, relativize_location, target_base};
 use crate::ShellApp;
-use kuzushi_core::{stable_finding_alias, Finding};
+use kuzushi_core::Finding;
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
@@ -26,31 +26,28 @@ pub(crate) struct CodePaneRow {
 }
 
 pub(crate) fn selected_finding_code_model(app: &ShellApp) -> Option<CodePaneModel> {
-    let finding = app.selected_finding.as_ref()?;
+    let (alias, finding) = current_finding_for_detail(app)?;
     let base = target_base(app);
-    let alias = stable_finding_alias(&app.findings, &finding.fingerprint)
-        .unwrap_or_else(|| "selected".to_string());
     Some(CodePaneModel::from_finding(
-        finding,
-        &alias,
-        app.target.as_deref(),
+        app,
+        &finding,
+        alias.as_deref().unwrap_or("selected"),
         base.as_deref(),
     ))
 }
 
 impl CodePaneModel {
-    fn from_finding(
-        finding: &Finding,
-        alias: &str,
-        target: Option<&Path>,
-        base: Option<&str>,
-    ) -> Self {
-        let source_path = resolve_source_path(target, &finding.file_path);
+    fn from_finding(app: &ShellApp, finding: &Finding, alias: &str, base: Option<&str>) -> Self {
+        let source_path = resolve_source_path(app.target.as_deref(), &finding.file_path);
         let path_label = relativize_location(finding.file_path.clone(), base);
         let title = code_title(alias, &path_label, finding.start_line, finding.end_line);
-        match std::fs::read_to_string(&source_path) {
+        match app
+            .workbench_cache
+            .borrow_mut()
+            .read_source_file(&source_path)
+        {
             Ok(raw) => code_model_from_source(finding, title, path_label, &raw),
-            Err(error) => missing_code_model(title, path_label, source_path, error),
+            Err(error) => missing_code_model(title, path_label, error),
         }
     }
 }
@@ -73,20 +70,12 @@ fn code_model_from_source(
     }
 }
 
-fn missing_code_model(
-    title: String,
-    path_label: String,
-    path: PathBuf,
-    error: std::io::Error,
-) -> CodePaneModel {
+fn missing_code_model(title: String, path_label: String, error: String) -> CodePaneModel {
     CodePaneModel {
         title,
+        empty_hint: Some(format!("could not read source file {path_label}: {error}")),
         path_label,
         rows: Vec::new(),
-        empty_hint: Some(format!(
-            "could not read source file {}: {error}",
-            path.display()
-        )),
     }
 }
 

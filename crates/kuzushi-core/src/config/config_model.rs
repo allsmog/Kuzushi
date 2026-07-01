@@ -7,6 +7,7 @@ pub struct V2Config {
     pub model: Option<String>,
     pub runtime: RuntimeConfig,
     pub operator: OperatorConfig,
+    pub phases: GuidedPhaseConfig,
 }
 
 impl Default for V2Config {
@@ -15,8 +16,55 @@ impl Default for V2Config {
             model: None,
             runtime: RuntimeConfig::default(),
             operator: OperatorConfig::default(),
+            phases: GuidedPhaseConfig::default(),
         }
     }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
+pub struct GuidedPhaseConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stop_after: Option<GuidedPhase>,
+    pub map: PhaseTemplateConfig,
+    pub hunt: PhaseTemplateConfig,
+    pub confirm: PhaseTemplateConfig,
+    pub fix: PhaseTemplateConfig,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "kebab-case")]
+pub enum GuidedPhase {
+    Map,
+    Hunt,
+    Confirm,
+    Fix,
+}
+
+impl GuidedPhase {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Map => "map",
+            Self::Hunt => "hunt",
+            Self::Confirm => "confirm",
+            Self::Fix => "fix",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(default, deny_unknown_fields, rename_all = "snake_case")]
+pub struct PhaseTemplateConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub budget_usd: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub concurrency: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub strategy_cap: Option<usize>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub confirmation_depth: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prompt_variant: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -138,4 +186,5 @@ pub(crate) struct PartialConfig {
     pub(crate) model: Option<Option<String>>,
     pub(crate) runtime: Option<PartialRuntimeConfig>,
     pub(crate) operator: Option<PartialOperatorConfig>,
+    pub(crate) phases: Option<PartialGuidedPhaseConfig>,
 }

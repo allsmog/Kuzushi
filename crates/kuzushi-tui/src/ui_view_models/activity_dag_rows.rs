@@ -36,7 +36,8 @@ pub(crate) fn activity_dag_pane_rows(
     let mut rows = session
         .tasks
         .values()
-        .flat_map(|row| task_pane_rows(session, row, width, now))
+        .enumerate()
+        .flat_map(|(index, row)| task_pane_rows(session, row, index, width, now))
         .collect::<Vec<_>>();
     if let Some(text) = dag_subsystems_row_text(session, width) {
         rows.push(ActivityDagPaneRow {
@@ -100,6 +101,7 @@ fn dag_row_tone(state: DagTaskState) -> ActivityDagRowTone {
         DagTaskState::Queued => ActivityDagRowTone::Queued,
         DagTaskState::Failing => ActivityDagRowTone::Failing,
         DagTaskState::Canceled => ActivityDagRowTone::Canceled,
+        DagTaskState::Skipped => ActivityDagRowTone::Muted,
     }
 }
 
@@ -120,20 +122,23 @@ fn spinner_frame_for_config(now: Instant, config: ThemeConfig) -> &'static str {
     SPINNER_FRAMES[idx]
 }
 
-fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant) -> String {
+fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant, selected: bool) -> String {
     let symbol = match row.state {
         DagTaskState::Done => "✓",
         DagTaskState::Active => spinner_frame(now),
         DagTaskState::Queued => "·",
         DagTaskState::Failing => "!",
         DagTaskState::Canceled => "×",
+        DagTaskState::Skipped => "⊘",
     };
+    let marker = if selected { "▌" } else { " " };
     let right_reserve: usize = 9;
     let task_pad = width.saturating_sub(right_reserve + 3).max(8);
     let task_label = fit(&row.task_id, task_pad);
     let elapsed = elapsed_label(row, now);
     let body = format!(
-        " {symbol} {task:<task_pad$} {elapsed:>8}",
+        "{marker} {symbol} {task:<task_pad$} {elapsed:>8}",
+        marker = marker,
         symbol = symbol,
         task = task_label,
         task_pad = task_pad,
@@ -147,11 +152,12 @@ fn dag_row_text(row: &DagTaskRow, width: usize, now: Instant) -> String {
 fn task_pane_rows(
     session: &ActivitySession,
     row: &DagTaskRow,
+    index: usize,
     width: usize,
     now: Instant,
 ) -> Vec<ActivityDagPaneRow> {
     let mut out = vec![ActivityDagPaneRow {
-        text: dag_row_text(row, width, now),
+        text: dag_row_text(row, width, now, index == session.task_cursor),
         tone: dag_row_tone(row.state),
     }];
     if should_show_task_details(session, row) {
@@ -237,6 +243,7 @@ fn subsystem_row_tone(state: DagTaskState) -> ActivityDagRowTone {
         DagTaskState::Active => ActivityDagRowTone::Active,
         DagTaskState::Done => ActivityDagRowTone::Done,
         DagTaskState::Canceled => ActivityDagRowTone::Canceled,
+        DagTaskState::Skipped => ActivityDagRowTone::Muted,
         DagTaskState::Queued => ActivityDagRowTone::Muted,
     }
 }
@@ -247,6 +254,7 @@ fn subsystem_state_label(state: DagTaskState) -> &'static str {
         DagTaskState::Active => "active",
         DagTaskState::Done => "done",
         DagTaskState::Canceled => "canceled",
+        DagTaskState::Skipped => "not run",
         DagTaskState::Queued => "queued",
     }
 }

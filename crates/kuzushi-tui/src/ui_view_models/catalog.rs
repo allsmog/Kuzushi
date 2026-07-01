@@ -1,7 +1,7 @@
 use super::context_snapshot_state;
 use crate::ShellApp;
 use kuzushi_core::modules::ModuleKind;
-use kuzushi_core::{sorted_finding_aliases, Severity};
+use kuzushi_core::Severity;
 use std::collections::BTreeMap;
 
 pub(crate) const CATALOG_CATEGORY_ORDER: &[&str] = &["OFFENSE", "INTEL", "GOVERNANCE", "DEFENSE"];
@@ -141,7 +141,7 @@ fn catalog_next_hint(app: &ShellApp) -> String {
 
 fn critical_finding_hint(app: &ShellApp) -> Option<String> {
     has_critical_finding(app)
-        .then(|| sorted_finding_aliases(&app.findings).into_iter().next())
+        .then(|| super::findings::cached_sorted_finding_alias_indices(app).into_iter().next())
         .flatten()
         .map(|(alias, _)| {
             format!(

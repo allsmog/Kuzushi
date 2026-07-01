@@ -14,7 +14,8 @@ impl ShellApp {
         // put focus there so j/k scrolls evidence immediately after Enter.
         self.shell_view = ShellView::Workbench;
         self.workbench_focus = crate::app::WorkbenchPane::Details;
-        self.scroll_offset = 0;
+        self.workbench_scroll
+            .set(crate::app::WorkbenchPane::Details, 0);
         self.log(
             "open",
             format!(

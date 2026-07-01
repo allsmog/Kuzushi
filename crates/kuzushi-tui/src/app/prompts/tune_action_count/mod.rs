@@ -6,6 +6,7 @@ mod prompt_diff_reset;
 mod prompt_dispatch;
 mod prompt_edit_show;
 mod prompt_list;
+mod prompt_mutations;
 mod prompt_paths;
 mod prompt_set;
 

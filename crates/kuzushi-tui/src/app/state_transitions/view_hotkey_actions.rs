@@ -1,4 +1,5 @@
 use super::*;
+use kuzushi_core::sorted_finding_aliases;
 
 impl ShellApp {
     pub(super) fn handle_view_hotkey(&mut self, key: KeyEvent) -> bool {
@@ -40,16 +41,28 @@ impl ShellApp {
         match action {
             ViewHotkeyAction::WorkbenchCyclePane => {
                 self.workbench_focus = self.workbench_focus.next();
-                self.scroll_offset = 0;
+            }
+            ViewHotkeyAction::WorkbenchCyclePanePrev => {
+                self.workbench_focus = self.workbench_focus.prev();
             }
             ViewHotkeyAction::WorkbenchScrollNext => self.workbench_move(1),
             ViewHotkeyAction::WorkbenchScrollPrev => self.workbench_move(-1),
             ViewHotkeyAction::WorkbenchScrollFirst => self.workbench_jump(true),
             ViewHotkeyAction::WorkbenchScrollLast => self.workbench_jump(false),
             ViewHotkeyAction::WorkbenchOpen => self.workbench_open_focused(),
+            ViewHotkeyAction::Back if self.focus_workbench_findings_before_back() => {}
             _ => return None,
         }
         Some(true)
+    }
+
+    fn focus_workbench_findings_before_back(&mut self) -> bool {
+        if self.shell_view != ShellView::Workbench || self.workbench_focus != WorkbenchPane::Details
+        {
+            return false;
+        }
+        self.workbench_focus = WorkbenchPane::Findings;
+        true
     }
 
     fn workbench_move(&mut self, delta: isize) {
@@ -169,7 +182,7 @@ impl ShellApp {
             return true;
         }
         match action {
-            ViewHotkeyAction::ActivityReset => self.activity = None,
+            ViewHotkeyAction::ActivityReset => self.reset_activity_view(),
             ViewHotkeyAction::ActivityFocusSelected => self.open_or_focus_activity_task(),
             ViewHotkeyAction::ActivityOpenDeckArtifact => self.open_activity_deck_artifact(),
             ViewHotkeyAction::ActivityOpenFindings => self.open_activity_findings_review(),
@@ -202,11 +215,52 @@ impl ShellApp {
         true
     }
 
+    fn reset_activity_view(&mut self) {
+        if self.activity_has_live_work() {
+            if let Some(session) = self.activity.as_mut() {
+                session.reset_presentation_state();
+            }
+            self.log("activity", "reset Activity view state; live run preserved");
+        } else {
+            self.activity = None;
+        }
+    }
+
+    fn activity_has_live_work(&self) -> bool {
+        self.running_tool_name().is_some()
+            || self.scan.as_ref().is_some_and(|scan| scan.running)
+            || self.activity.as_ref().is_some_and(|session| {
+                session
+                    .tasks
+                    .values()
+                    .any(|row| row.state == DagTaskState::Active)
+            })
+    }
+
     fn cancel_activity_run(&mut self) {
+        if !self.activity_cancel_armed() {
+            self.arm_activity_cancel();
+            return;
+        }
+        self.activity_cancel_armed_at = None;
         let aborted = self.request_active_abort();
         if !aborted {
             self.log("activity", "no running tool or scan to cancel");
         }
+    }
+
+    fn activity_cancel_armed(&self) -> bool {
+        self.activity_cancel_armed_at
+            .map(|armed_at| std::time::Instant::now().duration_since(armed_at) <= CTRL_C_ARM_WINDOW)
+            .unwrap_or(false)
+    }
+
+    fn arm_activity_cancel(&mut self) {
+        self.activity_cancel_armed_at = Some(std::time::Instant::now());
+        self.log(
+            "activity",
+            "press C again within 2s to cancel the running work",
+        );
     }
 
     fn open_activity_deck_artifact(&mut self) {
@@ -215,9 +269,8 @@ impl ShellApp {
             return;
         };
         match page {
-            ActivityDeckPage::Feed | ActivityDeckPage::Findings => {
-                self.open_activity_findings_review()
-            }
+            ActivityDeckPage::Task => self.open_activity_task_artifact(),
+            ActivityDeckPage::Findings => self.open_activity_findings_review(),
             page => match page.scene_page() {
                 Some(scene_page) => self.open_scene_to_page(scene_page),
                 None => self.log("activity", "this output view has no full visualization"),
@@ -225,7 +278,28 @@ impl ShellApp {
         }
     }
 
+    fn open_activity_task_artifact(&mut self) {
+        let Some(task_id) = self
+            .activity
+            .as_ref()
+            .and_then(|session| session.selected_task_id())
+            .map(ToOwned::to_owned)
+        else {
+            self.log("activity", "no task selected to open");
+            return;
+        };
+        match activity_task_deck_page(&task_id) {
+            Some(ActivityDeckPage::Findings) => self.open_activity_findings_review(),
+            Some(page) => match page.scene_page() {
+                Some(scene_page) => self.open_scene_to_page(scene_page),
+                None => self.log("activity", "selected task has no full artifact"),
+            },
+            None => self.log("activity", "selected task has no artifact yet"),
+        }
+    }
+
     fn open_activity_findings_review(&mut self) {
+        self.select_activity_deck_finding();
         self.open_workbench(WorkbenchPane::Findings);
         self.log(
             "activity",
@@ -233,18 +307,40 @@ impl ShellApp {
         );
     }
 
+    fn select_activity_deck_finding(&mut self) {
+        let Some(cursor) = self.activity.as_ref().and_then(|session| {
+            (session.deck_page == ActivityDeckPage::Findings).then_some(session.deck_cursor)
+        }) else {
+            return;
+        };
+        let aliases = sorted_finding_aliases(&self.findings);
+        if aliases.is_empty() {
+            return;
+        }
+        let index = cursor.min(aliases.len() - 1);
+        let (_, finding) = aliases[index].clone();
+        self.findings_cursor = index;
+        self.selected_finding = Some(finding);
+    }
+
     fn open_or_focus_activity_task(&mut self) {
+        let previous_focus = self
+            .activity
+            .as_ref()
+            .and_then(|session| session.focus_task.clone());
+        let was_showing_task = self
+            .activity
+            .as_ref()
+            .is_some_and(|session| session.deck_page == ActivityDeckPage::Task);
         let Some(task_id) = self.focus_activity_task_at_cursor() else {
             self.log_activity_focus_unavailable();
             return;
         };
-        let Some(page) = activity_task_deck_page(&task_id) else {
-            return;
-        };
+        let page = activity_page_for_focused_task(&task_id, previous_focus, was_showing_task);
         let Some(session) = self.activity.as_mut() else {
             return;
         };
-        session.set_deck_page(page);
+        session.set_deck_page_by_user(page);
         session.pane_focus = PaneFocus::Right;
         self.log(
             "activity",
@@ -268,12 +364,7 @@ impl ShellApp {
         if session.tasks.is_empty() {
             return None;
         }
-        let cursor = session
-            .task_scroll
-            .min(session.tasks.len().saturating_sub(1));
-        let task_id = visible_activity_task_id(session, cursor)?;
-        session.focus_task = Some(task_id.clone());
-        Some(task_id)
+        session.focus_task_at_cursor()
     }
 }
 
@@ -307,15 +398,16 @@ fn activity_session_action(action: ViewHotkeyAction) -> Option<ActivitySessionAc
         .find_map(|(candidate, apply)| (*candidate == action).then_some(*apply))
 }
 
-fn visible_activity_task_id(
-    session: &crate::app::ActivitySession,
-    cursor: usize,
-) -> Option<String> {
-    session
-        .tasks
-        .values()
-        .nth(cursor)
-        .map(|row| row.task_id.clone())
+fn activity_page_for_focused_task(
+    task_id: &str,
+    previous_focus: Option<String>,
+    was_showing_task: bool,
+) -> ActivityDeckPage {
+    let same_task = previous_focus.as_deref() == Some(task_id);
+    if was_showing_task && same_task {
+        return activity_task_deck_page(task_id).unwrap_or(ActivityDeckPage::Task);
+    }
+    ActivityDeckPage::Task
 }
 
 fn activity_task_deck_page(task_id: &str) -> Option<ActivityDeckPage> {

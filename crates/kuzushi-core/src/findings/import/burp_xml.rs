@@ -35,7 +35,14 @@ pub fn import_burp_xml(workspace: &WorkspaceTarget, path: &Path) -> Result<BurpI
     let mut imported = 0usize;
     let mut skipped = 0usize;
     for item in items {
-        persist_burp_item(&store, &run_id, scope.as_ref(), &item, &mut imported, &mut skipped)?;
+        persist_burp_item(
+            &store,
+            &run_id,
+            scope.as_ref(),
+            &item,
+            &mut imported,
+            &mut skipped,
+        )?;
     }
 
     Ok(BurpImportSummary {
@@ -217,8 +224,7 @@ mod tests {
     use std::fs;
 
     fn base64_encode(input: &[u8]) -> String {
-        const ALPHABET: &[u8] =
-            b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
         for chunk in input.chunks(3) {
             let len = chunk.len();

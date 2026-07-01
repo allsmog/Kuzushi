@@ -26,6 +26,12 @@ pub(crate) const CONTEXT_KB_COMMANDS: &[ShellCommandSpec] = &[
         description: "rebuild all, repo, or app-model",
     },
     ShellCommandSpec {
+        command: "project",
+        aliases: &["/project", "project model", "project-model"],
+        category: ShellCommandCategory::ContextKb,
+        description: "show the aggregated project model",
+    },
+    ShellCommandSpec {
         command: "kb [module]",
         aliases: &["attachments", "/kb [module]"],
         category: ShellCommandCategory::ContextKb,

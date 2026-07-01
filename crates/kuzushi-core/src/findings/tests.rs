@@ -383,7 +383,10 @@ mod tests {
             stored.snoozed_until.as_deref(),
             Some("2026-06-01T00:00:00Z")
         );
-        assert_eq!(stored.remediation.as_deref(), Some("allowlist redirect targets"));
+        assert_eq!(
+            stored.remediation.as_deref(),
+            Some("allowlist redirect targets")
+        );
         assert_eq!(stored.references, finding.references);
     }
 
@@ -600,11 +603,14 @@ mod tests {
 
         let input = vec![high_late.clone(), high_early.clone(), critical.clone()];
         let aliases = sorted_finding_aliases(&input);
+        let alias_indices = sorted_finding_alias_indices(&input);
 
         assert_eq!(aliases[0].0, "F-0001");
         assert_eq!(aliases[0].1.fingerprint, critical.fingerprint);
+        assert_eq!(alias_indices[0], ("F-0001".to_string(), 2));
         assert_eq!(aliases[1].0, "F-0002");
         assert_eq!(aliases[1].1.fingerprint, high_early.fingerprint);
+        assert_eq!(alias_indices[1], ("F-0002".to_string(), 1));
         assert_eq!(
             stable_finding_alias(&input, &high_late.fingerprint).as_deref(),
             Some("F-0003")
@@ -640,6 +646,39 @@ mod tests {
         assert!(first < second);
         assert!(output[first..].contains("aaaa1111"));
         assert!(output[second..].contains("zzzz1111"));
+    }
+
+    #[test]
+    fn finding_report_tool_json_omits_raw_http_blobs() {
+        let mut finding = Finding::new_semgrep(
+            "demo.http",
+            "captures/login.har",
+            1,
+            Some(1),
+            Severity::High,
+            "http",
+        );
+        finding.evidence.push(FindingEvidence {
+            kind: "http-request".to_string(),
+            file_path: "captures/login.har".to_string(),
+            line: 1,
+            snippet: "POST /login".to_string(),
+            rationale: "captured by HAR import".to_string(),
+            confidence: 90,
+            request_blob: Some("RAW REQUEST BODY".to_string()),
+            response_blob: Some("RAW RESPONSE BODY".to_string()),
+        });
+        let report = FindingListReport {
+            count: 1,
+            findings: vec![finding],
+        };
+
+        let output = report.to_tool_json().to_string();
+
+        assert!(output.contains("requestBlobPresent"));
+        assert!(output.contains("responseBlobPresent"));
+        assert!(!output.contains("RAW REQUEST BODY"));
+        assert!(!output.contains("RAW RESPONSE BODY"));
     }
 
     #[test]
@@ -765,6 +804,77 @@ mod tests {
             .unwrap();
         assert_eq!(review.count, 1);
         assert_eq!(review.findings[0].rule_id, "demo.review");
+    }
+
+    #[test]
+    fn filter_expression_matches_state_rank_text_run_and_source() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-2026-alpha", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+        store
+            .insert_scan_run("run-other", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+
+        let wanted = Finding::new_semgrep(
+            "demo.sql",
+            "src/db/query.ts",
+            12,
+            Some(12),
+            Severity::High,
+            "SQL injection in search",
+        );
+        let other_run = Finding::new_semgrep(
+            "demo.sql.other",
+            "src/db/other.ts",
+            12,
+            Some(12),
+            Severity::High,
+            "SQL injection in other run",
+        );
+        let wrong_rank = Finding::new_semgrep(
+            "demo.sql.low",
+            "src/db/low.ts",
+            12,
+            Some(12),
+            Severity::Low,
+            "SQL injection low rank",
+        );
+        let wrong_text = Finding::new_semgrep(
+            "demo.token",
+            "src/db/token.ts",
+            12,
+            Some(12),
+            Severity::High,
+            "Hardcoded token",
+        );
+        store.insert_finding("run-2026-alpha", &wanted).unwrap();
+        store.insert_finding("run-other", &other_run).unwrap();
+        store.insert_finding("run-2026-alpha", &wrong_rank).unwrap();
+        store.insert_finding("run-2026-alpha", &wrong_text).unwrap();
+
+        let report = store
+            .list_findings_filtered(
+                &FindingListFilter::from_tool_input(&json!({
+                    "filter": "state:new rank:high run:run-2026 source:sarif sql"
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+
+        assert_eq!(report.count, 1);
+        assert_eq!(report.findings[0].rule_id, "demo.sql");
+    }
+
+    #[test]
+    fn filter_expression_rejects_future_provenance_keys_instead_of_ignoring_them() {
+        let error = FindingListFilter::from_tool_input(&json!({
+            "filter": "rev:abcdef1"
+        }))
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("not supported until provenance indexing is available"));
     }
 
     #[test]

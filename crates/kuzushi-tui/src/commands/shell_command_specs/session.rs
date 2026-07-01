@@ -87,7 +87,7 @@ pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "scene",
-        aliases: &["/scene", "/viz", "viz", "/diagram"],
+        aliases: &["/scene", "/viz", "viz", "3d", "/3d", "/diagram"],
         category: ShellCommandCategory::Session,
         description: "security-viz gallery — risk heatmap, attack path/tree, DFD",
     },

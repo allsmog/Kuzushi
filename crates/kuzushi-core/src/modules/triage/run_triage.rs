@@ -110,7 +110,7 @@ fn emit_triage_start(ctx: &ToolExecutionContext<'_>, input: &TriageRunInput) {
             .step(
                 "tool",
                 "run",
-                format!("triage start (batch={})", input.batch_size),
+                format!("triage start (concurrency={})", input.concurrency),
             )
             .emit();
     }
@@ -200,25 +200,24 @@ pub(in crate::modules) fn require_triage_store<'a>(
 }
 
 pub(in crate::modules) fn empty_triage_response(
-    input: &TriageRunInput,
+    _input: &TriageRunInput,
     missing_fingerprints: Vec<String>,
 ) -> Value {
     let summary = "No findings matched triage input.";
     let output =
         "[-] No findings match. Run a scanner first (`kuzushi scan <repo>`) or pass explicit fingerprints.";
     let data = json!({
-            "summary": "No findings matched triage input.",
-            "triaged": 0,
-            "total": 0,
-            "tp": 0,
-            "fp": 0,
-            "needsReview": 0,
-            "byDesign": 0,
-            "costUsd": 0.0,
-            "missingFingerprints": missing_fingerprints,
-            "batchSize": input.batch_size,
-            "findings": [],
-        });
+        "summary": "No findings matched triage input.",
+        "triaged": 0,
+        "total": 0,
+        "tp": 0,
+        "fp": 0,
+        "needsReview": 0,
+        "byDesign": 0,
+        "costUsd": 0.0,
+        "missingFingerprints": missing_fingerprints,
+        "findings": [],
+    });
     let mut result = crate::module_result::skipped_output_result(
         summary,
         output,

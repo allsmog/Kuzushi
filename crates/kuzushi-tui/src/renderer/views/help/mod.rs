@@ -117,7 +117,7 @@ pub(crate) fn quickstart_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>>
     }
     lines.push(blank());
     lines.push(muted(&fit(
-        "Tip: Ctrl+O toggles the live event timeline.",
+        "Tip: Ctrl+O toggles the session story.",
         area.width as usize,
     )));
     lines.push(muted(&fit(&model.first_finding_tip, area.width as usize)));

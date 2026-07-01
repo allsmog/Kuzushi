@@ -166,15 +166,22 @@ pub(super) fn findings_pane_lines(model: &FindingsModel, inner: Rect) -> Vec<Lin
         if let Some(context_cta) = model.empty.context_cta {
             ctas.push(context_cta);
         }
-        lines.extend(pane_empty_state(
-            "no findings yet",
-            &["the findings ledger is empty for this target."],
-            &ctas,
-        ));
+        let details = [
+            "the findings ledger is empty for this target.",
+            model.empty.ledger.as_str(),
+        ];
+        lines.extend(pane_empty_state("no findings yet", &details, &ctas));
         return lines;
     }
     let mut lines = vec![filter_chip_line(&model.counts, model.total)];
-    let visible = (inner.height as usize).saturating_sub(1).max(1);
+    if let Some(notice) = &model.selected_out_of_window {
+        lines.push(Line::styled(
+            fit(notice, inner.width as usize),
+            theme::warn(),
+        ));
+    }
+    let chrome_rows = lines.len();
+    let visible = (inner.height as usize).saturating_sub(chrome_rows).max(1);
     let start = viewport_start_for_cursor(model.rows.len(), visible, model.cursor);
     let width = inner.width as usize;
     lines.extend(
@@ -207,8 +214,7 @@ fn filter_chip_line(counts: &SeverityCounts, total: usize) -> Line<'static> {
 
 fn finding_row_line(row: &FindingListRow, width: usize) -> Line<'static> {
     let (marker, marker_style) = row_marker(row);
-    let title_budget = width.saturating_sub(20).max(8);
-    Line::from(vec![
+    let mut spans = vec![
         Span::styled(marker.to_string(), marker_style),
         Span::styled(pad(&row.alias, 7), theme::accent()),
         Span::raw(" "),
@@ -218,10 +224,64 @@ fn finding_row_line(row: &FindingListRow, width: usize) -> Line<'static> {
         ),
         Span::raw(" "),
         Span::styled(
-            fit(&row.title, title_budget),
+            fit(&row.title, finding_title_budget(width)),
             theme::severity_tone(row.severity_tone),
         ),
-    ])
+    ];
+    spans.extend(finding_row_meta_spans(row, width));
+    Line::from(spans)
+}
+
+fn finding_title_budget(width: usize) -> usize {
+    width
+        .saturating_sub(16 + finding_row_meta_budget(width))
+        .max(8)
+}
+
+fn finding_row_meta_budget(width: usize) -> usize {
+    if width < 60 {
+        return 0;
+    }
+    let path_budget = finding_path_budget(width);
+    11 + path_budget + if width >= 96 { 28 } else { 0 }
+}
+
+fn finding_path_budget(width: usize) -> usize {
+    if width >= 96 {
+        24
+    } else {
+        20
+    }
+}
+
+fn finding_row_meta_spans(row: &FindingListRow, width: usize) -> Vec<Span<'static>> {
+    if width < 60 {
+        return Vec::new();
+    }
+    let mut spans = vec![
+        Span::raw(" "),
+        Span::styled(pad(&finding_status_label(row), 9), theme::muted()),
+        Span::raw(" "),
+        Span::styled(
+            fit_path(&row.location, finding_path_budget(width)),
+            theme::subtle(),
+        ),
+    ];
+    if width >= 96 {
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(pad(&row.run_label, 14), theme::muted()));
+        spans.push(Span::raw(" "));
+        spans.push(Span::styled(pad(&row.revision_label, 12), theme::subtle()));
+    }
+    spans
+}
+
+fn finding_status_label(row: &FindingListRow) -> String {
+    if row.confidence == "-" {
+        row.verdict.clone()
+    } else {
+        format!("{} {}", row.verdict, row.confidence)
+    }
 }
 
 fn severity_chip(tone: SeverityTone) -> String {
@@ -245,5 +305,39 @@ fn row_marker(row: &FindingListRow) -> (&'static str, ratatui::style::Style) {
         ("* ", theme::warn())
     } else {
         ("  ", theme::subtle())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn finding_row_includes_status_and_location_when_width_allows() {
+        let row = FindingListRow {
+            alias: "F-0001".to_string(),
+            severity_tone: SeverityTone::High,
+            severity_label: "HIGH".to_string(),
+            title: "request reaches sink".to_string(),
+            location: "crates/kuzushi-tui/src/app/example.rs:42".to_string(),
+            run_label: "run:abc".to_string(),
+            revision_label: "rev:def".to_string(),
+            verdict: "tp".to_string(),
+            confidence: "91%".to_string(),
+            cwe: "CWE-89".to_string(),
+            source: "semgrep".to_string(),
+            evidence: "source to sink".to_string(),
+            selected: false,
+            cursor: true,
+        };
+
+        let text = finding_row_line(&row, 80)
+            .spans
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect::<String>();
+
+        assert!(text.contains("tp 91%"), "{text}");
+        assert!(text.contains("example.rs:42"), "{text}");
     }
 }

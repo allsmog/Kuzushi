@@ -149,12 +149,25 @@ impl ShellApp {
             return;
         };
         let path = candidate.path.display().to_string();
+        let selected_scope = candidate.scope.clone();
         // Same wiring as the `target <path>` verb: workspace root, state
         // dir, findings, and program scope all refresh together.
         self.handle_target_command(Some(&path));
         if self.target.is_none() {
             // Invalid pick (already logged) — stay in the picker.
             return;
+        }
+        if let Some(scope) = selected_scope {
+            self.active_scope = Some(scope.clone());
+            self.log(
+                "target",
+                format!(
+                    "entered {} scope {} ({})",
+                    scope.kind.label(),
+                    scope.rel_path,
+                    scope.id
+                ),
+            );
         }
         // Continue the first-run chain now that a target exists: model →
         // auth → planning, exactly as if the shell had launched with it.
@@ -508,6 +521,9 @@ impl ShellApp {
                 .map(|phase| phase.label())
                 .unwrap_or("planning");
             self.log("phase", format!("nothing selected — skipping {phase}"));
+            if let Some(phase) = self.workflow_phase {
+                self.planning_skipped_phases.insert(phase);
+            }
             self.advance_to_next_phase();
             return;
         }
@@ -527,6 +543,9 @@ impl ShellApp {
             .map(|phase| phase.label())
             .unwrap_or("planning");
         self.log("phase", format!("skipped {phase}"));
+        if let Some(phase) = self.workflow_phase {
+            self.planning_skipped_phases.insert(phase);
+        }
         self.advance_to_next_phase();
     }
 }

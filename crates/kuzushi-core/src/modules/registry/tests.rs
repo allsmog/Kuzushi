@@ -272,6 +272,90 @@ export default {
     }
 
     #[test]
+    fn dynamic_js_module_supports_sdk_execute_and_input_schema_options() {
+        let tmp = tempfile::tempdir().unwrap();
+        let module_path = tmp.path().join("sdk-module.mjs");
+        fs::write(
+            &module_path,
+            r#"
+export default {
+  id: "sdk",
+  name: "SDK Module",
+  kind: "internal",
+  description: "test SDK-shaped module",
+  tools: [{
+    name: "sdk:sum",
+    description: "sum input",
+    headless: true,
+    inputSchema: {
+      type: "object",
+      required: ["left", "right"],
+      properties: {
+        left: { type: "integer", description: "left operand" },
+        right: { type: "integer", description: "right operand" },
+        mode: { type: "string", enum: ["auto", "manual"], default: "auto" }
+      }
+    },
+    async execute(input) {
+      return {
+        status: "completed",
+        output: `${input.left + input.right}:${input.mode}`,
+        data: { total: input.left + input.right, mode: input.mode }
+      };
+    }
+  }]
+};
+"#,
+        )
+        .unwrap();
+        let specifier = format!("file://{}", module_path.display());
+        let mut registry = ModuleRegistry::with_v2_builtins();
+        registry
+            .load_dynamic_module(
+                &specifier,
+                &DynamicModuleLoadOptions {
+                    allow_untrusted: true,
+                    trusted_specifiers: Vec::new(),
+                },
+            )
+            .unwrap();
+
+        let descriptor = registry.resolve_tool("sdk:sum").unwrap();
+        assert!(descriptor.options.iter().any(|option| {
+            option.name == "left" && option.option_type == OptionType::Int && option.required
+        }));
+        assert!(descriptor.options.iter().any(|option| {
+            option.name == "mode"
+                && option.option_type == OptionType::Enum
+                && option.choices == vec!["auto".to_string(), "manual".to_string()]
+                && option.default == Some(json!("auto"))
+        }));
+
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: None,
+            findings_store: None,
+            trace: None,
+        };
+        let output = registry
+            .execute_tool("sdk:sum", json!({ "left": "2", "right": 3 }), &ctx)
+            .unwrap();
+
+        assert_eq!(output.pointer("/data/total").and_then(Value::as_i64), Some(5));
+        assert_eq!(
+            output.pointer("/data/mode").and_then(Value::as_str),
+            Some("auto")
+        );
+
+        let error = registry
+            .prepare_tool_input("sdk:sum", json!({ "left": 1, "right": 2, "extra": true }), None)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("unknown option \"extra\""), "{error}");
+    }
+
+    #[test]
     fn dynamic_js_module_can_call_declared_runtime() {
         let tmp = tempfile::tempdir().unwrap();
         let module_path = tmp.path().join("runtime-module.mjs");

@@ -8,7 +8,7 @@ use super::dependencies::{topological_order, transitive_dependencies};
 use super::failure::{FailedPlanningTask, PendingRetry, RetryAdjustment};
 use super::recommend::model_recommended_in_phase;
 use super::task_id::PlanningTaskId;
-use crate::app::{auth_ready_for_provider, WorkflowPhase};
+use crate::app::WorkflowPhase;
 use crate::{ShellApp, ShellView};
 use kuzushi_core::WorkspaceTarget;
 use serde_json::{json, Value};
@@ -231,9 +231,28 @@ impl ShellApp {
     /// phase's picker — 組 → 崩 → 作 → 掛 — or finish the engagement after 掛 KAKE.
     pub(crate) fn advance_to_next_phase(&mut self) {
         match self.workflow_phase.and_then(|phase| phase.next()) {
-            Some(next) => self.open_phase_picker(next),
+            Some(next) => self.open_or_announce_next_phase(next),
             None => self.finish_engagement(),
         }
+    }
+
+    fn open_or_announce_next_phase(&mut self, next: WorkflowPhase) {
+        if self.should_auto_open_next_phase() {
+            self.open_phase_picker(next);
+            return;
+        }
+        self.workflow_phase = Some(next);
+        self.set_success_notice(
+            "phase",
+            format!("{} ready — type `next` to continue", next.label()),
+        );
+    }
+
+    fn should_auto_open_next_phase(&self) -> bool {
+        matches!(
+            self.shell_view,
+            ShellView::Activity | ShellView::PlanningPicker
+        )
     }
 
     /// End of the engagement (past 掛 KAKE). When tasks failed, offer a yes/no
@@ -331,22 +350,6 @@ impl ShellApp {
             "recommend",
             "run `recommend` when you want suggested next modules",
         );
-    }
-
-    /// Whether a chosen model has all the credentials it needs to run.
-    /// Used by the auth picker to decide whether to fall through to the
-    /// planning view or stay put until the operator finishes auth.
-    #[allow(dead_code)] // reserved for the auth-picker fall-through path
-    pub(crate) fn chosen_provider_auth_ready(&self) -> bool {
-        let Some(provider) = self
-            .config
-            .model
-            .as_deref()
-            .and_then(|model| model.split(':').next())
-        else {
-            return false;
-        };
-        auth_ready_for_provider(provider)
     }
 }
 

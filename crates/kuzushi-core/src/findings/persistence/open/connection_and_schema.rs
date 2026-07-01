@@ -81,7 +81,8 @@ fn migrate_legacy_fingerprints(conn: &Connection) -> Result<()> {
 /// failing with "database is locked". In-memory stores report
 /// `journal_mode=memory` — that's expected; the pragma result is informational.
 fn configure_connection(conn: &Connection) -> Result<()> {
-    let _journal_mode: String = conn.query_row("pragma journal_mode = wal", [], |row| row.get(0))?;
+    let _journal_mode: String =
+        conn.query_row("pragma journal_mode = wal", [], |row| row.get(0))?;
     conn.busy_timeout(std::time::Duration::from_millis(5_000))?;
     Ok(())
 }

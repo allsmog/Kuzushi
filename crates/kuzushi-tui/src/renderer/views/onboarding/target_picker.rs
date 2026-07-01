@@ -9,7 +9,7 @@ pub(crate) fn target_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stati
         "Kuzushi anchors scans, findings, and artifacts to a target directory.",
     ));
     lines.push(muted(
-        "Nothing defaults to cwd silently — pick it (or any repo below) explicitly.",
+        "Nothing defaults to cwd silently — pick it, a repo, or a submodule explicitly.",
     ));
     lines.push(blank());
     let label_width = candidate_label_width(&app.target_candidates);
@@ -56,7 +56,7 @@ fn target_picker_row(
     let body = format!(
         "  {marker} {label:<label_width$}   {hint}",
         label = candidate.label,
-        hint = candidate.hint,
+        hint = candidate_hint(candidate),
     );
     let style = if idx == app.target_picker_cursor {
         theme::success().add_modifier(Modifier::BOLD)
@@ -64,4 +64,12 @@ fn target_picker_row(
         theme::primary()
     };
     Line::styled(fit(&body, width as usize), style)
+}
+
+fn candidate_hint(candidate: &TargetCandidate) -> String {
+    candidate
+        .scope
+        .as_ref()
+        .map(|scope| format!("{} · scope:{}", candidate.hint, scope.id))
+        .unwrap_or_else(|| candidate.hint.to_string())
 }

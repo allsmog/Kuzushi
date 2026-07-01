@@ -88,7 +88,23 @@ thinking_level = "high"
 session_budget_usd = 2.50
 spend_hard_ceiling_usd = 10.00
 trusted_workflow_auto_accept = false
+
+[phases]
+# Optional phase boundary for guided runs: map, hunt, confirm, or fix.
+stop_after = "hunt"
+
+[phases.hunt]
+budget_usd = 1.25
+concurrency = 2
+strategy_cap = 3
+prompt_variant = "deep"
+confirmation_depth = "sampled"
 ```
+
+Phase templates are the durable guided-workflow surface. They belong in
+config, not environment variables. Project configs may set `[phases]` fields;
+runtime and `[operator]` fields remain global-only because a target repository
+must not redirect credentials, process execution, or operator trust policy.
 
 ## Environment Variables
 

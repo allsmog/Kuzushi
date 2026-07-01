@@ -4,7 +4,16 @@ import path from "node:path";
 
 const repo = process.cwd();
 
-const roots = ["README.md", "docs", "examples", "recipes", ".github", "AGENTS.md", "RELEASING.md"];
+const roots = [
+  "README.md",
+  "docs",
+  "examples",
+  "recipes",
+  ".github",
+  "AGENTS.md",
+  "CLAUDE.md",
+  "RELEASING.md",
+];
 
 const textExtensions = new Set([
   ".md",
@@ -38,19 +47,47 @@ const banned = [
 ];
 
 const currentGuidanceFiles = [
+  "AGENTS.md",
+  "CLAUDE.md",
   "docs/architecture/domain-boundaries.md",
   "docs/current-architecture.mmd",
   "docs/devex/new-contributor-map.md",
 ];
 
-const modelGuidanceFiles = ["AGENTS.md", ...currentGuidanceFiles];
+const modelGuidanceFiles = currentGuidanceFiles;
 
 const staleSplitPathPatterns = [
+  { label: "deleted TS Copilot core path", regex: /src\/copilot\/core\.ts/ },
+  { label: "deleted TS core-sast path", regex: /src\/modules\/core-sast\.ts/ },
+  { label: "deleted TS MCP bridge path", regex: /src\/modules\/mcp-bridge\.ts/ },
+  { label: "deleted TS hidden DAG node path", regex: /src\/modules\/hidden-dag-node\.ts/ },
+  { label: "deleted TS scan bootstrap path", regex: /src\/agents\/index\.ts/ },
+  { label: "deleted TS scan pipeline path", regex: /src\/cli\/commands\/scan-pipeline\.ts/ },
   { label: "old modules.rs path", regex: /crates\/kuzushi-core\/src\/modules\.rs/ },
   { label: "old findings.rs path", regex: /crates\/kuzushi-core\/src\/findings\.rs/ },
   { label: "old scan.rs path", regex: /crates\/kuzushi-core\/src\/scan\.rs/ },
   { label: "old TUI app.rs path", regex: /crates\/kuzushi-tui\/src\/app\.rs/ },
+  {
+    label: "old TUI state_transitions.rs path",
+    regex: /crates\/kuzushi-tui\/src\/app\/state_transitions\.rs/,
+  },
+  {
+    label: "old TUI commands.rs path",
+    regex: /crates\/kuzushi-tui\/src\/commands\.rs/,
+  },
   { label: "old TUI renderer.rs path", regex: /crates\/kuzushi-tui\/src\/renderer\.rs/ },
+  {
+    label: "old TUI renderer/plain.rs path",
+    regex: /crates\/kuzushi-tui\/src\/renderer\/plain\.rs/,
+  },
+  {
+    label: "old core builtins execution path",
+    regex: /(^|[^/\w.-])src\/modules\/registry\/with_v2_builtins\/execution\.rs/,
+  },
+  {
+    label: "old traced runtime path",
+    regex: /(^|[^/\w.-])src\/runtime\/traced_runtime\.rs/,
+  },
 ];
 
 const staleModelPathPatterns = [
@@ -66,6 +103,8 @@ const failures = [
   ),
   ...modelGuidanceFiles.flatMap((file) => checkCurrentGuidancePaths(file, staleModelPathPatterns)),
 ];
+
+failures.push(...currentGuidanceFiles.flatMap(checkReferencedRepoPaths));
 
 for (const file of roots.flatMap(walk)) {
   const rel = path.relative(repo, file);
@@ -175,4 +214,50 @@ function stalePathFailures(file, line, index, patterns) {
       pattern: pattern.label,
       text: line.trim(),
     }));
+}
+
+function checkReferencedRepoPaths(file) {
+  const abs = path.join(repo, file);
+  const lines = readFileSync(abs, "utf8").split(/\r?\n/);
+  const header = lines.slice(0, 12).join("\n");
+  const fileLabeledLegacy = allowedContext.test(header);
+  if (fileLabeledLegacy) return [];
+  return lines.flatMap((line, index) => referencedPathFailures(file, lines, line, index));
+}
+
+function referencedPathFailures(file, lines, line, index) {
+  const context = lines
+    .slice(Math.max(0, index - 4), Math.min(lines.length, index + 5))
+    .join("\n");
+  if (allowedContext.test(context)) return [];
+  return referencedRepoPaths(line)
+    .map((reference) => missingRepoPathFailure(file, index, reference))
+    .filter(Boolean);
+}
+
+function missingRepoPathFailure(file, index, reference) {
+  if (reference.includes("*")) return null;
+  if (safeStat(path.join(repo, reference)) !== null) return null;
+  return {
+    file,
+    line: index + 1,
+    pattern: "missing repo path",
+    text: reference,
+  };
+}
+
+function referencedRepoPaths(line) {
+  const out = new Set();
+  const regex = /(?:^|[\s`'"\[(])((?:crates|src)\/[A-Za-z0-9._~:+@%/-]+)/g;
+  for (const match of line.matchAll(regex)) {
+    out.add(cleanReferencedPath(match[1]));
+  }
+  return [...out].filter(Boolean);
+}
+
+function cleanReferencedPath(value) {
+  return value
+    .replace(/::[A-Za-z0-9_:]+$/, "")
+    .replace(/(?::\d+(?:-\d+)?)$/, "")
+    .replace(/[),.;\]}]+$/, "");
 }

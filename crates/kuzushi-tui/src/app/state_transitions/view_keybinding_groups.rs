@@ -11,7 +11,12 @@ pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
             ViewHotkeyAction::ActivityTabPaneFocus,
         ),
         bind_char('V', "V", "verbose", ViewHotkeyAction::ActivityToggleVerbose),
-        bind_char('p', "p", "pause", ViewHotkeyAction::ActivityTogglePause),
+        bind_char(
+            'p',
+            "p",
+            "feed pause",
+            ViewHotkeyAction::ActivityTogglePause,
+        ),
         bind_char('R', "R", "reset", ViewHotkeyAction::ActivityReset),
     ];
     bindings.extend(activity_deck_keybindings());
@@ -23,15 +28,9 @@ pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
             ViewHotkeyAction::ActivityFocusSelected,
         ),
         bind_char(
-            'c',
-            "c",
-            "cancel run",
-            ViewHotkeyAction::ActivityCancelRunning,
-        ),
-        bind(
-            HotkeyTrigger::Esc,
-            "Esc",
-            "cancel run",
+            'C',
+            "C",
+            "arm cancel",
             ViewHotkeyAction::ActivityCancelRunning,
         ),
     ]);
@@ -76,6 +75,12 @@ pub(super) fn workbench_keybindings() -> Vec<ViewKeybinding> {
             "Enter",
             "open finding",
             ViewHotkeyAction::WorkbenchOpen,
+        ),
+        bind(
+            HotkeyTrigger::BackTab,
+            "Shift+Tab",
+            "cycle pane",
+            ViewHotkeyAction::WorkbenchCyclePanePrev,
         ),
     ]
 }

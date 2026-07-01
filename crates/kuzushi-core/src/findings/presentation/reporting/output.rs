@@ -1,5 +1,9 @@
 use super::*;
 
+const TOOL_JSON_MESSAGE_LIMIT: usize = 1_000;
+const TOOL_JSON_EVIDENCE_LIMIT: usize = 3;
+const TOOL_JSON_EVIDENCE_TEXT_LIMIT: usize = 300;
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct FindingListReport {
     pub count: usize,
@@ -16,7 +20,11 @@ impl FindingListReport {
     }
 
     pub fn to_tool_json(&self) -> Value {
-        crate::module_result::completed_output_result(self.summary(), self.output(), json!(self))
+        crate::module_result::completed_output_result(
+            self.summary(),
+            self.output(),
+            json!(FindingListToolData::from_report(self)),
+        )
     }
 
     fn summary(&self) -> String {
@@ -26,6 +34,105 @@ impl FindingListReport {
             plural_suffix(self.count)
         )
     }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FindingListToolData {
+    count: usize,
+    findings: Vec<FindingListToolFinding>,
+}
+
+impl FindingListToolData {
+    fn from_report(report: &FindingListReport) -> Self {
+        let aliased = sorted_finding_aliases(&report.findings);
+        Self {
+            count: report.count,
+            findings: aliased
+                .iter()
+                .map(|(alias, finding)| FindingListToolFinding::from_finding(alias, finding))
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct FindingListToolFinding {
+    alias: String,
+    fingerprint: String,
+    rule_id: String,
+    title: String,
+    severity: String,
+    file_path: String,
+    start_line: u32,
+    end_line: Option<u32>,
+    message: String,
+    tool: String,
+    triage: Option<TriageOutcome>,
+    verification: Option<PersistedVerification>,
+    evidence: Vec<FindingListToolEvidence>,
+}
+
+impl FindingListToolFinding {
+    fn from_finding(alias: &str, finding: &Finding) -> Self {
+        Self {
+            alias: alias.to_string(),
+            fingerprint: finding.fingerprint.clone(),
+            rule_id: finding.rule_id.clone(),
+            title: finding.title.clone(),
+            severity: finding.severity.as_str().to_string(),
+            file_path: finding.file_path.clone(),
+            start_line: finding.start_line,
+            end_line: finding.end_line,
+            message: cap_tool_json_text(&finding.message, TOOL_JSON_MESSAGE_LIMIT),
+            tool: finding.tool.clone(),
+            triage: finding.triage.clone(),
+            verification: finding.verification.clone(),
+            evidence: finding
+                .evidence
+                .iter()
+                .take(TOOL_JSON_EVIDENCE_LIMIT)
+                .map(FindingListToolEvidence::from_evidence)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct FindingListToolEvidence {
+    kind: String,
+    file_path: String,
+    line: u32,
+    snippet: String,
+    rationale: String,
+    confidence: u8,
+    request_blob_present: bool,
+    response_blob_present: bool,
+}
+
+impl FindingListToolEvidence {
+    fn from_evidence(evidence: &FindingEvidence) -> Self {
+        Self {
+            kind: evidence.kind.clone(),
+            file_path: evidence.file_path.clone(),
+            line: evidence.line,
+            snippet: cap_tool_json_text(&evidence.snippet, TOOL_JSON_EVIDENCE_TEXT_LIMIT),
+            rationale: cap_tool_json_text(&evidence.rationale, TOOL_JSON_EVIDENCE_TEXT_LIMIT),
+            confidence: evidence.confidence,
+            request_blob_present: evidence.request_blob.is_some(),
+            response_blob_present: evidence.response_blob.is_some(),
+        }
+    }
+}
+
+fn cap_tool_json_text(value: &str, max_chars: usize) -> String {
+    if value.chars().count() <= max_chars {
+        return value.to_string();
+    }
+    let mut capped = value.chars().take(max_chars).collect::<String>();
+    capped.push_str("...");
+    capped
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -51,10 +158,7 @@ fn finding_list_output_lines(report: &FindingListReport) -> Vec<String> {
     lines
 }
 
-fn finding_table_widths(
-    aliased: &[(String, Finding)],
-    findings: &[Finding],
-) -> FindingTableWidths {
+fn finding_table_widths(aliased: &[(String, Finding)], findings: &[Finding]) -> FindingTableWidths {
     FindingTableWidths {
         alias: max_alias_width(aliased),
         fingerprint: max_fingerprint_width(aliased),
@@ -149,7 +253,11 @@ fn finding_table_row(alias: &str, finding: &Finding, widths: FindingTableWidths)
 }
 
 fn matching_line(report: &FindingListReport) -> String {
-    format!("  {} matching (showing {})", report.count, report.findings.len())
+    format!(
+        "  {} matching (showing {})",
+        report.count,
+        report.findings.len()
+    )
 }
 
 fn plural_suffix(count: usize) -> &'static str {

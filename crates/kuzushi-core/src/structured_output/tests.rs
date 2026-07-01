@@ -37,6 +37,45 @@ mod tests {
     }
 
     #[test]
+    fn query_required_structured_json_does_not_retry_full_prompt_on_truncation() {
+        use crate::findings::TriageOutcome;
+        use crate::runtime::TriageRequest;
+        use std::sync::Mutex;
+
+        struct TruncatedRuntime {
+            calls: Mutex<usize>,
+        }
+
+        impl AgentRuntime for TruncatedRuntime {
+            fn query_blocking(&self, _request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+                *self.calls.lock().unwrap() += 1;
+                Ok(AgentQueryResponse {
+                    text: "{\"items\":[".to_string(),
+                    truncated: true,
+                    stop_reason: Some("length".to_string()),
+                    ..Default::default()
+                })
+            }
+
+            fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+                anyhow::bail!("not used by structured output tests")
+            }
+        }
+
+        let runtime = TruncatedRuntime {
+            calls: Mutex::new(0),
+        };
+        let contract = StructuredJsonContract::new("test:tool", "TestSchema", Value::Null);
+        let request = AgentQueryRequest::new("model", ".", "system", "prompt");
+
+        let result: Result<Value> =
+            query_required_structured_json(&runtime, request, contract, Ok::<_, anyhow::Error>);
+
+        assert!(result.is_err());
+        assert_eq!(*runtime.calls.lock().unwrap(), 1);
+    }
+
+    #[test]
     fn extracts_last_fenced_json_block_when_preceded_by_prose_with_braces() {
         // Regression for the deep-audit "verdict at the bottom of a long
         // rationale paragraph" pattern: prose contains C code with `{`,

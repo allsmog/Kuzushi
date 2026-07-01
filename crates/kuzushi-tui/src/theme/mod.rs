@@ -41,6 +41,17 @@ pub fn muted() -> Style {
     Style::default().fg(T_MUTED)
 }
 
+pub fn disabled() -> Style {
+    disabled_for_config(active_theme())
+}
+
+fn disabled_for_config(config: ThemeConfig) -> Style {
+    if config.high_contrast {
+        return Style::default().fg(T_PRIMARY);
+    }
+    Style::default().fg(T_MUTED).add_modifier(Modifier::DIM)
+}
+
 pub fn subtle() -> Style {
     if active_theme().high_contrast {
         return Style::default().fg(T_MUTED);
@@ -166,5 +177,15 @@ mod tests {
             severity_tone_for_config(SeverityTone::High, config),
             Style::default().fg(T_DANGER).add_modifier(Modifier::BOLD)
         );
+    }
+
+    #[test]
+    fn disabled_style_does_not_dim_high_contrast_text() {
+        let style = disabled_for_config(ThemeConfig {
+            high_contrast: true,
+            reduced_motion: false,
+        });
+
+        assert!(!style.add_modifier.contains(Modifier::DIM));
     }
 }

@@ -14,16 +14,12 @@ pub(in crate::modules) fn validate_tool_input_options(
     tool: &ToolDescriptor,
     input: Value,
 ) -> Result<Value> {
-    if tool.options.is_empty() {
-        return Ok(input);
-    }
-
     let object = match input {
         Value::Null => Map::new(),
         Value::Object(object) => object,
         other => {
             anyhow::bail!(
-                "{} expects a JSON object input when option metadata is declared, got {}",
+                "{} expects a JSON object input, got {}",
                 tool.name,
                 json_summary(&other)
             );
@@ -93,8 +89,13 @@ fn unknown_tool_option_message(tool: &ToolDescriptor, name: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ");
+    let hint = if choices.is_empty() {
+        "no options are declared".to_string()
+    } else {
+        format!("use one of: {choices}")
+    };
     format!(
-        "{} received unknown option {name:?}. Declare it in option metadata or use one of: {choices}",
+        "{} received unknown option {name:?}. Declare it in option metadata or {hint}",
         tool.name
     )
 }

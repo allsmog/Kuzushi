@@ -20,6 +20,7 @@ mod sast_task_row;
 
 #[cfg(test)]
 mod tests;
+mod workbench_cache;
 pub use activity::is_hidden_module_id;
 pub use activity::ActivityDeckPage;
 pub use activity::ActivitySession;
@@ -59,4 +60,6 @@ pub(crate) use sast_task_row::SastTaskRow;
 pub use sast_task_row::ShellView;
 pub use sast_task_row::ThreatView;
 pub use sast_task_row::WorkbenchPane;
+pub use sast_task_row::WorkbenchPaneScroll;
 pub use sast_task_row::WorkspaceView;
+pub(crate) use workbench_cache::{ProjectScopeTreeState, WorkbenchCache};

@@ -37,10 +37,11 @@ const FULL_HINTS: &[ActivityFooterHint] = &[
     footer_hint!("f", "findings"),
     footer_hint!("o", "open"),
     footer_hint!("V", "verbose"),
-    footer_hint!("p", "pause"),
+    footer_hint!("p", "feed pause"),
     footer_hint!("R", "reset"),
     footer_hint!("Enter", "focus"),
-    footer_hint!("c", "cancel"),
+    footer_hint!("Esc", "leave"),
+    footer_hint!("C", "arm cancel"),
 ];
 
 /// Taskless (single-tool) runs collapse the TASKS pane, which pins focus to
@@ -52,9 +53,10 @@ const TASKLESS_HINTS: &[ActivityFooterHint] = &[
     footer_hint!("f", "findings"),
     footer_hint!("o", "open"),
     footer_hint!("V", "verbose"),
-    footer_hint!("p", "pause"),
+    footer_hint!("p", "feed pause"),
     footer_hint!("R", "reset"),
-    footer_hint!("c", "cancel"),
+    footer_hint!("Esc", "leave"),
+    footer_hint!("C", "arm cancel"),
 ];
 
 pub(crate) fn activity_footer_model(
@@ -125,7 +127,7 @@ fn focus_body(session: &ActivitySession, running_tool: Option<&str>) -> String {
 
 fn taskless_body(running_tool: Option<&str>) -> String {
     match running_tool {
-        Some(tool) => format!(" ▸ RUNNING  {tool} — output streams above · c cancels"),
+        Some(tool) => format!(" ▸ RUNNING  {tool} — output streams above · C arms cancel"),
         None => " ▸ FOCUS  no DAG tasks this run".to_string(),
     }
 }
@@ -194,7 +196,7 @@ mod tests {
         assert_eq!(model.body_line, model.body);
         assert_eq!(
             model.hints.last().map(|hint| hint.plain_key_text),
-            Some("c")
+            Some("C")
         );
         assert_eq!(
             model.hints.first().map(|hint| hint.full_key_text),
@@ -251,7 +253,7 @@ mod tests {
         let session = ActivitySession::new("r-1");
         assert_eq!(
             activity_footer_model(&session, 80, Some("threat-model:build")).body,
-            " ▸ RUNNING  threat-model:build — output streams above · c cancels"
+            " ▸ RUNNING  threat-model:build — output streams above · C arms cancel"
         );
         assert_eq!(
             activity_footer_model(&session, 80, None).body,
@@ -307,7 +309,7 @@ mod tests {
                 .iter()
                 .map(|hint| hint.plain_key_text)
                 .collect::<Vec<_>>(),
-            vec!["j/k/g/G", "Tab", "←/→", "f", "o", "V", "p", "R", "Enter", "c"]
+            vec!["j/k/g/G", "Tab", "←/→", "f", "o", "V", "p", "R", "Enter", "Esc", "C"]
         );
     }
 
@@ -328,10 +330,11 @@ mod tests {
                 ("f", "findings"),
                 ("o", "open"),
                 ("V", "verbose"),
-                ("p", "pause"),
+                ("p", "feed pause"),
                 ("R", "reset"),
                 ("Enter", "focus"),
-                ("c", "cancel"),
+                ("Esc", "leave"),
+                ("C", "arm cancel"),
             ]
         );
     }

@@ -65,6 +65,12 @@ fn plain_render_mode_selects_specialized_plain_views() {
     app.shell_view = ShellView::Help;
     assert_eq!(plain_render_mode(&app), PlainRenderMode::Help);
 
+    app.shell_view = ShellView::ProjectModel;
+    assert_eq!(plain_render_mode(&app), PlainRenderMode::ProjectModel);
+
+    app.shell_view = ShellView::StrategyQueue;
+    assert_eq!(plain_render_mode(&app), PlainRenderMode::StrategyQueue);
+
     app.shell_view = ShellView::Options(crate::OptionsView {
         tool_name: "sast:scan".to_string(),
         filter: crate::OptionsFilter::Standard,
@@ -106,6 +112,20 @@ fn shell_view_line_route_projects_payload_views() {
     assert_eq!(
         shell_view_line_route(&app),
         ShellViewLineRoute::ThreatAndRun(ThreatAndRunViewRoute::Trace("run-1"))
+    );
+
+    app.shell_view = ShellView::RunDiff {
+        left: "run-left".to_string(),
+        right: "run-right".to_string(),
+    };
+    app.scroll_offset = 3;
+    assert_eq!(
+        shell_view_line_route(&app),
+        ShellViewLineRoute::ThreatAndRun(ThreatAndRunViewRoute::RunDiff {
+            left: "run-left",
+            right: "run-right",
+            scroll: 3
+        })
     );
 
     app.shell_view = ShellView::Options(crate::OptionsView {

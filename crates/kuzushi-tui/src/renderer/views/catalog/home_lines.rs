@@ -43,6 +43,8 @@ fn journey_phase_tone_style(tone: JourneyPhaseTone) -> Style {
     match tone {
         JourneyPhaseTone::Success => theme::success(),
         JourneyPhaseTone::Warn => theme::warn(),
+        JourneyPhaseTone::Danger => theme::danger(),
+        JourneyPhaseTone::Muted => theme::muted(),
         JourneyPhaseTone::Subtle => theme::subtle(),
     }
 }

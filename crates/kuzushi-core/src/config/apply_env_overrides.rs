@@ -66,6 +66,7 @@ pub(crate) fn validate_config(config: &V2Config) -> Result<()> {
     validate_model(&config.model)?;
     validate_runtime(&config.runtime)?;
     validate_operator(&config.operator)?;
+    validate_phases(&config.phases)?;
     Ok(())
 }
 
@@ -105,6 +106,38 @@ fn validate_operator(operator: &OperatorConfig) -> Result<()> {
         operator.spend_hard_ceiling_usd,
     )?;
     validate_trusted_modules(&operator.trusted_modules)
+}
+
+fn validate_phases(phases: &GuidedPhaseConfig) -> Result<()> {
+    validate_phase_template("phases.map", &phases.map)?;
+    validate_phase_template("phases.hunt", &phases.hunt)?;
+    validate_phase_template("phases.confirm", &phases.confirm)?;
+    validate_phase_template("phases.fix", &phases.fix)
+}
+
+fn validate_phase_template(name: &str, template: &PhaseTemplateConfig) -> Result<()> {
+    validate_optional_usd(&format!("{name}.budget_usd"), template.budget_usd)?;
+    validate_positive_usize(&format!("{name}.concurrency"), template.concurrency)?;
+    validate_positive_usize(&format!("{name}.strategy_cap"), template.strategy_cap)?;
+    validate_optional_non_empty(
+        &format!("{name}.confirmation_depth"),
+        &template.confirmation_depth,
+    )?;
+    validate_optional_non_empty(&format!("{name}.prompt_variant"), &template.prompt_variant)
+}
+
+fn validate_positive_usize(name: &str, value: Option<usize>) -> Result<()> {
+    if value.is_some_and(|value| value == 0) {
+        anyhow::bail!("{name} must be greater than zero");
+    }
+    Ok(())
+}
+
+fn validate_optional_non_empty(name: &str, value: &Option<String>) -> Result<()> {
+    if value.as_deref().is_some_and(|value| value.trim().is_empty()) {
+        anyhow::bail!("{name} must not be empty");
+    }
+    Ok(())
 }
 
 fn validate_api_key_env(api_key_env: &str) -> Result<()> {

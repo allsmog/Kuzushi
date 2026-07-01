@@ -1,6 +1,8 @@
 import { DynamicStructuredTool } from "@langchain/core/tools";
 import * as z from "zod/v4";
 
+export const LANGGRAPH_BRIDGE_PROTOCOL_VERSION = 1;
+
 const primitiveSchemas = {
   string: () => z.string(),
   integer: () => z.number().int(),
@@ -12,6 +14,19 @@ const typedSchemas = {
   array: (schema) => z.array(zodValueForJsonSchema(schema.items)),
   object: (schema) => zodSchemaForJsonSchema(schema),
 };
+
+export function validateBridgeRequest(request) {
+  if (!request || typeof request !== "object" || Array.isArray(request)) {
+    throw new Error("LangGraph bridge request must be a JSON object");
+  }
+  const version = request.protocolVersion ?? request.protocol_version;
+  if (version !== LANGGRAPH_BRIDGE_PROTOCOL_VERSION) {
+    throw new Error(
+      `Unsupported LangGraph bridge protocolVersion ${version ?? "<missing>"}; expected ${LANGGRAPH_BRIDGE_PROTOCOL_VERSION}`,
+    );
+  }
+  return request;
+}
 
 export function bridgeToolsForNextStep(request) {
   return (request.tools ?? []).map(

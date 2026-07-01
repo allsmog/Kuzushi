@@ -129,7 +129,7 @@ fn compact_activity_run_id(run_id: &str) -> String {
 }
 
 fn paused_segment(paused: bool) -> &'static str {
-    paused.then_some("  ·  ⏸ paused").unwrap_or("")
+    paused.then_some("  ·  ⏸ feed paused").unwrap_or("")
 }
 
 fn verbose_segment(verbose: bool) -> &'static str {
@@ -171,7 +171,7 @@ mod tests {
         );
         assert!(model.detailed_title.contains("…d602a576"));
         assert!(model.detailed_title.contains("cost $0.3750"));
-        assert!(model.detailed_title.contains("paused"));
+        assert!(model.detailed_title.contains("feed paused"));
         assert_eq!(model.focus_label, "[output focused]");
     }
 

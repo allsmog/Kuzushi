@@ -29,9 +29,7 @@ pub fn import_har(workspace: &WorkspaceTarget, path: &Path) -> Result<HarImportS
     let entries = document
         .pointer("/log/entries")
         .and_then(Value::as_array)
-        .ok_or_else(|| {
-            anyhow::anyhow!("HAR file {} missing log.entries array", path.display())
-        })?;
+        .ok_or_else(|| anyhow::anyhow!("HAR file {} missing log.entries array", path.display()))?;
 
     let scope = load_program_scope(workspace).context("Could not load scope.toml")?;
     let store = FindingStore::open(workspace.findings_db_path())?;
@@ -41,7 +39,14 @@ pub fn import_har(workspace: &WorkspaceTarget, path: &Path) -> Result<HarImportS
     let mut imported = 0usize;
     let mut skipped = 0usize;
     for entry in entries {
-        persist_har_entry(&store, &run_id, scope.as_ref(), entry, &mut imported, &mut skipped)?;
+        persist_har_entry(
+            &store,
+            &run_id,
+            scope.as_ref(),
+            entry,
+            &mut imported,
+            &mut skipped,
+        )?;
     }
 
     Ok(HarImportSummary {

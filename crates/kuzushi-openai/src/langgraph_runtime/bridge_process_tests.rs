@@ -1,8 +1,11 @@
-use super::bridge_payloads::NextStepBridgeRequest;
+use super::bridge_payloads::{
+    BridgeRequest, NextStepBridgeRequest, LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
+};
 use super::bridge_process::{
     bridge_near_executable, default_langgraph_bridge_command, mcp_binary_env_defaults,
     public_bridge_error, run_next_step_bridge,
 };
+use kuzushi_core::AgentToolPolicy;
 use serde_json::json;
 use std::fs;
 use tempfile::tempdir;
@@ -135,8 +138,46 @@ fn bridge_parse_failure_rewrites_internal_provider_tokens() {
     assert!(!error.contains("openai-codex"));
 }
 
+#[test]
+fn bridge_requests_serialize_protocol_version() {
+    let request = BridgeRequest {
+        protocol_version: LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
+        model: "test-runtime-model".to_string(),
+        cwd: ".".to_string(),
+        system_prompt: "system".to_string(),
+        prompt: "prompt".to_string(),
+        structured_output: None,
+        api_key_env: "OPENAI_API_KEY".to_string(),
+        api_key: None,
+        base_url: None,
+        thinking_level: None,
+        max_output_tokens: None,
+        tool_policy: AgentToolPolicy::default(),
+        runtime_options: None,
+        temperature: None,
+    };
+
+    let value = serde_json::to_value(request).unwrap();
+
+    assert_eq!(
+        value.pointer("/protocolVersion"),
+        Some(&json!(LANGGRAPH_BRIDGE_PROTOCOL_VERSION))
+    );
+}
+
+#[test]
+fn next_step_requests_serialize_protocol_version() {
+    let value = serde_json::to_value(test_next_step_request()).unwrap();
+
+    assert_eq!(
+        value.pointer("/protocolVersion"),
+        Some(&json!(LANGGRAPH_BRIDGE_PROTOCOL_VERSION))
+    );
+}
+
 fn test_next_step_request() -> NextStepBridgeRequest {
     NextStepBridgeRequest {
+        protocol_version: LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
         envelope_type: "next-step",
         model: "test-runtime-model".to_string(),
         cwd: ".".to_string(),

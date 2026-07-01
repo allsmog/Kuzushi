@@ -82,7 +82,7 @@ fn plan_change_line(change: &PlanChangeRow, width: usize) -> Line<'static> {
 
 fn plan_change_style(change: &PlanChangeRow) -> Style {
     if change.skipped {
-        return theme::muted().add_modifier(Modifier::DIM);
+        return theme::disabled();
     }
     if change.selected {
         return theme::success().add_modifier(Modifier::BOLD);

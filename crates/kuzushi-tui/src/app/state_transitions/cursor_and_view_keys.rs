@@ -17,11 +17,16 @@ impl ShellApp {
         if !self.input.is_empty() {
             return false;
         }
+        let previous_view = self.shell_view.clone();
         // First view-specific handler that claims the key wins; the hotkey
         // fallback is last so per-view keys take precedence.
-        EMPTY_INPUT_VIEW_KEY_HANDLERS
+        let handled = EMPTY_INPUT_VIEW_KEY_HANDLERS
             .iter()
-            .any(|handler| handler(self, key, modifiers))
+            .any(|handler| handler(self, key, modifiers));
+        if handled && self.shell_view != previous_view {
+            self.last_cleared_input = None;
+        }
+        handled
     }
 
     /// Arrow-key / single-key view hotkeys, tried after the per-view handlers.
@@ -74,8 +79,10 @@ impl ShellApp {
         match key.code {
             KeyCode::Tab | KeyCode::Char('n') => self.cycle_scene(1),
             KeyCode::BackTab | KeyCode::Char('N') => self.cycle_scene(-1),
-            KeyCode::Char(' ') | KeyCode::Char('p') => self.scene_paused = !self.scene_paused,
-            KeyCode::Char('r') => self.reset_scene_orientation(),
+            KeyCode::Char(' ') | KeyCode::Char('p') if is_3d => {
+                self.scene_paused = !self.scene_paused
+            }
+            KeyCode::Char('r') if is_3d => self.reset_scene_orientation(),
             // Explicit exits: the gallery is a leaf view, never a trap.
             KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('o') => self.go_back(),
             KeyCode::Char('h') if is_3d => self.nudge_scene_yaw(-1.0),

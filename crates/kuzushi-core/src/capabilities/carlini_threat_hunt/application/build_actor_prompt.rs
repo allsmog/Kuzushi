@@ -7,25 +7,20 @@ pub(crate) fn build_actor_prompt(
     inventory: &[(String, String)],
     actor_fingerprint: &str,
 ) -> String {
-    let mut lines = actor_prompt_header(target, hunt, options, actor_fingerprint);
+    let mut lines = actor_prompt_preamble(target, options);
+    append_actor_inventory(&mut lines, inventory);
+    lines.extend(actor_identity_lines(hunt, actor_fingerprint));
     append_actor_flows(&mut lines, hunt);
     append_actor_threats(&mut lines, hunt, options);
     append_actor_mission(&mut lines, options);
-    append_actor_inventory(&mut lines, inventory);
     lines.push("Return exactly one JSON object and no prose. Use {\"findings\":[]} when there are no concrete exploitable findings.".to_string());
     lines.join("\n")
 }
 
-fn actor_prompt_header(
-    target: &Path,
-    hunt: &ActorHunt,
-    options: &CarliniInput,
-    actor_fingerprint: &str,
-) -> Vec<String> {
+fn actor_prompt_preamble(target: &Path, options: &CarliniInput) -> Vec<String> {
     let mut lines = vec![actor_prompt_target_rule(target), String::new()];
     append_actor_attachments(&mut lines, options);
     append_actor_context(&mut lines, options);
-    lines.extend(actor_identity_lines(hunt, actor_fingerprint));
     lines
 }
 

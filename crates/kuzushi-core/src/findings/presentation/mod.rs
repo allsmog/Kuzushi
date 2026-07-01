@@ -10,6 +10,7 @@ pub use detail::{
     FindingNextAction, ProofLadderState,
 };
 pub use reporting::{
-    format_finding_alias, parse_finding_alias, resolve_finding_alias, sorted_finding_aliases,
-    stable_finding_alias, FindingListFilter, FindingListReport, FindingVerdictFilter,
+    format_finding_alias, parse_finding_alias, resolve_finding_alias, sorted_finding_alias_indices,
+    sorted_finding_aliases, stable_finding_alias, FindingListFilter, FindingListReport,
+    FindingVerdictFilter,
 };

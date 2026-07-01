@@ -30,6 +30,10 @@ const JSON_SNAPSHOT_FILES: &[(&str, &str)] = &[
         "recommendations.json",
         "No module recommendations were recorded for this run.",
     ),
+    (
+        "strategy.json",
+        "No strategy proposals were recorded for this run.",
+    ),
     ("findings.json", "No findings snapshot was recorded for this run."),
     ("proof.json", "No proof snapshot was recorded for this run."),
 ];

@@ -11,10 +11,10 @@ public_modules!(
     agent_router, artifact_kb, attachments, attack_surface, capabilities, carlini_threat_hunt,
     classifier_gate, code_nav, concurrency, config, context, deep_auditor, dep_hygiene, diff_scope,
     events, evidence, findings, full_mode_multi, iac_scan, license_scan, modules, offense, options, patch,
-    pr_comment, proof, recon, remediation, report, repository_inventory, run_artifacts, run_trace, runtime,
+    pr_comment, prompt_stack, proof, recon, remediation, report, repository_inventory, run_artifacts, run_trace, runtime,
     sbom_scan, scan, scanners, secret_scan, semgrep_rule_synthesis, source_span, spend, static_context,
     static_evidence, static_narrative, static_proof_validator, static_ranking, static_registry,
-    systems_hunt, threat_leads, threat_model, triage, variant_ndiff, verification, verify,
+    strategy, systems_hunt, threat_leads, threat_model, triage, variant_ndiff, verification, verify,
     whitebox_static, whitebox_suppressions, workspace, x_ray,
 );
 

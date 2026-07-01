@@ -24,4 +24,20 @@ impl FindingStore {
         )?;
         Ok(())
     }
+
+    pub fn latest_scan_run_id(&self) -> Result<Option<String>> {
+        let mut stmt = self.conn.prepare(
+            r#"
+            select id
+            from scan_runs
+            order by coalesce(completed_at, started_at) desc, started_at desc, id desc
+            limit 1
+            "#,
+        )?;
+        match stmt.query_row([], |row| row.get(0)) {
+            Ok(id) => Ok(Some(id)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(error) => Err(error).context("Could not load latest scan run id"),
+        }
+    }
 }

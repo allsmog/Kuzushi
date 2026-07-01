@@ -10,7 +10,8 @@ mod run_scan;
 mod session;
 
 pub use command_payloads::{
-    ContextCommand, PwnCommand, SastTaskCommand, SastTaskModeCommand, WorkspaceCommand,
+    ContextCommand, PwnCommand, SastTaskCommand, SastTaskModeCommand, StrategyCommand,
+    StrategyCorrectionCommandScope, WorkspaceCommand,
 };
 
 pub(crate) const SHELL_COMMAND_SPEC_GROUPS: &[&[ShellCommandSpec]] = &[
@@ -101,6 +102,7 @@ fn parse_catalog_command(verb: &str) -> Option<ShellCommand> {
         "tune" | "t" => Some(ShellCommand::Tune),
         "prompts" => Some(ShellCommand::Prompts),
         "tasks" => Some(ShellCommand::Tasks),
+        "project" | "project-model" => Some(ShellCommand::ProjectModel),
         _ => None,
     }
 }
@@ -111,7 +113,6 @@ fn parse_session_command(verb: &str) -> Option<ShellCommand> {
         "cost" => Some(ShellCommand::Cost),
         "config" => Some(ShellCommand::Config),
         "permissions" => Some(ShellCommand::Permissions),
-        "runs" => Some(ShellCommand::ShowRuns),
         "history" => Some(ShellCommand::History),
         "clear" => Some(ShellCommand::Clear),
         "pause" => Some(ShellCommand::Pause),

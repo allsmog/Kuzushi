@@ -5,6 +5,7 @@ pub(crate) enum HotkeyTrigger {
     Char(char),
     Enter,
     Tab,
+    BackTab,
     Esc,
     PageUp,
     PageDown,
@@ -33,6 +34,7 @@ impl HotkeyTrigger {
             (Self::Char(expected), KeyCode::Char(actual)) => expected == actual,
             (Self::Enter, KeyCode::Enter) => true,
             (Self::Tab, KeyCode::Tab) => true,
+            (Self::BackTab, KeyCode::BackTab) => true,
             (Self::Esc, KeyCode::Esc) => true,
             (Self::PageUp, KeyCode::PageUp) => true,
             (Self::PageDown, KeyCode::PageDown) => true,
@@ -52,6 +54,7 @@ impl HotkeyTrigger {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewHotkeyAction {
     WorkbenchCyclePane,
+    WorkbenchCyclePanePrev,
     WorkbenchScrollNext,
     WorkbenchScrollPrev,
     WorkbenchScrollFirst,

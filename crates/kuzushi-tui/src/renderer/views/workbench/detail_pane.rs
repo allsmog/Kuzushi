@@ -29,7 +29,12 @@ fn detail_lines_for_model(detail: &FindingDetailModel, budget: usize) -> Vec<Lin
     push_detail_metadata(&mut lines, detail, budget);
     push_message_section(&mut lines, detail, budget);
     push_triage_section(&mut lines, &detail.triage, budget);
-    push_evidence_section(&mut lines, &detail.evidence, budget);
+    push_evidence_section(
+        &mut lines,
+        &detail.evidence,
+        detail.evidence_overflow,
+        budget,
+    );
     push_fingerprint_section(&mut lines, detail, budget);
     lines
 }
@@ -59,6 +64,7 @@ fn push_message_section(
     for message in &detail.message_lines {
         push_wrapped(lines, message, budget, "  ", theme::primary());
     }
+    push_overflow_notice(lines, detail.message_overflow, "message line");
 }
 
 fn push_triage_section(
@@ -83,6 +89,7 @@ fn push_triage_section(
 fn push_evidence_section(
     lines: &mut Vec<Line<'static>>,
     evidence: &[FindingEvidenceRow],
+    overflow: usize,
     budget: usize,
 ) {
     lines.push(section_line("EVIDENCE"));
@@ -93,6 +100,18 @@ fn push_evidence_section(
     for (index, row) in evidence.iter().enumerate() {
         push_evidence_row(lines, row, budget, index > 0);
     }
+    push_overflow_notice(lines, overflow, "evidence row");
+}
+
+fn push_overflow_notice(lines: &mut Vec<Line<'static>>, hidden: usize, noun: &'static str) {
+    if hidden == 0 {
+        return;
+    }
+    let plural = if hidden == 1 { "" } else { "s" };
+    lines.push(Line::styled(
+        format!("  … {hidden} more {noun}{plural}"),
+        theme::muted(),
+    ));
 }
 
 fn push_evidence_row(
@@ -179,4 +198,49 @@ fn push_optional_wrapped(
         return;
     }
     push_wrapped(lines, value, width, prefix, style);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ui_view_models::SeverityTone;
+
+    #[test]
+    fn detail_lines_disclose_hidden_message_and_evidence_rows() {
+        let detail = FindingDetailModel {
+            alias: Some("F-0001".to_string()),
+            severity_tone: SeverityTone::High,
+            severity_label: "high".to_string(),
+            title: "demo finding".to_string(),
+            location: "src/app.rs:42".to_string(),
+            rule: "demo.rule".to_string(),
+            tool: "demo".to_string(),
+            fingerprint: "fp-demo".to_string(),
+            proof_state: "not recorded".to_string(),
+            runtime_verification: "not run".to_string(),
+            evidence: vec![FindingEvidenceRow {
+                header: "source · conf 90 · src/app.rs:42".to_string(),
+                snippet: "request reaches sink".to_string(),
+                rationale: "tainted input".to_string(),
+            }],
+            message_lines: vec!["line 1".to_string()],
+            message_overflow: 2,
+            evidence_overflow: 3,
+            triage: None,
+        };
+
+        let text = detail_lines_for_model(&detail, 80)
+            .into_iter()
+            .map(|line| {
+                line.spans
+                    .into_iter()
+                    .map(|span| span.content.into_owned())
+                    .collect::<String>()
+            })
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        assert!(text.contains("… 2 more message lines"), "{text}");
+        assert!(text.contains("… 3 more evidence rows"), "{text}");
+    }
 }

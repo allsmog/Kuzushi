@@ -2,6 +2,47 @@ use super::*;
 
 impl FindingStore {
     pub fn save_triage(&self, finding_id: i64, triage: &TriageOutcome) -> Result<()> {
+        self.upsert_triage_for_finding_ids([finding_id], triage)
+    }
+
+    pub fn save_triage_for_fingerprint(
+        &self,
+        fingerprint: &str,
+        triage: &TriageOutcome,
+    ) -> Result<usize> {
+        let ids = self.finding_ids_for_fingerprint(fingerprint)?;
+        let count = ids.len();
+        self.upsert_triage_for_finding_ids(ids, triage)?;
+        Ok(count)
+    }
+
+    fn finding_ids_for_fingerprint(&self, fingerprint: &str) -> Result<Vec<i64>> {
+        let mut stmt = self
+            .conn
+            .prepare("select id from findings where fingerprint = ?1 order by id asc")?;
+        let rows = stmt.query_map(params![fingerprint], |row| row.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not list sibling findings for triage fingerprint")
+    }
+
+    fn upsert_triage_for_finding_ids(
+        &self,
+        finding_ids: impl IntoIterator<Item = i64>,
+        triage: &TriageOutcome,
+    ) -> Result<()> {
+        let created_at = now_isoish();
+        for finding_id in finding_ids {
+            self.upsert_triage_for_finding_id(finding_id, triage, &created_at)?;
+        }
+        Ok(())
+    }
+
+    fn upsert_triage_for_finding_id(
+        &self,
+        finding_id: i64,
+        triage: &TriageOutcome,
+        created_at: &str,
+    ) -> Result<()> {
         self.conn.execute(
             r#"
             insert into triage(finding_id, verdict, confidence, rationale, created_at, cost_usd)
@@ -18,7 +59,7 @@ impl FindingStore {
                 triage.verdict.as_str(),
                 triage.confidence,
                 triage.rationale,
-                now_isoish(),
+                created_at,
                 triage.cost_usd,
             ],
         )?;

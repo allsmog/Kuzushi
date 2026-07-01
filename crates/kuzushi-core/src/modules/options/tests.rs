@@ -100,6 +100,23 @@ mod tests {
     }
 
     #[test]
+    fn rejects_non_empty_input_when_no_options_are_declared() {
+        let descriptor = tool_with_options("test:empty", "no input", vec![]);
+
+        let empty = validate_tool_input_options(&descriptor, json!({})).unwrap();
+        assert_eq!(empty, json!({}));
+
+        let null = validate_tool_input_options(&descriptor, Value::Null).unwrap();
+        assert_eq!(null, json!({}));
+
+        let error = validate_tool_input_options(&descriptor, json!({ "extra": true }))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("unknown option \"extra\""), "{error}");
+        assert!(error.contains("no options are declared"), "{error}");
+    }
+
+    #[test]
     fn rejects_missing_required_and_invalid_option_values() {
         let descriptor = tool_with_options(
             "test:demo",

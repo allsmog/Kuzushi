@@ -1,6 +1,6 @@
 use super::ui_runs_root;
 use crate::ShellApp;
-use kuzushi_core::{run_artifacts::canonical_run_artifact_spec, sorted_finding_aliases};
+use kuzushi_core::run_artifacts::canonical_run_artifact_spec;
 use std::path::{Path, PathBuf};
 
 const LEGACY_RUN_SUMMARY_FILE: &str = "summary.json";
@@ -84,16 +84,19 @@ pub(crate) fn trace_model(app: &ShellApp, run_id: &str) -> TraceModel {
 
 pub(crate) fn alias_reference_model(app: &ShellApp) -> AliasReferenceModel {
     AliasReferenceModel {
-        rows: sorted_finding_aliases(&app.findings)
+        rows: super::findings::cached_sorted_finding_alias_indices(app)
             .into_iter()
             .take(3)
-            .map(|(alias, finding)| AliasReferenceRow {
-                alias,
-                detail: format!(
-                    "{} {}",
-                    short_fingerprint(&finding.fingerprint),
-                    finding.title
-                ),
+            .filter_map(|(alias, index)| {
+                let finding = app.findings.get(index)?;
+                Some(AliasReferenceRow {
+                    alias,
+                    detail: format!(
+                        "{} {}",
+                        short_fingerprint(&finding.fingerprint),
+                        finding.title
+                    ),
+                })
             })
             .collect(),
         empty_message: "aliases: load findings first with findings",

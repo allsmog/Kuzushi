@@ -93,17 +93,10 @@ pub(crate) fn text_triage_outcome(text: String, call_cost: f64) -> TriageOutcome
 }
 
 pub(crate) fn build_triage_prompt(request: &TriageRequest) -> Result<String> {
-    let json =
-        serde_json::to_string_pretty(&request.finding).context("could not serialize finding")?;
-    let template = request
-        .prompt_template
-        .as_deref()
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .unwrap_or(
-            "Triage this SAST finding. Be conservative; use needs_review when evidence is incomplete.",
-        );
-    Ok(format!("{template}\n\nFinding JSON:\n{json}"))
+    crate::triage_prompt::compact_triage_prompt(
+        &request.finding,
+        request.prompt_template.as_deref(),
+    )
 }
 
 pub(crate) fn clamp_outcome(mut outcome: TriageOutcome) -> TriageOutcome {

@@ -98,6 +98,10 @@ pub enum ShellView {
     PromptsEditor,
     ActorDetail(usize),
     Runs,
+    RunDiff {
+        left: String,
+        right: String,
+    },
     Replay(String),
     Trace(String),
     Help,
@@ -113,6 +117,8 @@ pub enum ShellView {
     Options(OptionsView),
     SastTasks,
     Context,
+    ProjectModel,
+    StrategyQueue,
     Workspace,
     KnowledgeBase,
     FailureHandoff,
@@ -198,6 +204,60 @@ impl WorkbenchPane {
             WorkbenchPane::Center => WorkbenchPane::Findings,
             WorkbenchPane::Findings => WorkbenchPane::Details,
             WorkbenchPane::Details => WorkbenchPane::Source,
+        }
+    }
+
+    /// Move focus to the previous pane in `Source ← Center ← Findings ← Details` order.
+    pub fn prev(self) -> Self {
+        match self {
+            WorkbenchPane::Source => WorkbenchPane::Details,
+            WorkbenchPane::Center => WorkbenchPane::Source,
+            WorkbenchPane::Findings => WorkbenchPane::Center,
+            WorkbenchPane::Details => WorkbenchPane::Findings,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WorkbenchPaneScroll {
+    pub source: u16,
+    pub center: u16,
+    pub details: u16,
+}
+
+impl WorkbenchPaneScroll {
+    pub fn get(self, pane: WorkbenchPane) -> u16 {
+        match pane {
+            WorkbenchPane::Source => self.source,
+            WorkbenchPane::Center => self.center,
+            WorkbenchPane::Findings => 0,
+            WorkbenchPane::Details => self.details,
+        }
+    }
+
+    pub fn shift(&mut self, pane: WorkbenchPane, amount: i32) {
+        let Some(scroll) = self.scroll_mut(pane) else {
+            return;
+        };
+        *scroll = if amount.is_negative() {
+            scroll.saturating_sub(amount.unsigned_abs().min(u16::MAX as u32) as u16)
+        } else {
+            scroll.saturating_add(amount.min(u16::MAX as i32) as u16)
+        };
+    }
+
+    pub fn set(&mut self, pane: WorkbenchPane, value: u16) {
+        if let Some(scroll) = self.scroll_mut(pane) {
+            *scroll = value;
+        }
+    }
+
+    fn scroll_mut(&mut self, pane: WorkbenchPane) -> Option<&mut u16> {
+        match pane {
+            WorkbenchPane::Source => Some(&mut self.source),
+            WorkbenchPane::Center => Some(&mut self.center),
+            WorkbenchPane::Findings => None,
+            WorkbenchPane::Details => Some(&mut self.details),
         }
     }
 }

@@ -28,5 +28,7 @@ pub use shell_command_specs::ContextCommand;
 pub use shell_command_specs::PwnCommand;
 pub use shell_command_specs::SastTaskCommand;
 pub use shell_command_specs::SastTaskModeCommand;
+pub use shell_command_specs::StrategyCommand;
+pub use shell_command_specs::StrategyCorrectionCommandScope;
 pub use shell_command_specs::WorkspaceCommand;
 pub use shellcommandspec::ShellCommandSpec;

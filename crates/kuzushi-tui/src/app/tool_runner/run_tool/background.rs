@@ -31,6 +31,9 @@ impl ShellApp {
         if self.reject_background_tool_overlap(&tool_name) {
             return;
         }
+        if self.reject_pending_prompt_mutation(&workspace, &tool_name) {
+            return;
+        }
 
         let dispatch = prepare_background_tool_dispatch(
             &self.registry,
@@ -81,6 +84,39 @@ impl ShellApp {
             format!("{active} is still running; wait for its result before starting {tool_name}"),
         );
         true
+    }
+
+    fn reject_pending_prompt_mutation(
+        &mut self,
+        workspace: &WorkspaceTarget,
+        tool_name: &str,
+    ) -> bool {
+        let (module_id, verb) = tool_name.split_once(':').unwrap_or((tool_name, "run"));
+        match kuzushi_core::latest_prompt_mutation(workspace, module_id, verb) {
+            Ok(Some(mutation))
+                if mutation.status == kuzushi_core::PromptMutationStatus::Pending =>
+            {
+                self.focused_module = Some(module_id.to_string());
+                self.shell_view = ShellView::PromptsEditor;
+                self.log(
+                    "prompt",
+                    format!(
+                        "{tool_name} blocked by pending prompt mutation {}; approve or reject it first",
+                        mutation.id
+                    ),
+                );
+                true
+            }
+            Ok(_) => false,
+            Err(error) => {
+                self.shell_view = ShellView::PromptsEditor;
+                self.log(
+                    "error",
+                    format!("could not read prompt mutations before {tool_name}: {error}"),
+                );
+                true
+            }
+        }
     }
 
     fn open_activity_for_started_background_tool(&mut self) {

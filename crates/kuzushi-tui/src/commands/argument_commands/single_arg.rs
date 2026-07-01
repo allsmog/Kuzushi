@@ -10,9 +10,10 @@ pub(crate) fn parse_single_arg_command(
         "open" | "use" | "since" | "replay" | "trace" | "detach" | "reparse" => {
             parse_required_single_arg_command(verb, first, original)
         }
-        "scan" | "provider" | "backend" | "target" | "resume" | "kb" | "attachments" => {
+        "scan" | "provider" | "backend" | "resume" | "kb" | "attachments" => {
             parse_optional_single_arg_command(verb, first)
         }
+        "target" => parse_target_command(args, original),
         "actor" => parse_actor_command(first, original),
         _ => return None,
     };
@@ -46,6 +47,17 @@ fn parse_optional_single_arg_command(verb: &str, first: Option<&str>) -> ShellCo
         "resume" => ShellCommand::Resume(first.map(ToString::to_string)),
         "kb" | "attachments" => ShellCommand::KnowledgeBase(first.map(ToString::to_string)),
         _ => ShellCommand::Unknown(verb.to_string()),
+    }
+}
+
+fn parse_target_command(args: &[&str], original: &str) -> ShellCommand {
+    match args {
+        [] => ShellCommand::Target(None),
+        ["rev" | "revision" | "sha", reference] => {
+            ShellCommand::TargetRevision((*reference).to_string())
+        }
+        ["rev" | "revision" | "sha"] => ShellCommand::Unknown(original.to_string()),
+        [path, ..] => ShellCommand::Target(Some((*path).to_string())),
     }
 }
 

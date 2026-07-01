@@ -45,12 +45,12 @@ impl Widget for DfdDiagram {
                 1,
                 0,
                 "widen terminal (≥24 cols) for the diagram",
-                theme::T_MUTED,
+                diagram_muted(),
             );
             return;
         }
         if let Some(hint) = &self.model.empty_hint {
-            text(buf, area, 2, 1, hint, theme::T_MUTED);
+            text(buf, area, 2, 1, hint, diagram_muted());
             return;
         }
         let zone_count = self.model.zones.len().max(1) as u16;
@@ -88,7 +88,7 @@ impl DfdDiagram {
                 zone_w,
                 zone_h,
                 &zone.to_uppercase(),
-                theme::T_SUBTLE,
+                diagram_subtle(),
             );
         }
     }
@@ -115,7 +115,7 @@ impl DfdDiagram {
                 self.model.nodes.len(),
                 self.model.flows.len()
             ),
-            theme::T_PRIMARY,
+            diagram_primary(),
         );
         text(
             buf,
@@ -123,7 +123,7 @@ impl DfdDiagram {
             2,
             legend_y + 1,
             "amber ▶ = trust-boundary crossing · grey = in-zone",
-            theme::T_MUTED,
+            diagram_muted(),
         );
     }
 
@@ -235,6 +235,12 @@ fn node_label(node: &DfdNodeModel) -> String {
 }
 
 fn node_color(kind: DfdKind) -> Color {
+    if theme::active_theme().high_contrast {
+        return match kind {
+            DfdKind::Entity | DfdKind::Process => theme::T_HEADING,
+            DfdKind::Store => theme::SEV_HIGH,
+        };
+    }
     match kind {
         DfdKind::Entity => theme::T_LABEL,
         DfdKind::Process => theme::T_ACCENT,
@@ -245,6 +251,8 @@ fn node_color(kind: DfdKind) -> Color {
 fn flow_color(crosses: bool) -> Color {
     if crosses {
         theme::SEV_HIGH
+    } else if theme::active_theme().high_contrast {
+        theme::T_PRIMARY
     } else {
         theme::T_MUTED
     }
