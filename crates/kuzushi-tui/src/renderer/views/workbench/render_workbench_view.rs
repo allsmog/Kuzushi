@@ -70,6 +70,7 @@ fn render_phase_page_body(
             "COVERAGE MATRIX",
             coverage_matrix_lines(app, area.width.saturating_sub(2) as usize),
             app,
+            model,
         ),
         WorkbenchPage::Review => {}
         WorkbenchPage::Ship => render_ship_body(frame, area, app, model),
@@ -80,16 +81,21 @@ fn render_terrain_body(
     frame: &mut Frame<'_>,
     area: Rect,
     app: &ShellApp,
-    _model: &WorkbenchViewModel,
+    model: &WorkbenchViewModel,
 ) {
     if area.width < 110 {
-        render_compact_terrain(frame, area, app);
+        render_compact_terrain(frame, area, app, model);
         return;
     }
-    render_terrain_columns(frame, area, app);
+    render_terrain_columns(frame, area, app, model);
 }
 
-fn render_compact_terrain(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+fn render_compact_terrain(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+) {
     let width = area.width.saturating_sub(2) as usize;
     render_single_page_pane(
         frame,
@@ -101,10 +107,16 @@ fn render_compact_terrain(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
             terrain_material_lines(app, width),
         ]),
         app,
+        model,
     );
 }
 
-fn render_terrain_columns(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+fn render_terrain_columns(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+) {
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -119,6 +131,7 @@ fn render_terrain_columns(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         "ATTACK SURFACE",
         terrain_attack_surface_lines(app, cols[0].width.saturating_sub(2) as usize),
         app,
+        model,
     );
     render_page_pane(
         frame,
@@ -126,6 +139,7 @@ fn render_terrain_columns(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         "DFD / TERRAIN",
         terrain_visual_lines(app, cols[1].width.saturating_sub(2) as usize),
         app,
+        model,
     );
     render_page_pane(
         frame,
@@ -133,23 +147,24 @@ fn render_terrain_columns(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         "RECON & MATERIALS",
         terrain_material_lines(app, cols[2].width.saturating_sub(2) as usize),
         app,
+        model,
     );
 }
 
-fn render_ship_body(
+fn render_ship_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp, model: &WorkbenchViewModel) {
+    if area.width < 100 {
+        render_compact_ship(frame, area, app, model);
+        return;
+    }
+    render_ship_columns(frame, area, app, model);
+}
+
+fn render_compact_ship(
     frame: &mut Frame<'_>,
     area: Rect,
     app: &ShellApp,
-    _model: &WorkbenchViewModel,
+    model: &WorkbenchViewModel,
 ) {
-    if area.width < 100 {
-        render_compact_ship(frame, area, app);
-        return;
-    }
-    render_ship_columns(frame, area, app);
-}
-
-fn render_compact_ship(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     let width = area.width.saturating_sub(2) as usize;
     render_single_page_pane(
         frame,
@@ -161,10 +176,16 @@ fn render_compact_ship(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
             ship_export_lines(app, width),
         ]),
         app,
+        model,
     );
 }
 
-fn render_ship_columns(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+fn render_ship_columns(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+) {
     let cols = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
@@ -179,6 +200,7 @@ fn render_ship_columns(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         "EXPLOIT CHAINS",
         ship_chain_lines(app, cols[0].width.saturating_sub(2) as usize),
         app,
+        model,
     );
     render_page_pane(
         frame,
@@ -186,6 +208,7 @@ fn render_ship_columns(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         "PATCH QUEUE",
         ship_patch_lines(app, cols[1].width.saturating_sub(2) as usize),
         app,
+        model,
     );
     render_page_pane(
         frame,
@@ -193,6 +216,7 @@ fn render_ship_columns(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         "EXPORT",
         ship_export_lines(app, cols[2].width.saturating_sub(2) as usize),
         app,
+        model,
     );
 }
 
@@ -202,8 +226,9 @@ fn render_single_page_pane(
     title: &str,
     lines: Vec<Line<'static>>,
     app: &ShellApp,
+    model: &WorkbenchViewModel,
 ) {
-    render_page_pane(frame, area, title, lines, app);
+    render_page_pane(frame, area, title, lines, app, model);
 }
 
 fn render_page_pane(
@@ -212,13 +237,14 @@ fn render_page_pane(
     title: &str,
     lines: Vec<Line<'static>>,
     app: &ShellApp,
+    model: &WorkbenchViewModel,
 ) {
     render_pane(
         frame,
         area,
         title,
         lines,
-        true,
+        model.focus == WorkbenchPane::Center,
         app.workbench_scroll.get(WorkbenchPane::Center),
     );
 }

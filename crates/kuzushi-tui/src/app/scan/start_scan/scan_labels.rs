@@ -9,7 +9,13 @@ impl ShellApp {
     }
 
     pub(crate) fn log_scan_alias_hint(&mut self) {
-        if let Some((alias, finding)) = sorted_finding_aliases(&self.findings).into_iter().next() {
+        if let Some((alias, index)) = kuzushi_core::sorted_finding_alias_indices(&self.findings)
+            .into_iter()
+            .next()
+        {
+            let Some(finding) = self.findings.get(index) else {
+                return;
+            };
             self.log(
                 "scan",
                 format!(

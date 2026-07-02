@@ -66,6 +66,14 @@ fn codeql_options() -> Vec<OptionSpec> {
             .aliases(&["db_path"])
             .advanced(),
         codeql_language_option(),
+        opt(
+            "buildMode",
+            OptionType::Enum,
+            "CodeQL build mode override.",
+        )
+        .aliases(&["build_mode"])
+        .choices(&["default", "autobuild", "none"])
+        .advanced(),
         opt("suite", OptionType::String, "CodeQL query suite.").advanced(),
         opt("threads", OptionType::Int, "CodeQL worker thread count.").advanced(),
         opt("ram", OptionType::Int, "CodeQL RAM budget in MB.").advanced(),
@@ -178,6 +186,21 @@ pub(in crate::modules) fn cargo_audit_module() -> BuiltinModule {
             vec![target_option()],
         )],
         vec![dag("cargo-audit:scan", "findings", &["context:build"])],
+    )
+}
+
+pub(in crate::modules) fn govulncheck_module() -> BuiltinModule {
+    builtin_module(
+        "govulncheck",
+        "Govulncheck",
+        ModuleKind::Defense,
+        "Run govulncheck against Go packages and persist reachable vulnerability findings.",
+        vec![tool_with_options(
+            "govulncheck:scan",
+            "Run govulncheck and persist normalized Go vulnerability findings.",
+            vec![target_option()],
+        )],
+        vec![dag("govulncheck:scan", "findings", &["context:build"])],
     )
 }
 

@@ -115,9 +115,6 @@ fn scope_tree_row(app: &ShellApp) -> ProjectModelRow {
         Some(ProjectScopeTreeState::Persisted(tree)) => {
             scope_tree_project_row(&tree, ProjectModelOrigin::Local, "present")
         }
-        Some(ProjectScopeTreeState::Discovered(tree)) => {
-            scope_tree_project_row(&tree, ProjectModelOrigin::Stale, "discovered")
-        }
         Some(ProjectScopeTreeState::RootOnly) => root_only_scope_tree_row(),
         Some(ProjectScopeTreeState::Unreadable(error)) => ProjectModelRow {
             section: "scope tree",
@@ -135,9 +132,9 @@ fn root_only_scope_tree_row() -> ProjectModelRow {
         section: "scope tree",
         origin: ProjectModelOrigin::Missing,
         state: "root only",
-        summary: "no persisted nested scopes; no submodules or major dependency roots found"
+        summary: "no persisted nested scopes yet; run `next` to map project boundaries"
             .to_string(),
-        action: "target <path>",
+        action: "next",
     }
 }
 

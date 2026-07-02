@@ -79,6 +79,17 @@ const MODULE_PLAYBOOKS: &[(&str, ModulePlaybook)] = &[
         },
     ),
     (
+        "govulncheck",
+        ModulePlaybook {
+            run: PlaybookText::Static(
+                "run . dispatches govulncheck:scan for Go reachable vulnerabilities",
+            ),
+            needs: "target with Go packages and govulncheck installed",
+            output: PlaybookText::FindingsDbPath,
+            inspect: "findings · use triage · use report",
+        },
+    ),
+    (
         "secret-scan",
         ModulePlaybook {
             run: PlaybookText::Static("run . dispatches secret-scan:scan for credential findings"),

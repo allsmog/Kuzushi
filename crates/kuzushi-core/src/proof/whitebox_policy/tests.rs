@@ -223,4 +223,24 @@ mod tests {
             Some(StaticProofState::SourceSinkLinked)
         );
     }
+
+    #[test]
+    fn static_proof_marking_replaces_baseline_signal_with_requested_state() {
+        let mut findings = vec![Finding::new_semgrep(
+            "demo.signal",
+            "src/app.ts",
+            1,
+            Some(1),
+            crate::findings::Severity::High,
+            "scanner signal",
+        )];
+
+        mark_whitebox_static_findings(&mut findings, StaticProofState::NeedsRuntimeEvidence)
+            .unwrap();
+
+        assert_eq!(
+            findings[0].static_proof_state,
+            Some(StaticProofState::NeedsRuntimeEvidence)
+        );
+    }
 }

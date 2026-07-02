@@ -148,6 +148,7 @@ fn tool_group_key(metadata: &ModuleMetadata, tool: &ToolDescriptor) -> &'static 
         | "secret-scan"
         | "iac-scan"
         | "cargo-audit"
+        | "govulncheck"
         | "dep-hygiene"
         | "android-apk"
         | "chrome-rce"

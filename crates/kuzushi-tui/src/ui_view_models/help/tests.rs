@@ -7,6 +7,8 @@ fn help_model_projects_registered_examples_and_aliases() {
     let model = help_model(None);
 
     assert!(model.intro.contains("? opens help"));
+    assert!(model.glossary.contains("taint-iris=source-to-sink"));
+    assert!(model.glossary.contains("randori=threat model"));
     assert!(model.examples.contains(&"run ."));
     assert!(model
         .categories

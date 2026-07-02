@@ -40,6 +40,10 @@ pub(crate) fn auth_method_rows(provider: &str) -> Vec<AuthMethodRow> {
                 label: "Claude.ai OAuth login",
                 hint: "opens a browser flow (or headless link in non-TTY)",
             },
+            AuthMethodRow {
+                label: "Offline demo",
+                hint: "run bundled fixture now; no key, model, or scanner binary",
+            },
         ],
         "openai" | "openai-codex" => vec![
             AuthMethodRow {
@@ -49,6 +53,10 @@ pub(crate) fn auth_method_rows(provider: &str) -> Vec<AuthMethodRow> {
             AuthMethodRow {
                 label: "OpenAI OAuth login",
                 hint: "opens a browser flow (or headless link in non-TTY)",
+            },
+            AuthMethodRow {
+                label: "Offline demo",
+                hint: "run bundled fixture now; no key, model, or scanner binary",
             },
         ],
         _ => Vec::new(),

@@ -23,10 +23,22 @@ pub fn mark_whitebox_static_findings(
     default_state: StaticProofState,
 ) -> Result<()> {
     for finding in findings {
-        let state = finding.static_proof_state.unwrap_or(default_state);
-        finding.set_static_proof_state(state);
+        finding.set_static_proof_state(whitebox_static_state(
+            finding.static_proof_state,
+            default_state,
+        ));
     }
     Ok(())
+}
+
+fn whitebox_static_state(
+    existing: Option<StaticProofState>,
+    default_state: StaticProofState,
+) -> StaticProofState {
+    match existing {
+        None | Some(StaticProofState::SignalOnly) => default_state,
+        Some(state) => state,
+    }
 }
 
 pub(crate) fn is_forbidden_agent_tool(tool: &str) -> bool {

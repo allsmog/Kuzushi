@@ -11,6 +11,7 @@ pub(crate) fn resolve_sast_task(raw_id: &str) -> Option<&'static SastTaskCapabil
         "codeql:scan" => "codeql",
         "dep-hygiene:check" => "dep-hygiene",
         "cargo audit" | "cargo-audit:scan" => "cargo-audit",
+        "go vuln" | "go-vuln" | "govulncheck:scan" => "govulncheck",
         "secret-scan:scan" | "secrets" => "secret-scan",
         "iac-scan:scan" => "iac-scan",
         "license" | "licenses" | "license-scan:scan" => "license-scan",

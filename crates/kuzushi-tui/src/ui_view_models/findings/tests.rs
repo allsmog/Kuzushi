@@ -315,6 +315,8 @@ fn selected_finding_detail_model_bounds_evidence_and_message() {
                 snippet: "file.save(filepath)".to_string(),
                 rationale: "Raw upload path reaches a filesystem write".to_string(),
                 confidence: 92,
+                request_blob: (index == 0).then(|| "RAW REQUEST".to_string()),
+                response_blob: (index == 0).then(|| "RAW RESPONSE".to_string()),
                 ..Default::default()
             })
             .collect(),
@@ -330,6 +332,10 @@ fn selected_finding_detail_model_bounds_evidence_and_message() {
     assert_eq!(
         model.evidence[0].header,
         "filesystem_sink · conf 92 · src/app.ts:8"
+    );
+    assert_eq!(
+        model.evidence[0].capture.as_deref(),
+        Some("http capture: request body recorded, response body recorded")
     );
     assert_eq!(model.message_lines.len(), 8);
     assert_eq!(model.message_overflow, 1);

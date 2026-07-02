@@ -12,44 +12,8 @@ pub(crate) fn handle_demo_command(app: &mut ShellApp, command: &ShellCommand) ->
     let ShellCommand::Demo = command else {
         return false;
     };
-    match prepare_demo_fixture() {
-        Ok(demo_dir) => {
-            app.log(
-                "demo",
-                format!(
-                    "offline fixture ready at {} — deterministic engines only; no key or model required",
-                    demo_dir.display()
-                ),
-            );
-            app.start_umbrella_sast_scan(Some(demo_dir));
-        }
-        Err(error) => app.log("error", format!("could not prepare demo fixture: {error}")),
-    }
+    app.start_offline_demo_fixture_scan();
     true
-}
-
-fn prepare_demo_fixture() -> std::io::Result<std::path::PathBuf> {
-    let demo_dir = std::env::temp_dir().join("kuzushi-demo");
-    if demo_dir.exists() {
-        std::fs::remove_dir_all(&demo_dir)?;
-    }
-    std::fs::create_dir_all(&demo_dir)?;
-    std::fs::write(
-        demo_dir.join("config.env"),
-        "# production credentials accidentally committed\n\
-         AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\n\
-         AWS_SECRET_ACCESS_KEY=wJalrXUtnFE/K7MDENG/bPxRfiCYEXAMPLEKEY\n\
-         GITHUB_TOKEN=ghp_x7rT9qLm2KvW8pYzN3jBdF5cH1aG6eQ4sU0i\n",
-    )?;
-    std::fs::write(
-        demo_dir.join("Dockerfile"),
-        "FROM node:latest\n\
-         ADD https://example.com/setup.sh /setup.sh\n\
-         COPY . .\n\
-         RUN npm install\n\
-         CMD [\"node\", \"server.js\"]\n",
-    )?;
-    Ok(demo_dir)
 }
 
 pub(crate) fn handle_model_command(app: &mut ShellApp, command: &ShellCommand) -> bool {

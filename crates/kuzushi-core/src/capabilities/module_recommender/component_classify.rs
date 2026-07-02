@@ -5,7 +5,7 @@ mod component_signals;
 use component_signals::ComponentSignals;
 
 pub(crate) fn component_recommendations(
-    target: &Path,
+    _target: &Path,
     tree: &NestedProjectScopeTree,
     inventory: &RepositoryInventory,
     attack_surface: &AttackSurfaceMap,
@@ -13,7 +13,7 @@ pub(crate) fn component_recommendations(
     let mut components = tree
         .non_root_scopes()
         .filter(|scope| recommendable_component_scope(scope.kind))
-        .map(|scope| component_recommendation(target, scope, inventory, attack_surface))
+        .map(|scope| component_recommendation(scope, inventory, attack_surface))
         .collect::<Vec<_>>();
     components.sort_by(component_sort_order);
     components
@@ -49,7 +49,6 @@ fn component_class_rules(
 }
 
 fn component_recommendation(
-    target: &Path,
     scope: &NestedProjectScope,
     inventory: &RepositoryInventory,
     attack_surface: &AttackSurfaceMap,
@@ -66,7 +65,7 @@ fn component_recommendation(
         tier,
         reasons: component_reasons(scope, class, &signals),
         recommended_tools: recommended_tools_for_tasks(&tasks),
-        next_input: scoped_scan_input(target, scope, class, &tasks),
+        next_input: scoped_scan_input(scope, &tasks),
     }
 }
 
@@ -107,7 +106,7 @@ fn scanner_tasks_for_component(class: ComponentClass, signals: &ComponentSignals
         ComponentClass::WebApp | ComponentClass::ServiceApi => {
             vec!["semgrep", "dep-hygiene", "taint-iris-next", "secret-scan"]
         }
-        ComponentClass::CliBinary => vec!["semgrep", "dep-hygiene", "secret-scan"],
+        ComponentClass::CliBinary => vec!["semgrep", "govulncheck", "secret-scan"],
         ComponentClass::Infra => vec!["iac-scan", "secret-scan"],
         ComponentClass::Library => vec!["semgrep", "dep-hygiene", "secret-scan"],
         ComponentClass::TestFixture => vec!["secret-scan"],
@@ -122,6 +121,7 @@ fn scanner_tasks_for_component(class: ComponentClass, signals: &ComponentSignals
 fn task_applicable(task: &str, signals: &ComponentSignals) -> bool {
     match task {
         "dep-hygiene" => signals.dependency_manifests > 0,
+        "govulncheck" => signals.languages.iter().any(|language| language == "Go"),
         "iac-scan" => signals.iac_files > 0,
         "taint-iris-next" => signals.routes > 0 || signals.entrypoints > 0,
         _ => true,
@@ -133,6 +133,7 @@ fn recommended_tools_for_tasks(tasks: &[String]) -> Vec<String> {
         .iter()
         .map(|task| match task.as_str() {
             "dep-hygiene" => "dep-hygiene:check",
+            "govulncheck" => "govulncheck:scan",
             "iac-scan" => "iac-scan:scan",
             "secret-scan" => "secret-scan:scan",
             "taint-iris-next" => "taint-iris-next:hunt",
@@ -143,22 +144,11 @@ fn recommended_tools_for_tasks(tasks: &[String]) -> Vec<String> {
         .collect()
 }
 
-fn scoped_scan_input(
-    target: &Path,
-    scope: &NestedProjectScope,
-    class: ComponentClass,
-    tasks: &[String],
-) -> Value {
+fn scoped_scan_input(scope: &NestedProjectScope, tasks: &[String]) -> Value {
     json!({
-        "target": target.display().to_string(),
         "paths": [scope.rel_path.clone()],
         "taskMode": "manual",
-        "tasks": tasks,
-        "component": {
-            "scopeId": scope.id,
-            "relPath": scope.rel_path,
-            "class": class.label(),
-        }
+        "tasks": tasks
     })
 }
 

@@ -24,6 +24,22 @@ pub struct StrategyProposal {
     pub rationale: String,
     pub expected_cost_usd: Option<f64>,
     pub expected_runtime: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub yield_score: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub estimated_rounds: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_cost_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actual_cost_usd: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub findings_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confirmed_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure: Option<String>,
     pub preflight: StrategyPreflight,
     pub resource_risk: StrategyResourceRisk,
     pub status: StrategyProposalStatus,
@@ -129,6 +145,9 @@ pub enum StrategyProposalStatus {
     Proposed,
     Approved,
     Rejected,
+    Running,
+    Done,
+    Failed,
 }
 
 impl StrategyProposalStatus {
@@ -137,6 +156,9 @@ impl StrategyProposalStatus {
             Self::Proposed => "proposed",
             Self::Approved => "approved",
             Self::Rejected => "rejected",
+            Self::Running => "running",
+            Self::Done => "done",
+            Self::Failed => "failed",
         }
     }
 }
@@ -168,6 +190,14 @@ impl StrategyProposal {
             rationale: rationale.into(),
             expected_cost_usd: None,
             expected_runtime: None,
+            yield_score: None,
+            estimated_rounds: None,
+            approved_cost_usd: None,
+            actual_cost_usd: None,
+            findings_count: None,
+            confirmed_count: None,
+            result_run_id: None,
+            failure: None,
             preflight: StrategyPreflight {
                 status: StrategyPreflightStatus::Unknown,
                 notes: Vec::new(),
@@ -209,6 +239,60 @@ impl StrategyProposal {
         self.preflight = preflight;
         self
     }
+
+    pub fn with_yield_score(mut self, yield_score: Option<f64>) -> Self {
+        self.yield_score = yield_score;
+        self
+    }
+
+    pub fn with_estimated_rounds(mut self, estimated_rounds: Option<u32>) -> Self {
+        self.estimated_rounds = estimated_rounds;
+        self
+    }
+
+    pub fn with_approved_cost(mut self, approved_cost_usd: Option<f64>) -> Self {
+        self.approved_cost_usd = approved_cost_usd;
+        self
+    }
+
+    pub fn mark_running(&mut self) {
+        self.status = StrategyProposalStatus::Running;
+        self.updated_at_ms = now_ms();
+    }
+
+    pub fn mark_done(
+        &mut self,
+        result_run_id: Option<String>,
+        actual_cost_usd: Option<f64>,
+        findings_count: Option<u32>,
+        confirmed_count: Option<u32>,
+    ) {
+        self.status = StrategyProposalStatus::Done;
+        self.result_run_id = result_run_id;
+        self.actual_cost_usd = actual_cost_usd;
+        self.findings_count = findings_count;
+        self.confirmed_count = confirmed_count;
+        self.failure = None;
+        self.updated_at_ms = now_ms();
+    }
+
+    pub fn mark_failed(&mut self, failure: impl Into<String>) {
+        self.status = StrategyProposalStatus::Failed;
+        self.failure = Some(failure.into());
+        self.updated_at_ms = now_ms();
+    }
+}
+
+pub fn estimate_strategy_cost(estimated_rounds: u32, cost_per_round_usd: f64, verify: bool) -> f64 {
+    let verifier_multiplier = if verify { 2.0 } else { 1.0 };
+    estimated_rounds as f64 * cost_per_round_usd.max(0.0) * verifier_multiplier
+}
+
+pub fn calibrated_cost_per_round(previous: f64, observed: f64) -> f64 {
+    if previous <= 0.0 {
+        return observed.max(0.0);
+    }
+    0.7 * previous + 0.3 * observed.max(0.0)
 }
 
 pub fn strategy_queue_path(workspace: &WorkspaceTarget) -> PathBuf {

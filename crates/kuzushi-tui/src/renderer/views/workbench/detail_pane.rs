@@ -163,7 +163,10 @@ fn push_triage_section(
     lines.push(section_line("TRIAGE"));
     push_wrapped(
         lines,
-        &format!("{} · confidence {}", triage.verdict, triage.confidence),
+        &format!(
+            "{} · confidence {} · by {}",
+            triage.verdict, triage.confidence, triage.author
+        ),
         budget,
         "  ",
         theme::label(),
@@ -211,6 +214,9 @@ fn push_evidence_row(
     push_wrapped(lines, &evidence.header, budget, "  ", theme::label());
     push_optional_wrapped(lines, &evidence.snippet, budget, "    ", theme::primary());
     push_optional_wrapped(lines, &evidence.rationale, budget, "    ", theme::muted());
+    if let Some(capture) = &evidence.capture {
+        push_optional_wrapped(lines, capture, budget, "    ", theme::muted());
+    }
 }
 
 fn push_reference_footer(
@@ -222,6 +228,8 @@ fn push_reference_footer(
     push_detail_kv(lines, "location", &detail.location, budget);
     push_detail_kv(lines, "rule", &detail.rule, budget);
     push_detail_kv(lines, "tool", &detail.tool, budget);
+    push_detail_kv(lines, "source signature", &detail.source_signature, budget);
+    push_detail_kv(lines, "corroboration", &detail.corroboration, budget);
     push_detail_kv(lines, "fingerprint", &detail.fingerprint, budget);
     push_alias_note(lines, budget);
 }
@@ -300,6 +308,8 @@ mod tests {
             location: "src/app.rs:42".to_string(),
             rule: "demo.rule".to_string(),
             tool: "demo".to_string(),
+            source_signature: "app.rs:42:demo-finding".to_string(),
+            corroboration: "1".to_string(),
             fingerprint: "fp-demo".to_string(),
             proof_label: "unverified".to_string(),
             proof_marker: "?",
@@ -319,6 +329,7 @@ mod tests {
                 header: "source · conf 90 · src/app.rs:42".to_string(),
                 snippet: "request reaches sink".to_string(),
                 rationale: "tainted input".to_string(),
+                capture: Some("http capture: request body recorded".to_string()),
             }],
             message_lines: vec!["line 1".to_string()],
             message_overflow: 2,
@@ -349,6 +360,10 @@ mod tests {
         assert!(text.contains("static: not recorded"), "{text}");
         assert!(text.contains("NEXT"), "{text}");
         assert!(text.contains("validate: `verify F-0001`"), "{text}");
+        assert!(
+            text.contains("http capture: request body recorded"),
+            "{text}"
+        );
         assert!(text.contains("… 2 more message lines"), "{text}");
         assert!(text.contains("… 3 more evidence rows"), "{text}");
     }

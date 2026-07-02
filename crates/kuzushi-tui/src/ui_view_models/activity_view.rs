@@ -290,6 +290,7 @@ mod tests {
                 message: "order_id".to_string(),
                 file: "orders.rs".to_string(),
                 line: 1,
+                snippet: None,
             }],
         });
         // The active session ran only an unrelated task — no taint-iris and no

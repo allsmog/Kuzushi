@@ -1,4 +1,5 @@
 use super::*;
+use crate::{Finding, Severity};
 
 pub(in crate::modules) fn run_sast_verification_and_patch(
     registry: &ModuleRegistry,
@@ -13,7 +14,7 @@ pub(in crate::modules) fn run_sast_verification_and_patch(
 ) -> Result<(Vec<Value>, Vec<Value>)> {
     let mut verification_results = Vec::new();
     let mut patch_results = Vec::new();
-    for fingerprint in true_positive_fingerprints_for_sast_runs(store, run_ids)? {
+    for fingerprint in selected_verification_fingerprints(store, run_ids, requests)? {
         let result = run_sast_verification_for_fingerprint(
             registry,
             input,
@@ -28,6 +29,51 @@ pub(in crate::modules) fn run_sast_verification_and_patch(
         patch_results.extend(result.patch);
     }
     Ok((verification_results, patch_results))
+}
+
+fn selected_verification_fingerprints(
+    store: &crate::findings::FindingStore,
+    run_ids: &SastRunIds,
+    requests: &SastScanRequests,
+) -> Result<Vec<String>> {
+    let mut findings = true_positive_findings_for_sast_runs(store, run_ids)?
+        .into_iter()
+        .filter(|finding| requests.verify_when.matches(finding))
+        .filter(|finding| finding_has_votes(finding, requests.verify_votes))
+        .collect::<Vec<_>>();
+    findings.sort_by_key(|finding| {
+        (
+            std::cmp::Reverse(severity_rank(finding.severity)),
+            finding.file_path.clone(),
+            finding.start_line,
+            finding.fingerprint.clone(),
+        )
+    });
+    if let Some(max) = requests.verify_max {
+        findings.truncate(max);
+    }
+    Ok(findings
+        .into_iter()
+        .map(|finding| finding.fingerprint)
+        .collect())
+}
+
+fn finding_has_votes(finding: &Finding, verify_votes: Option<usize>) -> bool {
+    let Some(required) = verify_votes else {
+        return true;
+    };
+    finding.corroboration_count.max(1) as usize >= required
+}
+
+fn severity_rank(severity: Severity) -> u8 {
+    match severity {
+        Severity::Critical => 5,
+        Severity::High => 4,
+        Severity::Medium => 3,
+        Severity::Low => 2,
+        Severity::Info => 1,
+        Severity::Unknown => 0,
+    }
 }
 
 struct SastVerificationResult {
@@ -176,4 +222,98 @@ pub(in crate::modules) fn whitebox_mode_label(
     whitebox_static: Option<&WhiteboxStaticPolicy>,
 ) -> &str {
     whitebox_static.map_or("standard", |policy| policy.mode.as_str())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{TriageOutcome, TriageVerdict};
+    use std::path::Path;
+
+    #[test]
+    fn selected_verification_fingerprints_filters_votes_when_and_max() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let run_ids = SastRunIds {
+            primary: "run-select".to_string(),
+            native: None,
+            agentic: None,
+            carlini: None,
+            taint_iris: None,
+            taint_iris_next: None,
+            systems_hunt: None,
+        };
+        store
+            .insert_scan_run(&run_ids.primary, Path::new("/tmp/repo"), "completed")
+            .unwrap();
+
+        let high = seed_verification_selection_findings(&store, &run_ids.primary);
+        let requests = SastScanRequests::from_input(&json!({
+            "verify": true,
+            "verifyWhen": "severity>=high",
+            "verifyVotes": 2,
+            "verifyMax": 1
+        }))
+        .unwrap();
+
+        let selected = selected_verification_fingerprints(&store, &run_ids, &requests).unwrap();
+
+        assert_eq!(selected, vec![high.fingerprint]);
+    }
+
+    fn seed_verification_selection_findings(store: &FindingStore, run_id: &str) -> Finding {
+        let high = insert_true_positive(
+            store,
+            run_id,
+            test_finding("semgrep", "rule/cwe-89", "src/db.rs", 10, Severity::High),
+        );
+        store
+            .insert_finding(
+                run_id,
+                &test_finding(
+                    "systems-hunt",
+                    "systems/cwe-89",
+                    "src/db.rs",
+                    11,
+                    Severity::High,
+                ),
+            )
+            .unwrap();
+        insert_true_positive(
+            store,
+            run_id,
+            test_finding("semgrep", "rule/cwe-78", "src/cmd.rs", 50, Severity::Critical),
+        );
+        insert_true_positive(
+            store,
+            run_id,
+            test_finding("semgrep", "rule/cwe-79", "src/view.rs", 30, Severity::Medium),
+        );
+        high
+    }
+
+    fn test_finding(
+        tool: &str,
+        rule_id: &str,
+        file_path: &str,
+        line: u32,
+        severity: Severity,
+    ) -> Finding {
+        Finding::new_tool(tool, rule_id, file_path, line, None, severity, rule_id)
+    }
+
+    fn insert_true_positive(store: &FindingStore, run_id: &str, finding: Finding) -> Finding {
+        let id = store.insert_finding(run_id, &finding).unwrap();
+        store
+            .save_triage(
+                id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.90,
+                    rationale: "test true positive".to_string(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        finding
+    }
 }

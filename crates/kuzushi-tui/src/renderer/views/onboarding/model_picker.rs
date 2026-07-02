@@ -14,9 +14,11 @@ pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static
     for (idx, choice) in choices.iter().enumerate() {
         lines.push(model_picker_row(app, idx, choice, widths, area.width));
     }
+    lines.push(offline_demo_action_line(area.width));
     lines.push(blank());
     lines.push(keybind_hint_line(&[
         ("↑/↓/j/k", "move"),
+        ("d/demo", "offline fixture"),
         (":", "type a command"),
         ("Enter", "confirm"),
         ("Esc/q", "defer (you'll need to /model later)"),
@@ -72,6 +74,16 @@ fn model_picker_row(
         theme::primary()
     };
     Line::styled(fit(&body, width as usize), style)
+}
+
+fn offline_demo_action_line(width: u16) -> Line<'static> {
+    Line::styled(
+        fit(
+            "  demo  Try offline fixture   local/no auth   deterministic scan",
+            width as usize,
+        ),
+        theme::muted(),
+    )
 }
 
 fn auth_hint_for(choice: &ModelChoice) -> String {

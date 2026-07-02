@@ -32,6 +32,32 @@ Roadmap surfaces such as binary exploitation, broad pentest automation,
 governance packs, and defensive operations should reinforce that evidence
 workflow before they become primary product surfaces.
 
+## Current Snapshot Highlights
+
+This snapshot tightens the data path from scan execution through persisted
+findings, run artifacts, shell view models, and exports:
+
+- Findings now carry source signatures, corroborating source rows, triage
+  authorship, static proof state, latest runtime verification, and safe HTTP
+  capture markers through list/detail/export surfaces. Unknown persisted
+  verification verdicts or sandbox backends are hard decode errors instead of
+  silent fallbacks.
+- SAST verification is descriptor-driven: `sast:scan` accepts
+  `verifyWhen`, `verifyMax`, and `verifyVotes`; `semgrep:scan` and
+  `codeql:scan` honor `staticProofState`; `codeql:scan` declares
+  `buildMode`; scan cost is carried into run/session accounting.
+- Visualization snapshots are no longer restart-only state. Persisted taint
+  flows and exploit chains hydrate back into the shell after scans complete,
+  including taint snippets plus exploit-chain narrative, impact, and
+  preconditions.
+- The Rust workbench and recommendation views now lean on persisted project
+  scope data, scoped component recommendations, richer strategy-queue status
+  fields, source-tree/project-model summaries, and reality-derived journey
+  chrome.
+- The native registry includes `govulncheck:scan` for Go vulnerability
+  findings, and the offline demo path can run deterministic scan input without
+  inheriting stored operator options.
+
 ## Privacy & Data Flow
 
 Kuzushi is local-first and ships **no telemetry**. Findings, evidence, run
@@ -130,7 +156,7 @@ inside the TUI and your terminal still gives you a selection modifier.
 | --- | --- |
 | `kuzushi shell [--target <repo>]` | Start the Ratatui shell. |
 | `kuzushi demo` | Scan a vendored vulnerable fixture offline — no API key, no model, no external scanners. The fastest way to see a real finding with evidence. |
-| `kuzushi scan <repo> [--mode standard\|whitebox-static] [--tasks a,b] [--triage] [--json] [--ci] [--fail-on low\|medium\|high\|critical] [--sarif out.sarif]` | Run the Rust SAST umbrella executor and persist findings. `--fail-on` exits 3 when findings at/above the severity exist (CI gating); `--sarif` writes a SARIF 2.1.0 export for Code Scanning upload. |
+| `kuzushi scan <repo> [--mode standard\|whitebox-static] [--tasks a,b] [--triage] [--json] [--ci] [--fail-on low\|medium\|high\|critical] [--sarif out.sarif]` | Run the Rust SAST umbrella executor and persist findings. `--fail-on` exits 3 when findings at/above the severity exist (CI gating); `--sarif` writes a SARIF 2.1.0 export for Code Scanning upload. Descriptor-backed inputs also support `verifyWhen`, `verifyMax`, and `verifyVotes` for post-triage verification selection. |
 | `kuzushi findings --target <repo> [--severity high,critical] [--verdict true_positive] [--name text] [--file-path path] [--limit 50] [--json]` | List persisted findings. |
 | `kuzushi finding <F-0001\|fingerprint-prefix> --target <repo> [--json]` | Inspect one finding's evidence, proof state, verification summary, patch result, and next action. |
 | `kuzushi runs list [--status completed,failed]\|show <runId>\|trace <runId>\|diff <a> <b>\|prune --target <repo>` | Inspect, compare, or prune replayable summaries, result artifacts, and trace JSONL under `.kuzushi/runs/<runId>/`. |
@@ -284,6 +310,7 @@ current built-ins are:
 | `semgrep` | `semgrep:scan` |
 | `codeql` | `codeql:scan` |
 | `cargo-audit` | `cargo-audit:scan` |
+| `govulncheck` | `govulncheck:scan` |
 | `agentic-sast` | `agentic-sast:scan` |
 | `offense-review` | `offense-review:threat-hunt` |
 | `taint-iris` | `taint-iris:hunt` |
@@ -336,7 +363,7 @@ binary-exploitation workflow.
 
 Native deterministic tools run without an LLM: `module-recommender`,
 `context`, `findings`, `dep-hygiene`, `secret-scan`, `license-scan`, `sbom-scan`,
-`iac-scan`, and local artifact readers.
+`iac-scan`, `govulncheck`, and local artifact readers.
 
 `license-scan` checks package manifest license declarations, top-level
 repository `LICENSE`/`COPYING` consistency, and SPDX source headers that
@@ -353,6 +380,7 @@ Subprocess-backed tools require the operator to install or configure binaries:
 | --- | --- |
 | `semgrep:scan` | `semgrep`, or pass `{"binary":"/path/to/semgrep"}`. |
 | `codeql:scan` | CodeQL CLI, or pass `{"binary":"/path/to/codeql"}`. |
+| `govulncheck:scan` | `govulncheck`, installed through the Go toolchain. |
 | Deferred `recon:nmap` | `nmap`, or pass a binary override. |
 | Deferred `recon:subdomain`, deferred `recon:http-fingerprint`, online `ndiff:fetch-cve` | `curl`, unless using offline/local input. |
 
@@ -384,6 +412,9 @@ not silently succeed and they do not substitute a different model.
 | `~/.kuzushi/v2/options.json` | persisted global tool options from shell `setg` |
 | `.kuzushi/v2/options.json` | optional project/workspace tool option overrides |
 | `.kuzushi/v2/findings.sqlite3` | scan, shell, and run-mode tool persistence |
+| `.kuzushi/v2/scene-taint-flow.json` | persisted attack-path snapshot for `/scene`, Activity, and workbench views |
+| `.kuzushi/v2/scene-exploit-chains.json` | persisted exploit-chain snapshot for `/scene`, Activity, and workbench views |
+| `.kuzushi/v2/strategy-queue.jsonl` | persisted strategy proposals, status, outcome, cost, and correction history |
 | `.kuzushi/v2/attachments.json` | Rust shell KB attachments |
 | `.kuzushi/v2/artifact-kb.sqlite3` | Local artifact knowledge search index |
 | `.kuzushi/context-snapshot.json` | `context:build` |

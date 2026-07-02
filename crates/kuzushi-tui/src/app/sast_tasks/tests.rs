@@ -53,6 +53,18 @@ mod tests {
     }
 
     #[test]
+    fn govulncheck_task_aliases_resolve_to_native_scanner() {
+        for alias in ["govulncheck", "go vuln", "go-vuln", "govulncheck:scan"] {
+            let task = resolve_sast_task(alias).unwrap();
+            assert_eq!(task.id, "govulncheck");
+            assert_eq!(task.scan_task, "govulncheck");
+            assert!(!task.default_enabled);
+        }
+
+        assert!(valid_sast_task_ids().contains(&"govulncheck"));
+    }
+
+    #[test]
     fn license_scan_task_aliases_resolve_to_native_scanner() {
         for alias in ["license-scan", "license", "licenses", "license-scan:scan"] {
             let task = resolve_sast_task(alias).unwrap();

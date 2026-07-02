@@ -257,6 +257,7 @@ fn sast_scan_data(parts: SastScanResultParts<'_>) -> Value {
         "mode": whitebox_mode_label(parts.whitebox_static),
         "whiteboxStatic": parts.whitebox_static.map(|policy| policy.to_json()),
         "findingsCount": parts.findings_count,
+        "costUsd": sast_cost_usd(parts.reports, parts.post_processing),
         "coreFindings": parts.core_findings,
         "db": parts.workspace.findings_db_path().display().to_string(),
         "engines": parts.reports.engine_ids.clone(),
@@ -276,6 +277,51 @@ fn sast_scan_data(parts: SastScanResultParts<'_>) -> Value {
         "patch": patch_json(parts.post_processing),
         "artifacts": sast_artifacts_json(parts.artifacts, paths),
     })
+}
+
+fn sast_cost_usd(reports: &SastPipelineReports, post_processing: &SastPostProcessing) -> f64 {
+    reports
+        .agentic
+        .as_ref()
+        .map(|report| report.cost_usd)
+        .unwrap_or(0.0)
+        + reports
+            .carlini
+            .as_ref()
+            .map(|report| report.cost_usd)
+            .unwrap_or(0.0)
+        + reports
+            .taint_iris
+            .as_ref()
+            .map(|report| report.cost_usd)
+            .unwrap_or(0.0)
+        + reports
+            .taint_iris_next
+            .as_ref()
+            .map(|report| report.cost_usd)
+            .unwrap_or(0.0)
+        + reports
+            .systems_hunt
+            .as_ref()
+            .map(|report| report.cost_usd)
+            .unwrap_or(0.0)
+        + tool_output_cost_usd(post_processing.triage.as_ref())
+        + post_processing
+            .verification_results
+            .iter()
+            .map(|result| tool_output_cost_usd(Some(result)))
+            .sum::<f64>()
+        + post_processing
+            .patch_results
+            .iter()
+            .map(|result| tool_output_cost_usd(Some(result)))
+            .sum::<f64>()
+}
+
+fn tool_output_cost_usd(output: Option<&Value>) -> f64 {
+    output
+        .and_then(crate::run_artifacts::tool_run_output_cost_usd)
+        .unwrap_or(0.0)
 }
 
 fn sast_run_ids_json(run_ids: SastRunIds) -> Value {

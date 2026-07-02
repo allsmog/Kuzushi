@@ -72,6 +72,38 @@ fn strategy_queue_missing_file_is_empty() {
     assert!(load_strategy_queue(&workspace).unwrap().is_empty());
 }
 
+#[test]
+fn strategy_proposal_records_execution_outcome() {
+    let mut proposal = StrategyProposal::new(
+        StrategyPhase::Review,
+        "run semgrep:scan",
+        "cheap coverage first",
+    )
+    .with_yield_score(Some(0.75))
+    .with_estimated_rounds(Some(3))
+    .with_approved_cost(Some(1.50));
+
+    proposal.mark_running();
+    assert_eq!(proposal.status, StrategyProposalStatus::Running);
+
+    proposal.mark_done(Some("run-123".to_string()), Some(1.20), Some(8), Some(3));
+
+    assert_eq!(proposal.status, StrategyProposalStatus::Done);
+    assert_eq!(proposal.result_run_id.as_deref(), Some("run-123"));
+    assert_eq!(proposal.actual_cost_usd, Some(1.20));
+    assert_eq!(proposal.findings_count, Some(8));
+    assert_eq!(proposal.confirmed_count, Some(3));
+    assert_eq!(proposal.failure, None);
+}
+
+#[test]
+fn strategy_cost_helpers_match_round_and_ema_rules() {
+    assert_eq!(estimate_strategy_cost(4, 0.25, false), 1.0);
+    assert_eq!(estimate_strategy_cost(4, 0.25, true), 2.0);
+    assert!((calibrated_cost_per_round(1.0, 2.0) - 1.3).abs() < 0.000_001);
+    assert_eq!(calibrated_cost_per_round(0.0, 2.0), 2.0);
+}
+
 fn workspace_with_recorded_strategy_correction(
 ) -> (tempfile::TempDir, WorkspaceTarget, StrategyCorrection) {
     let temp = tempfile::tempdir().unwrap();
@@ -138,6 +170,14 @@ fn codeql_strategy_proposal_for_rerun() -> StrategyProposal {
         rationale: "language coverage exists".to_string(),
         expected_cost_usd: None,
         expected_runtime: None,
+        yield_score: None,
+        estimated_rounds: None,
+        approved_cost_usd: None,
+        actual_cost_usd: None,
+        findings_count: None,
+        confirmed_count: None,
+        result_run_id: None,
+        failure: None,
         preflight: StrategyPreflight::ready(),
         resource_risk: StrategyResourceRisk::Low,
         status: StrategyProposalStatus::Proposed,

@@ -1,5 +1,7 @@
 use super::scan_gate::{apply_scan_gate_policy, ScanGatePolicy};
-use super::scan_prepare::{prepare_scan_command, PreparedScanCommand, SCAN_TOOL};
+use super::scan_prepare::{
+    prepare_scan_command, prepare_scan_command_with_requested_input, PreparedScanCommand, SCAN_TOOL,
+};
 use crate::command::ScanModeArg;
 use crate::presentation::{emit_scan_ci_start, emit_scan_output, scan_result_or_report_ci_error};
 use anyhow::{Context, Result};
@@ -44,6 +46,24 @@ pub(crate) async fn scan_command(
         )?,
         &target,
         &tasks,
+        json,
+        ci,
+        gate,
+    )
+}
+
+pub(crate) async fn scan_command_with_requested_input(
+    target: PathBuf,
+    input: serde_json::Value,
+    task_labels: Vec<String>,
+    json: bool,
+    ci: bool,
+    gate: ScanGatePolicy,
+) -> Result<()> {
+    execute_prepared_scan(
+        prepare_scan_command_with_requested_input(&target, input, json, ci)?,
+        &target,
+        &task_labels,
         json,
         ci,
         gate,

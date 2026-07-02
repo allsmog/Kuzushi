@@ -364,18 +364,7 @@ fn sample_findings(count: usize) -> Vec<Finding> {
             end_line: None,
             message: String::new(),
             tool: "test".to_string(),
-            actor_fingerprint: None,
-            static_proof_state: None,
-            triage: None,
-            verification: None,
-            created_at: String::new(),
-            vuln_source: None,
-            dedup_key: None,
-            suppressed: false,
-            snoozed_until: None,
-            remediation: None,
-            references: Vec::new(),
-            evidence: Vec::new(),
+            ..Finding::default()
         })
         .collect()
 }

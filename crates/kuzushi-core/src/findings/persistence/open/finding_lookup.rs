@@ -12,7 +12,8 @@ impl FindingStore {
                   f.static_proof_state, f.created_at,
                   t.verdict, t.confidence, t.rationale, t.cost_usd,
                   f.vuln_source, f.dedup_key, f.suppressed, f.snoozed_until,
-                  f.remediation, f.references_json
+                  f.remediation, f.references_json, t.triaged_by, f.source_signature,
+                  f.corroboration_count
                 from findings f
                 left join triage t on t.finding_id = f.id
                 where f.fingerprint = ?1
@@ -26,6 +27,7 @@ impl FindingStore {
             .context("Could not load finding")?;
 
         self.attach_evidence_to_finding(finding.as_mut())?;
+        self.attach_sources_to_finding(finding.as_mut())?;
         self.attach_latest_verification(finding.as_mut())?;
         Ok(finding)
     }
@@ -40,6 +42,10 @@ impl FindingStore {
             return Ok(Some(finding));
         }
 
+        self.hydrate_reference_match(reference, self.reference_prefix_matches(reference)?)
+    }
+
+    fn reference_prefix_matches(&self, reference: &str) -> Result<Vec<Finding>> {
         let like_pattern = format!("{reference}%");
         let mut stmt = self.conn.prepare(
             r#"
@@ -49,7 +55,8 @@ impl FindingStore {
               f.static_proof_state, f.created_at,
               t.verdict, t.confidence, t.rationale, t.cost_usd,
               f.vuln_source, f.dedup_key, f.suppressed, f.snoozed_until,
-              f.remediation, f.references_json
+              f.remediation, f.references_json, t.triaged_by, f.source_signature,
+              f.corroboration_count
             from findings f
             left join triage t on t.finding_id = f.id
             where f.fingerprint like ?1
@@ -59,15 +66,21 @@ impl FindingStore {
         )?;
 
         let rows = stmt.query_map(params![like_pattern], row_to_finding)?;
-        let matches = rows
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .context("Could not resolve finding reference")?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not resolve finding reference")
+    }
 
+    fn hydrate_reference_match(
+        &self,
+        reference: &str,
+        matches: Vec<Finding>,
+    ) -> Result<Option<Finding>> {
         match matches.len() {
             0 => Ok(None),
             1 => {
                 let mut finding = matches.into_iter().next();
                 self.attach_evidence_to_finding(finding.as_mut())?;
+                self.attach_sources_to_finding(finding.as_mut())?;
                 self.attach_latest_verification(finding.as_mut())?;
                 Ok(finding)
             }

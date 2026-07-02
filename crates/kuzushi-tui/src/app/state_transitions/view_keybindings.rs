@@ -1,6 +1,6 @@
 use super::view_keybinding_groups::{
     activity_keybindings, actor_detail_keybindings, home_keybindings, prompts_editor_keybindings,
-    threat_keybindings, tune_keybindings, workbench_keybindings,
+    recommend_keybindings, threat_keybindings, tune_keybindings, workbench_keybindings,
 };
 use super::view_keybinding_helpers::{
     back_keybinding, bind, pause_scan_keybindings, resume_scan_keybindings, scroll_keybindings,
@@ -27,6 +27,7 @@ impl ShellApp {
         match self.shell_view {
             ShellView::Home => home_keybindings(),
             ShellView::Workbench => workbench_keybindings(),
+            ShellView::Recommend => recommend_keybindings(),
             ShellView::Threat(_) => threat_keybindings(),
             ShellView::ModuleRun => self.module_run_keybindings(),
             ShellView::ActorDetail(_) => actor_detail_keybindings(),

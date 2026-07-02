@@ -62,6 +62,18 @@ mod tests {
     }
 
     #[test]
+    fn source_signature_keeps_basename_exact_line_and_cwe_or_title() {
+        assert_eq!(
+            compute_source_signature("src/foo.c", 42, Some("CWE-787")),
+            "foo.c:42:787"
+        );
+        assert_eq!(
+            compute_source_signature("./src/app.ts", 9, Some("SQL injection")),
+            "app.ts:9:sql-injection"
+        );
+    }
+
+    #[test]
     fn root_cause_key_groups_call_sites_the_dedup_key_separates() {
         // Two call sites of one CWE-89 defect, far enough apart that the
         // line-bucketed dedup key keeps them distinct...
@@ -253,6 +265,53 @@ mod tests {
     }
 
     #[test]
+    fn cross_run_dedup_accumulates_sources_without_changing_bucket_identity() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-source-1", Path::new("/tmp"), "completed")
+            .unwrap();
+        store
+            .insert_scan_run("run-source-2", Path::new("/tmp"), "completed")
+            .unwrap();
+
+        let semgrep = Finding::new_tool(
+            "semgrep",
+            "rule/cwe-78",
+            "src/foo.c",
+            42,
+            Some(42),
+            Severity::Medium,
+            "user-controlled exec, CWE-78",
+        );
+        let id1 = store.insert_finding("run-source-1", &semgrep).unwrap();
+        let systems = Finding::new_tool(
+            "systems-hunt",
+            "systems/cwe-78",
+            "src/foo.c",
+            43,
+            Some(43),
+            Severity::High,
+            "exec reaches shell with attacker input, CWE-78",
+        );
+        assert_eq!(semgrep.dedup_key, systems.dedup_key);
+        assert_ne!(semgrep.source_signature, systems.source_signature);
+
+        let id2 = store.insert_finding("run-source-2", &systems).unwrap();
+
+        assert_eq!(id1, id2);
+        let listed = store.list_findings(10).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].corroboration_count, 2);
+        assert_eq!(listed[0].sources.len(), 2);
+        assert!(listed[0].tool.contains("semgrep"));
+        assert!(listed[0].tool.contains("systems-hunt"));
+        assert!(listed[0]
+            .sources
+            .iter()
+            .any(|source| source.last_scan_id == "run-source-2"));
+    }
+
+    #[test]
     fn stores_and_lists_findings_with_triage() {
         let store = FindingStore::open_in_memory().unwrap();
         let run_id = "run-1";
@@ -287,6 +346,52 @@ mod tests {
             rows[0].triage.as_ref().unwrap().verdict,
             TriageVerdict::NeedsReview
         );
+    }
+
+    #[test]
+    fn human_triage_is_sticky_against_auto_updates() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-human-triage", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.rule",
+            "src/app.ts",
+            12,
+            Some(12),
+            Severity::High,
+            "User input reaches sink",
+        );
+        let finding_id = store.insert_finding("run-human-triage", &finding).unwrap();
+        store
+            .save_triage_with_author(
+                finding_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.95,
+                    rationale: "operator confirmed exploitability".to_string(),
+                    ..Default::default()
+                },
+                TriageAuthor::Human,
+            )
+            .unwrap();
+        store
+            .save_triage(
+                finding_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::FalsePositive,
+                    confidence: 0.10,
+                    rationale: "automated rerun disagreed".to_string(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let stored = store.list_findings(10).unwrap();
+        let triage = stored[0].triage.as_ref().unwrap();
+        assert_eq!(triage.verdict, TriageVerdict::TruePositive);
+        assert_eq!(stored[0].triaged_by, Some(TriageAuthor::Human));
+        assert_eq!(triage.rationale, "operator confirmed exploitability");
     }
 
     #[test]
@@ -770,6 +875,7 @@ mod tests {
             Severity::High,
             "http",
         );
+        finding.set_static_proof_state(StaticProofState::SourceSinkLinked);
         finding.evidence.push(FindingEvidence {
             kind: "http-request".to_string(),
             file_path: "captures/login.har".to_string(),
@@ -789,6 +895,7 @@ mod tests {
 
         assert!(output.contains("requestBlobPresent"));
         assert!(output.contains("responseBlobPresent"));
+        assert!(output.contains(r#""static_proof_state":"source_sink_linked""#));
         assert!(!output.contains("RAW REQUEST BODY"));
         assert!(!output.contains("RAW RESPONSE BODY"));
     }
@@ -1104,6 +1211,100 @@ mod tests {
         let fetched = store.get_latest_verification(finding_id).unwrap().unwrap();
         assert_eq!(fetched.proof_level, 4);
         assert_eq!(fetched.proof_verdict, PersistedProofVerdict::Exploited);
+    }
+
+    #[test]
+    fn get_latest_verification_rejects_unknown_verdict_and_backend() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-v-bad", Path::new("/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "verify-test",
+            "rule.test",
+            "src/x.rs",
+            1,
+            None,
+            Severity::High,
+            "test",
+        );
+        let finding_id = store.insert_finding("run-v-bad", &finding).unwrap();
+        store
+            .conn
+            .execute(
+                r#"
+                insert into verifications (
+                  finding_id, proof_level, proof_verdict, backend, duration_ms,
+                  cost_usd, notes_json, created_at
+                ) values (?1, 4, 'surprise', 'plain', 0, 0.0, '[]', '2026-01-01T00:00:00Z')
+                "#,
+                rusqlite::params![finding_id],
+            )
+            .unwrap();
+
+        let verdict_error = store.get_latest_verification(finding_id).unwrap_err();
+        assert!(verdict_error
+            .to_string()
+            .contains("unknown persisted proof verdict"));
+
+        store
+            .conn
+            .execute(
+                "update verifications set proof_verdict = 'exploited', backend = 'mystery'",
+                [],
+            )
+            .unwrap();
+        let backend_error = store.get_latest_verification(finding_id).unwrap_err();
+        assert!(backend_error
+            .to_string()
+            .contains("unknown persisted sandbox backend"));
+    }
+
+    #[test]
+    fn list_findings_attaches_latest_verification() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .insert_scan_run("run-v-list", Path::new("/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "verify-test",
+            "rule.test",
+            "src/x.rs",
+            1,
+            None,
+            Severity::High,
+            "test",
+        );
+        let finding_id = store.insert_finding("run-v-list", &finding).unwrap();
+        store
+            .save_verification(
+                finding_id,
+                &PersistedVerification {
+                    proof_level: 4,
+                    proof_verdict: PersistedProofVerdict::Exploited,
+                    backend: PersistedSandboxBackend::Bwrap,
+                    language: Some("rust".to_string()),
+                    harness_path: None,
+                    crash_evidence: Some("SIGSEGV".to_string()),
+                    duration_ms: 200,
+                    cost_usd: 0.0,
+                    notes: vec![],
+                    created_at: String::new(),
+                },
+            )
+            .unwrap();
+
+        let listed = store.list_findings(10).unwrap();
+        assert_eq!(
+            listed[0].verification.as_ref().map(|v| v.proof_verdict),
+            Some(PersistedProofVerdict::Exploited)
+        );
+
+        let scan_rows = store.list_findings_for_scan_id("run-v-list").unwrap();
+        assert_eq!(
+            scan_rows[0].verification.as_ref().map(|v| v.proof_level),
+            Some(4)
+        );
     }
 
     #[test]

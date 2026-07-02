@@ -1208,6 +1208,14 @@ exit 2
     }
 
     #[test]
+    fn scan_engines_for_tasks_resolves_govulncheck_task() {
+        let engines = scan_engines_for_tasks(&["govulncheck".to_string()]).unwrap();
+        let ids = engines.iter().map(|engine| engine.id()).collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["govulncheck"]);
+    }
+
+    #[test]
     fn scan_engines_for_tasks_resolves_license_scan_task() {
         let engines = scan_engines_for_tasks(&["license-scan".to_string()]).unwrap();
         let ids = engines.iter().map(|engine| engine.id()).collect::<Vec<_>>();

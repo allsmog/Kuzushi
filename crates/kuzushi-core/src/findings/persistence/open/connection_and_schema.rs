@@ -26,6 +26,7 @@ impl FindingStore {
         configure_connection(&self.conn)?;
         create_schema(&self.conn)?;
         migrate_findings_columns(&self.conn)?;
+        create_finding_sources_schema(&self.conn)?;
         create_findings_indexes(&self.conn)?;
         migrate_triage_columns(&self.conn)?;
         migrate_finding_evidence_columns(&self.conn)?;
@@ -102,10 +103,17 @@ fn migrate_findings_columns(conn: &Connection) -> Result<()> {
 fn create_findings_indexes(conn: &Connection) -> Result<()> {
     conn.execute_batch(
         "create index if not exists idx_findings_dedup_key
+           on findings(dedup_key) where dedup_key is not null;
+         create index if not exists idx_findings_scan_dedup_key
            on findings(scan_id, dedup_key) where dedup_key is not null;
          create index if not exists idx_findings_vuln_source
            on findings(vuln_source) where vuln_source is not null;",
     )?;
+    Ok(())
+}
+
+fn create_finding_sources_schema(conn: &Connection) -> Result<()> {
+    conn.execute_batch(FINDING_SOURCES_SCHEMA)?;
     Ok(())
 }
 
@@ -115,6 +123,12 @@ fn migrate_triage_columns(conn: &Connection) -> Result<()> {
         "triage",
         "cost_usd",
         "alter table triage add column cost_usd real not null default 0.0",
+    )?;
+    ensure_column(
+        conn,
+        "triage",
+        "triaged_by",
+        "alter table triage add column triaged_by text",
     )
 }
 
@@ -157,6 +171,14 @@ const FINDING_COLUMN_MIGRATIONS: &[ColumnMigration] = &[
     ColumnMigration {
         name: "dedup_key",
         sql: "alter table findings add column dedup_key text",
+    },
+    ColumnMigration {
+        name: "source_signature",
+        sql: "alter table findings add column source_signature text",
+    },
+    ColumnMigration {
+        name: "corroboration_count",
+        sql: "alter table findings add column corroboration_count integer not null default 1",
     },
     ColumnMigration {
         name: "suppressed",
@@ -274,4 +296,22 @@ create table if not exists verifications (
 );
 create index if not exists idx_verifications_finding
   on verifications(finding_id, created_at desc);
+"#;
+
+const FINDING_SOURCES_SCHEMA: &str = r#"
+create table if not exists finding_sources (
+  finding_id integer not null references findings(id) on delete cascade,
+  tool text not null,
+  vuln_source text,
+  source_signature text not null,
+  first_scan_id text not null,
+  last_scan_id text not null,
+  first_seen_at text not null,
+  last_seen_at text not null,
+  primary key (finding_id, tool, source_signature)
+);
+create index if not exists idx_finding_sources_finding
+  on finding_sources(finding_id, tool, source_signature);
+create index if not exists idx_finding_sources_signature
+  on finding_sources(source_signature);
 "#;

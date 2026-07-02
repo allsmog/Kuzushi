@@ -56,6 +56,7 @@ fn choice_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     }
     vec![
         bind("j/k", "move"),
+        bind("demo", "offline"),
         bind(":", "type command"),
         bind("Enter", "select"),
         bind("Esc", "skip"),

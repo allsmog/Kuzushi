@@ -22,7 +22,9 @@ pub(super) fn dispatch_reporting_command(
         Command::Suppressions { json } => suppressions_command(default_target, json),
         Command::Permissions { json } => permissions_command(default_target, json),
         Command::Doctor { json } => doctor_command(default_target, json),
-        pr_comment @ Command::PrComment(_) => dispatch_pr_comment_command(pr_comment, default_target),
+        pr_comment @ Command::PrComment(_) => {
+            dispatch_pr_comment_command(pr_comment, default_target)
+        }
         _ => unreachable!("non-reporting command routed to reporting dispatcher"),
     }
 }

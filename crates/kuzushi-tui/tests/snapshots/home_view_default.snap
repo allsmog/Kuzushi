@@ -17,6 +17,6 @@ assertion_line: 89
         ctx ■  surface ■  threat ■  recommend ■  strategy ■  findings ■  proof ■  failures ■  report ■  manifest ■
         .kuzushi/runs/latest · `show runs` for detail
 
-  WORKSPACE   target none · modules 41 · context not built
+  WORKSPACE   target none · modules 42 · context not built
 
 > try: target . · options sast:scan · tasks · next · quickstart · Ctrl+G

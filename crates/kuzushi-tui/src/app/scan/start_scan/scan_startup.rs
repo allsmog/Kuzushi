@@ -55,10 +55,40 @@ impl ShellApp {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn start_umbrella_sast_scan(&mut self, target: Option<PathBuf>) {
-        let Some(request) = self.prepare_scan_start(target) else {
+        let Some(request) = self.prepare_scan_start(target, None) else {
             return;
         };
+        self.start_prepared_scan(request);
+    }
+
+    pub(crate) fn start_offline_demo_scan(&mut self, target: PathBuf) {
+        let Some(request) =
+            self.prepare_scan_start(Some(target), Some(kuzushi_core::offline_demo_scan_input()))
+        else {
+            return;
+        };
+        self.start_prepared_scan(request);
+    }
+
+    pub(crate) fn start_offline_demo_fixture_scan(&mut self) {
+        match kuzushi_core::prepare_demo_fixture() {
+            Ok(demo_dir) => {
+                self.log(
+                    "demo",
+                    format!(
+                        "offline fixture ready at {} — deterministic engines only; no key or model required",
+                        demo_dir.display()
+                    ),
+                );
+                self.start_offline_demo_scan(demo_dir);
+            }
+            Err(error) => self.log("error", format!("could not prepare demo fixture: {error}")),
+        }
+    }
+
+    fn start_prepared_scan(&mut self, request: ScanStartRequest) {
         let (tx, rx) = mpsc::channel();
         let (trace_tx, trace_rx) = mpsc::channel::<RunTraceStep>();
         let trace_handle = scan_trace_handle(&request.target_root, &request.run_id, trace_tx);
@@ -149,20 +179,32 @@ impl ShellApp {
         ));
     }
 
-    fn prepare_scan_start(&mut self, target: Option<PathBuf>) -> Option<ScanStartRequest> {
+    fn prepare_scan_start(
+        &mut self,
+        target: Option<PathBuf>,
+        explicit_input: Option<serde_json::Value>,
+    ) -> Option<ScanStartRequest> {
         if self.scan.as_ref().is_some_and(|scan| scan.running) {
             self.log("scan", "scan already running");
             return None;
         }
-        self.resolve_scan_start_request(target)
+        self.resolve_scan_start_request(target, explicit_input)
     }
 
-    fn resolve_scan_start_request(&mut self, target: Option<PathBuf>) -> Option<ScanStartRequest> {
+    fn resolve_scan_start_request(
+        &mut self,
+        target: Option<PathBuf>,
+        explicit_input: Option<serde_json::Value>,
+    ) -> Option<ScanStartRequest> {
         let target_path = self.scan_target_path(target);
         let workspace = self.scan_workspace(&target_path)?;
         let run_id = new_run_id("scan");
-        let effective_options = effective_scan_options(&self.registry, &self.option_store);
-        let input = scan_input_with_run_id(self.scan_input_or_log()?, &run_id);
+        let effective_options = if explicit_input.is_some() {
+            Vec::new()
+        } else {
+            effective_scan_options(&self.registry, &self.option_store)
+        };
+        let input = scan_input_with_run_id(self.scan_input_or_log(explicit_input)?, &run_id);
         Some(ScanStartRequest {
             run_id,
             target_root: workspace.root().to_path_buf(),
@@ -191,8 +233,11 @@ impl ShellApp {
         }
     }
 
-    fn scan_input_or_log(&mut self) -> Option<serde_json::Value> {
-        match self.scan_input_from_store() {
+    fn scan_input_or_log(
+        &mut self,
+        explicit_input: Option<serde_json::Value>,
+    ) -> Option<serde_json::Value> {
+        match self.scan_input_from_explicit(explicit_input) {
             Ok(input) => Some(input),
             Err(error) => {
                 self.log("error", error.to_string());
@@ -201,11 +246,20 @@ impl ShellApp {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn scan_input_from_store(&self) -> Result<serde_json::Value> {
+        self.scan_input_from_explicit(None)
+    }
+
+    fn scan_input_from_explicit(
+        &self,
+        explicit_input: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
+        let use_stored_options = explicit_input.is_none();
         self.registry.prepare_tool_input(
             "sast:scan",
-            serde_json::json!({}),
-            Some(&self.option_store),
+            explicit_input.unwrap_or_else(|| serde_json::json!({})),
+            use_stored_options.then_some(&self.option_store),
         )
     }
 }

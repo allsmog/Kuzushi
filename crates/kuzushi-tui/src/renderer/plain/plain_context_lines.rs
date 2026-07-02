@@ -108,7 +108,7 @@ fn push_plain_strategy_queue_rows(lines: &mut Vec<String>, model: &StrategyQueue
 fn strategy_queue_plain_rows(row: &StrategyQueueRow) -> Vec<String> {
     vec![
         format!(
-            "{} {} {} {} preflight:{} cost:{} runtime:{} risk:{}",
+            "{} {} {} {} yield:{} rounds:{} est:{} actual:{} outcome:{} preflight:{} runtime:{} risk:{}",
             row.cells[0],
             row.cells[1],
             row.cells[2],
@@ -116,7 +116,11 @@ fn strategy_queue_plain_rows(row: &StrategyQueueRow) -> Vec<String> {
             row.cells[4],
             row.cells[5],
             row.cells[6],
-            row.cells[7]
+            row.cells[7],
+            row.cells[8],
+            row.cells[9],
+            row.cells[10],
+            row.cells[11]
         ),
         format!("  lineage: {}", row.lineage),
         format!("  why: {} · source {}", row.rationale, row.source_run),

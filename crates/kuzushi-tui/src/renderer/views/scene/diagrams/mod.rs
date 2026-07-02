@@ -118,14 +118,17 @@ mod tests {
                 TaintStageModel {
                     title: "req.body.id".into(),
                     location: "order.ts:12".into(),
+                    snippet: None,
                 },
                 TaintStageModel {
                     title: "buildQuery".into(),
                     location: "order.ts:42".into(),
+                    snippet: None,
                 },
                 TaintStageModel {
                     title: "db.exec()".into(),
                     location: "db.ts:7".into(),
+                    snippet: None,
                 },
             ],
             empty_hint: None,

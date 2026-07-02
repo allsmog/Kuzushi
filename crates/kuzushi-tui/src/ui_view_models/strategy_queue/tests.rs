@@ -43,13 +43,18 @@ fn strategy_queue_model_reads_persisted_proposals() {
 
     assert_eq!(
         model.summary,
-        "1 proposals: 1 proposed, 0 approved, 0 rejected, 0 corrected"
+        "1 proposals: 1 proposed, 0 approved, 0 running, 0 done, 0 failed, 0 rejected, 0 corrected"
     );
     assert_eq!(model.rows[0].id, "review-codeql-scan");
     assert_eq!(model.rows[0].cells[0], "proposed");
     assert_eq!(model.rows[0].cells[1], "review");
     assert_eq!(model.rows[0].cells[3], "run codeql:scan");
-    assert_eq!(model.rows[0].cells[4], "ready");
+    assert_eq!(model.rows[0].cells[4], "-");
+    assert_eq!(model.rows[0].cells[5], "-");
+    assert_eq!(model.rows[0].cells[8], "-");
+    assert_eq!(model.rows[0].cells[9], "ready");
+    assert_eq!(model.rows[0].cells[10], "local pass");
+    assert_eq!(model.rows[0].cells[11], "low");
     assert_eq!(model.rows[0].source_run, "rec-123");
 }
 

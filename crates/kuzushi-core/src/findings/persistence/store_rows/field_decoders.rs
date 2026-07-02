@@ -32,3 +32,8 @@ pub(super) fn vuln_source_from_row(row: &rusqlite::Row<'_>) -> Option<VulnSource
     let vuln_source: Option<String> = row.get(18).ok();
     vuln_source.as_deref().and_then(VulnSource::parse)
 }
+
+pub(super) fn triage_author_from_row(row: &rusqlite::Row<'_>) -> Option<TriageAuthor> {
+    let author: Option<String> = row.get(24).ok()?;
+    author.as_deref().and_then(TriageAuthor::from_str)
+}

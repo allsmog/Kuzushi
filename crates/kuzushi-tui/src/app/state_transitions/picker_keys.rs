@@ -123,6 +123,10 @@ impl ShellApp {
                 self.accept_model_picker_choice();
                 true
             }
+            KeyCode::Char('d') => {
+                self.start_offline_demo_fixture_scan();
+                true
+            }
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.defer_model_picker();
                 true
@@ -232,9 +236,9 @@ impl ShellApp {
                 ),
             );
         }
-        // Continue the first-run chain now that a target exists: model →
-        // auth → planning, exactly as if the shell had launched with it.
-        self.apply_initial_onboarding_phase();
+        // `target <path>` already continues the first-run chain; the picker
+        // intentionally shares that route so typed and selected targets do
+        // not diverge.
         if self.shell_view == ShellView::TargetPicker {
             self.open_workbench(WorkbenchPane::Findings);
         }
@@ -308,7 +312,7 @@ impl ShellApp {
     }
 
     fn move_auth_picker_cursor(&mut self, delta: isize) {
-        let len = 2usize; // API key + OAuth
+        let len = 3usize; // API key + OAuth + offline demo
         let current = (self.auth_picker_cursor.min(len - 1)) as isize;
         self.auth_picker_cursor = (current + delta).rem_euclid(len as isize) as usize;
     }
@@ -318,6 +322,11 @@ impl ShellApp {
             ShellView::AuthMethodPicker(provider) => provider.clone(),
             _ => return,
         };
+        if self.auth_picker_cursor == 2 {
+            self.auth_key_draft.clear();
+            self.start_offline_demo_fixture_scan();
+            return;
+        }
         if self.auth_picker_cursor == 0 {
             self.accept_auth_api_key_choice(&provider);
         } else {

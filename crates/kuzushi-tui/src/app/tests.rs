@@ -1294,6 +1294,7 @@ fn scan_completion_logs_same_stable_alias_used_by_findings() {
     app.apply_scan_event(ScanEvent::Finished {
         run_id: "run-1".to_string(),
         findings_count: 2,
+        cost_usd: None,
     });
 
     assert!(app.log.iter().any(|line| {
@@ -2799,10 +2800,12 @@ fn auth_picker_accepts_pasted_api_key_without_relaunch_or_logging_secret() {
     );
     assert!(app.auth_key_draft.is_empty());
     assert_eq!(app.config.model.as_deref(), Some("openai:gpt-5.5"));
-    assert!(app.log.iter().any(|line| line.prefix == "onboarding"
-        && line
-            .body
-            .contains("OPENAI_API_KEY accepted for this session")));
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "onboarding"
+            && line
+                .body
+                .contains("OPENAI_API_KEY accepted for this session")
+    }));
     assert!(
         app.log
             .iter()
@@ -2839,6 +2842,12 @@ fn picker_footer_omits_tab_complete_hint() {
     assert!(
         !bindings.iter().any(|binding| binding.key == "Tab"),
         "picker footer must not advertise Tab complete"
+    );
+    assert!(
+        bindings
+            .iter()
+            .any(|binding| binding.key == "demo" && binding.label == "offline"),
+        "picker footer should advertise the offline demo escape hatch"
     );
 }
 
@@ -4895,10 +4904,12 @@ fn phase_stop_after_config_blocks_later_phase_picker() {
 
     assert_ne!(app.shell_view, ShellView::PlanningPicker);
     assert_eq!(app.workflow_phase, Some(WorkflowPhase::Map));
-    assert!(app.log.iter().any(|line| line.prefix == "phase"
-        && line
-            .body
-            .contains("hunt stopped by config phases.stop_after=map")));
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "phase"
+            && line
+                .body
+                .contains("hunt stopped by config phases.stop_after=map")
+    }));
 }
 
 #[test]
@@ -5195,18 +5206,7 @@ fn make_finding(severity: Severity, fp: &str, title: &str) -> Finding {
         end_line: None,
         message: String::new(),
         tool: "test".to_string(),
-        actor_fingerprint: None,
-        static_proof_state: None,
-        triage: None,
-        verification: None,
-        created_at: String::new(),
-        vuln_source: None,
-        dedup_key: None,
-        suppressed: false,
-        snoozed_until: None,
-        remediation: None,
-        references: Vec::new(),
-        evidence: Vec::new(),
+        ..Finding::default()
     }
 }
 
@@ -5466,6 +5466,22 @@ fn target_command_switches_target_directory() {
         .log
         .iter()
         .any(|line| line.prefix == "target" && line.body.contains("current target")));
+}
+
+#[test]
+fn target_command_resumes_onboarding_after_deferred_picker() {
+    let _skip_guard = EnvVarGuard::unset("KUZUSHI_SKIP_ONBOARDING");
+    let temp = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+
+    app.handle_command(ShellCommand::Target(Some(
+        temp.path().to_string_lossy().to_string(),
+    )));
+
+    let canonical = std::fs::canonicalize(temp.path()).unwrap();
+    assert_eq!(app.target.as_deref(), Some(canonical.as_path()));
+    assert_eq!(app.shell_view, ShellView::ModelPicker);
 }
 
 #[test]
@@ -6068,6 +6084,20 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
             other => panic!("unexpected workbench hotkey action: {other:?}"),
         }
     }
+}
+
+#[test]
+fn non_review_workbench_pages_keep_tab_focus_on_visible_body() {
+    let mut app = app_with_findings(2);
+    app.workbench_page = Some(WorkbenchPage::Coverage);
+    app.workbench_focus = WorkbenchPane::Findings;
+
+    app.handle_key(key_event_for_trigger(HotkeyTrigger::Tab));
+    assert_eq!(app.workbench_focus, WorkbenchPane::Center);
+
+    app.workbench_focus = WorkbenchPane::Details;
+    app.handle_key(key_event_for_trigger(HotkeyTrigger::BackTab));
+    assert_eq!(app.workbench_focus, WorkbenchPane::Center);
 }
 
 #[test]
@@ -6754,6 +6784,8 @@ fn agent_answer_event_records_llm_audit_metadata() {
         audit: test_agent_audit(),
     });
 
+    assert_eq!(app.last_tool_cost_usd, Some(0.012));
+    assert!((app.session_cost_usd - 0.012).abs() < f64::EPSILON);
     let summary = load_run_summary(tmp.path(), "agent-answer").unwrap();
     assert_eq!(summary.llm_calls.len(), 1);
     assert_eq!(summary.llm_calls[0].model, "openai:gpt-test");
@@ -6791,6 +6823,8 @@ fn agent_failure_event_records_bounded_failure_handoff() {
         audit: test_agent_audit(),
     });
 
+    assert_eq!(app.last_tool_cost_usd, Some(0.012));
+    assert!((app.session_cost_usd - 0.012).abs() < f64::EPSILON);
     let failures = load_run_failures(tmp.path(), "agent-failed").unwrap();
     assert_eq!(failures.status, "failed");
     let failure = failures.failures.first().unwrap();
@@ -7122,6 +7156,146 @@ fn recommend_command_opens_artifact_backed_view() {
         .log
         .iter()
         .any(|line| line.prefix == "recommend" && line.body.contains("choose a target")));
+}
+
+#[test]
+fn recommend_enter_runs_selected_component_scoped_scan() {
+    let temp = tempfile::tempdir().unwrap();
+    let component_root = temp.path().join("web/app");
+    fs::create_dir_all(&component_root).unwrap();
+    fs::write(
+        component_root.join("config.env"),
+        [
+            "OPENAI_API_KEY=",
+            "sk",
+            "-proj-",
+            "abcdefghijklmnopqrstuvwxyzABCDEFGH",
+        ]
+        .concat(),
+    )
+    .unwrap();
+    write_component_recommendation_artifact(
+        temp.path(),
+        serde_json::json!({
+            "scopeId": "package-web-app",
+            "relPath": "web/app",
+            "class": "web-app",
+            "tier": "high",
+            "riskScore": 91,
+            "reasons": ["web-app component at web/app"],
+            "nextInput": {
+                "target": temp.path().display().to_string(),
+                "paths": ["web/app"],
+                "taskMode": "manual",
+                "tasks": ["secret-scan"]
+            }
+        }),
+    );
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.trusted_workflow_auto_accept = true;
+    app.shell_view = ShellView::Recommend;
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+    drain_chain_with_auto_reuse(&mut app);
+    assert_eq!(app.shell_view, ShellView::Activity);
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.prefix == "component" && line.body.contains("web/app")));
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    let findings = store.list_findings(10).unwrap();
+    assert_eq!(findings.len(), 1);
+    assert!(findings[0].file_path.starts_with("web/app/"));
+}
+
+#[test]
+fn recommend_promote_activates_selected_component_target() {
+    let temp = tempfile::tempdir().unwrap();
+    let component_root = temp.path().join("web/app");
+    fs::create_dir_all(&component_root).unwrap();
+    write_component_recommendation_artifact(
+        temp.path(),
+        serde_json::json!({
+            "scopeId": "package-web-app",
+            "relPath": "web/app",
+            "class": "web-app",
+            "tier": "high",
+            "riskScore": 91,
+            "reasons": ["web-app component at web/app"],
+            "nextInput": {
+                "target": temp.path().display().to_string(),
+                "paths": ["web/app"],
+                "taskMode": "manual",
+                "tasks": ["secret-scan"]
+            }
+        }),
+    );
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(temp.path().to_path_buf());
+    app.shell_view = ShellView::Recommend;
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()));
+
+    assert_eq!(
+        app.target
+            .as_deref()
+            .and_then(|path| fs::canonicalize(path).ok()),
+        fs::canonicalize(&component_root).ok()
+    );
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.prefix == "component" && line.body.contains("promoted web/app")));
+}
+
+#[test]
+fn recommend_promote_rejects_paths_outside_active_target() {
+    let temp = tempfile::tempdir().unwrap();
+    write_component_recommendation_artifact(
+        temp.path(),
+        serde_json::json!({
+            "scopeId": "escape",
+            "relPath": "../outside",
+            "class": "web-app",
+            "tier": "high",
+            "riskScore": 91,
+            "reasons": ["external path"]
+        }),
+    );
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(temp.path().to_path_buf());
+    app.shell_view = ShellView::Recommend;
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()));
+
+    assert_eq!(app.target.as_deref(), Some(temp.path()));
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "component" && line.body.contains("target-relative component path")
+    }));
+}
+
+fn write_component_recommendation_artifact(root: &std::path::Path, component: serde_json::Value) {
+    let run_dir = crate::ui_view_models::ui_run_dir(Some(root), "run-components");
+    fs::create_dir_all(&run_dir).unwrap();
+    fs::write(
+        crate::ui_view_models::ui_latest_run_path(Some(root)),
+        "run-components\n",
+    )
+    .unwrap();
+    fs::write(
+        run_dir.join("recommendations.json"),
+        serde_json::json!({
+            "status": "completed",
+            "data": {
+                "components": [component],
+                "recommendations": []
+            }
+        })
+        .to_string(),
+    )
+    .unwrap();
 }
 
 #[test]
@@ -7480,6 +7654,9 @@ fn cache_tool_snapshot_populates_exploit_chain_aliases_and_steps() {
                 "id": "C-0001",
                 "name": "Template render chain",
                 "overallSeverity": "critical",
+                "narrative": "request body reaches template rendering",
+                "impactDescription": "remote code execution",
+                "preconditions": ["templates are enabled"],
                 "steps": [{
                     "findingFingerprint": "fp",
                     "role": "template-input",
@@ -7502,6 +7679,18 @@ fn cache_tool_snapshot_populates_exploit_chain_aliases_and_steps() {
     assert_eq!(app.exploit_chains.len(), 1);
     assert_eq!(app.exploit_chains[0].title, "Template render chain");
     assert_eq!(app.exploit_chains[0].severity, ChainSeverity::Critical);
+    assert_eq!(
+        app.exploit_chains[0].narrative.as_deref(),
+        Some("request body reaches template rendering")
+    );
+    assert_eq!(
+        app.exploit_chains[0].impact_description.as_deref(),
+        Some("remote code execution")
+    );
+    assert_eq!(
+        app.exploit_chains[0].preconditions,
+        vec!["templates are enabled".to_string()]
+    );
     assert_eq!(app.exploit_chains[0].steps.len(), 1);
     assert_eq!(app.exploit_chains[0].steps[0].role, "template-input");
     assert_eq!(app.exploit_chains[0].steps[0].file, "app.js");
@@ -7517,7 +7706,12 @@ fn cache_tool_snapshot_populates_taint_flow() {
                 "cwe": "CWE-89",
                 "severity": "high",
                 "stages": [
-                    {"message": "source: req.query.id", "filePath": "src/routes.ts", "line": 3},
+                    {
+                        "message": "source: req.query.id",
+                        "filePath": "src/routes.ts",
+                        "line": 3,
+                        "snippet": "const id = req.query.id"
+                    },
                     {"message": "sink: db.query", "filePath": "src/db.ts", "line": 7}
                 ]
             }]
@@ -7532,6 +7726,10 @@ fn cache_tool_snapshot_populates_taint_flow() {
     assert_eq!(flow.stages.len(), 2);
     assert_eq!(flow.stages[0].file, "src/routes.ts");
     assert_eq!(flow.stages[0].line, 3);
+    assert_eq!(
+        flow.stages[0].snippet.as_deref(),
+        Some("const id = req.query.id")
+    );
     assert_eq!(flow.stages[1].message, "sink: db.query");
 }
 
@@ -8186,6 +8384,46 @@ fn scan_completion_focuses_activity_findings_when_watching_activity() {
         app.activity.as_ref().unwrap().deck_page,
         super::view_state::ActivityDeckPage::Findings
     );
+}
+
+#[test]
+fn scan_completion_rehydrates_persisted_taint_flow_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(dir.path()).unwrap();
+    kuzushi_core::capabilities::save_persistent_taint_flow(
+        workspace.root(),
+        &serde_json::json!({ "flows": [{
+            "cwe": "CWE-89",
+            "severity": "high",
+            "stages": [
+                { "message": "source", "filePath": "src/routes.rs", "line": 12 },
+                { "message": "sink", "filePath": "src/db.rs", "line": 44 }
+            ]
+        }] }),
+    )
+    .unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.taint_flow = None;
+
+    app.apply_scan_finished("run-viz".to_string(), 1);
+
+    let flow = app.taint_flow.as_ref().expect("taint flow");
+    assert_eq!(flow.cwe, "CWE-89");
+    assert_eq!(flow.stages.len(), 2);
+}
+
+#[test]
+fn scan_finished_event_records_aggregate_cost() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+
+    app.apply_scan_event(ScanEvent::Finished {
+        run_id: "run-cost".to_string(),
+        findings_count: 0,
+        cost_usd: Some(0.42),
+    });
+
+    assert_eq!(app.last_tool_cost_usd, Some(0.42));
+    assert!((app.session_cost_usd - 0.42).abs() < f64::EPSILON);
 }
 
 #[test]

@@ -24,6 +24,9 @@ pub(crate) fn target_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stati
     }
     lines.push(blank());
     lines.push(muted("any other directory: Esc, then `target <path>`"));
+    lines.push(muted(
+        "no repo or no key yet: type `demo` for the offline fixture",
+    ));
     lines.push(blank());
     lines.push(keybind_hint_line(&[
         ("↑/↓/j/k", "move"),

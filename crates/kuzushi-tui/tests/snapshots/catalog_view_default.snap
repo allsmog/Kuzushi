@@ -4,7 +4,7 @@ assertion_line: 33
 ---
  KUZUSHI > modules · mode:shell · target:none · ctx:not built · model:unconfigured
 
-MODULES · 41 modules
+MODULES · 42 modules
 
 > NEXT Run sast — Full SAST pipeline: context, scanners, AI triage, verification, patch, and report
 
@@ -14,6 +14,7 @@ MODULES · 41 modules
   codeql                  GitHub's taint-query semantic analyzer: deeper than pattern scanners but slower.
   dep-hygiene             Check dependency manifests for stale, vulnerable, or policy-risky packages.
   full-mode               Whole-codebase chunked LLM pass — token-greedy file clustering, per-chunk model query.
+  govulncheck             Run govulncheck against Go packages and persist reachable vulnerability findings.
   iac-scan                Scan IaC manifests for security misconfigurations.
   license-scan            Scan package manifests for missing or copyleft license declarations.
   offense-review          Model-backed offensive review tools over existing threat-model artifacts.

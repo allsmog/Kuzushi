@@ -27,18 +27,18 @@ pub fn sorted_finding_alias_indices(findings: &[Finding]) -> Vec<(String, usize)
 }
 
 pub fn stable_finding_alias(findings: &[Finding], fingerprint: &str) -> Option<String> {
-    sorted_finding_aliases(findings)
+    sorted_finding_alias_indices(findings)
         .into_iter()
-        .find(|(_, finding)| finding.fingerprint == fingerprint)
+        .find(|(_, index)| findings[*index].fingerprint == fingerprint)
         .map(|(alias, _)| alias)
 }
 
 pub fn resolve_finding_alias(findings: &[Finding], reference: &str) -> Option<Finding> {
     let index = parse_finding_alias(reference)?;
-    sorted_finding_aliases(findings)
+    sorted_finding_alias_indices(findings)
         .into_iter()
         .nth(index)
-        .map(|(_, finding)| finding)
+        .and_then(|(_, finding_index)| findings.get(finding_index).cloned())
 }
 
 pub(in crate::findings) fn string_values(input: &Value, key: &str) -> Result<Vec<String>> {
@@ -104,9 +104,11 @@ pub(in crate::findings) fn severity_rank(severity: Severity) -> u8 {
 }
 
 fn proof_rank(finding: &Finding) -> u8 {
-    if finding.verification.as_ref().is_some_and(|verification| {
-        verification.proof_verdict == PersistedProofVerdict::Exploited
-    }) {
+    if finding
+        .verification
+        .as_ref()
+        .is_some_and(|verification| verification.proof_verdict == PersistedProofVerdict::Exploited)
+    {
         return 0;
     }
     if finding

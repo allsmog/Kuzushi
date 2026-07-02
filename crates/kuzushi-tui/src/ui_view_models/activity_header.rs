@@ -38,11 +38,9 @@ pub(crate) fn activity_header_model(
     outcome: Option<ActivityRunOutcome>,
     live_tool: Option<&ActivityLiveTool>,
 ) -> ActivityHeaderModel {
-    let total = session.tasks.len();
-    let done = task_count(session, DagTaskState::Done);
-    let running = task_count(session, DagTaskState::Active);
+    let counts = ActivityTaskCounts::from_session(session);
     let cost_usd = session.tasks.values().map(|row| row.cost_usd).sum::<f64>();
-    let progress = progress_segment(&outcome, total, done, running, live_tool);
+    let progress = progress_segment(&outcome, counts, live_tool);
     ActivityHeaderModel {
         detailed_title: detailed_title(session, &progress, cost_usd),
         summary_title: format!(
@@ -55,9 +53,7 @@ pub(crate) fn activity_header_model(
 
 fn progress_segment(
     outcome: &Option<ActivityRunOutcome>,
-    total: usize,
-    done: usize,
-    running: usize,
+    counts: ActivityTaskCounts,
     live_tool: Option<&ActivityLiveTool>,
 ) -> String {
     match outcome {
@@ -66,8 +62,48 @@ fn progress_segment(
         }
         // "0/0 done · 0 running" reads as a broken pipeline; a single-tool
         // run has no DAG tasks — name the tool and tick instead.
-        None if total == 0 => taskless_progress(live_tool),
-        None => format!("{done}/{total} done  ·  {running} running"),
+        None if counts.total == 0 => taskless_progress(live_tool),
+        None => task_progress(counts),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ActivityTaskCounts {
+    total: usize,
+    done: usize,
+    running: usize,
+    failing: usize,
+    canceled: usize,
+    skipped: usize,
+}
+
+impl ActivityTaskCounts {
+    fn from_session(session: &ActivitySession) -> Self {
+        Self {
+            total: session.tasks.len(),
+            done: task_count(session, DagTaskState::Done),
+            running: task_count(session, DagTaskState::Active),
+            failing: task_count(session, DagTaskState::Failing),
+            canceled: task_count(session, DagTaskState::Canceled),
+            skipped: task_count(session, DagTaskState::Skipped),
+        }
+    }
+}
+
+fn task_progress(counts: ActivityTaskCounts) -> String {
+    let mut parts = vec![
+        format!("{}/{} done", counts.done, counts.total),
+        format!("{} running", counts.running),
+    ];
+    append_terminal_count(&mut parts, counts.failing, "! failed");
+    append_terminal_count(&mut parts, counts.canceled, "× canceled");
+    append_terminal_count(&mut parts, counts.skipped, "⊘ skipped");
+    parts.join("  ·  ")
+}
+
+fn append_terminal_count(parts: &mut Vec<String>, count: usize, label: &str) {
+    if count > 0 {
+        parts.push(format!("{count} {label}"));
     }
 }
 
@@ -262,6 +298,37 @@ mod tests {
         assert!(model.detailed_title.contains("see error banner"));
         assert!(!model.detailed_title.contains("done"));
         assert!(model.summary_title.contains("✗ run failed"));
+    }
+
+    #[test]
+    fn terminal_problem_counts_stay_visible_in_progress_summary() {
+        let mut session = ActivitySession::new("run-1");
+        session.tasks.insert(
+            "context:build".to_string(),
+            task("context:build", DagTaskState::Done, 0.0),
+        );
+        session.tasks.insert(
+            "triage:run".to_string(),
+            task("triage:run", DagTaskState::Canceled, 0.0),
+        );
+        session.tasks.insert(
+            "verify:finding".to_string(),
+            task("verify:finding", DagTaskState::Failing, 0.0),
+        );
+        session.tasks.insert(
+            "patch:finding".to_string(),
+            task("patch:finding", DagTaskState::Skipped, 0.0),
+        );
+
+        let model = activity_header_model(&session, None, None);
+
+        assert!(
+            model
+                .summary_title
+                .contains("1/4 done  ·  0 running  ·  1 ! failed  ·  1 × canceled  ·  1 ⊘ skipped"),
+            "{}",
+            model.summary_title
+        );
     }
 
     fn task(id: &str, state: DagTaskState, cost_usd: f64) -> DagTaskRow {

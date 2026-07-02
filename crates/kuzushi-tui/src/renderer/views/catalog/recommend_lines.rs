@@ -17,10 +17,10 @@ pub(crate) fn recommend_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> 
     }
     lines.push(blank());
 
-    if model.rows.is_empty() {
+    if model.rows.is_empty() && model.components.is_empty() {
         append_empty_recommendations(lines, &model, area)
     } else {
-        append_report(lines, &model, area)
+        append_report(lines, &model, area, app.recommend_cursor)
     }
 }
 
@@ -28,19 +28,22 @@ fn append_report(
     mut lines: Vec<Line<'static>>,
     model: &RecommendationModel,
     area: Rect,
+    recommend_cursor: usize,
 ) -> Vec<Line<'static>> {
     if let Some(summary) = &model.summary {
         lines.push(muted(&fit(&summary, area.width as usize)));
         lines.push(blank());
     }
-    append_components(&mut lines, model, area);
-    lines.push(aligned_header(
-        &model.report_headers,
-        &[8, 26, 8, 34, value_width(area, 84)],
-    ));
-    let take = (area.height.saturating_sub(10) as usize).max(4);
-    for recommendation in model.rows.iter().take(take) {
-        lines.extend(recommendation_lines(recommendation, area.width));
+    append_components(&mut lines, model, area, recommend_cursor);
+    if !model.rows.is_empty() {
+        lines.push(aligned_header(
+            &model.report_headers,
+            &[8, 26, 8, 34, value_width(area, 84)],
+        ));
+        let take = (area.height.saturating_sub(10) as usize).max(4);
+        for recommendation in model.rows.iter().take(take) {
+            lines.extend(recommendation_lines(recommendation, area.width));
+        }
     }
     lines.push(blank());
     lines.push(command_list_line(
@@ -50,21 +53,32 @@ fn append_report(
     lines
 }
 
-fn append_components(lines: &mut Vec<Line<'static>>, model: &RecommendationModel, area: Rect) {
+fn append_components(
+    lines: &mut Vec<Line<'static>>,
+    model: &RecommendationModel,
+    area: Rect,
+    recommend_cursor: usize,
+) {
     if model.components.is_empty() {
         return;
     }
     lines.push(divider("COMPONENTS", area.width));
     let take = (area.height as usize).saturating_sub(8).min(6).max(1);
-    for component in model.components.iter().take(take) {
-        lines.extend(component_lines(component, area.width));
+    let selected = recommend_cursor.min(model.components.len().saturating_sub(1));
+    for (index, component) in model.components.iter().take(take).enumerate() {
+        lines.extend(component_lines(component, area.width, index == selected));
     }
     lines.push(blank());
 }
 
-fn component_lines(component: &ComponentRecommendationRow, width: u16) -> Vec<Line<'static>> {
+fn component_lines(
+    component: &ComponentRecommendationRow,
+    width: u16,
+    selected: bool,
+) -> Vec<Line<'static>> {
+    let marker = if selected { "▌" } else { " " };
     let title = format!(
-        "◆ {} · {} · risk {} · {}",
+        "{marker} ◆ {} · {} · risk {} · {}",
         component.class_label, component.tier_label, component.risk_score, component.rel_path
     );
     let mut lines = vec![row(&[

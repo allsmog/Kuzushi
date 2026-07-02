@@ -1,6 +1,7 @@
 pub mod codeql;
 pub mod dep_hygiene;
 pub mod exploit_chain;
+pub mod govulncheck;
 pub mod iac_scan;
 pub mod license_scan;
 pub mod sbom_scan;
