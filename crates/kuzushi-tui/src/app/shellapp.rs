@@ -58,6 +58,13 @@ pub struct ShellApp {
     /// Which Workbench pane (`Source`/`Center`/`Findings`/`Details`) currently has keyboard
     /// focus. `Tab` cycles it; `j`/`k` move within it. Defaults to `Findings`.
     pub workbench_focus: WorkbenchPane,
+    /// Explicit cockpit page selected by the operator. `None` follows the
+    /// workspace-derived journey phase so a fresh target opens on TERRAIN while
+    /// a finding-bearing target opens on REVIEW.
+    pub workbench_page: Option<WorkbenchPage>,
+    /// Explicit content mode for the Workbench center pane. Focus changes should
+    /// not replace the operator's selected center-deck page.
+    pub workbench_center_mode: WorkbenchCenterMode,
     /// Pane-local scroll positions for non-list Workbench panes. The findings
     /// pane uses `findings_cursor` instead, so switching panes preserves the
     /// operator's reading position without confusing the list cursor.
@@ -95,6 +102,13 @@ pub struct ShellApp {
     /// Candidates shown by the target picker; populated by
     /// `open_target_picker` from cwd + child repos/previous targets.
     pub target_candidates: Vec<crate::app::TargetCandidate>,
+    /// Fuzzy file attach picker state. Paths are repo-relative and rooted at
+    /// the active target so accepting a row can reuse `attach <path>`.
+    pub file_picker_files: Vec<String>,
+    pub file_picker_query: String,
+    pub file_picker_cursor: usize,
+    pub file_picker_truncated: bool,
+    pub file_picker_return_view: Option<ShellView>,
     /// Planning-picker cursor (index into `planning_tasks`).
     pub planning_cursor: usize,
     /// Set of planning-task ids currently checked. Mirrors the
@@ -119,6 +133,18 @@ pub struct ShellApp {
     /// Cached artifact tasks the operator explicitly marked for rebuild (`g`),
     /// overriding the reuse-by-default behavior for this run.
     pub planning_rebuild: BTreeSet<PlanningTaskId>,
+    /// Which picker surface owns plain keys: the list, the selected step's
+    /// options pane, or the shell command prompt.
+    pub picker_focus: crate::app::PickerFocus,
+    /// Cursor into the focused step's ToolDescriptor.options list.
+    pub planning_option_cursor: usize,
+    /// Run-scoped per-step input overlays from the planning picker. These are
+    /// merged with stored options for this engagement only unless promoted.
+    pub planning_option_overrides: crate::app::PlanningOptionOverrides,
+    /// Inline editor draft for the selected planning option.
+    pub planning_option_edit: Option<crate::app::PlanningOptionEdit>,
+    /// Last validation/editing error shown in the planning options pane.
+    pub planning_option_error: Option<String>,
     /// Tasks that failed in the current engagement, with their error text.
     /// Drives dependency-aware skipping and the end-of-run retry gate.
     pub planning_failed: Vec<crate::app::FailedPlanningTask>,

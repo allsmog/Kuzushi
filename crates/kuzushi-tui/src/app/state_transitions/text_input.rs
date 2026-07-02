@@ -58,35 +58,33 @@ impl ShellApp {
         if text.is_empty() {
             return;
         }
-        let normalised: String = text
-            .replace("\r\n", "\n")
-            .chars()
-            .filter(|ch| *ch != '\r')
-            .collect();
-        if self.capture_auth_key_paste(&normalised) {
-            return;
-        }
-        // Multi-line pastes: keep the first line so the user can review and
-        // submit explicitly, then warn about the dropped tail. Submitting
-        // every \n-separated line as its own command is what bash/zsh do;
-        // the kuzushi shell is a single-command-per-Enter prompt and
-        // exposing the same behavior runs unintended commands (e.g. pasting
-        // a snippet that begins with `rm`).
-        if normalised.contains('\n') {
-            let first_line = normalised.lines().next().unwrap_or("");
-            let total = normalised.chars().count();
-            let kept = first_line.chars().count();
-            self.insert_str_at_cursor(first_line);
-            let dropped_lines = normalised.lines().count().saturating_sub(1);
-            self.set_warn_notice(
-                "paste",
-                format!(
-                    "kept first line ({kept}/{total} chars); dropped {dropped_lines} more line(s). Submit, then paste the next part."
-                ),
-            );
+        let normalised = normalise_paste_text(text);
+        if self.handle_routed_paste(&normalised) || self.handle_multiline_paste(&normalised) {
             return;
         }
         self.insert_str_at_cursor(&normalised);
+    }
+
+    fn handle_routed_paste(&mut self, text: &str) -> bool {
+        self.capture_auth_key_paste(text) || self.attach_workspace_files_from_paste(text)
+    }
+
+    fn handle_multiline_paste(&mut self, text: &str) -> bool {
+        if !text.contains('\n') {
+            return false;
+        }
+        let first_line = text.lines().next().unwrap_or("");
+        let total = text.chars().count();
+        let kept = first_line.chars().count();
+        let dropped_lines = text.lines().count().saturating_sub(1);
+        self.insert_str_at_cursor(first_line);
+        self.set_warn_notice(
+            "paste",
+            format!(
+                "kept first line ({kept}/{total} chars); dropped {dropped_lines} more line(s). Submit, then paste the next part."
+            ),
+        );
+        true
     }
 
     fn capture_auth_key_paste(&mut self, text: &str) -> bool {
@@ -155,8 +153,8 @@ impl ShellApp {
         if amount.is_negative() {
             self.findings_cursor = self.findings_cursor.saturating_sub(1);
         } else {
-            self.findings_cursor =
-                (self.findings_cursor + 1).min(self.findings.len().saturating_sub(1));
+            self.findings_cursor = (self.findings_cursor + 1)
+                .min(crate::ui_view_models::visible_findings_len(self).saturating_sub(1));
         }
     }
 
@@ -328,6 +326,13 @@ fn activity_body_pane_for_column(
     } else {
         crate::app::PaneFocus::Right
     }
+}
+
+fn normalise_paste_text(text: &str) -> String {
+    text.replace("\r\n", "\n")
+        .chars()
+        .filter(|ch| *ch != '\r')
+        .collect()
 }
 
 #[cfg(test)]

@@ -114,6 +114,10 @@ impl<'a> ActiveActivityViewModel<'a> {
         &self.context_line
     }
 
+    pub(crate) fn abort_banner(&self) -> Option<String> {
+        activity_abort_banner(self.app)
+    }
+
     pub(crate) fn frame_layout(&self) -> ActivityFrameLayout {
         activity_frame_layout()
     }
@@ -188,8 +192,48 @@ impl<'a> ActiveActivityViewModel<'a> {
     }
 
     pub(crate) fn footer(&self, width: u16) -> ActivityFooterModel {
-        activity_footer_model(self.session, width, self.app.running_tool_name())
+        activity_footer_model(
+            self.session,
+            width,
+            self.app.running_tool_name(),
+            activity_abort_pending(self.app),
+        )
     }
+}
+
+fn activity_abort_banner(app: &ShellApp) -> Option<String> {
+    let subjects = activity_abort_subjects(app);
+    (!subjects.is_empty()).then(|| {
+        format!(
+            "⚠ abort requested for {} — waiting for cleanup; Ctrl+C will not exit while work is live",
+            subjects.join(", ")
+        )
+    })
+}
+
+fn activity_abort_pending(app: &ShellApp) -> bool {
+    !activity_abort_subjects(app).is_empty()
+}
+
+fn activity_abort_subjects(app: &ShellApp) -> Vec<&'static str> {
+    [
+        (
+            app.scan.as_ref().is_some_and(|scan| scan.abort_requested),
+            "scan",
+        ),
+        (app.tool_abort_requested(), "tool"),
+        (
+            app.agent_chat
+                .as_ref()
+                .is_some_and(|agent| agent.abort_requested),
+            "agent",
+        ),
+        (app.plan_abort_requested, "plan"),
+        (app.threat_abort_requested, "threat model"),
+    ]
+    .into_iter()
+    .filter_map(|(active, subject)| active.then_some(subject))
+    .collect()
 }
 
 #[cfg(test)]

@@ -17,6 +17,16 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "open filtered findings in the Workbench",
     },
     ShellCommandSpec {
+        command: "component <scope|path|all>",
+        aliases: &[
+            "component web/app",
+            "component entrypoint-cmd-proxy",
+            "component all",
+        ],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "focus Workbench findings on a detected component",
+    },
+    ShellCommandSpec {
         command: "open <id>",
         aliases: &["open F-0001", "/open <id>"],
         category: ShellCommandCategory::FindingsEvidence,

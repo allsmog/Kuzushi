@@ -14,14 +14,47 @@ impl ShellApp {
                 | ShellView::AuthMethodPicker(_)
                 | ShellView::PlanningPicker
                 | ShellView::TargetPicker
+                | ShellView::FilePicker
         )
     }
 
     pub(super) fn handle_picker_key(&mut self, key: KeyEvent) -> bool {
-        // Let Ctrl/Alt chords (quit, palette, story) escape the picker.
-        if picker_shell_chord(key.modifiers) || !self.is_picker_view() {
+        if !self.picker_should_capture_key(key) {
             return false;
         }
+        self.handle_captured_picker_key(key)
+    }
+
+    fn handle_captured_picker_key(&mut self, key: KeyEvent) -> bool {
+        if matches!(self.shell_view, ShellView::FilePicker) {
+            return self.handle_file_picker_key(key);
+        }
+        if self.picker_prompt_focused() {
+            return self.handle_picker_prompt_focus_key(key);
+        }
+        if self.enter_picker_prompt_if_requested(key) {
+            return true;
+        }
+        self.dispatch_picker_control_key(key);
+        // Treat a picker as a true modal: swallow every other non-Ctrl/Alt
+        // keystroke so stray input cannot divert later navigation into the
+        // prompt and make the picker feel frozen.
+        true
+    }
+
+    fn enter_picker_prompt_if_requested(&mut self, key: KeyEvent) -> bool {
+        if !self.should_enter_picker_prompt(key) {
+            return false;
+        }
+        self.enter_picker_prompt_focus();
+        true
+    }
+
+    fn picker_should_capture_key(&self, key: KeyEvent) -> bool {
+        self.is_picker_view() && !picker_shell_chord(key.modifiers)
+    }
+
+    fn dispatch_picker_control_key(&mut self, key: KeyEvent) {
         match &self.shell_view {
             ShellView::ModelPicker => {
                 self.handle_model_picker_key(key.code);
@@ -30,17 +63,50 @@ impl ShellApp {
                 self.handle_auth_picker_key(key.code);
             }
             ShellView::PlanningPicker => {
-                self.handle_planning_picker_key(key.code);
+                self.handle_planning_picker_key(key);
             }
             ShellView::TargetPicker => {
                 self.handle_target_picker_key(key.code);
             }
+            ShellView::FilePicker => {
+                self.handle_file_picker_key(key);
+            }
             _ => {}
         };
-        // Treat a picker as a true modal: swallow every other non-Ctrl/Alt
-        // keystroke so stray input cannot divert later navigation into the
-        // prompt and make the picker feel frozen.
+    }
+
+    pub(crate) fn picker_prompt_focused(&self) -> bool {
+        self.is_picker_view() && self.picker_focus == PickerFocus::Prompt
+    }
+
+    fn handle_picker_prompt_focus_key(&mut self, key: KeyEvent) -> bool {
+        if !key.modifiers.is_empty() || key.code != KeyCode::Esc {
+            return false;
+        }
+        self.leave_picker_prompt_focus();
         true
+    }
+
+    fn should_enter_picker_prompt(&self, key: KeyEvent) -> bool {
+        key.modifiers.is_empty()
+            && key.code == KeyCode::Char(':')
+            && self.planning_option_edit.is_none()
+    }
+
+    fn enter_picker_prompt_focus(&mut self) {
+        self.picker_focus = PickerFocus::Prompt;
+        self.planning_option_edit = None;
+        self.planning_option_error = None;
+    }
+
+    fn leave_picker_prompt_focus(&mut self) {
+        self.reset_completion_cycle();
+        if !self.input.is_empty() {
+            self.last_cleared_input = Some(std::mem::take(&mut self.input));
+            self.cursor = 0;
+            self.history_index = None;
+        }
+        self.picker_focus = PickerFocus::List;
     }
 
     fn handle_model_picker_key(&mut self, code: KeyCode) -> bool {
@@ -106,11 +172,7 @@ impl ShellApp {
             self.open_workbench(WorkbenchPane::Findings);
             return;
         }
-        if self.target.is_some() {
-            self.open_planning_picker();
-        } else {
-            self.open_workbench(WorkbenchPane::Findings);
-        }
+        self.open_fresh_planner_or_workbench();
     }
 
     fn handle_target_picker_key(&mut self, code: KeyCode) -> bool {
@@ -369,14 +431,58 @@ impl ShellApp {
     }
 
     fn transition_after_auth_ready(&mut self) {
-        if self.target.is_some() {
-            self.open_planning_picker();
-        } else {
-            self.open_workbench(WorkbenchPane::Findings);
+        self.open_fresh_planner_or_workbench();
+    }
+
+    fn handle_planning_picker_key(&mut self, key: KeyEvent) -> bool {
+        if self.handle_planning_option_edit_key(key.code) {
+            return true;
+        }
+        match self.picker_focus {
+            PickerFocus::List => self.handle_planning_step_key(key.code),
+            PickerFocus::OptionsPane => self.handle_planning_options_key(key.code),
+            PickerFocus::Prompt => false,
         }
     }
 
-    fn handle_planning_picker_key(&mut self, code: KeyCode) -> bool {
+    fn handle_planning_option_edit_key(&mut self, code: KeyCode) -> bool {
+        if self.planning_option_edit.is_none() {
+            return false;
+        }
+        match code {
+            KeyCode::Enter => {
+                self.commit_planning_option_edit();
+                true
+            }
+            KeyCode::Esc => {
+                self.cancel_planning_option_edit();
+                true
+            }
+            KeyCode::Backspace => {
+                self.backspace_planning_option_draft();
+                true
+            }
+            KeyCode::Delete => {
+                if let Some(edit) = self.planning_option_edit.as_mut() {
+                    edit.draft.clear();
+                }
+                true
+            }
+            KeyCode::Char(ch) if !ch.is_control() => {
+                self.edit_planning_option_draft(ch);
+                true
+            }
+            _ => true,
+        }
+    }
+
+    fn handle_planning_step_key(&mut self, code: KeyCode) -> bool {
+        self.handle_planning_step_navigation_key(code)
+            || self.handle_planning_step_selection_key(code)
+            || self.handle_planning_step_action_key(code)
+    }
+
+    fn handle_planning_step_navigation_key(&mut self, code: KeyCode) -> bool {
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.move_planning_cursor(-1);
@@ -386,6 +492,26 @@ impl ShellApp {
                 self.move_planning_cursor(1);
                 true
             }
+            KeyCode::Left | KeyCode::Char('h') => {
+                self.move_planning_phase(-1);
+                true
+            }
+            KeyCode::Right | KeyCode::Char('l') => {
+                self.move_planning_phase(1);
+                true
+            }
+            KeyCode::Char(ch) if phase_for_digit(ch).is_some() => {
+                if let Some(phase) = phase_for_digit(ch) {
+                    self.open_phase_picker(phase);
+                }
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_planning_step_selection_key(&mut self, code: KeyCode) -> bool {
+        match code {
             KeyCode::Char(' ') => {
                 self.toggle_planning_current_row();
                 true
@@ -402,12 +528,69 @@ impl ShellApp {
                 self.toggle_rebuild_current_row();
                 true
             }
+            _ => false,
+        }
+    }
+
+    fn handle_planning_step_action_key(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::Tab | KeyCode::BackTab | KeyCode::Char('o') => {
+                self.enter_planning_options_pane();
+                true
+            }
             KeyCode::Enter => {
+                if self.open_file_picker_for_current_planning_row() {
+                    return true;
+                }
                 self.accept_planning_picker();
                 true
             }
+            KeyCode::Char('s') => {
+                self.skip_planning_phase();
+                true
+            }
             KeyCode::Esc | KeyCode::Char('q') => {
-                self.defer_planning_picker();
+                self.close_planning_picker();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_planning_options_key(&mut self, code: KeyCode) -> bool {
+        match code {
+            KeyCode::Up | KeyCode::Char('k') => {
+                self.move_planning_option_cursor(-1);
+                true
+            }
+            KeyCode::Down | KeyCode::Char('j') => {
+                self.move_planning_option_cursor(1);
+                true
+            }
+            KeyCode::Enter => {
+                self.begin_planning_option_edit();
+                true
+            }
+            KeyCode::Char(' ') => {
+                self.cycle_selected_planning_option();
+                true
+            }
+            KeyCode::Char(ch) if phase_for_digit(ch).is_some() => {
+                if let Some(phase) = phase_for_digit(ch) {
+                    self.open_phase_picker(phase);
+                }
+                true
+            }
+            KeyCode::Char('S') => {
+                self.persist_selected_planning_option_override();
+                true
+            }
+            KeyCode::Tab
+            | KeyCode::BackTab
+            | KeyCode::Char('o')
+            | KeyCode::Esc
+            | KeyCode::Char('q') => {
+                self.leave_planning_options_pane();
                 true
             }
             _ => false,
@@ -431,6 +614,17 @@ impl ShellApp {
             );
             return;
         }
+        if !row.cli_available {
+            self.log(
+                "phase",
+                format!(
+                    "{} is cached; rebuild requires `{}` on PATH",
+                    id.label(),
+                    row.required_cli.unwrap_or("required binary")
+                ),
+            );
+            return;
+        }
         if self.planning_rebuild.remove(&id) {
             self.planning_selected.remove(&id);
             self.log("phase", format!("[reuse] {} (cached)", id.label()));
@@ -448,6 +642,24 @@ impl ShellApp {
         }
         let current = (self.planning_cursor.min(len - 1)) as isize;
         self.planning_cursor = (current + delta).rem_euclid(len as isize) as usize;
+        self.clamp_planning_option_cursor();
+        self.planning_option_error = None;
+    }
+
+    fn move_planning_phase(&mut self, delta: isize) {
+        let Some(current) = self.workflow_phase else {
+            return;
+        };
+        let next = if delta < 0 {
+            current.previous()
+        } else {
+            current.next()
+        };
+        let Some(next) = next else {
+            self.log("phase", format!("already at {}", current.label()));
+            return;
+        };
+        self.open_phase_picker(next);
     }
 
     fn toggle_planning_current_row(&mut self) {
@@ -511,7 +723,12 @@ impl ShellApp {
 
     fn select_all_planning_rows(&mut self) {
         for row in &self.planning_tasks {
-            if row.cli_available {
+            if row.cli_available
+                || matches!(
+                    row.artifact_state,
+                    crate::app::PlanningArtifactState::Cached
+                )
+            {
                 self.planning_selected.insert(row.id);
             }
         }
@@ -524,6 +741,9 @@ impl ShellApp {
     }
 
     fn accept_planning_picker(&mut self) {
+        if self.open_file_picker_for_attach_only_plan() {
+            return;
+        }
         let plan = build_execution_plan(
             &self.planning_tasks,
             &self.planning_selected,
@@ -540,7 +760,7 @@ impl ShellApp {
             .join(" → ");
         self.log(
             "planning",
-            format!("running {} step(s): {labels}", plan.len()),
+            format!("running {} {}: {labels}", plan.len(), step_word(plan.len())),
         );
         self.planning_run_queue = plan.into_iter().collect();
         let Ok(workspace) = self.current_workspace() else {
@@ -556,6 +776,29 @@ impl ShellApp {
         // running (and that the queue is waiting on ranking, if it stalls).
         self.shell_view = ShellView::Activity;
         self.dispatch_next_planning_task(workspace);
+    }
+
+    fn open_file_picker_for_current_planning_row(&mut self) -> bool {
+        let Some(row) = self.planning_tasks.get(self.planning_cursor) else {
+            return false;
+        };
+        if row.id != PlanningTaskId::AttachFiles {
+            return false;
+        }
+        self.open_file_picker();
+        true
+    }
+
+    fn open_file_picker_for_attach_only_plan(&mut self) -> bool {
+        if self.planning_selected.len() != 1
+            || !self
+                .planning_selected
+                .contains(&PlanningTaskId::AttachFiles)
+        {
+            return false;
+        }
+        self.open_file_picker();
+        true
     }
 
     /// Enter built an empty plan. Checked-but-cached rows are reused without
@@ -578,14 +821,15 @@ impl ShellApp {
         self.log(
             "phase",
             format!(
-                "nothing to run — all {} checked task(s) are cached and will be reused; \
-                 press g to rebuild one, or Esc to skip this phase",
-                self.planning_selected.len()
+                "nothing to run — all {} checked {} are cached and will be reused; \
+                 press g to rebuild one, or s to skip this phase",
+                self.planning_selected.len(),
+                task_word(self.planning_selected.len())
             ),
         );
     }
 
-    fn defer_planning_picker(&mut self) {
+    fn skip_planning_phase(&mut self) {
         let phase = self
             .workflow_phase
             .map(|phase| phase.label())
@@ -596,10 +840,45 @@ impl ShellApp {
         }
         self.advance_to_next_phase();
     }
+
+    fn close_planning_picker(&mut self) {
+        let phase = self
+            .workflow_phase
+            .map(|phase| phase.label())
+            .unwrap_or("planning");
+        self.log("phase", format!("closed {phase} picker"));
+        self.open_workbench(WorkbenchPane::Findings);
+    }
 }
 
 fn picker_shell_chord(modifiers: KeyModifiers) -> bool {
     modifiers.contains(KeyModifiers::CONTROL) || modifiers.contains(KeyModifiers::ALT)
+}
+
+fn phase_for_digit(ch: char) -> Option<WorkflowPhase> {
+    match ch {
+        '1' => Some(WorkflowPhase::Map),
+        '2' => Some(WorkflowPhase::Hunt),
+        '3' => Some(WorkflowPhase::Confirm),
+        '4' => Some(WorkflowPhase::Fix),
+        _ => None,
+    }
+}
+
+fn step_word(count: usize) -> &'static str {
+    if count == 1 {
+        "step"
+    } else {
+        "steps"
+    }
+}
+
+fn task_word(count: usize) -> &'static str {
+    if count == 1 {
+        "task"
+    } else {
+        "tasks"
+    }
 }
 
 /// Maps a picker's display provider to the key its OAuth credentials are

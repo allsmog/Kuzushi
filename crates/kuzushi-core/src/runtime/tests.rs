@@ -99,6 +99,21 @@ mod tests {
     }
 
     #[test]
+    fn governance_rejects_model_credential_backend_mismatch() {
+        assert!(validate_model_api_key_env("anthropic:claude-sonnet-4-6", "ANTHROPIC_API_KEY")
+            .is_ok());
+        assert!(validate_model_api_key_env("openai:gpt-5.5", "OPENAI_API_KEY").is_ok());
+
+        let error = validate_model_api_key_env("anthropic:claude-sonnet-4-6", "OPENAI_API_KEY")
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("model provider \"anthropic\""));
+        assert!(error.contains("runtime.api_key_env=\"OPENAI_API_KEY\""));
+        assert!(error.contains("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
     fn driver_returns_final_in_one_step() {
         let runtime = ScriptedRuntime::new(vec![AgentLoopStep::Final {
             text: "done".to_string(),

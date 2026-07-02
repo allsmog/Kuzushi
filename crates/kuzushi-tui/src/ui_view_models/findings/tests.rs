@@ -1,8 +1,9 @@
 use super::*;
+use kuzushi_core::workspace::ROOT_SCOPE_ID;
 use kuzushi_core::{
     Finding, FindingEvidence, PersistedProofVerdict, PersistedSandboxBackend,
     PersistedVerification, RunSummary, RunTargetGitMetadata, Severity, StaticProofState,
-    TriageOutcome, TriageVerdict, V2Config,
+    TriageOutcome, TriageVerdict, V2Config, WorkspaceTarget,
 };
 use std::collections::BTreeMap;
 
@@ -42,7 +43,7 @@ fn findings_model_projects_counts_rows_and_selection() {
     assert_eq!(model.pending, 1);
     assert_eq!(model.counts.high, 1);
     assert_eq!(model.counts.medium, 1);
-    assert_eq!(model.header, "FINDINGS · 2 · 1 triaged · 1 pending");
+    assert_eq!(model.header, "FINDINGS · 2 · 1H · 1M");
     assert_eq!(model.rows[0].alias, "F-0001");
     assert_eq!(model.rows[0].severity_label, "HIGH");
     assert_eq!(model.rows[0].location, "src/search.ts:12-14");
@@ -52,7 +53,7 @@ fn findings_model_projects_counts_rows_and_selection() {
     assert_eq!(model.rows[0].confidence, "91%");
     assert_eq!(model.rows[0].proof_label, "triaged-tp");
     assert_eq!(model.rows[0].proof_marker, "◇");
-    assert_eq!(model.rows[0].proof_tier, ProofTier::StaticLinked);
+    assert_eq!(model.rows[0].proof_tier, ProofTier::Confirmed);
     assert_eq!(model.rows[0].source, "semgrep:demo.sql");
     assert!(model.rows[0].selected);
     assert_eq!(model.rows[1].proof_label, "unverified");
@@ -61,6 +62,67 @@ fn findings_model_projects_counts_rows_and_selection() {
     assert_eq!(model.preview.header, "FINDINGS · 1 triaged · 1 pending");
     assert_eq!(model.preview.rows.len(), 2);
     assert!(model.preview.overflow.is_none());
+}
+
+#[test]
+fn findings_model_filters_rows_to_active_component_scope() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let scope = kuzushi_core::NestedProjectScope {
+        id: "package-web-app".to_string(),
+        parent: Some(ROOT_SCOPE_ID.to_string()),
+        kind: kuzushi_core::NestedProjectKind::PackageRoot,
+        rel_path: "web/app".to_string(),
+        inherited_sections: Vec::new(),
+    };
+    let tree = kuzushi_core::NestedProjectScopeTree {
+        schema_version: 1,
+        root: ROOT_SCOPE_ID.to_string(),
+        scopes: vec![
+            kuzushi_core::NestedProjectScope {
+                id: ROOT_SCOPE_ID.to_string(),
+                parent: None,
+                kind: kuzushi_core::NestedProjectKind::Root,
+                rel_path: ".".to_string(),
+                inherited_sections: Vec::new(),
+            },
+            scope.clone(),
+        ],
+    };
+    kuzushi_core::save_nested_project_scopes(workspace.root(), &tree).unwrap();
+
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.active_scope = Some(crate::app::TargetCandidateScope {
+        id: scope.id,
+        kind: scope.kind,
+        rel_path: scope.rel_path,
+    });
+    app.findings = vec![
+        Finding::new_semgrep(
+            "demo.web",
+            "web/app/src/main.ts",
+            12,
+            None,
+            Severity::High,
+            "web finding",
+        ),
+        Finding::new_semgrep(
+            "demo.cli",
+            "cmd/proxy/main.go",
+            8,
+            None,
+            Severity::Medium,
+            "cli finding",
+        ),
+    ];
+
+    let model = findings_model(&app);
+
+    assert_eq!(model.total, 1);
+    assert_eq!(model.header, "FINDINGS · 1 · component:web/app · 1H");
+    assert_eq!(model.rows.len(), 1);
+    assert_eq!(model.rows[0].location, "web/app/src/main.ts:12");
+    assert_eq!(visible_findings_len(&app), 1);
 }
 
 #[test]
@@ -87,7 +149,10 @@ fn finding_proof_label_prioritizes_runtime_and_static_evidence() {
         created_at: "2026-01-01T00:00:00Z".to_string(),
     });
     assert_eq!(finding_proof_label(&verified), "verified L4");
-    assert_eq!(finding_proof_badge(&verified).tier, ProofTier::Confirmed);
+    assert_eq!(
+        finding_proof_badge(&verified).tier,
+        ProofTier::RuntimeVerified
+    );
 
     let linked = Finding::new_tool(
         "static",
@@ -174,6 +239,32 @@ fn findings_model_surfaces_malformed_context_prereq_when_empty() {
 }
 
 #[test]
+fn clean_scan_empty_state_describes_latest_zero_finding_scan() {
+    let mut clean = RunSummary::running(
+        "scan-clean-123456",
+        "scan",
+        Some("sast:scan".to_string()),
+        ".",
+    )
+    .with_findings(Some(0))
+    .complete();
+    clean.started_at_unix = 900;
+    clean.completed_at_unix = Some(940);
+    let runs = BTreeMap::from([(clean.run_id.clone(), clean)]);
+
+    let state = clean_scan_empty_state(
+        &runs,
+        std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_000),
+    )
+    .expect("zero-finding completed scan should render as clean");
+
+    assert_eq!(
+        state.summary,
+        "scanned ~1 min ago · 0 findings · run:scan-c..3456"
+    );
+}
+
+#[test]
 fn findings_model_caps_module_preview_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.findings = (0..10)
@@ -244,6 +335,11 @@ fn selected_finding_detail_model_bounds_evidence_and_message() {
     assert_eq!(model.message_overflow, 1);
     assert_eq!(model.evidence.len(), 8);
     assert_eq!(model.evidence_overflow, 2);
+    assert_eq!(model.static_proof_label, "signal-only");
+    assert_eq!(model.runtime_label, "not verified");
+    assert_eq!(model.next_action_label, "validate");
+    assert_eq!(model.next_command.as_deref(), Some("verify F-0001"));
+    assert!(model.remediation_hint.is_none());
 }
 
 #[test]
@@ -274,6 +370,47 @@ fn selected_finding_detail_uses_same_proof_badge_as_list() {
     assert_eq!(detail.proof_marker, list.rows[0].proof_marker);
     assert_eq!(detail.proof_tier, list.rows[0].proof_tier);
     assert!(detail.proof_state.contains("signal_only"));
+    assert_eq!(detail.static_proof_label, "signal-only");
+    assert!(detail.static_proof_explanation.contains("scanner signal"));
+    assert_eq!(detail.next_command.as_deref(), Some("verify F-0001"));
+}
+
+#[test]
+fn selected_finding_detail_recommends_patch_for_runtime_verified_findings() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let mut finding = Finding::new_semgrep(
+        "demo.sql",
+        "src/search.ts",
+        12,
+        Some(14),
+        Severity::High,
+        "SQL injection\nRemediation: bind the order id parameter",
+    )
+    .with_static_proof_state(StaticProofState::SourceSinkLinked);
+    finding.verification = Some(PersistedVerification {
+        proof_level: 4,
+        proof_verdict: PersistedProofVerdict::Exploited,
+        backend: PersistedSandboxBackend::Plain,
+        language: None,
+        harness_path: None,
+        crash_evidence: None,
+        duration_ms: 12,
+        cost_usd: 0.0,
+        notes: vec![],
+        created_at: "2026-01-01T00:00:00Z".to_string(),
+    });
+    app.findings = vec![finding];
+
+    let detail = selected_finding_detail_model(&app).expect("selected finding");
+
+    assert_eq!(detail.static_proof_label, "path-linked");
+    assert_eq!(detail.runtime_label, "verified L4");
+    assert_eq!(detail.next_action_label, "patch");
+    assert_eq!(detail.next_command.as_deref(), Some("patch F-0001"));
+    assert_eq!(
+        detail.remediation_hint.as_deref(),
+        Some("bind the order id parameter")
+    );
 }
 
 #[test]

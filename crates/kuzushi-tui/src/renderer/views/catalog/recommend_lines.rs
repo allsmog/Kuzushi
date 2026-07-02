@@ -1,5 +1,7 @@
 use super::*;
-use crate::ui_view_models::{recommendation_model, RecommendationModel, RecommendationRow};
+use crate::ui_view_models::{
+    recommendation_model, ComponentRecommendationRow, RecommendationModel, RecommendationRow,
+};
 
 pub(crate) fn recommend_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let model = recommendation_model(app);
@@ -31,6 +33,7 @@ fn append_report(
         lines.push(muted(&fit(&summary, area.width as usize)));
         lines.push(blank());
     }
+    append_components(&mut lines, model, area);
     lines.push(aligned_header(
         &model.report_headers,
         &[8, 26, 8, 34, value_width(area, 84)],
@@ -44,6 +47,43 @@ fn append_report(
         &model.report_commands,
         area.width as usize,
     ));
+    lines
+}
+
+fn append_components(lines: &mut Vec<Line<'static>>, model: &RecommendationModel, area: Rect) {
+    if model.components.is_empty() {
+        return;
+    }
+    lines.push(divider("COMPONENTS", area.width));
+    let take = (area.height as usize).saturating_sub(8).min(6).max(1);
+    for component in model.components.iter().take(take) {
+        lines.extend(component_lines(component, area.width));
+    }
+    lines.push(blank());
+}
+
+fn component_lines(component: &ComponentRecommendationRow, width: u16) -> Vec<Line<'static>> {
+    let title = format!(
+        "◆ {} · {} · risk {} · {}",
+        component.class_label, component.tier_label, component.risk_score, component.rel_path
+    );
+    let mut lines = vec![row(&[
+        fit(&title, 38),
+        fit(
+            &component.reason,
+            (width as usize).saturating_sub(40).max(20),
+        ),
+    ])];
+    lines.push(muted(&fit(
+        &format!("scan focused: {}", component.scan_command),
+        width as usize,
+    )));
+    if let Some(command) = &component.promote_command {
+        lines.push(muted(&fit(
+            &format!("promote target: {command}"),
+            width as usize,
+        )));
+    }
     lines
 }
 

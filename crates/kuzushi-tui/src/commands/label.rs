@@ -14,6 +14,7 @@ pub enum ShellCommand {
     Workbench(WorkbenchPane),
     Findings,
     FindingsFilter(String),
+    Component(Option<String>),
     Open(String),
     Scan(Option<PathBuf>),
     Demo,
@@ -24,6 +25,7 @@ pub enum ShellCommand {
     Backend(Option<String>),
     Cost,
     Config,
+    Health,
     Permissions,
     Use(String),
     Tune,
@@ -55,6 +57,9 @@ pub enum ShellCommand {
     /// Continue the engagement: open the phase picker at the journey's
     /// current phase (derived from workspace state when no walker is live).
     Next,
+    /// Open a specific engagement phase picker without changing workspace-
+    /// derived `next` semantics.
+    Phase(WorkflowPhase),
     Logs,
     Target(Option<String>),
     TargetRevision(String),
@@ -80,6 +85,7 @@ pub enum ShellCommand {
     Workspace(WorkspaceCommand),
     Pwn(PwnCommand),
     KnowledgeBase(Option<String>),
+    FilePicker,
     Attach(String),
     Detach(String),
     Reparse(String),

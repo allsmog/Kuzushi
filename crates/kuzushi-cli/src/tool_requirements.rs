@@ -67,6 +67,7 @@ pub(crate) const WORKSPACE_TOOL_PREFIXES: &[&str] = &[
     "module-recommender:",
     "context:",
     "recon:",
+    "bounty:",
     "vendor-assessment:",
     "chrome-rce:",
     "vuln-scout:",

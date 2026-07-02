@@ -47,12 +47,12 @@ fn renders_ink_style_shell_without_box_dashboard() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("HOME"));
-    assert!(rendered.contains("run artifacts"));
+    assert!(rendered.contains("RUN"));
+    assert!(rendered.contains("artifacts"));
     assert!(rendered.contains("modules"));
-    assert!(rendered.contains("recommend"));
     assert!(rendered.contains("kuzushi>"));
     assert!(rendered.contains("Tab complete"));
-    assert!(rendered.contains("modules browse"));
+    assert!(rendered.contains("next"));
     assert!(!rendered.contains("command log"));
     assert!(!rendered.contains("┌"));
     assert!(!rendered.contains("v2"));
@@ -138,6 +138,24 @@ fn planning_picker_announces_prior_state_and_plain_language_outcomes() {
         rendered.contains("Resuming"),
         "prior-state banner: {rendered}"
     );
+    assert!(
+        rendered.contains("組 map"),
+        "phase rail shows map: {rendered}"
+    );
+    assert!(
+        rendered.contains("崩 hunt"),
+        "phase rail shows hunt: {rendered}"
+    );
+    assert!(rendered.contains("‹h"), "rail advertises h: {rendered}");
+    assert!(
+        rendered.contains("1 組 map"),
+        "rail numbers phases: {rendered}"
+    );
+    assert!(rendered.contains("l›"), "rail advertises l: {rendered}");
+    assert!(
+        rendered.contains("TASKS FOCUS"),
+        "focused task pane is explicit: {rendered}"
+    );
     assert!(rendered.contains("cached artifact"));
     assert!(rendered.contains("1 finding"));
     // Ambiguous [x]/[~]/[ ] glyphs are gone; outcomes read as words + a legend.
@@ -150,6 +168,153 @@ fn planning_picker_announces_prior_state_and_plain_language_outcomes() {
         rendered.contains("Enter: run 1 new step"),
         "enter summary: {rendered}"
     );
+    assert!(
+        !rendered.contains("↑/↓/j/k"),
+        "planner body should not duplicate footer keybinds: {rendered}"
+    );
+    assert!(rendered.contains("command prompt paused"), "{rendered}");
+    assert!(rendered.contains(": to type a command"), "{rendered}");
+    assert!(!rendered.contains("kuzushi>"), "{rendered}");
+}
+
+#[test]
+fn planning_picker_options_focus_marks_the_options_pane() {
+    use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
+
+    let backend = TestBackend::new(132, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let dir = tempfile::tempdir().unwrap();
+    app.target = Some(dir.path().to_path_buf());
+    app.workflow_phase = Some(WorkflowPhase::Map);
+    app.planning_tasks = vec![planning_row_fixture(
+        PlanningTaskId::BuildStrideThreatModel,
+        PlanningArtifactState::Missing,
+    )];
+    app.planning_selected = [PlanningTaskId::BuildStrideThreatModel]
+        .into_iter()
+        .collect();
+    app.picker_focus = PickerFocus::OptionsPane;
+    app.shell_view = ShellView::PlanningPicker;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(
+        rendered.contains("threat-model:build FOCUS"),
+        "focused options pane is explicit: {rendered}"
+    );
+    assert!(
+        !rendered.contains("TASKS FOCUS"),
+        "inactive task pane should not claim focus: {rendered}"
+    );
+}
+
+#[test]
+fn planning_picker_is_vertically_centered_on_tall_terminals() {
+    use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
+
+    let backend = TestBackend::new(120, 60);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let dir = tempfile::tempdir().unwrap();
+    app.target = Some(dir.path().to_path_buf());
+    app.workflow_phase = Some(WorkflowPhase::Map);
+    app.planning_tasks = vec![planning_row_fixture(
+        PlanningTaskId::GatherRepoContext,
+        PlanningArtifactState::Missing,
+    )];
+    app.planning_selected = [PlanningTaskId::GatherRepoContext].into_iter().collect();
+    app.shell_view = ShellView::PlanningPicker;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let header_row = banner_row(buffer, "KUMI-KATA").expect("phase header row");
+    let prompt_row = banner_row(buffer, "command prompt paused").expect("prompt row");
+
+    assert!(
+        header_row >= 8,
+        "planner should not pin to the top on tall terminals; header row was {header_row}"
+    );
+    assert!(
+        prompt_row > header_row,
+        "prompt/footer should stay below centered planner content"
+    );
+}
+
+#[test]
+fn planning_picker_revisit_banner_names_cached_artifact_behavior() {
+    use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
+
+    let backend = TestBackend::new(120, 28);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let dir = tempfile::tempdir().unwrap();
+    app.target = Some(dir.path().to_path_buf());
+    app.workflow_phase = Some(WorkflowPhase::Map);
+    app.planning_tasks = vec![planning_row_fixture(
+        PlanningTaskId::GatherRepoContext,
+        PlanningArtifactState::Cached,
+    )];
+    app.planning_selected = [PlanningTaskId::GatherRepoContext].into_iter().collect();
+    app.shell_view = ShellView::PlanningPicker;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("Revisiting"), "{rendered}");
+    assert!(rendered.contains("press g to rebuild"), "{rendered}");
+    assert!(!rendered.contains("Resuming"), "{rendered}");
+}
+
+#[test]
+fn planning_picker_prompt_focus_renders_live_prompt() {
+    let backend = TestBackend::new(120, 28);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.planning_tasks = vec![planning_row_fixture(
+        PlanningTaskId::GatherRepoContext,
+        PlanningArtifactState::Missing,
+    )];
+    app.shell_view = ShellView::PlanningPicker;
+    app.picker_focus = PickerFocus::Prompt;
+    app.set_input("help");
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("kuzushi>"), "{rendered}");
+    assert!(rendered.contains("help"), "{rendered}");
+    assert!(!rendered.contains("command prompt paused"), "{rendered}");
+}
+
+#[test]
+fn planning_picker_reuses_cached_artifact_when_rebuild_cli_is_missing() {
+    use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
+
+    let backend = TestBackend::new(120, 28);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let dir = tempfile::tempdir().unwrap();
+    app.target = Some(dir.path().to_path_buf());
+    app.workflow_phase = Some(WorkflowPhase::Map);
+    let mut row = planning_row_fixture(
+        PlanningTaskId::BuildCodeQlDatabase,
+        PlanningArtifactState::Cached,
+    );
+    row.required_cli = Some("codeql");
+    row.cli_available = false;
+    app.planning_tasks = vec![row];
+    app.planning_selected = [PlanningTaskId::BuildCodeQlDatabase].into_iter().collect();
+    app.shell_view = ShellView::PlanningPicker;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("REUSE"), "{rendered}");
+    assert!(rendered.contains("cached"), "{rendered}");
+    assert!(rendered.contains("rebuild needs codeql"), "{rendered}");
+    assert!(!rendered.contains("blocked — install codeql"), "{rendered}");
 }
 
 #[test]
@@ -188,7 +353,7 @@ fn compact_alias_uses_kz_prompt_brand() {
 
 #[test]
 fn home_first_run_state_names_real_artifact_commands() {
-    let backend = TestBackend::new(80, 30);
+    let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Home;
@@ -197,12 +362,14 @@ fn home_first_run_state_names_real_artifact_commands() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("HOME"));
-    assert!(rendered.contains("run artifacts"));
-    assert!(rendered.contains("scan ."));
+    assert!(rendered.contains("RUN"));
+    assert!(rendered.contains("artifacts"));
+    assert!(rendered.contains("target ."));
+    assert!(rendered.contains("next"));
     assert!(rendered.contains("findings"));
     assert!(rendered.contains("modules"));
-    assert!(rendered.contains("recommend"));
     assert!(rendered.contains("quickstart"));
+    assert!(rendered.find("target .").unwrap() < rendered.find("next").unwrap());
     assert!(!rendered.contains("./repo"));
     assert!(!rendered.contains("┌"));
 }
@@ -256,7 +423,7 @@ fn home_view_renders_latest_run_artifact_rail() {
     assert!(rendered.contains("HOME"));
     assert!(rendered.contains("run-1"));
     assert!(rendered.contains("completed"));
-    assert!(rendered.contains("surface risk"));
+    assert!(rendered.contains("SURFACE"));
     assert!(rendered.contains("2 high/critical"));
     assert!(rendered.contains("critical=1"));
     assert!(rendered.contains("frameworks Next.js=1, Rails=1, Spring=1"));
@@ -265,13 +432,9 @@ fn home_view_renders_latest_run_artifact_rail() {
     assert!(rendered.contains("recorded"));
     assert!(rendered.contains("findings"));
     assert!(rendered.contains("○"));
-    assert!(rendered.contains("placeholder"));
     assert!(rendered.contains("⚠"));
-    assert!(rendered.contains("failed"));
     assert!(rendered.contains("■"));
-    assert!(rendered.contains("missing"));
     assert!(rendered.contains("◆"));
-    assert!(rendered.contains("partial"));
 }
 
 #[test]
@@ -286,10 +449,10 @@ fn catalog_default_is_grouped_at_normal_width() {
 
     assert!(rendered.contains("MODULES"));
     assert!(rendered.contains("▸ NEXT"));
-    assert!(rendered.contains("OFFENSE"));
-    assert!(rendered.contains("INTEL"));
-    assert!(rendered.contains("GOVERNANCE"));
-    assert!(rendered.contains("DEFENSE"));
+    assert!(rendered.contains("HUNT"));
+    assert!(rendered.contains("MAP"));
+    assert!(rendered.contains("OPERATE"));
+    assert!(rendered.contains("CONFIRM/FIX"));
     assert!(rendered.contains("sast"));
     assert!(!rendered.contains("Start here"));
     assert!(!rendered.contains("[!] no target selected"));
@@ -308,9 +471,10 @@ fn catalog_default_keeps_quickstart_fallback_on_tight_width() {
     assert!(rendered.contains("MODULES"));
     assert!(rendered.contains("Start here"));
     assert!(rendered.contains("context build"));
-    assert!(rendered.contains("scan ."));
+    assert!(rendered.contains("target ."));
+    assert!(rendered.contains("next"));
     assert!(rendered.contains("findings"));
-    assert!(!rendered.contains("OFFENSE"));
+    assert!(!rendered.contains("HUNT"));
     assert!(!rendered.contains("agentic-sast"));
 }
 
@@ -330,8 +494,10 @@ fn quickstart_follows_doctor_context_scan_findings_report_path() {
         "kuzushi doctor",
         "context build",
         ".kuzushi/context-snapshot.json",
+        "target .",
         "options sast:scan",
-        "scan .",
+        "next",
+        "run sast:scan",
         "findings",
         "proof state",
         "workspace export",
@@ -343,8 +509,10 @@ fn quickstart_follows_doctor_context_scan_findings_report_path() {
         );
     }
     assert!(rendered.find("kuzushi doctor").unwrap() < rendered.find("context build").unwrap());
-    assert!(rendered.find("context build").unwrap() < rendered.find("options sast:scan").unwrap());
-    assert!(rendered.find("options sast:scan").unwrap() < rendered.find("scan .").unwrap());
+    assert!(rendered.find("context build").unwrap() < rendered.find("target .").unwrap());
+    assert!(rendered.find("target .").unwrap() < rendered.find("options sast:scan").unwrap());
+    assert!(rendered.find("options sast:scan").unwrap() < rendered.find("next").unwrap());
+    assert!(rendered.find("next").unwrap() < rendered.find("run sast:scan").unwrap());
     for y in 0..22 {
         let row = buffer_row_text(buffer, 80, y);
         assert!(
@@ -542,8 +710,8 @@ fn renders_expanded_catalog_readably_on_narrow_terminal() {
     // Category divider embeds the section blurb on the rule line — see
     // `category_divider` and `design/mockups/catalog.jsx::catHead`. Narrow
     // terminals truncate, so assert on the shortest blurb word that
-    // survives an 58-col render: "OFFENSE" itself.
-    assert!(rendered.contains("OFFENSE"));
+    // survives a 58-col render: the workflow label itself.
+    assert!(rendered.contains("HUNT"));
     assert!(!rendered.contains("module context-lite"));
     assert!(!rendered.contains("command log"));
 }
@@ -560,7 +728,7 @@ fn expanded_catalog_uses_design_sections_without_dag_column() {
 
     assert!(rendered.contains("MODULES"));
     assert!(rendered.contains("▸ NEXT"));
-    assert!(rendered.contains("OFFENSE"));
+    assert!(rendered.contains("HUNT"));
     assert!(rendered.contains("sast"));
     assert!(!rendered.contains("dag"));
     assert!(!rendered.contains("DAG"));
@@ -608,7 +776,11 @@ fn module_playbooks_name_supported_run_and_scan_commands() {
     let cases = [
         ("context", "context build", "run build"),
         ("threat-model", "threats regen", "threats build"),
-        ("sast", "scan runs configured scanners", "run . or scan"),
+        (
+            "sast",
+            "next opens guided hunt",
+            "scan runs configured scanners",
+        ),
         ("cargo-audit", "RustSec advisories", "tool-specific options"),
         ("agentic-sast", "run agentic-sast:scan", "run scan"),
     ];
@@ -1357,6 +1529,7 @@ fn renders_options_table_readably_at_80_columns() {
     assert!(rendered.contains("triage"));
     assert!(rendered.contains("true"));
     assert!(rendered.contains("set <key> <value>"));
+    assert!(rendered.contains("lost on exit"));
     assert!(!rendered.contains("┌"));
 }
 
@@ -1596,6 +1769,7 @@ fn plain_options_table_has_no_ansi_or_box_drawing() {
     assert!(rendered.contains("sast:scan"));
     assert!(rendered.contains("triage"));
     assert!(rendered.contains("true"));
+    assert!(rendered.contains("lost on exit"));
     assert!(rendered.contains("Next: set <key> <value>"));
     assert_strict_plain_80(&rendered);
 }
@@ -1894,7 +2068,14 @@ fn viewport_help_remains_navigable_at_24_rows() {
 #[test]
 fn viewport_tools_remain_navigable_at_24_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    let last_tool = app.registry.tools().last().unwrap().name.clone();
+    let last_tool = crate::ui_view_models::tools_model(&app)
+        .groups
+        .iter()
+        .rev()
+        .find_map(|group| group.rows.last())
+        .unwrap()
+        .cells[0]
+        .clone();
     app.shell_view = ShellView::Tools;
     app.tools_scroll = usize::MAX;
 
@@ -2053,6 +2234,7 @@ fn renders_agent_chat_mode_while_question_is_active() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        screen_context_scope: Some("scope: F-0001 · 作 confirm · abc1234-dirty".to_string()),
         failure_context: None,
         pending_failure_context: None,
     });
@@ -2065,6 +2247,7 @@ fn renders_agent_chat_mode_while_question_is_active() {
     assert!(rendered.contains("running"));
     assert!(rendered.contains("mode:agent"));
     assert!(rendered.contains("agent: active"));
+    assert!(rendered.contains("scope: F-0001"));
     assert!(rendered.contains("kuzushi/agent>"));
     assert!(!rendered.contains("┌"));
 }
@@ -2090,6 +2273,7 @@ fn renders_honest_abort_requested_states() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        screen_context_scope: None,
         failure_context: None,
         pending_failure_context: None,
     });
@@ -2135,6 +2319,7 @@ fn agent_chat_renders_failure_handoff_panel() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        screen_context_scope: None,
         failure_context: Some(kuzushi_core::run_artifacts::FailureToLlmContext {
             failed_stage: "semgrep:scan".to_string(),
             cause: "semgrep binary missing".to_string(),
@@ -2182,6 +2367,7 @@ fn failure_handoff_view_renders_current_context() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        screen_context_scope: None,
         failure_context: Some(kuzushi_core::run_artifacts::FailureToLlmContext {
             failed_stage: "semgrep:scan".to_string(),
             cause: "semgrep binary missing".to_string(),
@@ -2377,21 +2563,19 @@ fn renders_shell_module_plan_and_run_routing_modes() {
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains(mode), "missing {mode} in {rendered}");
+        assert!(rendered.contains("KUZUSHI"), "missing brand in {rendered}");
         assert!(
-            rendered.contains("KUZUSHI mode:"),
-            "missing cockpit strip in {rendered}"
+            rendered.contains("mode:"),
+            "missing mode chip in {rendered}"
         );
         assert!(
-            rendered.contains(" · target:"),
-            "missing target separator in {rendered}"
+            rendered.contains("target:"),
+            "missing target chip in {rendered}"
         );
+        assert!(rendered.contains("ctx:"), "missing ctx chip in {rendered}");
         assert!(
-            rendered.contains(" · ctx:"),
-            "missing ctx separator in {rendered}"
-        );
-        assert!(
-            rendered.contains(" · model:"),
-            "missing model separator in {rendered}"
+            rendered.contains("model:"),
+            "missing model chip in {rendered}"
         );
         assert!(
             !rendered.contains("KUZUSHI  mode "),
@@ -2428,6 +2612,7 @@ fn renders_all_ink_parity_shell_surfaces() {
         (ShellView::Trace("run-1".to_string()), "TRACE"),
         (ShellView::Help, "HELP"),
         (ShellView::Config, "CONFIG"),
+        (ShellView::Health, "HEALTH"),
         (ShellView::Tools, "TOOLS"),
         (
             ShellView::Options(crate::app::OptionsView {
@@ -2442,6 +2627,7 @@ fn renders_all_ink_parity_shell_surfaces() {
         (ShellView::StrategyQueue, "STRATEGY QUEUE"),
         (ShellView::Workspace, "WORKSPACE"),
         (ShellView::KnowledgeBase, "KB ATTACHMENTS"),
+        (ShellView::FilePicker, "ATTACH A FILE"),
         (ShellView::FailureHandoff, "FAILURE HANDOFF"),
         (ShellView::AgentChat, "AGENT"),
         (ShellView::History, "COMMAND HISTORY"),
@@ -3412,8 +3598,12 @@ fn home_view_shows_journey_rail_and_phase_chip_with_target() {
     assert!(rendered.contains("掛 fix"), "rail shows fix phase");
     assert!(rendered.contains("組 map 1/4"), "footer phase chip");
     assert!(
-        rendered.contains("Run next"),
-        "NEXT action speaks the journey verb"
+        rendered.contains("type `next`"),
+        "NEXT mechanics name the typed command"
+    );
+    assert!(
+        rendered.contains("next · findings · options sast:scan"),
+        "journey Home command list should expose next, findings, and tuning"
     );
 }
 
@@ -3503,6 +3693,28 @@ fn target_picker_renders_candidates_with_cursor_and_hints() {
         rendered.contains("target <path>"),
         "manual-path escape hatch"
     );
+}
+
+#[test]
+fn file_picker_renders_filter_count_and_selected_file() {
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::FilePicker;
+    app.file_picker_files = vec![
+        "README.md".to_string(),
+        "docs/design.md".to_string(),
+        "src/main.rs".to_string(),
+    ];
+    app.file_picker_query = "des".to_string();
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("ATTACH A FILE"));
+    assert!(rendered.contains("filter: des"));
+    assert!(rendered.contains("1 shown"));
+    assert!(rendered.contains("> docs/design.md"));
 }
 
 #[test]
@@ -4032,6 +4244,7 @@ fn agent_chat_renders_multi_turn_history_with_bubble_per_turn() {
         ],
         run_id: None,
         started_secs: 0,
+        screen_context_scope: None,
         failure_context: None,
         pending_failure_context: None,
     });
@@ -4075,6 +4288,7 @@ fn agent_chat_fold_for_next_turn_pushes_completed_turn_into_history() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        screen_context_scope: None,
         failure_context: None,
         pending_failure_context: None,
     };
@@ -4108,6 +4322,7 @@ fn agent_chat_renders_role_tagged_bubbles() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        screen_context_scope: None,
         failure_context: None,
         pending_failure_context: None,
     });
@@ -4219,33 +4434,82 @@ fn workbench_app_with_findings() -> ShellApp {
     app
 }
 
-#[test]
-fn workbench_renders_pane_borders_at_wide_and_narrow_widths() {
-    for (width, height) in [(120, 24), (80, 30)] {
-        let backend = TestBackend::new(width, height);
-        let mut terminal = Terminal::new(backend).unwrap();
-        let app = workbench_app_with_findings();
+fn workbench_app_with_long_source_rows() -> ShellApp {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.findings.extend(repeat_finding(
+        "demo.workflow",
+        ".github/workflows/benchmark-regression.yml",
+        Severity::High,
+        1,
+    ));
+    app.findings.extend(repeat_finding(
+        "demo.reference",
+        ".github/workflows/kuzushi-reference.yml",
+        Severity::High,
+        4,
+    ));
+    app.findings.extend(repeat_finding(
+        "demo.secret",
+        "crates/kuzushi-core/src/scan/engines/secret_scan/applies_size_binary_and_severity_filters.rs",
+        Severity::High,
+        18,
+    ));
+    app.findings.extend(repeat_finding(
+        "demo.medium",
+        "src/review/moderate-risk-finding.rs",
+        Severity::Medium,
+        1,
+    ));
+    app
+}
 
-        terminal.draw(|frame| render_app(frame, &app)).unwrap();
-        let rendered = format!("{:?}", terminal.backend().buffer());
-
-        assert!(rendered.contains("┌"), "no pane border at {width}x{height}");
-        assert!(rendered.contains("SOURCE"), "no SOURCE at {width}x{height}");
-        assert!(rendered.contains("CODE"), "no CODE at {width}x{height}");
-        assert!(
-            rendered.contains("FINDINGS"),
-            "no FINDINGS at {width}x{height}"
-        );
-        assert!(
-            rendered.contains("DETAILS"),
-            "no DETAILS at {width}x{height}"
-        );
-        assert!(!rendered.contains("2/4 shown"), "{rendered}");
-    }
+fn repeat_finding<'a>(
+    rule: &'a str,
+    path: &'a str,
+    severity: Severity,
+    count: usize,
+) -> impl Iterator<Item = Finding> + 'a {
+    (0..count).map(move |index| {
+        Finding::new_semgrep(
+            format!("{rule}.{index}"),
+            path,
+            12,
+            Some(14),
+            severity.clone(),
+            "long source row render regression",
+        )
+    })
 }
 
 #[test]
-fn workbench_renders_three_column_intermediate_without_source() {
+fn workbench_renders_pane_borders_at_wide_and_narrow_widths() {
+    let wide = render_workbench_for_test(120, 24);
+    assert!(wide.contains("┌"), "{wide}");
+    assert!(wide.contains("SOURCE"), "{wide}");
+    assert!(wide.contains("CODE"), "{wide}");
+    assert!(wide.contains("FINDINGS"), "{wide}");
+    assert!(wide.contains("STATUS"), "{wide}");
+    assert!(!wide.contains("2/4 shown"), "{wide}");
+
+    let narrow = render_workbench_for_test(80, 16);
+    assert!(narrow.contains("┌"), "{narrow}");
+    assert!(narrow.contains("FINDINGS"), "{narrow}");
+    assert!(narrow.contains("F-0001"), "{narrow}");
+    assert!(narrow.contains("HIGH"), "{narrow}");
+    assert!(narrow.contains("2/4 shown"), "{narrow}");
+}
+
+fn render_workbench_for_test(width: u16, height: u16) -> String {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let app = workbench_app_with_findings();
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    format!("{:?}", terminal.backend().buffer())
+}
+
+#[test]
+fn workbench_renders_review_grid_at_common_terminal_widths() {
     let backend = TestBackend::new(110, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let app = workbench_app_with_findings();
@@ -4255,32 +4519,30 @@ fn workbench_renders_three_column_intermediate_without_source() {
 
     assert!(rendered.contains("CODE"), "{rendered}");
     assert!(rendered.contains("FINDINGS"), "{rendered}");
-    assert!(rendered.contains("DETAILS"), "{rendered}");
-    assert!(!rendered.contains("SOURCE"), "{rendered}");
+    assert!(rendered.contains("STATUS"), "{rendered}");
+    assert!(rendered.contains("SOURCE"), "{rendered}");
     assert!(!rendered.contains("2/4 shown"), "{rendered}");
 }
 
 #[test]
 fn workbench_short_review_hint_names_real_constraints() {
-    let backend = TestBackend::new(80, 24);
+    let backend = TestBackend::new(80, 16);
     let mut terminal = Terminal::new(backend).unwrap();
     let app = workbench_app_with_findings();
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("SOURCE+CODE/DFD hidden"), "{rendered}");
-    assert!(rendered.contains(">=30 rows"), "{rendered}");
-    assert!(rendered.contains(">=120 cols"), "{rendered}");
+    assert!(rendered.contains("SOURCE+CENTER hidden"), "{rendered}");
+    assert!(rendered.contains(">=100 cols"), "{rendered}");
     assert!(rendered.contains("2/4 shown"), "{rendered}");
-    assert!(rendered.contains("proof"), "{rendered}");
-    assert!(rendered.contains("? unconfirmed"), "{rendered}");
+    assert!(!rendered.contains("? unconfirmed"), "{rendered}");
     assert!(rendered.contains("FINDINGS"), "{rendered}");
-    assert!(rendered.contains("DETAILS"), "{rendered}");
+    assert!(rendered.contains("F-0001 · HIGH"), "{rendered}");
 }
 
 #[test]
-fn workbench_top_bar_renders_journey_phase_rail_with_target() {
+fn workbench_top_bar_renders_compact_journey_phase_with_target() {
     let target = tempfile::tempdir().expect("temp target");
     let backend = TestBackend::new(140, 30);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -4291,10 +4553,70 @@ fn workbench_top_bar_renders_journey_phase_rail_with_target() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
+    assert!(rendered.contains("▸ workbench"), "{rendered}");
+    assert!(rendered.contains("target:"), "{rendered}");
+    assert!(rendered.contains("phase:"), "{rendered}");
     assert!(rendered.contains("組 map"), "{rendered}");
-    assert!(rendered.contains("崩 hunt"), "{rendered}");
-    assert!(rendered.contains("作 confirm"), "{rendered}");
-    assert!(rendered.contains("掛 fix"), "{rendered}");
+    assert!(rendered.contains("▸ NEXT"), "{rendered}");
+    assert!(rendered.contains("page:terrain"), "{rendered}");
+    assert!(rendered.contains("map modules"), "{rendered}");
+}
+
+#[test]
+fn workbench_wide_frame_keeps_source_counts_and_footer_summary_on_one_row() {
+    let width = 220;
+    let backend = TestBackend::new(width, 42);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let app = workbench_app_with_long_source_rows();
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let rows = rendered_buffer_rows(buffer);
+    let rendered = rows.join("\n");
+
+    assert!(rendered.contains("type scan guided workflow"), "{rendered}");
+    assert!(rendered.contains(" / 1 med"), "{rendered}");
+    assert!(!rendered.contains("medium"), "{rendered}");
+    assert!(!rendered.contains("mediu"), "{rendered}");
+
+    let source_width = ((width * 14) / 100).clamp(18, 32) as usize;
+    for row in rows {
+        let Some(source_text) = source_inner_text(&row, source_width) else {
+            continue;
+        };
+        assert!(
+            !is_orphan_source_count(&source_text),
+            "source row count wrapped onto its own line: {source_text:?}\n{rendered}"
+        );
+    }
+}
+
+fn rendered_buffer_rows(buffer: &Buffer) -> Vec<String> {
+    (0..buffer.area.height)
+        .map(|y| buffer_row_text(buffer, buffer.area.width, y))
+        .collect()
+}
+
+fn source_inner_text(row: &str, source_width: usize) -> Option<String> {
+    let pane = row.chars().take(source_width).collect::<String>();
+    if !pane.starts_with('│') || !pane.ends_with('│') {
+        return None;
+    }
+    Some(
+        pane.chars()
+            .skip(1)
+            .take(source_width.saturating_sub(2))
+            .collect::<String>()
+            .trim()
+            .to_string(),
+    )
+}
+
+fn is_orphan_source_count(source_text: &str) -> bool {
+    let Some(stripped) = source_text.strip_prefix("· ") else {
+        return source_text.parse::<usize>().is_ok();
+    };
+    stripped.parse::<usize>().is_ok()
 }
 
 #[test]
@@ -4314,7 +4636,8 @@ fn workbench_lines_plain_shows_top_bar_findings_and_dfd_empty_hint() {
         rendered.contains("sql injection via order_id"),
         "{rendered}"
     );
-    assert!(rendered.contains("CODE · F-0001"), "{rendered}");
+    assert!(rendered.contains("CODE"), "{rendered}");
+    assert!(rendered.contains("F-0001"), "{rendered}");
     assert!(rendered.contains("source unavailable"), "{rendered}");
 }
 
@@ -4370,14 +4693,24 @@ fn workbench_selected_finding_gets_readable_details_pane() {
     assert!(rendered.contains("Demo.java:42"), "{rendered}");
     assert!(rendered.contains("▶"), "{rendered}");
     assert!(rendered.contains("SELECT * FROM accounts"), "{rendered}");
-    assert!(!rendered.contains("DFD"), "{rendered}");
-    assert!(rendered.contains("DETAILS"), "{rendered}");
-    assert!(
-        rendered.contains("workspace export findings report.sarif"),
-        "{rendered}"
-    );
+    assert!(!rendered.contains("┌DFD"), "{rendered}");
+    assert!(rendered.contains("F-0001 · HIGH"), "{rendered}");
+    assert!(rendered.contains("workspace export findings"), "{rendered}");
+    let status_pos = rendered.find("confirmation:").expect("status section");
+    let next_pos = rendered[status_pos..]
+        .find("validate")
+        .map(|offset| status_pos + offset)
+        .expect("next section");
+    let evidence_pos = rendered[next_pos..]
+        .find("source-sink")
+        .map(|offset| next_pos + offset)
+        .expect("evidence section");
+    assert!(status_pos < next_pos, "{rendered}");
+    assert!(next_pos < evidence_pos, "{rendered}");
+    assert!(rendered.contains("validate"), "{rendered}");
+    assert!(rendered.contains("not verified"), "{rendered}");
+    assert!(!rendered.contains("proof:"), "{rendered}");
     assert!(rendered.contains("prepareStatement"), "{rendered}");
-    assert!(rendered.contains("EVIDENCE"), "{rendered}");
     assert!(rendered.contains("source-sink"), "{rendered}");
     assert!(
         rendered.contains("Attacker-controlled source"),
@@ -4406,10 +4739,63 @@ fn workbench_center_renders_dfd_title_when_artifact_present() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Workbench;
     app.target = Some(temp.path().to_path_buf());
+    app.workbench_page = Some(WorkbenchPage::Review);
+    app.workbench_center_mode = WorkbenchCenterMode::Dfd;
 
     let rendered = render_plain_app(&app, 120);
 
     // The real data-flow diagram replaces the empty hint.
     assert!(rendered.contains("DATA-FLOW DIAGRAM"), "{rendered}");
     assert!(!rendered.contains("no threat model yet"), "{rendered}");
+}
+
+#[test]
+fn workbench_frame_uses_scene_dfd_widget_when_artifact_present() {
+    let temp = tempfile::tempdir().unwrap();
+    let doc = serde_json::json!({
+        "dfd": {
+            "nodes": [
+                {
+                    "id": "user",
+                    "type": "external-entity",
+                    "name": "Browser",
+                    "trustZone": "internet"
+                },
+                {
+                    "id": "api",
+                    "type": "process",
+                    "name": "API server",
+                    "trustZone": "app-tier"
+                }
+            ],
+            "flows": [
+                {
+                    "id": "f1",
+                    "sourceId": "user",
+                    "targetId": "api",
+                    "description": "https"
+                }
+            ]
+        }
+    });
+    let path = kuzushi_core::capabilities::persistent_threat_model_path(temp.path());
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, serde_json::to_string(&doc).unwrap()).unwrap();
+
+    let backend = TestBackend::new(150, 34);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.target = Some(temp.path().to_path_buf());
+    app.workbench_page = Some(WorkbenchPage::Review);
+    app.workbench_center_mode = WorkbenchCenterMode::Dfd;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("INTERNET"), "{rendered}");
+    assert!(rendered.contains("APP-TIER"), "{rendered}");
+    assert!(rendered.contains("◆ Browser"), "{rendered}");
+    assert!(rendered.contains("▸ API server"), "{rendered}");
+    assert!(!rendered.contains("DATA-FLOW DIAGRAM"), "{rendered}");
 }

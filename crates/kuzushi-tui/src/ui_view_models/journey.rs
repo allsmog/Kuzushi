@@ -14,9 +14,15 @@ pub struct JourneyModel {
     /// One entry per phase in canonical order, each marked done/current/pending.
     pub phases: Vec<JourneyPhaseStatus>,
     pub current: WorkflowPhase,
-    /// The home view's `▸ NEXT` line: one concrete action for the current
-    /// phase. Text after ` — ` renders muted (see `next_action_line`).
+    pub progress: JourneyProgress,
+    /// The home view's primary NEXT action: one concrete action for the
+    /// current phase, without command mechanics or tuning hints.
     pub next_action: String,
+    /// Concrete tools the `next` walker may dispatch for the current phase.
+    pub next_tools: String,
+    /// A compact Workbench header summary that keeps the engagement spine
+    /// visible without competing with pane content.
+    pub next_summary: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -41,10 +47,10 @@ impl JourneyPhaseState {
     pub fn glyph(self) -> &'static str {
         match self {
             JourneyPhaseState::Done => "✓",
-            JourneyPhaseState::Current => "●",
+            JourneyPhaseState::Current => "▸",
             JourneyPhaseState::Failed => "!",
             JourneyPhaseState::Skipped => "⊘",
-            JourneyPhaseState::Pending => "○",
+            JourneyPhaseState::Pending => "·",
         }
     }
 }
@@ -131,7 +137,10 @@ pub fn journey_model(app: &ShellApp) -> Option<JourneyModel> {
             &failed_phases,
         ),
         current,
+        progress,
         next_action: phase_next_action(current, progress),
+        next_tools: phase_tool_hint(current),
+        next_summary: phase_next_summary(current, progress),
     })
 }
 
@@ -139,12 +148,12 @@ fn journey_progress_from_parts(map_artifacts_built: bool, findings: &[Finding]) 
     JourneyProgress {
         map_artifacts_built,
         finding_total: findings.len(),
-        reviewed_findings: findings.iter().filter(|f| is_reviewed(f)).count(),
+        reviewed_findings: findings.iter().filter(|f| is_reviewed_finding(f)).count(),
         confirmed_findings: findings.iter().filter(|f| is_confirmed(f)).count(),
     }
 }
 
-fn is_reviewed(finding: &Finding) -> bool {
+pub(crate) fn is_reviewed_finding(finding: &Finding) -> bool {
     finding.verification.is_some()
         || finding.triage.as_ref().is_some_and(|triage| {
             matches!(
@@ -230,24 +239,43 @@ fn phase_state(
 fn phase_next_action(current: WorkflowPhase, progress: JourneyProgress) -> String {
     match current {
         WorkflowPhase::Map => format!(
-            "Run next to establish the grip — build context & analysis artifacts (組 map, 1 of 4). Tools: {}.",
-            phase_tool_hint(current)
+            "build context & analysis artifacts — 組 map, {} of {}",
+            current.position(),
+            WorkflowPhase::ORDER.len()
         ),
         WorkflowPhase::Hunt => format!(
-            "Run next to hunt for vulnerabilities — map artifacts ready (崩 hunt, 2 of 4). Tools: {}.",
-            phase_tool_hint(current)
+            "hunt for findings — map artifacts ready (崩 hunt, {} of {})",
+            current.position(),
+            WorkflowPhase::ORDER.len()
         ),
         WorkflowPhase::Confirm => format!(
-            "Run next to triage & verify — {} of {} findings need review (作 confirm, 3 of 4). Tools: {}.",
+            "triage & verify — {} of {} findings need review",
             progress.unreviewed_findings(),
-            progress.finding_total,
-            phase_tool_hint(current)
+            progress.finding_total
         ),
         WorkflowPhase::Fix => format!(
-            "Run next to patch & report — {} confirmed, {} reviewed (掛 fix, 4 of 4). Tools: {}.",
-            progress.confirmed_findings,
-            progress.reviewed_findings,
-            phase_tool_hint(current)
+            "patch & report — {} confirmed, {} reviewed",
+            progress.confirmed_findings, progress.reviewed_findings
+        ),
+    }
+}
+
+fn phase_next_summary(current: WorkflowPhase, progress: JourneyProgress) -> String {
+    match current {
+        WorkflowPhase::Map => {
+            "組 map · build context and analysis artifacts — next to continue".to_string()
+        }
+        WorkflowPhase::Hunt => {
+            "崩 hunt · map artifacts ready — scan for the full hunt or next to choose tools"
+                .to_string()
+        }
+        WorkflowPhase::Confirm => format!(
+            "作 confirm · {} findings need review — next to continue",
+            progress.unreviewed_findings()
+        ),
+        WorkflowPhase::Fix => format!(
+            "掛 fix · {} confirmed findings — next to patch and report",
+            progress.confirmed_findings
         ),
     }
 }
@@ -427,15 +455,20 @@ mod tests {
     fn next_action_counts_unreviewed_findings() {
         let action = phase_next_action(WorkflowPhase::Confirm, progress(true, 4, 1, 1));
         assert!(action.contains("3 of 4 findings need review"));
+        assert!(!action.contains("Type 'next'"));
+
+        let summary = phase_next_summary(WorkflowPhase::Confirm, progress(true, 4, 1, 1));
+        assert!(summary.contains("作 confirm · 3 findings need review"));
+        assert!(summary.contains("next to continue"));
     }
 
     #[test]
     fn next_action_names_concrete_phase_tools() {
-        let hunt = phase_next_action(WorkflowPhase::Hunt, progress(true, 0, 0, 0));
+        let hunt = phase_tool_hint(WorkflowPhase::Hunt);
         assert!(hunt.contains("secret-scan:scan"));
         assert!(hunt.contains("taint-iris-next:hunt"));
 
-        let confirm = phase_next_action(WorkflowPhase::Confirm, progress(true, 1, 0, 0));
+        let confirm = phase_tool_hint(WorkflowPhase::Confirm);
         assert!(confirm.contains("triage:run"));
         assert!(confirm.contains("verify:finding"));
     }

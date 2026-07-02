@@ -37,6 +37,7 @@ pub use crate::options::{
     relative_house_rules_root, relative_module_prompt_root, relative_prompt_override_path,
     relative_prompt_overrides_root, OptionScope, OptionTarget, ToolOptionStore,
 };
+pub use crate::process_lookup::executable_on_path;
 pub use crate::prompt_stack::{
     append_prompt_mutation, approve_prompt_mutation, latest_prompt_mutation, load_prompt_mutations,
     prompt_mutations_path, save_prompt_mutations, set_prompt_mutation_status, PromptMutation,

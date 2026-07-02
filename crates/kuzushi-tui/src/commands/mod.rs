@@ -13,7 +13,7 @@ mod label;
 mod parse_auth_command;
 mod parse_run_command;
 mod parse_task_command;
-use crate::app::{OptionsFilter, ThreatView, WorkbenchPane};
+use crate::app::{OptionsFilter, ThreatView, WorkbenchPane, WorkflowPhase};
 use std::path::PathBuf;
 mod shell_command_specs;
 mod shellcommandspec;

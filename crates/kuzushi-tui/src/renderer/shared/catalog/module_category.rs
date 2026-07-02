@@ -1,15 +1,18 @@
 pub(crate) fn module_category_blurb(category: &str) -> (&'static str, &'static str) {
     match category {
         "OFFENSE" => (
-            "OFFENSE",
-            "find vulnerabilities by scanning code, dependencies, and runtime surface",
+            "HUNT",
+            "scan code, dependencies, and runtime surface for candidates",
         ),
         "INTEL" => (
-            "INTEL",
-            "build context, recon, and threat model the operator reads first",
+            "MAP",
+            "build context, recon, inventory, and threat model first",
         ),
-        "GOVERNANCE" => ("GOVERNANCE", "configuration, allowlists, and audit trails"),
-        "DEFENSE" => ("DEFENSE", "triage, verify, and patch emitted findings"),
+        "GOVERNANCE" => (
+            "OPERATE",
+            "configure providers, catalogs, policy, and audit trails",
+        ),
+        "DEFENSE" => ("CONFIRM/FIX", "triage, verify, patch, and report findings"),
         _ => ("OTHER", "loaded module surfaces"),
     }
 }

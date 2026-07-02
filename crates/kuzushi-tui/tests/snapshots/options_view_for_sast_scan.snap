@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 307
 ---
- KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI > options[sast:scan] · mode:shell · target:none · ctx:not built · model:unconfigured
 
  -- OPTIONS ------------------------------------------------------------------------------------------------------------
 tool: sast:scan
@@ -14,7 +14,8 @@ taskMode          -           auto       no     enum   task_mode         Task-se
 tasks             -           -          no     list   taskIds, task...  Manual task allowlist. Use /tasks to edit.
 disabledTasks     -           -          no     list   disabled_tasks    Auto-mode task denylist. Use /tasks to edit.
 severity          -           -          no     list   -                 Optional severity filter: critical, high...
+paths             -           -          no     list   includePaths...   Optional workspace-relative path roots to scan.
 triage            -           false      no     bool   aiTriage...       Run model-backed triage after static scanners.
 
-Canonical keys are in the option column; aliases are compatibility names.
+set is session-only (lost on exit); setg is persistent for this tool.
 Next: set <key> <value>, setg <key> <value>, show advanced, show missing

@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 265
 ---
- KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI > kb · mode:shell · target:none · ctx:not built · model:unconfigured
 
  -- KB ATTACHMENTS -----------------------------------------------------------------------------------------------------
 module: context

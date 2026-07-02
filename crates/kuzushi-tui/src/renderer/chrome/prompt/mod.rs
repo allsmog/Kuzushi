@@ -5,6 +5,22 @@ pub(crate) fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if area.height == 0 {
         return;
     }
+    if matches!(app.shell_view, crate::ShellView::FilePicker) {
+        let line = Line::from(Span::styled(
+            "file picker active — type to filter · Enter attach · Esc close",
+            theme::disabled(),
+        ));
+        frame.render_widget(Paragraph::new(line), area);
+        return;
+    }
+    if app.is_picker_view() && !app.picker_prompt_focused() {
+        let line = Line::from(Span::styled(
+            "command prompt paused — : to type a command",
+            theme::disabled(),
+        ));
+        frame.render_widget(Paragraph::new(line), area);
+        return;
+    }
 
     let prompt = prompt_model(app);
     let segments = prompt_segments(

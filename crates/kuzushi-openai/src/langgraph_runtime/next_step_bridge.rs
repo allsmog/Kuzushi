@@ -15,6 +15,7 @@ pub(crate) fn next_step_blocking(
     request: &AgentToolLoopRequest,
     history: &[LoopHistoryEntry],
 ) -> Result<AgentLoopStep> {
+    validate_runtime_model(runtime, &request.model)?;
     let bridge_request = next_step_bridge_request(runtime, request, history);
     // Same transient-retry policy as query_blocking: without it, one 429 or
     // dropped socket kills an entire multi-step agent loop mid-flight. A
@@ -52,6 +53,7 @@ pub(crate) fn preflight_tool_loop_blocking(
     runtime: &LangGraphRuntime,
     request: &AgentToolLoopRequest,
 ) -> Result<()> {
+    validate_runtime_model(runtime, &request.model)?;
     let mut bridge_request = next_step_bridge_request(runtime, request, &[]);
     bridge_request.envelope_type = "next-step-preflight";
     let response = run_next_step_preflight_bridge(
@@ -60,6 +62,10 @@ pub(crate) fn preflight_tool_loop_blocking(
         runtime.cancellation.as_ref(),
     )?;
     ensure_next_step_preflight_ok(response)
+}
+
+fn validate_runtime_model(runtime: &LangGraphRuntime, model: &str) -> Result<()> {
+    kuzushi_core::runtime::validate_model_api_key_env(model, &runtime.api_key_env)
 }
 
 fn ensure_not_cancelled(runtime: &LangGraphRuntime) -> Result<()> {

@@ -31,7 +31,10 @@ fn workbench_footer_advertises_esc_back_and_run_path() {
     app.shell_view = ShellView::Workbench;
     let bindings = footer_keybindings(&app);
     assert!(bindings.contains(&bind("Esc", "back")));
-    assert!(bindings.contains(&bind("scan", "rescan")));
+    assert!(bindings.contains(&bind("cc", "workbench")));
+    assert!(bindings.contains(&bind("n/N", "page")));
+    assert!(bindings.contains(&bind("1..4", "page")));
+    assert!(bindings.contains(&bind("scan", "guided workflow")));
     assert!(bindings.contains(&bind("Ctrl+C", "exit")));
     assert!(!bindings.contains(&bind(WORKBENCH_REPORT_COMMAND, "export report")));
 }
@@ -56,12 +59,16 @@ fn workbench_footer_advertises_export_when_findings_exist() {
 
 #[test]
 fn footer_keybindings_include_shell_completion_prefix() {
-    let app = ShellApp::new(V2Config::default(), None);
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Home;
 
     let bindings = footer_keybindings(&app);
 
     assert_eq!(bindings[0], bind("Tab", "complete"));
     assert!(bindings.contains(&bind("modules", "browse")));
+    assert!(bindings.contains(&bind("cc", "workbench")));
+    assert!(bindings.contains(&bind("n", "next phase")));
+    assert!(bindings.contains(&bind("options sast:scan", "tune scan")));
     assert!(bindings.contains(&bind("Ctrl+C", "exit")));
 }
 
@@ -78,13 +85,13 @@ fn footer_keybindings_show_scan_abort_action_when_running() {
 }
 
 #[test]
-fn footer_keybindings_show_arm_exit_after_abort_request() {
+fn footer_keybindings_show_wait_cleanup_after_abort_request() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.scan = Some(scan_state(true, true));
 
     let bindings = footer_keybindings(&app);
 
-    assert_eq!(bindings[0], bind("Ctrl+C", "arm exit"));
+    assert_eq!(bindings[0], bind("Ctrl+C", "wait cleanup"));
 }
 
 #[test]
@@ -103,7 +110,50 @@ fn footer_keybindings_deduplicate_view_bindings() {
     let bindings = footer_keybindings(&app);
 
     assert_eq!(count_binding(&bindings, "j/k", "move"), 1);
-    assert_eq!(count_binding(&bindings, "scan", "rescan"), 1);
+    assert_eq!(count_binding(&bindings, "scan", "guided workflow"), 1);
+    assert_eq!(count_binding(&bindings, "n/N", "page"), 1);
+}
+
+#[test]
+fn planning_picker_footer_separates_phase_navigation_skip_and_close() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::PlanningPicker;
+
+    let bindings = footer_keybindings(&app);
+
+    assert!(bindings.contains(&bind("KEYS", "j/k move")));
+    assert!(bindings.contains(&bind("h/l ←/→", "phase")));
+    assert!(bindings.contains(&bind("1-4", "jump phase")));
+    assert!(bindings.contains(&bind("Tab/Shift+Tab/o", "focus pane")));
+    assert!(bindings.contains(&bind("a/n", "all/none")));
+    assert!(bindings.contains(&bind("s", "skip phase")));
+    assert!(bindings.contains(&bind("Esc/q", "workbench")));
+    assert!(bindings.contains(&bind("COMMAND", ": type")));
+    assert!(!bindings.contains(&bind("Esc", "close")));
+    assert!(!bindings.contains(&bind("cc", "workbench")));
+
+    app.picker_focus = crate::app::PickerFocus::OptionsPane;
+    let bindings = footer_keybindings(&app);
+
+    assert!(bindings.contains(&bind("KEYS", "j/k option")));
+    assert!(bindings.contains(&bind("Tab/Shift+Tab/o", "steps")));
+    assert!(bindings.contains(&bind("1-4", "phase")));
+    assert!(bindings.contains(&bind("Esc/q", "steps")));
+    assert!(bindings.contains(&bind("COMMAND", ": type")));
+    assert!(!bindings.contains(&bind("cc", "workbench")));
+}
+
+#[test]
+fn file_picker_footer_names_filter_and_attach_controls() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::FilePicker;
+
+    let bindings = footer_keybindings(&app);
+
+    assert!(bindings.contains(&bind("type", "filter")));
+    assert!(bindings.contains(&bind("Enter", "attach")));
+    assert!(bindings.contains(&bind("Esc", "close")));
+    assert!(!bindings.contains(&bind(":", "type command")));
 }
 
 #[test]

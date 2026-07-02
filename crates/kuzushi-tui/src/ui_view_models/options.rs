@@ -119,7 +119,7 @@ fn plain_options_table(table: OptionsTable) -> PlainOptionsTable {
     PlainOptionsTable {
         headers: table.headers,
         rows: table.rows.into_iter().map(plain_option_row).collect(),
-        note: "Canonical keys are in the option column; aliases are compatibility names.",
+        note: "set is session-only (lost on exit); setg is persistent for this tool.",
         next_hint: "Next: set <key> <value>, setg <key> <value>, show advanced, show missing",
     }
 }
@@ -140,7 +140,7 @@ fn options_model_body(view: &OptionsView, body: OptionsBody) -> OptionsModel {
 fn options_table(rows: Vec<OptionsTableRow>) -> OptionsTable {
     OptionsTable {
         hint:
-            "set <key> <value> writes session state; setg writes global state. Option names are canonical; aliases work.",
+            "set <key> <value>: session-only (lost on exit); setg <key> <value>: global for this tool.",
         headers: [
             "option",
             "value",

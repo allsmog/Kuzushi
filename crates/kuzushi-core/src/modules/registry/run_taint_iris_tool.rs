@@ -190,7 +190,7 @@ pub(in crate::modules) fn dispatch_recon_assessment_tool(
     runtime: Option<&dyn AgentRuntime>,
 ) -> ToolDispatchResult {
     match name {
-        "recon:nmap" | "recon:subdomain" | "recon:http-fingerprint" => {
+        "recon:nmap" | "recon:subdomain" | "recon:http-fingerprint" | "recon:import" => {
             Some(execute_recon_tool(name, input.clone(), ctx))
         }
         "vendor-assessment:attach"

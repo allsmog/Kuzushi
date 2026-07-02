@@ -10,11 +10,11 @@ pub(crate) fn parse_single_arg_command(
         "open" | "use" | "since" | "replay" | "trace" | "detach" | "reparse" => {
             parse_required_single_arg_command(verb, first, original)
         }
-        "scan" | "provider" | "backend" | "resume" | "kb" | "attachments" => {
-            parse_optional_single_arg_command(verb, first)
-        }
+        "scan" | "provider" | "backend" | "resume" | "kb" | "attachments" | "files"
+        | "file-picker" | "component" => parse_optional_single_arg_command(verb, first),
         "target" => parse_target_command(args, original),
         "actor" => parse_actor_command(first, original),
+        "phase" => parse_phase_command(first, original),
         _ => return None,
     };
     Some(command)
@@ -46,6 +46,8 @@ fn parse_optional_single_arg_command(verb: &str, first: Option<&str>) -> ShellCo
         "target" => ShellCommand::Target(first.map(ToString::to_string)),
         "resume" => ShellCommand::Resume(first.map(ToString::to_string)),
         "kb" | "attachments" => ShellCommand::KnowledgeBase(first.map(ToString::to_string)),
+        "files" | "file-picker" => ShellCommand::FilePicker,
+        "component" => ShellCommand::Component(first.map(ToString::to_string)),
         _ => ShellCommand::Unknown(verb.to_string()),
     }
 }
@@ -65,6 +67,13 @@ fn parse_actor_command(first: Option<&str>, original: &str) -> ShellCommand {
     first
         .and_then(|value| value.parse::<usize>().ok())
         .map(ShellCommand::Actor)
+        .unwrap_or_else(|| ShellCommand::Unknown(original.to_string()))
+}
+
+fn parse_phase_command(first: Option<&str>, original: &str) -> ShellCommand {
+    first
+        .and_then(WorkflowPhase::parse)
+        .map(ShellCommand::Phase)
         .unwrap_or_else(|| ShellCommand::Unknown(original.to_string()))
 }
 

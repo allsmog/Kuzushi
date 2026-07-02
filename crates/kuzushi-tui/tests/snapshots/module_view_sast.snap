@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 69
 ---
- KUZUSHI mode:module · target:none · ctx:not built · model:unconfigured
+ KUZUSHI > sast · mode:module · target:none · ctx:not built · model:unconfigured
 
  * /use sast
  · module now using sast · primary tool sast:scan
@@ -14,7 +14,8 @@ MODULE DETAIL · sast · SAST Pipeline
 
  -- NEXT ---------------------------------------------------------------------------------------------------------------
  · run .   dispatches sast:scan (shell); terminal: kuzushi --target . run sast:scan --input '{}'
- · tool    scan runs configured scanners; run . dispatches sast:scan
+ · tool    next opens guided hunt; run . dispatches sast:scan
  · needs   target, scanner/task config
+ · options options sast:scan before scan; show advanced sast:scan for budgets/model
  · output  .kuzushi/v2/findings.sqlite3
  · help tasks · findings · use triage

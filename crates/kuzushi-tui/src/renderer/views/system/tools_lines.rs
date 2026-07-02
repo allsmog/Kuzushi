@@ -1,9 +1,9 @@
 use super::*;
-use crate::ui_view_models::{tools_model, ToolRow};
+use crate::ui_view_models::{tools_model, ToolGroup, ToolRow};
 
 pub(crate) fn tools_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let model = tools_model(app);
-    let widths = [28usize, value_width(area, 30)];
+    let widths = tool_widths(area);
     let mut lines = context_strip(app, area);
     lines.push(blank());
     lines.push(divider(
@@ -13,16 +13,15 @@ pub(crate) fn tools_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     push_tools_filter_line(
         &mut lines,
         model.filter.as_deref(),
-        model.rows.len(),
+        model.visible_count,
         model.total_count,
         area.width as usize,
     );
-    if model.rows.is_empty() {
+    if model.visible_count == 0 {
         push_empty_tools_lines(&mut lines, area.width as usize);
         return lines;
     }
-    lines.push(aligned_header(&["tool", "description"], &widths));
-    push_tool_rows(&mut lines, &widths, &model.rows);
+    push_tool_groups(&mut lines, &widths, &model.groups, area.width as usize);
     push_tools_footer(&mut lines, area.width as usize);
     lines
 }
@@ -76,10 +75,42 @@ fn push_tools_footer(lines: &mut Vec<Line<'static>>, width: usize) {
     ));
 }
 
+fn push_tool_groups(
+    lines: &mut Vec<Line<'static>>,
+    widths: &[usize],
+    groups: &[ToolGroup],
+    width: usize,
+) {
+    for group in groups {
+        lines.push(blank());
+        lines.push(tool_group_header(group, width));
+        lines.push(aligned_header(&["tool", "purpose", "next"], widths));
+        push_tool_rows(lines, widths, &group.rows);
+    }
+}
+
+fn tool_group_header(group: &ToolGroup, width: usize) -> Line<'static> {
+    Line::from(vec![
+        Span::styled(format!("{} ", group.label), theme::accent()),
+        Span::styled(
+            fit(group.hint, width.saturating_sub(group.label.len() + 1)),
+            theme::muted(),
+        ),
+    ])
+}
+
 fn push_tool_rows(lines: &mut Vec<Line<'static>>, widths: &[usize], rows: &[ToolRow]) {
     for row in rows {
         lines.push(aligned_row(&row.cells, widths));
     }
+}
+
+fn tool_widths(area: Rect) -> [usize; 3] {
+    let width = area.width as usize;
+    let tool = 28usize.min(width.saturating_div(3).max(20));
+    let next = 28usize.min(width.saturating_div(3).max(18));
+    let purpose = width.saturating_sub(tool + next + 6).max(24);
+    [tool, purpose, next]
 }
 
 fn tools_title(filter: Option<&str>, total_count: usize) -> String {

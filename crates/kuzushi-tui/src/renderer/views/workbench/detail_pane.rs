@@ -1,6 +1,5 @@
 //! Finding detail line builder for the Workbench DETAILS pane.
 
-use super::panes::sep;
 use super::*;
 use crate::ui_view_models::{
     FindingDetailModel, FindingEvidenceRow, ProofTier, TriageSummaryModel,
@@ -33,9 +32,9 @@ fn detail_lines_for_model(
 ) -> Vec<Line<'static>> {
     let mut lines = detail_title_lines(detail, budget);
     lines.push(blank_line());
-    push_detail_metadata(&mut lines, detail, budget);
-    push_actions_section(&mut lines, detail, budget, report_command);
-    push_message_section(&mut lines, detail, budget);
+    push_status_section(&mut lines, detail, budget);
+    push_next_section(&mut lines, detail, budget, report_command);
+    push_fix_section(&mut lines, detail, budget);
     push_triage_section(&mut lines, &detail.triage, budget);
     push_evidence_section(
         &mut lines,
@@ -43,102 +42,98 @@ fn detail_lines_for_model(
         detail.evidence_overflow,
         budget,
     );
-    push_fingerprint_section(&mut lines, detail, budget);
-    push_alias_note(&mut lines, budget);
+    push_message_section(&mut lines, detail, budget);
+    push_reference_footer(&mut lines, detail, budget);
     lines
 }
 
-fn push_detail_metadata(
-    lines: &mut Vec<Line<'static>>,
-    detail: &FindingDetailModel,
-    budget: usize,
-) {
-    push_detail_kv(lines, "location", &detail.location, budget);
-    push_detail_kv(lines, "rule", &detail.rule, budget);
-    push_detail_kv(lines, "tool", &detail.tool, budget);
-    push_proof_detail(lines, detail, budget);
-    push_detail_kv(
-        lines,
-        "verification",
-        &runtime_verification_display(detail),
-        budget,
-    );
-}
-
-fn push_proof_detail(lines: &mut Vec<Line<'static>>, detail: &FindingDetailModel, budget: usize) {
+fn push_status_section(lines: &mut Vec<Line<'static>>, detail: &FindingDetailModel, budget: usize) {
+    lines.push(section_line("STATUS"));
     push_wrapped(
         lines,
-        &format!("proof: {}", proof_state_display(detail)),
+        &format!(
+            "confirmation: {} {}",
+            detail.proof_marker, detail.proof_label
+        ),
         budget,
-        "",
+        "  ",
         proof_detail_style(detail.proof_tier),
     );
-}
-
-fn proof_state_display(detail: &FindingDetailModel) -> String {
-    format!(
-        "{} {} - {}",
-        detail.proof_marker,
-        detail.proof_label,
-        proof_state_explanation(detail)
-    )
-}
-
-fn proof_state_explanation(detail: &FindingDetailModel) -> String {
-    if detail.proof_label == "triaged-tp" {
-        return format!(
-            "triage-confirmed true positive; static proof: {}",
-            static_proof_state_display(detail)
-        );
-    }
-    if detail.proof_label.starts_with("verified") {
-        return format!(
-            "runtime verification confirmed exploit; static proof: {}",
-            static_proof_state_display(detail)
-        );
-    }
-    static_proof_state_display(detail)
-}
-
-fn static_proof_state_display(detail: &FindingDetailModel) -> String {
-    if detail.proof_state == "not recorded" {
-        return "not recorded (run verify for proof)".to_string();
-    }
-    if detail.proof_state.contains("runtime proof not recorded") {
-        return format!("{} (run verify)", detail.proof_state);
-    }
-    detail.proof_state.clone()
+    push_wrapped(
+        lines,
+        &format!(
+            "static: {} - {}",
+            detail.static_proof_label, detail.static_proof_explanation
+        ),
+        budget,
+        "  ",
+        theme::label(),
+    );
+    push_wrapped(
+        lines,
+        &format!(
+            "runtime: {} - {}",
+            detail.runtime_label, detail.runtime_explanation
+        ),
+        budget,
+        "  ",
+        theme::muted(),
+    );
 }
 
 fn proof_detail_style(tier: ProofTier) -> Style {
     match tier {
-        ProofTier::Confirmed => theme::success(),
+        ProofTier::RuntimeVerified => theme::success(),
+        ProofTier::Confirmed => theme::label(),
         ProofTier::StaticLinked => theme::accent(),
-        ProofTier::Suspected => theme::warn(),
+        ProofTier::Suspected => theme::muted(),
         ProofTier::Rejected => theme::danger(),
     }
 }
 
-fn runtime_verification_display(detail: &FindingDetailModel) -> String {
-    if detail.runtime_verification == "not attempted" {
-        return "not attempted (run verify)".to_string();
-    }
-    detail.runtime_verification.clone()
-}
-
-fn push_actions_section(
+fn push_next_section(
     lines: &mut Vec<Line<'static>>,
     detail: &FindingDetailModel,
     budget: usize,
     report_command: Option<&'static str>,
 ) {
-    let alias = detail.alias.as_deref().unwrap_or("selected");
-    let mut commands = vec![format!("`verify {alias}`"), format!("`patch {alias}`")];
-    if let Some(report_command) = report_command {
-        commands.push(format!("`{report_command}`"));
+    lines.push(section_line("NEXT"));
+    match &detail.next_command {
+        Some(command) => push_wrapped(
+            lines,
+            &format!("{}: `{command}`", detail.next_action_label),
+            budget,
+            "  ",
+            theme::accent(),
+        ),
+        None => push_wrapped(
+            lines,
+            &format!("{}: {}", detail.next_action_label, detail.next_detail),
+            budget,
+            "  ",
+            theme::accent(),
+        ),
     }
-    let actions = format!("commands: {}", commands.join(" · "));
-    push_wrapped(lines, &actions, budget, "", theme::accent());
+    if detail.next_command.is_some() {
+        push_wrapped(lines, &detail.next_detail, budget, "  ", theme::muted());
+    }
+    if let Some(report_command) = report_command {
+        push_wrapped(
+            lines,
+            &format!("report: `{report_command}`"),
+            budget,
+            "  ",
+            theme::muted(),
+        );
+    }
+}
+
+fn push_fix_section(lines: &mut Vec<Line<'static>>, detail: &FindingDetailModel, budget: usize) {
+    let Some(hint) = detail.remediation_hint.as_deref() else {
+        return;
+    };
+    lines.push(section_line("FIX"));
+    push_wrapped(lines, hint, budget, "  ", theme::primary());
 }
 
 fn push_message_section(
@@ -146,7 +141,7 @@ fn push_message_section(
     detail: &FindingDetailModel,
     budget: usize,
 ) {
-    lines.push(section_line("MESSAGE"));
+    lines.push(section_line("SCANNER MESSAGE"));
     if detail.message_lines.is_empty() {
         lines.push(muted("  no message recorded"));
         return;
@@ -218,13 +213,17 @@ fn push_evidence_row(
     push_optional_wrapped(lines, &evidence.rationale, budget, "    ", theme::muted());
 }
 
-fn push_fingerprint_section(
+fn push_reference_footer(
     lines: &mut Vec<Line<'static>>,
     detail: &FindingDetailModel,
     budget: usize,
 ) {
-    lines.push(section_line("FINGERPRINT"));
-    push_wrapped(lines, &detail.fingerprint, budget, "  ", theme::subtle());
+    lines.push(blank_line());
+    push_detail_kv(lines, "location", &detail.location, budget);
+    push_detail_kv(lines, "rule", &detail.rule, budget);
+    push_detail_kv(lines, "tool", &detail.tool, budget);
+    push_detail_kv(lines, "fingerprint", &detail.fingerprint, budget);
+    push_alias_note(lines, budget);
 }
 
 fn push_alias_note(lines: &mut Vec<Line<'static>>, budget: usize) {
@@ -238,20 +237,7 @@ fn push_alias_note(lines: &mut Vec<Line<'static>>, budget: usize) {
 }
 
 fn detail_title_lines(detail: &FindingDetailModel, width: usize) -> Vec<Line<'static>> {
-    let mut lines = vec![Line::from(vec![
-        Span::styled(
-            detail
-                .alias
-                .clone()
-                .unwrap_or_else(|| "selected".to_string()),
-            theme::accent(),
-        ),
-        sep(),
-        Span::styled(
-            detail.severity_label.to_uppercase(),
-            theme::severity_tone(detail.severity_tone),
-        ),
-    ])];
+    let mut lines = Vec::new();
     push_wrapped(&mut lines, &detail.title, width, "", theme::heading());
     lines
 }
@@ -320,6 +306,15 @@ mod tests {
             proof_tier: ProofTier::Suspected,
             proof_state: "not recorded".to_string(),
             runtime_verification: "not run".to_string(),
+            static_proof_label: "not recorded".to_string(),
+            static_proof_explanation: "no static proof recorded".to_string(),
+            runtime_label: "not verified".to_string(),
+            runtime_explanation: "runtime verification has not run".to_string(),
+            next_action_label: "validate".to_string(),
+            next_command: Some("verify F-0001".to_string()),
+            next_detail: "collect runtime proof or stronger source evidence before patching"
+                .to_string(),
+            remediation_hint: None,
             evidence: vec![FindingEvidenceRow {
                 header: "source · conf 90 · src/app.rs:42".to_string(),
                 snippet: "request reaches sink".to_string(),
@@ -349,10 +344,11 @@ mod tests {
     fn detail_lines_disclose_hidden_message_and_evidence_rows() {
         let text = detail_text(None);
 
-        assert!(
-            text.contains("proof: ? unverified - not recorded"),
-            "{text}"
-        );
+        assert!(text.contains("STATUS"), "{text}");
+        assert!(text.contains("confirmation: ? unverified"), "{text}");
+        assert!(text.contains("static: not recorded"), "{text}");
+        assert!(text.contains("NEXT"), "{text}");
+        assert!(text.contains("validate: `verify F-0001`"), "{text}");
         assert!(text.contains("… 2 more message lines"), "{text}");
         assert!(text.contains("… 3 more evidence rows"), "{text}");
     }
@@ -363,9 +359,10 @@ mod tests {
 
         assert!(text.contains("`workspace export findings"), "{text}");
         assert!(text.contains("report.sarif`"), "{text}");
-        assert!(text.contains("commands: `verify F-0001`"), "{text}");
-        assert!(text.contains("`patch F-0001`"), "{text}");
+        assert!(text.contains("validate: `verify F-0001`"), "{text}");
+        assert!(text.contains("report:"), "{text}");
         assert!(!text.contains("o open in editor"), "{text}");
+        assert!(!text.contains("proof:"), "{text}");
         assert!(!text.contains("actions:"), "{text}");
     }
 }

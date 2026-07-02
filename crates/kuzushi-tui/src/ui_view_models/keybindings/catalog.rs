@@ -14,8 +14,9 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
 fn home_keybindings() -> Vec<FooterKeybinding> {
     vec![
         bind("Ctrl+G", "palette"),
+        bind("n", "next phase"),
         bind("modules", "browse"),
-        bind("recommend", "plan"),
+        bind("options sast:scan", "tune scan"),
         bind("scan", "run scanners"),
         bind("Ctrl+C", "exit"),
     ]

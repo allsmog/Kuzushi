@@ -6,35 +6,77 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
         ShellView::History => Some(history_keybindings(app)),
         ShellView::Story => Some(story_keybindings(app)),
         ShellView::Help => Some(help_keybindings(app)),
+        ShellView::Health => Some(health_keybindings(app)),
         ShellView::Tools => Some(tools_keybindings(app)),
         ShellView::Scene(page) => Some(scene_keybindings(page)),
         ShellView::SastTasks => Some(sast_tasks_keybindings(app)),
-        // First-run pickers print their controls to the log only — surface them
-        // in the footer so the very first screen is operable without guessing.
-        ShellView::PlanningPicker => Some(planning_picker_keybindings()),
+        // First-run pickers own input — surface their controls in the footer
+        // so the modal has one canonical hint row.
+        ShellView::PlanningPicker => Some(planning_picker_keybindings(app)),
+        ShellView::FilePicker => Some(file_picker_keybindings()),
         ShellView::ModelPicker | ShellView::AuthMethodPicker(_) | ShellView::TargetPicker => {
-            Some(choice_picker_keybindings())
+            Some(choice_picker_keybindings(app))
         }
         _ => None,
     }
 }
 
-fn planning_picker_keybindings() -> Vec<FooterKeybinding> {
+fn planning_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    match app.picker_focus {
+        crate::app::PickerFocus::Prompt => picker_prompt_keybindings(),
+        crate::app::PickerFocus::OptionsPane => vec![
+            bind("KEYS", "j/k option"),
+            bind("Tab/Shift+Tab/o", "steps"),
+            bind("1-4", "phase"),
+            bind("Enter", "edit"),
+            bind("Space", "cycle"),
+            bind("S", "persist"),
+            bind("Esc/q", "steps"),
+            bind("COMMAND", ": type"),
+        ],
+        crate::app::PickerFocus::List => vec![
+            bind("KEYS", "j/k move"),
+            bind("h/l ←/→", "phase"),
+            bind("1-4", "jump phase"),
+            bind("Tab/Shift+Tab/o", "focus pane"),
+            bind("Space", "check"),
+            bind("a/n", "all/none"),
+            bind("g", "rebuild cached"),
+            bind("Enter", "run checked"),
+            bind("s", "skip phase"),
+            bind("Esc/q", "workbench"),
+            bind("COMMAND", ": type"),
+        ],
+    }
+}
+
+fn choice_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    if app.picker_focus == crate::app::PickerFocus::Prompt {
+        return picker_prompt_keybindings();
+    }
     vec![
         bind("j/k", "move"),
-        bind("Space", "check/uncheck"),
-        bind("a/n", "all/none"),
-        bind("g", "rebuild cached"),
-        bind("Enter", "run checked"),
+        bind(":", "type command"),
+        bind("Enter", "select"),
         bind("Esc", "skip"),
     ]
 }
 
-fn choice_picker_keybindings() -> Vec<FooterKeybinding> {
+fn picker_prompt_keybindings() -> Vec<FooterKeybinding> {
     vec![
+        bind("Esc", "return to picker"),
+        bind("Enter", "run command"),
+        bind("Ctrl+G", "palette"),
+        bind("Ctrl+C", "exit"),
+    ]
+}
+
+fn file_picker_keybindings() -> Vec<FooterKeybinding> {
+    vec![
+        bind("type", "filter"),
         bind("j/k", "move"),
-        bind("Enter", "select"),
-        bind("Esc", "skip"),
+        bind("Enter", "attach"),
+        bind("Esc", "close"),
     ]
 }
 
@@ -106,5 +148,14 @@ fn tools_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     push_view_keybindings(&mut bindings, app);
     bindings.push(bind("use <id>", "focus module"));
     bindings.push(bind("options <tool>", "configure"));
+    bindings
+}
+
+fn health_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
+    let mut bindings = Vec::new();
+    push_view_keybindings(&mut bindings, app);
+    bindings.push(bind("auth", "credentials"));
+    bindings.push(bind("config", "model/runtime"));
+    bindings.push(bind("tools semgrep", "filter"));
     bindings
 }

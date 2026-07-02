@@ -20,6 +20,7 @@ fn missing_scanner_binary_demotes_the_recommendation_and_names_the_blocker() {
         tools_missing_binaries,
         available_tools: tool_set(&["secret-scan:scan", "semgrep:scan"]),
         signals: rich_signals(),
+        components: Vec::new(),
     };
 
     let report = build_recommendation_report(request);
@@ -68,6 +69,7 @@ fn recommends_installed_tools_from_combined_signals() {
             "verify:finding",
         ]),
         signals: rich_signals(),
+        components: Vec::new(),
     };
 
     let report = build_recommendation_report(request);
@@ -123,6 +125,7 @@ fn omits_deferred_ai_tools_from_default_recommendations() {
             "threat-model:build",
         ]),
         signals,
+        components: Vec::new(),
     };
 
     let report = build_recommendation_report(request);
@@ -148,6 +151,7 @@ fn omits_recommendations_for_missing_capabilities() {
         tools_missing_binaries: BTreeSet::new(),
         available_tools: tool_set(&["context:build", "semgrep:scan"]),
         signals: rich_signals(),
+        components: Vec::new(),
     };
 
     let report = build_recommendation_report(request);
@@ -178,6 +182,7 @@ fn codeql_recommendation_mentions_threat_model_related_cwes() {
         tools_missing_binaries: BTreeSet::new(),
         available_tools: tool_set(&["codeql:scan"]),
         signals,
+        components: Vec::new(),
     };
 
     let report = build_recommendation_report(request);
@@ -203,6 +208,7 @@ fn recommends_cargo_audit_for_rust_dependency_signals() {
         tools_missing_binaries: BTreeSet::new(),
         available_tools: tool_set(&["cargo-audit:scan"]),
         signals,
+        components: Vec::new(),
     };
 
     let report = build_recommendation_report(request);
@@ -400,7 +406,10 @@ fn executor_applies_workspace_strategy_corrections_to_rerun_proposals() {
         proposal.corrected_strategy.as_deref(),
         Some("run secret-scan:scan with authz focus")
     );
-    assert_eq!(proposal.applied_corrections[0].reason, "tighten authz paths");
+    assert_eq!(
+        proposal.applied_corrections[0].reason,
+        "tighten authz paths"
+    );
 
     let strategy_doc: Value = serde_json::from_str(
         &fs::read_to_string(crate::run_artifacts::run_artifact_path(
@@ -701,6 +710,8 @@ fn rich_signals() -> RepositorySignals {
         source_files: 12,
         languages: vec!["TypeScript".to_string()],
         frameworks: vec!["Express".to_string()],
+        product_boundaries: 2,
+        product_boundary_labels: vec!["api".to_string(), "web".to_string()],
         codeql_languages: vec!["typescript".to_string()],
         dependency_manifests: 2,
         config_files: 1,

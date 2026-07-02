@@ -1,3 +1,4 @@
+use super::component_classify::component_recommendations;
 use super::threat_model_signals::{
     threat_model_array_count, threat_model_dfd_count, threat_model_related_cwes,
     threat_signal_count,
@@ -19,22 +20,16 @@ pub(crate) fn execute_module_recommender_tool(
     let workspace = workspace_for_input(&input, ctx)?;
     let inventory = build_repository_inventory(workspace.root())?;
     let attack_surface = build_attack_surface_map_from_inventory(workspace.root(), &inventory)?;
-    let threat_model = load_persistent_threat_model(workspace.root());
     let (findings_available, findings) = list_findings(ctx, &workspace)?;
-    let request = RecommenderRequest {
-        target: workspace.root().display().to_string(),
-        max_recommendations: max_recommendations(&input),
-        available_tools: available_tools.into_iter().collect(),
-        tools_missing_binaries: tools_missing_binaries(),
-        signals: repository_signals(
-            workspace.root(),
-            &inventory,
-            &attack_surface,
-            threat_model.as_ref(),
-            findings_available,
-            &findings,
-        ),
-    };
+    let request = recommender_request(
+        &input,
+        &workspace,
+        available_tools,
+        &inventory,
+        &attack_surface,
+        findings_available,
+        &findings,
+    );
     // Rank with the session model when one is configured and a runtime is
     // available; otherwise fall back to the deterministic rule catalog.
     let ranking = ModelRanking::resolve(ctx, runtime, &input, workspace.root());
@@ -48,6 +43,45 @@ pub(crate) fn execute_module_recommender_tool(
     Ok(crate::module_result::completed_output_result(
         summary, output, data,
     ))
+}
+
+fn recommender_request(
+    input: &Value,
+    workspace: &WorkspaceTarget,
+    available_tools: Vec<String>,
+    inventory: &RepositoryInventory,
+    attack_surface: &AttackSurfaceMap,
+    findings_available: bool,
+    findings: &[Finding],
+) -> RecommenderRequest {
+    let threat_model = load_persistent_threat_model(workspace.root());
+    RecommenderRequest {
+        target: workspace.root().display().to_string(),
+        max_recommendations: max_recommendations(input),
+        available_tools: available_tools.into_iter().collect(),
+        tools_missing_binaries: tools_missing_binaries(),
+        signals: repository_signals(
+            workspace.root(),
+            inventory,
+            attack_surface,
+            threat_model.as_ref(),
+            findings_available,
+            findings,
+        ),
+        components: component_recommendations(
+            workspace.root(),
+            &recommender_scope_tree(workspace.root()),
+            inventory,
+            attack_surface,
+        ),
+    }
+}
+
+fn recommender_scope_tree(root: &Path) -> crate::workspace::NestedProjectScopeTree {
+    match crate::workspace::load_nested_project_scopes(root) {
+        Ok(Some(tree)) => tree,
+        _ => crate::workspace::discover_nested_project_scopes(root),
+    }
 }
 
 fn persist_strategy_proposals(
@@ -96,14 +130,8 @@ fn write_strategy_run_artifact(
     Ok(())
 }
 
-fn merge_strategy_proposal(
-    proposals: &mut Vec<StrategyProposal>,
-    mut next: StrategyProposal,
-) {
-    if let Some(existing) = proposals
-        .iter_mut()
-        .find(|proposal| proposal.id == next.id)
-    {
+fn merge_strategy_proposal(proposals: &mut Vec<StrategyProposal>, mut next: StrategyProposal) {
+    if let Some(existing) = proposals.iter_mut().find(|proposal| proposal.id == next.id) {
         next.status = existing.status;
         next.created_at_ms = existing.created_at_ms;
         *existing = next;
@@ -139,10 +167,7 @@ fn strategy_proposal_from_recommendation(
     }
 }
 
-fn strategy_preflight(
-    recommendation: &ModuleRecommendation,
-    blocked: bool,
-) -> StrategyPreflight {
+fn strategy_preflight(recommendation: &ModuleRecommendation, blocked: bool) -> StrategyPreflight {
     if blocked {
         return StrategyPreflight {
             status: StrategyPreflightStatus::Blocked,
@@ -211,9 +236,13 @@ fn binary_on_path(name: &str) -> bool {
 fn workspace_for_input(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<WorkspaceTarget> {
     match input_target(input) {
         Some(target) => WorkspaceTarget::new(target),
-        None => ctx.workspace.cloned().context(
-            crate::workspace::active_workspace_required_message("module-recommender:recommend"),
-        ),
+        None => {
+            ctx.workspace
+                .cloned()
+                .context(crate::workspace::active_workspace_required_message(
+                    "module-recommender:recommend",
+                ))
+        }
     }
 }
 
@@ -258,6 +287,9 @@ fn max_recommendations(input: &Value) -> usize {
 
 fn recommendation_report_output(report: &RecommendationReport) -> String {
     let mut lines = vec![report.summary.clone()];
+    if !report.components.is_empty() {
+        lines.extend(report.components.iter().take(3).map(component_line));
+    }
     if !report.recommendations.is_empty() {
         lines.extend(
             report
@@ -270,6 +302,20 @@ fn recommendation_report_output(report: &RecommendationReport) -> String {
     lines.join("\n")
 }
 
+fn component_line(component: &ComponentRecommendation) -> String {
+    format!(
+        "  - component {} ({}, {}): {}",
+        component.rel_path,
+        component.class.label(),
+        component_tier_label(component.tier),
+        component
+            .reasons
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "scoped scan candidate".to_string())
+    )
+}
+
 fn recommendation_line(recommendation: &ModuleRecommendation) -> String {
     format!(
         "  - {} ({}): {}",
@@ -277,6 +323,14 @@ fn recommendation_line(recommendation: &ModuleRecommendation) -> String {
         recommendation_priority_label(recommendation.priority),
         recommendation.reason
     )
+}
+
+fn component_tier_label(tier: ComponentTier) -> &'static str {
+    match tier {
+        ComponentTier::High => "high",
+        ComponentTier::Medium => "medium",
+        ComponentTier::Low => "low",
+    }
 }
 
 fn recommendation_priority_label(priority: RecommendationPriority) -> &'static str {
@@ -295,14 +349,26 @@ fn repository_signals(
     findings_available: bool,
     findings: &[Finding],
 ) -> RepositorySignals {
+    let mut signals = inventory_repository_signals(target, inventory, attack_surface);
+    apply_threat_model_signals(&mut signals, target, threat_model);
+    apply_finding_signals(&mut signals, findings_available, findings);
+    signals
+}
+
+fn inventory_repository_signals(
+    target: &Path,
+    inventory: &RepositoryInventory,
+    attack_surface: &AttackSurfaceMap,
+) -> RepositorySignals {
+    let boundary_labels = product_boundary_labels(target);
     RepositorySignals {
         context_source: "deterministic-workspace-inventory".to_string(),
         attack_surface_source: "deterministic-workspace-analysis".to_string(),
-        threat_model_source: threat_model_source(target, threat_model),
-        findings_source: findings_source(findings_available),
         source_files: inventory.source_files.len(),
         languages: language_names(inventory),
         frameworks: framework_names(inventory),
+        product_boundaries: boundary_labels.len(),
+        product_boundary_labels: boundary_labels,
         codeql_languages: codeql_languages(inventory),
         dependency_manifests: inventory.dependency_manifests.len(),
         config_files: inventory.config_files.len(),
@@ -313,19 +379,54 @@ fn repository_signals(
         attack_surface_risk_tiers: attack_surface.summary.by_risk_tier.clone(),
         attack_surface_high_risk: attack_surface.summary.high_risk,
         attack_surface_max_risk_score: attack_surface.summary.max_risk_score,
-        threat_model_present: threat_model.is_some(),
-        threat_signal_count: threat_signal_count(threat_model),
-        threat_model_threats: threat_model_array_count(threat_model, "threats"),
-        threat_model_dfd_nodes: threat_model_dfd_count(threat_model, "nodes"),
-        threat_model_dfd_flows: threat_model_dfd_count(threat_model, "flows"),
-        threat_model_trust_boundaries: threat_model_dfd_count(threat_model, "trustBoundaries"),
-        threat_model_related_cwes: threat_model_related_cwes(threat_model),
-        findings_available,
-        finding_count: findings.len(),
-        high_or_critical_findings: high_or_critical_findings(findings),
-        first_finding_fingerprint: first_finding_fingerprint(findings),
-        first_high_finding_fingerprint: first_high_finding_fingerprint(findings),
+        ..RepositorySignals::default()
     }
+}
+
+fn apply_threat_model_signals(
+    signals: &mut RepositorySignals,
+    target: &Path,
+    threat_model: Option<&Value>,
+) {
+    signals.threat_model_source = threat_model_source(target, threat_model);
+    signals.threat_model_present = threat_model.is_some();
+    signals.threat_signal_count = threat_signal_count(threat_model);
+    signals.threat_model_threats = threat_model_array_count(threat_model, "threats");
+    signals.threat_model_dfd_nodes = threat_model_dfd_count(threat_model, "nodes");
+    signals.threat_model_dfd_flows = threat_model_dfd_count(threat_model, "flows");
+    signals.threat_model_trust_boundaries = threat_model_dfd_count(threat_model, "trustBoundaries");
+    signals.threat_model_related_cwes = threat_model_related_cwes(threat_model);
+}
+
+fn apply_finding_signals(
+    signals: &mut RepositorySignals,
+    findings_available: bool,
+    findings: &[Finding],
+) {
+    signals.findings_source = findings_source(findings_available);
+    signals.findings_available = findings_available;
+    signals.finding_count = findings.len();
+    signals.high_or_critical_findings = high_or_critical_findings(findings);
+    signals.first_finding_fingerprint = first_finding_fingerprint(findings);
+    signals.first_high_finding_fingerprint = first_high_finding_fingerprint(findings);
+}
+
+fn product_boundary_labels(target: &Path) -> Vec<String> {
+    let tree = match crate::workspace::load_nested_project_scopes(target) {
+        Ok(Some(tree)) => tree,
+        _ => crate::workspace::discover_nested_project_scopes(target),
+    };
+    tree.non_root_scopes()
+        .filter(|scope| {
+            matches!(
+                scope.kind,
+                crate::workspace::NestedProjectKind::PackageRoot
+                    | crate::workspace::NestedProjectKind::Submodule
+                    | crate::workspace::NestedProjectKind::EntrypointCluster
+            )
+        })
+        .map(|scope| scope.display_label())
+        .collect()
 }
 
 fn threat_model_source(target: &Path, threat_model: Option<&Value>) -> String {

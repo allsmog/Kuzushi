@@ -5,8 +5,8 @@
 mod attack_path;
 mod heatmap;
 
-pub(super) use attack_path::attack_path_lines;
-pub(super) use heatmap::heatmap_lines;
+pub(in crate::renderer::views) use attack_path::attack_path_lines;
+pub(in crate::renderer::views) use heatmap::heatmap_lines;
 
 use crate::renderer::empty_state_panel;
 use crate::theme;
@@ -148,6 +148,7 @@ mod tests {
                 },
             ],
             empty_hint: None,
+            selected_module: None,
         }
     }
 
@@ -177,6 +178,7 @@ mod tests {
                 score: 0.0,
             }],
             empty_hint: None,
+            selected_module: Some("auth".into()),
         };
         let text = as_text(&heatmap_lines(72, &model));
         let widest = text.lines().map(|l| l.chars().count()).max().unwrap_or(0);
@@ -194,6 +196,7 @@ mod tests {
         let heatmap = FindingsHeatmap {
             rows: Vec::new(),
             empty_hint: Some("no findings".into()),
+            selected_module: None,
         };
         assert!(!attack_path_lines(72, &taint).is_empty());
         assert!(!heatmap_lines(72, &heatmap).is_empty());

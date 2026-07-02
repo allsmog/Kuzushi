@@ -9,7 +9,7 @@ pub fn direct_dependencies(task: PlanningTaskId) -> &'static [PlanningTaskId] {
     use PlanningTaskId::*;
     match task {
         // 組 KUMI-KATA · map — everything starts from repo context.
-        GatherRepoContext => &[],
+        AttachFiles | GatherRepoContext => &[],
         MapEntryPoints => &[GatherRepoContext],
         BuildXRay => &[GatherRepoContext],
         BuildStrideThreatModel => &[GatherRepoContext],
@@ -111,7 +111,7 @@ mod tests {
     #[test]
     fn every_other_task_depends_on_context() {
         for task in PlanningTaskId::ALL.iter().copied() {
-            if task == GatherRepoContext {
+            if matches!(task, GatherRepoContext | AttachFiles) {
                 continue;
             }
             let deps = transitive_dependencies(task);

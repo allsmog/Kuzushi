@@ -68,7 +68,7 @@ impl ShellApp {
         self.log("target", format!("current target: {current}"));
     }
 
-    fn activate_target(&mut self, workspace: WorkspaceTarget) {
+    pub(crate) fn activate_target(&mut self, workspace: WorkspaceTarget) {
         let root = workspace.root().to_path_buf();
         self.target = Some(root.clone());
         if self.ensure_target_state_dir(&workspace, &root) {
@@ -140,6 +140,52 @@ impl ShellApp {
         }
     }
 
+    pub(crate) fn apply_component_selection(&mut self, raw: Option<&str>) {
+        let Some(raw) = raw.map(str::trim).filter(|value| !value.is_empty()) else {
+            self.log(
+                "component",
+                "select a component path or id; use `recommend` to inspect candidates",
+            );
+            self.open_workbench(crate::app::WorkbenchPane::Findings);
+            return;
+        };
+        if matches!(raw, "all" | "clear" | "root" | ".") {
+            self.active_scope = None;
+            self.findings_cursor = 0;
+            self.open_workbench(crate::app::WorkbenchPane::Findings);
+            self.log("component", "cleared component filter");
+            return;
+        }
+        let Some(scope) = self.find_component_scope(raw) else {
+            self.log(
+                "component",
+                format!("no component matches {raw:?}; run `recommend` or `project`"),
+            );
+            self.open_workbench(crate::app::WorkbenchPane::Findings);
+            return;
+        };
+        self.active_scope = Some(scope.clone());
+        self.findings_cursor = 0;
+        self.open_workbench(crate::app::WorkbenchPane::Findings);
+        self.log(
+            "component",
+            format!(
+                "showing findings under {} ({})",
+                scope.rel_path,
+                scope.kind.label()
+            ),
+        );
+    }
+
+    fn find_component_scope(&mut self, raw: &str) -> Option<TargetCandidateScope> {
+        let target = self.target.clone()?;
+        let state = self
+            .workbench_cache
+            .borrow_mut()
+            .project_scope_tree(Some(target.as_path()))?;
+        component_scope_from_state(&state, raw)
+    }
+
     fn refresh_nested_project_scopes(
         &mut self,
         root: &std::path::Path,
@@ -199,4 +245,33 @@ fn active_scope_from_tree(
         .and_then(|id| tree.scopes.iter().find(|scope| scope.id == id))
         .or_else(|| tree.root_scope())
         .map(TargetCandidateScope::from)
+}
+
+fn component_scope_from_state(
+    state: &ProjectScopeTreeState,
+    raw: &str,
+) -> Option<TargetCandidateScope> {
+    let tree = match state {
+        ProjectScopeTreeState::Persisted(tree) | ProjectScopeTreeState::Discovered(tree) => tree,
+        ProjectScopeTreeState::RootOnly | ProjectScopeTreeState::Unreadable(_) => return None,
+    };
+    let raw_path = raw.trim_end_matches('/');
+    tree.non_root_scopes()
+        .find(|scope| {
+            component_scope_kind(scope.kind)
+                && (scope.id == raw
+                    || scope.rel_path == raw
+                    || scope.display_label() == raw
+                    || scope.rel_path.trim_end_matches('/') == raw_path)
+        })
+        .map(TargetCandidateScope::from)
+}
+
+fn component_scope_kind(kind: kuzushi_core::NestedProjectKind) -> bool {
+    matches!(
+        kind,
+        kuzushi_core::NestedProjectKind::Submodule
+            | kuzushi_core::NestedProjectKind::PackageRoot
+            | kuzushi_core::NestedProjectKind::EntrypointCluster
+    )
 }

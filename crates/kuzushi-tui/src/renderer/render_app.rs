@@ -71,8 +71,15 @@ fn main_view_layout(
     }
 
     let view_lines = shell_view_lines(app, view_area);
-    let view_height = (view_lines.len() as u16).clamp(1, max_view_height);
+    let view_height = line_view_height(app, view_lines.len(), max_view_height);
     (view_height, view_lines)
+}
+
+fn line_view_height(app: &ShellApp, line_count: usize, max_view_height: u16) -> u16 {
+    if matches!(app.shell_view, crate::ShellView::PlanningPicker) {
+        return max_view_height;
+    }
+    (line_count as u16).clamp(1, max_view_height)
 }
 
 fn render_primary_view(
@@ -86,8 +93,38 @@ fn render_primary_view(
         PrimaryRenderMode::Scene => render_scene_view(frame, area, app),
         PrimaryRenderMode::Activity => render_activity_view(frame, area, app),
         PrimaryRenderMode::Workbench => render_workbench_view(frame, area, app),
-        PrimaryRenderMode::Lines => render_lines(frame, area, view_lines),
+        PrimaryRenderMode::Lines => render_line_view(frame, area, app, view_lines),
     }
+}
+
+fn render_line_view(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    view_lines: Vec<Line<'static>>,
+) {
+    if matches!(app.shell_view, crate::ShellView::PlanningPicker) {
+        render_centered_lines(frame, area, view_lines);
+    } else {
+        render_lines(frame, area, view_lines);
+    }
+}
+
+fn render_centered_lines(frame: &mut Frame<'_>, area: Rect, lines: Vec<Line<'static>>) {
+    if area.height == 0 || lines.is_empty() {
+        return;
+    }
+    let content_height = (lines.len() as u16).min(area.height);
+    let top_padding = area.height.saturating_sub(content_height) / 2;
+    render_lines(
+        frame,
+        Rect {
+            y: area.y.saturating_add(top_padding),
+            height: content_height,
+            ..area
+        },
+        lines,
+    );
 }
 
 pub(crate) const PROMPT_HEIGHT: u16 = 1;

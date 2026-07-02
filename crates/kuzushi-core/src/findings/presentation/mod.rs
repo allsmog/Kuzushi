@@ -6,8 +6,9 @@ pub mod pr_comment;
 mod reporting;
 
 pub use detail::{
-    proof_ladder_state, proof_state_label, runtime_validation_label, FindingDetailReport,
-    FindingNextAction, ProofLadderState,
+    finding_next_action, proof_ladder_state, proof_state_label, runtime_validation_label,
+    runtime_validation_summary, static_proof_summary, FindingDetailReport, FindingNextAction,
+    ProofLadderState, RuntimeValidationSummary, StaticProofSummary,
 };
 pub use reporting::{
     format_finding_alias, parse_finding_alias, resolve_finding_alias, sorted_finding_alias_indices,

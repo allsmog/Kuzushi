@@ -26,7 +26,7 @@ pub(crate) const SHELL_COMMAND_SPEC_GROUPS: &[&[ShellCommandSpec]] = &[
 
 pub(crate) const FEATURED_HELP_EXAMPLES: &[&str] = &[
     "demo",
-    "scan .",
+    "next",
     "use semgrep",
     "run .",
     "findings",
@@ -44,7 +44,10 @@ pub fn shell_help_examples() -> Vec<&'static str> {
     FEATURED_HELP_EXAMPLES
         .iter()
         .copied()
-        .filter(|example| shell_command_specs().any(|spec| spec.aliases.contains(example)))
+        .filter(|example| {
+            shell_command_specs()
+                .any(|spec| spec.command == *example || spec.aliases.contains(example))
+        })
         .collect()
 }
 
@@ -122,6 +125,7 @@ fn parse_catalog_command(verb: &str) -> Option<ShellCommand> {
 fn parse_session_command(verb: &str) -> Option<ShellCommand> {
     match verb {
         "workbench" | "studio" | "cc" => Some(ShellCommand::Workbench(WorkbenchPane::Findings)),
+        "doctor" | "health" => Some(ShellCommand::Health),
         "cost" => Some(ShellCommand::Cost),
         "config" => Some(ShellCommand::Config),
         "permissions" => Some(ShellCommand::Permissions),

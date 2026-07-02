@@ -27,6 +27,7 @@ pub(crate) fn target_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stati
     lines.push(blank());
     lines.push(keybind_hint_line(&[
         ("↑/↓/j/k", "move"),
+        (":", "type a command"),
         ("Enter", "select"),
         ("Esc/q", "browse without a target"),
     ]));

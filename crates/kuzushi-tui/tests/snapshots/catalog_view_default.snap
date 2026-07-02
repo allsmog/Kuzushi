@@ -2,13 +2,13 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 33
 ---
- KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI > modules · mode:shell · target:none · ctx:not built · model:unconfigured
 
 MODULES · 41 modules
 
 > NEXT Run sast — Full SAST pipeline: context, scanners, AI triage, verification, patch, and report
 
--- OFFENSE find vulnerabilities by scanning code, dependencies, and runtime surface ------------------------------------
+-- HUNT scan code, dependencies, and runtime surface for candidates ----------------------------------------------------
 # agentic-sast            LLM-driven detectors that reason about data flow and intent rather than pattern-match.
   cargo-audit             Run cargo-audit against Rust lockfiles and persist advisory findings.
   codeql                  GitHub's taint-query semantic analyzer: deeper than pattern scanners but slower.
@@ -24,7 +24,7 @@ MODULES · 41 modules
   taint-iris-next         Bounded IRIS-style taint analysis with deterministic evidence extraction and agent review.
   variant                 Lift exploit patterns from confirmed findings and hunt sibling variants.
 
--- INTEL build context, recon, and threat model the operator reads first -----------------------------------------------
+-- MAP build context, recon, inventory, and threat model first ---------------------------------------------------------
   bounty                  Bug-bounty intake: import Burp Suite XML and HAR captures into the findings ledger as...
   codeql-db               Create a CodeQL database (.kuzushi/codeql-db/) for downstream taint and security queries.
   context                 Build and persist repository context snapshots for scanner and shell use.
@@ -38,7 +38,7 @@ MODULES · 41 modules
   workspace               Report target and state paths.
   x-ray                   Pashov X-Ray repository analysis and report artifacts.
 
--- GOVERNANCE configuration, allowlists, and audit trails --------------------------------------------------------------
+-- OPERATE configure providers, catalogs, policy, and audit trails -----------------------------------------------------
   catalog                 List native modules and tools.
   config                  Inspect effective configuration.
   module-recommender      Recommend next Kuzushi module tools from local repository, attack-surface, threat-model...
@@ -46,7 +46,7 @@ MODULES · 41 modules
   sbom-scan               Extract a deterministic dependency inventory from package manifests.
   smoke                   Diagnostic flows that exercise the bridge end-to-end without paying for a real scan.
 
--- DEFENSE triage, verify, and patch emitted findings ------------------------------------------------------------------
+-- CONFIRM/FIX triage, verify, patch, and report findings --------------------------------------------------------------
   android-apk             Unpack, decompile, and analyze Android APKs so Kuzushi's existing Java/Kotlin SAST engines...
   classifier-gate         Cheap LLM classifier with adaptive p80 quantile gate. Score one finding to decide whether...
   deep-audit              Tool-augmented LLM auditor — uses code-nav primitives to verify a finding's triggerability.

@@ -1,19 +1,23 @@
 use super::detail_pane::detail_pane_lines;
-use super::panes::{center_pane_lines, findings_pane_lines, sep, source_pane_lines, source_title};
+use super::panes::{
+    center_pane_lines, coverage_matrix_lines, findings_pane_lines, sep, ship_chain_lines,
+    ship_export_lines, ship_patch_lines, source_pane_lines, source_title,
+    terrain_attack_surface_lines, terrain_material_lines, terrain_visual_lines,
+};
 use super::*;
-use crate::app::WorkbenchPane;
+use crate::app::{WorkbenchPage, WorkbenchPane};
+use crate::renderer::views::scene::{DfdDiagram, TreeDiagram};
 use crate::ui_view_models::{
-    workbench_view_model, FindingsModel, JourneyPhaseStatus, WorkbenchCenterBody, WorkbenchHint,
-    WorkbenchTopBar, WorkbenchViewModel,
+    attack_tree, dfd_model, workbench_view_model, FindingsModel, JourneyPhaseStatus,
+    WorkbenchCenter, WorkbenchCenterTab, WorkbenchHint, WorkbenchTopBar, WorkbenchViewModel,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
+use ratatui::style::Modifier;
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Wrap};
 
-const TOP_BAR_ROWS: u16 = 2;
-const AFFORDANCE_ROWS: u16 = 1;
-const FOUR_COLUMN_MIN_WIDTH: u16 = 120;
-const THREE_COLUMN_MIN_WIDTH: u16 = 100;
+const FOUR_COLUMN_MIN_WIDTH: u16 = 150;
+const REVIEW_GRID_MIN_WIDTH: u16 = 100;
 const STACKED_MIN_BODY_HEIGHT: u16 = 21;
 
 /// Frame-level renderer for the Workbench command center. Owns the whole body
@@ -24,14 +28,15 @@ const STACKED_MIN_BODY_HEIGHT: u16 = 21;
 /// drawn by the shell chrome below `area`.
 pub(crate) fn render_workbench_view(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     let model = workbench_view_model(app);
+    let top_lines = top_bar_lines(&model.top_bar, &model.command_bar_hints);
     let outer = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([Constraint::Length(TOP_BAR_ROWS), Constraint::Min(0)])
+        .constraints([
+            Constraint::Length(top_lines.len() as u16),
+            Constraint::Min(0),
+        ])
         .split(area);
-    frame.render_widget(
-        Paragraph::new(top_bar_lines(&model.top_bar, &model.command_bar_hints)),
-        outer[0],
-    );
+    frame.render_widget(Paragraph::new(top_lines), outer[0]);
     render_body(frame, outer[1], app, &model);
 }
 
@@ -39,30 +44,200 @@ fn render_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp, model: &Workbe
     if area.width < 8 || area.height < 3 {
         return;
     }
-    let body = Layout::default()
-        .direction(Direction::Vertical)
-        .constraints([Constraint::Length(AFFORDANCE_ROWS), Constraint::Min(0)])
-        .split(area);
-    frame.render_widget(Paragraph::new(workbench_affordance_line()), body[0]);
-    if body[1].height < 3 {
+    if model.page != WorkbenchPage::Review {
+        render_phase_page_body(frame, area, app, model);
         return;
     }
-    match workbench_layout(body[1]) {
-        WorkbenchLayout::FourColumn => render_four_column_body(frame, body[1], app, model),
-        WorkbenchLayout::ThreeColumn => render_three_column_body(frame, body[1], app, model),
-        WorkbenchLayout::Stacked => render_stacked_body(frame, body[1], app, model),
-        WorkbenchLayout::ShortReview => render_short_review_body(frame, body[1], app, model),
+    match workbench_layout(area) {
+        WorkbenchLayout::FourColumn => render_four_column_body(frame, area, app, model),
+        WorkbenchLayout::ReviewGrid => render_review_grid_body(frame, area, app, model),
+        WorkbenchLayout::Stacked => render_stacked_body(frame, area, app, model),
+        WorkbenchLayout::ShortReview => render_short_review_body(frame, area, app, model),
     }
 }
 
-fn workbench_affordance_line() -> Line<'static> {
-    muted(" Tab cycle panes · Shift+Tab reverse · j/k move · Enter open finding · Esc back")
+fn render_phase_page_body(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+) {
+    match model.page {
+        WorkbenchPage::Terrain => render_terrain_body(frame, area, app, model),
+        WorkbenchPage::Coverage => render_single_page_pane(
+            frame,
+            area,
+            "COVERAGE MATRIX",
+            coverage_matrix_lines(app, area.width.saturating_sub(2) as usize),
+            app,
+        ),
+        WorkbenchPage::Review => {}
+        WorkbenchPage::Ship => render_ship_body(frame, area, app, model),
+    }
+}
+
+fn render_terrain_body(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    _model: &WorkbenchViewModel,
+) {
+    if area.width < 110 {
+        render_compact_terrain(frame, area, app);
+        return;
+    }
+    render_terrain_columns(frame, area, app);
+}
+
+fn render_compact_terrain(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    let width = area.width.saturating_sub(2) as usize;
+    render_single_page_pane(
+        frame,
+        area,
+        "TERRAIN",
+        combined_page_lines([
+            terrain_attack_surface_lines(app, width),
+            terrain_visual_lines(app, width),
+            terrain_material_lines(app, width),
+        ]),
+        app,
+    );
+}
+
+fn render_terrain_columns(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(38),
+            Constraint::Percentage(32),
+            Constraint::Percentage(30),
+        ])
+        .split(area);
+    render_page_pane(
+        frame,
+        cols[0],
+        "ATTACK SURFACE",
+        terrain_attack_surface_lines(app, cols[0].width.saturating_sub(2) as usize),
+        app,
+    );
+    render_page_pane(
+        frame,
+        cols[1],
+        "DFD / TERRAIN",
+        terrain_visual_lines(app, cols[1].width.saturating_sub(2) as usize),
+        app,
+    );
+    render_page_pane(
+        frame,
+        cols[2],
+        "RECON & MATERIALS",
+        terrain_material_lines(app, cols[2].width.saturating_sub(2) as usize),
+        app,
+    );
+}
+
+fn render_ship_body(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    _model: &WorkbenchViewModel,
+) {
+    if area.width < 100 {
+        render_compact_ship(frame, area, app);
+        return;
+    }
+    render_ship_columns(frame, area, app);
+}
+
+fn render_compact_ship(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    let width = area.width.saturating_sub(2) as usize;
+    render_single_page_pane(
+        frame,
+        area,
+        "SHIP",
+        combined_page_lines([
+            ship_chain_lines(app, width),
+            ship_patch_lines(app, width),
+            ship_export_lines(app, width),
+        ]),
+        app,
+    );
+}
+
+fn render_ship_columns(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
+    let cols = Layout::default()
+        .direction(Direction::Horizontal)
+        .constraints([
+            Constraint::Percentage(36),
+            Constraint::Percentage(32),
+            Constraint::Percentage(32),
+        ])
+        .split(area);
+    render_page_pane(
+        frame,
+        cols[0],
+        "EXPLOIT CHAINS",
+        ship_chain_lines(app, cols[0].width.saturating_sub(2) as usize),
+        app,
+    );
+    render_page_pane(
+        frame,
+        cols[1],
+        "PATCH QUEUE",
+        ship_patch_lines(app, cols[1].width.saturating_sub(2) as usize),
+        app,
+    );
+    render_page_pane(
+        frame,
+        cols[2],
+        "EXPORT",
+        ship_export_lines(app, cols[2].width.saturating_sub(2) as usize),
+        app,
+    );
+}
+
+fn render_single_page_pane(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &str,
+    lines: Vec<Line<'static>>,
+    app: &ShellApp,
+) {
+    render_page_pane(frame, area, title, lines, app);
+}
+
+fn render_page_pane(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &str,
+    lines: Vec<Line<'static>>,
+    app: &ShellApp,
+) {
+    render_pane(
+        frame,
+        area,
+        title,
+        lines,
+        true,
+        app.workbench_scroll.get(WorkbenchPane::Center),
+    );
+}
+
+fn combined_page_lines<const N: usize>(groups: [Vec<Line<'static>>; N]) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    for (index, group) in groups.into_iter().enumerate() {
+        if index > 0 {
+            lines.push(blank());
+        }
+        lines.extend(group);
+    }
+    lines
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WorkbenchLayout {
     FourColumn,
-    ThreeColumn,
+    ReviewGrid,
     Stacked,
     ShortReview,
 }
@@ -71,8 +246,8 @@ fn workbench_layout(area: Rect) -> WorkbenchLayout {
     if area.width >= FOUR_COLUMN_MIN_WIDTH {
         return WorkbenchLayout::FourColumn;
     }
-    if area.width >= THREE_COLUMN_MIN_WIDTH {
-        return WorkbenchLayout::ThreeColumn;
+    if area.width >= REVIEW_GRID_MIN_WIDTH {
+        return WorkbenchLayout::ReviewGrid;
     }
     if area.height >= STACKED_MIN_BODY_HEIGHT {
         return WorkbenchLayout::Stacked;
@@ -107,29 +282,33 @@ fn render_four_column_body(
     render_detail_pane(frame, cols[3], app, model);
 }
 
-fn render_three_column_body(
+fn render_review_grid_body(
     frame: &mut Frame<'_>,
     area: Rect,
     app: &ShellApp,
     model: &WorkbenchViewModel,
 ) {
-    let widths = three_column_widths(area.width);
     let cols = Layout::default()
         .direction(Direction::Horizontal)
-        .constraints([
-            Constraint::Length(widths.center),
-            Constraint::Length(widths.findings),
-            Constraint::Min(widths.details_min),
-        ])
+        .constraints([Constraint::Percentage(40), Constraint::Percentage(60)])
         .split(area);
-    render_center(frame, cols[0], app, model);
+    let left_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(28), Constraint::Percentage(72)])
+        .split(cols[0]);
+    let right_rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Percentage(56), Constraint::Percentage(44)])
+        .split(cols[1]);
+    render_source(frame, left_rows[0], app, model);
     render_findings_pane(
         frame,
-        cols[1],
+        left_rows[1],
         &model.right_list,
         model.focus == WorkbenchPane::Findings,
     );
-    render_detail_pane(frame, cols[2], app, model);
+    render_center(frame, right_rows[0], app, model);
+    render_detail_pane(frame, right_rows[1], app, model);
 }
 
 fn render_stacked_body(
@@ -179,26 +358,19 @@ fn render_short_review_body(
 
 fn hidden_panes_stub() -> Line<'static> {
     muted(concat!(
-        " SOURCE+CODE/DFD hidden · need >=30 rows or >=120 cols ",
-        "for all 4; 2/4 shown",
+        " SOURCE+CENTER hidden · need >=100 cols for the review grid; ",
+        "2/4 shown",
     ))
 }
 
 fn stacked_constraints(model: &WorkbenchViewModel) -> [Constraint; 4] {
-    match &model.center.body {
-        WorkbenchCenterBody::Code(_) => [
-            Constraint::Percentage(16),
-            Constraint::Percentage(44),
-            Constraint::Percentage(18),
-            Constraint::Percentage(22),
-        ],
-        WorkbenchCenterBody::Dfd { .. } => [
-            Constraint::Percentage(22),
-            Constraint::Percentage(28),
-            Constraint::Percentage(24),
-            Constraint::Percentage(26),
-        ],
-    }
+    let _ = model;
+    [
+        Constraint::Percentage(14),
+        Constraint::Percentage(30),
+        Constraint::Percentage(30),
+        Constraint::Percentage(26),
+    ]
 }
 
 fn render_source(frame: &mut Frame<'_>, area: Rect, app: &ShellApp, model: &WorkbenchViewModel) {
@@ -209,7 +381,7 @@ fn render_source(frame: &mut Frame<'_>, area: Rect, app: &ShellApp, model: &Work
             &source_title(&model.left),
             model.focus == WorkbenchPane::Source,
         ),
-        source_pane_lines(&model.left),
+        source_pane_lines(&model.left, area.width.saturating_sub(2) as usize),
         model.focus == WorkbenchPane::Source,
         pane_scroll(app, model, WorkbenchPane::Source),
     );
@@ -228,9 +400,9 @@ struct FourColumnWidths {
 /// wrap title/evidence instead of clipping it.
 fn four_column_widths(total: u16) -> FourColumnWidths {
     let source = (total * 14 / 100).clamp(18, 32);
-    let findings = (total * 26 / 100).clamp(34, 68);
-    let mut center = (total * 30 / 100).clamp(32, 76);
-    let details_min = 44;
+    let findings = (total * 34 / 100).clamp(44, 78);
+    let mut center = (total * 27 / 100).clamp(36, 72);
+    let details_min = 36;
     let fixed = source + findings + center;
     if fixed + details_min > total {
         let reducible = center.saturating_sub(24);
@@ -239,25 +411,6 @@ fn four_column_widths(total: u16) -> FourColumnWidths {
     }
     FourColumnWidths {
         source,
-        center,
-        findings,
-        details_min,
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ThreeColumnWidths {
-    center: u16,
-    findings: u16,
-    details_min: u16,
-}
-
-fn three_column_widths(total: u16) -> ThreeColumnWidths {
-    let center = (total * 34 / 100).clamp(32, 52);
-    let findings = (total * 30 / 100).clamp(30, 44);
-    let used = center.saturating_add(findings);
-    let details_min = total.saturating_sub(used).max(32);
-    ThreeColumnWidths {
         center,
         findings,
         details_min,
@@ -299,24 +452,138 @@ fn bordered_block(title: &str, focused: bool) -> Block<'static> {
         } else {
             theme::subtle()
         })
+        .border_type(if focused {
+            BorderType::Thick
+        } else {
+            BorderType::Plain
+        })
         .title(Span::styled(title.to_string(), title_style))
+}
+
+fn center_bordered_block(center: &WorkbenchCenter, focused: bool, width: u16) -> Block<'static> {
+    Block::default()
+        .borders(Borders::ALL)
+        .border_style(if focused {
+            theme::accent()
+        } else {
+            theme::subtle()
+        })
+        .border_type(if focused {
+            BorderType::Thick
+        } else {
+            BorderType::Plain
+        })
+        .title(Line::from(center_title_spans(center, focused, width)))
+}
+
+fn center_title_spans(center: &WorkbenchCenter, focused: bool, width: u16) -> Vec<Span<'static>> {
+    let mut spans = Vec::new();
+    for (index, tab) in center.tabs.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" │ ".to_string(), theme::subtle()));
+        }
+        spans.push(center_tab_span(tab, focused));
+    }
+    append_center_context(&mut spans, center, width);
+    spans
+}
+
+fn center_tab_span(tab: &WorkbenchCenterTab, focused: bool) -> Span<'static> {
+    let mut label = tab.label.to_string();
+    if tab.empty {
+        label.push('·');
+    }
+    let style = if tab.active {
+        theme::accent().add_modifier(Modifier::BOLD)
+    } else if tab.empty {
+        theme::subtle()
+    } else if focused {
+        theme::label()
+    } else {
+        theme::muted()
+    };
+    Span::styled(format!(" {label} "), style)
+}
+
+fn append_center_context(spans: &mut Vec<Span<'static>>, center: &WorkbenchCenter, width: u16) {
+    let Some(context) = &center.context else {
+        return;
+    };
+    let used = center_tabs_width(&center.tabs);
+    let available = (width as usize).saturating_sub(used + 6);
+    if available < 8 {
+        return;
+    }
+    spans.push(Span::styled(" ── ".to_string(), theme::subtle()));
+    spans.push(Span::styled(fit(context, available), theme::muted()));
+}
+
+fn center_tabs_width(tabs: &[WorkbenchCenterTab]) -> usize {
+    tabs.iter()
+        .map(|tab| tab.label.len() + usize::from(tab.empty) + 2)
+        .sum::<usize>()
+        + tabs.len().saturating_sub(1) * 3
 }
 
 fn render_center(frame: &mut Frame<'_>, area: Rect, app: &ShellApp, model: &WorkbenchViewModel) {
     let focused = model.focus == WorkbenchPane::Center;
-    let block = bordered_block(&pane_title(&model.center.title, focused), focused);
+    let block = center_bordered_block(&model.center, focused, area.width);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let lines = center_pane_lines(app, &model.center, inner.width as usize);
+    if render_center_widget(frame, inner, app, &model.center) {
+        return;
+    }
+    render_center_lines(frame, inner, app, model);
+}
+
+fn render_center_widget(
+    frame: &mut Frame<'_>,
+    inner: Rect,
+    app: &ShellApp,
+    center: &WorkbenchCenter,
+) -> bool {
+    if inner.width < 24 || inner.height < 8 {
+        return false;
+    }
+    match center.active_mode {
+        crate::app::WorkbenchCenterMode::Dfd => {
+            frame.render_widget(
+                DfdDiagram {
+                    model: dfd_model(app),
+                },
+                inner,
+            );
+            true
+        }
+        crate::app::WorkbenchCenterMode::Chain => {
+            frame.render_widget(
+                TreeDiagram {
+                    model: attack_tree(app),
+                },
+                inner,
+            );
+            true
+        }
+        _ => false,
+    }
+}
+
+fn render_center_lines(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+) {
+    let lines = center_pane_lines(app, &model.center, area.width as usize);
     let scroll = clamped_paragraph_scroll(
         pane_scroll(app, model, WorkbenchPane::Center),
         lines.len(),
-        inner.height,
+        area.height,
     );
     let para = Paragraph::new(lines)
         .scroll((scroll, 0))
         .wrap(Wrap { trim: false });
-    frame.render_widget(para, inner);
+    frame.render_widget(para, area);
 }
 
 fn render_detail_pane(
@@ -346,9 +613,18 @@ fn render_detail_pane(
 fn detail_pane_title(detail: &Option<crate::ui_view_models::FindingDetailModel>) -> String {
     detail
         .as_ref()
-        .and_then(|detail| detail.alias.as_deref())
-        .map(|alias| format!("DETAILS · {alias}"))
+        .map(detail_title)
         .unwrap_or_else(|| "DETAILS".to_string())
+}
+
+fn detail_title(detail: &crate::ui_view_models::FindingDetailModel) -> String {
+    let alias = detail.alias.as_deref().unwrap_or("selected");
+    format!(
+        "{alias} · {} · {} {}",
+        detail.severity_label.to_uppercase(),
+        detail.proof_marker,
+        detail.proof_label
+    )
 }
 
 fn report_command(model: &WorkbenchViewModel) -> Option<&'static str> {
@@ -356,21 +632,15 @@ fn report_command(model: &WorkbenchViewModel) -> Option<&'static str> {
 }
 
 fn render_findings_pane(frame: &mut Frame<'_>, area: Rect, model: &FindingsModel, focused: bool) {
-    let block = bordered_block(
-        &pane_title(&format!("FINDINGS · {}", model.total), focused),
-        focused,
-    );
+    let block = bordered_block(&pane_title(&model.header, focused), focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
     frame.render_widget(Paragraph::new(findings_pane_lines(model, inner)), inner);
 }
 
 fn pane_title(title: &str, focused: bool) -> String {
-    if focused {
-        format!("{title} ◂ focus")
-    } else {
-        title.to_string()
-    }
+    let _ = focused;
+    title.to_string()
 }
 
 fn clamped_paragraph_scroll(scroll: u16, line_count: usize, viewport_height: u16) -> u16 {
@@ -382,38 +652,43 @@ fn clamped_paragraph_scroll(scroll: u16, line_count: usize, viewport_height: u16
 // ── top bar ────────────────────────────────────────────────────────────────
 
 fn top_bar_lines(top: &WorkbenchTopBar, hints: &[WorkbenchHint]) -> Vec<Line<'static>> {
-    vec![identity_line(top), command_hint_line(hints)]
+    let mut lines = vec![identity_line(top)];
+    if let Some(line) = journey_line(top) {
+        lines.push(line);
+    }
+    lines.push(command_hint_line(hints));
+    lines
 }
 
 fn identity_line(top: &WorkbenchTopBar) -> Line<'static> {
     let mut spans = vec![
         Span::styled(top.brand.to_string(), theme::heading()),
+        Span::raw(" "),
+        Span::styled("▸ ", theme::subtle()),
+        Span::styled("workbench".to_string(), theme::accent()),
         sep(),
+        Span::styled("target:".to_string(), theme::muted()),
         Span::styled(top.project.clone(), theme::label()),
-        sep(),
-        Span::styled(format!("modules:{}", top.target), theme::muted()),
-        sep(),
-        live_span(top.live),
     ];
-    if !top.phase_rail.is_empty() {
+    if let Some(phase) = &top.phase {
         spans.push(sep());
-        push_phase_rail_spans(&mut spans, &top.phase_rail);
-    } else if let Some(phase) = &top.phase {
-        spans.push(sep());
+        spans.push(Span::styled("phase:".to_string(), theme::muted()));
         spans.push(Span::styled(phase.clone(), theme::accent()));
     }
+    spans.push(sep());
+    spans.push(Span::styled("page:".to_string(), theme::muted()));
+    spans.push(Span::styled(
+        top.page.title().to_ascii_lowercase(),
+        theme::label(),
+    ));
+    spans.push(sep());
+    spans.push(live_span(top.live));
+    spans.push(sep());
+    spans.push(Span::styled(
+        format!("modules:{}", top.target),
+        theme::muted(),
+    ));
     Line::from(spans)
-}
-
-fn push_phase_rail_spans(spans: &mut Vec<Span<'static>>, phases: &[JourneyPhaseStatus]) {
-    for (index, phase) in phases.iter().enumerate() {
-        if index > 0 {
-            spans.push(Span::styled(" · ", theme::subtle()));
-        }
-        let style = journey_phase_tone_style(phase.tone);
-        spans.push(Span::styled(phase.phase_label.to_string(), style));
-        spans.push(Span::styled(phase.state_symbol.to_string(), style));
-    }
 }
 
 fn live_span(live: bool) -> Span<'static> {
@@ -430,11 +705,54 @@ fn command_hint_line(hints: &[WorkbenchHint]) -> Line<'static> {
         if index > 0 {
             spans.push(Span::raw("   "));
         }
+        spans.push(Span::styled(hint_prefix(hint.verb), theme::subtle()));
         spans.push(Span::styled(hint.verb.to_string(), theme::accent()));
         spans.push(Span::raw(" "));
         spans.push(Span::styled(hint.label.to_string(), theme::muted()));
     }
     Line::from(spans)
+}
+
+fn hint_prefix(verb: &str) -> &'static str {
+    if verb.chars().count() == 1 {
+        "press "
+    } else {
+        "type "
+    }
+}
+
+fn journey_line(top: &WorkbenchTopBar) -> Option<Line<'static>> {
+    if top.phase_rail.is_empty() {
+        return None;
+    }
+    let mut spans = vec![Span::raw(" ")];
+    append_phase_rail_spans(&mut spans, &top.phase_rail);
+    if let Some(summary) = &top.phase_next_summary {
+        spans.push(Span::raw("   "));
+        append_next_summary_spans(&mut spans, summary);
+    }
+    Some(Line::from(spans))
+}
+
+fn append_phase_rail_spans(spans: &mut Vec<Span<'static>>, statuses: &[JourneyPhaseStatus]) {
+    for (index, status) in statuses.iter().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" · ", theme::subtle()));
+        }
+        let style = journey_phase_tone_style(status.tone);
+        spans.push(Span::styled(status.phase_label.to_string(), style));
+        spans.push(Span::styled(status.state_symbol.to_string(), style));
+    }
+}
+
+fn append_next_summary_spans(spans: &mut Vec<Span<'static>>, summary: &str) {
+    spans.push(Span::styled("▸ NEXT ", theme::warn()));
+    if let Some((head, tail)) = summary.split_once(" — ") {
+        spans.push(Span::styled(head.to_string(), theme::primary()));
+        spans.push(Span::styled(format!(" — {tail}"), theme::muted()));
+    } else {
+        spans.push(Span::styled(summary.to_string(), theme::primary()));
+    }
 }
 
 // ── plain / non-TTY path ─────────────────────────────────────────────────────
@@ -446,8 +764,10 @@ pub(crate) fn workbench_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> 
     let model = workbench_view_model(app);
     let mut lines = top_bar_lines(&model.top_bar, &model.command_bar_hints);
     lines.push(blank());
-    lines.push(workbench_affordance_line());
-    lines.push(blank());
+    if model.page != WorkbenchPage::Review {
+        append_phase_page_plain_lines(&mut lines, app, &model, area);
+        return lines;
+    }
     lines.push(divider(
         &pane_title(
             &source_title(&model.left),
@@ -455,7 +775,7 @@ pub(crate) fn workbench_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> 
         ),
         area.width,
     ));
-    lines.extend(source_pane_lines(&model.left));
+    lines.extend(source_pane_lines(&model.left, area.width as usize));
     lines.push(blank());
     lines.push(divider(
         &pane_title(&model.center.title, model.focus == WorkbenchPane::Center),
@@ -474,6 +794,42 @@ pub(crate) fn workbench_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> 
     lines.push(blank());
     append_detail_plain_lines(&mut lines, &model, area);
     lines
+}
+
+fn append_phase_page_plain_lines(
+    lines: &mut Vec<Line<'static>>,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+    area: Rect,
+) {
+    let width = area.width as usize;
+    match model.page {
+        WorkbenchPage::Terrain => {
+            lines.push(divider("ATTACK SURFACE", area.width));
+            lines.extend(terrain_attack_surface_lines(app, width));
+            lines.push(blank());
+            lines.push(divider("DFD / TERRAIN", area.width));
+            lines.extend(terrain_visual_lines(app, width));
+            lines.push(blank());
+            lines.push(divider("RECON & MATERIALS", area.width));
+            lines.extend(terrain_material_lines(app, width));
+        }
+        WorkbenchPage::Coverage => {
+            lines.push(divider("COVERAGE MATRIX", area.width));
+            lines.extend(coverage_matrix_lines(app, width));
+        }
+        WorkbenchPage::Review => {}
+        WorkbenchPage::Ship => {
+            lines.push(divider("EXPLOIT CHAINS", area.width));
+            lines.extend(ship_chain_lines(app, width));
+            lines.push(blank());
+            lines.push(divider("PATCH QUEUE", area.width));
+            lines.extend(ship_patch_lines(app, width));
+            lines.push(blank());
+            lines.push(divider("EXPORT", area.width));
+            lines.extend(ship_export_lines(app, width));
+        }
+    }
 }
 
 fn append_detail_plain_lines(
@@ -502,7 +858,23 @@ mod tests {
 
         assert!(
             widths.findings.saturating_sub(2) >= 60,
-            "findings pane inner width should fit verdict/proof/location cells: {widths:?}"
+            "findings pane inner width should fit dense worklist rows: {widths:?}"
+        );
+    }
+
+    #[test]
+    fn common_widths_use_review_grid_instead_of_short_columns() {
+        assert_eq!(
+            workbench_layout(Rect::new(0, 0, 120, 30)),
+            WorkbenchLayout::ReviewGrid
+        );
+    }
+
+    #[test]
+    fn very_wide_terminals_use_four_columns() {
+        assert_eq!(
+            workbench_layout(Rect::new(0, 0, 150, 30)),
+            WorkbenchLayout::FourColumn
         );
     }
 }

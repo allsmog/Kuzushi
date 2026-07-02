@@ -37,5 +37,6 @@ pub(in crate::modules) fn dag(
             .iter()
             .map(|dependency| dependency.to_string())
             .collect(),
+        executor: None,
     }
 }

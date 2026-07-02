@@ -19,7 +19,7 @@ pub(crate) fn heatmap_lines(_width: usize, model: &FindingsHeatmap) -> Vec<Line<
         );
     }
     let mut lines = vec![header_row(), blank_grid_row()];
-    lines.extend(model.rows.iter().map(data_row));
+    lines.extend(model.rows.iter().map(|row| data_row(row, model)));
     lines.push(blank());
     lines.push(line(vec![
         span("  legend  ", theme::label()),
@@ -50,15 +50,28 @@ fn blank_grid_row() -> Line<'static> {
     )])
 }
 
-fn data_row(row: &ModuleRisk) -> Line<'static> {
-    let mut spans = vec![span(
-        format!("  {}", fixed(&row.module, NAME_W)),
-        theme::primary(),
-    )];
+fn data_row(row: &ModuleRisk, model: &FindingsHeatmap) -> Line<'static> {
+    let selected = model
+        .selected_module
+        .as_ref()
+        .map_or(false, |module| module == &row.module);
+    let marker = if selected { "▌ " } else { "  " };
+    let mut spans = vec![
+        span(marker, selected_row_style(selected)),
+        span(fixed(&row.module, NAME_W), selected_row_style(selected)),
+    ];
     for (count, sev) in row.counts.iter().zip(COLUMNS) {
         spans.push(cell(*count, sev));
     }
     line(spans)
+}
+
+fn selected_row_style(selected: bool) -> ratatui::style::Style {
+    if selected {
+        theme::accent()
+    } else {
+        theme::primary()
+    }
 }
 
 fn cell(count: u32, sev: Sev) -> Span<'static> {

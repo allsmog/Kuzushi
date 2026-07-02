@@ -95,6 +95,13 @@ fn append_agent_status(lines: &mut Vec<Line<'static>>, model: &AgentChatModel) {
     lines.push(detail("mode", "agent chat"));
     lines.push(detail("status", status));
     lines.push(detail("model", &model.model));
+    if let Some(scope) = model
+        .session
+        .as_ref()
+        .and_then(|agent| agent.screen_context_scope.as_deref())
+    {
+        lines.push(Line::styled(scope.to_string(), theme::accent()));
+    }
     lines.push(blank());
 }
 

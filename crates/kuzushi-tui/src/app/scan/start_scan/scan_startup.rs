@@ -6,7 +6,56 @@ use std::collections::BTreeMap;
 const SCAN_TOOL_NAME: &str = "sast:scan";
 
 impl ShellApp {
-    pub(crate) fn start_scan(&mut self, target: Option<PathBuf>) {
+    pub(crate) fn open_guided_scan(&mut self, target: Option<PathBuf>) {
+        if self.scan.as_ref().is_some_and(|scan| scan.running) {
+            self.log("scan", "scan already running");
+            return;
+        }
+        if !self.activate_guided_scan_target(target) {
+            return;
+        }
+        self.workbench_cache.borrow_mut().invalidate_map_artifacts();
+        let Some(journey) = crate::ui_view_models::journey_model(self) else {
+            self.log(
+                "journey",
+                "no active workspace target; set one with `target <path>` first",
+            );
+            return;
+        };
+        self.log(
+            "scan",
+            "opening guided workflow — review checked tasks, then press Enter to run",
+        );
+        self.open_phase_picker(journey.current);
+    }
+
+    fn activate_guided_scan_target(&mut self, target: Option<PathBuf>) -> bool {
+        let Some(target) = target else {
+            if self.current_workspace().is_ok() {
+                return true;
+            }
+            self.log(
+                "scan",
+                "no active workspace target; run `target <path>` first, or `scan .` to use cwd",
+            );
+            return false;
+        };
+        match WorkspaceTarget::new(&target) {
+            Ok(workspace) => {
+                self.activate_target(workspace);
+                true
+            }
+            Err(error) => {
+                self.log(
+                    "error",
+                    format!("invalid target {}: {error}", target.display()),
+                );
+                false
+            }
+        }
+    }
+
+    pub(crate) fn start_umbrella_sast_scan(&mut self, target: Option<PathBuf>) {
         let Some(request) = self.prepare_scan_start(target) else {
             return;
         };
@@ -55,6 +104,7 @@ impl ShellApp {
         self.scan_cancel = Some(cancel);
         self.findings.clear();
         self.selected_finding = None;
+        self.workflow_phase = Some(crate::app::WorkflowPhase::Hunt);
         self.active_model_override = active_model_override_from_input(&request.input, &self.config);
         self.activity = Some(self.pending_scan_activity(&request.run_id));
         self.shell_view = self.scan_shell_view();
@@ -76,7 +126,15 @@ impl ShellApp {
     }
 
     fn log_scan_start(&mut self, target_root: &PathBuf, effective_options: &[EffectiveScanOption]) {
+        self.log(
+            "phase",
+            "崩 hunt (2/4): `scan` is the full-scan action for this phase",
+        );
         self.log("scan", format!("starting {}", target_root.display()));
+        self.log(
+            "scan",
+            "setup: `tasks` chooses scanners · `options sast:scan` tunes inputs · Ctrl+G opens commands",
+        );
         self.log("scan", scan_options_log_message(effective_options));
         if self.auto_open_activity {
             self.log(
@@ -226,7 +284,8 @@ fn scan_descriptor_accepts_option(registry: &ModuleRegistry, name: &str) -> bool
 
 fn scan_options_log_message(options: &[EffectiveScanOption]) -> String {
     if options.is_empty() {
-        return "0 stored options in effect — type `options sast:scan` before scanning".to_string();
+        return "0 stored options in effect — type `options sast:scan` or `tasks` before scanning"
+            .to_string();
     }
     format!(
         "{} stored {} in effect — {}",
@@ -350,6 +409,15 @@ mod tests {
         assert!(message.contains("maxFindings=12 (workspace)"), "{message}");
         assert!(message.contains("triage=false (session)"), "{message}");
         assert!(!message.contains("ui.auto_open_activity"), "{message}");
+    }
+
+    #[test]
+    fn empty_scan_options_log_points_to_sast_options() {
+        let message = scan_options_log_message(&[]);
+
+        assert!(message.contains("0 stored options in effect"), "{message}");
+        assert!(message.contains("options sast:scan"), "{message}");
+        assert!(message.contains("before scanning"), "{message}");
     }
 
     #[test]

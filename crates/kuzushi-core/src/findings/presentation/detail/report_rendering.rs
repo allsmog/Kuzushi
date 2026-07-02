@@ -4,7 +4,7 @@ impl FindingDetailReport {
     pub fn new(alias: Option<String>, finding: Finding, patch_results: Vec<PatchResult>) -> Self {
         let proof_state = proof_state_label(finding.static_proof_state).to_string();
         let runtime_validation = runtime_validation_label(finding.verification.as_ref());
-        let next_action = next_action(&finding, patch_results.first());
+        let next_action = finding_next_action(&finding, patch_results.first());
         let proof_ladder = proof_ladder_state(&finding, patch_results.first());
         Self {
             alias,

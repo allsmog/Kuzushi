@@ -39,9 +39,15 @@ pub(crate) const CONTEXT_KB_COMMANDS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "attach <path-or-url>",
-        aliases: &["/attach <path-or-url>"],
+        aliases: &["/attach <path-or-url>", "attach", "/attach"],
         category: ShellCommandCategory::ContextKb,
-        description: "record local file or URL metadata",
+        description: "record local file or URL metadata; omit the path to browse target files",
+    },
+    ShellCommandSpec {
+        command: "files",
+        aliases: &["/files", "file-picker", "/file-picker"],
+        category: ShellCommandCategory::ContextKb,
+        description: "open a fuzzy target-file picker for KB attachment",
     },
     ShellCommandSpec {
         command: "detach <id>",
@@ -68,7 +74,7 @@ pub(crate) const CONTEXT_KB_COMMANDS: &[ShellCommandSpec] = &[
             "findings export <path> [format]",
         ],
         category: ShellCommandCategory::ContextKb,
-        description: "export findings as json, jsonl, sarif, csv, or markdown-bundle",
+        description: "export findings; extensionless defaults to markdown-bundle, or pass json/jsonl/sarif/csv",
     },
     ShellCommandSpec {
         command: "workspace scope init",

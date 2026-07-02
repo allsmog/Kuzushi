@@ -27,7 +27,7 @@ fn plain_help_model_projects_plain_rows() {
     assert!(model.intro.contains("? opens help"));
     let examples = model.examples_line.as_deref().unwrap_or_default();
     assert!(examples.starts_with("Examples: "));
-    assert!(examples.contains("scan ."));
+    assert!(examples.contains("next"));
     assert!(examples.contains("run ."));
     assert!(examples.contains("model 1"));
     assert!(model
@@ -74,16 +74,18 @@ fn quickstart_model_uses_current_target_scan_shape() {
 
     let no_target = quickstart_model(&app);
 
-    assert!(no_target.steps[2].text.starts_with("options sast:scan"));
-    assert!(no_target.steps[3].text.starts_with("scan ."));
+    assert!(no_target.steps[2].text.starts_with("target ."));
+    assert!(no_target.steps[3].text.starts_with("options sast:scan"));
+    assert!(no_target.steps[4].text.starts_with("next"));
     assert!(no_target.steps[1]
         .text
         .contains(".kuzushi/context-snapshot.json"));
-    assert!(no_target.first_finding_tip.contains("`scan .`"));
+    assert!(no_target.first_finding_tip.contains("`target .; next`"));
 
     app.target = Some(PathBuf::from("."));
     let with_target = quickstart_model(&app);
 
-    assert!(with_target.steps[3].text.starts_with("scan "));
-    assert!(with_target.first_finding_tip.contains("`scan`"));
+    assert!(with_target.steps[2].text.starts_with("target "));
+    assert!(with_target.steps[4].text.starts_with("next"));
+    assert!(with_target.first_finding_tip.contains("`next`"));
 }

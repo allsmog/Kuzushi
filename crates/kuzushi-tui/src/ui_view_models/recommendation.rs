@@ -20,6 +20,7 @@ pub(crate) struct RecommendationModel {
     pub(crate) report_headers: [&'static str; 5],
     pub(crate) report_commands: [&'static str; 4],
     pub(crate) empty_state: RecommendationEmptyState,
+    pub(crate) components: Vec<ComponentRecommendationRow>,
     pub(crate) rows: Vec<RecommendationRow>,
 }
 
@@ -41,6 +42,18 @@ pub(crate) struct RecommendationRow {
     pub(crate) cells: [String; RECOMMENDATION_COLUMN_COUNT],
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ComponentRecommendationRow {
+    pub(crate) scope_id: String,
+    pub(crate) rel_path: String,
+    pub(crate) class_label: String,
+    pub(crate) tier_label: String,
+    pub(crate) risk_score: u16,
+    pub(crate) reason: String,
+    pub(crate) scan_command: String,
+    pub(crate) promote_command: Option<String>,
+}
+
 pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
     let source = RecommendationSource::from_app(app);
     let report = read_recommendations(&source.path);
@@ -57,8 +70,19 @@ pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
         report_headers: RECOMMENDATION_REPORT_HEADERS,
         report_commands: RECOMMENDATION_REPORT_COMMANDS,
         empty_state: recommendation_empty_state(recommender_running(app), app.target.is_some()),
+        components: report
+            .as_ref()
+            .map(|view| view.components.clone())
+            .unwrap_or_default(),
         rows: report.map(|view| view.rows).unwrap_or_default(),
     }
+}
+
+pub(crate) fn recommendation_components(app: &ShellApp) -> Vec<ComponentRecommendationRow> {
+    let source = RecommendationSource::from_app(app);
+    read_recommendations(&source.path)
+        .map(|view| view.components)
+        .unwrap_or_default()
 }
 
 pub(crate) fn recommendation_artifact_needs_refresh(app: &ShellApp) -> bool {
@@ -195,6 +219,10 @@ fn read_recommendations(path: &Path) -> Option<RecommendationView> {
     let report = recommendation_report_value(&value);
     Some(RecommendationView {
         summary: string_field(report, "summary"),
+        components: component_values(report)
+            .into_iter()
+            .filter_map(component_from_value)
+            .collect(),
         rows: recommendation_values(report)
             .into_iter()
             .filter_map(recommendation_from_value)
@@ -205,6 +233,7 @@ fn read_recommendations(path: &Path) -> Option<RecommendationView> {
 fn non_file_recommendations_view() -> RecommendationView {
     RecommendationView {
         summary: Some(format!("{} is not a file", recommendations_artifact_leaf())),
+        components: Vec::new(),
         rows: vec![RecommendationRow {
             cells: [
                 "⚠ high".to_string(),
@@ -221,6 +250,7 @@ fn non_file_recommendations_view() -> RecommendationView {
 fn malformed_recommendations_view() -> RecommendationView {
     RecommendationView {
         summary: Some(format!("malformed {}", recommendations_artifact_leaf())),
+        components: Vec::new(),
         rows: vec![RecommendationRow {
             cells: [
                 "⚠ high".to_string(),
@@ -254,6 +284,10 @@ fn has_recommendation_items(value: &serde_json::Value) -> bool {
         .get("recommendations")
         .and_then(serde_json::Value::as_array)
         .is_some()
+        || value
+            .get("components")
+            .and_then(serde_json::Value::as_array)
+            .is_some()
 }
 
 fn recommendation_values(value: &serde_json::Value) -> Vec<serde_json::Value> {
@@ -266,6 +300,69 @@ fn recommendation_values(value: &serde_json::Value) -> Vec<serde_json::Value> {
         .and_then(serde_json::Value::as_array)
         .cloned()
         .unwrap_or_default()
+}
+
+fn component_values(value: &serde_json::Value) -> Vec<serde_json::Value> {
+    value
+        .get("components")
+        .or_else(|| value.pointer("/data/components"))
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn component_from_value(value: serde_json::Value) -> Option<ComponentRecommendationRow> {
+    let next_input = value.get("nextInput").or_else(|| value.get("next_input"));
+    let rel_path = string_field(&value, "relPath").or_else(|| string_field(&value, "rel_path"))?;
+    let tier_label = string_field(&value, "tier").unwrap_or_else(|| "low".to_string());
+    let class_label = string_field(&value, "class").unwrap_or_else(|| "component".to_string());
+    Some(ComponentRecommendationRow {
+        scope_id: string_field(&value, "scopeId")
+            .or_else(|| string_field(&value, "scope_id"))
+            .unwrap_or_else(|| rel_path.clone()),
+        rel_path: rel_path.clone(),
+        class_label,
+        risk_score: value
+            .get("riskScore")
+            .or_else(|| value.get("risk_score"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default() as u16,
+        reason: primary_reason(&value).unwrap_or_else(|| "scoped scan candidate".to_string()),
+        scan_command: scoped_scan_command(next_input),
+        promote_command: promote_command(&rel_path, independent_component(&value)),
+        tier_label,
+    })
+}
+
+fn primary_reason(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("reasons")
+        .and_then(serde_json::Value::as_array)?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .find(|reason| !reason.trim().is_empty())
+        .map(str::to_string)
+}
+
+fn scoped_scan_command(next_input: Option<&serde_json::Value>) -> String {
+    let Some(next_input) = next_input else {
+        return "run sast:scan".to_string();
+    };
+    match serde_json::to_string(next_input) {
+        Ok(input) => format!("run sast:scan {input}"),
+        Err(_) => "run sast:scan".to_string(),
+    }
+}
+
+fn independent_component(value: &serde_json::Value) -> bool {
+    matches!(
+        string_field(value, "class").as_deref(),
+        Some("web-app" | "service-api")
+    )
+}
+
+fn promote_command(rel_path: &str, independent: bool) -> Option<String> {
+    independent.then(|| format!("target {rel_path}"))
 }
 
 fn recommendation_from_value(value: serde_json::Value) -> Option<RecommendationRow> {
@@ -399,6 +496,7 @@ fn recommendation_latest_run_file(path: &Path) -> RecommendationLatestRunId {
 
 struct RecommendationView {
     summary: Option<String>,
+    components: Vec<ComponentRecommendationRow>,
     rows: Vec<RecommendationRow>,
 }
 

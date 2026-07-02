@@ -14,6 +14,8 @@ mod tests {
         assert_eq!(parse_command("/show modules"), ShellCommand::Modules);
         assert_eq!(parse_command("/recommend"), ShellCommand::Recommend);
         assert_eq!(parse_command("rec"), ShellCommand::Recommend);
+        assert_eq!(parse_command("doctor"), ShellCommand::Health);
+        assert_eq!(parse_command("/health"), ShellCommand::Health);
         assert_eq!(parse_command("/tools"), ShellCommand::Tools(None));
         assert_eq!(parse_command("/show tools"), ShellCommand::Tools(None));
         assert_eq!(
@@ -244,6 +246,16 @@ mod tests {
             parse_command("attach docs/design.md"),
             ShellCommand::Attach("docs/design.md".to_string())
         );
+        assert_eq!(parse_command("attach"), ShellCommand::FilePicker);
+        assert_eq!(parse_command("files"), ShellCommand::FilePicker);
+        assert_eq!(
+            parse_command("component web/app"),
+            ShellCommand::Component(Some("web/app".to_string()))
+        );
+        assert_eq!(
+            parse_command("component all"),
+            ShellCommand::Component(Some("all".to_string()))
+        );
         assert_eq!(
             parse_command("detach A-123"),
             ShellCommand::Detach("A-123".to_string())
@@ -418,6 +430,14 @@ mod tests {
         );
         assert_eq!(parse_command("?"), ShellCommand::Help(None));
         assert_eq!(
+            parse_command("phase confirm"),
+            ShellCommand::Phase(WorkflowPhase::Confirm)
+        );
+        assert_eq!(
+            parse_command("/phase fix"),
+            ShellCommand::Phase(WorkflowPhase::Fix)
+        );
+        assert_eq!(
             parse_command("help scan"),
             ShellCommand::Help(Some("scan".to_string()))
         );
@@ -529,14 +549,17 @@ mod tests {
             "backend",
             "cancel",
             "clear",
+            "component",
             "config",
             "context",
             "cost",
             "demo",
             "detach",
             "failure-handoff",
+            "file-picker",
             "findings",
             "findings-filter",
+            "health",
             "help",
             "home",
             "history",
@@ -551,6 +574,7 @@ mod tests {
             "options",
             "pause",
             "permissions",
+            "phase",
             "plan",
             "plan-apply",
             "plan-discard",
@@ -603,7 +627,7 @@ mod tests {
             examples,
             vec![
                 "demo",
-                "scan .",
+                "next",
                 "use semgrep",
                 "run .",
                 "findings",
@@ -635,6 +659,7 @@ mod tests {
             ShellCommand::Workbench(_) => "workbench",
             ShellCommand::Findings => "findings",
             ShellCommand::FindingsFilter(_) => "findings-filter",
+            ShellCommand::Component(_) => "component",
             ShellCommand::Open(_) => "open",
             ShellCommand::Scan(_) => "scan",
             ShellCommand::Demo => "demo",
@@ -645,6 +670,7 @@ mod tests {
             ShellCommand::Backend(_) => "backend",
             ShellCommand::Cost => "cost",
             ShellCommand::Config => "config",
+            ShellCommand::Health => "health",
             ShellCommand::Permissions => "permissions",
             ShellCommand::ProjectModel => "project-model",
             ShellCommand::Use(_) => "use",
@@ -672,6 +698,7 @@ mod tests {
             ShellCommand::Quickstart => "quickstart",
             ShellCommand::Onboarding => "onboarding",
             ShellCommand::Next => "next",
+            ShellCommand::Phase(_) => "phase",
             ShellCommand::Logs => "logs",
             ShellCommand::Target(_) => "target",
             ShellCommand::TargetRevision(_) => "target-revision",
@@ -686,6 +713,7 @@ mod tests {
             ShellCommand::Strategy(_) => "strategy",
             ShellCommand::Pwn(_) => "pwn",
             ShellCommand::KnowledgeBase(_) => "kb",
+            ShellCommand::FilePicker => "file-picker",
             ShellCommand::Attach(_) => "attach",
             ShellCommand::Detach(_) => "detach",
             ShellCommand::Reparse(_) => "reparse",
@@ -718,6 +746,7 @@ mod tests {
                 "<run>" | "<runId>" => "run-123".to_string(),
                 "<ref>" => "main".to_string(),
                 "<provider>" => "openai".to_string(),
+                "<map|hunt|confirm|fix>" => "confirm".to_string(),
                 "<choice>" => "1".to_string(),
                 "<question>" => "what now".to_string(),
                 "<specifier>" => "builtin:sast".to_string(),

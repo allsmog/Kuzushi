@@ -45,6 +45,7 @@ fn system_view_status(app: &ShellApp) -> Option<String> {
         ShellView::Quickstart => Some("quickstart".to_string()),
         ShellView::Logs => Some("logs".to_string()),
         ShellView::Config => Some("config".to_string()),
+        ShellView::Health => Some("health".to_string()),
         ShellView::Tools => Some("tools".to_string()),
         ShellView::Options(view) => Some(format!("options[{}]", view.tool_name)),
         ShellView::SastTasks => Some("tasks".to_string()),

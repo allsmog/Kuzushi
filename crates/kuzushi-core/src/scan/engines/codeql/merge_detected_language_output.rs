@@ -1,4 +1,5 @@
 use super::*;
+use crate::scan::domain::scanner_binary_available;
 
 pub(crate) fn merge_detected_language_output(
     result: Result<ScanEngineOutput>,
@@ -37,6 +38,17 @@ pub(crate) fn record_detected_language_error(
 impl ScanEngine for CodeqlScanner {
     fn id(&self) -> &'static str {
         "codeql"
+    }
+
+    fn preflight(&self) -> Result<()> {
+        let binary = resolve_codeql_binary(self.binary.as_deref())?;
+        if scanner_binary_available(&binary) {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "codeql: could not find CodeQL CLI {:?}. Install it with `gh extension install github/gh-codeql && gh codeql install-stub`, download it from https://github.com/github/codeql-cli-binaries/releases, or pass {{\"binary\":\"/path/to/codeql\"}}. Next: run codeql:scan {{\"binary\":\"/path/to/codeql\",\"language\":\"javascript\"}} or task block codeql.",
+            binary
+        )
     }
 
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {

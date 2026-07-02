@@ -73,9 +73,10 @@ impl ShellApp {
         if !self.workbench_findings_paging() {
             return false;
         }
-        if !self.findings.is_empty() {
-            self.findings_cursor = (self.findings_cursor + FINDINGS_PAGE_ROWS)
-                .min(self.findings.len().saturating_sub(1));
+        let len = crate::ui_view_models::visible_findings_len(self);
+        if len > 0 {
+            self.findings_cursor =
+                (self.findings_cursor + FINDINGS_PAGE_ROWS).min(len.saturating_sub(1));
         }
         true
     }
@@ -122,6 +123,7 @@ impl ShellApp {
             ShellView::Help
             | ShellView::Quickstart
             | ShellView::Logs
+            | ShellView::Health
             | ShellView::Tools
             | ShellView::Options(_)
             | ShellView::Runs

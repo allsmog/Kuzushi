@@ -574,6 +574,82 @@ mod tests {
     }
 
     #[test]
+    fn compact_static_proof_summary_keeps_ui_vocabulary_short() {
+        let signal = static_proof_summary(Some(StaticProofState::SignalOnly));
+        assert_eq!(signal.label, "signal-only");
+        assert!(signal.explanation.contains("scanner signal"));
+
+        let linked = static_proof_summary(Some(StaticProofState::SourceSinkLinked));
+        assert_eq!(linked.label, "path-linked");
+        assert!(linked.explanation.contains("links source to sink"));
+
+        let missing = static_proof_summary(None);
+        assert_eq!(missing.label, "not recorded");
+        assert_eq!(missing.explanation, "no static proof recorded");
+
+        assert!(proof_state_label(Some(StaticProofState::SignalOnly)).contains("signal_only -"));
+    }
+
+    #[test]
+    fn compact_runtime_validation_summary_names_operator_state() {
+        let missing = runtime_validation_summary(None);
+        assert_eq!(missing.label, "not verified");
+        assert_eq!(missing.explanation, "runtime verification has not run");
+
+        let verification = PersistedVerification {
+            proof_level: 4,
+            proof_verdict: PersistedProofVerdict::Exploited,
+            backend: PersistedSandboxBackend::Bwrap,
+            language: Some("javascript".to_string()),
+            harness_path: None,
+            crash_evidence: None,
+            duration_ms: 321,
+            cost_usd: 0.0,
+            notes: Vec::new(),
+            created_at: "now".to_string(),
+        };
+        let verified = runtime_validation_summary(Some(&verification));
+        assert_eq!(verified.label, "verified L4");
+        assert!(verified.explanation.contains("reproduced exploitability"));
+    }
+
+    #[test]
+    fn finding_next_action_is_exported_for_ui_surfaces() {
+        let mut finding = Finding::new_semgrep(
+            "demo.xss",
+            "src/app.ts",
+            7,
+            None,
+            Severity::High,
+            "Request query data is rendered into HTML without escaping",
+        )
+        .with_static_proof_state(StaticProofState::SourceSinkLinked);
+
+        assert_eq!(
+            finding_next_action(&finding, None),
+            FindingNextAction::Validate
+        );
+
+        finding.verification = Some(PersistedVerification {
+            proof_level: 4,
+            proof_verdict: PersistedProofVerdict::Exploited,
+            backend: PersistedSandboxBackend::Bwrap,
+            language: Some("javascript".to_string()),
+            harness_path: None,
+            crash_evidence: None,
+            duration_ms: 321,
+            cost_usd: 0.0,
+            notes: Vec::new(),
+            created_at: "now".to_string(),
+        });
+        assert_eq!(
+            finding_next_action(&finding, None),
+            FindingNextAction::Patch
+        );
+        assert_eq!(finding_next_action(&finding, None).as_str(), "patch");
+    }
+
+    #[test]
     fn stable_aliases_sort_by_severity_then_fingerprint() {
         let mut high_late = Finding::new_semgrep(
             "demo.high",
@@ -624,6 +700,40 @@ mod tests {
             Some(high_early.fingerprint.as_str())
         );
         assert!(parse_finding_alias("F-0000").is_none());
+    }
+
+    #[test]
+    fn finding_aliases_sort_confirmed_before_guesses_within_severity() {
+        let mut guessed = Finding::new_semgrep(
+            "demo.guess",
+            "src/guess.ts",
+            1,
+            None,
+            Severity::High,
+            "high guess",
+        );
+        guessed.fingerprint = "aaaa1111".to_string();
+        let mut confirmed = Finding::new_semgrep(
+            "demo.confirmed",
+            "src/confirmed.ts",
+            2,
+            None,
+            Severity::High,
+            "high confirmed",
+        );
+        confirmed.fingerprint = "zzzz1111".to_string();
+        confirmed.triage = Some(TriageOutcome {
+            verdict: TriageVerdict::TruePositive,
+            confidence: 0.72,
+            rationale: "source reaches sink".to_string(),
+            cost_usd: 0.0,
+        });
+
+        let aliases = sorted_finding_aliases(&[guessed.clone(), confirmed.clone()]);
+
+        assert_eq!(aliases[0].0, "F-0001");
+        assert_eq!(aliases[0].1.fingerprint, confirmed.fingerprint);
+        assert_eq!(aliases[1].1.fingerprint, guessed.fingerprint);
     }
 
     #[test]

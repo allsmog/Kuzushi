@@ -88,6 +88,9 @@ impl PlanningTaskRow {
     /// hint — prefixing it with cost info only pushed the actionable part past
     /// the column budget where it got truncated.
     pub fn cost_hint(&self) -> String {
+        if self.id.is_inline_action() {
+            return "local UI action".to_string();
+        }
         let base = if self.model_backed {
             "model-backed"
         } else {

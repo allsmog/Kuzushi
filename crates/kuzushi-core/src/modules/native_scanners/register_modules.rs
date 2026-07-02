@@ -1,14 +1,16 @@
 use super::*;
 
-pub(in crate::modules) fn register_modules(registry: &mut ModuleRegistry) {
-    registry.register(semgrep_module());
-    registry.register(codeql_module());
-    registry.register(iac_scan_module());
-    registry.register(cargo_audit_module());
-    registry.register(license_scan_module());
-    registry.register(sbom_scan_module());
-    registry.register(exploit_chain_module());
-    registry.register(android_apk_module());
+use crate::modules::registry::ToolExecutor;
+
+pub(in crate::modules) fn register_modules(registry: &mut ModuleRegistry, executor: ToolExecutor) {
+    registry.register(semgrep_module().with_executor(executor));
+    registry.register(codeql_module().with_executor(executor));
+    registry.register(iac_scan_module().with_executor(executor));
+    registry.register(cargo_audit_module().with_executor(executor));
+    registry.register(license_scan_module().with_executor(executor));
+    registry.register(sbom_scan_module().with_executor(executor));
+    registry.register(exploit_chain_module().with_executor(executor));
+    registry.register(android_apk_module().with_executor(executor));
 }
 
 pub(in crate::modules) fn execute_tool(
@@ -44,8 +46,11 @@ pub(in crate::modules) fn run_semgrep_scan(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
-    emit_scan_start(ctx, "semgrep", &target);
     let scanner = SemgrepScanner::from_tool_input(&input)?;
+    if let Err(error) = scanner.preflight() {
+        return Ok(failed_tool_output("semgrep:scan", &target, error));
+    }
+    emit_scan_start(ctx, "semgrep", &target);
     let mut findings = match scanner.scan_with_cancel(&target, &ScanCancellation::default()) {
         Ok(findings) => findings,
         Err(error) => return Ok(failed_tool_output("semgrep:scan", &target, error)),
@@ -64,8 +69,11 @@ pub(in crate::modules) fn run_codeql_scan(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
-    emit_scan_start(ctx, "codeql", &target);
     let scanner = CodeqlScanner::from_tool_input(&input)?;
+    if let Err(error) = scanner.preflight() {
+        return Ok(failed_tool_output("codeql:scan", &target, error));
+    }
+    emit_scan_start(ctx, "codeql", &target);
     let mut output = match scanner.scan_with_artifacts(&target, &ScanCancellation::default()) {
         Ok(output) => output,
         Err(error) => return Ok(failed_tool_output("codeql:scan", &target, error)),

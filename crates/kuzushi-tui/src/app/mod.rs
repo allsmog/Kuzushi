@@ -9,6 +9,7 @@ pub(crate) use background_events::*;
 pub(crate) use catalog::*;
 pub(crate) use command_router::*;
 pub(crate) use ctrl_c_arm_window::*;
+pub(crate) use file_picker::*;
 pub(crate) use findings::*;
 pub(crate) use line_editor::*;
 pub(crate) use live_activity::*;
@@ -41,6 +42,7 @@ mod background_events;
 mod catalog;
 mod command_palette;
 mod command_router;
+mod file_picker;
 mod findings;
 mod line_editor;
 mod live_activity;
@@ -105,9 +107,9 @@ pub use onboarding::{
     provider_has_multiple_auth_methods, recommended_tasks_for_phase, record_recent_target,
     row_disposition, skip_onboarding_env, toggle_planning_row, topological_order,
     transitive_dependencies, ArtifactState as PlanningArtifactState, FailedPlanningTask,
-    InitialOnboardingPhase, OnboardingInputs, PendingRetry, PlanningTaskId, PlanningTaskRow,
-    RetryAdjustment, RowDisposition, TargetCandidate, TargetCandidateScope, TargetProfile,
-    ToggleOutcome, WorkflowPhase,
+    InitialOnboardingPhase, OnboardingInputs, PendingRetry, PickerFocus, PlanningOptionEdit,
+    PlanningOptionOverrides, PlanningTaskId, PlanningTaskRow, RetryAdjustment, RowDisposition,
+    TargetCandidate, TargetCandidateScope, TargetProfile, ToggleOutcome, WorkflowPhase,
 };
 pub use prereq_chain::{
     PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqPlanAction, PrereqPlanStep,
@@ -128,6 +130,6 @@ pub use view_state::{
     HistorySearch, KnowledgeBaseView, Notice, NoticeSeverity, OptionsFilter, OptionsView,
     PaneFocus, PlanChange, PlanProposal, PromptsAction, PwnView, ReconSnapshot, RecordedTraceEvent,
     ScanPanelState, ShellView, SubsystemAggregate, ThreatPatch, ThreatView, ThrottleAdvisory,
-    TuneAction, WorkbenchPane, WorkbenchPaneScroll, WorkspaceView,
+    TuneAction, WorkbenchPage, WorkbenchPane, WorkbenchPaneScroll, WorkspaceView,
 };
 pub(crate) use view_state::{SastTaskMode, SastTaskRow};

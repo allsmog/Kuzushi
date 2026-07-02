@@ -250,25 +250,36 @@ pub(crate) fn check_model_config(config: &kuzushi_core::V2Config) -> DoctorCheck
             "no explicit model configured; static scanners still work; no fallback model will be selected",
             "Set `KUZUSHI_MODEL=provider:model` or add `model = \"provider:model\"` before using agentic tools.",
         ),
-        Some(model) => model_config_check(model),
+        Some(model) => model_config_check(model, config),
     }
 }
 
-fn model_config_check(model: &str) -> DoctorCheck {
+fn model_config_check(model: &str, config: &kuzushi_core::V2Config) -> DoctorCheck {
     match kuzushi_core::runtime::canonical_model_spec(model) {
-        Ok(canonical) => DoctorCheck::ok(
-            "model",
-            format!(
-                "explicit model configured for provider {}",
-                model_provider(&canonical)
+        Ok(canonical) => match model_runtime_check(&canonical, config) {
+            Ok(()) => DoctorCheck::ok(
+                "model",
+                format!(
+                    "explicit model configured for provider {}",
+                    model_provider(&canonical)
+                ),
             ),
-        ),
+            Err(error) => DoctorCheck::fail(
+                "model",
+                error.to_string(),
+                "Align runtime.api_key_env with the model provider or choose a model for the configured runtime credentials.",
+            ),
+        },
         Err(error) => DoctorCheck::fail(
             "model",
             error.to_string(),
             "Set `KUZUSHI_MODEL=provider:model` or fix config.toml.",
         ),
     }
+}
+
+fn model_runtime_check(model: &str, config: &kuzushi_core::V2Config) -> Result<(), anyhow::Error> {
+    kuzushi_core::runtime::validate_model_api_key_env(model, &config.runtime.api_key_env)
 }
 
 fn model_provider(model: &str) -> &str {

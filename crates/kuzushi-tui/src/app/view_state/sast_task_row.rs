@@ -113,6 +113,7 @@ pub enum ShellView {
     /// and `j`/`k`/`g`/`G`/`PgUp`/`PgDn` page through the buffer.
     Logs,
     Config,
+    Health,
     Tools,
     Options(OptionsView),
     SastTasks,
@@ -166,6 +167,11 @@ pub enum ShellView {
     /// tasks (context build, x-ray, threat-model variants, CPG, CodeQL
     /// DB, threat intel). State lives on `app.planning_*` fields.
     PlanningPicker,
+    /// Target-rooted fuzzy file picker for `attach <path>`. It reuses the
+    /// shell's line-rendered picker pattern: app-owned query/cursor state,
+    /// no external event loop, and Enter dispatches through the existing
+    /// attachment store.
+    FilePicker,
     /// Security-visualization gallery, fed real Kuzushi data. One page is a 3D
     /// attack-surface terrain (half-block framebuffer); the rest are 2D diagrams
     /// (attack path, DFD, findings heatmap, exploit chain). Auto-opens to the
@@ -215,6 +221,136 @@ impl WorkbenchPane {
             WorkbenchPane::Findings => WorkbenchPane::Center,
             WorkbenchPane::Details => WorkbenchPane::Findings,
         }
+    }
+}
+
+/// Explicit content mode for the Workbench center pane. Focus decides which
+/// pane receives keyboard input; this decides which page the center deck shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WorkbenchCenterMode {
+    #[default]
+    Code,
+    Dfd,
+    Chain,
+    Flow,
+    Risk,
+}
+
+impl WorkbenchCenterMode {
+    pub const ALL: [Self; 5] = [
+        WorkbenchCenterMode::Code,
+        WorkbenchCenterMode::Dfd,
+        WorkbenchCenterMode::Chain,
+        WorkbenchCenterMode::Flow,
+        WorkbenchCenterMode::Risk,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            WorkbenchCenterMode::Code => "CODE",
+            WorkbenchCenterMode::Dfd => "DFD",
+            WorkbenchCenterMode::Chain => "CHAIN",
+            WorkbenchCenterMode::Flow => "FLOW",
+            WorkbenchCenterMode::Risk => "RISK",
+        }
+    }
+
+    pub fn toggled(self) -> Self {
+        match self {
+            WorkbenchCenterMode::Code => WorkbenchCenterMode::Dfd,
+            WorkbenchCenterMode::Dfd
+            | WorkbenchCenterMode::Chain
+            | WorkbenchCenterMode::Flow
+            | WorkbenchCenterMode::Risk => WorkbenchCenterMode::Code,
+        }
+    }
+
+    pub fn next(self) -> Self {
+        let index = self.index();
+        Self::ALL[(index + 1) % Self::ALL.len()]
+    }
+
+    pub fn prev(self) -> Self {
+        let index = self.index();
+        Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+
+    pub fn scene_page(self) -> Option<crate::scene3d::VizPage> {
+        match self {
+            WorkbenchCenterMode::Code => None,
+            WorkbenchCenterMode::Dfd => Some(crate::scene3d::VizPage::Dfd),
+            WorkbenchCenterMode::Chain => Some(crate::scene3d::VizPage::ExploitChain),
+            WorkbenchCenterMode::Flow => Some(crate::scene3d::VizPage::AttackPath),
+            WorkbenchCenterMode::Risk => Some(crate::scene3d::VizPage::Heatmap),
+        }
+    }
+
+    fn index(self) -> usize {
+        Self::ALL.iter().position(|mode| *mode == self).unwrap_or(0)
+    }
+}
+
+/// Full-page cockpit deck. Each page maps one-to-one to an engagement phase,
+/// while the existing Workbench center strip remains the REVIEW page's detail
+/// deck.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkbenchPage {
+    Terrain,
+    Coverage,
+    Review,
+    Ship,
+}
+
+impl WorkbenchPage {
+    pub const ALL: [Self; 4] = [Self::Terrain, Self::Coverage, Self::Review, Self::Ship];
+
+    pub fn from_phase(phase: WorkflowPhase) -> Self {
+        match phase {
+            WorkflowPhase::Map => Self::Terrain,
+            WorkflowPhase::Hunt => Self::Coverage,
+            WorkflowPhase::Confirm => Self::Review,
+            WorkflowPhase::Fix => Self::Ship,
+        }
+    }
+
+    pub fn phase(self) -> WorkflowPhase {
+        match self {
+            Self::Terrain => WorkflowPhase::Map,
+            Self::Coverage => WorkflowPhase::Hunt,
+            Self::Review => WorkflowPhase::Confirm,
+            Self::Ship => WorkflowPhase::Fix,
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Terrain => "TERRAIN",
+            Self::Coverage => "COVERAGE",
+            Self::Review => "REVIEW",
+            Self::Ship => "SHIP",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        let index = self.index();
+        Self::ALL[(index + 1) % Self::ALL.len()]
+    }
+
+    pub fn prev(self) -> Self {
+        let index = self.index();
+        Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+
+    pub fn from_digit(index: usize) -> Option<Self> {
+        Self::ALL.get(index.checked_sub(1)?).copied()
+    }
+
+    pub fn position(self) -> usize {
+        self.index() + 1
+    }
+
+    fn index(self) -> usize {
+        Self::ALL.iter().position(|page| *page == self).unwrap_or(0)
     }
 }
 

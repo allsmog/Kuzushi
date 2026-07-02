@@ -94,6 +94,7 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
     use PlanningTaskId::*;
     match row.id {
         // 組 KUMI-KATA · map — foundational artifacts when not already cached.
+        AttachFiles => false,
         GatherRepoContext
         | MapEntryPoints
         | BuildStrideThreatModel

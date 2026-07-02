@@ -1,9 +1,11 @@
 use super::*;
 
-pub(in crate::modules) fn register_modules(registry: &mut ModuleRegistry) {
-    registry.register(vuln_scout_module().deferred());
-    registry.register(tob_module().deferred());
-    registry.register(shinsa_module().deferred());
+use crate::modules::registry::ToolExecutor;
+
+pub(in crate::modules) fn register_modules(registry: &mut ModuleRegistry, executor: ToolExecutor) {
+    registry.register(vuln_scout_module().with_executor(executor).deferred());
+    registry.register(tob_module().with_executor(executor).deferred());
+    registry.register(shinsa_module().with_executor(executor).deferred());
 }
 
 pub(in crate::modules) fn execute_tool(

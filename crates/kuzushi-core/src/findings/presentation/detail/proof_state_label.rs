@@ -1,5 +1,17 @@
 use super::*;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StaticProofSummary {
+    pub label: &'static str,
+    pub explanation: &'static str,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RuntimeValidationSummary {
+    pub label: String,
+    pub explanation: &'static str,
+}
+
 pub fn proof_state_label(state: Option<StaticProofState>) -> &'static str {
     state
         .and_then(proof_state_recorded_label)
@@ -43,6 +55,73 @@ const PROOF_STATE_LABELS: &[(StaticProofState, &str)] = &[
     ),
 ];
 
+pub fn static_proof_summary(state: Option<StaticProofState>) -> StaticProofSummary {
+    state
+        .and_then(static_proof_recorded_summary)
+        .unwrap_or(StaticProofSummary {
+            label: "not recorded",
+            explanation: "no static proof recorded",
+        })
+}
+
+fn static_proof_recorded_summary(state: StaticProofState) -> Option<StaticProofSummary> {
+    STATIC_PROOF_SUMMARIES
+        .iter()
+        .find_map(|(candidate, summary)| (*candidate == state).then_some(*summary))
+}
+
+const STATIC_PROOF_SUMMARIES: &[(StaticProofState, StaticProofSummary)] = &[
+    (
+        StaticProofState::SignalOnly,
+        StaticProofSummary {
+            label: "signal-only",
+            explanation: "scanner signal only; no source-grounded evidence recorded",
+        },
+    ),
+    (
+        StaticProofState::CodeCited,
+        StaticProofSummary {
+            label: "code-cited",
+            explanation: "source-grounded code evidence cited",
+        },
+    ),
+    (
+        StaticProofState::SourceSinkLinked,
+        StaticProofSummary {
+            label: "path-linked",
+            explanation: "static evidence links source to sink",
+        },
+    ),
+    (
+        StaticProofState::SanitizerChecked,
+        StaticProofSummary {
+            label: "path-linked",
+            explanation: "static path includes sanitizer assessment",
+        },
+    ),
+    (
+        StaticProofState::StaticallyConfirmed,
+        StaticProofSummary {
+            label: "static-ok",
+            explanation: "source-grounded and statically confirmed",
+        },
+    ),
+    (
+        StaticProofState::StaticallyRejected,
+        StaticProofSummary {
+            label: "static-no",
+            explanation: "static evidence rejects exploitability",
+        },
+    ),
+    (
+        StaticProofState::NeedsRuntimeEvidence,
+        StaticProofSummary {
+            label: "needs-runtime",
+            explanation: "static evidence needs runtime verification",
+        },
+    ),
+];
+
 pub fn runtime_validation_label(verification: Option<&PersistedVerification>) -> String {
     let Some(verification) = verification else {
         return "not attempted".to_string();
@@ -74,7 +153,66 @@ pub fn runtime_validation_label(verification: Option<&PersistedVerification>) ->
     }
 }
 
-pub(in crate::findings) fn next_action(
+pub fn runtime_validation_summary(
+    verification: Option<&PersistedVerification>,
+) -> RuntimeValidationSummary {
+    let Some(verification) = verification else {
+        return runtime_summary("not verified", "runtime verification has not run");
+    };
+    if verification.proof_verdict == PersistedProofVerdict::Exploited {
+        return RuntimeValidationSummary {
+            label: format!("verified L{}", verification.proof_level),
+            explanation: "runtime verification reproduced exploitability",
+        };
+    }
+    runtime_verdict_summary(verification.proof_verdict)
+        .unwrap_or_else(|| runtime_summary("not verified", "runtime verification has not run"))
+}
+
+fn runtime_verdict_summary(verdict: PersistedProofVerdict) -> Option<RuntimeValidationSummary> {
+    RUNTIME_VALIDATION_SUMMARIES
+        .iter()
+        .find_map(|(candidate, label, explanation)| {
+            (*candidate == verdict).then(|| runtime_summary(*label, *explanation))
+        })
+}
+
+fn runtime_summary(label: &str, explanation: &'static str) -> RuntimeValidationSummary {
+    RuntimeValidationSummary {
+        label: label.to_string(),
+        explanation,
+    }
+}
+
+const RUNTIME_VALIDATION_SUMMARIES: &[(PersistedProofVerdict, &str, &str)] = &[
+    (
+        PersistedProofVerdict::NotReproduced,
+        "not reproduced",
+        "runtime verification did not reproduce exploit",
+    ),
+    (
+        PersistedProofVerdict::HarnessFailedToBuild,
+        "verify-build",
+        "verification harness failed to build",
+    ),
+    (
+        PersistedProofVerdict::InfrastructureError,
+        "verify-infra",
+        "runtime verification was blocked by infrastructure",
+    ),
+    (
+        PersistedProofVerdict::LanguageUnsupportedYet,
+        "unsupported",
+        "runtime verification does not support this language",
+    ),
+    (
+        PersistedProofVerdict::InsufficientFindingDetail,
+        "needs-detail",
+        "finding lacks enough detail for verification",
+    ),
+];
+
+pub fn finding_next_action(
     finding: &Finding,
     latest_patch: Option<&PatchResult>,
 ) -> FindingNextAction {

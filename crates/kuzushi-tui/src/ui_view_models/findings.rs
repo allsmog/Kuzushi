@@ -1,11 +1,15 @@
+use super::planning_overview::format_relative_age;
 use super::workspace::findings_db_relative_path;
 use super::{context_snapshot_state, SeverityCounts, SeverityTone};
 use crate::ShellApp;
 use kuzushi_core::{
-    finding_source_label, project_finding, Finding, PersistedProofVerdict, RunSummary,
-    RunTargetGitMetadata, StaticProofState, TriageVerdict,
+    finding_next_action, finding_remediation_hint, finding_source_label, project_finding,
+    runtime_validation_summary, static_proof_summary, Finding, FindingNextAction,
+    FindingProjection, PersistedProofVerdict, RunSummary, RunTargetGitMetadata, StaticProofState,
+    TriageVerdict,
 };
 use std::collections::BTreeMap;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const FINDINGS_PREVIEW_LIMIT: usize = 8;
 const FINDING_DETAIL_SECTION_LIMIT: usize = 8;
@@ -29,6 +33,12 @@ pub(crate) struct FindingsEmptyState {
     pub(crate) hint: &'static str,
     pub(crate) ledger: String,
     pub(crate) context_cta: Option<(&'static str, &'static str)>,
+    pub(crate) clean_scan: Option<CleanScanEmptyState>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CleanScanEmptyState {
+    pub(crate) summary: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -81,6 +91,14 @@ pub(crate) struct FindingDetailModel {
     pub(crate) proof_tier: ProofTier,
     pub(crate) proof_state: String,
     pub(crate) runtime_verification: String,
+    pub(crate) static_proof_label: String,
+    pub(crate) static_proof_explanation: String,
+    pub(crate) runtime_label: String,
+    pub(crate) runtime_explanation: String,
+    pub(crate) next_action_label: String,
+    pub(crate) next_command: Option<String>,
+    pub(crate) next_detail: String,
+    pub(crate) remediation_hint: Option<String>,
     pub(crate) evidence: Vec<FindingEvidenceRow>,
     pub(crate) message_lines: Vec<String>,
     pub(crate) message_overflow: usize,
@@ -90,6 +108,7 @@ pub(crate) struct FindingDetailModel {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProofTier {
+    RuntimeVerified,
     Confirmed,
     StaticLinked,
     Suspected,
@@ -111,27 +130,50 @@ pub(crate) struct TriageSummaryModel {
 }
 
 pub(crate) fn findings_model(app: &ShellApp) -> FindingsModel {
-    let rows = finding_rows(app);
+    let visible = visible_sorted_finding_alias_indices(app);
+    let rows = finding_rows(app, &visible);
     let selected_out_of_window = selected_out_of_window_notice(app, &rows);
-    let total = app.findings.len();
-    let triaged = app
-        .findings
-        .iter()
-        .filter(|finding| finding.triage.is_some())
-        .count();
+    let total = visible.len();
+    let triaged = visible_triaged_count(app, &visible);
     let pending = total.saturating_sub(triaged);
+    let counts = visible_severity_counts(app, &visible);
     FindingsModel {
         total,
         triaged,
         pending,
-        counts: SeverityCounts::from_findings(&app.findings),
-        header: format!("FINDINGS · {total} · {triaged} triaged · {pending} pending"),
+        counts,
+        header: findings_header(total, counts, active_component_rel_path(app).as_deref()),
         cursor: app.findings_cursor.min(total.saturating_sub(1)),
-        empty: empty_state(context_snapshot_state(app)),
+        empty: empty_state(app),
         selected_out_of_window,
         preview: findings_preview(total, triaged, pending, &rows),
         rows,
     }
+}
+
+fn findings_header(total: usize, counts: SeverityCounts, component: Option<&str>) -> String {
+    let mut parts = vec![format!("FINDINGS · {total}")];
+    if let Some(component) = component {
+        parts.push(format!("component:{component}"));
+    }
+    for segment in severity_count_segments(counts) {
+        parts.push(segment);
+    }
+    parts.join(" · ")
+}
+
+fn severity_count_segments(counts: SeverityCounts) -> Vec<String> {
+    [
+        (counts.critical, "C"),
+        (counts.high, "H"),
+        (counts.medium, "M"),
+        (counts.low, "L"),
+        (counts.info, "I"),
+    ]
+    .into_iter()
+    .filter(|(count, _)| *count > 0)
+    .map(|(count, suffix)| format!("{count}{suffix}"))
+    .collect()
 }
 
 pub(crate) fn selected_finding_detail_model(app: &ShellApp) -> Option<FindingDetailModel> {
@@ -144,7 +186,7 @@ pub(crate) fn selected_finding_detail_model(app: &ShellApp) -> Option<FindingDet
 }
 
 pub(crate) fn current_finding_for_detail(app: &ShellApp) -> Option<(Option<String>, Finding)> {
-    let sorted = cached_sorted_finding_alias_indices(app);
+    let sorted = visible_sorted_finding_alias_indices(app);
     if let Some(finding) = selected_outside_loaded_findings(app, &sorted) {
         let alias = cached_alias_for_fingerprint(app, &finding.fingerprint);
         return Some((alias, finding));
@@ -162,6 +204,9 @@ pub(crate) fn current_finding_for_detail(app: &ShellApp) -> Option<(Option<Strin
 }
 
 fn selected_outside_loaded_findings(app: &ShellApp, sorted: &[(String, usize)]) -> Option<Finding> {
+    if active_component_rel_path(app).is_some() {
+        return None;
+    }
     let selected = app.selected_finding.as_ref()?;
     let selected_is_loaded = sorted.iter().any(|(_, index)| {
         app.findings
@@ -182,24 +227,24 @@ fn selected_out_of_window_notice(app: &ShellApp, rows: &[FindingListRow]) -> Opt
     ))
 }
 
-fn finding_rows(app: &ShellApp) -> Vec<FindingListRow> {
+fn finding_rows(app: &ShellApp, visible: &[(String, usize)]) -> Vec<FindingListRow> {
     let selected = app
         .selected_finding
         .as_ref()
         .map(|finding| finding.fingerprint.as_str());
     let base = target_base(app);
     let runs = run_summary_index(app);
-    cached_sorted_finding_alias_indices(app)
-        .into_iter()
+    visible
+        .iter()
         .enumerate()
         .filter_map(|(row_index, (alias, finding_index))| {
-            let finding = app.findings.get(finding_index)?;
+            let finding = app.findings.get(*finding_index)?;
             let provenance = finding_run_provenance(&finding, &runs);
             Some(FindingListRow::from_finding(
                 row_index,
                 app.findings_cursor,
                 selected,
-                alias,
+                alias.clone(),
                 finding,
                 base.as_deref(),
                 provenance,
@@ -212,6 +257,26 @@ pub(crate) fn cached_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String
     app.workbench_cache
         .borrow_mut()
         .sorted_finding_alias_indices(&app.findings)
+}
+
+pub(crate) fn visible_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
+    let sorted = cached_sorted_finding_alias_indices(app);
+    let Some(prefix) = active_component_rel_path(app) else {
+        return sorted;
+    };
+    let base = target_base(app);
+    sorted
+        .into_iter()
+        .filter(|(_, index)| {
+            app.findings
+                .get(*index)
+                .is_some_and(|finding| finding_in_component(finding, &prefix, base.as_deref()))
+        })
+        .collect()
+}
+
+pub(crate) fn visible_findings_len(app: &ShellApp) -> usize {
+    visible_sorted_finding_alias_indices(app).len()
 }
 
 fn cached_alias_for_fingerprint(app: &ShellApp, fingerprint: &str) -> Option<String> {
@@ -246,27 +311,134 @@ pub(crate) fn relativize_location(location: String, base: Option<&str>) -> Strin
     }
 }
 
-fn empty_state(context_state: &'static str) -> FindingsEmptyState {
-    match context_state {
-        "present" => FindingsEmptyState {
-            hint: "runs configured scanners against the active target.",
-            ledger: format!("ledger: {}", findings_db_relative_path()),
-            context_cta: None,
-        },
-        "malformed" => FindingsEmptyState {
-            hint: "context snapshot is malformed; rebuild it before scanning.",
-            ledger: format!("ledger: {}", findings_db_relative_path()),
-            context_cta: Some(("context build", "rewrite the malformed snapshot first")),
-        },
-        _ => FindingsEmptyState {
-            hint: "runs the umbrella scanner over the target.",
-            ledger: format!("ledger: {}", findings_db_relative_path()),
-            context_cta: Some((
+fn visible_triaged_count(app: &ShellApp, visible: &[(String, usize)]) -> usize {
+    visible
+        .iter()
+        .filter_map(|(_, index)| app.findings.get(*index))
+        .filter(|finding| finding.triage.is_some())
+        .count()
+}
+
+fn visible_severity_counts(app: &ShellApp, visible: &[(String, usize)]) -> SeverityCounts {
+    let mut counts = SeverityCounts::default();
+    for finding in visible
+        .iter()
+        .filter_map(|(_, index)| app.findings.get(*index))
+    {
+        counts.add(finding.severity);
+    }
+    counts
+}
+
+fn active_component_rel_path(app: &ShellApp) -> Option<String> {
+    let active = app.active_scope.as_ref()?;
+    if active.rel_path == "." || active.rel_path.trim().is_empty() {
+        return None;
+    }
+    let target = app.target.as_deref()?;
+    let state = app
+        .workbench_cache
+        .borrow_mut()
+        .project_scope_tree(Some(target))?;
+    let tree = match &state {
+        crate::app::ProjectScopeTreeState::Persisted(tree)
+        | crate::app::ProjectScopeTreeState::Discovered(tree) => tree,
+        crate::app::ProjectScopeTreeState::RootOnly
+        | crate::app::ProjectScopeTreeState::Unreadable(_) => return None,
+    };
+    let in_active_component = tree.non_root_scopes().any(|scope| {
+        scope.id == active.id
+            && scope.rel_path == active.rel_path
+            && matches!(
+                scope.kind,
+                kuzushi_core::NestedProjectKind::Submodule
+                    | kuzushi_core::NestedProjectKind::PackageRoot
+                    | kuzushi_core::NestedProjectKind::EntrypointCluster
+            )
+    });
+    in_active_component.then(|| active.rel_path.trim_matches('/').to_string())
+}
+
+fn finding_in_component(finding: &Finding, prefix: &str, base: Option<&str>) -> bool {
+    let path = normalize_repo_path(&relativize_location(finding.file_path.clone(), base));
+    path == prefix
+        || path
+            .strip_prefix(prefix)
+            .is_some_and(|rest| rest.starts_with('/'))
+}
+
+fn normalize_repo_path(path: &str) -> String {
+    path.replace('\\', "/")
+        .trim_start_matches("./")
+        .trim_matches('/')
+        .to_string()
+}
+
+fn empty_state(app: &ShellApp) -> FindingsEmptyState {
+    let mut state = context_empty_state(context_snapshot_state(app));
+    state.clean_scan = clean_scan_empty_state(&run_summary_index(app), SystemTime::now());
+    state
+}
+
+fn context_empty_state(context_state: &'static str) -> FindingsEmptyState {
+    let (hint, context_cta) = match context_state {
+        "present" => (
+            "opens the guided hunt workflow for the active target.",
+            None,
+        ),
+        "malformed" => (
+            "context snapshot is malformed; rebuild it before scanning.",
+            Some(("context build", "rewrite the malformed snapshot first")),
+        ),
+        _ => (
+            "opens the guided workflow for the target.",
+            Some((
                 "context build",
                 "optional: index the repo first for richer analysis.",
             )),
-        },
+        ),
+    };
+    FindingsEmptyState {
+        hint,
+        ledger: format!("ledger: {}", findings_db_relative_path()),
+        context_cta,
+        clean_scan: None,
     }
+}
+
+fn clean_scan_empty_state(
+    runs: &BTreeMap<String, RunSummary>,
+    now: SystemTime,
+) -> Option<CleanScanEmptyState> {
+    let summary = latest_scan_summary(runs)?;
+    if summary.status != "completed" || summary.findings != Some(0) {
+        return None;
+    }
+    Some(CleanScanEmptyState {
+        summary: format!(
+            "scanned {} · 0 findings · run:{}",
+            completed_age(summary, now),
+            compact_run_id(&summary.run_id)
+        ),
+    })
+}
+
+fn latest_scan_summary(runs: &BTreeMap<String, RunSummary>) -> Option<&RunSummary> {
+    runs.values()
+        .filter(|summary| summary.kind == "scan")
+        .max_by_key(|summary| summary.completed_at_unix.unwrap_or(summary.started_at_unix))
+}
+
+fn completed_age(summary: &RunSummary, now: SystemTime) -> String {
+    summary
+        .completed_at_unix
+        .and_then(system_time_from_unix)
+        .and_then(|completed| format_relative_age(now, completed))
+        .unwrap_or_else(|| "recently".to_string())
+}
+
+fn system_time_from_unix(unix: u64) -> Option<SystemTime> {
+    UNIX_EPOCH.checked_add(Duration::from_secs(unix))
 }
 
 fn findings_preview(
@@ -349,7 +521,7 @@ fn runtime_proof_label(finding: &Finding) -> Option<ProofBadge> {
     Some(match verification.proof_verdict {
         PersistedProofVerdict::Exploited => proof_badge(
             format!("verified L{}", verification.proof_level),
-            ProofTier::Confirmed,
+            ProofTier::RuntimeVerified,
         ),
         PersistedProofVerdict::NotReproduced => proof_badge("not-repro", ProofTier::Rejected),
         PersistedProofVerdict::HarnessFailedToBuild => {
@@ -400,7 +572,7 @@ fn static_proof_label(finding: &Finding) -> Option<ProofBadge> {
 
 fn triage_proof_label(finding: &Finding) -> Option<ProofBadge> {
     if triaged_true_positive(finding) {
-        return Some(proof_badge("triaged-tp", ProofTier::StaticLinked));
+        return Some(proof_badge("triaged-tp", ProofTier::Confirmed));
     }
     finding
         .triage
@@ -418,7 +590,8 @@ fn proof_badge(label: impl Into<String>, tier: ProofTier) -> ProofBadge {
 
 fn proof_tier_marker(tier: ProofTier) -> &'static str {
     match tier {
-        ProofTier::Confirmed => "✓",
+        ProofTier::RuntimeVerified => "✓",
+        ProofTier::Confirmed => "◇",
         ProofTier::StaticLinked => "◇",
         ProofTier::Suspected => "?",
         ProofTier::Rejected => "!",
@@ -515,12 +688,19 @@ impl FindingDetailModel {
     fn from_finding(finding: &Finding, alias: Option<String>, base: Option<&str>) -> Self {
         let projection = project_finding(finding, alias);
         let proof = finding_proof_badge(finding);
-        let message_lines = finding
-            .message
-            .lines()
-            .take(FINDING_DETAIL_SECTION_LIMIT)
-            .map(str::to_string)
-            .collect::<Vec<_>>();
+        let status = detail_status_fields(finding, projection.alias.as_deref());
+        let body = detail_body_fields(finding);
+        Self::from_parts(finding, projection, proof, status, body, base)
+    }
+
+    fn from_parts(
+        finding: &Finding,
+        projection: FindingProjection,
+        proof: ProofBadge,
+        status: DetailStatusFields,
+        body: DetailBodyFields,
+        base: Option<&str>,
+    ) -> Self {
         Self {
             alias: projection.alias,
             severity_tone: SeverityTone::from_severity(projection.severity),
@@ -535,19 +715,110 @@ impl FindingDetailModel {
             proof_tier: proof.tier,
             proof_state: projection.proof_state,
             runtime_verification: projection.runtime_validation,
-            evidence: evidence_rows(finding),
-            message_overflow: finding
-                .message
-                .lines()
-                .count()
-                .saturating_sub(message_lines.len()),
-            evidence_overflow: finding
-                .evidence
-                .len()
-                .saturating_sub(FINDING_DETAIL_SECTION_LIMIT),
-            message_lines,
-            triage: finding.triage.as_ref().map(TriageSummaryModel::from_triage),
+            static_proof_label: status.static_proof_label,
+            static_proof_explanation: status.static_proof_explanation,
+            runtime_label: status.runtime_label,
+            runtime_explanation: status.runtime_explanation,
+            next_action_label: status.next_action_label,
+            next_command: status.next_command,
+            next_detail: status.next_detail,
+            remediation_hint: status.remediation_hint,
+            evidence: body.evidence,
+            message_overflow: body.message_overflow,
+            evidence_overflow: body.evidence_overflow,
+            message_lines: body.message_lines,
+            triage: body.triage,
         }
+    }
+}
+
+struct DetailStatusFields {
+    static_proof_label: String,
+    static_proof_explanation: String,
+    runtime_label: String,
+    runtime_explanation: String,
+    next_action_label: String,
+    next_command: Option<String>,
+    next_detail: String,
+    remediation_hint: Option<String>,
+}
+
+fn detail_status_fields(finding: &Finding, alias: Option<&str>) -> DetailStatusFields {
+    let static_proof = static_proof_summary(finding.static_proof_state);
+    let runtime = runtime_validation_summary(finding.verification.as_ref());
+    let next = next_action_display(finding_next_action(finding, None), alias);
+    DetailStatusFields {
+        static_proof_label: static_proof.label.to_string(),
+        static_proof_explanation: static_proof.explanation.to_string(),
+        runtime_label: runtime.label,
+        runtime_explanation: runtime.explanation.to_string(),
+        next_action_label: next.label.to_string(),
+        next_command: next.command,
+        next_detail: next.detail.to_string(),
+        remediation_hint: finding_remediation_hint(finding),
+    }
+}
+
+struct DetailBodyFields {
+    evidence: Vec<FindingEvidenceRow>,
+    message_lines: Vec<String>,
+    message_overflow: usize,
+    evidence_overflow: usize,
+    triage: Option<TriageSummaryModel>,
+}
+
+fn detail_body_fields(finding: &Finding) -> DetailBodyFields {
+    let message_lines = finding
+        .message
+        .lines()
+        .take(FINDING_DETAIL_SECTION_LIMIT)
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    DetailBodyFields {
+        evidence: evidence_rows(finding),
+        message_overflow: finding
+            .message
+            .lines()
+            .count()
+            .saturating_sub(message_lines.len()),
+        evidence_overflow: finding
+            .evidence
+            .len()
+            .saturating_sub(FINDING_DETAIL_SECTION_LIMIT),
+        message_lines,
+        triage: finding.triage.as_ref().map(TriageSummaryModel::from_triage),
+    }
+}
+
+struct NextActionDisplay {
+    label: &'static str,
+    command: Option<String>,
+    detail: &'static str,
+}
+
+fn next_action_display(action: FindingNextAction, alias: Option<&str>) -> NextActionDisplay {
+    let alias = alias.unwrap_or("selected");
+    match action {
+        FindingNextAction::Validate => NextActionDisplay {
+            label: action.as_str(),
+            command: Some(format!("verify {alias}")),
+            detail: "collect runtime proof or stronger source evidence before patching",
+        },
+        FindingNextAction::Patch => NextActionDisplay {
+            label: action.as_str(),
+            command: Some(format!("patch {alias}")),
+            detail: "runtime proof is recorded; generate remediation",
+        },
+        FindingNextAction::Suppress => NextActionDisplay {
+            label: action.as_str(),
+            command: None,
+            detail: "review the rejection evidence before suppressing",
+        },
+        FindingNextAction::Review => NextActionDisplay {
+            label: action.as_str(),
+            command: None,
+            detail: "review the finding and keep evidence attached",
+        },
     }
 }
 

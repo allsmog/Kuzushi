@@ -21,6 +21,7 @@ fn clamp_token_count_u32(value: u64) -> u32 {
 #[async_trait]
 impl AgentRuntime for LangGraphRuntime {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
+        kuzushi_core::runtime::validate_model_api_key_env(&request.model, &self.api_key_env)?;
         let structured_output = request.structured_output;
         let runtime_options = request.runtime_options;
         let thinking_level = request

@@ -11,6 +11,7 @@ mod dependencies;
 mod failure;
 mod initial_view;
 mod phase;
+mod planning_options;
 mod recommend;
 mod runner;
 mod target_candidates;
@@ -29,6 +30,8 @@ pub use initial_view::{
     skip_onboarding_env, InitialOnboardingPhase, OnboardingInputs,
 };
 pub use phase::WorkflowPhase;
+pub(crate) use planning_options::{planning_task_explicit_input, planning_task_preset_input};
+pub use planning_options::{PickerFocus, PlanningOptionEdit, PlanningOptionOverrides};
 pub use recommend::{
     applicable_tasks_for_phase, model_recommended_in_phase, recommended_tasks_for_phase,
     TargetProfile,

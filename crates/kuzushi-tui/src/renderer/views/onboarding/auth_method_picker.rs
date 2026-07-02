@@ -22,6 +22,7 @@ pub(crate) fn auth_method_picker_lines(
     lines.push(blank());
     lines.push(keybind_hint_line(&[
         ("↑/↓/j/k", "move"),
+        (":", "type a command"),
         ("Enter", "confirm"),
         ("Esc/q", "defer"),
     ]));

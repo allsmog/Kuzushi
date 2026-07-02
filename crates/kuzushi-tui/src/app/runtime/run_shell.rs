@@ -88,6 +88,7 @@ pub(crate) fn open_start_view(app: &mut ShellApp) {
     // here clobbers a first-run gate.
     app.shell_view = ShellView::Workbench;
     app.workbench_focus = WorkbenchPane::Findings;
+    app.workbench_center_mode = app.default_workbench_center_mode(WorkbenchPane::Findings);
 }
 
 pub(crate) fn terminal_shell_loop(

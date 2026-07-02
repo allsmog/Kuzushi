@@ -15,20 +15,7 @@ impl ShellApp {
                 self.workspace_view = self.build_workspace_view(Some(report.output_path.clone()));
                 self.shell_view = ShellView::Workspace;
                 self.focused_module = Some("workspace".to_string());
-                self.log(
-                    "export",
-                    format!(
-                        "wrote {} {} to {} ({})",
-                        report.count,
-                        if report.count == 1 {
-                            "finding"
-                        } else {
-                            "findings"
-                        },
-                        report.output_path.display(),
-                        report.format.as_str()
-                    ),
-                );
+                self.log("export", workspace_export_message(&report));
             }
             Err(error) => {
                 self.workspace_view = self.build_workspace_view(None);
@@ -72,4 +59,25 @@ impl ShellApp {
     pub(crate) fn build_workspace_view(&self, last_export: Option<PathBuf>) -> WorkspaceView {
         workspace_view_for_target(self.target.as_ref(), last_export)
     }
+}
+
+fn workspace_export_message(report: &kuzushi_core::WorkspaceFindingsExport) -> String {
+    let base = format!(
+        "wrote {} {} to {} ({})",
+        report.count,
+        if report.count == 1 {
+            "finding"
+        } else {
+            "findings"
+        },
+        report.output_path.display(),
+        report.format.as_str()
+    );
+    if report.format == kuzushi_core::WorkspaceExportFormat::MarkdownBundle {
+        return format!(
+            "{base} · open {}",
+            report.output_path.join("README.md").display()
+        );
+    }
+    base
 }

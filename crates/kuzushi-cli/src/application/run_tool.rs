@@ -19,10 +19,51 @@ pub(crate) fn run_tool_command(
     load: Vec<String>,
     allow_untrusted_module: bool,
 ) -> Result<()> {
-    let run = prepare_cli_tool_run(tool, input, options, target, load, allow_untrusted_module)?;
-    let output = execute_cli_tool_run(&run)?;
-    println!("{}", serde_json::to_string_pretty(&output)?);
-    fail_cli_on_failed_tool_output(&output)
+    let input = resolve_run_input(input)?;
+    let tool_label = tool.clone();
+    match prepare_cli_tool_run(tool, input, options, target, load, allow_untrusted_module) {
+        Ok(run) => {
+            let output = execute_cli_tool_run(&run)?;
+            println!("{}", serde_json::to_string_pretty(&output)?);
+            fail_cli_on_failed_tool_output(&output)
+        }
+        // Prepare-stage failures (unknown tool, bad JSON, unknown option, missing
+        // workspace) must emit the same machine-readable envelope as execution
+        // failures — a CI job piping stdout through `jq` should never hit empty
+        // stdout just because the tool couldn't be prepared.
+        Err(error) => {
+            let message = error.to_string();
+            let output = prepare_failure_output(&tool_label, &message);
+            println!("{}", serde_json::to_string_pretty(&output)?);
+            anyhow::bail!("{message}")
+        }
+    }
+}
+
+/// Resolve the `--input` value: `-` reads JSON from stdin, `@path` reads it
+/// from a file, and anything else is treated as inline JSON. `@` and `-` are
+/// never valid starts for a JSON document, so this sigil is unambiguous.
+fn resolve_run_input(input: String) -> Result<String> {
+    if input == "-" {
+        return std::io::read_to_string(std::io::stdin())
+            .map_err(|error| anyhow::anyhow!("--input - could not read stdin: {error}"));
+    }
+    if let Some(path) = input.strip_prefix('@') {
+        return std::fs::read_to_string(path)
+            .map_err(|error| anyhow::anyhow!("--input @{path} could not be read: {error}"));
+    }
+    Ok(input)
+}
+
+fn prepare_failure_output(tool: &str, error: &str) -> serde_json::Value {
+    serde_json::json!({
+        "ok": false,
+        "status": "failed",
+        "summary": format!("{tool} failed"),
+        "artifacts": [],
+        "warnings": [],
+        "errors": [error],
+    })
 }
 
 fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
