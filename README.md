@@ -294,7 +294,8 @@ dependency-correct task set:
 
 `cpg:build` accepts a `heapMb` option (defaulting to ~75% of physical RAM) and
 classifies heap-exhaustion failures with an actionable message instead of an
-opaque crash. The Activity view's OUTPUT pane renders the threat model's
+opaque crash. The Activity view's OUTPUT pane starts on findings and switches
+directly between generated security artifacts, including the threat model's
 data-flow diagram (boxes, trust zones, flows) once a threat model exists.
 
 ## Built-In Modules

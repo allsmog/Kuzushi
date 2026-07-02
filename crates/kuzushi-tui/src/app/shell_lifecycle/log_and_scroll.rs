@@ -94,7 +94,6 @@ impl ShellApp {
             return 0;
         };
         match session.deck_page {
-            ActivityDeckPage::Task => 0,
             ActivityDeckPage::Findings => self.findings.len().saturating_sub(1),
             ActivityDeckPage::AttackSurface => {
                 crate::ui_view_models::risk_by_module(&self.findings)

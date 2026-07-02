@@ -132,8 +132,7 @@ fn root_only_scope_tree_row() -> ProjectModelRow {
         section: "scope tree",
         origin: ProjectModelOrigin::Missing,
         state: "root only",
-        summary: "no persisted nested scopes yet; run `next` to map project boundaries"
-            .to_string(),
+        summary: "no persisted nested scopes yet; run `next` to map project boundaries".to_string(),
         action: "next",
     }
 }

@@ -187,7 +187,6 @@ fn pane_focus_routes_jk_to_focused_scroll_offset() {
     app.findings = sample_findings(10);
     {
         let session = app.activity.as_mut().unwrap();
-        session.next_deck_page();
         // Seed enough events that scrolling makes sense.
         for i in 0..50 {
             session.apply_step(
@@ -231,7 +230,6 @@ fn pause_toggle_preserves_pinned_output_cursor() {
     app.handle_command(ShellCommand::Activity);
     app.findings = sample_findings(10);
     let session: &mut ActivitySession = app.activity.as_mut().unwrap();
-    session.next_deck_page();
     for i in 0..40 {
         session.apply_step(
             RunTraceStep::new(i, "tool", format!("event {i}"))

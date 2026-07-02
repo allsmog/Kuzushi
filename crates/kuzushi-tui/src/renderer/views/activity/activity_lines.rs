@@ -9,7 +9,7 @@ use std::time::Instant;
 
 /// Build the line list for the Activity view. Renders a split-pane layout:
 ///   left ~46% — DAG status rows (one row per visible task + subsystems aggregate)
-///   right ~54% — OUTPUT deck (task detail, findings, and generated artifacts)
+///   right ~54% — OUTPUT deck (findings and generated artifacts)
 ///   footer    — single-line focus pane summary
 pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);

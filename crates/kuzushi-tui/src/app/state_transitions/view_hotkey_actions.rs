@@ -488,32 +488,11 @@ impl ShellApp {
             return;
         };
         match page {
-            ActivityDeckPage::Task => self.open_activity_task_artifact(),
             ActivityDeckPage::Findings => self.open_activity_findings_review(),
             page => match page.scene_page() {
                 Some(scene_page) => self.open_scene_to_page(scene_page),
                 None => self.log("activity", "this output view has no full visualization"),
             },
-        }
-    }
-
-    fn open_activity_task_artifact(&mut self) {
-        let Some(task_id) = self
-            .activity
-            .as_ref()
-            .and_then(|session| session.selected_task_id())
-            .map(ToOwned::to_owned)
-        else {
-            self.log("activity", "no task selected to open");
-            return;
-        };
-        match activity_task_deck_page(&task_id) {
-            Some(ActivityDeckPage::Findings) => self.open_activity_findings_review(),
-            Some(page) => match page.scene_page() {
-                Some(scene_page) => self.open_scene_to_page(scene_page),
-                None => self.log("activity", "selected task has no full artifact"),
-            },
-            None => self.log("activity", "selected task has no artifact yet"),
         }
     }
 
@@ -546,19 +525,17 @@ impl ShellApp {
     }
 
     fn open_or_focus_activity_task(&mut self) {
-        let previous_focus = self
-            .activity
-            .as_ref()
-            .and_then(|session| session.focus_task.clone());
-        let was_showing_task = self
-            .activity
-            .as_ref()
-            .is_some_and(|session| session.deck_page == ActivityDeckPage::Task);
         let Some(task_id) = self.focus_activity_task_at_cursor() else {
             self.log_activity_focus_unavailable();
             return;
         };
-        let page = activity_page_for_focused_task(&task_id, previous_focus, was_showing_task);
+        let Some(page) = activity_task_deck_page(&task_id) else {
+            self.log(
+                "activity",
+                format!("focused {task_id}; no generated output view yet"),
+            );
+            return;
+        };
         let Some(session) = self.activity.as_mut() else {
             return;
         };
@@ -618,18 +595,6 @@ fn activity_session_action(action: ViewHotkeyAction) -> Option<ActivitySessionAc
     ACTIONS
         .iter()
         .find_map(|(candidate, apply)| (*candidate == action).then_some(*apply))
-}
-
-fn activity_page_for_focused_task(
-    task_id: &str,
-    previous_focus: Option<String>,
-    was_showing_task: bool,
-) -> ActivityDeckPage {
-    let same_task = previous_focus.as_deref() == Some(task_id);
-    if was_showing_task && same_task {
-        return activity_task_deck_page(task_id).unwrap_or(ActivityDeckPage::Task);
-    }
-    ActivityDeckPage::Task
 }
 
 fn activity_task_deck_page(task_id: &str) -> Option<ActivityDeckPage> {
