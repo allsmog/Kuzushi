@@ -68,6 +68,11 @@ struct FindingListToolFinding {
     end_line: Option<u32>,
     message: String,
     tool: String,
+    static_proof_state: Option<String>,
+    triaged_by: Option<TriageAuthor>,
+    source_signature: Option<String>,
+    corroboration_count: u32,
+    sources: Vec<FindingSource>,
     triage: Option<TriageOutcome>,
     verification: Option<PersistedVerification>,
     evidence: Vec<FindingListToolEvidence>,
@@ -86,6 +91,13 @@ impl FindingListToolFinding {
             end_line: finding.end_line,
             message: cap_tool_json_text(&finding.message, TOOL_JSON_MESSAGE_LIMIT),
             tool: finding.tool.clone(),
+            static_proof_state: finding
+                .static_proof_state
+                .map(|state| state.as_str().to_string()),
+            triaged_by: finding.triaged_by,
+            source_signature: finding.source_signature.clone(),
+            corroboration_count: finding.corroboration_count,
+            sources: finding.sources.clone(),
             triage: finding.triage.clone(),
             verification: finding.verification.clone(),
             evidence: finding

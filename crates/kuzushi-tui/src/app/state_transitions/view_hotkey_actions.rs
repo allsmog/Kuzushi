@@ -1,4 +1,5 @@
 use super::*;
+use std::path::{Component, Path};
 
 impl ShellApp {
     pub(super) fn handle_view_hotkey(&mut self, key: KeyEvent) -> bool {
@@ -28,6 +29,7 @@ impl ShellApp {
     /// whether it claimed the action (short-circuit, like the `if` chain).
     fn apply_focused_view_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
         self.apply_scroll_hotkey(action)
+            || self.apply_recommend_hotkey(action)
             || self.apply_prompt_or_tune_hotkey(action)
             || self.apply_actor_hotkey(action)
             || self.apply_shell_hotkey(action)
@@ -38,12 +40,8 @@ impl ShellApp {
     /// and `Enter` selects the cursored finding when the FINDINGS pane is focused.
     fn apply_workbench_hotkey(&mut self, action: ViewHotkeyAction) -> Option<bool> {
         match action {
-            ViewHotkeyAction::WorkbenchCyclePane => {
-                self.workbench_focus = self.workbench_focus.next();
-            }
-            ViewHotkeyAction::WorkbenchCyclePanePrev => {
-                self.workbench_focus = self.workbench_focus.prev();
-            }
+            ViewHotkeyAction::WorkbenchCyclePane => self.cycle_workbench_pane(false),
+            ViewHotkeyAction::WorkbenchCyclePanePrev => self.cycle_workbench_pane(true),
             ViewHotkeyAction::WorkbenchScrollNext => self.workbench_move(1),
             ViewHotkeyAction::WorkbenchScrollPrev => self.workbench_move(-1),
             ViewHotkeyAction::WorkbenchScrollFirst => self.workbench_jump(true),
@@ -86,6 +84,18 @@ impl ShellApp {
                 page.title().to_ascii_lowercase()
             ),
         );
+    }
+
+    fn cycle_workbench_pane(&mut self, reverse: bool) {
+        if !self.workbench_is_review_page() {
+            self.workbench_focus = WorkbenchPane::Center;
+            return;
+        }
+        self.workbench_focus = if reverse {
+            self.workbench_focus.prev()
+        } else {
+            self.workbench_focus.next()
+        };
     }
 
     fn toggle_workbench_center_mode(&mut self) {
@@ -263,6 +273,117 @@ impl ShellApp {
             _ => return false,
         }
         true
+    }
+
+    fn apply_recommend_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
+        match action {
+            ViewHotkeyAction::RecommendCursorPrevious => self.move_recommend_cursor(-1),
+            ViewHotkeyAction::RecommendCursorNext => self.move_recommend_cursor(1),
+            ViewHotkeyAction::RecommendScanComponent => self.scan_recommend_component(),
+            ViewHotkeyAction::RecommendPromoteComponent => self.promote_recommend_component(),
+            _ => return false,
+        }
+        true
+    }
+
+    fn move_recommend_cursor(&mut self, delta: isize) {
+        let count = crate::ui_view_models::recommendation_components(self).len();
+        if count == 0 {
+            self.recommend_cursor = 0;
+            self.log(
+                "component",
+                "no component recommendations yet — run `recommend` first",
+            );
+            return;
+        }
+        if delta >= 0 {
+            self.recommend_cursor = (self.recommend_cursor + 1).min(count.saturating_sub(1));
+        } else {
+            self.recommend_cursor = self.recommend_cursor.saturating_sub(1);
+        }
+    }
+
+    fn scan_recommend_component(&mut self) {
+        let Some(component) = self.selected_recommend_component() else {
+            self.log(
+                "component",
+                "no component selected — run `recommend` to rank components first",
+            );
+            return;
+        };
+        self.log(
+            "component",
+            format!(
+                "scanning {} as {} within the current target",
+                component.rel_path, component.class_label
+            ),
+        );
+        self.run_tool(Some("sast:scan".to_string()), component.scan_input.clone());
+    }
+
+    fn promote_recommend_component(&mut self) {
+        let Some(component) = self.selected_recommend_component() else {
+            self.log(
+                "component",
+                "no component selected — run `recommend` to rank components first",
+            );
+            return;
+        };
+        if component.promote_command.is_none() {
+            self.log(
+                "component",
+                format!(
+                    "{} is best scanned inside the current target",
+                    component.rel_path
+                ),
+            );
+            return;
+        }
+        let Some(target_path) = self.recommend_component_target_path(&component.rel_path) else {
+            self.log(
+                "component",
+                "promotion needs an active target and target-relative component path",
+            );
+            return;
+        };
+        match WorkspaceTarget::new(&target_path) {
+            Ok(workspace) => {
+                self.activate_target(workspace);
+                self.log(
+                    "component",
+                    format!("promoted {} to its own target", component.rel_path),
+                );
+            }
+            Err(error) => self.log(
+                "component",
+                format!("cannot promote {}: {error}", component.rel_path),
+            ),
+        }
+    }
+
+    fn selected_recommend_component(
+        &mut self,
+    ) -> Option<crate::ui_view_models::ComponentRecommendationRow> {
+        let components = crate::ui_view_models::recommendation_components(self);
+        let max = components.len().saturating_sub(1);
+        self.recommend_cursor = self.recommend_cursor.min(max);
+        components.get(self.recommend_cursor).cloned()
+    }
+
+    fn recommend_component_target_path(&self, rel_path: &str) -> Option<PathBuf> {
+        let target = self.target.as_ref()?;
+        let rel = Self::target_relative_component_path(rel_path)?;
+        Some(target.join(rel))
+    }
+
+    fn target_relative_component_path(rel_path: &str) -> Option<PathBuf> {
+        let trimmed = rel_path.trim_matches('/');
+        let path = Path::new(trimmed);
+        let relative = !trimmed.is_empty()
+            && path
+                .components()
+                .all(|component| matches!(component, Component::Normal(_)));
+        relative.then(|| path.to_path_buf())
     }
 
     fn apply_prompt_or_tune_hotkey(&mut self, action: ViewHotkeyAction) -> bool {

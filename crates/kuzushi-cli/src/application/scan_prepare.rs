@@ -47,12 +47,34 @@ pub(crate) fn prepare_scan_command(
     ci: bool,
 ) -> Result<PreparedScanCommand> {
     let bootstrap = ScanCommandBootstrap::new(target, mode, tasks, triage)?;
+    prepare_scan_command_from_bootstrap(bootstrap, budget, since, include_worktree, json, ci, true)
+}
+
+pub(crate) fn prepare_scan_command_with_requested_input(
+    target: &PathBuf,
+    requested_input: serde_json::Value,
+    json: bool,
+    ci: bool,
+) -> Result<PreparedScanCommand> {
+    let bootstrap = ScanCommandBootstrap::from_input(target, requested_input)?;
+    prepare_scan_command_from_bootstrap(bootstrap, None, None, false, json, ci, false)
+}
+
+fn prepare_scan_command_from_bootstrap(
+    bootstrap: ScanCommandBootstrap,
+    budget: Option<&str>,
+    since: Option<&str>,
+    include_worktree: bool,
+    json: bool,
+    ci: bool,
+    use_stored_options: bool,
+) -> Result<PreparedScanCommand> {
     let config = bootstrap.load_config_or_record_failure()?;
     let setup = bootstrap.with_config(config);
     let store = setup.finding_store()?;
     setup.apply_since_scope(since, include_worktree, json, ci)?;
     setup.apply_budget_caps(budget, json, ci)?;
-    let input = setup.prepared_input()?;
+    let input = setup.prepared_input(use_stored_options)?;
     let runtime = setup.runtime(&input)?;
     Ok(setup.into_prepared(store, input, runtime))
 }
@@ -64,9 +86,12 @@ impl ScanCommandBootstrap {
         tasks: &[String],
         triage: Option<bool>,
     ) -> Result<Self> {
+        Self::from_input(target, scan_tool_input(mode, tasks, triage))
+    }
+
+    fn from_input(target: &PathBuf, requested_input: serde_json::Value) -> Result<Self> {
         let registry = ModuleRegistry::with_v2_builtins();
         let run_id = new_run_id("scan");
-        let requested_input = scan_tool_input(mode, tasks, triage);
         let workspace = match WorkspaceTarget::new(target) {
             Ok(workspace) => workspace,
             Err(error) => {
@@ -144,15 +169,22 @@ impl ScanCommandSetup {
         .inspect_err(|error| self.record_failure(&self.bootstrap.requested_input, error))
     }
 
-    fn prepared_input(&self) -> Result<serde_json::Value> {
-        let option_store = scan_option_store(&self.bootstrap.workspace)
-            .inspect_err(|error| self.record_failure(&self.bootstrap.requested_input, error))?;
+    fn prepared_input(&self, use_stored_options: bool) -> Result<serde_json::Value> {
+        let option_store = if use_stored_options {
+            Some(
+                scan_option_store(&self.bootstrap.workspace).inspect_err(|error| {
+                    self.record_failure(&self.bootstrap.requested_input, error)
+                })?,
+            )
+        } else {
+            None
+        };
         self.bootstrap
             .registry
             .prepare_tool_input(
                 SCAN_TOOL,
                 self.bootstrap.requested_input.clone(),
-                Some(&option_store),
+                option_store.as_ref(),
             )
             .map(|input| scan_input_with_run_id(input, &self.bootstrap.run_id))
             .inspect_err(|error| self.record_failure(&self.bootstrap.requested_input, error))

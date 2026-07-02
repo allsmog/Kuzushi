@@ -165,6 +165,13 @@ fn sast_whitebox_options() -> Vec<OptionSpec> {
 }
 
 fn sast_post_processing_options() -> Vec<OptionSpec> {
+    let mut options = sast_triage_options();
+    options.extend(sast_verification_options());
+    options.extend(sast_auto_patch_options());
+    options
+}
+
+fn sast_triage_options() -> Vec<OptionSpec> {
     vec![
         opt(
             "triage",
@@ -179,6 +186,11 @@ fn sast_post_processing_options() -> Vec<OptionSpec> {
             "Prompt text or path override forwarded to scan triage.",
         )
         .advanced(),
+    ]
+}
+
+fn sast_verification_options() -> Vec<OptionSpec> {
+    vec![
         opt(
             "verify",
             OptionType::Bool,
@@ -187,20 +199,44 @@ fn sast_post_processing_options() -> Vec<OptionSpec> {
         .default(json!(false))
         .advanced(),
         opt(
+            "verifyWhen",
+            OptionType::String,
+            "Verification filter such as severity>=high or all.",
+        )
+        .aliases(&["verify_when"])
+        .advanced(),
+        opt(
+            "verifyMax",
+            OptionType::Int,
+            "Maximum number of triaged findings to verify.",
+        )
+        .aliases(&["verify_max"])
+        .advanced(),
+        opt(
+            "verifyVotes",
+            OptionType::Int,
+            "Minimum corroborating source count required before verification.",
+        )
+        .aliases(&["verify_votes"])
+        .advanced(),
+        opt(
             "VERIFY_PROMPT",
             OptionType::String,
             "Prompt text or path override forwarded to scan verification.",
         )
         .advanced(),
-        opt(
-            "autoPatch",
-            OptionType::Bool,
-            "Generate patches for verified true positives.",
-        )
-        .aliases(&["auto_patch"])
-        .default(json!(false))
-        .advanced(),
     ]
+}
+
+fn sast_auto_patch_options() -> Vec<OptionSpec> {
+    vec![opt(
+        "autoPatch",
+        OptionType::Bool,
+        "Generate patches for verified true positives.",
+    )
+    .aliases(&["auto_patch"])
+    .default(json!(false))
+    .advanced()]
 }
 
 fn sast_patch_options() -> Vec<OptionSpec> {

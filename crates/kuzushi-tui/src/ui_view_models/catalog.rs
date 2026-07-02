@@ -250,6 +250,7 @@ fn catalog_category(id: &str, kind: ModuleKind) -> &'static str {
         | "iac-scan"
         | "license-scan"
         | "cargo-audit"
+        | "govulncheck"
         | "dep-hygiene"
         | "taint-iris"
         | "taint-iris-next"

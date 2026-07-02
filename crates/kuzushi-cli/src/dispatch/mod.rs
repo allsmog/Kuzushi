@@ -53,7 +53,19 @@ async fn dispatch_scan_command(command: Command, default_target: Option<PathBuf>
         fail_on: fail_on.map(crate::command::FailOnArg::as_severity),
         sarif,
     };
-    scan_command(target, mode, tasks, triage, json, ci, budget, since, include_worktree, gate).await
+    scan_command(
+        target,
+        mode,
+        tasks,
+        triage,
+        json,
+        ci,
+        budget,
+        since,
+        include_worktree,
+        gate,
+    )
+    .await
 }
 
 fn required_scan_target(

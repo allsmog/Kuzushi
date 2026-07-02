@@ -51,9 +51,9 @@ pub use crate::sbom_scan::{
 };
 pub use crate::scan::{
     default_scan_engines, index_codeql_sarif_as_static_evidence, normalize_codeql_sarif,
-    normalize_semgrep_json, run_scan_engines, run_semgrep_scan, scan_engines_for_tasks,
-    CodeqlScanner, ScanCancellation, ScanEngine, ScanEngineOutput, ScanRun, ScanRunOptions,
-    SemgrepScanner,
+    normalize_semgrep_json, parse_govulncheck_json, run_scan_engines, run_semgrep_scan,
+    scan_engines_for_tasks, CodeqlScanner, GovulncheckScanner, ScanCancellation, ScanEngine,
+    ScanEngineOutput, ScanRun, ScanRunOptions, SemgrepScanner,
 };
 pub use crate::secret_scan::{
     scan_for_secrets, SecretScanFinding, SecretScanOptions, SecretScanReport, SecretScanScanner,

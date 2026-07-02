@@ -1,13 +1,28 @@
 use super::*;
 
 impl ShellApp {
+    #[cfg(test)]
     pub(crate) fn apply_scan_finished(&mut self, run_id: String, findings_count: usize) {
+        self.apply_scan_finished_with_cost(run_id, findings_count, None);
+    }
+
+    pub(crate) fn apply_scan_finished_with_cost(
+        &mut self,
+        run_id: String,
+        findings_count: usize,
+        cost_usd: Option<f64>,
+    ) {
+        if let Some(cost_usd) = cost_usd {
+            self.record_cost(cost_usd);
+        }
         self.mark_scan_panel_completed(&run_id, findings_count);
         self.mark_scan_activity_run_id(&run_id);
         self.mark_scan_tasks_terminal();
         let target_label = self.scan_target_label();
         self.record_scan_completion_artifacts(&run_id, findings_count, &target_label);
         self.refresh_findings(false);
+        let target_root = self.target.clone();
+        self.hydrate_persisted_scene_snapshots(target_root.as_deref());
         self.workflow_phase = if findings_count == 0 {
             Some(crate::app::WorkflowPhase::Hunt)
         } else {

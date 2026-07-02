@@ -1,8 +1,18 @@
 use super::*;
+use std::collections::BTreeMap;
 
 impl FindingStore {
     pub fn save_triage(&self, finding_id: i64, triage: &TriageOutcome) -> Result<()> {
-        self.upsert_triage_for_finding_ids([finding_id], triage)
+        self.save_triage_with_author(finding_id, triage, TriageAuthor::Auto)
+    }
+
+    pub fn save_triage_with_author(
+        &self,
+        finding_id: i64,
+        triage: &TriageOutcome,
+        author: TriageAuthor,
+    ) -> Result<()> {
+        self.upsert_triage_for_finding_ids([finding_id], triage, author)
     }
 
     pub fn save_triage_for_fingerprint(
@@ -12,7 +22,7 @@ impl FindingStore {
     ) -> Result<usize> {
         let ids = self.finding_ids_for_fingerprint(fingerprint)?;
         let count = ids.len();
-        self.upsert_triage_for_finding_ids(ids, triage)?;
+        self.upsert_triage_for_finding_ids(ids, triage, TriageAuthor::Auto)?;
         Ok(count)
     }
 
@@ -29,10 +39,11 @@ impl FindingStore {
         &self,
         finding_ids: impl IntoIterator<Item = i64>,
         triage: &TriageOutcome,
+        author: TriageAuthor,
     ) -> Result<()> {
         let created_at = now_isoish();
         for finding_id in finding_ids {
-            self.upsert_triage_for_finding_id(finding_id, triage, &created_at)?;
+            self.upsert_triage_for_finding_id(finding_id, triage, author, &created_at)?;
         }
         Ok(())
     }
@@ -41,18 +52,24 @@ impl FindingStore {
         &self,
         finding_id: i64,
         triage: &TriageOutcome,
+        author: TriageAuthor,
         created_at: &str,
     ) -> Result<()> {
         self.conn.execute(
             r#"
-            insert into triage(finding_id, verdict, confidence, rationale, created_at, cost_usd)
-            values (?1, ?2, ?3, ?4, ?5, ?6)
+            insert into triage(
+              finding_id, verdict, confidence, rationale, created_at, cost_usd, triaged_by
+            )
+            values (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             on conflict(finding_id) do update set
               verdict = excluded.verdict,
               confidence = excluded.confidence,
               rationale = excluded.rationale,
               created_at = excluded.created_at,
-              cost_usd = excluded.cost_usd
+              cost_usd = excluded.cost_usd,
+              triaged_by = excluded.triaged_by
+            where coalesce(triage.triaged_by, 'auto') != 'human'
+               or excluded.triaged_by = 'human'
             "#,
             params![
                 finding_id,
@@ -61,6 +78,7 @@ impl FindingStore {
                 triage.rationale,
                 created_at,
                 triage.cost_usd,
+                author.as_str(),
             ],
         )?;
         Ok(())
@@ -125,25 +143,93 @@ impl FindingStore {
         }
         Ok(None)
     }
+
+    pub(crate) fn attach_latest_verifications_to_findings(
+        &self,
+        findings: &mut [Finding],
+    ) -> Result<()> {
+        let verification_by_id = self.latest_verifications_by_finding_id(finding_ids(findings))?;
+        for finding in findings {
+            if let Some(id) = finding.id {
+                finding.verification = verification_by_id.get(&id).cloned();
+            }
+        }
+        Ok(())
+    }
+
+    fn latest_verifications_by_finding_id(
+        &self,
+        finding_ids: Vec<i64>,
+    ) -> Result<BTreeMap<i64, PersistedVerification>> {
+        if finding_ids.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+        let placeholders = vec!["?"; finding_ids.len()].join(", ");
+        let sql = format!(
+            r#"
+            select v.finding_id, v.proof_level, v.proof_verdict, v.backend,
+                   v.language, v.harness_path, v.crash_evidence, v.duration_ms,
+                   v.cost_usd, v.notes_json, v.created_at
+              from verifications v
+             where v.finding_id in ({placeholders})
+               and v.id = (
+                   select latest.id
+                     from verifications latest
+                    where latest.finding_id = v.finding_id
+                    order by latest.created_at desc, latest.id desc
+                    limit 1
+               )
+             order by v.finding_id asc
+            "#
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let mut rows = stmt.query(rusqlite::params_from_iter(finding_ids.iter()))?;
+        let mut by_id = BTreeMap::new();
+        while let Some(row) = rows.next()? {
+            let finding_id: i64 = row.get(0)?;
+            let verification = latest_verification_from_row_at(row, 1)
+                .context("Could not load latest verification")?;
+            by_id.insert(finding_id, verification);
+        }
+        Ok(by_id)
+    }
 }
 
 fn latest_verification_from_row(row: &rusqlite::Row<'_>) -> Result<PersistedVerification> {
-    let notes_json: String = row.get(8)?;
+    latest_verification_from_row_at(row, 0)
+}
+
+fn latest_verification_from_row_at(
+    row: &rusqlite::Row<'_>,
+    offset: usize,
+) -> Result<PersistedVerification> {
+    let notes_json: String = row.get(offset + 8)?;
     let notes: Vec<String> = serde_json::from_str(&notes_json).unwrap_or_default();
-    let proof_verdict_str: String = row.get(1)?;
-    let backend_str: String = row.get(2)?;
+    let proof_verdict_str: String = row.get(offset + 1)?;
+    let backend_str: String = row.get(offset + 2)?;
     Ok(PersistedVerification {
-        proof_level: row.get::<_, i64>(0)? as u8,
-        proof_verdict: PersistedProofVerdict::from_str(&proof_verdict_str)
-            .unwrap_or(PersistedProofVerdict::NotReproduced),
+        proof_level: row.get::<_, i64>(offset)? as u8,
+        proof_verdict: PersistedProofVerdict::from_str(&proof_verdict_str).ok_or_else(|| {
+            anyhow::anyhow!("unknown persisted proof verdict {proof_verdict_str:?}")
+        })?,
         backend: PersistedSandboxBackend::from_str(&backend_str)
-            .unwrap_or(PersistedSandboxBackend::Plain),
-        language: row.get::<_, Option<String>>(3)?,
-        harness_path: row.get::<_, Option<String>>(4)?,
-        crash_evidence: row.get::<_, Option<String>>(5)?,
-        duration_ms: row.get::<_, i64>(6)? as u64,
-        cost_usd: row.get(7)?,
+            .ok_or_else(|| anyhow::anyhow!("unknown persisted sandbox backend {backend_str:?}"))?,
+        language: row.get::<_, Option<String>>(offset + 3)?,
+        harness_path: row.get::<_, Option<String>>(offset + 4)?,
+        crash_evidence: row.get::<_, Option<String>>(offset + 5)?,
+        duration_ms: row.get::<_, i64>(offset + 6)? as u64,
+        cost_usd: row.get(offset + 7)?,
         notes,
-        created_at: row.get(9)?,
+        created_at: row.get(offset + 9)?,
     })
+}
+
+fn finding_ids(findings: &[Finding]) -> Vec<i64> {
+    let mut ids = findings
+        .iter()
+        .filter_map(|finding| finding.id)
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
 }

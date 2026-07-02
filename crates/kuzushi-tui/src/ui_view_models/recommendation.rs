@@ -7,6 +7,8 @@ const RECOMMENDATION_REPORT_HEADERS: [&str; 5] =
     ["priority", "tool", "runtime", "signal", "reason"];
 const RECOMMENDATION_REPORT_COMMANDS: [&str; 4] =
     ["run <tool> [json]", "trace <run>", "runs", "back"];
+const RECOMMENDATION_COMPONENT_COMMANDS: [&str; 4] =
+    ["Enter component", "p promote", "run <tool>", "back"];
 const RECOMMENDATION_EMPTY_COMMANDS: [&str; 3] = ["recommend", "runs", "back"];
 const RECOMMENDATION_TARGETLESS_COMMANDS: [&str; 3] = ["target <path>", "demo", "back"];
 const RECOMMENDATION_RUNNING_COMMANDS: [&str; 3] = ["activity", "runs", "back"];
@@ -50,6 +52,7 @@ pub(crate) struct ComponentRecommendationRow {
     pub(crate) tier_label: String,
     pub(crate) risk_score: u16,
     pub(crate) reason: String,
+    pub(crate) scan_input: Option<String>,
     pub(crate) scan_command: String,
     pub(crate) promote_command: Option<String>,
 }
@@ -58,6 +61,15 @@ pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
     let source = RecommendationSource::from_app(app);
     let report = read_recommendations(&source.path);
     let source_detail = artifact_detail_label(&source.path);
+    let components = report
+        .as_ref()
+        .map(|view| view.components.clone())
+        .unwrap_or_default();
+    let report_commands = if components.is_empty() {
+        RECOMMENDATION_REPORT_COMMANDS
+    } else {
+        RECOMMENDATION_COMPONENT_COMMANDS
+    };
     RecommendationModel {
         title: "RECOMMEND",
         detail_rows: recommendation_detail_rows(
@@ -68,12 +80,9 @@ pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
         attack_surface: source.path.parent().and_then(attack_surface_risk_model),
         summary: report.as_ref().and_then(|view| view.summary.clone()),
         report_headers: RECOMMENDATION_REPORT_HEADERS,
-        report_commands: RECOMMENDATION_REPORT_COMMANDS,
+        report_commands,
         empty_state: recommendation_empty_state(recommender_running(app), app.target.is_some()),
-        components: report
-            .as_ref()
-            .map(|view| view.components.clone())
-            .unwrap_or_default(),
+        components,
         rows: report.map(|view| view.rows).unwrap_or_default(),
     }
 }
@@ -328,6 +337,7 @@ fn component_from_value(value: serde_json::Value) -> Option<ComponentRecommendat
             .and_then(serde_json::Value::as_u64)
             .unwrap_or_default() as u16,
         reason: primary_reason(&value).unwrap_or_else(|| "scoped scan candidate".to_string()),
+        scan_input: scoped_scan_input(next_input),
         scan_command: scoped_scan_command(next_input),
         promote_command: promote_command(&rel_path, independent_component(&value)),
         tier_label,
@@ -345,13 +355,20 @@ fn primary_reason(value: &serde_json::Value) -> Option<String> {
 }
 
 fn scoped_scan_command(next_input: Option<&serde_json::Value>) -> String {
-    let Some(next_input) = next_input else {
-        return "run sast:scan".to_string();
-    };
-    match serde_json::to_string(next_input) {
-        Ok(input) => format!("run sast:scan {input}"),
-        Err(_) => "run sast:scan".to_string(),
-    }
+    scoped_scan_input(next_input)
+        .map(|input| format!("run sast:scan {input}"))
+        .unwrap_or_else(|| "run sast:scan".to_string())
+}
+
+fn scoped_scan_input(next_input: Option<&serde_json::Value>) -> Option<String> {
+    next_input.and_then(|input| {
+        let mut input = input.clone();
+        if let serde_json::Value::Object(object) = &mut input {
+            object.remove("target");
+            object.remove("component");
+        }
+        serde_json::to_string(&input).ok()
+    })
 }
 
 fn independent_component(value: &serde_json::Value) -> bool {
@@ -811,5 +828,74 @@ mod tests {
         .unwrap();
 
         assert!(!recommendation_artifact_needs_refresh(&app));
+    }
+
+    #[test]
+    fn recommendation_model_reads_component_recommendations() {
+        let temp = tempfile::tempdir().unwrap();
+        write_component_recommendation_artifact(temp.path());
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.target = Some(temp.path().to_path_buf());
+
+        let model = recommendation_model(&app);
+
+        assert_component_recommendation_model(&model);
+    }
+
+    fn write_component_recommendation_artifact(target: &Path) {
+        let run_dir = test_run_dir(target, "run-components");
+        fs::create_dir_all(&run_dir).unwrap();
+        write_latest_run(target, "run-components");
+        fs::write(
+            run_dir.join(recommendations_artifact_leaf()),
+            component_recommendation_payload(target).to_string(),
+        )
+        .unwrap();
+    }
+
+    fn component_recommendation_payload(target: &Path) -> serde_json::Value {
+        json!({
+            "data": {
+                "components": [{
+                    "scopeId": "package-web",
+                    "relPath": "web/app",
+                    "class": "web-app",
+                    "tier": "high",
+                    "riskScore": 91,
+                    "reasons": ["web-app component at web/app"],
+                    "nextInput": {
+                        "target": target.display().to_string(),
+                        "paths": ["web/app"],
+                        "taskMode": "manual",
+                        "tasks": ["semgrep", "dep-hygiene", "secret-scan"]
+                    }
+                }],
+                "recommendations": []
+            }
+        })
+    }
+
+    fn assert_component_recommendation_model(model: &RecommendationModel) {
+        assert_eq!(model.components.len(), 1);
+        assert_component_recommendation_row(&model.components[0]);
+        assert_eq!(
+            model.report_commands,
+            ["Enter component", "p promote", "run <tool>", "back"]
+        );
+    }
+
+    fn assert_component_recommendation_row(row: &ComponentRecommendationRow) {
+        assert_eq!(row.scope_id, "package-web");
+        assert_eq!(row.rel_path, "web/app");
+        assert_eq!(row.class_label, "web-app");
+        assert!(row
+            .scan_input
+            .as_deref()
+            .is_some_and(|input| input.contains("\"paths\":[\"web/app\"]")));
+        assert!(row
+            .scan_input
+            .as_deref()
+            .is_some_and(|input| !input.contains("\"target\"")));
+        assert_eq!(row.promote_command.as_deref(), Some("target web/app"));
     }
 }

@@ -6,7 +6,8 @@ assertion_line: 162
 
  -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
-Glossary: TP=true positive; FP=false positive; proof=confidence; DFD=data-flow diagram; taint flow=source-to-sink path.
+Glossary: TP=true positive; FP=false positive; DFD=data-flow diagram; taint-iris=source-to-sink hunt; x-ray=architecture
+review; randori=threat model; tob/shinsa=plugin adapters.
 Examples: demo  ·  next  ·  use semgrep  ·  run .  ·  findings  ·  open F-0001  ·  model 1
 
 NAVIGATION — browse modules and tools

@@ -132,6 +132,18 @@ impl WorkbenchCache {
         Some(state)
     }
 
+    pub(crate) fn cache_persisted_project_scope_tree(
+        &mut self,
+        target: &Path,
+        tree: NestedProjectScopeTree,
+    ) {
+        self.scope_tree = Some(ScopeTreeCache {
+            target: target.to_path_buf(),
+            cached_at: Instant::now(),
+            state: ProjectScopeTreeState::Persisted(tree),
+        });
+    }
+
     pub(crate) fn strategy_queue(
         &mut self,
         workspace: Option<&WorkspaceTarget>,
@@ -253,17 +265,8 @@ fn run_summary_index_for_target(target: &Path) -> BTreeMap<String, RunSummary> {
 fn project_scope_tree_for_target(target: &Path) -> ProjectScopeTreeState {
     match kuzushi_core::load_nested_project_scopes(target) {
         Ok(Some(tree)) => ProjectScopeTreeState::Persisted(tree),
-        Ok(None) => discovered_project_scope_tree(target),
+        Ok(None) => ProjectScopeTreeState::RootOnly,
         Err(error) => ProjectScopeTreeState::Unreadable(error.to_string()),
-    }
-}
-
-fn discovered_project_scope_tree(target: &Path) -> ProjectScopeTreeState {
-    let tree = kuzushi_core::discover_nested_project_scopes(target);
-    if tree.scopes.len() > 1 {
-        ProjectScopeTreeState::Discovered(tree)
-    } else {
-        ProjectScopeTreeState::RootOnly
     }
 }
 
@@ -296,7 +299,6 @@ fn source_file_stamp(path: &Path) -> std::io::Result<SourceFileStamp> {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ProjectScopeTreeState {
     Persisted(NestedProjectScopeTree),
-    Discovered(NestedProjectScopeTree),
     RootOnly,
     Unreadable(String),
 }
@@ -430,5 +432,45 @@ mod tests {
 
         let indexed = cache.run_summary_index(Some(temp.path()), vec!["scan-a".to_string()]);
         assert!(indexed.contains_key("scan-a"));
+    }
+
+    #[test]
+    fn project_scope_tree_does_not_discover_on_cache_miss() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("libs/parser/.git")).unwrap();
+        std::fs::write(
+            temp.path().join(".gitmodules"),
+            r#"
+            [submodule "libs/parser"]
+                path = libs/parser
+            "#,
+        )
+        .unwrap();
+        let mut cache = WorkbenchCache::default();
+
+        let state = cache.project_scope_tree(Some(temp.path())).unwrap();
+
+        assert_eq!(state, ProjectScopeTreeState::RootOnly);
+    }
+
+    #[test]
+    fn project_scope_tree_reads_persisted_scope_map() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("libs/parser/.git")).unwrap();
+        std::fs::write(
+            temp.path().join(".gitmodules"),
+            r#"
+            [submodule "libs/parser"]
+                path = libs/parser
+            "#,
+        )
+        .unwrap();
+        let tree = kuzushi_core::discover_nested_project_scopes(temp.path());
+        kuzushi_core::save_nested_project_scopes(temp.path(), &tree).unwrap();
+        let mut cache = WorkbenchCache::default();
+
+        let state = cache.project_scope_tree(Some(temp.path())).unwrap();
+
+        assert!(matches!(state, ProjectScopeTreeState::Persisted(_)));
     }
 }

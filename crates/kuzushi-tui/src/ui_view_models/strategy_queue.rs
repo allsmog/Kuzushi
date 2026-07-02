@@ -6,13 +6,17 @@ use kuzushi_core::{
 };
 use std::path::Path;
 
-const STRATEGY_QUEUE_HEADERS: [&str; 8] = [
+const STRATEGY_QUEUE_HEADERS: [&str; 12] = [
     "status",
     "phase",
     "id",
     "strategy",
+    "yield",
+    "rounds",
+    "est",
+    "actual",
+    "outcome",
     "preflight",
-    "cost",
     "runtime",
     "risk",
 ];
@@ -31,7 +35,7 @@ pub(crate) struct StrategyQueueModel {
     pub(crate) title: &'static str,
     pub(crate) detail_rows: Vec<StrategyQueueDetailRow>,
     pub(crate) summary: String,
-    pub(crate) headers: [&'static str; 8],
+    pub(crate) headers: [&'static str; 12],
     pub(crate) commands: [&'static str; 6],
     pub(crate) empty_state: StrategyQueueEmptyState,
     pub(crate) rows: Vec<StrategyQueueRow>,
@@ -53,7 +57,7 @@ pub(crate) struct StrategyQueueEmptyState {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct StrategyQueueRow {
     pub(crate) id: String,
-    pub(crate) cells: [String; 8],
+    pub(crate) cells: [String; 12],
     pub(crate) rationale: String,
     pub(crate) lineage: String,
     pub(crate) source_run: String,
@@ -117,8 +121,12 @@ fn strategy_queue_error_row(error: String) -> StrategyQueueRow {
             "review".to_string(),
             "queue-read-error".to_string(),
             "repair queue artifact".to_string(),
+            "-".to_string(),
+            "-".to_string(),
             "blocked".to_string(),
             "unknown".to_string(),
+            "failed".to_string(),
+            "blocked".to_string(),
             "unknown".to_string(),
             "blocked".to_string(),
         ],
@@ -149,7 +157,10 @@ fn strategy_status_order(status: StrategyProposalStatus) -> u8 {
     match status {
         StrategyProposalStatus::Proposed => 0,
         StrategyProposalStatus::Approved => 1,
-        StrategyProposalStatus::Rejected => 2,
+        StrategyProposalStatus::Running => 2,
+        StrategyProposalStatus::Failed => 3,
+        StrategyProposalStatus::Done => 4,
+        StrategyProposalStatus::Rejected => 5,
     }
 }
 
@@ -163,8 +174,12 @@ fn strategy_row_from_proposal(proposal: StrategyProposal) -> StrategyQueueRow {
             phase_label(proposal.phase).to_string(),
             proposal.id.clone(),
             strategy,
-            preflight_label(proposal.preflight.status).to_string(),
+            yield_label(proposal.yield_score),
+            rounds_label(proposal.estimated_rounds),
             cost_label(proposal.expected_cost_usd),
+            cost_label(proposal.actual_cost_usd),
+            outcome_label(&proposal),
+            preflight_label(proposal.preflight.status).to_string(),
             proposal
                 .expected_runtime
                 .unwrap_or_else(|| "unknown".to_string()),
@@ -223,11 +238,41 @@ fn cost_label(cost: Option<f64>) -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+fn yield_label(score: Option<f64>) -> String {
+    score
+        .map(|value| format!("{:.2}", value.clamp(0.0, 1.0)))
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn rounds_label(rounds: Option<u32>) -> String {
+    rounds
+        .map(|value| value.to_string())
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn outcome_label(proposal: &StrategyProposal) -> String {
+    if let Some(failure) = proposal.failure.as_ref().filter(|value| !value.is_empty()) {
+        return format!("failed:{failure}");
+    }
+    match (proposal.findings_count, proposal.confirmed_count) {
+        (Some(findings), Some(confirmed)) => format!("{confirmed}/{findings} confirmed"),
+        (Some(findings), None) => format!("{findings} findings"),
+        _ => proposal
+            .result_run_id
+            .as_ref()
+            .map(|run| format!("run:{run}"))
+            .unwrap_or_else(|| "-".to_string()),
+    }
+}
+
 fn status_label(status: StrategyProposalStatus) -> &'static str {
     match status {
         StrategyProposalStatus::Proposed => "proposed",
         StrategyProposalStatus::Approved => "approved",
         StrategyProposalStatus::Rejected => "rejected",
+        StrategyProposalStatus::Running => "running",
+        StrategyProposalStatus::Done => "done",
+        StrategyProposalStatus::Failed => "failed",
     }
 }
 
@@ -247,30 +292,49 @@ fn strategy_queue_summary(proposals: &[StrategyProposal]) -> String {
     if proposals.is_empty() {
         return "no queued strategy proposals".to_string();
     }
-    let proposed = proposals
-        .iter()
-        .filter(|proposal| proposal.status == StrategyProposalStatus::Proposed)
-        .count();
-    let approved = proposals
-        .iter()
-        .filter(|proposal| proposal.status == StrategyProposalStatus::Approved)
-        .count();
-    let rejected = proposals
-        .iter()
-        .filter(|proposal| proposal.status == StrategyProposalStatus::Rejected)
-        .count();
-    let corrected = proposals
-        .iter()
-        .filter(|proposal| proposal.corrected_strategy.is_some())
-        .count();
+    let counts = strategy_queue_counts(proposals);
     format!(
-        "{} proposals: {} proposed, {} approved, {} rejected, {} corrected",
+        "{} proposals: {} proposed, {} approved, {} running, {} done, {} failed, {} rejected, {} corrected",
         proposals.len(),
-        proposed,
-        approved,
-        rejected,
-        corrected
+        counts.proposed,
+        counts.approved,
+        counts.running,
+        counts.done,
+        counts.failed,
+        counts.rejected,
+        counts.corrected
     )
+}
+
+struct StrategyQueueCounts {
+    proposed: usize,
+    approved: usize,
+    rejected: usize,
+    running: usize,
+    done: usize,
+    failed: usize,
+    corrected: usize,
+}
+
+fn strategy_queue_counts(proposals: &[StrategyProposal]) -> StrategyQueueCounts {
+    let status_count = |status| {
+        proposals
+            .iter()
+            .filter(|proposal| proposal.status == status)
+            .count()
+    };
+    StrategyQueueCounts {
+        proposed: status_count(StrategyProposalStatus::Proposed),
+        approved: status_count(StrategyProposalStatus::Approved),
+        rejected: status_count(StrategyProposalStatus::Rejected),
+        running: status_count(StrategyProposalStatus::Running),
+        done: status_count(StrategyProposalStatus::Done),
+        failed: status_count(StrategyProposalStatus::Failed),
+        corrected: proposals
+            .iter()
+            .filter(|proposal| proposal.corrected_strategy.is_some())
+            .count(),
+    }
 }
 
 fn strategy_queue_detail_rows(source: &StrategyQueueSource) -> Vec<StrategyQueueDetailRow> {

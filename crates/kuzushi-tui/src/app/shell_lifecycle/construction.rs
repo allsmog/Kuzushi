@@ -100,6 +100,7 @@ macro_rules! shell_app_initial_state {
             nav_history: Vec::new(),
             catalog_expanded: false,
             catalog_cursor: 0,
+            recommend_cursor: 0,
             pending_patch: None,
             confirm_allowlist: std::collections::BTreeSet::new(),
             confirm_denylist: std::collections::BTreeSet::new(),

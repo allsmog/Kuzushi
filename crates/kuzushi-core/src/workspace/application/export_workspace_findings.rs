@@ -1,6 +1,6 @@
-use super::*;
 use super::export_markdown_bundle::write_markdown_bundle;
 use super::export_sarif::findings_to_sarif;
+use super::*;
 
 pub fn export_workspace_findings(
     workspace: &WorkspaceTarget,
@@ -149,6 +149,10 @@ pub(crate) fn findings_to_csv(findings: &[Finding]) -> Result<String> {
         "start_line",
         "end_line",
         "message",
+        "source_signature",
+        "corroboration_count",
+        "triaged_by",
+        "sources",
     ])?;
     for finding in findings {
         writer.write_record(csv_finding_row(finding))?;
@@ -159,7 +163,7 @@ pub(crate) fn findings_to_csv(findings: &[Finding]) -> Result<String> {
     String::from_utf8(bytes).context("CSV export produced non-UTF-8 output")
 }
 
-fn csv_finding_row(finding: &Finding) -> [String; 9] {
+fn csv_finding_row(finding: &Finding) -> [String; 13] {
     [
         finding.fingerprint.clone(),
         finding.rule_id.clone(),
@@ -168,10 +172,23 @@ fn csv_finding_row(finding: &Finding) -> [String; 9] {
         finding.tool.clone(),
         finding.file_path.clone(),
         finding.start_line.to_string(),
-        finding
-            .end_line
-            .map(|n| n.to_string())
-            .unwrap_or_default(),
+        finding.end_line.map(|n| n.to_string()).unwrap_or_default(),
         finding.message.clone(),
+        finding.source_signature.clone().unwrap_or_default(),
+        finding.corroboration_count.to_string(),
+        finding
+            .triaged_by
+            .map(|author| author.as_str().to_string())
+            .unwrap_or_default(),
+        finding_source_list(finding),
     ]
+}
+
+fn finding_source_list(finding: &Finding) -> String {
+    finding
+        .sources
+        .iter()
+        .map(|source| format!("{}:{}", source.tool, source.source_signature))
+        .collect::<Vec<_>>()
+        .join(";")
 }

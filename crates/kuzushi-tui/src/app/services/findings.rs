@@ -1,6 +1,6 @@
 use super::*;
 use anyhow::Result;
-use kuzushi_core::{sorted_finding_aliases, FindingStore};
+use kuzushi_core::{sorted_finding_alias_indices, FindingStore};
 
 pub(crate) fn open_finding_store_for_target(
     target: Option<&PathBuf>,
@@ -39,10 +39,13 @@ fn load_findings_for_target(target: Option<&PathBuf>, limit: usize) -> Result<Ve
 
 fn finding_completion_values(findings: Vec<Finding>) -> Vec<String> {
     let mut values = Vec::new();
-    for (alias, finding) in sorted_finding_aliases(&findings) {
+    for (alias, index) in sorted_finding_alias_indices(&findings) {
+        let Some(finding) = findings.get(index) else {
+            continue;
+        };
         values.push(alias);
         values.push(short_fingerprint(&finding.fingerprint));
-        values.push(finding.fingerprint);
+        values.push(finding.fingerprint.clone());
     }
     values
 }

@@ -4,9 +4,7 @@ assertion_line: 164
 ---
  KUZUSHI > workbench · mode:shell · target:none · ctx:not built · model:unconfigured
 
-Kuzushi > workbench · target:no target · phase:作 confirm 3/4 · page:review · o idle · modules:all modules
-組 map · · 崩 hunt · · 作 confirm > · 掛 fix · > NEXT 作 review · validate findings and inspect evidence — press v for
-empirical validation
+Kuzushi > workbench · target:no target · page:review · o idle · modules:all modules
  type next guided workflow   type scan guided workflow   type options sast:scan tune scanners   type ask ask the...
 
  -- SOURCE · 2 files ---------------------------------------------------------------------------------------------------
@@ -39,7 +37,7 @@ NEXT
   collect runtime proof or stronger source evidence before patching
   report: `workspace export findings report.sarif`
 TRIAGE
-  true_positive · confidence 0.91
+  true_positive · confidence 0.91 · by unknown
   concatenated input
 EVIDENCE
   no evidence rows recorded
@@ -49,5 +47,7 @@ SCANNER MESSAGE
 location: apps/api/orders.rs:142
 rule: demo.sqli
 tool: semgrep
+source signature: orders.rs:142:sql-injection-via-order-id-concatenation
+corroboration: 1
 fingerprint: 2289b7586b0fd07896fc43d80bdb025d
 ids like F-0001 are aliases · show aliases to list

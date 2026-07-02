@@ -34,10 +34,10 @@ pub(in crate::modules) fn write_whitebox_diff_scope_json(
     Ok(report)
 }
 
-pub(in crate::modules) fn true_positive_fingerprints_for_sast_runs(
+pub(in crate::modules) fn true_positive_findings_for_sast_runs(
     store: &FindingStore,
     run_ids: &SastRunIds,
-) -> Result<Vec<String>> {
+) -> Result<Vec<Finding>> {
     let mut fingerprints = Vec::new();
     let mut seen = BTreeSet::new();
     for run_id in run_ids.all() {
@@ -48,7 +48,7 @@ pub(in crate::modules) fn true_positive_fingerprints_for_sast_runs(
                 .is_some_and(|triage| triage.verdict == TriageVerdict::TruePositive)
                 && seen.insert(finding.fingerprint.clone())
             {
-                fingerprints.push(finding.fingerprint);
+                fingerprints.push(finding);
             }
         }
     }

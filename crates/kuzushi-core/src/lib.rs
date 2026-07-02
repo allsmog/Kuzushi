@@ -9,7 +9,7 @@ macro_rules! public_modules {
 #[rustfmt::skip]
 public_modules!(
     agent_router, artifact_kb, attachments, attack_surface, capabilities, carlini_threat_hunt,
-    classifier_gate, code_nav, concurrency, config, context, deep_auditor, dep_hygiene, diff_scope,
+    classifier_gate, code_nav, concurrency, config, context, deep_auditor, demo, dep_hygiene, diff_scope,
     events, evidence, findings, full_mode_multi, iac_scan, license_scan, modules, offense, options, patch,
     pr_comment, prompt_stack, proof, recon, remediation, report, repository_inventory, run_artifacts, run_trace, runtime,
     sbom_scan, scan, scanners, secret_scan, semgrep_rule_synthesis, source_span, spend, static_context,
@@ -29,4 +29,5 @@ pub(crate) mod test_env;
 
 mod code_index;
 mod public_exports;
+pub use demo::{offline_demo_scan_input, offline_demo_task_labels, prepare_demo_fixture};
 pub use public_exports::*;

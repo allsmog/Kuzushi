@@ -128,7 +128,7 @@ fn project_model_renders_persisted_nested_scope_tree() {
 }
 
 #[test]
-fn project_model_marks_discovered_unpersisted_scope_tree_stale() {
+fn project_model_does_not_discover_unpersisted_scope_tree_during_render() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join("vendor")).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -141,9 +141,9 @@ fn project_model_marks_discovered_unpersisted_scope_tree_stale() {
         .iter()
         .find(|row| row.section == "scope tree")
         .expect("scope tree row");
-    assert_eq!(scope_row.origin, ProjectModelOrigin::Stale);
-    assert_eq!(scope_row.state, "discovered");
-    assert!(scope_row.summary.contains("vendored vendor"));
+    assert_eq!(scope_row.origin, ProjectModelOrigin::Missing);
+    assert_eq!(scope_row.state, "root only");
+    assert!(scope_row.summary.contains("run `next`"));
 }
 
 #[test]

@@ -52,6 +52,7 @@ pub fn scan_engines_for_tasks(tasks: &[String]) -> Result<Vec<Box<dyn ScanEngine
             "semgrep" | "semgrep:scan" => scanners.push(Box::new(SemgrepScanner::default())),
             "codeql" | "codeql:scan" => scanners.push(Box::new(CodeqlScanner::default())),
             "dep-hygiene" | "dep-hygiene:check" => scanners.push(Box::new(DepHygieneScanner)),
+            "govulncheck" | "govulncheck:scan" => scanners.push(Box::new(GovulncheckScanner)),
             "cargo-audit" | "cargo-audit:scan" => scanners.push(Box::new(CargoAuditScanner)),
             "secret-scan" | "secret-scan:scan" => scanners.push(Box::new(SecretScanScanner)),
             "license-scan" | "license-scan:scan" => scanners.push(Box::new(LicenseScanScanner)),
@@ -61,7 +62,7 @@ pub fn scan_engines_for_tasks(tasks: &[String]) -> Result<Vec<Box<dyn ScanEngine
             "iac-scan" | "iac-scan:scan" => scanners.push(Box::new(IacScanScanner::default())),
             "" => {}
             other => anyhow::bail!(
-                "unknown scan task {other:?}; supported tasks: semgrep, codeql, dep-hygiene, cargo-audit, secret-scan, license-scan, iac-scan, agentic, offense-review, taint-iris, taint-iris-next, systems-hunt"
+                "unknown scan task {other:?}; supported tasks: semgrep, codeql, dep-hygiene, govulncheck, cargo-audit, secret-scan, license-scan, iac-scan, agentic, offense-review, taint-iris, taint-iris-next, systems-hunt"
             ),
         }
     }

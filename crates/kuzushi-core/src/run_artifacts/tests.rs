@@ -264,6 +264,14 @@ mod tests {
         append_run_trace_step(
             tmp.path(),
             run_id,
+            &RunTraceStep::new(2, "tool-progress", "query · starting")
+                .with_verb("query")
+                .with_model_metadata("openai:gpt-test", "openai", "fnv1a64:abc123"),
+        )
+        .unwrap();
+        append_run_trace_step(
+            tmp.path(),
+            run_id,
             &RunTraceStep::new(3, "reasoning", "query · answer")
                 .with_verb("query")
                 .with_latency_ms(Some(42))

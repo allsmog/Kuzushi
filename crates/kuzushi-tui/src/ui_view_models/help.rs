@@ -58,7 +58,7 @@ pub(crate) fn help_model(query: Option<&str>) -> HelpModel {
     let query = normalized_help_query(query);
     HelpModel {
         intro: "Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.",
-        glossary: "Glossary: TP=true positive; FP=false positive; proof=confidence; DFD=data-flow diagram; taint flow=source-to-sink path.",
+        glossary: "Glossary: TP=true positive; FP=false positive; DFD=data-flow diagram; taint-iris=source-to-sink hunt; x-ray=architecture review; randori=threat model; tob/shinsa=plugin adapters.",
         filter_note: query.map(|value| {
             format!("Showing commands matching `{value}`. Type `help` for the full reference.")
         }),

@@ -284,9 +284,15 @@ impl ActivitySession {
             .tasks
             .entry(task_id.clone())
             .or_insert_with(|| DagTaskRow::queued(task_id, module_id, Vec::new()));
+        // A canceled row is terminal: once the operator aborted it, a late
+        // worker result must not silently overwrite `× canceled` with `✓ done`
+        // and present an aborted run as a clean success.
         if matches!(
             row.state,
-            DagTaskState::Done | DagTaskState::Failing | DagTaskState::Skipped
+            DagTaskState::Done
+                | DagTaskState::Failing
+                | DagTaskState::Skipped
+                | DagTaskState::Canceled
         ) {
             return;
         }
@@ -1123,6 +1129,28 @@ mod tests {
         assert_eq!(row.state, DagTaskState::Canceled);
         assert_eq!(row.last_label, "cancel requested; waiting for cleanup");
         assert!(row.completed_at.is_some());
+    }
+
+    #[test]
+    fn late_completion_does_not_flip_a_canceled_task_to_done() {
+        let mut session = ActivitySession::new("r-1");
+        session.tasks.insert(
+            "triage:run".to_string(),
+            DagTaskRow::queued("triage:run".to_string(), "triage".to_string(), Vec::new()),
+        );
+        session.apply_step(
+            RunTraceStep::new(1, "tool", "triage start")
+                .with_module_id("triage")
+                .with_verb("run"),
+        );
+        session.mark_active_tasks_canceled();
+
+        // Most tools don't honor mid-flight cancel: the worker still returns a
+        // result, which drives mark_task_done. The canceled row must stay canceled.
+        session.mark_task_done("triage:run");
+
+        let row = session.tasks.get("triage:run").unwrap();
+        assert_eq!(row.state, DagTaskState::Canceled);
     }
 
     #[test]

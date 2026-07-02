@@ -27,6 +27,9 @@ pub struct ShellApp {
     /// `design/mockups/catalog.jsx` the cursor is the bright `▌` on a
     /// `c-sel` background, set in `catalog_module_row`.
     pub catalog_cursor: usize,
+    /// Cursor into the component recommendation list. `Enter` runs the
+    /// focused scoped scan; `p` promotes independent components to targets.
+    pub recommend_cursor: usize,
     /// Patch staged for human approval — populated when a tool
     /// produces a `pending_patch` artefact.  See `ShellView::Patch`.
     pub pending_patch: Option<PendingPatch>,

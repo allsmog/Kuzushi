@@ -154,5 +154,8 @@ fn row_to_line(row: Vec<Cell>) -> Line<'static> {
 }
 
 fn styled(text: String, fg: Color, bg: Color) -> Span<'static> {
+    if crate::theme::active_theme().no_color {
+        return Span::styled(text, Style::default());
+    }
     Span::styled(text, Style::default().fg(fg).bg(bg))
 }

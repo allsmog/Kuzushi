@@ -62,8 +62,14 @@ pub(crate) fn activity_dag_pane_rows(
 }
 
 fn activity_legend_row(width: usize) -> String {
+    // The active glyph must match what active rows actually render — the
+    // braille spinner — not `●` (which the rows never use and which means
+    // "idle" elsewhere in the shell).
     fit(
-        " legend: ✓ done · ● active · ! fail · × canceled · ⊘ skipped · · queued",
+        &format!(
+            " legend: ✓ done · {} active · ! fail · × canceled · ⊘ skipped · · queued",
+            SPINNER_FRAMES[0]
+        ),
         width,
     )
 }

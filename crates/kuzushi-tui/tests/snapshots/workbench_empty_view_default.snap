@@ -4,9 +4,7 @@ assertion_line: 33
 ---
  KUZUSHI > workbench · mode:shell · target:none · ctx:not built · model:unconfigured
 
-Kuzushi > workbench · target:no target · phase:作 confirm 3/4 · page:review · o idle · modules:all modules
-組 map · · 崩 hunt · · 作 confirm > · 掛 fix · > NEXT 作 review · validate findings and inspect evidence — press v for
-empirical validation
+Kuzushi > workbench · target:no target · page:review · o idle · modules:all modules
  type next guided workflow   type scan guided workflow   type options sast:scan tune scanners   type ask ask the agent
 
  -- SOURCE · 0 files ---------------------------------------------------------------------------------------------------

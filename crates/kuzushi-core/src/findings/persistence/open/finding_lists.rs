@@ -16,7 +16,8 @@ impl FindingStore {
               f.static_proof_state, f.created_at,
               t.verdict, t.confidence, t.rationale, t.cost_usd,
               f.vuln_source, f.dedup_key, f.suppressed, f.snoozed_until,
-              f.remediation, f.references_json
+              f.remediation, f.references_json, t.triaged_by, f.source_signature,
+              f.corroboration_count
             from findings f
             left join triage t on t.finding_id = f.id
             where f.scan_id = ?1
@@ -28,6 +29,8 @@ impl FindingStore {
             .collect::<rusqlite::Result<Vec<_>>>()
             .context("Could not list findings for scan run")?;
         self.attach_evidence_to_findings(&mut findings)?;
+        self.attach_sources_to_findings(&mut findings)?;
+        self.attach_latest_verifications_to_findings(&mut findings)?;
         Ok(findings)
     }
 
@@ -40,7 +43,8 @@ impl FindingStore {
               f.static_proof_state, f.created_at,
               t.verdict, t.confidence, t.rationale, t.cost_usd,
               f.vuln_source, f.dedup_key, f.suppressed, f.snoozed_until,
-              f.remediation, f.references_json
+              f.remediation, f.references_json, t.triaged_by, f.source_signature,
+              f.corroboration_count
             from findings f
             left join triage t on t.finding_id = f.id
             order by
@@ -59,6 +63,8 @@ impl FindingStore {
         let rows = stmt.query_map([], row_to_finding)?;
         let (count, mut findings) = collect_filtered_findings(rows, filter)?;
         self.attach_evidence_to_findings(&mut findings)?;
+        self.attach_sources_to_findings(&mut findings)?;
+        self.attach_latest_verifications_to_findings(&mut findings)?;
         Ok(FindingListReport { count, findings })
     }
 }

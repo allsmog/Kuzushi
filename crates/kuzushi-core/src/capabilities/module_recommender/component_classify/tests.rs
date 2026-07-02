@@ -36,17 +36,28 @@ fn classifies_js_routes_as_web_apps() {
 }
 
 #[test]
+fn cli_binaries_get_go_vulnerability_scan_task_when_go_is_present() {
+    let mut signals = ComponentSignals {
+        entrypoints: 1,
+        source_files: 1,
+        ..ComponentSignals::default()
+    };
+    signals.languages.insert("Go".to_string());
+
+    let tasks = scanner_tasks_for_component(ComponentClass::CliBinary, &signals);
+
+    assert_eq!(tasks, vec!["semgrep", "govulncheck", "secret-scan"]);
+}
+
+#[test]
 fn scoped_scan_input_keeps_component_paths_under_parent_target() {
     let scope = scope(NestedProjectKind::PackageRoot, "web");
     let input = scoped_scan_input(
-        Path::new("/repo"),
         &scope,
-        ComponentClass::WebApp,
         &["semgrep".to_string(), "secret-scan".to_string()],
     );
 
-    assert_eq!(input["target"], "/repo");
     assert_eq!(input["paths"][0], "web");
     assert_eq!(input["tasks"][0], "semgrep");
-    assert_eq!(input["component"]["class"], "web-app");
+    assert!(input.get("target").is_none());
 }

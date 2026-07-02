@@ -34,9 +34,11 @@ impl FindingListFilter {
                 .into_iter()
                 .map(normalize_filter_value),
         );
-        self.revision_sha.extend(normalized_filter_values(
-            string_values_any(input, &["sha", "rev", "revision"])?,
-        ));
+        self.revision_sha
+            .extend(normalized_filter_values(string_values_any(
+                input,
+                &["sha", "rev", "revision"],
+            )?));
         self.branch
             .extend(normalized_filter_values(string_values(input, "branch")?));
         self.dirty = merge_dirty_filter(self.dirty, string_values(input, "dirty")?)?;
@@ -277,9 +279,10 @@ fn run_id_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
 
 fn revision_sha_matches(filter: &FindingListFilter, sha: &str) -> bool {
     filter.revision_sha.is_empty()
-        || filter.revision_sha.iter().any(|expected| {
-            sha.to_ascii_lowercase().starts_with(expected)
-        })
+        || filter
+            .revision_sha
+            .iter()
+            .any(|expected| sha.to_ascii_lowercase().starts_with(expected))
 }
 
 fn branch_matches(filter: &FindingListFilter, branch: Option<&str>) -> bool {

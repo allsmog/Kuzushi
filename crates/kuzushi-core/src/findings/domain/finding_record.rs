@@ -1,4 +1,5 @@
 use super::*;
+use std::path::Path;
 
 impl VulnSource {
     pub fn as_str(self) -> &'static str {
@@ -30,7 +31,9 @@ impl VulnSource {
     /// the source.
     pub fn from_tool(tool: &str) -> Self {
         match tool {
-            "semgrep" | "codeql" | "secret-scan" | "iac-scan" | "dep-hygiene" => Self::Sarif,
+            "semgrep" | "codeql" | "secret-scan" | "iac-scan" | "dep-hygiene" | "govulncheck" => {
+                Self::Sarif
+            }
             "systems-hunt" | "carlini-threat-hunt" => Self::Ainalysis,
             "full-mode-multi" => Self::AinalysisMulti,
             "variant-ndiff" => Self::DiffAnalyzer,
@@ -59,6 +62,19 @@ pub struct FindingEvidence {
     pub response_blob: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct FindingSource {
+    pub tool: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vuln_source: Option<VulnSource>,
+    pub source_signature: String,
+    pub first_scan_id: String,
+    pub last_scan_id: String,
+    pub first_seen_at: String,
+    pub last_seen_at: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Finding {
     pub id: Option<i64>,
@@ -81,6 +97,8 @@ pub struct Finding {
     )]
     pub static_proof_state: Option<StaticProofState>,
     pub triage: Option<TriageOutcome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triaged_by: Option<TriageAuthor>,
     /// Most-recent empirical verification, when present. Loaded by
     /// `FindingStore::get_finding_by_*` from the `verifications` side
     /// table; in-memory `Finding`s built via `Finding::new_tool` leave
@@ -100,6 +118,13 @@ pub struct Finding {
     /// 16-line regions in dense security-sensitive files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dedup_key: Option<String>,
+    /// Exact-line source signature retained alongside the bucketed
+    /// dedup key. This preserves cannon-style provenance without making
+    /// exact lines the canonical merge identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_signature: Option<String>,
+    #[serde(default)]
+    pub corroboration_count: u32,
     #[serde(default, skip_serializing_if = "is_false")]
     pub suppressed: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -110,6 +135,8 @@ pub struct Finding {
     pub references: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub evidence: Vec<FindingEvidence>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sources: Vec<FindingSource>,
 }
 
 impl Default for Finding {
@@ -129,15 +156,19 @@ impl Default for Finding {
             actor_fingerprint: None,
             static_proof_state: None,
             triage: None,
+            triaged_by: None,
             verification: None,
             created_at: String::new(),
             vuln_source: None,
             dedup_key: None,
+            source_signature: None,
+            corroboration_count: 0,
             suppressed: false,
             snoozed_until: None,
             remediation: None,
             references: Vec::new(),
             evidence: Vec::new(),
+            sources: Vec::new(),
         }
     }
 }
@@ -153,6 +184,52 @@ pub fn compute_dedup_key(file: &str, line: u32, cwe: Option<&str>) -> String {
     let normalised_file = file.trim_start_matches("./");
     let cwe_part = cwe.map(normalize_cwe).unwrap_or_else(|| "*".to_string());
     format!("{normalised_file}:{bucket}:{cwe_part}")
+}
+
+pub fn compute_source_signature(file: &str, line: u32, cwe_or_title: Option<&str>) -> String {
+    let basename = Path::new(file)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or(file)
+        .trim_start_matches("./");
+    let identity = source_signature_identity(cwe_or_title);
+    format!("{basename}:{line}:{identity}")
+}
+
+fn source_signature_identity(cwe_or_title: Option<&str>) -> String {
+    let Some(value) = cwe_or_title
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return "*".to_string();
+    };
+    let normalized_cwe = normalize_cwe(value);
+    if !normalized_cwe.is_empty() {
+        return normalized_cwe;
+    }
+    let slug = value
+        .chars()
+        .filter_map(|c| {
+            if c.is_ascii_alphanumeric() {
+                Some(c.to_ascii_lowercase())
+            } else if c.is_ascii_whitespace() || matches!(c, '-' | '_' | ':' | '/' | '.') {
+                Some('-')
+            } else {
+                None
+            }
+        })
+        .collect::<String>();
+    let compact = slug
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if compact.is_empty() {
+        "*".to_string()
+    } else {
+        compact.chars().take(80).collect()
+    }
 }
 
 /// Coarse root-cause key for the qualitative dedup pass.

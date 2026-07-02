@@ -47,7 +47,9 @@ fn expanded_catalog_keybindings() -> Vec<FooterKeybinding> {
 fn recommend_keybindings() -> Vec<FooterKeybinding> {
     vec![
         bind("Ctrl+G", "palette"),
-        bind("run <tool>", "dispatch"),
+        bind("j/k", "component"),
+        bind("Enter", "scan focused"),
+        bind("p", "promote target"),
         bind("runs", "ledger"),
         bind("Esc", "back"),
         bind("?", "help"),

@@ -207,6 +207,9 @@ pub(crate) fn dfd_model(app: &ShellApp) -> DfdModel {
 pub(crate) struct AttackChain {
     pub title: String,
     pub severity: ChainSeverity,
+    pub narrative: Option<String>,
+    pub impact_description: Option<String>,
+    pub preconditions: Vec<String>,
     pub steps: Vec<String>,
 }
 
@@ -230,6 +233,9 @@ pub(crate) fn attack_tree(app: &ShellApp) -> AttackTree {
         .map(|chain| AttackChain {
             title: chain.title.clone(),
             severity: chain.severity,
+            narrative: chain.narrative.clone(),
+            impact_description: chain.impact_description.clone(),
+            preconditions: chain.preconditions.clone(),
             steps: chain.steps.iter().take(4).map(step_label).collect(),
         })
         .collect();
@@ -253,6 +259,7 @@ fn step_label(step: &ExploitChainStep) -> String {
 pub(crate) struct TaintStageModel {
     pub title: String,
     pub location: String,
+    pub snippet: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -318,6 +325,7 @@ fn taint_flow_path_from_snapshot(flow: &TaintFlowSnapshot) -> TaintFlowPath {
                     stage.message.clone()
                 },
                 location: format!("{}:{}", short_file(&stage.file), stage.line),
+                snippet: stage.snippet.clone(),
             })
             .collect(),
         empty_hint: None,

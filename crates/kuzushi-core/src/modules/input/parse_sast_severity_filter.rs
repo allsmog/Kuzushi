@@ -75,6 +75,44 @@ pub(in crate::modules) fn bool_input(input: &Value, keys: &[&str]) -> Result<boo
     Ok(false)
 }
 
+pub(in crate::modules) fn optional_string_input(
+    input: &Value,
+    keys: &[&str],
+) -> Result<Option<String>> {
+    for key in keys {
+        if let Some(value) = input.get(*key) {
+            return value
+                .as_str()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(ToString::to_string)
+                .with_context(|| format!("sast:scan {key} must be a non-empty string"))
+                .map(Some);
+        }
+    }
+    Ok(None)
+}
+
+pub(in crate::modules) fn optional_usize_input(
+    input: &Value,
+    keys: &[&str],
+) -> Result<Option<usize>> {
+    for key in keys {
+        if let Some(value) = input.get(*key) {
+            let raw = value
+                .as_u64()
+                .with_context(|| format!("sast:scan {key} must be a positive integer"))?;
+            if raw == 0 {
+                anyhow::bail!("sast:scan {key} must be greater than zero");
+            }
+            return usize::try_from(raw)
+                .with_context(|| format!("sast:scan {key} is too large"))
+                .map(Some);
+        }
+    }
+    Ok(None)
+}
+
 pub(in crate::modules) fn same_scan_task(left: &str, right: &str) -> bool {
     let left = left.trim();
     let right = right.trim();

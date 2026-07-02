@@ -54,7 +54,10 @@ impl ShellApp {
         };
         let path = PathBuf::from(raw);
         match WorkspaceTarget::new(&path) {
-            Ok(workspace) => self.activate_target(workspace),
+            Ok(workspace) => {
+                self.activate_target(workspace);
+                self.apply_initial_onboarding_phase();
+            }
             Err(error) => self.log("error", format!("invalid target {raw:?}: {error}")),
         }
     }
@@ -192,6 +195,9 @@ impl ShellApp {
     ) -> Option<kuzushi_core::NestedProjectScopeTree> {
         match kuzushi_core::discover_and_save_nested_project_scopes(root) {
             Ok(tree) => {
+                self.workbench_cache
+                    .borrow_mut()
+                    .cache_persisted_project_scope_tree(root, tree.clone());
                 let nested_count = tree.scopes.len().saturating_sub(1);
                 if nested_count > 0 {
                     self.log(
@@ -252,7 +258,7 @@ fn component_scope_from_state(
     raw: &str,
 ) -> Option<TargetCandidateScope> {
     let tree = match state {
-        ProjectScopeTreeState::Persisted(tree) | ProjectScopeTreeState::Discovered(tree) => tree,
+        ProjectScopeTreeState::Persisted(tree) => tree,
         ProjectScopeTreeState::RootOnly | ProjectScopeTreeState::Unreadable(_) => return None,
     };
     let raw_path = raw.trim_end_matches('/');

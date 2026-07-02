@@ -782,6 +782,11 @@ fn module_playbooks_name_supported_run_and_scan_commands() {
             "scan runs configured scanners",
         ),
         ("cargo-audit", "RustSec advisories", "tool-specific options"),
+        (
+            "govulncheck",
+            "Go reachable vulnerabilities",
+            "tool-specific options",
+        ),
         ("agentic-sast", "run agentic-sast:scan", "run scan"),
     ];
     for (module, required, stale) in cases {
@@ -790,6 +795,7 @@ fn module_playbooks_name_supported_run_and_scan_commands() {
             "threat-model" => "threat-model:build",
             "sast" => "sast:scan",
             "cargo-audit" => "cargo-audit:scan",
+            "govulncheck" => "govulncheck:scan",
             "agentic-sast" => "agentic-sast:scan",
             _ => "demo:tool",
         };
@@ -3693,6 +3699,42 @@ fn target_picker_renders_candidates_with_cursor_and_hints() {
         rendered.contains("target <path>"),
         "manual-path escape hatch"
     );
+    assert!(
+        rendered.contains("type `demo`"),
+        "targetless/no-key escape hatch"
+    );
+}
+
+#[test]
+fn model_picker_renders_offline_demo_escape_hatch() {
+    let backend = TestBackend::new(110, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::ModelPicker;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("CHOOSE A MODEL"));
+    assert!(rendered.contains("Try offline fixture"));
+    assert!(rendered.contains("local/no auth"));
+    assert!(rendered.contains("d/demo"));
+}
+
+#[test]
+fn auth_picker_renders_selectable_offline_demo_row() {
+    let backend = TestBackend::new(110, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::AuthMethodPicker("openai".to_string());
+    app.auth_picker_cursor = 2;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("CHOOSE AUTH METHOD"));
+    assert!(rendered.contains("> Offline demo"));
+    assert!(rendered.contains("no key, model, or scanner binary"));
 }
 
 #[test]
@@ -4559,7 +4601,7 @@ fn workbench_top_bar_renders_compact_journey_phase_with_target() {
     assert!(rendered.contains("組 map"), "{rendered}");
     assert!(rendered.contains("▸ NEXT"), "{rendered}");
     assert!(rendered.contains("page:terrain"), "{rendered}");
-    assert!(rendered.contains("map modules"), "{rendered}");
+    assert!(rendered.contains("build context"), "{rendered}");
 }
 
 #[test]

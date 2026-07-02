@@ -21,7 +21,10 @@ pub(super) fn put(buf: &mut Buffer, area: Rect, x: u16, y: u16, ch: &str, color:
     let (ax, ay) = (area.x + x, area.y + y);
     if ax < area.right() && ay < area.bottom() {
         if let Some(cell) = buf.cell_mut((ax, ay)) {
-            cell.set_symbol(ch).set_fg(color);
+            cell.set_symbol(ch);
+            if !crate::theme::active_theme().no_color {
+                cell.set_fg(color);
+            }
         }
     }
 }
@@ -58,7 +61,7 @@ pub(super) fn text(buf: &mut Buffer, area: Rect, x: u16, y: u16, s: &str, color:
     }
     let max = (area.right() - ax) as usize;
     let clipped: String = s.chars().take(max).collect();
-    buf.set_string(ax, ay, clipped, Style::default().fg(color));
+    buf.set_string(ax, ay, clipped, diagram_style(color));
 }
 
 /// A rounded node box with a left-aligned label on its middle row.
@@ -83,7 +86,7 @@ pub(super) fn boxed(
     Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(border))
+        .border_style(diagram_style(border))
         .render(rect, buf);
     // Truncate to the box interior so long real labels don't spill past the border.
     let inner = (w.saturating_sub(3)) as usize;
@@ -112,12 +115,20 @@ pub(super) fn panel(
     Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Plain)
-        .border_style(Style::default().fg(color))
+        .border_style(diagram_style(color))
         .title(ratatui::text::Span::styled(
             format!(" {title} "),
-            Style::default().fg(color),
+            diagram_style(color),
         ))
         .render(rect, buf);
+}
+
+fn diagram_style(color: Color) -> Style {
+    if crate::theme::active_theme().no_color {
+        Style::default()
+    } else {
+        Style::default().fg(color)
+    }
 }
 
 /// Draw a horizontal glyph run on row `y` over `x0..x1`.
@@ -281,11 +292,17 @@ mod tests {
                 AttackChain {
                     title: "SQLi /orders".into(),
                     severity: ChainSeverity::Critical,
+                    narrative: None,
+                    impact_description: None,
+                    preconditions: Vec::new(),
                     steps: vec!["unsanitised id".into(), "raw db.exec()".into()],
                 },
                 AttackChain {
                     title: "IDOR /account".into(),
                     severity: ChainSeverity::High,
+                    narrative: None,
+                    impact_description: None,
+                    preconditions: Vec::new(),
                     steps: vec!["missing owner check".into()],
                 },
             ],

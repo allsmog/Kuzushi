@@ -13,14 +13,15 @@ mod triage_outcome;
 
 pub use extract_cwe::extract_cwe;
 pub use finding_record::{
-    compute_dedup_key, compute_root_cause_key, normalize_cwe, Finding, FindingEvidence,
+    compute_dedup_key, compute_root_cause_key, compute_source_signature, normalize_cwe, Finding,
+    FindingEvidence, FindingSource,
 };
 pub use from_semgrep::{Severity, VulnSource};
 pub(crate) use now_isoish::now_isoish;
 pub use patch_status::PatchStatus;
 pub use persisted_results::{
     PatchAttempt, PatchResult, PersistedProofVerdict, PersistedSandboxBackend,
-    PersistedVerification, TriageVerdict,
+    PersistedVerification, TriageAuthor, TriageVerdict,
 };
 pub(crate) use static_proof_state::is_runtime_proof_state;
 pub use static_proof_state::StaticProofState;

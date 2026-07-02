@@ -171,6 +171,7 @@ pub(crate) fn handle_recommend_command(app: &mut ShellApp, command: &ShellComman
         return false;
     };
     app.shell_view = ShellView::Recommend;
+    app.recommend_cursor = 0;
     if app.target.is_none() {
         app.log(
             "recommend",

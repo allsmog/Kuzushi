@@ -64,23 +64,70 @@ fn exploit_chain_plain_lines(width: usize, model: &AttackTree) -> Vec<Line<'stat
         theme::accent(),
     )])];
     for (index, chain) in model.chains.iter().enumerate() {
-        lines.push(Line::from(vec![Span::raw(fit_plain(
-            &format!(
-                "  {}. [{}] {}",
-                index + 1,
-                chain_severity_label(chain.severity),
-                chain.title
-            ),
+        append_exploit_chain_lines(
+            &mut lines,
             width,
-        ))]));
-        for (step_index, step) in chain.steps.iter().enumerate() {
-            lines.push(Line::from(vec![Span::raw(fit_plain(
-                &format!("      {}. {}", step_index + 1, step),
-                width,
-            ))]));
-        }
+            index,
+            &chain.title,
+            chain.severity,
+            chain.impact_description.as_deref(),
+            chain.narrative.as_deref(),
+            &chain.preconditions,
+            &chain.steps,
+        );
     }
     lines
+}
+
+fn append_exploit_chain_lines(
+    lines: &mut Vec<Line<'static>>,
+    width: usize,
+    index: usize,
+    title: &str,
+    severity: ChainSeverity,
+    impact: Option<&str>,
+    narrative: Option<&str>,
+    preconditions: &[String],
+    steps: &[String],
+) {
+    lines.push(plain_line(
+        width,
+        format!(
+            "  {}. [{}] {}",
+            index + 1,
+            chain_severity_label(severity),
+            title
+        ),
+    ));
+    append_optional_chain_line(lines, width, "impact", impact);
+    append_optional_chain_line(lines, width, "narrative", narrative);
+    for precondition in preconditions.iter().take(3) {
+        lines.push(plain_line(
+            width,
+            format!("      precondition: {precondition}"),
+        ));
+    }
+    for (step_index, step) in steps.iter().enumerate() {
+        lines.push(plain_line(
+            width,
+            format!("      {}. {}", step_index + 1, step),
+        ));
+    }
+}
+
+fn append_optional_chain_line(
+    lines: &mut Vec<Line<'static>>,
+    width: usize,
+    label: &str,
+    value: Option<&str>,
+) {
+    if let Some(value) = value {
+        lines.push(plain_line(width, format!("      {label}: {value}")));
+    }
+}
+
+fn plain_line(width: usize, text: String) -> Line<'static> {
+    Line::from(vec![Span::raw(fit_plain(&text, width))])
 }
 
 fn chain_severity_label(severity: ChainSeverity) -> &'static str {
@@ -269,6 +316,9 @@ mod tests {
             id: "chain-1".to_string(),
             title: "template render to RCE".to_string(),
             severity: crate::ChainSeverity::Critical,
+            narrative: Some("request template reaches renderer".to_string()),
+            impact_description: Some("remote code execution".to_string()),
+            preconditions: vec!["attacker can submit template name".to_string()],
             steps: vec![crate::ExploitChainStep {
                 role: "source".to_string(),
                 description: "attacker controls template name".to_string(),
@@ -283,6 +333,7 @@ mod tests {
         assert!(text.contains("ATTACK TREE · 1 chains"), "{text}");
         assert!(text.contains("[critical] template render to RCE"), "{text}");
         assert!(text.contains("attacker controls template name"), "{text}");
+        assert!(text.contains("remote code execution"), "{text}");
         assert!(!text.contains("renders only in an interactive"), "{text}");
     }
 

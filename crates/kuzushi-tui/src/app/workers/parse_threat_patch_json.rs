@@ -298,9 +298,11 @@ fn send_registry_scan_finished(tx: &Sender<ScanEvent>, result: serde_json::Value
         .pointer("/data/findingsCount")
         .and_then(serde_json::Value::as_u64)
         .unwrap_or(0) as usize;
+    let cost_usd = kuzushi_core::run_artifacts::tool_run_output_cost_usd(&result);
     let _ = tx.send(ScanEvent::Finished {
         run_id: run_id.to_string(),
         findings_count,
+        cost_usd,
     });
     Ok(())
 }

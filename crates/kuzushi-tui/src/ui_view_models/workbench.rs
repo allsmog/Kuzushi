@@ -8,8 +8,7 @@ use super::{
     attack_tree, dfd_model, findings_heatmap_with_selection, findings_model, journey_model,
     journey_phase_segment, selected_finding_code_model, selected_finding_detail_model,
     selected_taint_flow_path, source_tree_model, threat_model_doc, CodePaneModel,
-    FindingDetailModel, FindingsModel, JourneyPhaseState, JourneyPhaseStatus, JourneyPhaseTone,
-    SourceTreeModel,
+    FindingDetailModel, FindingsModel, JourneyPhaseStatus, SourceTreeModel,
 };
 use crate::app::{WorkbenchCenterMode, WorkbenchPage, WorkbenchPane, WorkflowPhase};
 use crate::ShellApp;
@@ -251,88 +250,16 @@ fn top_bar_model(app: &ShellApp, page: WorkbenchPage) -> WorkbenchTopBar {
         project: project_label(app),
         target: target_label(app),
         live: app.has_running_work(),
-        phase: Some(page_phase_segment(page)),
+        phase: journey
+            .as_ref()
+            .map(|journey| journey_phase_segment(journey.current)),
         page,
         phase_rail: journey
             .as_ref()
-            .map(|journey| phase_rail_for_page(&journey.phases, page))
-            .unwrap_or_else(|| default_phase_rail_for_page(page)),
-        phase_next_summary: Some(page_next_summary(page)),
+            .map(|journey| journey.phases.clone())
+            .unwrap_or_default(),
+        phase_next_summary: journey.map(|journey| journey.next_summary),
     }
-}
-
-fn page_phase_segment(page: WorkbenchPage) -> String {
-    format!(
-        "{} {} {}/4",
-        page.phase().kanji(),
-        page.phase().word(),
-        page.position()
-    )
-}
-
-fn phase_rail_for_page(
-    phases: &[JourneyPhaseStatus],
-    page: WorkbenchPage,
-) -> Vec<JourneyPhaseStatus> {
-    phases
-        .iter()
-        .map(|status| phase_status_for_page(*status, page))
-        .collect()
-}
-
-fn phase_status_for_page(
-    mut status: JourneyPhaseStatus,
-    page: WorkbenchPage,
-) -> JourneyPhaseStatus {
-    if status.phase == page.phase() {
-        status.state = JourneyPhaseState::Current;
-        status.state_symbol = JourneyPhaseState::Current.glyph();
-        status.tone = JourneyPhaseTone::Warn;
-    }
-    status
-}
-
-fn default_phase_rail_for_page(page: WorkbenchPage) -> Vec<JourneyPhaseStatus> {
-    WorkflowPhase::ORDER
-        .iter()
-        .map(|&phase| {
-            let state = if phase == page.phase() {
-                JourneyPhaseState::Current
-            } else {
-                JourneyPhaseState::Pending
-            };
-            JourneyPhaseStatus {
-                phase,
-                state,
-                phase_label: phase_rail_label(phase),
-                state_symbol: state.glyph(),
-                tone: if state == JourneyPhaseState::Current {
-                    JourneyPhaseTone::Warn
-                } else {
-                    JourneyPhaseTone::Subtle
-                },
-            }
-        })
-        .collect()
-}
-
-fn phase_rail_label(phase: WorkflowPhase) -> &'static str {
-    match phase {
-        WorkflowPhase::Map => "組 map ",
-        WorkflowPhase::Hunt => "崩 hunt ",
-        WorkflowPhase::Confirm => "作 confirm ",
-        WorkflowPhase::Fix => "掛 fix ",
-    }
-}
-
-fn page_next_summary(page: WorkbenchPage) -> String {
-    match page {
-        WorkbenchPage::Terrain => "組 terrain · map modules, recommendations, and seed materials — type next to run the guided workflow",
-        WorkbenchPage::Coverage => "崩 coverage · compare tools, scans, and clusters — press 3 for review",
-        WorkbenchPage::Review => "作 review · validate findings and inspect evidence — press v for empirical validation",
-        WorkbenchPage::Ship => "掛 ship · chain, patch, and export — workspace export findings report.sarif",
-    }
-    .to_string()
 }
 
 fn project_label(app: &ShellApp) -> String {
@@ -586,9 +513,7 @@ mod tests {
         assert_eq!(model.top_bar.phase_rail.len(), 4);
         assert_eq!(
             model.top_bar.phase_next_summary.as_deref(),
-            Some(
-                "組 terrain · map modules, recommendations, and seed materials — type next to run the guided workflow"
-            )
+            Some("組 map · build context and analysis artifacts — next to continue")
         );
         assert_eq!(
             model.top_bar.phase_rail[0].state,
@@ -597,6 +522,39 @@ mod tests {
         assert_eq!(
             model.top_bar.phase_rail[1].state,
             JourneyPhaseState::Pending
+        );
+    }
+
+    #[test]
+    fn top_bar_omits_journey_chrome_without_a_target() {
+        let model = workbench_view_model(&app());
+
+        assert_eq!(model.top_bar.phase, None);
+        assert!(model.top_bar.phase_rail.is_empty());
+        assert_eq!(model.top_bar.phase_next_summary, None);
+    }
+
+    #[test]
+    fn top_bar_rail_tracks_workspace_reality_not_open_page() {
+        let target = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.target = Some(target.path().to_path_buf());
+        app.findings = vec![finding(Severity::High)];
+        app.workbench_page = Some(WorkbenchPage::Terrain);
+
+        let model = workbench_view_model(&app);
+
+        assert_eq!(model.page, WorkbenchPage::Terrain);
+        assert_eq!(model.top_bar.phase.as_deref(), Some("作 confirm 3/4"));
+        assert_eq!(model.top_bar.phase_rail[0].state, JourneyPhaseState::Done);
+        assert_eq!(model.top_bar.phase_rail[1].state, JourneyPhaseState::Done);
+        assert_eq!(
+            model.top_bar.phase_rail[2].state,
+            JourneyPhaseState::Current
+        );
+        assert_eq!(
+            model.top_bar.phase_next_summary.as_deref(),
+            Some("作 confirm · 1 findings need review — next to continue")
         );
     }
 

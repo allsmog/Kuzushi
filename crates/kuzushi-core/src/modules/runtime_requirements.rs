@@ -100,6 +100,7 @@ pub const FINDING_STORE_TOOL_NAMES: &[&str] = &[
     "codeql:scan",
     "dep-hygiene:check",
     "exploit-chain:scan",
+    "govulncheck:scan",
     "iac-scan:scan",
     "license-scan:scan",
     "ndiff:hunt-variants",

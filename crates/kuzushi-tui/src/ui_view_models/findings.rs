@@ -85,6 +85,8 @@ pub(crate) struct FindingDetailModel {
     pub(crate) location: String,
     pub(crate) rule: String,
     pub(crate) tool: String,
+    pub(crate) source_signature: String,
+    pub(crate) corroboration: String,
     pub(crate) fingerprint: String,
     pub(crate) proof_label: String,
     pub(crate) proof_marker: &'static str,
@@ -120,12 +122,14 @@ pub(crate) struct FindingEvidenceRow {
     pub(crate) header: String,
     pub(crate) snippet: String,
     pub(crate) rationale: String,
+    pub(crate) capture: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct TriageSummaryModel {
     pub(crate) verdict: String,
     pub(crate) confidence: String,
+    pub(crate) author: String,
     pub(crate) rationale: String,
 }
 
@@ -341,8 +345,7 @@ fn active_component_rel_path(app: &ShellApp) -> Option<String> {
         .borrow_mut()
         .project_scope_tree(Some(target))?;
     let tree = match &state {
-        crate::app::ProjectScopeTreeState::Persisted(tree)
-        | crate::app::ProjectScopeTreeState::Discovered(tree) => tree,
+        crate::app::ProjectScopeTreeState::Persisted(tree) => tree,
         crate::app::ProjectScopeTreeState::RootOnly
         | crate::app::ProjectScopeTreeState::Unreadable(_) => return None,
     };
@@ -488,7 +491,7 @@ impl FindingListRow {
             proof_marker: proof.marker,
             proof_tier: proof.tier,
             cwe: projection.cwe_label,
-            source: finding_source_label(finding),
+            source: finding_source_summary_label(finding),
             evidence: projection.evidence_preview,
             selected: selected.is_some_and(|fingerprint| fingerprint == projection.fingerprint),
             cursor: cursor == index,
@@ -709,6 +712,8 @@ impl FindingDetailModel {
             location: relativize_location(projection.location, base),
             rule: projection.rule,
             tool: projection.tool,
+            source_signature: source_signature_label(finding),
+            corroboration: corroboration_label(finding),
             fingerprint: projection.fingerprint,
             proof_label: proof.label,
             proof_marker: proof.marker,
@@ -786,7 +791,7 @@ fn detail_body_fields(finding: &Finding) -> DetailBodyFields {
             .len()
             .saturating_sub(FINDING_DETAIL_SECTION_LIMIT),
         message_lines,
-        triage: finding.triage.as_ref().map(TriageSummaryModel::from_triage),
+        triage: finding_triage_summary(finding),
     }
 }
 
@@ -831,18 +836,61 @@ impl FindingEvidenceRow {
             ),
             snippet: evidence.snippet.clone(),
             rationale: evidence.rationale.clone(),
+            capture: evidence_capture_summary(evidence),
         }
     }
 }
 
-impl TriageSummaryModel {
-    fn from_triage(triage: &kuzushi_core::TriageOutcome) -> Self {
-        Self {
-            verdict: triage.verdict.as_str().to_string(),
-            confidence: format!("{:.2}", triage.confidence),
-            rationale: triage.rationale.clone(),
-        }
+fn evidence_capture_summary(evidence: &kuzushi_core::FindingEvidence) -> Option<String> {
+    let mut artifacts = Vec::new();
+    if evidence.request_blob.is_some() {
+        artifacts.push("request body recorded");
     }
+    if evidence.response_blob.is_some() {
+        artifacts.push("response body recorded");
+    }
+    (!artifacts.is_empty()).then(|| format!("http capture: {}", artifacts.join(", ")))
+}
+
+fn finding_triage_summary(finding: &Finding) -> Option<TriageSummaryModel> {
+    let triage = finding.triage.as_ref()?;
+    Some(TriageSummaryModel {
+        verdict: triage.verdict.as_str().to_string(),
+        confidence: format!("{:.2}", triage.confidence),
+        author: finding
+            .triaged_by
+            .map(|author| author.as_str().to_string())
+            .unwrap_or_else(|| "unknown".to_string()),
+        rationale: triage.rationale.clone(),
+    })
+}
+
+fn finding_source_summary_label(finding: &Finding) -> String {
+    let source = finding_source_label(finding);
+    match finding.corroboration_count {
+        count if count > 1 => format!("{source} · corroboration {count}"),
+        _ => source,
+    }
+}
+
+fn source_signature_label(finding: &Finding) -> String {
+    finding
+        .source_signature
+        .clone()
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn corroboration_label(finding: &Finding) -> String {
+    if finding.sources.is_empty() {
+        return finding.corroboration_count.to_string();
+    }
+    let tools = finding
+        .sources
+        .iter()
+        .map(|source| source.tool.as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{} ({tools})", finding.sources.len())
 }
 
 fn evidence_rows(finding: &Finding) -> Vec<FindingEvidenceRow> {

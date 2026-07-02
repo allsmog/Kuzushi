@@ -562,7 +562,7 @@ fn selected_stage_rows(
     selected: &super::viz_data::TaintStageModel,
     width: usize,
 ) -> Vec<ActivityFeedPaneRow> {
-    vec![
+    let mut rows = vec![
         row("  SELECTED STAGE".to_string(), ActivityFeedRowTone::Primary),
         row(
             format!(
@@ -575,7 +575,14 @@ fn selected_stage_rows(
             format!("  location: {}", selected.location),
             ActivityFeedRowTone::Subtle,
         ),
-    ]
+    ];
+    if let Some(snippet) = &selected.snippet {
+        rows.push(row(
+            format!("  snippet: {}", truncate(snippet, width.saturating_sub(11))),
+            ActivityFeedRowTone::Subtle,
+        ));
+    }
+    rows
 }
 
 fn exploit_chain_deck_rows(
@@ -635,7 +642,18 @@ fn selected_chain_rows(
     selected: &super::viz_data::AttackChain,
     width: usize,
 ) -> Vec<ActivityFeedPaneRow> {
-    let mut rows = vec![
+    let mut rows = selected_chain_header_rows(selected, width);
+    rows.extend(selected_chain_context_rows(selected, width));
+    rows.extend(selected_chain_precondition_rows(selected, width));
+    rows.extend(selected_chain_step_rows(selected));
+    rows
+}
+
+fn selected_chain_header_rows(
+    selected: &super::viz_data::AttackChain,
+    width: usize,
+) -> Vec<ActivityFeedPaneRow> {
+    vec![
         row("  SELECTED CHAIN".to_string(), ActivityFeedRowTone::Primary),
         row(
             format!(
@@ -645,14 +663,58 @@ fn selected_chain_rows(
             ),
             chain_tone(selected.severity),
         ),
-    ];
-    rows.extend(
-        selected
-            .steps
-            .iter()
-            .map(|step| row(format!("    → {step}"), ActivityFeedRowTone::Subtle)),
-    );
+    ]
+}
+
+fn selected_chain_context_rows(
+    selected: &super::viz_data::AttackChain,
+    width: usize,
+) -> Vec<ActivityFeedPaneRow> {
+    let mut rows = Vec::new();
+    if let Some(impact) = &selected.impact_description {
+        rows.push(row(
+            format!("  impact: {}", truncate(impact, width.saturating_sub(10))),
+            ActivityFeedRowTone::Warn,
+        ));
+    }
+    if let Some(narrative) = &selected.narrative {
+        rows.push(row(
+            format!(
+                "  narrative: {}",
+                truncate(narrative, width.saturating_sub(13))
+            ),
+            ActivityFeedRowTone::Muted,
+        ));
+    }
     rows
+}
+
+fn selected_chain_precondition_rows(
+    selected: &super::viz_data::AttackChain,
+    width: usize,
+) -> impl Iterator<Item = ActivityFeedPaneRow> + '_ {
+    selected
+        .preconditions
+        .iter()
+        .take(3)
+        .map(move |precondition| {
+            row(
+                format!(
+                    "  precondition: {}",
+                    truncate(precondition, width.saturating_sub(18))
+                ),
+                ActivityFeedRowTone::Muted,
+            )
+        })
+}
+
+fn selected_chain_step_rows(
+    selected: &super::viz_data::AttackChain,
+) -> impl Iterator<Item = ActivityFeedPaneRow> + '_ {
+    selected
+        .steps
+        .iter()
+        .map(|step| row(format!("    → {step}"), ActivityFeedRowTone::Subtle))
 }
 
 fn chain_list_tone(severity: ChainSeverity, active: bool) -> ActivityFeedRowTone {

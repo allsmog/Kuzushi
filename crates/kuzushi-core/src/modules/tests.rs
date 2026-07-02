@@ -479,6 +479,24 @@ JSON
         binary
     }
 
+    fn javascript_fixture_with_line_9_sink() -> String {
+        [
+            "const q = req.query.q;",
+            "function handler(req, res, db) {",
+            "  const prefix = 'select ';",
+            "  const table = 'users';",
+            "  const where = ' where name = ';",
+            "  const sql = prefix + '* from ' + table + where;",
+            "  const suffix = q;",
+            "  const built = sql + suffix;",
+            "  return db.query(built);",
+            "}",
+            "res.send(req.query.name);",
+        ]
+        .join("\n")
+            + "\n"
+    }
+
     #[cfg(unix)]
     fn fake_codeql_binary(dir: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
@@ -3705,6 +3723,53 @@ OUT
         }));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn semgrep_static_evidence_direct_tool_honors_static_proof_state_option() {
+        let temp = tempdir().unwrap();
+        fs::write(
+            temp.path().join("server.js"),
+            javascript_fixture_with_line_9_sink(),
+        )
+        .unwrap();
+        let binary = fake_semgrep_binary(temp.path());
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool(
+                "semgrep:scan",
+                json!({
+                    "binary": binary.display().to_string(),
+                    "mode": "whitebox-static",
+                    "staticProofState": "needs_runtime_evidence"
+                }),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(
+            result
+                .pointer("/data/findings/0/staticProofState")
+                .and_then(Value::as_str),
+            Some("needs_runtime_evidence")
+        );
+        let finding = store.list_findings(10).unwrap().pop().unwrap();
+        assert_eq!(
+            finding.static_proof_state,
+            Some(StaticProofState::NeedsRuntimeEvidence)
+        );
+    }
+
     #[test]
     fn semgrep_missing_binary_failure_is_actionable() {
         let temp = tempdir().unwrap();
@@ -3862,6 +3927,55 @@ OUT
         assert!(nodes
             .iter()
             .any(|node| node.kind == crate::static_evidence::StaticEvidenceNodeKind::DataflowStep));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn codeql_static_evidence_direct_tool_honors_static_proof_state_option() {
+        let temp = tempdir().unwrap();
+        fs::write(temp.path().join("package.json"), "{}\n").unwrap();
+        fs::write(
+            temp.path().join("server.js"),
+            javascript_fixture_with_line_9_sink(),
+        )
+        .unwrap();
+        let binary = fake_codeql_binary(temp.path());
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool(
+                "codeql:scan",
+                json!({
+                    "binary": binary.display().to_string(),
+                    "language": "javascript",
+                    "mode": "whitebox-static",
+                    "staticProofState": "needs_runtime_evidence"
+                }),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(
+            result
+                .pointer("/data/findings/0/staticProofState")
+                .and_then(Value::as_str),
+            Some("needs_runtime_evidence")
+        );
+        let finding = store.list_findings(10).unwrap().pop().unwrap();
+        assert_eq!(
+            finding.static_proof_state,
+            Some(StaticProofState::NeedsRuntimeEvidence)
+        );
     }
 
     #[test]

@@ -112,6 +112,9 @@ fn exploit_chain_detail(chain: &serde_json::Value) -> Option<ExploitChainDetail>
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("high"),
         ),
+        narrative: data_string(chain, "narrative"),
+        impact_description: data_string(chain, "impactDescription"),
+        preconditions: string_array(chain, "preconditions"),
         steps: chain
             .get("steps")
             .and_then(serde_json::Value::as_array)
@@ -176,7 +179,22 @@ fn taint_stage(stage: &serde_json::Value) -> Option<TaintStage> {
             .or_else(|| stage.get("startLine"))
             .and_then(serde_json::Value::as_u64)
             .unwrap_or(0) as u32,
+        snippet: data_string(stage, "snippet"),
     })
+}
+
+fn string_array(value: &serde_json::Value, key: &str) -> Vec<String> {
+    value
+        .get(key)
+        .and_then(serde_json::Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 fn exploit_chain_aliases(data: &serde_json::Value) -> Vec<ExploitChain> {

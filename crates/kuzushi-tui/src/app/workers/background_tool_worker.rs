@@ -6,6 +6,7 @@ pub(crate) enum ScanEvent {
     Finished {
         run_id: String,
         findings_count: usize,
+        cost_usd: Option<f64>,
     },
     Failed {
         error: String,

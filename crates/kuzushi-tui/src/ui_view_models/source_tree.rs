@@ -244,9 +244,7 @@ fn scope_component_roots(
 
 fn scope_tree(state: &ProjectScopeTreeState) -> Option<&NestedProjectScopeTree> {
     match state {
-        ProjectScopeTreeState::Persisted(tree) | ProjectScopeTreeState::Discovered(tree) => {
-            Some(tree)
-        }
+        ProjectScopeTreeState::Persisted(tree) => Some(tree),
         ProjectScopeTreeState::RootOnly | ProjectScopeTreeState::Unreadable(_) => None,
     }
 }

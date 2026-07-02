@@ -53,6 +53,47 @@ pub(super) fn home_keybindings() -> Vec<ViewKeybinding> {
     )]
 }
 
+pub(super) fn recommend_keybindings() -> Vec<ViewKeybinding> {
+    vec![
+        bind_char(
+            'j',
+            "j/k",
+            "component",
+            ViewHotkeyAction::RecommendCursorNext,
+        ),
+        bind_char(
+            'k',
+            "j/k",
+            "component",
+            ViewHotkeyAction::RecommendCursorPrevious,
+        ),
+        bind(
+            HotkeyTrigger::Down,
+            "Up/Down",
+            "component",
+            ViewHotkeyAction::RecommendCursorNext,
+        ),
+        bind(
+            HotkeyTrigger::Up,
+            "Up/Down",
+            "component",
+            ViewHotkeyAction::RecommendCursorPrevious,
+        ),
+        bind(
+            HotkeyTrigger::Enter,
+            "Enter",
+            "scan component",
+            ViewHotkeyAction::RecommendScanComponent,
+        ),
+        bind_char(
+            'p',
+            "p",
+            "promote target",
+            ViewHotkeyAction::RecommendPromoteComponent,
+        ),
+    ]
+}
+
 pub(super) fn workbench_keybindings() -> Vec<ViewKeybinding> {
     let mut bindings = workbench_movement_keybindings();
     bindings.extend(workbench_pane_keybindings());

@@ -10,8 +10,8 @@ use self::workers::scan_worker;
 use self::{with_next_step, ScanEvent, ScanPanelState, ShellApp, ShellView};
 use anyhow::Result;
 use kuzushi_core::{
-    new_run_id, next_run_trace_step_number, sorted_finding_aliases, BroadcastSink, JsonlSink,
-    RunTraceStep, ScanCancellation, TraceHandle, TraceSink, WorkspaceTarget,
+    new_run_id, next_run_trace_step_number, BroadcastSink, JsonlSink, RunTraceStep,
+    ScanCancellation, TraceHandle, TraceSink, WorkspaceTarget,
 };
 pub(crate) use start_scan::*;
 use std::path::PathBuf;

@@ -13,14 +13,13 @@ impl FindingStore {
     }
 
     fn insert_finding_statements(&self, scan_id: &str, finding: &Finding) -> Result<i64> {
-        // Cross-channel dedup: when a finding with the same dedup_key but a
-        // different fingerprint already exists in this scan, merge instead
-        // of inserting a duplicate row. Higher severity wins; tools merge
-        // into a comma-list. Skipped silently when the new finding has no
-        // dedup_key (legacy callers).
+        // Cross-channel dedup: when a finding with the same dedup_key already
+        // exists in this workspace, merge instead of inserting a duplicate
+        // row. Same-scan collisions are preferred; cross-run collisions still
+        // accumulate source provenance for engagement-level corroboration.
         if let Some(dedup_key) = finding.dedup_key.as_deref() {
             if let Some(existing) = self.find_collision(scan_id, dedup_key, &finding.fingerprint)? {
-                return self.merge_finding_collision(existing, finding);
+                return self.merge_finding_collision(existing, scan_id, finding);
             }
         }
 
@@ -31,6 +30,7 @@ impl FindingStore {
             |row| row.get(0),
         )?;
         self.replace_finding_evidence(id, &finding.evidence)?;
+        self.record_finding_source(id, scan_id, finding)?;
         Ok(id)
     }
 
@@ -54,6 +54,8 @@ impl FindingStore {
                 finding.created_at,
                 finding.vuln_source.map(|s| s.as_str()),
                 finding.dedup_key,
+                finding.source_signature,
+                finding.corroboration_count.max(1),
                 finding.suppressed,
                 finding.snoozed_until,
                 finding.remediation,
@@ -63,7 +65,12 @@ impl FindingStore {
         Ok(())
     }
 
-    fn merge_finding_collision(&self, existing: Finding, finding: &Finding) -> Result<i64> {
+    fn merge_finding_collision(
+        &self,
+        existing: Finding,
+        scan_id: &str,
+        finding: &Finding,
+    ) -> Result<i64> {
         let merge_id = existing.id.expect("existing finding always has id");
         let merged_tool = merge_tool_list(&existing.tool, &finding.tool);
         let merged_source = merge_vuln_source(existing.vuln_source, finding.vuln_source);
@@ -73,6 +80,7 @@ impl FindingStore {
         } else if existing.tool != merged_tool {
             self.update_collision_tool(merge_id, &merged_tool, merged_source)?;
         }
+        self.record_finding_source(merge_id, scan_id, finding)?;
         Ok(merge_id)
     }
 
@@ -119,10 +127,9 @@ impl FindingStore {
         Ok(())
     }
 
-    /// Look up an existing finding in the same scan that shares the
-    /// dedup_key but differs in fingerprint. Returns the existing
-    /// finding's `(id, severity, tool, vuln_source)` enough to drive
-    /// merge logic.
+    /// Look up an existing finding in the workspace that shares the dedup_key.
+    /// Same-scan collisions win over historical rows, preserving old merge
+    /// behavior while allowing reruns to add corroborating source rows.
     pub(crate) fn find_collision(
         &self,
         scan_id: &str,
@@ -130,32 +137,57 @@ impl FindingStore {
         new_fingerprint: &str,
     ) -> Result<Option<Finding>> {
         let mut stmt = self.conn.prepare(
-            "select id, severity, tool, vuln_source
+            "select id, scan_id, severity, tool, vuln_source, source_signature, corroboration_count
                from findings
-              where scan_id = ?1
-                and dedup_key = ?2
-                and fingerprint != ?3
+              where dedup_key = ?2
+                and not (scan_id = ?1 and fingerprint = ?3)
+              order by case when scan_id = ?1 then 0 else 1 end,
+                       id asc
               limit 1",
         )?;
-        let row: Option<(i64, String, String, Option<String>)> = stmt
-            .query_row(params![scan_id, dedup_key, new_fingerprint], |row| {
-                Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))
-            })
+        let row = stmt
+            .query_row(params![scan_id, dedup_key, new_fingerprint], collision_row)
             .optional()?;
-        Ok(row.map(|(id, sev_str, tool, src_str)| {
-            let severity = Severity::try_from(sev_str.as_str()).unwrap_or(Severity::Unknown);
-            let vuln_source = src_str.as_deref().and_then(VulnSource::parse);
-            Finding {
-                id: Some(id),
-                scan_id: Some(scan_id.to_string()),
-                severity,
-                tool,
-                vuln_source,
-                dedup_key: Some(dedup_key.to_string()),
-                ..Finding::default()
-            }
-        }))
+        Ok(row.map(|row| row.into_finding(dedup_key)))
     }
+}
+
+struct CollisionRow {
+    id: i64,
+    scan_id: String,
+    severity: String,
+    tool: String,
+    vuln_source: Option<String>,
+    source_signature: Option<String>,
+    corroboration_count: i64,
+}
+
+impl CollisionRow {
+    fn into_finding(self, dedup_key: &str) -> Finding {
+        Finding {
+            id: Some(self.id),
+            scan_id: Some(self.scan_id),
+            severity: Severity::try_from(self.severity.as_str()).unwrap_or(Severity::Unknown),
+            tool: self.tool,
+            vuln_source: self.vuln_source.as_deref().and_then(VulnSource::parse),
+            dedup_key: Some(dedup_key.to_string()),
+            source_signature: self.source_signature,
+            corroboration_count: self.corroboration_count.max(0) as u32,
+            ..Finding::default()
+        }
+    }
+}
+
+fn collision_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollisionRow> {
+    Ok(CollisionRow {
+        id: row.get(0)?,
+        scan_id: row.get(1)?,
+        severity: row.get(2)?,
+        tool: row.get(3)?,
+        vuln_source: row.get(4)?,
+        source_signature: row.get(5)?,
+        corroboration_count: row.get(6)?,
+    })
 }
 
 fn references_json(references: &[String]) -> Result<Option<String>> {
@@ -170,10 +202,11 @@ insert into findings(
   scan_id, fingerprint, rule_id, title, severity, file_path,
   start_line, end_line, message, tool, actor_fingerprint,
   static_proof_state, created_at, vuln_source, dedup_key,
-  suppressed, snoozed_until, remediation, references_json
+  source_signature, corroboration_count, suppressed, snoozed_until,
+  remediation, references_json
 )
 values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-        ?16, ?17, ?18, ?19)
+        ?16, ?17, ?18, ?19, ?20, ?21)
 on conflict(scan_id, fingerprint) do update set
   title = excluded.title,
   severity = excluded.severity,
@@ -182,6 +215,8 @@ on conflict(scan_id, fingerprint) do update set
   static_proof_state = coalesce(excluded.static_proof_state, findings.static_proof_state),
   vuln_source = coalesce(excluded.vuln_source, findings.vuln_source),
   dedup_key = coalesce(excluded.dedup_key, findings.dedup_key),
+  source_signature = coalesce(excluded.source_signature, findings.source_signature),
+  corroboration_count = max(findings.corroboration_count, excluded.corroboration_count),
   suppressed = excluded.suppressed,
   snoozed_until = excluded.snoozed_until,
   remediation = excluded.remediation,
