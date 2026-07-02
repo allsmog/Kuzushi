@@ -6,7 +6,8 @@ assertion_line: 162
 
  -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
-Examples: scan .  ·  use semgrep  ·  run .  ·  findings  ·  open F-0001  ·  model 1
+Glossary: TP=true positive; FP=false positive; proof=confidence; DFD=data-flow diagram; taint flow=source-to-sink path.
+Examples: demo  ·  scan .  ·  use semgrep  ·  run .  ·  findings  ·  open F-0001  ·  model 1
 
 NAVIGATION — browse modules and tools
 home - open Kuzushi cockpit home
@@ -19,8 +20,8 @@ modules - browse native Rust modules
   aliases / examples: /modules, /m, m, show modules
 recommend - open latest module recommendations
   aliases / examples: /recommend, rec, /rec
-tools - list routed Rust tools
-  aliases / examples: /tools, show tools
+tools [query] - list or filter routed Rust tools
+  aliases / examples: /tools, show tools, tools semgrep
 use <module> - focus a module
   aliases / examples: use semgrep, /use <module>
 back - return to the previous view
@@ -35,6 +36,8 @@ logs - scrollable full-screen transcript
   aliases / examples: /logs, log, transcript, /transcript
 
 RUN / SCAN — dispatch tools and scans
+demo - run a 90-second offline fixture scan; no key, model, or external scanner
+  aliases / examples: /demo
 scan [target] - run configured scanners
   aliases / examples: scan ., /scan [target]
 run <tool> [json] - dispatch a tool; run . is shell-only focused-module shorthand
@@ -101,8 +104,10 @@ reparse <id> - refresh local attachment metadata
   aliases / examples: /reparse <id>
 workspace - show target and state status
   aliases / examples: /workspace, workspace status
-workspace export findings <path> - export findings JSON or JSONL
-  aliases / examples: /workspace export findings <path>, findings export <path>
+workspace export findings <path> [format] - export findings as json, jsonl, sarif, csv, or markdown-bundle
+  aliases / examples: /workspace export findings <path> [format], findings export <path> [format]
+workspace scope init - write an editable .kuzushi/scope.toml scaffold
+  aliases / examples: /workspace scope init
 
 FINDINGS / EVIDENCE — browse findings, evidence, and report output
 findings - open persisted findings
@@ -117,8 +122,8 @@ show runs - recent run artifacts
   aliases / examples: /show runs, runs, /runs
 runs diff <left> <right> - compare findings snapshots from two runs
   aliases / examples: runs diff <runA> <runB>, runs compare <runA> <runB>
-replay <run> - render a run summary
-  aliases / examples: /replay <run>
+replay <run|latest> - render a run summary
+  aliases / examples: /replay <run|latest>, replay latest
 trace <run> - stream run events
   aliases / examples: /trace <run>
 activity - live module-progress dashboard

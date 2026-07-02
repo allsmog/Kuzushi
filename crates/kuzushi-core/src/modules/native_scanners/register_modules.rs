@@ -77,8 +77,13 @@ pub(in crate::modules) fn run_codeql_scan(
     let finding_count = output.findings.len();
     let findings = output.findings;
     let sarif_documents = output.codeql_sarif_documents;
-    let persisted =
-        persist_codeql_findings(&target, &findings, ctx, &sarif_documents, index_static_evidence)?;
+    let persisted = persist_codeql_findings(
+        &target,
+        &findings,
+        ctx,
+        &sarif_documents,
+        index_static_evidence,
+    )?;
     emit_scan_done(ctx, "codeql", finding_count);
     Ok(
         CodeqlScanReport::new(target.display().to_string(), findings, persisted)
@@ -249,7 +254,7 @@ pub(in crate::modules) fn run_exploit_chain_scan(
     emit_scan_start(ctx, "exploit-chain", &target);
     let scanner = ExploitChainScanner::from_tool_input(&input)?;
     let runtime = require_exploit_chain_runtime(runtime)?;
-    let model = require_exploit_chain_model(ctx)?;
+    let model = require_exploit_chain_model(&input, ctx)?;
     let report: ExploitChainReport = scan_exploit_chains_with_runtime(
         &target,
         &ScanCancellation::default(),
@@ -262,9 +267,7 @@ pub(in crate::modules) fn run_exploit_chain_scan(
     Ok(exploit_chain_output(report, &target, persisted))
 }
 
-fn require_exploit_chain_runtime(
-    runtime: Option<&dyn AgentRuntime>,
-) -> Result<&dyn AgentRuntime> {
+fn require_exploit_chain_runtime(runtime: Option<&dyn AgentRuntime>) -> Result<&dyn AgentRuntime> {
     runtime.ok_or_else(|| {
         anyhow::anyhow!(
             "exploit-chain:scan requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies."
@@ -272,8 +275,8 @@ fn require_exploit_chain_runtime(
     })
 }
 
-fn require_exploit_chain_model(ctx: &ToolExecutionContext<'_>) -> Result<String> {
-    crate::runtime::require_configured_model("exploit-chain:scan", ctx.config.model.as_deref())
+fn require_exploit_chain_model(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<String> {
+    resolve_tool_model("exploit-chain:scan", input, ctx)
 }
 
 fn persist_exploit_chain_findings(
@@ -310,7 +313,10 @@ mod tests {
         let output = cargo_audit_output(Path::new("/repo"), vec![finding], None);
 
         assert_eq!(output["status"], json!("completed"));
-        assert_eq!(output["data"]["coreFindings"][0]["tool"], json!("cargo-audit"));
+        assert_eq!(
+            output["data"]["coreFindings"][0]["tool"],
+            json!("cargo-audit")
+        );
         assert_eq!(
             output["data"]["coreFindings"][0]["staticProofState"],
             json!("signal_only")
@@ -320,5 +326,4 @@ mod tests {
             json!("signal_only")
         );
     }
-
 }

@@ -3,7 +3,9 @@ mod tests {
     use super::super::domain::fingerprint_parts;
     use super::super::persistence::merge_tool_list;
     use super::super::*;
+    use crate::run_artifacts::{RunSummary, RunTargetGitMetadata};
     use serde_json::json;
+    use std::collections::BTreeMap;
     use std::path::Path;
 
     #[test]
@@ -867,14 +869,34 @@ mod tests {
     }
 
     #[test]
-    fn filter_expression_rejects_future_provenance_keys_instead_of_ignoring_them() {
-        let error = FindingListFilter::from_tool_input(&json!({
-            "filter": "rev:abcdef1"
+    fn filter_expression_accepts_and_matches_provenance_keys() {
+        let filter = FindingListFilter::from_tool_input(&json!({
+            "filter": "rev:ABCDEF1 branch:Main dirty:clean"
         }))
-        .unwrap_err()
-        .to_string();
+        .unwrap();
+        let mut finding = Finding::new_tool(
+            "tool",
+            "rule".to_string(),
+            "src/lib.rs".to_string(),
+            1,
+            None,
+            Severity::High,
+            "message".to_string(),
+        );
+        finding.scan_id = Some("run-1".to_string());
+        let mut summary = RunSummary::running("run-1", "scan", Some("tool".to_string()), "/repo");
+        summary.target_git = Some(RunTargetGitMetadata {
+            sha: "abcdef1234567890".to_string(),
+            branch: Some("main".to_string()),
+            dirty: false,
+        });
+        let runs = BTreeMap::from([("run-1".to_string(), summary)]);
 
-        assert!(error.contains("not supported until provenance indexing is available"));
+        assert!(filter.has_provenance_filter());
+        assert!(filter.matches_run_provenance(&finding, &runs));
+        assert_eq!(filter.revision_sha, vec!["abcdef1"]);
+        assert_eq!(filter.branch, vec!["main"]);
+        assert_eq!(filter.dirty, Some(false));
     }
 
     #[test]

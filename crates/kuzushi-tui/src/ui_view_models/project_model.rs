@@ -55,14 +55,13 @@ impl ProjectModelOrigin {
 }
 
 pub(crate) fn project_model(app: &ShellApp) -> ProjectModel {
-    let context = context_snapshot_model(app);
-    let threat = threat_summary_review(app);
-    let dfd = dfd_model(app);
-    let findings = findings_model(app);
     let mut rows = vec![scope_tree_row(app)];
     if let Some(document_rows) = project_model_document_rows(app) {
         rows.extend(document_rows);
     } else {
+        let context = context_snapshot_model(app);
+        let threat = threat_summary_review(app);
+        let dfd = dfd_model(app);
         rows.extend([
             context_feed_row(&context),
             inventory_row(&context),
@@ -70,6 +69,7 @@ pub(crate) fn project_model(app: &ShellApp) -> ProjectModel {
             dfd_row(&dfd),
         ]);
     }
+    let findings = findings_model(app);
     rows.push(review_surface_row(&findings));
     ProjectModel {
         scope_label: project_scope_label(app),

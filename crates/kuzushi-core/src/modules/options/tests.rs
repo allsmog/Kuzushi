@@ -97,6 +97,22 @@ mod tests {
         assert!(error.contains("target"), "{error}");
         assert!(error.contains("maxFindings"), "{error}");
         assert!(error.contains("max_findings"), "{error}");
+        assert!(!error.contains("Declare it in option metadata"), "{error}");
+    }
+
+    #[test]
+    fn unknown_option_reports_close_match() {
+        let descriptor = tool_with_options(
+            "test:demo",
+            "exercise strict option validation",
+            vec![opt("maxFindings", OptionType::Int, "aliased option")],
+        );
+
+        let error = validate_tool_input_options(&descriptor, json!({"maxFinding": 7})).unwrap_err();
+        let error = format!("{error:#}");
+
+        assert!(error.contains("Did you mean `maxFindings`?"), "{error}");
+        assert!(error.contains("Next: use one of: maxFindings"), "{error}");
     }
 
     #[test]

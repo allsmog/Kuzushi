@@ -4,7 +4,7 @@ assertion_line: 69
 ---
  KUZUSHI mode:module · target:none · ctx:not built · model:unconfigured
 
- ● /use sast
+ * /use sast
  · module now using sast · primary tool sast:scan
 MODULE DETAIL · sast · SAST Pipeline
   Full SAST pipeline: context, scanners, AI triage, verification, patch, and report

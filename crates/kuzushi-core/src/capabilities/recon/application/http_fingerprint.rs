@@ -8,7 +8,7 @@ pub(crate) fn run_recon_http_fingerprint(
     cancel: &ScanCancellation,
 ) -> Result<ReconReport> {
     let workspace = ctx.workspace.context(
-        "recon:http-fingerprint needs an active workspace. Pass --target <repo> or start the shell with --target.",
+        crate::workspace::active_workspace_required_message("recon:http-fingerprint"),
     )?;
     let options = HttpFingerprintInput::from_tool_input(input)?;
     emit_http_fingerprint_start(ctx, &options);

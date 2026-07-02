@@ -5,6 +5,35 @@ Notable changes to Kuzushi. Release procedure lives in
 
 ## Unreleased
 
+**Fixed:**
+
+- `cargo test --workspace` release blockers: the BDD onboarding skip-path
+  scenario now asserts the Workbench cockpit handoff, and Workbench snapshots
+  include the findings ledger row.
+- Single-tool run mode and shell background tools now share the same
+  finding-store provisioning predicate. Tools such as `cargo-audit:scan`,
+  `offense:chain`, `variant:*`, SBOM, secret scan, and Android APK finding
+  producers no longer drift between modes.
+- The npm postinstall check now warns when the package has no native Kuzushi
+  binary for the current platform, with consumer-facing remediation steps.
+- Release native builds are pinned to the same Rust toolchain version as CI
+  (`1.88.0`) via `rust-toolchain.toml` and the release workflow.
+- `kuzushi doctor` now checks Joern and nmap availability, and auth ping
+  missing-credential failures include exact `export ...` remediation.
+- Unknown tool options now report valid option names and close-match hints
+  instead of author-facing metadata wording.
+- Dev scripts no longer depend on `/home/user`, fixed `/tmp` filenames, or a
+  hardcoded `~/go/bin/ascii-image-converter` path.
+
+**Docs:**
+
+- Release instructions now describe the full gate set, cross-platform native
+  binary staging, pack verification, and CI-driven npm publish flow.
+- Mode-parity and agent docs now describe `kuzushi run` as always emitting
+  JSON, without a separate `--json` flag.
+- The actionlint workflow now installs actionlint from the pinned `v1.7.12`
+  tag instead of downloading from upstream `main`.
+
 ## v0.24.0-alpha.4 — CI gating, offline demo, multi-platform packaging, reliability
 
 First release where the npm package ships the documented Rust CLI on every
@@ -43,8 +72,8 @@ green-built platform.
   phase-workflow/security-viz work are resolved (model-ranked recommendation is
   an explicit adapter concern; chrome-layout and threat-DFD renderers consume
   view models), and the BDD onboarding features now encode the phase-driven
-  launch contract (Esc skips a phase and advances; past 掛 KAKE the shell hands
-  off to recommendations).
+  launch contract (Esc skips a phase and advances; past 掛 KAKE the shell opens
+  the Workbench cockpit).
 - The CRAP-risk gate fails loudly when its diff base cannot be resolved
   instead of silently checking 0 files on shallow CI checkouts.
 

@@ -30,8 +30,9 @@ pub(crate) enum Command {
         #[arg(long, conflicts_with = "json")]
         ci: bool,
         /// Per-operation USD budget caps, e.g. `triage=50,deep-audit=200,full-mode-multi=300`.
-        /// Caps are persisted to the spend ledger and enforced before each LLM call
-        /// once the runtime is wired through (Phase 4+). Set without value to clear all caps.
+        /// Caps are persisted to the spend ledger and enforced by spend-aware
+        /// model-backed operations before they reserve estimated LLM spend.
+        /// Scanner-only work and tools that do not report spend are unaffected.
         #[arg(long)]
         budget: Option<String>,
         /// Diff-scope the scan to files changed since `<ref>`. Engines that

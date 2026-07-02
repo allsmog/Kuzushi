@@ -3,9 +3,10 @@ use super::auth_ping::AuthPingLog;
 pub(crate) fn record_anthropic_oauth_readiness(
     readiness: kuzushi_openai::OauthReadiness,
     log: &mut AuthPingLog,
-) {
+) -> bool {
     let (ok, message) = anthropic_oauth_readiness_message(readiness);
     log.record(ok, message);
+    ok
 }
 
 pub(crate) fn anthropic_oauth_readiness_message(
@@ -40,19 +41,24 @@ pub(crate) fn anthropic_oauth_readiness_message(
     }
 }
 
-pub(crate) fn record_anthropic_env_presence(log: &mut AuthPingLog) {
-    record_env_presence(
+pub(crate) fn record_anthropic_env_presence(log: &mut AuthPingLog) -> bool {
+    let oauth_env = record_env_presence(
         log,
         &["ANTHROPIC_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"],
         "ANTHROPIC_OAUTH_TOKEN/AUTH_TOKEN env present",
     );
-    record_env_presence(log, &["ANTHROPIC_API_KEY"], "ANTHROPIC_API_KEY env present");
+    let api_key = record_env_presence(log, &["ANTHROPIC_API_KEY"], "ANTHROPIC_API_KEY env present");
+    oauth_env || api_key
 }
 
-pub(crate) fn record_openai_runtime_auth_presence(log: &mut AuthPingLog) {
-    record_env_presence(log, &["OPENAI_API_KEY"], "OPENAI_API_KEY env present");
+pub(crate) fn record_openai_runtime_auth_presence(log: &mut AuthPingLog) -> bool {
+    let api_key = record_env_presence(log, &["OPENAI_API_KEY"], "OPENAI_API_KEY env present");
     record_openai_base_url_presence(log);
-    record_hosted_openai_presence(log);
+    let hosted = record_hosted_openai_presence(log);
+    if !api_key && !hosted {
+        log.record(false, openai_missing_credential_message());
+    }
+    api_key || hosted
 }
 
 fn record_openai_base_url_presence(log: &mut AuthPingLog) {
@@ -74,19 +80,31 @@ fn masked_openai_base_url(base_url: String) -> String {
     format!("{}…", &base_url[..96])
 }
 
-fn record_hosted_openai_presence(log: &mut AuthPingLog) {
+fn record_hosted_openai_presence(log: &mut AuthPingLog) -> bool {
     if std::env::var("CODEX_CI").is_ok() {
         log.record(
             true,
             "hosted runtime flag present; OpenAI may authenticate without local oauth-credentials.json",
         );
+        return true;
     }
+    false
 }
 
-pub(crate) fn record_env_presence(log: &mut AuthPingLog, names: &[&str], label: &str) {
+pub(crate) fn record_env_presence(log: &mut AuthPingLog, names: &[&str], label: &str) -> bool {
     if names.iter().any(|name| std::env::var(name).is_ok()) {
         log.record(true, label);
+        return true;
     }
+    false
+}
+
+pub(crate) fn anthropic_missing_credential_message() -> &'static str {
+    "no Anthropic credentials found. Next: export ANTHROPIC_API_KEY=... or run `auth login anthropic` in the shell."
+}
+
+pub(crate) fn openai_missing_credential_message() -> &'static str {
+    "OPENAI_API_KEY env missing. Next: export OPENAI_API_KEY=... before running `kuzushi auth ping openai`."
 }
 
 pub(crate) fn auth_ping_model(

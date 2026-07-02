@@ -1,7 +1,8 @@
 use super::*;
 use finding_alias_cache::FindingAliasCache;
 use kuzushi_core::{
-    list_run_summaries, Finding, NestedProjectScopeTree, RunSummary, RunTargetGitMetadata,
+    list_run_summaries, Finding, NestedProjectScopeTree, PromptMutation, RunSummary,
+    RunTargetGitMetadata, StrategyProposal, WorkspaceTarget,
 };
 use map_artifacts_cache::MapArtifactsCache;
 use prompt_override_cache::PromptOverrideCache;
@@ -23,6 +24,9 @@ pub(crate) struct WorkbenchCache {
     source_file: Option<SourceFileCache>,
     git_metadata: Option<GitMetadataCache>,
     scope_tree: Option<ScopeTreeCache>,
+    strategy_queue: Option<StrategyQueueCache>,
+    prompt_mutations: Option<PromptMutationsCache>,
+    json_files: BTreeMap<PathBuf, JsonFileCache>,
     map_artifacts: MapArtifactsCache,
     prompt_overrides: PromptOverrideCache,
     finding_aliases: FindingAliasCache,
@@ -128,6 +132,88 @@ impl WorkbenchCache {
         Some(state)
     }
 
+    pub(crate) fn strategy_queue(
+        &mut self,
+        workspace: Option<&WorkspaceTarget>,
+    ) -> Option<StrategyQueueState> {
+        let workspace = workspace?;
+        let target = workspace.root();
+        let path = kuzushi_core::strategy_queue_path(workspace);
+        let stamp = source_file_stamp(&path).ok();
+        if let Some(cache) = self
+            .strategy_queue
+            .as_ref()
+            .filter(|cache| cache.target == target && cache.stamp == stamp)
+        {
+            return Some(cache.state.clone());
+        }
+        let state = match kuzushi_core::load_strategy_queue(workspace) {
+            Ok(proposals) => StrategyQueueState::Ready(proposals),
+            Err(error) => StrategyQueueState::Unreadable(error.to_string()),
+        };
+        self.strategy_queue = Some(StrategyQueueCache {
+            target: target.to_path_buf(),
+            stamp,
+            state: state.clone(),
+        });
+        Some(state)
+    }
+
+    pub(crate) fn invalidate_strategy_queue(&mut self) {
+        self.strategy_queue = None;
+    }
+
+    pub(crate) fn prompt_mutations(
+        &mut self,
+        workspace: Option<&WorkspaceTarget>,
+    ) -> Option<PromptMutationsState> {
+        let workspace = workspace?;
+        let target = workspace.root();
+        let path = kuzushi_core::prompt_mutations_path(workspace);
+        let stamp = source_file_stamp(&path).ok();
+        if let Some(cache) = self
+            .prompt_mutations
+            .as_ref()
+            .filter(|cache| cache.target == target && cache.stamp == stamp)
+        {
+            return Some(cache.state.clone());
+        }
+        let state = match kuzushi_core::load_prompt_mutations(workspace) {
+            Ok(mutations) => PromptMutationsState::Ready(mutations),
+            Err(_) => PromptMutationsState::Unreadable,
+        };
+        self.prompt_mutations = Some(PromptMutationsCache {
+            target: target.to_path_buf(),
+            stamp,
+            state: state.clone(),
+        });
+        Some(state)
+    }
+
+    pub(crate) fn invalidate_prompt_mutations(&mut self) {
+        self.prompt_mutations = None;
+    }
+
+    pub(crate) fn json_file(&mut self, path: &Path) -> JsonFileState {
+        let stamp = source_file_stamp(path).ok();
+        if let Some(cache) = self
+            .json_files
+            .get(path)
+            .filter(|cache| cache.stamp == stamp)
+        {
+            return cache.state.clone();
+        }
+        let state = read_json_file(path);
+        self.json_files.insert(
+            path.to_path_buf(),
+            JsonFileCache {
+                stamp,
+                state: state.clone(),
+            },
+        );
+        state
+    }
+
     pub(crate) fn map_artifacts_built(&mut self, target: Option<&Path>) -> bool {
         self.map_artifacts.built(target)
     }
@@ -181,6 +267,24 @@ fn discovered_project_scope_tree(target: &Path) -> ProjectScopeTreeState {
     }
 }
 
+fn read_json_file(path: &Path) -> JsonFileState {
+    match std::fs::metadata(path) {
+        Ok(metadata) if metadata.is_file() => {}
+        Ok(_) => return JsonFileState::NonFile,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return JsonFileState::Missing;
+        }
+        Err(_) => return JsonFileState::Unreadable,
+    };
+    let raw = match std::fs::read_to_string(path) {
+        Ok(raw) => raw,
+        Err(_) => return JsonFileState::Unreadable,
+    };
+    serde_json::from_str::<serde_json::Value>(&raw)
+        .map(JsonFileState::Present)
+        .unwrap_or(JsonFileState::Malformed)
+}
+
 fn source_file_stamp(path: &Path) -> std::io::Result<SourceFileStamp> {
     let metadata = std::fs::metadata(path)?;
     Ok(SourceFileStamp {
@@ -195,6 +299,27 @@ pub(crate) enum ProjectScopeTreeState {
     Discovered(NestedProjectScopeTree),
     RootOnly,
     Unreadable(String),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum StrategyQueueState {
+    Ready(Vec<StrategyProposal>),
+    Unreadable(String),
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum PromptMutationsState {
+    Ready(Vec<PromptMutation>),
+    Unreadable,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) enum JsonFileState {
+    Present(serde_json::Value),
+    Missing,
+    NonFile,
+    Malformed,
+    Unreadable,
 }
 
 #[derive(Debug)]
@@ -236,15 +361,35 @@ struct ScopeTreeCache {
     state: ProjectScopeTreeState,
 }
 
-impl ScopeTreeCache {
-    fn fresh_at(&self, now: Instant) -> bool {
-        now.duration_since(self.cached_at) <= SCOPE_TREE_TTL
-    }
+#[derive(Debug)]
+struct StrategyQueueCache {
+    target: PathBuf,
+    stamp: Option<SourceFileStamp>,
+    state: StrategyQueueState,
+}
+
+#[derive(Debug)]
+struct PromptMutationsCache {
+    target: PathBuf,
+    stamp: Option<SourceFileStamp>,
+    state: PromptMutationsState,
+}
+
+#[derive(Debug)]
+struct JsonFileCache {
+    stamp: Option<SourceFileStamp>,
+    state: JsonFileState,
 }
 
 impl GitMetadataCache {
     fn fresh_at(&self, now: Instant) -> bool {
         now.duration_since(self.cached_at) <= GIT_METADATA_TTL
+    }
+}
+
+impl ScopeTreeCache {
+    fn fresh_at(&self, now: Instant) -> bool {
+        now.duration_since(self.cached_at) <= SCOPE_TREE_TTL
     }
 }
 

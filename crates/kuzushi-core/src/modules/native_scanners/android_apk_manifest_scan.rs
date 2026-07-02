@@ -46,40 +46,72 @@ pub(in crate::modules) fn run_manifest_scan(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
-    if let Some(trace) = ctx.trace {
-        let _ = trace
-            .step("tool", "scan", format!("manifest-scan start · target={}", target.display()))
-            .emit();
-    }
-    let inputs = match resolve_manifest_inputs(&input, &target) {
-        Ok(inputs) => inputs,
-        Err(error) => return Ok(failed_tool_output("android-apk:manifest-scan", &target, error)),
+    emit_manifest_scan_step(ctx, "tool", "manifest-scan start", &target, None);
+    let scan = match collect_manifest_scan(&input, &target) {
+        Ok(scan) => scan,
+        Err(error) => return Ok(manifest_scan_failed_output(&target, error)),
     };
-    let manifest = match parse_manifest_file(&inputs.manifest_path) {
-        Ok(parsed) => parsed,
-        Err(error) => return Ok(failed_tool_output("android-apk:manifest-scan", &target, error)),
-    };
-    let findings = collect_manifest_findings(&manifest, &inputs.manifest_path);
-    let taint_summary = write_taint_sources(&manifest, &inputs.taint_sources_path)?;
     let persisted = persist_tool_findings(
         "android-apk",
         &target,
-        &findings,
+        &scan.findings,
         ctx.workspace,
         ctx.findings_store,
     )?;
-    if let Some(trace) = ctx.trace {
-        let _ = trace
-            .step("done", "scan", format!("manifest-scan complete · {} findings", findings.len()))
-            .emit();
-    }
+    emit_manifest_scan_step(
+        ctx,
+        "done",
+        "manifest-scan complete",
+        &target,
+        Some(scan.findings.len()),
+    );
     Ok(manifest_scan_output(
-        &inputs,
-        &manifest,
-        findings,
+        &scan.inputs,
+        &scan.manifest,
+        scan.findings,
         persisted,
-        taint_summary,
+        scan.taint_summary,
     ))
+}
+
+struct ManifestScan {
+    inputs: ManifestScanInputs,
+    manifest: ParsedManifest,
+    findings: Vec<Finding>,
+    taint_summary: TaintSourcesSummary,
+}
+
+fn collect_manifest_scan(input: &Value, target: &Path) -> Result<ManifestScan> {
+    let inputs = resolve_manifest_inputs(input, target)?;
+    let manifest = parse_manifest_file(&inputs.manifest_path)?;
+    let findings = collect_manifest_findings(&manifest, &inputs.manifest_path);
+    let taint_summary = write_taint_sources(&manifest, &inputs.taint_sources_path)?;
+    Ok(ManifestScan {
+        inputs,
+        manifest,
+        findings,
+        taint_summary,
+    })
+}
+
+fn manifest_scan_failed_output(target: &Path, error: anyhow::Error) -> Value {
+    failed_tool_output("android-apk:manifest-scan", target, error)
+}
+
+fn emit_manifest_scan_step(
+    ctx: &ToolExecutionContext<'_>,
+    kind: &str,
+    label: &str,
+    target: &Path,
+    findings_count: Option<usize>,
+) {
+    let Some(trace) = ctx.trace else {
+        return;
+    };
+    let suffix = findings_count
+        .map(|count| format!(" · {count} findings"))
+        .unwrap_or_else(|| format!(" · target={}", target.display()));
+    let _ = trace.step(kind, "scan", format!("{label}{suffix}")).emit();
 }
 
 fn collect_manifest_findings(manifest: &ParsedManifest, manifest_path: &Path) -> Vec<Finding> {
@@ -118,18 +150,18 @@ fn check_components(manifest: &ParsedManifest, manifest_path: &str) -> Vec<Findi
         .collect()
 }
 
-fn component_findings(
-    component: &Component,
-    manifest_path: &str,
-    index: usize,
-) -> Vec<Finding> {
+fn component_findings(component: &Component, manifest_path: &str, index: usize) -> Vec<Finding> {
     if !component.is_effectively_exported() {
         return Vec::new();
     }
     let line = component_synthetic_line(index);
     let mut findings = Vec::new();
     if component.permission.is_none() {
-        findings.push(exported_no_permission_finding(component, manifest_path, line));
+        findings.push(exported_no_permission_finding(
+            component,
+            manifest_path,
+            line,
+        ));
     }
     findings.extend(provider_findings(component, manifest_path, line));
     findings
@@ -151,7 +183,11 @@ fn provider_findings(component: &Component, manifest_path: &str, line: u32) -> V
         .collect()
 }
 
-fn exported_no_permission_finding(component: &Component, manifest_path: &str, line: u32) -> Finding {
+fn exported_no_permission_finding(
+    component: &Component,
+    manifest_path: &str,
+    line: u32,
+) -> Finding {
     let label = component.kind.label();
     finding_at(
         &format!("android-apk:exported-{label}-no-permission"),
@@ -207,10 +243,23 @@ fn check_deeplinks(manifest: &ParsedManifest, manifest_path: &str) -> Vec<Findin
     findings
 }
 
-fn finding_at(rule_id: &str, file_path: &str, line: u32, severity: Severity, message: &str) -> Finding {
-    Finding::new_tool("android-apk", rule_id, file_path, line, None, severity, message.to_string())
+fn finding_at(
+    rule_id: &str,
+    file_path: &str,
+    line: u32,
+    severity: Severity,
+    message: &str,
+) -> Finding {
+    Finding::new_tool(
+        "android-apk",
+        rule_id,
+        file_path,
+        line,
+        None,
+        severity,
+        message.to_string(),
+    )
 }
-
 
 fn manifest_scan_output(
     inputs: &ManifestScanInputs,
@@ -315,5 +364,4 @@ mod tests {
         assert!(deeplink.message.contains("lyft"));
         assert!(deeplink.message.contains("ride"));
     }
-
 }

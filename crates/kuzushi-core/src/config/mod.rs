@@ -45,4 +45,5 @@ pub use config_hash::config_hash;
 pub use load_config_for_target::load_anthropic_oauth_config;
 pub use load_config_for_target::load_config;
 pub use load_config_for_target::load_config_for_target;
+pub use load_config_for_target::persist_global_model_selection;
 pub use load_config_for_target::write_default_config;

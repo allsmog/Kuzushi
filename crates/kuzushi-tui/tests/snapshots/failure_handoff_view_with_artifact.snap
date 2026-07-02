@@ -15,4 +15,4 @@ recovery           Install semgrep.
 forbidden          verified
 prompt             Continue the failed Kuzushi run.
 
-▸ try: ask <question> · runs · replay <run> · back
+> try: ask <question> · runs · replay <run> · back

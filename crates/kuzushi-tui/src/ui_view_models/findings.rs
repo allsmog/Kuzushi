@@ -2,7 +2,8 @@ use super::workspace::findings_db_relative_path;
 use super::{context_snapshot_state, SeverityCounts, SeverityTone};
 use crate::ShellApp;
 use kuzushi_core::{
-    finding_source_label, project_finding, Finding, RunSummary, RunTargetGitMetadata,
+    finding_source_label, project_finding, Finding, PersistedProofVerdict, RunSummary,
+    RunTargetGitMetadata, StaticProofState, TriageVerdict,
 };
 use std::collections::BTreeMap;
 
@@ -55,6 +56,9 @@ pub(crate) struct FindingListRow {
     pub(crate) revision_label: String,
     pub(crate) verdict: String,
     pub(crate) confidence: String,
+    pub(crate) proof_label: String,
+    pub(crate) proof_marker: &'static str,
+    pub(crate) proof_tier: ProofTier,
     pub(crate) cwe: String,
     pub(crate) source: String,
     pub(crate) evidence: String,
@@ -72,6 +76,9 @@ pub(crate) struct FindingDetailModel {
     pub(crate) rule: String,
     pub(crate) tool: String,
     pub(crate) fingerprint: String,
+    pub(crate) proof_label: String,
+    pub(crate) proof_marker: &'static str,
+    pub(crate) proof_tier: ProofTier,
     pub(crate) proof_state: String,
     pub(crate) runtime_verification: String,
     pub(crate) evidence: Vec<FindingEvidenceRow>,
@@ -79,6 +86,14 @@ pub(crate) struct FindingDetailModel {
     pub(crate) message_overflow: usize,
     pub(crate) evidence_overflow: usize,
     pub(crate) triage: Option<TriageSummaryModel>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProofTier {
+    Confirmed,
+    StaticLinked,
+    Suspected,
+    Rejected,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -286,6 +301,7 @@ impl FindingListRow {
         provenance: FindingRunProvenance,
     ) -> Self {
         let projection = project_finding(finding, Some(alias.clone()));
+        let proof = finding_proof_badge(finding);
         Self {
             alias,
             severity_tone: SeverityTone::from_severity(projection.severity),
@@ -296,6 +312,9 @@ impl FindingListRow {
             revision_label: provenance.revision_label,
             verdict: projection.verdict_label,
             confidence: projection.confidence_label,
+            proof_label: proof.label,
+            proof_marker: proof.marker,
+            proof_tier: proof.tier,
             cwe: projection.cwe_label,
             source: finding_source_label(finding),
             evidence: projection.evidence_preview,
@@ -303,6 +322,114 @@ impl FindingListRow {
             cursor: cursor == index,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ProofBadge {
+    label: String,
+    marker: &'static str,
+    tier: ProofTier,
+}
+
+#[cfg(test)]
+fn finding_proof_label(finding: &Finding) -> String {
+    finding_proof_badge(finding).label
+}
+
+fn finding_proof_badge(finding: &Finding) -> ProofBadge {
+    runtime_proof_label(finding)
+        .or_else(|| rejected_triage_label(finding))
+        .or_else(|| static_proof_label(finding))
+        .or_else(|| triage_proof_label(finding))
+        .unwrap_or_else(|| proof_badge("unverified", ProofTier::Suspected))
+}
+
+fn runtime_proof_label(finding: &Finding) -> Option<ProofBadge> {
+    let verification = finding.verification.as_ref()?;
+    Some(match verification.proof_verdict {
+        PersistedProofVerdict::Exploited => proof_badge(
+            format!("verified L{}", verification.proof_level),
+            ProofTier::Confirmed,
+        ),
+        PersistedProofVerdict::NotReproduced => proof_badge("not-repro", ProofTier::Rejected),
+        PersistedProofVerdict::HarnessFailedToBuild => {
+            proof_badge("verify-build", ProofTier::Rejected)
+        }
+        PersistedProofVerdict::InfrastructureError => {
+            proof_badge("verify-infra", ProofTier::Rejected)
+        }
+        PersistedProofVerdict::LanguageUnsupportedYet => {
+            proof_badge("unsupported", ProofTier::Suspected)
+        }
+        PersistedProofVerdict::InsufficientFindingDetail => {
+            proof_badge("needs-detail", ProofTier::Suspected)
+        }
+    })
+}
+
+fn rejected_triage_label(finding: &Finding) -> Option<ProofBadge> {
+    finding
+        .triage
+        .as_ref()
+        .is_some_and(|triage| {
+            matches!(
+                triage.verdict,
+                TriageVerdict::FalsePositive | TriageVerdict::ByDesign
+            )
+        })
+        .then(|| proof_badge("rejected", ProofTier::Rejected))
+}
+
+fn static_proof_label(finding: &Finding) -> Option<ProofBadge> {
+    match finding.static_proof_state? {
+        StaticProofState::StaticallyConfirmed => {
+            Some(proof_badge("static-ok", ProofTier::StaticLinked))
+        }
+        StaticProofState::StaticallyRejected => Some(proof_badge("static-no", ProofTier::Rejected)),
+        StaticProofState::SourceSinkLinked | StaticProofState::SanitizerChecked => {
+            Some(proof_badge("path-linked", ProofTier::StaticLinked))
+        }
+        StaticProofState::CodeCited => Some(proof_badge("code-cited", ProofTier::StaticLinked)),
+        StaticProofState::NeedsRuntimeEvidence => {
+            Some(proof_badge("needs-runtime", ProofTier::Suspected))
+        }
+        StaticProofState::SignalOnly if triaged_true_positive(finding) => None,
+        StaticProofState::SignalOnly => Some(proof_badge("signal-only", ProofTier::Suspected)),
+    }
+}
+
+fn triage_proof_label(finding: &Finding) -> Option<ProofBadge> {
+    if triaged_true_positive(finding) {
+        return Some(proof_badge("triaged-tp", ProofTier::StaticLinked));
+    }
+    finding
+        .triage
+        .is_some()
+        .then(|| proof_badge("needs-review", ProofTier::Suspected))
+}
+
+fn proof_badge(label: impl Into<String>, tier: ProofTier) -> ProofBadge {
+    ProofBadge {
+        label: label.into(),
+        marker: proof_tier_marker(tier),
+        tier,
+    }
+}
+
+fn proof_tier_marker(tier: ProofTier) -> &'static str {
+    match tier {
+        ProofTier::Confirmed => "✓",
+        ProofTier::StaticLinked => "◇",
+        ProofTier::Suspected => "?",
+        ProofTier::Rejected => "!",
+    }
+}
+
+fn triaged_true_positive(finding: &Finding) -> bool {
+    finding
+        .triage
+        .as_ref()
+        .is_some_and(|triage| triage.verdict == TriageVerdict::TruePositive)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -387,6 +514,7 @@ fn compact_middle(value: &str, head: usize, tail: usize, max_len: usize) -> Stri
 impl FindingDetailModel {
     fn from_finding(finding: &Finding, alias: Option<String>, base: Option<&str>) -> Self {
         let projection = project_finding(finding, alias);
+        let proof = finding_proof_badge(finding);
         let message_lines = finding
             .message
             .lines()
@@ -402,6 +530,9 @@ impl FindingDetailModel {
             rule: projection.rule,
             tool: projection.tool,
             fingerprint: projection.fingerprint,
+            proof_label: proof.label,
+            proof_marker: proof.marker,
+            proof_tier: proof.tier,
             proof_state: projection.proof_state,
             runtime_verification: projection.runtime_validation,
             evidence: evidence_rows(finding),

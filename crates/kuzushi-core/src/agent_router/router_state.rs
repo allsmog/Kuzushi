@@ -24,9 +24,9 @@ impl AgentRouter {
         self.concurrency_caps.get(model).copied()
     }
 
-    /// Load `models.toml` from the home dir and (if present) the project
-    /// dir. Project entries override home entries on the same role.
-    /// The path can also be overridden via `KUZUSHI_MODELS_FILE`.
+    /// Load operator-owned `models.toml`. Target-local models files are
+    /// rejected: a scanned repository must not steer model choice.
+    /// The home path can also be overridden via `KUZUSHI_MODELS_FILE`.
     pub fn load(paths: &ConfigPaths) -> Result<Self> {
         let mut router = Self::empty();
         router.merge_existing_file(&home_models_path(paths))?;
@@ -54,11 +54,21 @@ impl AgentRouter {
     }
 
     fn merge_project_models_file(&mut self, paths: &ConfigPaths) -> Result<()> {
-        paths
+        let Some(path) = paths
             .target_dir
             .as_ref()
             .map(crate::workspace::workspace_models_path)
-            .map_or(Ok(()), |path| self.merge_existing_file(&path))
+        else {
+            return Ok(());
+        };
+        if !path.exists() {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "project models file at {} is not trusted; model routing belongs in \
+             $HOME/.kuzushi/models.toml or KUZUSHI_MODELS_FILE",
+            path.display()
+        )
     }
 
     fn apply_default_model(&mut self, default_model: Option<String>, path: &Path) -> Result<()> {
@@ -129,8 +139,12 @@ fn ensure_no_model_fallbacks(key: &str, route: &ModelRoute, path: &Path) -> Resu
 }
 
 fn ensure_valid_router_model(field: &str, model: &str, path: &Path) -> Result<()> {
-    validate_model_spec(model)
-        .with_context(|| format!("{field} in {} is not a valid provider:model", path.display()))
+    validate_model_spec(model).with_context(|| {
+        format!(
+            "{field} in {} is not a valid provider:model",
+            path.display()
+        )
+    })
 }
 
 #[derive(Debug, Default, Deserialize)]

@@ -31,17 +31,31 @@ pub(crate) fn ignored_dir(name: &str) -> bool {
 }
 
 pub(crate) fn vendor_dir(name: &str) -> bool {
+    vendor_dir_kind(name).is_some()
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum VendorDirKind {
+    DependencyRoot,
+    VendoredRoot,
+    PythonCache,
+}
+
+pub(crate) fn vendor_dir_kind(name: &str) -> Option<VendorDirKind> {
+    let name = name.to_ascii_lowercase();
     matches!(
-        name,
-        "node_modules"
-            | "vendor"
-            | "third_party"
-            | "third-party"
-            | "external"
-            | ".venv"
-            | "venv"
-            | "__pycache__"
+        name.as_str(),
+        "node_modules" | ".venv" | "venv"
     )
+    .then_some(VendorDirKind::DependencyRoot)
+    .or_else(|| {
+        matches!(
+            name.as_str(),
+            "vendor" | "third_party" | "third-party" | "external"
+        )
+        .then_some(VendorDirKind::VendoredRoot)
+    })
+    .or_else(|| (name == "__pycache__").then_some(VendorDirKind::PythonCache))
 }
 
 pub(crate) fn generated_dir(name: &str) -> bool {

@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::services::init_scope_for_target;
 
 impl ShellApp {
     pub(crate) fn show_workspace_status(&mut self) {
@@ -8,8 +9,8 @@ impl ShellApp {
         self.log("workspace", self.workspace_view.status.clone());
     }
 
-    pub(crate) fn export_workspace_findings(&mut self, output: &PathBuf) {
-        match export_findings_for_target(self.target.as_ref(), output) {
+    pub(crate) fn export_workspace_findings(&mut self, output: &PathBuf, format: Option<&str>) {
+        match export_findings_for_target(self.target.as_ref(), output, format) {
             Ok(report) => {
                 self.workspace_view = self.build_workspace_view(Some(report.output_path.clone()));
                 self.shell_view = ShellView::Workspace;
@@ -34,7 +35,35 @@ impl ShellApp {
                 self.shell_view = ShellView::Workspace;
                 self.log(
                     "error",
-                    format!("{error}. Next: workspace export findings <path>.json"),
+                    format!(
+                        "{error}. Next: workspace export findings <path> [json|jsonl|sarif|csv|markdown-bundle]"
+                    ),
+                );
+            }
+        }
+    }
+
+    pub(crate) fn init_workspace_scope(&mut self) {
+        match init_scope_for_target(self.target.as_ref()) {
+            Ok(path) => {
+                self.refresh_program_scope();
+                self.workspace_view = self.build_workspace_view(None);
+                self.shell_view = ShellView::Workspace;
+                self.focused_module = Some("workspace".to_string());
+                self.log(
+                    "scope",
+                    format!(
+                        "wrote {}. Edit in_scope/out_of_scope, then run recon/import tools.",
+                        path.display()
+                    ),
+                );
+            }
+            Err(error) => {
+                self.workspace_view = self.build_workspace_view(None);
+                self.shell_view = ShellView::Workspace;
+                self.log(
+                    "error",
+                    format!("{error}. Next: target <path>, then workspace scope init"),
                 );
             }
         }

@@ -12,6 +12,29 @@ mod tests {
     use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
 
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            if let Some(previous) = &self.previous {
+                std::env::set_var(self.key, previous);
+            } else {
+                std::env::remove_var(self.key);
+            }
+        }
+    }
+
     fn make_workspace(files: &[(&str, &str)]) -> tempfile::TempDir {
         let tmp = tempdir().unwrap();
         for (name, body) in files {
@@ -122,6 +145,23 @@ mod tests {
         assert!(report.dry_run);
         assert_eq!(report.plan.total_files, 1);
         assert_eq!(report.findings.len(), 0);
+    }
+
+    #[test]
+    fn full_mode_model_ignores_env_model_channel() {
+        let _guard = EnvVarGuard::set("MODEL_FULL_MODE_MULTI", "anthropic:claude-haiku-4-5");
+        let tmp = make_workspace(&[("src/a.c", "void a(){}")]);
+        let inner: Arc<dyn AgentRuntime> = Arc::new(PanickingRuntime);
+        let runtime = RoutedRuntime::new(inner, Arc::new(AgentRouter::empty()), None);
+        let cfg = FullModeConfig {
+            workspace_root: tmp.path().to_path_buf(),
+            ..Default::default()
+        };
+
+        let error = run(&runtime, None, &cfg).unwrap_err().to_string();
+
+        assert!(error.contains("no model configured"), "{error}");
+        assert!(!error.contains("export MODEL_FULL_MODE_MULTI"), "{error}");
     }
 
     #[test]

@@ -17,7 +17,11 @@ pub(crate) fn run_smoke_next_step_tool(
     drop(_loop_scope);
     let echoed = outcome.text.contains(&phrase);
 
-    let summary = format!("smoke:next-step completed in {} step{}", outcome.steps_used, if outcome.steps_used == 1 { "" } else { "s" });
+    let summary = format!(
+        "smoke:next-step completed in {} step{}",
+        outcome.steps_used,
+        if outcome.steps_used == 1 { "" } else { "s" }
+    );
     let data = json!({
         "echoedPhrase": echoed,
         "stepsUsed": outcome.steps_used,
@@ -107,7 +111,9 @@ fn smoke_request(
 
 pub(crate) fn smoke_runtime(runtime: Option<&dyn AgentRuntime>) -> Result<&dyn AgentRuntime> {
     let runtime = runtime.ok_or_else(|| {
-        anyhow::anyhow!("smoke:next-step requires an agent runtime; none configured")
+        anyhow::anyhow!(crate::runtime::missing_agent_runtime_message(
+            "smoke:next-step"
+        ))
     })?;
     ensure_smoke_tools_supported(runtime)?;
     Ok(runtime)
@@ -151,8 +157,8 @@ pub(crate) fn smoke_toolbox() -> crate::runtime::ToolBox {
 mod tests {
     use super::*;
     use crate::runtime::{AgentLoopStep, AgentToolLoopRequest, LoopHistoryEntry, ToolCall};
-    use crate::{TriageOutcome, TriageRequest};
     use crate::V2Config;
+    use crate::{TriageOutcome, TriageRequest};
     use std::sync::Mutex;
 
     struct ScriptedSmokeRuntime {
@@ -199,10 +205,15 @@ mod tests {
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-5.5".to_string());
 
-        assert_eq!(smoke_model(&smoke_context(&config)).unwrap(), "openai:gpt-5.5");
+        assert_eq!(
+            smoke_model(&smoke_context(&config)).unwrap(),
+            "openai:gpt-5.5"
+        );
 
         config.model = None;
-        let err = smoke_model(&smoke_context(&config)).unwrap_err().to_string();
+        let err = smoke_model(&smoke_context(&config))
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("smoke:next-step requires an explicit model"));
     }
 
@@ -227,14 +238,22 @@ mod tests {
             ..V2Config::default()
         };
 
-        let result = run_smoke_next_step_tool(json!({}), &smoke_context(&config), Some(&runtime))
-            .unwrap();
+        let result =
+            run_smoke_next_step_tool(json!({}), &smoke_context(&config), Some(&runtime)).unwrap();
 
-        assert_eq!(result.pointer("/status").and_then(Value::as_str), Some("completed"));
         assert_eq!(
-            result.pointer("/data/echoedPhrase").and_then(Value::as_bool),
+            result.pointer("/status").and_then(Value::as_str),
+            Some("completed")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/echoedPhrase")
+                .and_then(Value::as_bool),
             Some(true)
         );
-        assert_eq!(result.pointer("/costUsd").and_then(Value::as_f64), Some(0.01));
+        assert_eq!(
+            result.pointer("/costUsd").and_then(Value::as_f64),
+            Some(0.01)
+        );
     }
 }

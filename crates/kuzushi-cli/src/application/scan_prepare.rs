@@ -154,6 +154,7 @@ impl ScanCommandSetup {
                 self.bootstrap.requested_input.clone(),
                 Some(&option_store),
             )
+            .map(|input| scan_input_with_run_id(input, &self.bootstrap.run_id))
             .inspect_err(|error| self.record_failure(&self.bootstrap.requested_input, error))
     }
 
@@ -181,6 +182,13 @@ impl ScanCommandSetup {
             run_id: self.bootstrap.run_id,
         }
     }
+}
+
+fn scan_input_with_run_id(mut input: serde_json::Value, run_id: &str) -> serde_json::Value {
+    if let serde_json::Value::Object(object) = &mut input {
+        object.insert("runId".to_string(), serde_json::json!(run_id));
+    }
+    input
 }
 
 fn record_scan_prepare_failure(
@@ -230,4 +238,17 @@ fn record_scan_prepare_failure_at_target(
         registry.loaded_module_specifiers(),
     );
     record_tool_run_failed(record, &error.to_string());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_input_with_run_id_adds_internal_artifact_identity() {
+        let input = scan_input_with_run_id(serde_json::json!({"triage": true}), "scan-123");
+
+        assert_eq!(input["runId"], serde_json::json!("scan-123"));
+        assert_eq!(input["triage"], serde_json::json!(true));
+    }
 }

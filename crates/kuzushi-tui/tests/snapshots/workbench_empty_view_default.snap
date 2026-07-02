@@ -2,28 +2,33 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 33
 ---
-Kuzushi · no target · target:all modules · ○ idle
+ KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
+
+Kuzushi · no target · modules:all modules · o idle
  scan rescan target   options tune scanners   ask ask the agent
+
+ Tab cycle panes · Shift+Tab reverse · j/k move · Enter open finding · Esc back
 
  -- SOURCE · 0 files ---------------------------------------------------------------------------------------------------
        ∅  no source tree
        no finding-bearing files yet — run `scan` to populate the tree.
 
-       ▸ scan                  populate finding-bearing files
+       > scan                  populate finding-bearing files
 
  -- DFD ----------------------------------------------------------------------------------------------------------------
        ∅  no data-flow diagram
        no threat model yet — run `threat-model:build` to map this target's data flows.
 
-       ▸ threat-model:build    map trust zones and flows
+       > threat-model:build    map trust zones and flows
 
- -- FINDINGS · 0 · 0 triaged · 0 pending -------------------------------------------------------------------------------
+ -- FINDINGS · 0 · 0 triaged · 0 pending < focus -----------------------------------------------------------------------
 all:0  crit:0  high:0  med:0  low:0
        ∅  no findings yet
        the findings ledger is empty for this target.
+       ledger: .kuzushi/v2/findings.sqlite3
 
-       ▸ scan                  runs the umbrella scanner over the target.
-       ▸ context build         optional: index the repo first for richer analysis.
+       > scan                  runs the umbrella scanner over the target.
+       > context build         optional: index the repo first for richer analysis.
 
  -- DETAILS ------------------------------------------------------------------------------------------------------------
-no finding selected — press Enter on a FINDINGS row to inspect it.
+no finding selected — move through FINDINGS to preview details here.

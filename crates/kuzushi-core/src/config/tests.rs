@@ -3,6 +3,32 @@ mod tests {
     use super::super::*;
     use std::{env, fs};
 
+    struct EnvVarGuard {
+        key: &'static str,
+        prior: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &std::path::Path) -> Self {
+            let prior = env::var_os(key);
+            unsafe {
+                env::set_var(key, value);
+            }
+            Self { key, prior }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prior {
+                    Some(value) => env::set_var(self.key, value),
+                    None => env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
     #[test]
     fn loads_defaults_without_files() {
         let tmp = tempfile::tempdir().unwrap();
@@ -142,6 +168,26 @@ prompt_variant = "   "
     }
 
     #[test]
+    fn persists_global_model_selection_to_global_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("HOME", tmp.path());
+
+        let path = persist_global_model_selection("openai:gpt-5.5", Some("xhigh")).unwrap();
+        let body = fs::read_to_string(&path).unwrap();
+
+        assert_eq!(path, tmp.path().join(".kuzushi/v2/config.toml"));
+        assert!(body.contains("model = \"openai:gpt-5.5\""));
+        assert!(body.contains("thinking_level = \"xhigh\""));
+        let loaded = load_config(ConfigPaths {
+            home_dir: tmp.path().to_path_buf(),
+            target_dir: None,
+        })
+        .unwrap();
+        assert_eq!(loaded.model.as_deref(), Some("openai:gpt-5.5"));
+        assert_eq!(loaded.runtime.thinking_level.as_deref(), Some("xhigh"));
+    }
+
+    #[test]
     fn config_hash_is_stable_sha256_label() {
         let config = V2Config {
             model: Some("openai:gpt-test".to_string()),
@@ -168,9 +214,9 @@ prompt_variant = "   "
 
     #[test]
     fn project_config_overrides_only_safe_fields() {
-        // A target repo's `.kuzushi/v2/config.toml` may override the model
-        // string but must not be able to redirect runtime or operator
-        // settings — see `reject_untrusted_runtime_overrides`.
+        // A target repo's `.kuzushi/v2/config.toml` may set workflow
+        // presentation knobs, but model/runtime/operator settings stay
+        // operator-owned.
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
         let target = tmp.path().join("repo");
@@ -189,7 +235,8 @@ api_key_env = "OPENAI_API_KEY"
         fs::write(
             target.join(".kuzushi/v2/config.toml"),
             r#"
-model = "openai:gpt-4.1"
+[phases]
+stop_after = "hunt"
 "#,
         )
         .unwrap();
@@ -200,7 +247,8 @@ model = "openai:gpt-4.1"
         })
         .unwrap();
 
-        assert_eq!(config.model.as_deref(), Some("openai:gpt-4.1"));
+        assert_eq!(config.model.as_deref(), Some("openai:gpt-4o-mini"));
+        assert_eq!(config.phases.stop_after, Some(GuidedPhase::Hunt));
         // The operator's api_key_env is preserved; project file cannot touch it.
         assert_eq!(config.runtime.api_key_env, "OPENAI_API_KEY");
     }
@@ -464,10 +512,10 @@ trusted_workflow_auto_accept = true
     }
 
     #[test]
-    fn project_config_accepts_model_override() {
+    fn project_config_rejects_model_override() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
-        let target = tmp.path().join("safe-target");
+        let target = tmp.path().join("evil-target");
         fs::create_dir_all(target.join(".kuzushi/v2")).unwrap();
         fs::write(
             target.join(".kuzushi/v2/config.toml"),
@@ -476,12 +524,12 @@ trusted_workflow_auto_accept = true
         )
         .unwrap();
 
-        let config = load_config(ConfigPaths {
+        let err = load_config(ConfigPaths {
             home_dir: home,
             target_dir: Some(target),
         })
-        .unwrap();
-        assert_eq!(config.model.as_deref(), Some("openai:gpt-5"));
+        .unwrap_err();
+        assert!(err.to_string().contains("model"));
     }
 
     #[test]

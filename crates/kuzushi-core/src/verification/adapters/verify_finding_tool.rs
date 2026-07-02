@@ -31,8 +31,7 @@ pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> 
     }
 
     let runtime = require_verify_finding_runtime(request.runtime)?;
-    let model =
-        crate::runtime::require_configured_model("verify:finding", request.configured_model)?;
+    let model = verify_finding_model(&request.input, request.configured_model)?;
     let prompt = build_verify_prompt(&finding, input.prompt_template.as_deref())?;
 
     // Each pass is an independent adversarial verifier with no shared
@@ -52,6 +51,17 @@ pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> 
     let result = super::verify_consensus::combine_verify_passes(passes);
 
     Ok(verify_finding_response(result))
+}
+
+fn verify_finding_model(input: &Value, configured_model: Option<&str>) -> Result<String> {
+    crate::runtime::resolve_explicit_model(
+        "verify:finding",
+        input
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        configured_model,
+    )
 }
 
 fn run_one_verify_pass(
@@ -91,7 +101,8 @@ fn missing_finding_response(fingerprint: &str) -> Value {
 }
 
 fn untriaged_finding_response(fingerprint: &str) -> Value {
-    let output = format!("[-] Finding '{fingerprint}' has no triage verdict. Run triage:run first.");
+    let output =
+        format!("[-] Finding '{fingerprint}' has no triage verdict. Run triage:run first.");
     crate::module_result::failed_output_result(
         "verify:finding failed",
         output,

@@ -3,7 +3,10 @@ mod tests {
     use crate::adapters::auth_bridge::{
         bridge_ping_error, bridge_ping_summary, parse_bridge_stdout, run_auth_ping_bridge,
     };
-    use crate::adapters::auth_oauth::{anthropic_oauth_readiness_message, auth_ping_model};
+    use crate::adapters::auth_oauth::{
+        anthropic_missing_credential_message, anthropic_oauth_readiness_message, auth_ping_model,
+        openai_missing_credential_message,
+    };
     use crate::adapters::auth_ping::{auth_ping_provider_kind, AuthPingLog};
     use crate::application::config::{config_command, ensure_config_init_allowed};
     use crate::application::run_tool::{
@@ -16,18 +19,22 @@ mod tests {
     use crate::application::scan::{scan_scope_body, scan_tool_input, scan_worktree_suffix};
     use crate::application::suppressions::{suppressions_command_output, suppressions_plain_lines};
     use crate::command::{ConfigCommand, McpBackend, ScanModeArg};
-    use crate::doctor::{check_model_config, deterministic_capability_checks, DoctorStatus};
+    use crate::doctor::{
+        check_auth_env, check_model_config, deterministic_capability_checks, DoctorStatus,
+    };
     use crate::mcp::{mcp_health_spawn_error, mcp_spawn_error};
     use crate::presentation::{
-        ci_line, format_duration, plain_output_requested, scan_json_output, scan_started_body,
-        shell_startup_progress_messages, should_emit_shell_startup_progress,
+        ci_line, format_duration, plain_output_requested, scan_json_output,
+        scan_plain_artifact_footer, scan_started_body, shell_startup_progress_messages,
+        should_emit_shell_startup_progress,
     };
     use crate::presentation::{
         parse_trace_json_lines, run_summary_plain, runs_list_output, runs_show_output,
         runs_trace_output,
     };
     use crate::tool_requirements::{
-        tool_defaults_to_workspace, tool_needs_finding_store, tool_needs_runtime,
+        run_tool_workspace, run_tool_workspace_for_input, tool_defaults_to_workspace,
+        tool_needs_finding_store, tool_needs_runtime,
     };
     use crate::tool_run_artifacts::{fail_cli_tool_run, finish_cli_tool_run};
     use kuzushi_core::{
@@ -35,6 +42,40 @@ mod tests {
         WorkspaceTarget,
     };
     use std::path::{Path, PathBuf};
+
+    struct EnvVarGuard {
+        key: &'static str,
+        prior: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn unset(key: &'static str) -> Self {
+            let prior = std::env::var_os(key);
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, prior }
+        }
+
+        fn set(key: &'static str, value: &str) -> Self {
+            let prior = std::env::var_os(key);
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, prior }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prior {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
 
     #[test]
     fn ci_line_uses_relative_timestamp_and_prefix() {
@@ -567,6 +608,12 @@ mod tests {
     }
 
     #[test]
+    fn auth_ping_missing_credential_messages_name_export_commands() {
+        assert!(anthropic_missing_credential_message().contains("export ANTHROPIC_API_KEY="));
+        assert!(openai_missing_credential_message().contains("export OPENAI_API_KEY="));
+    }
+
+    #[test]
     fn doctor_model_check_uses_shared_model_policy() {
         let mut config = kuzushi_core::V2Config::default();
         config.model = None;
@@ -588,6 +635,54 @@ mod tests {
 
         assert_eq!(check.status, DoctorStatus::Fail);
         assert!(check.detail.contains("provider:model"));
+    }
+
+    #[test]
+    fn doctor_auth_check_matches_configured_model_provider() {
+        let _openai = EnvVarGuard::unset("OPENAI_API_KEY");
+        let _anthropic = EnvVarGuard::set("ANTHROPIC_API_KEY", "hidden");
+        let mut config = kuzushi_core::V2Config::default();
+        config.model = Some("openai:gpt-5.5".to_string());
+
+        let check = check_auth_env(&config);
+
+        assert_eq!(check.status, DoctorStatus::Warn);
+        assert!(check.detail.contains("OPENAI_API_KEY"));
+        assert!(!check.detail.contains("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn doctor_auth_check_reads_openai_oauth_for_codex_models() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("HOME", tmp.path().to_str().unwrap());
+        let mut config = kuzushi_core::V2Config::default();
+        config.model = Some("openai-codex:gpt-5.4".to_string());
+
+        let missing = check_auth_env(&config);
+        assert_eq!(missing.status, DoctorStatus::Warn);
+        assert!(missing
+            .detail
+            .contains("OpenAI OAuth credentials not found"));
+
+        let credentials_path = kuzushi_core::config::default_oauth_credentials_path(tmp.path());
+        std::fs::create_dir_all(credentials_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &credentials_path,
+            serde_json::json!({
+                "openai-codex": {
+                    "access": "hidden-access",
+                    "refresh": "hidden-refresh",
+                    "expires": u64::MAX
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let ready = check_auth_env(&config);
+        assert_eq!(ready.status, DoctorStatus::Ok);
+        assert!(ready.detail.contains("OpenAI OAuth credentials are stored"));
+        assert!(!ready.detail.contains("hidden-access"));
     }
 
     #[test]
@@ -697,6 +792,8 @@ mod tests {
         assert!(!tool_defaults_to_workspace("clang.health"));
 
         assert!(tool_needs_finding_store("variant:hunt"));
+        assert!(tool_needs_finding_store("variant:lift-pattern"));
+        assert!(tool_needs_finding_store("offense:chain"));
         assert!(tool_needs_finding_store("offense-review:threat-hunt"));
         assert!(tool_needs_finding_store("taint-iris-next:finding-review"));
         assert!(!tool_needs_finding_store("taint-iris-next:dataflow-plan"));
@@ -705,6 +802,10 @@ mod tests {
         ));
         assert!(tool_needs_finding_store("module-recommender:recommend"));
         assert!(tool_needs_finding_store("prompt-armor:scan"));
+        assert!(tool_needs_finding_store("cargo-audit:scan"));
+        assert!(tool_needs_finding_store("sbom-scan:scan"));
+        assert!(tool_needs_finding_store("secret-scan:scan"));
+        assert!(tool_needs_finding_store("android-apk:scan"));
         assert!(!tool_needs_finding_store("context-lite:index"));
 
         assert!(tool_needs_runtime("deep-audit:run", &serde_json::json!({})));
@@ -716,6 +817,21 @@ mod tests {
             "sast:scan",
             &serde_json::json!({"whiteboxStatic": true})
         ));
+    }
+
+    #[test]
+    fn run_tool_workspace_requires_explicit_target_for_workspace_tools() {
+        let error = run_tool_workspace("sast:scan", None)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("--target <path>"), "{error}");
+        assert!(
+            run_tool_workspace_for_input("iac-scan:scan", None, r#"{"target":"missing"}"#)
+                .unwrap()
+                .is_none()
+        );
+        assert!(run_tool_workspace("clang.health", None).unwrap().is_none());
     }
 
     #[test]
@@ -761,6 +877,11 @@ mod tests {
         let summary = scan_json_output(&workspace, &data);
         assert_eq!(summary["findingsCount"], serde_json::json!(2));
         assert!(summary["db"].as_str().unwrap().contains(".kuzushi"));
+
+        let footer = scan_plain_artifact_footer(&workspace, &data);
+        assert!(footer.contains(".kuzushi/runs/run-1"));
+        assert!(footer.contains(".kuzushi/v2/findings.sqlite3"));
+        assert!(footer.contains("kuzushi runs show run-1"));
     }
 
     #[test]

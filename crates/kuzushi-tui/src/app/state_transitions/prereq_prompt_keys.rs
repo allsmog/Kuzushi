@@ -27,7 +27,7 @@ fn prereq_prompt_action(code: KeyCode) -> Option<PrereqPlanAction> {
         'a' | 'y' => Some(PrereqPlanAction::Approve),
         'r' => Some(PrereqPlanAction::Reuse),
         'g' => Some(PrereqPlanAction::Regenerate),
-        'c' | 'n' => Some(PrereqPlanAction::Cancel),
+        'n' => Some(PrereqPlanAction::Cancel),
         _ => None,
     }
 }

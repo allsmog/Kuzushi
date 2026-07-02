@@ -1,4 +1,8 @@
 use super::*;
+use kuzushi_core::workspace::{
+    save_project_model_document, ProjectModelDocument, ProjectModelSection,
+    ProjectModelSectionOrigin, PROJECT_MODEL_SCHEMA_VERSION, ROOT_SCOPE_ID,
+};
 use kuzushi_core::V2Config;
 
 #[test]
@@ -149,24 +153,24 @@ fn project_model_prefers_persisted_scope_document_rows() {
     std::fs::create_dir_all(context_path.parent().unwrap()).unwrap();
     std::fs::write(&context_path, "{\"old\":true}\n").unwrap();
     let old_hash = kuzushi_core::static_evidence::static_content_hash("{\"old\":true}\n");
-    let document = kuzushi_core::ProjectModelDocument {
-        schema_version: kuzushi_core::PROJECT_MODEL_SCHEMA_VERSION,
-        scope_id: kuzushi_core::ROOT_SCOPE_ID.to_string(),
+    let document = ProjectModelDocument {
+        schema_version: PROJECT_MODEL_SCHEMA_VERSION,
+        scope_id: ROOT_SCOPE_ID.to_string(),
         scope_path: ".".to_string(),
         built_at_revision: None,
         sections: vec![
-            kuzushi_core::ProjectModelSection {
+            ProjectModelSection {
                 key: "context-feed".to_string(),
-                origin: kuzushi_core::ProjectModelSectionOrigin::Local,
+                origin: ProjectModelSectionOrigin::Local,
                 summary: "context snapshot present".to_string(),
                 source_path: Some(".kuzushi/context-snapshot.json".to_string()),
                 content_hash: Some(old_hash),
                 built_at_revision: None,
                 stale: false,
             },
-            kuzushi_core::ProjectModelSection {
+            ProjectModelSection {
                 key: "inventory".to_string(),
-                origin: kuzushi_core::ProjectModelSectionOrigin::Inherited,
+                origin: ProjectModelSectionOrigin::Inherited,
                 summary: "inherited inventory summary".to_string(),
                 source_path: None,
                 content_hash: None,
@@ -175,7 +179,7 @@ fn project_model_prefers_persisted_scope_document_rows() {
             },
         ],
     };
-    kuzushi_core::save_project_model_document(temp.path(), &document).unwrap();
+    save_project_model_document(temp.path(), &document).unwrap();
     std::fs::write(&context_path, "{\"new\":true}\n").unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.target = Some(temp.path().to_path_buf());

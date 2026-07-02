@@ -6,10 +6,10 @@ assertion_line: 33
 
 MODULES · 41 modules
 
-▸ NEXT Run sast — Full SAST pipeline: context, scanners, AI triage, verification, patch, and report
+> NEXT Run sast — Full SAST pipeline: context, scanners, AI triage, verification, patch, and report
 
 -- OFFENSE find vulnerabilities by scanning code, dependencies, and runtime surface ------------------------------------
-▌ agentic-sast            LLM-driven detectors that reason about data flow and intent rather than pattern-match.
+# agentic-sast            LLM-driven detectors that reason about data flow and intent rather than pattern-match.
   cargo-audit             Run cargo-audit against Rust lockfiles and persist advisory findings.
   codeql                  GitHub's taint-query semantic analyzer: deeper than pattern scanners but slower.
   dep-hygiene             Check dependency manifests for stale, vulnerable, or policy-risky packages.

@@ -60,7 +60,12 @@ fn uses_activity_frame_only_for_activity_view() {
 #[test]
 fn plain_render_mode_selects_specialized_plain_views() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    assert_eq!(plain_render_mode(&app), PlainRenderMode::LineBased);
+    assert_eq!(
+        plain_render_mode(&app),
+        PlainRenderMode::LineBased {
+            include_context_strip: false
+        }
+    );
 
     app.shell_view = ShellView::Help;
     assert_eq!(plain_render_mode(&app), PlainRenderMode::Help);
@@ -78,6 +83,20 @@ fn plain_render_mode_selects_specialized_plain_views() {
     assert!(matches!(
         plain_render_mode(&app),
         PlainRenderMode::Options(view) if view.tool_name == "sast:scan"
+    ));
+
+    app.shell_view = ShellView::Workbench;
+    assert_eq!(
+        plain_render_mode(&app),
+        PlainRenderMode::LineBased {
+            include_context_strip: true
+        }
+    );
+
+    app.shell_view = ShellView::ModelPicker;
+    assert!(matches!(
+        plain_render_mode(&app),
+        PlainRenderMode::InteractiveOnly(model) if model.title == "MODEL PICKER"
     ));
 }
 

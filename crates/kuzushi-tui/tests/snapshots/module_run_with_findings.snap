@@ -2,14 +2,14 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 239
 ---
- KUZUSHI mode:run · target:none · ctx:not built · model:unconfigured · stage:⠿ searching
+ KUZUSHI mode:run · target:none · ctx:not built · model:unconfigured · stage:* searching
 
-⠿ ./acme-checkout · running: agentic-sast tracing · 1 finding · run run-abc1
+* ./acme-checkout · running: agentic-sast tracing · 1 finding · run run-abc1
 
  -- SCAN PROGRESS ------------------------------------------------------------------------------------------------------
-✓ context:build           ready
++ context:build           ready
 ⏵ sast:scan               agentic-sast tracing
-○ triage:run              queued after scan
+o triage:run              queued after scan
 
  -- FINDINGS · 1 TRIAGED · 0 PENDING -----------------------------------------------------------------------------------
  F-0001    CRITICAL sql injection via order_id concatenation                                      apps/api/orders.rs:142

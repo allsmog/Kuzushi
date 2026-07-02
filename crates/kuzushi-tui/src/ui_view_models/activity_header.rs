@@ -81,7 +81,7 @@ fn taskless_progress(live_tool: Option<&ActivityLiveTool>) -> String {
             tool.elapsed_secs,
             queued_plan_segment(tool),
         ),
-        None => "no DAG tasks — streaming tool output".to_string(),
+        None => "no task rows — streaming tool output".to_string(),
     }
 }
 
@@ -183,7 +183,7 @@ mod tests {
         let model = activity_header_model(&session, None, None);
         assert!(model
             .summary_title
-            .contains("no DAG tasks — streaming tool output"));
+            .contains("no task rows — streaming tool output"));
         assert!(!model.summary_title.contains("0/0 done"));
         // With no TASKS pane on screen the stored Left focus is meaningless;
         // the label must follow the only visible pane.

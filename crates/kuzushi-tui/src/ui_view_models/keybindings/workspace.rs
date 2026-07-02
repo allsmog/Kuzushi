@@ -36,6 +36,7 @@ fn workspace_status_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     let mut bindings = Vec::new();
     push_view_keybindings(&mut bindings, app);
     bindings.push(bind("workspace status", "summary"));
+    bindings.push(bind("workspace scope init", "scope file"));
     bindings.push(bind("workspace export", "export findings"));
     bindings.push(bind("scan <target>", "select target"));
     bindings

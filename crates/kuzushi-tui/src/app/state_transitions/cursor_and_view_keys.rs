@@ -17,16 +17,11 @@ impl ShellApp {
         if !self.input.is_empty() {
             return false;
         }
-        let previous_view = self.shell_view.clone();
         // First view-specific handler that claims the key wins; the hotkey
         // fallback is last so per-view keys take precedence.
-        let handled = EMPTY_INPUT_VIEW_KEY_HANDLERS
+        EMPTY_INPUT_VIEW_KEY_HANDLERS
             .iter()
-            .any(|handler| handler(self, key, modifiers));
-        if handled && self.shell_view != previous_view {
-            self.last_cleared_input = None;
-        }
-        handled
+            .any(|handler| handler(self, key, modifiers))
     }
 
     /// Arrow-key / single-key view hotkeys, tried after the per-view handlers.
@@ -73,18 +68,18 @@ impl ShellApp {
         if !self.input.is_empty() {
             return false;
         }
-        // Orbit keys only apply on the 3D attack-surface page; on 2D pages they
-        // fall through. Tab/space/r/o/Esc/q work on every page.
+        // 3D controls only apply on the attack-surface page; on 2D pages they
+        // fall through. Tab/Shift+Tab/Esc/q work on every page.
         let is_3d = matches!(self.shell_view, ShellView::Scene(page) if page.is_3d());
         match key.code {
-            KeyCode::Tab | KeyCode::Char('n') => self.cycle_scene(1),
-            KeyCode::BackTab | KeyCode::Char('N') => self.cycle_scene(-1),
+            KeyCode::Tab => self.cycle_scene(1),
+            KeyCode::BackTab => self.cycle_scene(-1),
             KeyCode::Char(' ') | KeyCode::Char('p') if is_3d => {
                 self.scene_paused = !self.scene_paused
             }
             KeyCode::Char('r') if is_3d => self.reset_scene_orientation(),
             // Explicit exits: the gallery is a leaf view, never a trap.
-            KeyCode::Esc | KeyCode::Char('q') | KeyCode::Char('o') => self.go_back(),
+            KeyCode::Esc | KeyCode::Char('q') => self.go_back(),
             KeyCode::Char('h') if is_3d => self.nudge_scene_yaw(-1.0),
             KeyCode::Char('l') if is_3d => self.nudge_scene_yaw(1.0),
             KeyCode::Char('k') if is_3d => self.nudge_scene_pitch(1.0),

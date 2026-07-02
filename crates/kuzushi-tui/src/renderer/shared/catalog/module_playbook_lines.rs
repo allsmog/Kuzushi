@@ -216,6 +216,10 @@ fn append_run_rows(
     lines.push(playbook_row("run .", &fit(&resolution, width as usize)));
     lines.push(playbook_row("tool", &fit(&run, width as usize)));
     lines.push(playbook_row("needs", &fit(playbook.needs, width as usize)));
+    lines.push(playbook_row(
+        "options",
+        &fit(&options_row_text(primary_tool), width as usize),
+    ));
     lines.push(playbook_row("output", &fit(&output, width as usize)));
 }
 
@@ -234,6 +238,17 @@ fn run_resolution(primary_tool: &str) -> String {
     format!(
         "dispatches {primary_tool} (shell); terminal: kuzushi --target . run {primary_tool} --input '{{}}'"
     )
+}
+
+fn options_row_text(primary_tool: &str) -> String {
+    if primary_tool == "sast:scan" {
+        return "options sast:scan before scan; show advanced sast:scan for budgets/model"
+            .to_string();
+    }
+    if primary_tool == "no-tool" {
+        return "options . when this module exposes tunable tool knobs".to_string();
+    }
+    "options . before run; show advanced . for hidden knobs".to_string()
 }
 
 fn append_help_row(lines: &mut Vec<Line<'static>>, inspect: &str) {

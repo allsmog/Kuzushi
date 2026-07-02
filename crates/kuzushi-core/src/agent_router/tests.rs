@@ -123,7 +123,7 @@ primary = "anthropic:claude-opus-4-7"
     }
 
     #[test]
-    fn project_local_overrides_home() {
+    fn project_local_models_toml_is_rejected() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
         let target = tmp.path().join("project");
@@ -141,12 +141,14 @@ primary = "anthropic:home-model"
 primary = "openai:project-model"
 "#,
         );
-        let r = AgentRouter::load(&ConfigPaths {
+        let err = AgentRouter::load(&ConfigPaths {
             home_dir: home,
             target_dir: Some(target),
         })
-        .unwrap();
-        assert_eq!(r.pick(AgentRole::DeepAuditor, 0), Some("openai:project-model"));
+        .unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("project models file"), "{message}");
+        assert!(message.contains("not trusted"), "{message}");
     }
 
     #[test]
@@ -345,9 +347,10 @@ primary = "gpt-5.5"
     fn option_store_override_takes_precedence_over_role_map() {
         let inner = RecorderRuntime::new();
         let mut router = AgentRouter::empty();
-        router
-            .routes
-            .insert(AgentRole::DeepAuditor, ModelRoute::new("anthropic:toml-model"));
+        router.routes.insert(
+            AgentRole::DeepAuditor,
+            ModelRoute::new("anthropic:toml-model"),
+        );
 
         let mut store = ToolOptionStore::new();
         store.set_value(
@@ -367,7 +370,12 @@ primary = "gpt-5.5"
         routed
             .query_for_role(
                 AgentRole::DeepAuditor,
-                AgentQueryRequest::new("openai:operator-default", PathBuf::from("/tmp"), "sys", "user"),
+                AgentQueryRequest::new(
+                    "openai:operator-default",
+                    PathBuf::from("/tmp"),
+                    "sys",
+                    "user",
+                ),
             )
             .unwrap();
         assert_eq!(
@@ -404,7 +412,12 @@ primary = "gpt-5.5"
         let err = routed
             .query_for_role(
                 AgentRole::DeepAuditor,
-                AgentQueryRequest::new("openai:operator-default", PathBuf::from("/tmp"), "sys", "user"),
+                AgentQueryRequest::new(
+                    "openai:operator-default",
+                    PathBuf::from("/tmp"),
+                    "sys",
+                    "user",
+                ),
             )
             .unwrap_err();
         let message = format!("{err:#}");

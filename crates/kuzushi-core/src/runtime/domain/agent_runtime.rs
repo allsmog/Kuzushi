@@ -64,10 +64,9 @@ pub trait AgentRuntime: Send + Sync {
         Ok(())
     }
 
-    /// Resolve a tier handle (`Cheap`/`Mid`/`Deep`) to a concrete model
-    /// name. Default: pass-through to whatever the operator
-    /// configured. Providers that can route across model classes
-    /// override this so multi-stage triage can ask for a cheap pass.
+    /// Resolve a tier label (`Cheap`/`Mid`/`Deep`) to the concrete model.
+    /// This must preserve the operator-configured model unless an explicit
+    /// operator-controlled route chooses a different model before the call.
     fn model_for_tier(&self, _tier: ModelTier, configured: &str) -> String {
         configured.to_string()
     }

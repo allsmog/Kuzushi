@@ -9,22 +9,22 @@ pub(in crate::modules) fn run_android_apk_scan(
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
     let started = Instant::now();
-    emit_step(ctx, "tool", "scan", &format!("android-apk:scan start · workspace={}", target.display()));
+    emit_android_scan_start(ctx, &target);
     let plan = match ScanPlan::from_input(&input, &target) {
         Ok(plan) => plan,
         Err(error) => return Ok(failed_tool_output("android-apk:scan", &target, error)),
     };
     let prepare_outcome = run_prepare_stage(&plan, ctx)?;
     if !stage_ok(&prepare_outcome) {
-        return Ok(early_exit_output(&target, "prepare", prepare_outcome, started));
+        return Ok(early_exit_output(
+            &target,
+            "prepare",
+            prepare_outcome,
+            started,
+        ));
     }
     let stage_results = run_scan_stages(&plan, ctx);
-    emit_step(
-        ctx,
-        "done",
-        "scan",
-        &format!("android-apk:scan complete · {} stages", stage_results.len() + 1),
-    );
+    emit_android_scan_done(ctx, stage_results.len() + 1);
     Ok(scan_pipeline_output(
         &plan,
         prepare_outcome,
@@ -87,8 +87,23 @@ fn run_prepare_stage(plan: &ScanPlan, ctx: &ToolExecutionContext<'_>) -> Result<
 }
 
 fn run_scan_stages(plan: &ScanPlan, ctx: &ToolExecutionContext<'_>) -> Vec<StageOutcome> {
-    let mut stages: Vec<StageOutcome> = Vec::new();
-    push_stage(&mut stages, "manifest-scan", run_manifest_scan(plan.workspace_input.clone(), ctx));
+    let mut stages = run_fixed_scan_stages(plan, ctx);
+    push_optional_scan_stages(&mut stages, plan, ctx);
+    push_stage(
+        &mut stages,
+        "sast-handoff",
+        run_sast_handoff(plan.workspace_input.clone(), ctx),
+    );
+    stages
+}
+
+fn run_fixed_scan_stages(plan: &ScanPlan, ctx: &ToolExecutionContext<'_>) -> Vec<StageOutcome> {
+    let mut stages = Vec::new();
+    push_stage(
+        &mut stages,
+        "manifest-scan",
+        run_manifest_scan(plan.workspace_input.clone(), ctx),
+    );
     push_stage(
         &mut stages,
         "network-security-config",
@@ -99,21 +114,35 @@ fn run_scan_stages(plan: &ScanPlan, ctx: &ToolExecutionContext<'_>) -> Vec<Stage
         "fileprovider-scan",
         run_fileprovider_scan(plan.workspace_input.clone(), ctx),
     );
+    stages
+}
+
+fn push_optional_scan_stages(
+    stages: &mut Vec<StageOutcome>,
+    plan: &ScanPlan,
+    ctx: &ToolExecutionContext<'_>,
+) {
     if !plan.skip_code {
-        push_stage(&mut stages, "code-scan", run_code_scan(plan.workspace_input.clone(), ctx));
+        push_stage(
+            stages,
+            "code-scan",
+            run_code_scan(plan.workspace_input.clone(), ctx),
+        );
     }
     if !plan.skip_native {
-        push_stage(&mut stages, "native-libs", run_native_libs_scan(plan.workspace_input.clone(), ctx));
+        push_stage(
+            stages,
+            "native-libs",
+            run_native_libs_scan(plan.workspace_input.clone(), ctx),
+        );
     }
     if !plan.skip_hybrid {
-        push_stage(&mut stages, "hybrid-detect", run_hybrid_detect(plan.workspace_input.clone(), ctx));
+        push_stage(
+            stages,
+            "hybrid-detect",
+            run_hybrid_detect(plan.workspace_input.clone(), ctx),
+        );
     }
-    push_stage(
-        &mut stages,
-        "sast-handoff",
-        run_sast_handoff(plan.workspace_input.clone(), ctx),
-    );
-    stages
 }
 
 fn push_stage(stages: &mut Vec<StageOutcome>, name: &'static str, result: Result<Value>) {
@@ -135,13 +164,35 @@ struct StageOutcome {
 }
 
 fn stage_ok(stage: &StageOutcome) -> bool {
-    stage.value.get("ok").and_then(Value::as_bool).unwrap_or(false)
+    stage
+        .value
+        .get("ok")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 fn emit_step(ctx: &ToolExecutionContext<'_>, kind: &str, verb: &str, message: &str) {
     if let Some(trace) = ctx.trace {
         let _ = trace.step(kind, verb, message.to_string()).emit();
     }
+}
+
+fn emit_android_scan_start(ctx: &ToolExecutionContext<'_>, target: &Path) {
+    emit_step(
+        ctx,
+        "tool",
+        "scan",
+        &format!("android-apk:scan start · workspace={}", target.display()),
+    );
+}
+
+fn emit_android_scan_done(ctx: &ToolExecutionContext<'_>, stage_count: usize) {
+    emit_step(
+        ctx,
+        "done",
+        "scan",
+        &format!("android-apk:scan complete · {stage_count} stages"),
+    );
 }
 
 fn scan_pipeline_output(
@@ -255,7 +306,11 @@ fn stage_to_json(stage: &StageOutcome) -> Value {
 }
 
 fn stage_findings_array(value: &Value) -> Vec<Value> {
-    value.pointer("/data/findings").and_then(Value::as_array).cloned().unwrap_or_default()
+    value
+        .pointer("/data/findings")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -271,7 +326,10 @@ mod tests {
             },
             "errors": if ok { json!([]) } else { json!(["boom"]) },
         });
-        StageOutcome { name, value: payload }
+        StageOutcome {
+            name,
+            value: payload,
+        }
     }
 
     #[test]
@@ -313,8 +371,14 @@ mod tests {
             "skipCode": true,
         });
         let plan = ScanPlan::from_input(&input, &target).unwrap();
-        assert_eq!(plan.apk_input.get("apk"), Some(&Value::String("./app.apk".into())));
-        assert_eq!(plan.apk_input.get("decompiler"), Some(&Value::String("jadx".into())));
+        assert_eq!(
+            plan.apk_input.get("apk"),
+            Some(&Value::String("./app.apk".into()))
+        );
+        assert_eq!(
+            plan.apk_input.get("decompiler"),
+            Some(&Value::String("jadx".into()))
+        );
         assert!(plan.skip_native);
         assert!(plan.skip_code);
         assert!(!plan.skip_hybrid);

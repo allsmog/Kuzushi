@@ -71,11 +71,12 @@ impl ShellApp {
         };
         self.config.model = Some(choice.id.to_string());
         self.session_thinking_level = Some(choice.thinking_level.to_string());
+        self.persist_global_model_choice(choice.id, Some(choice.thinking_level));
         self.shell_view = ShellView::Config;
         self.log(
             "model",
             format!(
-                "{} / {} selected (session only; no fallback model) — showing config, Esc to go back",
+                "{} / {} selected (no fallback model) — showing config, Esc to go back",
                 model_choice_display_selector(choice),
                 choice.thinking_level
             ),

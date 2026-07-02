@@ -153,7 +153,9 @@ fn dfd_kind(raw: &str) -> DfdKind {
 pub(crate) fn dfd_model(app: &ShellApp) -> DfdModel {
     let Some(doc) = super::threat_model_doc(app) else {
         return DfdModel {
-            empty_hint: Some("no threat model yet — run `threat-model` to populate".to_string()),
+            empty_hint: Some(
+                "no threat model yet — run `threat-model:build` to populate".to_string(),
+            ),
             ..Default::default()
         };
     };

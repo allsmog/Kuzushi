@@ -87,7 +87,10 @@ mod tests {
             .execute_tool("router:show", json!({}), &ctx)
             .unwrap();
 
-        assert_eq!(result.pointer("/status").and_then(Value::as_str), Some("completed"));
+        assert_eq!(
+            result.pointer("/status").and_then(Value::as_str),
+            Some("completed")
+        );
         assert_eq!(
             result.pointer("/data/configModel").and_then(Value::as_str),
             Some("openai:gpt-4.1")
@@ -142,8 +145,15 @@ mod tests {
             result.pointer("/status").and_then(Value::as_str),
             Some("completed")
         );
-        assert_eq!(result.pointer("/data/active").and_then(Value::as_bool), Some(false));
-        assert!(result.pointer("/output").and_then(Value::as_str).unwrap().contains("no active workspace"));
+        assert_eq!(
+            result.pointer("/data/active").and_then(Value::as_bool),
+            Some(false)
+        );
+        assert!(result
+            .pointer("/output")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("no active workspace"));
     }
 
     #[test]
@@ -174,7 +184,11 @@ mod tests {
         assert_eq!(prepared["model"], json!("openai:gpt-test"));
 
         let error = registry
-            .prepare_tool_input("secret-scan:scan", json!({"model": "openai:gpt-test"}), None)
+            .prepare_tool_input(
+                "secret-scan:scan",
+                json!({"model": "openai:gpt-test"}),
+                None,
+            )
             .unwrap_err();
         assert!(error.to_string().contains("unknown option \"model\""));
     }
@@ -266,8 +280,14 @@ export default {
             .execute_tool("dyn:echo", json!({ "message": "hello" }), &ctx)
             .unwrap();
 
-        assert_eq!(output.pointer("/status").and_then(Value::as_str), Some("completed"));
-        assert_eq!(output.pointer("/data/message").and_then(Value::as_str), Some("hello"));
+        assert_eq!(
+            output.pointer("/status").and_then(Value::as_str),
+            Some("completed")
+        );
+        assert_eq!(
+            output.pointer("/data/message").and_then(Value::as_str),
+            Some("hello")
+        );
         assert!(registry.loaded_module_specifiers().contains(&specifier));
     }
 
@@ -342,14 +362,21 @@ export default {
             .execute_tool("sdk:sum", json!({ "left": "2", "right": 3 }), &ctx)
             .unwrap();
 
-        assert_eq!(output.pointer("/data/total").and_then(Value::as_i64), Some(5));
+        assert_eq!(
+            output.pointer("/data/total").and_then(Value::as_i64),
+            Some(5)
+        );
         assert_eq!(
             output.pointer("/data/mode").and_then(Value::as_str),
             Some("auto")
         );
 
         let error = registry
-            .prepare_tool_input("sdk:sum", json!({ "left": 1, "right": 2, "extra": true }), None)
+            .prepare_tool_input(
+                "sdk:sum",
+                json!({ "left": 1, "right": 2, "extra": true }),
+                None,
+            )
             .unwrap_err()
             .to_string();
         assert!(error.contains("unknown option \"extra\""), "{error}");
@@ -671,7 +698,10 @@ export default {
             );
         }
 
-        let visible_tools = registry.tools().map(|tool| tool.name.as_str()).collect::<Vec<_>>();
+        let visible_tools = registry
+            .tools()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>();
         for hidden_tool in [
             "carlini-threat-hunt:run",
             "chrome-rce:scan",

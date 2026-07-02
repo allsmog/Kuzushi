@@ -5,7 +5,7 @@
 use super::*;
 use crate::ui_view_models::{
     threat_dfd_view, CodePaneModel, CodePaneRow, DfdLineKind, FindingListRow, FindingsModel,
-    SeverityCounts, SeverityTone, SourceTreeModel, SourceTreeRow, WorkbenchCenter,
+    ProofTier, SeverityCounts, SeverityTone, SourceTreeModel, SourceTreeRow, WorkbenchCenter,
     WorkbenchCenterBody,
 };
 use ratatui::layout::Rect;
@@ -159,6 +159,10 @@ fn dfd_style(kind: DfdLineKind) -> ratatui::style::Style {
 
 // ── FINDINGS pane ────────────────────────────────────────────────────────────
 
+const FINDING_PROOF_CHIP_WIDTH: usize = 44;
+const FINDING_FULL_META_WIDTH: usize = 60;
+const FINDING_RUN_META_WIDTH: usize = 96;
+
 pub(super) fn findings_pane_lines(model: &FindingsModel, inner: Rect) -> Vec<Line<'static>> {
     if model.rows.is_empty() {
         let mut lines = vec![filter_chip_line(&model.counts, model.total)];
@@ -174,6 +178,7 @@ pub(super) fn findings_pane_lines(model: &FindingsModel, inner: Rect) -> Vec<Lin
         return lines;
     }
     let mut lines = vec![filter_chip_line(&model.counts, model.total)];
+    lines.push(proof_legend_line());
     if let Some(notice) = &model.selected_out_of_window {
         lines.push(Line::styled(
             fit(notice, inner.width as usize),
@@ -212,6 +217,24 @@ fn filter_chip_line(counts: &SeverityCounts, total: usize) -> Line<'static> {
     Line::from(spans)
 }
 
+fn proof_legend_line() -> Line<'static> {
+    Line::from(vec![
+        Span::styled("proof ", theme::muted()),
+        proof_legend_span("✓ runtime", ProofTier::Confirmed),
+        Span::styled(" · ", theme::subtle()),
+        proof_legend_span("◇ static/triaged", ProofTier::StaticLinked),
+        Span::styled(" · ", theme::subtle()),
+        proof_legend_span("? unconfirmed", ProofTier::Suspected),
+        Span::styled(" · ", theme::subtle()),
+        proof_legend_span("! rejected", ProofTier::Rejected),
+        Span::styled("   conf verdict %", theme::muted()),
+    ])
+}
+
+fn proof_legend_span(label: &'static str, tier: ProofTier) -> Span<'static> {
+    Span::styled(label, proof_tier_style(tier))
+}
+
 fn finding_row_line(row: &FindingListRow, width: usize) -> Line<'static> {
     let (marker, marker_style) = row_marker(row);
     let mut spans = vec![
@@ -223,31 +246,55 @@ fn finding_row_line(row: &FindingListRow, width: usize) -> Line<'static> {
             theme::severity_tone(row.severity_tone),
         ),
         Span::raw(" "),
-        Span::styled(
-            fit(&row.title, finding_title_budget(width)),
-            theme::severity_tone(row.severity_tone),
-        ),
     ];
+    if uses_inline_proof_marker(width) {
+        spans.push(Span::styled(row.proof_marker, proof_label_style(row)));
+        spans.push(Span::raw(" "));
+    }
+    spans.push(Span::styled(
+        fit(&row.title, finding_title_budget(width)),
+        theme::primary(),
+    ));
     spans.extend(finding_row_meta_spans(row, width));
     Line::from(spans)
 }
 
 fn finding_title_budget(width: usize) -> usize {
     width
-        .saturating_sub(16 + finding_row_meta_budget(width))
+        .saturating_sub(finding_row_prefix_budget(width) + finding_row_meta_budget(width))
         .max(8)
 }
 
+fn finding_row_prefix_budget(width: usize) -> usize {
+    16 + if uses_inline_proof_marker(width) {
+        2
+    } else {
+        0
+    }
+}
+
+fn uses_inline_proof_marker(width: usize) -> bool {
+    width < FINDING_PROOF_CHIP_WIDTH
+}
+
 fn finding_row_meta_budget(width: usize) -> usize {
-    if width < 60 {
+    if width < FINDING_PROOF_CHIP_WIDTH {
         return 0;
     }
+    if width < FINDING_FULL_META_WIDTH {
+        return 16;
+    }
     let path_budget = finding_path_budget(width);
-    11 + path_budget + if width >= 96 { 28 } else { 0 }
+    27 + path_budget
+        + if width >= FINDING_RUN_META_WIDTH {
+            28
+        } else {
+            0
+        }
 }
 
 fn finding_path_budget(width: usize) -> usize {
-    if width >= 96 {
+    if width >= FINDING_RUN_META_WIDTH {
         24
     } else {
         20
@@ -255,25 +302,50 @@ fn finding_path_budget(width: usize) -> usize {
 }
 
 fn finding_row_meta_spans(row: &FindingListRow, width: usize) -> Vec<Span<'static>> {
-    if width < 60 {
+    if width < FINDING_PROOF_CHIP_WIDTH {
         return Vec::new();
+    }
+    if width < FINDING_FULL_META_WIDTH {
+        return vec![
+            Span::raw(" "),
+            Span::styled(pad(&proof_chip(row), 15), proof_label_style(row)),
+        ];
     }
     let mut spans = vec![
         Span::raw(" "),
         Span::styled(pad(&finding_status_label(row), 9), theme::muted()),
+        Span::raw(" "),
+        Span::styled(pad(&proof_chip(row), 15), proof_label_style(row)),
         Span::raw(" "),
         Span::styled(
             fit_path(&row.location, finding_path_budget(width)),
             theme::subtle(),
         ),
     ];
-    if width >= 96 {
+    if width >= FINDING_RUN_META_WIDTH {
         spans.push(Span::raw(" "));
         spans.push(Span::styled(pad(&row.run_label, 14), theme::muted()));
         spans.push(Span::raw(" "));
         spans.push(Span::styled(pad(&row.revision_label, 12), theme::subtle()));
     }
     spans
+}
+
+fn proof_label_style(row: &FindingListRow) -> ratatui::style::Style {
+    proof_tier_style(row.proof_tier)
+}
+
+fn proof_tier_style(tier: ProofTier) -> ratatui::style::Style {
+    match tier {
+        ProofTier::Confirmed => theme::success(),
+        ProofTier::StaticLinked => theme::accent(),
+        ProofTier::Suspected => theme::warn(),
+        ProofTier::Rejected => theme::danger(),
+    }
+}
+
+fn proof_chip(row: &FindingListRow) -> String {
+    format!("{} {}", row.proof_marker, row.proof_label)
 }
 
 fn finding_status_label(row: &FindingListRow) -> String {
@@ -312,9 +384,12 @@ fn row_marker(row: &FindingListRow) -> (&'static str, ratatui::style::Style) {
 mod tests {
     use super::*;
 
-    #[test]
-    fn finding_row_includes_status_and_location_when_width_allows() {
-        let row = FindingListRow {
+    fn row_with_proof(
+        proof_label: &str,
+        proof_marker: &'static str,
+        proof_tier: ProofTier,
+    ) -> FindingListRow {
+        FindingListRow {
             alias: "F-0001".to_string(),
             severity_tone: SeverityTone::High,
             severity_label: "HIGH".to_string(),
@@ -324,13 +399,28 @@ mod tests {
             revision_label: "rev:def".to_string(),
             verdict: "tp".to_string(),
             confidence: "91%".to_string(),
+            proof_label: proof_label.to_string(),
+            proof_marker,
+            proof_tier,
             cwe: "CWE-89".to_string(),
             source: "semgrep".to_string(),
             evidence: "source to sink".to_string(),
             selected: false,
             cursor: true,
-        };
+        }
+    }
 
+    fn row_text(row: &FindingListRow, width: usize) -> String {
+        finding_row_line(row, width)
+            .spans
+            .into_iter()
+            .map(|span| span.content.into_owned())
+            .collect::<String>()
+    }
+
+    #[test]
+    fn finding_row_includes_status_and_location_when_width_allows() {
+        let row = row_with_proof("path-linked", "◇", ProofTier::StaticLinked);
         let text = finding_row_line(&row, 80)
             .spans
             .into_iter()
@@ -338,6 +428,27 @@ mod tests {
             .collect::<String>();
 
         assert!(text.contains("tp 91%"), "{text}");
+        assert!(text.contains("◇ path-linked"), "{text}");
         assert!(text.contains("example.rs:42"), "{text}");
+    }
+
+    #[test]
+    fn finding_row_keeps_proof_marker_when_narrow() {
+        let row = row_with_proof("unverified", "?", ProofTier::Suspected);
+        let text = row_text(&row, 36);
+
+        assert!(text.contains("HIGH"), "{text}");
+        assert!(text.contains("?"), "{text}");
+        assert!(!text.contains("unverified"), "{text}");
+        assert!(!text.contains("tp 91%"), "{text}");
+    }
+
+    #[test]
+    fn finding_row_shows_proof_chip_before_full_meta_fits() {
+        let row = row_with_proof("unverified", "?", ProofTier::Suspected);
+        let text = row_text(&row, 52);
+
+        assert!(text.contains("? unverified"), "{text}");
+        assert!(!text.contains("example.rs:42"), "{text}");
     }
 }

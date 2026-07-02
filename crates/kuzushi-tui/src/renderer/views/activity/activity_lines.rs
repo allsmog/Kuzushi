@@ -63,7 +63,13 @@ fn active_activity_lines(
         footer.body_line,
         theme::label(),
     )]));
-    lines.push(keybind_hint_line(&footer.plain_hints));
+    lines.extend(footer.hint_rows.iter().map(|row| {
+        let pairs = row
+            .iter()
+            .map(|hint| (hint.plain_key_text, hint.plain_hint_text))
+            .collect::<Vec<_>>();
+        keybind_hint_line(&pairs)
+    }));
     lines
 }
 

@@ -30,6 +30,7 @@ impl ModuleRegistry {
         option_store: Option<&ToolOptionStore>,
     ) -> Result<Value> {
         let input = self.prepare_tool_input(name, input, option_store)?;
+        let input = input_with_prompt_file_default(name, input, ctx)?;
 
         self.dispatch_prepared_tool_with_runtime(name, input, ctx, runtime)
     }
@@ -70,10 +71,9 @@ impl ModuleRegistry {
         let traced_runtime = traced_tool_runtime(runtime, scoped_trace.as_ref());
         let runtime = active_tool_runtime(runtime, traced_runtime.as_ref());
 
-        let executor = self
-            .executors
-            .get(name)
-            .with_context(|| format!("registered tool or DAG node {name:?} has no Rust executor mapping"))?;
+        let executor = self.executors.get(name).with_context(|| {
+            format!("registered tool or DAG node {name:?} has no Rust executor mapping")
+        })?;
         let result = executor(self, name, &input, ctx, runtime);
         return result.map(|output| normalize_tool_output_contract(name, output));
     }
@@ -86,13 +86,103 @@ fn prepare_input_with_stored_options(
     tool: Option<&ToolDescriptor>,
 ) -> Result<Value> {
     match (option_store, tool) {
-        (Some(store), Some(tool)) => store.effective_tool_input_with_stored_filter(
-            name,
-            input,
-            |option_name| tool.options.iter().any(|spec| spec.matches_name_or_alias(option_name)),
-        ),
+        (Some(store), Some(tool)) => {
+            store.effective_tool_input_with_stored_filter(name, input, |option_name| {
+                tool.options
+                    .iter()
+                    .any(|spec| spec.matches_name_or_alias(option_name))
+            })
+        }
         (Some(store), None) => store.effective_tool_input(name, input),
         (None, _) => Ok(input),
+    }
+}
+
+fn input_with_prompt_file_default(
+    name: &str,
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    let Some(default) = prompt_file_default_for_tool(name) else {
+        return Ok(input);
+    };
+    apply_prompt_file_default(input, ctx, default)
+}
+
+#[derive(Clone, Copy)]
+struct PromptFileDefault {
+    module_id: &'static str,
+    verb: &'static str,
+    option_key: &'static str,
+}
+
+fn prompt_file_default_for_tool(name: &str) -> Option<PromptFileDefault> {
+    match name {
+        "triage:run" => Some(prompt_file_default("triage", "run", "TRIAGE_PROMPT")),
+        "verify:finding" => Some(prompt_file_default("verify", "finding", "VERIFY_PROMPT")),
+        "taint-iris:hunt" => Some(prompt_file_default(
+            "taint-iris",
+            "hunt",
+            "TAINT_IRIS_PROMPT",
+        )),
+        "carlini-threat-hunt:run" => Some(prompt_file_default(
+            "carlini-threat-hunt",
+            "run",
+            "CARLINI_THREAT_HUNT_PROMPT",
+        )),
+        _ => None,
+    }
+}
+
+fn prompt_file_default(
+    module_id: &'static str,
+    verb: &'static str,
+    option_key: &'static str,
+) -> PromptFileDefault {
+    PromptFileDefault {
+        module_id,
+        verb,
+        option_key,
+    }
+}
+
+fn apply_prompt_file_default(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    default: PromptFileDefault,
+) -> Result<Value> {
+    let Value::Object(mut object) = input else {
+        return Ok(input);
+    };
+    if object.contains_key(default.option_key) {
+        return Ok(Value::Object(object));
+    }
+    if let Some(text) = read_prompt_file_default(ctx, default)? {
+        object.insert(default.option_key.to_string(), Value::String(text));
+    }
+    Ok(Value::Object(object))
+}
+
+fn read_prompt_file_default(
+    ctx: &ToolExecutionContext<'_>,
+    default: PromptFileDefault,
+) -> Result<Option<String>> {
+    let Some(workspace) = ctx.workspace else {
+        return Ok(None);
+    };
+    let path =
+        crate::options::prompt_override_path(workspace.root(), default.module_id, default.verb);
+    match std::fs::read_to_string(&path) {
+        Ok(text) if !text.trim().is_empty() => Ok(Some(text)),
+        Ok(_) => Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| {
+            format!(
+                "Could not read {} from {}",
+                default.option_key,
+                path.display()
+            )
+        }),
     }
 }
 
@@ -135,6 +225,59 @@ fn active_tool_runtime<'scope>(
     traced_runtime
         .map(|runtime| runtime as &dyn AgentRuntime)
         .or(runtime)
+}
+
+#[cfg(test)]
+mod prompt_file_default_tests {
+    use super::*;
+    use crate::{V2Config, WorkspaceTarget};
+
+    fn context<'a>(
+        config: &'a V2Config,
+        workspace: &'a WorkspaceTarget,
+    ) -> ToolExecutionContext<'a> {
+        ToolExecutionContext {
+            config,
+            workspace: Some(workspace),
+            findings_store: None,
+            trace: None,
+        }
+    }
+
+    #[test]
+    fn direct_tool_prompt_file_default_is_injected() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let path = crate::options::prompt_override_path(temp.path(), "triage", "run");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "prioritize exploitability\n").unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+
+        let input = input_with_prompt_file_default("triage:run", json!({}), &ctx).unwrap();
+
+        assert_eq!(input["TRIAGE_PROMPT"], json!("prioritize exploitability\n"));
+    }
+
+    #[test]
+    fn direct_tool_prompt_file_default_keeps_explicit_input() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let path = crate::options::prompt_override_path(temp.path(), "triage", "run");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "file prompt\n").unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+
+        let input = input_with_prompt_file_default(
+            "triage:run",
+            json!({"TRIAGE_PROMPT": "explicit prompt"}),
+            &ctx,
+        )
+        .unwrap();
+
+        assert_eq!(input["TRIAGE_PROMPT"], json!("explicit prompt"));
+    }
 }
 
 /// Derive a module id from a qualified tool name (`semgrep:scan` -> `semgrep`).

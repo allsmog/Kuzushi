@@ -13,9 +13,13 @@
 // The shell silently aborts on any code path that opens findings.sqlite3.
 
 import { spawnSync } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
 import { createRequire } from "node:module";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const require = createRequire(import.meta.url);
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 function tryLoad(modName) {
   try {
@@ -49,6 +53,35 @@ function attemptRebuild(modName) {
   return false;
 }
 
+function isFile(path) {
+  return existsSync(path) && statSync(path).isFile();
+}
+
+function nativeBinaryCandidates() {
+  const cliName = process.platform === "win32" ? "kuzushi.exe" : "kuzushi";
+  const aliasName = process.platform === "win32" ? "kz.exe" : "kz";
+  const slug = `${process.platform}-${process.arch}`;
+  return [
+    process.env.KUZUSHI_NATIVE_BIN,
+    join(root, "native", slug, cliName),
+    join(root, "native", slug, aliasName),
+    join(root, "target", "release", cliName),
+    join(root, "target", "debug", cliName),
+  ].filter(Boolean);
+}
+
+function checkNativeBinary() {
+  if (nativeBinaryCandidates().some(isFile)) return true;
+
+  const slug = `${process.platform}-${process.arch}`;
+  logErr(`No Kuzushi native binary found for ${slug}.`);
+  logErr(`Expected native/${slug}/kuzushi, a Cargo build output, or KUZUSHI_NATIVE_BIN.`);
+  logErr(
+    "The package can still install, but `kuzushi` will fail until a matching binary is available. Next: install a release that includes this platform, set KUZUSHI_NATIVE_BIN, or build from source with `cargo build -p kuzushi-cli --release`.",
+  );
+  return false;
+}
+
 const NATIVE_DEPS = ["better-sqlite3"];
 let recovered = true;
 
@@ -76,6 +109,8 @@ for (const dep of NATIVE_DEPS) {
     logErr(`${dep} rebuilt successfully for Node ${process.version}.`);
   }
 }
+
+recovered = checkNativeBinary() && recovered;
 
 // Always exit 0 so `pnpm install` stays green even if rebuild fails.
 // The user gets the actionable message via stderr above.

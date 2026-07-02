@@ -152,6 +152,10 @@ fn collect_context_file(
     if files_sample.len() >= sample_limit {
         return;
     }
-    let display_path = path.strip_prefix(root).unwrap_or(path).display().to_string();
+    let display_path = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .display()
+        .to_string();
     files_sample.push(display_path);
 }

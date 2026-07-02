@@ -12,4 +12,4 @@ findings db: .kuzushi/v2/findings.sqlite3
 findings: none yet (run scan first)
 last export: none
 
-Next: workspace status, workspace export findings <path>.json, kuzushi pr-comment
+Next: workspace status, workspace scope init, workspace export findings <path> [format]

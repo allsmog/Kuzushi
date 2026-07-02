@@ -10,22 +10,45 @@ const HELP_DESCRIPTION_COLUMN: usize = 2;
 
 pub(crate) fn help_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
-    let model = help_model();
-    lines.push(blank());
-    lines.push(divider("HELP", area.width));
-    lines.push(muted(&fit(model.intro, area.width as usize)));
-    if !model.examples.is_empty() {
-        lines.push(muted(&fit(
-            &format!("Examples: {}", model.examples.join("  ·  ")),
-            area.width as usize,
-        )));
-    }
+    let model = help_model(app.help_filter.as_deref());
+    lines.extend(help_header_lines(
+        model.intro,
+        model.glossary,
+        model.filter_note.as_deref(),
+        &model.examples,
+        area.width,
+    ));
     for category in &model.categories {
         lines.push(blank());
         lines.push(category_divider(category.label, category.blurb, area.width));
         for row in &category.commands {
             lines.extend(help_command_lines(row, area.width));
         }
+    }
+    lines
+}
+
+fn help_header_lines(
+    intro: &str,
+    glossary: &str,
+    filter_note: Option<&str>,
+    examples: &[&str],
+    width: u16,
+) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        blank(),
+        divider("HELP", width),
+        muted(&fit(intro, width as usize)),
+        muted(&fit(glossary, width as usize)),
+    ];
+    if let Some(note) = filter_note {
+        lines.push(muted(&fit(note, width as usize)));
+    }
+    if !examples.is_empty() {
+        lines.push(muted(&fit(
+            &format!("Examples: {}", examples.join("  ·  ")),
+            width as usize,
+        )));
     }
     lines
 }

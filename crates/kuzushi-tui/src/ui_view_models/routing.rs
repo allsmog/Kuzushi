@@ -9,7 +9,7 @@ pub(crate) enum RoutingMode {
     Run,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum PlainRenderMode<'a> {
     Options(&'a OptionsView),
     SastTasks,
@@ -20,7 +20,14 @@ pub(crate) enum PlainRenderMode<'a> {
     KnowledgeBase,
     Config,
     Help,
-    LineBased,
+    InteractiveOnly(PlainInteractiveOnlyModel),
+    LineBased { include_context_strip: bool },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PlainInteractiveOnlyModel {
+    pub(crate) title: &'static str,
+    pub(crate) next: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -144,6 +151,10 @@ pub(crate) fn uses_scene_frame(app: &ShellApp) -> bool {
 }
 
 pub(crate) fn plain_render_mode(app: &ShellApp) -> PlainRenderMode<'_> {
+    if let Some(model) = interactive_only_plain_model(&app.shell_view) {
+        return PlainRenderMode::InteractiveOnly(model);
+    }
+
     match &app.shell_view {
         ShellView::Options(view) => PlainRenderMode::Options(view),
         ShellView::SastTasks => PlainRenderMode::SastTasks,
@@ -154,7 +165,48 @@ pub(crate) fn plain_render_mode(app: &ShellApp) -> PlainRenderMode<'_> {
         ShellView::KnowledgeBase => PlainRenderMode::KnowledgeBase,
         ShellView::Config => PlainRenderMode::Config,
         ShellView::Help => PlainRenderMode::Help,
-        _ => PlainRenderMode::LineBased,
+        ShellView::Workbench => PlainRenderMode::LineBased {
+            include_context_strip: true,
+        },
+        _ => PlainRenderMode::LineBased {
+            include_context_strip: false,
+        },
+    }
+}
+
+fn interactive_only_plain_model(view: &ShellView) -> Option<PlainInteractiveOnlyModel> {
+    match view {
+        ShellView::ModelPicker => Some(PlainInteractiveOnlyModel {
+            title: "MODEL PICKER",
+            next: "This picker needs an interactive terminal. Use `model <id>` or `config` in plain mode.".to_string(),
+        }),
+        ShellView::AuthMethodPicker(provider) => Some(PlainInteractiveOnlyModel {
+                title: "AUTH PICKER",
+                next: format!(
+                    "This picker needs an interactive terminal. Use `auth login {provider}` or set credentials before relaunch."
+                ),
+            }),
+        ShellView::TargetPicker => Some(PlainInteractiveOnlyModel {
+            title: "TARGET PICKER",
+            next: "This picker needs an interactive terminal. Use `target <path>` in plain mode.".to_string(),
+        }),
+        ShellView::PlanningPicker => Some(PlainInteractiveOnlyModel {
+            title: "PLANNING PICKER",
+            next: "This picker needs an interactive terminal. Use explicit `scan` or `run <tool>` commands in plain mode.".to_string(),
+        }),
+        ShellView::ThreatEditor => Some(PlainInteractiveOnlyModel {
+            title: "THREAT EDITOR",
+            next: "This editor needs an interactive terminal. Use `threats regen` or edit the threat model file directly.".to_string(),
+        }),
+        ShellView::PromptsEditor => Some(PlainInteractiveOnlyModel {
+            title: "PROMPTS EDITOR",
+            next: "This editor needs an interactive terminal. Use `prompt show <tool>` or edit `.kuzushi/prompts/` directly.".to_string(),
+        }),
+        ShellView::CommandPalette => Some(PlainInteractiveOnlyModel {
+            title: "COMMAND PALETTE",
+            next: "This palette needs an interactive terminal. Use `help <query>` in plain mode.".to_string(),
+        }),
+        _ => None,
     }
 }
 

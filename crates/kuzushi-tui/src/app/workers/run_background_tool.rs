@@ -70,42 +70,7 @@ fn background_current_dir() -> PathBuf {
 }
 
 pub(crate) fn tool_requires_findings_store(tool_name: &str) -> bool {
-    tool_name.starts_with("findings:")
-        || tool_name.starts_with("module-recommender:")
-        || tool_name.starts_with("systems-hunt:")
-        || tool_name.starts_with("chrome-rce:")
-        || tool_name.starts_with("uaf-hunt:")
-        || matches!(
-            tool_name,
-            "triage:run"
-                | "verify:finding"
-                | "verify:exploit"
-                | "patch:finding"
-                | "agentic-sast:scan"
-                | "carlini-threat-hunt:run"
-                | "offense-review:threat-hunt"
-                | "vuln-scout:audit"
-                | "tob:audit"
-                | "shinsa:scan"
-                | "shinsa:quick-check"
-                | "shinsa:nist-scan"
-                | "shinsa:nist-quick-check"
-                | "prompt-armor:scan"
-                | "prompt-armor:analyze"
-                | "prompt-armor:attack"
-                | "variant:lift-pattern"
-                | "variant:hunt"
-                | "ndiff:hunt-variants"
-                | "taint-iris:hunt"
-                | "taint-iris-next:finding-review"
-                | "taint-iris-next:hunt"
-                | "sast:scan"
-                | "semgrep:scan"
-                | "codeql:scan"
-                | "iac-scan:scan"
-                | "license-scan:scan"
-                | "cargo-audit:scan"
-        )
+    tool_needs_finding_store(tool_name)
 }
 
 #[cfg(test)]
@@ -169,7 +134,14 @@ mod tests {
         assert!(super::tool_requires_findings_store(
             "offense-review:threat-hunt"
         ));
+        assert!(super::tool_requires_findings_store("offense:chain"));
+        assert!(super::tool_requires_findings_store(
+            "variant:any-future-tool"
+        ));
         assert!(super::tool_requires_findings_store("cargo-audit:scan"));
+        assert!(super::tool_requires_findings_store("sbom-scan:scan"));
+        assert!(super::tool_requires_findings_store("secret-scan:scan"));
+        assert!(super::tool_requires_findings_store("android-apk:scan"));
         assert!(!super::tool_requires_findings_store(
             "taint-iris-next:dataflow-plan"
         ));

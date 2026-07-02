@@ -10,49 +10,35 @@ pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
             "toggle pane",
             ViewHotkeyAction::ActivityTabPaneFocus,
         ),
+        bind(
+            HotkeyTrigger::BackTab,
+            "Shift+Tab",
+            "toggle pane",
+            ViewHotkeyAction::ActivityTabPaneFocus,
+        ),
         bind_char('V', "V", "verbose", ViewHotkeyAction::ActivityToggleVerbose),
         bind_char(
-            'p',
-            "p",
+            ' ',
+            "Space",
             "feed pause",
             ViewHotkeyAction::ActivityTogglePause,
         ),
-        bind_char('R', "R", "reset", ViewHotkeyAction::ActivityReset),
+        bind_char('x', "x", "reset view", ViewHotkeyAction::ActivityReset),
     ];
     bindings.extend(activity_deck_keybindings());
-    bindings.extend([
-        bind(
-            HotkeyTrigger::Enter,
-            "Enter",
-            "focus task",
-            ViewHotkeyAction::ActivityFocusSelected,
-        ),
-        bind_char(
-            'C',
-            "C",
-            "arm cancel",
-            ViewHotkeyAction::ActivityCancelRunning,
-        ),
-    ]);
+    bindings.extend([bind(
+        HotkeyTrigger::Enter,
+        "Enter",
+        "focus task",
+        ViewHotkeyAction::ActivityFocusSelected,
+    )]);
     bindings
 }
 
 fn activity_deck_keybindings() -> Vec<ViewKeybinding> {
     vec![
-        bind(
-            HotkeyTrigger::Right,
-            "←/→",
-            "views",
-            ViewHotkeyAction::ActivityDeckNext,
-        ),
-        bind(
-            HotkeyTrigger::Left,
-            "←/→",
-            "views",
-            ViewHotkeyAction::ActivityDeckPrev,
-        ),
-        bind_char(']', "←/→", "views", ViewHotkeyAction::ActivityDeckNext),
-        bind_char('[', "←/→", "views", ViewHotkeyAction::ActivityDeckPrev),
+        bind_char(']', "[/]", "views", ViewHotkeyAction::ActivityDeckNext),
+        bind_char('[', "[/]", "views", ViewHotkeyAction::ActivityDeckPrev),
         bind_char('f', "f", "findings", ViewHotkeyAction::ActivityOpenFindings),
         bind_char('o', "o", "open", ViewHotkeyAction::ActivityOpenDeckArtifact),
     ]

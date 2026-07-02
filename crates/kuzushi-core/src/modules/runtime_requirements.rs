@@ -76,6 +76,56 @@ pub const RUNTIME_TOOL_NAMES: &[&str] = &[
     "x-ray:x-ray",
 ];
 
+pub const FINDING_STORE_TOOL_PREFIXES: &[&str] = &[
+    "chrome-rce:",
+    "findings:",
+    "module-recommender:",
+    "offense:",
+    "systems-hunt:",
+    "uaf-hunt:",
+    "variant:",
+];
+
+pub const FINDING_STORE_TOOL_NAMES: &[&str] = &[
+    "agentic-sast:scan",
+    "android-apk:code-scan",
+    "android-apk:fileprovider-scan",
+    "android-apk:hybrid-detect",
+    "android-apk:manifest-scan",
+    "android-apk:native-libs",
+    "android-apk:network-security-config",
+    "android-apk:scan",
+    "cargo-audit:scan",
+    "carlini-threat-hunt:run",
+    "codeql:scan",
+    "dep-hygiene:check",
+    "exploit-chain:scan",
+    "iac-scan:scan",
+    "license-scan:scan",
+    "ndiff:hunt-variants",
+    "offense-review:threat-hunt",
+    "patch:finding",
+    "prompt-armor:analyze",
+    "prompt-armor:attack",
+    "prompt-armor:scan",
+    "sast:scan",
+    "sbom-scan:scan",
+    "secret-scan:scan",
+    "semgrep:scan",
+    "shinsa:nist-quick-check",
+    "shinsa:nist-scan",
+    "shinsa:quick-check",
+    "shinsa:scan",
+    "taint-iris-next:finding-review",
+    "taint-iris-next:hunt",
+    "taint-iris:hunt",
+    "tob:audit",
+    "triage:run",
+    "verify:exploit",
+    "verify:finding",
+    "vuln-scout:audit",
+];
+
 /// Returns true when `tool_name` is one of the native tools whose
 /// handler dereferences an `AgentRuntime` and bails when it's missing.
 /// `sast:scan` is *not* covered here — use `tool_needs_runtime` when
@@ -87,6 +137,17 @@ pub fn tool_uses_agent_runtime(tool_name: &str) -> bool {
 
 pub fn tool_requires_agent_runtime(tool_name: &str) -> bool {
     tool_uses_agent_runtime(tool_name)
+}
+
+pub fn tool_uses_finding_store(tool_name: &str) -> bool {
+    FINDING_STORE_TOOL_PREFIXES
+        .iter()
+        .any(|prefix| tool_name.starts_with(prefix))
+        || FINDING_STORE_TOOL_NAMES.contains(&tool_name)
+}
+
+pub fn tool_needs_finding_store(tool_name: &str) -> bool {
+    tool_uses_finding_store(tool_name)
 }
 
 /// Input-aware variant of `tool_uses_agent_runtime`. Adds the
@@ -199,6 +260,14 @@ mod tests {
     }
 
     #[test]
+    fn finding_store_allowlist_has_no_duplicates() {
+        let mut seen = std::collections::HashSet::new();
+        for name in FINDING_STORE_TOOL_NAMES {
+            assert!(seen.insert(*name), "duplicate entry: {name}");
+        }
+    }
+
+    #[test]
     fn tools_that_bail_without_runtime_are_listed() {
         // Mirror of the `*_runtime(runtime)?` bail sites in src/modules/.
         // Anything that bails with "requires an agent runtime" must be here,
@@ -250,10 +319,7 @@ mod tests {
 
     #[test]
     fn offense_review_threat_hunt_needs_runtime() {
-        assert!(tool_needs_runtime(
-            "offense-review:threat-hunt",
-            &json!({})
-        ));
+        assert!(tool_needs_runtime("offense-review:threat-hunt", &json!({})));
     }
 
     #[test]
@@ -278,6 +344,34 @@ mod tests {
             "taint-iris-next:finding-review",
             &json!({})
         ));
+    }
+
+    #[test]
+    fn finding_store_requirement_covers_cross_mode_drift_cases() {
+        assert!(tool_needs_finding_store("cargo-audit:scan"));
+        assert!(tool_needs_finding_store("offense:chain"));
+        assert!(tool_needs_finding_store("variant:hunt"));
+        assert!(tool_needs_finding_store("variant:lift-pattern"));
+        assert!(!tool_needs_finding_store("taint-iris-next:dataflow-plan"));
+    }
+
+    #[test]
+    fn tools_that_persist_findings_get_a_store() {
+        for tool in [
+            "dep-hygiene:check",
+            "secret-scan:scan",
+            "sbom-scan:scan",
+            "exploit-chain:scan",
+            "android-apk:scan",
+            "android-apk:manifest-scan",
+            "android-apk:network-security-config",
+            "android-apk:fileprovider-scan",
+            "android-apk:code-scan",
+            "android-apk:native-libs",
+            "android-apk:hybrid-detect",
+        ] {
+            assert!(tool_needs_finding_store(tool), "{tool} should get a store");
+        }
     }
 
     #[test]

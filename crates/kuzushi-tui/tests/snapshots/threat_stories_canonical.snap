@@ -7,15 +7,15 @@ assertion_line: 45
 1 STRIDE  2 STORIES  3 SCOPE  4 SUMMARY
 
  -- ATTACKER STORIES · 4 -----------------------------------------------------------------------------------------------
-   ▸ T-001   CRITICAL sql injection via order_id concatenation
+   > T-001   CRITICAL sql injection via order_id concatenation
               attack POST /orders/<id>
               loc    apps/api/orders.rs:142
-   ▸ T-002   CRITICAL prompt injection sink reads user body
-              attack user message → llm context
+   > T-002   CRITICAL prompt injection sink reads user body
+              attack user message > llm context
               loc    apps/web/agents/concierge.ts:88
-   ▸ T-003   HIGH     jwt verify accepts alg=none
+   > T-003   HIGH     jwt verify accepts alg=none
               attack forged Authorization header
               loc    apps/api/auth/jwt.rs:54
-   ▸ T-004   HIGH     shell exec from cron payload
+   > T-004   HIGH     shell exec from cron payload
               attack scheduled job pulls untrusted task
               loc    jobs/worker.py:213

@@ -1,5 +1,7 @@
 use super::*;
 pub(in crate::renderer) use super::*;
+use crate::ui_view_models::JourneyPhaseTone;
+use ratatui::style::Style;
 
 pub(in crate::renderer) use activity::*;
 pub(in crate::renderer) use catalog::*;
@@ -54,3 +56,13 @@ pub(super) use system::*;
 pub(super) use threat::*;
 pub(super) use workbench::*;
 pub(super) use workspace::*;
+
+pub(in crate::renderer) fn journey_phase_tone_style(tone: JourneyPhaseTone) -> Style {
+    match tone {
+        JourneyPhaseTone::Success => theme::success(),
+        JourneyPhaseTone::Warn => theme::warn(),
+        JourneyPhaseTone::Danger => theme::danger(),
+        JourneyPhaseTone::Muted => theme::muted(),
+        JourneyPhaseTone::Subtle => theme::subtle(),
+    }
+}

@@ -4,7 +4,6 @@ impl ShellApp {
     pub fn tick(&mut self) -> bool {
         let mut changed = false;
         changed |= self.expire_ctrl_c_arm();
-        changed |= self.expire_activity_cancel_arm();
         changed |= self.expire_stale_advisory(AdvisoryKind::Throttle);
         changed |= self.expire_stale_advisory(AdvisoryKind::Notice);
         changed |= self.advance_spinner();
@@ -50,17 +49,6 @@ impl ShellApp {
             return false;
         }
         self.ctrl_c_armed_at = None;
-        true
-    }
-
-    fn expire_activity_cancel_arm(&mut self) -> bool {
-        let Some(armed_at) = self.activity_cancel_armed_at else {
-            return false;
-        };
-        if Instant::now().duration_since(armed_at) <= CTRL_C_ARM_WINDOW {
-            return false;
-        }
-        self.activity_cancel_armed_at = None;
         true
     }
 

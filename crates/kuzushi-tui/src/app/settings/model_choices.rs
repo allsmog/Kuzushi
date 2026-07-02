@@ -68,7 +68,7 @@ pub(crate) fn oauth_model_choice_for_provider(provider: &str) -> Option<&'static
 
 pub(crate) fn api_key_model_choice_for_provider(provider: &str) -> Option<&'static ModelChoice> {
     match provider {
-        "openai-codex" => MODEL_CHOICES
+        "openai" | "openai-codex" => MODEL_CHOICES
             .iter()
             .find(|choice| choice.provider == "openai"),
         _ => None,
@@ -76,7 +76,11 @@ pub(crate) fn api_key_model_choice_for_provider(provider: &str) -> Option<&'stat
 }
 
 pub(crate) fn visible_model_choice_indexes(configured_model: Option<&str>) -> Vec<usize> {
-    vec![visible_primary_openai_choice(configured_model), 1, 3, 4]
+    let mut seen = std::collections::BTreeSet::new();
+    [visible_primary_openai_choice(configured_model), 1, 2, 3, 4]
+        .into_iter()
+        .filter(|index| seen.insert(*index))
+        .collect()
 }
 
 pub(crate) fn visible_model_choices(configured_model: Option<&str>) -> Vec<&'static ModelChoice> {

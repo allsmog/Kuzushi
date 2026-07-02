@@ -12,22 +12,23 @@ pub mod source_span;
 mod tests;
 
 pub use application::{
-    build_project_model_document, export_workspace_findings, load_program_scope,
-    load_project_model_document, project_model_scope_path, refresh_project_model_staleness,
-    save_project_model_document, workspace_status_for_target, ProjectModelDocument,
-    ProjectModelSection, ProjectModelSectionOrigin, WorkspaceStatus, PROJECT_MODEL_SCHEMA_VERSION,
+    active_workspace_required_message, build_project_model_document, discover_and_save_nested_project_scopes,
+    discover_nested_project_scopes, export_workspace_findings, findings_since_filter_expression,
+    load_nested_project_scopes, load_program_scope, load_project_model_document,
+    project_model_scope_path, refresh_project_model_staleness, save_nested_project_scopes,
+    save_project_model_document, workspace_status_for_target, write_program_scope_scaffold,
+    ProjectModelDocument, ProjectModelSection, ProjectModelSectionOrigin, WorkspaceStatus,
+    PROJECT_MODEL_SCHEMA_VERSION,
 };
 pub use artifact_kb::*;
 pub use artifacts::{artifact_state, ArtifactState};
 pub use attack_surface::*;
 pub use diff_scope::*;
 pub use domain::{
-    discover_and_save_nested_project_scopes, discover_nested_project_scopes,
-    legacy_codeql_db_path, load_nested_project_scopes, project_model_dir,
-    project_model_scopes_path, save_nested_project_scopes, workspace_artifact_kb_db_path,
-    workspace_attachments_path, workspace_codeql_db_path, workspace_config_path,
-    workspace_findings_db_path, workspace_history_path, workspace_models_path,
-    workspace_options_path, workspace_state_dir, workspace_state_root,
+    legacy_codeql_db_path, project_model_dir, project_model_scopes_path,
+    workspace_artifact_kb_db_path, workspace_attachments_path, workspace_codeql_db_path,
+    workspace_config_path, workspace_findings_db_path, workspace_history_path,
+    workspace_models_path, workspace_options_path, workspace_state_dir, workspace_state_root,
     workspace_static_evidence_db_path, HostPattern, ProgramScope, ProgramScopeFile,
     ProgramScopeList, ScopeVerdict, NestedProjectKind, NestedProjectScope,
     NestedProjectScopeTree, WorkspaceExportFormat, WorkspaceFindingsExport, WorkspaceTarget,

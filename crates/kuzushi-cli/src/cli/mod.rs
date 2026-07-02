@@ -8,6 +8,7 @@ use std::path::PathBuf;
 // release binary and a working-tree build are distinguishable at a glance.
 #[command(about = "Kuzushi security-native code agent", version = kuzushi_tui::build_version_static())]
 pub(crate) struct Cli {
+    /// Workspace/repository target. Required for findings, runs, exports, and workspace tools; pass `--target .` to explicitly opt into the current directory.
     #[arg(long, global = true)]
     pub(crate) target: Option<PathBuf>,
     /// Force line-oriented output with no ANSI, animation, or box drawing.

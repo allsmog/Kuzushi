@@ -488,8 +488,6 @@ HTTP
     fn scope_toml_refuses_out_of_scope_recon_target() {
         // M2 §2.1: recon dispatch must refuse OutOfScope targets so
         // operators don't accidentally scan their bounty's deny list.
-        // Unknown verdicts (target matches neither list) are allowed
-        // through — only an explicit OutOfScope refuses.
         let workspace_dir = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(workspace_dir.path()).unwrap();
         let scope_dir = workspace_dir.path().join(".kuzushi");

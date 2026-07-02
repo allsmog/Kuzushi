@@ -3,6 +3,7 @@ use super::threat_model_signals::{
     threat_signal_count,
 };
 use super::*;
+use crate::fs_atomic::{now_ms, slug};
 use crate::strategy::{
     apply_strategy_corrections, load_strategy_queue, save_strategy_queue, StrategyPhase,
     StrategyPreflight, StrategyPreflightStatus, StrategyProposal, StrategyProposalStatus,
@@ -55,7 +56,7 @@ fn persist_strategy_proposals(
     run_id: Option<String>,
 ) -> Result<Vec<StrategyProposal>> {
     let mut existing = load_strategy_queue(workspace)?;
-    let now = strategy_now_ms();
+    let now = now_ms();
     let mut generated_ids = Vec::new();
     let mut generated = Vec::new();
     for recommendation in &report.recommendations {
@@ -180,26 +181,7 @@ fn strategy_runtime_estimate(recommendation: &ModuleRecommendation) -> &'static 
 }
 
 fn strategy_tool_slug(tool: &str) -> String {
-    tool.chars()
-        .map(|value| {
-            if value.is_ascii_alphanumeric() {
-                value.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
-}
-
-fn strategy_now_ms() -> u64 {
-    std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
-        .unwrap_or_default()
+    slug(tool, "tool", usize::MAX)
 }
 
 /// Recommendable tools that shell out to an external scanner, paired with the
@@ -229,10 +211,9 @@ fn binary_on_path(name: &str) -> bool {
 fn workspace_for_input(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<WorkspaceTarget> {
     match input_target(input) {
         Some(target) => WorkspaceTarget::new(target),
-        None => ctx
-            .workspace
-            .cloned()
-            .context("module-recommender:recommend requires a workspace target"),
+        None => ctx.workspace.cloned().context(
+            crate::workspace::active_workspace_required_message("module-recommender:recommend"),
+        ),
     }
 }
 

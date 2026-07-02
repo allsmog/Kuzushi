@@ -58,32 +58,77 @@ fn foundation_executor_for_tool(name: &str) -> Option<ToolExecutor> {
             Some(execute_catalog_tool)
         }
         "module-recommender:recommend" => Some(execute_module_recommender_tool),
-        "context:build" | "context-lite:index" | "config:show" | "router:show"
-        | "workspace:status" | "workspace:export-findings" | "findings:list" | "report:build"
+        "context:build"
+        | "context-lite:index"
+        | "config:show"
+        | "router:show"
+        | "workspace:status"
+        | "workspace:export-findings"
+        | "findings:list"
+        | "report:build"
         | "entry-points:extract" => Some(execute_context_workspace_tool),
         _ => None,
     }
 }
 
 fn security_executor_for_tool(name: &str) -> Option<ToolExecutor> {
+    basic_security_executor_for_tool(name)
+        .or_else(|| native_security_executor_for_tool(name))
+        .or_else(|| agentic_security_executor_for_tool(name))
+}
+
+fn basic_security_executor_for_tool(name: &str) -> Option<ToolExecutor> {
     match name {
-        "dep-hygiene:check" | "secret-scan:scan" | "semgrep:scan" | "codeql:scan"
-        | "iac-scan:scan" | "cargo-audit:scan" | "license-scan:scan" | "sbom-scan:scan"
-        | "exploit-chain:scan" | "sast:scan" | "cpg:build" | "codeql:create-db"
-        | "android-apk:check-env" | "android-apk:prepare" | "android-apk:manifest-scan"
-        | "android-apk:network-security-config" | "android-apk:fileprovider-scan"
-        | "android-apk:code-scan" | "android-apk:sast-handoff" | "android-apk:native-libs"
-        | "android-apk:hybrid-detect" | "android-apk:scan" => {
-            Some(execute_native_security_tool)
-        }
-        "agentic-sast:scan" | "variant:lift-pattern" | "variant:hunt" | "ndiff:fetch-cve"
-        | "ndiff:extract-fix-pattern" | "ndiff:hunt-variants" | "carlini-threat-hunt:run"
-        | "offense-review:threat-hunt" | "pipeline:taint-cwe-select" | "taint-iris:hunt"
-        | "taint-iris-next:hunt" | "taint-iris-next:dataflow-plan"
-        | "taint-iris-next:source-sink-trace" | "taint-iris-next:finding-review"
-        | "taint-iris-next:catalog" | "taint-iris-next:codeql-db" => {
-            Some(execute_agentic_security_tool)
-        }
+        "dep-hygiene:check"
+        | "secret-scan:scan"
+        | "semgrep:scan"
+        | "codeql:scan"
+        | "iac-scan:scan"
+        | "cargo-audit:scan"
+        | "license-scan:scan"
+        | "sbom-scan:scan"
+        | "exploit-chain:scan"
+        | "sast:scan"
+        | "cpg:build"
+        | "codeql:create-db" => Some(execute_native_security_tool),
+        _ => None,
+    }
+}
+
+fn native_security_executor_for_tool(name: &str) -> Option<ToolExecutor> {
+    match name {
+        "android-apk:check-env"
+        | "android-apk:prepare"
+        | "android-apk:manifest-scan"
+        | "android-apk:network-security-config"
+        | "android-apk:fileprovider-scan"
+        | "android-apk:code-scan"
+        | "android-apk:sast-handoff"
+        | "android-apk:native-libs"
+        | "android-apk:hybrid-detect"
+        | "android-apk:scan" => Some(execute_native_security_tool),
+        _ => None,
+    }
+}
+
+fn agentic_security_executor_for_tool(name: &str) -> Option<ToolExecutor> {
+    match name {
+        "agentic-sast:scan"
+        | "variant:lift-pattern"
+        | "variant:hunt"
+        | "ndiff:fetch-cve"
+        | "ndiff:extract-fix-pattern"
+        | "ndiff:hunt-variants"
+        | "carlini-threat-hunt:run"
+        | "offense-review:threat-hunt"
+        | "pipeline:taint-cwe-select"
+        | "taint-iris:hunt"
+        | "taint-iris-next:hunt"
+        | "taint-iris-next:dataflow-plan"
+        | "taint-iris-next:source-sink-trace"
+        | "taint-iris-next:finding-review"
+        | "taint-iris-next:catalog"
+        | "taint-iris-next:codeql-db" => Some(execute_agentic_security_tool),
         _ => None,
     }
 }
@@ -97,8 +142,14 @@ fn specialist_executor_for_tool(name: &str) -> Option<ToolExecutor> {
         | "systems-hunt:deep-semantic-hunt"
         | "systems-hunt:systems-trigger-synth" => Some(execute_systems_hunt_tool_mapping),
         "uaf-hunt:hunt" => Some(execute_uaf_hunt_tool_mapping),
-        "pwn:profile-binary" | "pwn:reverse" | "pwn:state" | "pwn:calibrate-local"
-        | "pwn:run-candidates" | "pwn:auto-solve" | "pwn:menu-probe" | "pwn:exploit-run"
+        "pwn:profile-binary"
+        | "pwn:reverse"
+        | "pwn:state"
+        | "pwn:calibrate-local"
+        | "pwn:run-candidates"
+        | "pwn:auto-solve"
+        | "pwn:menu-probe"
+        | "pwn:exploit-run"
         | "pwn:heap-uaf-scan" => Some(execute_pwn_tool_mapping),
         "offense:chain" => Some(execute_offense_tool_mapping),
         "threat-intel:discover"
@@ -134,8 +185,11 @@ fn findings_executor_for_tool(name: &str) -> Option<ToolExecutor> {
         "triage:run" | "verify:finding" | "verify:exploit" | "patch:finding" => {
             Some(execute_finding_action_tool)
         }
-        "findings:suppress" | "findings:unsuppress" | "findings:verify"
-        | "findings:verify-batch" | "findings:patch" => Some(execute_finding_action_tool),
+        "findings:suppress"
+        | "findings:unsuppress"
+        | "findings:verify"
+        | "findings:verify-batch"
+        | "findings:patch" => Some(execute_finding_action_tool),
         _ => None,
     }
 }
@@ -150,14 +204,22 @@ fn adapter_executor_for_tool(name: &str) -> Option<ToolExecutor> {
         | "vendor-assessment:prompts"
         | "vendor-assessment:assess"
         | "chrome-rce:scan"
-        | "chrome-rce:review-trigger" => {
-            Some(execute_recon_assessment_tool)
-        }
-        "vuln-scout:audit" | "tob:audit" | "tob:skills" | "shinsa:scan"
-        | "shinsa:quick-check" | "shinsa:nist-scan" | "shinsa:nist-quick-check"
-        | "shinsa:frameworks" | "prompt-armor:scan" | "prompt-armor:analyze"
-        | "prompt-armor:attack" | "prompt-armor:diff" | "prompt-armor:report"
-        | "prompt-armor:config" | "pipeline:task-selector"
+        | "chrome-rce:review-trigger" => Some(execute_recon_assessment_tool),
+        "vuln-scout:audit"
+        | "tob:audit"
+        | "tob:skills"
+        | "shinsa:scan"
+        | "shinsa:quick-check"
+        | "shinsa:nist-scan"
+        | "shinsa:nist-quick-check"
+        | "shinsa:frameworks"
+        | "prompt-armor:scan"
+        | "prompt-armor:analyze"
+        | "prompt-armor:attack"
+        | "prompt-armor:diff"
+        | "prompt-armor:report"
+        | "prompt-armor:config"
+        | "pipeline:task-selector"
         | "pipeline:approval-before-verification" => Some(execute_plugin_prompt_tool),
         _ => None,
     }
@@ -197,13 +259,16 @@ fn execute_context_workspace_tool(
 }
 
 fn execute_native_security_tool(
-    _registry: &ModuleRegistry,
+    registry: &ModuleRegistry,
     name: &str,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    dispatch_result(dispatch_native_security_tool(name, input, ctx, runtime), name)
+    dispatch_result(
+        dispatch_native_security_tool(registry, name, input, ctx, runtime),
+        name,
+    )
 }
 
 fn execute_agentic_security_tool(
@@ -213,7 +278,10 @@ fn execute_agentic_security_tool(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    dispatch_result(dispatch_agentic_security_tool(name, input, ctx, runtime), name)
+    dispatch_result(
+        dispatch_agentic_security_tool(name, input, ctx, runtime),
+        name,
+    )
 }
 
 fn execute_systems_hunt_tool_mapping(
@@ -263,7 +331,10 @@ fn execute_threat_intel_tool_mapping(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    dispatch_result(registry.dispatch_threat_intel_tool(name, input, ctx, runtime), name)
+    dispatch_result(
+        registry.dispatch_threat_intel_tool(name, input, ctx, runtime),
+        name,
+    )
 }
 
 fn execute_runtime_analysis_tool(
@@ -273,7 +344,10 @@ fn execute_runtime_analysis_tool(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    dispatch_result(dispatch_runtime_analysis_tool(name, input, ctx, runtime), name)
+    dispatch_result(
+        dispatch_runtime_analysis_tool(name, input, ctx, runtime),
+        name,
+    )
 }
 
 fn execute_finding_action_tool(
@@ -283,7 +357,10 @@ fn execute_finding_action_tool(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    dispatch_result(dispatch_finding_action_tool(name, input, ctx, runtime), name)
+    dispatch_result(
+        dispatch_finding_action_tool(name, input, ctx, runtime),
+        name,
+    )
 }
 
 fn execute_recon_assessment_tool(
@@ -293,7 +370,10 @@ fn execute_recon_assessment_tool(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    dispatch_result(dispatch_recon_assessment_tool(name, input, ctx, runtime), name)
+    dispatch_result(
+        dispatch_recon_assessment_tool(name, input, ctx, runtime),
+        name,
+    )
 }
 
 fn execute_plugin_prompt_tool(

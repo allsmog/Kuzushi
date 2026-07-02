@@ -62,4 +62,6 @@ pub use sast_task_row::ThreatView;
 pub use sast_task_row::WorkbenchPane;
 pub use sast_task_row::WorkbenchPaneScroll;
 pub use sast_task_row::WorkspaceView;
-pub(crate) use workbench_cache::{ProjectScopeTreeState, WorkbenchCache};
+pub(crate) use workbench_cache::{
+    JsonFileState, ProjectScopeTreeState, PromptMutationsState, StrategyQueueState, WorkbenchCache,
+};

@@ -6,7 +6,7 @@ pub(in crate::modules) fn build_context_snapshot(
 ) -> Result<Value> {
     let workspace = ctx
         .workspace
-        .context("context:build requires a workspace target")?;
+        .context(crate::workspace::active_workspace_required_message("context:build"))?;
     let options = context_build_options(&input)?;
 
     emit_context_build_start(ctx, workspace.root());
@@ -14,7 +14,10 @@ pub(in crate::modules) fn build_context_snapshot(
     let file_sample = collect_context_file_sample(workspace.root(), options.sample_limit)?;
     emit_context_build_step(
         ctx,
-        format!("indexed {} files · building snapshot", file_sample.files_indexed),
+        format!(
+            "indexed {} files · building snapshot",
+            file_sample.files_indexed
+        ),
     );
     let snapshot = context_snapshot_value(workspace.root(), &options, &file_sample)?;
     emit_context_build_step(ctx, "writing snapshot".to_string());

@@ -82,6 +82,76 @@ fn retry_gate_card_renders_failed_tasks_and_fix() {
     assert!(rendered.contains("retry"));
 }
 
+fn planning_row_fixture(
+    id: crate::app::PlanningTaskId,
+    state: crate::app::PlanningArtifactState,
+) -> crate::app::PlanningTaskRow {
+    crate::app::PlanningTaskRow {
+        id,
+        label: id.label(),
+        tool_name: id.tool_name(),
+        artifact_path: std::path::PathBuf::from("/dev/null"),
+        artifact_state: state,
+        artifact_modified: None,
+        model_backed: id.is_model_backed(),
+        required_cli: None,
+        cli_available: true,
+    }
+}
+
+#[test]
+fn planning_picker_announces_prior_state_and_plain_language_outcomes() {
+    use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
+
+    let backend = TestBackend::new(110, 44);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let dir = tempfile::tempdir().unwrap();
+    app.target = Some(dir.path().to_path_buf());
+    app.workflow_phase = Some(WorkflowPhase::Map);
+    app.findings.push(Finding::new_tool(
+        "demo",
+        "demo.rule",
+        "src/lib.rs",
+        7,
+        None,
+        Severity::Medium,
+        "prior finding",
+    ));
+    app.planning_tasks = vec![
+        planning_row_fixture(
+            PlanningTaskId::GatherRepoContext,
+            PlanningArtifactState::Cached,
+        ),
+        planning_row_fixture(PlanningTaskId::BuildXRay, PlanningArtifactState::Missing),
+    ];
+    app.planning_selected = [PlanningTaskId::GatherRepoContext, PlanningTaskId::BuildXRay]
+        .into_iter()
+        .collect();
+    app.shell_view = ShellView::PlanningPicker;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    // Prior state is announced up front, with counts the operator can verify.
+    assert!(
+        rendered.contains("Resuming"),
+        "prior-state banner: {rendered}"
+    );
+    assert!(rendered.contains("cached artifact"));
+    assert!(rendered.contains("1 finding"));
+    // Ambiguous [x]/[~]/[ ] glyphs are gone; outcomes read as words + a legend.
+    assert!(rendered.contains("OUTCOME"));
+    assert!(rendered.contains("RUN"));
+    assert!(rendered.contains("REUSE"));
+    assert!(!rendered.contains("[~]"));
+    // Enter is spelled out, not left to guesswork.
+    assert!(
+        rendered.contains("Enter: run 1 new step"),
+        "enter summary: {rendered}"
+    );
+}
+
 #[test]
 fn plain_retry_gate_explains_y_n_intercept() {
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -260,6 +330,7 @@ fn quickstart_follows_doctor_context_scan_findings_report_path() {
         "kuzushi doctor",
         "context build",
         ".kuzushi/context-snapshot.json",
+        "options sast:scan",
         "scan .",
         "findings",
         "proof state",
@@ -272,7 +343,8 @@ fn quickstart_follows_doctor_context_scan_findings_report_path() {
         );
     }
     assert!(rendered.find("kuzushi doctor").unwrap() < rendered.find("context build").unwrap());
-    assert!(rendered.find("context build").unwrap() < rendered.find("scan .").unwrap());
+    assert!(rendered.find("context build").unwrap() < rendered.find("options sast:scan").unwrap());
+    assert!(rendered.find("options sast:scan").unwrap() < rendered.find("scan .").unwrap());
     for y in 0..22 {
         let row = buffer_row_text(buffer, 80, y);
         assert!(
@@ -570,7 +642,15 @@ fn module_playbooks_name_supported_run_and_scan_commands() {
             text.contains("terminal: kuzushi --target . run"),
             "{module} does not distinguish terminal run syntax: {text}"
         );
+        assert!(
+            text.contains("options .") || text.contains("options sast:scan"),
+            "{module} does not point at the options view: {text}"
+        );
         if module == "sast" {
+            assert!(
+                text.contains("options sast:scan"),
+                "{module} does not name scan tuning command: {text}"
+            );
             assert!(
                 text.contains(".kuzushi/v2/findings.sqlite3"),
                 "{module} does not name the findings DB artifact: {text}"
@@ -1414,7 +1494,7 @@ fn renders_workspace_status_readably_at_80_columns() {
         )),
         findings_count: Some(2),
         last_export: Some(std::path::PathBuf::from("/tmp/findings.json")),
-        status: "workspace ready; 2 finding(s). Next: workspace export findings <path>.json"
+        status: "workspace ready; 2 finding(s). Next: workspace scope init or workspace export findings <path> [format]"
             .to_string(),
     };
     app.shell_view = ShellView::Workspace;
@@ -1607,7 +1687,7 @@ fn plain_workspace_guidance_wraps_without_truncating_export_command() {
         )),
         findings_count: Some(2),
         last_export: None,
-        status: "workspace ready; 2 finding(s). Next: workspace export findings <path>.json"
+        status: "workspace ready; 2 finding(s). Next: workspace scope init or workspace export findings <path> [format]"
             .to_string(),
     };
     app.shell_view = ShellView::Workspace;
@@ -1615,7 +1695,8 @@ fn plain_workspace_guidance_wraps_without_truncating_export_command() {
     let rendered = render_plain_app(&app, 52);
 
     assert!(rendered.contains("workspace ready; 2 finding(s)."));
-    assert!(rendered.contains("workspace export findings <path>.json"));
+    assert!(rendered.contains("workspace scope init"));
+    assert!(rendered.contains("workspace export findings <path> [format]"));
     assert!(!rendered.contains("workspace export findings..."));
     assert_strict_plain_width(&rendered, 52);
 }
@@ -2758,7 +2839,7 @@ fn prereq_plan_card_shows_cached_missing_writes_risk_cost_and_actions() {
     assert!(rendered.contains("a approve"));
     assert!(rendered.contains("r reuse cached"));
     assert!(rendered.contains("g regenerate"));
-    assert!(rendered.contains("c cancel"));
+    assert!(rendered.contains("n cancel"));
 }
 
 #[test]
@@ -3353,7 +3434,7 @@ fn activity_view_collapses_tasks_pane_for_taskless_runs() {
     assert!(!rendered.contains("no DAG tasks yet"));
     assert!(!rendered.contains("TASKS"));
     assert!(rendered.contains("OUTPUT"));
-    assert!(rendered.contains("no DAG tasks — streaming tool output"));
+    assert!(rendered.contains("no task rows — streaming tool output"));
     assert!(rendered.contains("[output focused]"));
 }
 
@@ -3561,6 +3642,23 @@ fn cost_cap_halt_row_drops_bracket_chrome() {
         !rendered.contains("[a]"),
         "stale bracket chrome: {rendered}"
     );
+}
+
+#[test]
+fn cost_cap_halt_renders_compact_fallback_on_short_terminals() {
+    let backend = TestBackend::new(80, 4);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.advisory.budget_halt = Some(crate::app::BudgetHalt {
+        limit_usd: 1.0,
+        spent_usd: 1.5,
+    });
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("COST CAP: c=continue"));
+    assert!(rendered.contains("a=abort"));
 }
 
 #[test]
@@ -3816,7 +3914,7 @@ fn patch_diff_summary_counts_files_adds_and_dels() {
 #[test]
 fn confirm_card_renders_tool_target_and_y_n_action_row() {
     // `design/mockups/confirm-dialog.jsx` paints CONFIRM gates with
-    // a warn header, tool/target/rationale rows, and a y/Y/n/N action
+    // a warn header, tool/target/rationale rows, and a y/Y/n/Esc/N action
     // row.  Verify each lands in the buffer when the gate is pending.
     let backend = TestBackend::new(120, 24);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -3841,6 +3939,8 @@ fn confirm_card_renders_tool_target_and_y_n_action_row() {
     assert!(rendered.contains("verify F-0012"));
     assert!(rendered.contains("refund.acme on project allowlist"));
     assert!(rendered.contains("allow once"));
+    assert!(rendered.contains("n/Esc"));
+    assert!(rendered.contains("deny once"));
     assert!(rendered.contains("deny + add to denylist"));
 }
 
@@ -4121,7 +4221,7 @@ fn workbench_app_with_findings() -> ShellApp {
 
 #[test]
 fn workbench_renders_pane_borders_at_wide_and_narrow_widths() {
-    for (width, height) in [(120, 30), (48, 18)] {
+    for (width, height) in [(120, 24), (80, 30)] {
         let backend = TestBackend::new(width, height);
         let mut terminal = Terminal::new(backend).unwrap();
         let app = workbench_app_with_findings();
@@ -4129,20 +4229,72 @@ fn workbench_renders_pane_borders_at_wide_and_narrow_widths() {
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
 
-        // Bordered panes are drawn (box-drawing). Wide terminals keep SOURCE;
-        // short terminals collapse to the review path so FINDINGS stays usable.
         assert!(rendered.contains("┌"), "no pane border at {width}x{height}");
-        if height >= 22 {
-            assert!(
-                rendered.contains("SOURCE"),
-                "no SOURCE pane at {width}x{height}"
-            );
-        }
+        assert!(rendered.contains("SOURCE"), "no SOURCE at {width}x{height}");
+        assert!(rendered.contains("CODE"), "no CODE at {width}x{height}");
         assert!(
             rendered.contains("FINDINGS"),
-            "no FINDINGS pane at {width}x{height}"
+            "no FINDINGS at {width}x{height}"
         );
+        assert!(
+            rendered.contains("DETAILS"),
+            "no DETAILS at {width}x{height}"
+        );
+        assert!(!rendered.contains("2/4 shown"), "{rendered}");
     }
+}
+
+#[test]
+fn workbench_renders_three_column_intermediate_without_source() {
+    let backend = TestBackend::new(110, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let app = workbench_app_with_findings();
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("CODE"), "{rendered}");
+    assert!(rendered.contains("FINDINGS"), "{rendered}");
+    assert!(rendered.contains("DETAILS"), "{rendered}");
+    assert!(!rendered.contains("SOURCE"), "{rendered}");
+    assert!(!rendered.contains("2/4 shown"), "{rendered}");
+}
+
+#[test]
+fn workbench_short_review_hint_names_real_constraints() {
+    let backend = TestBackend::new(80, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let app = workbench_app_with_findings();
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("SOURCE+CODE/DFD hidden"), "{rendered}");
+    assert!(rendered.contains(">=30 rows"), "{rendered}");
+    assert!(rendered.contains(">=120 cols"), "{rendered}");
+    assert!(rendered.contains("2/4 shown"), "{rendered}");
+    assert!(rendered.contains("proof"), "{rendered}");
+    assert!(rendered.contains("? unconfirmed"), "{rendered}");
+    assert!(rendered.contains("FINDINGS"), "{rendered}");
+    assert!(rendered.contains("DETAILS"), "{rendered}");
+}
+
+#[test]
+fn workbench_top_bar_renders_journey_phase_rail_with_target() {
+    let target = tempfile::tempdir().expect("temp target");
+    let backend = TestBackend::new(140, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.target = Some(target.path().to_path_buf());
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("組 map"), "{rendered}");
+    assert!(rendered.contains("崩 hunt"), "{rendered}");
+    assert!(rendered.contains("作 confirm"), "{rendered}");
+    assert!(rendered.contains("掛 fix"), "{rendered}");
 }
 
 #[test]
@@ -4153,6 +4305,10 @@ fn workbench_lines_plain_shows_top_bar_findings_and_dfd_empty_hint() {
     // Top bar identity, a findings row, and the cursor-following code/detail
     // preview. DFD is still available by focusing the center pane explicitly.
     assert!(rendered.contains("Kuzushi"), "{rendered}");
+    assert!(
+        rendered.contains("workspace export findings report.sarif"),
+        "{rendered}"
+    );
     assert!(rendered.contains("F-0001"), "{rendered}");
     assert!(
         rendered.contains("sql injection via order_id"),
@@ -4216,6 +4372,10 @@ fn workbench_selected_finding_gets_readable_details_pane() {
     assert!(rendered.contains("SELECT * FROM accounts"), "{rendered}");
     assert!(!rendered.contains("DFD"), "{rendered}");
     assert!(rendered.contains("DETAILS"), "{rendered}");
+    assert!(
+        rendered.contains("workspace export findings report.sarif"),
+        "{rendered}"
+    );
     assert!(rendered.contains("prepareStatement"), "{rendered}");
     assert!(rendered.contains("EVIDENCE"), "{rendered}");
     assert!(rendered.contains("source-sink"), "{rendered}");

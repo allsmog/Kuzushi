@@ -1,9 +1,11 @@
 use super::*;
 
 pub(in crate::modules) fn run_sast_verification_and_patch(
+    registry: &ModuleRegistry,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
+    option_store: &crate::options::ToolOptionStore,
     store: &crate::findings::FindingStore,
     run_ids: &SastRunIds,
     artifacts: &SastRunArtifacts,
@@ -12,26 +14,119 @@ pub(in crate::modules) fn run_sast_verification_and_patch(
     let mut verification_results = Vec::new();
     let mut patch_results = Vec::new();
     for fingerprint in true_positive_fingerprints_for_sast_runs(store, run_ids)? {
-        let fingerprint_for_patch = fingerprint.clone();
-        let verification = run_verify_finding(json!({ "fingerprint": fingerprint }), ctx, runtime)?;
-        write_verify_jsonl(artifacts, &verification)?;
-        let exploitable = verification
-            .pointer("/data/exploitable")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        verification_results.push(verification);
-
-        if requests.auto_patch && exploitable {
-            let patch = run_patch_finding(
-                sast_patch_input(input, &fingerprint_for_patch),
-                ctx,
-                runtime,
-            )?;
-            write_patch_jsonl(artifacts, &fingerprint_for_patch, &patch)?;
-            patch_results.push(patch);
-        }
+        let result = run_sast_verification_for_fingerprint(
+            registry,
+            input,
+            ctx,
+            runtime,
+            option_store,
+            artifacts,
+            requests,
+            fingerprint,
+        )?;
+        verification_results.push(result.verification);
+        patch_results.extend(result.patch);
     }
     Ok((verification_results, patch_results))
+}
+
+struct SastVerificationResult {
+    verification: Value,
+    patch: Option<Value>,
+}
+
+fn run_sast_verification_for_fingerprint(
+    registry: &ModuleRegistry,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    option_store: &crate::options::ToolOptionStore,
+    artifacts: &SastRunArtifacts,
+    requests: &SastScanRequests,
+    fingerprint: String,
+) -> Result<SastVerificationResult> {
+    let verification = run_sast_verifier(
+        registry,
+        input,
+        ctx,
+        runtime,
+        option_store,
+        fingerprint.clone(),
+    )?;
+    write_verify_jsonl(artifacts, &verification)?;
+    let patch = run_optional_sast_patch(
+        registry,
+        input,
+        ctx,
+        runtime,
+        option_store,
+        artifacts,
+        requests,
+        &fingerprint,
+        &verification,
+    )?;
+    Ok(SastVerificationResult {
+        verification,
+        patch,
+    })
+}
+
+fn run_sast_verifier(
+    registry: &ModuleRegistry,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    option_store: &crate::options::ToolOptionStore,
+    fingerprint: String,
+) -> Result<Value> {
+    let verify_input = with_sast_prompt_override(
+        json!({ "fingerprint": fingerprint }),
+        input,
+        ctx,
+        "verify",
+        "VERIFY_PROMPT",
+    )?;
+    run_sast_subtool(
+        registry,
+        "verify:finding",
+        verify_input,
+        ctx,
+        runtime,
+        option_store,
+    )
+}
+
+fn run_optional_sast_patch(
+    registry: &ModuleRegistry,
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    option_store: &crate::options::ToolOptionStore,
+    artifacts: &SastRunArtifacts,
+    requests: &SastScanRequests,
+    fingerprint: &str,
+    verification: &Value,
+) -> Result<Option<Value>> {
+    if !requests.auto_patch || !sast_verification_exploitable(verification) {
+        return Ok(None);
+    }
+    let patch = run_sast_subtool(
+        registry,
+        "patch:finding",
+        sast_patch_input(input, fingerprint),
+        ctx,
+        runtime,
+        option_store,
+    )?;
+    write_patch_jsonl(artifacts, fingerprint, &patch)?;
+    Ok(Some(patch))
+}
+
+fn sast_verification_exploitable(verification: &Value) -> bool {
+    verification
+        .pointer("/data/exploitable")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
 }
 
 pub(in crate::modules) fn sast_output_lines(

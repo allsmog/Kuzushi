@@ -29,3 +29,11 @@ pub use policy::{
     canonical_model_spec, require_configured_model, resolve_explicit_model, validate_model_spec,
 };
 pub use traced_runtime::{model_provider, prompt_pair_hash, TracedRuntime};
+
+pub fn missing_agent_runtime_message(tool_name: &str) -> String {
+    format!(
+        "{tool_name} requires an agent runtime; none configured. \
+         Set a model with `model anthropic:claude-haiku-4-5` in the shell \
+         or `KUZUSHI_MODEL=...` for CLI runs before invoking."
+    )
+}

@@ -1,11 +1,12 @@
 use super::*;
+use crate::fs_atomic::write_atomic;
+use crate::workspace::inventory::repo_relative;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 mod formatting;
 use formatting::{
-    default_project_model_schema_version, join_framework_names, join_language_names, relative_path,
-    value_hash,
+    default_project_model_schema_version, join_framework_names, join_language_names, value_hash,
 };
 
 pub const PROJECT_MODEL_SCHEMA_VERSION: u32 = 1;
@@ -56,8 +57,8 @@ pub fn build_project_model_document(
     current_revision: Option<String>,
 ) -> Result<ProjectModelDocument> {
     let root = root.as_ref();
-    let tree = load_nested_project_scopes(root)?
-        .unwrap_or_else(|| discover_nested_project_scopes(root));
+    let tree =
+        load_nested_project_scopes(root)?.unwrap_or_else(|| discover_nested_project_scopes(root));
     build_project_model_document_from_tree(root, &tree, scope_id, current_revision)
 }
 
@@ -71,7 +72,8 @@ pub fn load_project_model_document(
     if !path.exists() {
         return Ok(None);
     }
-    let body = fs::read_to_string(&path).with_context(|| format!("Could not read {}", path.display()))?;
+    let body =
+        fs::read_to_string(&path).with_context(|| format!("Could not read {}", path.display()))?;
     let document = serde_json::from_str(&body)
         .with_context(|| format!("Could not parse {}", path.display()))?;
     Ok(Some(refresh_project_model_staleness(
@@ -86,12 +88,9 @@ pub fn save_project_model_document(
     document: &ProjectModelDocument,
 ) -> Result<PathBuf> {
     let path = project_model_scope_path(root, &document.scope_id);
-    let Some(parent) = path.parent() else {
-        anyhow::bail!("project model path has no parent: {}", path.display());
-    };
-    fs::create_dir_all(parent).with_context(|| format!("Could not create {}", parent.display()))?;
-    let body = serde_json::to_string_pretty(document).context("Could not serialize project model")?;
-    fs::write(&path, body).with_context(|| format!("Could not write {}", path.display()))?;
+    let body =
+        serde_json::to_string_pretty(document).context("Could not serialize project model")?;
+    write_atomic(&path, &body)?;
     Ok(path)
 }
 
@@ -113,50 +112,92 @@ fn build_project_model_document_from_tree(
     scope_id: &str,
     current_revision: Option<String>,
 ) -> Result<ProjectModelDocument> {
-    let scope = tree
-        .scopes
-        .iter()
-        .find(|scope| scope.id == scope_id)
-        .with_context(|| format!("unknown project scope {scope_id:?}"))?;
-    let scope_root = scope.absolute_path(root);
-    let mut sections = inherited_sections(root, tree, scope, current_revision.clone())?;
-    merge_local_sections(
-        &mut sections,
-        local_sections(root, &scope_root, current_revision.as_deref()),
-    );
-    Ok(ProjectModelDocument {
-        schema_version: PROJECT_MODEL_SCHEMA_VERSION,
-        scope_id: scope.id.clone(),
-        scope_path: scope.rel_path.clone(),
-        built_at_revision: current_revision,
-        sections: sections.into_values().collect(),
-    })
+    ProjectModelBuilder::new(root, tree, current_revision).build(scope_id)
 }
 
-fn inherited_sections(
-    root: &Path,
-    tree: &NestedProjectScopeTree,
-    scope: &NestedProjectScope,
+struct ProjectModelBuilder<'a> {
+    root: &'a Path,
+    tree: &'a NestedProjectScopeTree,
     current_revision: Option<String>,
-) -> Result<BTreeMap<String, ProjectModelSection>> {
-    let Some(parent_id) = scope.parent.as_deref() else {
-        return Ok(BTreeMap::new());
-    };
-    let parent = build_project_model_document_from_tree(root, tree, parent_id, current_revision)?;
-    let inherited_keys = scope
-        .inherited_sections
-        .iter()
-        .map(String::as_str)
-        .collect::<Vec<_>>();
-    Ok(parent
-        .sections
-        .into_iter()
-        .filter(|section| inherited_keys.contains(&section.key.as_str()))
-        .map(|mut section| {
-            section.origin = ProjectModelSectionOrigin::Inherited;
-            (section.key.clone(), section)
+    memo: BTreeMap<String, ProjectModelDocument>,
+    visiting: BTreeSet<String>,
+}
+
+impl<'a> ProjectModelBuilder<'a> {
+    fn new(
+        root: &'a Path,
+        tree: &'a NestedProjectScopeTree,
+        current_revision: Option<String>,
+    ) -> Self {
+        Self {
+            root,
+            tree,
+            current_revision,
+            memo: BTreeMap::new(),
+            visiting: BTreeSet::new(),
+        }
+    }
+
+    fn build(&mut self, scope_id: &str) -> Result<ProjectModelDocument> {
+        if let Some(document) = self.memo.get(scope_id) {
+            return Ok(document.clone());
+        }
+        if !self.visiting.insert(scope_id.to_string()) {
+            anyhow::bail!("cyclic project scope parent chain at {scope_id:?}");
+        }
+        let result = self.build_uncached(scope_id);
+        self.visiting.remove(scope_id);
+        let document = result?;
+        self.memo.insert(scope_id.to_string(), document.clone());
+        Ok(document)
+    }
+
+    fn build_uncached(&mut self, scope_id: &str) -> Result<ProjectModelDocument> {
+        let scope = self
+            .tree
+            .scopes
+            .iter()
+            .find(|scope| scope.id == scope_id)
+            .cloned()
+            .with_context(|| format!("unknown project scope {scope_id:?}"))?;
+        let scope_root = scope.absolute_path(self.root);
+        let mut sections = self.inherited_sections(&scope)?;
+        merge_local_sections(
+            &mut sections,
+            local_sections(self.root, &scope_root, self.current_revision.as_deref()),
+        );
+        Ok(ProjectModelDocument {
+            schema_version: PROJECT_MODEL_SCHEMA_VERSION,
+            scope_id: scope.id.clone(),
+            scope_path: scope.rel_path.clone(),
+            built_at_revision: self.current_revision.clone(),
+            sections: sections.into_values().collect(),
         })
-        .collect())
+    }
+
+    fn inherited_sections(
+        &mut self,
+        scope: &NestedProjectScope,
+    ) -> Result<BTreeMap<String, ProjectModelSection>> {
+        let Some(parent_id) = scope.parent.as_deref() else {
+            return Ok(BTreeMap::new());
+        };
+        let parent = self.build(parent_id)?;
+        let inherited_keys = scope
+            .inherited_sections
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        Ok(parent
+            .sections
+            .into_iter()
+            .filter(|section| inherited_keys.contains(&section.key.as_str()))
+            .map(|mut section| {
+                section.origin = ProjectModelSectionOrigin::Inherited;
+                (section.key.clone(), section)
+            })
+            .collect())
+    }
 }
 
 fn local_sections(
@@ -210,7 +251,7 @@ fn source_file_section(
             key: key.to_string(),
             origin: ProjectModelSectionOrigin::Local,
             summary: format!("{label} present"),
-            source_path: Some(relative_path(root, source_path)),
+            source_path: Some(repo_relative(root, source_path)),
             content_hash: Some(crate::static_evidence::static_content_hash(&body)),
             built_at_revision: current_revision.map(str::to_string),
             stale: false,
@@ -243,7 +284,10 @@ fn inventory_section(scope_root: &Path, current_revision: Option<&str>) -> Proje
     }
 }
 
-fn attack_surface_section(scope_root: &Path, current_revision: Option<&str>) -> ProjectModelSection {
+fn attack_surface_section(
+    scope_root: &Path,
+    current_revision: Option<&str>,
+) -> ProjectModelSection {
     match crate::attack_surface::build_attack_surface_map(scope_root) {
         Ok(surface) => ProjectModelSection {
             key: "attack-surface".to_string(),
@@ -298,9 +342,10 @@ fn revision_is_stale(built_at_revision: Option<&str>, current_revision: Option<&
 }
 
 fn source_hash_changed(root: &Path, section: &ProjectModelSection) -> bool {
-    let (Some(source_path), Some(content_hash)) =
-        (section.source_path.as_deref(), section.content_hash.as_deref())
-    else {
+    let (Some(source_path), Some(content_hash)) = (
+        section.source_path.as_deref(),
+        section.content_hash.as_deref(),
+    ) else {
         return false;
     };
     fs::read_to_string(root.join(source_path))

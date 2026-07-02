@@ -72,11 +72,8 @@ fn strategy_queue_missing_file_is_empty() {
     assert!(load_strategy_queue(&workspace).unwrap().is_empty());
 }
 
-fn workspace_with_recorded_strategy_correction() -> (
-    tempfile::TempDir,
-    WorkspaceTarget,
-    StrategyCorrection,
-) {
+fn workspace_with_recorded_strategy_correction(
+) -> (tempfile::TempDir, WorkspaceTarget, StrategyCorrection) {
     let temp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
     let mut proposal = StrategyProposal::new(
@@ -166,7 +163,8 @@ fn run_scoped_correction() -> StrategyCorrection {
 }
 
 fn semgrep_strategy_proposal() -> StrategyProposal {
-    let mut proposal = StrategyProposal::new(StrategyPhase::Review, "run semgrep:scan", "fast pass");
+    let mut proposal =
+        StrategyProposal::new(StrategyPhase::Review, "run semgrep:scan", "fast pass");
     proposal.id = "review-semgrep-scan".to_string();
     proposal
 }

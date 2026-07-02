@@ -64,6 +64,7 @@ mod tests {
                 "cost_cap_usd": 1.25,
                 "prefilter_threshold": 7,
                 "stage2_tier": "deep",
+                "model": "openai:gpt-override",
                 "retriage": true
             }),
             temp.path(),
@@ -83,6 +84,7 @@ mod tests {
         assert_eq!(parsed.cost_cap_usd, Some(1.25));
         assert_eq!(parsed.prefilter_threshold, 7);
         assert_eq!(parsed.stage2_tier, ModelTier::Deep);
+        assert_eq!(parsed.model.as_deref(), Some("openai:gpt-override"));
         assert!(parsed.retriage);
     }
 
@@ -146,7 +148,12 @@ mod tests {
             trace: None,
         };
 
-        let err = resolve_triage_model(&ctx, &BareTierRuntime, ModelTier::Cheap).unwrap_err();
+        let input = TriageRunInput::from_tool_input(
+            &json!({"stage2Tier": "cheap"}),
+            std::path::Path::new("."),
+        )
+        .unwrap();
+        let err = resolve_triage_model(&ctx, &BareTierRuntime, &input).unwrap_err();
         let message = format!("{err:#}");
         assert!(message.contains("triage:run resolved an invalid stage2 model"));
         assert!(message.contains("provider:model"));

@@ -49,6 +49,7 @@ mod module_run;
 mod options;
 mod patch_review;
 mod plan_card;
+mod planning_overview;
 mod prereq_prompt;
 mod project_model;
 mod prompt;
@@ -89,6 +90,7 @@ pub(crate) use activity_dag_rows::ActivityDagRowTone;
 pub(crate) use activity_empty_state::ActivityEmptyStateModel;
 pub(crate) use activity_feed_rows::ActivityFeedRowTone;
 pub(crate) use activity_footer::ActivityFooterHint;
+pub(crate) use activity_layout::activity_frame_layout;
 pub(crate) use activity_pane_chrome::{ActivityPaneTitle, ActivityPlainPaneHeaderCell};
 pub(crate) use activity_plain_rows::{
     ActivityPlainDagCell, ActivityPlainFeedCell, ActivityPlainPaneRow,
@@ -134,7 +136,7 @@ pub(crate) use finding_summary::{
 };
 pub(crate) use findings::{
     findings_model, selected_finding_detail_model, FindingDetailModel, FindingEvidenceRow,
-    FindingListRow, FindingsModel, TriageSummaryModel,
+    FindingListRow, FindingsModel, ProofTier, TriageSummaryModel,
 };
 pub(crate) use help::{
     help_model, plain_help_model, quickstart_model, HelpCommandRow, PlainHelpCategoryModel,
@@ -170,6 +172,10 @@ pub(crate) use options::{
 };
 pub(crate) use patch_review::{patch_review_model, PatchReviewModel, PatchReviewTestRow};
 pub(crate) use plan_card::{plan_card_model, PlanCardModel, PlanChangeRow};
+pub(crate) use planning_overview::{
+    enter_plan, format_relative_age, latest_cached_modified, row_outcome, workspace_history,
+    EnterPlan, PriorState, RowOutcome, WorkspaceHistory,
+};
 pub(crate) use prereq_prompt::{
     plain_prereq_plan_model, prereq_prompt_model, PlainPrereqPlanModel, PrereqPromptModel,
     PrereqPromptStepModel,
@@ -187,13 +193,16 @@ pub(crate) use recent_module_activity::{
     recent_module_activity_model, ModuleActivityKind, ModuleActivityModel, ModuleActivityRow,
     ModuleActivityTone,
 };
-pub(crate) use recommendation::{recommendation_model, RecommendationModel, RecommendationRow};
+pub(crate) use recommendation::{
+    recommendation_artifact_needs_refresh, recommendation_model, RecommendationModel,
+    RecommendationRow,
+};
 pub(crate) use retry_card::{retry_card_model, RetryCardModel, RetryCardRow};
 pub(crate) use routing::{
     has_run_activity, plain_render_mode, routing_mode, routing_mode_segment, shell_view_line_route,
-    uses_activity_frame, uses_scene_frame, uses_workbench_frame, PlainRenderMode, PrimaryViewRoute,
-    RoutingMode, ShellViewLineRoute, SystemViewRoute, ThreatAndRunViewRoute,
-    WorkspaceSessionViewRoute,
+    uses_activity_frame, uses_scene_frame, uses_workbench_frame, PlainInteractiveOnlyModel,
+    PlainRenderMode, PrimaryViewRoute, RoutingMode, ShellViewLineRoute, SystemViewRoute,
+    ThreatAndRunViewRoute, WorkspaceSessionViewRoute,
 };
 pub(crate) use run_diff::{run_diff_model, RunDiffFindingRow, RunDiffModel};
 pub(crate) use run_paths::{
@@ -250,7 +259,7 @@ pub(crate) use viz_data::{
 };
 pub(crate) use workbench::{
     workbench_view_model, WorkbenchCenter, WorkbenchCenterBody, WorkbenchHint, WorkbenchState,
-    WorkbenchTopBar, WorkbenchViewModel,
+    WorkbenchTopBar, WorkbenchViewModel, WORKBENCH_REPORT_COMMAND,
 };
 pub(crate) use workspace::{
     findings_db_relative_path, plain_workspace_model, workspace_model, PlainWorkspaceModel,

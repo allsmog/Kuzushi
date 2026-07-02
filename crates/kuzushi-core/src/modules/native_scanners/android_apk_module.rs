@@ -177,11 +177,7 @@ fn check_env_tool() -> ToolDescriptor {
     tool_with_options(
         "android-apk:check-env",
         "Verify that jadx, apktool, and unzip are available on PATH.",
-        vec![
-            jadx_bin_option(),
-            apktool_bin_option(),
-            unzip_bin_option(),
-        ],
+        vec![jadx_bin_option(), apktool_bin_option(), unzip_bin_option()],
     )
 }
 
@@ -227,9 +223,13 @@ fn jadx_bin_option() -> OptionSpec {
 }
 
 fn apktool_bin_option() -> OptionSpec {
-    opt("apktoolBin", OptionType::Path, "Path to the apktool binary.")
-        .aliases(&["apktool_bin", "apktool"])
-        .advanced()
+    opt(
+        "apktoolBin",
+        OptionType::Path,
+        "Path to the apktool binary.",
+    )
+    .aliases(&["apktool_bin", "apktool"])
+    .advanced()
 }
 
 fn unzip_bin_option() -> OptionSpec {

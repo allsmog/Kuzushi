@@ -1,7 +1,8 @@
 use super::*;
 
 use self::{
-    binary_option, builtin_module, dag, opt, resolve_tool_target, target_option, tool_with_options,
+    binary_option, builtin_module, dag, model_option, opt, resolve_tool_target, target_option,
+    tool_with_options,
 };
 use crate::dep_hygiene::CargoAuditScanner;
 use crate::findings::{persist_tool_findings, Finding, GenericPersistedRun, StaticProofState};
@@ -15,7 +16,7 @@ use crate::scan::{
     ScanEngine, SemgrepPersistedRun, SemgrepScanReport, SemgrepScanner,
 };
 use crate::whitebox_static::{mark_whitebox_static_findings, whitebox_static_profile_requested};
-use anyhow::Result;
+pub(in crate::modules) use android_apk_code_scan::*;
 pub(in crate::modules) use android_apk_fileprovider::*;
 pub(in crate::modules) use android_apk_hybrid_detect::*;
 pub(in crate::modules) use android_apk_manifest_parser::*;
@@ -31,14 +32,14 @@ pub(in crate::modules) use android_apk_sast_handoff::*;
 pub(in crate::modules) use android_apk_scan::*;
 pub(in crate::modules) use android_apk_taint_sources::*;
 pub(in crate::modules) use android_apk_toolchain::*;
-pub(in crate::modules) use android_apk_code_scan::*;
+use anyhow::Result;
 pub(in crate::modules) use persist_semgrep_findings::*;
 pub(in crate::modules) use run_android_apk::*;
 pub(in crate::modules) use semgrep_module::*;
 use serde_json::{json, Value};
 use std::path::Path;
 use uuid::Uuid;
-mod exploit_chain_output;
+mod android_apk_code_scan;
 mod android_apk_fileprovider;
 mod android_apk_hybrid_detect;
 mod android_apk_manifest_parser;
@@ -54,7 +55,7 @@ mod android_apk_sast_handoff;
 mod android_apk_scan;
 mod android_apk_taint_sources;
 mod android_apk_toolchain;
-mod android_apk_code_scan;
+mod exploit_chain_output;
 mod persist_semgrep_findings;
 mod register_modules;
 mod run_android_apk;

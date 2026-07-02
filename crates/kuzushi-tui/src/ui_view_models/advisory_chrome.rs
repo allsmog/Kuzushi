@@ -33,6 +33,7 @@ impl NoticeBannerModel {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CostCapHaltModel {
     pub(crate) header: String,
+    pub(crate) compact: &'static str,
 }
 
 pub(crate) fn throttle_banner_model(app: &ShellApp) -> Option<ThrottleBannerModel> {
@@ -65,6 +66,7 @@ impl CostCapHaltModel {
                 "■ COST CAP HALT · spent ${:.4} / cap ${:.4}",
                 halt.spent_usd, halt.limit_usd
             ),
+            compact: "COST CAP: c=continue · a=abort",
         }
     }
 }

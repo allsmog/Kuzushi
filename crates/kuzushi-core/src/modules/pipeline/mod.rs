@@ -127,7 +127,10 @@ mod tests {
         let ctx = pipeline_test_context(&config, &workspace);
         let selector =
             run_pipeline_task_selector(json!({"disabledTasks": ["semgrep"]}), &ctx).unwrap();
-        let tasks = selector.pointer("/data/tasks").and_then(Value::as_array).unwrap();
+        let tasks = selector
+            .pointer("/data/tasks")
+            .and_then(Value::as_array)
+            .unwrap();
 
         assert!(tasks.iter().any(|task| task == "cargo-audit"));
         assert!(!tasks.iter().any(|task| task == "semgrep"));

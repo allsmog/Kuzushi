@@ -21,8 +21,7 @@ impl<'a> ToolExecutionContext<'a> {
     }
 
     pub fn run_artifact_location(&self) -> Option<(PathBuf, String)> {
-        self.trace
-            .and_then(|trace| trace.run_artifact_location())
+        self.trace.and_then(|trace| trace.run_artifact_location())
     }
 
     pub fn artifact_knowledge_context(

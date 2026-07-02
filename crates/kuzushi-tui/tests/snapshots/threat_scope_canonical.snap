@@ -8,20 +8,20 @@ assertion_line: 57
 
  -- SCOPE · 11 ISSUES --------------------------------------------------------------------------------------------------
    CRITICAL · 2
-      • sql injection via order_id concatenation
-      • prompt injection sink reads user body
+      * sql injection via order_id concatenation
+      * prompt injection sink reads user body
    HIGH · 3
-      • jwt verify accepts alg=none
-      • shell exec from cron payload
-      • path traversal in /assets/<file>
+      * jwt verify accepts alg=none
+      * shell exec from cron payload
+      * path traversal in /assets/<file>
    MEDIUM · 3
-      • open redirect on /login?next=
-      • csrf token not bound to session
-      • unbounded regex on /search
+      * open redirect on /login?next=
+      * csrf token not bound to session
+      * unbounded regex on /search
    LOW · 3
-      • cors allows null origin
-      • cookie set without SameSite
-      • console.log of req.body in handler
+      * cors allows null origin
+      * cookie set without SameSite
+      * console.log of req.body in handler
 
    OUT OF SCOPE
-      • generated caches, vendored fixtures
+      * generated caches, vendored fixtures

@@ -1,8 +1,9 @@
 use super::*;
 use anyhow::Result;
+use kuzushi_core::workspace::write_program_scope_scaffold;
 use kuzushi_core::{
-    export_workspace_findings, workspace_status_for_target, WorkspaceFindingsExport,
-    WorkspaceStatus,
+    export_workspace_findings, workspace_status_for_target, WorkspaceExportFormat,
+    WorkspaceFindingsExport, WorkspaceStatus,
 };
 
 pub(crate) fn workspace_for_target(target: Option<&PathBuf>) -> Result<WorkspaceTarget> {
@@ -26,10 +27,17 @@ pub(crate) fn explicit_workspace_for_target(target: Option<&PathBuf>) -> Result<
 pub(crate) fn export_findings_for_target(
     target: Option<&PathBuf>,
     output: &PathBuf,
+    format: Option<&str>,
 ) -> Result<WorkspaceFindingsExport> {
     let workspace = explicit_workspace_for_target(target)?;
     let output = workspace_output_path(&workspace, output);
-    export_workspace_findings(&workspace, &output, None)
+    let format = format.map(WorkspaceExportFormat::from_input).transpose()?;
+    export_workspace_findings(&workspace, &output, format)
+}
+
+pub(crate) fn init_scope_for_target(target: Option<&PathBuf>) -> Result<PathBuf> {
+    let workspace = explicit_workspace_for_target(target)?;
+    write_program_scope_scaffold(&workspace)
 }
 
 pub(crate) fn workspace_view_for_target(

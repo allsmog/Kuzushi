@@ -1,16 +1,19 @@
-use super::confirmation_keys::{confirm_key_action, ConfirmKeyAction};
+use super::confirmation_keys::{
+    confirm_key_action, confirm_key_is_consumed_without_action, ConfirmKeyAction,
+};
 use super::control_keys::control_key_handler;
 use super::*;
 
 impl ShellApp {
     pub fn handle_key(&mut self, key: KeyEvent) {
         if self.handle_modal_key(key) {
+            self.record_operator_interaction();
             return;
         }
 
         self.update_quit_chord_arm(key);
-        self.update_activity_cancel_arm(key);
         if self.handle_story_toggle_key(key) {
+            self.record_operator_interaction();
             return;
         }
 
@@ -23,8 +26,13 @@ impl ShellApp {
             || self.handle_history_key(key, modifiers)
             || self.handle_text_key(key)
         {
+            self.record_operator_interaction();
             return;
         }
+    }
+
+    fn record_operator_interaction(&mut self) {
+        self.last_char_at = Some(Instant::now());
     }
 
     pub(super) fn handle_modal_key(&mut self, key: KeyEvent) -> bool {
@@ -138,7 +146,7 @@ impl ShellApp {
             return false;
         }
         let Some(action) = confirm_key_action(key.code) else {
-            return false;
+            return confirm_key_is_consumed_without_action(key.code);
         };
         self.apply_confirm_key_action(action);
         true
@@ -173,12 +181,6 @@ impl ShellApp {
         }
     }
 
-    pub(super) fn update_activity_cancel_arm(&mut self, key: KeyEvent) {
-        if !is_activity_cancel_key(key) {
-            self.activity_cancel_armed_at = None;
-        }
-    }
-
     pub(super) fn handle_story_toggle_key(&mut self, key: KeyEvent) -> bool {
         if !key.modifiers.contains(KeyModifiers::CONTROL)
             || !matches!(key.code, KeyCode::Char('o') | KeyCode::Char('O'))
@@ -191,7 +193,7 @@ impl ShellApp {
 
     pub(super) fn reset_completion_cycle_for_key(&mut self, key: KeyEvent) {
         // Tab keeps the cycle alive (it's the cycle's input). Esc owns
-        // the cycle teardown via `esc_clear_or_restore` (M3 §3.3) so the
+        // the cycle teardown via `esc_clear_input_or_completion` (M3 §3.3) so the
         // popup can restore the operator's original prefix instead of
         // losing it to a blanket reset.
         if matches!(key.code, KeyCode::Tab | KeyCode::Esc) {

@@ -128,7 +128,7 @@ impl ShellApp {
             self.shell_view = ShellView::Activity;
             self.log(
                 "view",
-                "opened activity — c cancels run; type `back` to leave (disable: setg ui.auto_open_activity false)",
+                "opened activity — Ctrl+C requests abort; type `back` to leave (disable: setg ui.auto_open_activity false)",
             );
         }
     }

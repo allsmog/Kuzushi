@@ -12,9 +12,12 @@ pub(in crate::modules) struct AndroidApkToolchain {
 impl AndroidApkToolchain {
     pub(in crate::modules) fn from_tool_input(input: &Value) -> Self {
         Self {
-            jadx: read_bin(input, &["jadxBin", "jadx_bin", "jadx"]).unwrap_or_else(|| "jadx".into()),
-            apktool: read_bin(input, &["apktoolBin", "apktool_bin", "apktool"]).unwrap_or_else(|| "apktool".into()),
-            unzip: read_bin(input, &["unzipBin", "unzip_bin", "unzip"]).unwrap_or_else(|| "unzip".into()),
+            jadx: read_bin(input, &["jadxBin", "jadx_bin", "jadx"])
+                .unwrap_or_else(|| "jadx".into()),
+            apktool: read_bin(input, &["apktoolBin", "apktool_bin", "apktool"])
+                .unwrap_or_else(|| "apktool".into()),
+            unzip: read_bin(input, &["unzipBin", "unzip_bin", "unzip"])
+                .unwrap_or_else(|| "unzip".into()),
         }
     }
 }
@@ -136,7 +139,11 @@ fn run_version_probe(binary: &str, args: &[&str]) -> Option<String> {
         .map(str::to_string)
 }
 
-pub(in crate::modules) fn missing_tool_error(name: &str, binary: &str, error: std::io::Error) -> anyhow::Error {
+pub(in crate::modules) fn missing_tool_error(
+    name: &str,
+    binary: &str,
+    error: std::io::Error,
+) -> anyhow::Error {
     if error.kind() == std::io::ErrorKind::NotFound {
         anyhow::anyhow!(
             "android-apk: could not find {name} binary {binary:?}. Install {name} or pass {{\"{name}Bin\":\"/path/to/{name}\"}} in the tool input."
@@ -175,8 +182,20 @@ mod tests {
     fn missing_count_zero_when_all_found() {
         let report = ToolchainReport {
             entries: vec![
-                ToolchainEntry { name: "jadx", binary: "jadx".into(), found: true, resolved_path: Some("/usr/bin/jadx".into()), version_line: None },
-                ToolchainEntry { name: "apktool", binary: "apktool".into(), found: true, resolved_path: Some("/usr/bin/apktool".into()), version_line: None },
+                ToolchainEntry {
+                    name: "jadx",
+                    binary: "jadx".into(),
+                    found: true,
+                    resolved_path: Some("/usr/bin/jadx".into()),
+                    version_line: None,
+                },
+                ToolchainEntry {
+                    name: "apktool",
+                    binary: "apktool".into(),
+                    found: true,
+                    resolved_path: Some("/usr/bin/apktool".into()),
+                    version_line: None,
+                },
             ],
         };
         assert_eq!(report.missing_count(), 0);
@@ -186,9 +205,27 @@ mod tests {
     fn missing_count_counts_unfound() {
         let report = ToolchainReport {
             entries: vec![
-                ToolchainEntry { name: "jadx", binary: "jadx".into(), found: false, resolved_path: None, version_line: None },
-                ToolchainEntry { name: "apktool", binary: "apktool".into(), found: true, resolved_path: Some("/usr/bin/apktool".into()), version_line: None },
-                ToolchainEntry { name: "unzip", binary: "unzip".into(), found: false, resolved_path: None, version_line: None },
+                ToolchainEntry {
+                    name: "jadx",
+                    binary: "jadx".into(),
+                    found: false,
+                    resolved_path: None,
+                    version_line: None,
+                },
+                ToolchainEntry {
+                    name: "apktool",
+                    binary: "apktool".into(),
+                    found: true,
+                    resolved_path: Some("/usr/bin/apktool".into()),
+                    version_line: None,
+                },
+                ToolchainEntry {
+                    name: "unzip",
+                    binary: "unzip".into(),
+                    found: false,
+                    resolved_path: None,
+                    version_line: None,
+                },
             ],
         };
         assert_eq!(report.missing_count(), 2);

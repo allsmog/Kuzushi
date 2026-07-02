@@ -33,6 +33,8 @@ pub use recommend::{
     applicable_tasks_for_phase, model_recommended_in_phase, recommended_tasks_for_phase,
     TargetProfile,
 };
-pub use target_candidates::{discover_target_candidates, TargetCandidate, TargetCandidateScope};
+pub use target_candidates::{
+    discover_target_candidates, record_recent_target, TargetCandidate, TargetCandidateScope,
+};
 pub use task_id::PlanningTaskId;
 pub use task_row::{artifact_state, cli_is_on_path, ArtifactState, PlanningTaskRow};

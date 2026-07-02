@@ -112,7 +112,7 @@ fn status_footer_model_prefers_active_scan_status() {
 
     assert_eq!(
         model.left_segments,
-        ["mode:run", "openai:gpt-5.2", "running: semgrep"]
+        ["mode:run", "modules", "openai:gpt-5.2", "running: semgrep"]
     );
 }
 
@@ -127,6 +127,11 @@ fn status_footer_model_reflects_active_tool_model_override() {
 
     assert_eq!(
         model.left_segments,
-        ["mode:run", "openai:gpt-tool (tool)", "triage:run: active"]
+        [
+            "mode:run",
+            "modules",
+            "openai:gpt-tool (tool)",
+            "triage:run: active"
+        ]
     );
 }

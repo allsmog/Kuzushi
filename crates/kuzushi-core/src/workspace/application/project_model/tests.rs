@@ -15,7 +15,11 @@ fn project_model_document_builds_root_sections_and_round_trips() {
     let temp = tempfile::tempdir().unwrap();
     write_source(temp.path(), "src/lib.rs", "fn main() {}\n");
     write_source(temp.path(), ".kuzushi/context-snapshot.json", "{}\n");
-    write_source(temp.path(), ".kuzushi/threat-model.json", "{\"summary\":{}}\n");
+    write_source(
+        temp.path(),
+        ".kuzushi/threat-model.json",
+        "{\"summary\":{}}\n",
+    );
     let tree = discover_nested_project_scopes(temp.path());
     save_nested_project_scopes(temp.path(), &tree).unwrap();
 
@@ -46,7 +50,11 @@ fn nested_project_model_inherits_parent_context_and_threat_model() {
     touch_dir(temp.path(), "libs/parser/.git");
     write_source(temp.path(), "libs/parser/src/lib.rs", "pub fn parse() {}\n");
     write_source(temp.path(), ".kuzushi/context-snapshot.json", "{}\n");
-    write_source(temp.path(), ".kuzushi/threat-model.json", "{\"summary\":{}}\n");
+    write_source(
+        temp.path(),
+        ".kuzushi/threat-model.json",
+        "{\"summary\":{}}\n",
+    );
     fs::write(
         temp.path().join(".gitmodules"),
         r#"
@@ -79,7 +87,11 @@ fn nested_project_model_inherits_parent_context_and_threat_model() {
 #[test]
 fn loaded_project_model_marks_revision_and_hash_staleness() {
     let temp = tempfile::tempdir().unwrap();
-    write_source(temp.path(), ".kuzushi/context-snapshot.json", "{\"old\":true}\n");
+    write_source(
+        temp.path(),
+        ".kuzushi/context-snapshot.json",
+        "{\"old\":true}\n",
+    );
     let document = ProjectModelDocument {
         schema_version: PROJECT_MODEL_SCHEMA_VERSION,
         scope_id: ROOT_SCOPE_ID.to_string(),
@@ -94,11 +106,47 @@ fn loaded_project_model_marks_revision_and_hash_staleness() {
         )],
     };
     save_project_model_document(temp.path(), &document).unwrap();
-    write_source(temp.path(), ".kuzushi/context-snapshot.json", "{\"new\":true}\n");
+    write_source(
+        temp.path(),
+        ".kuzushi/context-snapshot.json",
+        "{\"new\":true}\n",
+    );
 
     let loaded = load_project_model_document(temp.path(), ROOT_SCOPE_ID, Some("newrev"))
         .unwrap()
         .unwrap();
 
     assert!(loaded.sections[0].stale);
+}
+
+#[test]
+fn cyclic_project_scope_parent_chain_returns_error() {
+    let temp = tempfile::tempdir().unwrap();
+    let tree = NestedProjectScopeTree {
+        schema_version: 1,
+        root: "scope-a".to_string(),
+        scopes: vec![
+            NestedProjectScope {
+                id: "scope-a".to_string(),
+                parent: Some("scope-b".to_string()),
+                kind: NestedProjectKind::Root,
+                rel_path: ".".to_string(),
+                inherited_sections: vec!["context-feed".to_string()],
+            },
+            NestedProjectScope {
+                id: "scope-b".to_string(),
+                parent: Some("scope-a".to_string()),
+                kind: NestedProjectKind::Submodule,
+                rel_path: "libs/parser".to_string(),
+                inherited_sections: vec!["context-feed".to_string()],
+            },
+        ],
+    };
+
+    let error =
+        build_project_model_document_from_tree(temp.path(), &tree, "scope-a", None).unwrap_err();
+
+    assert!(error
+        .to_string()
+        .contains("cyclic project scope parent chain"));
 }

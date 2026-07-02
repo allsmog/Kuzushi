@@ -49,15 +49,19 @@ pub(crate) enum ConfigSource {
     /// Operator-owned config under `$HOME/.kuzushi/v2/`. Trusted.
     Global,
     /// Config under `<target>/.kuzushi/v2/`. Untrusted: a scanned repository
-    /// can include this file, so `[runtime]` and `[operator]` fields must
-    /// never be honored from this source.
+    /// can include this file, so model/runtime/operator fields must never be
+    /// honored from this source.
     Project,
 }
 
 pub fn load_config(paths: ConfigPaths) -> Result<V2Config> {
     let mut config = V2Config::default();
 
-    merge_existing_file(&mut config, paths.global_config_path(), ConfigSource::Global)?;
+    merge_existing_file(
+        &mut config,
+        paths.global_config_path(),
+        ConfigSource::Global,
+    )?;
     merge_project_file(&mut config, paths.project_config_path())?;
     apply_env_overrides(&mut config);
     normalize_config(&mut config)?;
@@ -72,6 +76,32 @@ pub fn load_anthropic_oauth_config(paths: &ConfigPaths) -> Result<Option<Anthrop
 pub fn write_default_config(path: &Path) -> Result<()> {
     create_config_parent(path)?;
     write_config_body(path, default_config_body()?)
+}
+
+pub fn persist_global_model_selection(
+    model: &str,
+    thinking_level: Option<&str>,
+) -> Result<PathBuf> {
+    let paths = ConfigPaths::from_target(None)?;
+    let path = paths.global_config_path();
+    let mut config = global_config_for_write(&path)?;
+    config.model = Some(model.to_string());
+    config.runtime.thinking_level = thinking_level.map(str::to_string);
+    create_config_parent(&path)?;
+    write_config_body(
+        &path,
+        toml::to_string_pretty(&config).context("Could not serialize config")?,
+    )?;
+    Ok(path)
+}
+
+fn global_config_for_write(path: &Path) -> Result<V2Config> {
+    if !path.exists() {
+        return Ok(V2Config::default());
+    }
+    let raw =
+        fs::read_to_string(path).with_context(|| format!("Could not read {}", path.display()))?;
+    toml::from_str(&raw).with_context(|| format!("Could not parse {}", path.display()))
 }
 
 pub(crate) fn create_config_parent(path: &Path) -> Result<()> {
@@ -108,11 +138,7 @@ fn merge_existing_file(config: &mut V2Config, path: PathBuf, source: ConfigSourc
     merge_file(config, &path, source)
 }
 
-pub(crate) fn merge_file(
-    config: &mut V2Config,
-    path: &Path,
-    source: ConfigSource,
-) -> Result<()> {
+pub(crate) fn merge_file(config: &mut V2Config, path: &Path, source: ConfigSource) -> Result<()> {
     let raw =
         fs::read_to_string(path).with_context(|| format!("Could not read {}", path.display()))?;
     let patch: PartialConfig =
@@ -123,12 +149,12 @@ pub(crate) fn merge_file(
 }
 
 /// A target repository's `.kuzushi/v2/config.toml` is loaded as part of the
-/// effective configuration, but it must not be able to redirect the agent
-/// bridge, API endpoint, credential env var, OAuth config, or operator
-/// safety knobs — those are operator decisions that must come from the
-/// global config under `$HOME/.kuzushi/v2/`. Without this gate a malicious
-/// target repo could swap `langgraph_bridge_command` for an exfil binary that
-/// receives the operator's API key over stdin.
+/// effective configuration, but it must not be able to redirect model choice,
+/// the agent bridge, API endpoint, credential env var, OAuth config, or
+/// operator safety knobs — those are operator decisions that must come from
+/// the global config under `$HOME/.kuzushi/v2/`. Without this gate a malicious
+/// target repo could steer spend/model safety or swap `langgraph_bridge_command`
+/// for an exfil binary that receives the operator's API key over stdin.
 fn reject_untrusted_runtime_overrides(
     path: &Path,
     patch: &PartialConfig,
@@ -153,7 +179,11 @@ fn reject_untrusted_runtime_overrides(
 }
 
 fn forbidden_project_fields(patch: &PartialConfig) -> Vec<&'static str> {
-    let mut fields = forbidden_runtime_fields(patch.runtime.as_ref());
+    let mut fields = Vec::new();
+    if patch.model.is_some() {
+        fields.push("model");
+    }
+    fields.extend(forbidden_runtime_fields(patch.runtime.as_ref()));
     fields.extend(forbidden_operator_fields(patch.operator.as_ref()));
     fields
 }
@@ -195,7 +225,10 @@ fn forbidden_operator_fields(operator: Option<&PartialOperatorConfig>) -> Vec<&'
             "operator.trusted_workflow_auto_accept",
             operator.trusted_workflow_auto_accept.is_some(),
         ),
-        ("operator.trusted_modules", operator.trusted_modules.is_some()),
+        (
+            "operator.trusted_modules",
+            operator.trusted_modules.is_some(),
+        ),
     ]
     .into_iter()
     .filter_map(|(field, present)| present.then_some(field))
@@ -228,10 +261,7 @@ fn merge_runtime_config(config: &mut RuntimeConfig, patch: PartialRuntimeConfig)
 }
 
 fn merge_operator_config(config: &mut OperatorConfig, patch: PartialOperatorConfig) {
-    apply_patch_field(
-        &mut config.session_budget_usd,
-        patch.session_budget_usd,
-    );
+    apply_patch_field(&mut config.session_budget_usd, patch.session_budget_usd);
     apply_patch_field(
         &mut config.spend_hard_ceiling_usd,
         patch.spend_hard_ceiling_usd,

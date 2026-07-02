@@ -6,7 +6,10 @@ use super::diagrams::{attack_path_lines, heatmap_lines};
 use super::*;
 use crate::scene3d::VizPage;
 use crate::theme;
-use crate::ui_view_models::{dfd_model, findings_heatmap, taint_flow_path, DfdKind, DfdModel};
+use crate::ui_view_models::{
+    attack_tree, dfd_model, findings_heatmap, taint_flow_path, AttackTree, DfdKind, DfdModel,
+};
+use crate::ChainSeverity;
 use ratatui::layout::Rect;
 use ratatui::prelude::{Line, Span};
 
@@ -43,9 +46,48 @@ fn page_body_lines(app: &ShellApp, area: Rect, page: VizPage) -> Vec<Line<'stati
         VizPage::Heatmap => heatmap_lines(width, &findings_heatmap(&app.findings)),
         // Frame-rendered pages (3D terrain + box-drawing graph/tree) can't draw
         // in the line/plain path; show a short note instead.
-        VizPage::AttackSurface => frame_only_lines("3D relief"),
+        VizPage::AttackSurface => attack_surface_plain_lines(app, width),
         VizPage::Dfd => dfd_plain_lines(width, &dfd_model(app)),
-        VizPage::ExploitChain => frame_only_lines("attack tree"),
+        VizPage::ExploitChain => exploit_chain_plain_lines(width, &attack_tree(app)),
+    }
+}
+
+fn exploit_chain_plain_lines(width: usize, model: &AttackTree) -> Vec<Line<'static>> {
+    if let Some(hint) = &model.empty_hint {
+        return vec![Line::from(vec![Span::styled(
+            fit_plain(hint, width),
+            theme::muted(),
+        )])];
+    }
+    let mut lines = vec![Line::from(vec![Span::styled(
+        format!("ATTACK TREE · {} chains", model.chains.len()),
+        theme::accent(),
+    )])];
+    for (index, chain) in model.chains.iter().enumerate() {
+        lines.push(Line::from(vec![Span::raw(fit_plain(
+            &format!(
+                "  {}. [{}] {}",
+                index + 1,
+                chain_severity_label(chain.severity),
+                chain.title
+            ),
+            width,
+        ))]));
+        for (step_index, step) in chain.steps.iter().enumerate() {
+            lines.push(Line::from(vec![Span::raw(fit_plain(
+                &format!("      {}. {}", step_index + 1, step),
+                width,
+            ))]));
+        }
+    }
+    lines
+}
+
+fn chain_severity_label(severity: ChainSeverity) -> &'static str {
+    match severity {
+        ChainSeverity::Critical => "critical",
+        ChainSeverity::High => "high",
+        ChainSeverity::Medium => "medium",
     }
 }
 
@@ -147,10 +189,23 @@ fn nav_spans(app: &ShellApp, page: VizPage) -> Vec<Span<'static>> {
         ));
     }
     spans.push(Span::styled(
-        "  ·  o return · esc back".to_string(),
+        "  ·  Esc/q return".to_string(),
         theme::muted(),
     ));
     spans
+}
+
+fn attack_surface_plain_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
+    if app.findings.is_empty() {
+        return vec![Line::from(vec![Span::styled(
+            fit_plain(
+                "no risk surface yet — run `scan` to populate findings.",
+                width,
+            ),
+            theme::muted(),
+        )])];
+    }
+    frame_only_lines("3D relief")
 }
 
 /// Plain / non-TTY fallback for the frame-rendered pages (their braille/half-
@@ -192,6 +247,43 @@ mod tests {
 
         assert!(text.contains("static"), "{text}");
         assert!(!text.contains("spinning"), "{text}");
+        assert!(text.contains("Esc/q return"), "{text}");
+        assert!(!text.contains("o return"), "{text}");
+    }
+
+    #[test]
+    fn attack_surface_plain_lines_name_empty_state() {
+        let app = ShellApp::new(V2Config::default(), None);
+
+        let lines = scene_page_lines(&app, Rect::new(0, 0, 80, 24), VizPage::AttackSurface);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("no risk surface yet"), "{text}");
+        assert!(text.contains("run `scan`"), "{text}");
+    }
+
+    #[test]
+    fn exploit_chain_plain_lines_list_chain_steps() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.exploit_chains = vec![crate::ExploitChainDetail {
+            id: "chain-1".to_string(),
+            title: "template render to RCE".to_string(),
+            severity: crate::ChainSeverity::Critical,
+            steps: vec![crate::ExploitChainStep {
+                role: "source".to_string(),
+                description: "attacker controls template name".to_string(),
+                file: "app.js".to_string(),
+                line: 12,
+            }],
+        }];
+
+        let lines = scene_page_lines(&app, Rect::new(0, 0, 96, 24), VizPage::ExploitChain);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("ATTACK TREE · 1 chains"), "{text}");
+        assert!(text.contains("[critical] template render to RCE"), "{text}");
+        assert!(text.contains("attacker controls template name"), "{text}");
+        assert!(!text.contains("renders only in an interactive"), "{text}");
     }
 
     fn sample_dfd_doc() -> serde_json::Value {

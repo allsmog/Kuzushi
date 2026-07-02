@@ -32,10 +32,10 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         description: "open latest module recommendations",
     },
     ShellCommandSpec {
-        command: "tools",
-        aliases: &["/tools", "show tools"],
+        command: "tools [query]",
+        aliases: &["/tools", "show tools", "tools semgrep"],
         category: ShellCommandCategory::Navigation,
-        description: "list routed Rust tools",
+        description: "list or filter routed Rust tools",
     },
     ShellCommandSpec {
         command: "use <module>",

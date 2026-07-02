@@ -1,6 +1,5 @@
 use super::PROJECT_MODEL_SCHEMA_VERSION;
 use serde::Serialize;
-use std::path::Path;
 
 pub(super) fn value_hash(value: &impl Serialize) -> String {
     serde_json::to_string(value)
@@ -27,15 +26,6 @@ fn names_or_none<'a>(names: impl Iterator<Item = &'a str>) -> String {
     } else {
         names.join(", ")
     }
-}
-
-pub(super) fn relative_path(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
-        .unwrap_or(path)
-        .components()
-        .map(|component| component.as_os_str().to_string_lossy())
-        .collect::<Vec<_>>()
-        .join("/")
 }
 
 pub(super) fn default_project_model_schema_version() -> u32 {

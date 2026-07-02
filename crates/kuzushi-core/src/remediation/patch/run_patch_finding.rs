@@ -6,7 +6,8 @@ pub fn run_patch_finding(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
     let resources = patch_resources(ctx)?;
-    let input = PatchFindingInput::from_tool_input(&input)?;
+    let raw_input = input;
+    let input = PatchFindingInput::from_tool_input(&raw_input)?;
     let parent_step = emit_patch_start(ctx, &input);
     emit_patch_progress(ctx, parent_step, "finding · confirm patch candidate");
     let candidate = match confirmed_patch_candidate(resources.store, &input)? {
@@ -14,7 +15,7 @@ pub fn run_patch_finding(
         PatchCandidateLookup::Refused(response) => return Ok(response),
     };
     emit_patch_progress(ctx, parent_step, "execution · detect validation plan");
-    let execution = patch_execution(ctx, runtime, resources.workspace.root(), &input)?;
+    let execution = patch_execution(ctx, runtime, resources.workspace.root(), &input, &raw_input)?;
     let attempts = run_patch_attempts(
         ctx,
         parent_step,
@@ -43,9 +44,9 @@ struct PatchResources<'a> {
 }
 
 fn patch_resources<'a>(ctx: &'a ToolExecutionContext<'a>) -> Result<PatchResources<'a>> {
-    let workspace = ctx.workspace.context(
-        "patch:finding needs an active workspace. Pass --target <repo> or start the shell with --target.",
-    )?;
+    let workspace = ctx
+        .workspace
+        .context(crate::workspace::active_workspace_required_message("patch:finding"))?;
     let store = ctx
         .findings_store
         .context("patch:finding requires a findings store for the active workspace")?;
@@ -104,9 +105,7 @@ fn confirmed_patch_candidate(
     };
     if triage.verdict != TriageVerdict::TruePositive {
         return Ok(PatchCandidateLookup::Refused(
-            super::patch_refusal_response::unconfirmed_patch_finding_response(
-                &finding.fingerprint,
-            ),
+            super::patch_refusal_response::unconfirmed_patch_finding_response(&finding.fingerprint),
         ));
     }
     Ok(PatchCandidateLookup::Ready(ConfirmedPatchFinding {
@@ -127,12 +126,12 @@ fn patch_execution<'a>(
     runtime: Option<&'a dyn AgentRuntime>,
     repo_root: &Path,
     input: &PatchFindingInput,
+    raw_input: &Value,
 ) -> Result<PatchExecution<'a>> {
     let runtime = runtime.context(
         "patch:finding requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
     )?;
-    let model =
-        crate::runtime::require_configured_model("patch:finding", ctx.config.model.as_deref())?;
+    let model = patch_model(raw_input, ctx)?;
 
     let detected = detect_validation_plan(repo_root);
     let plan = PatchValidationPlan {
@@ -151,6 +150,17 @@ fn patch_execution<'a>(
         plan,
         repo_name,
     })
+}
+
+fn patch_model(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<String> {
+    crate::runtime::resolve_explicit_model(
+        "patch:finding",
+        input
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        ctx.config.model.as_deref(),
+    )
 }
 
 struct PatchAttemptOutcome {

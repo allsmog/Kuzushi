@@ -74,6 +74,10 @@ impl ShellApp {
     /// whether it actually produced data — a zero-flow hunt or empty chain run
     /// shouldn't yank the operator to a "run the tool" empty page.
     fn auto_open_viz_for_tool(&mut self, tool_name: &str) {
+        if tool_name == "threat-model:build" {
+            self.auto_open_workbench_dfd();
+            return;
+        }
         if let Some(page) = viz_page_for_tool(tool_name) {
             if self.viz_page_has_content(page) {
                 self.auto_open_viz_page(page);

@@ -146,6 +146,7 @@ impl ShellApp {
             | ShellView::ActorDetail(_)
             | ShellView::ModuleRun
             | ShellView::Workbench => true,
+            ShellView::Scene(page) => !page.is_3d(),
             _ => false,
         }
     }

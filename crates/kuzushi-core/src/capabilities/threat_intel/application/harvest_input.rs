@@ -39,8 +39,8 @@ pub(super) fn resolve_output_path(
     }
     let workspace = ctx.workspace.ok_or_else(|| {
         anyhow::anyhow!(
-            "threat-intel:harvest needs a workspace target or an explicit `outputPath`. \
-             Pass --target <repo> or `outputPath` in the input."
+            "{} Or pass `outputPath` in the input.",
+            crate::workspace::active_workspace_required_message("threat-intel:harvest")
         )
     })?;
     Ok(crate::capabilities::threat_intel::harvested_threat_intel_catalog_path(

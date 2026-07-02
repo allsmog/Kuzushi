@@ -7,8 +7,8 @@ const RECOMMENDATION_REPORT_HEADERS: [&str; 5] =
     ["priority", "tool", "runtime", "signal", "reason"];
 const RECOMMENDATION_REPORT_COMMANDS: [&str; 4] =
     ["run <tool> [json]", "trace <run>", "runs", "back"];
-const RECOMMENDATION_EMPTY_COMMANDS: [&str; 3] =
-    ["run module-recommender:recommend", "runs", "back"];
+const RECOMMENDATION_EMPTY_COMMANDS: [&str; 3] = ["recommend", "runs", "back"];
+const RECOMMENDATION_TARGETLESS_COMMANDS: [&str; 3] = ["target <path>", "demo", "back"];
 const RECOMMENDATION_RUNNING_COMMANDS: [&str; 3] = ["activity", "runs", "back"];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -56,8 +56,19 @@ pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
         summary: report.as_ref().and_then(|view| view.summary.clone()),
         report_headers: RECOMMENDATION_REPORT_HEADERS,
         report_commands: RECOMMENDATION_REPORT_COMMANDS,
-        empty_state: recommendation_empty_state(recommender_running(app)),
+        empty_state: recommendation_empty_state(recommender_running(app), app.target.is_some()),
         rows: report.map(|view| view.rows).unwrap_or_default(),
+    }
+}
+
+pub(crate) fn recommendation_artifact_needs_refresh(app: &ShellApp) -> bool {
+    if app.target.is_none() || recommender_running(app) {
+        return false;
+    }
+    let source = RecommendationSource::from_app(app);
+    match std::fs::metadata(&source.path) {
+        Ok(metadata) => !metadata.is_file(),
+        Err(_) => true,
     }
 }
 
@@ -90,31 +101,63 @@ fn recommendation_detail_row(label: &str, value: String) -> RecommendationDetail
     }
 }
 
-fn recommendation_empty_state(running: bool) -> RecommendationEmptyState {
+fn recommendation_empty_state(running: bool, has_target: bool) -> RecommendationEmptyState {
     if running {
-        return RecommendationEmptyState {
-            title: "ranking modules…",
-            explanations: [
-                "module-recommender:recommend is running for this workspace.",
-                "results will appear here automatically when it finishes.",
-            ],
-            actions: [
-                ("(running)", "no action needed — sit tight"),
-                ("runs", "inspect persisted runs"),
-            ],
-            commands: RECOMMENDATION_RUNNING_COMMANDS,
-        };
+        return running_recommendation_empty_state();
     }
+    if !has_target {
+        return targetless_recommendation_empty_state();
+    }
+    missing_recommendation_empty_state()
+}
+
+fn running_recommendation_empty_state() -> RecommendationEmptyState {
+    RecommendationEmptyState {
+        title: "ranking modules…",
+        explanations: [
+            "module-recommender:recommend is running for this workspace.",
+            "results will appear here automatically when it finishes.",
+        ],
+        actions: [
+            ("(running)", "no action needed — sit tight"),
+            ("runs", "inspect persisted runs"),
+        ],
+        commands: RECOMMENDATION_RUNNING_COMMANDS,
+    }
+}
+
+fn targetless_recommendation_empty_state() -> RecommendationEmptyState {
+    RecommendationEmptyState {
+        title: "choose a target first",
+        explanations: [
+            "recommend ranks modules from the active workspace.",
+            "set a repository target or run the offline demo to see a complete flow.",
+        ],
+        actions: [
+            (
+                "target <path>",
+                "use an existing repository or app directory",
+            ),
+            (
+                "demo",
+                "run the bundled offline fixture without credentials",
+            ),
+        ],
+        commands: RECOMMENDATION_TARGETLESS_COMMANDS,
+    }
+}
+
+fn missing_recommendation_empty_state() -> RecommendationEmptyState {
     RecommendationEmptyState {
         title: "no recommendations artifact",
         explanations: [
-            "recommend reads the latest recommendations.json artifact.",
-            "generate it through normal tool dispatch when planning is needed.",
+            "recommend will run module-recommender:recommend for this workspace.",
+            "results appear here after the background run finishes.",
         ],
         actions: [
             (
                 "recommend",
-                "ranks modules for the active workspace and writes recommendations.json",
+                "rank modules for the active workspace and write recommendations.json",
             ),
             ("runs", "inspect persisted runs"),
         ],
@@ -385,7 +428,7 @@ mod tests {
 
     #[test]
     fn empty_state_shows_ranking_while_recommender_runs() {
-        let running = recommendation_empty_state(true);
+        let running = recommendation_empty_state(true, true);
         assert_eq!(running.title, "ranking modules…");
         // Must NOT invite a re-run while it's already in flight.
         assert!(!running
@@ -393,12 +436,13 @@ mod tests {
             .iter()
             .any(|c| c.contains("module-recommender")));
 
-        let idle = recommendation_empty_state(false);
+        let idle = recommendation_empty_state(false, true);
         assert_eq!(idle.title, "no recommendations artifact");
-        assert!(idle
-            .commands
-            .iter()
-            .any(|c| c.contains("module-recommender")));
+        assert!(idle.commands.iter().any(|c| *c == "recommend"));
+
+        let targetless = recommendation_empty_state(false, false);
+        assert_eq!(targetless.title, "choose a target first");
+        assert_eq!(targetless.commands, ["target <path>", "demo", "back"]);
     }
 
     #[test]
@@ -643,10 +687,31 @@ mod tests {
             model.report_commands,
             ["run <tool> [json]", "trace <run>", "runs", "back"]
         );
-        assert_eq!(model.empty_state.title, "no recommendations artifact");
+        assert_eq!(model.empty_state.title, "choose a target first");
         assert_eq!(
             model.empty_state.commands,
-            ["run module-recommender:recommend", "runs", "back"]
+            ["target <path>", "demo", "back"]
         );
+    }
+
+    #[test]
+    fn recommendation_artifact_needs_refresh_only_with_target_and_missing_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        assert!(!recommendation_artifact_needs_refresh(&app));
+
+        app.target = Some(temp.path().to_path_buf());
+        assert!(recommendation_artifact_needs_refresh(&app));
+
+        let run_dir = test_run_dir(temp.path(), "run-rec");
+        fs::create_dir_all(&run_dir).unwrap();
+        write_latest_run(temp.path(), "run-rec");
+        fs::write(
+            run_dir.join(recommendations_artifact_leaf()),
+            serde_json::json!({"recommendations": []}).to_string(),
+        )
+        .unwrap();
+
+        assert!(!recommendation_artifact_needs_refresh(&app));
     }
 }

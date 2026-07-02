@@ -12,13 +12,16 @@ impl ShellApp {
     pub(crate) fn handle_workspace_command(&mut self, command: WorkspaceCommand) {
         match command {
             WorkspaceCommand::Status => self.show_workspace_status(),
-            WorkspaceCommand::ExportFindings { output } => self.export_workspace_findings(&output),
+            WorkspaceCommand::ScopeInit => self.init_workspace_scope(),
+            WorkspaceCommand::ExportFindings { output, format } => {
+                self.export_workspace_findings(&output, format.as_deref())
+            }
             WorkspaceCommand::Unsupported(raw) => {
                 self.shell_view = ShellView::Workspace;
                 self.log(
                     "error",
                     format!(
-                        "{raw} is not supported by the Rust workspace bridge yet. Supported: workspace status, workspace export findings <path>.json"
+                        "{raw} is not supported by the Rust workspace bridge yet. Supported: workspace status, workspace scope init, workspace export findings <path> [json|jsonl|sarif|csv|markdown-bundle]"
                     ),
                 );
             }

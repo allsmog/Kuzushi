@@ -508,7 +508,53 @@ fn run_candidates(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value
 }
 
 fn menu_probe(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
-    let binary = required_file(input, "binary")?;
+    let config = MenuProbeConfig::from_input(input)?;
+    emit_menu_probe_start(ctx, &config.binary);
+    let initial = run_menu_probe_step(&config.binary, &config.argv, config.env, b"", config.timeout)?;
+    let prompts = extract_menu_prompts(&initial);
+    let probes = collect_menu_probes(&config)?;
+    Ok(menu_probe_output(&config.binary, &initial, prompts, probes))
+}
+
+struct MenuProbeConfig<'a> {
+    binary: PathBuf,
+    argv: Vec<String>,
+    env: Option<&'a Value>,
+    max_choices: u32,
+    timeout: Duration,
+}
+
+impl<'a> MenuProbeConfig<'a> {
+    fn from_input(input: &'a Value) -> Result<Self> {
+        Ok(Self {
+            binary: required_file(input, "binary")?,
+            argv: string_list(input.get("argv")),
+            env: input.get("env"),
+            max_choices: menu_probe_max_choices(input),
+            timeout: menu_probe_timeout(input),
+        })
+    }
+}
+
+fn menu_probe_max_choices(input: &Value) -> u32 {
+    input
+        .get("maxChoices")
+        .and_then(Value::as_i64)
+        .unwrap_or(10)
+        .clamp(1, 32) as u32
+}
+
+fn menu_probe_timeout(input: &Value) -> Duration {
+    Duration::from_millis(
+        input
+            .get("timeoutMs")
+            .and_then(Value::as_i64)
+            .unwrap_or(400)
+            .clamp(50, 5_000) as u64,
+    )
+}
+
+fn emit_menu_probe_start(ctx: &ToolExecutionContext<'_>, binary: &Path) {
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
@@ -518,49 +564,55 @@ fn menu_probe(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
             )
             .emit();
     }
-    let max_choices = input
-        .get("maxChoices")
-        .and_then(Value::as_i64)
-        .unwrap_or(10)
-        .clamp(1, 32) as u32;
-    let timeout = Duration::from_millis(
-        input
-            .get("timeoutMs")
-            .and_then(Value::as_i64)
-            .unwrap_or(400)
-            .clamp(50, 5_000) as u64,
-    );
-    let argv = string_list(input.get("argv"));
+}
+
+fn collect_menu_probes(config: &MenuProbeConfig<'_>) -> Result<Vec<Value>> {
     let mut probes = Vec::new();
-    let initial = run_menu_probe_step(&binary, &argv, input.get("env"), b"", timeout)?;
-    let prompts = extract_menu_prompts(&initial);
-    for choice in 1..=max_choices {
-        let script = format!("{choice}\n\n\n\n");
-        let observation = run_menu_probe_step(
-            &binary,
-            &argv,
-            input.get("env"),
-            script.as_bytes(),
-            timeout,
-        )?;
-        probes.push(json!({
-            "choice": choice,
-            "stdoutExcerpt": observation.chars().take(800).collect::<String>(),
-            "looksValid": !observation.contains("[-] Invalid choice")
-                && !observation.contains("Invalid choice"),
-        }));
+    for choice in 1..=config.max_choices {
+        probes.push(menu_probe_choice(config, choice)?);
     }
+    Ok(probes)
+}
+
+fn menu_probe_choice(config: &MenuProbeConfig<'_>, choice: u32) -> Result<Value> {
+    let script = format!("{choice}\n\n\n\n");
+    let observation = run_menu_probe_step(
+        &config.binary,
+        &config.argv,
+        config.env,
+        script.as_bytes(),
+        config.timeout,
+    )?;
     Ok(json!({
+        "choice": choice,
+        "stdoutExcerpt": observation.chars().take(800).collect::<String>(),
+        "looksValid": menu_choice_looks_valid(&observation),
+    }))
+}
+
+fn menu_choice_looks_valid(observation: &str) -> bool {
+    !observation.contains("[-] Invalid choice") && !observation.contains("Invalid choice")
+}
+
+fn menu_probe_output(
+    binary: &Path,
+    initial: &str,
+    prompts: Vec<String>,
+    probes: Vec<Value>,
+) -> Value {
+    let prompt_count = prompts.len();
+    let probe_count = probes.len();
+    json!({
         "binary": binary.display().to_string(),
         "initialOutput": initial.chars().take(1600).collect::<String>(),
         "menuPrompts": prompts,
         "probes": probes,
         "output": format!(
             "menu probe finished -- {} prompts captured, {} choices probed",
-            extract_menu_prompts(&initial).len(),
-            probes.len()
+            prompt_count,
+            probe_count
         ),
-    }))
+    })
 }
 
 fn run_menu_probe_step(
@@ -607,11 +659,8 @@ fn extract_menu_prompts(output: &str) -> Vec<String> {
         if trimmed.is_empty() {
             continue;
         }
-        let starts_numeric = trimmed
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_digit())
-            && trimmed.contains('.');
+        let starts_numeric =
+            trimmed.chars().next().is_some_and(|c| c.is_ascii_digit()) && trimmed.contains('.');
         if starts_numeric && seen.insert(trimmed.to_string()) {
             prompts.push(trimmed.to_string());
         }
@@ -883,7 +932,8 @@ fn auto_solve(
     let target = required_existing_path(input, "target")?;
     let binary = generic_binary_target(&target)
         .with_context(|| format!("could not find an ELF target under {}", target.display()))?;
-    let runtime = runtime.context("pwn:auto-solve requires a configured agent runtime")?;
+    let runtime =
+        runtime.with_context(|| crate::runtime::missing_agent_runtime_message("pwn:auto-solve"))?;
     let model = resolve_tool_model("pwn:auto-solve", input, ctx)?;
     let profile = profile_binary(&json!({ "binary": binary }), ctx)?;
     let reverse_summary = generic_reverse_summary(&binary);
@@ -897,27 +947,32 @@ fn auto_solve(
         ctx,
     )?;
     let mut output = auto_solve_generic(&target, &binary, profile, reverse_summary)?;
-    if let Value::Object(ref mut object) = output {
-        object.insert(
-            "llmPlanner".to_string(),
-            json!({
-                "used": true,
-                "model": model,
-                "reason": "configured LLM observe/replan loop",
-                "decision": loop_report.get("finalDecision").cloned(),
-                "iterations": loop_report.get("iterations").cloned(),
-            }),
-        );
-        object.insert(
-            "actionExecution".to_string(),
-            loop_report
-                .get("actionExecution")
-                .cloned()
-                .unwrap_or_else(|| json!({"executed": false, "results": []})),
-        );
-        object.insert("actionsExecuted".to_string(), json!(true));
-    }
+    attach_auto_solve_loop_report(&mut output, &model, &loop_report);
     Ok(output)
+}
+
+fn attach_auto_solve_loop_report(output: &mut Value, model: &str, loop_report: &Value) {
+    let Value::Object(object) = output else {
+        return;
+    };
+    object.insert(
+        "llmPlanner".to_string(),
+        json!({
+            "used": true,
+            "model": model,
+            "reason": "configured LLM observe/replan loop",
+            "decision": loop_report.get("finalDecision").cloned(),
+            "iterations": loop_report.get("iterations").cloned(),
+        }),
+    );
+    object.insert(
+        "actionExecution".to_string(),
+        loop_report
+            .get("actionExecution")
+            .cloned()
+            .unwrap_or_else(|| json!({"executed": false, "results": []})),
+    );
+    object.insert("actionsExecuted".to_string(), json!(true));
 }
 
 fn run_pwn_observe_replan_loop(
@@ -1009,7 +1064,8 @@ fn plan_auto_solve_strategy(
     profile: &Value,
     reverse_summary: &Value,
 ) -> Result<Value> {
-    let runtime = runtime.context("pwn:auto-solve requires a configured agent runtime")?;
+    let runtime =
+        runtime.with_context(|| crate::runtime::missing_agent_runtime_message("pwn:auto-solve"))?;
     let model = resolve_tool_model("pwn:auto-solve", input, ctx)?;
     let observations = Vec::new();
     let decision = query_pwn_strategy_planner(

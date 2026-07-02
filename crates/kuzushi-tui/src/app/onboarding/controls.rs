@@ -93,16 +93,6 @@ pub enum RowDisposition {
     Unavailable,
 }
 
-impl RowDisposition {
-    pub fn checkbox(self) -> &'static str {
-        match self {
-            RowDisposition::WillRun => "[x]",
-            RowDisposition::Reused => "[~]",
-            RowDisposition::Off | RowDisposition::Unavailable => "[ ]",
-        }
-    }
-}
-
 pub fn row_disposition(
     row: &PlanningTaskRow,
     selected: &BTreeSet<PlanningTaskId>,
@@ -159,6 +149,7 @@ mod tests {
             tool_name: id.tool_name(),
             artifact_path: PathBuf::from("/dev/null"),
             artifact_state: state,
+            artifact_modified: None,
             model_backed: id.is_model_backed(),
             required_cli: id.required_cli(),
             cli_available: id.required_cli().is_none(),
@@ -253,9 +244,9 @@ mod tests {
 
     #[test]
     fn disposition_separates_will_run_from_reused() {
-        // The seed disconnect: a checked cached row used to render the same
-        // `[x]` as a row that will actually run. The disposition keeps the
-        // two states (and their glyphs) distinct.
+        // The seed disconnect: a checked cached row used to look identical to a
+        // row that will actually run. The disposition keeps the two states
+        // distinct so the picker can label one RUN and the other REUSE.
         let cached = row(GatherRepoContext, ArtifactState::Cached);
         let missing = row(BuildXRay, ArtifactState::Missing);
         let selected: BTreeSet<PlanningTaskId> =
@@ -268,10 +259,6 @@ mod tests {
         assert_eq!(
             row_disposition(&missing, &selected, &rebuild),
             RowDisposition::WillRun
-        );
-        assert_ne!(
-            RowDisposition::Reused.checkbox(),
-            RowDisposition::WillRun.checkbox()
         );
     }
 
@@ -301,7 +288,6 @@ mod tests {
             row_disposition(&no_cli, &selected, &rebuild),
             RowDisposition::Unavailable
         );
-        assert_eq!(RowDisposition::Off.checkbox(), "[ ]");
     }
 
     #[test]
@@ -313,6 +299,7 @@ mod tests {
             tool_name: BuildCodePropertyGraph.tool_name(),
             artifact_path: PathBuf::from("/dev/null"),
             artifact_state: ArtifactState::Missing,
+            artifact_modified: None,
             model_backed: false,
             required_cli: Some("joern-parse"),
             cli_available: false,

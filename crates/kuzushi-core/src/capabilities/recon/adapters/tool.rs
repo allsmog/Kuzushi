@@ -102,8 +102,8 @@ fn dispatch_recon_import(
 }
 
 /// Refuse recon dispatch when the requested target is out of scope per
-/// `.kuzushi/scope.toml`. Unknown verdicts are allowed through silently —
-/// the operator's tool log already surfaces the verdict at start time.
+/// `.kuzushi/scope.toml`. Unknown verdicts are allowed only when the scope
+/// has no in-scope allow list; absence of a match in allow-list mode refuses.
 /// Absence of scope.toml is the no-op default.
 fn enforce_recon_scope(
     name: &str,

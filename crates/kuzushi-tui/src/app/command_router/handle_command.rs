@@ -114,13 +114,20 @@ pub(crate) fn handle_home_command(app: &mut ShellApp, command: &ShellCommand) ->
 }
 
 pub(crate) fn handle_help_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
-    let ShellCommand::Help = command else {
+    let ShellCommand::Help(query) = command else {
         return false;
     };
     app.shell_view = ShellView::Help;
     app.help_scroll = 0;
-    app.log("help", compact_help_summary());
+    app.help_filter = query.clone();
+    app.log("help", help_log_summary(query.as_deref()));
     true
+}
+
+fn help_log_summary(query: Option<&str>) -> String {
+    query.map_or_else(compact_help_summary, |query| {
+        format!("filtered command reference for `{query}`")
+    })
 }
 
 pub(crate) fn handle_back_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
@@ -164,22 +171,49 @@ pub(crate) fn handle_recommend_command(app: &mut ShellApp, command: &ShellComman
         return false;
     };
     app.shell_view = ShellView::Recommend;
+    if app.target.is_none() {
+        app.log(
+            "recommend",
+            "choose a target with `target <path>` or run `demo` for the offline fixture",
+        );
+        return true;
+    }
+    if crate::ui_view_models::recommendation_artifact_needs_refresh(app) {
+        app.log(
+            "recommend",
+            "running module-recommender:recommend for the active target",
+        );
+        app.run_tool(Some("module-recommender:recommend".to_string()), None);
+        return true;
+    }
     app.log("recommend", "latest module recommendations");
     true
 }
 
 pub(crate) fn handle_tools_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
-    let ShellCommand::Tools = command else {
+    let ShellCommand::Tools(filter) = command else {
         return false;
     };
     app.shell_view = ShellView::Tools;
     app.tools_scroll = 0;
-    let count = app.registry.tools().count();
+    app.tools_filter = filter.clone();
+    let model = crate::ui_view_models::tools_model(app);
+    let suffix = filter
+        .as_ref()
+        .map(|query| format!(" matching {query:?}"))
+        .unwrap_or_default();
     app.log(
         "tool",
         format!(
-            "showing {count} {}",
-            if count == 1 { "tool" } else { "tools" }
+            "showing {} of {} {}{}",
+            model.rows.len(),
+            model.total_count,
+            if model.total_count == 1 {
+                "tool"
+            } else {
+                "tools"
+            },
+            suffix
         ),
     );
     true
@@ -234,199 +268,6 @@ pub(crate) fn handle_strategy_command(app: &mut ShellApp, command: &ShellCommand
     app.open_strategy_queue();
     app.apply_strategy_command(command);
     true
-}
-
-impl ShellApp {
-    fn open_strategy_queue(&mut self) {
-        self.shell_view = ShellView::StrategyQueue;
-        self.scroll_offset = 0;
-    }
-
-    fn apply_strategy_command(&mut self, command: &StrategyCommand) {
-        match command {
-            StrategyCommand::Show => self.log("strategy", "showing strategy queue"),
-            StrategyCommand::Approve(id) => self.update_strategy_proposal_status(
-                id,
-                kuzushi_core::StrategyProposalStatus::Approved,
-                "approved",
-            ),
-            StrategyCommand::Reject(id) => self.update_strategy_proposal_status(
-                id,
-                kuzushi_core::StrategyProposalStatus::Rejected,
-                "rejected",
-            ),
-            StrategyCommand::Correct {
-                id,
-                to_strategy,
-                reason,
-                scope,
-            } => {
-                self.record_strategy_correction_command(id, to_strategy, reason.as_deref(), *scope)
-            }
-            StrategyCommand::Unsupported(raw) => self.log_unknown_strategy_command(raw),
-        }
-    }
-
-    fn log_unknown_strategy_command(&mut self, raw: &str) {
-        self.log(
-            "strategy",
-            format!(
-                "unknown strategy command: {raw}; try strategy approve <id> or strategy correct <id> <strategy>"
-            ),
-        );
-    }
-
-    fn update_strategy_proposal_status(
-        &mut self,
-        id: &str,
-        status: kuzushi_core::StrategyProposalStatus,
-        label: &str,
-    ) {
-        let Some(workspace) = self.strategy_workspace("updating") else {
-            return;
-        };
-        match kuzushi_core::set_strategy_proposal_status(&workspace, id, status) {
-            Ok(true) => self.log("strategy", format!("{label} {id}")),
-            Ok(false) => self.log("strategy", format!("no strategy proposal named {id}")),
-            Err(error) => self.log("strategy", format!("could not update {id}: {error}")),
-        }
-    }
-
-    fn record_strategy_correction_command(
-        &mut self,
-        id: &str,
-        to_strategy: &str,
-        reason: Option<&str>,
-        scope: StrategyCorrectionCommandScope,
-    ) {
-        let Some(workspace) = self.strategy_workspace("correcting") else {
-            return;
-        };
-        let Some(proposal) = self.strategy_proposal(&workspace, id) else {
-            return;
-        };
-        let correction = self.strategy_correction(&proposal, to_strategy, reason, scope);
-        self.record_strategy_correction_result(&workspace, id, &correction);
-    }
-
-    fn strategy_workspace(&mut self, action: &str) -> Option<kuzushi_core::WorkspaceTarget> {
-        let Some(target) = self.target.as_deref() else {
-            self.log(
-                "strategy",
-                format!("select a target before {action} the strategy queue"),
-            );
-            return None;
-        };
-        match kuzushi_core::WorkspaceTarget::new(target) {
-            Ok(workspace) => Some(workspace),
-            Err(error) => {
-                self.log("strategy", format!("target unavailable: {error}"));
-                None
-            }
-        }
-    }
-
-    fn strategy_proposal(
-        &mut self,
-        workspace: &kuzushi_core::WorkspaceTarget,
-        id: &str,
-    ) -> Option<kuzushi_core::StrategyProposal> {
-        let found = kuzushi_core::load_strategy_queue(workspace)
-            .ok()?
-            .into_iter()
-            .find(|proposal| proposal.id == id);
-        if found.is_none() {
-            self.log("strategy", format!("no strategy proposal named {id}"));
-        }
-        found
-    }
-
-    fn strategy_correction(
-        &self,
-        proposal: &kuzushi_core::StrategyProposal,
-        to_strategy: &str,
-        reason: Option<&str>,
-        scope: StrategyCorrectionCommandScope,
-    ) -> kuzushi_core::StrategyCorrection {
-        let correction_scope = strategy_correction_scope(scope);
-        kuzushi_core::StrategyCorrection::new(
-            proposal.phase,
-            Some(proposal.id.clone()),
-            proposal.effective_strategy().to_string(),
-            to_strategy.trim().to_string(),
-            correction_scope,
-            self.strategy_correction_run_id(proposal, correction_scope),
-            strategy_correction_reason(reason),
-            "operator",
-        )
-    }
-
-    fn strategy_correction_run_id(
-        &self,
-        proposal: &kuzushi_core::StrategyProposal,
-        scope: kuzushi_core::StrategyCorrectionScope,
-    ) -> Option<String> {
-        (scope == kuzushi_core::StrategyCorrectionScope::Run)
-            .then(|| {
-                proposal
-                    .source_run_id
-                    .clone()
-                    .or_else(|| self.active_strategy_run_id())
-            })
-            .flatten()
-    }
-
-    fn record_strategy_correction_result(
-        &mut self,
-        workspace: &kuzushi_core::WorkspaceTarget,
-        id: &str,
-        correction: &kuzushi_core::StrategyCorrection,
-    ) {
-        match kuzushi_core::record_strategy_correction(workspace, correction) {
-            Ok(()) => self.log_strategy_correction(id, correction),
-            Err(error) => self.log("strategy", format!("could not correct {id}: {error}")),
-        }
-    }
-
-    fn log_strategy_correction(&mut self, id: &str, correction: &kuzushi_core::StrategyCorrection) {
-        self.log(
-            "strategy",
-            format!(
-                "corrected {id}: {} -> {} ({})",
-                correction.from_strategy,
-                correction.to_strategy,
-                correction.scope.label()
-            ),
-        );
-    }
-
-    fn active_strategy_run_id(&self) -> Option<String> {
-        self.tool_run_id
-            .clone()
-            .or_else(|| self.scan.as_ref().and_then(|scan| scan.run_id.clone()))
-            .or_else(|| {
-                self.activity
-                    .as_ref()
-                    .map(|activity| activity.run_id.clone())
-            })
-    }
-}
-
-fn strategy_correction_scope(
-    scope: StrategyCorrectionCommandScope,
-) -> kuzushi_core::StrategyCorrectionScope {
-    match scope {
-        StrategyCorrectionCommandScope::Run => kuzushi_core::StrategyCorrectionScope::Run,
-        StrategyCorrectionCommandScope::Workspace => {
-            kuzushi_core::StrategyCorrectionScope::Workspace
-        }
-    }
-}
-
-fn strategy_correction_reason(reason: Option<&str>) -> &str {
-    reason
-        .filter(|value| !value.trim().is_empty())
-        .unwrap_or("operator correction from Strategy Queue")
 }
 
 pub(crate) fn handle_open_command(app: &mut ShellApp, command: &ShellCommand) -> bool {

@@ -7,15 +7,23 @@ mod tests {
     fn parses_kept_commands() {
         assert_eq!(parse_command("/"), ShellCommand::Home);
         assert_eq!(parse_command("home"), ShellCommand::Home);
-        assert_eq!(parse_command("/help"), ShellCommand::Help);
-        assert_eq!(parse_command("/h"), ShellCommand::Help);
-        assert_eq!(parse_command("?"), ShellCommand::Help);
+        assert_eq!(parse_command("/help"), ShellCommand::Help(None));
+        assert_eq!(parse_command("/h"), ShellCommand::Help(None));
+        assert_eq!(parse_command("?"), ShellCommand::Help(None));
         assert_eq!(parse_command("/modules"), ShellCommand::Modules);
         assert_eq!(parse_command("/show modules"), ShellCommand::Modules);
         assert_eq!(parse_command("/recommend"), ShellCommand::Recommend);
         assert_eq!(parse_command("rec"), ShellCommand::Recommend);
-        assert_eq!(parse_command("/tools"), ShellCommand::Tools);
-        assert_eq!(parse_command("/show tools"), ShellCommand::Tools);
+        assert_eq!(parse_command("/tools"), ShellCommand::Tools(None));
+        assert_eq!(parse_command("/show tools"), ShellCommand::Tools(None));
+        assert_eq!(
+            parse_command("tools semgrep scan"),
+            ShellCommand::Tools(Some("semgrep scan".to_string()))
+        );
+        assert_eq!(
+            parse_command("show tools codeql"),
+            ShellCommand::Tools(Some("codeql".to_string()))
+        );
         assert_eq!(parse_command("/findings"), ShellCommand::Findings);
         assert_eq!(parse_command("/f"), ShellCommand::Findings);
         assert_eq!(
@@ -25,7 +33,15 @@ mod tests {
         assert_eq!(
             parse_command("findings export /tmp/findings.json"),
             ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
-                output: PathBuf::from("/tmp/findings.json")
+                output: PathBuf::from("/tmp/findings.json"),
+                format: None,
+            })
+        );
+        assert_eq!(
+            parse_command("findings export /tmp/findings-bundle format=markdown-bundle"),
+            ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+                output: PathBuf::from("/tmp/findings-bundle"),
+                format: Some("markdown-bundle".to_string()),
             })
         );
         assert_eq!(parse_command("runs"), ShellCommand::ShowRuns);
@@ -69,6 +85,7 @@ mod tests {
             parse_command("/scan ./repo"),
             ShellCommand::Scan(Some(PathBuf::from("./repo")))
         );
+        assert_eq!(parse_command("/demo"), ShellCommand::Demo);
         assert_eq!(
             parse_command("/target rev abcdef1"),
             ShellCommand::TargetRevision("abcdef1".to_string())
@@ -344,8 +361,20 @@ mod tests {
         assert_eq!(
             parse_command("workspace export findings out.json"),
             ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
-                output: PathBuf::from("out.json")
+                output: PathBuf::from("out.json"),
+                format: None,
             })
+        );
+        assert_eq!(
+            parse_command("workspace export findings markdown-bundle bundle-dir"),
+            ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+                output: PathBuf::from("bundle-dir"),
+                format: Some("markdown-bundle".to_string()),
+            })
+        );
+        assert_eq!(
+            parse_command("workspace scope init"),
+            ShellCommand::Workspace(WorkspaceCommand::ScopeInit)
         );
         assert_eq!(
             parse_command("workspace import burp report.xml"),
@@ -387,7 +416,11 @@ mod tests {
             parse_command("?what changed?"),
             ShellCommand::Ask("what changed?".to_string())
         );
-        assert_eq!(parse_command("?"), ShellCommand::Help);
+        assert_eq!(parse_command("?"), ShellCommand::Help(None));
+        assert_eq!(
+            parse_command("help scan"),
+            ShellCommand::Help(Some("scan".to_string()))
+        );
         assert_eq!(
             parse_command("/run dep-hygiene:check {\"target\":\".\"}"),
             ShellCommand::RunTool {
@@ -415,10 +448,10 @@ mod tests {
 
     #[test]
     fn accepts_commands_without_slash_for_log_prompt() {
-        assert_eq!(parse_command("help"), ShellCommand::Help);
+        assert_eq!(parse_command("help"), ShellCommand::Help(None));
         assert_eq!(parse_command("modules"), ShellCommand::Modules);
         assert_eq!(parse_command("m"), ShellCommand::Modules);
-        assert_eq!(parse_command("tools"), ShellCommand::Tools);
+        assert_eq!(parse_command("tools"), ShellCommand::Tools(None));
         assert_eq!(parse_command("findings"), ShellCommand::Findings);
         assert_eq!(parse_command("back"), ShellCommand::Back);
         assert_eq!(parse_command("b"), ShellCommand::Back);
@@ -499,6 +532,7 @@ mod tests {
             "config",
             "context",
             "cost",
+            "demo",
             "detach",
             "failure-handoff",
             "findings",
@@ -568,6 +602,7 @@ mod tests {
         assert_eq!(
             examples,
             vec![
+                "demo",
                 "scan .",
                 "use semgrep",
                 "run .",
@@ -591,17 +626,18 @@ mod tests {
 
     fn route_kind(command: &ShellCommand) -> &'static str {
         match command {
-            ShellCommand::Help => "help",
+            ShellCommand::Help(_) => "help",
             ShellCommand::Home => "home",
             ShellCommand::Back => "back",
             ShellCommand::Modules => "modules",
             ShellCommand::Recommend => "recommend",
-            ShellCommand::Tools => "tools",
+            ShellCommand::Tools(_) => "tools",
             ShellCommand::Workbench(_) => "workbench",
             ShellCommand::Findings => "findings",
             ShellCommand::FindingsFilter(_) => "findings-filter",
             ShellCommand::Open(_) => "open",
             ShellCommand::Scan(_) => "scan",
+            ShellCommand::Demo => "demo",
             ShellCommand::Model(_) => "model",
             ShellCommand::Auth => "auth",
             ShellCommand::AuthLogin(_) => "auth-login",
@@ -688,6 +724,7 @@ mod tests {
                 "<verb>" => "show run".to_string(),
                 "<n>" => "1".to_string(),
                 "[json]" => String::new(),
+                "[format]" => String::new(),
                 "[tool]" => "sast:scan".to_string(),
                 "[target]" => "./repo".to_string(),
                 "[module]" => "context".to_string(),

@@ -226,9 +226,7 @@ function checkReferencedRepoPaths(file) {
 }
 
 function referencedPathFailures(file, lines, line, index) {
-  const context = lines
-    .slice(Math.max(0, index - 4), Math.min(lines.length, index + 5))
-    .join("\n");
+  const context = lines.slice(Math.max(0, index - 4), Math.min(lines.length, index + 5)).join("\n");
   if (allowedContext.test(context)) return [];
   return referencedRepoPaths(line)
     .map((reference) => missingRepoPathFailure(file, index, reference))
@@ -248,7 +246,7 @@ function missingRepoPathFailure(file, index, reference) {
 
 function referencedRepoPaths(line) {
   const out = new Set();
-  const regex = /(?:^|[\s`'"\[(])((?:crates|src)\/[A-Za-z0-9._~:+@%/-]+)/g;
+  const regex = /(?:^|[\s`'"[(])((?:crates|src)\/[A-Za-z0-9._~:+@%/-]+)/g;
   for (const match of line.matchAll(regex)) {
     out.add(cleanReferencedPath(match[1]));
   }

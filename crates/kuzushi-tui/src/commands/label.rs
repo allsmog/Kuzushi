@@ -3,11 +3,11 @@ use super::*;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ShellCommand {
     Home,
-    Help,
+    Help(Option<String>),
     Back,
     Modules,
     Recommend,
-    Tools,
+    Tools(Option<String>),
     /// Open the Workbench command center with the given pane focused. The
     /// shell's default landing surface; `findings`/`open`/`threats dfd` also
     /// route here with the appropriate pane focus / selection.
@@ -16,6 +16,7 @@ pub enum ShellCommand {
     FindingsFilter(String),
     Open(String),
     Scan(Option<PathBuf>),
+    Demo,
     Model(Option<String>),
     Auth,
     AuthLogin(Option<String>),

@@ -221,16 +221,13 @@ without explicit operator consent. The Rust enforcement boundary lives in
 agent router rejects fallback chains, and `scripts/check-model-safety.mjs`
 keeps those paths wired into CI.
 
-Allowed fallbacks:
+Allowed behavior:
 1. Same-model transport retries (network 5xx, rate limit 429) — handled
    inside each adapter, model object is reused.
-2. Batch API → sequential per-prompt fallback — see
-   the runtime execution helpers. The configured model is preserved.
-3. Informational stale-model warnings. Banner only, never rewrites the model.
-4. Backend defaults only when the operator has not configured a model at all.
-5. Deterministic non-LLM fallback that is clearly labeled (e.g. extraction
-   degradation in taint-analysis when `consentToExtractionLabelingFallback`
-   is set).
+2. Configuration/env bootstrap may materialize the operator's selected model
+   before policy resolution. Once execution starts, missing or incompatible
+   runtime-backed models are hard errors, not opportunities to choose another
+   model.
 
 Forbidden behaviors (caught by enforcement):
 - Empty/missing `model` substituted with a backend default.
@@ -239,10 +236,21 @@ Forbidden behaviors (caught by enforcement):
 - Fallback model chains plumbed through provider or router configuration.
 - Hardcoded `?? "anthropic:..."` defaults inside modules / orchestrator
   helpers — they bypass `ctx.config.model`.
+- Tool-local model env vars such as `MODEL_<ROLE>` read directly from the
+  process environment. Per-role model overrides must flow through
+  `models.toml` or declared option-store keys such as `setg MODEL_<ROLE>`.
+- Target-local model steering. `<target>/.kuzushi/v2/config.toml` must not set
+  `model`, and `<target>/.kuzushi/models.toml` is rejected; model policy belongs
+  to operator-owned config/models files, env bootstrap, or explicit tool input.
+- Target-local model steering. `<target>/.kuzushi/v2/config.toml` must not set
+  `model`, and `<target>/.kuzushi/models.toml` is rejected; model policy belongs
+  to operator-owned config/models files, env bootstrap, or explicit tool input.
 
-When authoring a new module: derive the model from `ctx.toolModel ??
-ctx.config.model` (or, in DAG tasks, via `resolveTaskModel(context, ...)`).
-Never inline a literal model string as a runtime fallback.
+When authoring a new Rust module: use the shared model helpers
+(`resolve_tool_model` for descriptor-backed module tools, or
+`resolve_explicit_model` when a capability adapter has already parsed an
+inline `model` value). Never inline a literal model string as a runtime
+fallback.
 
 ### Operator control surfaces (flags, options, env)
 
@@ -404,9 +412,9 @@ is expected to behave identically and should be filed as a parity bug.
   models are pure and testable off-screen — `scene3d` rasterizer math, the
   `viz_data` builders, the diagram `Line` builders, and the box-drawing widgets
   (rendered into a `Buffer` in unit tests).
-- **`--ci` is scan-only.** Single-tool `kuzushi run` uses `--json` for
-  machine-readable output; the shell is interactive by definition. Don't
-  add `--ci` to `run`.
+- **`--ci` is scan-only.** Single-tool `kuzushi run` always emits
+  machine-readable JSON on stdout; the shell is interactive by definition.
+  Don't add `--ci` or `--json` to `run`.
 - **`/replay <runId>` and `/trace <runId>` are shell-only operator
   surfaces** that *consume* shared `.kuzushi/runs/<runId>/`
   artefacts. They are read-only over a shared on-disk format.
@@ -414,24 +422,25 @@ is expected to behave identically and should be filed as a parity bug.
   dispatch now mint a `runId` and write `summary.json`, `trace.jsonl`,
   and input/result JSON. They do not produce scan-specific `triage.jsonl`,
   `verify.jsonl`, or `patch.jsonl` unless the tool itself emits them.
-- **`ExecutionContext.workspace` handle is shell-only.** `kuzushi run`
-  takes `--workspace <id>` (forwarded to tools that look the workspace
-  up themselves) but does not wire the `WorkspaceHandle` capability —
-  that needs the shell's `WorkspaceManager` lifecycle.
-- **`ExecutionContext.datastore` is shell-only.** Scan + run modes
-  consult `taskConfig` and the on-disk prompt files via
-  `ctx.resolveOption`; they don't expose a live key/value store. New
-  agentic capabilities should read through `resolveOption`, not from
-  `ctx.datastore` directly.
+- **Rust `ToolExecutionContext.workspace` is an optional resolved
+  `WorkspaceTarget`.** Workspace-backed tools must be given an explicit target
+  by the mode that launches them. Do not silently substitute cwd.
+- **Prompt overrides flow through the Rust option boundary.** Direct
+  prompt-aware tools load `.kuzushi/prompts/<module>/<verb>.md` into their
+  declared `_PROMPT` option when the caller did not pass that option
+  explicitly. The `sast:scan` umbrella forwards its own
+  `.kuzushi/prompts/sast/triage.md` and
+  `.kuzushi/prompts/sast/verify.md` files into the internal triage/verify
+  stages. New prompt knobs should be declared as `ToolDescriptor.options` and
+  consumed from prepared input.
 - **`ExecutionContext.uiStore` is for live UI feedback only.** Scan
   workers populate it; run mode leaves it undefined; shell wires it for
   TTY paths. Tools must treat `uiStore` as optional (already enforced by
   the type and the `host.capabilities.has("ui-store")` probe).
-- **`scan` mode loads only modules that contribute DAG nodes**
-  (via `createDefaultTaskRegistry`). A module that exposes only
-  shell-only `ModuleTool`s never has its `init()` called during scan —
-  it isn't in scope for the pipeline. Use `createDagTool`/
-  `exposeAgentTaskAsHiddenDagTool` to surface DAG-time work.
+- **`scan` mode enters the Rust scan application and dispatches the
+  `sast:scan` tool through the shared registry boundary.** Additional scan-time
+  behavior belongs in Rust descriptors/executors or in explicit
+  `sast:scan` orchestration, not in retired TypeScript task registries.
 
 ### When you add a new feature
 
@@ -507,9 +516,11 @@ second TypeScript router. Common verbs include:
   surfaces the active target in the top/status chrome.
 - **Program scope.** Drop a `<workspace>/.kuzushi/scope.toml` with
   `[in_scope] hosts = […] cidrs = […]` and (optionally) `[out_of_scope]`
-  to deny rules. Recon dispatch and the bounty importers refuse
-  `OutOfScope` targets with an actionable error; the status footer
-  shows a `scope: on` chip when the file is loaded.
+  to deny rules. When an allow list is present, unmatched targets are
+  `OutOfScope`; deny-list-only files leave unmatched targets `Unknown`.
+  Recon dispatch and the bounty importers refuse `OutOfScope` targets with an
+  actionable error; the status footer shows a `scope: on` chip when the file is
+  loaded.
 - **Exports.** `workspace:export-findings` accepts
   `format=json|jsonl|sarif|csv|markdown-bundle`. SARIF emits one
   `runs[]` per `Finding.tool`; the markdown bundle is a directory

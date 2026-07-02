@@ -26,30 +26,18 @@ pub(crate) fn activity_deck_rows(
     width: usize,
     _running_tool: Option<&str>,
 ) -> Vec<ActivityFeedPaneRow> {
-    let mut rows = activity_deck_header_rows(app, session, width);
-    rows.extend(match session.deck_page {
-        ActivityDeckPage::Task => task_deck_rows(session, width),
-        ActivityDeckPage::Findings => findings_deck_rows(app, session.deck_cursor, width),
-        ActivityDeckPage::AttackSurface => {
-            attack_surface_deck_rows(&risk_by_module(&app.findings), session.deck_cursor, width)
-        }
-        ActivityDeckPage::Dfd => dfd_deck_rows(&dfd_model(app), session.deck_cursor, width),
-        ActivityDeckPage::Heatmap => {
-            heatmap_deck_rows(&findings_heatmap(&app.findings), session.deck_cursor, width)
-        }
-        ActivityDeckPage::AttackPath => {
-            attack_path_deck_rows(&taint_flow_path(app), session.deck_cursor, width)
-        }
-        ActivityDeckPage::ExploitChain => {
-            exploit_chain_deck_rows(&attack_tree(app), session.deck_cursor, width)
-        }
-    });
-    rows.into_iter()
-        .map(|paned| row(clip(paned.text, width), paned.tone))
-        .collect()
+    activity_deck_page_rows(app, session, width)
 }
 
 pub(crate) fn activity_deck_plain_extra_rows(
+    app: &ShellApp,
+    session: &ActivitySession,
+    width: usize,
+) -> Vec<ActivityFeedPaneRow> {
+    activity_deck_page_rows(app, session, width)
+}
+
+fn activity_deck_page_rows(
     app: &ShellApp,
     session: &ActivitySession,
     width: usize,
@@ -133,9 +121,9 @@ fn deck_hint(page: ActivityDeckPage, width: usize) -> String {
             "Tab tasks/output · j/k task or item · Enter task detail · o open artifact"
         }
         ActivityDeckPage::Findings => {
-            "←/→ views · j/k item · o open findings · dots mean no artifact"
+            "[/] views · j/k item · o open findings · dots mean no artifact"
         }
-        _ => "←/→ views · j/k item · f findings · o open · dots mean no artifact",
+        _ => "[/] views · j/k item · f findings · o open · dots mean no artifact",
     };
     format!("  {}", truncate(hint, width.saturating_sub(2)))
 }
@@ -144,7 +132,7 @@ fn deck_hint(page: ActivityDeckPage, width: usize) -> String {
 
 fn task_deck_rows(session: &ActivitySession, width: usize) -> Vec<ActivityFeedPaneRow> {
     let Some(task) = selected_task_row(session) else {
-        return empty_deck_rows("TASK", "no DAG task selected yet", width);
+        return empty_deck_rows("TASK", "no task selected yet", width);
     };
     let mut rows = task_header_rows(task, width);
     rows.extend(task_dependency_rows(task, width));

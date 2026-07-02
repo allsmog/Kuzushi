@@ -1,6 +1,6 @@
 Feature: Skip paths
   Esc on a phase picker skips that phase and advances to the next one;
-  past the last phase the shell hands off to next-step recommendations.
+  past the last phase the shell hands off to the Workbench cockpit.
   The documented `KUZUSHI_SKIP_ONBOARDING` env bypasses the flow.
 
   Scenario: KUZUSHI_SKIP_ONBOARDING short-circuits to Catalog
@@ -19,7 +19,7 @@ Feature: Skip paths
     Then I see "KUZUSHI · hunt"
     And the status segment shows "planning"
 
-  Scenario: Esc through every phase hands off to recommendations
+  Scenario: Esc through every phase hands off to Workbench
     Given a fresh kuzushi workspace
     And a model and auth are configured
     When I launch the shell
@@ -27,8 +27,4 @@ Feature: Skip paths
     And I press "Esc"
     And I press "Esc"
     And I press "Esc"
-    # Assert the stable handoff (the Recommend view header), not the transient
-    # "ranking modules" transcript line — the 2-row strip scrolls it away as
-    # soon as the background recommender logs again, which races the poller
-    # on slow CI runners.
-    Then I see "RECOMMEND"
+    Then I see "FINDINGS"

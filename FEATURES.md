@@ -166,11 +166,11 @@ The most useful improvements are:
 A useful workflow for a challenge like the HTB scanner binary would be:
 
 ```text
-kuzushi run pwn:profile-binary '{"binary":"./scanner","libc":"./libc.so.6","ld":"./ld-2.31.so"}'
-kuzushi run pwn:reverse '{"binary":"./scanner","backend":"revng"}'
-kuzushi run pwn:calibrate-local '{"binary":"./scanner","argv":[]}'
-kuzushi run pwn:state '{"binary":"./scanner","action":"merge","state":{...}}'
-kuzushi run pwn:run-candidates '{"target":"154.57.164.67:31029","stateId":"..."}'
+kuzushi --target . run pwn:profile-binary --input '{"binary":"./scanner","libc":"./libc.so.6","ld":"./ld-2.31.so"}'
+kuzushi --target . run pwn:reverse --input '{"binary":"./scanner","backend":"revng"}'
+kuzushi --target . run pwn:calibrate-local --input '{"binary":"./scanner","argv":[]}'
+kuzushi --target . run pwn:state --input '{"binary":"./scanner","action":"merge","state":"<state-json>"}'
+kuzushi --target . run pwn:run-candidates --input '{"target":"154.57.164.67:31029","stateId":"<state-id>"}'
 ```
 
 For the scanner challenge specifically, this should have surfaced:

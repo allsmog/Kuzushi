@@ -1,29 +1,53 @@
 #!/usr/bin/env bash
 # Auto-triage HIGH+CRITICAL findings using deep-audit; aggregate verdicts.
 # Usage: auto-triage.sh <target> [maxSteps]
-set -u
+set -euo pipefail
+
+if [ "$#" -lt 1 ]; then
+  echo "Usage: $0 <target> [maxSteps]" >&2
+  exit 2
+fi
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ROOT="$(dirname "$SCRIPT_DIR")"
 TARGET="$1"
 MAX_STEPS="${2:-18}"
-KUZUSHI=/home/user/Kuzushi/target/release/kuzushi
+KUZUSHI="${KUZUSHI_BIN:-}"
+if [ -z "$KUZUSHI" ] && [ -x "${ROOT}/target/release/kuzushi" ]; then
+  KUZUSHI="${ROOT}/target/release/kuzushi"
+fi
+if [ -z "$KUZUSHI" ]; then
+  KUZUSHI="$(command -v kuzushi || true)"
+fi
+if [ -z "$KUZUSHI" ] || [ ! -x "$KUZUSHI" ]; then
+  echo "Could not find kuzushi. Set KUZUSHI_BIN=/path/to/kuzushi or run pnpm build:native." >&2
+  exit 127
+fi
+
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/kuzushi-auto-triage.XXXXXX")"
+trap 'rm -rf "$TMP_DIR"' EXIT
+FINDINGS_JSON="${TMP_DIR}/findings-hc.json"
+FINDINGS_LIST="${TMP_DIR}/findings-list.txt"
+TRIAGE_VERDICTS="${TMP_DIR}/triage-verdicts.txt"
 
 # Get HIGH+CRITICAL fingerprints as JSON
 "$KUZUSHI" --target "$TARGET" findings --json --severity critical,high 2>/dev/null \
-  > /tmp/findings-hc.json
+  > "$FINDINGS_JSON"
 
-TOTAL=$(python3 -c "import json; print(len(json.load(open('/tmp/findings-hc.json')).get('findings',[])))")
+TOTAL=$(python3 -c "import json; print(len(json.load(open('$FINDINGS_JSON')).get('findings',[])))")
 echo "== Auto-triaging $TOTAL HIGH+CRITICAL findings in $TARGET (maxSteps=$MAX_STEPS) =="
 echo ""
 
 # Build the parallel argument list
 python3 -c "
 import json
-d = json.load(open('/tmp/findings-hc.json'))
+d = json.load(open('$FINDINGS_JSON'))
 for f in d.get('findings', []):
     print(f\"{f['fingerprint']}|{f['severity']}|{f['file_path']}:{f['start_line']}|{f.get('title','')[:80]}\")
-" > /tmp/findings-list.txt
+" > "$FINDINGS_LIST"
 
 # Triage each finding
-> /tmp/triage-verdicts.txt
+> "$TRIAGE_VERDICTS"
 while IFS='|' read -r FP SEV LOC TITLE; do
   echo "-> [${SEV}] $LOC"
   echo "   $TITLE"
@@ -36,12 +60,12 @@ try:
     print(f'{data.get(\"verdict\",\"?\")}|{data.get(\"confidence\",0):.2f}|{data.get(\"rationale\",\"\")[:300].replace(chr(10), \" \")}')
 except: print('parse-error|0|')
 ")
-  echo "$FP|$SEV|$LOC|$VERDICT" >> /tmp/triage-verdicts.txt
+  echo "$FP|$SEV|$LOC|$VERDICT" >> "$TRIAGE_VERDICTS"
   V=$(echo "$VERDICT" | cut -d'|' -f1)
   C=$(echo "$VERDICT" | cut -d'|' -f2)
   echo "   => verdict=$V confidence=$C"
   echo ""
-done < /tmp/findings-list.txt
+done < "$FINDINGS_LIST"
 
 echo "== SUMMARY =="
 python3 -c "
@@ -50,7 +74,7 @@ verdicts = collections.Counter()
 true_pos = []
 needs_review = []
 false_pos = []
-for line in open('/tmp/triage-verdicts.txt'):
+for line in open('$TRIAGE_VERDICTS'):
     fp, sev, loc, verdict, conf, rationale = line.strip().split('|', 5)
     verdicts[verdict] += 1
     if verdict == 'true_positive':

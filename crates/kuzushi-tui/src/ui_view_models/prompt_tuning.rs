@@ -1,3 +1,4 @@
+use crate::app::PromptMutationsState;
 use crate::{HouseRulesRead, ShellApp, TuneAction};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -299,8 +300,19 @@ fn prompt_mutation_layer_state(
         Ok(workspace) => workspace,
         Err(_) => return PromptMutationLayerState::Unreadable,
     };
-    match kuzushi_core::latest_prompt_mutation(&workspace, module, verb) {
-        Ok(Some(mutation)) => {
+    match app
+        .workbench_cache
+        .borrow_mut()
+        .prompt_mutations(Some(&workspace))
+    {
+        Some(PromptMutationsState::Ready(mutations)) => {
+            let Some(mutation) = mutations
+                .into_iter()
+                .rev()
+                .find(|mutation| mutation.module_id == module && mutation.verb == verb)
+            else {
+                return PromptMutationLayerState::Missing;
+            };
             let hash = mutation.content_hash();
             PromptMutationLayerState::Present {
                 id: mutation.id,
@@ -308,8 +320,8 @@ fn prompt_mutation_layer_state(
                 hash,
             }
         }
-        Ok(None) => PromptMutationLayerState::Missing,
-        Err(_) => PromptMutationLayerState::Unreadable,
+        Some(PromptMutationsState::Unreadable) => PromptMutationLayerState::Unreadable,
+        None => PromptMutationLayerState::Missing,
     }
 }
 

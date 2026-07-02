@@ -4,11 +4,10 @@
 //! The renderer and the plain `workbench_lines` path both consume this single
 //! model so TTY and scripted output stay in lockstep.
 
-use super::display_text::compact_target_path;
 use super::{
-    findings_model, has_run_activity, journey_model, journey_phase_segment,
-    selected_finding_code_model, selected_finding_detail_model, source_tree_model,
-    threat_model_doc, CodePaneModel, FindingDetailModel, FindingsModel, SourceTreeModel,
+    findings_model, journey_model, journey_phase_segment, selected_finding_code_model,
+    selected_finding_detail_model, source_tree_model, threat_model_doc, CodePaneModel,
+    FindingDetailModel, FindingsModel, JourneyPhaseStatus, SourceTreeModel,
 };
 use crate::app::{WorkbenchPane, WorkflowPhase};
 use crate::ShellApp;
@@ -36,10 +35,12 @@ pub(crate) struct WorkbenchTopBar {
     pub(crate) project: String,
     /// Focused module, or `all modules` when none is focused.
     pub(crate) target: String,
-    /// Lit only on real run activity (scan/tool/module-run).
+    /// Lit only on real executing work (scan/tool/agent/planner/threat worker).
     pub(crate) live: bool,
     /// `組 map 1/4`-style chip, or `None` without a target.
     pub(crate) phase: Option<String>,
+    /// Full engagement rail for default Workbench orientation.
+    pub(crate) phase_rail: Vec<JourneyPhaseStatus>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,9 +73,12 @@ pub(crate) struct WorkbenchViewModel {
     pub(crate) right_list: FindingsModel,
     pub(crate) right_detail: Option<FindingDetailModel>,
     pub(crate) command_bar_hints: Vec<WorkbenchHint>,
+    pub(crate) report_cta: Option<WorkbenchHint>,
     pub(crate) state: WorkbenchState,
     pub(crate) focus: WorkbenchPane,
 }
+
+pub(crate) const WORKBENCH_REPORT_COMMAND: &str = "workspace export findings report.sarif";
 
 const COMMAND_BAR_HINTS: [WorkbenchHint; 3] = [
     WorkbenchHint {
@@ -91,29 +95,57 @@ const COMMAND_BAR_HINTS: [WorkbenchHint; 3] = [
     },
 ];
 
+const REPORT_HINT: WorkbenchHint = WorkbenchHint {
+    verb: WORKBENCH_REPORT_COMMAND,
+    label: "export SARIF",
+};
+
 const DFD_EMPTY_HINT: &str =
     "no threat model yet — run `threat-model:build` to map this target's data flows.";
 
 pub(crate) fn workbench_view_model(app: &ShellApp) -> WorkbenchViewModel {
+    let state = workbench_state(app);
+    let right_list = findings_model(app);
+    let report_cta = report_cta(state, right_list.total);
     WorkbenchViewModel {
         top_bar: top_bar_model(app),
         left: source_tree_model(app),
         center: center_model(app),
-        right_list: findings_model(app),
+        right_list,
         right_detail: selected_finding_detail_model(app),
-        command_bar_hints: COMMAND_BAR_HINTS.to_vec(),
-        state: workbench_state(app),
+        command_bar_hints: command_bar_hints(report_cta),
+        report_cta,
+        state,
         focus: app.workbench_focus,
     }
 }
 
+fn command_bar_hints(report_cta: Option<WorkbenchHint>) -> Vec<WorkbenchHint> {
+    let mut hints = COMMAND_BAR_HINTS.to_vec();
+    if let Some(report_cta) = report_cta {
+        hints.push(report_cta);
+    }
+    hints
+}
+
+fn report_cta(state: WorkbenchState, finding_total: usize) -> Option<WorkbenchHint> {
+    (state == WorkbenchState::Report || finding_total > 0).then_some(REPORT_HINT)
+}
+
 fn top_bar_model(app: &ShellApp) -> WorkbenchTopBar {
+    let journey = journey_model(app);
     WorkbenchTopBar {
         brand: "Kuzushi",
         project: project_label(app),
         target: target_label(app),
-        live: has_run_activity(app),
-        phase: phase_chip(app),
+        live: app.has_running_work(),
+        phase: journey
+            .as_ref()
+            .map(|journey| journey_phase_segment(journey.current)),
+        phase_rail: journey
+            .as_ref()
+            .map(|journey| journey.phases.clone())
+            .unwrap_or_default(),
     }
 }
 
@@ -129,11 +161,6 @@ fn target_label(app: &ShellApp) -> String {
     app.focused_module
         .clone()
         .unwrap_or_else(|| "all modules".to_string())
-}
-
-fn phase_chip(app: &ShellApp) -> Option<String> {
-    let journey = journey_model(app)?;
-    Some(journey_phase_segment(journey.current))
 }
 
 fn center_model(app: &ShellApp) -> WorkbenchCenter {
@@ -163,7 +190,7 @@ fn dfd_center_model(app: &ShellApp) -> WorkbenchCenter {
 
 fn workbench_state(app: &ShellApp) -> WorkbenchState {
     derive_state(WorkbenchStateInputs {
-        scanning: has_run_activity(app),
+        scanning: app.has_running_work(),
         selected: app.selected_finding.is_some(),
         has_findings: !app.findings.is_empty(),
         has_threat_doc: threat_model_doc(app).is_some(),
@@ -213,6 +240,7 @@ fn derive_quiescent_state(inputs: WorkbenchStateInputs) -> WorkbenchState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui_view_models::JourneyPhaseState;
     use kuzushi_core::{Finding, Severity, V2Config};
 
     fn app() -> ShellApp {
@@ -257,9 +285,58 @@ mod tests {
     }
 
     #[test]
+    fn live_is_on_with_agentic_background_work() {
+        let setups: [fn(&mut ShellApp); 3] = [
+            |app: &mut ShellApp| app.planner_running = true,
+            |app: &mut ShellApp| app.threat_worker_running = true,
+            |app: &mut ShellApp| {
+                app.agent_chat = Some(crate::app::AgentChatView {
+                    question: "q".to_string(),
+                    running: true,
+                    ..Default::default()
+                });
+            },
+        ];
+        for setup in setups {
+            let mut app = app();
+            setup(&mut app);
+
+            let model = workbench_view_model(&app);
+
+            assert!(model.top_bar.live);
+            assert_eq!(model.state, WorkbenchState::Scanning);
+        }
+    }
+
+    #[test]
+    fn top_bar_includes_full_phase_rail_when_target_is_set() {
+        let target = tempfile::tempdir().unwrap();
+        let mut app = app();
+        app.target = Some(target.path().to_path_buf());
+
+        let model = workbench_view_model(&app);
+
+        assert_eq!(model.top_bar.phase.as_deref(), Some("組 map 1/4"));
+        assert_eq!(model.top_bar.phase_rail.len(), 4);
+        assert_eq!(
+            model.top_bar.phase_rail[0].state,
+            JourneyPhaseState::Current
+        );
+        assert_eq!(
+            model.top_bar.phase_rail[1].state,
+            JourneyPhaseState::Pending
+        );
+    }
+
+    #[test]
     fn first_run_state_with_no_findings_and_no_doc() {
         let model = workbench_view_model(&app());
         assert_eq!(model.state, WorkbenchState::FirstRun);
+        assert!(model.report_cta.is_none());
+        assert!(!model
+            .command_bar_hints
+            .iter()
+            .any(|hint| hint.verb == WORKBENCH_REPORT_COMMAND));
         assert!(matches!(
             model.center.body,
             WorkbenchCenterBody::Dfd {
@@ -267,6 +344,31 @@ mod tests {
             }
         ));
         assert!(model.left.empty_hint.is_some());
+    }
+
+    #[test]
+    fn findings_surface_report_export_cta() {
+        let mut app = app();
+        app.findings = vec![finding(Severity::High)];
+
+        let model = workbench_view_model(&app);
+
+        assert_eq!(
+            model.report_cta.map(|hint| hint.verb),
+            Some(WORKBENCH_REPORT_COMMAND)
+        );
+        assert!(model
+            .command_bar_hints
+            .iter()
+            .any(|hint| hint.verb == WORKBENCH_REPORT_COMMAND));
+    }
+
+    #[test]
+    fn report_state_surfaces_report_export_cta() {
+        assert_eq!(
+            report_cta(WorkbenchState::Report, 0).map(|hint| hint.verb),
+            Some(WORKBENCH_REPORT_COMMAND)
+        );
     }
 
     #[test]
