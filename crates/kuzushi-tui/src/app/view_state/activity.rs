@@ -26,7 +26,6 @@ impl PaneFocus {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActivityDeckPage {
-    Task,
     Findings,
     AttackSurface,
     Dfd,
@@ -36,8 +35,7 @@ pub enum ActivityDeckPage {
 }
 
 impl ActivityDeckPage {
-    pub const ALL: [Self; 7] = [
-        Self::Task,
+    pub const ALL: [Self; 6] = [
         Self::Findings,
         Self::AttackSurface,
         Self::Dfd,
@@ -48,7 +46,6 @@ impl ActivityDeckPage {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::Task => "task",
             Self::Findings => "findings",
             Self::AttackSurface => "surface",
             Self::Dfd => "dfd",
@@ -60,7 +57,7 @@ impl ActivityDeckPage {
 
     pub fn scene_page(self) -> Option<crate::scene3d::VizPage> {
         match self {
-            Self::Task | Self::Findings => None,
+            Self::Findings => None,
             Self::AttackSurface => Some(crate::scene3d::VizPage::AttackSurface),
             Self::Dfd => Some(crate::scene3d::VizPage::Dfd),
             Self::Heatmap => Some(crate::scene3d::VizPage::Heatmap),
@@ -249,7 +246,7 @@ impl ActivitySession {
             feed_scroll: 0,
             task_scroll: 0,
             task_cursor: 0,
-            deck_page: ActivityDeckPage::Task,
+            deck_page: ActivityDeckPage::Findings,
             deck_cursor: 0,
             deck_page_pinned_by_user: false,
             paused_event_count: None,
@@ -521,7 +518,7 @@ impl ActivitySession {
         self.feed_scroll = 0;
         self.task_scroll = 0;
         self.task_cursor = 0;
-        self.deck_page = ActivityDeckPage::Task;
+        self.deck_page = ActivityDeckPage::Findings;
         self.deck_cursor = 0;
         self.deck_page_pinned_by_user = false;
         self.feed_auto_tail = false;
@@ -1161,14 +1158,14 @@ mod tests {
 
         session.next_deck_page();
 
-        assert_eq!(session.deck_page, ActivityDeckPage::Findings);
+        assert_eq!(session.deck_page, ActivityDeckPage::AttackSurface);
         assert_eq!(session.deck_cursor, 0);
         assert_eq!(session.feed_scroll, 0);
         assert!(!session.feed_auto_tail);
 
         session.prev_deck_page();
 
-        assert_eq!(session.deck_page, ActivityDeckPage::Task);
+        assert_eq!(session.deck_page, ActivityDeckPage::Findings);
         assert!(!session.feed_auto_tail);
     }
 

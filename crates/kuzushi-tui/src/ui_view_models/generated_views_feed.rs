@@ -10,10 +10,7 @@ use super::viz_data::{
     DfdFlowModel, DfdModel, FindingsHeatmap, ModuleRisk, RiskByModule, TaintFlowPath,
 };
 use super::SeverityTone;
-use crate::{
-    ActivityDeckPage, ActivitySession, ChainSeverity, DagTaskDetailState, DagTaskRow, DagTaskState,
-    ShellApp,
-};
+use crate::{ActivityDeckPage, ActivitySession, ChainSeverity, ShellApp};
 
 const DECK_WINDOW_ROWS: usize = 7;
 
@@ -44,7 +41,6 @@ fn activity_deck_page_rows(
 ) -> Vec<ActivityFeedPaneRow> {
     let mut rows = activity_deck_header_rows(app, session, width);
     rows.extend(match session.deck_page {
-        ActivityDeckPage::Task => task_deck_rows(session, width),
         ActivityDeckPage::Findings => findings_deck_rows(app, session.deck_cursor, width),
         ActivityDeckPage::AttackSurface => {
             attack_surface_deck_rows(&risk_by_module(&app.findings), session.deck_cursor, width)
@@ -94,7 +90,7 @@ fn deck_tabs(app: &ShellApp, active: ActivityDeckPage) -> String {
 
 fn deck_tab(app: &ShellApp, page: ActivityDeckPage, active: ActivityDeckPage) -> String {
     let mut label = page.label().to_string();
-    if page != ActivityDeckPage::Task && !deck_page_has_content(app, page) {
+    if !deck_page_has_content(app, page) {
         label.push('·');
     }
     if page == active {
@@ -106,7 +102,6 @@ fn deck_tab(app: &ShellApp, page: ActivityDeckPage, active: ActivityDeckPage) ->
 
 fn deck_page_has_content(app: &ShellApp, page: ActivityDeckPage) -> bool {
     match page {
-        ActivityDeckPage::Task => true,
         ActivityDeckPage::Findings => !app.findings.is_empty(),
         ActivityDeckPage::AttackSurface | ActivityDeckPage::Heatmap => !app.findings.is_empty(),
         ActivityDeckPage::Dfd => dfd_model(app).empty_hint.is_none(),
@@ -117,9 +112,6 @@ fn deck_page_has_content(app: &ShellApp, page: ActivityDeckPage) -> bool {
 
 fn deck_hint(page: ActivityDeckPage, width: usize) -> String {
     let hint = match page {
-        ActivityDeckPage::Task => {
-            "Tab tasks/output · j/k task or item · Enter task detail · o open artifact"
-        }
         ActivityDeckPage::Findings => {
             "[/] views · j/k item · o open findings · dots mean no artifact"
         }
@@ -129,166 +121,6 @@ fn deck_hint(page: ActivityDeckPage, width: usize) -> String {
 }
 
 // ── Activity artifact pages ───────────────────────────────────────────────
-
-fn task_deck_rows(session: &ActivitySession, width: usize) -> Vec<ActivityFeedPaneRow> {
-    let Some(task) = selected_task_row(session) else {
-        return empty_deck_rows("TASK", "no task selected yet", width);
-    };
-    let mut rows = task_header_rows(task, width);
-    rows.extend(task_dependency_rows(task, width));
-    rows.extend(task_detail_rows(task, width));
-    rows.extend(task_event_rows(session, task, width));
-    rows
-}
-
-fn selected_task_row<'a>(session: &'a ActivitySession) -> Option<&'a DagTaskRow> {
-    let task_id = session.selected_task_id()?;
-    session.tasks.get(task_id)
-}
-
-fn task_header_rows(task: &DagTaskRow, width: usize) -> Vec<ActivityFeedPaneRow> {
-    vec![
-        row(rule("TASK", width), ActivityFeedRowTone::Success),
-        row(
-            format!(
-                "  {} · {} · {} steps · {}",
-                task.task_id,
-                task_state_label(task.state),
-                task.steps_done,
-                task_cost_label(task)
-            ),
-            task_state_tone(task.state),
-        ),
-        row(
-            format!(
-                "  last: {}",
-                truncate(task.last_label.trim(), width.saturating_sub(8))
-            ),
-            ActivityFeedRowTone::Muted,
-        ),
-    ]
-}
-
-fn task_dependency_rows(task: &DagTaskRow, width: usize) -> Vec<ActivityFeedPaneRow> {
-    if task.depends_on.is_empty() {
-        return Vec::new();
-    }
-    vec![row(
-        format!(
-            "  needs: {}",
-            truncate(&task.depends_on.join(", "), width.saturating_sub(9))
-        ),
-        ActivityFeedRowTone::Subtle,
-    )]
-}
-
-fn task_detail_rows(task: &DagTaskRow, width: usize) -> Vec<ActivityFeedPaneRow> {
-    if task.details.is_empty() {
-        return vec![row(
-            "  details: waiting for task steps".to_string(),
-            ActivityFeedRowTone::Subtle,
-        )];
-    }
-    let mut rows = vec![row("  DETAILS".to_string(), ActivityFeedRowTone::Primary)];
-    rows.extend(task.details.iter().rev().take(6).rev().map(|detail| {
-        row(
-            format!(
-                "    {} {}{}",
-                detail_state_label(detail.state),
-                truncate(&detail.label, width.saturating_sub(12)),
-                detail.meta
-            ),
-            task_detail_tone(detail.state),
-        )
-    }));
-    rows
-}
-
-fn task_event_rows(
-    session: &ActivitySession,
-    task: &DagTaskRow,
-    width: usize,
-) -> Vec<ActivityFeedPaneRow> {
-    let events = session
-        .events
-        .iter()
-        .rev()
-        .filter(|event| step_belongs_to_task(session, event.step.n, &task.task_id))
-        .take(6)
-        .collect::<Vec<_>>();
-    if events.is_empty() {
-        return Vec::new();
-    }
-    let mut rows = vec![row(
-        "  LAST STEPS".to_string(),
-        ActivityFeedRowTone::Primary,
-    )];
-    rows.extend(events.into_iter().rev().map(|event| {
-        row(
-            format!(
-                "    {} · {}",
-                event.step.kind,
-                truncate(&event.step.label, width.saturating_sub(12))
-            ),
-            ActivityFeedRowTone::Muted,
-        )
-    }));
-    rows
-}
-
-fn step_belongs_to_task(session: &ActivitySession, step_n: usize, task_id: &str) -> bool {
-    session
-        .step_task_ids
-        .get(&step_n)
-        .is_some_and(|candidate| candidate == task_id)
-}
-
-fn task_state_label(state: DagTaskState) -> &'static str {
-    match state {
-        DagTaskState::Queued => "queued",
-        DagTaskState::Active => "running",
-        DagTaskState::Done => "done",
-        DagTaskState::Failing => "failed",
-        DagTaskState::Canceled => "canceled",
-        DagTaskState::Skipped => "not run",
-    }
-}
-
-fn task_state_tone(state: DagTaskState) -> ActivityFeedRowTone {
-    match state {
-        DagTaskState::Done => ActivityFeedRowTone::Success,
-        DagTaskState::Active => ActivityFeedRowTone::Primary,
-        DagTaskState::Queued => ActivityFeedRowTone::Muted,
-        DagTaskState::Failing | DagTaskState::Canceled => ActivityFeedRowTone::Danger,
-        DagTaskState::Skipped => ActivityFeedRowTone::Muted,
-    }
-}
-
-fn task_cost_label(task: &DagTaskRow) -> String {
-    if task.cost_usd > 0.0 {
-        format!("${:.4}", task.cost_usd)
-    } else {
-        "$0".to_string()
-    }
-}
-
-fn detail_state_label(state: DagTaskDetailState) -> &'static str {
-    match state {
-        DagTaskDetailState::Active => "↳",
-        DagTaskDetailState::Done => "✓",
-        DagTaskDetailState::Failing => "!",
-        DagTaskDetailState::Canceled => "×",
-    }
-}
-
-fn task_detail_tone(state: DagTaskDetailState) -> ActivityFeedRowTone {
-    match state {
-        DagTaskDetailState::Active => ActivityFeedRowTone::Primary,
-        DagTaskDetailState::Done => ActivityFeedRowTone::Success,
-        DagTaskDetailState::Failing => ActivityFeedRowTone::Danger,
-        DagTaskDetailState::Canceled => ActivityFeedRowTone::Warn,
-    }
-}
 
 fn findings_deck_rows(app: &ShellApp, cursor: usize, width: usize) -> Vec<ActivityFeedPaneRow> {
     let model = findings_model(app);

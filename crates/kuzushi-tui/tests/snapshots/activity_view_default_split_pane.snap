@@ -6,18 +6,18 @@ assertion_line: 89
 
  -- ACTIVITY  run r-snapshot  ·  2/3 done  ·  1 running ----------------------------------------------------------------
  -- TASKS                                      |  -- OUTPUT
-# + context:build                          <1… | views  [task]  findings·   surface·   dfd·   heatmap·   path·   chain·
-  + semgrep:scan                           <1… |   Tab tasks/output · j/k task or item · Enter task detail · o open arti
+# + context:build                          <1… | views  [findings·]  surface·   dfd·   heatmap·   path·   chain·
+  + semgrep:scan                           <1… |   [/] views · j/k item · o open findings · dots mean no artifact
   * triage:run                             <1… |
-     + triage start                            | -- TASK ------------------------------------------------
-     + evidence-collect                        |   context:build · done · 2 steps · $0
-     + stage1 kept 14/14                       |   last: context:build complete · 412 files
-     ↳ verdict=likely-tp severity=high         |   DETAILS
- ⤳ subsystems (1)  active · hidden — V to exp… |     + context:build start
- legend: + done · * active · ! fail · x cance… |     + context:build complete · 412 files
-  ACTIONS                                      |   LAST STEPS
-     22:13:20  ⏵ [context:build] context:buil… |     tool · context:build start
-     22:13:20  + [context:build] context:buil… |     done · context:build complete · 412 files
+     + triage start                            | -- FINDINGS ------------------------------------------------
+     + evidence-collect                        |   opens the guided workflow for the target.
+     + stage1 kept 14/14                       |
+     ↳ verdict=likely-tp severity=high         |
+ ⤳ subsystems (1)  active · hidden — V to exp… |
+ legend: + done · * active · ! fail · x cance… |
+  ACTIONS                                      |
+     22:13:20  ⏵ [context:build] context:buil… |
+     22:13:20  + [context:build] context:buil… |
      22:13:20  ⏵ [semgrep:scan] semgrep start  |
      22:13:20  + [semgrep:scan] semgrep compl… |
      22:13:20  ⏵ [triage:run] triage start     |

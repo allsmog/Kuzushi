@@ -7920,7 +7920,10 @@ fn reset_during_live_run_preserves_run_identity() {
 
     let session = app.activity.as_ref().expect("live run session preserved");
     assert_eq!(session.run_id, "run-live");
-    assert_eq!(session.deck_page, super::view_state::ActivityDeckPage::Task);
+    assert_eq!(
+        session.deck_page,
+        super::view_state::ActivityDeckPage::Findings
+    );
     assert_eq!(session.deck_cursor, 0);
     assert_eq!(session.task_cursor, 0);
     assert_eq!(session.pane_focus, PaneFocus::Left);
@@ -7967,7 +7970,10 @@ fn reset_finished_activity_preserves_completed_run() {
     assert_eq!(row.state, DagTaskState::Done);
     assert_eq!(session.events.len(), 2);
     assert_eq!(session.focus_task, None);
-    assert_eq!(session.deck_page, super::view_state::ActivityDeckPage::Task);
+    assert_eq!(
+        session.deck_page,
+        super::view_state::ActivityDeckPage::Findings
+    );
     assert_eq!(session.feed_scroll, 0);
     assert_eq!(session.task_scroll, 0);
     assert_eq!(session.deck_cursor, 0);
@@ -7992,19 +7998,19 @@ fn activity_bracket_keys_cycle_deck_pages_and_arrows_do_not() {
     app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::empty()));
     assert_eq!(
         app.activity.as_ref().unwrap().deck_page,
-        super::view_state::ActivityDeckPage::Task
+        super::view_state::ActivityDeckPage::Findings
     );
 
     app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::empty()));
     assert_eq!(
         app.activity.as_ref().unwrap().deck_page,
-        super::view_state::ActivityDeckPage::Findings
+        super::view_state::ActivityDeckPage::AttackSurface
     );
 
     app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::empty()));
     assert_eq!(
         app.activity.as_ref().unwrap().deck_page,
-        super::view_state::ActivityDeckPage::Task
+        super::view_state::ActivityDeckPage::Findings
     );
 }
 
@@ -8019,7 +8025,7 @@ fn activity_left_right_keys_edit_prompt_when_draft_exists() {
 
     assert_eq!(
         app.activity.as_ref().unwrap().deck_page,
-        super::view_state::ActivityDeckPage::Task
+        super::view_state::ActivityDeckPage::Findings
     );
     assert_eq!(app.cursor, "scan ./target".chars().count() - 1);
 }
@@ -8127,12 +8133,6 @@ fn activity_enter_on_artifact_task_switches_output_deck() {
 
     let session = app.activity.as_ref().unwrap();
     assert_eq!(session.focus_task.as_deref(), Some("threat-model:build"));
-    assert_eq!(session.deck_page, super::view_state::ActivityDeckPage::Task);
-    assert_eq!(session.pane_focus, PaneFocus::Right);
-
-    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
-
-    let session = app.activity.as_ref().unwrap();
     assert_eq!(session.deck_page, super::view_state::ActivityDeckPage::Dfd);
     assert_eq!(session.pane_focus, PaneFocus::Right);
 }
@@ -8158,11 +8158,14 @@ fn activity_enter_targets_the_visible_task_cursor() {
     let session = app.activity.as_ref().unwrap();
     assert_eq!(session.task_cursor, 1);
     assert_eq!(session.focus_task.as_deref(), Some("b:second"));
-    assert_eq!(session.deck_page, super::view_state::ActivityDeckPage::Task);
+    assert_eq!(
+        session.deck_page,
+        super::view_state::ActivityDeckPage::Findings
+    );
 }
 
 #[test]
-fn activity_task_page_renders_selected_task_details() {
+fn activity_output_deck_omits_redundant_task_page() {
     use kuzushi_core::RunTraceStep;
 
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -8183,7 +8186,8 @@ fn activity_task_page_renders_selected_task_details() {
 
     let output = render_plain_app(&app, 120);
 
-    assert!(output.contains("TASK"));
+    assert!(!output.contains("[task]"), "{output}");
+    assert!(!output.contains("── TASK ─"), "{output}");
     assert!(output.contains("triage:run"));
     assert!(output.contains("evidence collect"));
 }
