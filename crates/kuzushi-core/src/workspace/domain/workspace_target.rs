@@ -139,14 +139,15 @@ impl WorkspaceExportFormat {
             return Ok(Self::Sarif);
         }
         match path.extension().and_then(|extension| extension.to_str()) {
-            Some("json") | None => Ok(Self::Json),
+            None => Ok(Self::MarkdownBundle),
+            Some("json") => Ok(Self::Json),
             Some("jsonl") | Some("ndjson") => Ok(Self::Jsonl),
             Some("sarif") => Ok(Self::Sarif),
             Some("csv") => Ok(Self::Csv),
             Some(other) => anyhow::bail!(
                 "unsupported workspace findings export extension .{other}. \
                  Supported extensions: .json, .jsonl, .sarif, .sarif.json, .csv. \
-                 Pass format=markdown-bundle explicitly for directory output."
+                 Use an extensionless directory or format=markdown-bundle for a report bundle."
             ),
         }
     }

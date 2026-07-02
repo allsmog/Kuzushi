@@ -37,6 +37,7 @@ impl ShellApp {
     }
 
     pub(crate) fn open_model_picker(&mut self) {
+        self.picker_focus = crate::app::PickerFocus::List;
         let visible = visible_model_choices(self.config.model.as_deref());
         self.model_picker_cursor = self
             .model_picker_cursor
@@ -49,6 +50,7 @@ impl ShellApp {
     }
 
     pub(crate) fn open_auth_method_picker(&mut self, provider: String) {
+        self.picker_focus = crate::app::PickerFocus::List;
         self.auth_picker_cursor = 0;
         self.auth_key_draft.clear();
         self.log(
@@ -71,6 +73,7 @@ impl ShellApp {
     /// the interactive terminal path — never construction — so headless
     /// and test apps keep their targetless default.
     pub(crate) fn open_target_picker(&mut self) {
+        self.picker_focus = crate::app::PickerFocus::List;
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
         self.target_candidates = crate::app::discover_target_candidates(&cwd);
         self.target_picker_cursor = 0;
@@ -104,6 +107,10 @@ impl ShellApp {
         self.planning_selected = selected;
         self.planning_rebuild = BTreeSet::new();
         self.planning_cursor = 0;
+        self.picker_focus = crate::app::PickerFocus::List;
+        self.planning_option_cursor = 0;
+        self.planning_option_edit = None;
+        self.planning_option_error = None;
         self.workflow_phase = Some(phase);
         self.shell_view = ShellView::PlanningPicker;
         self.log(
@@ -115,10 +122,6 @@ impl ShellApp {
                 crate::app::WorkflowPhase::ORDER.len(),
                 phase.intent()
             ),
-        );
-        self.log(
-            "phase",
-            "Space check/uncheck · g rebuild cached · Enter run checked · Esc skip phase",
         );
     }
 
@@ -245,8 +248,47 @@ impl ShellApp {
             self.target.as_deref(),
             auth_ready,
             has_multiple_auth,
+            self.workspace_is_fresh_for_auto_planner(),
         )
     }
+
+    pub(crate) fn open_fresh_planner_or_workbench(&mut self) {
+        if self.workspace_is_fresh_for_auto_planner() {
+            self.open_planning_picker();
+        } else {
+            self.open_workbench(WorkbenchPane::Findings);
+        }
+    }
+
+    fn workspace_is_fresh_for_auto_planner(&self) -> bool {
+        let Some(target) = self.target.as_deref() else {
+            return false;
+        };
+        !workspace_has_persisted_findings_for_startup(target)
+            && !map_artifact_exists_for_startup(target)
+            && !run_summary_exists_for_startup(target)
+    }
+}
+
+fn workspace_has_persisted_findings_for_startup(target: &std::path::Path) -> bool {
+    let db_path = kuzushi_core::workspace_findings_db_path(target);
+    if !db_path.is_file() {
+        return false;
+    }
+    kuzushi_core::FindingStore::open(&db_path)
+        .and_then(|store| store.list_findings(1))
+        .is_ok_and(|findings| !findings.is_empty())
+}
+
+fn map_artifact_exists_for_startup(target: &std::path::Path) -> bool {
+    crate::app::PlanningTaskId::in_phase(crate::app::WorkflowPhase::Map)
+        .into_iter()
+        .filter_map(crate::app::PlanningTaskId::artifact_relative_path)
+        .any(|relative| target.join(relative).exists())
+}
+
+fn run_summary_exists_for_startup(target: &std::path::Path) -> bool {
+    kuzushi_core::list_run_summaries(target).is_ok_and(|runs| !runs.is_empty())
 }
 
 fn guided_phase_to_workflow_phase(phase: kuzushi_core::GuidedPhase) -> crate::app::WorkflowPhase {

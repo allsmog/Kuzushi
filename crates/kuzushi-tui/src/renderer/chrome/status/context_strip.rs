@@ -5,13 +5,10 @@ pub(crate) fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let model = context_strip_model(app);
 
     // Build the cockpit strip:
-    //   `KUZUSHI mode:<m> | target <path> | ctx <s> | model <m>`
-    // - heading: bold white
-    // - segment label: muted
-    // - segment value: primary
-    // - `✓` ctx checkmark when context snapshot exists: success
-    // Session config only — view and findings live in the bottom status bar
-    // (and the view divider), so each fact is stated once per screen.
+    //   `KUZUSHI ▸ <view> · mode:<m> · target:<path> · phase:<p> · ctx:<s> · model:<m>`
+    // View/target/phase are the stable breadcrumb; model and context keep
+    // runtime safety and optional repo-index state visible without opening
+    // another panel.
     let spans = context_strip_spans(&model);
 
     if spans_overflow(&spans, area.width) {
@@ -27,8 +24,12 @@ fn context_strip_spans(model: &ContextStripModel) -> Vec<Span<'static>> {
         Span::styled("KUZUSHI", theme::heading()),
         Span::raw(" "),
     ];
+    push_breadcrumb_segment(&mut spans, model.view.clone());
     push_prefixed_segment(&mut spans, model.mode.clone(), theme::accent());
     push_segment(&mut spans, "target", model.target.clone(), theme::primary());
+    if let Some(phase) = &model.phase {
+        push_segment(&mut spans, "phase", phase.clone(), theme::accent());
+    }
     push_context_segment(&mut spans, model.context_state);
     push_segment(&mut spans, "model", model.model.clone(), theme::primary());
     push_activity_or_run_segment(&mut spans, model);
@@ -56,6 +57,12 @@ fn compact_context_strip_line(model: &ContextStripModel, area: Rect) -> Vec<Line
         Span::raw(" "),
         Span::styled(rest, theme::primary()),
     ])]
+}
+
+fn push_breadcrumb_segment(spans: &mut Vec<Span<'static>>, view: String) {
+    spans.push(Span::styled("▸ ", theme::subtle()));
+    spans.push(Span::styled(view, theme::accent()));
+    push_separator(spans);
 }
 
 fn push_prefixed_segment(spans: &mut Vec<Span<'static>>, value: String, style: Style) {

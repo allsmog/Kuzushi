@@ -12,7 +12,7 @@ fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     // dead end.
     let mut bindings = vec![bind("Enter", "open finding")];
     push_view_keybindings(&mut bindings, app);
-    bindings.extend([bind("Ctrl+G", "palette"), bind("scan", "rescan")]);
+    bindings.extend([bind("Ctrl+G", "palette"), bind("scan", "guided workflow")]);
     if !app.findings.is_empty() {
         bindings.push(bind(WORKBENCH_REPORT_COMMAND, "export report"));
     }

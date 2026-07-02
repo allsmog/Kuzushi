@@ -62,7 +62,10 @@ pub(crate) fn activity_dag_pane_rows(
 }
 
 fn activity_legend_row(width: usize) -> String {
-    fit(" legend: ✓ done · ! fail · × canceled · · queued", width)
+    fit(
+        " legend: ✓ done · ● active · ! fail · × canceled · ⊘ skipped · · queued",
+        width,
+    )
 }
 
 fn action_pane_rows(

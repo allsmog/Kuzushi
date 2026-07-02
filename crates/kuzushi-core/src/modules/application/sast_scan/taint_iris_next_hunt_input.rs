@@ -48,6 +48,8 @@ pub(in crate::modules) fn sast_scan_options(
     Ok(ScanRunOptions {
         run_id: string_input_any(input, &["runId", "run_id"]),
         severity: parse_sast_severity_filter(input)?,
+        paths: string_list_input(input, &["paths", "includePaths", "include_paths"])?
+            .unwrap_or_default(),
         tasks: None,
         static_proof_state: whitebox_static.then_some(StaticProofState::SignalOnly),
         index_static_evidence: whitebox_static,

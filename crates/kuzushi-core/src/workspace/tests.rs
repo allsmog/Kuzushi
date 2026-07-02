@@ -89,6 +89,10 @@ mod tests {
             WorkspaceExportFormat::from_output_path(std::path::Path::new("out.csv")).unwrap(),
             WorkspaceExportFormat::Csv
         );
+        assert_eq!(
+            WorkspaceExportFormat::from_output_path(std::path::Path::new("report")).unwrap(),
+            WorkspaceExportFormat::MarkdownBundle
+        );
     }
 
     #[test]

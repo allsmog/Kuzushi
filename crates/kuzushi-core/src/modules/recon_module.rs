@@ -6,55 +6,84 @@ pub(crate) fn recon_module() -> BuiltinModule {
         "Recon",
         ModuleKind::Intel,
         "Network and web reconnaissance tools.",
-        vec![
-            tool_with_options(
-                "recon:nmap",
-                "Run nmap reconnaissance.",
-                vec![
-                    opt("target", OptionType::String, "Host or network target.").required(),
-                    opt(
-                        "ports",
-                        OptionType::String,
-                        "Port set or comma-separated port list.",
-                    )
-                    .default(json!("top100")),
-                    binary_option("nmap binary path."),
-                ],
-            ),
-            tool_with_options(
-                "recon:subdomain",
-                "Run subdomain reconnaissance.",
-                vec![
-                    opt("domain", OptionType::String, "Domain to enumerate.").required(),
-                    opt("source", OptionType::Enum, "Subdomain source.")
-                        .choices(&["crtsh", "wayback", "both"])
-                        .default(json!("both")),
-                    opt(
-                        "timeoutSeconds",
-                        OptionType::Int,
-                        "HTTP fetch timeout in seconds.",
-                    )
-                    .aliases(&["timeout_seconds"])
-                    .default(json!(20)),
-                    binary_option("curl binary path."),
-                ],
-            ),
-            tool_with_options(
-                "recon:http-fingerprint",
-                "Fingerprint HTTP services and technology stacks.",
-                vec![
-                    opt("target", OptionType::String, "HTTP service URL or host.").required(),
-                    opt(
-                        "timeoutSeconds",
-                        OptionType::Int,
-                        "HTTP fetch timeout in seconds.",
-                    )
-                    .aliases(&["timeout_seconds"])
-                    .default(json!(10)),
-                    binary_option("curl binary path."),
-                ],
-            ),
-        ],
+        recon_tools(),
         vec![dag("recon:http-fingerprint", "context", &["context:build"])],
     )
+}
+
+fn recon_tools() -> Vec<ToolDescriptor> {
+    vec![
+        nmap_tool(),
+        subdomain_tool(),
+        http_fingerprint_tool(),
+        recon_import_tool(),
+    ]
+}
+
+fn nmap_tool() -> ToolDescriptor {
+    tool_with_options(
+        "recon:nmap",
+        "Run nmap reconnaissance.",
+        vec![
+            opt("target", OptionType::String, "Host or network target.").required(),
+            opt(
+                "ports",
+                OptionType::String,
+                "Port set or comma-separated port list.",
+            )
+            .default(json!("top100")),
+            binary_option("nmap binary path."),
+        ],
+    )
+}
+
+fn subdomain_tool() -> ToolDescriptor {
+    tool_with_options(
+        "recon:subdomain",
+        "Run subdomain reconnaissance.",
+        vec![
+            opt("domain", OptionType::String, "Domain to enumerate.").required(),
+            opt("source", OptionType::Enum, "Subdomain source.")
+                .choices(&["crtsh", "wayback", "both"])
+                .default(json!("both")),
+            timeout_seconds_option(20),
+            binary_option("curl binary path."),
+        ],
+    )
+}
+
+fn http_fingerprint_tool() -> ToolDescriptor {
+    tool_with_options(
+        "recon:http-fingerprint",
+        "Fingerprint HTTP services and technology stacks.",
+        vec![
+            opt("target", OptionType::String, "HTTP service URL or host.").required(),
+            timeout_seconds_option(10),
+            binary_option("curl binary path."),
+        ],
+    )
+}
+
+fn recon_import_tool() -> ToolDescriptor {
+    tool_with_options(
+        "recon:import",
+        "Import an external recon export (amass, httpx, nuclei, nmap-xml) into the recon store.",
+        vec![
+            opt("tool", OptionType::Enum, "Recon export format to import.")
+                .choices(&["amass", "httpx", "nuclei", "nmap-xml"])
+                .aliases(&["source", "format"])
+                .required(),
+            opt("path", OptionType::String, "Path to the recon export file.").required(),
+        ],
+    )
+}
+
+fn timeout_seconds_option(default: u64) -> OptionSpec {
+    opt(
+        "timeoutSeconds",
+        OptionType::Int,
+        "HTTP fetch timeout in seconds.",
+    )
+    .aliases(&["timeout_seconds"])
+    .default(json!(default))
 }

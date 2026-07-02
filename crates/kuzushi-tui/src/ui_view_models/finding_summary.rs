@@ -23,9 +23,9 @@ pub(crate) fn status_footer_findings_summary(findings: &[Finding]) -> String {
     let counts = SeverityCounts::from_findings(findings);
     let total = findings.len();
     let mut parts = vec![format!("{total} {}", finding_noun(total))];
-    append_nonzero_severity(&mut parts, counts.critical, "critical");
+    append_nonzero_severity(&mut parts, counts.critical, "crit");
     append_nonzero_severity(&mut parts, counts.high, "high");
-    append_nonzero_severity(&mut parts, counts.medium, "medium");
+    append_nonzero_severity(&mut parts, counts.medium, "med");
     parts.join(" / ")
 }
 
@@ -34,6 +34,29 @@ pub(crate) fn ci_result_findings_summary(findings: &[Finding], fallback_count: u
         return format!("{fallback_count} {}", finding_noun(fallback_count));
     }
     status_footer_findings_summary(findings)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn finding(severity: Severity) -> Finding {
+        Finding::new_semgrep("demo.rule", "src/app.rs", 1, None, severity, "demo")
+    }
+
+    #[test]
+    fn status_footer_summary_uses_compact_severity_labels() {
+        let findings = [
+            finding(Severity::High),
+            finding(Severity::High),
+            finding(Severity::Medium),
+        ];
+
+        assert_eq!(
+            status_footer_findings_summary(&findings),
+            "3 findings / 2 high / 1 med"
+        );
+    }
 }
 
 fn finding_noun(count: usize) -> &'static str {
@@ -68,7 +91,7 @@ impl SeverityCounts {
         counts
     }
 
-    fn add(&mut self, severity: Severity) {
+    pub(crate) fn add(&mut self, severity: Severity) {
         match severity {
             Severity::Critical => self.critical += 1,
             Severity::High => self.high += 1,

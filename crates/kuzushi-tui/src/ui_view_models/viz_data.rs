@@ -5,7 +5,7 @@
 //! renderer can draw a single guidance line instead of dummy content.
 
 use super::threat_dfd_diagram::{parse_flows, parse_nodes, zones_in_order};
-use crate::{ChainSeverity, ExploitChainStep, ShellApp};
+use crate::{ChainSeverity, ExploitChainStep, ShellApp, TaintFlowSnapshot};
 use kuzushi_core::{Finding, Severity};
 use std::collections::BTreeMap;
 
@@ -91,19 +91,29 @@ const MAX_HEATMAP_ROWS: usize = 10;
 pub(crate) struct FindingsHeatmap {
     pub rows: Vec<ModuleRisk>,
     pub empty_hint: Option<String>,
+    pub selected_module: Option<String>,
 }
 
 pub(crate) fn findings_heatmap(findings: &[Finding]) -> FindingsHeatmap {
+    findings_heatmap_with_selection(findings, None)
+}
+
+pub(crate) fn findings_heatmap_with_selection(
+    findings: &[Finding],
+    selected: Option<&Finding>,
+) -> FindingsHeatmap {
     let risk = risk_by_module(findings);
     if risk.modules.is_empty() {
         return FindingsHeatmap {
             rows: Vec::new(),
             empty_hint: Some("no findings yet — run `scan` to populate".to_string()),
+            selected_module: None,
         };
     }
     FindingsHeatmap {
         rows: risk.modules.into_iter().take(MAX_HEATMAP_ROWS).collect(),
         empty_hint: None,
+        selected_module: selected.map(|finding| module_of(&finding.file_path)),
     }
 }
 
@@ -260,6 +270,40 @@ pub(crate) fn taint_flow_path(app: &ShellApp) -> TaintFlowPath {
             ..Default::default()
         };
     };
+    taint_flow_path_from_snapshot(flow)
+}
+
+pub(crate) fn selected_taint_flow_path(app: &ShellApp) -> TaintFlowPath {
+    let Some(selected) = app.selected_finding.as_ref() else {
+        return taint_flow_path(app);
+    };
+    let Some(flow) = app.taint_flow.as_ref() else {
+        return TaintFlowPath {
+            empty_hint: Some(
+                "no taint flow for the selected finding yet — run `taint-iris:hunt`".to_string(),
+            ),
+            ..Default::default()
+        };
+    };
+    if flow_matches_finding(flow, selected) {
+        return taint_flow_path_from_snapshot(flow);
+    }
+    TaintFlowPath {
+        empty_hint: Some(
+            "cached taint flow does not match the selected finding — run `taint-iris:hunt`"
+                .to_string(),
+        ),
+        ..Default::default()
+    }
+}
+
+fn flow_matches_finding(flow: &TaintFlowSnapshot, finding: &Finding) -> bool {
+    flow.stages
+        .iter()
+        .any(|stage| stage.file == finding.file_path || stage.file.ends_with(&finding.file_path))
+}
+
+fn taint_flow_path_from_snapshot(flow: &TaintFlowSnapshot) -> TaintFlowPath {
     TaintFlowPath {
         cwe: flow.cwe.clone(),
         severity: flow.severity.clone(),

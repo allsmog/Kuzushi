@@ -1,9 +1,15 @@
 use super::*;
-use crate::app::{row_disposition, PlanningArtifactState, PlanningTaskRow, WorkflowPhase};
-use crate::ui_view_models::{
-    enter_plan, format_relative_age, latest_cached_modified, workspace_history, RowOutcome,
-    WorkspaceHistory,
+use crate::app::{
+    format_option_value, row_disposition, PickerFocus, PlanningArtifactState, PlanningTaskRow,
+    WorkflowPhase,
 };
+use crate::ui_view_models::{
+    enter_plan, format_relative_age, journey_model, latest_cached_modified, workspace_history,
+    JourneyPhaseState, JourneyPhaseStatus, JourneyPhaseTone, RowOutcome, WorkspaceHistory,
+};
+use kuzushi_core::modules::OptionSpec;
+use kuzushi_core::OptionScope;
+use serde_json::Value;
 use std::time::SystemTime;
 
 pub(crate) fn planning_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -11,37 +17,22 @@ pub(crate) fn planning_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'sta
     push_phase_header(app, area.width, &mut lines);
     if app.planning_tasks.is_empty() {
         lines.push(muted("(no tasks in this phase)"));
-        lines.push(blank());
-        // Even with nothing to pick, the picker is still a modal — say how
-        // to leave it instead of presenting a dead end.
-        lines.push(keybind_hint_line(&[
-            ("Enter", "continue"),
-            ("Esc/q", "skip phase"),
-        ]));
         return lines;
     }
     lines.push(blank());
-    lines.push(prior_state_banner(app, area.width));
+    lines.push(prior_state_banner(app));
     lines.push(blank());
     lines.push(legend_line(area.width));
     lines.push(blank());
-    if let Some(header) = column_header(area.width) {
-        lines.push(header);
-    }
-    for (idx, row) in app.planning_tasks.iter().enumerate() {
-        lines.push(planning_row_line(app, idx, row, area.width));
+    if area.width as usize >= MASTER_DETAIL_WIDTH {
+        push_master_detail_rows(app, area.width, &mut lines);
+    } else {
+        lines.extend(task_list_pane_lines(app, area.width));
+        lines.push(blank());
+        lines.extend(planning_options_pane_lines(app, area.width as usize));
     }
     lines.push(blank());
     lines.push(enter_summary_line(app));
-    lines.push(keybind_hint_line(&[
-        ("↑/↓/j/k", "move"),
-        ("Space", "check/uncheck"),
-        ("g", "rebuild cached"),
-        ("a", "all"),
-        ("n", "none"),
-        ("Enter", "run checked"),
-        ("Esc/q", "skip phase"),
-    ]));
     lines
 }
 
@@ -51,6 +42,7 @@ fn push_phase_header(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>)
         Some(phase) => {
             lines.push(divider(phase.label(), width));
             lines.push(blank());
+            push_phase_rail(app, width, lines);
             lines.push(muted(&format!(
                 "phase {} of {} — {}",
                 phase.position(),
@@ -68,12 +60,112 @@ fn push_phase_header(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>)
     }
 }
 
+fn push_phase_rail(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>) {
+    if let Some(journey) = journey_model(app) {
+        lines.push(phase_rail_line(&journey.phases, width as usize));
+        return;
+    }
+    if let Some(current) = app.workflow_phase {
+        lines.push(fallback_phase_rail_line(current, width as usize));
+    }
+}
+
+fn phase_rail_line(phases: &[JourneyPhaseStatus], width: usize) -> Line<'static> {
+    let mut spans = vec![
+        Span::styled("‹h ", theme::accent()),
+        Span::styled("phase ", theme::muted()),
+    ];
+    for (idx, phase) in phases.iter().enumerate() {
+        if idx > 0 {
+            spans.push(Span::styled("  ", theme::subtle()));
+        }
+        push_phase_segment(&mut spans, idx, phase);
+    }
+    spans.push(Span::styled(" l›", theme::accent()));
+    fit_spans(spans, width)
+}
+
+fn push_phase_segment(spans: &mut Vec<Span<'static>>, index: usize, phase: &JourneyPhaseStatus) {
+    let label = phase.phase_label.trim();
+    let text = format!("{} {label} {}", index + 1, phase.state_symbol);
+    if phase.state == JourneyPhaseState::Current {
+        spans.push(Span::styled("[", theme::warn()));
+        spans.push(Span::styled(text, phase_tone_style(phase.tone)));
+        spans.push(Span::styled("]", theme::warn()));
+    } else {
+        spans.push(Span::styled(text, phase_tone_style(phase.tone)));
+    }
+}
+
+fn fallback_phase_rail_line(current: WorkflowPhase, width: usize) -> Line<'static> {
+    let statuses: Vec<JourneyPhaseStatus> = WorkflowPhase::ORDER
+        .iter()
+        .map(|&phase| JourneyPhaseStatus {
+            phase,
+            state: if phase == current {
+                JourneyPhaseState::Current
+            } else {
+                JourneyPhaseState::Pending
+            },
+            phase_label: fallback_phase_rail_label(phase),
+            state_symbol: if phase == current { "▸" } else { "·" },
+            tone: if phase == current {
+                JourneyPhaseTone::Warn
+            } else {
+                JourneyPhaseTone::Subtle
+            },
+        })
+        .collect();
+    phase_rail_line(&statuses, width)
+}
+
+fn fallback_phase_rail_label(phase: WorkflowPhase) -> &'static str {
+    match phase {
+        WorkflowPhase::Map => "組 map",
+        WorkflowPhase::Hunt => "崩 hunt",
+        WorkflowPhase::Confirm => "作 confirm",
+        WorkflowPhase::Fix => "掛 fix",
+    }
+}
+
+fn phase_tone_style(tone: JourneyPhaseTone) -> Style {
+    match tone {
+        JourneyPhaseTone::Success => theme::success(),
+        JourneyPhaseTone::Warn => theme::warn(),
+        JourneyPhaseTone::Danger => theme::danger(),
+        JourneyPhaseTone::Muted => theme::muted(),
+        JourneyPhaseTone::Subtle => theme::subtle(),
+    }
+}
+
+fn fit_spans(spans: Vec<Span<'static>>, width: usize) -> Line<'static> {
+    let text_width = spans_width(&spans);
+    if text_width <= width {
+        return Line::from(spans);
+    }
+    let text: String = spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect::<Vec<_>>()
+        .join("");
+    Line::styled(fit(&text, width), theme::subtle())
+}
+
 /// Tell a returning operator, up front, whether Kuzushi found prior work for
 /// this target — the single biggest missing signal in the old picker.
-fn prior_state_banner(app: &ShellApp, _width: u16) -> Line<'static> {
+fn prior_state_banner(app: &ShellApp) -> Line<'static> {
     let last_activity = latest_cached_modified(&app.planning_tasks)
         .and_then(|then| format_relative_age(SystemTime::now(), then));
-    match workspace_history(&app.planning_tasks, app.findings.len(), last_activity) {
+    let map_artifacts_built = app
+        .workbench_cache
+        .borrow_mut()
+        .map_artifacts_built(app.target.as_deref());
+    match workspace_history(
+        &app.planning_tasks,
+        app.findings.len(),
+        map_artifacts_built,
+        last_activity,
+    ) {
         WorkspaceHistory::Fresh => Line::from(vec![
             Span::styled("▌ ", theme::subtle()),
             Span::styled("Fresh target".to_string(), theme::label()),
@@ -82,15 +174,43 @@ fn prior_state_banner(app: &ShellApp, _width: u16) -> Line<'static> {
                 theme::muted(),
             ),
         ]),
-        WorkspaceHistory::Prior(state) => Line::from(vec![
-            Span::styled("▌ ", theme::success()),
-            Span::styled(
-                "Resuming — Kuzushi found prior work: ".to_string(),
-                theme::success().add_modifier(Modifier::BOLD),
-            ),
-            Span::styled(state.headline(), theme::primary()),
-        ]),
+        WorkspaceHistory::Prior(state) => prior_state_line(app, state.headline()),
     }
+}
+
+fn prior_state_line(app: &ShellApp, headline: String) -> Line<'static> {
+    if revisiting_cached_artifact_phase(app) {
+        return Line::from(vec![
+            Span::styled("▌ ", theme::accent()),
+            Span::styled(
+                "Revisiting — artifacts cached; press g to rebuild".to_string(),
+                theme::accent().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(format!(" ({headline})"), theme::muted()),
+        ]);
+    }
+    Line::from(vec![
+        Span::styled("▌ ", theme::success()),
+        Span::styled(
+            "Resuming — Kuzushi found prior work: ".to_string(),
+            theme::success().add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(headline, theme::primary()),
+    ])
+}
+
+fn revisiting_cached_artifact_phase(app: &ShellApp) -> bool {
+    app.workflow_phase.is_some()
+        && app
+            .planning_tasks
+            .iter()
+            .any(|row| matches!(row.artifact_state, PlanningArtifactState::Cached))
+        && app.planning_tasks.iter().all(|row| {
+            matches!(
+                row.artifact_state,
+                PlanningArtifactState::Cached | PlanningArtifactState::Action
+            )
+        })
 }
 
 /// A colour-keyed legend so the outcome words in the rows are never load-
@@ -147,6 +267,80 @@ fn column_header(width: u16) -> Option<Line<'static>> {
 
 const WIDE: usize = 88;
 const MEDIUM: usize = 60;
+const MASTER_DETAIL_WIDTH: usize = 118;
+
+fn push_master_detail_rows(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>) {
+    let w = width as usize;
+    let detail_width = (w / 3).clamp(38, 52);
+    let list_width = w.saturating_sub(detail_width + 2);
+    let left = task_list_pane_lines(app, list_width as u16);
+    let right = planning_options_pane_lines(app, detail_width);
+    let row_count = left.len().max(right.len());
+    for idx in 0..row_count {
+        lines.push(join_pane_lines(
+            left.get(idx).cloned(),
+            right.get(idx).cloned(),
+            list_width,
+        ));
+    }
+}
+
+fn task_list_lines(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
+    let mut lines = Vec::new();
+    if let Some(header) = column_header(width) {
+        lines.push(header);
+    }
+    for (idx, row) in app.planning_tasks.iter().enumerate() {
+        lines.push(planning_row_line(app, idx, row, width));
+    }
+    lines
+}
+
+fn task_list_pane_lines(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
+    let width = (width as usize).max(24);
+    let focused = app.picker_focus == PickerFocus::List;
+    let border_style = pane_border_style(focused);
+    let mut lines = vec![border_line(
+        "┌",
+        pane_title(" TASKS ", focused).as_str(),
+        "┐",
+        width,
+        border_style,
+        pane_title_style(focused),
+    )];
+    lines.extend(
+        task_list_lines(app, width.saturating_sub(4) as u16)
+            .into_iter()
+            .map(|line| pane_line(line, width, border_style)),
+    );
+    lines.push(border_line(
+        "└",
+        "",
+        "┘",
+        width,
+        border_style,
+        theme::label(),
+    ));
+    lines
+}
+
+fn join_pane_lines(
+    left: Option<Line<'static>>,
+    right: Option<Line<'static>>,
+    left_width: usize,
+) -> Line<'static> {
+    let mut left = left.unwrap_or_else(blank);
+    let current_width = spans_width(&left.spans);
+    if current_width < left_width {
+        left.spans
+            .push(Span::raw(" ".repeat(left_width - current_width)));
+    }
+    left.spans.push(Span::raw("  "));
+    if let Some(right) = right {
+        left.spans.extend(right.spans);
+    }
+    left
+}
 
 fn planning_row_line(
     app: &ShellApp,
@@ -158,46 +352,80 @@ fn planning_row_line(
     let outcome = RowOutcome::from_disposition(disposition);
     let marker = if idx == app.planning_cursor { ">" } else { " " };
     let note = planning_row_note(app, row, outcome);
+    let label = planning_row_label(app, row);
     let w = width as usize;
     let body = if w >= WIDE {
         format!(
             "  {marker} {outcome:<7} {label:<30} {tool:<22} {note}",
             outcome = outcome.word(),
-            label = row.label,
+            label = label,
             tool = row.tool_name,
         )
     } else if w >= MEDIUM {
         format!(
             "  {marker} {outcome:<7} {label:<28} {note}",
             outcome = outcome.word(),
-            label = row.label,
+            label = label,
         )
     } else {
         format!(
             "  {marker} {outcome:<7} {label}",
             outcome = outcome.word(),
-            label = row.label,
+            label = label,
         )
     };
     Line::styled(fit(&body, w), planning_row_style(app, idx, outcome))
 }
 
+fn planning_row_label(app: &ShellApp, row: &PlanningTaskRow) -> String {
+    let count = app.planning_override_count(row.id);
+    if count == 0 {
+        row.label.to_string()
+    } else {
+        format!("{} ∙{}", row.label, count)
+    }
+}
+
 /// The row's "why" column: the artifact reality plus the one cost/blocker the
 /// operator needs to act on, phrased so it agrees with the outcome word.
 fn planning_row_note(app: &ShellApp, row: &PlanningTaskRow, outcome: RowOutcome) -> String {
-    if outcome == RowOutcome::Blocked {
-        return format!("requires {} on PATH", row.required_cli.unwrap_or("a tool"));
+    blocked_row_note(row, outcome)
+        .or_else(|| cached_row_note(row, outcome))
+        .or_else(|| missing_model_note(app, row))
+        .unwrap_or_else(|| outcome_row_note(app, row, outcome))
+}
+
+fn blocked_row_note(row: &PlanningTaskRow, outcome: RowOutcome) -> Option<String> {
+    (outcome == RowOutcome::Blocked).then(|| {
+        format!(
+            "blocked — install {} for this step",
+            row.required_cli.unwrap_or("a tool")
+        )
+    })
+}
+
+fn cached_row_note(row: &PlanningTaskRow, outcome: RowOutcome) -> Option<String> {
+    if !matches!(row.artifact_state, PlanningArtifactState::Cached) {
+        return None;
     }
-    if row.model_backed && app.config.model.is_none() {
-        return "needs model — run /model first".to_string();
+    if let Some(cli) = row.required_cli.filter(|_| !row.cli_available) {
+        return Some(format!("cached — rebuild needs {cli}"));
     }
+    (outcome == RowOutcome::Reuse).then(|| "cached — press g to rebuild".to_string())
+}
+
+fn missing_model_note(app: &ShellApp, row: &PlanningTaskRow) -> Option<String> {
+    (row.model_backed && app.config.model.is_none())
+        .then(|| "needs model — run /model first".to_string())
+}
+
+fn outcome_row_note(app: &ShellApp, row: &PlanningTaskRow, outcome: RowOutcome) -> String {
     match outcome {
-        RowOutcome::Reuse => "cached — press g to rebuild".to_string(),
         RowOutcome::Run if app.planning_rebuild.contains(&row.id) => {
             with_cost(row, "rebuild (overwrites cache)")
         }
         RowOutcome::Run | RowOutcome::Skip => with_cost(row, artifact_reason(row)),
-        RowOutcome::Blocked => unreachable!("blocked handled above"),
+        RowOutcome::Reuse | RowOutcome::Blocked => unreachable!("handled above"),
     }
 }
 
@@ -211,10 +439,353 @@ fn artifact_reason(row: &PlanningTaskRow) -> &'static str {
 }
 
 fn with_cost(row: &PlanningTaskRow, base: &str) -> String {
+    let mut parts = vec![base.to_string()];
     if row.model_backed {
-        format!("{base} · model-backed")
+        parts.push("model-backed".to_string());
+    }
+    if let Some(cli) = row.required_cli.filter(|_| row.cli_available) {
+        parts.push(format!("{cli} ready"));
+    }
+    parts.join(" · ")
+}
+
+fn planning_options_pane_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
+    let width = width.max(24);
+    let Some(row) = app.planning_tasks.get(app.planning_cursor) else {
+        return bordered_message("options", "no focused step", width);
+    };
+    let focused = app.picker_focus == PickerFocus::OptionsPane;
+    let border_style = pane_border_style(focused);
+    let title = pane_title(&format!(" {} ", row.tool_name), focused);
+    let Some(tool) = app.registry.resolve_tool(row.tool_name) else {
+        return bordered_message(&title, "tool descriptor missing", width);
+    };
+    let mut lines = option_pane_header(&title, focused, border_style, width);
+    append_option_pane_rows(&mut lines, app, row, &tool.options, width);
+    append_option_pane_error(&mut lines, app, border_style, width);
+    lines.push(pane_separator(width, border_style));
+    lines.push(input_preview_line(app, row, width));
+    lines.push(border_line(
+        "└",
+        "",
+        "┘",
+        width,
+        border_style,
+        theme::label(),
+    ));
+    lines
+}
+
+fn option_pane_header(
+    title: &str,
+    focused: bool,
+    border_style: Style,
+    width: usize,
+) -> Vec<Line<'static>> {
+    vec![border_line(
+        "┌",
+        title,
+        "┐",
+        width,
+        border_style,
+        pane_title_style(focused),
+    )]
+}
+
+fn append_option_pane_rows(
+    lines: &mut Vec<Line<'static>>,
+    app: &ShellApp,
+    row: &PlanningTaskRow,
+    options: &[OptionSpec],
+    width: usize,
+) {
+    if options.is_empty() {
+        lines.push(pane_body_line(
+            "no declared options",
+            width,
+            theme::muted(),
+            pane_border_style(app.picker_focus == PickerFocus::OptionsPane),
+        ));
+        return;
+    }
+    let resolved = app.resolved_input_for_planning_task(row.id).ok();
+    for (idx, spec) in options.iter().enumerate() {
+        lines.push(option_pane_row(
+            app,
+            row,
+            spec,
+            idx,
+            resolved.as_ref(),
+            width,
+        ));
+    }
+}
+
+fn append_option_pane_error(
+    lines: &mut Vec<Line<'static>>,
+    app: &ShellApp,
+    border_style: Style,
+    width: usize,
+) {
+    if let Some(error) = &app.planning_option_error {
+        lines.push(pane_body_line(
+            &fit(error, width.saturating_sub(4)),
+            width,
+            theme::danger(),
+            border_style,
+        ));
+    }
+}
+
+fn bordered_message(title: &str, message: &str, width: usize) -> Vec<Line<'static>> {
+    let border_style = theme::subtle();
+    vec![
+        border_line("┌", title, "┐", width, border_style, theme::label()),
+        pane_body_line(message, width, theme::muted(), border_style),
+        border_line("└", "", "┘", width, border_style, theme::label()),
+    ]
+}
+
+fn option_pane_row(
+    app: &ShellApp,
+    row: &PlanningTaskRow,
+    spec: &OptionSpec,
+    idx: usize,
+    resolved: Option<&Value>,
+    width: usize,
+) -> Line<'static> {
+    let selected =
+        app.picker_focus == PickerFocus::OptionsPane && idx == app.planning_option_cursor;
+    let editing = app
+        .planning_option_edit
+        .as_ref()
+        .is_some_and(|edit| edit.task == row.id && edit.option_name == spec.name);
+    let marker = if selected { ">" } else { " " };
+    let value = option_display_value(app, spec, resolved, editing);
+    let provenance = option_provenance(app, row, spec, resolved);
+    let name = option_name_label(app, row, spec);
+    let body_width = width.saturating_sub(4);
+    let row_text = option_pane_row_text(marker, &name, &value, &provenance, body_width);
+    let style = option_pane_row_style(selected, &provenance);
+    pane_body_line(
+        &fit(&row_text, body_width),
+        width,
+        style,
+        pane_border_style(app.picker_focus == PickerFocus::OptionsPane),
+    )
+}
+
+fn option_pane_row_text(
+    marker: &str,
+    name: &str,
+    value: &str,
+    provenance: &str,
+    body_width: usize,
+) -> String {
+    if body_width >= 40 {
+        return format!(
+            "{marker} {name:<14} {value:<13} {provenance:<9}",
+            name = fit(name, 14),
+            value = fit(value, 13),
+        );
+    }
+    format!("{marker} {name} {value} {provenance}")
+}
+
+fn option_pane_row_style(selected: bool, provenance: &str) -> Style {
+    if selected {
+        return theme::accent().add_modifier(Modifier::BOLD);
+    }
+    if provenance == "preset" {
+        theme::muted()
     } else {
-        base.to_string()
+        theme::primary()
+    }
+}
+
+fn option_name_label(app: &ShellApp, row: &PlanningTaskRow, spec: &OptionSpec) -> String {
+    let suffix = if app.option_locked_by_planning_preset(row.id, &spec.name) {
+        " lock"
+    } else if spec.advanced {
+        " adv"
+    } else {
+        ""
+    };
+    format!("{}{}", spec.name, suffix)
+}
+
+fn option_display_value(
+    app: &ShellApp,
+    spec: &OptionSpec,
+    resolved: Option<&Value>,
+    editing: bool,
+) -> String {
+    if editing {
+        let draft = app
+            .planning_option_edit
+            .as_ref()
+            .map(|edit| edit.draft.as_str())
+            .unwrap_or_default();
+        return format!("{draft}_");
+    }
+    resolved
+        .and_then(|input| input.get(&spec.name))
+        .map(format_option_value)
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn option_provenance(
+    app: &ShellApp,
+    row: &PlanningTaskRow,
+    spec: &OptionSpec,
+    resolved: Option<&Value>,
+) -> &'static str {
+    option_locked_provenance(app, row, spec)
+        .or_else(|| option_override_provenance(app, row, spec))
+        .or_else(|| option_stored_provenance(app, row, spec))
+        .or_else(|| option_default_provenance(resolved, spec))
+        .unwrap_or("-")
+}
+
+fn option_locked_provenance(
+    app: &ShellApp,
+    row: &PlanningTaskRow,
+    spec: &OptionSpec,
+) -> Option<&'static str> {
+    if app.option_locked_by_planning_preset(row.id, &spec.name) {
+        return Some("preset");
+    }
+    None
+}
+
+fn option_override_provenance(
+    app: &ShellApp,
+    row: &PlanningTaskRow,
+    spec: &OptionSpec,
+) -> Option<&'static str> {
+    if app
+        .planning_option_overrides
+        .get(&row.id)
+        .is_some_and(|values| values.contains_key(&spec.name))
+    {
+        return Some("this run");
+    }
+    None
+}
+
+fn option_stored_provenance(
+    app: &ShellApp,
+    row: &PlanningTaskRow,
+    spec: &OptionSpec,
+) -> Option<&'static str> {
+    app.planning_option_stored_scope(row.tool_name, spec)
+        .map(stored_scope_label)
+}
+
+fn option_default_provenance(resolved: Option<&Value>, spec: &OptionSpec) -> Option<&'static str> {
+    if resolved.is_some_and(|input| input.get(&spec.name).is_some()) {
+        return Some("default");
+    }
+    if spec.required {
+        return Some("missing");
+    }
+    None
+}
+
+fn stored_scope_label(scope: OptionScope) -> &'static str {
+    match scope {
+        OptionScope::Global => "setg",
+        OptionScope::Workspace => "workspace",
+        OptionScope::Session => "set",
+    }
+}
+
+fn input_preview_line(app: &ShellApp, row: &PlanningTaskRow, width: usize) -> Line<'static> {
+    let preview = match app.resolved_input_for_planning_task(row.id) {
+        Ok(input) => format!(
+            "input {}",
+            serde_json::to_string(&input).unwrap_or_else(|_| "{}".to_string())
+        ),
+        Err(error) => format!("input error: {error:#}"),
+    };
+    let style = if preview.starts_with("input error") {
+        theme::danger()
+    } else {
+        theme::muted()
+    };
+    pane_body_line(
+        &fit(&preview, width.saturating_sub(4)),
+        width,
+        style,
+        pane_border_style(app.picker_focus == PickerFocus::OptionsPane),
+    )
+}
+
+fn pane_separator(width: usize, border_style: Style) -> Line<'static> {
+    border_line("├", "", "┤", width, border_style, theme::label())
+}
+
+fn pane_body_line(text: &str, width: usize, style: Style, border_style: Style) -> Line<'static> {
+    let body_width = width.saturating_sub(4);
+    Line::from(vec![
+        Span::styled("│ ", border_style),
+        Span::styled(format!("{:<body_width$}", fit(text, body_width)), style),
+        Span::styled(" │", border_style),
+    ])
+}
+
+fn pane_line(line: Line<'static>, width: usize, border_style: Style) -> Line<'static> {
+    let body_width = width.saturating_sub(4);
+    let line_width = spans_width(&line.spans).min(body_width);
+    let mut spans = vec![Span::styled("│ ", border_style)];
+    spans.extend(line.spans);
+    if line_width < body_width {
+        spans.push(Span::raw(" ".repeat(body_width - line_width)));
+    }
+    spans.push(Span::styled(" │", border_style));
+    Line::from(spans)
+}
+
+fn border_line(
+    left: &str,
+    title: &str,
+    right: &str,
+    width: usize,
+    border_style: Style,
+    title_style: Style,
+) -> Line<'static> {
+    let inner_width = width.saturating_sub(2);
+    let title = fit(title, inner_width);
+    let fill = inner_width.saturating_sub(title.chars().count());
+    Line::from(vec![
+        Span::styled(left.to_string(), border_style),
+        Span::styled(title, title_style),
+        Span::styled("─".repeat(fill), border_style),
+        Span::styled(right.to_string(), border_style),
+    ])
+}
+
+fn pane_title(title: &str, focused: bool) -> String {
+    if focused {
+        format!("{title}FOCUS ")
+    } else {
+        title.to_string()
+    }
+}
+
+fn pane_border_style(focused: bool) -> Style {
+    if focused {
+        theme::accent()
+    } else {
+        theme::subtle()
+    }
+}
+
+fn pane_title_style(focused: bool) -> Style {
+    if focused {
+        theme::accent().add_modifier(Modifier::BOLD)
+    } else {
+        theme::label()
     }
 }
 

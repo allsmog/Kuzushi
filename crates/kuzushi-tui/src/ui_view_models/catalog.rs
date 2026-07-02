@@ -115,7 +115,7 @@ fn collapsed_catalog_model(app: &ShellApp) -> CatalogCollapsedModel {
 
 fn collapsed_target_warning(app: &ShellApp) -> Option<&'static str> {
     if app.target.is_none() {
-        return Some("[!] no target selected; `scan .` uses the current directory");
+        return Some("[!] no target selected; run `target .`, then `next`");
     }
     app.findings
         .is_empty()

@@ -29,7 +29,8 @@ fn options_model_formats_stored_option_rows() {
         .unwrap();
 
     assert_eq!(model.title, "OPTIONS");
-    assert!(table.hint.contains("session state"));
+    assert!(table.hint.contains("session-only"));
+    assert!(table.hint.contains("lost on exit"));
     assert_eq!(
         table.headers,
         [
@@ -95,6 +96,10 @@ fn plain_options_model_projects_ready_table() {
         ]
     );
     assert!(table.rows.iter().any(|row| row.cells[0] == "triage"));
+    assert_eq!(
+        table.note,
+        "set is session-only (lost on exit); setg is persistent for this tool."
+    );
     assert_eq!(
         table.next_hint,
         "Next: set <key> <value>, setg <key> <value>, show advanced, show missing"

@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 89
 ---
- KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI > activity · mode:shell · target:none · ctx:not built · model:unconfigured
 
  -- ACTIVITY  run r-snapshot  ·  2/3 done  ·  1 running ----------------------------------------------------------------
  -- TASKS                                      |  -- OUTPUT
@@ -14,7 +14,7 @@ assertion_line: 89
      + stage1 kept 14/14                       |   last: context:build complete · 412 files
      ↳ verdict=likely-tp severity=high         |   DETAILS
  ⤳ subsystems (1)  active · hidden — V to exp… |     + context:build start
- legend: + done · ! fail · x canceled · · que… |     + context:build complete · 412 files
+ legend: + done · * active · ! fail · x cance… |     + context:build complete · 412 files
   ACTIONS                                      |   LAST STEPS
      22:13:20  ⏵ [context:build] context:buil… |     tool · context:build start
      22:13:20  + [context:build] context:buil… |     done · context:build complete · 412 files

@@ -54,9 +54,9 @@ fn append_module_groups(lines: &mut Vec<Line<'static>>, model: &CatalogModel, wi
 }
 
 fn append_module_group(lines: &mut Vec<Line<'static>>, group: &CatalogModuleGroup, width: u16) {
-    let (_, blurb) = module_category_blurb(group.category);
+    let (label, blurb) = module_category_blurb(group.category);
     let widths = module_table_widths(width);
-    lines.push(category_divider(group.category, blurb, width));
+    lines.push(category_divider(label, blurb, width));
     for module in &group.rows {
         lines.push(catalog_module_row(
             &module.cells[0],

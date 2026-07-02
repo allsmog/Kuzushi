@@ -17,13 +17,19 @@ pub(crate) enum Command {
     },
     /// Run configured scanners and persist findings.
     Scan {
-        target: PathBuf,
+        /// Workspace/repository to scan. Optional when the global `--target`
+        /// is set; pass `.` for the current directory.
+        target: Option<PathBuf>,
+        /// Scan mode: `standard` or `whitebox-static`.
         #[arg(long, value_enum)]
         mode: Option<ScanModeArg>,
+        /// Restrict the scan to these DAG tasks (comma- or repeat-separated).
         #[arg(long, value_delimiter = ',')]
         tasks: Vec<String>,
+        /// Run model-backed triage on recorded findings after the scan.
         #[arg(long, action = clap::ArgAction::SetTrue)]
         triage: Option<bool>,
+        /// Emit the scan result as a single machine-readable JSON object.
         #[arg(long)]
         json: bool,
         /// Emit one line per pipeline event in a deterministic, grep-friendly format.
@@ -55,30 +61,34 @@ pub(crate) enum Command {
     },
     /// List persisted findings.
     Findings {
-        #[arg(long)]
-        target: Option<PathBuf>,
+        /// Maximum number of findings to list.
         #[arg(long, default_value_t = 50)]
         limit: usize,
+        /// Filter by severity (critical, high, medium, low, info). Comma- or repeat-separated.
         #[arg(long, value_delimiter = ',')]
         severity: Vec<String>,
+        /// Filter by triage verdict (e.g. confirmed, rejected, untriaged). Comma- or repeat-separated.
         #[arg(long, value_delimiter = ',')]
         verdict: Vec<String>,
+        /// Filter by finding alias or rule name.
         #[arg(long)]
         name: Option<String>,
+        /// Filter by source file path substring.
         #[arg(long = "file-path")]
         file_path: Option<String>,
         /// Filter by discovery channel: sarif, ainalysis, ainalysis-multi,
         /// diff-analyzer, infer, fuzzing. Comma- or repeat-separated.
         #[arg(long = "vuln-source", value_delimiter = ',')]
         vuln_source: Vec<String>,
+        /// Emit the findings list as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// Inspect one persisted finding by alias, fingerprint, or fingerprint prefix.
     Finding {
+        /// Finding alias (F-0001), full fingerprint, or fingerprint prefix.
         reference: String,
-        #[arg(long)]
-        target: Option<PathBuf>,
+        /// Emit the finding as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
@@ -89,29 +99,30 @@ pub(crate) enum Command {
     },
     /// Add an expiring, evidence-backed suppression for a finding.
     Suppress {
+        /// Finding alias, fingerprint, or fingerprint prefix to suppress.
         reference: String,
-        #[arg(long)]
-        target: Option<PathBuf>,
+        /// Why this finding is being suppressed (recorded in the audit store).
         #[arg(long)]
         reason: String,
+        /// Operator recorded as the author of the suppression.
         #[arg(long, default_value = "operator")]
         author: String,
+        /// Days until the suppression expires and the finding resurfaces.
         #[arg(long, default_value_t = 90)]
         days: u64,
+        /// Emit the result as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// List whitebox/static suppressions and their audit store.
     Suppressions {
-        #[arg(long)]
-        target: Option<PathBuf>,
+        /// Emit the suppressions list as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// Show the current CLI/shell permission and sandbox policy summary.
     Permissions {
-        #[arg(long)]
-        target: Option<PathBuf>,
+        /// Emit the policy summary as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
@@ -129,18 +140,19 @@ pub(crate) enum Command {
     },
     /// List native modules.
     Modules {
+        /// Emit the module list as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// List native tools.
     Tools {
+        /// Emit the tool list as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// Run Rust CLI preflight diagnostics.
     Doctor {
-        #[arg(long)]
-        target: Option<PathBuf>,
+        /// Emit the diagnostics report as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
@@ -153,7 +165,9 @@ pub(crate) enum Command {
     /// Execute a native tool descriptor-backed command. Use an explicit
     /// `module:tool`; shell-only `run .` needs focused module state.
     Run {
+        /// Tool to execute, as `module:tool` (e.g. `context:build`).
         tool: String,
+        /// Tool input as JSON. Use `@path` to read a file or `-` to read stdin.
         #[arg(long, default_value = "{}")]
         input: String,
         /// Override a canonical tool option. Repeat as `--option key=value`.

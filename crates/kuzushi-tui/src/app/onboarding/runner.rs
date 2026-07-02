@@ -10,9 +10,11 @@ use super::recommend::model_recommended_in_phase;
 use super::task_id::PlanningTaskId;
 use crate::app::WorkflowPhase;
 use crate::{ShellApp, ShellView};
-use kuzushi_core::WorkspaceTarget;
+use anyhow::Result;
+use kuzushi_core::{NestedProjectKind, WorkspaceTarget};
 use serde_json::{json, Value};
 use std::collections::BTreeSet;
+use std::path::Path;
 
 impl ShellApp {
     /// Dispatch the head of the planning queue (if any) on `workspace`.
@@ -27,7 +29,17 @@ impl ShellApp {
             return;
         };
         let tool_name = task.tool_name();
-        let input = self.input_for_planning_task(task);
+        let input = match self.input_for_planning_task(task) {
+            Ok(input) => input,
+            Err(error) => {
+                self.log(
+                    "error",
+                    format!("{} input invalid: {error:#}", task.tool_name()),
+                );
+                self.fail_planning_task(task.tool_name(), &format!("{error:#}"));
+                return;
+            }
+        };
         self.planning_running_tool = Some(tool_name.to_string());
         self.log(
             "planning",
@@ -230,10 +242,58 @@ impl ShellApp {
     /// After a phase's queue drains (or the operator skips it), open the next
     /// phase's picker — 組 → 崩 → 作 → 掛 — or finish the engagement after 掛 KAKE.
     pub(crate) fn advance_to_next_phase(&mut self) {
-        match self.workflow_phase.and_then(|phase| phase.next()) {
+        let completed = self.workflow_phase;
+        self.maybe_refresh_recommendations_after_map(completed);
+        match completed.and_then(|phase| phase.next()) {
             Some(next) => self.open_or_announce_next_phase(next),
             None => self.finish_engagement(),
         }
+    }
+
+    fn maybe_refresh_recommendations_after_map(&mut self, completed: Option<WorkflowPhase>) {
+        if !self.should_refresh_recommendations_after_map(completed) {
+            return;
+        }
+        let Ok(workspace) = self.current_workspace() else {
+            return;
+        };
+        self.log("recommend", map_recommendation_notice(workspace.root()));
+        if !crate::ui_view_models::recommendation_artifact_needs_refresh(self) {
+            return;
+        }
+        self.start_deterministic_recommender(workspace);
+    }
+
+    fn should_refresh_recommendations_after_map(&self, completed: Option<WorkflowPhase>) -> bool {
+        completed == Some(WorkflowPhase::Map)
+            && !self.planning_skipped_phases.contains(&WorkflowPhase::Map)
+            && self.tool_running.is_none()
+            && self.target.is_some()
+    }
+
+    fn start_deterministic_recommender(&mut self, workspace: WorkspaceTarget) {
+        let input = json!({ "useModelRanking": false });
+        let prepared = match self.registry.prepare_tool_input(
+            "module-recommender:recommend",
+            input,
+            Some(&self.option_store),
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.log("error", format!("recommendation input invalid: {error}"));
+                return;
+            }
+        };
+        let previous_auto_open = self.auto_open_activity;
+        self.auto_open_activity = false;
+        self.start_background_tool(
+            "module-recommender:recommend".to_string(),
+            prepared,
+            workspace,
+            "deterministic module recommendations in flight",
+            None,
+        );
+        self.auto_open_activity = previous_auto_open;
     }
 
     fn open_or_announce_next_phase(&mut self, next: WorkflowPhase) {
@@ -331,14 +391,14 @@ impl ShellApp {
 
     /// Tool input for a planning task, with any retry adjustment applied (e.g.
     /// a larger `heapMb` after a joern OOM).
-    fn input_for_planning_task(&self, task: PlanningTaskId) -> Value {
-        let mut input = planning_task_input(task);
+    fn input_for_planning_task(&self, task: PlanningTaskId) -> Result<Value> {
+        let mut input = self.input_for_planning_task_with_options(task)?;
         if let Some(RetryAdjustment::RaiseHeap { heap_mb }) = self.planning_adjustments.get(&task) {
             if let Some(object) = input.as_object_mut() {
                 object.insert("heapMb".to_string(), json!(heap_mb));
             }
         }
-        input
+        Ok(input)
     }
 
     /// Planning is done. Return to the Workbench cockpit and leave the module
@@ -351,6 +411,47 @@ impl ShellApp {
             "run `recommend` when you want suggested next modules",
         );
     }
+}
+
+fn map_recommendation_notice(root: &Path) -> String {
+    let labels = product_boundary_labels(root);
+    if labels.is_empty() {
+        return "map complete — running deterministic module recommendations".to_string();
+    }
+    let preview = boundary_preview(&labels);
+    format!(
+        "map complete — detected {} product boundaries: {} — `recommend` to inspect module suggestions",
+        labels.len(),
+        preview
+    )
+}
+
+fn boundary_preview(labels: &[String]) -> String {
+    let mut preview = labels.iter().take(5).cloned().collect::<Vec<_>>();
+    if labels.len() > preview.len() {
+        preview.push(format!("+{} more", labels.len() - preview.len()));
+    }
+    preview.join(" ")
+}
+
+fn product_boundary_labels(root: &Path) -> Vec<String> {
+    let tree = match kuzushi_core::load_nested_project_scopes(root) {
+        Ok(Some(tree)) => tree,
+        _ => kuzushi_core::discover_nested_project_scopes(root),
+    };
+    tree.non_root_scopes()
+        .filter(|scope| product_boundary_kind(scope.kind))
+        .map(|scope| format!("{}/", scope.display_label().trim_end_matches('/')))
+        .collect()
+}
+
+fn product_boundary_kind(kind: NestedProjectKind) -> bool {
+    matches!(
+        kind,
+        NestedProjectKind::PackageRoot
+            | NestedProjectKind::Submodule
+            | NestedProjectKind::EntrypointCluster
+    )
 }
 
 /// Resolve a tool name back to its planning task. STRIDE/PASTA share a tool
@@ -392,19 +493,6 @@ fn model_tasks_from_recommendation_result(result: &Value) -> BTreeSet<PlanningTa
         .filter_map(|rec| rec.get("tool").and_then(Value::as_str))
         .filter_map(planning_task_for_tool)
         .collect()
-}
-
-fn planning_task_input(task: PlanningTaskId) -> Value {
-    match task {
-        PlanningTaskId::BuildPastaThreatModel => json!({
-            "methodology": "pasta",
-            "outputDir": ".kuzushi/threat-model-pasta",
-        }),
-        PlanningTaskId::BuildStrideThreatModel => json!({
-            "methodology": "stride",
-        }),
-        _ => json!({}),
-    }
 }
 
 #[cfg(test)]

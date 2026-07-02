@@ -51,6 +51,7 @@ fn render_active_activity_view(
     activity: &ActiveActivityViewModel<'_>,
 ) {
     let layout = activity.frame_layout();
+    let header_lines = activity_header_lines(activity);
     // Footer height tracks the wrapped hint rows so narrow terminals get a
     // second hint line instead of keys clipped off the right edge.
     let footer = activity.footer(area.width);
@@ -58,13 +59,13 @@ fn render_active_activity_view(
     let outer = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(layout.header_rows),
+            Constraint::Length(header_lines.len() as u16),
             Constraint::Min(0),
             Constraint::Length(footer_rows),
         ])
         .split(area);
 
-    render_header(frame, outer[0], activity);
+    render_header(frame, outer[0], header_lines);
 
     let pane_chrome = activity.pane_chrome();
     if activity.collapse_dag_pane() {
@@ -86,14 +87,14 @@ fn render_active_activity_view(
     render_focus_footer(frame, outer[2], activity);
 }
 
-fn render_header(frame: &mut Frame<'_>, area: Rect, activity: &ActiveActivityViewModel<'_>) {
-    let para = Paragraph::new(activity_header_lines(activity));
+fn render_header(frame: &mut Frame<'_>, area: Rect, lines: Vec<Line<'static>>) {
+    let para = Paragraph::new(lines);
     frame.render_widget(para, area);
 }
 
 fn activity_header_lines(activity: &ActiveActivityViewModel<'_>) -> Vec<Line<'static>> {
     let model = activity.header();
-    vec![
+    let mut lines = vec![
         Line::from(vec![Span::styled(model.detailed_title, theme::heading())]),
         Line::from(vec![Span::styled(
             activity.context_line().to_string(),
@@ -103,7 +104,11 @@ fn activity_header_lines(activity: &ActiveActivityViewModel<'_>) -> Vec<Line<'st
             model.focus_label.to_string(),
             theme::accent(),
         )]),
-    ]
+    ];
+    if let Some(banner) = activity.abort_banner() {
+        lines.push(Line::from(vec![Span::styled(banner, theme::warn())]));
+    }
+    lines
 }
 
 fn render_dag_pane_widget(

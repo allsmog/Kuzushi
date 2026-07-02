@@ -42,6 +42,9 @@ fn active_activity_lines(
 ) -> Vec<Line<'static>> {
     let header = activity.header();
     lines.push(divider(&header.summary_title, area.width));
+    if let Some(banner) = activity.abort_banner() {
+        lines.push(Line::from(vec![Span::styled(banner, theme::warn())]));
+    }
 
     let widths = activity.plain_pane_widths(area.width);
     let pane_header = activity.plain_pane_header(widths);

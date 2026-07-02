@@ -165,6 +165,9 @@ pub struct PriorState {
     pub cached_artifacts: usize,
     /// Findings already recorded for the target (across all prior runs).
     pub findings: usize,
+    /// Map artifacts exist on disk even when no cacheable rows appear in this
+    /// phase — so a later phase never reads as a fresh start after 組 map ran.
+    pub map_artifacts_built: bool,
     /// Human phrase for when the newest cached artifact was written, e.g.
     /// "~2 h ago". `None` when no timestamp is available.
     pub last_activity: Option<String>,
@@ -180,6 +183,9 @@ impl PriorState {
                 self.cached_artifacts,
                 plural(self.cached_artifacts)
             ));
+        } else if self.map_artifacts_built {
+            // Later phases carry no cacheable rows, but the map is still done.
+            parts.push("map artifacts ready".to_string());
         }
         if self.findings > 0 {
             parts.push(format!(
@@ -196,20 +202,22 @@ impl PriorState {
 }
 
 /// Derive the workspace history shown at the top of the picker. Pure over the
-/// picker rows + findings count + a pre-formatted activity phrase, so the
-/// filesystem clock stays at the renderer boundary.
+/// picker rows + findings count + the map-built signal + a pre-formatted
+/// activity phrase, so the filesystem clock stays at the renderer boundary.
 pub fn workspace_history(
     rows: &[PlanningTaskRow],
     findings: usize,
+    map_artifacts_built: bool,
     last_activity: Option<String>,
 ) -> WorkspaceHistory {
     let cached_artifacts = rows.iter().filter(|row| is_cached(row)).count();
-    if cached_artifacts == 0 && findings == 0 {
+    if cached_artifacts == 0 && findings == 0 && !map_artifacts_built {
         return WorkspaceHistory::Fresh;
     }
     WorkspaceHistory::Prior(PriorState {
         cached_artifacts,
         findings,
+        map_artifacts_built,
         last_activity,
     })
 }
@@ -345,7 +353,10 @@ mod tests {
     #[test]
     fn fresh_workspace_has_no_prior_state() {
         let rows = vec![row(GatherRepoContext, PlanningArtifactState::Missing)];
-        assert_eq!(workspace_history(&rows, 0, None), WorkspaceHistory::Fresh);
+        assert_eq!(
+            workspace_history(&rows, 0, false, None),
+            WorkspaceHistory::Fresh
+        );
     }
 
     #[test]
@@ -355,12 +366,13 @@ mod tests {
             row(BuildXRay, PlanningArtifactState::Cached),
             row(MapEntryPoints, PlanningArtifactState::Missing),
         ];
-        let history = workspace_history(&rows, 5, Some("~2 h ago".to_string()));
+        let history = workspace_history(&rows, 5, true, Some("~2 h ago".to_string()));
         let WorkspaceHistory::Prior(state) = history else {
             panic!("expected prior state");
         };
         assert_eq!(state.cached_artifacts, 2);
         assert_eq!(state.findings, 5);
+        // cached count already represents the map artifacts — no double-count.
         assert_eq!(
             state.headline(),
             "2 cached artifacts · 5 findings · last activity ~2 h ago"
@@ -372,12 +384,25 @@ mod tests {
         // Later phases (hunt/confirm) list action rows with nothing cached, but
         // an imported-findings workspace still has prior state to announce.
         let rows = vec![row(TriageFindings, PlanningArtifactState::Action)];
-        let history = workspace_history(&rows, 3, None);
+        let history = workspace_history(&rows, 3, false, None);
         let WorkspaceHistory::Prior(state) = history else {
             panic!("expected prior state");
         };
         assert_eq!(state.cached_artifacts, 0);
         assert_eq!(state.headline(), "3 findings");
+    }
+
+    #[test]
+    fn completed_map_keeps_a_later_phase_from_reading_as_fresh() {
+        // Entering 崩 hunt straight after 組 map: no findings yet, and the hunt
+        // rows are actions with nothing cached — but the map is done, so the
+        // banner must not claim a fresh start.
+        let rows = vec![row(HuntTaint, PlanningArtifactState::Action)];
+        let history = workspace_history(&rows, 0, true, None);
+        let WorkspaceHistory::Prior(state) = history else {
+            panic!("expected prior state once map artifacts exist");
+        };
+        assert_eq!(state.headline(), "map artifacts ready");
     }
 
     #[test]

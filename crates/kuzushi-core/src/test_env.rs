@@ -6,3 +6,10 @@ pub(crate) fn codeql_bin_env_lock() -> MutexGuard<'static, ()> {
         .lock()
         .unwrap_or_else(|error| error.into_inner())
 }
+
+pub(crate) fn joern_env_lock() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+}

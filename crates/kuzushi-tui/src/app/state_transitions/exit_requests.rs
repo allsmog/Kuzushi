@@ -127,7 +127,7 @@ impl ShellApp {
 
     pub(super) fn handle_quit_chord(&mut self) {
         if self.request_active_abort() {
-            self.arm_quit_chord();
+            self.ctrl_c_armed_at = None;
             return;
         }
         if self.exit_or_arm_while_work_is_running() {
@@ -143,12 +143,26 @@ impl ShellApp {
         if !self.has_running_work() {
             return false;
         }
-        if self.ctrl_c_armed() {
-            self.request_exit();
+        if self.abort_request_pending() {
+            self.log(
+                "system",
+                "abort already requested; waiting for cleanup (type `quit` to force exit)",
+            );
             return true;
         }
         self.arm_quit_chord();
         true
+    }
+
+    fn abort_request_pending(&self) -> bool {
+        self.scan.as_ref().is_some_and(|scan| scan.abort_requested)
+            || self.tool_abort_requested
+            || self
+                .agent_chat
+                .as_ref()
+                .is_some_and(|agent| agent.abort_requested)
+            || self.plan_abort_requested
+            || self.threat_abort_requested
     }
 
     fn cancel_active_tokens(&self) {

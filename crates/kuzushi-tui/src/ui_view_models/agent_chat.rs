@@ -15,6 +15,7 @@ pub(crate) struct AgentChatSession {
     pub(crate) running: bool,
     pub(crate) abort_requested: bool,
     pub(crate) error: Option<String>,
+    pub(crate) screen_context_scope: Option<String>,
     pub(crate) history: Vec<AgentChatTurn>,
     pub(crate) failure_context: Option<FailureHandoffModel>,
 }
@@ -50,6 +51,7 @@ impl AgentChatSession {
             running: agent.running,
             abort_requested: agent.abort_requested,
             error: agent.error.clone(),
+            screen_context_scope: agent.screen_context_scope.clone(),
             history: agent.history.iter().map(AgentChatTurn::from).collect(),
             failure_context: agent
                 .failure_context

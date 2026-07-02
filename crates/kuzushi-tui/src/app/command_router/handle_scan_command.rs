@@ -4,7 +4,7 @@ pub(crate) fn handle_scan_command(app: &mut ShellApp, command: &ShellCommand) ->
     let ShellCommand::Scan(target) = command else {
         return false;
     };
-    app.start_scan(target.clone());
+    app.open_guided_scan(target.clone());
     true
 }
 
@@ -21,7 +21,7 @@ pub(crate) fn handle_demo_command(app: &mut ShellApp, command: &ShellCommand) ->
                     demo_dir.display()
                 ),
             );
-            app.start_scan(Some(demo_dir));
+            app.start_umbrella_sast_scan(Some(demo_dir));
         }
         Err(error) => app.log("error", format!("could not prepare demo fixture: {error}")),
     }

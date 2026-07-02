@@ -90,6 +90,7 @@ impl ShellApp {
         next.running = true;
         next.run_id = Some(run_id.clone());
         next.started_secs = started_secs;
+        next.screen_context_scope = screen_context.scope_chip();
         next.failure_context = failure_context.clone();
         self.agent_chat = Some(next);
         self.agent_rx = Some(rx);

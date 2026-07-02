@@ -11,7 +11,7 @@ pub(crate) const RUN_SCAN_COMMANDS: &[ShellCommandSpec] = &[
         command: "scan [target]",
         aliases: &["scan .", "/scan [target]"],
         category: ShellCommandCategory::RunScan,
-        description: "run configured scanners",
+        description: "open the guided workflow for a target; `scan .` opts into cwd",
     },
     ShellCommandSpec {
         command: "run <tool> [json]",

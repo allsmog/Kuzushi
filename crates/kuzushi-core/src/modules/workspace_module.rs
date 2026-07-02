@@ -68,7 +68,7 @@ fn sast_scan_options() -> Vec<OptionSpec> {
 }
 
 fn sast_selection_options() -> Vec<OptionSpec> {
-    vec![
+    let mut options = vec![
         opt("mode", OptionType::Enum, "Analysis mode or preset.")
             .aliases(&["preset"])
             .choices(&["standard", "whitebox-static"])
@@ -77,6 +77,15 @@ fn sast_selection_options() -> Vec<OptionSpec> {
             .aliases(&["task_mode"])
             .choices(&["auto", "manual"])
             .default(json!("auto")),
+    ];
+    options.extend(sast_manual_task_options());
+    options.extend(sast_run_filter_options());
+    options.push(max_findings_option(40).advanced());
+    options
+}
+
+fn sast_manual_task_options() -> Vec<OptionSpec> {
+    vec![
         opt(
             "tasks",
             OptionType::StringList,
@@ -89,6 +98,11 @@ fn sast_selection_options() -> Vec<OptionSpec> {
             "Auto-mode task denylist. Use /tasks to edit.",
         )
         .aliases(&["disabled_tasks"]),
+    ]
+}
+
+fn sast_run_filter_options() -> Vec<OptionSpec> {
+    vec![
         opt(
             "runId",
             OptionType::String,
@@ -101,7 +115,12 @@ fn sast_selection_options() -> Vec<OptionSpec> {
             OptionType::StringList,
             "Optional severity filter: critical, high, medium, low, or info.",
         ),
-        max_findings_option(40).advanced(),
+        opt(
+            "paths",
+            OptionType::StringList,
+            "Optional workspace-relative path roots to scan.",
+        )
+        .aliases(&["includePaths", "include_paths"]),
     ]
 }
 

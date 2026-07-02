@@ -1,7 +1,7 @@
 pub(in crate::renderer) use super::*;
 
 /// Catalog category divider that embeds the section blurb on the rule line:
-///   `── OFFENSE find vulnerabilities by … ──────────`
+///   `── HUNT scan code and dependencies … ──────────`
 /// Mirrors `catHead` in `design/mockups/catalog.jsx`.
 
 /// Inline keybind hint matching `keybindings_line` shape:

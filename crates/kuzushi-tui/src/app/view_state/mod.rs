@@ -59,6 +59,8 @@ pub use sast_task_row::ReconSnapshot;
 pub(crate) use sast_task_row::SastTaskRow;
 pub use sast_task_row::ShellView;
 pub use sast_task_row::ThreatView;
+pub use sast_task_row::WorkbenchCenterMode;
+pub use sast_task_row::WorkbenchPage;
 pub use sast_task_row::WorkbenchPane;
 pub use sast_task_row::WorkbenchPaneScroll;
 pub use sast_task_row::WorkspaceView;

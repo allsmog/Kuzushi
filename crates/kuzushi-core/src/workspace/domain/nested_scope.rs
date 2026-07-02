@@ -30,6 +30,8 @@ pub struct NestedProjectScope {
 pub enum NestedProjectKind {
     Root,
     Submodule,
+    PackageRoot,
+    EntrypointCluster,
     VendoredRoot,
     DependencyRoot,
 }
@@ -40,7 +42,9 @@ impl NestedProjectScopeTree {
     }
 
     pub fn non_root_scopes(&self) -> impl Iterator<Item = &NestedProjectScope> {
-        self.scopes.iter().filter(|scope| scope.kind != NestedProjectKind::Root)
+        self.scopes
+            .iter()
+            .filter(|scope| scope.kind != NestedProjectKind::Root)
     }
 }
 
@@ -67,6 +71,8 @@ impl NestedProjectKind {
         match self {
             Self::Root => "root",
             Self::Submodule => "submodule",
+            Self::PackageRoot => "package",
+            Self::EntrypointCluster => "entrypoint",
             Self::VendoredRoot => "vendored",
             Self::DependencyRoot => "dependency",
         }
@@ -76,6 +82,8 @@ impl NestedProjectKind {
         match self {
             Self::Root => ROOT_SCOPE_ID,
             Self::Submodule => "submodule",
+            Self::PackageRoot => "package",
+            Self::EntrypointCluster => "entrypoint",
             Self::VendoredRoot => "vendored",
             Self::DependencyRoot => "dependency",
         }

@@ -60,9 +60,10 @@ pub(crate) fn activity_footer_model(
     session: &ActivitySession,
     width: u16,
     running_tool: Option<&str>,
+    abort_pending: bool,
 ) -> ActivityFooterModel {
     let hints = footer_hints(session);
-    let body = focus_body(session, running_tool);
+    let body = focus_body(session, running_tool, abort_pending);
     ActivityFooterModel {
         body_line: fit(&body, width as usize),
         body,
@@ -96,12 +97,23 @@ fn hint_display_width(hint: &ActivityFooterHint) -> usize {
     hint.full_key_text.chars().count() + 1 + hint.full_hint_text.chars().count() + 1
 }
 
-fn focus_body(session: &ActivitySession, running_tool: Option<&str>) -> String {
+fn focus_body(
+    session: &ActivitySession,
+    running_tool: Option<&str>,
+    abort_pending: bool,
+) -> String {
+    if abort_pending {
+        return " ⚠ ABORT REQUESTED  waiting for cleanup · Ctrl+C stays here".to_string();
+    }
     // Taskless (single-tool) runs have nothing to focus — "hover to
     // inspect a task" would point at a pane that isn't on screen.
     if session.tasks.is_empty() {
         return taskless_body(running_tool);
     }
+    tasked_body(session)
+}
+
+fn tasked_body(session: &ActivitySession) -> String {
     if session.effective_pane_focus() == crate::PaneFocus::Right {
         return format!(
             " ▸ OUTPUT  {} · j/k item · f findings · o open",
@@ -176,7 +188,7 @@ mod tests {
         session.focus_task = Some(row.task_id.clone());
         session.tasks.insert(row.task_id.clone(), row);
 
-        let model = activity_footer_model(&session, 120, None);
+        let model = activity_footer_model(&session, 120, None, false);
 
         assert_eq!(
             model.body,
@@ -200,10 +212,10 @@ mod tests {
     #[test]
     fn hints_wrap_to_extra_rows_on_narrow_terminals_without_losing_keys() {
         let session = ActivitySession::new("r-1");
-        let wide = activity_footer_model(&session, 160, None);
+        let wide = activity_footer_model(&session, 160, None, false);
         assert_eq!(wide.hint_rows.len(), 1, "wide terminals keep one row");
 
-        let narrow = activity_footer_model(&session, 40, None);
+        let narrow = activity_footer_model(&session, 40, None, false);
         assert!(narrow.hint_rows.len() > 1, "narrow terminals wrap");
         let total: usize = narrow.hint_rows.iter().map(Vec::len).sum();
         assert_eq!(total, narrow.hints.len(), "every key survives the wrap");
@@ -214,7 +226,7 @@ mod tests {
         // With no DAG tasks the TASKS pane is collapsed and focus is pinned to
         // OUTPUT — Tab and Enter are task controls, so they must not appear.
         let taskless = ActivitySession::new("r-1");
-        let keys = plain_keys(&activity_footer_model(&taskless, 120, None));
+        let keys = plain_keys(&activity_footer_model(&taskless, 120, None, false));
         assert!(!keys.contains(&"Tab"), "{keys:?}");
         assert!(!keys.contains(&"Enter"), "{keys:?}");
 
@@ -223,7 +235,7 @@ mod tests {
             "triage:run".to_string(),
             DagTaskRow::queued("triage:run".into(), "triage".into(), Vec::new()),
         );
-        let keys = plain_keys(&activity_footer_model(&with_tasks, 120, None));
+        let keys = plain_keys(&activity_footer_model(&with_tasks, 120, None, false));
         assert!(keys.contains(&"Tab"), "{keys:?}");
         assert!(keys.contains(&"Enter"), "{keys:?}");
     }
@@ -233,13 +245,27 @@ mod tests {
         // Never tell the operator to inspect tasks that don't exist.
         let session = ActivitySession::new("r-1");
         assert_eq!(
-            activity_footer_model(&session, 80, Some("threat-model:build")).body,
+            activity_footer_model(&session, 80, Some("threat-model:build"), false).body,
             " ▸ RUNNING  threat-model:build — output streams above · Ctrl+C aborts"
         );
         assert_eq!(
-            activity_footer_model(&session, 80, None).body,
+            activity_footer_model(&session, 80, None, false).body,
             " ▸ FOCUS  no task rows this run"
         );
+    }
+
+    #[test]
+    fn abort_pending_footer_overrides_focus_body() {
+        let mut session = ActivitySession::new("r-1");
+        session.tasks.insert(
+            "triage:run".to_string(),
+            DagTaskRow::queued("triage:run".into(), "triage".into(), Vec::new()),
+        );
+
+        let model = activity_footer_model(&session, 80, Some("triage:run"), true);
+
+        assert!(model.body.contains("ABORT REQUESTED"));
+        assert!(model.body.contains("Ctrl+C stays here"));
     }
 
     #[test]
@@ -257,7 +283,7 @@ mod tests {
         session.pane_focus = PaneFocus::Right;
 
         assert_eq!(
-            activity_footer_model(&session, 100, None).body,
+            activity_footer_model(&session, 100, None, false).body,
             " ▸ OUTPUT  dfd · j/k item · f findings · o open"
         );
     }
@@ -271,21 +297,21 @@ mod tests {
             DagTaskRow::queued("triage:run".into(), "triage".into(), Vec::new()),
         );
         assert_eq!(
-            activity_footer_model(&session, 80, None).body,
+            activity_footer_model(&session, 80, None, false).body,
             " ▸ FOCUS  hover [j/k] to inspect a task"
         );
         assert_eq!(
-            activity_footer_model(&session, 18, None).body_line,
+            activity_footer_model(&session, 18, None, false).body_line,
             " ▸ FOCUS  hover […"
         );
 
         session.focus_task = Some("patch:finding".to_string());
         assert_eq!(
-            activity_footer_model(&session, 80, None).body,
+            activity_footer_model(&session, 80, None, false).body,
             " ▸ FOCUS  patch:finding  (not yet recorded)"
         );
         assert_eq!(
-            plain_keys(&activity_footer_model(&session, 80, None)),
+            plain_keys(&activity_footer_model(&session, 80, None, false)),
             vec!["j/k/g/G", "Tab", "[/]", "f", "o", "V", "Space", "x", "Enter", "Esc"]
         );
     }
@@ -299,7 +325,7 @@ mod tests {
         );
 
         assert_eq!(
-            plain_pairs(&activity_footer_model(&session, 80, None)),
+            plain_pairs(&activity_footer_model(&session, 80, None, false)),
             vec![
                 ("j/k/g/G", "scroll"),
                 ("Tab", "pane"),

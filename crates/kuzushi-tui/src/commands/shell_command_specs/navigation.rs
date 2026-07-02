@@ -15,7 +15,7 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "workbench",
-        aliases: &["/workbench", "/studio", "/cc", "workbench"],
+        aliases: &["/workbench", "/studio", "/cc", "workbench", "studio", "cc"],
         category: ShellCommandCategory::Navigation,
         description: "open the split-pane command center",
     },
@@ -36,6 +36,12 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         aliases: &["/tools", "show tools", "tools semgrep"],
         category: ShellCommandCategory::Navigation,
         description: "list or filter routed Rust tools",
+    },
+    ShellCommandSpec {
+        command: "doctor",
+        aliases: &["/doctor", "health", "/health"],
+        category: ShellCommandCategory::Navigation,
+        description: "show shell preflight health",
     },
     ShellCommandSpec {
         command: "use <module>",
@@ -61,13 +67,19 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
         category: ShellCommandCategory::Navigation,
         description: "open the planning-stage multi-select picker",
     },
-    // `continue` stays a typed alias (parser) only — listing `/continue`
-    // here would shadow `/context` in Tab completion for `/con…`.
+    // Keep the typed alias visible without adding `/continue`, which would
+    // shadow `/context` in Tab completion for `/con…`.
     ShellCommandSpec {
         command: "next",
-        aliases: &["/next"],
+        aliases: &["next", "/next"],
         category: ShellCommandCategory::Navigation,
-        description: "continue the engagement — open the current phase's picker",
+        description: "continue the engagement (alias: continue) — open the current phase's picker",
+    },
+    ShellCommandSpec {
+        command: "phase <map|hunt|confirm|fix>",
+        aliases: &["phase map", "phase hunt", "phase confirm", "phase fix"],
+        category: ShellCommandCategory::Navigation,
+        description: "open a specific engagement phase picker",
     },
     ShellCommandSpec {
         command: "logs",

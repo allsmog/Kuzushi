@@ -44,23 +44,30 @@ fn activity_deck_keybindings() -> Vec<ViewKeybinding> {
     ]
 }
 
+pub(super) fn home_keybindings() -> Vec<ViewKeybinding> {
+    vec![bind_char(
+        'n',
+        "n",
+        "next phase",
+        ViewHotkeyAction::OpenNextPhase,
+    )]
+}
+
 pub(super) fn workbench_keybindings() -> Vec<ViewKeybinding> {
+    let mut bindings = workbench_movement_keybindings();
+    bindings.extend(workbench_pane_keybindings());
+    bindings.extend(workbench_center_keybindings());
+    bindings.extend(workbench_action_keybindings());
+    bindings
+}
+
+fn workbench_pane_keybindings() -> Vec<ViewKeybinding> {
     vec![
         bind(
             HotkeyTrigger::Tab,
             "Tab",
             "cycle pane",
             ViewHotkeyAction::WorkbenchCyclePane,
-        ),
-        bind_char('j', "j/k", "move", ViewHotkeyAction::WorkbenchScrollNext),
-        bind_char('k', "j/k", "move", ViewHotkeyAction::WorkbenchScrollPrev),
-        bind_char('g', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollFirst),
-        bind_char('G', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollLast),
-        bind(
-            HotkeyTrigger::Enter,
-            "Enter",
-            "open finding",
-            ViewHotkeyAction::WorkbenchOpen,
         ),
         bind(
             HotkeyTrigger::BackTab,
@@ -69,6 +76,80 @@ pub(super) fn workbench_keybindings() -> Vec<ViewKeybinding> {
             ViewHotkeyAction::WorkbenchCyclePanePrev,
         ),
     ]
+}
+
+fn workbench_movement_keybindings() -> Vec<ViewKeybinding> {
+    vec![
+        bind_char('j', "j/k", "move", ViewHotkeyAction::WorkbenchScrollNext),
+        bind_char('k', "j/k", "move", ViewHotkeyAction::WorkbenchScrollPrev),
+        bind_char('g', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollFirst),
+        bind_char('G', "g/G", "ends", ViewHotkeyAction::WorkbenchScrollLast),
+    ]
+}
+
+fn workbench_center_keybindings() -> Vec<ViewKeybinding> {
+    vec![
+        bind_char(
+            'd',
+            "d",
+            "CODE/DFD",
+            ViewHotkeyAction::WorkbenchToggleCenter,
+        ),
+        bind(
+            HotkeyTrigger::Right,
+            "←/→",
+            "center view",
+            ViewHotkeyAction::WorkbenchCenterNext,
+        ),
+        bind(
+            HotkeyTrigger::Left,
+            "←/→",
+            "center view",
+            ViewHotkeyAction::WorkbenchCenterPrev,
+        ),
+        bind_char(
+            ']',
+            "[/]",
+            "center view",
+            ViewHotkeyAction::WorkbenchCenterNext,
+        ),
+        bind_char(
+            '[',
+            "[/]",
+            "center view",
+            ViewHotkeyAction::WorkbenchCenterPrev,
+        ),
+        bind_char('z', "z", "zoom viz", ViewHotkeyAction::WorkbenchZoomCenter),
+    ]
+}
+
+fn workbench_action_keybindings() -> Vec<ViewKeybinding> {
+    let mut bindings = WorkbenchPage::ALL
+        .iter()
+        .enumerate()
+        .map(|(index, page)| {
+            bind_char(
+                char::from_digit((index + 1) as u32, 10).unwrap(),
+                "1..4",
+                "page",
+                ViewHotkeyAction::WorkbenchPage(*page),
+            )
+        })
+        .collect::<Vec<_>>();
+    bindings.extend([
+        bind(
+            HotkeyTrigger::Enter,
+            "Enter",
+            "open finding",
+            ViewHotkeyAction::WorkbenchOpen,
+        ),
+        bind_char('n', "n/N", "page", ViewHotkeyAction::WorkbenchPageNext),
+        bind_char('N', "n/N", "page", ViewHotkeyAction::WorkbenchPagePrev),
+        bind_char('v', "v", "validate", ViewHotkeyAction::WorkbenchValidate),
+        bind_char('c', "c", "chain", ViewHotkeyAction::WorkbenchOrderChain),
+        bind_char('D', "D", "cluster", ViewHotkeyAction::WorkbenchCluster),
+    ]);
+    bindings
 }
 
 pub(super) fn threat_keybindings() -> Vec<ViewKeybinding> {

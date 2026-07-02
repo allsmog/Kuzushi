@@ -27,6 +27,7 @@ impl ShellApp {
         } = tool_option_write_target(global, &option.tool_name, "set", "setg");
         self.option_store
             .set_value(scope, target, option.canonical_name.clone(), value.clone());
+        self.clear_legacy_global_tool_option(global, &option.canonical_name);
         self.persist_option_store(scope);
         self.shell_view = ShellView::Options(OptionsView {
             tool_name: option.tool_name.clone(),
@@ -62,12 +63,16 @@ impl ShellApp {
         let removed = self
             .option_store
             .unset_value(scope, &target, &option.canonical_name);
+        let legacy_removed = self.clear_legacy_global_tool_option(global, &option.canonical_name);
         self.persist_option_store(scope);
         self.shell_view = ShellView::Options(OptionsView {
             tool_name: option.tool_name.clone(),
             filter: self.current_options_filter(),
         });
-        self.log(prefix, removed_tool_option_message(&option, removed));
+        self.log(
+            prefix,
+            removed_tool_option_message(&option, removed || legacy_removed),
+        );
     }
 
     fn resolve_tool_option(&mut self, name: &str) -> Option<ResolvedToolOption> {
@@ -166,7 +171,7 @@ impl ShellApp {
         true
     }
 
-    fn persist_option_store(&mut self, scope: OptionScope) {
+    pub(crate) fn persist_option_store(&mut self, scope: OptionScope) {
         if scope == OptionScope::Session {
             return;
         }
@@ -186,6 +191,13 @@ impl ShellApp {
         ) {
             self.log("options", format!("could not persist options: {error}"));
         }
+    }
+
+    fn clear_legacy_global_tool_option(&mut self, global: bool, name: &str) -> bool {
+        global
+            && self
+                .option_store
+                .unset_value(OptionScope::Global, &OptionTarget::All, name)
     }
 }
 
@@ -218,7 +230,7 @@ fn tool_option_write_target(
     if global {
         return ToolOptionWriteTarget {
             scope: OptionScope::Global,
-            target: OptionTarget::All,
+            target: OptionTarget::Tool(tool_name.to_string()),
             prefix: global_prefix,
         };
     }

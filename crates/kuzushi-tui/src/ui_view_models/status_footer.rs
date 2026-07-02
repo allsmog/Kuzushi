@@ -27,12 +27,16 @@ fn status_footer_left_segments(app: &ShellApp) -> Vec<String> {
 }
 
 fn active_status_footer_segments(app: &ShellApp, activity: FooterActivity) -> Vec<String> {
-    vec![
-        routing_mode_segment(app),
+    let mut segments = vec![routing_mode_segment(app)];
+    if let Some(chip) = journey_footer_segment(app) {
+        segments.push(chip);
+    }
+    segments.extend([
         view_status_segment(app),
         model_footer_segment(app),
         activity.label,
-    ]
+    ]);
+    segments
 }
 
 /// Idle bottom bar: routing + current view (live orientation). Target, ctx,

@@ -268,6 +268,8 @@ fn scope_kind_hint(kind: NestedProjectKind) -> &'static str {
     match kind {
         NestedProjectKind::Root => "current directory",
         NestedProjectKind::Submodule => "git submodule",
+        NestedProjectKind::PackageRoot => "package root",
+        NestedProjectKind::EntrypointCluster => "entrypoint cluster",
         NestedProjectKind::VendoredRoot => "vendored root",
         NestedProjectKind::DependencyRoot => "dependency root",
     }

@@ -11,6 +11,28 @@ mod tests {
     use crate::workspace::WorkspaceTarget;
     use tempfile::tempdir;
 
+    struct EnvVarGuard {
+        name: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(name: &'static str, value: &std::path::Path) -> Self {
+            let previous = std::env::var_os(name);
+            std::env::set_var(name, value);
+            Self { name, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.name, value),
+                None => std::env::remove_var(self.name),
+            }
+        }
+    }
+
     struct TaintNextRuntime {
         queries: Mutex<Vec<AgentQueryRequest>>,
     }
@@ -90,6 +112,47 @@ mod tests {
         assert_eq!(options.mcp_tool_timeout_ms, Some(180_000));
         assert!(options.mcp_environment.is_empty());
     }
+
+    #[test]
+    fn explicit_codeql_backend_fails_preflight_when_db_is_missing() {
+        let temp = tempdir().unwrap();
+        let options = TaintIrisNextInput::from_tool_input(&json!({
+            "mode": "plan",
+            "backend": "codeql"
+        }))
+        .unwrap();
+
+        let error = build_taint_iris_next_plan(temp.path(), options)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("backend=codeql requested"));
+        assert!(error.contains("no existing CodeQL DB was found"));
+        assert!(!error.contains("Using structural evidence"));
+    }
+
+    #[test]
+    fn explicit_joern_backend_fails_preflight_when_cpg_is_missing() {
+        let _guard = crate::test_env::joern_env_lock();
+        let temp = tempdir().unwrap();
+        let missing_cpg = temp.path().join("missing-cpg.bin");
+        let _env = EnvVarGuard::set("KUZUSHI_JOERN_CPG", &missing_cpg);
+        let options = TaintIrisNextInput::from_tool_input(&json!({
+            "mode": "plan",
+            "backend": "joern"
+        }))
+        .unwrap();
+
+        let error = build_taint_iris_next_plan(temp.path(), options)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("backend=joern requested"));
+        assert!(error.contains("no CPG was found"));
+        assert!(error.contains(&missing_cpg.display().to_string()));
+        assert!(!error.contains("Using structural evidence"));
+    }
+
     /// Cost the test runtime reports for every query — exercises the cost
     /// propagation path through `query_taint_iris_next_agent` and the result
     /// builders so we catch regressions where cost gets dropped on the way to

@@ -2,12 +2,12 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 33
 ---
- KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI > workbench · mode:shell · target:none · ctx:not built · model:unconfigured
 
-Kuzushi · no target · modules:all modules · o idle
- scan rescan target   options tune scanners   ask ask the agent
-
- Tab cycle panes · Shift+Tab reverse · j/k move · Enter open finding · Esc back
+Kuzushi > workbench · target:no target · phase:作 confirm 3/4 · page:review · o idle · modules:all modules
+組 map · · 崩 hunt · · 作 confirm > · 掛 fix · > NEXT 作 review · validate findings and inspect evidence — press v for
+empirical validation
+ type next guided workflow   type scan guided workflow   type options sast:scan tune scanners   type ask ask the agent
 
  -- SOURCE · 0 files ---------------------------------------------------------------------------------------------------
        ∅  no source tree
@@ -15,19 +15,19 @@ Kuzushi · no target · modules:all modules · o idle
 
        > scan                  populate finding-bearing files
 
- -- DFD ----------------------------------------------------------------------------------------------------------------
-       ∅  no data-flow diagram
-       no threat model yet — run `threat-model:build` to map this target's data flows.
+ -- [CODE·] |  DFD·  |  CHAIN·  |  FLOW·  |  RISK·  --------------------------------------------------------------------
+       ∅  no finding selected
+       select a finding to show source context.
 
-       > threat-model:build    map trust zones and flows
+       > scan                  populate findings
+       > open <id>             pin a finding
 
- -- FINDINGS · 0 · 0 triaged · 0 pending < focus -----------------------------------------------------------------------
-all:0  crit:0  high:0  med:0  low:0
+ -- FINDINGS · 0 -------------------------------------------------------------------------------------------------------
        ∅  no findings yet
        the findings ledger is empty for this target.
        ledger: .kuzushi/v2/findings.sqlite3
 
-       > scan                  runs the umbrella scanner over the target.
+       > scan                  opens the guided workflow for the target.
        > context build         optional: index the repo first for richer analysis.
 
  -- DETAILS ------------------------------------------------------------------------------------------------------------

@@ -128,6 +128,8 @@ macro_rules! shell_app_initial_state {
             findings: Vec::new(),
             selected_finding: None,
             workbench_focus: crate::app::WorkbenchPane::Findings,
+            workbench_page: None,
+            workbench_center_mode: crate::app::WorkbenchCenterMode::default(),
             workbench_scroll: crate::app::WorkbenchPaneScroll::default(),
             workbench_cache: std::cell::RefCell::new(WorkbenchCache::default()),
             scan: None,
@@ -149,6 +151,11 @@ macro_rules! shell_app_initial_state {
             auth_key_draft: String::new(),
             target_picker_cursor: 0,
             target_candidates: Vec::new(),
+            file_picker_files: Vec::new(),
+            file_picker_query: String::new(),
+            file_picker_cursor: 0,
+            file_picker_truncated: false,
+            file_picker_return_view: None,
             planning_cursor: 0,
             planning_selected: BTreeSet::new(),
             planning_tasks: Vec::new(),
@@ -157,6 +164,11 @@ macro_rules! shell_app_initial_state {
             workflow_phase: None,
             target_kind: None,
             planning_rebuild: BTreeSet::new(),
+            picker_focus: crate::app::PickerFocus::List,
+            planning_option_cursor: 0,
+            planning_option_overrides: std::collections::BTreeMap::new(),
+            planning_option_edit: None,
+            planning_option_error: None,
             planning_failed: Vec::new(),
             planning_skipped_phases: BTreeSet::new(),
             planning_adjustments: std::collections::BTreeMap::new(),
@@ -281,7 +293,7 @@ impl ShellApp {
         // copy in the transcript wasted one of only two visible log rows.
         self.log(
             "help",
-            "type `scan` to begin · `help` for commands · `?<text>` to ask the agent",
+            "type `next` to continue the guided workflow · `help` for commands · `?<text>` to ask the agent",
         );
         if has_target {
             self.refresh_findings(false);

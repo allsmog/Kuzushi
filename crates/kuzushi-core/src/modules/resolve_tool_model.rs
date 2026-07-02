@@ -55,6 +55,13 @@ pub(crate) fn module_recommender_module() -> BuiltinModule {
                 )
                 .aliases(&["max_recommendations", "limit"])
                 .default(json!(8)),
+                opt(
+                    "useModelRanking",
+                    OptionType::Bool,
+                    "Use the configured session model to rank deterministic recommendation candidates.",
+                )
+                .aliases(&["use_model_ranking", "modelRanking"])
+                .default(json!(true)),
             ],
         )],
         vec![],

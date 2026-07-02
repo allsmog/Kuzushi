@@ -51,15 +51,6 @@ pub(crate) fn threat_dfd_view(app: &crate::ShellApp, width: usize) -> Option<Vec
     threat_dfd_diagram_lines(&doc, width)
 }
 
-/// Whether the persisted threat model has at least one DFD node. Width-
-/// independent, so the Workbench center pane can decide between drawing the
-/// diagram and showing one empty-hint line without a render width in hand.
-pub(crate) fn threat_dfd_present(app: &crate::ShellApp) -> bool {
-    super::threat_model_doc(app)
-        .map(|doc| !parse_nodes(&doc).is_empty())
-        .unwrap_or(false)
-}
-
 /// Render the DFD as role-tagged lines, or `None` when the artifact has no nodes.
 pub(crate) fn threat_dfd_diagram_lines(
     doc: &serde_json::Value,

@@ -25,8 +25,10 @@ pub use domain::{
 };
 pub use persistence::FindingStore;
 pub use presentation::{
-    format_finding_alias, parse_finding_alias, proof_ladder_state, proof_state_label,
-    resolve_finding_alias, runtime_validation_label, sorted_finding_alias_indices,
-    sorted_finding_aliases, stable_finding_alias, FindingDetailReport, FindingListFilter,
-    FindingListReport, FindingNextAction, FindingVerdictFilter, ProofLadderState,
+    finding_next_action, format_finding_alias, parse_finding_alias, proof_ladder_state,
+    proof_state_label, resolve_finding_alias, runtime_validation_label, runtime_validation_summary,
+    sorted_finding_alias_indices, sorted_finding_aliases, stable_finding_alias,
+    static_proof_summary, FindingDetailReport, FindingListFilter, FindingListReport,
+    FindingNextAction, FindingVerdictFilter, ProofLadderState, RuntimeValidationSummary,
+    StaticProofSummary,
 };

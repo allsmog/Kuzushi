@@ -10,7 +10,7 @@ pub(crate) fn build_taint_iris_next_plan(
     let catalog = catalog_selection.catalog;
     let structural_queries = build_taint_iris_next_structural_queries(&catalog);
     let prompt_catalog = render_taint_iris_next_catalog(&catalog);
-    let backend = configure_taint_iris_next_backend(&roots.repo_root, &options);
+    let backend = configure_taint_iris_next_backend(&roots.repo_root, &options)?;
 
     Ok(TaintIrisNextPlan {
         target: target.to_path_buf(),
@@ -248,8 +248,9 @@ fn finalize_taint_iris_next_catalog(
 fn configure_taint_iris_next_backend(
     repo_root: &Path,
     options: &TaintIrisNextInput,
-) -> TaintIrisNextBackendChoice {
+) -> Result<TaintIrisNextBackendChoice> {
     let mut backend = choose_taint_iris_next_backend(&options.backend, repo_root);
+    validate_explicit_taint_iris_next_backend(&backend)?;
     if options.target_subdir.is_none() {
         let c_file_count = count_c_files_under(repo_root);
         if should_recommend_partitioning(repo_root, c_file_count) {
@@ -267,7 +268,27 @@ fn configure_taint_iris_next_backend(
             ));
         }
     }
-    backend
+    Ok(backend)
+}
+
+fn validate_explicit_taint_iris_next_backend(backend: &TaintIrisNextBackendChoice) -> Result<()> {
+    if !matches!(backend.requested.as_str(), "codeql" | "joern") {
+        return Ok(());
+    }
+    if backend.selected == backend.requested {
+        return Ok(());
+    }
+    let reason = backend
+        .warnings
+        .first()
+        .map(|warning| warning.replace(" Using structural evidence.", ""))
+        .unwrap_or_else(|| {
+            format!(
+                "backend={} requested, but the backend is not available",
+                backend.requested
+            )
+        });
+    anyhow::bail!("{reason}")
 }
 
 /// Cheap .c-file count under a directory. Stops walking after

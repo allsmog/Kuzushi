@@ -12,6 +12,7 @@ pub fn run_semgrep_scan(
     store: &FindingStore,
     scanner: &SemgrepScanner,
 ) -> Result<ScanRun> {
+    scanner.preflight()?;
     workspace.ensure_state_dir()?;
 
     let run_id = Uuid::new_v4().to_string();
@@ -80,6 +81,7 @@ pub fn run_scan_engines(
 pub struct ScanRunOptions {
     pub run_id: Option<String>,
     pub severity: Option<Vec<Severity>>,
+    pub paths: Vec<String>,
     pub tasks: Option<Vec<String>>,
     pub static_proof_state: Option<StaticProofState>,
     pub index_static_evidence: bool,

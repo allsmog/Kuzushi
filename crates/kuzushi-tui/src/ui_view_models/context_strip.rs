@@ -1,7 +1,7 @@
 use super::{
     active_stage_label, compact_target_path, context_snapshot_state, findings_count_summary,
-    format_session_cost, routing_mode_segment, scoped_target_path_label, view_status_segment,
-    ShellApp,
+    format_session_cost, journey_footer_segment, routing_mode_segment, scoped_target_path_label,
+    view_status_segment, ShellApp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +13,7 @@ pub(crate) struct ContextStripModel {
     pub(crate) model: String,
     pub(crate) findings: String,
     pub(crate) view: String,
+    pub(crate) phase: Option<String>,
     pub(crate) compact_activity: Option<String>,
     pub(crate) activity: Option<ContextStripSegment>,
     pub(crate) run: Option<ContextStripSegment>,
@@ -35,6 +36,7 @@ pub(crate) fn context_strip_model(app: &ShellApp) -> ContextStripModel {
         model: model_segment_value(app),
         findings: findings_count_summary(&app.findings),
         view: view_status_segment(app),
+        phase: journey_footer_segment(app),
         compact_activity: compact_activity_segment(app),
         activity: live_activity_segment(app),
         run: run_tool_segment(app),
@@ -45,25 +47,24 @@ pub(crate) fn context_strip_model(app: &ShellApp) -> ContextStripModel {
 
 impl ContextStripModel {
     pub(crate) fn compact_segments(&self) -> Vec<String> {
-        // Order by decision-relevance, not layout: on a narrow terminal the
-        // strip is `fit()`-truncated from the right, so the model (the
-        // no-silent-fallback safety fact) must precede the lower-stakes
-        // target/ctx — which are also surfaced on the Home cockpit.
-        let mut segments = vec![
-            self.mode.clone(),
-            format!("model:{}", self.model),
+        let mut segments = vec![self.mode.clone(), format!("view:{}", self.view)];
+        segments.extend(self.phase.iter().map(|phase| format!("phase:{phase}")));
+        segments.extend([
             format!("target:{}", self.target),
+            format!("model:{}", self.model),
             self.context_state_segment(),
-        ];
-        if let Some(activity) = &self.compact_activity {
-            segments.push(format!("activity:{activity}"));
-        }
-        if let Some(stage) = &self.stage {
-            segments.push(format!("{}:{}", stage.label, stage.value));
-        }
-        if let Some(cost) = &self.cost {
-            segments.push(format!("cost:{cost}"));
-        }
+        ]);
+        segments.extend(
+            self.compact_activity
+                .iter()
+                .map(|activity| format!("activity:{activity}")),
+        );
+        segments.extend(
+            self.stage
+                .iter()
+                .map(|stage| format!("{}:{}", stage.label, stage.value)),
+        );
+        segments.extend(self.cost.iter().map(|cost| format!("cost:{cost}")));
         segments
     }
 

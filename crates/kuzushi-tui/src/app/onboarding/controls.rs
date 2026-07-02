@@ -38,7 +38,7 @@ pub fn toggle_planning_row(
         Some(row) => row,
         None => return ToggleOutcome::Off { task },
     };
-    if !row.cli_available {
+    if !row.cli_available && !is_cached(row) {
         return ToggleOutcome::MissingCli {
             task,
             cli: row.required_cli.unwrap_or("required binary"),
@@ -98,16 +98,31 @@ pub fn row_disposition(
     selected: &BTreeSet<PlanningTaskId>,
     rebuild: &BTreeSet<PlanningTaskId>,
 ) -> RowDisposition {
+    if let Some(disposition) = cached_row_disposition(row, selected, rebuild) {
+        return disposition;
+    }
     if !row.cli_available {
         return RowDisposition::Unavailable;
     }
     if !selected.contains(&row.id) {
         return RowDisposition::Off;
     }
-    if is_cached(row) && !rebuild.contains(&row.id) {
-        return RowDisposition::Reused;
-    }
     RowDisposition::WillRun
+}
+
+fn cached_row_disposition(
+    row: &PlanningTaskRow,
+    selected: &BTreeSet<PlanningTaskId>,
+    rebuild: &BTreeSet<PlanningTaskId>,
+) -> Option<RowDisposition> {
+    if !is_cached(row) || rebuild.contains(&row.id) {
+        return None;
+    }
+    Some(if selected.contains(&row.id) {
+        RowDisposition::Reused
+    } else {
+        RowDisposition::Off
+    })
 }
 
 /// Build the ordered execution plan from the currently-selected rows. Cached
@@ -121,6 +136,7 @@ pub fn build_execution_plan(
     let runnable: BTreeSet<PlanningTaskId> = selected
         .iter()
         .copied()
+        .filter(|task| !task.is_inline_action())
         .filter(|task| {
             rows.iter()
                 .find(|row| row.id == *task)

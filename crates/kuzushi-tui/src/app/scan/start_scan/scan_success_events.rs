@@ -8,6 +8,11 @@ impl ShellApp {
         let target_label = self.scan_target_label();
         self.record_scan_completion_artifacts(&run_id, findings_count, &target_label);
         self.refresh_findings(false);
+        self.workflow_phase = if findings_count == 0 {
+            Some(crate::app::WorkflowPhase::Hunt)
+        } else {
+            None
+        };
         self.log_scan_alias_hint();
         self.log_scan_completion(&run_id, findings_count);
         self.log_scan_result(
@@ -99,8 +104,9 @@ impl ShellApp {
         self.set_success_notice(
             "scan",
             format!(
-                "✓ scan finished — {findings_count} {} · `findings` to review",
-                scan_finding_label(findings_count)
+                "✓ scan finished — {findings_count} {} · {}",
+                scan_finding_label(findings_count),
+                scan_completion_next_step(findings_count)
             ),
         );
     }
@@ -146,10 +152,11 @@ impl ShellApp {
         self.log(
             "scan",
             format!(
-                "completed {} with {} {}",
+                "completed {} with {} {} · {}",
                 short_fingerprint(run_id),
                 findings_count,
                 scan_finding_label(findings_count),
+                scan_completion_next_step(findings_count)
             ),
         );
     }
@@ -199,5 +206,13 @@ fn scan_finding_label(count: usize) -> &'static str {
         "finding"
     } else {
         "findings"
+    }
+}
+
+fn scan_completion_next_step(findings_count: usize) -> &'static str {
+    if findings_count == 0 {
+        "崩 hunt remains active · `options sast:scan` to tune or `scan` to rerun"
+    } else {
+        "next: 作 confirm · `findings` to browse or `next` to triage/verify"
     }
 }

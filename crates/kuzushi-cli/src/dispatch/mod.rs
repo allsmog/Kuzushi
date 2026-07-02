@@ -24,41 +24,45 @@ pub(crate) async fn dispatch_command(
         Command::Shell { target } => {
             dispatch_shell_command(target, default_target, plain, load, allow_untrusted_module)
         }
-        Command::Scan {
-            target,
-            mode,
-            tasks,
-            triage,
-            json,
-            ci,
-            budget,
-            since,
-            include_worktree,
-            fail_on,
-            sarif,
-        } => {
-            let gate = crate::application::scan_gate::ScanGatePolicy {
-                fail_on: fail_on.map(crate::command::FailOnArg::as_severity),
-                sarif,
-            };
-            scan_command(
-                target,
-                mode,
-                tasks,
-                triage,
-                json,
-                ci,
-                budget,
-                since,
-                include_worktree,
-                gate,
-            )
-            .await
-        }
+        scan @ Command::Scan { .. } => dispatch_scan_command(scan, default_target).await,
         other => {
             dispatch_non_scan_command(other, default_target, load, allow_untrusted_module).await
         }
     }
+}
+
+async fn dispatch_scan_command(command: Command, default_target: Option<PathBuf>) -> Result<()> {
+    let Command::Scan {
+        target,
+        mode,
+        tasks,
+        triage,
+        json,
+        ci,
+        budget,
+        since,
+        include_worktree,
+        fail_on,
+        sarif,
+    } = command
+    else {
+        unreachable!("non-scan command routed to scan dispatcher")
+    };
+    let target = required_scan_target(target, default_target)?;
+    let gate = crate::application::scan_gate::ScanGatePolicy {
+        fail_on: fail_on.map(crate::command::FailOnArg::as_severity),
+        sarif,
+    };
+    scan_command(target, mode, tasks, triage, json, ci, budget, since, include_worktree, gate).await
+}
+
+fn required_scan_target(
+    target: Option<PathBuf>,
+    default_target: Option<PathBuf>,
+) -> Result<PathBuf> {
+    target.or(default_target).context(
+        "scan needs a target: pass `kuzushi scan <path>` or the global `--target <path>` (use `.` for the current directory).",
+    )
 }
 
 fn dispatch_shell_command(

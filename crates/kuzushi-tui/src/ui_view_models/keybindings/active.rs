@@ -57,7 +57,7 @@ fn abort_binding(abort_requested: bool) -> FooterKeybinding {
     bind(
         "Ctrl+C",
         if abort_requested {
-            "arm exit"
+            "wait cleanup"
         } else {
             "request abort"
         },

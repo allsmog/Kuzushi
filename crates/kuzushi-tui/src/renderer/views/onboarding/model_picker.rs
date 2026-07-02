@@ -17,6 +17,7 @@ pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static
     lines.push(blank());
     lines.push(keybind_hint_line(&[
         ("↑/↓/j/k", "move"),
+        (":", "type a command"),
         ("Enter", "confirm"),
         ("Esc/q", "defer (you'll need to /model later)"),
     ]));

@@ -21,6 +21,7 @@ fn model_report(
 ) -> RecommendationReport {
     let recommendations = demote_blocked_scanners(&request, recommendations);
     let warnings = warnings_for(&request);
+    let components = request.components.clone();
     let summary = format!(
         "Recommended {} module tool(s) for {} — ranked by {}.",
         recommendations.len(),
@@ -38,6 +39,7 @@ fn model_report(
             skipped_missing_tools: Vec::new(),
         },
         recommendations,
+        components,
         warnings,
         errors: Vec::new(),
     }
@@ -58,6 +60,7 @@ pub(crate) fn build_recommendation_report(request: RecommenderRequest) -> Recomm
     recommendations.sort_by_key(recommendation_sort_key);
     recommendations.truncate(request.max_recommendations);
     let warnings = warnings_for(&request);
+    let components = request.components.clone();
 
     RecommendationReport {
         ok: true,
@@ -70,6 +73,7 @@ pub(crate) fn build_recommendation_report(request: RecommenderRequest) -> Recomm
             skipped_missing_tools,
         },
         recommendations,
+        components,
         warnings,
         errors: Vec::new(),
     }

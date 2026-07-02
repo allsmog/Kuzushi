@@ -126,7 +126,9 @@ pub(crate) fn codeql_available() -> bool {
 
 /// Resolve the CodeQL CLI launcher.
 pub(crate) fn codeql_launcher_path() -> Option<PathBuf> {
-    configured_codeql_launcher().or_else(first_standard_codeql_launcher)
+    configured_codeql_launcher()
+        .or_else(|| crate::process_lookup::executable_on_path("codeql"))
+        .or_else(first_standard_codeql_launcher)
 }
 
 fn configured_codeql_launcher() -> Option<PathBuf> {

@@ -10,7 +10,7 @@ pub enum FindingNextAction {
 }
 
 impl FindingNextAction {
-    pub(in crate::findings) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Validate => "validate",
             Self::Suppress => "suppress",

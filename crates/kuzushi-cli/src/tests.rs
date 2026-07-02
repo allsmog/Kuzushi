@@ -635,6 +635,19 @@ mod tests {
 
         assert_eq!(check.status, DoctorStatus::Fail);
         assert!(check.detail.contains("provider:model"));
+
+        config.model = Some("anthropic:claude-sonnet-4-6".to_string());
+        let check = check_model_config(&config);
+
+        assert_eq!(check.status, DoctorStatus::Fail);
+        assert!(check.detail.contains("runtime.api_key_env"));
+        assert!(check.detail.contains("ANTHROPIC_API_KEY"));
+
+        config.runtime.api_key_env = "ANTHROPIC_API_KEY".to_string();
+        let check = check_model_config(&config);
+
+        assert_eq!(check.status, DoctorStatus::Ok);
+        assert!(check.detail.contains("provider anthropic"));
     }
 
     #[test]

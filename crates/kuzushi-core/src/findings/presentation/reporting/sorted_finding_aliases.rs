@@ -11,11 +11,13 @@ pub fn sorted_finding_alias_indices(findings: &[Finding]) -> Vec<(String, usize)
     let mut indexed: Vec<(usize, &Finding)> = findings.iter().enumerate().collect();
     indexed.sort_by(|a, b| {
         let by_severity = severity_rank(a.1.severity).cmp(&severity_rank(b.1.severity));
-        if by_severity == std::cmp::Ordering::Equal {
-            a.1.fingerprint.cmp(&b.1.fingerprint)
-        } else {
-            by_severity
+        if by_severity != std::cmp::Ordering::Equal {
+            return by_severity;
         }
+        proof_rank(a.1)
+            .cmp(&proof_rank(b.1))
+            .then_with(|| confidence_rank(a.1).cmp(&confidence_rank(b.1)))
+            .then_with(|| a.1.fingerprint.cmp(&b.1.fingerprint))
     });
     indexed
         .into_iter()
@@ -99,6 +101,39 @@ pub(in crate::findings) fn severity_rank(severity: Severity) -> u8 {
         Severity::Info => 4,
         Severity::Unknown => 5,
     }
+}
+
+fn proof_rank(finding: &Finding) -> u8 {
+    if finding.verification.as_ref().is_some_and(|verification| {
+        verification.proof_verdict == PersistedProofVerdict::Exploited
+    }) {
+        return 0;
+    }
+    if finding
+        .triage
+        .as_ref()
+        .is_some_and(|triage| triage.verdict == TriageVerdict::TruePositive)
+    {
+        return 1;
+    }
+    match finding.static_proof_state {
+        Some(StaticProofState::StaticallyConfirmed)
+        | Some(StaticProofState::SourceSinkLinked)
+        | Some(StaticProofState::SanitizerChecked)
+        | Some(StaticProofState::CodeCited) => 2,
+        Some(StaticProofState::StaticallyRejected) => 5,
+        _ => 4,
+    }
+}
+
+fn confidence_rank(finding: &Finding) -> u16 {
+    let confidence = finding
+        .triage
+        .as_ref()
+        .map(|triage| triage.confidence)
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0);
+    10_000u16.saturating_sub((confidence * 10_000.0).round() as u16)
 }
 
 pub(in crate::findings) fn pad(value: &str, width: usize) -> String {

@@ -1,5 +1,4 @@
 use super::*;
-use kuzushi_core::sorted_finding_aliases;
 
 impl ShellApp {
     pub(super) fn handle_view_hotkey(&mut self, key: KeyEvent) -> bool {
@@ -49,11 +48,70 @@ impl ShellApp {
             ViewHotkeyAction::WorkbenchScrollPrev => self.workbench_move(-1),
             ViewHotkeyAction::WorkbenchScrollFirst => self.workbench_jump(true),
             ViewHotkeyAction::WorkbenchScrollLast => self.workbench_jump(false),
+            ViewHotkeyAction::WorkbenchToggleCenter => self.toggle_workbench_center_mode(),
+            ViewHotkeyAction::WorkbenchCenterNext => self.cycle_workbench_center_mode(1),
+            ViewHotkeyAction::WorkbenchCenterPrev => self.cycle_workbench_center_mode(-1),
+            ViewHotkeyAction::WorkbenchZoomCenter => self.open_workbench_center_viz(),
             ViewHotkeyAction::WorkbenchOpen => self.workbench_open_focused(),
+            ViewHotkeyAction::WorkbenchPageNext => {
+                self.set_workbench_page(crate::ui_view_models::active_workbench_page(self).next())
+            }
+            ViewHotkeyAction::WorkbenchPagePrev => {
+                self.set_workbench_page(crate::ui_view_models::active_workbench_page(self).prev())
+            }
+            ViewHotkeyAction::WorkbenchPage(page) => self.set_workbench_page(page),
+            ViewHotkeyAction::WorkbenchValidate => self.validate_workbench_finding(),
+            ViewHotkeyAction::WorkbenchOrderChain => self.order_workbench_chain(),
+            ViewHotkeyAction::WorkbenchCluster => self.open_workbench_coverage_clusters(),
             ViewHotkeyAction::Back if self.focus_workbench_findings_before_back() => {}
             _ => return None,
         }
         Some(true)
+    }
+
+    fn set_workbench_page(&mut self, page: WorkbenchPage) {
+        self.workbench_page = Some(page);
+        self.shell_view = ShellView::Workbench;
+        self.workbench_scroll.set(WorkbenchPane::Center, 0);
+        if page == WorkbenchPage::Review {
+            self.workbench_focus = WorkbenchPane::Findings;
+        } else {
+            self.workbench_focus = WorkbenchPane::Center;
+        }
+        self.log(
+            "workbench",
+            format!(
+                "page {} · {}",
+                page.position(),
+                page.title().to_ascii_lowercase()
+            ),
+        );
+    }
+
+    fn toggle_workbench_center_mode(&mut self) {
+        self.workbench_center_mode = self.workbench_center_mode.toggled();
+        self.workbench_scroll.set(WorkbenchPane::Center, 0);
+    }
+
+    fn cycle_workbench_center_mode(&mut self, direction: i32) {
+        self.workbench_center_mode = if direction >= 0 {
+            self.workbench_center_mode.next()
+        } else {
+            self.workbench_center_mode.prev()
+        };
+        self.workbench_focus = WorkbenchPane::Center;
+        self.workbench_scroll.set(WorkbenchPane::Center, 0);
+    }
+
+    fn open_workbench_center_viz(&mut self) {
+        let Some(page) = self.workbench_center_mode.scene_page() else {
+            self.log(
+                "workbench",
+                "CODE has no full visualization; choose DFD/CHAIN/FLOW/RISK",
+            );
+            return;
+        };
+        self.open_scene_to_page(page);
     }
 
     fn focus_workbench_findings_before_back(&mut self) -> bool {
@@ -67,21 +125,34 @@ impl ShellApp {
     }
 
     fn workbench_move(&mut self, delta: isize) {
+        if !self.workbench_is_review_page() {
+            self.move_workbench_page_body(delta);
+            return;
+        }
         match self.workbench_focus {
             WorkbenchPane::Findings => self.step_findings_cursor(delta),
             WorkbenchPane::Source | WorkbenchPane::Center | WorkbenchPane::Details => {
-                if delta >= 0 {
-                    self.scroll_down(1);
-                } else {
-                    self.scroll_up(1);
-                }
+                self.scroll_by_delta(delta)
             }
+        }
+    }
+
+    fn move_workbench_page_body(&mut self, delta: isize) {
+        self.workbench_focus = WorkbenchPane::Center;
+        self.scroll_by_delta(delta);
+    }
+
+    fn scroll_by_delta(&mut self, delta: isize) {
+        if delta >= 0 {
+            self.scroll_down(1);
+        } else {
+            self.scroll_up(1);
         }
     }
 
     fn step_findings_cursor(&mut self, delta: isize) {
         if delta >= 0 {
-            let max = self.findings.len().saturating_sub(1);
+            let max = crate::ui_view_models::visible_findings_len(self).saturating_sub(1);
             self.findings_cursor = (self.findings_cursor + 1).min(max);
         } else {
             self.findings_cursor = self.findings_cursor.saturating_sub(1);
@@ -89,33 +160,96 @@ impl ShellApp {
     }
 
     fn workbench_jump(&mut self, to_start: bool) {
+        if !self.workbench_is_review_page() {
+            self.jump_workbench_page_body(to_start);
+            return;
+        }
         match self.workbench_focus {
             WorkbenchPane::Findings => {
                 self.findings_cursor = if to_start {
                     0
                 } else {
-                    self.findings.len().saturating_sub(1)
+                    crate::ui_view_models::visible_findings_len(self).saturating_sub(1)
                 };
             }
             WorkbenchPane::Source | WorkbenchPane::Center | WorkbenchPane::Details => {
-                if to_start {
-                    self.scroll_to_top();
-                } else {
-                    self.scroll_to_bottom();
-                }
+                self.jump_scroll_region(to_start);
             }
         }
     }
 
+    fn jump_workbench_page_body(&mut self, to_start: bool) {
+        self.workbench_focus = WorkbenchPane::Center;
+        self.jump_scroll_region(to_start);
+    }
+
+    fn jump_scroll_region(&mut self, to_start: bool) {
+        if to_start {
+            self.scroll_to_top();
+        } else {
+            self.scroll_to_bottom();
+        }
+    }
+
     fn workbench_open_focused(&mut self) {
-        if self.workbench_focus != WorkbenchPane::Findings {
+        if !self.workbench_is_review_page() {
             return;
         }
+        match self.workbench_focus {
+            WorkbenchPane::Center => self.open_workbench_center_viz(),
+            WorkbenchPane::Findings => self.open_workbench_finding_or_log(),
+            WorkbenchPane::Source | WorkbenchPane::Details => {}
+        }
+    }
+
+    fn workbench_is_review_page(&self) -> bool {
+        crate::ui_view_models::active_workbench_page(self) == WorkbenchPage::Review
+    }
+
+    fn open_workbench_finding_or_log(&mut self) {
         if self.findings.is_empty() {
             self.log("findings", "no findings yet — run `scan` first");
             return;
         }
         self.open_finding_at_cursor();
+    }
+
+    fn validate_workbench_finding(&mut self) {
+        let Some(finding) = self.current_workbench_finding() else {
+            self.log(
+                "verify",
+                "no finding selected — open REVIEW and choose a finding first",
+            );
+            return;
+        };
+        let input = serde_json::json!({ "fingerprint": finding.fingerprint }).to_string();
+        self.handle_command(ShellCommand::RunTool {
+            tool: Some("verify:exploit".to_string()),
+            input: Some(input),
+        });
+    }
+
+    fn order_workbench_chain(&mut self) {
+        self.handle_command(ShellCommand::RunTool {
+            tool: Some("exploit-chain:scan".to_string()),
+            input: None,
+        });
+    }
+
+    fn open_workbench_coverage_clusters(&mut self) {
+        self.set_workbench_page(WorkbenchPage::Coverage);
+        self.log(
+            "cluster",
+            "coverage groups duplicates and root-cause clusters without hiding distinct sinks",
+        );
+    }
+
+    fn current_workbench_finding(&self) -> Option<Finding> {
+        self.selected_finding.clone().or_else(|| {
+            crate::ui_view_models::visible_sorted_finding_alias_indices(self)
+                .get(self.findings_cursor)
+                .and_then(|(_, index)| self.findings.get(*index).cloned())
+        })
     }
 
     fn apply_scroll_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
@@ -172,6 +306,9 @@ impl ShellApp {
             ViewHotkeyAction::ResumeScan => {
                 self.handle_command(ShellCommand::Resume(None));
             }
+            ViewHotkeyAction::OpenNextPhase => {
+                self.handle_command(ShellCommand::Next);
+            }
             ViewHotkeyAction::Back => self.go_back(),
             _ => return false,
         }
@@ -216,25 +353,12 @@ impl ShellApp {
     }
 
     fn reset_activity_view(&mut self) {
-        if self.activity_has_live_work() {
-            if let Some(session) = self.activity.as_mut() {
-                session.reset_presentation_state();
-            }
-            self.log("activity", "reset Activity view state; live run preserved");
-        } else {
-            self.activity = None;
-        }
-    }
-
-    fn activity_has_live_work(&self) -> bool {
-        self.running_tool_name().is_some()
-            || self.scan.as_ref().is_some_and(|scan| scan.running)
-            || self.activity.as_ref().is_some_and(|session| {
-                session
-                    .tasks
-                    .values()
-                    .any(|row| row.state == DagTaskState::Active)
-            })
+        let Some(session) = self.activity.as_mut() else {
+            self.log("activity", "no Activity view state to reset");
+            return;
+        };
+        session.reset_presentation_state();
+        self.log("activity", "reset Activity view state; run preserved");
     }
 
     fn open_activity_deck_artifact(&mut self) {
@@ -287,12 +411,15 @@ impl ShellApp {
         }) else {
             return;
         };
-        let aliases = sorted_finding_aliases(&self.findings);
+        let aliases = crate::ui_view_models::visible_sorted_finding_alias_indices(self);
         if aliases.is_empty() {
             return;
         }
         let index = cursor.min(aliases.len() - 1);
-        let (_, finding) = aliases[index].clone();
+        let (_, finding_index) = aliases[index].clone();
+        let Some(finding) = self.findings.get(finding_index).cloned() else {
+            return;
+        };
         self.findings_cursor = index;
         self.selected_finding = Some(finding);
     }

@@ -1,13 +1,23 @@
 use crate::app::{PaneFocus, ShellView, WorkbenchPane};
 use crate::ShellApp;
-use kuzushi_core::{stable_finding_alias, Finding};
+use kuzushi_core::{
+    finding_next_action, runtime_validation_summary, stable_finding_alias, static_proof_summary,
+    Finding, FindingEvidence, FindingNextAction, PersistedProofVerdict, PersistedVerification,
+};
+use std::collections::BTreeMap;
 
 mod model;
 
-pub(crate) use model::{ScreenContext, ScreenCursor, ScreenRevision, ScreenSelectedItem};
+pub(crate) use model::{
+    ScreenContext, ScreenCount, ScreenCursor, ScreenEvidenceContext, ScreenFindingSummary,
+    ScreenProofContext, ScreenRevision, ScreenSelectedItem, ScreenTriageContext,
+    ScreenVerificationContext,
+};
 
 const VISIBLE_ROW_LIMIT: usize = 8;
 const VISIBLE_ROW_TEXT_LIMIT: usize = 160;
+const SCREEN_CONTEXT_LIST_LIMIT: usize = 12;
+const SCREEN_CONTEXT_TEXT_LIMIT: usize = 4000;
 
 pub(crate) fn screen_context_model(app: &ShellApp) -> ScreenContext {
     ScreenContext {
@@ -19,6 +29,7 @@ pub(crate) fn screen_context_model(app: &ShellApp) -> ScreenContext {
         active_phase: active_phase(app),
         active_filters: active_filters(app),
         selected_scope: selected_scope(app),
+        finding_summary: finding_summary(app),
         visible_rows: visible_rows(app),
         cursor: ScreenCursor {
             row: active_cursor_row(app),
@@ -81,6 +92,7 @@ fn system_shell_view_label(view: &ShellView) -> Option<&'static str> {
         ShellView::Quickstart => Some("Quickstart"),
         ShellView::Logs => Some("Logs"),
         ShellView::Config => Some("Config"),
+        ShellView::Health => Some("Health"),
         ShellView::Tools => Some("Tools"),
         ShellView::Options(_) => Some("Options"),
         ShellView::SastTasks => Some("SastTasks"),
@@ -131,8 +143,9 @@ fn selected_item(app: &ShellApp) -> Option<ScreenSelectedItem> {
 }
 
 fn selected_item_from_finding(app: &ShellApp, finding: &Finding) -> ScreenSelectedItem {
+    let alias = stable_finding_alias(&app.findings, &finding.fingerprint);
     ScreenSelectedItem {
-        alias: stable_finding_alias(&app.findings, &finding.fingerprint),
+        alias: alias.clone(),
         fingerprint: finding.fingerprint.clone(),
         title: finding.title.clone(),
         file: finding.file_path.clone(),
@@ -140,6 +153,91 @@ fn selected_item_from_finding(app: &ShellApp, finding: &Finding) -> ScreenSelect
         rank: finding.severity.as_str().to_string(),
         state: classification_state(finding),
         confirmation: confirmation_state(finding),
+        triage: triage_context(finding),
+        proof: proof_context(finding, alias.as_deref()),
+        evidence: evidence_context(finding),
+    }
+}
+
+fn triage_context(finding: &Finding) -> Option<ScreenTriageContext> {
+    finding.triage.as_ref().map(|triage| ScreenTriageContext {
+        verdict: triage.verdict.as_str().to_string(),
+        confidence: format!("{:.2}", triage.confidence),
+        rationale: bounded_prompt_text(&triage.rationale),
+    })
+}
+
+fn proof_context(finding: &Finding, alias: Option<&str>) -> ScreenProofContext {
+    let static_proof = static_proof_summary(finding.static_proof_state);
+    let runtime = runtime_validation_summary(finding.verification.as_ref());
+    let next_action = finding_next_action(finding, None);
+    ScreenProofContext {
+        static_label: static_proof.label.to_string(),
+        static_explanation: static_proof.explanation.to_string(),
+        runtime_label: runtime.label,
+        runtime_explanation: runtime.explanation.to_string(),
+        verification: finding.verification.as_ref().map(verification_context),
+        next_action: next_action.as_str().to_string(),
+        next_command: next_action_command(next_action, alias),
+        next_detail: next_action_detail(next_action).to_string(),
+    }
+}
+
+fn verification_context(verification: &PersistedVerification) -> ScreenVerificationContext {
+    ScreenVerificationContext {
+        verdict: verification.proof_verdict.as_str().to_string(),
+        proof_level: verification.proof_level,
+        backend: verification.backend.as_str().to_string(),
+        language: verification.language.clone(),
+        harness: verification
+            .harness_path
+            .as_ref()
+            .map(|path| bounded_prompt_text(path)),
+        crash_evidence: verification
+            .crash_evidence
+            .as_ref()
+            .map(|evidence| bounded_prompt_text(evidence)),
+        notes: bounded_prompt_list(&verification.notes),
+    }
+}
+
+fn next_action_command(action: FindingNextAction, alias: Option<&str>) -> Option<String> {
+    let alias = alias.unwrap_or("selected");
+    match action {
+        FindingNextAction::Validate => Some(format!("verify {alias}")),
+        FindingNextAction::Patch => Some(format!("patch {alias}")),
+        FindingNextAction::Suppress | FindingNextAction::Review => None,
+    }
+}
+
+fn next_action_detail(action: FindingNextAction) -> &'static str {
+    match action {
+        FindingNextAction::Validate => {
+            "collect runtime proof or stronger source evidence before patching"
+        }
+        FindingNextAction::Patch => "runtime proof is recorded; generate remediation",
+        FindingNextAction::Suppress => "review the rejection evidence before suppressing",
+        FindingNextAction::Review => "review the finding and keep evidence attached",
+    }
+}
+
+fn evidence_context(finding: &Finding) -> Vec<ScreenEvidenceContext> {
+    finding
+        .evidence
+        .iter()
+        .take(SCREEN_CONTEXT_LIST_LIMIT)
+        .map(evidence_item_context)
+        .collect()
+}
+
+fn evidence_item_context(evidence: &FindingEvidence) -> ScreenEvidenceContext {
+    ScreenEvidenceContext {
+        kind: evidence.kind.clone(),
+        file: evidence.file_path.clone(),
+        line: evidence.line,
+        confidence: evidence.confidence,
+        snippet: bounded_prompt_text(&evidence.snippet),
+        rationale: bounded_prompt_text(&evidence.rationale),
     }
 }
 
@@ -204,6 +302,70 @@ fn selected_scope(app: &ShellApp) -> Option<String> {
             .as_ref()
             .map(|path| super::compact_target_path(&path.to_string_lossy()))
     })
+}
+
+fn finding_summary(app: &ShellApp) -> Option<ScreenFindingSummary> {
+    if !matches!(app.shell_view, ShellView::Workbench) || app.findings.is_empty() {
+        return None;
+    }
+    Some(ScreenFindingSummary {
+        total: app.findings.len(),
+        by_severity: count_findings(&app.findings, severity_bucket),
+        by_verdict: count_findings(&app.findings, classification_state),
+        by_proof_state: count_findings(&app.findings, proof_state_bucket),
+        runtime_proof_by_severity: count_findings(
+            runtime_proven_findings(&app.findings),
+            severity_bucket,
+        ),
+    })
+}
+
+fn runtime_proven_findings(findings: &[Finding]) -> Vec<&Finding> {
+    findings
+        .iter()
+        .filter(|finding| {
+            matches!(
+                finding
+                    .verification
+                    .as_ref()
+                    .map(|verification| verification.proof_verdict),
+                Some(PersistedProofVerdict::Exploited)
+            )
+        })
+        .collect()
+}
+
+fn count_findings<'a, I, F>(findings: I, label_for: F) -> Vec<ScreenCount>
+where
+    I: IntoIterator<Item = &'a Finding>,
+    F: Fn(&Finding) -> String,
+{
+    let mut counts = BTreeMap::<String, usize>::new();
+    for finding in findings {
+        *counts.entry(label_for(finding)).or_default() += 1;
+    }
+    counts
+        .into_iter()
+        .take(SCREEN_CONTEXT_LIST_LIMIT)
+        .map(|(label, count)| ScreenCount { label, count })
+        .collect()
+}
+
+fn severity_bucket(finding: &Finding) -> String {
+    finding.severity.as_str().to_string()
+}
+
+fn proof_state_bucket(finding: &Finding) -> String {
+    finding
+        .verification
+        .as_ref()
+        .map(|verification| verification.proof_verdict.as_str().to_string())
+        .or_else(|| {
+            finding
+                .static_proof_state
+                .map(|state| state.as_str().to_string())
+        })
+        .unwrap_or_else(|| "unconfirmed".to_string())
 }
 
 fn visible_rows(app: &ShellApp) -> Vec<String> {
@@ -314,6 +476,26 @@ fn bounded_row(value: String) -> String {
             .take(VISIBLE_ROW_TEXT_LIMIT)
             .collect::<String>()
     )
+}
+
+fn bounded_prompt_text(text: &str) -> String {
+    if text.chars().count() <= SCREEN_CONTEXT_TEXT_LIMIT {
+        return text.to_string();
+    }
+    format!(
+        "{}...",
+        text.chars()
+            .take(SCREEN_CONTEXT_TEXT_LIMIT)
+            .collect::<String>()
+    )
+}
+
+fn bounded_prompt_list(values: &[String]) -> Vec<String> {
+    values
+        .iter()
+        .take(SCREEN_CONTEXT_LIST_LIMIT)
+        .map(|value| bounded_prompt_text(value))
+        .collect()
 }
 
 fn active_cursor_row(app: &ShellApp) -> usize {

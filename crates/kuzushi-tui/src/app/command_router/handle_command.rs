@@ -206,7 +206,7 @@ pub(crate) fn handle_tools_command(app: &mut ShellApp, command: &ShellCommand) -
         "tool",
         format!(
             "showing {} of {} {}{}",
-            model.rows.len(),
+            model.visible_count,
             model.total_count,
             if model.total_count == 1 {
                 "tool"
@@ -216,6 +216,17 @@ pub(crate) fn handle_tools_command(app: &mut ShellApp, command: &ShellCommand) -
             suffix
         ),
     );
+    true
+}
+
+pub(crate) fn handle_health_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Health = command else {
+        return false;
+    };
+    app.shell_view = ShellView::Health;
+    app.scroll_offset = 0;
+    let model = crate::ui_view_models::health_model(app);
+    app.log("health", model.summary);
     true
 }
 
@@ -241,6 +252,14 @@ pub(crate) fn handle_findings_command(app: &mut ShellApp, command: &ShellCommand
         }
         _ => false,
     }
+}
+
+pub(crate) fn handle_component_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Component(selection) = command else {
+        return false;
+    };
+    app.apply_component_selection(selection.as_deref());
+    true
 }
 
 pub(crate) fn handle_pwn_command(app: &mut ShellApp, command: &ShellCommand) -> bool {

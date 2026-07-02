@@ -221,49 +221,50 @@ fn quickstart_steps(app: &ShellApp) -> Vec<QuickstartStep> {
     // chrome) so it can carry the complete bug-bounty operator path —
     // scope, scan, triage, export, observe.
     vec![
-        QuickstartStep {
-            number: "1",
-            text: "kuzushi doctor             CLI preflight (run from your terminal, not here)"
-                .to_string(),
-        },
-        QuickstartStep {
-            number: "2",
-            text: format!(
+        quickstart_step(
+            "1",
+            "kuzushi doctor             CLI preflight (run from your terminal, not here)",
+        ),
+        quickstart_step(
+            "2",
+            format!(
                 "onboarding (or context build -> {})  planner: context / x-ray / STRIDE / PASTA / CPG / CodeQL / threat intel",
                 context_snapshot_relative_path()
             ),
-        },
-        QuickstartStep {
-            number: "3",
-            text: "options sast:scan        review scanner tuning before spending a scan"
-                .to_string(),
-        },
-        QuickstartStep {
-            number: "4",
-            text: quickstart_scan_step(app).to_string(),
-        },
-        QuickstartStep {
-            number: "5",
-            text: "run <tool>                 dispatch a single tool (e.g. run semgrep:scan)"
-                .to_string(),
-        },
-        QuickstartStep {
-            number: "6",
-            text: "findings · open F-0001     inspect evidence and proof state".to_string(),
-        },
-        QuickstartStep {
-            number: "7",
-            text: "workspace export findings · kuzushi pr-comment  report bundle / PR text"
-                .to_string(),
-        },
+        ),
+        quickstart_step("3", quickstart_target_step(app)),
+        quickstart_step(
+            "4",
+            "options sast:scan          tune model, backend, budgets before scanning",
+        ),
+        quickstart_step(
+            "5",
+            "next                       open the current phase picker and review checked tasks",
+        ),
+        quickstart_step(
+            "6",
+            "run sast:scan              explicit umbrella SAST run, outside the guided spine",
+        ),
+        quickstart_step("7", "findings · open F-0001     inspect evidence and proof state"),
+        quickstart_step(
+            "8",
+            "workspace export findings · kuzushi pr-comment  report bundle / PR text",
+        ),
     ]
 }
 
-fn quickstart_scan_step(app: &ShellApp) -> &'static str {
+fn quickstart_step(number: &'static str, text: impl Into<String>) -> QuickstartStep {
+    QuickstartStep {
+        number,
+        text: text.into(),
+    }
+}
+
+fn quickstart_target_step(app: &ShellApp) -> &'static str {
     if app.target.is_some() {
-        "scan                       scan the active target with configured scanners"
+        "target                     confirm the active target before spending tools"
     } else {
-        "scan .                     scan the current directory (the dot is cwd)"
+        "target .                   set cwd as target, or use target <path>"
     }
 }
 

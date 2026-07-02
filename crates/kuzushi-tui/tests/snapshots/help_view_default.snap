@@ -2,12 +2,12 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 162
 ---
- KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI > help · mode:shell · target:none · ctx:not built · model:unconfigured
 
  -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
 Glossary: TP=true positive; FP=false positive; proof=confidence; DFD=data-flow diagram; taint flow=source-to-sink path.
-Examples: demo  ·  scan .  ·  use semgrep  ·  run .  ·  findings  ·  open F-0001  ·  model 1
+Examples: demo  ·  next  ·  use semgrep  ·  run .  ·  findings  ·  open F-0001  ·  model 1
 
 NAVIGATION — browse modules and tools
 home - open Kuzushi cockpit home
@@ -15,13 +15,15 @@ home - open Kuzushi cockpit home
 help - show grouped shell help
   aliases / examples: /help, /h, h, ?
 workbench - open the split-pane command center
-  aliases / examples: /workbench, /studio, /cc
+  aliases / examples: /workbench, /studio, /cc, studio, cc
 modules - browse native Rust modules
   aliases / examples: /modules, /m, m, show modules
 recommend - open latest module recommendations
   aliases / examples: /recommend, rec, /rec
 tools [query] - list or filter routed Rust tools
   aliases / examples: /tools, show tools, tools semgrep
+doctor - show shell preflight health
+  aliases / examples: /doctor, health, /health
 use <module> - focus a module
   aliases / examples: use semgrep, /use <module>
 back - return to the previous view
@@ -30,15 +32,17 @@ quickstart - first-run guided setup
   aliases / examples: /quickstart
 onboarding - open the planning-stage multi-select picker
   aliases / examples: /onboarding, /setup, /planning, /plan-stage
-next - continue the engagement — open the current phase's picker
+next - continue the engagement (alias: continue) — open the current phase's picker
   aliases / examples: /next
+phase <map|hunt|confirm|fix> - open a specific engagement phase picker
+  aliases / examples: phase map, phase hunt, phase confirm, phase fix
 logs - scrollable full-screen transcript
   aliases / examples: /logs, log, transcript, /transcript
 
 RUN / SCAN — dispatch tools and scans
 demo - run a 90-second offline fixture scan; no key, model, or external scanner
   aliases / examples: /demo
-scan [target] - run configured scanners
+scan [target] - open the guided workflow for a target; `scan .` opts into cwd
   aliases / examples: scan ., /scan [target]
 run <tool> [json] - dispatch a tool; run . is shell-only focused-module shorthand
   aliases / examples: run ., /run <tool> [json], run . [json]
@@ -54,13 +58,13 @@ show advanced [tool] - advanced and evasion options
   aliases / examples: /show advanced [tool]
 show missing [tool] - required options without values
   aliases / examples: /show missing [tool]
-set <key> <value> - set a session option
+set <key> <value> - set a session option or shell preference
   aliases / examples: /set <key> <value>
-setg <key> <value> - set a global option
+setg <key> <value> - set a persistent option or shell preference
   aliases / examples: /setg <key> <value>
-unset <key> - clear a session option
+unset <key> - clear a session option or shell preference
   aliases / examples: /unset <key>
-unsetg <key> - clear a global option
+unsetg <key> - clear a persistent option or shell preference
   aliases / examples: /unsetg <key>
 tasks - choose SAST scanner tasks
   aliases / examples: /tasks
@@ -96,15 +100,18 @@ project - show the aggregated project model
   aliases / examples: /project, project model, project-model
 kb [module] - show local KB attachments
   aliases / examples: attachments, /kb [module]
-attach <path-or-url> - record local file or URL metadata
-  aliases / examples: /attach <path-or-url>
+attach <path-or-url> - record local file or URL metadata; omit the path to browse target files
+  aliases / examples: /attach <path-or-url>, attach, /attach
+files - open a fuzzy target-file picker for KB attachment
+  aliases / examples: /files, file-picker, /file-picker
 detach <id> - remove a KB attachment
   aliases / examples: /detach <id>
 reparse <id> - refresh local attachment metadata
   aliases / examples: /reparse <id>
 workspace - show target and state status
   aliases / examples: /workspace, workspace status
-workspace export findings <path> [format] - export findings as json, jsonl, sarif, csv, or markdown-bundle
+workspace export findings <path> [format] - export findings; extensionless defaults to markdown-bundle, or pass
+json/jsonl/sarif/csv
   aliases / examples: /workspace export findings <path> [format], findings export <path> [format]
 workspace scope init - write an editable .kuzushi/scope.toml scaffold
   aliases / examples: /workspace scope init
@@ -114,6 +121,8 @@ findings - open persisted findings
   aliases / examples: /f, f, /findings
 findings filter <expr> - open filtered findings in the Workbench
   aliases / examples: findings filter state:new rank:high, /findings filter <expr>
+component <scope|path|all> - focus Workbench findings on a detected component
+  aliases / examples: component web/app, component entrypoint-cmd-proxy, component all
 open <id> - open a finding alias or fingerprint
   aliases / examples: open F-0001, /open <id>
 show aliases [prefix] - list finding aliases

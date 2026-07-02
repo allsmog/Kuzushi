@@ -123,6 +123,22 @@ pub(crate) fn handle_next_command(app: &mut ShellApp, command: &ShellCommand) ->
     true
 }
 
+pub(crate) fn handle_phase_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Phase(phase) = command else {
+        return false;
+    };
+    if app.target.is_none() {
+        app.log(
+            "journey",
+            "no active workspace target; set one with `target <path>` first",
+        );
+        return true;
+    }
+    app.workbench_cache.borrow_mut().invalidate_map_artifacts();
+    app.open_phase_picker(*phase);
+    true
+}
+
 pub(crate) fn handle_logs_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
     let ShellCommand::Logs = command else {
         return false;

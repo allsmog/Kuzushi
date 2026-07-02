@@ -62,7 +62,16 @@ fn wants_background_runtime(config: &V2Config, tool_name: &str, input: &serde_js
     if tool_needs_runtime(tool_name, input) {
         return true;
     }
-    tool_name == "module-recommender:recommend" && config.model.is_some()
+    tool_name == "module-recommender:recommend"
+        && recommender_model_ranking_enabled(input)
+        && config.model.is_some()
+}
+
+fn recommender_model_ranking_enabled(input: &serde_json::Value) -> bool {
+    input
+        .get("useModelRanking")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true)
 }
 
 fn background_current_dir() -> PathBuf {
@@ -120,6 +129,19 @@ mod tests {
         // Hidden DAG node that's purely deterministic surface gathering.
         assert!(!tool_uses_agent_runtime(
             "systems-hunt:systems-context-gatherer"
+        ));
+    }
+
+    #[test]
+    fn recommender_can_force_deterministic_ranking_without_runtime() {
+        let mut config = kuzushi_core::V2Config::default();
+        config.model = Some("openai:gpt-5.4".to_string());
+        let input = serde_json::json!({ "useModelRanking": false });
+
+        assert!(!super::wants_background_runtime(
+            &config,
+            "module-recommender:recommend",
+            &input
         ));
     }
 

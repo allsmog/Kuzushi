@@ -73,6 +73,43 @@ mod tests {
     }
 
     #[test]
+    fn reports_effective_stored_value_scope_with_same_precedence_as_input_merge() {
+        let mut store = ToolOptionStore::new();
+        store.set_value(
+            OptionScope::Global,
+            OptionTarget::Tool("threat-model:build".to_string()),
+            "model",
+            json!("global-model"),
+        );
+        store.set_value(
+            OptionScope::Workspace,
+            OptionTarget::Tool("threat-model:build".to_string()),
+            "model",
+            json!("workspace-model"),
+        );
+        store.set_value(
+            OptionScope::Session,
+            OptionTarget::Module("threat-model".to_string()),
+            "model",
+            json!("session-model"),
+        );
+
+        let input = store
+            .effective_tool_input("threat-model:build", json!({}))
+            .unwrap();
+
+        assert_eq!(input["model"], json!("session-model"));
+        assert_eq!(
+            store.effective_stored_value_scope("threat-model:build", "model"),
+            Some(OptionScope::Session)
+        );
+        assert_eq!(
+            store.effective_stored_value_scope("threat-model:build", "missing"),
+            None
+        );
+    }
+
+    #[test]
     fn persistent_store_writes_only_when_save_is_explicit() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join(".kuzushi/v2/options.json");

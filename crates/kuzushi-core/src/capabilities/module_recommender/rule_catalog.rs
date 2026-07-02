@@ -161,10 +161,22 @@ fn codeql_input(request: &RecommenderRequest) -> Value {
 
 fn context_signals(signals: &RepositorySignals) -> Vec<String> {
     let mut context = vec![format!("{} indexed source file(s)", signals.source_files)];
+    append_boundary_signals(signals, &mut context);
     if !signals.frameworks.is_empty() {
         context.push(format!("frameworks: {}", signals.frameworks.join(", ")));
     }
     context
+}
+
+fn append_boundary_signals(signals: &RepositorySignals, output: &mut Vec<String>) {
+    if signals.product_boundaries == 0 {
+        return;
+    }
+    output.push(format!(
+        "{} product boundary/boundaries: {}",
+        signals.product_boundaries,
+        signals.product_boundary_labels.join(", ")
+    ));
 }
 
 fn source_file_signals(signals: &RepositorySignals) -> Vec<String> {

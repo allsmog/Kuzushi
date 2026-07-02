@@ -11,6 +11,8 @@ pub(crate) enum HotkeyTrigger {
     PageDown,
     Up,
     Down,
+    Left,
+    Right,
 }
 
 impl HotkeyTrigger {
@@ -38,6 +40,8 @@ impl HotkeyTrigger {
             (Self::PageDown, KeyCode::PageDown) => true,
             (Self::Up, KeyCode::Up) => true,
             (Self::Down, KeyCode::Down) => true,
+            (Self::Left, KeyCode::Left) => true,
+            (Self::Right, KeyCode::Right) => true,
             _ => false,
         }
     }
@@ -55,7 +59,17 @@ pub(crate) enum ViewHotkeyAction {
     WorkbenchScrollPrev,
     WorkbenchScrollFirst,
     WorkbenchScrollLast,
+    WorkbenchToggleCenter,
+    WorkbenchCenterNext,
+    WorkbenchCenterPrev,
+    WorkbenchZoomCenter,
     WorkbenchOpen,
+    WorkbenchPageNext,
+    WorkbenchPagePrev,
+    WorkbenchPage(WorkbenchPage),
+    WorkbenchValidate,
+    WorkbenchOrderChain,
+    WorkbenchCluster,
     ThreatView(ThreatView),
     ActorDetail(usize),
     PauseScan,
@@ -84,6 +98,7 @@ pub(crate) enum ViewHotkeyAction {
     ActivityDeckPrev,
     ActivityOpenDeckArtifact,
     ActivityOpenFindings,
+    OpenNextPhase,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
