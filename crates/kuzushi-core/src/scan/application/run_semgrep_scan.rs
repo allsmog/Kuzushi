@@ -78,6 +78,7 @@ pub fn run_scan_engines(
 
 #[derive(Debug, Default, Clone)]
 pub struct ScanRunOptions {
+    pub run_id: Option<String>,
     pub severity: Option<Vec<Severity>>,
     pub tasks: Option<Vec<String>>,
     pub static_proof_state: Option<StaticProofState>,

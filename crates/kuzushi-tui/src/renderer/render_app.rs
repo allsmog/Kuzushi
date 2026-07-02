@@ -143,11 +143,11 @@ const RENDER_SECTION_HANDLERS: &[RenderSectionHandler] = &[
 
 pub(crate) fn render_sections(app: &ShellApp, area: Rect) -> Vec<RenderSectionSlot> {
     [
+        section_slot(RenderSection::Budget, cost_cap_halt_height(app, area)),
         section_slot(RenderSection::Notice, notice_banner_height(app, area)),
         section_slot(RenderSection::Throttle, throttle_banner_height(app, area)),
         section_slot(RenderSection::Status, status_footer_height(app, area)),
         section_slot(RenderSection::Keybind, keybind_footer_height(app, area)),
-        section_slot(RenderSection::Budget, cost_cap_halt_height(app, area)),
         section_slot(RenderSection::Plan, plan_card_height(app, area)),
         section_slot(
             RenderSection::ThreatPatch,

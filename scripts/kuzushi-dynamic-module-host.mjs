@@ -152,9 +152,7 @@ function arrayOptionType(schema, type) {
 }
 
 function schemaEnumValues(values) {
-  return Array.isArray(values)
-    ? values.filter((value) => typeof value === "string")
-    : [];
+  return Array.isArray(values) ? values.filter((value) => typeof value === "string") : [];
 }
 
 async function executeTool(module, name, request) {

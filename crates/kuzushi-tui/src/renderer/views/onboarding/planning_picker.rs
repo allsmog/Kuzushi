@@ -1,8 +1,10 @@
 use super::*;
-use crate::app::{
-    build_execution_plan, row_disposition, PlanningArtifactState, PlanningTaskRow, RowDisposition,
-    WorkflowPhase,
+use crate::app::{row_disposition, PlanningArtifactState, PlanningTaskRow, WorkflowPhase};
+use crate::ui_view_models::{
+    enter_plan, format_relative_age, latest_cached_modified, workspace_history, RowOutcome,
+    WorkspaceHistory,
 };
+use std::time::SystemTime;
 
 pub(crate) fn planning_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
@@ -18,52 +20,29 @@ pub(crate) fn planning_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'sta
         ]));
         return lines;
     }
-    push_reuse_line(app, &mut lines);
     lines.push(blank());
+    lines.push(prior_state_banner(app, area.width));
+    lines.push(blank());
+    lines.push(legend_line(area.width));
+    lines.push(blank());
+    if let Some(header) = column_header(area.width) {
+        lines.push(header);
+    }
     for (idx, row) in app.planning_tasks.iter().enumerate() {
         lines.push(planning_row_line(app, idx, row, area.width));
     }
     lines.push(blank());
-    lines.push(muted(&enter_outcome_summary(app)));
+    lines.push(enter_summary_line(app));
     lines.push(keybind_hint_line(&[
         ("↑/↓/j/k", "move"),
-        ("Space", "toggle"),
+        ("Space", "check/uncheck"),
         ("g", "rebuild cached"),
         ("a", "all"),
         ("n", "none"),
-        ("Enter", "run"),
+        ("Enter", "run checked"),
         ("Esc/q", "skip phase"),
     ]));
     lines
-}
-
-/// State exactly what Enter will do, so a confirmed picker can never surprise:
-/// `[x]` rows run, `[~]` rows are reused without running.
-fn enter_outcome_summary(app: &ShellApp) -> String {
-    let will_run = build_execution_plan(
-        &app.planning_tasks,
-        &app.planning_selected,
-        &app.planning_rebuild,
-    )
-    .len();
-    let reused = app
-        .planning_tasks
-        .iter()
-        .filter(|row| {
-            row_disposition(row, &app.planning_selected, &app.planning_rebuild)
-                == RowDisposition::Reused
-        })
-        .count();
-    match (will_run, reused) {
-        (0, 0) => "Enter runs nothing (no tasks checked) — it skips to the next phase".to_string(),
-        (0, reused) => format!(
-            "Enter runs nothing — all {reused} checked task(s) are [~] reused; g rebuilds one"
-        ),
-        (will_run, 0) => format!("Enter runs {will_run} step(s)"),
-        (will_run, reused) => {
-            format!("Enter runs {will_run} step(s) · reuses {reused} cached without running")
-        }
-    }
 }
 
 /// Announce the current judo phase (組→崩→作→掛) and its intent.
@@ -89,23 +68,85 @@ fn push_phase_header(app: &ShellApp, width: u16, lines: &mut Vec<Line<'static>>)
     }
 }
 
-/// Summarize cached artifacts that will be reused (not rebuilt) this phase.
-fn push_reuse_line(app: &ShellApp, lines: &mut Vec<Line<'static>>) {
-    let cached: Vec<&str> = app
-        .planning_tasks
-        .iter()
-        .filter(|row| matches!(row.artifact_state, PlanningArtifactState::Cached))
-        .filter(|row| !app.planning_rebuild.contains(&row.id))
-        .map(|row| row.label)
-        .collect();
-    if !cached.is_empty() {
-        lines.push(muted(&format!(
-            "reusing {} cached: {} — press g to rebuild",
-            cached.len(),
-            cached.join(", ")
-        )));
+/// Tell a returning operator, up front, whether Kuzushi found prior work for
+/// this target — the single biggest missing signal in the old picker.
+fn prior_state_banner(app: &ShellApp, _width: u16) -> Line<'static> {
+    let last_activity = latest_cached_modified(&app.planning_tasks)
+        .and_then(|then| format_relative_age(SystemTime::now(), then));
+    match workspace_history(&app.planning_tasks, app.findings.len(), last_activity) {
+        WorkspaceHistory::Fresh => Line::from(vec![
+            Span::styled("▌ ", theme::subtle()),
+            Span::styled("Fresh target".to_string(), theme::label()),
+            Span::styled(
+                " — no prior Kuzushi state here; everything below is new work.".to_string(),
+                theme::muted(),
+            ),
+        ]),
+        WorkspaceHistory::Prior(state) => Line::from(vec![
+            Span::styled("▌ ", theme::success()),
+            Span::styled(
+                "Resuming — Kuzushi found prior work: ".to_string(),
+                theme::success().add_modifier(Modifier::BOLD),
+            ),
+            Span::styled(state.headline(), theme::primary()),
+        ]),
     }
 }
+
+/// A colour-keyed legend so the outcome words in the rows are never load-
+/// bearing on their own. Full glosses when they fit; just the coloured words
+/// on a narrow terminal.
+fn legend_line(width: u16) -> Line<'static> {
+    let full = legend_spans(true);
+    if spans_width(&full) <= width as usize {
+        return Line::from(full);
+    }
+    Line::from(legend_spans(false))
+}
+
+fn legend_spans(with_gloss: bool) -> Vec<Span<'static>> {
+    let mut spans = vec![Span::styled(" outcome: ", theme::muted())];
+    for (idx, outcome) in RowOutcome::LEGEND.iter().enumerate() {
+        if idx > 0 {
+            spans.push(Span::styled("   ", theme::subtle()));
+        }
+        spans.push(Span::styled(
+            outcome.word().to_string(),
+            outcome_style(*outcome),
+        ));
+        if with_gloss {
+            spans.push(Span::styled(
+                format!(" {}", outcome.gloss()),
+                theme::muted(),
+            ));
+        }
+    }
+    spans
+}
+
+fn spans_width(spans: &[Span<'static>]) -> usize {
+    spans.iter().map(|span| span.content.chars().count()).sum()
+}
+
+/// A subtle column header so operators can read the grid. Dropped entirely on
+/// very narrow terminals, where rows collapse to outcome + task.
+fn column_header(width: u16) -> Option<Line<'static>> {
+    let w = width as usize;
+    let body = if w >= WIDE {
+        format!(
+            "    {:<7} {:<30} {:<22} {}",
+            "OUTCOME", "TASK", "TOOL", "WHY"
+        )
+    } else if w >= MEDIUM {
+        format!("    {:<7} {:<28} {}", "OUTCOME", "TASK", "WHY")
+    } else {
+        return None;
+    };
+    Some(styled(&fit(&body, w), theme::subtle()))
+}
+
+const WIDE: usize = 88;
+const MEDIUM: usize = 60;
 
 fn planning_row_line(
     app: &ShellApp,
@@ -114,77 +155,154 @@ fn planning_row_line(
     width: u16,
 ) -> Line<'static> {
     let disposition = row_disposition(row, &app.planning_selected, &app.planning_rebuild);
+    let outcome = RowOutcome::from_disposition(disposition);
     let marker = if idx == app.planning_cursor { ">" } else { " " };
-    let body = format!(
-        "  {marker} {toggle} {label:<32} {tool:<26} {state:<8} {cost}",
-        toggle = disposition.checkbox(),
-        label = row.label,
-        tool = row.tool_name,
-        state = planning_state_label(app, row, disposition),
-        cost = planning_cost_note(app, row),
-    );
-    let style = planning_row_style(app, idx, row, disposition);
-    Line::styled(fit(&body, width as usize), style)
+    let note = planning_row_note(app, row, outcome);
+    let w = width as usize;
+    let body = if w >= WIDE {
+        format!(
+            "  {marker} {outcome:<7} {label:<30} {tool:<22} {note}",
+            outcome = outcome.word(),
+            label = row.label,
+            tool = row.tool_name,
+        )
+    } else if w >= MEDIUM {
+        format!(
+            "  {marker} {outcome:<7} {label:<28} {note}",
+            outcome = outcome.word(),
+            label = row.label,
+        )
+    } else {
+        format!(
+            "  {marker} {outcome:<7} {label}",
+            outcome = outcome.word(),
+            label = row.label,
+        )
+    };
+    Line::styled(fit(&body, w), planning_row_style(app, idx, outcome))
 }
 
-/// The state column tracks the row's disposition: a checked cached row says
-/// "reuse" (Enter will NOT run it), and `g` flips it to "rebuild".
-fn planning_state_label(
-    app: &ShellApp,
-    row: &PlanningTaskRow,
-    disposition: RowDisposition,
-) -> &'static str {
-    if app.planning_rebuild.contains(&row.id) {
-        return "rebuild";
+/// The row's "why" column: the artifact reality plus the one cost/blocker the
+/// operator needs to act on, phrased so it agrees with the outcome word.
+fn planning_row_note(app: &ShellApp, row: &PlanningTaskRow, outcome: RowOutcome) -> String {
+    if outcome == RowOutcome::Blocked {
+        return format!("requires {} on PATH", row.required_cli.unwrap_or("a tool"));
     }
-    if disposition == RowDisposition::Reused {
-        return "reuse";
-    }
-    row.artifact_state.label()
-}
-
-/// The row's cost column. A model-backed task with no session model can only
-/// fail, so say that — and how to fix it — instead of the generic cost label.
-fn planning_cost_note(app: &ShellApp, row: &PlanningTaskRow) -> String {
     if row.model_backed && app.config.model.is_none() {
         return "needs model — run /model first".to_string();
     }
-    row.cost_hint()
+    match outcome {
+        RowOutcome::Reuse => "cached — press g to rebuild".to_string(),
+        RowOutcome::Run if app.planning_rebuild.contains(&row.id) => {
+            with_cost(row, "rebuild (overwrites cache)")
+        }
+        RowOutcome::Run | RowOutcome::Skip => with_cost(row, artifact_reason(row)),
+        RowOutcome::Blocked => unreachable!("blocked handled above"),
+    }
 }
 
-fn planning_row_style(
-    app: &ShellApp,
-    idx: usize,
-    row: &PlanningTaskRow,
-    disposition: RowDisposition,
-) -> Style {
-    if disposition == RowDisposition::Unavailable {
-        return theme::disabled();
+fn artifact_reason(row: &PlanningTaskRow) -> &'static str {
+    match row.artifact_state {
+        PlanningArtifactState::Cached => "cached",
+        PlanningArtifactState::Missing => "not built yet",
+        PlanningArtifactState::Invalid => "cached but invalid",
+        PlanningArtifactState::Action => "runs a scan/action",
     }
-    let base = planning_row_base_style(row, disposition);
+}
+
+fn with_cost(row: &PlanningTaskRow, base: &str) -> String {
+    if row.model_backed {
+        format!("{base} · model-backed")
+    } else {
+        base.to_string()
+    }
+}
+
+/// State exactly what Enter will do, styled green only when something actually
+/// runs — a reused/skipped-only plan stays muted so the colour can't overclaim.
+fn enter_summary_line(app: &ShellApp) -> Line<'static> {
+    let plan = enter_plan(
+        &app.planning_tasks,
+        &app.planning_selected,
+        &app.planning_rebuild,
+    );
+    let style = if plan.run > 0 {
+        theme::success().add_modifier(Modifier::BOLD)
+    } else {
+        theme::muted()
+    };
+    styled(&format!(" {}", plan.summary_line()), style)
+}
+
+fn outcome_style(outcome: RowOutcome) -> Style {
+    match outcome {
+        RowOutcome::Run => theme::success(),
+        RowOutcome::Reuse => theme::accent(),
+        RowOutcome::Skip => theme::subtle(),
+        RowOutcome::Blocked => theme::danger(),
+    }
+}
+
+/// Green is reserved for rows Enter will actually run; reused rows stay muted,
+/// skipped rows dim, blocked rows disabled — the colour tracks the outcome word.
+fn planning_row_style(app: &ShellApp, idx: usize, outcome: RowOutcome) -> Style {
+    let base = match outcome {
+        RowOutcome::Run => theme::success(),
+        RowOutcome::Reuse => theme::muted(),
+        RowOutcome::Skip => theme::primary(),
+        RowOutcome::Blocked => theme::disabled(),
+    };
     if idx == app.planning_cursor {
-        return planning_cursor_style(base, disposition);
+        return planning_cursor_style(base, outcome);
     }
     base
 }
 
-/// Green is reserved for rows Enter will actually run; reused rows stay
-/// muted so the colour can't contradict the [~] glyph.
-fn planning_row_base_style(row: &PlanningTaskRow, disposition: RowDisposition) -> Style {
-    match disposition {
-        RowDisposition::WillRun => theme::success(),
-        RowDisposition::Reused => theme::muted(),
-        RowDisposition::Off if matches!(row.artifact_state, PlanningArtifactState::Cached) => {
-            theme::muted()
-        }
-        _ => theme::primary(),
-    }
-}
-
-fn planning_cursor_style(base: Style, disposition: RowDisposition) -> Style {
-    if disposition == RowDisposition::WillRun {
+fn planning_cursor_style(base: Style, outcome: RowOutcome) -> Style {
+    if outcome == RowOutcome::Run {
         base.add_modifier(Modifier::BOLD)
     } else {
         theme::accent().add_modifier(Modifier::BOLD)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn line_text(line: &Line<'_>) -> String {
+        line.spans
+            .iter()
+            .map(|span| span.content.as_ref())
+            .collect()
+    }
+
+    #[test]
+    fn legend_drops_glosses_when_it_cannot_fit() {
+        let wide = legend_line(200);
+        assert!(line_text(&wide).contains("runs now"), "wide keeps glosses");
+        let narrow = legend_line(30);
+        let text = line_text(&narrow);
+        assert!(text.contains("RUN"), "narrow keeps the words");
+        assert!(!text.contains("runs now"), "narrow drops the glosses");
+    }
+
+    #[test]
+    fn legend_covers_every_outcome_word() {
+        let text = line_text(&legend_line(200));
+        for outcome in RowOutcome::LEGEND {
+            assert!(
+                text.contains(outcome.word()),
+                "legend lists {}",
+                outcome.word()
+            );
+        }
+    }
+
+    #[test]
+    fn column_header_collapses_on_narrow_terminals() {
+        assert!(line_text(&column_header(120).unwrap()).contains("TOOL"));
+        assert!(!line_text(&column_header(70).unwrap()).contains("TOOL"));
+        assert!(column_header(40).is_none());
     }
 }

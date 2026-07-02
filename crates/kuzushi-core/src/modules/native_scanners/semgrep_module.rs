@@ -235,6 +235,7 @@ pub(in crate::modules) fn exploit_chain_module() -> BuiltinModule {
             "Scan source for chained exploitability signals and synthesize PoC shapes with the configured agent runtime.",
             vec![
                 target_option(),
+                model_option(),
                 opt(
                     "maxEvidence",
                     OptionType::Int,

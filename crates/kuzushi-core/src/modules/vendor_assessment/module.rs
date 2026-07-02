@@ -54,18 +54,19 @@ fn vendor_assessment_attach_options() -> Vec<OptionSpec> {
 }
 
 fn deprecated_target_option() -> OptionSpec {
-    opt("target", OptionType::String, "Legacy evidence source alias.")
-        .deprecated_aliases(&["input"])
-        .advanced()
+    opt(
+        "target",
+        OptionType::String,
+        "Legacy evidence source alias.",
+    )
+    .deprecated_aliases(&["input"])
+    .advanced()
 }
 
 fn vendor_assessment_scope_options() -> Vec<OptionSpec> {
     vec![
-        opt("vendorName", OptionType::String, "Vendor name."),
+        vendor_name_option(),
         opt("productName", OptionType::String, "Product name.").aliases(&["product_name"]),
-        opt("vendor", OptionType::String, "Legacy vendor name alias.")
-            .deprecated_aliases(&["vendor_name"])
-            .advanced(),
         primary_domain_option(),
         use_case_option(),
         data_classes_option(),
@@ -74,15 +75,18 @@ fn vendor_assessment_scope_options() -> Vec<OptionSpec> {
     ]
 }
 
+fn vendor_name_option() -> OptionSpec {
+    opt("vendorName", OptionType::String, "Vendor name.")
+        .aliases(&["vendor"])
+        .deprecated_aliases(&["vendor_name"])
+}
+
 fn vendor_assessment_attach_metadata_options() -> Vec<OptionSpec> {
     vec![
-        opt("vendorName", OptionType::String, "Vendor name.")
-            .aliases(&["vendor_name"])
-            .advanced(),
+        vendor_name_option().advanced(),
         opt("productName", OptionType::String, "Product name.")
             .aliases(&["product_name"])
             .advanced(),
-        opt("vendor", OptionType::String, "Legacy vendor name alias.").advanced(),
         primary_domain_option(),
         use_case_option(),
         data_classes_option(),
@@ -92,9 +96,13 @@ fn vendor_assessment_attach_metadata_options() -> Vec<OptionSpec> {
 }
 
 fn primary_domain_option() -> OptionSpec {
-    opt("primaryDomain", OptionType::String, "Primary vendor domain.")
-        .aliases(&["domain", "primary_domain"])
-        .advanced()
+    opt(
+        "primaryDomain",
+        OptionType::String,
+        "Primary vendor domain.",
+    )
+    .aliases(&["domain", "primary_domain"])
+    .advanced()
 }
 
 fn use_case_option() -> OptionSpec {
@@ -104,13 +112,22 @@ fn use_case_option() -> OptionSpec {
 }
 
 fn data_classes_option() -> OptionSpec {
-    opt("dataClasses", OptionType::StringList, "Data classes in scope.")
-        .aliases(&["data_classes"])
-        .advanced()
+    opt(
+        "dataClasses",
+        OptionType::StringList,
+        "Data classes in scope.",
+    )
+    .aliases(&["data_classes"])
+    .advanced()
 }
 
 fn integrations_option() -> OptionSpec {
-    opt("integrations", OptionType::StringList, "Vendor integrations.").advanced()
+    opt(
+        "integrations",
+        OptionType::StringList,
+        "Vendor integrations.",
+    )
+    .advanced()
 }
 
 fn vendor_assessment_prompt_options() -> Vec<OptionSpec> {
@@ -209,7 +226,7 @@ fn scope_tool(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
 
 fn prompts_tool(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
     let root = root(&input, ctx)?;
-    let run_id = string_input_any(&input, &["runId", "run_id"]);
+    let run_id = string_input_any(&input, &["runId"]);
     vendor_assessment_capability::prompts(&root, scope_update_from_input(&input), run_id)
 }
 
@@ -222,10 +239,12 @@ fn assess_tool(
     let parent_step = emit_vendor_assessment_start(ctx, &root);
     emit_vendor_assessment_progress(ctx, parent_step, "scope · load documents and prompts");
     let _assessment_scope = begin_vendor_assessment_scope(ctx, parent_step);
-    let result =
-        vendor_assessment_capability::assess(&root, scope_update_from_input(&input), runtime, || {
-        resolve_tool_model("vendor-assessment:assess", &input, ctx)
-        })?;
+    let result = vendor_assessment_capability::assess(
+        &root,
+        scope_update_from_input(&input),
+        runtime,
+        || resolve_tool_model("vendor-assessment:assess", &input, ctx),
+    )?;
     drop(_assessment_scope);
     emit_vendor_assessment_progress(ctx, parent_step, "artifacts · write report");
     emit_vendor_assessment_done(ctx, &result);
@@ -297,9 +316,9 @@ fn root(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
 
 fn scope_update_from_input(input: &Value) -> vendor_assessment_capability::ScopeUpdate {
     vendor_assessment_capability::ScopeUpdate {
-        vendor_name: string_input_any(input, &["vendorName", "vendor"]),
+        vendor_name: string_input_any(input, &["vendorName"]),
         product_name: string_input_any(input, &["productName"]),
-        primary_domain: string_input_any(input, &["primaryDomain", "domain"]),
+        primary_domain: string_input_any(input, &["primaryDomain"]),
         use_case: string_input_any(input, &["useCase"]),
         profile: string_input_any(input, &["profile"]),
         data_classes: string_array_or_csv_input(input, &["dataClasses"]),

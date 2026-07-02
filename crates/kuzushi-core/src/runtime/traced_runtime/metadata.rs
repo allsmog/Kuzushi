@@ -28,7 +28,10 @@ pub(super) fn final_label(text: &str, history_len: usize) -> String {
 }
 
 pub fn model_provider(model: &str) -> &str {
-    model.split_once(':').map(|(provider, _)| provider).unwrap_or("")
+    model
+        .split_once(':')
+        .map(|(provider, _)| provider)
+        .unwrap_or("")
 }
 
 pub fn prompt_pair_hash(system_prompt: &str, prompt: &str) -> String {
@@ -120,9 +123,7 @@ fn tool_input_summary(input: &Value) -> Option<String> {
     }
 }
 
-fn object_tool_input_summary(
-    object: &serde_json::Map<String, Value>,
-) -> Option<String> {
+fn object_tool_input_summary(object: &serde_json::Map<String, Value>) -> Option<String> {
     preferred_tool_input_summary(object).or_else(|| fallback_tool_input_summary(object))
 }
 

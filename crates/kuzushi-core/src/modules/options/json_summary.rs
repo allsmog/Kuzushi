@@ -79,8 +79,19 @@ fn reject_unknown_tool_options(tool: &ToolDescriptor, object: &Map<String, Value
 }
 
 fn unknown_tool_option_message(tool: &ToolDescriptor, name: &str) -> String {
-    let choices = tool
-        .options
+    let choices = option_choice_names(tool);
+    let hint = option_hint(&choices);
+    let suggestion = closest_option_name(name, &choices)
+        .map(|choice| format!(" Did you mean `{choice}`?"))
+        .unwrap_or_default();
+    format!(
+        "{} received unknown option {name:?}.{suggestion} Next: {hint}",
+        tool.name
+    )
+}
+
+fn option_choice_names(tool: &ToolDescriptor) -> Vec<&str> {
+    tool.options
         .iter()
         .flat_map(|spec| {
             std::iter::once(spec.name.as_str())
@@ -88,16 +99,40 @@ fn unknown_tool_option_message(tool: &ToolDescriptor, name: &str) -> String {
                 .chain(spec.deprecated_aliases.iter().map(String::as_str))
         })
         .collect::<Vec<_>>()
-        .join(", ");
-    let hint = if choices.is_empty() {
-        "no options are declared".to_string()
+}
+
+fn option_hint(choices: &[&str]) -> String {
+    if choices.is_empty() {
+        "no options are declared for this tool; run `tools --json` to inspect the descriptor"
+            .to_string()
     } else {
-        format!("use one of: {choices}")
-    };
-    format!(
-        "{} received unknown option {name:?}. Declare it in option metadata or {hint}",
-        tool.name
-    )
+        format!("use one of: {}", choices.join(", "))
+    }
+}
+
+fn closest_option_name<'a>(name: &str, choices: &[&'a str]) -> Option<&'a str> {
+    let needle = normalized_option_name(name);
+    choices.iter().copied().find(|choice| {
+        let candidate = normalized_option_name(choice);
+        candidate.contains(&needle)
+            || needle.contains(&candidate)
+            || common_prefix_len(&needle, &candidate) >= 3
+    })
+}
+
+fn normalized_option_name(value: &str) -> String {
+    value
+        .chars()
+        .filter(|ch| ch.is_ascii_alphanumeric())
+        .flat_map(char::to_lowercase)
+        .collect()
+}
+
+fn common_prefix_len(left: &str, right: &str) -> usize {
+    left.chars()
+        .zip(right.chars())
+        .take_while(|(left, right)| left == right)
+        .count()
 }
 
 pub(in crate::modules) fn coerce_option_value(spec: &OptionSpec, value: Value) -> Result<Value> {

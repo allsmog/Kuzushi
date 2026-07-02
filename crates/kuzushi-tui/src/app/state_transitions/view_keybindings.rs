@@ -31,9 +31,20 @@ impl ShellApp {
             ShellView::ActorDetail(_) => actor_detail_keybindings(),
             ShellView::PromptsEditor => prompts_editor_keybindings(),
             ShellView::Tune => tune_keybindings(),
-            ShellView::Activity => activity_keybindings(),
+            ShellView::Activity => self.activity_view_keybindings(),
             _ => Vec::new(),
         }
+    }
+
+    fn activity_view_keybindings(&self) -> Vec<ViewKeybinding> {
+        let mut bindings = activity_keybindings();
+        if self.can_pause_scan_hotkey() {
+            bindings.extend(pause_scan_keybindings());
+        }
+        if self.can_resume_scan_hotkey() {
+            bindings.extend(resume_scan_keybindings());
+        }
+        bindings
     }
 
     /// Generic `j/k/g/G` scrolling applies to scrollable views except those
@@ -45,10 +56,10 @@ impl ShellApp {
     }
 
     /// Esc goes back everywhere except views that already own Esc
-    /// (pickers/modals intercept Esc earlier) and while a
-    /// cleared draft is stashed (Esc restores it — see `esc_clear_or_restore`).
+    /// (pickers/modals intercept Esc earlier). Cleared prompt drafts are
+    /// restored explicitly with Ctrl+_ / Ctrl+/ so Esc stays navigation.
     fn view_offers_back(&self) -> bool {
-        self.last_cleared_input.is_none() && !self.view_owns_esc()
+        !self.view_owns_esc()
     }
 
     fn view_owns_esc(&self) -> bool {

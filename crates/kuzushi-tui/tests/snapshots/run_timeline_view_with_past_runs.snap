@@ -9,4 +9,4 @@ runId           status        findings   revision       target
 r-2026…T15-18   failed        0          rev:unknown    ~/work/acme-checkout
 r-2026…T14-31   completed     18         rev:unknown    ~/work/acme-checkout
 
-▸ try: runs diff <left> <right> · replay <runId> · trace <runId> · findings · back
+> try: runs diff <left> <right> · replay <runId> · trace <runId> · findings · back

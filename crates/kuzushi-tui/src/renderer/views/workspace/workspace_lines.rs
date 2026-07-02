@@ -13,11 +13,7 @@ pub(crate) fn workspace_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> 
 
     lines.push(blank());
     lines.push(command_list_line(
-        &[
-            "workspace status",
-            "workspace export findings <path>.json",
-            "kuzushi pr-comment",
-        ],
+        &["workspace scope init", "workspace export findings <path>"],
         area.width as usize,
     ));
     lines

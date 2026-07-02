@@ -321,14 +321,11 @@ fn cancel_hotkey_in_activity_emits_visible_signal() {
     });
     assert!(matches!(app.shell_view, ShellView::Activity));
 
-    // Press 'C' twice on the Activity view; the first key arms cancellation.
+    // Ctrl+C requests abort without leaving the Activity view; a second
+    // Ctrl+C is the explicit exit chord.
     app.handle_key(crossterm::event::KeyEvent::new(
-        crossterm::event::KeyCode::Char('C'),
-        crossterm::event::KeyModifiers::empty(),
-    ));
-    app.handle_key(crossterm::event::KeyEvent::new(
-        crossterm::event::KeyCode::Char('C'),
-        crossterm::event::KeyModifiers::empty(),
+        crossterm::event::KeyCode::Char('c'),
+        crossterm::event::KeyModifiers::CONTROL,
     ));
 
     // The hotkey is wired iff one of the cancel paths logs:
@@ -342,13 +339,15 @@ fn cancel_hotkey_in_activity_emits_visible_signal() {
     });
     assert!(
         log_has_signal,
-        "C hotkey should produce a visible signal in the transcript; \
+        "Ctrl+C should produce a visible signal in the transcript; \
          got log: {:?}",
         app.log
             .iter()
             .map(|l| format!("{}: {}", l.prefix, l.body))
             .collect::<Vec<_>>()
     );
+    assert!(matches!(app.shell_view, ShellView::Activity));
+    assert!(!app.should_quit);
 }
 
 fn sample_findings(count: usize) -> Vec<Finding> {

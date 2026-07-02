@@ -18,9 +18,7 @@ impl AgentToolPolicy {
     /// the bare boolean attaches every MCP whether or not its backing
     /// artifact exists, which makes the operator chase confusing
     /// runtime errors when (for example) a CPG was never built.
-    #[deprecated(
-        note = "Use `with_mcps_for_target` to gate attachment on artifact existence."
-    )]
+    #[deprecated(note = "Use `with_mcps_for_target` to gate attachment on artifact existence.")]
     pub fn with_mcps(mut self, mcps: bool) -> Self {
         self.mcps = mcps;
         self
@@ -160,7 +158,10 @@ mod policy_tests {
             .expect("mcpsAttached should serialise as camelCase");
         assert_eq!(attachments.len(), 2);
         assert_eq!(attachments[0]["name"], "treesitter");
-        assert_eq!(attachments[1]["artifactPath"], "/work/.kuzushi/context-snapshot.json");
+        assert_eq!(
+            attachments[1]["artifactPath"],
+            "/work/.kuzushi/context-snapshot.json"
+        );
         let round_tripped: AgentToolPolicy = serde_json::from_value(json).expect("deserialise");
         assert_eq!(round_tripped, policy);
     }
@@ -209,14 +210,12 @@ pub struct AgentQueryResponse {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelTier {
-    /// Cheapest tier — Haiku-class. ~$0.001/k tokens. Use for fast
-    /// scans + Stage 2 noise reduction.
+    /// Cheap stage label. The runtime still uses the operator-configured
+    /// model unless an explicit operator route selected another one.
     Cheap,
-    /// Mid-tier — current Sonnet. Default when no explicit tier is
-    /// requested.
+    /// Mid stage label. Default when no explicit tier is requested.
     Mid,
-    /// Most-capable tier — Opus. Reserve for Stage 3 verify on the
-    /// few survivors that warrant the cost.
+    /// Deep stage label. Reserve for stages that warrant more scrutiny.
     Deep,
 }
 

@@ -9,10 +9,21 @@ pub(in crate::modules) fn run_native_libs_scan(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
-    emit_step(ctx, "tool", "scan", &format!("native-libs start · target={}", target.display()));
+    emit_step(
+        ctx,
+        "tool",
+        "scan",
+        &format!("native-libs start · target={}", target.display()),
+    );
     let outcome = match scan_native_libs(&input, &target) {
         Ok(outcome) => outcome,
-        Err(error) => return Ok(failed_tool_output("android-apk:native-libs", &target, error)),
+        Err(error) => {
+            return Ok(failed_tool_output(
+                "android-apk:native-libs",
+                &target,
+                error,
+            ))
+        }
     };
     let persisted = persist_tool_findings(
         "android-apk",
@@ -21,7 +32,16 @@ pub(in crate::modules) fn run_native_libs_scan(
         ctx.workspace,
         ctx.findings_store,
     )?;
-    emit_step(ctx, "done", "scan", &format!("native-libs complete · {} libs, {} findings", outcome.libs.len(), outcome.findings.len()));
+    emit_step(
+        ctx,
+        "done",
+        "scan",
+        &format!(
+            "native-libs complete · {} libs, {} findings",
+            outcome.libs.len(),
+            outcome.findings.len()
+        ),
+    );
     Ok(native_libs_output(&outcome, persisted))
 }
 

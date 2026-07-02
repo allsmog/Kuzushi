@@ -1,6 +1,7 @@
 use super::*;
 
-pub(in crate::modules) fn run_sast_scan(
+pub(in crate::modules) fn run_sast_scan_with_registry(
+    registry: &ModuleRegistry,
     input: Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
@@ -10,10 +11,13 @@ pub(in crate::modules) fn run_sast_scan(
     let store = sast_store(ctx)?;
     let requests = SastScanRequests::from_input(&input)?;
     let options = sast_scan_options(&input, whitebox_static.is_some())?;
+    let option_store = sast_subtool_options(ctx, workspace)?;
     let executed = execute_sast_scan(SastScanExecutionInput {
+        registry,
         input: &input,
         ctx,
         runtime,
+        option_store: &option_store,
         workspace,
         store,
         requests: &requests,
@@ -35,9 +39,11 @@ pub(in crate::modules) fn run_sast_scan(
 }
 
 struct SastScanExecutionInput<'a> {
+    registry: &'a ModuleRegistry,
     input: &'a Value,
     ctx: &'a ToolExecutionContext<'a>,
     runtime: Option<&'a dyn AgentRuntime>,
+    option_store: &'a crate::options::ToolOptionStore,
     workspace: &'a crate::workspace::WorkspaceTarget,
     store: &'a crate::findings::FindingStore,
     requests: &'a SastScanRequests,
@@ -78,10 +84,12 @@ impl SastScanExecutionInput<'_> {
         artifacts: &SastRunArtifacts,
     ) -> Result<SastPostProcessing> {
         run_sast_post_processing(
+            self.registry,
             self.requests,
             self.input,
             self.ctx,
             self.runtime,
+            self.option_store,
             self.store,
             run_ids,
             artifacts,
@@ -188,16 +196,21 @@ impl ExecutedSastScan {
 fn sast_workspace<'a>(
     ctx: &'a ToolExecutionContext<'_>,
 ) -> Result<&'a crate::workspace::WorkspaceTarget> {
-    ctx.workspace.context(
-        "sast:scan requires a workspace target; pass --target <repo> or start the shell with --target <repo>",
-    )
+    ctx.workspace
+        .context(crate::workspace::active_workspace_required_message("sast:scan"))
 }
 
-fn sast_store<'a>(
-    ctx: &'a ToolExecutionContext<'_>,
-) -> Result<&'a crate::findings::FindingStore> {
+fn sast_store<'a>(ctx: &'a ToolExecutionContext<'_>) -> Result<&'a crate::findings::FindingStore> {
     ctx.findings_store
         .context("sast:scan requires a findings store")
+}
+
+fn sast_subtool_options(
+    ctx: &ToolExecutionContext<'_>,
+    workspace: &crate::workspace::WorkspaceTarget,
+) -> Result<crate::options::ToolOptionStore> {
+    let paths = tool_context_config_paths(ctx, Some(workspace.root()))?;
+    persistent_tool_options_for_paths(&paths)
 }
 
 fn write_sast_whitebox_artifacts(

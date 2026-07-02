@@ -10,63 +10,51 @@ impl ShellApp {
     }
 
     pub fn scroll_up(&mut self, amount: u16) {
-        if matches!(self.shell_view, ShellView::Activity) {
-            self.scroll_active_activity_pane(-(amount as isize));
-            return;
+        match self.scroll_target() {
+            ScrollTarget::Activity => self.scroll_active_activity_pane(-(amount as isize)),
+            ScrollTarget::WorkbenchPane => self
+                .workbench_scroll
+                .shift(self.workbench_focus, -(amount as i32)),
+            ScrollTarget::Logs => {
+                self.logs_scroll = self.logs_scroll.saturating_sub(amount as usize)
+            }
+            ScrollTarget::Default => self.scroll_offset = self.scroll_offset.saturating_sub(amount),
         }
-        if self.scroll_focused_workbench_pane(-(amount as i32)) {
-            return;
-        }
-        if matches!(self.shell_view, ShellView::Logs) {
-            self.logs_scroll = self.logs_scroll.saturating_sub(amount as usize);
-            return;
-        }
-        self.scroll_offset = self.scroll_offset.saturating_sub(amount);
     }
 
     pub fn scroll_down(&mut self, amount: u16) {
-        if matches!(self.shell_view, ShellView::Activity) {
-            self.scroll_active_activity_pane(amount as isize);
-            return;
+        match self.scroll_target() {
+            ScrollTarget::Activity => self.scroll_active_activity_pane(amount as isize),
+            ScrollTarget::WorkbenchPane => self
+                .workbench_scroll
+                .shift(self.workbench_focus, amount as i32),
+            ScrollTarget::Logs => {
+                self.logs_scroll = self.logs_scroll.saturating_add(amount as usize)
+            }
+            ScrollTarget::Default => self.scroll_offset = self.scroll_offset.saturating_add(amount),
         }
-        if self.scroll_focused_workbench_pane(amount as i32) {
-            return;
-        }
-        if matches!(self.shell_view, ShellView::Logs) {
-            self.logs_scroll = self.logs_scroll.saturating_add(amount as usize);
-            return;
-        }
-        self.scroll_offset = self.scroll_offset.saturating_add(amount);
     }
 
     pub fn scroll_to_top(&mut self) {
-        if matches!(self.shell_view, ShellView::Activity) {
-            self.activity.as_mut().map(focused_pane_to_top);
-            return;
+        match self.scroll_target() {
+            ScrollTarget::Activity => {
+                self.activity.as_mut().map(focused_pane_to_top);
+            }
+            ScrollTarget::WorkbenchPane => self.workbench_scroll.set(self.workbench_focus, 0),
+            ScrollTarget::Logs => self.logs_scroll = 0,
+            ScrollTarget::Default => self.scroll_offset = 0,
         }
-        if self.set_focused_workbench_pane_scroll(0) {
-            return;
-        }
-        if matches!(self.shell_view, ShellView::Logs) {
-            self.logs_scroll = 0;
-            return;
-        }
-        self.scroll_offset = 0;
     }
 
     pub fn scroll_to_bottom(&mut self) {
-        if matches!(self.shell_view, ShellView::Activity) {
-            self.focused_activity_pane_to_bottom();
-            return;
+        match self.scroll_target() {
+            ScrollTarget::Activity => self.focused_activity_pane_to_bottom(),
+            ScrollTarget::WorkbenchPane => {
+                self.workbench_scroll.set(self.workbench_focus, u16::MAX)
+            }
+            ScrollTarget::Logs => self.logs_scroll = usize::MAX,
+            ScrollTarget::Default => self.scroll_offset = u16::MAX,
         }
-        if self.set_focused_workbench_pane_scroll(u16::MAX) {
-            return;
-        }
-        if matches!(self.shell_view, ShellView::Logs) {
-            self.logs_scroll = usize::MAX;
-            return;
-        }
-        self.scroll_offset = u16::MAX;
     }
 
     /// j/k delta routed to whichever Activity-view pane currently has focus.
@@ -114,57 +102,37 @@ impl ShellApp {
                     .len()
                     .saturating_sub(1)
             }
-            ActivityDeckPage::Dfd => {
-                let model = crate::ui_view_models::dfd_model(self);
-                let selectable = if model.flows.is_empty() {
-                    model.nodes.len()
-                } else {
-                    model.flows.len()
-                };
-                selectable.saturating_sub(1)
+            ActivityDeckPage::Dfd => threat_dfd_selectable_count(self).saturating_sub(1),
+            ActivityDeckPage::Heatmap => crate::ui_view_models::risk_by_module(&self.findings)
+                .modules
+                .len()
+                .min(10)
+                .saturating_sub(1),
+            ActivityDeckPage::AttackPath => self
+                .taint_flow
+                .as_ref()
+                .map(|flow| flow.stages.len().min(6))
+                .unwrap_or_default()
+                .saturating_sub(1),
+            ActivityDeckPage::ExploitChain => self.exploit_chains.len().min(3).saturating_sub(1),
+        }
+    }
+
+    fn scroll_target(&self) -> ScrollTarget {
+        match self.shell_view {
+            ShellView::Activity => ScrollTarget::Activity,
+            ShellView::Workbench if self.workbench_focus != WorkbenchPane::Findings => {
+                ScrollTarget::WorkbenchPane
             }
-            ActivityDeckPage::Heatmap => crate::ui_view_models::findings_heatmap(&self.findings)
-                .rows
-                .len()
-                .saturating_sub(1),
-            ActivityDeckPage::AttackPath => crate::ui_view_models::taint_flow_path(self)
-                .stages
-                .len()
-                .saturating_sub(1),
-            ActivityDeckPage::ExploitChain => crate::ui_view_models::attack_tree(self)
-                .chains
-                .len()
-                .saturating_sub(1),
+            ShellView::Logs => ScrollTarget::Logs,
+            _ => ScrollTarget::Default,
         }
-    }
-
-    fn scroll_focused_workbench_pane(&mut self, amount: i32) -> bool {
-        if !matches!(self.shell_view, ShellView::Workbench) {
-            return false;
-        }
-        if matches!(self.workbench_focus, WorkbenchPane::Findings) {
-            return false;
-        }
-        self.workbench_scroll.shift(self.workbench_focus, amount);
-        true
-    }
-
-    fn set_focused_workbench_pane_scroll(&mut self, value: u16) -> bool {
-        if !matches!(self.shell_view, ShellView::Workbench) {
-            return false;
-        }
-        if matches!(self.workbench_focus, WorkbenchPane::Findings) {
-            return false;
-        }
-        self.workbench_scroll.set(self.workbench_focus, value);
-        true
     }
 
     pub(crate) fn sync_view_change(&mut self) -> bool {
         let current = Some(self.shell_view.clone());
         if self.prev_shell_view != current {
             self.scroll_offset = 0;
-            self.last_cleared_input = None;
             if let Some(prev) = self.prev_shell_view.take() {
                 self.push_nav_history(prev);
             }
@@ -200,11 +168,37 @@ impl ShellApp {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScrollTarget {
+    Activity,
+    WorkbenchPane,
+    Logs,
+    Default,
+}
+
 fn focused_pane_to_top(session: &mut ActivitySession) {
     match session.effective_pane_focus() {
         PaneFocus::Left => session.move_task_cursor_to_top(),
         PaneFocus::Right => session.deck_cursor = 0,
     }
+}
+
+fn threat_dfd_selectable_count(app: &ShellApp) -> usize {
+    let Some(doc) = crate::ui_view_models::threat_model_doc(app) else {
+        return 0;
+    };
+    let flows = json_array_len(doc.pointer("/dfd/flows"));
+    if flows > 0 {
+        return flows;
+    }
+    json_array_len(doc.pointer("/dfd/nodes"))
+}
+
+fn json_array_len(value: Option<&serde_json::Value>) -> usize {
+    value
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::len)
+        .unwrap_or_default()
 }
 
 /// Apply a signed scroll delta and clamp the result to `[0, max]`, so a pane

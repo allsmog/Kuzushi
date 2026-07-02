@@ -82,11 +82,12 @@ impl ShellApp {
         };
         self.config.model = Some(choice.id.to_string());
         self.session_thinking_level = Some(choice.thinking_level.to_string());
+        self.persist_global_model_choice(choice.id, Some(choice.thinking_level));
         self.log(
             "model",
             format!(
-                "{} selected via onboarding (session only; persist with `model {}` after auth)",
-                choice.id, choice.id,
+                "{} selected via onboarding (saved as the global model)",
+                display_model_selector(choice.id),
             ),
         );
         self.transition_after_model_choice(choice.provider);
@@ -100,15 +101,15 @@ impl ShellApp {
         if !auth_ready_for_provider(provider) {
             self.log(
                 "onboarding",
-                format!("{provider} credentials missing; continuing to catalog (run /auth login {provider} to fix)"),
+                format!("{provider} credentials missing; continuing to Workbench (run /auth login {provider} to fix)"),
             );
-            self.shell_view = ShellView::Catalog;
+            self.open_workbench(WorkbenchPane::Findings);
             return;
         }
         if self.target.is_some() {
             self.open_planning_picker();
         } else {
-            self.shell_view = ShellView::Catalog;
+            self.open_workbench(WorkbenchPane::Findings);
         }
     }
 
@@ -173,7 +174,7 @@ impl ShellApp {
         // auth → planning, exactly as if the shell had launched with it.
         self.apply_initial_onboarding_phase();
         if self.shell_view == ShellView::TargetPicker {
-            self.shell_view = ShellView::Home;
+            self.open_workbench(WorkbenchPane::Findings);
         }
     }
 
@@ -182,7 +183,7 @@ impl ShellApp {
             "onboarding",
             "browsing without a target — set one later with `target <path>`",
         );
-        self.shell_view = ShellView::Home;
+        self.open_workbench(WorkbenchPane::Findings);
     }
 
     fn defer_model_picker(&mut self) {
@@ -190,10 +191,13 @@ impl ShellApp {
             "onboarding",
             "model selection deferred — set one with /model <id>",
         );
-        self.shell_view = ShellView::Catalog;
+        self.open_workbench(WorkbenchPane::Findings);
     }
 
     fn handle_auth_picker_key(&mut self, code: KeyCode) -> bool {
+        if self.handle_auth_api_key_draft_key(code) {
+            return true;
+        }
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.move_auth_picker_cursor(-1);
@@ -209,6 +213,32 @@ impl ShellApp {
             }
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.defer_auth_picker();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn handle_auth_api_key_draft_key(&mut self, code: KeyCode) -> bool {
+        if self.auth_picker_cursor != 0 {
+            return false;
+        }
+        match code {
+            KeyCode::Char(ch)
+                if self.auth_key_draft.is_empty() && matches!(ch, 'j' | 'k' | 'q') =>
+            {
+                false
+            }
+            KeyCode::Char(ch) if !ch.is_control() && !ch.is_whitespace() => {
+                self.auth_key_draft.push(ch);
+                true
+            }
+            KeyCode::Backspace => {
+                self.auth_key_draft.pop();
+                true
+            }
+            KeyCode::Delete => {
+                self.auth_key_draft.clear();
                 true
             }
             _ => false,
@@ -235,6 +265,10 @@ impl ShellApp {
 
     fn accept_auth_api_key_choice(&mut self, provider: &str) {
         let api_key_provider = api_key_auth_provider(provider);
+        if !self.auth_key_draft.trim().is_empty() {
+            self.accept_pasted_auth_api_key(provider, api_key_provider);
+            return;
+        }
         if auth_ready_for_provider(api_key_provider) {
             self.select_api_key_model_for_provider(provider);
             self.log(
@@ -244,16 +278,28 @@ impl ShellApp {
             self.transition_after_auth_ready();
             return;
         }
-        let env_var = match api_key_provider {
-            "anthropic" => "ANTHROPIC_API_KEY",
-            _ => "OPENAI_API_KEY",
-        };
+        let env_var = api_key_env_var(api_key_provider);
         self.log(
             "onboarding",
-            format!(
-                "set {env_var} in your shell and relaunch kuzushi, or press Esc to defer onboarding"
-            ),
+            format!("paste {env_var} here, then press Enter; value stays session-only and hidden"),
         );
+    }
+
+    fn accept_pasted_auth_api_key(&mut self, provider: &str, api_key_provider: &str) {
+        let env_var = api_key_env_var(api_key_provider);
+        let key = self.auth_key_draft.trim().to_string();
+        self.auth_key_draft.clear();
+        // In-session only: this removes the relaunch wall without writing a
+        // secret to shell history, command history, config, or logs.
+        unsafe {
+            std::env::set_var(env_var, &key);
+        }
+        self.select_api_key_model_for_provider(provider);
+        self.log(
+            "onboarding",
+            format!("{env_var} accepted for this session; value hidden"),
+        );
+        self.transition_after_auth_ready();
     }
 
     fn accept_auth_oauth_choice(&mut self, provider: &str) {
@@ -303,28 +349,30 @@ impl ShellApp {
         }
         self.config.model = Some(choice.id.to_string());
         self.session_thinking_level = Some(choice.thinking_level.to_string());
+        self.persist_global_model_choice(choice.id, Some(choice.thinking_level));
         self.log(
             "model",
             format!(
-                "{} selected for {auth_method} (session only; no fallback model)",
+                "{} selected for {auth_method} (no fallback model)",
                 display_model_selector(choice.id)
             ),
         );
     }
 
     fn defer_auth_picker(&mut self) {
+        self.auth_key_draft.clear();
         self.log(
             "onboarding",
             "auth deferred — set credentials and re-run /onboarding when ready",
         );
-        self.shell_view = ShellView::Catalog;
+        self.open_workbench(WorkbenchPane::Findings);
     }
 
     fn transition_after_auth_ready(&mut self) {
         if self.target.is_some() {
             self.open_planning_picker();
         } else {
-            self.shell_view = ShellView::Catalog;
+            self.open_workbench(WorkbenchPane::Findings);
         }
     }
 
@@ -568,6 +616,13 @@ fn api_key_auth_provider(provider: &str) -> &str {
     match provider {
         "openai-codex" => "openai",
         other => other,
+    }
+}
+
+fn api_key_env_var(provider: &str) -> &'static str {
+    match provider {
+        "anthropic" => "ANTHROPIC_API_KEY",
+        _ => "OPENAI_API_KEY",
     }
 }
 

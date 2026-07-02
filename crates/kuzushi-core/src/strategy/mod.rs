@@ -1,11 +1,9 @@
-use crate::fs_atomic::write_atomic;
+use crate::fs_atomic::{load_jsonl, now_ms, save_jsonl, slug};
 use crate::workspace::WorkspaceTarget;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::fs;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const STRATEGY_QUEUE_FILE: &str = "strategy-queue.jsonl";
 
@@ -150,6 +148,15 @@ impl StrategyProposal {
         rationale: impl Into<String>,
     ) -> Self {
         let now = now_ms();
+        Self::new_at(now, phase, recommended_strategy, rationale)
+    }
+
+    pub fn new_at(
+        now: u64,
+        phase: StrategyPhase,
+        recommended_strategy: impl Into<String>,
+        rationale: impl Into<String>,
+    ) -> Self {
         let recommended_strategy = recommended_strategy.into();
         Self {
             id: strategy_proposal_id(phase, &recommended_strategy, now),
@@ -209,25 +216,17 @@ pub fn strategy_queue_path(workspace: &WorkspaceTarget) -> PathBuf {
 }
 
 pub fn load_strategy_queue(workspace: &WorkspaceTarget) -> Result<Vec<StrategyProposal>> {
-    let path = strategy_queue_path(workspace);
-    let text = match fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => {
-            return Err(error).with_context(|| format!("Could not read {}", path.display()))
-        }
-    };
-    parse_strategy_queue_jsonl(&text)
-        .with_context(|| format!("Could not parse {}", path.display()))
+    load_jsonl(&strategy_queue_path(workspace), "strategy proposal")
 }
 
 pub fn save_strategy_queue(
     workspace: &WorkspaceTarget,
     proposals: &[StrategyProposal],
 ) -> Result<()> {
-    write_atomic(
+    save_jsonl(
         &strategy_queue_path(workspace),
-        &serialize_strategy_queue_jsonl(proposals)?,
+        proposals,
+        "strategy proposal",
     )
 }
 
@@ -255,54 +254,9 @@ pub fn set_strategy_proposal_status(
     Ok(true)
 }
 
-fn parse_strategy_queue_jsonl(text: &str) -> Result<Vec<StrategyProposal>> {
-    text.lines()
-        .enumerate()
-        .filter(|(_, line)| !line.trim().is_empty())
-        .map(|(index, line)| {
-            serde_json::from_str::<StrategyProposal>(line)
-                .with_context(|| format!("line {}", index + 1))
-        })
-        .collect()
-}
-
-fn serialize_strategy_queue_jsonl(proposals: &[StrategyProposal]) -> Result<String> {
-    let mut lines = Vec::with_capacity(proposals.len());
-    for proposal in proposals {
-        lines.push(serde_json::to_string(proposal).context("Could not serialize proposal")?);
-    }
-    Ok(if lines.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", lines.join("\n"))
-    })
-}
-
 fn strategy_proposal_id(phase: StrategyPhase, recommended_strategy: &str, now: u64) -> String {
-    let slug = recommended_strategy
-        .chars()
-        .map(|value| {
-            if value.is_ascii_alphanumeric() {
-                value.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .take(4)
-        .collect::<Vec<_>>()
-        .join("-");
-    let suffix = if slug.is_empty() { "strategy" } else { &slug };
+    let suffix = slug(recommended_strategy, "strategy", 4);
     format!("{}-{now}-{suffix}", phase.label())
-}
-
-pub(crate) fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
-        .unwrap_or_default()
 }
 
 #[cfg(test)]

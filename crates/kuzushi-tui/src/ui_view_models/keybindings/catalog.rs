@@ -13,6 +13,7 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
 
 fn home_keybindings() -> Vec<FooterKeybinding> {
     vec![
+        bind("Ctrl+G", "palette"),
         bind("modules", "browse"),
         bind("recommend", "plan"),
         bind("scan", "run scanners"),
@@ -22,6 +23,7 @@ fn home_keybindings() -> Vec<FooterKeybinding> {
 
 fn collapsed_catalog_keybindings() -> Vec<FooterKeybinding> {
     vec![
+        bind("Ctrl+G", "palette"),
         bind("modules", "browse"),
         bind("use <id>", "focus module"),
         bind("scan", "run scanners"),
@@ -31,6 +33,7 @@ fn collapsed_catalog_keybindings() -> Vec<FooterKeybinding> {
 
 fn expanded_catalog_keybindings() -> Vec<FooterKeybinding> {
     vec![
+        bind("Ctrl+G", "palette"),
         bind("j/k", "row"),
         bind("PgUp/PgDn", "scroll"),
         bind("Enter", "use selected row"),
@@ -42,6 +45,7 @@ fn expanded_catalog_keybindings() -> Vec<FooterKeybinding> {
 
 fn recommend_keybindings() -> Vec<FooterKeybinding> {
     vec![
+        bind("Ctrl+G", "palette"),
         bind("run <tool>", "dispatch"),
         bind("runs", "ledger"),
         bind("Esc", "back"),

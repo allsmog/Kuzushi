@@ -45,14 +45,24 @@ pub(crate) fn activity_dag_pane_rows(
             tone: subsystem_row_tone(session.subsystem_aggregate.state),
         });
     }
+    if !session.tasks.is_empty() {
+        rows.push(ActivityDagPaneRow {
+            text: activity_legend_row(width),
+            tone: ActivityDagRowTone::Muted,
+        });
+    }
     rows.extend(action_pane_rows(session, width, running_tool));
     if rows.is_empty() {
         rows.push(ActivityDagPaneRow {
-            text: " (no DAG tasks yet)".to_string(),
+            text: " (no task rows yet)".to_string(),
             tone: ActivityDagRowTone::Muted,
         });
     }
     rows
+}
+
+fn activity_legend_row(width: usize) -> String {
+    fit(" legend: ✓ done · ! fail · × canceled · · queued", width)
 }
 
 fn action_pane_rows(
@@ -225,12 +235,18 @@ fn dag_subsystems_row_text(session: &ActivitySession, width: usize) -> Option<St
     if agg.total_count == 0 {
         return None;
     }
-    let label = fit(&agg.last_label, width.saturating_sub(28).max(8));
+    let label = fit(&agg.last_label, width.saturating_sub(43).max(8));
+    let visibility = if session.verbose_subsystems {
+        "expanded"
+    } else {
+        "hidden — V to expand"
+    };
     Some(fit(
         &format!(
-            " ⤳ subsystems ({total})  {state} {label}",
+            " ⤳ subsystems ({total})  {state} · {visibility} · {label}",
             total = agg.total_count,
             state = subsystem_state_label(agg.state),
+            visibility = visibility,
             label = label,
         ),
         width,
@@ -318,13 +334,15 @@ mod tests {
 
         let rows = activity_dag_pane_rows(&session, 40, Instant::now(), None);
 
-        assert_eq!(rows.len(), 4);
+        assert_eq!(rows.len(), 5);
         assert!(rows[0].text.contains("semgrep:scan"));
         assert_eq!(rows[0].tone, ActivityDagRowTone::Queued);
         assert!(rows[1].text.contains("subsystems (2)"));
+        assert!(rows[1].text.contains("hidden"));
         assert_eq!(rows[1].tone, ActivityDagRowTone::Muted);
-        assert!(rows[2].text.contains("ACTIONS"));
-        assert!(rows[3].text.contains("no trace events"));
+        assert!(rows[2].text.contains("legend:"));
+        assert!(rows[3].text.contains("ACTIONS"));
+        assert!(rows[4].text.contains("no trace events"));
     }
 
     #[test]
@@ -382,15 +400,16 @@ mod tests {
 
         let rows = activity_dag_pane_rows(&session, 80, Instant::now(), None);
 
-        assert_eq!(rows.len(), 5);
+        assert_eq!(rows.len(), 6);
         assert!(rows[0].text.contains("agentic-sast:scan"));
         assert!(rows[1].text.contains("✓ inventory-review"));
         assert_eq!(rows[1].tone, ActivityDagRowTone::Muted);
         assert!(rows[2].text.contains("↳ vulnerability-hunt"));
         assert!(rows[2].text.contains("2.4s"));
         assert_eq!(rows[2].tone, ActivityDagRowTone::Active);
-        assert!(rows[3].text.contains("ACTIONS"));
-        assert!(rows[4].text.contains("no trace events"));
+        assert!(rows[3].text.contains("legend:"));
+        assert!(rows[4].text.contains("ACTIONS"));
+        assert!(rows[5].text.contains("no trace events"));
     }
 
     #[test]

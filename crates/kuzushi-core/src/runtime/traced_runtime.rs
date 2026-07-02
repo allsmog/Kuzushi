@@ -16,13 +16,7 @@ impl<'a> TracedRuntime<'a> {
         Self { inner, trace }
     }
 
-    fn record_model_call_start(
-        &self,
-        verb: &str,
-        label: String,
-        model: &str,
-        prompt_hash: &str,
-    ) {
+    fn record_model_call_start(&self, verb: &str, label: String, model: &str, prompt_hash: &str) {
         let _ = self
             .trace
             .step("tool-progress", verb, label)
@@ -114,7 +108,11 @@ impl<'a> TracedRuntime<'a> {
     ) {
         let _ = self
             .trace
-            .step("tool-progress", "next-step", tool_call_label(call, history_len))
+            .step(
+                "tool-progress",
+                "next-step",
+                tool_call_label(call, history_len),
+            )
             .with_latency_ms(elapsed_ms)
             .with_model_metadata(model, provider, prompt_hash)
             .emit();

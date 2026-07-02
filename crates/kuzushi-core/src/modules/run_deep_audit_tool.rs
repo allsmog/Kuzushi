@@ -69,7 +69,10 @@ fn emit_deep_audit_progress(
     let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
         return;
     };
-    let _ = trace.child(parent).step("tool-progress", "run", label.into()).emit();
+    let _ = trace
+        .child(parent)
+        .step("tool-progress", "run", label.into())
+        .emit();
 }
 
 fn begin_deep_audit_agent_scope(
@@ -95,7 +98,10 @@ fn emit_deep_audit_done(
             .step(
                 "done",
                 "run",
-                format!("deep-audit:run complete · {}", outcome.triage.verdict.as_str()),
+                format!(
+                    "deep-audit:run complete · {}",
+                    outcome.triage.verdict.as_str()
+                ),
             )
             .emit();
     }
@@ -120,20 +126,24 @@ fn prepare_deep_audit<'a>(
 }
 
 fn required_deep_audit_runtime(runtime: Option<&dyn AgentRuntime>) -> Result<&dyn AgentRuntime> {
-    runtime.ok_or_else(|| anyhow::anyhow!("deep-audit:run requires an agent runtime; none configured"))
+    runtime.ok_or_else(|| {
+        anyhow::anyhow!(crate::runtime::missing_agent_runtime_message(
+            "deep-audit:run"
+        ))
+    })
 }
 
 fn required_deep_audit_workspace<'a>(
     ctx: &ToolExecutionContext<'a>,
 ) -> Result<&'a crate::WorkspaceTarget> {
-    ctx.workspace
-        .ok_or_else(|| anyhow::anyhow!("deep-audit:run requires a workspace target"))
+    ctx.workspace.ok_or_else(|| {
+        anyhow::anyhow!(crate::workspace::active_workspace_required_message(
+            "deep-audit:run"
+        ))
+    })
 }
 
-fn deep_audit_finding(
-    input: &Value,
-    store: &FindingStore,
-) -> Result<crate::findings::Finding> {
+fn deep_audit_finding(input: &Value, store: &FindingStore) -> Result<crate::findings::Finding> {
     let fingerprint = input
         .get("findingFingerprint")
         .and_then(Value::as_str)
@@ -146,9 +156,17 @@ fn deep_audit_finding(
 fn deep_audit_options(input: &Value) -> DeepAuditOptions {
     DeepAuditOptions {
         max_steps: read_deep_audit_u32(input, "maxSteps", 24),
-        deposit_usd: input.get("depositUsd").and_then(Value::as_f64).unwrap_or(1.0),
+        deposit_usd: input
+            .get("depositUsd")
+            .and_then(Value::as_f64)
+            .unwrap_or(1.0),
         temperature: deep_audit_temperature(input),
-        passes: read_deep_audit_u32(input, "passes", crate::capabilities::deep_auditor::DEFAULT_PASSES).max(1),
+        passes: read_deep_audit_u32(
+            input,
+            "passes",
+            crate::capabilities::deep_auditor::DEFAULT_PASSES,
+        )
+        .max(1),
     }
 }
 
@@ -173,20 +191,7 @@ fn deep_audit_routed_runtime<'a>(
     ctx: &ToolExecutionContext<'_>,
     root: &std::path::Path,
 ) -> Result<crate::agent_router::RoutedRuntime<'a>> {
-    use crate::agent_router::{AgentRouter, RoutedRuntime};
-    use crate::config::ConfigPaths;
-    use std::sync::Arc;
-
-    let paths = ConfigPaths {
-        home_dir: dirs::home_dir().unwrap_or_default(),
-        target_dir: Some(root.to_path_buf()),
-    };
-    let router = Arc::new(AgentRouter::load(&paths)?);
-    Ok(RoutedRuntime::borrowed(
-        runtime,
-        router,
-        ctx.config.model.clone(),
-    ))
+    routed_runtime_for_tool_context(runtime, ctx, Some(root))
 }
 
 fn deep_audit_spend_limiter(

@@ -24,12 +24,24 @@ pub(crate) fn fit_sections_to_height(
     mut sections: Vec<RenderSectionSlot>,
     area_height: u16,
 ) -> Vec<RenderSectionSlot> {
+    let min_primary_height = min_primary_view_height(&sections);
     while !sections.is_empty()
-        && fixed_chrome_height(&sections).saturating_add(MIN_PRIMARY_VIEW_HEIGHT) > area_height
+        && fixed_chrome_height(&sections).saturating_add(min_primary_height) > area_height
     {
         sections.pop();
     }
     sections
+}
+
+fn min_primary_view_height(sections: &[RenderSectionSlot]) -> u16 {
+    if sections
+        .iter()
+        .any(|section| matches!(section.kind, RenderSection::Budget))
+    {
+        1
+    } else {
+        MIN_PRIMARY_VIEW_HEIGHT
+    }
 }
 
 pub(crate) fn render_constraints(
@@ -81,9 +93,12 @@ pub(crate) fn notice_banner_height(app: &ShellApp, area: Rect) -> u16 {
 }
 
 pub(crate) fn cost_cap_halt_height(app: &ShellApp, area: Rect) -> u16 {
-    if cost_cap_halt_model(app).is_some() && area.height >= 5 {
+    if cost_cap_halt_model(app).is_none() || area.height == 0 {
+        return 0;
+    }
+    if area.height >= 5 {
         2
     } else {
-        0
+        1
     }
 }

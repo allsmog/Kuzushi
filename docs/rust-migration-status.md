@@ -14,3 +14,7 @@ For current guidance, use:
 Do not add new current-status rows here. If a migration-specific historical
 note is needed, put it under `docs/notes/` and label it explicitly as
 historical.
+
+Historical cutover note: the `src/cli.ts shell` path was retired during the
+Rust shell migration. Legacy invocation fails with a Rust replacement message,
+and the retired TS runtime island was deleted.

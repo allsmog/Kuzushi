@@ -41,8 +41,8 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "compare findings snapshots from two runs",
     },
     ShellCommandSpec {
-        command: "replay <run>",
-        aliases: &["/replay <run>"],
+        command: "replay <run|latest>",
+        aliases: &["/replay <run|latest>", "replay latest"],
         category: ShellCommandCategory::FindingsEvidence,
         description: "render a run summary",
     },

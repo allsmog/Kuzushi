@@ -1,12 +1,112 @@
 use super::*;
 
-pub(crate) fn full_mode_config_paths(ctx: &ToolExecutionContext<'_>) -> crate::config::ConfigPaths {
-    let target_dir = ctx
-        .workspace
-        .map(|workspace| workspace.root().to_path_buf());
-    crate::config::ConfigPaths {
-        home_dir: dirs::home_dir().unwrap_or_default(),
-        target_dir,
+pub(crate) fn tool_context_config_paths(
+    ctx: &ToolExecutionContext<'_>,
+    target_root: Option<&std::path::Path>,
+) -> Result<crate::config::ConfigPaths> {
+    let target = target_root.or_else(|| ctx.workspace.map(|workspace| workspace.root()));
+    crate::config::ConfigPaths::from_target(target)
+}
+
+pub(crate) fn routed_runtime_for_tool_context<'a>(
+    runtime: &'a dyn AgentRuntime,
+    ctx: &ToolExecutionContext<'_>,
+    target_root: Option<&std::path::Path>,
+) -> Result<crate::agent_router::RoutedRuntime<'a>> {
+    use crate::agent_router::{AgentRouter, RoutedRuntime};
+    use std::sync::Arc;
+
+    let paths = tool_context_config_paths(ctx, target_root)?;
+    let router = Arc::new(AgentRouter::load(&paths)?);
+    let routed = RoutedRuntime::borrowed(runtime, router, ctx.config.model.clone());
+    routed_runtime_with_persistent_options(routed, &paths)
+}
+
+pub(crate) fn persistent_tool_options_for_paths(
+    paths: &crate::config::ConfigPaths,
+) -> Result<crate::options::ToolOptionStore> {
+    crate::options::ToolOptionStore::load_persistent(
+        &paths.global_options_path(),
+        paths.project_options_path().as_deref(),
+    )
+}
+
+fn routed_runtime_with_persistent_options<'a>(
+    routed: crate::agent_router::RoutedRuntime<'a>,
+    paths: &crate::config::ConfigPaths,
+) -> Result<crate::agent_router::RoutedRuntime<'a>> {
+    let store = persistent_tool_options_for_paths(paths)?;
+    Ok(routed.with_option_store(&store))
+}
+
+#[cfg(test)]
+mod routed_runtime_option_tests {
+    use super::*;
+
+    struct NoopRuntime;
+
+    impl AgentRuntime for NoopRuntime {
+        fn triage_finding_blocking(
+            &self,
+            _request: crate::runtime::TriageRequest,
+        ) -> Result<crate::findings::TriageOutcome> {
+            anyhow::bail!("unused test runtime")
+        }
+    }
+
+    #[test]
+    fn routed_runtime_snapshots_persistent_role_options() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = test_config_paths(temp.path());
+        write_deep_auditor_override(&paths);
+        let routed = routed_runtime_with_persistent_options(test_routed_runtime(), &paths).unwrap();
+
+        assert_eq!(
+            routed
+                .resolve_model_for_role(
+                    crate::agent_router::AgentRole::DeepAuditor,
+                    0,
+                    Some("openai:operator-default"),
+                )
+                .unwrap(),
+            "openai:setg-model"
+        );
+    }
+
+    fn test_config_paths(root: &std::path::Path) -> crate::config::ConfigPaths {
+        let home = root.join("home");
+        let target = root.join("repo");
+        std::fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+        std::fs::create_dir_all(target.join(".kuzushi/v2")).unwrap();
+        crate::config::ConfigPaths {
+            home_dir: home,
+            target_dir: Some(target),
+        }
+    }
+
+    fn write_deep_auditor_override(paths: &crate::config::ConfigPaths) {
+        let mut store = crate::options::ToolOptionStore::new();
+        store.set_value(
+            crate::options::OptionScope::Global,
+            crate::options::OptionTarget::All,
+            "MODEL_DEEP_AUDITOR",
+            json!("openai:setg-model"),
+        );
+        store
+            .save_persistent(
+                &paths.global_options_path(),
+                paths.project_options_path().as_deref(),
+            )
+            .unwrap();
+    }
+
+    fn test_routed_runtime() -> crate::agent_router::RoutedRuntime<'static> {
+        let runtime = NoopRuntime;
+        crate::agent_router::RoutedRuntime::owned(
+            std::sync::Arc::new(runtime),
+            std::sync::Arc::new(crate::agent_router::AgentRouter::empty()),
+            Some("openai:operator-default".to_string()),
+        )
     }
 }
 
@@ -90,21 +190,23 @@ fn prepare_classifier_score<'a>(
 
 fn required_classifier_runtime(runtime: Option<&dyn AgentRuntime>) -> Result<&dyn AgentRuntime> {
     runtime.ok_or_else(|| {
-        anyhow::anyhow!("classifier-gate:score requires an agent runtime; none configured")
+        anyhow::anyhow!(crate::runtime::missing_agent_runtime_message(
+            "classifier-gate:score"
+        ))
     })
 }
 
 fn required_classifier_workspace<'a>(
     ctx: &ToolExecutionContext<'a>,
 ) -> Result<&'a crate::WorkspaceTarget> {
-    ctx.workspace
-        .ok_or_else(|| anyhow::anyhow!("classifier-gate:score requires a workspace target"))
+    ctx.workspace.ok_or_else(|| {
+        anyhow::anyhow!(crate::workspace::active_workspace_required_message(
+            "classifier-gate:score"
+        ))
+    })
 }
 
-fn classifier_finding(
-    input: &Value,
-    store: &FindingStore,
-) -> Result<crate::findings::Finding> {
+fn classifier_finding(input: &Value, store: &FindingStore) -> Result<crate::findings::Finding> {
     let fingerprint = input
         .get("findingFingerprint")
         .and_then(Value::as_str)
@@ -127,20 +229,7 @@ fn classifier_routed_runtime<'a>(
     ctx: &ToolExecutionContext<'_>,
     root: &std::path::Path,
 ) -> Result<crate::agent_router::RoutedRuntime<'a>> {
-    use crate::agent_router::{AgentRouter, RoutedRuntime};
-    use crate::config::ConfigPaths;
-    use std::sync::Arc;
-
-    let paths = ConfigPaths {
-        home_dir: dirs::home_dir().unwrap_or_default(),
-        target_dir: Some(root.to_path_buf()),
-    };
-    let router = Arc::new(AgentRouter::load(&paths)?);
-    Ok(RoutedRuntime::borrowed(
-        runtime,
-        router,
-        ctx.config.model.clone(),
-    ))
+    routed_runtime_for_tool_context(runtime, ctx, Some(root))
 }
 
 fn classifier_gate<'a>(

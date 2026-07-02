@@ -29,6 +29,7 @@ fn status_footer_left_segments(app: &ShellApp) -> Vec<String> {
 fn active_status_footer_segments(app: &ShellApp, activity: FooterActivity) -> Vec<String> {
     vec![
         routing_mode_segment(app),
+        view_status_segment(app),
         model_footer_segment(app),
         activity.label,
     ]

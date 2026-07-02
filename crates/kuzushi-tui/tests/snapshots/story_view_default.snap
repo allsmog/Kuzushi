@@ -10,4 +10,4 @@ system      kuzushi shell
 startup     ready: 41 modules, 67 tools, target none
 help        type `scan` to begin · `help` for commands · `?<text>` to ask the agent
 
-▸ try: Ctrl+O toggle · /history commands · /show runs · /replay <runId> · /trace <runId>
+> try: Ctrl+O toggle · /history commands · /show runs · /replay <runId> · /trace <runId>

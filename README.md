@@ -142,8 +142,8 @@ inside the TUI and your terminal still gives you a selection modifier.
 | `kuzushi tools [--json]` | List visible executable tool descriptors. |
 | `kuzushi doctor [--target <repo>] [--json]` | Check config, local state, findings DB openability, scanner binaries, bridge readiness, and model/auth setup. |
 | `kuzushi run <module:tool> --input '<json>' [--option key=value]` | Execute one explicit tool through the Rust registry. Use global `--target` for workspace-backed tools; `run .` is shell-only focused-module shorthand. |
-| `kuzushi mcp <server>` | Run a local MCP server over stdio. |
-| `kuzushi auth` | Print auth diagnostics; interactive provider login is handled inside `kuzushi shell`. |
+| `kuzushi mcp serve <gtags\|clang\|joern\|tree-sitter\|codeql>` | Run a local MCP server over stdio. Use `kuzushi mcp health <backend>` for a JSON readiness check. |
+| `kuzushi auth ping [anthropic\|openai] [--model provider:model]` | Round-trip auth diagnostics; interactive provider login is handled inside `kuzushi shell`. |
 | `kuzushi config show` | Print effective config. |
 | `kuzushi config init [--force]` | Write the default global config. |
 | `kuzushi config path` | Print the global config path. |
@@ -202,7 +202,10 @@ the same canonical key.
 
 Persistent state lives in `~/.kuzushi/v2/options.json` and
 `<target>/.kuzushi/v2/options.json`. Config remains separate for model,
-runtime, bridge, budget, and approval policy. See
+runtime, bridge, budget, and approval policy. Project configs may set guided
+phase fields, but model/runtime/operator policy is operator-owned and must live
+in home config/models files, env bootstrap, or explicit tool input. See
+[docs/operator-control-surfaces.md](docs/operator-control-surfaces.md).
 [docs/operator-control-surfaces.md](docs/operator-control-surfaces.md).
 
 ## Rust Shell
@@ -228,11 +231,11 @@ Piped shell output automatically uses the same strict plain renderer as
 | `/workspace`, `workspace export findings <path>`, `findings export <path>` | Show workspace state and export findings as JSON or JSONL. |
 | `/findings`, `/open <alias-or-fingerprint>`, `/show aliases [prefix]` | Load findings and open deterministic aliases such as `F-0001`. |
 | `/show runs`, `/replay <runId>`, `/trace <runId>`, `/since <git-ref>` | Inspect replayable run artifacts and diff-scoped findings. |
-| `/threats [dfd\|stride\|stories\|scope\|summary\|1..5]`, `/threats regen`, `/threats ask <question>` | Switch threat-model views or request a reviewable threat-model patch. |
+| `/threats [dfd\|stride\|stories\|scope\|summary\|1..4]`, `/threats edit`, `/threats regen`, `/threats apply`, `/threats reject`, `/threats ask <question>` | Switch threat-model views or request and review a threat-model patch. |
 | `/auth`, `/auth login <provider>`, `/provider`, `/backend`, `/model [choice]`, `/cost`, `/config`, `/permissions` | Show credential status without secrets, select explicit models, and report known cost/config/approval state. |
 | `/history`, `/clear`, `/load <specifier>`, `/pause`, `/resume [runId]`, `/story` | Session utilities and precise replacement messages for unsupported legacy live-control paths. |
 | `/prompts`, `/prompt <verb>`, `/tune`, `/actor <n>`, `/plan <english>` | Prompt, tuning, transcript, and planner surfaces. |
-| `/quit`, `exit`, `/exit`, `/exitj` | Exit. |
+| `/quit`, `exit`, `/exit` | Exit. |
 
 ## Phase-Driven Workflow (組 → 崩 → 作 → 掛)
 
@@ -280,24 +283,39 @@ current built-ins are:
 | `sast` | `sast:scan` |
 | `semgrep` | `semgrep:scan` |
 | `codeql` | `codeql:scan` |
+| `cargo-audit` | `cargo-audit:scan` |
 | `agentic-sast` | `agentic-sast:scan` |
 | `offense-review` | `offense-review:threat-hunt` |
 | `taint-iris` | `taint-iris:hunt` |
-| `taint-iris-next` | `taint-iris-next:dataflow-plan`, `taint-iris-next:source-sink-trace`, `taint-iris-next:finding-review` |
+| `taint-iris-next` | `taint-iris-next:hunt`, `taint-iris-next:dataflow-plan`, `taint-iris-next:source-sink-trace`, `taint-iris-next:finding-review` |
 | `triage` | `triage:run` |
 | `verify` | `verify:finding` |
 | `patch` | `patch:finding` |
 | `findings` | `findings:list` |
+| `report` | `report:build` |
 | `threat-model` | `threat-model:build`, `threat-model:read`, `threat-model:methodologies` |
+| `threat-intel` | `threat-intel:discover`, `threat-intel:list`, `threat-intel:apply`, `threat-intel:harvest` |
+| `threat-leads` | `threat-leads:build`, `threat-leads:read` |
 | `randori` | `randori:pasta`, `randori:threat-model` |
 | `x-ray` | `x-ray:run`, `x-ray:read` |
 | `dep-hygiene` | `dep-hygiene:check` |
 | `secret-scan` | `secret-scan:scan` |
 | `license-scan` | `license-scan:scan` |
 | `sbom-scan` | `sbom-scan:scan` |
+| `exploit-chain` | `exploit-chain:scan` |
 | `variant` | `variant:lift-pattern`, `variant:hunt` |
 | `ndiff` | `ndiff:fetch-cve`, `ndiff:extract-fix-pattern`, `ndiff:hunt-variants` |
 | `iac-scan` | `iac-scan:scan` |
+| `android-apk` | `android-apk:scan` |
+| `entry-points` | `entry-points:extract` |
+| `cpg` | `cpg:build` |
+| `codeql-db` | `codeql:create-db` |
+| `bounty` | `bounty:import-har`, `bounty:import-burp` |
+| `router` | `router:show` |
+| `full-mode` | `full-mode:hunt` |
+| `classifier-gate` | `classifier-gate:score` |
+| `deep-audit` | `deep-audit:run` |
+| `smoke` | `smoke:next-step` |
 | `catalog` | `catalog:modules`, `catalog:tools` |
 | `config` | `config:show` |
 | `workspace` | `workspace:status`, `workspace:export-findings` |

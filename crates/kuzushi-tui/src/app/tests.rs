@@ -22,7 +22,34 @@ use kuzushi_core::{
     AttachmentRecord, FindingStore, OptionScope, OptionTarget, RuntimeConfig, RuntimeKind,
     Severity, ToolOptionStore, TriageOutcome, TriageVerdict,
 };
+use std::ffi::OsString;
 use std::fs;
+
+struct EnvVarGuard {
+    key: &'static str,
+    prior: Option<OsString>,
+}
+
+impl EnvVarGuard {
+    fn unset(key: &'static str) -> Self {
+        let prior = std::env::var_os(key);
+        unsafe {
+            std::env::remove_var(key);
+        }
+        Self { key, prior }
+    }
+}
+
+impl Drop for EnvVarGuard {
+    fn drop(&mut self) {
+        unsafe {
+            match &self.prior {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+}
 
 #[test]
 fn mouse_capture_requires_truthy_opt_in() {
@@ -123,6 +150,10 @@ fn prereq_plan_cancel_aborts_chain_before_dispatch() {
         None,
     );
     app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()));
+
+    assert!(app.pending_chain.is_some(), "c must not mean cancel here");
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty()));
 
     assert!(app.pending_chain.is_none());
     assert!(app.pending_prereq_prompt.is_none());
@@ -1138,6 +1169,20 @@ fn command_reducer_focuses_existing_module() {
 }
 
 #[test]
+fn tools_command_applies_filter() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.handle_command(ShellCommand::Tools(Some("semgrep".to_string())));
+
+    assert_eq!(app.shell_view, ShellView::Tools);
+    assert_eq!(app.tools_filter.as_deref(), Some("semgrep"));
+    assert_eq!(app.tools_scroll, 0);
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.prefix == "tool" && line.body.contains("matching \"semgrep\"")));
+}
+
+#[test]
 fn findings_command_loads_store_rows() {
     let tmp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
@@ -1543,6 +1588,7 @@ fn workspace_export_findings_to_temp_path() {
 
     app.handle_command(ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
         output: output.clone(),
+        format: None,
     }));
 
     assert_eq!(app.shell_view, ShellView::Workspace);
@@ -1568,6 +1614,7 @@ fn workspace_export_rejects_unsupported_formats_actionably() {
 
     app.handle_command(ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
         output: tmp.path().join("findings.xml"),
+        format: None,
     }));
 
     let error = app
@@ -1578,8 +1625,55 @@ fn workspace_export_rejects_unsupported_formats_actionably() {
         .map(|line| line.body.as_str())
         .unwrap_or_default();
     assert!(error.contains("unsupported workspace findings export extension"));
-    assert!(error.contains("Next: workspace export findings <path>.json"));
+    assert!(error.contains("Next: workspace export findings <path>"));
     assert!(!tmp.path().join("findings.xml").exists());
+}
+
+#[test]
+fn workspace_export_accepts_explicit_markdown_bundle_format() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    seed_true_positive_finding(&workspace);
+    let output = tmp.path().join("bundle");
+    fs::create_dir(&output).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.handle_command(ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+        output: output.clone(),
+        format: Some("markdown-bundle".to_string()),
+    }));
+
+    assert_eq!(
+        app.workspace_view.last_export.as_deref(),
+        Some(output.as_path())
+    );
+    assert!(output.join("README.md").is_file());
+    assert!(output.join("manifest.json").is_file());
+    assert!(app
+        .log
+        .iter()
+        .any(|line| { line.prefix == "export" && line.body.contains("(markdown-bundle)") }));
+}
+
+#[test]
+fn workspace_scope_init_writes_editable_empty_scaffold() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.handle_command(ShellCommand::Workspace(WorkspaceCommand::ScopeInit));
+
+    let path = tmp.path().join(".kuzushi/scope.toml");
+    let body = fs::read_to_string(&path).unwrap();
+    assert!(body.contains("[in_scope]"));
+    assert!(body.contains("hosts = []"));
+    assert!(app
+        .program_scope
+        .as_ref()
+        .is_some_and(|scope| scope.is_empty()));
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "scope" && line.body.contains("Edit in_scope/out_of_scope")
+    }));
 }
 
 #[test]
@@ -2145,6 +2239,12 @@ fn auth_provider_backend_model_and_cost_commands_are_explicit_and_secret_safe() 
         .iter()
         .any(|line| { line.prefix == "model" && line.body.contains("no fallback model") }));
 
+    app.handle_command(ShellCommand::Model(Some("openai:".to_string())));
+    assert_eq!(app.config.model.as_deref(), Some("openai:gpt-4.1-mini"));
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "error" && line.body.contains("both provider and model id")
+    }));
+
     app.handle_command(ShellCommand::Model(Some("1 xtrahigh".to_string())));
     assert_eq!(app.config.model.as_deref(), Some("openai:gpt-5.5"));
     assert_eq!(app.session_thinking_level.as_deref(), Some("xhigh"));
@@ -2234,6 +2334,15 @@ fn doctor_verb_points_to_cli_not_ask_agent() {
     // Plain unknown verb still uses the agent-path fallback.
     let message = unknown_command_message("zzwombat");
     assert!(message.contains("Free-form chat"));
+}
+
+#[test]
+fn unknown_command_suggests_nearby_shell_verb() {
+    let message = unknown_command_message("scn");
+
+    assert!(message.contains("Did you mean `scan`?"), "{message}");
+    assert!(message.contains("Next: `scan` or /help"), "{message}");
+    assert!(!message.contains("Free-form chat"), "{message}");
 }
 
 #[test]
@@ -2483,28 +2592,25 @@ fn esc_during_active_completion_cycle_restores_original_prefix() {
 }
 
 #[test]
-fn esc_stashes_input_and_one_more_esc_restores_it() {
-    // P3-2: previously Esc wiped the input with no recovery, so a long
-    // command typed and then Esc'd was lost forever (Up arrow restores
-    // history, not the most recent draft). Now Esc stashes the draft and
-    // a second Esc on an empty prompt restores it.
+fn esc_stashes_input_and_ctrl_underscore_restores_it() {
+    // Esc clears the draft without losing it, but empty-prompt Esc remains
+    // navigation. Restore is an explicit Ctrl+_ / Ctrl+/ action so hidden
+    // draft state never changes what Esc means.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_input("scan ./very/specific/path with --since main --include-worktree");
     let original = app.input.clone();
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
     assert!(app.input.is_empty(), "first Esc clears the input");
-    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
-    assert_eq!(app.input, original, "second Esc restores the draft");
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('_'), KeyModifiers::CONTROL));
+    assert_eq!(app.input, original, "Ctrl+_ restores the draft");
     assert_eq!(app.cursor, original.chars().count());
 
-    // Restoring consumed the stash; a third Esc cycle starts fresh.
+    // Restoring consumed the stash; another Esc cycle starts fresh.
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
-    assert!(app.input.is_empty(), "third Esc clears again");
-    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
-    assert_eq!(
-        app.input, original,
-        "fourth Esc restores the new stash (which was the second clear)"
-    );
+    assert!(app.input.is_empty(), "Esc clears again");
+    app.handle_key(KeyEvent::new(KeyCode::Char('/'), KeyModifiers::CONTROL));
+    assert_eq!(app.input, original, "Ctrl+/ also restores the new stash");
 }
 
 #[test]
@@ -2602,14 +2708,15 @@ fn auth_picker_navigation_keys_work_with_text_in_prompt() {
 
 #[test]
 fn auth_picker_swallows_typed_characters() {
-    // Printable keys are consumed by the modal so they never leak into the
-    // prompt and quietly disarm the navigation keys.
+    // Printable keys are consumed by the modal as a masked API-key draft; they
+    // never leak into the prompt or command history.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::AuthMethodPicker("anthropic".to_string());
     app.input.clear();
 
     app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::empty()));
     assert!(app.input.is_empty(), "picker must swallow typed characters");
+    assert_eq!(app.auth_key_draft, "x");
 }
 
 #[test]
@@ -2623,6 +2730,54 @@ fn auth_picker_swallows_shifted_typed_characters() {
     assert!(
         app.input.is_empty(),
         "picker must swallow shifted printable characters"
+    );
+    assert_eq!(app.auth_key_draft, "H");
+}
+
+#[test]
+fn auth_picker_accepts_pasted_api_key_without_relaunch_or_logging_secret() {
+    let _guard = EnvVarGuard::unset("OPENAI_API_KEY");
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::AuthMethodPicker("openai".to_string());
+    app.auth_picker_cursor = 0;
+
+    app.handle_paste("sk-test-secret");
+    assert_eq!(app.auth_key_draft, "sk-test-secret");
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+    assert_eq!(
+        std::env::var("OPENAI_API_KEY").as_deref(),
+        Ok("sk-test-secret")
+    );
+    assert!(app.auth_key_draft.is_empty());
+    assert_eq!(app.config.model.as_deref(), Some("openai:gpt-5.5"));
+    assert!(app.log.iter().any(|line| line.prefix == "onboarding"
+        && line
+            .body
+            .contains("OPENAI_API_KEY accepted for this session")));
+    assert!(
+        app.log
+            .iter()
+            .all(|line| !line.body.contains("sk-test-secret")),
+        "secret must never be logged"
+    );
+    assert!(
+        app.command_history
+            .iter()
+            .all(|entry| !entry.contains("sk-test-secret")),
+        "secret must never enter command history"
+    );
+}
+
+#[test]
+fn model_picker_shows_openai_oauth_before_login() {
+    let _guard = EnvVarGuard::unset("OPENAI_API_KEY");
+    let choices = super::settings::visible_model_choices(None);
+    assert!(
+        choices
+            .iter()
+            .any(|choice| choice.id == "openai-codex:gpt-5.4"),
+        "OpenAI OAuth must be visible before credentials exist"
     );
 }
 
@@ -2834,6 +2989,35 @@ fn session_history_clear_load_resume_pause_and_story_are_explicit() {
 
     app.handle_command(parse_command("/story"));
     assert_eq!(app.shell_view, ShellView::Story);
+}
+
+#[test]
+fn replay_latest_resolves_latest_run_pointer() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    fs::create_dir_all(tmp.path().join(".kuzushi")).unwrap();
+    fs::write(tmp.path().join(".kuzushi/latest"), "run-latest\n").unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.handle_command(parse_command("replay latest"));
+
+    assert_eq!(app.shell_view, ShellView::Replay("run-latest".to_string()));
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.prefix == "replay" && line.body == "run-latest"));
+}
+
+#[test]
+fn replay_latest_without_target_is_actionable() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+
+    app.handle_command(parse_command("replay latest"));
+
+    assert!(!matches!(app.shell_view, ShellView::Replay(_)));
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "error" && line.body.contains("replay latest needs a target")
+    }));
 }
 
 #[cfg(unix)]
@@ -3936,11 +4120,9 @@ fn run_command_dispatches_threat_model_build_through_langgraph_runtime_bridge() 
     });
     drain_chain_with_auto_reuse(&mut app);
 
-    // Auto-open lands on the data-flow diagram once the threat model is built.
-    assert_eq!(
-        app.shell_view,
-        ShellView::Scene(crate::scene3d::VizPage::Dfd)
-    );
+    // Auto-open lands on the Workbench DFD center once the threat model is built.
+    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.workbench_focus, WorkbenchPane::Center);
     assert!(app.log.iter().any(|line| {
         line.prefix == "result" && line.body.contains("threat-model:build complete")
     }));
@@ -4562,14 +4744,15 @@ fn target_picker_enter_applies_candidate_and_leaves_the_picker() {
 }
 
 #[test]
-fn target_picker_esc_defers_to_home_without_a_target() {
+fn target_picker_esc_defers_to_workbench_without_a_target() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.target_candidates = Vec::new();
     app.shell_view = ShellView::TargetPicker;
 
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
-    assert_eq!(app.shell_view, ShellView::Home);
+    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.workbench_focus, WorkbenchPane::Findings);
     assert!(app.target.is_none());
     assert!(app
         .log
@@ -4629,7 +4812,7 @@ fn scene_view_is_never_a_trap() {
     // /scene used to eat h/j/k/l (camera orbit) even mid-word, making
     // `back` and `home` untypeable on the default 3D page, and Esc with a
     // half-typed prompt toggled clear/restore forever. The gallery must
-    // always be exitable: Esc, q, and o leave directly, and typing yields the
+    // always be exitable: Esc and q leave directly, and typing yields the
     // hotkeys to the prompt.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Workbench;
@@ -4645,10 +4828,20 @@ fn scene_view_is_never_a_trap() {
 
     app.handle_command(ShellCommand::Scene);
     app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()));
-    assert!(!matches!(app.shell_view, ShellView::Scene(_)), "o exits");
+    assert!(
+        matches!(app.shell_view, ShellView::Scene(_)),
+        "o is not a scene exit alias"
+    );
+    app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty()));
+    assert!(
+        matches!(app.shell_view, ShellView::Scene(_)),
+        "n is not a scene paging alias"
+    );
+    assert_eq!(app.input, "on");
+    app.input.clear();
+    app.cursor = 0;
 
     // Typing a command containing orbit keys must reach the prompt intact.
-    app.handle_command(ShellCommand::Scene);
     for ch in "back".chars() {
         app.handle_key(KeyEvent::new(KeyCode::Char(ch), KeyModifiers::empty()));
     }
@@ -4738,8 +4931,6 @@ fn non_char_hotkey_code(trigger: HotkeyTrigger) -> KeyCode {
         (HotkeyTrigger::PageDown, KeyCode::PageDown),
         (HotkeyTrigger::Up, KeyCode::Up),
         (HotkeyTrigger::Down, KeyCode::Down),
-        (HotkeyTrigger::Left, KeyCode::Left),
-        (HotkeyTrigger::Right, KeyCode::Right),
     ];
     NON_CHAR_CODES
         .iter()
@@ -4957,7 +5148,7 @@ fn target_command_switches_target_directory() {
         .any(|scope| scope.rel_path == "vendor"));
     assert_eq!(
         app.active_scope.as_ref().map(|scope| scope.id.as_str()),
-        Some(kuzushi_core::ROOT_SCOPE_ID)
+        Some(kuzushi_core::workspace::ROOT_SCOPE_ID)
     );
     // When called with no path, should report the current target.
     app.handle_command(ShellCommand::Target(None));
@@ -5137,6 +5328,37 @@ fn mouse_wheel_scrolls_focused_workbench_pane_by_one_line() {
         modifiers: KeyModifiers::empty(),
     });
     assert_eq!(app.workbench_scroll.details, 0);
+}
+
+#[test]
+fn mouse_click_focuses_activity_panes() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Activity;
+    let mut session = ActivitySession::new("run-live");
+    session.tasks.insert(
+        "triage:run".to_string(),
+        DagTaskRow::queued("triage:run".to_string(), "triage".to_string(), Vec::new()),
+    );
+    app.activity = Some(session);
+
+    app.handle_mouse(crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column: 1,
+        row: 4,
+        modifiers: KeyModifiers::empty(),
+    });
+    assert_eq!(app.activity.as_ref().unwrap().pane_focus, PaneFocus::Left);
+
+    let width = crossterm::terminal::size()
+        .map(|(width, _)| width)
+        .unwrap_or(160);
+    app.handle_mouse(crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column: width.saturating_sub(1),
+        row: 4,
+        modifiers: KeyModifiers::empty(),
+    });
+    assert_eq!(app.activity.as_ref().unwrap().pane_focus, PaneFocus::Right);
 }
 
 #[test]
@@ -5702,7 +5924,7 @@ fn esc_clears_draft_instead_of_going_back_when_typing() {
 }
 
 #[test]
-fn esc_restores_stashed_draft_instead_of_going_back() {
+fn esc_goes_back_with_stashed_draft() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Tools;
     app.nav_history.push(ShellView::Catalog);
@@ -5710,8 +5932,23 @@ fn esc_restores_stashed_draft_instead_of_going_back() {
 
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
+    assert_eq!(app.shell_view, ShellView::Catalog);
+    assert!(app.input.is_empty(), "stashed draft should stay explicit");
+    assert_eq!(app.last_cleared_input.as_deref(), Some("scan"));
+}
+
+#[test]
+fn ctrl_underscore_restores_stashed_draft() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Tools;
+    app.nav_history.push(ShellView::Catalog);
+    app.last_cleared_input = Some("scan".to_string());
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('_'), KeyModifiers::CONTROL));
+
     assert_eq!(app.shell_view, ShellView::Tools, "view must not change");
     assert_eq!(app.input, "scan", "stashed draft should be restored");
+    assert!(app.last_cleared_input.is_none());
 }
 
 #[test]
@@ -5723,8 +5960,12 @@ fn esc_back_stays_advertised_after_a_draft_clear_and_view_change() {
 
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
     assert_eq!(app.last_cleared_input.as_deref(), Some("scan"));
+    assert!(app
+        .view_keybindings()
+        .iter()
+        .any(|binding| binding.action == ViewHotkeyAction::Back));
 
-    app.handle_command(ShellCommand::Help);
+    app.handle_command(ShellCommand::Help(None));
 
     assert!(app.last_cleared_input.is_none());
     assert!(app
@@ -5785,7 +6026,7 @@ fn taskless_activity_task_keys_log_why_they_do_not_focus() {
             line.prefix == "activity"
                 && line
                     .body
-                    .contains("no DAG tasks to focus; output is already full width")
+                    .contains("no task rows to focus; output is already full width")
         })
         .count();
     assert_eq!(explanations, 2);
@@ -5920,6 +6161,25 @@ fn pending_plan_y_key_applies() {
     app.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::empty()));
     assert!(app.pending_plan.is_none());
     assert!(app.log.iter().any(|line| line.body.contains("noted")));
+}
+
+#[test]
+fn pending_plan_enter_applies_default() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_pending_plan(PlanProposal {
+        goal: "g".to_string(),
+        summary: "s".to_string(),
+        changes: vec![PlanChange::Note {
+            text: "accepted by enter".to_string(),
+        }],
+        unsupported: vec![],
+    });
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    assert!(app.pending_plan.is_none());
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.body.contains("accepted by enter")));
 }
 
 #[test]
@@ -6244,32 +6504,7 @@ fn second_ctrl_c_during_background_tool_exits_after_cancelling_worker() {
 }
 
 #[test]
-fn activity_c_cancels_background_tool_without_leaving_tui() {
-    let mut app = ShellApp::new(V2Config::default(), None);
-    let cancel = ScanCancellation::default();
-    app.shell_view = ShellView::Activity;
-    app.activity = Some(ActivitySession::new("tool-x"));
-    app.tool_running = Some("triage:run".to_string());
-    app.tool_cancel = Some(cancel.clone());
-
-    app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE));
-    assert_eq!(app.input, "c", "lowercase c starts command input");
-    app.clear_input();
-
-    app.handle_key(KeyEvent::new(KeyCode::Char('C'), KeyModifiers::NONE));
-    assert!(app.activity_cancel_armed_at.is_some());
-    assert!(!app.tool_abort_requested);
-
-    app.handle_key(KeyEvent::new(KeyCode::Char('C'), KeyModifiers::NONE));
-
-    assert!(app.tool_abort_requested);
-    assert!(cancel.is_cancelled());
-    assert_eq!(app.shell_view, ShellView::Activity);
-    assert!(!app.should_quit);
-}
-
-#[test]
-fn activity_c_cancels_scan_and_background_tool_when_both_are_marked_running() {
+fn activity_ctrl_c_cancels_scan_and_background_tool_without_leaving_tui() {
     let tmp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     let scan_cancel = ScanCancellation::default();
@@ -6289,11 +6524,12 @@ fn activity_c_cancels_scan_and_background_tool_when_both_are_marked_running() {
     app.tool_running = Some("triage:run".to_string());
     app.tool_cancel = Some(tool_cancel.clone());
 
-    app.handle_key(KeyEvent::new(KeyCode::Char('C'), KeyModifiers::NONE));
-    assert!(app.activity_cancel_armed_at.is_some());
-    assert!(!app.scan.as_ref().is_some_and(|scan| scan.abort_requested));
+    assert!(!app
+        .view_keybindings()
+        .iter()
+        .any(|binding| binding.hint == "C"));
 
-    app.handle_key(KeyEvent::new(KeyCode::Char('C'), KeyModifiers::NONE));
+    app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::CONTROL));
 
     assert!(app.scan.as_ref().is_some_and(|scan| scan.abort_requested));
     assert!(scan_cancel.is_cancelled());
@@ -6301,6 +6537,7 @@ fn activity_c_cancels_scan_and_background_tool_when_both_are_marked_running() {
     assert!(tool_cancel.is_cancelled());
     assert_eq!(app.shell_view, ShellView::Activity);
     assert!(!app.should_quit);
+    assert!(app.ctrl_c_armed());
 }
 
 #[test]
@@ -6475,7 +6712,7 @@ fn recommend_command_opens_artifact_backed_view() {
     assert!(app
         .log
         .iter()
-        .any(|line| line.prefix == "recommend" && line.body.contains("latest")));
+        .any(|line| line.prefix == "recommend" && line.body.contains("choose a target")));
 }
 
 #[test]
@@ -6639,6 +6876,50 @@ fn confirm_resolve_remember_writes_session_allowlist() {
         .confirm_allowlist
         .contains("sandbox:run https://refund.acme/api"));
     assert!(app.advisory.pending_confirm.is_none());
+}
+
+#[test]
+fn pending_confirm_enter_is_consumed_without_approval() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.advisory.pending_confirm = Some(PendingConfirm {
+        kind: ConfirmKind::NetworkEgress,
+        tool: "sandbox:run".to_string(),
+        target: "https://refund.acme/api".to_string(),
+        rationale: None,
+        allowlist: None,
+        actor: None,
+        remembered: false,
+    });
+    app.set_input("help");
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+    assert!(app.advisory.pending_confirm.is_some());
+    assert_eq!(app.input, "help", "Enter must not submit behind the gate");
+    assert!(app.confirm_allowlist.is_empty());
+}
+
+#[test]
+fn pending_confirm_esc_denies_once_without_navigation() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Tools;
+    app.nav_history.push(ShellView::Catalog);
+    app.advisory.pending_confirm = Some(PendingConfirm {
+        kind: ConfirmKind::NetworkEgress,
+        tool: "sandbox:run".to_string(),
+        target: "https://refund.acme/api".to_string(),
+        rationale: None,
+        allowlist: None,
+        actor: None,
+        remembered: false,
+    });
+
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view, ShellView::Tools);
+    assert!(app.advisory.pending_confirm.is_none());
+    assert!(app.confirm_denylist.is_empty());
+    assert!(app.log.iter().any(|line| line.body.contains("denied once")));
 }
 
 #[test]
@@ -6974,10 +7255,10 @@ fn activity_view_pause_verbose_reset_keys() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.handle_command(ShellCommand::Activity);
 
-    // Pause toggle.
-    app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()));
+    // Space freezes only the Activity feed presentation.
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::empty()));
     assert!(app.activity.as_ref().unwrap().paused);
-    app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()));
+    app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::empty()));
     assert!(!app.activity.as_ref().unwrap().paused);
 
     // Verbose toggle.
@@ -6985,8 +7266,35 @@ fn activity_view_pause_verbose_reset_keys() {
     assert!(app.activity.as_ref().unwrap().verbose_subsystems);
 
     // Reset drops the session.
-    app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::empty()));
+    app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::empty()));
     assert!(app.activity.is_none());
+}
+
+#[test]
+fn activity_p_key_pauses_real_scan_work_not_the_feed() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let cancel = ScanCancellation::default();
+    app.shell_view = ShellView::Activity;
+    app.activity = Some(ActivitySession::new("run-live"));
+    app.scan_cancel = Some(cancel.clone());
+    app.scan = Some(ScanPanelState {
+        run_id: Some("run-1".to_string()),
+        target: PathBuf::from("."),
+        stage: "running".to_string(),
+        findings_count: 0,
+        running: true,
+        abort_requested: false,
+        error: None,
+    });
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()));
+
+    assert!(cancel.is_paused());
+    assert!(!app.activity.as_ref().unwrap().paused);
+    assert_eq!(
+        app.scan.as_ref().map(|scan| scan.stage.as_str()),
+        Some("paused")
+    );
 }
 
 #[test]
@@ -7001,7 +7309,7 @@ fn reset_during_live_run_preserves_run_identity() {
     session.task_cursor = 3;
     session.pane_focus = PaneFocus::Right;
 
-    app.handle_key(KeyEvent::new(KeyCode::Char('R'), KeyModifiers::empty()));
+    app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::empty()));
 
     let session = app.activity.as_ref().expect("live run session preserved");
     assert_eq!(session.run_id, "run-live");
@@ -7012,20 +7320,30 @@ fn reset_during_live_run_preserves_run_identity() {
 }
 
 #[test]
-fn activity_view_left_right_keys_cycle_deck_pages() {
+fn activity_bracket_keys_cycle_deck_pages_and_arrows_do_not() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.handle_command(ShellCommand::Activity);
     assert!(!app.view_keybindings().iter().any(|binding| {
         binding.trigger == HotkeyTrigger::Char('n') || binding.trigger == HotkeyTrigger::Char('N')
     }));
+    assert!(!app
+        .view_keybindings()
+        .iter()
+        .any(|binding| binding.hint.contains('←') || binding.hint.contains('→')));
 
     app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::empty()));
+    assert_eq!(
+        app.activity.as_ref().unwrap().deck_page,
+        super::view_state::ActivityDeckPage::Task
+    );
+
+    app.handle_key(KeyEvent::new(KeyCode::Char(']'), KeyModifiers::empty()));
     assert_eq!(
         app.activity.as_ref().unwrap().deck_page,
         super::view_state::ActivityDeckPage::Findings
     );
 
-    app.handle_key(KeyEvent::new(KeyCode::Left, KeyModifiers::empty()));
+    app.handle_key(KeyEvent::new(KeyCode::Char('['), KeyModifiers::empty()));
     assert_eq!(
         app.activity.as_ref().unwrap().deck_page,
         super::view_state::ActivityDeckPage::Task
@@ -7113,7 +7431,7 @@ fn activity_open_carries_deck_selection_into_workbench() {
 }
 
 #[test]
-fn activity_open_key_on_visualization_returns_to_activity_with_o() {
+fn activity_open_key_on_visualization_returns_to_activity_with_q() {
     use crate::scene3d::VizPage;
 
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -7126,7 +7444,7 @@ fn activity_open_key_on_visualization_returns_to_activity_with_o() {
     app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()));
     assert_eq!(app.shell_view, ShellView::Scene(VizPage::Dfd));
 
-    app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()));
+    app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()));
     assert_eq!(app.shell_view, ShellView::Activity);
 }
 
@@ -7289,7 +7607,7 @@ fn viz_page_for_tool_maps_artifacts_to_pages() {
         viz_page_for_tool("exploit-chain:scan"),
         Some(VizPage::ExploitChain)
     );
-    assert_eq!(viz_page_for_tool("threat-model:build"), Some(VizPage::Dfd));
+    assert_eq!(viz_page_for_tool("threat-model:build"), None);
     assert_eq!(viz_page_for_tool("sast:scan"), None);
     assert_eq!(viz_page_for_tool("recon:nmap"), None);
     // Prereq / read-only / non-flow-emitting verbs share a prefix but produce no
@@ -7365,6 +7683,27 @@ fn auto_open_viz_page_respects_manually_pinned_activity_output() {
 }
 
 #[test]
+fn auto_open_viz_page_respects_recent_manual_navigation() {
+    use crate::scene3d::VizPage;
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.auto_open_viz = true;
+    app.shell_view = ShellView::Catalog;
+    app.set_input("help");
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    assert_eq!(app.shell_view, ShellView::Help);
+
+    app.auto_open_viz_page(VizPage::Dfd);
+
+    assert_eq!(app.shell_view, ShellView::Help);
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "scene"
+            && line.body.contains("use `scene` to view")
+            && line.body.contains("setg ui.auto_open_viz false")
+    }));
+}
+
+#[test]
 fn scan_completion_auto_opens_the_findings_heatmap() {
     use crate::scene3d::VizPage;
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -7419,6 +7758,7 @@ fn planning_test_row(id: PlanningTaskId, state: PlanningArtifactState) -> Planni
         tool_name: id.tool_name(),
         artifact_path: std::path::PathBuf::from("/dev/null"),
         artifact_state: state,
+        artifact_modified: None,
         model_backed: id.is_model_backed(),
         required_cli: None,
         cli_available: true,

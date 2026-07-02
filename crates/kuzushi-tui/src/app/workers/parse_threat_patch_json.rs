@@ -111,6 +111,7 @@ pub(crate) fn scan_worker(
     registry: ModuleRegistry,
     config: V2Config,
     thinking_level: Option<String>,
+    trace_handle: TraceHandle,
 ) {
     if let Err(error) = run_scan_worker(
         target,
@@ -121,6 +122,7 @@ pub(crate) fn scan_worker(
         registry,
         config,
         thinking_level,
+        trace_handle,
     ) {
         let _ = tx.send(ScanEvent::Failed {
             error: error.to_string(),
@@ -137,6 +139,7 @@ pub(crate) fn run_scan_worker(
     registry: ModuleRegistry,
     config: V2Config,
     thinking_level: Option<String>,
+    trace_handle: TraceHandle,
 ) -> Result<()> {
     if cancel.is_cancelled() {
         anyhow::bail!("scan cancelled");
@@ -150,6 +153,7 @@ pub(crate) fn run_scan_worker(
         registry,
         config,
         thinking_level,
+        trace_handle,
     )
 }
 
@@ -162,9 +166,17 @@ pub(crate) fn run_registry_scan_worker(
     registry: ModuleRegistry,
     config: V2Config,
     thinking_level: Option<String>,
+    trace_handle: TraceHandle,
 ) -> Result<()> {
-    let invocation =
-        prepare_registry_scan_invocation(target, db_path, input, config, thinking_level, cancel)?;
+    let invocation = prepare_registry_scan_invocation(
+        target,
+        db_path,
+        input,
+        config,
+        thinking_level,
+        cancel,
+        trace_handle,
+    )?;
     let _ = tx.send(ScanEvent::Stage("running sast:scan".to_string()));
     let result = invocation.execute(registry)?;
     send_registry_scan_result(cancel, tx, result)
@@ -176,6 +188,7 @@ struct RegistryScanInvocation {
     input: serde_json::Value,
     config: V2Config,
     runtime: Option<LangGraphRuntime>,
+    trace_handle: TraceHandle,
 }
 
 impl RegistryScanInvocation {
@@ -186,12 +199,13 @@ impl RegistryScanInvocation {
             input,
             config,
             runtime,
+            trace_handle,
         } = self;
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
             findings_store: Some(&store),
-            trace: None,
+            trace: Some(&trace_handle),
         };
         registry.execute_tool_with_runtime(
             "sast:scan",
@@ -209,6 +223,7 @@ fn prepare_registry_scan_invocation(
     config: V2Config,
     thinking_level: Option<String>,
     cancel: &ScanCancellation,
+    trace_handle: TraceHandle,
 ) -> Result<RegistryScanInvocation> {
     let (workspace, store) = registry_scan_workspace_store(target, db_path)?;
     let runtime = registry_scan_runtime(&input, &config, thinking_level, cancel)?;
@@ -218,6 +233,7 @@ fn prepare_registry_scan_invocation(
         input,
         config,
         runtime,
+        trace_handle,
     })
 }
 

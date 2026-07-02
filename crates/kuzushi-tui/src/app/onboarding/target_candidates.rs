@@ -4,7 +4,9 @@
 //! the "no silent cwd fallback" rule (PR #64) while keeping the front door
 //! inside the guided journey.
 
+use anyhow::{Context, Result};
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use kuzushi_core::{NestedProjectKind, NestedProjectScope, NestedProjectScopeTree};
@@ -12,6 +14,9 @@ use kuzushi_core::{NestedProjectKind, NestedProjectScope, NestedProjectScopeTree
 /// Children of cwd shown at most — the picker is a launchpad, not a file
 /// browser; anything else is one `target <path>` away.
 const MAX_CHILD_CANDIDATES: usize = 8;
+const MAX_RECENT_CANDIDATES: usize = 8;
+const MAX_TARGET_HISTORY: usize = 20;
+const TARGET_HISTORY_FILE: &str = "target-history.json";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TargetCandidate {
@@ -33,6 +38,13 @@ pub struct TargetCandidateScope {
 /// previous kuzushi targets (`.kuzushi/`) ahead of plain git repos, each
 /// group alphabetical.
 pub fn discover_target_candidates(cwd: &Path) -> Vec<TargetCandidate> {
+    discover_target_candidates_with_recent(cwd, &load_recent_target_paths())
+}
+
+fn discover_target_candidates_with_recent(
+    cwd: &Path,
+    recent_paths: &[PathBuf],
+) -> Vec<TargetCandidate> {
     let scope_tree = kuzushi_core::discover_nested_project_scopes(cwd);
     let nested_scopes = nested_scope_candidates(cwd, &scope_tree);
     let nested_scope_paths = candidate_paths(&nested_scopes);
@@ -44,7 +56,15 @@ pub fn discover_target_candidates(cwd: &Path) -> Vec<TargetCandidate> {
     }];
     candidates.extend(nested_scopes);
     candidates.extend(child_candidates(cwd, &nested_scope_paths));
+    append_recent_candidates(&mut candidates, recent_paths);
     candidates
+}
+
+pub fn record_recent_target(path: &Path) -> Result<()> {
+    if skip_real_target_history_for_tests() {
+        return Ok(());
+    }
+    record_recent_target_at(&target_history_path()?, path)
 }
 
 fn child_candidates(cwd: &Path, excluded_paths: &BTreeSet<PathBuf>) -> Vec<TargetCandidate> {
@@ -87,6 +107,38 @@ fn child_candidate(path: PathBuf) -> TargetCandidate {
     }
 }
 
+fn append_recent_candidates(candidates: &mut Vec<TargetCandidate>, recent_paths: &[PathBuf]) {
+    let mut seen = candidate_paths(candidates);
+    let recent = recent_paths
+        .iter()
+        .filter_map(|path| recent_candidate(path, &mut seen))
+        .take(MAX_RECENT_CANDIDATES)
+        .collect::<Vec<_>>();
+    candidates.extend(recent);
+}
+
+fn recent_candidate(path: &Path, seen: &mut BTreeSet<PathBuf>) -> Option<TargetCandidate> {
+    if !path.is_dir() {
+        return None;
+    }
+    let normalized = normalized_candidate_path(path);
+    if !seen.insert(normalized) {
+        return None;
+    }
+    Some(TargetCandidate {
+        path: path.to_path_buf(),
+        label: recent_target_label(path),
+        hint: "recent target",
+        scope: None,
+    })
+}
+
+fn recent_target_label(path: &Path) -> String {
+    path.file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| path.display().to_string())
+}
+
 fn directory_hint(path: &Path, fallback: &'static str) -> &'static str {
     if path.join(".kuzushi").is_dir() {
         "previous kuzushi target"
@@ -101,11 +153,12 @@ fn directory_hint(path: &Path, fallback: &'static str) -> &'static str {
 fn candidate_rank(hint: &str) -> u8 {
     match hint {
         "previous kuzushi target" => 0,
-        "git submodule" => 1,
-        "vendored root" => 2,
-        "dependency root" => 3,
-        "git repo" => 4,
-        _ => 5,
+        "recent target" => 1,
+        "git submodule" => 2,
+        "vendored root" => 3,
+        "dependency root" => 4,
+        "git repo" => 5,
+        _ => 6,
     }
 }
 
@@ -128,6 +181,61 @@ fn candidate_paths(candidates: &[TargetCandidate]) -> BTreeSet<PathBuf> {
 
 fn normalized_candidate_path(path: &Path) -> PathBuf {
     path.canonicalize().unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn load_recent_target_paths() -> Vec<PathBuf> {
+    if skip_real_target_history_for_tests() {
+        return Vec::new();
+    }
+    target_history_path()
+        .ok()
+        .and_then(|path| read_target_history(&path))
+        .unwrap_or_default()
+}
+
+fn target_history_path() -> Result<PathBuf> {
+    Ok(kuzushi_core::ConfigPaths::from_target(None)?
+        .global_history_path()
+        .with_file_name(TARGET_HISTORY_FILE))
+}
+
+fn read_target_history(path: &Path) -> Option<Vec<PathBuf>> {
+    let raw = fs::read_to_string(path).ok()?;
+    let entries = serde_json::from_str::<Vec<String>>(&raw).ok()?;
+    Some(
+        entries
+            .into_iter()
+            .map(PathBuf::from)
+            .filter(|path| path.is_dir())
+            .collect(),
+    )
+}
+
+fn record_recent_target_at(history_path: &Path, target: &Path) -> Result<()> {
+    let target = normalized_candidate_path(target);
+    let mut entries = read_target_history(history_path).unwrap_or_default();
+    entries.retain(|path| normalized_candidate_path(path) != target);
+    entries.insert(0, target);
+    entries.truncate(MAX_TARGET_HISTORY);
+    if let Some(parent) = history_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Could not create {}", parent.display()))?;
+    }
+    let body = serde_json::to_string_pretty(&history_strings(&entries))
+        .context("Could not serialize target history")?;
+    fs::write(history_path, body)
+        .with_context(|| format!("Could not write {}", history_path.display()))
+}
+
+fn history_strings(entries: &[PathBuf]) -> Vec<String> {
+    entries
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect()
+}
+
+fn skip_real_target_history_for_tests() -> bool {
+    cfg!(test) && std::env::var_os("KUZUSHI_TUI_TEST_TARGET_HISTORY").is_none()
 }
 
 fn nested_scope_candidates(
@@ -219,6 +327,65 @@ mod tests {
             .map(|candidate| candidate.label)
             .collect();
         assert_eq!(labels, vec!["mid", "alpha", "zeta"]);
+    }
+
+    #[test]
+    fn recent_targets_from_other_cwds_are_listed() {
+        let cwd = tempfile::tempdir().expect("cwd");
+        let other = tempfile::tempdir().expect("other");
+        touch_dir(other.path(), ".git");
+
+        let labels: Vec<String> =
+            discover_target_candidates_with_recent(cwd.path(), &[other.path().to_path_buf()])
+                .into_iter()
+                .map(|candidate| format!("{}:{}", candidate.label, candidate.hint))
+                .collect();
+
+        let other_label = other
+            .path()
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .into_owned();
+        assert!(labels.contains(&format!("{other_label}:recent target")));
+    }
+
+    #[test]
+    fn recent_targets_dedupe_existing_candidates() {
+        let cwd = tempfile::tempdir().expect("cwd");
+        touch_dir(cwd.path(), "repo/.git");
+        let repo = cwd.path().join("repo");
+
+        let candidates = discover_target_candidates_with_recent(cwd.path(), &[repo]);
+        let repo_rows = candidates
+            .iter()
+            .filter(|candidate| candidate.label == "repo")
+            .count();
+
+        assert_eq!(repo_rows, 1);
+    }
+
+    #[test]
+    fn record_recent_target_moves_existing_entry_to_front() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let history_path = dir.path().join("target-history.json");
+        touch_dir(dir.path(), "one/.git");
+        touch_dir(dir.path(), "two/.git");
+
+        record_recent_target_at(&history_path, &dir.path().join("one")).unwrap();
+        record_recent_target_at(&history_path, &dir.path().join("two")).unwrap();
+        record_recent_target_at(&history_path, &dir.path().join("one")).unwrap();
+
+        let entries = read_target_history(&history_path).unwrap();
+        assert_eq!(
+            entries[0],
+            normalized_candidate_path(&dir.path().join("one"))
+        );
+        assert_eq!(
+            entries[1],
+            normalized_candidate_path(&dir.path().join("two"))
+        );
+        assert_eq!(entries.len(), 2);
     }
 
     #[test]

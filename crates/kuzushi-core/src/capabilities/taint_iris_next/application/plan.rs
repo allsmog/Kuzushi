@@ -387,12 +387,8 @@ pub(crate) fn catalog_regex_markers_for_discovery(
             if out.len() >= CATALOG_MARKER_CAP {
                 return out;
             }
-            // Default languages: when the marker doesn't specify them,
-            // inherit the entry's languages. Empty fall-back is "any C"
-            // — discovery's per-marker language filter is permissive
-            // when the marker list is empty? No — it requires a match.
-            // Inherit the entry's full language list as the default
-            // (empty-language markers would otherwise never fire).
+            // Empty-language markers never fire, so inherit the entry's
+            // language list when a marker does not declare its own.
             let languages = if marker.languages.is_empty() {
                 entry.languages.clone()
             } else {
@@ -1063,7 +1059,10 @@ pub(crate) struct TaintIrisNextArtifactLoad {
 }
 
 pub(crate) fn load_taint_iris_next_context(repo_root: &Path) -> TaintIrisNextArtifactLoad {
-    let path = crate::context::context_snapshot_path(repo_root);
+    load_taint_iris_next_json_artifact(crate::context::context_snapshot_path(repo_root))
+}
+
+fn load_taint_iris_next_json_artifact(path: PathBuf) -> TaintIrisNextArtifactLoad {
     match fs::read_to_string(&path) {
         Ok(raw) => match serde_json::from_str::<Value>(&raw) {
             Ok(value) => TaintIrisNextArtifactLoad {
@@ -1385,33 +1384,7 @@ mod catalog_regex_markers_for_discovery_tests {
 }
 
 pub(crate) fn load_taint_iris_next_threat_model(repo_root: &Path) -> TaintIrisNextArtifactLoad {
-    let path = crate::capabilities::threat_model::persistent_threat_model_path(repo_root);
-    match fs::read_to_string(&path) {
-        Ok(raw) => match serde_json::from_str::<Value>(&raw) {
-            Ok(value) => TaintIrisNextArtifactLoad {
-                status: TaintIrisNextArtifactStatus {
-                    ok: true,
-                    path: Some(path.display().to_string()),
-                    reason: "loaded".to_string(),
-                },
-                value: Some(value),
-            },
-            Err(error) => TaintIrisNextArtifactLoad {
-                status: TaintIrisNextArtifactStatus {
-                    ok: false,
-                    path: Some(path.display().to_string()),
-                    reason: format!("invalid JSON: {error}"),
-                },
-                value: None,
-            },
-        },
-        Err(_) => TaintIrisNextArtifactLoad {
-            status: TaintIrisNextArtifactStatus {
-                ok: false,
-                path: Some(path.display().to_string()),
-                reason: "not found".to_string(),
-            },
-            value: None,
-        },
-    }
+    load_taint_iris_next_json_artifact(
+        crate::capabilities::threat_model::persistent_threat_model_path(repo_root),
+    )
 }

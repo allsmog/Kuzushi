@@ -65,9 +65,14 @@ pub(in crate::modules) fn select_triage_findings(
     let scan_id = effective_triage_scan_id(store, input)?;
 
     let missing = match &input.fingerprints {
-        Some(references) => {
-            select_referenced_triage_findings(store, input, scan_id.as_deref(), references, &mut findings, &mut seen)?
-        }
+        Some(references) => select_referenced_triage_findings(
+            store,
+            input,
+            scan_id.as_deref(),
+            references,
+            &mut findings,
+            &mut seen,
+        )?,
         None => {
             select_all_triage_findings(store, input, scan_id.as_deref(), &mut findings, &mut seen)?;
             Vec::new()

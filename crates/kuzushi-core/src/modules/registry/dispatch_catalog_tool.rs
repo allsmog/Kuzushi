@@ -140,11 +140,57 @@ pub(in crate::modules) fn list_findings_tool(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
-    let filter = FindingListFilter::from_tool_input(input)?;
+    let mut filter = FindingListFilter::from_tool_input(input)?;
+    let requested_limit = filter.limit;
+    if filter.has_provenance_filter() {
+        filter.limit = FindingListFilter::MAX_LIMIT;
+    }
     let store = ctx
         .findings_store
         .context("findings:list requires a findings store")?;
-    Ok(store.list_findings_filtered(&filter)?.to_tool_json())
+    let report = store.list_findings_filtered(&filter)?;
+    if !filter.has_provenance_filter() {
+        return Ok(report.to_tool_json());
+    }
+    let target = findings_provenance_target(input, ctx)?;
+    let runs = crate::list_run_summaries(&target)?
+        .into_iter()
+        .map(|summary| (summary.run_id.clone(), summary))
+        .collect::<BTreeMap<_, _>>();
+    let findings = report
+        .findings
+        .into_iter()
+        .filter(|finding| filter.matches_run_provenance(finding, &runs))
+        .collect::<Vec<_>>();
+    let count = findings.len();
+    Ok(crate::findings::FindingListReport {
+        count,
+        findings: findings.into_iter().take(requested_limit).collect(),
+    }
+    .to_tool_json())
+}
+
+fn findings_provenance_target(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<std::path::PathBuf> {
+    if let Some(target) = input.get("target").and_then(Value::as_str) {
+        let trimmed = target.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("findings:list provenance filters require a non-empty target");
+        }
+        let candidate = std::path::PathBuf::from(trimmed);
+        return Ok(if candidate.is_absolute() {
+            candidate
+        } else {
+            std::env::current_dir()
+                .context("Could not resolve current directory")?
+                .join(candidate)
+        });
+    }
+    ctx.workspace
+        .map(|workspace| workspace.root().to_path_buf())
+        .context("findings:list provenance filters require an active workspace or target")
 }
 
 pub(in crate::modules) fn build_report_tool(
@@ -157,41 +203,56 @@ pub(in crate::modules) fn build_report_tool(
 }
 
 pub(in crate::modules) fn dispatch_native_security_tool(
+    registry: &ModuleRegistry,
     name: &str,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> ToolDispatchResult {
-    match name {
-        "dep-hygiene:check" => Some(run_dep_hygiene_tool(input, ctx)),
-        "secret-scan:scan" => Some(run_secret_scan_tool(input, ctx)),
-        "semgrep:scan"
-        | "codeql:scan"
-        | "iac-scan:scan"
-        | "cargo-audit:scan"
-        | "license-scan:scan"
-        | "sbom-scan:scan"
-        | "exploit-chain:scan"
-        | "android-apk:check-env"
-        | "android-apk:prepare"
-        | "android-apk:manifest-scan"
-        | "android-apk:network-security-config"
-        | "android-apk:fileprovider-scan"
-        | "android-apk:code-scan"
-        | "android-apk:sast-handoff"
-        | "android-apk:native-libs"
-        | "android-apk:hybrid-detect"
-        | "android-apk:scan" => Some(native_scanners::execute_tool(
+    if native_scanner_tool(name) {
+        return Some(native_scanners::execute_tool(
             name,
             input.clone(),
             ctx,
             runtime,
+        ));
+    }
+    match name {
+        "dep-hygiene:check" => Some(run_dep_hygiene_tool(input, ctx)),
+        "secret-scan:scan" => Some(run_secret_scan_tool(input, ctx)),
+        "sast:scan" => Some(run_sast_scan_with_registry(
+            registry,
+            input.clone(),
+            ctx,
+            runtime,
         )),
-        "sast:scan" => Some(run_sast_scan(input.clone(), ctx, runtime)),
         "cpg:build" => Some(run_cpg_build(input, ctx)),
         "codeql:create-db" => Some(run_codeql_create_db(input, ctx)),
         _ => None,
     }
+}
+
+fn native_scanner_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "semgrep:scan"
+            | "codeql:scan"
+            | "iac-scan:scan"
+            | "cargo-audit:scan"
+            | "license-scan:scan"
+            | "sbom-scan:scan"
+            | "exploit-chain:scan"
+            | "android-apk:check-env"
+            | "android-apk:prepare"
+            | "android-apk:manifest-scan"
+            | "android-apk:network-security-config"
+            | "android-apk:fileprovider-scan"
+            | "android-apk:code-scan"
+            | "android-apk:sast-handoff"
+            | "android-apk:native-libs"
+            | "android-apk:hybrid-detect"
+            | "android-apk:scan"
+    )
 }
 
 pub(in crate::modules) fn run_dep_hygiene_tool(
@@ -216,7 +277,10 @@ pub(in crate::modules) fn run_dep_hygiene_tool(
     if let Some(trace) = ctx.trace {
         let _ = trace.step("done", "check", "dep-hygiene complete").emit();
     }
-    Ok(output_with_core_findings(report.to_tool_json(), store_result))
+    Ok(output_with_core_findings(
+        report.to_tool_json(),
+        store_result,
+    ))
 }
 
 pub(in crate::modules) fn run_secret_scan_tool(
@@ -242,7 +306,10 @@ pub(in crate::modules) fn run_secret_scan_tool(
     if let Some(trace) = ctx.trace {
         let _ = trace.step("done", "scan", "secret-scan complete").emit();
     }
-    Ok(output_with_core_findings(report.to_tool_json(), store_result))
+    Ok(output_with_core_findings(
+        report.to_tool_json(),
+        store_result,
+    ))
 }
 
 struct StoredCoreFindings {

@@ -1,4 +1,6 @@
 use super::*;
+use crate::run_artifacts::RunSummary;
+use std::collections::BTreeMap;
 
 impl FindingListFilter {
     pub const MAX_LIMIT: usize = 500;
@@ -32,6 +34,12 @@ impl FindingListFilter {
                 .into_iter()
                 .map(normalize_filter_value),
         );
+        self.revision_sha.extend(normalized_filter_values(
+            string_values_any(input, &["sha", "rev", "revision"])?,
+        ));
+        self.branch
+            .extend(normalized_filter_values(string_values(input, "branch")?));
+        self.dirty = merge_dirty_filter(self.dirty, string_values(input, "dirty")?)?;
         self.vuln_source.extend(parsed_sources(string_values_any(
             input,
             &["source", "vulnSource", "vuln_source"],
@@ -65,34 +73,18 @@ impl FindingListFilter {
         vuln_source: Vec<String>,
         limit: usize,
     ) -> Result<Self> {
-        let severity = severity
-            .into_iter()
-            .flat_map(split_csv)
-            .map(|value| Severity::try_from(value.as_str()))
-            .collect::<Result<Vec<_>>>()?;
-        let verdict = verdict
-            .into_iter()
-            .flat_map(split_csv)
-            .map(|value| FindingVerdictFilter::from_input(&value))
-            .collect::<Result<Vec<_>>>()?;
-        let vuln_source = vuln_source
-            .into_iter()
-            .flat_map(split_csv)
-            .map(|value| {
-                VulnSource::parse(&value)
-                    .ok_or_else(|| anyhow::anyhow!("unknown vuln source {value:?}"))
-            })
-            .collect::<Result<Vec<_>>>()?;
-
         Ok(Self {
-            severity,
-            verdict,
+            severity: parsed_part_severities(severity)?,
+            verdict: parsed_part_verdicts(verdict)?,
             triage_state: Vec::new(),
             name: normalize_string(name),
             text_terms: Vec::new(),
             file_path: normalize_string(file_path),
             run_id: Vec::new(),
-            vuln_source,
+            revision_sha: Vec::new(),
+            branch: Vec::new(),
+            dirty: None,
+            vuln_source: parsed_part_sources(vuln_source)?,
             limit: limit.min(Self::MAX_LIMIT),
         })
     }
@@ -139,6 +131,9 @@ impl FindingListFilter {
                 self.file_path = merge_optional_contains(self.file_path.take(), values)
             }
             FilterKey::Name => self.name = merge_optional_contains(self.name.take(), values),
+            FilterKey::Revision => self.revision_sha.extend(normalized_filter_values(values)),
+            FilterKey::Branch => self.branch.extend(normalized_filter_values(values)),
+            FilterKey::Dirty => self.dirty = merge_dirty_filter(self.dirty, values)?,
             FilterKey::Run => self
                 .run_id
                 .extend(values.into_iter().map(normalize_filter_value)),
@@ -157,6 +152,56 @@ impl FindingListFilter {
             && file_path_matches(self, finding)
             && run_id_matches(self, finding)
     }
+
+    pub fn has_provenance_filter(&self) -> bool {
+        !self.revision_sha.is_empty() || !self.branch.is_empty() || self.dirty.is_some()
+    }
+
+    pub fn matches_run_provenance(
+        &self,
+        finding: &Finding,
+        runs: &BTreeMap<String, RunSummary>,
+    ) -> bool {
+        if !self.has_provenance_filter() {
+            return true;
+        }
+        let Some(summary) = finding.scan_id.as_ref().and_then(|run_id| runs.get(run_id)) else {
+            return false;
+        };
+        let Some(git) = summary.target_git.as_ref() else {
+            return false;
+        };
+        revision_sha_matches(self, &git.sha)
+            && branch_matches(self, git.branch.as_deref())
+            && dirty_matches(self, git.dirty)
+    }
+}
+
+fn parsed_part_severities(values: Vec<String>) -> Result<Vec<Severity>> {
+    values
+        .into_iter()
+        .flat_map(split_csv)
+        .map(|value| Severity::try_from(value.as_str()))
+        .collect()
+}
+
+fn parsed_part_verdicts(values: Vec<String>) -> Result<Vec<FindingVerdictFilter>> {
+    values
+        .into_iter()
+        .flat_map(split_csv)
+        .map(|value| FindingVerdictFilter::from_input(&value))
+        .collect()
+}
+
+fn parsed_part_sources(values: Vec<String>) -> Result<Vec<VulnSource>> {
+    values
+        .into_iter()
+        .flat_map(split_csv)
+        .map(|value| {
+            VulnSource::parse(&value)
+                .ok_or_else(|| anyhow::anyhow!("unknown vuln source {value:?}"))
+        })
+        .collect()
 }
 
 fn triage_state_matches(state: FindingTriageStateFilter, finding: &Finding) -> bool {
@@ -228,6 +273,28 @@ fn run_id_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
             .run_id
             .iter()
             .any(|run_id| run_matches(finding, run_id))
+}
+
+fn revision_sha_matches(filter: &FindingListFilter, sha: &str) -> bool {
+    filter.revision_sha.is_empty()
+        || filter.revision_sha.iter().any(|expected| {
+            sha.to_ascii_lowercase().starts_with(expected)
+        })
+}
+
+fn branch_matches(filter: &FindingListFilter, branch: Option<&str>) -> bool {
+    filter.branch.is_empty()
+        || branch.is_some_and(|branch| {
+            let branch = branch.to_ascii_lowercase();
+            filter
+                .branch
+                .iter()
+                .any(|expected| branch == *expected || branch.starts_with(expected))
+        })
+}
+
+fn dirty_matches(filter: &FindingListFilter, dirty: bool) -> bool {
+    filter.dirty.is_none_or(|expected| dirty == expected)
 }
 
 fn finding_contains_text(finding: &Finding, term: &str) -> bool {
@@ -311,6 +378,9 @@ enum FilterKey {
     Source,
     File,
     Name,
+    Revision,
+    Branch,
+    Dirty,
     Run,
     Limit,
 }
@@ -324,10 +394,12 @@ impl FilterKey {
             "source" | "channel" => Ok(Self::Source),
             "file" | "path" => Ok(Self::File),
             "name" | "title" | "q" => Ok(Self::Name),
+            "rev" | "revision" | "sha" => Ok(Self::Revision),
+            "branch" => Ok(Self::Branch),
+            "dirty" => Ok(Self::Dirty),
             "run" | "runid" | "scan" => Ok(Self::Run),
             "limit" => Ok(Self::Limit),
-            "rev" | "revision" | "sha" | "branch" | "dirty" | "owner" | "changed" | "strategy"
-            | "strat" | "scope" => unsupported_future_key(key),
+            "owner" | "changed" | "strategy" | "strat" | "scope" => unsupported_future_key(key),
             other => anyhow::bail!("unknown findings:list filter key {other:?}"),
         }
     }
@@ -341,6 +413,44 @@ fn unsupported_future_key<T>(key: &str) -> Result<T> {
 
 fn normalize_filter_value(value: String) -> String {
     value.trim().to_ascii_lowercase()
+}
+
+fn normalized_filter_values(values: Vec<String>) -> Vec<String> {
+    values
+        .into_iter()
+        .map(normalize_filter_value)
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn merge_dirty_filter(current: Option<bool>, values: Vec<String>) -> Result<Option<bool>> {
+    let Some(next) = parse_dirty_filter(values)? else {
+        return Ok(current);
+    };
+    match current {
+        Some(current) if current != next => {
+            anyhow::bail!("dirty filter cannot mix true and false values")
+        }
+        _ => Ok(Some(next)),
+    }
+}
+
+fn parse_dirty_filter(values: Vec<String>) -> Result<Option<bool>> {
+    let mut parsed = normalized_filter_values(values)
+        .into_iter()
+        .map(|value| match value.as_str() {
+            "1" | "true" | "yes" | "dirty" => Ok(true),
+            "0" | "false" | "no" | "clean" => Ok(false),
+            _ => anyhow::bail!("unknown dirty filter value {value:?}"),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    parsed.sort();
+    parsed.dedup();
+    match parsed.as_slice() {
+        [] => Ok(None),
+        [value] => Ok(Some(*value)),
+        _ => anyhow::bail!("dirty filter cannot mix true and false values"),
+    }
 }
 
 fn merge_optional_contains(current: Option<String>, values: Vec<String>) -> Option<String> {

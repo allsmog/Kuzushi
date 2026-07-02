@@ -92,7 +92,12 @@ fn ensure_dynamic_module_trusted(
     specifier: &str,
     options: &DynamicModuleLoadOptions,
 ) -> Result<()> {
-    if options.allow_untrusted || options.trusted_specifiers.iter().any(|entry| entry == specifier) {
+    if options.allow_untrusted
+        || options
+            .trusted_specifiers
+            .iter()
+            .any(|entry| entry == specifier)
+    {
         return Ok(());
     }
     anyhow::bail!(

@@ -12,6 +12,7 @@ pub(crate) const COMMAND_HANDLERS: &[CommandHandler] = &[
     handle_workbench_command,
     handle_findings_command,
     handle_open_command,
+    handle_demo_command,
     handle_scan_command,
     handle_model_command,
     handle_auth_command,

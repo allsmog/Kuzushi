@@ -2,8 +2,12 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 164
 ---
-Kuzushi · no target · target:all modules · ○ idle
- scan rescan target   options tune scanners   ask ask the agent
+ KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
+
+Kuzushi · no target · modules:all modules · o idle
+ scan rescan target   options tune scanners   ask ask the agent   workspace export findings report.sarif export SARIF
+
+ Tab cycle panes · Shift+Tab reverse · j/k move · Enter open finding · Esc back
 
  -- SOURCE · 2 files ---------------------------------------------------------------------------------------------------
 apps/  · 2
@@ -16,12 +20,13 @@ apps/  · 2
        ∅  source unavailable
        could not read source file apps/api/orders.rs: No such file or directory (os error 2)
 
-       ▸ open <id>             select another finding with source context
+       > open <id>             select another finding with source context
 
- -- FINDINGS · 2 · 1 triaged · 1 pending -------------------------------------------------------------------------------
+ -- FINDINGS · 2 · 1 triaged · 1 pending < focus -----------------------------------------------------------------------
 all:2  crit:1  high:1  med:0  low:0
-▌ F-0001  CRIT  sql injection via order_id concatenation tp 91%    apps/api/orders.rs:142 run:unknown    rev:unknown
-  F-0002  HIGH  path traversal in /assets/<file> untriaged apps/web/server.ts:301 run:unknown    rev:unknown
+proof + runtime · ◇ static/triaged · ? unconfirmed · ! rejected   conf verdict %
+# F-0001  CRIT  sql injection via... tp 91%    ◇ triaged-tp    apps/api/orders.rs:142 run:unknown    rev:unknown
+  F-0002  HIGH  path traversal in... untriaged ? unverified    apps/web/server.ts:301 run:unknown    rev:unknown
 
  -- DETAILS ------------------------------------------------------------------------------------------------------------
 F-0001 · CRITICAL
@@ -30,8 +35,10 @@ sql injection via order_id concatenation
 location: apps/api/orders.rs:142
 rule: demo.sqli
 tool: semgrep
-proof: signal_only - Scanner signal only; source-grounded evidence is not recorded
-verification: not attempted
+proof: ◇ triaged-tp - triage-confirmed true positive; static proof: signal_only - Scanner signal only; source-grounded
+evidence is not recorded
+verification: not attempted (run verify)
+commands: `verify F-0001` · `patch F-0001` · `workspace export findings report.sarif`
 MESSAGE
   sql injection via order_id concatenation
 TRIAGE
@@ -41,3 +48,4 @@ EVIDENCE
   no evidence rows recorded
 FINGERPRINT
   2289b7586b0fd07896fc43d80bdb025d
+ids like F-0001 are aliases · show aliases to list

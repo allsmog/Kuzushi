@@ -62,6 +62,7 @@ impl ShellApp {
             return false;
         }
         self.workbench_focus = WorkbenchPane::Findings;
+        self.log("workbench", "returned to findings — Esc again to leave");
         true
     }
 
@@ -186,7 +187,6 @@ impl ShellApp {
             ViewHotkeyAction::ActivityFocusSelected => self.open_or_focus_activity_task(),
             ViewHotkeyAction::ActivityOpenDeckArtifact => self.open_activity_deck_artifact(),
             ViewHotkeyAction::ActivityOpenFindings => self.open_activity_findings_review(),
-            ViewHotkeyAction::ActivityCancelRunning => self.cancel_activity_run(),
             _ => return false,
         }
         true
@@ -201,7 +201,7 @@ impl ShellApp {
         {
             self.log(
                 "activity",
-                "no DAG tasks to focus; output is already full width",
+                "no task rows to focus; output is already full width",
             );
             return true;
         }
@@ -235,32 +235,6 @@ impl ShellApp {
                     .values()
                     .any(|row| row.state == DagTaskState::Active)
             })
-    }
-
-    fn cancel_activity_run(&mut self) {
-        if !self.activity_cancel_armed() {
-            self.arm_activity_cancel();
-            return;
-        }
-        self.activity_cancel_armed_at = None;
-        let aborted = self.request_active_abort();
-        if !aborted {
-            self.log("activity", "no running tool or scan to cancel");
-        }
-    }
-
-    fn activity_cancel_armed(&self) -> bool {
-        self.activity_cancel_armed_at
-            .map(|armed_at| std::time::Instant::now().duration_since(armed_at) <= CTRL_C_ARM_WINDOW)
-            .unwrap_or(false)
-    }
-
-    fn arm_activity_cancel(&mut self) {
-        self.activity_cancel_armed_at = Some(std::time::Instant::now());
-        self.log(
-            "activity",
-            "press C again within 2s to cancel the running work",
-        );
     }
 
     fn open_activity_deck_artifact(&mut self) {
@@ -352,7 +326,7 @@ impl ShellApp {
         let message = match self.activity.as_ref() {
             None => "no active run to focus",
             Some(session) if session.tasks.is_empty() => {
-                "no DAG tasks to focus; output is already full width"
+                "no task rows to focus; output is already full width"
             }
             Some(_) => "no visible task at the current cursor",
         };
@@ -411,6 +385,9 @@ fn activity_page_for_focused_task(
 }
 
 fn activity_task_deck_page(task_id: &str) -> Option<ActivityDeckPage> {
+    if task_id == "threat-model:build" {
+        return Some(ActivityDeckPage::Dfd);
+    }
     if let Some(page) = viz_page_for_tool(task_id) {
         return Some(ActivityDeckPage::from_scene_page(page));
     }

@@ -33,6 +33,6 @@ pub(in crate::app) use keybinding_types::HotkeyTrigger;
 pub(in crate::app) use keybinding_types::KeyModifierState;
 pub(in crate::app) use keybinding_types::ViewHotkeyAction;
 pub(in crate::app) use keybinding_types::ViewKeybinding;
-pub(crate) use quit_chord::{is_activity_cancel_key, is_quit_chord};
+pub(crate) use quit_chord::is_quit_chord;
 use view_keybinding_groups::*;
 use view_keybinding_helpers::*;

@@ -56,6 +56,16 @@ fn render_terrain_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if cols == 0 || rows == 0 {
         return;
     }
+    if app.findings.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                "no risk surface yet — run `scan` to populate findings.",
+                crate::theme::muted(),
+            )])),
+            area,
+        );
+        return;
+    }
     let scene = attack_surface_scene(&risk_by_module(&app.findings));
     let cam = scene_camera(app);
     let fb = render_to_framebuffer(&scene, cam, cols, rows * 2);

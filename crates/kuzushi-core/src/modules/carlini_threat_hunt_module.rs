@@ -42,10 +42,14 @@ pub(in crate::modules) fn carlini_threat_hunt_options() -> Vec<OptionSpec> {
 }
 
 fn carlini_max_actors_option() -> OptionSpec {
-    opt("maxActors", OptionType::Int, "Maximum threat-model actors to hunt.")
-        .aliases(&["max_actors"])
-        .default(json!(5))
-        .advanced()
+    opt(
+        "maxActors",
+        OptionType::Int,
+        "Maximum threat-model actors to hunt.",
+    )
+    .aliases(&["max_actors"])
+    .default(json!(5))
+    .advanced()
 }
 
 fn carlini_runs_per_actor_option() -> OptionSpec {
@@ -56,11 +60,15 @@ fn carlini_runs_per_actor_option() -> OptionSpec {
 }
 
 fn carlini_prompt_context_option() -> OptionSpec {
-    opt("promptContext", OptionType::Enum, "Actor prompt context variant.")
-        .aliases(&["prompt_context"])
-        .choices(&["actor-flows", "actor-flows-threat-titles"])
-        .default(json!("actor-flows"))
-        .advanced()
+    opt(
+        "promptContext",
+        OptionType::Enum,
+        "Actor prompt context variant.",
+    )
+    .aliases(&["prompt_context"])
+    .choices(&["actor-flows", "actor-flows-threat-titles"])
+    .default(json!("actor-flows"))
+    .advanced()
 }
 
 fn carlini_debug_inline_threats_option() -> OptionSpec {
@@ -69,9 +77,9 @@ fn carlini_debug_inline_threats_option() -> OptionSpec {
         OptionType::Bool,
         "Inline raw threat-model details in actor prompts.",
     )
-        .aliases(&["debug_inline_threats"])
-        .default(json!(false))
-        .advanced()
+    .aliases(&["debug_inline_threats"])
+    .default(json!(false))
+    .advanced()
 }
 
 pub(crate) fn taint_iris_module() -> BuiltinModule {
@@ -206,59 +214,134 @@ fn taint_iris_next_planning_options() -> Vec<OptionSpec> {
 fn taint_iris_next_planning_knobs() -> Vec<OptionSpec> {
     let mut options = taint_iris_next_backend_knobs();
     options.extend(taint_iris_next_limit_knobs());
-    options.extend(vec![cwe_focus_option(), discover_signals_option(), target_subdir_option()]);
+    options.extend(vec![
+        cwe_focus_option(),
+        discover_signals_option(),
+        target_subdir_option(),
+    ]);
     options
 }
 
 fn taint_iris_next_backend_knobs() -> Vec<OptionSpec> {
     vec![
-        opt("backend", OptionType::Enum, "Evidence backend selector.")
-            .choices(&["auto", "structural", "semgrep", "codeql", "joern", "language"])
-            .default(json!("auto"))
-            .advanced(),
-        opt("languages", OptionType::StringList, "Language filters for catalog ranking.")
-            .advanced(),
-        opt("maxBudgetUsd", OptionType::Float, "Maximum runtime budget for this hunt.")
-            .aliases(&["max_budget_usd"])
-            .advanced(),
-        opt("codeqlAnalyzeTimeoutMs", OptionType::Int, "CodeQL analyze timeout in milliseconds.")
-            .aliases(&["codeql_analyze_timeout_ms"])
-            .default(json!(180000))
-            .advanced(),
-        opt("minEvidenceLevel", OptionType::Enum, "Minimum evidence level.")
-            .aliases(&["min_evidence_level"])
-            .choices(&["path", "linked", "candidate"])
-            .default(json!("linked"))
-            .advanced(),
+        evidence_backend_option(),
+        catalog_languages_option(),
+        max_budget_usd_option(),
+        codeql_analyze_timeout_option(),
+        min_evidence_level_option(),
     ]
 }
 
 fn taint_iris_next_limit_knobs() -> Vec<OptionSpec> {
     vec![
-        opt("maxCatalogEntries", OptionType::Int, "Maximum catalog entries.")
-            .aliases(&["maxCwes", "max_catalog_entries", "max_cwes"])
-            .default(json!(24))
-            .advanced(),
-        opt("maxCandidatesPerCwe", OptionType::Int, "Maximum candidates per CWE.")
-            .aliases(&["max_candidates_per_cwe"])
-            .default(json!(2000))
-            .advanced(),
-        opt("maxEvidencePerCwe", OptionType::Int, "Maximum evidence items per CWE.")
-            .aliases(&["max_evidence_per_cwe"])
-            .default(json!(12))
-            .advanced(),
-        opt("maxFilesPerQuery", OptionType::Int, "Maximum files per query.")
-            .aliases(&["max_files_per_query"])
-            .default(json!(120))
-            .advanced(),
-        opt("maxSpecsPerCwe", OptionType::Int, "Maximum specs per CWE.")
-            .aliases(&["max_specs_per_cwe"])
-            .default(json!(16))
-            .advanced(),
-        opt("maxAgentFindings", OptionType::Int, "Maximum agent findings.")
-            .aliases(&["max_agent_findings"])
-            .advanced(),
+        max_catalog_entries_option(),
+        max_candidates_per_cwe_option(),
+        max_evidence_per_cwe_option(),
+        max_files_per_query_option(),
+        max_specs_per_cwe_option(),
+        max_agent_findings_option(),
     ]
+}
+
+fn evidence_backend_option() -> OptionSpec {
+    opt("backend", OptionType::Enum, "Evidence backend selector.")
+        .choices(&[
+            "auto",
+            "structural",
+            "semgrep",
+            "codeql",
+            "joern",
+            "language",
+        ])
+        .default(json!("auto"))
+        .advanced()
+}
+
+fn catalog_languages_option() -> OptionSpec {
+    opt(
+        "languages",
+        OptionType::StringList,
+        "Language filters for catalog ranking.",
+    )
+    .advanced()
+}
+
+fn max_budget_usd_option() -> OptionSpec {
+    opt(
+        "maxBudgetUsd",
+        OptionType::Float,
+        "Maximum runtime budget for this hunt.",
+    )
+    .aliases(&["max_budget_usd"])
+    .advanced()
+}
+
+fn codeql_analyze_timeout_option() -> OptionSpec {
+    opt(
+        "codeqlAnalyzeTimeoutMs",
+        OptionType::Int,
+        "CodeQL analyze timeout in milliseconds.",
+    )
+    .aliases(&["codeql_analyze_timeout_ms"])
+    .default(json!(180000))
+    .advanced()
+}
+
+fn min_evidence_level_option() -> OptionSpec {
+    opt("minEvidenceLevel", OptionType::Enum, "Minimum evidence level.")
+        .aliases(&["min_evidence_level"])
+        .choices(&["path", "linked", "candidate"])
+        .default(json!("linked"))
+        .advanced()
+}
+
+fn max_catalog_entries_option() -> OptionSpec {
+    opt("maxCatalogEntries", OptionType::Int, "Maximum catalog entries.")
+        .aliases(&["maxCwes", "max_catalog_entries", "max_cwes"])
+        .default(json!(24))
+        .advanced()
+}
+
+fn max_candidates_per_cwe_option() -> OptionSpec {
+    opt(
+        "maxCandidatesPerCwe",
+        OptionType::Int,
+        "Maximum candidates per CWE.",
+    )
+    .aliases(&["max_candidates_per_cwe"])
+    .default(json!(2000))
+    .advanced()
+}
+
+fn max_evidence_per_cwe_option() -> OptionSpec {
+    opt(
+        "maxEvidencePerCwe",
+        OptionType::Int,
+        "Maximum evidence items per CWE.",
+    )
+    .aliases(&["max_evidence_per_cwe"])
+    .default(json!(12))
+    .advanced()
+}
+
+fn max_files_per_query_option() -> OptionSpec {
+    opt("maxFilesPerQuery", OptionType::Int, "Maximum files per query.")
+        .aliases(&["max_files_per_query"])
+        .default(json!(120))
+        .advanced()
+}
+
+fn max_specs_per_cwe_option() -> OptionSpec {
+    opt("maxSpecsPerCwe", OptionType::Int, "Maximum specs per CWE.")
+        .aliases(&["max_specs_per_cwe"])
+        .default(json!(16))
+        .advanced()
+}
+
+fn max_agent_findings_option() -> OptionSpec {
+    opt("maxAgentFindings", OptionType::Int, "Maximum agent findings.")
+        .aliases(&["max_agent_findings"])
+        .advanced()
 }
 
 fn taint_iris_next_agent_knobs() -> Vec<OptionSpec> {

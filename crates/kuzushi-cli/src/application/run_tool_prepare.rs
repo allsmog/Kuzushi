@@ -1,7 +1,7 @@
 use super::run_tool::run_option_store;
 use crate::dispatch::load_dynamic_modules;
 use crate::tool_requirements::{
-    reject_shell_only_run_dot, run_tool_workspace, tool_needs_finding_store,
+    reject_shell_only_run_dot, run_tool_workspace_for_input, tool_needs_finding_store,
 };
 use crate::tool_run_artifacts::fail_cli_tool_run;
 use anyhow::Result;
@@ -76,7 +76,7 @@ impl CliToolRunBootstrap {
     fn new(tool: String, target: Option<PathBuf>, raw_input: &str) -> Result<Self> {
         let registry = ModuleRegistry::with_v2_builtins();
         let run_id = new_run_id("run");
-        let workspace = match run_tool_workspace(&tool, target.as_deref()) {
+        let workspace = match run_tool_workspace_for_input(&tool, target.as_deref(), raw_input) {
             Ok(workspace) => workspace,
             Err(error) => {
                 record_early_prepare_failure(&run_id, &tool, raw_input, &error.to_string())?;

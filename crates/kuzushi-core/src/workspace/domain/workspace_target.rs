@@ -76,7 +76,10 @@ impl WorkspaceTarget {
             fs::canonicalize(path)
                 .with_context(|| format!("Could not resolve {}", path.display()))?
         } else {
-            anyhow::bail!("Target path does not exist: {}", path.display());
+            anyhow::bail!(
+                "Target path does not exist: {}. Next: pass an existing directory with --target <path> (or --target . for the current directory).",
+                path.display()
+            );
         };
 
         if !root.is_dir() {

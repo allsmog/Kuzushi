@@ -119,14 +119,10 @@ pub(crate) fn parse_findings_command(args: &[&str]) -> ShellCommand {
                 ShellCommand::FindingsFilter(expression)
             }
         }
-        Some("export") => args
-            .get(1)
-            .map(|path| {
-                ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
-                    output: PathBuf::from(path),
-                })
-            })
-            .unwrap_or_else(|| ShellCommand::Unknown("findings export".to_string())),
+        Some("export") => parse_workspace_findings_export_args(
+            args.get(1..).unwrap_or_default(),
+            "findings export",
+        ),
         Some(other) => ShellCommand::Unknown(format!("findings {other}")),
         None => ShellCommand::Findings,
     }

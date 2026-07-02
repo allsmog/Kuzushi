@@ -1,8 +1,8 @@
 use super::*;
 use crate::ui_view_models::{
     plain_command_result_model, plain_live_activity_model, plain_prereq_plan_model,
-    plain_render_mode, retry_card_model, PlainCommandResultModel, PlainLiveActivityModel,
-    PlainPrereqPlanModel, PlainRenderMode, RetryCardModel,
+    plain_render_mode, retry_card_model, PlainCommandResultModel, PlainInteractiveOnlyModel,
+    PlainLiveActivityModel, PlainPrereqPlanModel, PlainRenderMode, RetryCardModel,
 };
 
 pub fn render_plain_app(app: &ShellApp, width: usize) -> String {
@@ -40,7 +40,10 @@ pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
         PlainRenderMode::KnowledgeBase => plain_knowledge_base_lines(app, width),
         PlainRenderMode::Config => plain_config_lines(app, width),
         PlainRenderMode::Help => plain_help_lines(app, width),
-        PlainRenderMode::LineBased => plain_line_based_view_lines(app, width),
+        PlainRenderMode::InteractiveOnly(model) => interactive_only_plain_lines(app, width, model),
+        PlainRenderMode::LineBased {
+            include_context_strip,
+        } => plain_line_based_view_lines(app, width, include_context_strip),
     };
 
     lines = prepend_plain_activity_lines(app, width, lines);
@@ -49,12 +52,36 @@ pub(crate) fn render_plain_lines(app: &ShellApp, width: usize) -> Vec<String> {
     trim_plain_lines(lines)
 }
 
-fn plain_line_based_view_lines(app: &ShellApp, width: usize) -> Vec<String> {
+fn interactive_only_plain_lines(
+    app: &ShellApp,
+    width: usize,
+    model: PlainInteractiveOnlyModel,
+) -> Vec<String> {
+    let mut lines = plain_context_strip(app, width);
+    lines.push(String::new());
+    lines.push(plain_section_divider(model.title, width));
+    lines.push(model.next);
+    lines
+}
+
+fn plain_line_based_view_lines(
+    app: &ShellApp,
+    width: usize,
+    include_context_strip: bool,
+) -> Vec<String> {
     let area = Rect::new(0, 0, width.min(u16::MAX as usize) as u16, u16::MAX);
-    shell_view_lines(app, area)
+    let body = shell_view_lines(app, area)
         .into_iter()
         .map(line_to_unstyled_text)
-        .collect()
+        .collect::<Vec<_>>();
+    if !include_context_strip {
+        return body;
+    }
+
+    let mut lines = plain_context_strip(app, width);
+    lines.push(String::new());
+    lines.extend(body);
+    lines
 }
 
 pub(crate) fn render_plain_command_result_lines(

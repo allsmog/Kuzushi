@@ -12,9 +12,7 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 use super::extract_findings::extract_findings;
-use super::toolbox::{
-    build_uaf_hunt_toolbox, new_clang_call_stats, snapshot_clang_call_stats,
-};
+use super::toolbox::{build_uaf_hunt_toolbox, new_clang_call_stats, snapshot_clang_call_stats};
 
 pub fn run_uaf_hunt_report(
     input: &Value,
@@ -47,7 +45,11 @@ fn prepare_uaf_hunt_run<'a>(
     let target = resolve_target(input, ctx)?;
     let options = parse_uaf_hunt_input(input, &target)?;
     let parent_step = emit_uaf_hunt_start(ctx, &target);
-    emit_uaf_hunt_progress(ctx, parent_step, "input · parsed compile database and agent budget");
+    emit_uaf_hunt_progress(
+        ctx,
+        parent_step,
+        "input · parsed compile database and agent budget",
+    );
     let runtime = require_runtime(runtime)?;
     if !runtime.supports_tools() {
         emit_uaf_hunt_child(
@@ -242,11 +244,9 @@ fn current_dir_target() -> Result<PathBuf> {
 
 fn require_runtime(runtime: Option<&dyn AgentRuntime>) -> Result<&dyn AgentRuntime> {
     runtime.ok_or_else(|| {
-        anyhow::anyhow!(
-            "uaf-hunt:hunt requires an agent runtime; none configured. \
-             Set a model with `model anthropic:claude-haiku-4-5` (shell) \
-             or `KUZUSHI_MODEL=...` (CLI) before invoking."
-        )
+        anyhow::anyhow!(crate::runtime::missing_agent_runtime_message(
+            "uaf-hunt:hunt"
+        ))
     })
 }
 

@@ -9,6 +9,7 @@ pub(in crate::modules) struct TriageRunInput {
     pub(in crate::modules) cost_cap_usd: Option<f64>,
     pub(in crate::modules) prefilter_threshold: i64,
     pub(in crate::modules) stage2_tier: ModelTier,
+    pub(in crate::modules) model: Option<String>,
     pub(in crate::modules) retriage: bool,
 }
 
@@ -22,6 +23,7 @@ impl TriageRunInput {
             cost_cap_usd: parse_triage_cost_cap_usd(input)?,
             prefilter_threshold: parse_triage_prefilter_threshold(input),
             stage2_tier: parse_triage_stage2_tier(input)?,
+            model: optional_nonempty_string(input, "model")?,
             retriage: parse_triage_retriage(input),
         })
     }
@@ -80,27 +82,8 @@ pub(in crate::modules) fn nonempty_fingerprints(fingerprints: Vec<String>) -> Op
 }
 
 pub(in crate::modules) fn parse_triage_retriage(input: &Value) -> bool {
-    bool_input_any(
-        input,
-        &["retriage", "force", "includeTriaged", "include_triaged"],
-    )
-}
-
-fn bool_input_any(input: &Value, keys: &[&str]) -> bool {
-    keys.iter()
-        .find_map(|key| input.get(*key))
-        .and_then(bool_value)
+    input
+        .get("retriage")
+        .and_then(Value::as_bool)
         .unwrap_or(false)
-}
-
-fn bool_value(value: &Value) -> Option<bool> {
-    match value {
-        Value::Bool(value) => Some(*value),
-        Value::String(value) => match value.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => Some(true),
-            "0" | "false" | "no" | "off" => Some(false),
-            _ => None,
-        },
-        _ => None,
-    }
 }

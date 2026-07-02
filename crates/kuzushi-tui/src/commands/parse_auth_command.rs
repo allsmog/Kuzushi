@@ -57,7 +57,7 @@ pub(crate) fn threat_ask_command(args: &[&str]) -> ShellCommand {
 pub(crate) fn parse_show_command(args: &[&str], original: &str) -> ShellCommand {
     match args.first().copied() {
         Some("modules") => ShellCommand::Modules,
-        Some("tools") => ShellCommand::Tools,
+        Some("tools") => ShellCommand::Tools(join_query(args.get(1..).unwrap_or_default())),
         Some("runs") => ShellCommand::ShowRuns,
         Some("aliases") => ShellCommand::ShowAliases(args.get(1).map(|value| (*value).to_string())),
         Some("prompts") => ShellCommand::Prompts,
@@ -68,6 +68,11 @@ pub(crate) fn parse_show_command(args: &[&str], original: &str) -> ShellCommand 
         Some(other) => ShellCommand::Unknown(format!("/show {other}")),
         None => ShellCommand::Unknown(original.to_string()),
     }
+}
+
+fn join_query(args: &[&str]) -> Option<String> {
+    let query = args.join(" ");
+    (!query.trim().is_empty()).then_some(query)
 }
 
 pub(crate) fn parse_context_command(parts: Vec<&str>) -> ShellCommand {
@@ -87,18 +92,23 @@ pub(crate) fn parse_workspace_command(parts: Vec<&str>) -> ShellCommand {
     match parts.first().copied() {
         None | Some("status") => ShellCommand::Workspace(WorkspaceCommand::Status),
         Some("export") => match parts.get(1).copied() {
-            Some("findings") => parts
-                .get(2)
-                .map(|path| {
-                    ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
-                        output: PathBuf::from(path),
-                    })
-                })
-                .unwrap_or_else(|| ShellCommand::Unknown("workspace export findings".to_string())),
+            Some("findings") => parse_workspace_findings_export_args(
+                parts.get(2..).unwrap_or_default(),
+                "workspace export findings",
+            ),
             Some(other) => ShellCommand::Workspace(WorkspaceCommand::Unsupported(format!(
                 "workspace export {other}"
             ))),
             None => ShellCommand::Unknown("workspace export".to_string()),
+        },
+        Some("scope") => match parts.get(1).copied() {
+            Some("init") => ShellCommand::Workspace(WorkspaceCommand::ScopeInit),
+            Some(other) => ShellCommand::Workspace(WorkspaceCommand::Unsupported(format!(
+                "workspace scope {other}"
+            ))),
+            None => ShellCommand::Workspace(WorkspaceCommand::Unsupported(
+                "workspace scope".to_string(),
+            )),
         },
         Some("import") => ShellCommand::Workspace(WorkspaceCommand::Unsupported(
             "workspace import".to_string(),
@@ -107,4 +117,121 @@ pub(crate) fn parse_workspace_command(parts: Vec<&str>) -> ShellCommand {
             ShellCommand::Workspace(WorkspaceCommand::Unsupported(format!("workspace {other}")))
         }
     }
+}
+
+pub(crate) fn parse_workspace_findings_export_args(
+    args: &[&str],
+    missing_label: &str,
+) -> ShellCommand {
+    let Some((output, format)) = workspace_findings_export_args(args) else {
+        return ShellCommand::Unknown(missing_label.to_string());
+    };
+    ShellCommand::Workspace(WorkspaceCommand::ExportFindings { output, format })
+}
+
+fn workspace_findings_export_args(args: &[&str]) -> Option<(PathBuf, Option<String>)> {
+    let mut output: Option<PathBuf> = None;
+    let mut format: Option<String> = None;
+    let mut index = 0;
+    while index < args.len() {
+        let consumed = apply_workspace_export_arg(args, index, &mut output, &mut format)?;
+        index += consumed;
+    }
+    output.map(|output| (output, format))
+}
+
+fn apply_workspace_export_arg(
+    args: &[&str],
+    index: usize,
+    output: &mut Option<PathBuf>,
+    format: &mut Option<String>,
+) -> Option<usize> {
+    let token = args.get(index).copied()?;
+    apply_format_style_export_arg(args, index, token, format)
+        .or_else(|| apply_positional_export_arg(args, token, output, format))
+}
+
+fn apply_format_style_export_arg(
+    args: &[&str],
+    index: usize,
+    token: &str,
+    format: &mut Option<String>,
+) -> Option<usize> {
+    if apply_explicit_format_token(token, format) {
+        return Some(1);
+    }
+    if workspace_export_format_flag(token) {
+        *format = args.get(index + 1).map(|value| (*value).to_string());
+        return Some(2);
+    }
+    None
+}
+
+fn apply_positional_export_arg(
+    args: &[&str],
+    token: &str,
+    output: &mut Option<PathBuf>,
+    format: &mut Option<String>,
+) -> Option<usize> {
+    if apply_leading_format_token(args, token, output, format) {
+        return Some(1);
+    }
+    if apply_output_token(token, output) {
+        return Some(1);
+    }
+    if apply_trailing_format_token(token, format) {
+        return Some(1);
+    }
+    None
+}
+
+fn apply_explicit_format_token(token: &str, format: &mut Option<String>) -> bool {
+    explicit_format_value(token).is_some_and(|value| {
+        *format = Some(value.to_string());
+        true
+    })
+}
+
+fn workspace_export_format_flag(token: &str) -> bool {
+    matches!(token, "--format" | "format")
+}
+
+fn apply_leading_format_token(
+    args: &[&str],
+    token: &str,
+    output: &Option<PathBuf>,
+    format: &mut Option<String>,
+) -> bool {
+    output.is_none() && args.len() > 1 && apply_format_token(token, format)
+}
+
+fn apply_output_token(token: &str, output: &mut Option<PathBuf>) -> bool {
+    if output.is_some() {
+        return false;
+    }
+    *output = Some(PathBuf::from(token));
+    true
+}
+
+fn apply_trailing_format_token(token: &str, format: &mut Option<String>) -> bool {
+    format.is_none() && apply_format_token(token, format)
+}
+
+fn apply_format_token(token: &str, format: &mut Option<String>) -> bool {
+    if !workspace_export_format_token(token) {
+        return false;
+    }
+    *format = Some(token.to_string());
+    true
+}
+
+fn explicit_format_value(token: &str) -> Option<&str> {
+    token
+        .strip_prefix("format=")
+        .or_else(|| token.strip_prefix("--format="))
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn workspace_export_format_token(token: &str) -> bool {
+    kuzushi_core::WorkspaceExportFormat::from_input(token).is_ok()
 }

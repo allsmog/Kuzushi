@@ -14,7 +14,7 @@ impl ShellApp {
                 self.log(
                     "budget",
                     format!(
-                        "session cost ${:.4} reached cap ${:.4}; press [c] to continue or [a] to abort",
+                        "session cost ${:.4} reached cap ${:.4}; c=continue · a=abort",
                         self.session_cost_usd, limit
                     ),
                 );

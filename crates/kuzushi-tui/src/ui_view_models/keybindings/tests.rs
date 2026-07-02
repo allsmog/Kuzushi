@@ -1,5 +1,6 @@
 use super::*;
 use crate::scene3d::VizPage;
+use crate::ui_view_models::WORKBENCH_REPORT_COMMAND;
 use crate::{ScanPanelState, ShellView};
 use kuzushi_core::V2Config;
 use std::path::PathBuf;
@@ -32,6 +33,25 @@ fn workbench_footer_advertises_esc_back_and_run_path() {
     assert!(bindings.contains(&bind("Esc", "back")));
     assert!(bindings.contains(&bind("scan", "rescan")));
     assert!(bindings.contains(&bind("Ctrl+C", "exit")));
+    assert!(!bindings.contains(&bind(WORKBENCH_REPORT_COMMAND, "export report")));
+}
+
+#[test]
+fn workbench_footer_advertises_export_when_findings_exist() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.findings = vec![kuzushi_core::Finding::new_semgrep(
+        "demo.rule",
+        "src/app.rs",
+        1,
+        Some(1),
+        kuzushi_core::Severity::High,
+        "demo",
+    )];
+
+    let bindings = footer_keybindings(&app);
+
+    assert!(bindings.contains(&bind(WORKBENCH_REPORT_COMMAND, "export report")));
 }
 
 #[test]
@@ -140,14 +160,17 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     app.shell_view = ShellView::Scene(VizPage::Dfd);
 
     let dfd_bindings = footer_keybindings(&app);
-    assert!(dfd_bindings.contains(&bind("Tab/n", "next page")));
-    assert!(dfd_bindings.contains(&bind("S-Tab/N", "prev page")));
+    assert!(dfd_bindings.contains(&bind("j/k/g/G", "scroll")));
+    assert!(dfd_bindings.contains(&bind("Tab", "next page")));
+    assert!(dfd_bindings.contains(&bind("Shift+Tab", "prev page")));
+    assert!(dfd_bindings.contains(&bind("Esc/q", "leave")));
     assert!(!dfd_bindings.contains(&bind("h/l/j/k", "orbit 3D")));
     assert!(!dfd_bindings.contains(&bind("space/p", "pause")));
     assert!(!dfd_bindings.contains(&bind("r", "reset")));
 
     app.shell_view = ShellView::Scene(VizPage::AttackSurface);
     let terrain_bindings = footer_keybindings(&app);
+    assert!(!terrain_bindings.contains(&bind("j/k/g/G", "scroll")));
     assert!(terrain_bindings.contains(&bind("h/l/j/k", "orbit 3D")));
     assert!(terrain_bindings.contains(&bind("space/p", "pause")));
     assert!(terrain_bindings.contains(&bind("r", "reset")));

@@ -1,11 +1,9 @@
-use crate::fs_atomic::write_atomic;
-use crate::options::prompt_content_sha256;
+use crate::fs_atomic::{load_jsonl, now_ms, save_jsonl, slug, write_atomic};
+use crate::options::{prompt_content_sha256, prompt_override_path};
 use crate::workspace::WorkspaceTarget;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
 
 pub const PROMPT_MUTATIONS_FILE: &str = "prompt-mutations.jsonl";
 
@@ -49,6 +47,16 @@ impl PromptMutation {
         author: impl Into<String>,
     ) -> Self {
         let now = now_ms();
+        Self::new_at(now, module_id, verb, text, author)
+    }
+
+    pub fn new_at(
+        now: u64,
+        module_id: impl Into<String>,
+        verb: impl Into<String>,
+        text: impl Into<String>,
+        author: impl Into<String>,
+    ) -> Self {
         let module_id = module_id.into();
         let verb = verb.into();
         let text = text.into();
@@ -75,24 +83,17 @@ pub fn prompt_mutations_path(workspace: &WorkspaceTarget) -> PathBuf {
 }
 
 pub fn load_prompt_mutations(workspace: &WorkspaceTarget) -> Result<Vec<PromptMutation>> {
-    let path = prompt_mutations_path(workspace);
-    let text = match fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => {
-            return Err(error).with_context(|| format!("Could not read {}", path.display()))
-        }
-    };
-    parse_prompt_mutations_jsonl(&text).with_context(|| format!("Could not parse {}", path.display()))
+    load_jsonl(&prompt_mutations_path(workspace), "prompt mutation")
 }
 
 pub fn save_prompt_mutations(
     workspace: &WorkspaceTarget,
     mutations: &[PromptMutation],
 ) -> Result<()> {
-    write_atomic(
+    save_jsonl(
         &prompt_mutations_path(workspace),
-        &serialize_prompt_mutations_jsonl(mutations)?,
+        mutations,
+        "prompt mutation",
     )
 }
 
@@ -111,18 +112,61 @@ pub fn set_prompt_mutation_status(
     status: PromptMutationStatus,
     reason: Option<&str>,
 ) -> Result<bool> {
+    if status == PromptMutationStatus::Approved {
+        return Ok(approve_prompt_mutation(workspace, id, reason)?.is_some());
+    }
+    update_prompt_mutation_status(workspace, id, status, reason).map(|mutation| mutation.is_some())
+}
+
+pub fn approve_prompt_mutation(
+    workspace: &WorkspaceTarget,
+    id: &str,
+    reason: Option<&str>,
+) -> Result<Option<PromptMutation>> {
+    let mut mutations = load_prompt_mutations(workspace)?;
+    let Some(index) = mutations.iter().position(|mutation| mutation.id == id) else {
+        return Ok(None);
+    };
+    let mut mutation = mutations[index].clone();
+    mutation.apply_status(PromptMutationStatus::Approved, reason);
+    write_prompt_override(workspace, &mutation)?;
+    mutations[index] = mutation.clone();
+    save_prompt_mutations(workspace, &mutations)?;
+    Ok(Some(mutation))
+}
+
+fn update_prompt_mutation_status(
+    workspace: &WorkspaceTarget,
+    id: &str,
+    status: PromptMutationStatus,
+    reason: Option<&str>,
+) -> Result<Option<PromptMutation>> {
     let mut mutations = load_prompt_mutations(workspace)?;
     let Some(mutation) = mutations.iter_mut().find(|mutation| mutation.id == id) else {
-        return Ok(false);
+        return Ok(None);
     };
-    mutation.status = status;
-    mutation.reason = reason
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string);
-    mutation.updated_at_ms = now_ms();
+    mutation.apply_status(status, reason);
+    let updated = mutation.clone();
     save_prompt_mutations(workspace, &mutations)?;
-    Ok(true)
+    Ok(Some(updated))
+}
+
+fn write_prompt_override(workspace: &WorkspaceTarget, mutation: &PromptMutation) -> Result<()> {
+    write_atomic(
+        &prompt_override_path(workspace.root(), &mutation.module_id, &mutation.verb),
+        &mutation.text,
+    )
+}
+
+impl PromptMutation {
+    fn apply_status(&mut self, status: PromptMutationStatus, reason: Option<&str>) {
+        self.status = status;
+        self.reason = reason
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string);
+        self.updated_at_ms = now_ms();
+    }
 }
 
 pub fn latest_prompt_mutation(
@@ -136,28 +180,6 @@ pub fn latest_prompt_mutation(
         .find(|mutation| mutation.module_id == module_id && mutation.verb == verb))
 }
 
-fn parse_prompt_mutations_jsonl(text: &str) -> Result<Vec<PromptMutation>> {
-    text.lines()
-        .enumerate()
-        .filter(|(_, line)| !line.trim().is_empty())
-        .map(|(index, line)| {
-            serde_json::from_str::<PromptMutation>(line).with_context(|| format!("line {}", index + 1))
-        })
-        .collect()
-}
-
-fn serialize_prompt_mutations_jsonl(mutations: &[PromptMutation]) -> Result<String> {
-    let mut lines = Vec::with_capacity(mutations.len());
-    for mutation in mutations {
-        lines.push(serde_json::to_string(mutation).context("Could not serialize prompt mutation")?);
-    }
-    Ok(if lines.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", lines.join("\n"))
-    })
-}
-
 fn prompt_mutation_id(module_id: &str, verb: &str, text: &str, now: u64) -> String {
     let hash = prompt_content_sha256(text)
         .strip_prefix("sha256:")
@@ -167,39 +189,9 @@ fn prompt_mutation_id(module_id: &str, verb: &str, text: &str, now: u64) -> Stri
         .collect::<String>();
     format!(
         "prompt-mutation-{}-{}-{now}-{hash}",
-        slug_part(module_id),
-        slug_part(verb)
+        slug(module_id, "prompt", 4),
+        slug(verb, "prompt", 4)
     )
-}
-
-fn slug_part(value: &str) -> String {
-    let slug = value
-        .chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() {
-                ch.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .take(4)
-        .collect::<Vec<_>>()
-        .join("-");
-    if slug.is_empty() {
-        "prompt".to_string()
-    } else {
-        slug
-    }
-}
-
-fn now_ms() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis().min(u128::from(u64::MAX)) as u64)
-        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -210,8 +202,7 @@ mod tests {
     fn prompt_mutations_round_trip_and_status_gate() {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
-        let mutation =
-            PromptMutation::new("sast", "triage", "focus authz paths", "operator");
+        let mutation = PromptMutation::new("sast", "triage", "focus authz paths", "operator");
 
         append_prompt_mutation(&workspace, &mutation).unwrap();
         assert_eq!(
@@ -234,7 +225,15 @@ mod tests {
             .unwrap();
         assert_eq!(loaded.status, PromptMutationStatus::Approved);
         assert_eq!(loaded.reason.as_deref(), Some("reviewed stack"));
-        assert_eq!(loaded.content_hash(), prompt_content_sha256("focus authz paths"));
+        assert_eq!(
+            loaded.content_hash(),
+            prompt_content_sha256("focus authz paths")
+        );
+        assert_eq!(
+            std::fs::read_to_string(prompt_override_path(workspace.root(), "sast", "triage"))
+                .unwrap(),
+            "focus authz paths"
+        );
     }
 
     #[test]

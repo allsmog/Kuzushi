@@ -8,7 +8,7 @@ pub fn run_scan_engines_with_options(
 ) -> Result<ScanRun> {
     workspace.ensure_state_dir()?;
 
-    let run_id = Uuid::new_v4().to_string();
+    let run_id = scan_run_id(options);
     store.insert_scan_run(&run_id, workspace.root(), "running")?;
 
     let cancellation = ScanCancellation::default();
@@ -26,6 +26,13 @@ pub fn run_scan_engines_with_options(
         target: workspace.root().to_path_buf(),
         findings_count: scan_output.findings.len(),
     })
+}
+
+fn scan_run_id(options: &ScanRunOptions) -> String {
+    options
+        .run_id
+        .clone()
+        .unwrap_or_else(|| Uuid::new_v4().to_string())
 }
 
 struct ScanEngineOutputs {

@@ -1,4 +1,5 @@
 use super::ui_run_dir;
+use crate::app::JsonFileState;
 use crate::ShellApp;
 use kuzushi_core::RunTargetGitMetadata;
 use std::collections::BTreeMap;
@@ -33,8 +34,8 @@ pub(crate) fn run_diff_model(app: &ShellApp, left: &str, right: &str) -> RunDiff
     let left_dir = ui_run_dir(app.target.as_deref(), left);
     let right_dir = ui_run_dir(app.target.as_deref(), right);
     let mut warnings = Vec::new();
-    let left_findings = load_run_findings(&left_dir, left, &mut warnings);
-    let right_findings = load_run_findings(&right_dir, right, &mut warnings);
+    let left_findings = load_run_findings(app, &left_dir, left, &mut warnings);
+    let right_findings = load_run_findings(app, &right_dir, right, &mut warnings);
     let added = right_findings
         .iter()
         .filter(|(key, _)| !left_findings.contains_key(*key))
@@ -53,8 +54,8 @@ pub(crate) fn run_diff_model(app: &ShellApp, left: &str, right: &str) -> RunDiff
     RunDiffModel {
         left_run: left.to_string(),
         right_run: right.to_string(),
-        left_revision: run_revision_label(&left_dir),
-        right_revision: run_revision_label(&right_dir),
+        left_revision: run_revision_label(app, &left_dir),
+        right_revision: run_revision_label(app, &right_dir),
         added,
         removed,
         unchanged_count,
@@ -63,18 +64,22 @@ pub(crate) fn run_diff_model(app: &ShellApp, left: &str, right: &str) -> RunDiff
 }
 
 fn load_run_findings(
+    app: &ShellApp,
     run_dir: &Path,
     run_id: &str,
     warnings: &mut Vec<String>,
 ) -> BTreeMap<String, RunDiffFindingRow> {
     let path = run_dir.join(FINDINGS_FILE);
-    let Ok(raw) = std::fs::read_to_string(&path) else {
-        warnings.push(format!("{run_id}: missing {FINDINGS_FILE}"));
-        return BTreeMap::new();
-    };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
-        warnings.push(format!("{run_id}: malformed {FINDINGS_FILE}"));
-        return BTreeMap::new();
+    let value = match app.workbench_cache.borrow_mut().json_file(&path) {
+        JsonFileState::Present(value) => value,
+        JsonFileState::Missing => {
+            warnings.push(format!("{run_id}: missing {FINDINGS_FILE}"));
+            return BTreeMap::new();
+        }
+        JsonFileState::NonFile | JsonFileState::Malformed | JsonFileState::Unreadable => {
+            warnings.push(format!("{run_id}: malformed {FINDINGS_FILE}"));
+            return BTreeMap::new();
+        }
     };
     let Some(findings) = findings_array(&value) else {
         warnings.push(format!("{run_id}: {FINDINGS_FILE} has no findings array"));
@@ -154,22 +159,31 @@ fn location_label(file: &str, line: Option<u64>) -> String {
         .unwrap_or_else(|| file.to_string())
 }
 
-fn run_revision_label(run_dir: &Path) -> String {
-    read_json(&run_dir.join(RUN_FILE))
-        .or_else(|| read_json(&run_dir.join(SUMMARY_FILE)))
-        .and_then(|value| {
-            value
-                .get("targetGit")
-                .or_else(|| value.get("target_git"))
-                .and_then(|git| serde_json::from_value::<RunTargetGitMetadata>(git.clone()).ok())
-        })
+fn run_revision_label(app: &ShellApp, run_dir: &Path) -> String {
+    let run_state = app
+        .workbench_cache
+        .borrow_mut()
+        .json_file(&run_dir.join(RUN_FILE));
+    if let Some(git) = run_target_git_from_state(run_state) {
+        return target_git_revision_label(&git);
+    }
+    let summary_state = app
+        .workbench_cache
+        .borrow_mut()
+        .json_file(&run_dir.join(SUMMARY_FILE));
+    run_target_git_from_state(summary_state)
         .map(|git| target_git_revision_label(&git))
         .unwrap_or_else(|| "rev:unknown".to_string())
 }
 
-fn read_json(path: &Path) -> Option<serde_json::Value> {
-    let raw = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str(&raw).ok()
+fn run_target_git_from_state(state: JsonFileState) -> Option<RunTargetGitMetadata> {
+    let JsonFileState::Present(value) = state else {
+        return None;
+    };
+    value
+        .get("targetGit")
+        .or_else(|| value.get("target_git"))
+        .and_then(|git| serde_json::from_value::<RunTargetGitMetadata>(git.clone()).ok())
 }
 
 fn target_git_revision_label(git: &RunTargetGitMetadata) -> String {

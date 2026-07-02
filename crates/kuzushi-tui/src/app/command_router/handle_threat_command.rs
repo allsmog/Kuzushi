@@ -1,6 +1,6 @@
 use super::*;
+use kuzushi_core::workspace::findings_since_filter_expression;
 use std::path::Path;
-use std::process::Command;
 
 pub(crate) fn handle_threat_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
     let ShellCommand::Threat(view) = command else {
@@ -113,7 +113,7 @@ pub(crate) fn handle_since_command(app: &mut ShellApp, command: &ShellCommand) -
     let ShellCommand::Since(reference) = command else {
         return false;
     };
-    let expression = match since_filter_expression(app.target.as_deref(), reference) {
+    let expression = match findings_since_filter_expression(app.target.as_deref(), reference) {
         Ok(expression) => expression,
         Err(error) => {
             app.log(
@@ -129,60 +129,53 @@ pub(crate) fn handle_since_command(app: &mut ShellApp, command: &ShellCommand) -
     true
 }
 
-fn since_filter_expression(target: Option<&Path>, reference: &str) -> anyhow::Result<String> {
-    let reference = normalized_since_ref(reference)?;
-    let target = target.ok_or_else(|| anyhow::anyhow!("since requires an active target"))?;
-    if let Some(sha) = resolve_git_ref(target, reference) {
-        return Ok(format!("rev:{sha}"));
-    }
-    if looks_like_sha_prefix(reference) {
-        return Ok(format!("rev:{}", reference.to_ascii_lowercase()));
-    }
-    Ok(format!("branch:{}", reference.to_ascii_lowercase()))
-}
-
-fn normalized_since_ref(reference: &str) -> anyhow::Result<&str> {
-    let reference = reference.trim();
-    if reference.is_empty() {
-        anyhow::bail!("since needs a git ref");
-    }
-    if reference.split_whitespace().count() > 1 {
-        anyhow::bail!("since git ref cannot contain whitespace");
-    }
-    Ok(reference)
-}
-
-fn resolve_git_ref(target: &Path, reference: &str) -> Option<String> {
-    let commit_spec = format!("{reference}^{{commit}}");
-    git_stdout(
-        target,
-        &["rev-parse", "--verify", "--quiet", commit_spec.as_str()],
-    )
-}
-
-fn git_stdout(target: &Path, args: &[&str]) -> Option<String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(target)
-        .args(args)
-        .output()
-        .ok()?;
-    output
-        .status
-        .success()
-        .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .filter(|value| !value.is_empty())
-}
-
-fn looks_like_sha_prefix(reference: &str) -> bool {
-    reference.len() >= 7 && reference.chars().all(|ch| ch.is_ascii_hexdigit())
-}
-
 pub(crate) fn handle_replay_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
     let ShellCommand::Replay(run_id) = command else {
         return false;
     };
-    app.shell_view = ShellView::Replay(run_id.clone());
-    app.log("replay", run_id);
+    let Some(resolved) = resolve_run_selector(app, run_id, "replay") else {
+        return true;
+    };
+    app.shell_view = ShellView::Replay(resolved.clone());
+    app.log("replay", resolved);
     true
+}
+
+fn resolve_run_selector(app: &mut ShellApp, selector: &str, verb: &str) -> Option<String> {
+    if selector != "latest" {
+        return Some(selector.to_string());
+    }
+    let Some(target) = app.target.as_deref() else {
+        app.log(
+            "error",
+            format!("{verb} latest needs a target. Next: target <path> or show runs"),
+        );
+        return None;
+    };
+    let latest_path = crate::ui_view_models::ui_latest_run_path(Some(target));
+    let text = match std::fs::read_to_string(&latest_path) {
+        Ok(text) => text,
+        Err(error) => {
+            app.log(
+                "error",
+                format!(
+                    "could not read latest run pointer {}: {error}. Next: show runs",
+                    latest_path.display()
+                ),
+            );
+            return None;
+        }
+    };
+    let run_id = text.trim();
+    if run_id.is_empty() {
+        app.log(
+            "error",
+            format!(
+                "latest run pointer {} is empty. Next: show runs",
+                latest_path.display()
+            ),
+        );
+        return None;
+    }
+    Some(run_id.to_string())
 }

@@ -6,22 +6,24 @@ assertion_line: 89
 
  -- ACTIVITY  run r-snapshot  ·  2/3 done  ·  1 running ----------------------------------------------------------------
  -- TASKS                                      |  -- OUTPUT
-▌ ✓ context:build                          <1… | views  [task]  findings·   surface·   dfd·   heatmap·   path·   chain·
-  ✓ semgrep:scan                           <1… |   Tab tasks/output · j/k task or item · Enter task detail · o open arti
-  ⠋ triage:run                             <1… |
-     ✓ triage start                            | -- TASK ------------------------------------------------
-     ✓ evidence-collect                        |   context:build · done · 2 steps · $0
-     ✓ stage1 kept 14/14                       |   last: context:build complete · 412 files
+# + context:build                          <1… | views  [task]  findings·   surface·   dfd·   heatmap·   path·   chain·
+  + semgrep:scan                           <1… |   Tab tasks/output · j/k task or item · Enter task detail · o open arti
+  * triage:run                             <1… |
+     + triage start                            | -- TASK ------------------------------------------------
+     + evidence-collect                        |   context:build · done · 2 steps · $0
+     + stage1 kept 14/14                       |   last: context:build complete · 412 files
      ↳ verdict=likely-tp severity=high         |   DETAILS
- ⤳ subsystems (1)  active task-selector ran    |     ✓ context:build start
-  ACTIONS                                      |     ✓ context:build complete · 412 files
-     22:13:20  ⏵ [context:build] context:buil… |   LAST STEPS
-     22:13:20  ✓ [context:build] context:buil… |     tool · context:build start
-     22:13:20  ⏵ [semgrep:scan] semgrep start  |     done · context:build complete · 412 files
-     22:13:20  ✓ [semgrep:scan] semgrep compl… |
+ ⤳ subsystems (1)  active · hidden — V to exp… |     + context:build start
+ legend: + done · ! fail · x canceled · · que… |     + context:build complete · 412 files
+  ACTIONS                                      |   LAST STEPS
+     22:13:20  ⏵ [context:build] context:buil… |     tool · context:build start
+     22:13:20  + [context:build] context:buil… |     done · context:build complete · 412 files
+     22:13:20  ⏵ [semgrep:scan] semgrep start  |
+     22:13:20  + [semgrep:scan] semgrep compl… |
      22:13:20  ⏵ [triage:run] triage start     |
      22:13:20   ↳ … [triage:run] evidence-col… |
      22:13:20   ↳ … [triage:run] verdict=like… |
 
- ▸ FOCUS  hover [j/k] to inspect a task
- j/k/g/G scroll   Tab pane   ←/→ views   f findings   o open   V verbose   p feed pause   R reset   Enter focus...
+ > FOCUS  hover [j/k] to inspect a task
+ j/k/g/G scroll   Tab pane   [/] views   f findings   o open   V verbose   Space pause   x reset view   Enter focus
+ Esc leave

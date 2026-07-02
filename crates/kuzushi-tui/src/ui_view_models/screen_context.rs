@@ -28,13 +28,71 @@ pub(crate) fn screen_context_model(app: &ShellApp) -> ScreenContext {
 }
 
 fn shell_view_label(view: &ShellView) -> String {
-    let label = format!("{view:?}");
-    let end = [label.find('('), label.find("{")]
-        .into_iter()
-        .flatten()
-        .min()
-        .unwrap_or(label.len());
-    label[..end].to_string()
+    core_shell_view_label(view)
+        .or_else(|| workspace_shell_view_label(view))
+        .or_else(|| system_shell_view_label(view))
+        .unwrap_or("Unknown")
+        .to_string()
+}
+
+fn core_shell_view_label(view: &ShellView) -> Option<&'static str> {
+    match view {
+        ShellView::Home => Some("Home"),
+        ShellView::Catalog => Some("Catalog"),
+        ShellView::Recommend => Some("Recommend"),
+        ShellView::Module => Some("Module"),
+        ShellView::ModuleRun => Some("ModuleRun"),
+        ShellView::Workbench => Some("Workbench"),
+        ShellView::Tune => Some("Tune"),
+        ShellView::Threat(_) => Some("Threat"),
+        ShellView::ThreatEditor => Some("ThreatEditor"),
+        ShellView::PromptsEditor => Some("PromptsEditor"),
+        ShellView::ActorDetail(_) => Some("ActorDetail"),
+        ShellView::Runs => Some("Runs"),
+        ShellView::RunDiff { .. } => Some("RunDiff"),
+        ShellView::Replay(_) => Some("Replay"),
+        ShellView::Trace(_) => Some("Trace"),
+        ShellView::Activity => Some("Activity"),
+        _ => None,
+    }
+}
+
+fn workspace_shell_view_label(view: &ShellView) -> Option<&'static str> {
+    match view {
+        ShellView::Context => Some("Context"),
+        ShellView::ProjectModel => Some("ProjectModel"),
+        ShellView::StrategyQueue => Some("StrategyQueue"),
+        ShellView::Workspace => Some("Workspace"),
+        ShellView::KnowledgeBase => Some("KnowledgeBase"),
+        ShellView::FailureHandoff => Some("FailureHandoff"),
+        ShellView::AgentChat => Some("AgentChat"),
+        ShellView::History => Some("History"),
+        ShellView::Story => Some("Story"),
+        ShellView::Patch(_) => Some("Patch"),
+        ShellView::Pwn => Some("Pwn"),
+        ShellView::Scene(_) => Some("Scene"),
+        _ => None,
+    }
+}
+
+fn system_shell_view_label(view: &ShellView) -> Option<&'static str> {
+    match view {
+        ShellView::Help => Some("Help"),
+        ShellView::Quickstart => Some("Quickstart"),
+        ShellView::Logs => Some("Logs"),
+        ShellView::Config => Some("Config"),
+        ShellView::Tools => Some("Tools"),
+        ShellView::Options(_) => Some("Options"),
+        ShellView::SastTasks => Some("SastTasks"),
+        ShellView::Auth => Some("Auth"),
+        ShellView::Cost => Some("Cost"),
+        ShellView::CommandPalette => Some("CommandPalette"),
+        ShellView::ModelPicker => Some("ModelPicker"),
+        ShellView::AuthMethodPicker(_) => Some("AuthMethodPicker"),
+        ShellView::TargetPicker => Some("TargetPicker"),
+        ShellView::PlanningPicker => Some("PlanningPicker"),
+        _ => None,
+    }
 }
 
 fn focused_pane_label(app: &ShellApp) -> Option<String> {

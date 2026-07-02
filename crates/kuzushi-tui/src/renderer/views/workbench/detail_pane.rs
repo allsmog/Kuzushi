@@ -2,31 +2,39 @@
 
 use super::panes::sep;
 use super::*;
-use crate::ui_view_models::{FindingDetailModel, FindingEvidenceRow, TriageSummaryModel};
+use crate::ui_view_models::{
+    FindingDetailModel, FindingEvidenceRow, ProofTier, TriageSummaryModel,
+};
 use ratatui::prelude::{Line, Span};
 use ratatui::style::Style;
 
 pub(super) fn detail_pane_lines(
     detail: &Option<FindingDetailModel>,
     width: usize,
+    report_command: Option<&'static str>,
 ) -> Vec<Line<'static>> {
     let Some(detail) = detail else {
         return no_detail_lines();
     };
     let budget = width.saturating_sub(2).max(16);
-    detail_lines_for_model(detail, budget)
+    detail_lines_for_model(detail, budget, report_command)
 }
 
 fn no_detail_lines() -> Vec<Line<'static>> {
     vec![muted(
-        "no finding selected — press Enter on a FINDINGS row to inspect it.",
+        "no finding selected — move through FINDINGS to preview details here.",
     )]
 }
 
-fn detail_lines_for_model(detail: &FindingDetailModel, budget: usize) -> Vec<Line<'static>> {
+fn detail_lines_for_model(
+    detail: &FindingDetailModel,
+    budget: usize,
+    report_command: Option<&'static str>,
+) -> Vec<Line<'static>> {
     let mut lines = detail_title_lines(detail, budget);
     lines.push(blank_line());
     push_detail_metadata(&mut lines, detail, budget);
+    push_actions_section(&mut lines, detail, budget, report_command);
     push_message_section(&mut lines, detail, budget);
     push_triage_section(&mut lines, &detail.triage, budget);
     push_evidence_section(
@@ -36,6 +44,7 @@ fn detail_lines_for_model(detail: &FindingDetailModel, budget: usize) -> Vec<Lin
         budget,
     );
     push_fingerprint_section(&mut lines, detail, budget);
+    push_alias_note(&mut lines, budget);
     lines
 }
 
@@ -47,8 +56,89 @@ fn push_detail_metadata(
     push_detail_kv(lines, "location", &detail.location, budget);
     push_detail_kv(lines, "rule", &detail.rule, budget);
     push_detail_kv(lines, "tool", &detail.tool, budget);
-    push_detail_kv(lines, "proof", &detail.proof_state, budget);
-    push_detail_kv(lines, "verification", &detail.runtime_verification, budget);
+    push_proof_detail(lines, detail, budget);
+    push_detail_kv(
+        lines,
+        "verification",
+        &runtime_verification_display(detail),
+        budget,
+    );
+}
+
+fn push_proof_detail(lines: &mut Vec<Line<'static>>, detail: &FindingDetailModel, budget: usize) {
+    push_wrapped(
+        lines,
+        &format!("proof: {}", proof_state_display(detail)),
+        budget,
+        "",
+        proof_detail_style(detail.proof_tier),
+    );
+}
+
+fn proof_state_display(detail: &FindingDetailModel) -> String {
+    format!(
+        "{} {} - {}",
+        detail.proof_marker,
+        detail.proof_label,
+        proof_state_explanation(detail)
+    )
+}
+
+fn proof_state_explanation(detail: &FindingDetailModel) -> String {
+    if detail.proof_label == "triaged-tp" {
+        return format!(
+            "triage-confirmed true positive; static proof: {}",
+            static_proof_state_display(detail)
+        );
+    }
+    if detail.proof_label.starts_with("verified") {
+        return format!(
+            "runtime verification confirmed exploit; static proof: {}",
+            static_proof_state_display(detail)
+        );
+    }
+    static_proof_state_display(detail)
+}
+
+fn static_proof_state_display(detail: &FindingDetailModel) -> String {
+    if detail.proof_state == "not recorded" {
+        return "not recorded (run verify for proof)".to_string();
+    }
+    if detail.proof_state.contains("runtime proof not recorded") {
+        return format!("{} (run verify)", detail.proof_state);
+    }
+    detail.proof_state.clone()
+}
+
+fn proof_detail_style(tier: ProofTier) -> Style {
+    match tier {
+        ProofTier::Confirmed => theme::success(),
+        ProofTier::StaticLinked => theme::accent(),
+        ProofTier::Suspected => theme::warn(),
+        ProofTier::Rejected => theme::danger(),
+    }
+}
+
+fn runtime_verification_display(detail: &FindingDetailModel) -> String {
+    if detail.runtime_verification == "not attempted" {
+        return "not attempted (run verify)".to_string();
+    }
+    detail.runtime_verification.clone()
+}
+
+fn push_actions_section(
+    lines: &mut Vec<Line<'static>>,
+    detail: &FindingDetailModel,
+    budget: usize,
+    report_command: Option<&'static str>,
+) {
+    let alias = detail.alias.as_deref().unwrap_or("selected");
+    let mut commands = vec![format!("`verify {alias}`"), format!("`patch {alias}`")];
+    if let Some(report_command) = report_command {
+        commands.push(format!("`{report_command}`"));
+    }
+    let actions = format!("commands: {}", commands.join(" · "));
+    push_wrapped(lines, &actions, budget, "", theme::accent());
 }
 
 fn push_message_section(
@@ -137,6 +227,16 @@ fn push_fingerprint_section(
     push_wrapped(lines, &detail.fingerprint, budget, "  ", theme::subtle());
 }
 
+fn push_alias_note(lines: &mut Vec<Line<'static>>, budget: usize) {
+    push_wrapped(
+        lines,
+        "ids like F-0001 are aliases · show aliases to list",
+        budget,
+        "",
+        theme::muted(),
+    );
+}
+
 fn detail_title_lines(detail: &FindingDetailModel, width: usize) -> Vec<Line<'static>> {
     let mut lines = vec![Line::from(vec![
         Span::styled(
@@ -203,11 +303,10 @@ fn push_optional_wrapped(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ui_view_models::SeverityTone;
+    use crate::ui_view_models::{ProofTier, SeverityTone, WORKBENCH_REPORT_COMMAND};
 
-    #[test]
-    fn detail_lines_disclose_hidden_message_and_evidence_rows() {
-        let detail = FindingDetailModel {
+    fn detail() -> FindingDetailModel {
+        FindingDetailModel {
             alias: Some("F-0001".to_string()),
             severity_tone: SeverityTone::High,
             severity_label: "high".to_string(),
@@ -216,6 +315,9 @@ mod tests {
             rule: "demo.rule".to_string(),
             tool: "demo".to_string(),
             fingerprint: "fp-demo".to_string(),
+            proof_label: "unverified".to_string(),
+            proof_marker: "?",
+            proof_tier: ProofTier::Suspected,
             proof_state: "not recorded".to_string(),
             runtime_verification: "not run".to_string(),
             evidence: vec![FindingEvidenceRow {
@@ -227,9 +329,11 @@ mod tests {
             message_overflow: 2,
             evidence_overflow: 3,
             triage: None,
-        };
+        }
+    }
 
-        let text = detail_lines_for_model(&detail, 80)
+    fn detail_text(report_command: Option<&'static str>) -> String {
+        detail_lines_for_model(&detail(), 80, report_command)
             .into_iter()
             .map(|line| {
                 line.spans
@@ -238,9 +342,30 @@ mod tests {
                     .collect::<String>()
             })
             .collect::<Vec<_>>()
-            .join("\n");
+            .join("\n")
+    }
 
+    #[test]
+    fn detail_lines_disclose_hidden_message_and_evidence_rows() {
+        let text = detail_text(None);
+
+        assert!(
+            text.contains("proof: ? unverified - not recorded"),
+            "{text}"
+        );
         assert!(text.contains("… 2 more message lines"), "{text}");
         assert!(text.contains("… 3 more evidence rows"), "{text}");
+    }
+
+    #[test]
+    fn detail_actions_include_report_command_when_available() {
+        let text = detail_text(Some(WORKBENCH_REPORT_COMMAND));
+
+        assert!(text.contains("`workspace export findings"), "{text}");
+        assert!(text.contains("report.sarif`"), "{text}");
+        assert!(text.contains("commands: `verify F-0001`"), "{text}");
+        assert!(text.contains("`patch F-0001`"), "{text}");
+        assert!(!text.contains("o open in editor"), "{text}");
+        assert!(!text.contains("actions:"), "{text}");
     }
 }

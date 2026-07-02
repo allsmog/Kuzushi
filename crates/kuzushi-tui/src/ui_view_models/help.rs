@@ -1,4 +1,5 @@
 use super::context_snapshot::context_snapshot_relative_path;
+use crate::app::rank_fuzzy;
 use crate::commands::{
     shell_command_specs, shell_help_examples, ShellCommandCategory, ShellCommandSpec,
 };
@@ -7,6 +8,8 @@ use crate::ShellApp;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct HelpModel {
     pub(crate) intro: &'static str,
+    pub(crate) glossary: &'static str,
+    pub(crate) filter_note: Option<String>,
     pub(crate) examples: Vec<&'static str>,
     pub(crate) categories: Vec<HelpCategoryModel>,
 }
@@ -27,6 +30,8 @@ pub(crate) struct HelpCommandRow {
 pub(crate) struct PlainHelpModel {
     pub(crate) title: &'static str,
     pub(crate) intro: &'static str,
+    pub(crate) glossary: &'static str,
+    pub(crate) filter_note: Option<String>,
     pub(crate) examples_line: Option<String>,
     pub(crate) categories: Vec<PlainHelpCategoryModel>,
 }
@@ -49,19 +54,27 @@ pub(crate) struct QuickstartStep {
     pub(crate) text: String,
 }
 
-pub(crate) fn help_model() -> HelpModel {
+pub(crate) fn help_model(query: Option<&str>) -> HelpModel {
+    let query = normalized_help_query(query);
     HelpModel {
         intro: "Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.",
-        examples: shell_help_examples().to_vec(),
+        glossary: "Glossary: TP=true positive; FP=false positive; proof=confidence; DFD=data-flow diagram; taint flow=source-to-sink path.",
+        filter_note: query.map(|value| {
+            format!("Showing commands matching `{value}`. Type `help` for the full reference.")
+        }),
+        examples: query
+            .is_none()
+            .then(|| shell_help_examples().to_vec())
+            .unwrap_or_default(),
         categories: ShellCommandCategory::ORDER
             .iter()
-            .map(|category| help_category_model(*category))
+            .filter_map(|category| help_category_model(*category, query))
             .collect(),
     }
 }
 
-pub(crate) fn plain_help_model() -> PlainHelpModel {
-    PlainHelpModel::from_help_model(help_model())
+pub(crate) fn plain_help_model(query: Option<&str>) -> PlainHelpModel {
+    PlainHelpModel::from_help_model(help_model(query))
 }
 
 impl PlainHelpModel {
@@ -69,6 +82,8 @@ impl PlainHelpModel {
         PlainHelpModel {
             title: "HELP",
             intro: model.intro,
+            glossary: model.glossary,
+            filter_note: model.filter_note,
             examples_line: plain_examples_line(&model.examples),
             categories: model
                 .categories
@@ -115,15 +130,53 @@ pub(crate) fn quickstart_model(app: &ShellApp) -> QuickstartModel {
     }
 }
 
-fn help_category_model(category: ShellCommandCategory) -> HelpCategoryModel {
-    HelpCategoryModel {
+fn help_category_model(
+    category: ShellCommandCategory,
+    query: Option<&str>,
+) -> Option<HelpCategoryModel> {
+    let specs = shell_command_specs()
+        .filter(|spec| spec.category == category)
+        .collect::<Vec<_>>();
+    let commands = filtered_help_specs(specs, query)
+        .into_iter()
+        .map(help_command_row)
+        .collect::<Vec<_>>();
+    (!commands.is_empty()).then(|| HelpCategoryModel {
         label: category.label(),
         blurb: help_category_blurb(category),
-        commands: shell_command_specs()
-            .filter(|spec| spec.category == category)
-            .map(help_command_row)
-            .collect(),
-    }
+        commands,
+    })
+}
+
+fn normalized_help_query(query: Option<&str>) -> Option<&str> {
+    query.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn filtered_help_specs(
+    specs: Vec<&'static ShellCommandSpec>,
+    query: Option<&str>,
+) -> Vec<&'static ShellCommandSpec> {
+    let Some(query) = query else {
+        return specs;
+    };
+    let entries = specs
+        .into_iter()
+        .map(|spec| (help_search_key(spec), spec))
+        .collect::<Vec<_>>();
+    let ranked = rank_fuzzy(entries.iter().map(|(key, _)| key.clone()).collect(), query);
+    ranked
+        .into_iter()
+        .filter_map(|key| {
+            entries
+                .iter()
+                .find_map(|(candidate, spec)| (candidate == &key).then_some(*spec))
+        })
+        .collect()
+}
+
+fn help_search_key(spec: &ShellCommandSpec) -> String {
+    let aliases = spec.aliases.join(" ");
+    format!("{} {aliases} {}", spec.command, spec.description)
 }
 
 fn help_category_blurb(category: ShellCommandCategory) -> &'static str {
@@ -182,20 +235,25 @@ fn quickstart_steps(app: &ShellApp) -> Vec<QuickstartStep> {
         },
         QuickstartStep {
             number: "3",
-            text: quickstart_scan_step(app).to_string(),
+            text: "options sast:scan        review scanner tuning before spending a scan"
+                .to_string(),
         },
         QuickstartStep {
             number: "4",
+            text: quickstart_scan_step(app).to_string(),
+        },
+        QuickstartStep {
+            number: "5",
             text: "run <tool>                 dispatch a single tool (e.g. run semgrep:scan)"
                 .to_string(),
         },
         QuickstartStep {
-            number: "5",
+            number: "6",
             text: "findings · open F-0001     inspect evidence and proof state".to_string(),
         },
         QuickstartStep {
-            number: "6",
-            text: "workspace export findings  write a report; kuzushi pr-comment for PR drop"
+            number: "7",
+            text: "workspace export findings · kuzushi pr-comment  report bundle / PR text"
                 .to_string(),
         },
     ]

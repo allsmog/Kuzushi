@@ -19,7 +19,9 @@ impl ModuleRegistry {
     }
 
     pub fn tools(&self) -> impl Iterator<Item = &ToolDescriptor> {
-        self.tools.values().filter(|tool| self.is_tool_visible(tool))
+        self.tools
+            .values()
+            .filter(|tool| self.is_tool_visible(tool))
     }
 
     pub fn resolve_tool(&self, name: &str) -> Option<&ToolDescriptor> {

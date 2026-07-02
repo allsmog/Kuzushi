@@ -90,7 +90,9 @@ pub(in crate::modules) fn run_cpg_build(
         return Ok(skip);
     }
     let elapsed_ms = started.elapsed().as_millis() as u64;
-    let bytes = fs::metadata(&output_path).map(|meta| meta.len()).unwrap_or(0);
+    let bytes = fs::metadata(&output_path)
+        .map(|meta| meta.len())
+        .unwrap_or(0);
     announce_cpg_phase(ctx, "done", &cpg_complete_label(bytes, elapsed_ms));
     let timestamp = now_ms()?;
     Ok(cpg_build_response(
@@ -208,7 +210,12 @@ fn joern_outcome(
     if let Some(skip) = joern_environment_skip(target, &output.stderr) {
         // Emit a terminal step so the Activity DAG row resolves (not left
         // spinning) and reads as a clean skip rather than a failure.
-        emit_step(ctx, "done", "build", "cpg:build skipped — joern astgen frontend missing");
+        emit_step(
+            ctx,
+            "done",
+            "build",
+            "cpg:build skipped — joern astgen frontend missing",
+        );
         return Ok(Some(skip));
     }
     if let Some(message) = joern_oom_message(&output.stderr, heap_mb) {
@@ -238,7 +245,9 @@ fn joern_oom_message(stderr: &[u8], heap_mb: u64) -> Option<String> {
 /// Next heap to try after an OOM: double the current heap, but stay within the
 /// hard cap and below physical RAM so the retry doesn't thrash the host.
 fn suggested_retry_heap_mb(heap_mb: u64) -> u64 {
-    let ram_ceiling = physical_ram_mb().map(|ram| ram * 9 / 10).unwrap_or(MAX_HEAP_MB);
+    let ram_ceiling = physical_ram_mb()
+        .map(|ram| ram * 9 / 10)
+        .unwrap_or(MAX_HEAP_MB);
     (heap_mb * 2).min(MAX_HEAP_MB).min(ram_ceiling).max(heap_mb)
 }
 
@@ -366,7 +375,8 @@ mod joern_skip_tests {
 
     #[test]
     fn oom_stderr_maps_to_actionable_retry_hint() {
-        let stderr = b"... java.lang.OutOfMemoryError: Java heap space\n\tat com.github.javaparser...";
+        let stderr =
+            b"... java.lang.OutOfMemoryError: Java heap space\n\tat com.github.javaparser...";
         let message = joern_oom_message(stderr, 4096).expect("OOM should be classified");
         assert!(message.contains("OutOfMemoryError"));
         assert!(message.contains("heapMb="));
@@ -391,7 +401,10 @@ mod joern_skip_tests {
     #[test]
     fn resolve_heap_mb_defaults_within_band_when_unset() {
         let heap = resolve_heap_mb(&json!({}));
-        assert!((4096..=16384).contains(&heap), "default heap {heap} out of band");
+        assert!(
+            (4096..=16384).contains(&heap),
+            "default heap {heap} out of band"
+        );
     }
 
     #[test]

@@ -86,7 +86,7 @@ fn plain_workspace_model_projects_missing_workspace_rows() {
     assert!(model.empty_rows.is_empty());
     assert_eq!(
         model.next_hint,
-        "Next: workspace status, workspace export findings <path>.json, kuzushi pr-comment"
+        "Next: workspace status, workspace scope init, workspace export findings <path> [format]"
     );
 }
 

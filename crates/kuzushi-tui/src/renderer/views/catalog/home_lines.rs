@@ -1,7 +1,5 @@
 use super::*;
-use crate::ui_view_models::{
-    home_cockpit_model, HomeArtifactRow, HomeCockpitModel, JourneyModel, JourneyPhaseTone,
-};
+use crate::ui_view_models::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel, JourneyModel};
 
 pub(crate) fn home_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let model = home_cockpit_model(app);
@@ -37,16 +35,6 @@ fn journey_rail_line(journey: &JourneyModel) -> Line<'static> {
         spans.push(Span::styled(status.state_symbol.to_string(), style));
     }
     Line::from(spans)
-}
-
-fn journey_phase_tone_style(tone: JourneyPhaseTone) -> Style {
-    match tone {
-        JourneyPhaseTone::Success => theme::success(),
-        JourneyPhaseTone::Warn => theme::warn(),
-        JourneyPhaseTone::Danger => theme::danger(),
-        JourneyPhaseTone::Muted => theme::muted(),
-        JourneyPhaseTone::Subtle => theme::subtle(),
-    }
 }
 
 fn append_home_summary(lines: &mut Vec<Line<'static>>, model: &HomeCockpitModel, width: u16) {

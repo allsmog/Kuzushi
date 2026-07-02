@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 use crate::workspace::{
-    export_workspace_findings, workspace_status_for_target, WorkspaceExportFormat,
+    active_workspace_required_message, export_workspace_findings, workspace_status_for_target,
+    WorkspaceExportFormat,
 };
 
 use super::input::{resolve_input_path, string_input_any};
@@ -10,14 +11,14 @@ use super::ToolExecutionContext;
 
 pub(in crate::modules) fn workspace_status_output(ctx: &ToolExecutionContext<'_>) -> String {
     let status = workspace_status_for_target(ctx.workspace.map(|workspace| workspace.root()), None);
-    match (status.root, status.state_dir, status.findings_db) {
+    match (&status.root, &status.state_dir, &status.findings_db) {
         (Some(root), Some(state_dir), Some(findings_db)) => format!(
             "workspace status\n  Root:      {}\n  State:     {}\n  Findings:  {}",
             root.display(),
             state_dir.display(),
             findings_db.display()
         ),
-        _ => "workspace status unavailable: no active workspace. Next: pass --target <repo> or start the shell with --target .".to_string(),
+        _ => format!("workspace status unavailable: {}", status.status),
     }
 }
 
@@ -25,9 +26,9 @@ pub(in crate::modules) fn export_workspace_findings_tool(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
-    let workspace = ctx
-        .workspace
-        .context("workspace:export-findings requires an active workspace target")?;
+    let workspace = ctx.workspace.context(active_workspace_required_message(
+        "workspace:export-findings",
+    ))?;
     let output = string_input_any(&input, &["output", "path"])
         .context("workspace:export-findings requires output=<path>. Next: run workspace:export-findings {\"output\":\"findings.json\"}")?;
     let output_path = resolve_input_path(workspace.root(), &output);

@@ -1,7 +1,8 @@
+use crate::app::StrategyQueueState;
 use crate::ShellApp;
 use kuzushi_core::{
-    load_strategy_queue, strategy_queue_path, StrategyPhase, StrategyPreflightStatus,
-    StrategyProposal, StrategyProposalStatus, StrategyResourceRisk, WorkspaceTarget,
+    strategy_queue_path, StrategyPhase, StrategyPreflightStatus, StrategyProposal,
+    StrategyProposalStatus, StrategyResourceRisk, WorkspaceTarget,
 };
 use std::path::Path;
 
@@ -60,42 +61,70 @@ pub(crate) struct StrategyQueueRow {
 
 pub(crate) fn strategy_queue_model(app: &ShellApp) -> StrategyQueueModel {
     let source = StrategyQueueSource::from_app(app);
-    let rows = source
-        .workspace
-        .as_ref()
-        .map(load_strategy_rows)
-        .unwrap_or_default();
+    let snapshot = strategy_queue_snapshot(app, &source);
     let detail_rows = strategy_queue_detail_rows(&source);
     StrategyQueueModel {
         title: "STRATEGY QUEUE",
         detail_rows,
-        summary: strategy_queue_summary(&rows, &source),
+        summary: snapshot.summary,
         headers: STRATEGY_QUEUE_HEADERS,
         commands: STRATEGY_QUEUE_COMMANDS,
         empty_state: strategy_queue_empty_state(source.workspace.is_some()),
-        rows,
+        rows: snapshot.rows,
     }
 }
 
-fn load_strategy_rows(workspace: &WorkspaceTarget) -> Vec<StrategyQueueRow> {
-    match load_strategy_queue(workspace) {
-        Ok(proposals) => strategy_rows_from_proposals(proposals),
-        Err(error) => vec![StrategyQueueRow {
-            id: "queue-read-error".to_string(),
-            cells: [
-                "blocked".to_string(),
-                "review".to_string(),
-                "queue-read-error".to_string(),
-                "repair queue artifact".to_string(),
-                "blocked".to_string(),
-                "unknown".to_string(),
-                "unknown".to_string(),
-                "blocked".to_string(),
-            ],
-            rationale: error.to_string(),
-            lineage: "base -> recommended".to_string(),
-            source_run: "-".to_string(),
-        }],
+struct StrategyQueueSnapshot {
+    rows: Vec<StrategyQueueRow>,
+    summary: String,
+}
+
+fn strategy_queue_snapshot(app: &ShellApp, source: &StrategyQueueSource) -> StrategyQueueSnapshot {
+    if source.workspace.is_none() {
+        return StrategyQueueSnapshot {
+            rows: Vec::new(),
+            summary: "no target selected; strategy queue is target-scoped".to_string(),
+        };
+    };
+    match app
+        .workbench_cache
+        .borrow_mut()
+        .strategy_queue(source.workspace.as_ref())
+    {
+        Some(StrategyQueueState::Ready(proposals)) => {
+            let summary = strategy_queue_summary(&proposals);
+            StrategyQueueSnapshot {
+                rows: strategy_rows_from_proposals(proposals),
+                summary,
+            }
+        }
+        Some(StrategyQueueState::Unreadable(error)) => StrategyQueueSnapshot {
+            rows: vec![strategy_queue_error_row(error.clone())],
+            summary: format!("could not read strategy queue: {error}"),
+        },
+        None => StrategyQueueSnapshot {
+            rows: Vec::new(),
+            summary: "no target selected; strategy queue is target-scoped".to_string(),
+        },
+    }
+}
+
+fn strategy_queue_error_row(error: String) -> StrategyQueueRow {
+    StrategyQueueRow {
+        id: "queue-read-error".to_string(),
+        cells: [
+            "blocked".to_string(),
+            "review".to_string(),
+            "queue-read-error".to_string(),
+            "repair queue artifact".to_string(),
+            "blocked".to_string(),
+            "unknown".to_string(),
+            "unknown".to_string(),
+            "blocked".to_string(),
+        ],
+        rationale: error,
+        lineage: "base -> recommended".to_string(),
+        source_run: "-".to_string(),
     }
 }
 
@@ -214,23 +243,29 @@ fn risk_label(risk: StrategyResourceRisk) -> &'static str {
     risk.label()
 }
 
-fn strategy_queue_summary(rows: &[StrategyQueueRow], source: &StrategyQueueSource) -> String {
-    if source.workspace.is_none() {
-        return "no target selected; strategy queue is target-scoped".to_string();
-    }
-    if rows.is_empty() {
+fn strategy_queue_summary(proposals: &[StrategyProposal]) -> String {
+    if proposals.is_empty() {
         return "no queued strategy proposals".to_string();
     }
-    let proposed = rows.iter().filter(|row| row.cells[0] == "proposed").count();
-    let approved = rows.iter().filter(|row| row.cells[0] == "approved").count();
-    let rejected = rows.iter().filter(|row| row.cells[0] == "rejected").count();
-    let corrected = rows
+    let proposed = proposals
         .iter()
-        .filter(|row| row.lineage.matches(" -> ").count() >= 2)
+        .filter(|proposal| proposal.status == StrategyProposalStatus::Proposed)
+        .count();
+    let approved = proposals
+        .iter()
+        .filter(|proposal| proposal.status == StrategyProposalStatus::Approved)
+        .count();
+    let rejected = proposals
+        .iter()
+        .filter(|proposal| proposal.status == StrategyProposalStatus::Rejected)
+        .count();
+    let corrected = proposals
+        .iter()
+        .filter(|proposal| proposal.corrected_strategy.is_some())
         .count();
     format!(
         "{} proposals: {} proposed, {} approved, {} rejected, {} corrected",
-        rows.len(),
+        proposals.len(),
         proposed,
         approved,
         rejected,

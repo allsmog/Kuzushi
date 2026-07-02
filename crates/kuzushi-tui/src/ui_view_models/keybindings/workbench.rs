@@ -1,4 +1,5 @@
 use super::{bind, push_view_keybindings, FooterKeybinding};
+use crate::ui_view_models::WORKBENCH_REPORT_COMMAND;
 use crate::{ShellApp, ShellView};
 
 pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
@@ -11,6 +12,10 @@ fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     // dead end.
     let mut bindings = vec![bind("Enter", "open finding")];
     push_view_keybindings(&mut bindings, app);
-    bindings.extend([bind("scan", "rescan"), bind("Ctrl+C", "exit")]);
+    bindings.extend([bind("Ctrl+G", "palette"), bind("scan", "rescan")]);
+    if !app.findings.is_empty() {
+        bindings.push(bind(WORKBENCH_REPORT_COMMAND, "export report"));
+    }
+    bindings.push(bind("Ctrl+C", "exit"));
     bindings
 }

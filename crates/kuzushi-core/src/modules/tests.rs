@@ -6,11 +6,12 @@ mod tests {
         Finding, FindingListFilter, PatchStatus, Severity, StaticProofState, TriageOutcome,
         TriageVerdict,
     };
+    use crate::options::{OptionScope, OptionTarget, ToolOptionStore};
+    use crate::run_artifacts::{run_dir, write_run_summary, RunSummary};
     use crate::runtime::{
         AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentToolLoopRequest,
         LoopHistoryEntry, TriageRequest,
     };
-    use crate::run_artifacts::{run_dir, write_run_summary, RunSummary};
     use crate::workspace::WorkspaceTarget;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -43,6 +44,13 @@ mod tests {
     impl AgentRuntime for MockRuntime {
         fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
             self.queries.lock().unwrap().push(request);
+            if let Some(structured) = self.exploit_chain_response() {
+                return Ok(AgentQueryResponse {
+                    text: String::new(),
+                    structured: Some(structured),
+                    ..Default::default()
+                });
+            }
             let is_patch_request = self
                 .queries
                 .lock()
@@ -394,6 +402,47 @@ mod tests {
                 })),
                 cost_usd: Some(0.002),
             })
+        }
+    }
+
+    impl MockRuntime {
+        fn exploit_chain_response(&self) -> Option<Value> {
+            let queries = self.queries();
+            let query = queries.last()?;
+            if query.system_prompt.contains("exploit-chain code navigator") {
+                return Some(json!({
+                    "selections": [{
+                        "filePath": "src/app.js",
+                        "startLine": 1,
+                        "endLine": 3,
+                        "rationale": "request body reaches template rendering"
+                    }]
+                }));
+            }
+            query
+                .system_prompt
+                .contains("exploit-chain analyzer")
+                .then(|| {
+                    json!({
+                        "evidence": [{
+                            "kind": "template-rendering",
+                            "filePath": "src/app.js",
+                            "line": 2,
+                            "snippet": "res.send(ejs.render(req.body.template));",
+                            "rationale": "request body controls rendered template",
+                            "confidence": 9
+                        }],
+                        "findings": [{
+                            "ruleId": "exploit-chain/template-render",
+                            "title": "Template render chain",
+                            "severity": "high",
+                            "filePath": "src/app.js",
+                            "startLine": 2,
+                            "message": "Request body controls template rendering.",
+                            "evidenceIndexes": [0]
+                        }]
+                    })
+                })
         }
     }
 
@@ -1041,10 +1090,7 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
-        assert_eq!(
-            result.get("status").and_then(Value::as_str),
-            Some("failed")
-        );
+        assert_eq!(result.get("status").and_then(Value::as_str), Some("failed"));
         assert!(result
             .get("errors")
             .and_then(Value::as_array)
@@ -1119,7 +1165,9 @@ OUT
             .unwrap();
         assert!(Path::new(report_path).exists());
         assert_eq!(
-            report_result.pointer("/artifacts/0/path").and_then(Value::as_str),
+            report_result
+                .pointer("/artifacts/0/path")
+                .and_then(Value::as_str),
             Some(report_path)
         );
         assert!(report_result
@@ -2031,12 +2079,16 @@ OUT
             trace: None,
         };
 
-        let result = registry.execute_tool("sbom-scan:scan", json!({}), &ctx).unwrap();
+        let result = registry
+            .execute_tool("sbom-scan:scan", json!({}), &ctx)
+            .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_completed_result_envelope(&result, "sbom-scan:");
         assert_eq!(
-            result.pointer("/data/componentCount").and_then(Value::as_u64),
+            result
+                .pointer("/data/componentCount")
+                .and_then(Value::as_u64),
             Some(1)
         );
         assert_eq!(
@@ -2170,7 +2222,10 @@ OUT
             )
             .unwrap();
 
-        assert_eq!(result.get("status").and_then(Value::as_str), Some("completed"));
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
         assert!(result
             .get("summary")
             .and_then(Value::as_str)
@@ -2223,7 +2278,10 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
-        assert_eq!(result.get("status").and_then(Value::as_str), Some("completed"));
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
         assert!(result
             .get("summary")
             .and_then(Value::as_str)
@@ -2232,7 +2290,12 @@ OUT
             .get("errors")
             .and_then(Value::as_array)
             .is_some_and(Vec::is_empty));
-        assert_eq!(result.pointer("/data/findingsCount").and_then(Value::as_u64), Some(0));
+        assert_eq!(
+            result
+                .pointer("/data/findingsCount")
+                .and_then(Value::as_u64),
+            Some(0)
+        );
         assert!(result
             .pointer("/data/coreFindings")
             .and_then(Value::as_array)
@@ -2245,6 +2308,48 @@ OUT
     }
 
     #[test]
+    fn exploit_chain_scan_honors_input_model_override() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/app.js"),
+            "res.send(ejs.render(req.body.template));\n",
+        )
+        .unwrap();
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config {
+            model: Some("openai:gpt-config".to_string()),
+            ..V2Config::default()
+        };
+        let runtime = MockRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "exploit-chain:scan",
+                json!({"model": "openai:gpt-input", "maxEvidence": 8}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        let queries = runtime.queries();
+        assert_eq!(queries.len(), 2);
+        assert!(queries
+            .iter()
+            .all(|query| query.model == "openai:gpt-input"));
+    }
+
+    #[test]
     fn sast_scan_can_continue_into_langgraph_runtime_triage() {
         let temp = tempdir().unwrap();
         fs::write(
@@ -2254,6 +2359,12 @@ OUT
         .unwrap();
 
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        save_workspace_tool_option(
+            &workspace,
+            "triage:run",
+            "TRIAGE_PROMPT",
+            "Persistent triage guidance.",
+        );
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let mut config = V2Config::default();
@@ -2292,6 +2403,10 @@ OUT
             Some(TriageVerdict::TruePositive)
         );
         assert_eq!(runtime.requests().len(), 1);
+        assert_eq!(
+            runtime.requests()[0].prompt_template.as_deref(),
+            Some("Persistent triage guidance.")
+        );
     }
 
     #[test]
@@ -3211,14 +3326,18 @@ OUT
         assert!(fs::read_to_string(summary)
             .unwrap()
             .contains("\"verification\""));
-        let run_id = result.pointer("/data/runId").and_then(Value::as_str).unwrap();
+        let run_id = result
+            .pointer("/data/runId")
+            .and_then(Value::as_str)
+            .unwrap();
         let run_summary = crate::run_artifacts::load_run_summary(temp.path(), run_id).unwrap();
         assert_eq!(run_summary.status, "completed");
         assert_eq!(run_summary.tool.as_deref(), Some("sast:scan"));
         assert_eq!(run_summary.findings, Some(1));
-        assert!(run_summary.artifacts.iter().any(|artifact| {
-            artifact.label == "sast summary" && artifact.path == summary
-        }));
+        assert!(run_summary
+            .artifacts
+            .iter()
+            .any(|artifact| { artifact.label == "sast summary" && artifact.path == summary }));
         let canonical_summary = temp
             .path()
             .join(".kuzushi")
@@ -3900,10 +4019,7 @@ OUT
         let expected_report_path = run_dir(workspace.root(), "run-report-source").join("report.md");
         assert_eq!(Path::new(report_path), expected_report_path.as_path());
         assert!(Path::new(report_path).exists());
-        assert!(result
-            .get("warnings")
-            .and_then(Value::as_array)
-            .is_some());
+        assert!(result.get("warnings").and_then(Value::as_array).is_some());
         assert!(result
             .get("errors")
             .and_then(Value::as_array)
@@ -3953,6 +4069,7 @@ OUT
                 "triage:run",
                 json!({
                     "fingerprint": confirmed.fingerprint.clone(),
+                    "model": "openai:gpt-override",
                     "TRIAGE_PROMPT": "Use repository evidence only."
                 }),
                 &ctx,
@@ -3982,7 +4099,7 @@ OUT
         );
         let requests = runtime.requests();
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].model, "openai:gpt-4.1");
+        assert_eq!(requests[0].model, "openai:gpt-override");
         assert_eq!(
             requests[0].prompt_template.as_deref(),
             Some("Use repository evidence only.")
@@ -4057,7 +4174,10 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
-        assert_eq!(result.get("status").and_then(Value::as_str), Some("skipped"));
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("skipped")
+        );
         assert_eq!(
             result.pointer("/data/triaged").and_then(Value::as_u64),
             Some(0)
@@ -4233,7 +4353,10 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
-        assert_eq!(result.pointer("/status").and_then(Value::as_str), Some("completed"));
+        assert_eq!(
+            result.pointer("/status").and_then(Value::as_str),
+            Some("completed")
+        );
         assert_eq!(
             result.pointer("/summary").and_then(Value::as_str),
             Some("full-mode:hunt planned 1 chunk over 1 file")
@@ -4295,6 +4418,7 @@ OUT
                 "verify:finding",
                 json!({
                     "fingerprint": finding.fingerprint.clone(),
+                    "model": "openai:gpt-verify",
                     "VERIFY_PROMPT": "Prove exploitability with concrete runtime evidence."
                 }),
                 &ctx,
@@ -4327,7 +4451,7 @@ OUT
 
         let queries = runtime.queries();
         assert_eq!(queries.len(), 1);
-        assert_eq!(queries[0].model, "openai:gpt-4.1");
+        assert_eq!(queries[0].model, "openai:gpt-verify");
         assert!(queries[0]
             .prompt
             .contains("Prove exploitability with concrete runtime evidence."));
@@ -4463,6 +4587,7 @@ OUT
                 "patch:finding",
                 json!({
                     "fingerprint": finding.fingerprint.clone(),
+                    "model": "openai:gpt-patch",
                     "maxIterations": 1,
                     "buildCmd": "true",
                     "testCmd": "true"
@@ -4497,7 +4622,7 @@ OUT
 
         let queries = runtime.queries();
         assert_eq!(queries.len(), 1);
-        assert_eq!(queries[0].model, "openai:gpt-4.1");
+        assert_eq!(queries[0].model, "openai:gpt-patch");
         assert!(queries[0].prompt.contains(&finding.fingerprint));
         assert!(queries[0].prompt.contains("const query = req.query.q"));
     }
@@ -4630,7 +4755,10 @@ OUT
     }
 
     fn assert_completed_result_envelope(result: &Value, summary_prefix: &str) {
-        assert_eq!(result.get("status").and_then(Value::as_str), Some("completed"));
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
         assert!(result
             .get("summary")
             .and_then(Value::as_str)
@@ -4649,9 +4777,29 @@ OUT
             .is_some_and(Vec::is_empty));
     }
 
+    fn save_workspace_tool_option(
+        workspace: &WorkspaceTarget,
+        tool: &str,
+        name: &str,
+        value: &str,
+    ) {
+        let mut store = ToolOptionStore::new();
+        store.set_value(
+            OptionScope::Workspace,
+            OptionTarget::Tool(tool.to_string()),
+            name,
+            json!(value),
+        );
+        store
+            .save_to_path(&crate::workspace::workspace_options_path(workspace.root()))
+            .unwrap();
+    }
+
     fn assert_route_path(routes: &[Value], expected: &str) {
         assert!(
-            routes.iter().any(|route| route_path(route) == Some(expected)),
+            routes
+                .iter()
+                .any(|route| route_path(route) == Some(expected)),
             "missing route {expected}: {routes:#?}"
         );
     }

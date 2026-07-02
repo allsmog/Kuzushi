@@ -8,10 +8,21 @@ pub(in crate::modules) fn run_hybrid_detect(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
-    emit_step(ctx, "tool", "scan", &format!("hybrid-detect start · target={}", target.display()));
+    emit_step(
+        ctx,
+        "tool",
+        "scan",
+        &format!("hybrid-detect start · target={}", target.display()),
+    );
     let outcome = match detect_hybrid_frameworks(&input, &target) {
         Ok(outcome) => outcome,
-        Err(error) => return Ok(failed_tool_output("android-apk:hybrid-detect", &target, error)),
+        Err(error) => {
+            return Ok(failed_tool_output(
+                "android-apk:hybrid-detect",
+                &target,
+                error,
+            ))
+        }
     };
     let persisted = persist_tool_findings(
         "android-apk",
@@ -20,7 +31,12 @@ pub(in crate::modules) fn run_hybrid_detect(
         ctx.workspace,
         ctx.findings_store,
     )?;
-    emit_step(ctx, "done", "scan", &format!("hybrid-detect complete · frameworks={:?}", outcome.detected));
+    emit_step(
+        ctx,
+        "done",
+        "scan",
+        &format!("hybrid-detect complete · frameworks={:?}", outcome.detected),
+    );
     Ok(hybrid_detect_output(&outcome, persisted))
 }
 
@@ -144,7 +160,10 @@ fn hybrid_finding(evidence: &HybridEvidence) -> Finding {
     );
     Finding::new_tool(
         "android-apk",
-        &format!("android-apk:hybrid-{}", evidence.framework.to_lowercase().replace(' ', "-")),
+        &format!(
+            "android-apk:hybrid-{}",
+            evidence.framework.to_lowercase().replace(' ', "-")
+        ),
         &path,
         1,
         None,

@@ -358,7 +358,7 @@ fn plain_flag_forces_line_oriented_shell_output() {
     let tmp = tempfile::tempdir().unwrap();
     let out = stdout(
         kuzushi()
-            // Skip first-run onboarding so the shell lands on the home view
+            // Skip first-run onboarding so the shell lands on the workbench
             // this test exercises, not the no-model-configured model picker.
             .env("KUZUSHI_SKIP_ONBOARDING", "1")
             .args(["--plain", "shell", "--target"])
@@ -369,9 +369,9 @@ fn plain_flag_forces_line_oriented_shell_output() {
 
     assert!(out.contains("KUZUSHI"));
     assert!(out.contains("mode:shell"));
-    assert!(out.contains("HOME"));
-    // Fresh workspace collapses the per-artifact rail into a one-line summary.
-    assert!(out.contains("run artifacts"));
+    assert!(out.contains("FINDINGS"));
+    assert!(out.contains("DETAILS"));
+    assert!(out.contains("no findings yet"));
     assert_strict_plain("--plain shell", &out);
 }
 
@@ -381,7 +381,7 @@ fn plain_env_aliases_are_line_oriented_for_screen_reader_mode() {
     let out = stdout(
         kuzushi()
             .env("KUZUSHI_SCREEN_READER", "1")
-            // Skip first-run onboarding so the shell lands on the home view
+            // Skip first-run onboarding so the shell lands on the workbench
             // this test exercises, not the no-model-configured model picker.
             .env("KUZUSHI_SKIP_ONBOARDING", "1")
             .args(["shell", "--target"])
@@ -392,6 +392,7 @@ fn plain_env_aliases_are_line_oriented_for_screen_reader_mode() {
 
     assert!(out.contains("KUZUSHI"));
     assert!(out.contains("mode:shell"));
+    assert!(out.contains("FINDINGS"));
     assert_strict_plain("KUZUSHI_SCREEN_READER shell", &out);
 }
 
@@ -952,6 +953,8 @@ fn doctor_checks_rust_preflight_without_printing_secrets() {
         "findings-db",
         "semgrep",
         "codeql",
+        "joern",
+        "nmap",
         "model",
         "auth-env",
         "LangGraph bridge",
@@ -1001,6 +1004,8 @@ fn doctor_json_reports_named_preflight_checks() {
         "findings-db",
         "semgrep",
         "codeql",
+        "joern",
+        "nmap",
         "model",
         "auth-env",
         "LangGraph bridge",

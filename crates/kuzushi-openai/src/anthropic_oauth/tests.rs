@@ -236,16 +236,16 @@ mod tests {
     // ----- model_for_tier ------------------------------------------
 
     #[test]
-    fn model_for_tier_promotes_haiku_when_cheap_requested_with_sonnet() {
+    fn model_for_tier_preserves_sonnet_when_cheap_requested() {
         let resolved = anthropic_model_for_tier(ModelTier::Cheap, "anthropic:claude-sonnet-4-6");
-        assert_eq!(resolved, "anthropic:claude-haiku-4-5-20251001");
+        assert_eq!(resolved, "anthropic:claude-sonnet-4-6");
     }
 
     #[test]
-    fn model_for_tier_promotes_opus_when_deep_requested_with_haiku() {
+    fn model_for_tier_preserves_haiku_when_deep_requested() {
         let resolved =
             anthropic_model_for_tier(ModelTier::Deep, "anthropic:claude-haiku-4-5-20251001");
-        assert_eq!(resolved, "anthropic:claude-opus-4-7");
+        assert_eq!(resolved, "anthropic:claude-haiku-4-5-20251001");
     }
 
     #[test]
@@ -261,8 +261,7 @@ mod tests {
             "sk-ant-oat01-XYZ",
         ))
         .unwrap();
-        // Ask for Cheap on an Opus-configured model — should down-shift.
         let model = runtime.model_for_tier(ModelTier::Cheap, "anthropic:claude-opus-4-7");
-        assert_eq!(model, "anthropic:claude-haiku-4-5-20251001");
+        assert_eq!(model, "anthropic:claude-opus-4-7");
     }
 }

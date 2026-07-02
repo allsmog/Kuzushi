@@ -63,6 +63,9 @@ pub struct FindingListFilter {
     pub text_terms: Vec<String>,
     pub file_path: Option<String>,
     pub run_id: Vec<String>,
+    pub revision_sha: Vec<String>,
+    pub branch: Vec<String>,
+    pub dirty: Option<bool>,
     /// Filter by discovery channel(s). Empty = no filter.
     pub vuln_source: Vec<VulnSource>,
     pub limit: usize,
@@ -78,6 +81,9 @@ impl Default for FindingListFilter {
             text_terms: Vec::new(),
             file_path: None,
             run_id: Vec::new(),
+            revision_sha: Vec::new(),
+            branch: Vec::new(),
+            dirty: None,
             vuln_source: Vec::new(),
             limit: 50,
         }

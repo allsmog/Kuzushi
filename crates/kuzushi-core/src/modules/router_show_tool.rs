@@ -1,29 +1,30 @@
 use super::*;
 
 pub(crate) fn router_show_tool(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
-    let router = load_router_for_context(ctx);
-    let roles = router_role_rows(&input, ctx, &router);
-    Ok(router_show_response(ctx.config.model.clone(), &router, roles))
+    let paths = tool_context_config_paths(ctx, None)?;
+    let router = load_router_for_paths(&paths);
+    let options = persistent_tool_options_for_paths(&paths)?;
+    let roles = router_role_rows(&input, ctx, &router, &options);
+    Ok(router_show_response(
+        ctx.config.model.clone(),
+        &router,
+        roles,
+    ))
 }
 
-fn load_router_for_context(ctx: &ToolExecutionContext<'_>) -> crate::agent_router::AgentRouter {
-    let target = ctx
-        .workspace
-        .map(|workspace| workspace.root().to_path_buf());
-    crate::config::ConfigPaths::from_target(target.as_deref())
-        .ok()
-        .and_then(|paths| crate::agent_router::AgentRouter::load(&paths).ok())
-        .unwrap_or_default()
+fn load_router_for_paths(paths: &crate::config::ConfigPaths) -> crate::agent_router::AgentRouter {
+    crate::agent_router::AgentRouter::load(paths).unwrap_or_default()
 }
 
 fn router_role_rows(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     router: &crate::agent_router::AgentRouter,
+    options: &crate::options::ToolOptionStore,
 ) -> Vec<Value> {
     crate::agent_router::AgentRole::all()
         .iter()
-        .map(|role| router_role_row(input, ctx, router, *role))
+        .map(|role| router_role_row(input, ctx, router, options, *role))
         .collect()
 }
 
@@ -31,10 +32,11 @@ fn router_role_row(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     router: &crate::agent_router::AgentRouter,
+    options: &crate::options::ToolOptionStore,
     role: crate::agent_router::AgentRole,
 ) -> Value {
     let key = role.option_store_key();
-    let option_override = router_option_override(input, &key);
+    let option_override = router_option_override(input, options, &key);
     let toml_route = router.route(role).cloned();
     let effective = option_override
         .clone()
@@ -51,12 +53,80 @@ fn router_role_row(
     })
 }
 
-fn router_option_override(input: &Value, key: &str) -> Option<String> {
+fn router_option_override(
+    input: &Value,
+    options: &crate::options::ToolOptionStore,
+    key: &str,
+) -> Option<String> {
+    router_input_option_override(input, key).or_else(|| router_stored_option_override(options, key))
+}
+
+fn router_input_option_override(input: &Value, key: &str) -> Option<String> {
     input
         .as_object()
         .and_then(|obj| obj.get(key))
         .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+fn router_stored_option_override(
+    options: &crate::options::ToolOptionStore,
+    key: &str,
+) -> Option<String> {
+    options
+        .values_for(
+            crate::options::OptionScope::Global,
+            &crate::options::OptionTarget::All,
+        )?
+        .get(key)?
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+#[cfg(test)]
+mod router_show_tests {
+    use super::*;
+
+    #[test]
+    fn router_option_override_reads_global_setg_value() {
+        let mut options = crate::options::ToolOptionStore::new();
+        options.set_value(
+            crate::options::OptionScope::Global,
+            crate::options::OptionTarget::All,
+            "MODEL_DEEP_AUDITOR",
+            json!("openai:setg-model"),
+        );
+
+        assert_eq!(
+            router_option_override(&json!({}), &options, "MODEL_DEEP_AUDITOR").as_deref(),
+            Some("openai:setg-model")
+        );
+    }
+
+    #[test]
+    fn router_input_override_beats_stored_value() {
+        let mut options = crate::options::ToolOptionStore::new();
+        options.set_value(
+            crate::options::OptionScope::Global,
+            crate::options::OptionTarget::All,
+            "MODEL_DEEP_AUDITOR",
+            json!("openai:setg-model"),
+        );
+
+        assert_eq!(
+            router_option_override(
+                &json!({"MODEL_DEEP_AUDITOR": "anthropic:input-model"}),
+                &options,
+                "MODEL_DEEP_AUDITOR",
+            )
+            .as_deref(),
+            Some("anthropic:input-model")
+        );
+    }
 }
 
 fn router_show_response(
@@ -64,17 +134,17 @@ fn router_show_response(
     router: &crate::agent_router::AgentRouter,
     roles: Vec<Value>,
 ) -> Value {
-    let summary = format!("router:show resolved {} role route{}", roles.len(), if roles.len() == 1 { "" } else { "s" });
+    let summary = format!(
+        "router:show resolved {} role route{}",
+        roles.len(),
+        if roles.len() == 1 { "" } else { "s" }
+    );
     let data = json!({
         "configModel": config_model,
         "tomlDefaultModel": router.default_model(),
         "roles": roles,
     });
-    crate::module_result::completed_output_result(
-        summary.clone(),
-        summary,
-        data,
-    )
+    crate::module_result::completed_output_result(summary.clone(), summary, data)
 }
 
 pub(crate) fn run_full_mode_hunt_tool(
@@ -214,9 +284,11 @@ fn auto_triage_resources<'a>(
         &'a crate::findings::FindingStore,
     )>,
 > {
-    let workspace = ctx
-        .workspace
-        .ok_or_else(|| anyhow::anyhow!("autoTriage requires a workspace target"))?;
+    let workspace = ctx.workspace.ok_or_else(|| {
+        anyhow::anyhow!(crate::workspace::active_workspace_required_message(
+            "autoTriage"
+        ))
+    })?;
     Ok(ctx.findings_store.map(|store| (workspace, store)))
 }
 

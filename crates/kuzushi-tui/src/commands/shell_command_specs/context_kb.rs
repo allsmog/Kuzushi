@@ -62,12 +62,18 @@ pub(crate) const CONTEXT_KB_COMMANDS: &[ShellCommandSpec] = &[
         description: "show target and state status",
     },
     ShellCommandSpec {
-        command: "workspace export findings <path>",
+        command: "workspace export findings <path> [format]",
         aliases: &[
-            "/workspace export findings <path>",
-            "findings export <path>",
+            "/workspace export findings <path> [format]",
+            "findings export <path> [format]",
         ],
         category: ShellCommandCategory::ContextKb,
-        description: "export findings JSON or JSONL",
+        description: "export findings as json, jsonl, sarif, csv, or markdown-bundle",
+    },
+    ShellCommandSpec {
+        command: "workspace scope init",
+        aliases: &["/workspace scope init", "workspace scope init"],
+        category: ShellCommandCategory::ContextKb,
+        description: "write an editable .kuzushi/scope.toml scaffold",
     },
 ];

@@ -214,19 +214,7 @@ fn identifier_printf_call<'tree, 'src>(
         return None;
     }
 
-    // Locate the format-string argument. Heuristic: first
-    // `string_literal` in the argument list. This handles
-    // appendStringInfo(buf, "fmt", ...) (fmt at index 1) AND
-    // sprintf(buf, "fmt", ...) (fmt at index 1) AND
-    // printf("fmt", ...) (fmt at index 0). For snprintf(buf, size,
-    // "fmt", ...) the literal is at index 2 — same heuristic.
-    let Some((fmt_arg_idx, fmt_node)) = arg_nodes
-        .iter()
-        .enumerate()
-        .find_map(|(idx, node)| (node.kind() == "string_literal").then_some((idx, *node)))
-    else {
-        return None;
-    };
+    let (fmt_arg_idx, fmt_node) = locate_format_string_arg(&arg_nodes)?;
     let fmt_inner = string_literal_inner_text(fmt_node, src);
     if fmt_inner.is_empty() {
         return None;
@@ -240,6 +228,16 @@ fn identifier_printf_call<'tree, 'src>(
         fmt_inner_upper: fmt_inner.to_ascii_uppercase(),
         fmt_inner,
     })
+}
+
+/// Heuristic: first `string_literal` in the argument list. This handles
+/// appendStringInfo(buf, "fmt", ...), sprintf(buf, "fmt", ...),
+/// printf("fmt", ...), and snprintf(buf, size, "fmt", ...).
+fn locate_format_string_arg<'tree>(arg_nodes: &[Node<'tree>]) -> Option<(usize, Node<'tree>)> {
+    arg_nodes
+        .iter()
+        .enumerate()
+        .find_map(|(idx, node)| (node.kind() == "string_literal").then_some((idx, *node)))
 }
 
 fn collect_identifier_injection_specs(

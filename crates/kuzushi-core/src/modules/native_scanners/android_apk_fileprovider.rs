@@ -11,37 +11,66 @@ pub(in crate::modules) fn run_fileprovider_scan(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
-    if let Some(trace) = ctx.trace {
-        let _ = trace
-            .step("tool", "scan", format!("fileprovider-scan start · target={}", target.display()))
-            .emit();
-    }
-    let paths = match resolve_fileprovider_inputs(&input, &target) {
-        Ok(paths) => paths,
-        Err(error) => return Ok(failed_tool_output("android-apk:fileprovider-scan", &target, error)),
+    emit_fileprovider_step(ctx, "tool", "fileprovider-scan start", &target, None);
+    let scan = match scan_fileprovider_inputs(&input, &target) {
+        Ok(scan) => scan,
+        Err(error) => return Ok(fileprovider_failed_output(&target, error)),
     };
-    let descriptors = match collect_path_descriptors(&paths.file_paths) {
-        Ok(descriptors) => descriptors,
-        Err(error) => return Ok(failed_tool_output("android-apk:fileprovider-scan", &target, error)),
-    };
-    let findings = fileprovider_findings(&descriptors, &paths.file_paths);
     let persisted = persist_tool_findings(
         "android-apk",
         &target,
-        &findings,
+        &scan.findings,
         ctx.workspace,
         ctx.findings_store,
     )?;
-    if let Some(trace) = ctx.trace {
-        let _ = trace
-            .step("done", "scan", format!("fileprovider-scan complete · {} findings", findings.len()))
-            .emit();
-    }
-    Ok(fileprovider_output(&paths.file_paths, &descriptors, findings, persisted))
+    emit_fileprovider_step(ctx, "done", "fileprovider-scan complete", &target, Some(scan.findings.len()));
+    Ok(fileprovider_output(
+        &scan.inputs.file_paths,
+        &scan.descriptors,
+        scan.findings,
+        persisted,
+    ))
 }
 
 struct FileProviderInputs {
     file_paths: PathBuf,
+}
+
+struct FileProviderScan {
+    inputs: FileProviderInputs,
+    descriptors: Vec<PathDescriptor>,
+    findings: Vec<Finding>,
+}
+
+fn scan_fileprovider_inputs(input: &Value, target: &Path) -> Result<FileProviderScan> {
+    let inputs = resolve_fileprovider_inputs(input, target)?;
+    let descriptors = collect_path_descriptors(&inputs.file_paths)?;
+    let findings = fileprovider_findings(&descriptors, &inputs.file_paths);
+    Ok(FileProviderScan {
+        inputs,
+        descriptors,
+        findings,
+    })
+}
+
+fn fileprovider_failed_output(target: &Path, error: anyhow::Error) -> Value {
+    failed_tool_output("android-apk:fileprovider-scan", target, error)
+}
+
+fn emit_fileprovider_step(
+    ctx: &ToolExecutionContext<'_>,
+    kind: &str,
+    label: &str,
+    target: &Path,
+    findings_count: Option<usize>,
+) {
+    let Some(trace) = ctx.trace else {
+        return;
+    };
+    let suffix = findings_count
+        .map(|count| format!(" · {count} findings"))
+        .unwrap_or_else(|| format!(" · target={}", target.display()));
+    let _ = trace.step(kind, "scan", format!("{label}{suffix}")).emit();
 }
 
 fn resolve_fileprovider_inputs(input: &Value, workspace_root: &Path) -> Result<FileProviderInputs> {
@@ -67,7 +96,9 @@ fn resolve_fileprovider_inputs(input: &Value, workspace_root: &Path) -> Result<F
             candidate.display()
         );
     }
-    Ok(FileProviderInputs { file_paths: candidate })
+    Ok(FileProviderInputs {
+        file_paths: candidate,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -240,7 +271,9 @@ fn attr_value(element: &BytesStart<'_>, qualified: &str) -> Result<Option<String
         let attr = attr?;
         let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
         if key == qualified || strip_ns(&key) == strip_ns(qualified) {
-            return Ok(Some(String::from_utf8_lossy(attr.value.as_ref()).to_string()));
+            return Ok(Some(
+                String::from_utf8_lossy(attr.value.as_ref()).to_string(),
+            ));
         }
     }
     Ok(None)

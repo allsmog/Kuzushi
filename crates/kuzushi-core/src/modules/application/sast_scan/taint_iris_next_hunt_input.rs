@@ -46,6 +46,7 @@ pub(in crate::modules) fn sast_scan_options(
     whitebox_static: bool,
 ) -> Result<ScanRunOptions> {
     Ok(ScanRunOptions {
+        run_id: string_input_any(input, &["runId", "run_id"]),
         severity: parse_sast_severity_filter(input)?,
         tasks: None,
         static_proof_state: whitebox_static.then_some(StaticProofState::SignalOnly),

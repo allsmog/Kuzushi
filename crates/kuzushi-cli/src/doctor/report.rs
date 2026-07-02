@@ -1,6 +1,6 @@
 use super::{
-    check_auth_env, check_container_runtime, check_findings_db, check_model_config,
-    check_offense_sandbox, check_revng_image, check_scanner_binary,
+    check_auth_env, check_container_runtime, check_findings_db, check_joern_binary,
+    check_model_config, check_offense_sandbox, check_revng_image, check_scanner_binary,
     deterministic_capability_checks, DoctorCheck, DoctorReport,
 };
 use kuzushi_core::{load_config_for_target, WorkspaceTarget};
@@ -15,12 +15,14 @@ pub(crate) fn build_doctor_report(target: PathBuf) -> DoctorReport {
 
     checks.push(check_scanner_binary("semgrep"));
     checks.push(check_scanner_binary("codeql"));
+    checks.push(check_joern_binary());
     // M2 §2.2: optional recon-intake binaries. Doctor warns if they
     // are absent so operators know which bounty workflows they can
     // feed via `recon:import` without leaving the cockpit.
     checks.push(check_scanner_binary("amass"));
     checks.push(check_scanner_binary("httpx"));
     checks.push(check_scanner_binary("nuclei"));
+    checks.push(check_scanner_binary("nmap"));
     checks.extend(deterministic_capability_checks());
     checks.push(check_container_runtime());
     checks.push(check_offense_sandbox());

@@ -7,9 +7,9 @@ pub(in crate::modules) fn run_verify_finding(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    let workspace = ctx.workspace.context(
-        "verify:finding needs an active workspace. Pass --target <repo> or start the shell with --target.",
-    )?;
+    let workspace = ctx
+        .workspace
+        .context(crate::workspace::active_workspace_required_message("verify:finding"))?;
     let store = ctx
         .findings_store
         .context("verify:finding requires a findings store for the active workspace")?;
@@ -22,7 +22,8 @@ pub(in crate::modules) fn run_verify_finding(
     let parent_step = emit_verify_start(ctx, fingerprint);
     emit_verify_progress(ctx, parent_step, "finding · load evidence and context");
 
-    let result = run_scoped_verify_finding(input, ctx, runtime, workspace.root(), store, parent_step);
+    let result =
+        run_scoped_verify_finding(input, ctx, runtime, workspace.root(), store, parent_step);
     emit_verify_done(ctx, &result);
     result
 }
@@ -52,7 +53,11 @@ fn run_scoped_verify_finding(
 fn emit_verify_start(ctx: &ToolExecutionContext<'_>, fingerprint: &str) -> Option<usize> {
     ctx.trace.map(|trace| {
         trace
-            .step("tool", "finding", format!("verify start · fp={fingerprint}"))
+            .step(
+                "tool",
+                "finding",
+                format!("verify start · fp={fingerprint}"),
+            )
             .emit()
     })
 }
@@ -103,9 +108,8 @@ pub(in crate::modules) fn run_verify_exploit(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
-    ctx.workspace.context(
-        "verify:exploit needs an active workspace. Pass --target <repo> or start the shell with --target.",
-    )?;
+    ctx.workspace
+        .context(crate::workspace::active_workspace_required_message("verify:exploit"))?;
     let store = ctx
         .findings_store
         .context("verify:exploit requires a findings store for the active workspace")?;

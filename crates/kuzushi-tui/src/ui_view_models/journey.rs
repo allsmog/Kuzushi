@@ -4,7 +4,7 @@
 //! than from the launch walker's transient state. The walker finishing
 //! doesn't end the journey — the workspace always *is* somewhere.
 
-use crate::app::WorkflowPhase;
+use crate::app::{PlanningTaskId, WorkflowPhase};
 use crate::ShellApp;
 use kuzushi_core::{Finding, TriageVerdict};
 use std::collections::BTreeSet;
@@ -229,24 +229,38 @@ fn phase_state(
 
 fn phase_next_action(current: WorkflowPhase, progress: JourneyProgress) -> String {
     match current {
-        WorkflowPhase::Map => {
-            "Run next to establish the grip — build context & analysis artifacts (組 map, 1 of 4)."
-                .to_string()
-        }
-        WorkflowPhase::Hunt => {
-            "Run next to hunt for vulnerabilities — map artifacts ready (崩 hunt, 2 of 4)."
-                .to_string()
-        }
+        WorkflowPhase::Map => format!(
+            "Run next to establish the grip — build context & analysis artifacts (組 map, 1 of 4). Tools: {}.",
+            phase_tool_hint(current)
+        ),
+        WorkflowPhase::Hunt => format!(
+            "Run next to hunt for vulnerabilities — map artifacts ready (崩 hunt, 2 of 4). Tools: {}.",
+            phase_tool_hint(current)
+        ),
         WorkflowPhase::Confirm => format!(
-            "Run next to triage & verify — {} of {} findings need review (作 confirm, 3 of 4).",
+            "Run next to triage & verify — {} of {} findings need review (作 confirm, 3 of 4). Tools: {}.",
             progress.unreviewed_findings(),
-            progress.finding_total
+            progress.finding_total,
+            phase_tool_hint(current)
         ),
         WorkflowPhase::Fix => format!(
-            "Run next to patch & report — {} confirmed, {} reviewed (掛 fix, 4 of 4).",
-            progress.confirmed_findings, progress.reviewed_findings
+            "Run next to patch & report — {} confirmed, {} reviewed (掛 fix, 4 of 4). Tools: {}.",
+            progress.confirmed_findings,
+            progress.reviewed_findings,
+            phase_tool_hint(current)
         ),
     }
+}
+
+fn phase_tool_hint(phase: WorkflowPhase) -> String {
+    let mut tools = Vec::new();
+    for task in PlanningTaskId::in_phase(phase) {
+        let tool = task.tool_name();
+        if !tools.contains(&tool) {
+            tools.push(tool);
+        }
+    }
+    tools.join(", ")
 }
 
 pub(crate) fn journey_phase_segment(phase: WorkflowPhase) -> String {
@@ -413,5 +427,16 @@ mod tests {
     fn next_action_counts_unreviewed_findings() {
         let action = phase_next_action(WorkflowPhase::Confirm, progress(true, 4, 1, 1));
         assert!(action.contains("3 of 4 findings need review"));
+    }
+
+    #[test]
+    fn next_action_names_concrete_phase_tools() {
+        let hunt = phase_next_action(WorkflowPhase::Hunt, progress(true, 0, 0, 0));
+        assert!(hunt.contains("secret-scan:scan"));
+        assert!(hunt.contains("taint-iris-next:hunt"));
+
+        let confirm = phase_next_action(WorkflowPhase::Confirm, progress(true, 1, 0, 0));
+        assert!(confirm.contains("triage:run"));
+        assert!(confirm.contains("verify:finding"));
     }
 }

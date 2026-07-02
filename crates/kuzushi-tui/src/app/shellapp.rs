@@ -66,7 +66,6 @@ pub struct ShellApp {
     pub scan: Option<ScanPanelState>,
     pub should_quit: bool,
     pub ctrl_c_armed_at: Option<Instant>,
-    pub activity_cancel_armed_at: Option<Instant>,
     pub session_budget_usd: Option<f64>,
     pub advisory: AdvisoryState,
     pub live_activity: Option<LiveActivity>,
@@ -85,6 +84,9 @@ pub struct ShellApp {
     pub model_picker_cursor: usize,
     /// Auth-method picker cursor (0 = API key row, 1 = OAuth row).
     pub auth_picker_cursor: usize,
+    /// Masked in-session API-key draft used only by the auth picker. It is
+    /// never submitted as a command, logged, or persisted.
+    pub auth_key_draft: String,
     /// Per-task duration history for ETA forecasting in the ambient
     /// progress chip. Loaded from `<target>/.kuzushi/task-durations.json`.
     pub(crate) task_durations: crate::app::TaskDurationStore,
@@ -140,7 +142,9 @@ pub struct ShellApp {
     pub story_return_view: Option<ShellView>,
     pub findings_cursor: usize,
     pub help_scroll: usize,
+    pub help_filter: Option<String>,
     pub tools_scroll: usize,
+    pub tools_filter: Option<String>,
     pub modules_scroll: usize,
     pub history_scroll: usize,
     pub kb_scroll: usize,
@@ -148,6 +152,8 @@ pub struct ShellApp {
     /// M1 §1.1 — operators page through the complete log buffer here instead
     /// of relying on the truncated embedded transcript strip.
     pub logs_scroll: usize,
+    /// Last handled keyboard interaction. Viz auto-open uses this as a grace
+    /// window so a finishing tool does not yank a recently navigated view.
     pub last_char_at: Option<Instant>,
     pub scroll_offset: u16,
     pub spinner_phase: u8,

@@ -14,7 +14,7 @@ pub fn target_git_metadata(target: &Path) -> Option<RunTargetGitMetadata> {
     Some(RunTargetGitMetadata {
         sha,
         branch: git_branch(target),
-        dirty: git_dirty(target),
+        dirty: git_dirty_excluding_kuzushi_state(target),
     })
 }
 
@@ -57,21 +57,14 @@ fn git_branch(target: &Path) -> Option<String> {
     git_stdout(target, &["branch", "--show-current"]).filter(|branch| !branch.trim().is_empty())
 }
 
-fn git_dirty(target: &Path) -> bool {
+fn git_dirty_excluding_kuzushi_state(target: &Path) -> bool {
     git_stdout(target, &["status", "--porcelain"])
-        .map(|status| !status.trim().is_empty())
+        .map(|status| dirty_status_lines(&status).any(|line| !status_line_is_kuzushi_state(line)))
         .unwrap_or(false)
 }
 
-fn git_dirty_excluding_kuzushi_state(target: &Path) -> bool {
-    git_stdout(target, &["status", "--porcelain"])
-        .map(|status| {
-            status
-                .lines()
-                .filter(|line| !line.trim().is_empty())
-                .any(|line| !status_line_is_kuzushi_state(line))
-        })
-        .unwrap_or(false)
+fn dirty_status_lines(status: &str) -> impl Iterator<Item = &str> {
+    status.lines().filter(|line| !line.trim().is_empty())
 }
 
 fn status_line_is_kuzushi_state(line: &str) -> bool {
@@ -173,6 +166,19 @@ mod tests {
         let outcome = switch_target_revision(repo.path(), &first).unwrap();
 
         assert_eq!(outcome.current.sha, first);
+    }
+
+    #[test]
+    fn target_git_metadata_ignores_kuzushi_state_dir() {
+        let Some(repo) = temp_git_repo() else {
+            return;
+        };
+        fs::create_dir_all(repo.path().join(".kuzushi/runs/run-1")).unwrap();
+        fs::write(repo.path().join(".kuzushi/runs/run-1/run.json"), "{}").unwrap();
+
+        let metadata = target_git_metadata(repo.path()).unwrap();
+
+        assert!(!metadata.dirty);
     }
 
     fn temp_git_repo() -> Option<tempfile::TempDir> {

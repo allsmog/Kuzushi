@@ -26,7 +26,6 @@ pub(crate) fn viz_page_for_tool(tool_name: &str) -> Option<VizPage> {
     match tool_name {
         "taint-iris:hunt" => Some(VizPage::AttackPath),
         "exploit-chain:scan" => Some(VizPage::ExploitChain),
-        "threat-model:build" => Some(VizPage::Dfd),
         _ => None,
     }
 }
@@ -47,7 +46,7 @@ impl ShellApp {
         self.log(
             "scene",
             format!(
-                "security-viz — {} · Tab cycles pages · o returns · esc back",
+                "security-viz — {} · Tab cycles pages · Esc/q returns",
                 page.label()
             ),
         );
@@ -66,6 +65,24 @@ impl ShellApp {
         }
         self.sync_activity_deck_to_scene_page(page);
         self.open_or_log_scene_ready(page);
+    }
+
+    pub(crate) fn auto_open_workbench_dfd(&mut self) {
+        if !self.auto_open_viz {
+            return;
+        }
+        if crate::ui_view_models::dfd_model(self).empty_hint.is_some() {
+            return;
+        }
+        if self.can_auto_open_viz_now() {
+            self.open_workbench(crate::app::WorkbenchPane::Center);
+            self.log(
+                "workbench",
+                "data-flow model ready — showing Workbench DFD center pane",
+            );
+        } else {
+            self.log_workbench_ready("use `workbench` or `threats dfd` to view");
+        }
     }
 
     fn activity_deck_is_pinned(&self) -> bool {
@@ -89,7 +106,22 @@ impl ShellApp {
     }
 
     fn log_scene_ready(&mut self, page: VizPage, message: &str) {
-        self.log("scene", format!("{} ready — {message}", page.label()));
+        self.log(
+            "scene",
+            format!(
+                "{} ready — {message}; setg ui.auto_open_viz false disables auto-open",
+                page.label()
+            ),
+        );
+    }
+
+    fn log_workbench_ready(&mut self, message: &str) {
+        self.log(
+            "workbench",
+            format!(
+                "data-flow model ready — {message}; setg ui.auto_open_viz false disables auto-open"
+            ),
+        );
     }
 
     fn can_auto_open_viz_now(&self) -> bool {
@@ -102,9 +134,15 @@ impl ShellApp {
         !matches!(
             self.shell_view,
             ShellView::Workbench
+                | ShellView::TargetPicker
+                | ShellView::PlanningPicker
+                | ShellView::ModelPicker
+                | ShellView::AuthMethodPicker(_)
                 | ShellView::PromptsEditor
+                | ShellView::ThreatEditor
                 | ShellView::AgentChat
                 | ShellView::Story
+                | ShellView::FailureHandoff
                 | ShellView::Trace(_)
                 | ShellView::Replay(_)
         )

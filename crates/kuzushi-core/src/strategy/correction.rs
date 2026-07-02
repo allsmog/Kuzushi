@@ -1,9 +1,8 @@
-use super::{now_ms, save_strategy_queue, StrategyPhase, StrategyProposal};
-use crate::fs_atomic::write_atomic;
+use super::{save_strategy_queue, StrategyPhase, StrategyProposal};
+use crate::fs_atomic::{load_jsonl, now_ms, save_jsonl, slug};
 use crate::workspace::WorkspaceTarget;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::fs;
 use std::path::PathBuf;
 
 pub const STRATEGY_CORRECTIONS_FILE: &str = "strategy-corrections.jsonl";
@@ -62,6 +61,30 @@ impl StrategyCorrection {
         author: impl Into<String>,
     ) -> Self {
         let now = now_ms();
+        Self::new_at(
+            now,
+            target_phase,
+            proposal_id,
+            from_strategy,
+            to_strategy,
+            scope,
+            run_id,
+            reason,
+            author,
+        )
+    }
+
+    pub fn new_at(
+        now: u64,
+        target_phase: StrategyPhase,
+        proposal_id: Option<String>,
+        from_strategy: impl Into<String>,
+        to_strategy: impl Into<String>,
+        scope: StrategyCorrectionScope,
+        run_id: Option<String>,
+        reason: impl Into<String>,
+        author: impl Into<String>,
+    ) -> Self {
         let to_strategy = to_strategy.into();
         Self {
             id: strategy_correction_id(target_phase, &to_strategy, now),
@@ -83,25 +106,17 @@ pub fn strategy_corrections_path(workspace: &WorkspaceTarget) -> PathBuf {
 }
 
 pub fn load_strategy_corrections(workspace: &WorkspaceTarget) -> Result<Vec<StrategyCorrection>> {
-    let path = strategy_corrections_path(workspace);
-    let text = match fs::read_to_string(&path) {
-        Ok(text) => text,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-        Err(error) => {
-            return Err(error).with_context(|| format!("Could not read {}", path.display()))
-        }
-    };
-    parse_strategy_corrections_jsonl(&text)
-        .with_context(|| format!("Could not parse {}", path.display()))
+    load_jsonl(&strategy_corrections_path(workspace), "strategy correction")
 }
 
 pub fn save_strategy_corrections(
     workspace: &WorkspaceTarget,
     corrections: &[StrategyCorrection],
 ) -> Result<()> {
-    write_atomic(
+    save_jsonl(
         &strategy_corrections_path(workspace),
-        &serialize_strategy_corrections_jsonl(corrections)?,
+        corrections,
+        "strategy correction",
     )
 }
 
@@ -115,6 +130,13 @@ pub fn append_strategy_correction(
 }
 
 pub fn record_strategy_correction(
+    workspace: &WorkspaceTarget,
+    correction: &StrategyCorrection,
+) -> Result<()> {
+    record_and_apply_strategy_correction(workspace, correction)
+}
+
+pub fn record_and_apply_strategy_correction(
     workspace: &WorkspaceTarget,
     correction: &StrategyCorrection,
 ) -> Result<()> {
@@ -198,45 +220,7 @@ impl StrategyProposal {
     }
 }
 
-fn parse_strategy_corrections_jsonl(text: &str) -> Result<Vec<StrategyCorrection>> {
-    text.lines()
-        .enumerate()
-        .filter(|(_, line)| !line.trim().is_empty())
-        .map(|(index, line)| {
-            serde_json::from_str::<StrategyCorrection>(line)
-                .with_context(|| format!("line {}", index + 1))
-        })
-        .collect()
-}
-
-fn serialize_strategy_corrections_jsonl(corrections: &[StrategyCorrection]) -> Result<String> {
-    let mut lines = Vec::with_capacity(corrections.len());
-    for correction in corrections {
-        lines.push(serde_json::to_string(correction).context("Could not serialize correction")?);
-    }
-    Ok(if lines.is_empty() {
-        String::new()
-    } else {
-        format!("{}\n", lines.join("\n"))
-    })
-}
-
 fn strategy_correction_id(phase: StrategyPhase, to_strategy: &str, now: u64) -> String {
-    let slug = to_strategy
-        .chars()
-        .map(|value| {
-            if value.is_ascii_alphanumeric() {
-                value.to_ascii_lowercase()
-            } else {
-                '-'
-            }
-        })
-        .collect::<String>()
-        .split('-')
-        .filter(|part| !part.is_empty())
-        .take(4)
-        .collect::<Vec<_>>()
-        .join("-");
-    let suffix = if slug.is_empty() { "strategy" } else { &slug };
+    let suffix = slug(to_strategy, "strategy", 4);
     format!("correction-{}-{now}-{suffix}", phase.label())
 }

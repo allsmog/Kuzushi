@@ -53,6 +53,7 @@ fn pending_plan_key_handler_for(
 }
 
 const PENDING_PLAN_KEY_ACTIONS: &[(KeyCode, fn(&mut ShellApp))] = &[
+    (KeyCode::Enter, ShellApp::apply_pending_plan),
     (KeyCode::Char('y'), ShellApp::apply_pending_plan),
     (KeyCode::Char('Y'), ShellApp::apply_pending_plan),
     (KeyCode::Char('n'), ShellApp::discard_pending_plan),

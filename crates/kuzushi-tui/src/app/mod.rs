@@ -26,6 +26,7 @@ pub(crate) use session::*;
 pub(crate) use settings::*;
 pub(crate) use shell_lifecycle::{auth_ready_for_provider, *};
 pub(crate) use shellapp::*;
+pub(crate) use strategy::*;
 pub(crate) use threats::*;
 pub(crate) use tool_runner::*;
 pub(crate) use view_state::*;
@@ -78,6 +79,7 @@ mod session;
 mod settings;
 mod state;
 pub(crate) mod state_transitions;
+mod strategy;
 mod task_durations;
 mod threats;
 mod tool_runner;
@@ -100,12 +102,12 @@ pub use onboarding::{
     applicable_tasks_for_phase, artifact_state as planning_artifact_state, build_execution_plan,
     cli_is_on_path, direct_dependencies, direct_dependents, discover_target_candidates,
     initial_onboarding_phase, initial_onboarding_phase_for, model_recommended_in_phase,
-    provider_has_multiple_auth_methods, recommended_tasks_for_phase, row_disposition,
-    skip_onboarding_env, toggle_planning_row, topological_order, transitive_dependencies,
-    ArtifactState as PlanningArtifactState, FailedPlanningTask, InitialOnboardingPhase,
-    OnboardingInputs, PendingRetry, PlanningTaskId, PlanningTaskRow, RetryAdjustment,
-    RowDisposition, TargetCandidate, TargetCandidateScope, TargetProfile, ToggleOutcome,
-    WorkflowPhase,
+    provider_has_multiple_auth_methods, recommended_tasks_for_phase, record_recent_target,
+    row_disposition, skip_onboarding_env, toggle_planning_row, topological_order,
+    transitive_dependencies, ArtifactState as PlanningArtifactState, FailedPlanningTask,
+    InitialOnboardingPhase, OnboardingInputs, PendingRetry, PlanningTaskId, PlanningTaskRow,
+    RetryAdjustment, RowDisposition, TargetCandidate, TargetCandidateScope, TargetProfile,
+    ToggleOutcome, WorkflowPhase,
 };
 pub use prereq_chain::{
     PendingPrereqPrompt, PrereqArtifactState, PrereqChain, PrereqPlanAction, PrereqPlanStep,

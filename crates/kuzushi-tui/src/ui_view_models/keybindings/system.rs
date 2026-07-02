@@ -22,10 +22,10 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
 fn planning_picker_keybindings() -> Vec<FooterKeybinding> {
     vec![
         bind("j/k", "move"),
-        bind("Space", "toggle"),
+        bind("Space", "check/uncheck"),
         bind("a/n", "all/none"),
-        bind("g", "rebuild"),
-        bind("Enter", "run"),
+        bind("g", "rebuild cached"),
+        bind("Enter", "run checked"),
         bind("Esc", "skip"),
     ]
 }
@@ -41,11 +41,15 @@ fn choice_picker_keybindings() -> Vec<FooterKeybinding> {
 // The security-viz gallery is fully interactive but its controls live only in
 // the key handler; surface them so Tab/orbit/pause are discoverable.
 fn scene_keybindings(page: crate::scene3d::VizPage) -> Vec<FooterKeybinding> {
-    let mut bindings = vec![
-        bind("Tab/n", "next page"),
-        bind("S-Tab/N", "prev page"),
-        bind("o/Esc/q", "leave"),
-    ];
+    let mut bindings = Vec::new();
+    if !page.is_3d() {
+        bindings.push(bind("j/k/g/G", "scroll"));
+    }
+    bindings.extend([
+        bind("Tab", "next page"),
+        bind("Shift+Tab", "prev page"),
+        bind("Esc/q", "leave"),
+    ]);
     if page.is_3d() {
         bindings.extend([
             bind("h/l/j/k", "orbit 3D"),
@@ -89,6 +93,8 @@ fn story_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 fn help_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     let mut bindings = Vec::new();
     push_view_keybindings(&mut bindings, app);
+    bindings.push(bind("Ctrl+G", "palette"));
+    bindings.push(bind("Ctrl+R", "reverse search"));
     bindings.push(bind("?<text>", "agent chat"));
     bindings.push(bind("Tab", "complete"));
     bindings.push(bind("Ctrl+P/N", "history prev/next"));

@@ -50,11 +50,10 @@ impl ShellApp {
 
     pub(crate) fn open_auth_method_picker(&mut self, provider: String) {
         self.auth_picker_cursor = 0;
+        self.auth_key_draft.clear();
         self.log(
             "onboarding",
-            format!(
-                "{provider} supports multiple auth methods — pick one with ↑/↓/Enter (Esc to defer)"
-            ),
+            format!("{provider} supports multiple auth methods — paste an API key or pick OAuth"),
         );
         self.shell_view = ShellView::AuthMethodPicker(provider);
     }
@@ -119,7 +118,7 @@ impl ShellApp {
         );
         self.log(
             "phase",
-            "Space toggle · g rebuild cached · Enter run · Esc skip phase",
+            "Space check/uncheck · g rebuild cached · Enter run checked · Esc skip phase",
         );
     }
 

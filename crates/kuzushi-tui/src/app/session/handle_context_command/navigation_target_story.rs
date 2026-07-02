@@ -1,4 +1,5 @@
 use super::*;
+use std::path::Path;
 
 impl ShellApp {
     pub fn show_quickstart(&mut self) {
@@ -47,35 +48,62 @@ impl ShellApp {
     }
 
     pub fn handle_target_command(&mut self, raw: Option<&str>) {
-        let Some(raw) = raw.map(str::trim).filter(|raw| !raw.is_empty()) else {
-            let current = self
-                .target
-                .as_ref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| "<unset>".to_string());
-            self.log("target", format!("current target: {current}"));
+        let Some(raw) = target_argument(raw) else {
+            self.log_current_target();
             return;
         };
         let path = PathBuf::from(raw);
         match WorkspaceTarget::new(&path) {
-            Ok(workspace) => {
-                let root = workspace.root().to_path_buf();
-                self.target = Some(root.clone());
-                if let Err(error) = workspace.ensure_state_dir() {
-                    self.log(
-                        "target",
-                        format!("set {} but state dir init failed: {error}", root.display()),
-                    );
-                } else {
-                    self.log("target", format!("set {}", root.display()));
-                    if let Some(tree) = self.refresh_nested_project_scopes(&root) {
-                        self.active_scope = active_scope_from_tree(&tree, None);
-                    }
-                }
-                self.refresh_findings(false);
-                self.refresh_program_scope();
-            }
+            Ok(workspace) => self.activate_target(workspace),
             Err(error) => self.log("error", format!("invalid target {raw:?}: {error}")),
+        }
+    }
+
+    fn log_current_target(&mut self) {
+        let current = self
+            .target
+            .as_ref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| "<unset>".to_string());
+        self.log("target", format!("current target: {current}"));
+    }
+
+    fn activate_target(&mut self, workspace: WorkspaceTarget) {
+        let root = workspace.root().to_path_buf();
+        self.target = Some(root.clone());
+        if self.ensure_target_state_dir(&workspace, &root) {
+            self.record_active_target(&root);
+            self.refresh_active_scope_tree(&root);
+        }
+        self.refresh_findings(false);
+        self.refresh_program_scope();
+    }
+
+    fn ensure_target_state_dir(&mut self, workspace: &WorkspaceTarget, root: &Path) -> bool {
+        match workspace.ensure_state_dir() {
+            Ok(_) => {
+                self.log("target", format!("set {}", root.display()));
+                true
+            }
+            Err(error) => {
+                self.log(
+                    "target",
+                    format!("set {} but state dir init failed: {error}", root.display()),
+                );
+                false
+            }
+        }
+    }
+
+    fn record_active_target(&mut self, root: &Path) {
+        if let Err(error) = crate::app::record_recent_target(root) {
+            self.log("target", format!("target history not updated: {error}"));
+        }
+    }
+
+    fn refresh_active_scope_tree(&mut self, root: &Path) {
+        if let Some(tree) = self.refresh_nested_project_scopes(root) {
+            self.active_scope = active_scope_from_tree(&tree, None);
         }
     }
 
@@ -153,6 +181,10 @@ impl ShellApp {
             self.show_story();
         }
     }
+}
+
+fn target_argument(raw: Option<&str>) -> Option<&str> {
+    raw.map(str::trim).filter(|raw| !raw.is_empty())
 }
 
 fn short_revision(sha: &str) -> String {

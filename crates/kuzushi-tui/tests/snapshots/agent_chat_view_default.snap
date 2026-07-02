@@ -9,6 +9,6 @@ assertion_line: 277
        agent chat dispatches a single question through LangGraph.
        tools and findings are read-only; the chat doesn't write to disk.
 
-       ▸ ask <question>        explicit agent route
-       ▸ ?<text>               always-on agent route from any view
-       ▸ model <provider:id>   pick the model the agent will use
+       > ask <question>        explicit agent route
+       > ?<text>               always-on agent route from any view
+       > model <provider:id>   pick the model the agent will use
