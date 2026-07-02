@@ -9,11 +9,11 @@ importers:
   .:
     dependencies:
       '@anthropic-ai/sdk':
-        specifier: ^0.81.0
-        version: 0.81.0(zod@4.3.6)
+        specifier: ^0.109.1
+        version: 0.109.1(zod@4.3.6)
       '@kuzushi/augur':
-        specifier: ^0.1.0
-        version: 0.1.0
+        specifier: ^0.3.0
+        version: 0.3.0
       '@langchain/anthropic':
         specifier: ^1.0.0
         version: 1.4.0(@langchain/core@1.1.48(openai@6.39.0(ws@8.20.1)(zod@4.3.6))(ws@8.20.1))
@@ -110,8 +110,8 @@ packages:
     resolution: {integrity: sha512-30iZtAPgz+LTIYoeivqYo853f02jBYSd5uGnGpkFV0M3xOt9aN73erkgYAmZU43x4VfqcnLxW9Kpg3R5LC4YYw==}
     engines: {node: '>=6.0.0'}
 
-  '@anthropic-ai/sdk@0.81.0':
-    resolution: {integrity: sha512-D4K5PvEV6wPiRtVlVsJHIUhHAmOZ6IT/I9rKlTf84gR7GyyAurPJK7z9BOf/AZqC5d1DhYQGJNKRmV+q8dGhgw==}
+  '@anthropic-ai/sdk@0.109.1':
+    resolution: {integrity: sha512-q9OnEKLr5H9nxSuXdgDgJhxfYMiE+AaUEBze2Gk91UcaaLnsN+Lx5fbCYywiqurU/APLdwv23x03Wm6WN3EBsg==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -494,8 +494,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@kuzushi/augur@0.1.0':
-    resolution: {integrity: sha512-YFLJ3N9J5nFzWMEIDFyqE7M/an/fzYyswRJvY5HTPQPXSLl+6OLad+RJvEOwpWgK8Z9up9teUSwsTdL8b8rZcQ==}
+  '@kuzushi/augur@0.3.0':
+    resolution: {integrity: sha512-oHuNhOORZiJL0FOVDJakZ/5unN363A21CwdF56EJBdJVc33JArzyIIJtb3pGgCYVehMqXc3uhCYocb4KcEpMXw==}
 
   '@kuzushi/tob-skills@https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2':
     resolution: {tarball: https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2}
@@ -2402,9 +2402,10 @@ snapshots:
       '@jridgewell/gen-mapping': 0.3.13
       '@jridgewell/trace-mapping': 0.3.31
 
-  '@anthropic-ai/sdk@0.81.0(zod@4.3.6)':
+  '@anthropic-ai/sdk@0.109.1(zod@4.3.6)':
     dependencies:
       json-schema-to-ts: 3.1.1
+      standardwebhooks: 1.0.0
     optionalDependencies:
       zod: 4.3.6
 
@@ -2708,7 +2709,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@kuzushi/augur@0.1.0': {}
+  '@kuzushi/augur@0.3.0': {}
 
   '@kuzushi/tob-skills@https://codeload.github.com/allsmog/tob-security-skills/tar.gz/98dda39a53eb74b90d60f305c8523e47552a9fb2':
     optional: true
