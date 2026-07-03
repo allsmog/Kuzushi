@@ -281,6 +281,177 @@ mod tests {
             Some("ThreatModelDocument")
         );
         assert!(requests[0].prompt.contains("Repository inventory"));
+        assert!(requests[0].prompt.contains("Bootstrap stages"));
+        assert!(requests[0].prompt.contains("Evidence raises likelihood"));
+        assert!(requests[0].prompt.contains("DREAD-style"));
+        assert!(requests[0]
+            .prompt
+            .contains(r#"<untrusted-source label="context""#));
+        assert_eq!(
+            result
+                .pointer("/data/sources/0/label")
+                .and_then(Value::as_str),
+            Some("context")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/sources/0/status")
+                .and_then(Value::as_str),
+            Some("loaded")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/sources/1/label")
+                .and_then(Value::as_str),
+            Some("threat-model")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/sources/1/status")
+                .and_then(Value::as_str),
+            Some("skipped")
+        );
+    }
+
+    #[test]
+    fn threat_model_build_feeds_requested_sources_seed_and_design_doc() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("design.md"),
+            "Payments design doc: callbacks cross the merchant trust boundary.",
+        )
+        .unwrap();
+        fs::create_dir_all(temp.path().join("x-ray")).unwrap();
+        fs::write(
+            temp.path().join("x-ray/x-ray.md"),
+            "X-Ray: permissionless bridge settlement is critical.",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("x-ray/entry-points.md"),
+            "Entry points: POST /callbacks/settle.",
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("x-ray/invariants.md"),
+            "Invariant: settlement amount must match signed invoice.",
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({
+                    "sources": ["x-ray"],
+                    "seed": ["Prior threat model output: callback replay was uncertain."],
+                    "designDoc": "design.md",
+                    "outputDir": ".kuzushi/tm-artifacts",
+                    "preserveUserEdits": false
+                }),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        let prompt = runtime.requests()[0].prompt.clone();
+        assert!(prompt.contains(r#"<untrusted-source label="x-ray""#));
+        assert!(prompt.contains("permissionless bridge settlement"));
+        assert!(prompt.contains(r#"<untrusted-source label="designDoc""#));
+        assert!(prompt.contains("callbacks cross the merchant trust boundary"));
+        assert!(prompt.contains(r#"<untrusted-source label="seed-1""#));
+        assert!(prompt.contains("callback replay was uncertain"));
+        assert_eq!(
+            result
+                .pointer("/data/sources")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn threat_model_build_rejects_conflicting_context_off_source() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let error = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({
+                    "sources": ["context"],
+                    "contextMode": "off",
+                }),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("contextMode=off conflicts"), "{error}");
+    }
+
+    #[test]
+    fn threat_model_build_rejects_unknown_source_artifacts() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let error = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"sources": ["interview"]}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("unsupported value"), "{error}");
     }
 
     fn run_randori_pasta_with_runtime(root: &Path, runtime: &MockThreatRuntime) -> Result<Value> {
@@ -567,6 +738,36 @@ mod tests {
             Some("deterministic")
         );
         assert!(runtime.requests().is_empty());
+    }
+
+    #[test]
+    fn threat_model_no_runtime_rejects_source_backed_options() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let error = registry
+            .execute_tool(
+                "threat-model:build",
+                json!({"sources": ["x-ray"], "seed": ["prior threat model"]}),
+                &ctx,
+            )
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("require a configured model/runtime"), "{error}");
     }
 
     #[test]

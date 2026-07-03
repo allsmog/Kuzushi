@@ -34,6 +34,35 @@ pub(in crate::modules) fn build_context_snapshot(
     ))
 }
 
+pub(crate) struct ContextSnapshotBuild {
+    pub(crate) snapshot: Value,
+}
+
+pub(crate) fn build_context_snapshot_for_root(
+    root: &Path,
+    sample_limit: usize,
+) -> Result<ContextSnapshotBuild> {
+    let options = ContextBuildOptions {
+        sample_limit: sample_limit.min(2_000),
+        discovery: "auto".to_string(),
+        enrichment: false,
+        scope: "all".to_string(),
+    };
+    build_context_snapshot_for_root_with_options(root, &options)
+}
+
+fn build_context_snapshot_for_root_with_options(
+    root: &Path,
+    options: &ContextBuildOptions,
+) -> Result<ContextSnapshotBuild> {
+    let file_sample = collect_context_file_sample(root, options.sample_limit)?;
+    let snapshot = context_snapshot_value(root, options, &file_sample)?;
+    save_context_snapshot(root, &snapshot)?;
+    Ok(ContextSnapshotBuild {
+        snapshot,
+    })
+}
+
 struct ContextBuildOptions {
     sample_limit: usize,
     discovery: String,
