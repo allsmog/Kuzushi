@@ -15,10 +15,28 @@ pub(crate) fn threat_model_module() -> BuiltinModule {
                     opt(
                         "methodology",
                         OptionType::Enum,
-                        "Threat-model methodology overlay.",
+                        "Threat-model method: STRIDE gap-fill, PASTA stage framing, or DREAD scoring.",
                     )
                     .choices(&["pasta", "stride", "dread"])
                     .default(json!("stride")),
+                    opt(
+                        "sources",
+                        OptionType::StringList,
+                        "Parent artifacts to feed into the model: context, threat-model, x-ray, entry-points, or none.",
+                    )
+                    .aliases(&["sourceArtifacts", "source_artifacts"])
+                    .default(json!(["context", "threat-model"])),
+                    opt(
+                        "seed",
+                        OptionType::StringList,
+                        "Operator seed context; each item may be inline text or a path.",
+                    ),
+                    opt(
+                        "designDoc",
+                        OptionType::Path,
+                        "Architecture or design document to include as source context.",
+                    )
+                    .aliases(&["design_doc", "design"]),
                     opt(
                         "outputDir",
                         OptionType::Path,
@@ -35,6 +53,31 @@ pub(crate) fn threat_model_module() -> BuiltinModule {
                         OptionType::StringList,
                         "PASTA stages to generate.",
                     )
+                    .advanced(),
+                    opt(
+                        "contextMode",
+                        OptionType::Enum,
+                        "How to handle the context snapshot source.",
+                    )
+                    .aliases(&["context_mode"])
+                    .choices(&["auto", "refresh", "require", "off"])
+                    .default(json!("auto"))
+                    .advanced(),
+                    opt(
+                        "contextLimit",
+                        OptionType::Int,
+                        "Context snapshot file sample limit when building context.",
+                    )
+                    .aliases(&["contextSampleLimit", "context_sample_limit", "sampleLimit"])
+                    .default(json!(200))
+                    .advanced(),
+                    opt(
+                        "maxSourceBytes",
+                        OptionType::Int,
+                        "Maximum bytes from each source block included in the prompt.",
+                    )
+                    .aliases(&["max_source_bytes"])
+                    .default(json!(200000))
                     .advanced(),
                     opt("maxElements", OptionType::Int, "Maximum model elements.")
                         .aliases(&["max_elements"])
@@ -59,6 +102,12 @@ pub(crate) fn threat_model_module() -> BuiltinModule {
                     )
                     .aliases(&["preserve_user_edits"])
                     .default(json!(true))
+                    .advanced(),
+                    opt(
+                        "THREAT_MODEL_PROMPT",
+                        OptionType::String,
+                        "Additional threat-model prompt guidance or a prompt file path.",
+                    )
                     .advanced(),
                     model_option(),
                 ],

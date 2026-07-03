@@ -70,6 +70,50 @@ fn options_model_marks_unknown_tools() {
 }
 
 #[test]
+fn threat_model_options_surface_source_controls_as_standard_options() {
+    let app = ShellApp::new(V2Config::default(), None);
+
+    let model = options_model(
+        &app,
+        &options_view("threat-model:build", OptionsFilter::Standard),
+    );
+    let OptionsBody::Table(table) = &model.body else {
+        panic!("expected ready options table");
+    };
+    let names = table
+        .rows
+        .iter()
+        .map(|row| row.cells[0].as_str())
+        .collect::<Vec<_>>();
+
+    for expected in ["methodology", "sources", "seed", "designDoc"] {
+        assert!(names.contains(&expected), "missing {expected}: {names:?}");
+    }
+}
+
+#[test]
+fn threat_model_options_keep_low_level_source_controls_advanced() {
+    let app = ShellApp::new(V2Config::default(), None);
+
+    let model = options_model(
+        &app,
+        &options_view("threat-model:build", OptionsFilter::Advanced),
+    );
+    let OptionsBody::Table(table) = &model.body else {
+        panic!("expected ready advanced options table");
+    };
+    let names = table
+        .rows
+        .iter()
+        .map(|row| row.cells[0].as_str())
+        .collect::<Vec<_>>();
+
+    for expected in ["contextMode", "contextLimit", "THREAT_MODEL_PROMPT"] {
+        assert!(names.contains(&expected), "missing {expected}: {names:?}");
+    }
+}
+
+#[test]
 fn plain_options_model_projects_ready_table() {
     let app = ShellApp::new(V2Config::default(), None);
 

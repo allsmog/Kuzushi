@@ -46,7 +46,7 @@ mod agentic_sast;
 mod application;
 mod builtins;
 mod chrome_rce;
-mod context;
+pub(crate) mod context;
 mod contracts;
 mod descriptor;
 mod dynamic_loader;

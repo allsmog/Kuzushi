@@ -120,6 +120,11 @@ fn prompt_file_default_for_tool(name: &str) -> Option<PromptFileDefault> {
     match name {
         "triage:run" => Some(prompt_file_default("triage", "run", "TRIAGE_PROMPT")),
         "verify:finding" => Some(prompt_file_default("verify", "finding", "VERIFY_PROMPT")),
+        "threat-model:build" => Some(prompt_file_default(
+            "threat-model",
+            "build",
+            "THREAT_MODEL_PROMPT",
+        )),
         "taint-iris:hunt" => Some(prompt_file_default(
             "taint-iris",
             "hunt",
@@ -277,6 +282,24 @@ mod prompt_file_default_tests {
         .unwrap();
 
         assert_eq!(input["TRIAGE_PROMPT"], json!("explicit prompt"));
+    }
+
+    #[test]
+    fn threat_model_prompt_file_default_is_injected() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let path = crate::options::prompt_override_path(temp.path(), "threat-model", "build");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "focus callback replay threats\n").unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+
+        let input = input_with_prompt_file_default("threat-model:build", json!({}), &ctx).unwrap();
+
+        assert_eq!(
+            input["THREAT_MODEL_PROMPT"],
+            json!("focus callback replay threats\n")
+        );
     }
 }
 

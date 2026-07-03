@@ -15,4 +15,5 @@ use std::time::{SystemTime, UNIX_EPOCH};
 mod register_context_modules;
 #[cfg(test)]
 mod tests;
+pub(crate) use build_context_snapshot::build_context_snapshot_for_root;
 pub(in crate::modules) use build_context_snapshot::build_context_snapshot;
