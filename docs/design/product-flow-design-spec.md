@@ -13,18 +13,27 @@
 
 ## 0. Design goals
 
+The product is a **control room for non-deterministic scans**: a *control plane*
+to steer where the non-determinism spends and how hard to corroborate, and a
+*visual plane* to see the otherwise-invisible agent reasoning. Every screen
+serves one of those two planes.
+
 1. **The screen is the map.** At any moment the operator can see which phase they
    are in, what phase reality is (from artifacts on disk, not the viewed page),
-   and the single most useful next action.
-2. **Steering lives at the phase boundary.** Model, prompts, budget, strategy,
-   and verify config are surfaced *together* at the moment you advance a phase —
-   not scattered across 92 commands.
+   the running **cost**, and the single most useful next action.
+2. **Steering lives at the phase boundary.** The control-plane levers — model
+   tiers, prompts, budget, **strategy**, **engines**, the **harness/focus**, and
+   verify config — are surfaced *together* at the moment you advance a phase, not
+   scattered across 92 commands.
 3. **Signifiers are honest by construction.** One glyph = one meaning. Terminal
-   states are terminal. Nothing renders that phase reality doesn't support.
-4. **Depth on demand.** The catalog, the 55 modules, the MCP oracles are one
-   keystroke away, never in the default path.
+   states are terminal. Cost and corroboration are always on screen. Nothing
+   renders that phase reality doesn't support.
+4. **Depth on demand.** The catalog — the 42 modules (composable *parts*, not a
+   catalog to shop) and the MCP oracles — is one keystroke away, never the
+   default path.
 5. **Parity is structural.** Every interactive gate has a headless equivalent
-   (`scan --until <phase>`, `run <tool>`, `--approve`, `--when/--max/--votes`).
+   (`scan --until <phase>`, `run <tool>`, `--approve`, `--when/--max/--votes`,
+   `--engines`, `--focus`, `findings seed`).
 
 ---
 
@@ -41,8 +50,8 @@ Shell (kuzushi)
 ├── Steering gate  ... modal-ish overlay at each phase boundary (model/prompts/
 │                       budget/strategy/verify) — the one place levers converge
 ├── Finding detail ... proof ladder, evidence, sources[], corroboration, votes
-├── Advanced catalog . the full registry, grouped by phase & category (was the
-│                       41-tile home + Recommend/Module/ModuleRun)
+├── Advanced catalog . the 42 modules as composable parts, grouped by phase
+│                       (was the tile home + Recommend/Module/ModuleRun)
 ├── Activity ......... live DAG + output deck (auto-opens on run/scan)
 └── Utility views .... logs, help, config, replay/trace, KB, threat views
 ```
@@ -134,6 +143,14 @@ prompt, never to view hotkeys.
 - Every folder artifact is **editable in place** (`[edit]` opens the prompt/KB
   editor or the file). Editing calibration before Hunt is the whole point of the
   phase — no spend happens here beyond the map build.
+- **`aim` seeds the harness.** A recon/discover pass pre-populates
+  `engagement/harness.toml` — ranked focus areas (`{entry, input_surface,
+  rank}`), detected toolchain/build system, an input vocabulary, and the default
+  strategy/oracle. This is the mutable scan config the operator edits and the
+  Hunt salvo fires (PRD §7). A fuzzer is never handed `main()`.
+- **Prepare engines here, where cost is a one-time build.** `cpg:build` /
+  `codeql-db:build` are surfaced as Aim actions with their build cost, so the
+  scoped Confirm pass can enable the CPG oracle instantly (§8 steering gate).
 - Empty state (no map yet): a single guidance line — *"run `aim` to map the
   target"* — never dummy content.
 
@@ -213,12 +230,14 @@ from both surfaces:
 
 ---
 
-## 7. Advanced catalog (the reframed 41-tile home)
+## 7. Advanced catalog (the reframed home)
 
-The full registry stays reachable — legible, not a wall:
+The full registry stays reachable — legible, not a wall. The 42 modules read as
+**composable parts** (detectors · analysis oracles · signal generators ·
+verifiers, §6 of the PRD), grouped by the phase they serve:
 
 ```
-│ CATALOG — 34 modules · 58 tools                    [/] filter   [tab] complete│
+│ CATALOG — 42 modules · ~67 tools                   [/] filter   [tab] complete│
 │                                                                              │
 │ AIM ── map & model                                                           │
 │   context        build the context snapshot                                  │
@@ -252,11 +271,15 @@ The one place the scattered levers converge. Triggered by `next` (advancing a
 phase) or by a steer key. It is the interactive equivalent of the headless flags.
 
 ```
-┌ STEER → entering HUNT ────────────────────────────────────────────┐
-│  model      claude-opus-4-8            [change]   (per-phase ok)    │
+┌ STEER → entering HUNT ─────────────────────────────────────────────┐
+│  model      find:mid  triage:cheap  verify:deep     [change]        │
+│  strategy   deep  ▾   (quick · deep · pr-review)                    │
+│  engines    cpg ✓ (~40s/scan)  codeql ○  clangd-lsp ○   [toggle]    │
+│  harness    focus: request handlers · seeds: 2 · oracle: reach      │
+│  focus  ›   "focus on sqli"________________________              ↵  │
+│  runs × variants   2 × {default, aggressive}   → 4-round salvo      │
 │  prompts    engagement/prompts/ · 2 overrides · base sha 9f3a…      │
-│  budget     $2.00 cap    ▓▓▓░░ $0.85 spent                          │
-│  strategy   stride  ▾   (quick · deep · stride)                     │
+│  budget     $2.00 cap    ▓▓▓░░ $0.85 spent   · ~$0.75/round         │
 │  verify     when≥high · max 8 · votes 2         (Confirm phase)     │
 │  salvos     P-001 ✓  P-002 ✓  P-003 ○                               │
 │                                                                    │
@@ -264,17 +287,29 @@ phase) or by a steer key. It is the interactive equivalent of the headless flags
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Per-phase/per-role model override** flows through the existing layered option
-  store — and is validated against the runtime here (no `anthropic:` model on a
-  codex backend passing silently). No silent fallback: an incompatible pick is
-  rejected in the gate with the reason.
+- **Model tiers** route per role — cheap models for triage/dedup/classify, deep
+  models for verify/patch/PoV. Each pick flows through the layered option store
+  and is validated against the runtime here (no `anthropic:` model on a codex
+  backend passing silently). No silent fallback: an incompatible pick is rejected
+  in the gate with the reason.
+- **Strategy** is the composed recipe = the salvo's variant axis (`deep = pattern
+  + iris-taint + review×2 + invariant`); picking it expands into the salvo matrix.
+- **Engines** toggles the analysis oracles for *this* pass (Joern CPG, CodeQL DB,
+  clangd LSP) with a **cost/latency estimate shown before commit** — artifact-
+  gated and honest; a missing prerequisite refuses with a build hint, never a
+  silent degrade. The analysis-depth ladder (`structural → linked → path →
+  proven`) drives which engine is needed.
+- **Harness / focus** is the mutable scan config (§3): recon-seeded focus areas,
+  seeds, oracle. Typing intent — *"focus on sqli"* — re-ranks focus areas, sets
+  the oracle CWEs, and biases seeds for the next salvo.
 - **Prompts** shows the 3-level resolution (`project override → variant → base`)
   and the base sha — provenance the operator can trust and diff.
-- **Strategy** is the variant axis (`deep = pattern + iris-taint + review×2 +
-  invariant`); picking it expands into the salvo matrix.
+- **Budget** prices the approved salvo; the cap is enforced between proposals with
+  a self-calibrating `$/round`; a single-proposal overshoot is surfaced.
 - **Verify** config shows only in/entering Confirm.
-- Everything here has a headless twin: `--model`, `--prompts`, `--budget`,
-  `--strategy`, `--when/--max/--votes`, `--approve`.
+- Everything here has a headless twin: `--model`/`MODEL_<ROLE>`, `--strategy`,
+  `--engines`, `--focus`, `--prompts`, `--budget`, `--when/--max/--votes`,
+  `--approve`.
 
 ---
 

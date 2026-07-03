@@ -1,516 +1,739 @@
-# PRD — Kuzushi end-to-end product flow
+# PRD — Kuzushi as a control room for non-deterministic security scans
 
-> **Status:** proposal, awaiting review.
-> **Owner:** operator experience.
-> **Companion docs:** the implementation seams live in
-> [`docs/plans/cannon-port-plan.md`](./cannon-port-plan.md); the screen-level
-> behavior lives in [`docs/design/product-flow-design-spec.md`](../design/product-flow-design-spec.md).
-> **Grounding:** the four 2026-07 audits (new-user journey, TUI+headless devEX,
-> LLM token-waste, perf-waste), the cannon reframe decision (Direction A,
-> 2026-07-02), `VISION.md`, and `ROADMAP.md`. Every problem claim below is
-> traceable to one of those; every requirement is stated as a checkable outcome.
-
----
-
-## 1. TL;DR
-
-Kuzushi is a local-first security workbench whose engine is an LLM agent you
-steer per phase — but the product *presents* itself as a 41-tile scanner catalog
-(55 registered modules / 67 visible tools / 92 command specs). The gap between
-what it **is** and what it **shows** is the single biggest drag on adoption:
-new users hit an auth wall before they see value, can't find the capability they
-want in an alphabetical wall of codenames, and can't tell a confirmed exploit
-from an LLM guess.
-
-This PRD defines one coherent end-to-end flow — **Aim → Hunt → Confirm → Fix →
-Report** — steered from a single cockpit, backed by one editable engagement
-folder and one findings ledger with sticky human decisions and honest proof
-state. It folds the catalog *behind* the phases (still reachable for power
-users), makes the keyless first run actually work, and makes every on-screen
-signifier tell the truth.
-
-**One-sentence product promise:** *point Kuzushi at a repo, and it walks you from
-"what's the attack surface" to "here is a confirmed, evidence-backed finding and
-a patch" — with a measurable detection number, not a claim.*
+> **Status:** proposal, awaiting review. **Owner:** operator experience.
+> **Companion docs:** screen/interaction behavior in
+> [`docs/design/product-flow-design-spec.md`](../design/product-flow-design-spec.md);
+> code seams in [`docs/plans/cannon-port-plan.md`](./cannon-port-plan.md).
+> **Grounded in:** the 2026-07 journey / devEX / token-waste / perf audits; a
+> file-by-file map of current Kuzushi (`design-sync/kuzushi-tui-kit`); the
+> cannon harness (`~/vibe-code/vuln-scan-cannon-harness`); Anthropic's
+> defending-code reference harness; the three AIxCC-winning cyber-reasoning
+> systems (atlantis / buttercup / theori); the IRIS neuro-symbolic taint method;
+> and Google's OSS-Fuzz-Gen / Project Naptime→Big Sleep. Citations in §16.
 
 ---
 
-## 2. The problem with today's flow
+## 1. Thesis
 
-The product works — the pieces are real and mostly good. The **flow between them
-is confused**. Concretely, from the audits:
+**An LLM security scan is non-deterministic and it costs money every time you
+run it.** The same agent, pointed at the same code, surfaces different findings
+run to run — and each run spends tokens and takes seconds-to-minutes per file.
+That is not a bug to be fixed; it is the material the product is made of.
+Anthropic's own reference harness says it plainly: *models are stochastic,
+don't expect the nth run to have zero new findings* — and its entire design is
+**two countermeasures**:
 
-**A. It reads as an inventory, not a workspace.** Home shows ~41 modules like a
-scanner catalog when the engine underneath is one steerable agent. There are 55
-registered modules, 67 visible tools, 43 `ShellView` variants, 92 command
-specs. The `/tools` list is a flat alphabetical wall of opaque codenames
-(`randori:pasta`, `carlini-threat-hunt`, `shinsa`, `tob`, `x-ray`) with
-circular descriptions and no headers. Tab-completion is fully implemented but
-undiscoverable, and the ghost-text preview that would advertise it is tested
-dead code that never renders.
+> **Any single AI scan is flaky and noisy. The countermeasures are: union across
+> a permuted salvo (coverage from variance) and a separate adversarial verifier
+> whose only job is to disprove findings (precision). Everything else — the
+> ledger, the cockpit, seeding — is lifecycle management around those two.**
 
-**B. The keyless first run is broken end-to-end.** The one zero-friction win —
-`kuzushi demo` (offline, no key, deterministic 7 findings) — is invisible in the
-shell; it exists in the CLI/README only. The model picker offers only
-paid/credentialed models with no offline choice. Defer the target picker and you
-land in a bare Workbench with empty states that point only at `scan`/`next`
-(which need a target *and* a model) and never at `demo`. A new user hits an auth
-wall before they see a single finding.
+Kuzushi's job is to make that governable. It is the **control room** for
+non-deterministic scans: a **control plane** to steer *where* the
+non-determinism spends and *how hard* to corroborate it, and a **visual plane**
+to *see* the otherwise-invisible agent reasoning — attack surface, threat model,
+data-flow, attack chains, and a findings ledger with an honest proof state.
 
-**C. You can't trust what the screen tells you.** A canceled task flips
-`×` → `✓ done` when its worker finishes late — an aborted run presented as clean
-success. The Workbench fabricates a phase chip and rail with no target set,
-contradicting its own target-gating invariant, and tracks the *viewed page*
-rather than engagement reality (double "current" markers, Done regressing to
-Current). The DAG legend advertises `● active` while rows render a braille
-spinner; `●` means three different states across views. Focus signifiers lie off
-the Review page. **When the tool's job is evidence, a dishonest signifier is a
-product-level defect, not a cosmetic one.**
+The 42 built-in modules are not a catalog to browse. They are **composable
+parts** — detectors, analysis oracles, signal generators, verifiers — that the
+operator (and the workflow) assemble into **strategies** and fire as **salvos**
+against a target, phase by phase.
 
-**D. The steering levers exist but are scattered.** Every lever the phased vision
-needs already exists and is read fresh per stage — layered option store,
-per-stage/per-role model overrides (with no silent fallback), prompt-override
-files, KB/threat-model attach, `ask`/`plan`. What's missing is **one
-phase-boundary steering gate** that surfaces them together at the moment they
-matter. Today verification is opt-in but all-or-nothing: bare `scan` verifies
-nothing; turn it on and it verifies *every* true positive with no severity
-floor, cap, or vote threshold.
+**The pieces already exist.** Kuzushi ships a deduping findings ledger with
+corroboration counts, sticky human triage, a three-tier model router, per-op
+budget caps, batch triage, twelve MCP analysis servers, on-demand CPG/CodeQL
+builds, a five-page security-visualization gallery, attack chaining, and
+prompts-as-files. **What's missing is the room that composes and steers them:**
+the salvo, the mutable harness, saveable strategies, per-scan engine enablement,
+and a deterministic seed plane. This PRD specifies that room.
 
-**E. Runs waste tokens and money.** Triage re-triages 4×-duplicated findings with
-no verdict-skip and no latest-scan scope (the same fingerprint triaged 10–11× in
-one observed run — 222 LLM calls, then canceled, zero results surfaced). No
-Anthropic prompt caching anywhere in the shipping path. Carlini re-embeds the
-full repo inventory per actor×run at the prompt tail, defeating caching. The cost
-cap can't trip on the codex backend (reports `cost_usd 0.0` every call).
-
-**F. Headless has sharp edges that block CI.** `recon:import` is advertised but
-unreachable (not in the dispatch match arm) — a blocker. `--target` behaves three
-different ways (`kuzushi --target . scan` errors "missing `<TARGET>`"). `run`
-prepare-errors emit empty stdout, breaking `jq` in CI. Nearly every flag has
-blank `--help`. The friendly `workspace export findings <path>` verb drops the
-format argument and refuses directories, making the human/bounty markdown bundle
-unreachable through the friendly path.
-
-**G. Detection quality is a claim, not a number.** `baseline.json` is `{}`.
-Kuzushi ships `kuzushi-eval` (precision/recall/F1 vs oracle corpora) but it's
-recall-centric, standalone, and not wired to a `kuzushi` verb. There is no
-head-to-head-vs-SARIF, no regression gate, no self-tuning loop.
-
-**The through-line:** the product's differentiator is *evidence, not chat* —
-findings with verified evidence, honest proof state, defensible next action, and
-a published detection number. Today's flow undercuts that differentiator at
-every seam. This PRD closes those seams into one flow.
+**One-sentence promise:** *point Kuzushi at a target, aim it, and fire
+controlled salvos of AI scans you can steer, price, corroborate, and see — until
+you have confirmed, evidence-backed findings you can defend.*
 
 ---
 
-## 3. Who this is for
+## 2. The load-bearing idea (why this product exists)
 
-| Persona | What they want | Where today's flow fails them |
+Discovery is easy to parallelize; the bottleneck has moved to **verification,
+triage, and patching** (Anthropic reference harness, `docs/blog-post.md`). A
+product that just fires more agents produces more noise. The value is in the
+loop that turns noisy, stochastic, expensive AI output into a small set of
+corroborated, proven findings — **without clobbering the human's judgment along
+the way.**
+
+Two mechanisms recover signal from non-determinism, and both must be **operator-
+controllable**, not buried:
+
+1. **Sample** — fire a *salvo*: the same target hit from many angles
+   (`focus × strategy × model × runs`), results **unioned and deduped** so
+   coverage comes from variance instead of a single lucky pull.
+2. **Corroborate** — a separate **adversarial verifier** (guilty-until-proven-
+   innocent, multi-vote, blind, and where possible **crash/PoV-backed**) whose
+   only job is to disprove. In the reference harness this roughly halved false
+   positives; requiring a reproducing PoC drove them near zero.
+
+Everything else in this PRD — the ledger, the two planes, budget, strategies,
+the harness — is lifecycle management around those two mechanisms.
+
+---
+
+## 3. The problem with today's flow
+
+Kuzushi works, and most of the machinery is real and good. The failure is that
+it presents the **parts** but not the **control room**, so the operator cannot
+actually govern a non-deterministic scan. Symptoms, each traceable to an audit
+or the current-state map:
+
+**A. You can't steer where the non-determinism spends.** Phase *execution* is a
+static 22-entry `PlanningTaskId` walker (`app/shellapp.rs`), not a signal-driven,
+priced **salvo**. There is no `focus × strategy × model × runs` matrix, no queue
+of proposed permutations you approve under a budget. The `COVERAGE MATRIX` in the
+Workbench is display-only (`workbench/panes.rs`).
+
+**B. You can't shape the scan itself — the harness is frozen.** The engine
+wiring, detector set, and tool graph are compile-time
+(`builtin_registration.rs`). Prompt *text* is editable (prompt-override files +
+the `PromptMutation` ledger), but you cannot mutate the **harness** — seed it
+from recon, retarget it by typing *"focus on SQLi"*, or let coverage feedback
+evolve it. Operator "focus" exists only as one-off `ask`/`prompt mutate`, not as
+a first-class steering input that re-ranks the scan.
+
+**C. Engines you own aren't controllable per-scan.** Kuzushi has 12 MCP oracle
+servers, `cpg:build`, and `codeql-db:build`, but enablement is **artifact-
+presence-gated** behind the scenes (`with_mcps_for_target` probes disk), never an
+explicit, cost-estimated operator toggle in the run UI. There is no way to say
+*"turn on the Joern CPG and the CodeQL DB for this confirm pass"* and see the
+latency/cost that implies. LSP is a single clang MCP, not a general control.
+
+**D. The two planes are conflated.** A deterministic seed (Semgrep/CodeQL/SARIF)
+and a non-deterministic LLM hunt are different kinds of evidence that should
+*corroborate* one row — Kuzushi's ledger already merges them and tags
+`vuln_source` — but nothing lets you **ingest an external SARIF/Semgrep file** as
+a seed, and nothing surfaces or steers the two planes as first-class surfaces.
+
+**E. You can't compose or save a strategy.** There is no named, replayable
+recipe (`deep = pattern + iris-taint + review×2 + invariant`). The parts exist —
+`variant`, `ndiff`, prompt overrides, phases — but they don't compose into a
+stored strategy object you can pick, edit, and re-fire.
+
+**F. You can't fully trust or fully see the output.** Confirmed-vs-guess is
+detail-only, not in the findings list; a canceled task can flip to `✓ done`; the
+Workbench fabricates a phase chip with no target and tracks the *viewed page*
+rather than engagement reality; the DAG legend names a state rows can't show.
+When the product's promise is *evidence*, a dishonest signifier is a defect.
+
+**G. It reads as an inventory.** 42 modules / ~67 tools surfaced as a phase-
+bucketed catalog is better than a flat wall, but the *default* is still "pick a
+tool" rather than "aim, then fire a salvo." Codenames stay opaque; tab-completion
+is implemented but its ghost-text preview never renders.
+
+**H. The keyless first run is broken.** The offline `demo` win is invisible in
+the shell; the model picker offers only credentialed models; deferring the target
+picker lands in a bare Workbench whose empty states point at `scan`/`next` (which
+need a key and a target). A stranger hits an auth wall before a single finding.
+
+**I. Runs waste tokens.** Triage re-triages duplicates with no verdict-skip and
+no latest-scan scope (one fingerprint triaged 10–11× in an observed 222-call
+run, then canceled). No prompt caching on the shipping path.
+
+**J. Headless has CI-blocking edges.** `recon:import` is advertised but
+unreachable; `--target` behaves three ways; `run` prepare-errors emit empty
+stdout; the friendly export verb drops the format and refuses directories.
+
+**K. Detection quality is a claim, not a number.** `baseline.json` is `{}`;
+`kuzushi-eval` exists but is recall-centric, standalone, and not a `kuzushi`
+verb. No head-to-head-vs-SARIF, no regression gate, no prompt self-tuning.
+
+**The through-line:** the differentiator is *governed evidence*. Today the
+operator has the parts but not the controls to sample, steer, corroborate, and
+see a non-deterministic scan. This PRD builds the control room.
+
+---
+
+## 4. What already exists (so we build the room, not the parts)
+
+Grounding for every requirement below — verified against the current tree. The
+gap is composition and control, not greenfield capability.
+
+| Capability | Status | Where |
 | --- | --- | --- |
-| **Solo bug-bounty hunter** | Point at an in-scope repo, get confirmed, reportable findings fast; export a markdown bundle for the program. | Auth wall before first finding; markdown bundle unreachable via the friendly verb; can't tell confirmed from guessed in the list. |
-| **AppSec engineer (in CI)** | Gate PRs on high-severity findings, upload SARIF, keep the false-positive rate low and *known*. | `run`/`scan` `--target` inconsistency and empty-stdout errors; no published FP/TP number; verify is all-or-nothing. |
-| **Security researcher / red-teamer** | Steer the agent per phase — pick methodology, models, prompts, budget; hunt variants and chains; measure the run. | Levers scattered across 92 commands; no phase-boundary gate; static 22-task walker instead of signal-driven proposals; no measure/tune verb. |
+| Deduping findings ledger, `corroboration_count`, severity-max merge | **Exists** (dedupes *within* a `scan_id`; accumulates *across* runs) | `findings/domain/finding_record.rs`, `persistence/open/finding_writes.rs` |
+| Sticky human triage (`triaged_by`, refuses to overwrite human), suppress/snooze | **Exists** | `persistence/open/triage_and_verification.rs` |
+| Three-tier model routing + per-role overrides (`Cheap/Mid/Deep`, `MODEL_<ROLE>`, `models.toml`) | **Exists** | `runtime/domain/response_and_roles.rs`, `agent_router/routed_runtime_dispatch.rs` |
+| Per-op budget caps + spend ledger + cost-cap halt card | **Exists** | `spend/drop.rs`, `spend/parse_budget_flag.rs` |
+| Batch triage over all findings, concurrency, `costCapUsd`, `stage2Tier` | **Exists** | `modules/triage/*` |
+| Live Semgrep + CodeQL detectors (persist to the one ledger) | **Exists** | `native_scanners/register_modules.rs` |
+| Attack chaining → attack-tree viz | **Exists** | `scan/engines/exploit_chain/`, `ui_view_models/viz_data.rs` |
+| Threat-model build + TUI regenerate (`threats regen`, `g rebuild`) | **Exists** | `capabilities/threat_model/`, `modules/threat_model_module.rs` |
+| 5-page viz gallery: 3D attack-surface terrain, DFD, exploit-chain, attack-path, heatmap | **Exists** | `renderer/views/scene/`, `ui_view_models/viz_data.rs` |
+| 12 MCP oracle servers (tree-sitter, Joern, CodeQL, clangd, gtags, entry-points, …) | **Exists**, artifact-gated | `crates/kuzushi-mcp-*`, `runtime/mcp_probe.rs` |
+| On-demand CPG + CodeQL DB build | **Exists** | `modules/cpg_module.rs`, `codeql_db_module.rs` |
+| Neuro-symbolic taint (LLM specs → CPG/CodeQL flows → LLM triage), evidence ladder | **Exists** (experimental) | `capabilities/taint_iris_next/`, `docs/taint-iris-next.md` |
+| Prompts-as-files (`.kuzushi/prompts/<module>/<verb>.md`) + mutation ledger | **Exists** | `options/prompt_paths.rs`, prompt-mutation ledger |
+| Phase derivation 組→崩→作→掛 from workspace reality | **Exists** | `ui_view_models/journey.rs` |
+| Phase-bucketed module catalog (42 modules, ~67 tools) | **Exists** | `builtins/.../builtin_registration.rs` |
 
-All three share one need: **a legible path from target to evidence they can
-defend**, with the depth available when they want it and out of the way when they
-don't.
-
----
-
-## 4. Product principles (the bar every change is held to)
-
-1. **Evidence, not chat.** Every capability must produce a first-class artifact,
-   an honest proof state, and an operator next action. Anything that doesn't is
-   roadmap material, not product surface. (From `VISION.md`.)
-2. **One flow, depth on demand.** The default path is the five-phase spine.
-   The full 55-module registry stays reachable behind an advanced catalog — the
-   reframe *hides* complexity, it never *removes* capability.
-3. **Honest signifiers.** A glyph, status, chip, or keybind hint must reflect the
-   real state and the real intent. Canceled is not done; a fabricated phase chip
-   is a bug; a legend that names a state the row can't show is a bug.
-4. **Mode parity by construction.** Phase logic, the ledger, prompts, and the
-   planner live in `kuzushi-core`. Shell gates and editors are interactive-only
-   chrome over the same on-disk state. Every phase is reachable via shell,
-   `scan --until`, and single `run`. No TUI-only or CLI-only product behavior.
-5. **No silent fallback.** Model, provider, and runtime never change without
-   explicit operator consent. Every ported path resolves models through
-   `resolve_tool_model` / `ctx.config.model`.
-6. **Local-first and honest about cost.** The only bytes that leave the machine
-   go to the operator's model provider. Budget is enforced per-call, and the run
-   never silently burns tokens re-triaging duplicates.
+| Missing connective tissue | Status |
+| --- | --- |
+| Signal-driven, priced, budget-gated **salvo** (`focus × strategy × model × runs`) | **New** (only a static walker today) |
+| A mutable, recon-seeded, operator-steerable **harness** object | **New** |
+| Named, saveable, replayable **strategies** | **New** |
+| Per-scan **engine enablement** UI (CPG/MCP/LSP toggle + cost estimate) | **New** (artifact-gated only) |
+| **Deterministic seed ingest** (external SARIF/Semgrep file → ledger) | **New** (live-run only) |
+| Engagement-scoped **cross-run merge** (corroborate one row across `scan_id`) | **New** (per-`scan_id` today) |
+| Confirmed-vs-guess **in the findings list**; cost/corroboration always visible | **New** (detail-only today) |
+| LLM-authored **fuzz harness** build-and-fix loop (PoV proof) | **New** |
+| Detection as a **number** (F1 + head-to-head-vs-SARIF + gate + tune) | **New** (`kuzushi-eval` standalone) |
 
 ---
 
-## 5. The end-to-end flow we are building
+## 5. The two planes
 
-One spine, five phases, over one engagement folder and one ledger. The four
-core phases already have honest *derivation* today (the `組 Map / 崩 Hunt /
-作 Confirm / 掛 Fix` journey, derived from workspace reality); this PRD keeps that
-derivation and rebuilds the *execution* and the *steering* around it, then adds
-Report as the explicit exit and Measure/Tune as the calibration loop.
+The user-facing model is two planes over one engagement folder and one ledger.
+
+### 5.1 The control plane — steer the non-determinism
+
+Everything the operator turns, in one place (surfaced at the phase-boundary
+**steering gate**, §8 of the design spec):
+
+- **The salvo** — the unit of sampled non-determinism: `focus × strategy ×
+  model × runs`. Fire N permuted scans at one target; **union + dedupe** the
+  results into the ledger with a corroboration count. `runs` samples variance;
+  `strategy`/`focus` aim it; `model` tiers it.
+- **Priced, budget-gated proposals** — signal generators (commit-archaeology
+  incomplete-fix hunts, threat-model reachability audits, dependency-intel
+  footguns, prompt evolution, fuzz-recon) *propose* priced salvos ranked by
+  yield. The operator approves under a hard budget cap; `$/round` self-calibrates
+  from actuals. Cost is enforced **between** proposals; a single in-flight
+  overshoot is surfaced, never hidden.
+- **The harness** (§7) — the mutable scan config: which engines, which strategy,
+  which model tiers, which focus areas, which oracle, which seeds.
+- **Per-scan engine enablement** — turn on the Joern CPG, the CodeQL DB, specific
+  MCP oracles, or the clangd LSP *for this pass*, with a **cost/latency estimate
+  shown before you commit**, defaulting off for broad first-pass and on for a
+  scoped confirm. Enablement stays **artifact-gated and honest** — never a silent
+  heavyweight spin-up; a missing prerequisite refuses with an actionable build
+  hint, it does not degrade silently.
+- **The analysis-depth ladder** — `structural → linked → path (CPG) → proven
+  (symbolic/PoV)`. The operator picks target depth; Kuzushi picks the engine.
+  `minEvidenceLevel` becomes the user-facing knob.
+- **Verify config** — `--when severity>=X --max N --votes K`, multi-lens
+  (reachability / exploitability / mitigation), optional metamorphic and PoV.
+- **Model tiering** — delegate cheap work (dedup, classify, easy triage) to weak
+  models and hard work (root-cause, patch, PoV) to strong ones; per-role map +
+  presets; same-role fallback on error; **cost-per-confirmed-finding** surfaced.
+- **The seed plane** — ingest deterministic scanner output (Semgrep / CodeQL /
+  SARIF) as `sources[]`, deduped and corroborated against the hunt.
+- **Human judgment** — mark FPs, confirm, suppress; **sticky** — an AI re-run
+  never overwrites a human verdict.
+
+### 5.2 The visual plane — see the invisible
+
+The agent's reasoning is otherwise a black box; the visual plane renders it (all
+of this exists today — the PRD wires it to control-plane reality):
+
+- **Attack surface** (3D terrain / route+entry map), **DFD**, **threat model**
+  (trust-tier graph), **attack tree**, **attack chains**, **findings table** with
+  proof markers, **coverage matrix** — the five-page `/scene` gallery + the
+  Workbench cockpit.
+- **Live salvo activity** — per-round DAG, which model, which strategy,
+  **live cost**, agent tree, tool calls, latency; coverage growth for fuzz
+  harnesses (`cov:`/`ft:`/`NEW`). The invisible spend made legible.
+- **Hotkeys/commands to regenerate** the threat model, chains, or the attack
+  surface when the picture drifts (`threats regen`, `r` for chains).
+- **The proof story** — each finding shows its evidence tier, the oracle that
+  produced it (structural / tree-sitter / Joern / CodeQL / PoV), its
+  corroboration count, and its vote breakdown — the confirmed-vs-guess signal, in
+  the list, not buried in detail.
+
+---
+
+## 6. Composable parts → strategies
+
+The 42 modules are **parts of four kinds**, composed — never a catalog to shop:
+
+| Kind | Parts (examples) | Role in a scan |
+| --- | --- | --- |
+| **Detectors** | `semgrep`, `codeql`, `static_review` (LLM), `secrets` (deterministic), `dynamic`/fuzz | turn a target into candidate findings |
+| **Analysis oracles** | tree-sitter, Joern CPG, CodeQL, clangd LSP, entry-points, (KLEE, opt-in) | answer reachability / callers / taint-path deterministically |
+| **Signal generators** | commit-archaeology, threat-model, dependency-intel, evolution, fuzz-recon | *propose* priced salvos from evidence about the target |
+| **Verifiers** | multi-lens vote, metamorphic, PoV/crash | try to disprove; promote proof state |
+
+A **strategy** is a named, saveable, replayable recipe that composes parts — the
+salvo's **"variant" axis**:
 
 ```
-   AIM (組)          HUNT (崩)          CONFIRM (作)        FIX (掛)          REPORT
-   map the       →  find candidate  →  prove or reject  →  patch &        →  export
-   target &         vulns with          with verified       re-verify         evidence
-   generate the     signal-driven       proof + votes                         (SARIF /
-   engagement       proposals                                                 markdown /
-   folder                                                                     ledger)
+strategies/deep.toml     = pattern(semgrep+codeql) + iris-taint(CPG) + review×2 + invariant-check
+strategies/quick.toml    = secrets + static_review×1
+strategies/pr-review.toml = diff-scope + review + reachability-vote   (Full vs Delta mode)
+```
+
+Diversity + merge beats one pipeline: the AIxCC winners all run *many* diverse
+engines/agents in parallel and funnel into one dedup/score gate (theori merges
+five vuln sources; atlantis ensembles input-generators and three diverse patch
+agents). Strategies make that composition a first-class, operator-owned object.
+
+---
+
+## 7. The harness — the mutable unit of a scan
+
+"The harness" is the whole configuration of a non-deterministic scan, modeled as
+**one versioned, editable artifact** under `engagement/` (not scattered flags):
+
+```
+harness = {
+  focus_areas[]     # ranked {entry(file:function:line), input_surface, rank}
+  strategy          # the composed recipe (§6)
+  engines_enabled   # cpg? codeql-db? which MCP oracles? clangd LSP?
+  model_tiers       # {find: mid, triage: cheap, verify: deep, patch: deep}
+  runs / variants   # the sampling matrix
+  oracle            # ASan/UBSan crash | asserted invariant | reachability
+  seeds[]           # corpus seeds / operator hunches / imported findings
+  budget            # cap + priced proposals
+}
+```
+
+Three ways it mutates — this is the product's differentiator:
+
+1. **Recon seeds it.** A recon/discover pass clusters attacker-reachable code
+   into ranked focus areas, detects the toolchain/build system, and extracts an
+   input vocabulary — pre-populating a partitioned harness plan (never hand a
+   fuzzer `main()`). This is the "map" of the Aim phase.
+2. **The operator edits it — by typing intent.** *"Focus on SQLi"* /
+   *"target the parser"* is a **first-class steering input** that re-ranks focus
+   areas, sets the oracle's CWEs, and biases seed generation. (This is the knob
+   the fuzz-plugin sources lack and the reference harness only gestures at — it
+   is Kuzushi's differentiator.) The operator can also hand-edit the harness file
+   or attach a design doc / prior findings as evidence (provenance-tagged
+   `<untrusted-source>` blocks — already in flight for `threat-model:build`).
+3. **Feedback mutates it dynamically.** For agentic taint, the reachability
+   oracle prunes unreachable candidates. For fuzzing, an **LLM-authored harness**
+   runs a build-and-fix loop (compiler rejects → LLM fixes), and coverage signal
+   (`cov:`/`ft:`/`NEW`) decides *extend budget vs saturated → stop*, with an
+   escalation ladder (a clean crash is a signpost, not the prize — keep mutating
+   toward a controllable OOB write). Only a reproducing PoV promotes a finding to
+   `proven`. This is the OSS-Fuzz-Gen / Big Sleep mechanic, productized.
+
+---
+
+## 8. Who this is for
+
+| Persona | Wants | Fails them today |
+| --- | --- | --- |
+| **Bug-bounty hunter** | Aim at an in-scope repo, fire a cheap salvo, get confirmed reportable findings, export a bundle. | Auth wall before first finding; no salvo/budget control; confirmed-vs-guess not in the list; bundle unreachable via the friendly verb. |
+| **AppSec engineer (CI)** | Seed with the team's Semgrep/CodeQL, corroborate with an AI hunt, gate PRs on high-severity, keep FP rate *known*. | No external SARIF/Semgrep ingest; `--target` inconsistency + empty-stdout errors; verify all-or-nothing; no published FP number. |
+| **Security researcher** | Compose a deep strategy, enable a CPG + symbolic tier, steer by typed focus, mutate a fuzz harness, measure the run. | No composable strategy; engine enablement is hidden/artifact-gated; no "focus" steering; static walker; no measure/tune. |
+
+Shared need: **govern a non-deterministic scan — sample it, steer it,
+corroborate it, see it — cheaply and defensibly.**
+
+---
+
+## 9. Product principles
+
+1. **Non-determinism is managed, never hidden.** Surface variance
+   (net-new vs re-found across runs), sample it (salvo), and corroborate it
+   (verifier). Never present one stochastic pull as ground truth.
+2. **Sample + corroborate.** Union across a permuted salvo for coverage; a
+   separate guilty-until-proven-innocent verifier for precision. These are the
+   two load-bearing mechanisms; everything else supports them.
+3. **Cost is always visible and gated.** Every run shows `$cost`; proposals are
+   priced; budgets are enforced per-op and per-call; cost-per-confirmed-finding
+   is a first-class metric.
+4. **Evidence, not chat.** Every finding carries an evidence tier, the oracle
+   that produced it, a proof state, and a next action. Proof beats opinion —
+   prefer a reachability path or a PoV crash to a model assertion.
+5. **Deterministic seed + non-deterministic hunt corroborate one row.**
+   Semgrep/CodeQL/SARIF and the AI hunt are different evidence for the same
+   defect; merge them with `sources[]`, don't duplicate them.
+6. **Parts compose; strategies are owned by the operator.** The catalog is
+   building blocks. Diversity + merge beats one pipeline.
+7. **Engine enablement is explicit, cost-estimated, and honest.** Turn engines on
+   per-scan with the cost shown; artifact-gated; refuse-with-hint over silent
+   degradation.
+8. **Human judgment is sticky.** Manual FP/confirm survives every re-run.
+9. **No silent fallback.** Model/provider/runtime never change without consent;
+   every path resolves models through `resolve_tool_model` / `ctx.config.model`.
+10. **Local-first.** The only bytes that leave the machine go to the operator's
+    model provider; deterministic detectors (secrets, Semgrep) run offline.
+
+---
+
+## 10. The flow — phases as control loci
+
+One spine, over one engagement folder and one ledger. Each phase is where you
+compose parts and control non-determinism. Keep the honest phase *derivation*
+(`journey.rs`); rebuild phase *execution* around the salvo.
+
+```
+   AIM (組)         HUNT (崩)          CONFIRM (作)        FIX (掛)          REPORT
+   map + build   →  fire salvos:    →  sample→corroborate →  patch + re-    →  export
+   the harness      focus×strategy×    →prove: votes,        verify (PoV       evidence
+   (recon seeds     model×runs,        lenses, PoV/          re-attack)        (SARIF /
+    focus areas,    priced, budget-    metamorphic;                            bundle /
+    threat model,   gated proposals    sticky human                           ledger)
+    engines)        + seed ingest      triage
       │                  │                   │                  │
-      └──────────────────┴─── one findings ledger (sources[], sticky triage, ───┘
-                              corroboration, proof state) + one engagement/ folder
+      └─ CONTROL PLANE (salvo · harness · budget · engines · depth · verify) ─┘
+      └─ VISUAL PLANE   (surface · DFD · threat model · tree · chains · ledger · live cost) ┘
                                           ▲
-                                MEASURE / TUNE — score the run vs a labeled
-                                corpus, head-to-head vs SARIF, self-tune prompts
+                                MEASURE / TUNE — F1 vs a corpus, head-to-head
+                                vs SARIF, regression gate, prompt self-tune
 ```
 
-**Aim (組 Map).** `aim` generates and organizes an editable **`engagement/`
-folder** for the target — `profile.toml`, `threat-model.md`, `map/`, `kb/`,
-`strategies/`, `prompts/`, `context/`, `authorization.md` — synthesized from the
-existing producers (context snapshot, threat model, entry-points, CPG). This is
-where the operator sees the attack surface and edits the calibration before any
-spend. (The threat-model source-bundle work already in flight — feeding parent
-artifacts as provenance-tagged `<untrusted-source>` blocks — is a first brick of
-this phase.)
-
-**Hunt (崩).** The static 22-task walker is replaced by a **signal-driven,
-priced, budget-gated proposal queue**. Generators (`commits` incomplete-fix
-hunts, `threatmodel` reachability audits, `intel` dependency footguns, `evolve`
-prompt breeding) propose salvos; each is priced and ranked by yield; the operator
-approves under a budget at the phase-boundary gate. Live `native_scanners`
-(Semgrep/CodeQL) and imported SARIF both feed the *same* ledger row via
-`sources[]`.
-
-**Confirm (作).** Verification is opt-in *and configurable*: `--when severity>=high
---max N --votes K`. Optionally the multi-lens, majority-vote verifier
-(reachability / exploitability / mitigation) backed by the tree-sitter/Joern/
-CodeQL MCP oracles. Human verdicts are **sticky** — an AI re-run never overwrites
-`triaged_by="human"`.
-
-**Fix (掛).** Patch synthesis and re-verification against the same ledger,
-producing a defensible diff tied to the finding's evidence.
-
-**Report.** One explicit exit: SARIF for CI/Code Scanning, a markdown bundle for
-bounty programs, the ledger for audit — all reachable through *both* the friendly
-verb and the headless flag, with the format argument honored.
-
-**Measure / Tune (calibration loop).** `kuzushi measure` scores a run's confirmed
-findings against a labeled corpus (precision/recall/F1), grades head-to-head vs
-an imported SARIF, and gates CI on regression; `kuzushi tune` picks the best
-prompt variant on a holdout. This turns "detection quality" from a claim into a
-number.
+- **Aim (組).** Build the editable `engagement/` folder — profile, threat model
+  (regenerable), map/focus areas, strategies, prompts, context — and **seed the
+  harness** from recon. Feeds the generators' signals. Pick which engines to
+  prepare (CPG/CodeQL DB) here, where the cost is a one-time build.
+- **Hunt (崩).** The **salvo**: signal generators propose priced permutations;
+  approve under budget; fire `focus × strategy × model × runs`; **union + dedupe**
+  into the ledger with corroboration. Live scanners and imported SARIF feed the
+  same rows. This is the control plane's centerpiece.
+- **Confirm (作).** Sample → corroborate → prove. Configurable verification
+  (`when/max/votes`), multi-lens blind verifier, optional metamorphic and PoV;
+  the reachability oracle (CPG) is the deterministic FP suppressor; human triage
+  is sticky. Batch-triage all findings at once.
+- **Fix (掛).** Patch synthesis (optionally diverse patch agents, pick best) +
+  re-verify against the same ledger row (PoV re-attack, tests pass).
+- **Report.** One explicit exit — SARIF (CI/Code Scanning), markdown bundle
+  (bounty), ledger (audit) — via both the friendly verb and the headless flag.
+- **Measure / Tune.** Turn the non-determinism into a number: F1 on a labeled
+  corpus, head-to-head vs an imported SARIF, a CI regression gate, and prompt
+  self-tuning on a holdout.
 
 ---
 
-## 6. Goals & non-goals
+## 11. Goals & non-goals
 
 ### Goals
-- G1. A stranger with no API key sees real findings within ~60 seconds of launch.
-- G2. The default surface reads as a phased cockpit; the catalog is one advanced
-  view, not the home screen.
-- G3. Every finding in every list carries an honest confirmed-vs-guess proof
-  marker; no signifier contradicts engagement reality.
-- G4. Verification is configurable (when / max / votes), not all-or-nothing.
-- G5. One ledger row per real defect, accumulating `sources[]`, with sticky human
-  triage that survives re-runs.
-- G6. Every phase is reachable identically from shell, `scan --until`, and `run`.
-- G7. A run does not re-triage duplicates, caches prompts where the provider
-  supports it, and enforces the budget per-call.
-- G8. Detection quality is a reproducible number (F1 vs corpus + head-to-head vs
-  SARIF + regression gate).
+- G1. Fire a controlled, priced salvo and see net-new-vs-re-found across its runs.
+- G2. Steer a scan by typed intent ("focus on SQLi") and by editing one harness.
+- G3. Enable/disable analysis engines (CPG/CodeQL/MCP/LSP) per-scan with cost shown.
+- G4. Ingest an external Semgrep/CodeQL/SARIF file as a deterministic seed that
+  corroborates the AI hunt in one ledger row.
+- G5. Compose, save, and replay a named strategy.
+- G6. Confirmed-vs-guess (evidence tier + oracle + votes) visible in every list.
+- G7. Delegate cheap work to weak models, hard work to strong; cost-per-confirmed
+  surfaced; budget enforced per-call.
+- G8. Keyless first run reaches a real finding in ~60s via `demo`.
+- G9. Every phase reachable identically in shell, `scan --until`, and `run`.
+- G10. Detection quality is a reproducible number (F1 + head-to-head + gate).
 
 ### Non-goals
-- Backward compatibility of the *surface* (verb names, view layout) — the user
-  has explicitly waived it. `.kuzushi/` on-disk paths must still be *migrated*,
-  not broken.
-- Shipping the roadmap modules (blackbox, pwn, honeypot, yokai, revgraph) — they
-  graduate only when they produce first-class evidence artifacts.
-- A cloud/hosted control plane. Kuzushi stays local-first.
-- Replacing `native_scanners` — live Semgrep/CodeQL stay as detector arms; the
-  reframe folds them into Hunt passes, it doesn't remove them.
+- Surface backward-compat (verb names, layout) — waived; on-disk `.kuzushi/`
+  paths are **migrated**, not broken.
+- A fully-autonomous CRS. Kuzushi keeps a human in the loop; don't over-claim
+  autonomy in triage/patch (the reference harness calls these "still open").
+- A cloud control plane. Local-first.
+- Replacing live `native_scanners` — Semgrep/CodeQL stay as detector parts.
+- Shipping roadmap modules (blackbox/pwn/honeypot/…) until they produce
+  first-class evidence artifacts.
 
 ---
 
-## 7. Requirements
+## 12. Requirements
 
-Each requirement is `[Rn] statement → acceptance criteria`. Phase tags map to the
-rollout in §9.
+`[Rn] statement → acceptance`. Status = **Exists** (wire/expose) / **Partial** /
+**New**. Wave tags map to §14.
 
-### 7.1 First-run & onboarding (cross-cutting; Phase 0/1)
+### 12.1 Non-determinism control — the salvo (New)
+- **[R1] Priced, budget-gated salvo.** `focus × strategy × model × runs`;
+  generators propose, operator approves under a cap, `$/round` self-calibrates.
+  *Accept:* generators propose from git/manifest/graph fixtures; the queue
+  prices, ranks by yield, refuses over-budget; EMA recalibrates after a fire.
+- **[R2] Union + engagement-scoped merge.** Salvo runs union into one ledger row
+  per defect, merging on `dedup_key` **across `scan_id`** with a corroboration
+  count. *Accept:* two runs / two engines over one defect → one row, corroboration 2.
+- **[R3] Variance is visible.** A campaign shows **net-new vs re-found** per run.
+  *Accept:* firing a second run reports how many rows are new vs corroborated.
+- **[R4] Budget honesty.** Cap gates between proposals; a single in-flight
+  overshoot is surfaced. *Accept:* the UI shows the overshoot, not a hidden cap.
 
-- **[R1] Keyless first run reaches value.** From a fresh launch with no key, the
-  shell surfaces `demo` as a first-class option, the model picker offers an
-  offline/local choice, and every relevant empty state points at `demo` (not only
-  `scan`/`next`). *Accept:* on a machine with no `ANTHROPIC_API_KEY` and no
-  network, a new user runs `demo` from the shell landing and sees the 7-finding
-  fixture result, using the same deterministic secret-scan+iac-scan path the CLI
-  `demo` runs.
-- **[R2] In-session auth is never a dead end.** API-key paste and OAuth both
-  complete in-session (paste already exists — keep it and make it the advertised
-  path). *Accept:* a user can go from "no credential" to "authenticated" without
-  leaving the shell or relaunching.
-- **[R3] Model↔runtime compatibility is validated up front.** An
-  `anthropic:` model on a codex backend is rejected at pick time with an
-  actionable message, not at first API call. *Accept:* `doctor` and the model
-  picker both fail-loud on an incompatible pair before any spend.
-- **[R4] `target <path>` and the target picker run the same onboarding.** The
-  typed `target` verb applies the same initial onboarding phase (model picker /
-  planner) the picker path does. *Accept:* both entry paths land in the same
-  state with the same chrome.
+### 12.2 The harness — mutable, seeded, steerable (New)
+- **[R5] The harness is one versioned artifact.** `engagement/harness.toml`
+  captures focus/strategy/engines/tiers/runs/oracle/seeds/budget. *Accept:*
+  round-trips: generate → edit → re-read → re-fire.
+- **[R6] Recon seeds it.** A discover pass pre-populates ranked focus areas,
+  toolchain, and input vocabulary. *Accept:* a fresh target yields a partitioned,
+  ranked harness without hand-authoring; a fuzzer is never handed `main()`.
+- **[R7] Typed-intent steering.** "Focus on SQLi" re-ranks focus areas, sets the
+  oracle CWEs, and biases seeds. *Accept:* the same command measurably reorders
+  the harness plan and the next salvo's scope.
+- **[R8] Dynamic mutation.** Reachability prunes unreachable candidates; an
+  LLM-authored fuzz harness runs a build-and-fix loop and coverage decides
+  extend-vs-stop; only a PoV promotes to `proven`. *Accept:* a build failure
+  re-prompts (capped); coverage growth extends budget; a signed-overflow stays
+  `candidate`, an OOB-write with a reproducing input becomes `proven`.
 
-### 7.2 Surface reframe (Phase 0 — reversible)
+### 12.3 Composable strategies (New)
+- **[R9] Named, saveable, replayable strategies.** `engagement/strategies/*.toml`
+  compose detectors + oracles + verifiers + tiers. *Accept:* `deep` expands into a
+  salvo spec; picking it fires the composed passes; editing persists.
+- **[R10] Diversity ensemble.** A strategy can run several diverse
+  detectors/patch-agents in parallel and merge/pick-best. *Accept:* two detectors
+  in one strategy corroborate into shared rows.
 
-- **[R5] Home is the cockpit.** The default landing is the phased Workbench, not a
-  41-tile catalog. `Catalog`/`Recommend`/`Module`/`ModuleRun` collapse into one
-  advanced catalog view. *Accept:* `home` and fallbacks land on the Workbench;
-  the three retired render arms are gone; module-count assertions updated.
-- **[R6] Plumbing is hidden, not removed.** The 7 plumbing modules flip to
-  `hidden_module`; they stay executable by name. *Accept:* visible module count
-  drops to the reframed number; a guard test proves the 7 remain runnable by
-  string.
-- **[R7] The catalog is legible.** The advanced catalog groups tools by phase and
-  category with headers, uses the human `name` field, and advertises
-  tab-completion (render the ghost-text preview that exists today). *Accept:* no
-  flat alphabetical wall; every tool row shows a plain-language name; completion
-  preview renders.
-- **[R8] `workspace:export-findings` survives the hide.** Before hiding
-  `workspace`, the export action is surfaced from the Report phase / a `findings
-  export` verb. *Accept:* export is reachable from the reframed surface with the
-  format argument honored (closes the markdown-bundle gap).
+### 12.4 Analysis engines per-scan (Exists → expose)
+- **[R11] Explicit engine enablement with cost estimate.** Toggle CPG / CodeQL DB
+  / specific MCP oracles / clangd LSP for a pass; show latency/cost before commit;
+  default off for broad, on for scoped confirm. *Accept:* enabling the CPG shows
+  an estimate; disabling it falls back to structural with no silent spin-up.
+- **[R12] Analysis-depth ladder.** `structural → linked → path (CPG) → proven
+  (PoV/symbolic)` as the user knob (reuse `minEvidenceLevel`). *Accept:* raising
+  target depth enables the engine that can reach it, or refuses-with-hint.
+- **[R13] Reachability oracle is the FP suppressor.** Only a backend produces
+  `path`; the LLM never promotes a hit the symbolic engine couldn't reach.
+  *Accept:* a structural-only hit cannot become a finding at
+  `minEvidenceLevel=linked`.
+- **[R14] Optional symbolic (KLEE) deepest tier for C/C++.** Behind the same
+  evidence interface; offered only when a CPG already confirmed a reachable C/C++
+  sink. *Accept:* KLEE promotes `path → proven` with a concrete input, or is
+  absent honestly.
 
-### 7.3 Findings ledger (Phase 1 — the spine)
+### 12.5 The deterministic seed plane (New)
+- **[R15] Ingest external SARIF/Semgrep/CodeQL files.** `findings seed <file>`
+  tags `sources[]`, sets `triaged_by="imported"`, dedups against existing rows.
+  *Accept:* seeding a SARIF over an existing row adds a source, not a duplicate.
+- **[R16] Seed corroborates the hunt.** An imported deterministic finding and an
+  AI-hunt finding over the same defect share one row. *Accept:* corroboration
+  count reflects both planes.
 
-- **[R9] One row, many sources.** Cross-engine collisions merge to one ledger row
-  that accumulates `sources[]` (`["semgrep","cannon","sarif:CodeQL"]`). *Accept:*
-  running two engines over the same defect yields one row with two sources, not
-  two rows.
-- **[R10] Human triage is sticky.** A `triaged_by` author flag guards every triage
-  write; an AI re-run never overwrites a human verdict. *Accept:* port cannon's
-  `human_decisions_are_sticky_across_remerge` test; it passes.
-- **[R11] Corroboration is counted.** Merge derives a corroboration count.
-  *Accept:* the count is available to the verify `--votes` gate and shown in the
-  finding detail.
-- **[R12] Engagement-scoped merge.** Findings merge on `dedup_key` across
-  `scan_id` so many engines corroborate one row. *Accept:* a scan and an imported
-  SARIF over the same defect corroborate rather than duplicate.
-- **[R13] SARIF/semgrep seed-ingest.** `findings seed <file>` ingests external
-  results, tagging `sources[]` and `triaged_by="imported"`. *Accept:* `seed`
-  dedups against existing rows and adds a source.
-
-### 7.4 Confirm / verify (Phase 3/4)
-
-- **[R14] Verify is configurable.** `--when severity>=X --max N --votes K` on the
-  scan/verify request; bare scan still verifies nothing. *Accept:* severity
-  filter, cap truncation, and vote threshold each have a test; the
+### 12.6 Confirm / verify (Partial → configure)
+- **[R17] Configurable verification.** `--when severity>=X --max N --votes K`;
+  bare scan verifies nothing. *Accept:* filter/cap/votes each tested; the
   bare-scan-verifies-nothing invariant holds.
-- **[R15] Reachability oracle is deterministic.** The verifier can ask "reachable
-  from an untrusted entry?" via the MCP oracles (Joern/CodeQL), with an explicit
-  fallback when MCP is absent. *Accept:* oracle-absent is an honest, named state,
-  never a silent pass.
+- **[R18] Adversarial, blind, multi-vote.** Guilty-until-proven; each verifier
+  starts from code not the finder's claim; majority rules; split-vote policy is
+  explicit. *Accept:* the verifier's context excludes the finder's reasoning; the
+  vote breakdown is recorded.
+- **[R19] Proof over opinion.** Where feasible, promote via a reproducing PoV /
+  crash oracle or metamorphic perturbation, not a model claim. *Accept:*
+  `proven` requires a reproducing artifact; a re-attack after patch is its own gate.
+- **[R20] Sticky human triage + batch triage.** Manual FP/confirm survives
+  re-runs; triage runs over all findings, deduped, skipping persisted verdicts.
+  *Accept (Exists — protect + extend):* the sticky test passes; a repeat triage
+  issues one call per unique un-triaged fingerprint.
 
-### 7.5 Hunt / permutation planner (Phase 5)
+### 12.7 Model tiering & cost (Exists → surface)
+- **[R21] Per-role/tier model map + presets.** Cheap models for
+  dedup/classify/easy-triage, strong for root-cause/patch/PoV; same-role fallback
+  on error. *Accept:* a role map + a weak↔best preset switch; cost per role
+  accounted.
+- **[R22] Cost-per-confirmed surfaced; budget per-call.** *Accept:* the run shows
+  $/confirmed-finding; a codex-backend run (reports `cost_usd 0.0`) still halts at
+  the cap via a call-count/token fallback.
+- **[R23] No duplicate triage; prompt caching.** *Accept:* repeat runs over
+  unchanged context show cache hits; large invariant context moves to the prompt
+  head; no re-triage of duplicates.
 
-- **[R16] Signal-driven proposals replace the static walker.** Generators propose
-  priced, ranked, budget-gated salvos; the operator approves at the phase gate.
-  *Accept:* generators produce proposals from git/manifest fixtures; the queue
-  prices, ranks by yield, and refuses over-budget salvos; EMA recalibrates cost.
-- **[R17] Planner lives in core.** `Proposal`/`Queue`/`Generator` live in
-  `kuzushi-core`; the TUI gate and `--approve P-001,P-003` are parity chrome.
-  *Accept:* the same proposals are approvable from shell and headless.
-- **[R18] Budget honesty.** The cap gates *between* proposals; a single in-flight
-  proposal that overshoots is surfaced, not hidden. *Accept:* the UI shows the
-  known single-proposal overshoot rather than pretending the cap is hard.
+### 12.8 The visual plane (Exists → wire to reality)
+- **[R24] Confirmed-vs-guess in every list.** Each finding row shows proof marker
+  (`✓ ◇ ? !`), evidence tier, oracle, and corroboration. *Accept:* 100% of list
+  rows carry the signal, not just detail.
+- **[R25] The full gallery, fed by real state.** Attack surface, DFD, threat
+  model, attack tree, chains, findings table, coverage matrix — each with an
+  empty-hint when its artifact is absent. *Accept:* no dummy content; each page
+  draws from its persisted artifact.
+- **[R26] Regenerate on demand.** Hotkeys/commands regenerate threat model,
+  chains, surface when they drift. *Accept:* `threats regen` / chain `r` rebuild
+  from current findings.
+- **[R27] Live salvo introspection.** The activity view shows per-round model,
+  strategy, live cost, agent tree, tool calls, latency, and coverage growth.
+  *Accept:* a running salvo shows spend and per-step confidence live.
 
-### 7.6 Measure / tune (Phase 6)
+### 12.9 Surface, first-run, discoverability (Partial)
+- **[R28] Home is the control room, not a catalog.** Landing is the aim→fire
+  cockpit; the 42-module catalog is one advanced, phase-grouped view with human
+  names and rendered tab-completion. *Accept:* default is aim/fire; completion
+  ghost-text renders.
+- **[R29] Keyless first run reaches value.** `demo` is first-class on the landing
+  and every empty state; the model picker offers an offline choice; typed
+  `target` runs the same onboarding as the picker. *Accept:* no key + no network →
+  a finding via `demo` in ~60s.
+- **[R30] Model↔runtime validated up front + export survives the reframe.**
+  Incompatible pairs rejected at pick time; `export-findings` reachable from
+  Report with the format honored. *Accept:* `doctor`/picker fail-loud pre-spend;
+  the markdown bundle is reachable via the friendly verb.
 
-- **[R19] Detection is a number.** `kuzushi measure` reports precision/recall/F1
-  on a labeled corpus and head-to-head vs an imported SARIF; `--gate` fails CI on
-  regression past a baseline+margin. *Accept:* F1 on a fixture corpus; `--against`
-  is apples-to-apples; the gate exits non-zero on regression.
-- **[R20] Prompts self-tune.** `kuzushi tune` does a train/test split and picks the
-  best prompt variant on a holdout, feeding the `evolve` generator's fitness.
-  *Accept:* holdout split is deterministic; fitness closes back to `evolve`.
+### 12.10 Headless/CI parity, robustness, interaction (Partial)
+- **[R31] `recon:import` reachable; `--target` consistent; `run` errors are valid
+  JSON; export honors format+dirs.** *Accept:* the four CI-blocking edges are
+  closed (`… | jq` never sees empty stdout; `kuzushi --target . scan` works).
+- **[R32] Palette degrades (256-color); width is unicode-aware.** *Accept:*
+  semantic colors survive on macOS Terminal.app; 組崩作掛 don't misalign tables.
+- **[R33] No empty-prompt hotkey trap; one scroll/keybind grammar; honest
+  signifiers.** *Accept:* typing `config` doesn't fire `c`→exploit-chain; the DAG
+  legend matches what rows render; canceled never flips to done; the phase chip
+  never renders without a target.
 
-### 7.7 Token & cost efficiency (cross-cutting; can lead)
-
-- **[R21] No duplicate triage.** Triage dedups by fingerprint and skips
-  already-persisted verdicts, defaulting to latest-scan scope. *Accept:* a repeat
-  triage over a DB with duplicates issues one LLM call per unique un-triaged
-  fingerprint, not one per row.
-- **[R22] Prompt caching on the shipping path.** Anthropic prompt caching is wired
-  with stable prefixes; large invariant context (repo inventory) moves to the
-  prompt *head*, not the tail. *Accept:* a repeat run over unchanged context
-  shows cache hits; carlini stops re-embedding the inventory per actor at the
-  tail.
-- **[R23] Budget enforced per-call.** The cost cap trips on call-count/token
-  fallback when the provider reports `cost_usd 0.0`. *Accept:* a codex-backend run
-  halts at the cap.
-
-### 7.8 Headless & CI parity (cross-cutting)
-
-- **[R24] `recon:import` is reachable.** Wired into the dispatch match arm and
-  declared in the module. *Accept:* the advertised command runs.
-- **[R25] `--target` is consistent.** One resolution rule across `scan`/`run`/
-  `findings`/`finding`/`shell`; `kuzushi --target . scan` works. *Accept:* the
-  three-way inconsistency is gone; every subcommand's `--target` has help text.
-- **[R26] `run` errors are always valid JSON.** Prepare-errors emit the same JSON
-  envelope as execution-errors. *Accept:* `kuzushi run … | jq` never sees empty
-  stdout on error.
-- **[R27] Export parity.** `workspace export findings <path> <format>` honors all
-  five formats and accepts a directory for the markdown bundle. *Accept:* the
-  markdown bundle is reachable via the friendly verb.
-
-### 7.9 Terminal robustness (cross-cutting)
-
-- **[R28] Palette degrades.** Detect `COLORTERM`; downsample the truecolor palette
-  to 256-color so semantic colors survive on macOS Terminal.app. *Accept:*
-  semantic colors are distinguishable on a non-truecolor terminal; `NO_COLOR`
-  still respected.
-- **[R29] Width math is unicode-aware.** Layout uses display width, not
-  one-cell-per-char, so kanji/CJK/emoji tables and the footer align. *Accept:*
-  the phase chip (組/崩/作/掛) and CJK content don't misalign tables or spill the
-  footer.
-
-### 7.10 Interaction model (cross-cutting; design-spec detail)
-
-- **[R30] No empty-prompt hotkey trap.** Typing in the prompt is never captured by
-  view hotkeys; the input mode and the `/`-escape are advertised. *Accept:*
-  typing `config` on the Workbench landing does not fire `c`→exploit-chain then
-  insert the rest.
-- **[R31] One scroll/keybind grammar.** Arrows scroll content where content
-  scrolls (history recall gated to the prompt); `g`/`Shift+Tab`/pause semantics
-  are consistent across views; every advertised key is wired. *Accept:* the DAG
-  `● active` legend matches what rows render; no key hint names an unwired
-  action.
+### 12.11 Measure / tune (New)
+- **[R34] Detection is a number.** `kuzushi measure` reports precision/recall/F1
+  and head-to-head vs an imported SARIF; `--gate` fails CI on regression.
+  *Accept:* F1 on a fixture corpus; `--against` apples-to-apples; gate exits
+  non-zero on regression.
+- **[R35] Prompts self-tune.** `kuzushi tune` picks the best prompt variant on a
+  holdout, feeding the `evolve` generator's fitness. *Accept:* holdout split
+  deterministic; fitness closes back to `evolve`.
 
 ---
 
-## 8. The signifier contract (why §7.3/§C requirements are P0)
+## 13. The signifier & trust contract
 
-Because the product promise is *evidence*, the finding surface has a hard
-contract, tracked as a standing gate (see the TUI-signifier invariant):
+Because the promise is *governed evidence*, the finding surface has a hard,
+release-gating contract:
 
-- Every finding in every **list** (not just detail) shows its proof state:
-  confirmed `✓` / candidate `◇` / unverified `?` / rejected `!`.
-- A phase chip/rail reflects **engagement reality** (artifacts on disk, findings,
-  triage/verify state), never the viewed page, and never renders without a
-  target.
+- Confirmed-vs-guess — proof marker (`✓ ◇ ? !`), **evidence tier**, **the oracle
+  that produced it**, **corroboration count**, and **vote breakdown** — is visible
+  in every list, not just detail.
+- **Cost and corroboration are always on screen** during a run — the operator
+  never spends blind.
+- The phase chip/rail reflects **engagement reality** (artifacts on disk,
+  findings, triage/verify state), never the viewed page, and never renders without
+  a target.
 - A terminal state is terminal: canceled never becomes done; a legend never names
-  a state the row cannot display.
-- Focus, spinner, and status glyphs mean one thing each, consistently across
-  views.
+  a state a row can't display.
+- **Verification independence is a visible badge** — a finding shows that its
+  verifier saw only the evidence (PoC/path), not the finder's reasoning
+  (the two-container trust boundary).
 
-A change that regresses this contract is a release blocker, not a polish item.
-
----
-
-## 9. Rollout — phased, shippable, mapped to the port plan
-
-This PRD's requirements map onto the eight engineering phases in
-[`cannon-port-plan.md`](./cannon-port-plan.md). Recommended order — each ends
-green (tests + `pnpm quality:crap-risk`) and is independently shippable:
-
-| Wave | Delivers (requirements) | Port-plan phase | Why here |
-| --- | --- | --- | --- |
-| **W0 — Honest surface** | R5–R8, R30–R31, R28–R29, plus the §C signifier bug fixes | Phase 0 | Reversible, decision-independent, visible value on day one. |
-| **W1 — Reach value keyless** | R1–R4 | (onboarding, folds into 0/1) | Removes the first-run wall; unblocks every downstream funnel metric. |
-| **W2 — Efficient runs** | R21–R23 | (token audit) | Stops the bleeding; can land in parallel with W0. |
-| **W3 — One ledger** | R9–R13 | Phase 1 | The spine; unblocks votes and measure. |
-| **W4 — Prompts as files** | (prompt resolution + sha) | Phase 2 | Small, independent, high value; feeds Aim's `engagement/prompts/`. |
-| **W5 — Configurable Confirm** | R14–R15 | Phase 3/4 | Turns all-or-nothing verify into a knob; needs W3's corroboration. |
-| **W6 — Signal-driven Hunt** | R16–R18 | Phase 5 | The deepest change; de-risked by W3. |
-| **W7 — Detection as a number** | R19–R20 | Phase 6 | Publishable F1 + regression gate + self-tune. |
-| **W8 — Engagement folder** | (Aim capstone) | Phase 7 | One editable `engagement/` folder + strategies; the verb collapse. |
-| **cross** | R24–R27 (headless/CI parity) | — | Land opportunistically; R24 is a standing BLOCKER, do it early. |
-
-**Sequencing rule (from `ROADMAP.md`):** nothing in a later wave is worth doing
-while the ship-the-product work (P0.1 publish, P0.2 platform binaries, P0.3
-supply-chain) is red. W0–W2 can proceed in parallel with that; W3+ should follow
-a clean baseline.
+A change that regresses this contract is a release blocker.
 
 ---
 
-## 10. Success metrics
+## 14. Rollout — waves (mapped to what exists)
 
-Extends the `ROADMAP.md` world-class table with flow metrics:
+Because most parts exist, the early waves are **expose + compose**, not build.
+
+| Wave | Delivers | Nature |
+| --- | --- | --- |
+| **W0 — Honest surface & trust** | R24, R28, R33 + signifier fixes; render the gallery from real state | expose/fix (parts exist) |
+| **W1 — Keyless value** | R29–R30 | onboarding |
+| **W2 — Engine controls** | R11–R14 (surface the CPG/MCP/LSP enablement + depth ladder that exist artifact-gated) | expose |
+| **W3 — Seed plane** | R15–R16 (external SARIF/Semgrep ingest) | build (small) |
+| **W4 — Cost & tiering surfaced** | R21–R23 (per-role map exists; surface cost-per-confirmed; kill duplicate triage; prompt caching) | expose + fix |
+| **W5 — Cross-run ledger** | R2, R20 (engagement-scoped merge; protect sticky triage) | build |
+| **W6 — Configurable Confirm** | R17–R19 (votes/lenses/PoV over the existing verifier) | build |
+| **W7 — The salvo** | R1, R3–R4 (signal-driven priced proposal queue replaces the static walker) | build (deep) |
+| **W8 — The harness** | R5–R8 (mutable, recon-seeded, typed-intent, dynamic fuzz build-and-fix) | build (deep) |
+| **W9 — Strategies** | R9–R10 (saveable composable recipes = the salvo variant axis) | build |
+| **W10 — Detection as a number** | R34–R35 (fold into `kuzushi-eval`) | build |
+| **cross** | R31–R32 (CI/terminal parity; R31's `recon:import` is a standing BLOCKER) | fix early |
+
+**Sequencing rule:** nothing here is worth doing while the ship-the-product work
+(publish, platform binaries, supply-chain — `ROADMAP.md` P0) is red. W0–W4 are
+mostly expose/fix and land early; W7/W8 (salvo + harness) are the deep new build
+and are de-risked by W5's ledger.
+
+---
+
+## 15. Success metrics
 
 | Metric | Today | Target |
 | --- | --- | --- |
-| Time from fresh launch → first finding (no key) | auth wall (∞) | ≤ 60s via `demo` |
-| Findings with repo-verified evidence (span + hash) | Semgrep-only | 100% of persisted |
-| "Exploitable: confirmed" backed by proof (level 4) | LLM opinion can claim it | crash/PoV-backed only |
-| Confirmed-vs-guess visible in the list | detail-only | 100% of list rows |
-| Duplicate LLM triage calls per unique fingerprint | up to ~11× | 1× |
-| Prompt-cache hit rate on repeat runs | 0 | > 0, provider-permitting |
-| Verify configurability | all-or-nothing | when / max / votes |
-| Published detection number (F1 + head-to-head) | `baseline.json = {}` | scoreboard on real corpora |
-| Signifier-contract violations (§8) | ≥ 5 known | 0 |
-| Every phase reachable in shell + `scan --until` + `run` | partial | 100% parity |
+| Fresh launch → first finding (no key) | auth wall | ≤ 60s via `demo` |
+| Steer a scan by typed intent | one-off `ask` | re-ranks the harness + next salvo |
+| Enable an engine per-scan with cost shown | hidden/artifact-gated | explicit toggle + estimate |
+| Confirmed-vs-guess visible in the list | detail-only | 100% of rows (tier + oracle + votes) |
+| Cost per confirmed finding | not surfaced | shown live |
+| Duplicate LLM triage per unique fingerprint | up to ~11× | 1× |
+| Deterministic seed corroborates the hunt | no ingest path | one row, `sources[]` ≥ 2 |
+| Net-new vs re-found across a salvo | not shown | per-run counter |
+| Verify configurability | all-or-nothing | when / max / votes / PoV |
+| Published detection number | `baseline = {}` | F1 + head-to-head vs SARIF |
+| Signifier/trust-contract violations | ≥ 5 known | 0 |
+| Phase reachable in shell + scan + run | partial | 100% parity |
 
 ---
 
-## 11. Risks & guardrails
+## 16. Risks, guardrails & references
 
-- **Model safety is a hard gate.** No ported path inherits a default-model
-  behavior; `scripts/check-model-safety.mjs` stays green.
-- **Mode parity by construction.** Planner + ledger + prompts in `kuzushi-core`;
-  every wave updates `docs/assessments/mode-parity.md`.
-- **CRAP / clean-code gate.** New functions ≤ complexity 4, < 40 logical lines,
-  `pnpm quality:crap-risk` < 7. The merge and planner code are the likeliest
-  offenders.
+**Risks / guardrails**
+- **Model safety (hard gate).** No ported path inherits a default model;
+  `check-model-safety.mjs` stays green; per-role/tier routing goes through
+  `resolve_tool_model`.
+- **Mode parity.** Salvo + harness + ledger + strategies live in `kuzushi-core`;
+  the TUI gate is chrome over the same on-disk state. Update
+  `docs/assessments/mode-parity.md` each wave.
+- **CPG cost is exponential.** `reachableByFlows` must keep its caps
+  (sources/sinks/flows/per-CWE timeout); default CPG off for broad passes.
+- **Cap overshoot honesty.** A single in-flight salvo can exceed the cap; surface
+  it, don't pretend the cap is hard.
+- **Recon over-scaling.** More agents → more duplicates; the lever is **partition
+  quality**, not agent count — cap fan-out.
+- **Don't over-claim autonomy.** Triage/patch calibration is "still open" even in
+  the reference harness; keep the human in the loop, keep triage sticky.
+- **KLEE/symbolic is unintegrated today; `semgrep`/`language` taint backends are
+  reserved stubs** — ship them as explicitly-optional, not implied.
+- **`.kuzushi/` path moves** are migrated (additive `open/init`), not broken.
 - **Baseline red tests.** HEAD already fails some workspace tests (BDD onboarding
-  + snapshot; findings-store parity drift). Capture the known-red set before W3 so
-  new regressions are attributable.
-- **`.kuzushi/` path moves.** Backward compat of the *surface* is waived, but
-  on-disk paths must be migrated (additive `open/init` migration), not broken, or
-  existing targets stop resolving prior-run artifacts.
-- **Overshoot honesty.** Preserve the planner's between-proposals gating; surface
-  the single-proposal cap overshoot rather than pretending the cap is hard.
+  + snapshot; findings-store drift); capture the known-red set before W5.
+- **CRAP gate.** New functions ≤ complexity 4, < 40 logical lines,
+  `quality:crap-risk` < 7 — the salvo/harness/merge code are the likely offenders.
+
+**References**
+- cannon harness — `~/vibe-code/vuln-scan-cannon-harness` (`README.md`,
+  `PERMUTATION.md`, `BENCHMARK.md`, `src/{queue,runner,ledger,stages}`).
+- Anthropic defending-code reference harness — `~/clone-references/anthropic/…`
+  (`docs/blog-post.md`, `docs/pipeline.md`, `harness/prompts/*`).
+- AIxCC winners — `~/vibe-code/aixcc-winners/{atlantis,buttercup,theori}`
+  (theori `configs/models-*.toml` model tiering; atlantis `crs-sarif` CPG stack +
+  `crs-multilang` input-generator ensemble; buttercup 7-agent patcher +
+  `sarif_matcher.py` dedup).
+- IRIS neuro-symbolic taint — `docs/taint-iris-next.md`,
+  `scripts/taint_iris_next_flows.sc`, `capabilities/taint_iris_next/`.
+- LLM fuzzing — OSS-Fuzz-Gen (`google.github.io/oss-fuzz/research/llms/target_generation/`,
+  `github.com/google/oss-fuzz-gen`), Project Zero Naptime→Big Sleep
+  (`projectzero.google/2024/10/from-naptime-to-big-sleep.html`),
+  26-bugs/CVE-2024-9143 coverage; local: `kuzushi-security-plugin/agents/fuzz-*`,
+  `aixcc-winners/buttercup/fuzzer`.
+- Current-state map — `crates/kuzushi-core/src/{findings,runtime,spend,modules,
+  capabilities}`, `crates/kuzushi-tui/src/{ui_view_models,renderer}`,
+  `crates/kuzushi-mcp-*`.
 
 ---
 
-## 12. Open questions (blockers on specific waves)
+## 17. Open questions
 
-Carried from the port plan, framed as product decisions:
-
-1. **Export home (W0):** keep `workspace` visible, or relocate `export-findings`
-   to a `findings export` verb before hiding it? *(Recommend: relocate — the
-   Report phase is the natural home.)*
-2. **Dedup key (W3):** adopt cannon's exact-line `basename:line:cwe`, or keep
-   Kuzushi's `line/8` bucket and add `sources[]`/sticky on top? *(Exact-line
-   matches cross-engine collisions better; the bucket tolerates line drift.)*
-3. **Verify strategy (W5):** ship `--when/--max/--votes` on the existing verifier
-   only, or also port cannon's full multi-lens 2-of-3 verifier as an alternative
-   strategy? *(The latter is cannon's benchmarked edge but materially more work.)*
-4. **Measure home (W7):** extend `kuzushi-eval` in place, or build a fresh
-   `measure`/`tune` module that calls into it? *(Extending is cleaner but touches
-   its recall-shaped report schema.)*
-5. **Verb-collapse depth (W8):** hard-collapse 55 modules to ~8 verbs, or keep
-   modules as strategy *passes* behind the phase verbs and only reframe the
-   surface? *(Recommend the reversible option: reframe the surface, keep modules
-   as passes.)*
+1. **Harness home (W8):** one `engagement/harness.toml`, or per-strategy harness
+   files? *(Recommend one harness + referenced strategies.)*
+2. **Dedup key (W5):** exact-line `basename:line:cwe` vs the current `line/8`
+   bucket? Exact matches cross-engine collisions; the bucket tolerates drift.
+3. **Verify strategy (W6):** `--when/--max/--votes` on the existing verifier
+   only, or also the full multi-lens 2-of-3 + metamorphic + PoV? *(Latter is the
+   benchmarked edge but materially more work.)*
+4. **Engine-enablement UX (W2):** an explicit pre-scan toggle panel, or infer
+   from the analysis-depth ladder and only prompt on cost? *(Recommend
+   depth-drives-engines, prompt on cost.)*
+5. **Verb-collapse depth (W9):** hard-collapse 42 modules to ~8 phase verbs, or
+   keep modules as strategy *passes* behind the verbs and only reframe the
+   surface? *(Recommend reversible: reframe surface, keep modules as passes.)*
 
 ---
 
-## 13. Appendix — the flow, one screen
+## 18. Appendix — the control room, one screen
 
 ```
 $ kuzushi --target ./acme-api
 
-  Kuzushi · acme-api · Node/Express · LIVE                     [組 aim 1/5]
-  ───────────────────────────────────────────────────────────────────────
-  組 AIM ▸  崩 hunt   作 confirm   掛 fix   ▪ report
-  ───────────────────────────────────────────────────────────────────────
-  ATTACK SURFACE (engagement/map)          NEXT ▸ review the surface, then
-    3 routes · 2 untrusted entries              approve a hunt salvo
-    POST /auth/login   public, no rate-limit
-    GET  /api/users/:id  IDOR candidate    steer:  model · prompts · budget
-    POST /api/upload   no type validation          strategy: [stride ▾]
-  ───────────────────────────────────────────────────────────────────────
-  > aim            build/refresh the engagement folder
-  > next           advance to Hunt (approve salvos under budget)
-  > demo           no key? see a finding now (offline)
+  Kuzushi · acme-api · Node/Express · LIVE            崩 hunt 2/5   $0.85/$2.00
+  ───────────────────────────────────────────────────────────────────────────
+  組 aim ✓   崩 HUNT ▸   作 confirm   掛 fix   ▪ report
+  ─────────────────────────────── CONTROL ──────────┬──────── VISUAL ─────────
+  SALVO   focus × strategy × model × runs            │ ATTACK SURFACE
+    ▸ P-001 incomplete-fix hunt  $0.40 · yield .82   │   3 routes · 2 untrusted
+      strategy: deep   model: mid   runs: 2  [k/s]   │   ╱╲  webhook.ts  ● hot
+      P-002 SSRF reachability      $0.30 · .74 [k/s] │  ╱  ╲ users.ts    ◇
+    harness  engines: cpg ✓ codeql ○ lsp ○  [edit]   │ ─────────────────────────
+    seed     + semgrep.sarif (imported, 4)           │ FINDINGS (ledger)
+    focus ›  "focus on sqli"________              ↵  │  ✓ SQLi  users.ts:31
+  ──────────────────────────────────────────────────┤    critical · path · ×2
+  NEXT ▸ approve salvos, then `next` to fire         │  ◇ SSRF  webhook.ts:47
+  steer: [m]odel [s]trategy [e]ngines [b]udget       │    high · linked · votes 1/2
+  ───────────────────────────────────────────────────────────────────────────
+  > _                                    demo · seed · measure · / for commands
 ```
 
-The catalog, the 55 modules, the MCP oracles, the bounty/recon intake — all
-still there, one keystroke away in the advanced view. The *default* is the flow.
+The 42 modules, the MCP oracles, the CPG, the bounty/recon intake — all still
+there as **parts**, composed into the strategy behind the salvo. The default is
+the control room.
