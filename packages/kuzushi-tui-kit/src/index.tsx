@@ -18,6 +18,15 @@ export { SectionHeader, type SectionHeaderProps } from "./SectionHeader";
 export { LogLine, type LogLineProps } from "./LogLine";
 export { Footer, type FooterProps, type Keybind } from "./Footer";
 export { SeverityBadge, type SeverityBadgeProps } from "./SeverityBadge";
+export { PhaseRail, type PhaseRailProps, type Phase, type PhaseState } from "./PhaseRail";
+export { ProofBadge, type ProofBadgeProps, type ProofState } from "./ProofBadge";
+export { MeterBar, type MeterBarProps } from "./MeterBar";
+export {
+  ProposalRow,
+  type ProposalRowProps,
+  type ProposalState,
+} from "./ProposalRow";
+export { EngineChips, type EngineChipsProps, type EngineChip } from "./EngineChips";
 export {
   DEFAULT_THEME_TOKENS,
   HIGH_CONTRAST_THEME_TOKENS,
