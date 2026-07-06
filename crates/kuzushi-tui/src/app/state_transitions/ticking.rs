@@ -2,12 +2,16 @@ use super::*;
 
 impl ShellApp {
     pub fn tick(&mut self) -> bool {
+        self.tick_at(Instant::now())
+    }
+
+    pub(crate) fn tick_at(&mut self, now: Instant) -> bool {
         let mut changed = false;
-        changed |= self.expire_ctrl_c_arm();
-        changed |= self.expire_stale_advisory(AdvisoryKind::Throttle);
-        changed |= self.expire_stale_advisory(AdvisoryKind::Notice);
-        changed |= self.advance_spinner();
-        changed |= self.advance_scene();
+        changed |= self.expire_ctrl_c_arm(now);
+        changed |= self.expire_stale_advisory(AdvisoryKind::Throttle, now);
+        changed |= self.expire_stale_advisory(AdvisoryKind::Notice, now);
+        changed |= self.advance_spinner(now);
+        changed |= self.advance_scene(now);
         changed
     }
 
@@ -22,12 +26,11 @@ impl ShellApp {
 
     /// Spin the playground camera, paced by wall-clock so speed is independent
     /// of the redraw rate. No-op (and clears the baseline) when not animating.
-    fn advance_scene(&mut self) -> bool {
+    fn advance_scene(&mut self, now: Instant) -> bool {
         if !self.scene_animating() {
             self.last_scene_advance = None;
             return false;
         }
-        let now = Instant::now();
         let Some(prev) = self.last_scene_advance else {
             self.last_scene_advance = Some(now);
             return true;
@@ -41,36 +44,35 @@ impl ShellApp {
         true
     }
 
-    fn expire_ctrl_c_arm(&mut self) -> bool {
+    fn expire_ctrl_c_arm(&mut self, now: Instant) -> bool {
         let Some(armed_at) = self.ctrl_c_armed_at else {
             return false;
         };
-        if Instant::now().duration_since(armed_at) <= CTRL_C_ARM_WINDOW {
+        if now.duration_since(armed_at) <= CTRL_C_ARM_WINDOW {
             return false;
         }
         self.ctrl_c_armed_at = None;
         true
     }
 
-    fn expire_stale_advisory(&mut self, kind: AdvisoryKind) -> bool {
+    fn expire_stale_advisory(&mut self, kind: AdvisoryKind, now: Instant) -> bool {
         let Some(since) = kind.since(self) else {
             return false;
         };
-        if Instant::now().duration_since(since) <= kind.stale_after() {
+        if now.duration_since(since) <= kind.stale_after() {
             return false;
         }
         kind.clear(self);
         true
     }
 
-    fn advance_spinner(&mut self) -> bool {
+    fn advance_spinner(&mut self, now: Instant) -> bool {
         if crate::theme::active_theme().reduced_motion {
             return self.reset_spinner();
         }
         if !self.has_running_work() {
             return self.reset_spinner();
         }
-        let now = Instant::now();
         let due = self
             .last_spinner_advance
             .map(|prev| now.duration_since(prev) >= SPINNER_FRAME)

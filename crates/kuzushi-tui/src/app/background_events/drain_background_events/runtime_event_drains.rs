@@ -23,12 +23,12 @@ impl ShellApp {
         let events = self.jobs.drain(JOB_DRAIN_LIMIT);
         let changed = !events.is_empty();
         for event in events {
-            self.apply_job_event(event);
+            update(self, Msg::Job(event));
         }
         changed
     }
 
-    fn apply_job_event(&mut self, event: ShellEvent) {
+    pub(crate) fn apply_job_event(&mut self, event: ShellEvent) {
         let kind = event.kind();
         let finishes_slot = self.job_event_finishes_slot(&event);
         if finishes_slot {

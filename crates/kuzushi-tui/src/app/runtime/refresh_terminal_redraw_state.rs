@@ -12,7 +12,7 @@ pub(crate) fn refresh_terminal_redraw_state(
 }
 
 pub(crate) fn app_background_changed(app: &mut ShellApp) -> bool {
-    let tick_changed = app.tick();
+    let tick_changed = update(app, Msg::Tick(Instant::now())).changed;
     let drain_changed = app.drain_background_events();
     let view_changed = app.sync_view_change();
     tick_changed || drain_changed || view_changed
@@ -54,14 +54,9 @@ pub(crate) fn terminal_event_timeout(app: &ShellApp) -> Duration {
 }
 
 pub(crate) fn apply_terminal_event(app: &mut ShellApp, event: Event) -> bool {
-    match event {
-        Event::Key(key) => app.handle_key(key),
-        Event::Paste(text) => app.handle_paste(&text),
-        Event::Mouse(mouse) => app.handle_mouse(mouse),
-        Event::Resize(_, _) => {}
-        _ => return false,
-    }
-    true
+    TermEvent::from_crossterm(event)
+        .map(|event| update(app, Msg::Term(event)).changed)
+        .unwrap_or(false)
 }
 
 pub(crate) fn run_plain_shell(
