@@ -37,6 +37,8 @@
     "process_id": { "type": "integer", "minimum": 0 },
     "kuzushiVersion": { "type": "string" },
     "kuzushi_version": { "type": "string" },
+    "promptSpineVersion": { "type": "string" },
+    "prompt_spine_version": { "type": "string" },
     "gitSha": { "type": "string" },
     "git_sha": { "type": "string" },
     "gitBranch": { "type": "string" },
