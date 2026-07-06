@@ -1,4 +1,6 @@
 use super::*;
+use crate::runbooks::prompt_spine::PROMPT_SPINE_UNTRUSTED_REPO;
+use crate::runbooks::untrusted::{render_untrusted_derived_block, render_untrusted_repo_blocks};
 
 pub(crate) fn build_agentic_sast_prompt(
     target: &Path,
@@ -41,16 +43,16 @@ pub(crate) fn build_agentic_sast_prompt(
     }
     if let Some(review_context) = review_context {
         prompt.push(String::new());
-        prompt.push(review_context.to_string());
+        prompt.push(render_untrusted_derived_block(
+            "agentic-sast-first-pass-findings",
+            review_context,
+        ));
     }
     prompt.push(String::new());
+    prompt.push(PROMPT_SPINE_UNTRUSTED_REPO.to_string());
+    prompt.push(String::new());
     prompt.push("Repository inventory and snippets:".to_string());
-    if inventory.is_empty() {
-        prompt.push("(no readable source snippets found)".to_string());
-    }
-    for (path, snippet) in inventory {
-        prompt.push(format!("\n--- {path} ---\n{snippet}"));
-    }
+    prompt.push(render_untrusted_repo_blocks(inventory));
     prompt.join("\n")
 }
 
