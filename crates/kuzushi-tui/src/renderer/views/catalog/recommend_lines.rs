@@ -20,7 +20,7 @@ pub(crate) fn recommend_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> 
     if model.rows.is_empty() && model.components.is_empty() {
         append_empty_recommendations(lines, &model, area)
     } else {
-        append_report(lines, &model, area, app.recommend_cursor)
+        append_report(lines, &model, area, app.catalog_route.recommend_cursor())
     }
 }
 

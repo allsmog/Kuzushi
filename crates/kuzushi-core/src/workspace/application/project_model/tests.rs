@@ -33,7 +33,7 @@ fn project_model_document_builds_root_sections_and_round_trips() {
 
     assert_eq!(
         path,
-        temp.path().join(".kuzushi/v2/project-model/root.json")
+        temp.path().join(".kuzushi/v3/project-model/root.json")
     );
     assert_eq!(loaded.scope_id, ROOT_SCOPE_ID);
     assert!(loaded.sections.iter().any(|section| {

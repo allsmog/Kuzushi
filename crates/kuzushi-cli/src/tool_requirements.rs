@@ -62,57 +62,8 @@ fn input_has_target_value(input: &Value) -> bool {
     })
 }
 
-pub(crate) const WORKSPACE_TOOL_PREFIXES: &[&str] = &[
-    "findings:",
-    "module-recommender:",
-    "context:",
-    "recon:",
-    "bounty:",
-    "vendor-assessment:",
-    "chrome-rce:",
-    "vuln-scout:",
-    "tob:",
-    "shinsa:",
-    "prompt-armor:",
-    "x-ray:",
-    "threat-model:",
-    "randori:",
-    "variant:",
-    "ndiff:",
-    "systems-hunt:",
-    "threat-intel:",
-    "uaf-hunt:",
-];
-
-pub(crate) const WORKSPACE_TOOL_NAMES: &[&str] = &[
-    "carlini-threat-hunt:run",
-    "offense-review:threat-hunt",
-    "agentic-sast:scan",
-    "taint-iris:hunt",
-    "taint-iris-next:dataflow-plan",
-    "taint-iris-next:source-sink-trace",
-    "taint-iris-next:finding-review",
-    "taint-iris-next:hunt",
-    "taint-iris-next:catalog",
-    "taint-iris-next:codeql-db",
-    "triage:run",
-    "verify:finding",
-    "verify:exploit",
-    "patch:finding",
-    "context-lite:index",
-    "full-mode:hunt",
-    "classifier-gate:score",
-    "deep-audit:run",
-    "sast:scan",
-    "semgrep:scan",
-    "codeql:scan",
-    "iac-scan:scan",
-    "license-scan:scan",
-    "sbom-scan:scan",
-];
-
 pub(crate) fn tool_defaults_to_workspace(tool: &str) -> bool {
-    has_known_prefix(tool, WORKSPACE_TOOL_PREFIXES) || has_known_name(tool, WORKSPACE_TOOL_NAMES)
+    kuzushi_core::tool_defaults_to_workspace(tool)
 }
 
 pub(crate) fn tool_needs_finding_store(tool: &str) -> bool {
@@ -125,12 +76,4 @@ pub(crate) fn tool_needs_finding_store(tool: &str) -> bool {
 #[cfg(test)]
 pub(crate) fn tool_needs_runtime(tool: &str, input: &serde_json::Value) -> bool {
     kuzushi_core::tool_needs_runtime(tool, input)
-}
-
-pub(crate) fn has_known_prefix(tool: &str, prefixes: &[&str]) -> bool {
-    prefixes.iter().any(|prefix| tool.starts_with(prefix))
-}
-
-pub(crate) fn has_known_name(tool: &str, names: &[&str]) -> bool {
-    names.contains(&tool)
 }

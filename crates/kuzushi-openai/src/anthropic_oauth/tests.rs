@@ -160,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn triage_outcome_from_response_prefers_structured_then_json_text_then_fallbacks() {
+    fn triage_outcome_from_response_prefers_structured_then_json_text() {
         let structured = triage_outcome_from_response(AgentQueryResponse {
             structured: Some(json!({
                 "verdict": "true_positive",
@@ -169,7 +169,8 @@ mod tests {
             })),
             cost_usd: 0.12,
             ..Default::default()
-        });
+        })
+        .unwrap();
         assert_eq!(structured.verdict, TriageVerdict::TruePositive);
         assert_eq!(structured.confidence, 1.0);
         assert_eq!(structured.cost_usd, 0.12);
@@ -178,26 +179,46 @@ mod tests {
             text: r#"{"verdict":"false_positive","confidence":0.8,"rationale":"json"}"#.to_string(),
             cost_usd: 0.03,
             ..Default::default()
-        });
+        })
+        .unwrap();
         assert_eq!(from_text.verdict, TriageVerdict::FalsePositive);
         assert_eq!(from_text.cost_usd, 0.03);
+    }
 
+    #[test]
+    fn triage_outcome_from_response_errors_on_plain_or_empty_content() {
         let plain = triage_outcome_from_response(AgentQueryResponse {
             text: "plain rationale".to_string(),
             cost_usd: 0.04,
             ..Default::default()
-        });
-        assert_eq!(plain.verdict, TriageVerdict::NeedsReview);
-        assert_eq!(plain.confidence, 0.25);
-        assert_eq!(plain.rationale, "plain rationale");
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(plain.contains("not valid triage JSON"));
 
         let empty = triage_outcome_from_response(AgentQueryResponse {
             cost_usd: 0.05,
             ..Default::default()
-        });
-        assert_eq!(empty.verdict, TriageVerdict::NeedsReview);
-        assert_eq!(empty.confidence, 0.0);
-        assert!(empty.rationale.contains("no triage content"));
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(empty.contains("no triage content"));
+    }
+
+    #[test]
+    fn triage_outcome_from_response_errors_on_schema_violations() {
+        let err = triage_outcome_from_response(AgentQueryResponse {
+            structured: Some(json!({
+                "verdict": "true_positive",
+                "confidence": "high",
+                "rationale": "reachable"
+            })),
+            ..Default::default()
+        })
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("violated schema"));
     }
 
     // ----- cost estimation -----------------------------------------

@@ -10,8 +10,8 @@ mod run_scan;
 mod session;
 
 pub use command_payloads::{
-    ContextCommand, PwnCommand, SastTaskCommand, SastTaskModeCommand, StrategyCommand,
-    StrategyCorrectionCommandScope, WorkspaceCommand,
+    ContextCommand, PatchCommand, PwnCommand, ReviewDecisionCommand, SastTaskCommand,
+    SastTaskModeCommand, StrategyCommand, StrategyCorrectionCommandScope, WorkspaceCommand,
 };
 
 pub(crate) const SHELL_COMMAND_SPEC_GROUPS: &[&[ShellCommandSpec]] = &[
@@ -124,7 +124,7 @@ fn parse_catalog_command(verb: &str) -> Option<ShellCommand> {
 
 fn parse_session_command(verb: &str) -> Option<ShellCommand> {
     match verb {
-        "workbench" | "studio" | "cc" => Some(ShellCommand::Workbench(WorkbenchPane::Findings)),
+        "workbench" => Some(ShellCommand::Workbench(WorkbenchPane::Findings)),
         "doctor" | "health" => Some(ShellCommand::Health),
         "cost" => Some(ShellCommand::Cost),
         "config" => Some(ShellCommand::Config),
@@ -135,11 +135,11 @@ fn parse_session_command(verb: &str) -> Option<ShellCommand> {
         "cancel" | "c" | "stop" => Some(ShellCommand::Cancel),
         "story" => Some(ShellCommand::Story),
         "quickstart" => Some(ShellCommand::Quickstart),
-        "onboarding" | "setup" | "plan-stage" | "planning" => Some(ShellCommand::Onboarding),
+        "onboarding" | "planning" => Some(ShellCommand::Onboarding),
         "next" | "continue" => Some(ShellCommand::Next),
         "logs" | "log" | "transcript" => Some(ShellCommand::Logs),
         "activity" | "progress" | "a" => Some(ShellCommand::Activity),
-        "scene" | "viz" | "3d" | "diagram" => Some(ShellCommand::Scene),
+        "scene" | "viz" => Some(ShellCommand::Scene),
         "handoff" | "failure" | "failures" => Some(ShellCommand::FailureHandoff),
         _ => None,
     }

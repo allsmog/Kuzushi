@@ -57,6 +57,12 @@ pub enum AgentLoopStep {
     ToolCall {
         #[serde(flatten)]
         call: ToolCall,
+        /// Cost of this intermediate round-trip, when the bridge surfaces it.
+        /// Accounting must not wait for the terminal `Final`: a loop that hits
+        /// `max_steps` (or errors) still incurred the spend of every tool round
+        /// it made, so the driver folds this into the running total per step.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cost_usd: Option<f64>,
     },
     /// Model returned a final answer — driver should exit the loop.
     Final {

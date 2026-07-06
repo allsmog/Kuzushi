@@ -338,7 +338,7 @@ src/strategies/
 1. **Unit tests**: `pnpm test` — all new tests in `tests/agents/code-graph/` and `tests/strategies/`
 2. **Type check**: `pnpm typecheck` — no type errors
 3. **E2E**: Run `kuzushi scan benchmarks/juice-shop/repo --code-graph --multi-strategy --scanners semgrep` and verify:
-   - Graph is persisted in `.kuzushi/findings.sqlite3` (code_graph_nodes/edges/paths tables populated)
+   - Graph is persisted in `.kuzushi/index.sqlite3` (code_graph_nodes/edges/paths tables populated)
    - Triage prompts include graph context
    - Findings show strategy corroboration evidence
    - Cost tracking shows per-strategy breakdown

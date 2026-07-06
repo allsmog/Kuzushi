@@ -1,5 +1,4 @@
 use super::*;
-use crate::app::services::init_scope_for_target;
 
 impl ShellApp {
     pub(crate) fn show_workspace_status(&mut self) {
@@ -9,61 +8,17 @@ impl ShellApp {
         self.log("workspace", self.workspace_view.status.clone());
     }
 
-    pub(crate) fn export_workspace_findings(&mut self, output: &PathBuf, format: Option<&str>) {
-        match export_findings_for_target(self.target.as_ref(), output, format) {
-            Ok(report) => {
-                self.workspace_view = self.build_workspace_view(Some(report.output_path.clone()));
-                self.shell_view = ShellView::Workspace;
-                self.focused_module = Some("workspace".to_string());
-                self.log("export", workspace_export_message(&report));
-            }
-            Err(error) => {
-                self.workspace_view = self.build_workspace_view(None);
-                self.shell_view = ShellView::Workspace;
-                self.log(
-                    "error",
-                    format!(
-                        "{error}. Next: workspace export findings <path> [json|jsonl|sarif|csv|markdown-bundle]"
-                    ),
-                );
-            }
-        }
-    }
-
-    pub(crate) fn init_workspace_scope(&mut self) {
-        match init_scope_for_target(self.target.as_ref()) {
-            Ok(path) => {
-                self.refresh_program_scope();
-                self.workspace_view = self.build_workspace_view(None);
-                self.shell_view = ShellView::Workspace;
-                self.focused_module = Some("workspace".to_string());
-                self.log(
-                    "scope",
-                    format!(
-                        "wrote {}. Edit in_scope/out_of_scope, then run recon/import tools.",
-                        path.display()
-                    ),
-                );
-            }
-            Err(error) => {
-                self.workspace_view = self.build_workspace_view(None);
-                self.shell_view = ShellView::Workspace;
-                self.log(
-                    "error",
-                    format!("{error}. Next: target <path>, then workspace scope init"),
-                );
-            }
-        }
-    }
-
     pub(crate) fn build_workspace_view(&self, last_export: Option<PathBuf>) -> WorkspaceView {
         workspace_view_for_target(self.target.as_ref(), last_export)
     }
 }
 
-fn workspace_export_message(report: &kuzushi_core::WorkspaceFindingsExport) -> String {
+pub(crate) fn workspace_export_message(
+    report: &kuzushi_core::WorkspaceFindingsExport,
+    completeness: Option<&str>,
+) -> String {
     let base = format!(
-        "wrote {} {} to {} ({})",
+        "wrote {} {} to {} ({}) completeness:{}",
         report.count,
         if report.count == 1 {
             "finding"
@@ -71,7 +26,8 @@ fn workspace_export_message(report: &kuzushi_core::WorkspaceFindingsExport) -> S
             "findings"
         },
         report.output_path.display(),
-        report.format.as_str()
+        report.format.as_str(),
+        completeness.unwrap_or("all")
     );
     if report.format == kuzushi_core::WorkspaceExportFormat::MarkdownBundle {
         return format!(

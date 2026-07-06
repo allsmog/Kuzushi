@@ -11,7 +11,7 @@ use crate::scene3d::{
     active_palette, attack_surface_scene, brighten, render_to_framebuffer, Camera, Projector,
     SceneLabel, VizPage, BACKGROUND,
 };
-use crate::ui_view_models::{attack_tree, dfd_model, risk_by_module};
+use crate::ui_view_models::{attack_tree, cached_risk_by_module, dfd_model};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
 use ratatui::style::{Color, Style};
@@ -66,7 +66,7 @@ fn render_terrain_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         );
         return;
     }
-    let scene = attack_surface_scene(&risk_by_module(&app.findings));
+    let scene = attack_surface_scene(&cached_risk_by_module(app));
     let cam = scene_camera(app);
     let fb = render_to_framebuffer(&scene, cam, cols, rows * 2);
     let proj = Projector::new(cam, cols, rows * 2);

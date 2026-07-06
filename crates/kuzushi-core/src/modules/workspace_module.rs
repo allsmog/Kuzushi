@@ -6,31 +6,59 @@ pub(crate) fn workspace_module() -> BuiltinModule {
         "Workspace",
         ModuleKind::Intel,
         "Report target and state paths.",
-        vec![
-            tool(
-                "workspace:status",
-                "Show current target and state paths.",
-            ),
-            tool_with_options(
-                "workspace:export-findings",
-                "Export persisted workspace findings to a local file or markdown bundle directory. \
-                 Supports JSON, JSONL, SARIF 2.1.0, CSV, and a multi-file markdown bundle.",
-                vec![
-                    opt(
-                        "output",
-                        OptionType::Path,
-                        "Output path for exported findings. Relative paths resolve under the workspace root. \
-                         Use a directory path when format=markdown-bundle.",
-                    )
-                    .aliases(&["path"])
-                    .required(),
-                    opt("format", OptionType::Enum, "Export format.")
-                        .choices(&["json", "jsonl", "sarif", "csv", "markdown-bundle"]),
-                ],
-            ),
-        ],
+        vec![workspace_status_tool(), workspace_export_findings_tool()],
         vec![],
     )
+}
+
+fn workspace_status_tool() -> ToolDescriptor {
+    tool(
+        "workspace:status",
+        "Show current target and state paths.",
+    )
+}
+
+fn workspace_export_findings_tool() -> ToolDescriptor {
+    tool_with_options(
+        "workspace:export-findings",
+        "Export persisted workspace findings to a local file or markdown bundle directory. \
+         Supports JSON, JSONL, SARIF 2.1.0, CSV, and a multi-file markdown bundle.",
+        workspace_export_findings_options(),
+    )
+}
+
+fn workspace_export_findings_options() -> Vec<OptionSpec> {
+    vec![
+        workspace_export_output_option(),
+        opt("format", OptionType::Enum, "Export format.")
+            .choices(&["json", "jsonl", "sarif", "csv", "markdown-bundle"]),
+        opt(
+            "completeness",
+            OptionType::Enum,
+            "Findings to include by review completeness.",
+        )
+        .aliases(&["reviewCompleteness", "review_completeness"])
+        .choices(&["all", "open", "complete"])
+        .default(json!("all")),
+        opt(
+            "allowEmpty",
+            OptionType::Bool,
+            "Permit writing a valid metadata-only export when no findings match.",
+        )
+        .aliases(&["allow_empty"])
+        .default(json!(false)),
+    ]
+}
+
+fn workspace_export_output_option() -> OptionSpec {
+    opt(
+        "output",
+        OptionType::Path,
+        "Output path for exported findings. Relative paths resolve under the workspace root. \
+         Use a directory path when format=markdown-bundle.",
+    )
+    .aliases(&["path"])
+    .required()
 }
 
 pub(crate) fn sast_module() -> BuiltinModule {
@@ -63,6 +91,7 @@ fn sast_scan_options() -> Vec<OptionSpec> {
     options.extend(sast_taint_backend_options());
     options.extend(sast_taint_cwe_limit_options());
     options.extend(sast_taint_output_limit_options());
+    options.push(mcps_option());
     options.push(model_option());
     options
 }
@@ -422,29 +451,120 @@ pub(crate) fn agentic_sast_module() -> BuiltinModule {
         "Agentic SAST",
         ModuleKind::Defense,
         "LLM-driven detectors that reason about data flow and intent rather than pattern-match.",
-        vec![tool_with_options(
-            "agentic-sast:scan",
-            "Run agentic SAST detectors for the current target.",
-            vec![
-                target_option(),
-                max_findings_option(40),
-                opt("passes", OptionType::Int, "Agentic review pass count.").default(json!(1)),
-                opt(
-                    "severity",
-                    OptionType::StringList,
-                    "Agentic severities to include.",
-                )
-                .advanced(),
-                opt(
-                    "excludePatterns",
-                    OptionType::StringList,
-                    "Repo-relative patterns to exclude from agentic analysis.",
-                )
-                .aliases(&["exclude_patterns"])
-                .advanced(),
-                model_option(),
-            ],
-        )],
+        vec![agentic_sast_scan_tool()],
         vec![dag("agentic-sast:scan", "findings", &["context:build"])],
     )
+}
+
+fn agentic_sast_scan_tool() -> ToolDescriptor {
+    tool_with_options(
+        "agentic-sast:scan",
+        "Run agentic SAST detectors for the current target.",
+        agentic_sast_scan_options(),
+    )
+}
+
+fn agentic_sast_scan_options() -> Vec<OptionSpec> {
+    let mut options = vec![
+        target_option(),
+        max_findings_option(40),
+        opt("passes", OptionType::Int, "Agentic review pass count.").default(json!(1)),
+        agentic_sast_mode_option(),
+    ];
+    options.extend(sast_whitebox_options());
+    options.extend(agentic_sast_filter_options());
+    options.extend(agentic_sast_chunk_options());
+    options.extend(agentic_sast_auto_triage_options());
+    options.push(model_option());
+    options
+}
+
+fn agentic_sast_mode_option() -> OptionSpec {
+    opt("mode", OptionType::Enum, "Agentic SAST analysis mode.")
+        .aliases(&["preset"])
+        .choices(&["standard", "whitebox-static"])
+        .default(json!("standard"))
+        .advanced()
+}
+
+fn agentic_sast_filter_options() -> Vec<OptionSpec> {
+    vec![
+        opt(
+            "severity",
+            OptionType::StringList,
+            "Agentic severities to include.",
+        )
+        .advanced(),
+        opt(
+            "excludePatterns",
+            OptionType::StringList,
+            "Repo-relative patterns to exclude from agentic analysis.",
+        )
+        .aliases(&["exclude_patterns"])
+        .advanced(),
+    ]
+}
+
+fn agentic_sast_chunk_options() -> Vec<OptionSpec> {
+    vec![
+        opt("strategy", OptionType::Enum, "Agentic SAST strategy.")
+            .choices(&["standard", "chunked"])
+            .default(json!("standard"))
+            .advanced(),
+        opt(
+            "language",
+            OptionType::Enum,
+            "Chunked strategy language prompt.",
+        )
+        .choices(&["c", "unknown"])
+        .advanced(),
+        opt(
+            "maxTokensPerChunk",
+            OptionType::Int,
+            "Chunked strategy token budget per chunk.",
+        )
+        .advanced(),
+        opt(
+            "depositUsdPerChunk",
+            OptionType::Float,
+            "Chunked strategy spend deposit per chunk.",
+        )
+        .advanced(),
+        opt(
+            "dryRun",
+            OptionType::Bool,
+            "Plan chunked strategy cost without model calls.",
+        )
+        .advanced(),
+        opt("scopeFile", OptionType::Path, "Chunked strategy scope file.").advanced(),
+        opt(
+            "failedChunkIds",
+            OptionType::String,
+            "Chunked strategy retry filter.",
+        )
+        .advanced(),
+    ]
+}
+
+fn agentic_sast_auto_triage_options() -> Vec<OptionSpec> {
+    vec![
+        opt(
+            "autoTriage",
+            OptionType::Bool,
+            "Run deep triage on HIGH+CRITICAL chunked findings.",
+        )
+        .advanced(),
+        opt(
+            "autoTriageMaxSteps",
+            OptionType::Int,
+            "Step budget per chunked auto-triage pass.",
+        )
+        .advanced(),
+        opt(
+            "autoTriageDepositUsd",
+            OptionType::Float,
+            "Spend deposit per chunked auto-triage pass.",
+        )
+        .advanced(),
+    ]
 }

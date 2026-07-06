@@ -1,6 +1,7 @@
 use super::*;
 pub(in crate::renderer) use super::*;
 
+mod depth_stack;
 mod detail_pane;
 mod panes;
 mod render_workbench_view;

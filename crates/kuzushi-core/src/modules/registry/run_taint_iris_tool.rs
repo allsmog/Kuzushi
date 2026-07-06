@@ -5,7 +5,7 @@ pub(in crate::modules) fn run_taint_iris_tool(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    Ok(run_taint_iris_report(input, ctx, runtime)?.to_tool_json())
+    run_taint_iris_next_tool(&taint_iris_legacy_input(input), ctx, runtime)
 }
 
 pub(in crate::modules) fn run_taint_iris_next_tool(
@@ -54,6 +54,20 @@ fn taint_iris_next_mode_input(input: &Value, mode: &str) -> Value {
         return normalized;
     }
     json!({ "mode": mode })
+}
+
+fn taint_iris_legacy_input(input: &Value) -> Value {
+    let mut normalized = taint_iris_next_mode_input(input, "hunt");
+    let Value::Object(object) = &mut normalized else {
+        return normalized;
+    };
+    if object.contains_key("cweFocus") || object.contains_key("cwe_focus") {
+        return normalized;
+    }
+    if let Some(cwe) = object.get("cwe").cloned() {
+        object.insert("cweFocus".to_string(), cwe);
+    }
+    normalized
 }
 
 pub(in crate::modules) fn run_taint_iris_next_catalog_tool(
@@ -150,7 +164,6 @@ pub(in crate::modules) fn dispatch_runtime_analysis_tool(
         "full-mode:hunt" => Some(run_full_mode_hunt_tool(input.clone(), ctx, runtime)),
         "classifier-gate:score" => Some(run_classifier_score_tool(input.clone(), ctx, runtime)),
         "deep-audit:run" => Some(run_deep_audit_tool(input.clone(), ctx, runtime)),
-        "smoke:next-step" => Some(run_smoke_next_step_tool(input.clone(), ctx, runtime)),
         "threat-model:build"
         | "threat-model:read"
         | "threat-model:methodologies"
@@ -175,12 +188,51 @@ pub(in crate::modules) fn dispatch_finding_action_tool(
     runtime: Option<&dyn AgentRuntime>,
 ) -> ToolDispatchResult {
     match name {
+        "triage:run" if triage_strategy(input, "deep") => {
+            Some(run_deep_audit_tool(deep_triage_input(input), ctx, runtime))
+        }
+        "triage:run" if triage_strategy(input, "gate-deep") => Some(run_classifier_score_tool(
+            deep_triage_input(input),
+            ctx,
+            runtime,
+        )),
         "triage:run" => Some(run_triage(input.clone(), ctx, runtime)),
+        "verify:finding" if verify_empirical_mode(input) => {
+            Some(run_verify_exploit(input.clone(), ctx))
+        }
         "verify:finding" => Some(run_verify_finding(input.clone(), ctx, runtime)),
         "verify:exploit" => Some(run_verify_exploit(input.clone(), ctx)),
         "patch:finding" => Some(run_patch_finding(input.clone(), ctx, runtime)),
         _ => None,
     }
+}
+
+fn triage_strategy(input: &Value, expected: &str) -> bool {
+    input
+        .get("strategy")
+        .and_then(Value::as_str)
+        .is_some_and(|strategy| strategy.trim().eq_ignore_ascii_case(expected))
+}
+
+fn deep_triage_input(input: &Value) -> Value {
+    let mut normalized = input.clone();
+    let Value::Object(object) = &mut normalized else {
+        return normalized;
+    };
+    if object.contains_key("findingFingerprint") {
+        return normalized;
+    }
+    if let Some(fingerprint) = object.get("fingerprint").cloned() {
+        object.insert("findingFingerprint".to_string(), fingerprint);
+    }
+    normalized
+}
+
+fn verify_empirical_mode(input: &Value) -> bool {
+    input
+        .get("mode")
+        .and_then(Value::as_str)
+        .is_some_and(|mode| mode.trim().eq_ignore_ascii_case("empirical"))
 }
 
 pub(in crate::modules) fn dispatch_recon_assessment_tool(

@@ -10,7 +10,7 @@ pub fn run_scan_engines_with_options(
     workspace.ensure_state_dir()?;
 
     let run_id = scan_run_id(options);
-    store.insert_scan_run(&run_id, workspace.root(), "running")?;
+    store.record_run_started(&run_id, workspace.root(), "running")?;
 
     let cancellation = ScanCancellation::default();
     let mut scan_output = collect_scan_engine_outputs(workspace, scanners, &cancellation, options)?;
@@ -20,7 +20,7 @@ pub fn run_scan_engines_with_options(
     for finding in &scan_output.findings {
         store.insert_finding(&run_id, finding)?;
     }
-    store.complete_scan_run(&run_id, "completed", scan_output.findings.len())?;
+    store.record_run_finished(&run_id, "completed", scan_output.findings.len())?;
 
     Ok(ScanRun {
         id: run_id,

@@ -81,7 +81,8 @@ pub struct WhiteboxDiffScopeReport {
     pub changed_files: Vec<ChangedFile>,
     pub context: Vec<DiffContext>,
     pub finding_tags: Vec<DiffFindingTag>,
-    pub fixed_findings: Vec<DiffFindingTag>,
+    #[serde(alias = "fixedFindings")]
+    pub not_seen_findings: Vec<DiffFindingTag>,
     pub summary: DiffScopeSummary,
     pub deterministic: bool,
     pub no_remote_provider_required: bool,

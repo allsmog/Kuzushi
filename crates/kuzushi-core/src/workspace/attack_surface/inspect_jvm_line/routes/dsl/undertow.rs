@@ -11,7 +11,15 @@ pub(super) fn inspect_undertow_route_line(
     builder: &mut AttackSurfaceBuilder,
 ) {
     remember_undertow_scope(lower, state);
-    emit_undertow_route(source_file, framework, line_number, detail, lower, state, builder);
+    emit_undertow_route(
+        source_file,
+        framework,
+        line_number,
+        detail,
+        lower,
+        state,
+        builder,
+    );
 }
 
 fn remember_undertow_scope(lower: &str, state: &mut RouteScanState) {

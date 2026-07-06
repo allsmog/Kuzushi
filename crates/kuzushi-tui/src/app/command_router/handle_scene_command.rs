@@ -3,7 +3,7 @@ use crate::scene3d::VizPage;
 
 const AUTO_OPEN_INTERACTION_GRACE: std::time::Duration = std::time::Duration::from_secs(4);
 
-/// `/scene` (`/viz`, `/diagram`) opens the security-viz gallery, keeping
+/// `/scene` (`/viz`) opens the security-viz gallery, keeping
 /// whatever page was last shown. Pages are fed real Kuzushi data and show an
 /// empty-state hint until the backing artifact (findings, threat model, exploit
 /// chains, taint flow) has been generated.
@@ -81,7 +81,7 @@ impl ShellApp {
                 "data-flow model ready — showing Workbench DFD center pane",
             );
         } else {
-            self.log_workbench_ready("use `workbench` or `threats dfd` to view");
+            self.log_workbench_ready("use `workbench` to view");
         }
     }
 

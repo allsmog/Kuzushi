@@ -46,7 +46,7 @@ mod tests {
         app.open_guided_scan(Some(temp.path().to_path_buf()));
 
         assert_eq!(app.shell_view, ShellView::PlanningPicker);
-        assert_eq!(app.workflow_phase, Some(WorkflowPhase::Map));
+        assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
         assert!(app.target.is_some());
         assert!(app.scan.is_none());
         assert!(app
@@ -64,7 +64,7 @@ mod tests {
         app.open_guided_scan(None);
 
         assert_eq!(app.shell_view, ShellView::PlanningPicker);
-        assert_eq!(app.workflow_phase, Some(WorkflowPhase::Map));
+        assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
         assert_eq!(app.target.as_deref(), Some(workspace.root()));
         assert!(app.scan.is_none());
     }

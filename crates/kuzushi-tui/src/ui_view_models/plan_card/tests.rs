@@ -18,8 +18,8 @@ fn plan_card_model_marks_cursor_skips_and_counts_active_changes() {
         ],
         unsupported: vec!["manual follow-up".to_string()],
     });
-    app.plan_cursor = 1;
-    app.plan_skipped.insert(0);
+    app.toggle_plan_change_skip();
+    app.move_plan_cursor(1);
 
     let model = plan_card_model(&app).expect("pending plan model");
 

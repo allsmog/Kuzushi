@@ -1,7 +1,8 @@
 use super::*;
+use kuzushi_core::findings::TriageAuthor;
 use kuzushi_core::workspace::ROOT_SCOPE_ID;
 use kuzushi_core::{
-    Finding, FindingEvidence, PersistedProofVerdict, PersistedSandboxBackend,
+    write_run_summary, Finding, FindingEvidence, PersistedProofVerdict, PersistedSandboxBackend,
     PersistedVerification, RunSummary, RunTargetGitMetadata, Severity, StaticProofState,
     TriageOutcome, TriageVerdict, V2Config, WorkspaceTarget,
 };
@@ -24,6 +25,7 @@ fn findings_model_projects_counts_rows_and_selection() {
         rationale: "source and sink are linked".to_string(),
         cost_usd: 0.0,
     });
+    high.identity_id = Some("fi_0123456789abcdef0123456789abcdef".to_string());
     let medium = Finding::new_tool(
         "codeql",
         "js/path-injection",
@@ -44,16 +46,24 @@ fn findings_model_projects_counts_rows_and_selection() {
     assert_eq!(model.counts.high, 1);
     assert_eq!(model.counts.medium, 1);
     assert_eq!(model.header, "FINDINGS · 2 · 1H · 1M");
+    assert_eq!(
+        model.reconciliation_header,
+        "showing 2 of 2 · filters:all · review:all · sorted by priority"
+    );
     assert_eq!(model.rows[0].alias, "F-0001");
+    assert_eq!(model.rows[0].identity_label, "FI-01234567");
     assert_eq!(model.rows[0].severity_label, "HIGH");
     assert_eq!(model.rows[0].location, "src/search.ts:12-14");
     assert_eq!(model.rows[0].run_label, "run:unknown");
     assert_eq!(model.rows[0].revision_label, "rev:unknown");
     assert_eq!(model.rows[0].verdict, "tp");
     assert_eq!(model.rows[0].confidence, "91%");
-    assert_eq!(model.rows[0].proof_label, "triaged-tp");
-    assert_eq!(model.rows[0].proof_marker, "◇");
-    assert_eq!(model.rows[0].proof_tier, ProofTier::Confirmed);
+    assert_eq!(model.rows[0].priority_label, "p:1");
+    assert_eq!(model.rows[0].lifecycle_status, "candidate");
+    assert_eq!(model.rows[0].decision, "confirmed");
+    assert_eq!(model.rows[0].proof_label, "signal-only");
+    assert_eq!(model.rows[0].proof_marker, "?");
+    assert_eq!(model.rows[0].proof_tier, ProofTier::Suspected);
     assert_eq!(model.rows[0].source, "semgrep:demo.sql");
     assert!(model.rows[0].selected);
     assert_eq!(model.rows[1].proof_label, "unverified");
@@ -62,6 +72,341 @@ fn findings_model_projects_counts_rows_and_selection() {
     assert_eq!(model.preview.header, "FINDINGS · 1 triaged · 1 pending");
     assert_eq!(model.preview.rows.len(), 2);
     assert!(model.preview.overflow.is_none());
+}
+
+#[test]
+fn findings_model_reconciliation_header_names_active_filter_expression() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.active_findings_filter = Some("decision:needs_review completeness:open".to_string());
+    app.findings = vec![Finding::new_tool(
+        "semgrep",
+        "demo.review",
+        "src/lib.rs",
+        12,
+        None,
+        Severity::High,
+        "finding awaiting review",
+    )];
+
+    let model = findings_model(&app);
+
+    assert_eq!(
+        model.reconciliation_header,
+        "showing 1 of 1 · filters:decision:needs_review completeness:open · review:all · sorted by priority"
+    );
+}
+
+#[test]
+fn findings_model_applies_active_filter_to_visible_rows() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.active_findings_filter = Some("decision:confirmed completeness:complete".to_string());
+    let open = Finding::new_tool(
+        "semgrep",
+        "demo.open",
+        "src/open.rs",
+        12,
+        None,
+        Severity::High,
+        "open finding",
+    );
+    let mut confirmed = Finding::new_tool(
+        "semgrep",
+        "demo.confirmed",
+        "src/confirmed.rs",
+        44,
+        None,
+        Severity::Medium,
+        "confirmed finding",
+    );
+    confirmed.triage = Some(TriageOutcome {
+        verdict: TriageVerdict::TruePositive,
+        confidence: 0.86,
+        rationale: "reviewed".to_string(),
+        cost_usd: 0.0,
+    });
+    app.findings = vec![open, confirmed];
+
+    let model = findings_model(&app);
+
+    assert_eq!(model.total, 1);
+    assert_eq!(model.triaged, 1);
+    assert_eq!(model.pending, 0);
+    assert_eq!(
+        model.reconciliation_header,
+        "showing 1 of 2 · filters:decision:confirmed completeness:complete · review:all · sorted by priority"
+    );
+    assert_eq!(model.rows.len(), 1);
+    assert_eq!(model.rows[0].title, "confirmed finding");
+    assert_eq!(model.rows[0].decision, "confirmed");
+}
+
+#[test]
+fn findings_model_empty_state_distinguishes_filtered_out_rows() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.active_findings_filter = Some("decision:suppressed completeness:complete".to_string());
+
+    let model = findings_model(&app);
+
+    assert!(model.rows.is_empty());
+    assert_eq!(
+        model
+            .empty
+            .filtered_out
+            .as_ref()
+            .map(|state| state.expression.as_str()),
+        Some("decision:suppressed completeness:complete")
+    );
+    assert_eq!(
+        model.reconciliation_header,
+        "showing 0 of 0 · filters:decision:suppressed completeness:complete · review:all · sorted by priority"
+    );
+}
+
+#[test]
+fn findings_model_counts_reviewed_by_durable_identity() {
+    let identity_id = "fi_0123456789abcdef0123456789abcdef".to_string();
+    let mut reviewed = Finding::new_tool(
+        "semgrep",
+        "demo.reviewed",
+        "src/lib.rs",
+        12,
+        None,
+        Severity::High,
+        "reviewed finding",
+    );
+    reviewed.identity_id = Some(identity_id.clone());
+    reviewed.triage = Some(TriageOutcome {
+        verdict: TriageVerdict::TruePositive,
+        confidence: 0.91,
+        rationale: "reviewed".to_string(),
+        cost_usd: 0.0,
+    });
+    let mut rerun = Finding::new_tool(
+        "semgrep",
+        "demo.rerun",
+        "src/lib.rs",
+        20,
+        None,
+        Severity::Medium,
+        "same durable finding seen later",
+    );
+    rerun.identity_id = Some(identity_id);
+    assert!(rerun.triage.is_none());
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.findings = vec![reviewed, rerun];
+
+    let model = findings_model(&app);
+
+    assert_eq!(model.total, 2);
+    assert_eq!(model.triaged, 2);
+    assert_eq!(model.pending, 0);
+    assert_eq!(model.preview.header, "FINDINGS · 2 triaged · 0 pending");
+    assert_eq!(model.rows[1].verdict, "untriaged");
+    assert_eq!(model.rows[1].confidence, "91%");
+    assert_eq!(model.rows[1].priority_label, "p:2");
+    assert_eq!(model.rows[1].decision, "confirmed");
+}
+
+#[test]
+fn selected_finding_detail_uses_durable_identity_review_decision() {
+    let identity_id = "fi_0123456789abcdef0123456789abcdef".to_string();
+    let mut reviewed = Finding::new_tool(
+        "semgrep",
+        "demo.reviewed",
+        "src/lib.rs",
+        12,
+        None,
+        Severity::High,
+        "reviewed finding",
+    );
+    reviewed.id = Some(1);
+    reviewed.identity_id = Some(identity_id.clone());
+    reviewed.triage = Some(TriageOutcome {
+        verdict: TriageVerdict::TruePositive,
+        confidence: 0.91,
+        rationale: "operator confirmed this identity".to_string(),
+        cost_usd: 0.0,
+    });
+    reviewed.triaged_by = Some(TriageAuthor::Human);
+
+    let mut rerun = Finding::new_tool(
+        "semgrep",
+        "demo.rerun",
+        "src/lib.rs",
+        20,
+        None,
+        Severity::Medium,
+        "same durable finding seen later",
+    );
+    rerun.id = Some(2);
+    rerun.identity_id = Some(identity_id);
+    assert!(rerun.triage.is_none());
+
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.findings = vec![reviewed, rerun];
+    app.findings_route.set_cursor(1);
+
+    let detail = selected_finding_detail_model(&app).expect("selected finding");
+    let triage = detail.triage.as_ref().expect("carried review decision");
+
+    assert_eq!(detail.location, "src/lib.rs:20");
+    assert_eq!(detail.decision, "confirmed");
+    assert_eq!(detail.confidence, "91%");
+    assert_eq!(detail.decision_source, "durable identity");
+    assert_eq!(
+        detail.decision_history,
+        "latest loaded decision from durable identity"
+    );
+    assert_eq!(triage.review_decision, "confirmed");
+    assert_eq!(triage.verdict, "true_positive");
+    assert_eq!(triage.confidence, "91%");
+    assert_eq!(triage.author, "human");
+    assert_eq!(triage.source, "durable identity");
+    assert_eq!(triage.rationale, "operator confirmed this identity");
+}
+
+#[test]
+fn selected_finding_detail_includes_run_summary_provenance() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut summary = RunSummary::running(
+        "run-detail",
+        "scan",
+        Some("sast:scan".to_string()),
+        workspace.root().display().to_string(),
+    )
+    .complete();
+    summary.model = Some("openai:gpt-test".to_string());
+    summary.platform = Some("codex".to_string());
+    summary.kuzushi_version = Some("0.24.0-test".to_string());
+    summary.target_git = Some(RunTargetGitMetadata {
+        sha: "abcdef1234567890".to_string(),
+        branch: Some("main".to_string()),
+        dirty: true,
+    });
+    write_run_summary(workspace.root(), &summary).unwrap();
+
+    let mut finding = Finding::new_tool(
+        "semgrep",
+        "demo.provenance",
+        "src/lib.rs",
+        12,
+        None,
+        Severity::High,
+        "finding with run provenance",
+    );
+    finding.scan_id = Some("run-detail".to_string());
+
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.findings = vec![finding];
+
+    let detail = selected_finding_detail_model(&app).expect("selected finding");
+
+    assert_eq!(detail.run_label, "run:run-detail");
+    assert_eq!(detail.run_status, "status:completed");
+    assert_eq!(detail.run_tool, "tool:sast:scan");
+    assert_eq!(detail.run_model, "model:openai:gpt-test");
+    assert_eq!(detail.run_runtime, "runtime:codex");
+    assert_eq!(detail.run_kuzushi_version, "kuzushi:0.24.0-test");
+    assert_eq!(detail.revision_label, "rev:abcdef1*");
+}
+
+#[test]
+fn finding_identity_label_is_explicit_when_unassigned() {
+    let mut finding = Finding::new_semgrep(
+        "demo.sql",
+        "src/search.ts",
+        12,
+        None,
+        Severity::High,
+        "SQL injection",
+    );
+
+    assert_eq!(finding_identity_label(&finding), "unassigned");
+
+    finding.identity_id = Some("fi_89abcdef0123456789abcdef01234567".to_string());
+    assert_eq!(finding_identity_label(&finding), "FI-89ABCDEF");
+}
+
+#[test]
+fn findings_model_projects_cross_run_duplicates_by_engagement_key() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let mut semgrep = Finding::new_tool(
+        "semgrep",
+        "semgrep/cwe-89",
+        "src/search.ts",
+        12,
+        None,
+        Severity::Medium,
+        "SQL injection CWE-89 reaches db.query",
+    );
+    semgrep.scan_id = Some("scan-a".to_string());
+    let mut systems = Finding::new_tool(
+        "systems-hunt",
+        "systems/cwe-89",
+        "src/search.ts",
+        14,
+        None,
+        Severity::High,
+        "SQL injection CWE-89 reaches db.query",
+    );
+    systems.scan_id = Some("scan-b".to_string());
+    assert_eq!(semgrep.dedup_key, systems.dedup_key);
+    app.selected_finding = Some(semgrep.clone());
+    app.findings = vec![semgrep, systems];
+
+    let model = findings_model(&app);
+
+    assert_eq!(model.total, 1);
+    assert_eq!(visible_findings_len(&app), 1);
+    assert_eq!(model.header, "FINDINGS · 1 · 1H");
+    assert_eq!(model.counts.high, 1);
+    assert_eq!(model.counts.medium, 0);
+    assert_eq!(model.rows.len(), 1);
+    assert_eq!(model.rows[0].severity_label, "HIGH");
+    assert!(model.rows[0].selected);
+    assert!(model.rows[0].source.contains("corroboration 2"));
+}
+
+#[test]
+fn current_finding_for_detail_tracks_projected_cursor_not_raw_duplicate() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let mut semgrep = Finding::new_tool(
+        "semgrep",
+        "semgrep/cwe-89",
+        "src/search.ts",
+        12,
+        None,
+        Severity::Medium,
+        "SQL injection CWE-89 reaches db.query",
+    );
+    semgrep.scan_id = Some("scan-a".to_string());
+    let mut systems = Finding::new_tool(
+        "systems-hunt",
+        "systems/cwe-89",
+        "src/search.ts",
+        14,
+        None,
+        Severity::High,
+        "SQL injection CWE-89 reaches db.query",
+    );
+    systems.scan_id = Some("scan-b".to_string());
+    let distinct = Finding::new_tool(
+        "semgrep",
+        "semgrep/cwe-200",
+        "src/info.ts",
+        30,
+        None,
+        Severity::Low,
+        "Information exposure CWE-200",
+    );
+    app.selected_finding = Some(semgrep);
+    app.findings = vec![systems, distinct.clone()];
+    app.findings_route.set_cursor(1);
+
+    let (_, finding) = current_finding_for_detail(&app).expect("projected cursor finding");
+
+    assert_eq!(finding.fingerprint, distinct.fingerprint);
 }
 
 #[test]
@@ -166,6 +511,14 @@ fn finding_proof_label_prioritizes_runtime_and_static_evidence() {
     .with_static_proof_state(StaticProofState::SourceSinkLinked);
     assert_eq!(finding_proof_label(&linked), "path-linked");
     assert_eq!(finding_proof_badge(&linked).tier, ProofTier::StaticLinked);
+
+    let mut strong_static = linked.clone();
+    strong_static.static_proof_state = Some(StaticProofState::StaticallyConfirmed);
+    assert_eq!(finding_proof_label(&strong_static), "static-supported");
+    assert_eq!(
+        finding_proof_badge(&strong_static).tier,
+        ProofTier::StaticLinked
+    );
 
     let mut rejected = linked.clone();
     rejected.static_proof_state = Some(StaticProofState::StaticallyRejected);
@@ -333,6 +686,7 @@ fn selected_finding_detail_model_bounds_evidence_and_message() {
         model.evidence[0].header,
         "filesystem_sink · conf 92 · src/app.ts:8"
     );
+    assert_eq!(model.evidence[0].origin, "observed capture evidence");
     assert_eq!(
         model.evidence[0].capture.as_deref(),
         Some("http capture: request body recorded, response body recorded")
@@ -346,6 +700,46 @@ fn selected_finding_detail_model_bounds_evidence_and_message() {
     assert_eq!(model.next_action_label, "validate");
     assert_eq!(model.next_command.as_deref(), Some("verify F-0001"));
     assert!(model.remediation_hint.is_none());
+}
+
+#[test]
+fn selected_finding_detail_labels_observed_and_model_generated_evidence() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let finding = Finding::new_tool(
+        "agentic-sast",
+        "demo.reasoning",
+        "src/app.ts",
+        8,
+        Some(8),
+        Severity::High,
+        "model-reviewed finding",
+    )
+    .with_evidence(vec![
+        FindingEvidence {
+            kind: "code".to_string(),
+            file_path: "src/app.ts".to_string(),
+            line: 8,
+            snippet: "db.query(input)".to_string(),
+            rationale: "source reaches sink in code".to_string(),
+            confidence: 91,
+            ..Default::default()
+        },
+        FindingEvidence {
+            kind: "reasoning".to_string(),
+            file_path: String::new(),
+            line: 0,
+            snippet: "model compared source and sink context".to_string(),
+            rationale: "LLM analysis only; not observed runtime evidence".to_string(),
+            confidence: 67,
+            ..Default::default()
+        },
+    ]);
+    app.findings = vec![finding];
+
+    let model = selected_finding_detail_model(&app).expect("selected finding");
+
+    assert_eq!(model.evidence[0].origin, "observed code evidence");
+    assert_eq!(model.evidence[1].origin, "model-generated reasoning");
 }
 
 #[test]
@@ -366,18 +760,31 @@ fn selected_finding_detail_uses_same_proof_badge_as_list() {
         rationale: "source and sink are linked".to_string(),
         cost_usd: 0.0,
     });
+    finding.triaged_by = Some(TriageAuthor::Human);
     app.findings = vec![finding];
 
     let list = findings_model(&app);
     let detail = selected_finding_detail_model(&app).expect("selected finding");
+    let triage = detail.triage.as_ref().expect("triage summary");
 
-    assert_eq!(list.rows[0].proof_label, "triaged-tp");
+    assert_eq!(list.rows[0].proof_label, "signal-only");
     assert_eq!(detail.proof_label, list.rows[0].proof_label);
     assert_eq!(detail.proof_marker, list.rows[0].proof_marker);
     assert_eq!(detail.proof_tier, list.rows[0].proof_tier);
     assert!(detail.proof_state.contains("signal_only"));
     assert_eq!(detail.static_proof_label, "signal-only");
     assert!(detail.static_proof_explanation.contains("scanner signal"));
+    assert_eq!(triage.review_decision, "confirmed");
+    assert_eq!(triage.verdict, "true_positive");
+    assert_eq!(triage.source, "selected finding");
+    assert_eq!(triage.author, "human");
+    assert_eq!(detail.decision, "confirmed");
+    assert_eq!(detail.confidence, "91%");
+    assert_eq!(detail.decision_source, "selected finding");
+    assert_eq!(
+        detail.decision_history,
+        "latest loaded decision from selected finding"
+    );
     assert_eq!(detail.next_command.as_deref(), Some("verify F-0001"));
 }
 
@@ -441,7 +848,7 @@ fn selected_out_of_window_finding_drives_detail_with_notice() {
         "opened outside loaded list",
     );
     app.findings = vec![visible];
-    app.findings_cursor = 0;
+    app.findings_route.set_cursor(0);
     app.selected_finding = Some(opened.clone());
 
     let list = findings_model(&app);

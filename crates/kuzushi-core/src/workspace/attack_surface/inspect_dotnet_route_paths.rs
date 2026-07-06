@@ -18,7 +18,8 @@ pub(super) fn dotnet_route_attribute(line: &str) -> Option<String> {
     if !line.to_ascii_lowercase().contains("[route(") {
         return None;
     }
-    dotnet_named_argument_route(line, "template").or_else(|| dotnet_positional_attribute_route(line))
+    dotnet_named_argument_route(line, "template")
+        .or_else(|| dotnet_positional_attribute_route(line))
 }
 
 pub(super) fn combine_dotnet_routes(prefix: Option<&str>, route: Option<&str>) -> Option<String> {
@@ -177,7 +178,8 @@ fn dotnet_controller_route(line: &str, lower: &str) -> Option<String> {
         return Some("/{controller}/{action}".to_string());
     }
     if lower.contains("mapcontrollerroute(") || lower.contains("mapareacontrollerroute(") {
-        return dotnet_named_argument_route(line, "pattern").or_else(|| dotnet_last_quoted_route(line));
+        return dotnet_named_argument_route(line, "pattern")
+            .or_else(|| dotnet_last_quoted_route(line));
     }
     None
 }
@@ -186,7 +188,9 @@ fn dotnet_dynamic_route(line: &str, lower: &str) -> Option<String> {
     if !lower.contains("mapdynamiccontrollerroute") && !lower.contains("mapdynamicpageroute") {
         return None;
     }
-    dotnet_quoted_values(line).into_iter().find_map(dotnet_route_path)
+    dotnet_quoted_values(line)
+        .into_iter()
+        .find_map(dotnet_route_path)
 }
 
 fn dotnet_last_quoted_route(line: &str) -> Option<String> {

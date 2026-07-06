@@ -8,6 +8,7 @@ pub(crate) fn parse_joined_arg_command(
     let rest = args.join(" ");
     let command = match verb {
         "model" => ShellCommand::Model((!rest.trim().is_empty()).then_some(rest)),
+        "aim" => ShellCommand::Aim((!rest.trim().is_empty()).then_some(rest)),
         "tools" => ShellCommand::Tools((!rest.trim().is_empty()).then_some(rest)),
         "prompt" => empty_joined_arg(rest, ShellCommand::Prompts, ShellCommand::Prompt),
         "plan" => required_joined_arg(rest, original, ShellCommand::Plan),

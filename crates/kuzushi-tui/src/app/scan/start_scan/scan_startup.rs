@@ -1,9 +1,4 @@
 use super::*;
-use kuzushi_core::{OptionScope, OptionTarget, ToolOptionStore};
-use serde_json::Value;
-use std::collections::BTreeMap;
-
-const SCAN_TOOL_NAME: &str = "sast:scan";
 
 impl ShellApp {
     pub(crate) fn open_guided_scan(&mut self, target: Option<PathBuf>) {
@@ -55,21 +50,15 @@ impl ShellApp {
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn start_umbrella_sast_scan(&mut self, target: Option<PathBuf>) {
-        let Some(request) = self.prepare_scan_start(target, None) else {
-            return;
-        };
-        self.start_prepared_scan(request);
+        let effects = self.reduce_scan_start(target, None);
+        self.execute_effects(effects);
     }
 
     pub(crate) fn start_offline_demo_scan(&mut self, target: PathBuf) {
-        let Some(request) =
-            self.prepare_scan_start(Some(target), Some(kuzushi_core::offline_demo_scan_input()))
-        else {
-            return;
-        };
-        self.start_prepared_scan(request);
+        let effects =
+            self.reduce_scan_start(Some(target), Some(kuzushi_core::offline_demo_scan_input()));
+        self.execute_effects(effects);
     }
 
     pub(crate) fn start_offline_demo_fixture_scan(&mut self) {
@@ -88,28 +77,46 @@ impl ShellApp {
         }
     }
 
-    fn start_prepared_scan(&mut self, request: ScanStartRequest) {
-        let (tx, rx) = mpsc::channel();
-        let (trace_tx, trace_rx) = mpsc::channel::<RunTraceStep>();
-        let trace_handle = scan_trace_handle(&request.target_root, &request.run_id, trace_tx);
-        let cancel = ScanCancellation::default();
+    pub(crate) fn reduce_scan_start(
+        &mut self,
+        target: Option<PathBuf>,
+        explicit_input: Option<serde_json::Value>,
+    ) -> Vec<ShellEffect> {
+        self.prepare_scan_start(target, explicit_input)
+            .map(|request| vec![ShellEffect::StartScan(request)])
+            .unwrap_or_default()
+    }
 
-        self.begin_scan_state(&request, rx, trace_rx, cancel.clone());
-        self.spawn_scan_worker(request, tx, trace_handle, cancel);
+    pub(crate) fn start_prepared_scan(&mut self, request: ScanStartRequest) {
+        let ticket = self.jobs.start(JobKind::Run, "scan");
+        let generation = ticket.generation();
+        let trace_budget = self.jobs.trace_budget();
+        let trace_handle = scan_trace_handle(
+            &request.target_root,
+            &request.run_id,
+            ticket.sink(),
+            trace_budget.clone(),
+        );
+        let cancel = ticket.cancel.clone();
+
+        self.begin_scan_state(&request, generation, cancel.clone());
+        self.spawn_scan_worker(request, ticket, trace_handle, cancel);
     }
 
     fn spawn_scan_worker(
-        &self,
+        &mut self,
         request: ScanStartRequest,
-        tx: mpsc::Sender<ScanEvent>,
+        ticket: JobTicket,
         trace_handle: TraceHandle,
         cancel: ScanCancellation,
     ) {
-        thread::spawn(move || {
+        let generation = ticket.generation();
+        let watchdog_cancel = cancel.clone();
+        let handle = spawn_job_worker("scan", ticket, move |sink, cancel| {
             scan_worker(
                 request.target_root,
                 request.db_path,
-                tx,
+                sink,
                 cancel,
                 request.input,
                 request.registry,
@@ -118,23 +125,25 @@ impl ShellApp {
                 trace_handle,
             )
         });
+        self.register_worker_handle_with_watchdog("scan", generation, handle, watchdog_cancel);
     }
 
     fn begin_scan_state(
         &mut self,
         request: &ScanStartRequest,
-        rx: mpsc::Receiver<ScanEvent>,
-        trace_rx: mpsc::Receiver<RunTraceStep>,
+        generation: WorkerGeneration,
         cancel: ScanCancellation,
     ) {
         self.target = Some(request.target_root.clone());
         self.scan = Some(queued_scan_panel(&request.target_root, &request.run_id));
-        self.scan_rx = Some(rx);
-        self.trace_rx = Some(trace_rx);
+        self.scan_generation = Some(generation);
+        self.scan_rx = None;
+        self.trace_generation = Some(generation);
+        self.trace_rx = None;
         self.scan_cancel = Some(cancel);
         self.findings.clear();
         self.selected_finding = None;
-        self.workflow_phase = Some(crate::app::WorkflowPhase::Hunt);
+        self.engagement.set_phase(crate::app::WorkflowPhase::Hunt);
         self.active_model_override = active_model_override_from_input(&request.input, &self.config);
         self.activity = Some(self.pending_scan_activity(&request.run_id));
         self.shell_view = self.scan_shell_view();
@@ -204,7 +213,8 @@ impl ShellApp {
         } else {
             effective_scan_options(&self.registry, &self.option_store)
         };
-        let input = scan_input_with_run_id(self.scan_input_or_log(explicit_input)?, &run_id);
+        let input =
+            scan_input_with_run_id(self.scan_input_or_log(explicit_input, &workspace)?, &run_id);
         Some(ScanStartRequest {
             run_id,
             target_root: workspace.root().to_path_buf(),
@@ -236,8 +246,9 @@ impl ShellApp {
     fn scan_input_or_log(
         &mut self,
         explicit_input: Option<serde_json::Value>,
+        workspace: &WorkspaceTarget,
     ) -> Option<serde_json::Value> {
-        match self.scan_input_from_explicit(explicit_input) {
+        match self.scan_input_from_explicit(explicit_input, workspace) {
             Ok(input) => Some(input),
             Err(error) => {
                 self.log("error", error.to_string());
@@ -248,279 +259,27 @@ impl ShellApp {
 
     #[cfg(test)]
     pub(crate) fn scan_input_from_store(&self) -> Result<serde_json::Value> {
-        self.scan_input_from_explicit(None)
+        let workspace = self.current_workspace()?;
+        self.scan_input_from_explicit(None, &workspace)
     }
 
     fn scan_input_from_explicit(
         &self,
         explicit_input: Option<serde_json::Value>,
+        workspace: &WorkspaceTarget,
     ) -> Result<serde_json::Value> {
         let use_stored_options = explicit_input.is_none();
-        self.registry.prepare_tool_input(
+        let ctx = ToolExecutionContext {
+            config: &self.config,
+            workspace: Some(workspace),
+            findings_store: None,
+            trace: None,
+        };
+        self.registry.prepare_tool_input_for_dispatch(
             "sast:scan",
             explicit_input.unwrap_or_else(|| serde_json::json!({})),
+            &ctx,
             use_stored_options.then_some(&self.option_store),
         )
     }
-}
-
-fn scan_trace_handle(
-    target: &std::path::Path,
-    run_id: &str,
-    trace_tx: std::sync::mpsc::Sender<RunTraceStep>,
-) -> TraceHandle {
-    let inner_sink: Arc<dyn TraceSink> = Arc::new(JsonlSink::new(target.to_path_buf(), run_id));
-    let broadcast_sink: Arc<dyn TraceSink> = Arc::new(BroadcastSink::new(inner_sink, trace_tx));
-    let initial_step_number = next_run_trace_step_number(target, run_id).saturating_sub(1);
-    TraceHandle::with_initial_step_number(broadcast_sink, initial_step_number)
-}
-
-fn scan_input_with_run_id(mut input: serde_json::Value, run_id: &str) -> serde_json::Value {
-    if let serde_json::Value::Object(object) = &mut input {
-        object.insert("runId".to_string(), serde_json::json!(run_id));
-    }
-    input
-}
-
-fn effective_scan_options(
-    registry: &ModuleRegistry,
-    store: &ToolOptionStore,
-) -> Vec<EffectiveScanOption> {
-    let mut options = BTreeMap::new();
-    for scope in [
-        OptionScope::Global,
-        OptionScope::Workspace,
-        OptionScope::Session,
-    ] {
-        merge_scan_options(registry, store, scope, &OptionTarget::All, &mut options);
-        merge_scan_options(
-            registry,
-            store,
-            scope,
-            &OptionTarget::Module("sast".to_string()),
-            &mut options,
-        );
-        merge_scan_options(
-            registry,
-            store,
-            scope,
-            &OptionTarget::Tool(SCAN_TOOL_NAME.to_string()),
-            &mut options,
-        );
-    }
-    options.into_values().collect()
-}
-
-fn merge_scan_options(
-    registry: &ModuleRegistry,
-    store: &ToolOptionStore,
-    scope: OptionScope,
-    target: &OptionTarget,
-    options: &mut BTreeMap<String, EffectiveScanOption>,
-) {
-    let Some(values) = store.values_for(scope, target) else {
-        return;
-    };
-    for (name, value) in values {
-        if scan_descriptor_accepts_option(registry, name) {
-            options.insert(name.clone(), EffectiveScanOption::new(name, value, scope));
-        }
-    }
-}
-
-fn scan_descriptor_accepts_option(registry: &ModuleRegistry, name: &str) -> bool {
-    registry.resolve_tool(SCAN_TOOL_NAME).is_some_and(|tool| {
-        tool.options
-            .iter()
-            .any(|spec| spec.matches_name_or_alias(name))
-    })
-}
-
-fn scan_options_log_message(options: &[EffectiveScanOption]) -> String {
-    if options.is_empty() {
-        return "0 stored options in effect — type `options sast:scan` or `tasks` before scanning"
-            .to_string();
-    }
-    format!(
-        "{} stored {} in effect — {}",
-        options.len(),
-        option_count_label(options.len()),
-        scan_option_preview(options)
-    )
-}
-
-fn option_count_label(count: usize) -> &'static str {
-    if count == 1 {
-        "option"
-    } else {
-        "options"
-    }
-}
-
-fn scan_option_preview(options: &[EffectiveScanOption]) -> String {
-    let mut parts = options
-        .iter()
-        .take(4)
-        .map(format_effective_scan_option)
-        .collect::<Vec<_>>();
-    if options.len() > parts.len() {
-        parts.push(format!("+{} more", options.len() - parts.len()));
-    }
-    parts.join(", ")
-}
-
-fn format_effective_scan_option(option: &EffectiveScanOption) -> String {
-    format!(
-        "{}={} ({})",
-        option.name,
-        option_value_label(&option.value),
-        scope_label(option.scope)
-    )
-}
-
-fn option_value_label(value: &Value) -> String {
-    match value {
-        Value::String(text) => text.clone(),
-        other => other.to_string(),
-    }
-}
-
-fn scope_label(scope: OptionScope) -> &'static str {
-    match scope {
-        OptionScope::Global => "global",
-        OptionScope::Workspace => "workspace",
-        OptionScope::Session => "session",
-    }
-}
-
-fn queued_scan_panel(target_root: &PathBuf, run_id: &str) -> ScanPanelState {
-    ScanPanelState {
-        run_id: Some(run_id.to_string()),
-        target: target_root.clone(),
-        stage: "queued".to_string(),
-        findings_count: 0,
-        running: true,
-        abort_requested: false,
-        error: None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn queued_scan_panel_seeds_failure_handoff_run_id() {
-        let temp = tempfile::tempdir().unwrap();
-        let panel = queued_scan_panel(&temp.path().to_path_buf(), "scan-seeded");
-
-        assert_eq!(panel.run_id.as_deref(), Some("scan-seeded"));
-        assert!(panel.running);
-    }
-
-    #[test]
-    fn scan_input_with_run_id_adds_internal_artifact_identity() {
-        let input = scan_input_with_run_id(serde_json::json!({"triage": false}), "scan-tui");
-
-        assert_eq!(input["runId"], serde_json::json!("scan-tui"));
-        assert_eq!(input["triage"], serde_json::json!(false));
-    }
-
-    #[test]
-    fn effective_scan_options_log_uses_descriptor_filter_and_precedence() {
-        let registry = ModuleRegistry::with_v2_builtins();
-        let mut store = ToolOptionStore::new();
-        store.set_value(
-            OptionScope::Global,
-            OptionTarget::All,
-            "ui.auto_open_activity",
-            serde_json::json!(false),
-        );
-        store.set_value(
-            OptionScope::Global,
-            OptionTarget::All,
-            "triage",
-            serde_json::json!(true),
-        );
-        store.set_value(
-            OptionScope::Workspace,
-            OptionTarget::Tool(SCAN_TOOL_NAME.to_string()),
-            "maxFindings",
-            serde_json::json!(12),
-        );
-        store.set_value(
-            OptionScope::Session,
-            OptionTarget::Tool(SCAN_TOOL_NAME.to_string()),
-            "triage",
-            serde_json::json!(false),
-        );
-
-        let options = effective_scan_options(&registry, &store);
-        let message = scan_options_log_message(&options);
-
-        assert_eq!(options.len(), 2);
-        assert!(message.contains("2 stored options in effect"), "{message}");
-        assert!(message.contains("maxFindings=12 (workspace)"), "{message}");
-        assert!(message.contains("triage=false (session)"), "{message}");
-        assert!(!message.contains("ui.auto_open_activity"), "{message}");
-    }
-
-    #[test]
-    fn empty_scan_options_log_points_to_sast_options() {
-        let message = scan_options_log_message(&[]);
-
-        assert!(message.contains("0 stored options in effect"), "{message}");
-        assert!(message.contains("options sast:scan"), "{message}");
-        assert!(message.contains("before scanning"), "{message}");
-    }
-
-    #[test]
-    fn scan_trace_handle_broadcasts_and_writes_trace_jsonl() {
-        let temp = tempfile::tempdir().unwrap();
-        let (tx, rx) = mpsc::channel::<RunTraceStep>();
-        let trace = scan_trace_handle(temp.path(), "scan-trace", tx);
-
-        trace.step("tool", "scan", "started").emit();
-
-        let broadcast = rx
-            .recv_timeout(std::time::Duration::from_secs(1))
-            .expect("trace step should broadcast to activity");
-        let trace_path = kuzushi_core::run_artifacts::run_artifact_path(
-            temp.path(),
-            "scan-trace",
-            "trace.jsonl",
-        );
-        let persisted = std::fs::read_to_string(trace_path).unwrap();
-
-        assert_eq!(broadcast.label, "started");
-        assert!(persisted.contains("\"label\":\"started\""), "{persisted}");
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
-struct EffectiveScanOption {
-    name: String,
-    value: Value,
-    scope: OptionScope,
-}
-
-impl EffectiveScanOption {
-    fn new(name: &str, value: &Value, scope: OptionScope) -> Self {
-        Self {
-            name: name.to_string(),
-            value: value.clone(),
-            scope,
-        }
-    }
-}
-
-struct ScanStartRequest {
-    run_id: String,
-    target_root: PathBuf,
-    db_path: PathBuf,
-    input: serde_json::Value,
-    effective_options: Vec<EffectiveScanOption>,
-    registry: ModuleRegistry,
-    config: V2Config,
-    thinking_level: Option<String>,
 }

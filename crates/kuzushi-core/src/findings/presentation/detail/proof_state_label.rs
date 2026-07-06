@@ -18,6 +18,59 @@ pub fn proof_state_label(state: Option<StaticProofState>) -> &'static str {
         .unwrap_or("not recorded")
 }
 
+pub fn finding_lifecycle_status(finding: &Finding) -> &'static str {
+    if finding.suppressed {
+        return "suppressed";
+    }
+    if finding.snoozed_until.is_some() {
+        return "snoozed";
+    }
+    proof_lifecycle_status(finding).unwrap_or_else(|| run_lifecycle_status(finding))
+}
+
+fn proof_lifecycle_status(finding: &Finding) -> Option<&'static str> {
+    finding
+        .verification
+        .as_ref()
+        .map(|verification| verification_lifecycle_label(verification.proof_verdict))
+        .or_else(|| finding.static_proof_state.map(static_lifecycle_label))
+}
+
+fn run_lifecycle_status(finding: &Finding) -> &'static str {
+    if finding
+        .scan_id
+        .as_ref()
+        .is_some_and(|scan_id| !scan_id.is_empty())
+    {
+        "seen"
+    } else {
+        "candidate"
+    }
+}
+
+fn verification_lifecycle_label(verdict: PersistedProofVerdict) -> &'static str {
+    match verdict {
+        PersistedProofVerdict::Exploited => "runtime_verified",
+        PersistedProofVerdict::NotReproduced => "runtime_not_reproduced",
+        PersistedProofVerdict::HarnessFailedToBuild => "verification_build_failed",
+        PersistedProofVerdict::InfrastructureError => "verification_infra_error",
+        PersistedProofVerdict::LanguageUnsupportedYet => "verification_unsupported",
+        PersistedProofVerdict::InsufficientFindingDetail => "needs_detail",
+    }
+}
+
+fn static_lifecycle_label(state: StaticProofState) -> &'static str {
+    match state {
+        StaticProofState::StaticallyConfirmed => "verified_static",
+        StaticProofState::StaticallyRejected => "statically_rejected",
+        StaticProofState::NeedsRuntimeEvidence => "needs_runtime_evidence",
+        StaticProofState::CodeCited
+        | StaticProofState::SourceSinkLinked
+        | StaticProofState::SanitizerChecked => "statically_supported",
+        StaticProofState::SignalOnly => "candidate",
+    }
+}
+
 fn proof_state_recorded_label(state: StaticProofState) -> Option<&'static str> {
     PROOF_STATE_LABELS
         .iter()
@@ -43,7 +96,7 @@ const PROOF_STATE_LABELS: &[(StaticProofState, &str)] = &[
     ),
     (
         StaticProofState::StaticallyConfirmed,
-        "statically_confirmed - Source-grounded and statically confirmed; runtime proof not recorded",
+        "statically_confirmed - Strong static evidence supports the scanner claim; runtime proof not recorded",
     ),
     (
         StaticProofState::StaticallyRejected,
@@ -102,15 +155,15 @@ const STATIC_PROOF_SUMMARIES: &[(StaticProofState, StaticProofSummary)] = &[
     (
         StaticProofState::StaticallyConfirmed,
         StaticProofSummary {
-            label: "static-ok",
-            explanation: "source-grounded and statically confirmed",
+            label: "static-supported",
+            explanation: "strong static evidence supports the scanner claim",
         },
     ),
     (
         StaticProofState::StaticallyRejected,
         StaticProofSummary {
             label: "static-no",
-            explanation: "static evidence rejects exploitability",
+            explanation: "static evidence rejects the scanner claim",
         },
     ),
     (
@@ -129,12 +182,12 @@ pub fn runtime_validation_label(verification: Option<&PersistedVerification>) ->
     match verification.proof_verdict {
         PersistedProofVerdict::Exploited => {
             format!(
-                "execution_confirmed - Empirically confirmed at proof level {}",
+                "runtime_verified - empirical verification evidence recorded at proof level {}",
                 verification.proof_level
             )
         }
         PersistedProofVerdict::NotReproduced => {
-            "execution_attempted - Runtime verification attempted; exploit was not reproduced"
+            "runtime_attempted - runtime verification did not reproduce the scanner claim"
                 .to_string()
         }
         PersistedProofVerdict::HarnessFailedToBuild => {
@@ -162,7 +215,7 @@ pub fn runtime_validation_summary(
     if verification.proof_verdict == PersistedProofVerdict::Exploited {
         return RuntimeValidationSummary {
             label: format!("verified L{}", verification.proof_level),
-            explanation: "runtime verification reproduced exploitability",
+            explanation: "runtime verification recorded empirical evidence for this finding",
         };
     }
     runtime_verdict_summary(verification.proof_verdict)
@@ -188,7 +241,7 @@ const RUNTIME_VALIDATION_SUMMARIES: &[(PersistedProofVerdict, &str, &str)] = &[
     (
         PersistedProofVerdict::NotReproduced,
         "not reproduced",
-        "runtime verification did not reproduce exploit",
+        "runtime verification did not reproduce the scanner claim",
     ),
     (
         PersistedProofVerdict::HarnessFailedToBuild,

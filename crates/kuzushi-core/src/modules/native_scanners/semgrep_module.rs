@@ -66,14 +66,10 @@ fn codeql_options() -> Vec<OptionSpec> {
             .aliases(&["db_path"])
             .advanced(),
         codeql_language_option(),
-        opt(
-            "buildMode",
-            OptionType::Enum,
-            "CodeQL build mode override.",
-        )
-        .aliases(&["build_mode"])
-        .choices(&["default", "autobuild", "none"])
-        .advanced(),
+        opt("buildMode", OptionType::Enum, "CodeQL build mode override.")
+            .aliases(&["build_mode"])
+            .choices(&["default", "autobuild", "none"])
+            .advanced(),
         opt("suite", OptionType::String, "CodeQL query suite.").advanced(),
         opt("threads", OptionType::Int, "CodeQL worker thread count.").advanced(),
         opt("ram", OptionType::Int, "CodeQL RAM budget in MB.").advanced(),

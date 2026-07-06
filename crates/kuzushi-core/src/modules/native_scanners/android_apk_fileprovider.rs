@@ -23,7 +23,13 @@ pub(in crate::modules) fn run_fileprovider_scan(
         ctx.workspace,
         ctx.findings_store,
     )?;
-    emit_fileprovider_step(ctx, "done", "fileprovider-scan complete", &target, Some(scan.findings.len()));
+    emit_fileprovider_step(
+        ctx,
+        "done",
+        "fileprovider-scan complete",
+        &target,
+        Some(scan.findings.len()),
+    );
     Ok(fileprovider_output(
         &scan.inputs.file_paths,
         &scan.descriptors,

@@ -31,7 +31,8 @@ pub(crate) fn handle_threat_apply_command(app: &mut ShellApp, command: &ShellCom
     let ShellCommand::ThreatApply = command else {
         return false;
     };
-    app.apply_pending_threat_patch();
+    let effects = app.reduce_threat_apply();
+    app.execute_effects(effects);
     true
 }
 

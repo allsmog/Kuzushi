@@ -7,6 +7,8 @@ mod tests {
         Finding {
             id: None,
             scan_id: None,
+            identity_id: None,
+            identity_match_tier: None,
             fingerprint: fp.to_string(),
             rule_id: "test/rule".to_string(),
             title: title.to_string(),

@@ -5,7 +5,7 @@ pub(crate) fn context_strip(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let model = context_strip_model(app);
 
     // Build the cockpit strip:
-    //   `KUZUSHI ▸ <view> · mode:<m> · target:<path> · phase:<p> · ctx:<s> · model:<m>`
+    //   `KUZUSHI › <view> · mode:<m> · target:<path> · phase:<p> · ctx:<s> · model:<m>`
     // View/target/phase are the stable breadcrumb; model and context keep
     // runtime safety and optional repo-index state visible without opening
     // another panel.
@@ -60,7 +60,7 @@ fn compact_context_strip_line(model: &ContextStripModel, area: Rect) -> Vec<Line
 }
 
 fn push_breadcrumb_segment(spans: &mut Vec<Span<'static>>, view: String) {
-    spans.push(Span::styled("▸ ", theme::subtle()));
+    spans.push(Span::styled("› ", theme::subtle()));
     spans.push(Span::styled(view, theme::accent()));
     push_separator(spans);
 }

@@ -21,7 +21,7 @@ pub(in crate::modules) fn run_hybrid_detect(
                 "android-apk:hybrid-detect",
                 &target,
                 error,
-            ))
+            ));
         }
     };
     let persisted = persist_tool_findings(
@@ -156,7 +156,8 @@ fn hybrid_finding(evidence: &HybridEvidence) -> Finding {
     let path = evidence.indicator_path.display().to_string();
     let message = format!(
         "Detected {} hybrid app via {} (CWE-915-adjacent attack surface). Audit the JavaScript bundle for hardcoded secrets, insecure URL loading, and JS-bridge methods that touch sensitive APIs from the device side. Lyft's apps and other production Android targets often embed React Native / Cordova partials behind native shells.",
-        evidence.framework, evidence.indicator_path.display()
+        evidence.framework,
+        evidence.indicator_path.display()
     );
     Finding::new_tool(
         "android-apk",

@@ -5,13 +5,17 @@
 //! model so TTY and scripted output stay in lockstep.
 
 use super::{
-    attack_tree, dfd_model, findings_heatmap_with_selection, findings_model, journey_model,
-    journey_phase_segment, selected_finding_code_model, selected_finding_detail_model,
-    selected_taint_flow_path, source_tree_model, threat_model_doc, CodePaneModel,
-    FindingDetailModel, FindingsModel, JourneyPhaseStatus, SourceTreeModel,
+    attack_tree, cached_findings_heatmap_with_selection, dfd_model, findings_model, journey_model,
+    journey_phase_segment, review_queue_model, selected_finding_code_model,
+    selected_finding_detail_model, selected_taint_flow_path, source_tree_model, threat_model_doc,
+    CodePaneModel, FindingDetailModel, FindingsModel, JourneyPhaseStatus, ReviewQueueMode,
+    ReviewQueueModel, SourceTreeModel,
 };
 use crate::app::{WorkbenchCenterMode, WorkbenchPage, WorkbenchPane, WorkflowPhase};
 use crate::ShellApp;
+use kuzushi_core::findings::FindingReviewCompletenessFilter;
+use kuzushi_core::FindingListFilter;
+use std::borrow::Cow;
 
 /// Which workflow posture the Workbench is in, derived from app signals. Drives
 /// truthful pane titles / empty-hints, never invented content.
@@ -44,7 +48,7 @@ pub(crate) struct WorkbenchTopBar {
     pub(crate) page: WorkbenchPage,
     /// Full engagement rail for default Workbench orientation.
     pub(crate) phase_rail: Vec<JourneyPhaseStatus>,
-    /// Compact `▸ NEXT` summary for the current phase.
+    /// Compact NEXT summary for the current phase.
     pub(crate) phase_next_summary: Option<String>,
 }
 
@@ -84,9 +88,9 @@ pub(crate) enum WorkbenchCenterBody {
 }
 
 /// A command-bar label that maps to an existing shell verb (no new tool paths).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WorkbenchHint {
-    pub(crate) verb: &'static str,
+    pub(crate) verb: Cow<'static, str>,
     pub(crate) label: &'static str,
 }
 
@@ -97,6 +101,7 @@ pub(crate) struct WorkbenchViewModel {
     pub(crate) left: SourceTreeModel,
     pub(crate) center: WorkbenchCenter,
     pub(crate) right_list: FindingsModel,
+    pub(crate) review_queue: ReviewQueueModel,
     pub(crate) right_detail: Option<FindingDetailModel>,
     pub(crate) command_bar_hints: Vec<WorkbenchHint>,
     pub(crate) report_cta: Option<WorkbenchHint>,
@@ -108,82 +113,82 @@ pub(crate) const WORKBENCH_REPORT_COMMAND: &str = "workspace export findings rep
 
 const REVIEW_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     WorkbenchHint {
-        verb: "next",
+        verb: Cow::Borrowed("next"),
         label: "guided workflow",
     },
     WorkbenchHint {
-        verb: "scan",
-        label: "guided workflow",
+        verb: Cow::Borrowed("scan"),
+        label: "run scan",
     },
     WorkbenchHint {
-        verb: "options sast:scan",
+        verb: Cow::Borrowed("options sast:scan"),
         label: "tune scanners",
     },
     WorkbenchHint {
-        verb: "ask",
+        verb: Cow::Borrowed("ask"),
         label: "ask the agent",
     },
 ];
 
 const TERRAIN_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     WorkbenchHint {
-        verb: "scan",
-        label: "full hunt",
+        verb: Cow::Borrowed("next"),
+        label: "map target",
     },
     WorkbenchHint {
-        verb: "recommend",
-        label: "refresh modules",
+        verb: Cow::Borrowed("context build"),
+        label: "build context",
     },
     WorkbenchHint {
-        verb: "attach <path>",
+        verb: Cow::Borrowed("attach <path>"),
         label: "seed materials",
     },
     WorkbenchHint {
-        verb: "ask",
+        verb: Cow::Borrowed("ask"),
         label: "ask about terrain",
     },
 ];
 
 const COVERAGE_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     WorkbenchHint {
-        verb: "D",
-        label: "show clusters",
+        verb: Cow::Borrowed("strategy"),
+        label: "proposal queue",
     },
     WorkbenchHint {
-        verb: "scan",
-        label: "rescan target",
+        verb: Cow::Borrowed("recommend"),
+        label: "generate proposals",
     },
     WorkbenchHint {
-        verb: "findings",
-        label: "open review",
+        verb: Cow::Borrowed("scan"),
+        label: "fire hunt",
     },
     WorkbenchHint {
-        verb: "ask",
-        label: "ask about coverage",
+        verb: Cow::Borrowed("ask"),
+        label: "steer focus",
     },
 ];
 
 const SHIP_COMMAND_BAR_HINTS: [WorkbenchHint; 4] = [
     WorkbenchHint {
-        verb: "c",
+        verb: Cow::Borrowed("c"),
         label: "order exploit chain",
     },
     WorkbenchHint {
-        verb: "run patch:finding",
+        verb: Cow::Borrowed("run patch:finding"),
         label: "patch selected",
     },
     WorkbenchHint {
-        verb: WORKBENCH_REPORT_COMMAND,
+        verb: Cow::Borrowed(WORKBENCH_REPORT_COMMAND),
         label: "export report",
     },
     WorkbenchHint {
-        verb: "ask",
+        verb: Cow::Borrowed("ask"),
         label: "ask about shipping",
     },
 ];
 
 const REPORT_HINT: WorkbenchHint = WorkbenchHint {
-    verb: WORKBENCH_REPORT_COMMAND,
+    verb: Cow::Borrowed(WORKBENCH_REPORT_COMMAND),
     label: "export SARIF",
 };
 
@@ -191,18 +196,58 @@ pub(crate) fn workbench_view_model(app: &ShellApp) -> WorkbenchViewModel {
     let page = active_workbench_page(app);
     let state = workbench_state(app);
     let right_list = findings_model(app);
-    let report_cta = report_cta(state, right_list.total);
+    let review_mode = active_review_queue_mode(app);
+    let review_queue = review_queue_model(app, review_mode);
+    let report_cta = report_cta(state, right_list.total, review_mode);
+    let right_detail = selected_finding_detail_model(app);
     WorkbenchViewModel {
         page,
         top_bar: top_bar_model(app, page),
         left: source_tree_model(app),
         center: center_model(app),
         right_list,
-        right_detail: selected_finding_detail_model(app),
-        command_bar_hints: command_bar_hints(page, report_cta),
+        review_queue,
+        command_bar_hints: command_bar_hints(page, report_cta.clone(), right_detail.as_ref()),
+        right_detail,
         report_cta,
         state,
         focus: app.workbench_focus,
+    }
+}
+
+pub(crate) fn active_review_queue_mode(app: &ShellApp) -> ReviewQueueMode {
+    let Some(expression) = app.active_findings_filter.as_deref() else {
+        return ReviewQueueMode::All;
+    };
+    let Ok(filter) = FindingListFilter::from_filter_expression(expression) else {
+        return ReviewQueueMode::All;
+    };
+    review_queue_mode_for_completeness(&filter.completeness)
+}
+
+pub(crate) fn workbench_export_command(
+    command: &'static str,
+    mode: ReviewQueueMode,
+) -> Cow<'static, str> {
+    match mode {
+        ReviewQueueMode::All => Cow::Borrowed(command),
+        ReviewQueueMode::Open | ReviewQueueMode::Complete => {
+            Cow::Owned(format!("{command} --completeness {}", mode.label()))
+        }
+    }
+}
+
+pub(crate) fn workbench_report_command(mode: ReviewQueueMode) -> Cow<'static, str> {
+    workbench_export_command(WORKBENCH_REPORT_COMMAND, mode)
+}
+
+fn review_queue_mode_for_completeness(
+    completeness: &[FindingReviewCompletenessFilter],
+) -> ReviewQueueMode {
+    match completeness {
+        [FindingReviewCompletenessFilter::Open] => ReviewQueueMode::Open,
+        [FindingReviewCompletenessFilter::Complete] => ReviewQueueMode::Complete,
+        _ => ReviewQueueMode::All,
     }
 }
 
@@ -216,14 +261,47 @@ pub(crate) fn active_workbench_page(app: &ShellApp) -> WorkbenchPage {
         .unwrap_or(WorkbenchPage::Review)
 }
 
-fn command_bar_hints(page: WorkbenchPage, report_cta: Option<WorkbenchHint>) -> Vec<WorkbenchHint> {
+fn command_bar_hints(
+    page: WorkbenchPage,
+    report_cta: Option<WorkbenchHint>,
+    detail: Option<&FindingDetailModel>,
+) -> Vec<WorkbenchHint> {
     let mut hints = page_command_bar_hints(page);
+    if page == WorkbenchPage::Ship {
+        replace_patch_hint(&mut hints, detail);
+    }
+    if let Some(report_cta) = report_cta.as_ref() {
+        replace_report_hint(&mut hints, report_cta);
+    }
     if let Some(report_cta) =
         report_cta.filter(|cta| !hints.iter().any(|hint| hint.verb == cta.verb))
     {
         hints.push(report_cta);
     }
     hints
+}
+
+fn replace_patch_hint(hints: &mut [WorkbenchHint], detail: Option<&FindingDetailModel>) {
+    let Some(detail) = detail else {
+        return;
+    };
+    let Some(hint) = hints.iter_mut().find(|hint| hint.label == "patch selected") else {
+        return;
+    };
+    hint.verb = Cow::Owned(format!(
+        "run patch:finding {{\"fingerprint\":\"{}\"}}",
+        detail.fingerprint
+    ));
+}
+
+fn replace_report_hint(hints: &mut [WorkbenchHint], report_cta: &WorkbenchHint) {
+    let Some(hint) = hints
+        .iter_mut()
+        .find(|hint| hint.verb == WORKBENCH_REPORT_COMMAND)
+    else {
+        return;
+    };
+    hint.verb = report_cta.verb.clone();
 }
 
 fn page_command_bar_hints(page: WorkbenchPage) -> Vec<WorkbenchHint> {
@@ -239,8 +317,15 @@ fn page_command_bar_hint_slice(page: WorkbenchPage) -> &'static [WorkbenchHint] 
     }
 }
 
-fn report_cta(state: WorkbenchState, finding_total: usize) -> Option<WorkbenchHint> {
-    (state == WorkbenchState::Report || finding_total > 0).then_some(REPORT_HINT)
+fn report_cta(
+    state: WorkbenchState,
+    finding_total: usize,
+    mode: ReviewQueueMode,
+) -> Option<WorkbenchHint> {
+    (state == WorkbenchState::Report || finding_total > 0).then(|| WorkbenchHint {
+        verb: workbench_report_command(mode),
+        ..REPORT_HINT
+    })
 }
 
 fn top_bar_model(app: &ShellApp, page: WorkbenchPage) -> WorkbenchTopBar {
@@ -308,11 +393,8 @@ fn center_body(
             empty_hint: selected_taint_flow_path(app).empty_hint,
         },
         WorkbenchCenterMode::Risk => WorkbenchCenterBody::Risk {
-            empty_hint: findings_heatmap_with_selection(
-                &app.findings,
-                app.selected_finding.as_ref(),
-            )
-            .empty_hint,
+            empty_hint: cached_findings_heatmap_with_selection(app, app.selected_finding.as_ref())
+                .empty_hint,
         },
     }
 }
@@ -441,7 +523,11 @@ mod tests {
     }
 
     fn finding(severity: Severity) -> Finding {
-        Finding::new_semgrep("demo.rule", "crates/foo.rs", 12, None, severity, "title")
+        finding_at("crates/foo.rs", severity)
+    }
+
+    fn finding_at(file_path: &str, severity: Severity) -> Finding {
+        Finding::new_semgrep("demo.rule", file_path, 12, None, severity, "title")
     }
 
     fn inputs() -> WorkbenchStateInputs {
@@ -604,7 +690,7 @@ mod tests {
         let model = workbench_view_model(&app);
 
         assert_eq!(
-            model.report_cta.map(|hint| hint.verb),
+            model.report_cta.as_ref().map(|hint| hint.verb.as_ref()),
             Some(WORKBENCH_REPORT_COMMAND)
         );
         assert!(model
@@ -614,11 +700,56 @@ mod tests {
     }
 
     #[test]
+    fn report_export_cta_tracks_active_review_completeness_filter() {
+        let mut app = app();
+        app.findings = vec![finding(Severity::High)];
+        app.active_findings_filter = Some("completeness:open".to_string());
+        app.workbench_page = Some(WorkbenchPage::Ship);
+
+        let model = workbench_view_model(&app);
+        let expected = "workspace export findings report.sarif --completeness open";
+        let report_hints = model
+            .command_bar_hints
+            .iter()
+            .filter(|hint| hint.label == "export report")
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            model.report_cta.as_ref().map(|hint| hint.verb.as_ref()),
+            Some(expected)
+        );
+        assert_eq!(report_hints.len(), 1);
+        assert_eq!(report_hints[0].verb.as_ref(), expected);
+    }
+
+    #[test]
     fn report_state_surfaces_report_export_cta() {
         assert_eq!(
-            report_cta(WorkbenchState::Report, 0).map(|hint| hint.verb),
+            report_cta(WorkbenchState::Report, 0, ReviewQueueMode::All)
+                .as_ref()
+                .map(|hint| hint.verb.as_ref()),
             Some(WORKBENCH_REPORT_COMMAND)
         );
+    }
+
+    #[test]
+    fn ship_page_patch_hint_includes_selected_finding_fingerprint() {
+        let mut app = app();
+        let selected = finding(Severity::High);
+        let fingerprint = selected.fingerprint.clone();
+        app.findings = vec![selected.clone()];
+        app.selected_finding = Some(selected);
+        app.workbench_page = Some(WorkbenchPage::Ship);
+
+        let model = workbench_view_model(&app);
+
+        let patch = model
+            .command_bar_hints
+            .iter()
+            .find(|hint| hint.label == "patch selected")
+            .expect("patch hint");
+        assert!(patch.verb.contains("run patch:finding"));
+        assert!(patch.verb.contains(&fingerprint));
     }
 
     #[test]
@@ -682,22 +813,57 @@ mod tests {
     fn app_with_findings_cursor(app: &mut ShellApp, first: Finding, second: Finding) {
         app.findings = vec![first.clone(), second];
         app.selected_finding = Some(first);
-        app.findings_cursor = 1;
+        app.findings_route.set_cursor(1);
     }
 
     #[test]
     fn severity_chip_counts_reflect_findings() {
         let mut app = app();
         app.findings = vec![
-            finding(Severity::Critical),
-            finding(Severity::High),
-            finding(Severity::High),
-            finding(Severity::Low),
+            finding_at("crates/critical.rs", Severity::Critical),
+            finding_at("crates/high_a.rs", Severity::High),
+            finding_at("crates/high_b.rs", Severity::High),
+            finding_at("crates/low.rs", Severity::Low),
         ];
         let counts = workbench_view_model(&app).right_list.counts;
         assert_eq!(counts.critical, 1);
         assert_eq!(counts.high, 2);
         assert_eq!(counts.low, 1);
+    }
+
+    #[test]
+    fn severity_chip_counts_use_engagement_projection() {
+        let mut app = app();
+        app.findings = vec![finding(Severity::Medium), finding(Severity::High)];
+        let right_list = workbench_view_model(&app).right_list;
+        assert_eq!(right_list.total, 1);
+        assert_eq!(right_list.counts.high, 1);
+        assert_eq!(right_list.counts.medium, 0);
+    }
+
+    #[test]
+    fn review_queue_mode_follows_active_completeness_filter() {
+        let mut app = app();
+        app.findings = vec![finding(Severity::High)];
+        app.active_findings_filter = Some("decision:needs_review completeness:open".to_string());
+
+        let model = workbench_view_model(&app);
+
+        assert_eq!(model.review_queue.completeness_mode, "open");
+        assert_eq!(model.review_queue.filter_label, "decision:open");
+        assert_eq!(model.review_queue.visible_count, 1);
+    }
+
+    #[test]
+    fn review_queue_mode_defaults_to_all_for_ambiguous_completeness_filter() {
+        let mut app = app();
+        app.findings = vec![finding(Severity::High)];
+        app.active_findings_filter = Some("completeness:open completeness:complete".to_string());
+
+        let model = workbench_view_model(&app);
+
+        assert_eq!(model.review_queue.completeness_mode, "all");
+        assert_eq!(model.review_queue.filter_label, "decision:all");
     }
 
     #[test]

@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 162
 ---
- KUZUSHI > help · mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › help · mode:shell · target:none · ctx:not built · model:unconfigured
 
  -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
@@ -16,7 +16,9 @@ home - open Kuzushi cockpit home
 help - show grouped shell help
   aliases / examples: /help, /h, h, ?
 workbench - open the split-pane command center
-  aliases / examples: /workbench, /studio, /cc, studio, cc
+  aliases / examples: /workbench
+aim [focus] - seed the engagement harness from the Workbench AIM page
+  aliases / examples: aim, /aim, aim sqli, aim idor
 modules - browse native Rust modules
   aliases / examples: /modules, /m, m, show modules
 recommend - open latest module recommendations
@@ -32,7 +34,7 @@ back - return to the previous view
 quickstart - first-run guided setup
   aliases / examples: /quickstart
 onboarding - open the planning-stage multi-select picker
-  aliases / examples: /onboarding, /setup, /planning, /plan-stage
+  aliases / examples: /onboarding, /planning
 next - continue the engagement (alias: continue) — open the current phase's picker
   aliases / examples: /next
 phase <map|hunt|confirm|fix> - open a specific engagement phase picker
@@ -52,9 +54,7 @@ ask <question> - explicit agent question
 
 OPTIONS / TASKS — options + sast task control
 options [tool] - show tool options
-  aliases / examples: /options [tool]
-show options [tool] - show tool options
-  aliases / examples: /show options [tool]
+  aliases / examples: /options [tool], /show options [tool]
 show advanced [tool] - advanced and evasion options
   aliases / examples: /show advanced [tool]
 show missing [tool] - required options without values
@@ -71,10 +71,12 @@ tasks - choose SAST scanner tasks
   aliases / examples: /tasks
 strategy - show proposed phase strategies
   aliases / examples: /strategy, strategies, strategy queue
-strategy approve <id> - approve a queued strategy proposal
-  aliases / examples: /strategy approve <id>
-strategy reject <id> - reject a queued strategy proposal
-  aliases / examples: /strategy reject <id>
+strategy approve <id> - approve/keep a queued strategy proposal
+  aliases / examples: /strategy approve <id>, strategy keep <id>
+strategy reject <id> - reject/skip a queued strategy proposal
+  aliases / examples: /strategy reject <id>, strategy skip <id>
+strategy fire - run the next approved strategy proposal
+  aliases / examples: /strategy fire, strategy run
 strategy correct <id> <strategy> - record a strategy correction
   aliases / examples: /strategy correct <id> <strategy>, strategy correct <id> <strategy> --workspace
 task block <id> - block a SAST task
@@ -111,21 +113,26 @@ reparse <id> - refresh local attachment metadata
   aliases / examples: /reparse <id>
 workspace - show target and state status
   aliases / examples: /workspace, workspace status
-workspace export findings <path> [format] - export findings; extensionless defaults to markdown-bundle, or pass
-json/jsonl/sarif/csv
-  aliases / examples: /workspace export findings <path> [format], findings export <path> [format]
+workspace export findings <path> [format] [--completeness open|complete] [--allow-empty] - export findings; choose
+all/open/complete and pass --allow-empty for metadata-only exports
+aliases / examples: /workspace export findings <path> [format] [--completeness open|complete] [--allow-empty], findings
+export <path> [format] [--completeness open|complete] [--allow-empty]
 workspace scope init - write an editable .kuzushi/scope.toml scaffold
   aliases / examples: /workspace scope init
 
 FINDINGS / EVIDENCE — browse findings, evidence, and report output
 findings - open persisted findings
   aliases / examples: /f, f, /findings
-findings filter <expr> - open filtered findings in the Workbench
-  aliases / examples: findings filter state:new rank:high, /findings filter <expr>
+findings filter <expr> - open filtered findings by severity, review decision, or completeness
+aliases / examples: findings filter state:new rank:high, findings filter decision:confirmed completeness:open, /findings
+filter <expr>
 component <scope|path|all> - focus Workbench findings on a detected component
   aliases / examples: component web/app, component entrypoint-cmd-proxy, component all
 open <id> - open a finding alias or fingerprint
   aliases / examples: open F-0001, /open <id>
+decision <verdict> <reason> - record a human review decision for the selected finding
+aliases / examples: decision confirmed reviewed source-linked evidence, decision suppressed accepted by policy owner,
+review rejected_false_positive reviewed data flow
 show aliases [prefix] - list finding aliases
   aliases / examples: /show aliases [prefix]
 show runs - recent run artifacts
@@ -140,10 +147,16 @@ activity - live module-progress dashboard
   aliases / examples: /activity, progress, /progress, /a
 handoff - latest bounded failure handoff
   aliases / examples: /handoff, failure, /failure
+patch apply - apply the pending reviewed patch to the active target
+  aliases / examples: /patch apply
+patch reject - discard the pending reviewed patch
+  aliases / examples: /patch reject, patch discard
+patch regen [--style minimal|defensive] - regenerate the pending patch for the same finding
+  aliases / examples: /patch regen, patch regen --style defensive
 since <ref> - scope findings to a git ref
   aliases / examples: /since <ref>
 threats [1-4] - threat model views
-  aliases / examples: /threats [1-4], threats summary, threats dfd, threats stride, threats stories, threats scope
+  aliases / examples: /threats [1-4], threats summary, threats stride, threats stories, threats scope
 threats edit - open the editable threat model view
   aliases / examples: /threats edit
 threats regen - Haiku-driven threat-model patch; review then /threats apply
@@ -184,11 +197,11 @@ clear - clear conversation log
   aliases / examples: /clear
 load <specifier> - static registry status or load error
   aliases / examples: /load <specifier>
-pause - document live-control absence
+pause - pause a running scan when scan cancellation is available
   aliases / examples: /pause
 cancel - cancel the active scan/tool/agent without leaving the shell
   aliases / examples: /cancel, c, /c, stop, /stop
-resume [runId] - document checkpoint-resume absence
+resume [runId] - resume a paused scan or open a run replay by id
   aliases / examples: /resume [runId]
 story - show session story replacements
   aliases / examples: /story
@@ -207,6 +220,9 @@ yes - apply pending plan
 no - discard pending plan
   aliases / examples: /no, n
 scene - security-viz gallery — risk heatmap, attack path/tree, DFD
-  aliases / examples: /scene, /viz, viz, 3d, /3d, /diagram
+  aliases / examples: /scene, /viz, viz
+pwn - binary exploitation dashboard and pwn:* workflow actions
+aliases / examples: /pwn, pwn target <path>, pwn profile, pwn reverse [function], pwn auto, pwn state, pwn candidates
+<target>
 quit - exit the shell
   aliases / examples: q, /q, exit, /quit, /exit

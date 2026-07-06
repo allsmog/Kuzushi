@@ -11,7 +11,15 @@ pub(super) fn inspect_armeria_route_line(
     builder: &mut AttackSurfaceBuilder,
 ) {
     remember_armeria_scope(lower, state);
-    emit_armeria_route(source_file, framework, line_number, detail, lower, state, builder);
+    emit_armeria_route(
+        source_file,
+        framework,
+        line_number,
+        detail,
+        lower,
+        state,
+        builder,
+    );
 }
 
 fn remember_armeria_scope(lower: &str, state: &mut RouteScanState) {

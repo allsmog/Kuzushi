@@ -1,9 +1,9 @@
 use super::*;
 
 pub(crate) fn infer_title(source_path: &str, absolute: &Path) -> String {
-    if source_path.ends_with("summary.json") {
+    if source_path.ends_with("run.json") {
         if let Some(run_id) = infer_run_id(source_path) {
-            return format!("run {run_id} summary");
+            return format!("run {run_id} metadata");
         }
     }
     absolute

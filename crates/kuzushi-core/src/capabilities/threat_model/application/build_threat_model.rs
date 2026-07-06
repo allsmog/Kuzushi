@@ -7,9 +7,18 @@ pub(crate) fn build_threat_model(
     flavor: BuildFlavor,
 ) -> Result<Value> {
     if should_build_deterministically(&input, ctx, runtime) {
-        reject_source_options_without_runtime(&input)?;
+        reject_source_options_without_runtime(&input, ctx)?;
         return build_deterministic_threat_model(input, ctx, flavor);
     }
+    build_agentic_threat_model(input, ctx, runtime, flavor)
+}
+
+fn build_agentic_threat_model(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    flavor: BuildFlavor,
+) -> Result<Value> {
     let runtime = runtime.expect("deterministic path handles missing runtime");
     let input = parse_build_input(&input, ctx, flavor)?;
     let verb = threat_model_build_verb(flavor);
@@ -20,11 +29,7 @@ pub(crate) fn build_threat_model(
         generate_threat_model_document(runtime, ctx, flavor, verb, &input, &source_bundle)?;
     let artifacts = write_threat_model_outputs(flavor, &input, &generated.document)?;
     emit_artifact_write(ctx, verb, &artifacts);
-    let findings = threat_model_findings(
-        &input,
-        generated.bridge_findings.take(),
-        &generated.document,
-    );
+    let findings = take_threat_model_findings(&input, &mut generated);
     let summary = threat_model_summary(&generated.document);
     let lines = threat_model_output_lines(
         flavor,
@@ -46,6 +51,17 @@ pub(crate) fn build_threat_model(
     ))
 }
 
+fn take_threat_model_findings(
+    input: &BuildInput,
+    generated: &mut GeneratedThreatModel,
+) -> Vec<Value> {
+    threat_model_findings(
+        input,
+        generated.bridge_findings.take(),
+        &generated.document,
+    )
+}
+
 fn should_build_deterministically(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
@@ -54,8 +70,8 @@ fn should_build_deterministically(
     runtime.is_none() || (read_string(input, &["model"]).is_none() && ctx.config.model.is_none())
 }
 
-fn reject_source_options_without_runtime(input: &Value) -> Result<()> {
-    if has_runtime_only_source_option(input) {
+fn reject_source_options_without_runtime(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<()> {
+    if has_runtime_only_source_option(input, ctx) {
         anyhow::bail!(
             "threat-model:build seed/design/source prompt options require a configured model/runtime; deterministic no-runtime threat modeling cannot consume them"
         );
@@ -63,10 +79,10 @@ fn reject_source_options_without_runtime(input: &Value) -> Result<()> {
     Ok(())
 }
 
-fn has_runtime_only_source_option(input: &Value) -> bool {
+fn has_runtime_only_source_option(input: &Value, ctx: &ToolExecutionContext<'_>) -> bool {
     has_nonempty_list(input, "seed")
         || read_string(input, &["designDoc", "design_doc", "design"]).is_some()
-        || read_string(input, &["THREAT_MODEL_PROMPT"]).is_some()
+        || explicit_prompt_override_requested(input, ctx)
         || nondefault_sources_requested(input)
         || nondefault_context_controls_requested(input)
 }
@@ -88,11 +104,16 @@ fn nondefault_sources_requested(input: &Value) -> bool {
         .into_iter()
         .map(|source| source.to_lowercase())
         .collect::<Vec<_>>();
-    !sources.is_empty() && sources != ["context", "threat-model"] && sources != ["none"]
+    !sources.is_empty()
+        && !source_lists_match(&sources, &["context", "threat-model"])
+        && !source_lists_match(&sources, &["none"])
 }
 
 fn nondefault_context_controls_requested(input: &Value) -> bool {
-    read_string(input, &["contextMode", "context_mode"]).is_some_and(|mode| mode != "auto")
+    read_string(input, &["contextMode", "context_mode"]).is_some_and(|mode| {
+        let mode = mode.to_ascii_lowercase();
+        mode != "auto" && mode != "off"
+    })
         || input
             .get("contextLimit")
             .and_then(Value::as_u64)
@@ -101,6 +122,42 @@ fn nondefault_context_controls_requested(input: &Value) -> bool {
             .get("maxSourceBytes")
             .and_then(Value::as_u64)
             .is_some_and(|limit| limit != 200_000)
+}
+
+fn explicit_prompt_override_requested(input: &Value, ctx: &ToolExecutionContext<'_>) -> bool {
+    let Some(prompt) = read_string(input, &["THREAT_MODEL_PROMPT"]) else {
+        return false;
+    };
+    !prompt_matches_workspace_default_prompt(input, ctx, &prompt)
+}
+
+fn prompt_matches_workspace_default_prompt(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+    prompt: &str,
+) -> bool {
+    let target = ctx
+        .workspace
+        .map(|workspace| workspace.root().to_path_buf())
+        .or_else(|| read_string(input, &["target"]).map(PathBuf::from));
+    let Some(target) = target else {
+        return false;
+    };
+    let path = crate::options::prompt_override_path(&target, "threat-model", "build");
+    std::fs::read_to_string(path).is_ok_and(|content| prompt_text_matches(&content, prompt))
+}
+
+fn prompt_text_matches(file_content: &str, prompt: &str) -> bool {
+    file_content.trim_end_matches(['\r', '\n']) == prompt.trim_end_matches(['\r', '\n'])
+}
+
+fn source_lists_match(actual: &[String], expected: &[&str]) -> bool {
+    if actual.len() != expected.len() {
+        return false;
+    }
+    expected
+        .iter()
+        .all(|expected| actual.iter().any(|actual| actual == expected))
 }
 
 fn threat_model_build_verb(flavor: BuildFlavor) -> &'static str {
@@ -145,7 +202,7 @@ fn emit_source_bundle_loaded(ctx: &ToolExecutionContext<'_>, verb: &str, loaded_
 
 fn emit_validation_done(ctx: &ToolExecutionContext<'_>, verb: &str) {
     if let Some(trace) = ctx.trace {
-        let _ = trace.step("tool-progress", verb, "validate:coverage").emit();
+        let _ = trace.step("tool-progress", verb, "schema:normalize").emit();
     }
 }
 
@@ -232,7 +289,7 @@ fn begin_threat_model_llm_scope(
             .step(
                 "reasoning",
                 verb,
-                "model:threat synthesis · validate:coverage",
+                "model:threat synthesis · schema:normalize",
             )
             .emit();
         trace.parent_scope(phase)

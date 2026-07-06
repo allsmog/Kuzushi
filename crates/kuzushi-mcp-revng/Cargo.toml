@@ -15,7 +15,6 @@ path = "src/main.rs"
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
-dirs.workspace = true
 kuzushi-mcp-common = { path = "../kuzushi-mcp-common" }
 serde.workspace = true
 serde_json.workspace = true

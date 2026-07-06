@@ -253,10 +253,8 @@ export const tokenChecks = [
     label: "run summary writes canonical metadata before placeholder substrate",
     file: "crates/kuzushi-core/src/run_artifacts/run_summary_store.rs",
     tokens: [
-      "LEGACY_SUMMARY_FILE",
       "run_metadata_artifact_spec().leaf",
       'canonical_run_artifact_spec("run.json")',
-      "write_run_summary_file(&dir.join(LEGACY_SUMMARY_FILE)",
       "write_run_summary_file(&dir.join(run_metadata_artifact_spec().leaf)",
       "ensure_canonical_run_files(target, &summary.run_id, &summary.status)",
       "write_latest_run_id(target, &summary.run_id)",
@@ -333,7 +331,6 @@ export const tokenChecks = [
       "`failures.json`",
       "`report.md`",
       "`artifacts.json`",
-      "legacy `summary.json`",
       "tool input/result artifacts",
     ],
   },
@@ -376,7 +373,7 @@ export const tokenChecks = [
   },
   {
     label: "TUI tool entrypoint starts canonical artifact recording",
-    file: "crates/kuzushi-tui/src/app/tool_runner/run_tool/background.rs",
+    file: "crates/kuzushi-tui/src/app/tool_runner/run_tool/background/dispatch.rs",
     tokens: [
       "prepare_background_tool_run",
       "record_tool_run_started_with_reproducibility",

@@ -45,7 +45,7 @@ fn start_uaf_findings_run(
     findings: &[Finding],
     store: &crate::findings::FindingStore,
 ) -> Result<()> {
-    store.insert_scan_run(run_id, target, "running")?;
+    store.record_run_started(run_id, target, "running")?;
     insert_uaf_findings(run_id, findings, store)
 }
 
@@ -54,7 +54,7 @@ fn complete_uaf_findings_run(
     finding_count: usize,
     store: &crate::findings::FindingStore,
 ) -> Result<()> {
-    store.complete_scan_run(run_id, "completed", finding_count)
+    store.record_run_finished(run_id, "completed", finding_count)
 }
 
 fn insert_uaf_findings(
@@ -70,8 +70,8 @@ fn insert_uaf_findings(
 
 /// Write each `LoopHistoryEntry` as a single JSON line to
 /// `<state>/uaf-hunt-runs/<run_id>/transcript.jsonl`. The directory is
-/// inside the workspace state dir (next to findings.sqlite3) rather than
-/// the CLI's `.kuzushi/runs/<run-id>` tree so the transcript survives
+/// inside the workspace state dir (next to index.sqlite3) rather than
+/// the CLI's `.kuzushi/v3/runs/<run-id>` tree so the transcript survives
 /// independently of how the tool was launched (CLI, TUI, scan worker).
 fn write_uaf_hunt_transcript(
     state_dir: &Path,

@@ -186,7 +186,8 @@ impl ShellApp {
     }
 
     fn has_worker_channels(&self) -> bool {
-        self.scan_rx.is_some()
+        self.jobs.is_running(JobKind::Run)
+            || self.scan_rx.is_some()
             || self.tool_rx.is_some()
             || self.agent_rx.is_some()
             || self.plan_rx.is_some()

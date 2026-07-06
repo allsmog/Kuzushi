@@ -64,7 +64,8 @@ pub struct DiffFindingTag {
 pub enum DiffFindingStatus {
     New,
     Existing,
-    Fixed,
+    #[serde(alias = "fixed")]
+    NotSeen,
     ChangedContext,
 }
 
@@ -73,7 +74,7 @@ impl DiffFindingStatus {
         match self {
             Self::New => "new",
             Self::Existing => "existing",
-            Self::Fixed => "fixed",
+            Self::NotSeen => "not-seen",
             Self::ChangedContext => "changed-context",
         }
     }
@@ -88,6 +89,7 @@ pub struct DiffScopeSummary {
     pub context_items: usize,
     pub new_findings: usize,
     pub existing_findings: usize,
-    pub fixed_findings: usize,
+    #[serde(alias = "fixedFindings")]
+    pub not_seen_findings: usize,
     pub changed_context_findings: usize,
 }

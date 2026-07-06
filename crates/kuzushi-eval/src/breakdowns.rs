@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::{MatchRow, ProofStateBreakdown};
+use crate::{LabelAccuracy, MatchRow, ProofStateBreakdown};
 
 pub(crate) fn primary_hit_breakdowns(
     matches_out: &[MatchRow],
@@ -37,4 +37,25 @@ pub(crate) fn increment_vuln_source_breakdown(
         .clone()
         .unwrap_or_else(|| "unknown".to_string());
     *breakdown.entry(key).or_insert(0) += 1;
+}
+
+pub(crate) fn label_accuracy(matches_out: &[MatchRow]) -> LabelAccuracy {
+    let mut accuracy = LabelAccuracy::default();
+    for row in matches_out.iter().filter(|row| is_primary_hit(row)) {
+        if let Some(matches) = row.verdict_match {
+            accuracy.verdict_labeled += 1;
+            accuracy.verdict_correct += usize::from(matches);
+        }
+        if let Some(matches) = row.severity_match {
+            accuracy.severity_labeled += 1;
+            accuracy.severity_correct += usize::from(matches);
+        }
+    }
+    accuracy.verdict_accuracy = ratio(accuracy.verdict_correct, accuracy.verdict_labeled);
+    accuracy.severity_accuracy = ratio(accuracy.severity_correct, accuracy.severity_labeled);
+    accuracy
+}
+
+fn ratio(correct: usize, total: usize) -> Option<f64> {
+    (total > 0).then(|| correct as f64 / total as f64)
 }

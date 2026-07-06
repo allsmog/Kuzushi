@@ -131,9 +131,8 @@ pub enum ShellView {
     Auth,
     /// `/cost` budget bars + by-tool spend.  See `design/mockups/cost.jsx`.
     Cost,
-    /// `/patch <alias>` view — RATIONALE / DIFF / TESTS / GUARDRAIL
-    /// per `design/mockups/patch.jsx`.  String is the finding alias
-    /// the patch addresses.
+    /// Patch review view — RATIONALE / DIFF / TESTS / GUARDRAIL.
+    /// String is the finding alias the patch addresses.
     Patch(String),
     /// Dedicated pwn workflow dashboard backed by pwn:* tool results and
     /// `.kuzushi/pwn/<hash>/state.json`.
@@ -149,8 +148,7 @@ pub enum ShellView {
     CommandPalette,
     /// First-run model picker. Lists the entries in `MODEL_CHOICES` and
     /// lets the operator pick one with ↑/↓/Enter. Esc falls through to
-    /// `Catalog`. Opened only when `config.model.is_none()` at shell
-    /// startup, or on demand via `/model-picker`.
+    /// `Catalog`. Opened when `config.model.is_none()` at shell startup.
     ModelPicker,
     /// Secondary picker shown after `ModelPicker` when the chosen
     /// provider supports both an API-key and an OAuth login path
@@ -290,9 +288,8 @@ impl WorkbenchCenterMode {
     }
 }
 
-/// Full-page cockpit deck. Each page maps one-to-one to an engagement phase,
-/// while the existing Workbench center strip remains the REVIEW page's detail
-/// deck.
+/// Full-page cockpit deck. The enum names are historical, but each page maps
+/// one-to-one to the control-room engagement phases.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WorkbenchPage {
     Terrain,
@@ -324,10 +321,10 @@ impl WorkbenchPage {
 
     pub fn title(self) -> &'static str {
         match self {
-            Self::Terrain => "TERRAIN",
-            Self::Coverage => "COVERAGE",
-            Self::Review => "REVIEW",
-            Self::Ship => "SHIP",
+            Self::Terrain => "AIM",
+            Self::Coverage => "HUNT",
+            Self::Review => "CONFIRM",
+            Self::Ship => "FIX/REPORT",
         }
     }
 

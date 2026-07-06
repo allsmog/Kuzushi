@@ -21,15 +21,12 @@ impl ShellApp {
         task: PlanningTaskId,
         option_name: &str,
     ) -> Option<Value> {
-        self.planning_option_overrides
-            .get(&task)
-            .and_then(|values| values.get(option_name))
-            .cloned()
+        self.engagement.option_override_value(task, option_name)
     }
 
     fn report_missing_planning_option_override(&mut self) {
-        self.planning_option_error =
-            Some("S promotes a this-run override; edit this option first".to_string());
+        self.planning_picker_route
+            .set_option_error("S promotes a this-run override; edit this option first");
     }
 
     fn persist_planning_option_override(
@@ -47,18 +44,12 @@ impl ShellApp {
         );
         self.clear_planning_option_override(task, &spec.name);
         self.persist_option_store(OptionScope::Global);
-        self.planning_option_error = None;
+        self.planning_picker_route.clear_option_error();
         self.log_promoted_planning_option(&tool_name, spec, &value);
     }
 
     fn clear_planning_option_override(&mut self, task: PlanningTaskId, option_name: &str) {
-        let Some(values) = self.planning_option_overrides.get_mut(&task) else {
-            return;
-        };
-        values.remove(option_name);
-        if values.is_empty() {
-            self.planning_option_overrides.remove(&task);
-        }
+        self.engagement.remove_option_override(task, option_name);
     }
 
     fn log_promoted_planning_option(&mut self, tool_name: &str, spec: &OptionSpec, value: &Value) {

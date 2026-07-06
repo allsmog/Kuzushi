@@ -14,7 +14,7 @@ pub(crate) use tree::TreeDiagram;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
-use ratatui::widgets::{Block, BorderType, Borders, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Widget};
 
 /// Set one cell's glyph + colour, clipped to `area` (coords are area-relative).
 pub(super) fn put(buf: &mut Buffer, area: Rect, x: u16, y: u16, ch: &str, color: Color) {
@@ -51,6 +51,21 @@ pub(super) fn diagram_subtle() -> Color {
     } else {
         crate::theme::T_SUBTLE
     }
+}
+
+pub(super) fn render_empty_state_panel(
+    buf: &mut Buffer,
+    area: Rect,
+    glyph_label: &str,
+    hint: &str,
+    ctas: &[(&str, &str)],
+) {
+    Paragraph::new(crate::renderer::empty_state_panel(
+        glyph_label,
+        &[hint],
+        ctas,
+    ))
+    .render(area, buf);
 }
 
 /// Write a label, truncated to fit within `area`.
@@ -296,6 +311,7 @@ mod tests {
                     impact_description: None,
                     preconditions: Vec::new(),
                     steps: vec!["unsanitised id".into(), "raw db.exec()".into()],
+                    hidden_step_count: 0,
                 },
                 AttackChain {
                     title: "IDOR /account".into(),
@@ -304,8 +320,10 @@ mod tests {
                     impact_description: None,
                     preconditions: Vec::new(),
                     steps: vec!["missing owner check".into()],
+                    hidden_step_count: 0,
                 },
             ],
+            hidden_chain_count: 0,
             empty_hint: None,
         }
     }

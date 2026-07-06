@@ -12,7 +12,15 @@ pub(super) fn inspect_javalin_route_line(
 ) {
     remember_javalin_scope(lower, state);
     remember_javalin_prefix(detail, lower, state);
-    emit_javalin_route(source_file, framework, line_number, detail, lower, state, builder);
+    emit_javalin_route(
+        source_file,
+        framework,
+        line_number,
+        detail,
+        lower,
+        state,
+        builder,
+    );
 }
 
 fn remember_javalin_scope(lower: &str, state: &mut RouteScanState) {

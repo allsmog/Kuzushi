@@ -10,7 +10,7 @@
 // Why this exists: better-sqlite3 ships per-Node-major prebuilds. When the
 // user bumps from Node 22 → 24/25, the prebuild for the new ABI is missing
 // and `require('better-sqlite3')` throws NODE_MODULE_VERSION mismatch errors.
-// The shell silently aborts on any code path that opens findings.sqlite3.
+// The shell silently aborts on any code path that opens index.sqlite3.
 
 import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";

@@ -4,8 +4,8 @@
 //! and the CLI's `kuzushi run` adapter (`kuzushi-cli::tool_requirements`)
 //! decide whether to construct a `LangGraphRuntime` before dispatching
 //! a tool. They used to keep their own private allowlists; the lists
-//! drifted, and the TUI's copy was missing `smoke:next-step`,
-//! `full-mode:hunt`, `deep-audit:run`, and `classifier-gate:score`.
+//! drifted, and the TUI's copy was missing `full-mode:hunt`,
+//! `deep-audit:run`, and `classifier-gate:score`.
 //! Those tools fail at runtime with "requires an agent runtime; none
 //! configured" because the caller never passes one.
 //!
@@ -22,6 +22,7 @@
 //! agentic sub-task) and doesn't need a runtime in that case. Callers
 //! that have input should prefer `tool_needs_runtime`.
 
+use crate::config::V2Config;
 use serde_json::Value;
 
 /// Sorted allowlist for `tool_uses_agent_runtime`. `sast:scan` is
@@ -50,7 +51,6 @@ pub const RUNTIME_TOOL_NAMES: &[&str] = &[
     "shinsa:nist-scan",
     "shinsa:quick-check",
     "shinsa:scan",
-    "smoke:next-step",
     "systems-hunt:deep-semantic-cwe-select",
     "systems-hunt:deep-semantic-hunt",
     "systems-hunt:systems-hunt",
@@ -63,7 +63,6 @@ pub const RUNTIME_TOOL_NAMES: &[&str] = &[
     "taint-iris:hunt",
     "threat-intel:apply",
     "threat-intel:harvest",
-    "threat-model:build",
     "tob:audit",
     "triage:run",
     "uaf-hunt:hunt",
@@ -127,6 +126,55 @@ pub const FINDING_STORE_TOOL_NAMES: &[&str] = &[
     "vuln-scout:audit",
 ];
 
+pub const WORKSPACE_TOOL_PREFIXES: &[&str] = &[
+    "findings:",
+    "module-recommender:",
+    "context:",
+    "recon:",
+    "bounty:",
+    "vendor-assessment:",
+    "chrome-rce:",
+    "vuln-scout:",
+    "tob:",
+    "shinsa:",
+    "prompt-armor:",
+    "x-ray:",
+    "threat-model:",
+    "randori:",
+    "variant:",
+    "ndiff:",
+    "systems-hunt:",
+    "threat-intel:",
+    "uaf-hunt:",
+];
+
+pub const WORKSPACE_TOOL_NAMES: &[&str] = &[
+    "carlini-threat-hunt:run",
+    "offense-review:threat-hunt",
+    "agentic-sast:scan",
+    "taint-iris:hunt",
+    "taint-iris-next:dataflow-plan",
+    "taint-iris-next:source-sink-trace",
+    "taint-iris-next:finding-review",
+    "taint-iris-next:hunt",
+    "taint-iris-next:catalog",
+    "taint-iris-next:codeql-db",
+    "triage:run",
+    "verify:finding",
+    "verify:exploit",
+    "patch:finding",
+    "context-lite:index",
+    "full-mode:hunt",
+    "classifier-gate:score",
+    "deep-audit:run",
+    "sast:scan",
+    "semgrep:scan",
+    "codeql:scan",
+    "iac-scan:scan",
+    "license-scan:scan",
+    "sbom-scan:scan",
+];
+
 /// Returns true when `tool_name` is one of the native tools whose
 /// handler dereferences an `AgentRuntime` and bails when it's missing.
 /// `sast:scan` is *not* covered here — use `tool_needs_runtime` when
@@ -151,18 +199,78 @@ pub fn tool_needs_finding_store(tool_name: &str) -> bool {
     tool_uses_finding_store(tool_name)
 }
 
+pub fn tool_defaults_to_workspace(tool_name: &str) -> bool {
+    has_known_prefix(tool_name, WORKSPACE_TOOL_PREFIXES)
+        || has_known_name(tool_name, WORKSPACE_TOOL_NAMES)
+}
+
 /// Input-aware variant of `tool_uses_agent_runtime`. Adds the
 /// `sast:scan` carve-out: only build a runtime when the input asks for
 /// a triage / verify / autoPatch pass or an agentic sub-task. The CLI
 /// uses this in `kuzushi run`, the TUI in its background-tool worker.
 pub fn tool_needs_runtime(tool_name: &str, input: &Value) -> bool {
-    if tool_uses_agent_runtime(tool_name) {
-        return true;
+    if let Some(needs_runtime) = input_specific_runtime_requirement(tool_name, input) {
+        return needs_runtime;
     }
-    if tool_name == "pwn:auto-solve" {
-        return true;
+    tool_always_needs_runtime(tool_name)
+}
+
+/// Runtime construction predicate for callers that have the resolved operator
+/// config. Required-runtime tools must get a runtime. A small number of tools
+/// can optionally use a runtime when the operator has configured a model while
+/// still running deterministically without one.
+pub fn tool_wants_runtime(tool_name: &str, input: &Value, config: &V2Config) -> bool {
+    tool_needs_runtime(tool_name, input)
+        || threat_model_build_wants_runtime(tool_name, config)
+        || module_recommender_wants_runtime(tool_name, input, config)
+}
+
+fn threat_model_build_needs_runtime(input: &Value) -> bool {
+    input
+        .get("model")
+        .and_then(Value::as_str)
+        .is_some_and(|model| !model.trim().is_empty())
+}
+
+fn input_specific_runtime_requirement(tool_name: &str, input: &Value) -> Option<bool> {
+    match tool_name {
+        "full-mode:hunt" => Some(full_mode_hunt_needs_runtime(input)),
+        "threat-model:build" => Some(threat_model_build_needs_runtime(input)),
+        "sast:scan" => Some(wants_sast_runtime(input)),
+        _ => None,
     }
-    tool_name == "sast:scan" && wants_sast_runtime(input)
+}
+
+fn tool_always_needs_runtime(tool_name: &str) -> bool {
+    tool_uses_agent_runtime(tool_name) || tool_name == "pwn:auto-solve"
+}
+
+fn threat_model_build_wants_runtime(tool_name: &str, config: &V2Config) -> bool {
+    tool_name == "threat-model:build" && config.model.is_some()
+}
+
+fn module_recommender_wants_runtime(tool_name: &str, input: &Value, config: &V2Config) -> bool {
+    tool_name == "module-recommender:recommend"
+        && config.model.is_some()
+        && input
+            .get("useModelRanking")
+            .and_then(Value::as_bool)
+            .unwrap_or(true)
+}
+
+fn full_mode_hunt_needs_runtime(input: &Value) -> bool {
+    !input
+        .get("dryRun")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn has_known_prefix(tool_name: &str, prefixes: &[&str]) -> bool {
+    prefixes.iter().any(|prefix| tool_name.starts_with(prefix))
+}
+
+fn has_known_name(tool_name: &str, names: &[&str]) -> bool {
+    names.contains(&tool_name)
 }
 
 /// All tool names known to require an agent runtime, in sorted order.
@@ -275,7 +383,6 @@ mod tests {
         // otherwise the shell will skip building a runtime and the tool
         // will fail at execution time.
         for tool in [
-            "smoke:next-step",
             "full-mode:hunt",
             "deep-audit:run",
             "exploit-chain:scan",
@@ -314,8 +421,70 @@ mod tests {
     }
 
     #[test]
+    fn tool_needs_runtime_allows_full_mode_dry_run_without_runtime() {
+        assert!(!tool_needs_runtime(
+            "full-mode:hunt",
+            &json!({"dryRun": true})
+        ));
+        assert!(tool_needs_runtime(
+            "full-mode:hunt",
+            &json!({"dryRun": false})
+        ));
+        assert!(tool_needs_runtime("full-mode:hunt", &json!({})));
+    }
+
+    #[test]
     fn pwn_auto_solve_always_needs_runtime() {
         assert!(tool_needs_runtime("pwn:auto-solve", &json!({})));
+    }
+
+    #[test]
+    fn threat_model_build_runtime_requirement_is_input_aware() {
+        assert!(!tool_uses_agent_runtime("threat-model:build"));
+        assert!(!tool_needs_runtime("threat-model:build", &json!({})));
+        assert!(tool_needs_runtime(
+            "threat-model:build",
+            &json!({"model": "openai:gpt-5.4"})
+        ));
+    }
+
+    #[test]
+    fn threat_model_build_wants_runtime_when_config_has_model() {
+        let mut config = V2Config::default();
+        assert!(!tool_wants_runtime(
+            "threat-model:build",
+            &json!({}),
+            &config
+        ));
+
+        config.model = Some("openai:gpt-5.4".to_string());
+        assert!(tool_wants_runtime(
+            "threat-model:build",
+            &json!({}),
+            &config
+        ));
+    }
+
+    #[test]
+    fn recommender_wants_runtime_only_when_model_ranking_is_enabled_with_model() {
+        let mut config = V2Config::default();
+        assert!(!tool_wants_runtime(
+            "module-recommender:recommend",
+            &json!({}),
+            &config
+        ));
+
+        config.model = Some("openai:gpt-5.4".to_string());
+        assert!(tool_wants_runtime(
+            "module-recommender:recommend",
+            &json!({}),
+            &config
+        ));
+        assert!(!tool_wants_runtime(
+            "module-recommender:recommend",
+            &json!({"useModelRanking": false}),
+            &config
+        ));
     }
 
     #[test]

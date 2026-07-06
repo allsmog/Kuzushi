@@ -12,8 +12,8 @@ use super::settings::{auth_login_process_provider_arg, auth_login_status_message
 use super::state_transitions::{HotkeyTrigger, ViewHotkeyAction};
 use super::view_state::ChainSeverity;
 use crate::commands::{
-    parse_command, ContextCommand, SastTaskCommand, SastTaskModeCommand, ShellCommand,
-    WorkspaceCommand,
+    parse_command, ContextCommand, PatchCommand, ReviewDecisionCommand, SastTaskCommand,
+    SastTaskModeCommand, ShellCommand, WorkspaceCommand,
 };
 use crate::ui_view_models::ui_run_artifact_relative_path;
 use kuzushi_core::run_artifacts::load_run_failures;
@@ -35,6 +35,14 @@ impl EnvVarGuard {
         let prior = std::env::var_os(key);
         unsafe {
             std::env::remove_var(key);
+        }
+        Self { key, prior }
+    }
+
+    fn set(key: &'static str, value: &str) -> Self {
+        let prior = std::env::var_os(key);
+        unsafe {
+            std::env::set_var(key, value);
         }
         Self { key, prior }
     }
@@ -655,7 +663,7 @@ esac
 fn seed_true_positive_finding(workspace: &WorkspaceTarget) -> String {
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     store
-        .insert_scan_run("run-variant", workspace.root(), "running")
+        .record_run_started("run-variant", workspace.root(), "running")
         .unwrap();
     let finding = Finding::new_tool(
         "semgrep",
@@ -680,7 +688,7 @@ fn seed_true_positive_finding(workspace: &WorkspaceTarget) -> String {
         )
         .unwrap();
     store
-        .complete_scan_run("run-variant", "completed", 1)
+        .record_run_finished("run-variant", "completed", 1)
         .unwrap();
     fingerprint
 }
@@ -724,6 +732,11 @@ fn fake_taint_iris_bridge(dir: &PathBuf) -> PathBuf {
             r#"#!/bin/sh
 request="$(cat)"
 case "$request" in
+  *"Taint IRIS Next agent"*)
+    cat <<'JSON'
+{"ok":true,"structured":{"selectedCwes":[{"cwe":"CWE-89","reason":"database query uses request input","catalogSignals":["sink: query("],"sourceSpec":"request query parameters","sinkSpec":"database query calls","sanitizerSpec":"parameterized query APIs","customCweRationale":""}],"findings":[{"title":"Request input reaches SQL query","cwe":"CWE-89","severity":"high","confidence":"medium","evidenceLevel":"linked","filePath":"src/db.ts","startLine":1,"message":"The request query is concatenated into a SQL query.","sourceSinkTrace":"req.query.q -> db.query","catalogSignals":["sink: query("],"customCweRationale":"","taintPath":[{"filePath":"src/db.ts","line":1,"message":"source and sink","snippet":"db.query(req.query.q)"}]}],"triage":[{"status":"finding","cwe":"CWE-89","evidenceLevel":"linked","rationale":"request data reaches SQL query","filePath":"src/db.ts","line":1,"catalogSignals":["sink: query("]}],"notes":[]}}
+JSON
+    ;;
   *"Taint CWE selector"*)
     cat <<'JSON'
 {"ok":true,"structured":{"cwes":[{"id":"CWE-89","name":"SQL Injection","reason":"database query uses request input"}]}}
@@ -871,7 +884,7 @@ fn fake_verify_bridge(dir: &PathBuf) -> PathBuf {
             r#"#!/bin/sh
 cat >/dev/null
 cat <<'JSON'
-{"ok":true,"structured":{"fingerprint":"fp-from-bridge","exploitable":true,"poc_payload":"curl -X POST /admin","poc_description":"POST reaches admin sink","attack_vector":"curl POST /admin","preconditions":["network access"],"confidence":0.84,"proof_level":3,"proof_verdict":"exploited"}}
+{"ok":true,"structured":{"fingerprint":"fp-from-bridge","exploitable":true,"poc_payload":"fixture-marker","poc_description":"fixture marker reaches review sink","attack_vector":"fixture marker path","preconditions":["local fixture"],"confidence":0.84,"proof_level":3,"proof_verdict":"exploited"}}
 JSON
 "#,
         )
@@ -926,6 +939,14 @@ fn init_git_repo(dir: &PathBuf) {
             String::from_utf8_lossy(&output.stderr)
         );
     }
+}
+
+#[cfg(unix)]
+fn git_is_unavailable() -> bool {
+    std::process::Command::new("git")
+        .arg("--version")
+        .output()
+        .is_err()
 }
 
 #[cfg(unix)]
@@ -1021,26 +1042,42 @@ fn logs_command_routes_to_full_screen_transcript() {
 #[test]
 fn logs_view_routes_j_k_and_page_keys_to_logs_scroll() {
     // M1 §1.1: while in the Logs view, j/k and PgDn/PgUp must drive the
-    // dedicated `logs_scroll` field rather than the shared `scroll_offset`
+    // dedicated logs route scroll rather than the shared `scroll_offset`
     // — otherwise the transcript would visually stay pinned while the
     // generic offset advances.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Logs;
     app.scroll_offset = 0;
-    app.logs_scroll = 0;
+    app.logs_route.open();
 
     app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
-    assert_eq!(app.logs_scroll, 10);
+    assert_eq!(app.logs_route.scroll(), 10);
     assert_eq!(app.scroll_offset, 0);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
-    assert_eq!(app.logs_scroll, 11);
+    assert_eq!(app.logs_route.scroll(), 11);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
-    assert_eq!(app.logs_scroll, 0);
+    assert_eq!(app.logs_route.scroll(), 0);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
-    assert_eq!(app.logs_scroll, usize::MAX);
+    assert_eq!(app.logs_route.scroll(), usize::MAX);
+}
+
+#[test]
+fn shell_log_retention_is_bounded_to_recent_lines() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+
+    for index in 0..(LOG_LINE_CAPACITY + 25) {
+        app.log("test", format!("line-{index}"));
+    }
+
+    assert_eq!(app.log.len(), LOG_LINE_CAPACITY);
+    assert_eq!(app.log.first().unwrap().body, "line-25");
+    assert_eq!(
+        app.log.last().unwrap().body,
+        format!("line-{}", LOG_LINE_CAPACITY + 24)
+    );
 }
 
 #[test]
@@ -1069,7 +1106,7 @@ fn completion_covers_commands_stateful_arguments_and_config_keys() {
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     store
-        .insert_scan_run("run-complete", workspace.root(), "completed")
+        .record_run_started("run-complete", workspace.root(), "completed")
         .unwrap();
     let finding = Finding::new_semgrep(
         "demo.rule",
@@ -1169,13 +1206,637 @@ fn command_reducer_focuses_existing_module() {
 }
 
 #[test]
+fn run_tool_reducer_returns_launch_effect_without_spawning_worker() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    let effects = app.reduce_run_tool(Some("semgrep:scan".to_string()), None);
+
+    assert_eq!(effects.len(), 1);
+    match effects.into_iter().next().unwrap() {
+        ShellEffect::DispatchRunTool(launch) => {
+            assert_eq!(launch.tool_name, "semgrep:scan");
+            assert_eq!(launch.workspace.root(), workspace.root());
+            assert!(launch.input.is_object());
+        }
+        ShellEffect::ApplyReviewedPatch(_) => panic!("expected run-tool launch effect"),
+        ShellEffect::ApplyThreatPatch(_) => panic!("expected run-tool launch effect"),
+        ShellEffect::CancelActiveJobs => panic!("expected run-tool launch effect"),
+        ShellEffect::DispatchAgent(_) => panic!("expected run-tool launch effect"),
+        ShellEffect::PersistCommandHistory => panic!("expected run-tool launch effect"),
+        ShellEffect::PersistOptions(_) => panic!("expected run-tool launch effect"),
+        ShellEffect::Quit => panic!("expected run-tool launch effect"),
+        ShellEffect::RecordReviewDecision(_) => panic!("expected run-tool launch effect"),
+        ShellEffect::StartPlanner(_) => panic!("expected run-tool launch effect"),
+        ShellEffect::StartScan(_) => panic!("expected run-tool launch effect"),
+        ShellEffect::StartThreat(_) => panic!("expected run-tool launch effect"),
+        ShellEffect::WorkspaceExportFindings(_) => panic!("expected run-tool launch effect"),
+        ShellEffect::WorkspaceScopeInit(_) => panic!("expected run-tool launch effect"),
+    }
+    assert!(app.tool_running.is_none());
+    assert!(!app.jobs.is_running(JobKind::Run));
+}
+
+#[test]
+fn scan_reducer_returns_launch_effect_without_spawning_worker() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    let effects = app.reduce_scan_start(Some(tmp.path().to_path_buf()), None);
+
+    assert_eq!(effects.len(), 1);
+    match effects.into_iter().next().unwrap() {
+        ShellEffect::StartScan(_) => {}
+        ShellEffect::ApplyReviewedPatch(_) => panic!("expected scan launch effect"),
+        ShellEffect::ApplyThreatPatch(_) => panic!("expected scan launch effect"),
+        ShellEffect::CancelActiveJobs => panic!("expected scan launch effect"),
+        ShellEffect::DispatchAgent(_) => panic!("expected scan launch effect"),
+        ShellEffect::DispatchRunTool(_) => panic!("expected scan launch effect"),
+        ShellEffect::PersistCommandHistory => panic!("expected scan launch effect"),
+        ShellEffect::PersistOptions(_) => panic!("expected scan launch effect"),
+        ShellEffect::Quit => panic!("expected scan launch effect"),
+        ShellEffect::RecordReviewDecision(_) => panic!("expected scan launch effect"),
+        ShellEffect::StartPlanner(_) => panic!("expected scan launch effect"),
+        ShellEffect::StartThreat(_) => panic!("expected scan launch effect"),
+        ShellEffect::WorkspaceExportFindings(_) => panic!("expected scan launch effect"),
+        ShellEffect::WorkspaceScopeInit(_) => panic!("expected scan launch effect"),
+    }
+    assert!(app.scan.is_none());
+    assert!(!app.jobs.is_running(JobKind::Run));
+}
+
+#[test]
+fn ask_reducer_returns_dispatch_effect_without_spawning_worker() {
+    let mut config = V2Config::default();
+    config.model = Some("openai:gpt-5.5".to_string());
+    let mut app = ShellApp::new(config, None);
+
+    let effects = app.reduce_ask_agent("What should I run first?");
+
+    assert_eq!(effects.len(), 1);
+    match effects.into_iter().next().unwrap() {
+        ShellEffect::DispatchAgent(_) => {}
+        ShellEffect::ApplyReviewedPatch(_)
+        | ShellEffect::ApplyThreatPatch(_)
+        | ShellEffect::CancelActiveJobs
+        | ShellEffect::DispatchRunTool(_)
+        | ShellEffect::PersistCommandHistory
+        | ShellEffect::PersistOptions(_)
+        | ShellEffect::Quit
+        | ShellEffect::RecordReviewDecision(_)
+        | ShellEffect::StartPlanner(_)
+        | ShellEffect::StartScan(_)
+        | ShellEffect::StartThreat(_)
+        | ShellEffect::WorkspaceExportFindings(_)
+        | ShellEffect::WorkspaceScopeInit(_) => {
+            panic!("expected agent dispatch effect")
+        }
+    }
+    let agent = app.agent_chat.as_ref().unwrap();
+    assert_eq!(agent.question, "What should I run first?");
+    assert!(agent.running);
+    assert!(app.agent_rx.is_some());
+    assert!(app.live_activity.is_none());
+    assert!(!app.log.iter().any(|line| line.prefix == "agent"));
+}
+
+#[test]
+fn planner_reducer_returns_start_effect_without_spawning_worker() {
+    let mut config = V2Config::default();
+    config.model = Some("openai:gpt-5.5".to_string());
+    let mut app = ShellApp::new(config, None);
+
+    let effects = app.reduce_planner_start("tighten module option policy");
+
+    assert_eq!(effects.len(), 1);
+    match effects.into_iter().next().unwrap() {
+        ShellEffect::StartPlanner(_) => {}
+        ShellEffect::ApplyReviewedPatch(_)
+        | ShellEffect::ApplyThreatPatch(_)
+        | ShellEffect::CancelActiveJobs
+        | ShellEffect::DispatchAgent(_)
+        | ShellEffect::DispatchRunTool(_)
+        | ShellEffect::PersistCommandHistory
+        | ShellEffect::PersistOptions(_)
+        | ShellEffect::Quit
+        | ShellEffect::RecordReviewDecision(_)
+        | ShellEffect::StartScan(_)
+        | ShellEffect::StartThreat(_)
+        | ShellEffect::WorkspaceExportFindings(_)
+        | ShellEffect::WorkspaceScopeInit(_) => panic!("expected planner start effect"),
+    }
+    assert!(!app.planner_running);
+    assert!(app.plan_rx.is_none());
+    assert!(app.live_activity.is_none());
+}
+
+#[test]
+fn threat_reducers_return_start_effects_without_spawning_workers() {
+    let mut config = V2Config::default();
+    config.model = Some("openai:gpt-5.5".to_string());
+    let mut app = ShellApp::new(config, None);
+
+    let regen_effects = app.reduce_threat_regen();
+    let ask_effects = app.reduce_threat_ask("what changed in the threat model?");
+
+    assert_eq!(regen_effects.len(), 1);
+    assert_eq!(ask_effects.len(), 1);
+    match regen_effects.into_iter().next().unwrap() {
+        ShellEffect::StartThreat(_) => {}
+        ShellEffect::ApplyReviewedPatch(_)
+        | ShellEffect::ApplyThreatPatch(_)
+        | ShellEffect::CancelActiveJobs
+        | ShellEffect::DispatchAgent(_)
+        | ShellEffect::DispatchRunTool(_)
+        | ShellEffect::PersistCommandHistory
+        | ShellEffect::PersistOptions(_)
+        | ShellEffect::Quit
+        | ShellEffect::RecordReviewDecision(_)
+        | ShellEffect::StartPlanner(_)
+        | ShellEffect::StartScan(_)
+        | ShellEffect::WorkspaceExportFindings(_)
+        | ShellEffect::WorkspaceScopeInit(_) => panic!("expected threat start effect"),
+    }
+    match ask_effects.into_iter().next().unwrap() {
+        ShellEffect::StartThreat(_) => {}
+        ShellEffect::ApplyReviewedPatch(_)
+        | ShellEffect::ApplyThreatPatch(_)
+        | ShellEffect::CancelActiveJobs
+        | ShellEffect::DispatchAgent(_)
+        | ShellEffect::DispatchRunTool(_)
+        | ShellEffect::PersistCommandHistory
+        | ShellEffect::PersistOptions(_)
+        | ShellEffect::Quit
+        | ShellEffect::RecordReviewDecision(_)
+        | ShellEffect::StartPlanner(_)
+        | ShellEffect::StartScan(_)
+        | ShellEffect::WorkspaceExportFindings(_)
+        | ShellEffect::WorkspaceScopeInit(_) => panic!("expected threat start effect"),
+    }
+    assert!(!app.threat_worker_running);
+    assert!(app.threat_rx.is_none());
+    assert!(app.live_activity.is_none());
+}
+
+#[test]
+fn option_reducers_return_persist_effects_only_for_durable_scopes() {
+    let mut session_app = ShellApp::new(V2Config::default(), None);
+    let session_effects = session_app.reduce_set_option(false, "ui.auto_open_activity", "false");
+
+    assert!(session_effects.is_empty());
+    assert!(!session_app.auto_open_activity);
+    assert_eq!(
+        session_app
+            .option_store
+            .values_for(OptionScope::Session, &OptionTarget::All)
+            .and_then(|values| values.get("ui.auto_open_activity")),
+        Some(&serde_json::json!(false))
+    );
+
+    let mut global_app = ShellApp::new(V2Config::default(), None);
+    let global_effects = global_app.reduce_set_option(true, "ui.auto_open_activity", "false");
+
+    assert_eq!(
+        persist_option_scope(&global_effects),
+        Some(OptionScope::Global)
+    );
+    assert!(!global_app.auto_open_activity);
+    assert_eq!(
+        global_app
+            .option_store
+            .values_for(OptionScope::Global, &OptionTarget::All)
+            .and_then(|values| values.get("ui.auto_open_activity")),
+        Some(&serde_json::json!(false))
+    );
+
+    let unset_effects = global_app.reduce_unset_option(true, "ui.auto_open_activity");
+
+    assert_eq!(
+        persist_option_scope(&unset_effects),
+        Some(OptionScope::Global)
+    );
+    assert!(global_app
+        .option_store
+        .values_for(OptionScope::Global, &OptionTarget::All)
+        .and_then(|values| values.get("ui.auto_open_activity"))
+        .is_none());
+}
+
+#[test]
+fn command_effect_reducer_routes_existing_effectful_commands() {
+    assert_eq!(
+        command_effect_kind(ShellCommand::Cancel),
+        Some(EffectKind::Cancel)
+    );
+    assert_eq!(
+        command_effect_kind(ShellCommand::Ask("What next?".to_string())),
+        Some(EffectKind::Agent)
+    );
+    assert_eq!(
+        command_effect_kind(ShellCommand::Plan("map authz drift".to_string())),
+        Some(EffectKind::Planner)
+    );
+    assert_eq!(
+        command_effect_kind(ShellCommand::SetOption {
+            global: true,
+            name: "ui.auto_open_activity".to_string(),
+            value: "false".to_string(),
+        }),
+        Some(EffectKind::PersistOptions)
+    );
+    assert_eq!(
+        command_effect_kind(ShellCommand::ThreatRegen),
+        Some(EffectKind::Threat)
+    );
+    assert_eq!(
+        command_effect_kind(ShellCommand::ThreatAsk(
+            "what changed in the threat model?".to_string()
+        )),
+        Some(EffectKind::Threat)
+    );
+    assert_eq!(
+        command_effect_kind(ShellCommand::Quit),
+        Some(EffectKind::Quit)
+    );
+}
+
+#[test]
+fn command_effect_reducer_routes_session_option_commands_without_io_effects() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let effects = app
+        .reduce_command_effects(&ShellCommand::SetOption {
+            global: false,
+            name: "ui.auto_open_activity".to_string(),
+            value: "false".to_string(),
+        })
+        .expect("session option command should be effect-routed");
+
+    assert!(effects.is_empty());
+    assert!(!app.auto_open_activity);
+}
+
+#[test]
+fn command_history_reducer_persists_only_for_workspace_backed_history() {
+    let mut targetless_app = ShellApp::new(V2Config::default(), None);
+    let targetless_effects = targetless_app.reduce_remember_command("modules");
+
+    assert!(targetless_effects.is_empty());
+    assert_eq!(targetless_app.command_history, vec!["modules"]);
+
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let history_path = temp.path().join(".kuzushi/v3/shell-history.txt");
+    let effects = app.reduce_remember_command("tools");
+
+    assert!(has_history_persist_effect(&effects));
+    assert_eq!(app.command_history, vec!["tools"]);
+    assert!(!history_path.exists());
+
+    app.execute_effects(effects);
+
+    assert_eq!(fs::read_to_string(history_path).unwrap(), "tools");
+}
+
+#[test]
+fn command_effect_reducer_routes_tool_launcher_commands_without_spawning() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+
+    let mut aim_app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let aim_effects = aim_app
+        .reduce_command_effects(&ShellCommand::Aim(Some("auth".to_string())))
+        .expect("aim should be effect-routed");
+    let aim_launch = run_tool_launch(&aim_effects).expect("aim should launch a tool");
+    assert_eq!(aim_launch.tool_name, "engagement:aim");
+    assert_eq!(aim_launch.input["focus"], serde_json::json!("auth"));
+    assert_eq!(aim_app.shell_view, ShellView::Workbench);
+    assert!(aim_app.tool_running.is_none());
+    assert!(!aim_app.jobs.is_running(JobKind::Run));
+
+    let mut recommend_app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let recommend_effects = recommend_app
+        .reduce_command_effects(&ShellCommand::Recommend)
+        .expect("recommend should be effect-routed");
+    let recommend_launch =
+        run_tool_launch(&recommend_effects).expect("recommend should launch a tool");
+    assert_eq!(recommend_launch.tool_name, "module-recommender:recommend");
+    assert_eq!(recommend_app.shell_view, ShellView::Recommend);
+    assert!(recommend_app.tool_running.is_none());
+    assert!(!recommend_app.jobs.is_running(JobKind::Run));
+
+    let mut patch_app = ShellApp::new(V2Config::default(), Some(&workspace));
+    patch_app.engagement.set_pending_patch(PendingPatch {
+        alias: "F-0001".to_string(),
+        rationale: "guard tainted input".to_string(),
+        side_effect: None,
+        diff: "--- a/x.rs\n+++ b/x.rs\n".to_string(),
+        tests: Vec::new(),
+        guardrail: None,
+        staged_at: None,
+    });
+    let patch_effects = patch_app
+        .reduce_command_effects(&ShellCommand::Patch(PatchCommand::Regen {
+            style: Some("minimal".to_string()),
+        }))
+        .expect("patch regen should be effect-routed");
+    let patch_launch = run_tool_launch(&patch_effects).expect("patch regen should launch a tool");
+    assert_eq!(patch_launch.tool_name, "patch:finding");
+    assert_eq!(
+        patch_launch.input["fingerprint"],
+        serde_json::json!("F-0001")
+    );
+    assert_eq!(patch_launch.input["style"], serde_json::json!("minimal"));
+    assert!(patch_app.tool_running.is_none());
+    assert!(!patch_app.jobs.is_running(JobKind::Run));
+}
+
+#[test]
+fn patch_apply_reducer_returns_apply_effect_without_mutating_worktree() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.engagement.set_pending_patch(PendingPatch {
+        alias: "F-0001".to_string(),
+        rationale: "guard tainted input".to_string(),
+        side_effect: None,
+        diff: demo_patch_diff().to_string(),
+        tests: Vec::new(),
+        guardrail: None,
+        staged_at: None,
+    });
+
+    let effects = app
+        .reduce_command_effects(&ShellCommand::Patch(PatchCommand::Apply))
+        .expect("patch apply should be effect-routed");
+    let apply = reviewed_patch_apply(&effects).expect("patch apply effect");
+
+    assert_eq!(apply.alias, "F-0001");
+    assert_eq!(apply.diff, demo_patch_diff());
+    assert_eq!(apply.workspace.root(), workspace.root());
+    assert!(app.engagement.pending_patch().is_some());
+    assert_ne!(app.workbench_page, Some(WorkbenchPage::Ship));
+}
+
+#[cfg(unix)]
+#[test]
+fn patch_apply_effect_applies_reviewed_diff_and_updates_view_state() {
+    if git_is_unavailable() {
+        return;
+    }
+    let temp = tempfile::tempdir().unwrap();
+    let repo = temp.path().to_path_buf();
+    fs::write(repo.join("demo.txt"), "before\n").unwrap();
+    init_git_repo(&repo);
+    let workspace = WorkspaceTarget::new(&repo).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.engagement.set_pending_patch(PendingPatch {
+        alias: "F-0001".to_string(),
+        rationale: "guard tainted input".to_string(),
+        side_effect: None,
+        diff: demo_patch_diff().to_string(),
+        tests: Vec::new(),
+        guardrail: None,
+        staged_at: None,
+    });
+
+    let effects = app
+        .reduce_command_effects(&ShellCommand::Patch(PatchCommand::Apply))
+        .expect("patch apply should be effect-routed");
+    app.execute_effects(effects);
+
+    assert_eq!(
+        fs::read_to_string(repo.join("demo.txt")).unwrap(),
+        "after\n"
+    );
+    assert!(app.engagement.pending_patch().is_none());
+    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.workbench_page, Some(WorkbenchPage::Ship));
+    assert_eq!(app.workbench_focus, WorkbenchPane::Details);
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.prefix == "patch" && line.body.contains("demo.txt")));
+}
+
+#[test]
+fn threat_apply_reducer_returns_apply_effect_without_writing_artifact() {
+    let temp = tempfile::tempdir().unwrap();
+    let target = temp.path().to_path_buf();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(target.clone());
+    app.set_pending_threat_patch(ThreatPatch {
+        goal: "g".to_string(),
+        summary: "s".to_string(),
+        patch: serde_json::json!({"trustZones":{"admin":"isolated"}}),
+        unsupported: vec!["manual follow-up".to_string()],
+    });
+
+    let effects = app
+        .reduce_command_effects(&ShellCommand::ThreatApply)
+        .expect("threat apply should be effect-routed");
+    let apply = threat_patch_apply(&effects).expect("threat apply effect");
+
+    assert_eq!(apply.target.as_deref(), Some(target.as_path()));
+    assert_eq!(
+        apply.patch.patch.pointer("/trustZones/admin"),
+        Some(&serde_json::json!("isolated"))
+    );
+    assert!(app.pending_threat_patch.is_some());
+    assert!(load_persistent_threat_model(&target).is_none());
+}
+
+#[test]
+fn review_decision_reducer_returns_record_effect_without_writing_store() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.findings = vec![Finding::new_tool(
+        "fixture",
+        "fixture/open",
+        "src/app.ts",
+        7,
+        None,
+        Severity::High,
+        "open finding",
+    )];
+    let db_existed_before = workspace.findings_db_path().exists();
+
+    let effects = app
+        .reduce_command_effects(&ShellCommand::ReviewDecision(
+            ReviewDecisionCommand::Record {
+                verdict: "suppressed".to_string(),
+                reason: "reviewed under approved suppression policy".to_string(),
+            },
+        ))
+        .expect("review decision should be effect-routed");
+    let apply = review_decision_apply(&effects).expect("review decision effect");
+
+    assert_eq!(apply.target.as_deref(), Some(workspace.root()));
+    assert_eq!(
+        apply.decision.verdict,
+        kuzushi_core::findings::ReviewDecisionVerdict::Suppressed
+    );
+    assert_eq!(
+        apply.decision.rationale,
+        "reviewed under approved suppression policy"
+    );
+    assert_eq!(apply.finding.title, "open finding");
+    assert_eq!(
+        workspace.findings_db_path().exists(),
+        db_existed_before,
+        "reducer must not create the findings store"
+    );
+}
+
+#[test]
+fn workspace_reducers_return_file_effects_without_writing_outputs() {
+    let temp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    let export_path = temp.path().join("findings.json");
+
+    let export_effects = app
+        .reduce_command_effects(&ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+            output: export_path.clone(),
+            format: Some("json".to_string()),
+            completeness: Some("open".to_string()),
+            allow_empty: true,
+        }))
+        .expect("workspace export should be effect-routed");
+    let export = workspace_export_effect(&export_effects).expect("workspace export effect");
+
+    assert_eq!(export.output, export_path);
+    assert_eq!(export.format.as_deref(), Some("json"));
+    assert_eq!(export.completeness.as_deref(), Some("open"));
+    assert!(export.allow_empty);
+    assert_eq!(export.target.as_deref(), Some(workspace.root()));
+    assert!(!export.output.exists());
+
+    let scope_effects = app
+        .reduce_command_effects(&ShellCommand::Workspace(WorkspaceCommand::ScopeInit))
+        .expect("workspace scope init should be effect-routed");
+    let scope = workspace_scope_init_effect(&scope_effects).expect("scope init effect");
+
+    assert_eq!(scope.target.as_deref(), Some(workspace.root()));
+    assert!(!temp.path().join(".kuzushi/scope.toml").exists());
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EffectKind {
+    ApplyReviewedPatch,
+    ApplyThreatPatch,
+    Agent,
+    Cancel,
+    PersistCommandHistory,
+    PersistOptions,
+    Planner,
+    Quit,
+    RecordReviewDecision,
+    RunTool,
+    Scan,
+    Threat,
+    WorkspaceExport,
+    WorkspaceScope,
+}
+
+fn command_effect_kind(command: ShellCommand) -> Option<EffectKind> {
+    let mut config = V2Config::default();
+    config.model = Some("openai:gpt-5.5".to_string());
+    let mut app = ShellApp::new(config, None);
+    let effect = app.reduce_command_effects(&command)?.into_iter().next()?;
+    Some(match effect {
+        ShellEffect::ApplyReviewedPatch(_) => EffectKind::ApplyReviewedPatch,
+        ShellEffect::ApplyThreatPatch(_) => EffectKind::ApplyThreatPatch,
+        ShellEffect::CancelActiveJobs => EffectKind::Cancel,
+        ShellEffect::DispatchAgent(_) => EffectKind::Agent,
+        ShellEffect::DispatchRunTool(_) => EffectKind::RunTool,
+        ShellEffect::PersistCommandHistory => EffectKind::PersistCommandHistory,
+        ShellEffect::PersistOptions(_) => EffectKind::PersistOptions,
+        ShellEffect::Quit => EffectKind::Quit,
+        ShellEffect::RecordReviewDecision(_) => EffectKind::RecordReviewDecision,
+        ShellEffect::StartPlanner(_) => EffectKind::Planner,
+        ShellEffect::StartScan(_) => EffectKind::Scan,
+        ShellEffect::StartThreat(_) => EffectKind::Threat,
+        ShellEffect::WorkspaceExportFindings(_) => EffectKind::WorkspaceExport,
+        ShellEffect::WorkspaceScopeInit(_) => EffectKind::WorkspaceScope,
+    })
+}
+
+fn persist_option_scope(effects: &[ShellEffect]) -> Option<OptionScope> {
+    effects.iter().find_map(|effect| match effect {
+        ShellEffect::PersistOptions(scope) => Some(*scope),
+        _ => None,
+    })
+}
+
+fn has_history_persist_effect(effects: &[ShellEffect]) -> bool {
+    effects
+        .iter()
+        .any(|effect| matches!(effect, ShellEffect::PersistCommandHistory))
+}
+
+fn run_tool_launch(effects: &[ShellEffect]) -> Option<&RunToolLaunch> {
+    effects.iter().find_map(|effect| match effect {
+        ShellEffect::DispatchRunTool(launch) => Some(launch),
+        _ => None,
+    })
+}
+
+fn reviewed_patch_apply(effects: &[ShellEffect]) -> Option<&ReviewedPatchApply> {
+    effects.iter().find_map(|effect| match effect {
+        ShellEffect::ApplyReviewedPatch(apply) => Some(apply),
+        _ => None,
+    })
+}
+
+fn threat_patch_apply(effects: &[ShellEffect]) -> Option<&ThreatPatchApply> {
+    effects.iter().find_map(|effect| match effect {
+        ShellEffect::ApplyThreatPatch(apply) => Some(apply),
+        _ => None,
+    })
+}
+
+fn review_decision_apply(effects: &[ShellEffect]) -> Option<&ReviewDecisionApply> {
+    effects.iter().find_map(|effect| match effect {
+        ShellEffect::RecordReviewDecision(apply) => Some(apply),
+        _ => None,
+    })
+}
+
+fn workspace_export_effect(effects: &[ShellEffect]) -> Option<&WorkspaceExportFindings> {
+    effects.iter().find_map(|effect| match effect {
+        ShellEffect::WorkspaceExportFindings(export) => Some(export),
+        _ => None,
+    })
+}
+
+fn workspace_scope_init_effect(effects: &[ShellEffect]) -> Option<&WorkspaceScopeInit> {
+    effects.iter().find_map(|effect| match effect {
+        ShellEffect::WorkspaceScopeInit(init) => Some(init),
+        _ => None,
+    })
+}
+
+fn demo_patch_diff() -> &'static str {
+    "diff --git a/demo.txt b/demo.txt\n\
+     --- a/demo.txt\n\
+     +++ b/demo.txt\n\
+     @@ -1 +1 @@\n\
+     -before\n\
+     +after\n"
+}
+
+#[test]
 fn tools_command_applies_filter() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.handle_command(ShellCommand::Tools(Some("semgrep".to_string())));
 
     assert_eq!(app.shell_view, ShellView::Tools);
-    assert_eq!(app.tools_filter.as_deref(), Some("semgrep"));
-    assert_eq!(app.tools_scroll, 0);
+    assert_eq!(app.tools_route.filter(), Some("semgrep"));
+    assert_eq!(app.tools_route.scroll(), 0);
     assert!(app
         .log
         .iter()
@@ -1188,7 +1849,7 @@ fn findings_command_loads_store_rows() {
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     store
-        .insert_scan_run("run-1", workspace.root(), "completed")
+        .record_run_started("run-1", workspace.root(), "completed")
         .unwrap();
     let finding = Finding::new_semgrep(
         "demo.rule",
@@ -1215,7 +1876,7 @@ fn open_command_accepts_deterministic_finding_alias() {
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     store
-        .insert_scan_run("run-1", workspace.root(), "completed")
+        .record_run_started("run-1", workspace.root(), "completed")
         .unwrap();
     let finding = Finding::new_semgrep(
         "demo.rule",
@@ -1247,7 +1908,7 @@ fn open_command_resolves_alias_from_stable_sorted_mapping() {
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     store
-        .insert_scan_run("run-1", workspace.root(), "completed")
+        .record_run_started("run-1", workspace.root(), "completed")
         .unwrap();
     let mut stable_first = make_finding(Severity::High, "aaaa1111", "stable first");
     let stable_later = make_finding(Severity::High, "zzzz1111", "stored later");
@@ -1273,7 +1934,7 @@ fn scan_completion_logs_same_stable_alias_used_by_findings() {
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     store
-        .insert_scan_run("run-1", workspace.root(), "completed")
+        .record_run_started("run-1", workspace.root(), "completed")
         .unwrap();
     let stable_first = make_finding(Severity::High, "aaaa1111", "stable first");
     let stored_later = make_finding(Severity::High, "zzzz1111", "stored later");
@@ -1520,6 +2181,42 @@ fn strategy_approve_command_updates_persisted_queue() {
 }
 
 #[test]
+fn strategy_fire_runs_next_approved_runnable_proposal() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let mut proposal = kuzushi_core::StrategyProposal::new(
+        kuzushi_core::StrategyPhase::Review,
+        "show workspace status",
+        "cheap readiness check",
+    )
+    .with_tool("workspace:status", Some(serde_json::json!({})))
+    .with_preflight(kuzushi_core::StrategyPreflight::ready())
+    .with_estimates(
+        Some(0.0),
+        Some("instant".to_string()),
+        kuzushi_core::StrategyResourceRisk::Low,
+    );
+    proposal.id = "review-workspace-status".to_string();
+    proposal.status = kuzushi_core::StrategyProposalStatus::Approved;
+    kuzushi_core::append_strategy_proposal(&workspace, &proposal).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.handle_command(parse_command("strategy fire"));
+
+    let queue = kuzushi_core::load_strategy_queue(&workspace).unwrap();
+    assert_eq!(
+        queue[0].status,
+        kuzushi_core::StrategyProposalStatus::Running
+    );
+    assert_eq!(app.tool_running.as_deref(), Some("workspace:status"));
+    assert_eq!(app.shell_view, ShellView::Activity);
+    assert!(app.log.iter().any(|line| line.prefix == "strategy"
+        && line
+            .body
+            .contains("firing review-workspace-status via workspace:status")));
+}
+
+#[test]
 fn strategy_correct_command_records_lineage_and_updates_queue() {
     let tmp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
@@ -1568,7 +2265,7 @@ fn workspace_export_findings_to_temp_path() {
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     store
-        .insert_scan_run("run-1", workspace.root(), "completed")
+        .record_run_started("run-1", workspace.root(), "completed")
         .unwrap();
     store
         .insert_finding(
@@ -1590,6 +2287,8 @@ fn workspace_export_findings_to_temp_path() {
     app.handle_command(ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
         output: output.clone(),
         format: None,
+        completeness: None,
+        allow_empty: false,
     }));
 
     assert_eq!(app.shell_view, ShellView::Workspace);
@@ -1608,6 +2307,313 @@ fn workspace_export_findings_to_temp_path() {
 }
 
 #[test]
+fn workspace_export_honors_completeness_filter() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    store
+        .record_run_started("run-1", workspace.root(), "completed")
+        .unwrap();
+    let confirmed_id = store
+        .insert_finding(
+            "run-1",
+            &Finding::new_tool(
+                "fixture",
+                "fixture/confirmed",
+                "src/app.ts",
+                7,
+                None,
+                Severity::High,
+                "confirmed finding",
+            ),
+        )
+        .unwrap();
+    store
+        .insert_finding(
+            "run-1",
+            &Finding::new_tool(
+                "fixture",
+                "fixture/open",
+                "src/app.ts",
+                17,
+                None,
+                Severity::Medium,
+                "open finding",
+            ),
+        )
+        .unwrap();
+    store
+        .save_triage(
+            confirmed_id,
+            &TriageOutcome {
+                verdict: TriageVerdict::TruePositive,
+                confidence: 0.92,
+                rationale: "operator confirmed".to_string(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    let output = tmp.path().join("open-findings.json");
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.handle_command(ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+        output: output.clone(),
+        format: Some("json".to_string()),
+        completeness: Some("open".to_string()),
+        allow_empty: false,
+    }));
+
+    let exported: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
+    assert_eq!(exported["metadata"]["completeness"], "open");
+    assert_eq!(exported["metadata"]["includedCount"], 1);
+    assert_eq!(exported["metadata"]["totalCount"], 2);
+    assert_eq!(exported["findings"][0]["ruleId"], "fixture/open");
+    assert!(app
+        .log
+        .iter()
+        .any(|line| { line.prefix == "export" && line.body.contains("completeness:open") }));
+}
+
+#[test]
+fn refresh_findings_loads_review_decisions_without_mutating_triage() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    store
+        .record_run_started("run-1", workspace.root(), "completed")
+        .unwrap();
+    let finding_id = store
+        .insert_finding(
+            "run-1",
+            &Finding::new_tool(
+                "fixture",
+                "fixture/suppressed",
+                "src/app.ts",
+                7,
+                None,
+                Severity::High,
+                "suppressed finding",
+            ),
+        )
+        .unwrap();
+    store
+        .append_user_review_decision(
+            finding_id,
+            &kuzushi_core::findings::ReviewDecision {
+                verdict: kuzushi_core::findings::ReviewDecisionVerdict::Suppressed,
+                author: kuzushi_core::findings::TriageAuthor::Human,
+                confidence: 1.0,
+                rationale: "suppressed by approved review policy".to_string(),
+            },
+        )
+        .unwrap();
+    drop(store);
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.refresh_findings(false);
+
+    assert_eq!(app.findings.len(), 1);
+    assert!(
+        app.findings[0].triage.is_none(),
+        "review decisions must not be projected into scanner triage"
+    );
+    assert_eq!(app.review_decisions.len(), 1);
+    assert_eq!(
+        app.review_decisions[0].decision.verdict,
+        kuzushi_core::findings::ReviewDecisionVerdict::Suppressed
+    );
+}
+
+#[test]
+fn review_decision_command_saves_and_explains_filter_movement() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    store
+        .record_run_started("run-1", workspace.root(), "completed")
+        .unwrap();
+    let finding_id = store
+        .insert_finding(
+            "run-1",
+            &Finding::new_tool(
+                "fixture",
+                "fixture/open",
+                "src/app.ts",
+                7,
+                None,
+                Severity::High,
+                "open finding",
+            ),
+        )
+        .unwrap();
+    drop(store);
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.handle_command(ShellCommand::FindingsFilter(
+        "completeness:open".to_string(),
+    ));
+
+    app.handle_command(ShellCommand::ReviewDecision(
+        ReviewDecisionCommand::Record {
+            verdict: "suppressed".to_string(),
+            reason: "reviewed under approved suppression policy".to_string(),
+        },
+    ));
+
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    let latest = store
+        .latest_review_decision(finding_id)
+        .unwrap()
+        .expect("saved review decision");
+    assert_eq!(
+        latest.decision.verdict,
+        kuzushi_core::findings::ReviewDecisionVerdict::Suppressed
+    );
+    assert_eq!(latest.triage_verdict, None);
+    assert_eq!(store.list_findings(10).unwrap()[0].triage, None);
+    assert_eq!(
+        app.active_findings_filter.as_deref(),
+        Some("completeness:open")
+    );
+    assert!(app.findings.is_empty());
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "review" && line.body.contains("decision saved; will carry forward")
+    }));
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "review"
+            && line
+                .body
+                .contains("row moved because the active filter excludes it")
+    }));
+}
+
+#[test]
+fn review_decision_command_rejects_stale_workbench_watermark() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    store
+        .record_run_started("run-1", workspace.root(), "completed")
+        .unwrap();
+    let finding_id = store
+        .insert_finding(
+            "run-1",
+            &Finding::new_tool(
+                "fixture",
+                "fixture/open",
+                "src/app.ts",
+                7,
+                None,
+                Severity::High,
+                "open finding",
+            ),
+        )
+        .unwrap();
+    drop(store);
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.handle_command(ShellCommand::Findings);
+    let stable_fp = app.findings[0]
+        .identity_id
+        .clone()
+        .expect("stored finding should have a v3 stable identity");
+    let read_watermark = kuzushi_core::storage_v3::ProjectionDb::open(workspace.findings_db_path())
+        .unwrap()
+        .meta()
+        .unwrap()
+        .applied_seq;
+    app.workbench_review.replace_frame(
+        vec![review_row_for_stale_test(&stable_fp)],
+        read_watermark,
+        1,
+    );
+
+    app.handle_command(ShellCommand::ReviewDecision(
+        ReviewDecisionCommand::Record {
+            verdict: "confirmed".to_string(),
+            reason: "first read of this finding".to_string(),
+        },
+    ));
+    app.handle_command(ShellCommand::ReviewDecision(
+        ReviewDecisionCommand::Record {
+            verdict: "suppressed".to_string(),
+            reason: "stale second read".to_string(),
+        },
+    ));
+
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    assert_eq!(store.list_review_decisions(finding_id).unwrap().len(), 1);
+    assert!(matches!(
+        app.workbench_review.mode,
+        ReviewMode::Conflict { .. }
+    ));
+}
+
+fn review_row_for_stale_test(stable_fp: &str) -> ReviewRow {
+    ReviewRow {
+        stable_fp: stable_fp.to_string(),
+        observation_hash: "obs3_stale".to_string(),
+        snapshot_hash: "snap3_stale".to_string(),
+        blob_hash: None,
+        byte_span: None,
+        display_path: "src/app.ts".to_string(),
+        display_line: 7,
+        code_snippet: Vec::new(),
+        trace_hops: Vec::new(),
+        attestations: Vec::new(),
+        verdict: "unreviewed".to_string(),
+        confidence: 50,
+        justification: None,
+        provenance_refs: Vec::new(),
+        projection_seq: 0,
+    }
+}
+
+#[test]
+fn review_decision_command_rejects_empty_reason_without_write() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    store
+        .record_run_started("run-1", workspace.root(), "completed")
+        .unwrap();
+    let finding_id = store
+        .insert_finding(
+            "run-1",
+            &Finding::new_tool(
+                "fixture",
+                "fixture/open",
+                "src/app.ts",
+                7,
+                None,
+                Severity::High,
+                "open finding",
+            ),
+        )
+        .unwrap();
+    drop(store);
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.handle_command(ShellCommand::FindingsFilter(
+        "completeness:open".to_string(),
+    ));
+
+    app.handle_command(ShellCommand::ReviewDecision(
+        ReviewDecisionCommand::Record {
+            verdict: "suppressed".to_string(),
+            reason: "   ".to_string(),
+        },
+    ));
+
+    let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+    assert!(store.latest_review_decision(finding_id).unwrap().is_none());
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "review" && line.body.contains("review decision reason cannot be empty")
+    }));
+    assert!(!app.log.iter().any(|line| {
+        line.prefix == "review" && line.body.contains("decision saved; will carry forward")
+    }));
+}
+
+#[test]
 fn workspace_export_rejects_unsupported_formats_actionably() {
     let tmp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
@@ -1616,6 +2622,8 @@ fn workspace_export_rejects_unsupported_formats_actionably() {
     app.handle_command(ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
         output: tmp.path().join("findings.xml"),
         format: None,
+        completeness: None,
+        allow_empty: false,
     }));
 
     let error = app
@@ -1631,6 +2639,45 @@ fn workspace_export_rejects_unsupported_formats_actionably() {
 }
 
 #[test]
+fn workspace_export_requires_allow_empty_for_empty_selection() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    FindingStore::open(workspace.findings_db_path()).unwrap();
+    let output = workspace.root().join("exports/empty.json");
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.handle_command(ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+        output: output.clone(),
+        format: Some("json".to_string()),
+        completeness: None,
+        allow_empty: false,
+    }));
+
+    let error = app
+        .log
+        .iter()
+        .rev()
+        .find(|line| line.prefix == "error")
+        .map(|line| line.body.as_str())
+        .unwrap_or_default();
+    assert!(error.contains("selected 0 findings"));
+    assert!(error.contains("--allow-empty"));
+    assert!(!workspace.root().join("exports").exists());
+
+    app.handle_command(ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+        output: output.clone(),
+        format: Some("json".to_string()),
+        completeness: None,
+        allow_empty: true,
+    }));
+
+    let exported: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(output).unwrap()).unwrap();
+    assert_eq!(exported["count"], serde_json::json!(0));
+    assert_eq!(exported["metadata"]["includedCount"], 0);
+}
+
+#[test]
 fn workspace_export_accepts_explicit_markdown_bundle_format() {
     let tmp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
@@ -1642,6 +2689,8 @@ fn workspace_export_accepts_explicit_markdown_bundle_format() {
     app.handle_command(ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
         output: output.clone(),
         format: Some("markdown-bundle".to_string()),
+        completeness: None,
+        allow_empty: false,
     }));
 
     assert_eq!(
@@ -1667,6 +2716,8 @@ fn workspace_export_extensionless_path_defaults_to_markdown_bundle() {
     app.handle_command(ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
         output: output.clone(),
         format: None,
+        completeness: None,
+        allow_empty: false,
     }));
 
     assert!(output.join("README.md").is_file());
@@ -1772,7 +2823,9 @@ fn explicit_run_input_overrides_stored_tool_options() {
 
 #[test]
 fn scan_path_reads_stored_sast_options() {
-    let mut app = ShellApp::new(V2Config::default(), None);
+    let temp = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.option_store.set_value(
         OptionScope::Session,
         OptionTarget::Tool("sast:scan".to_string()),
@@ -1788,7 +2841,9 @@ fn scan_path_reads_stored_sast_options() {
 
 #[test]
 fn scan_path_builds_canonical_sast_tool_input_from_option_store() {
-    let mut app = ShellApp::new(V2Config::default(), None);
+    let temp = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.option_store.set_value(
         OptionScope::Session,
         OptionTarget::Tool("sast:scan".to_string()),
@@ -1913,13 +2968,13 @@ fn ux_empty_and_error_states_name_next_real_commands() {
     assert!(unknown_module.contains("Closest: sast"));
     assert!(unknown_module.contains("Next: modules or use <module-id>"));
 
+    let error_count = app.log.iter().filter(|line| line.prefix == "error").count();
     app.handle_command(ShellCommand::Use("recon".to_string()));
-    assert_ne!(app.focused_module.as_deref(), Some("recon"));
-    assert!(app
-        .log
-        .iter()
-        .rev()
-        .any(|line| { line.prefix == "error" && line.body.contains("unknown module \"recon\"") }));
+    assert_eq!(app.focused_module.as_deref(), Some("recon"));
+    assert_eq!(
+        app.log.iter().filter(|line| line.prefix == "error").count(),
+        error_count
+    );
 
     app.handle_command(ShellCommand::RunTool {
         tool: Some("missing:tool".to_string()),
@@ -2011,7 +3066,7 @@ fn kb_attach_detach_and_reparse_store_under_v2() {
     assert_eq!(app.kb_view.module_id, "threat-model");
     assert!(workspace
         .root()
-        .join(".kuzushi/v2/attachments.json")
+        .join(".kuzushi/v3/attachments.json")
         .exists());
     let record = app
         .kb_view
@@ -2747,11 +3802,15 @@ fn auth_picker_navigation_keys_work_with_text_in_prompt() {
     // modal it now captures navigation regardless of prompt contents.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::AuthMethodPicker("openai".to_string());
-    app.auth_picker_cursor = 0;
+    app.auth_picker_route.open();
     app.input = "leftover".to_string();
 
     app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
-    assert_eq!(app.auth_picker_cursor, 1, "j must move the picker cursor");
+    assert_eq!(
+        app.auth_picker_route.cursor(),
+        1,
+        "j must move the picker cursor"
+    );
     assert_eq!(app.input, "leftover", "navigation must not edit the prompt");
 }
 
@@ -2765,7 +3824,7 @@ fn auth_picker_swallows_typed_characters() {
 
     app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::empty()));
     assert!(app.input.is_empty(), "picker must swallow typed characters");
-    assert_eq!(app.auth_key_draft, "x");
+    assert_eq!(app.auth_picker_route.key_draft(), "x");
 }
 
 #[test]
@@ -2780,7 +3839,7 @@ fn auth_picker_swallows_shifted_typed_characters() {
         app.input.is_empty(),
         "picker must swallow shifted printable characters"
     );
-    assert_eq!(app.auth_key_draft, "H");
+    assert_eq!(app.auth_picker_route.key_draft(), "H");
 }
 
 #[test]
@@ -2788,17 +3847,17 @@ fn auth_picker_accepts_pasted_api_key_without_relaunch_or_logging_secret() {
     let _guard = EnvVarGuard::unset("OPENAI_API_KEY");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::AuthMethodPicker("openai".to_string());
-    app.auth_picker_cursor = 0;
+    app.auth_picker_route.open();
 
     app.handle_paste("sk-test-secret");
-    assert_eq!(app.auth_key_draft, "sk-test-secret");
+    assert_eq!(app.auth_picker_route.key_draft(), "sk-test-secret");
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
     assert_eq!(
         std::env::var("OPENAI_API_KEY").as_deref(),
         Ok("sk-test-secret")
     );
-    assert!(app.auth_key_draft.is_empty());
+    assert!(app.auth_picker_route.key_draft().is_empty());
     assert_eq!(app.config.model.as_deref(), Some("openai:gpt-5.5"));
     assert!(app.log.iter().any(|line| {
         line.prefix == "onboarding"
@@ -2855,21 +3914,21 @@ fn picker_footer_omits_tab_complete_hint() {
 fn picker_colon_focuses_prompt_and_esc_returns_to_picker() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::PlanningPicker;
-    app.workflow_phase = Some(WorkflowPhase::Map);
+    app.engagement.set_phase(WorkflowPhase::Map);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
     assert!(app.input.is_empty(), "list-focused picker swallows letters");
 
     app.handle_key(KeyEvent::new(KeyCode::Char(':'), KeyModifiers::empty()));
-    assert_eq!(app.picker_focus, PickerFocus::Prompt);
+    assert_eq!(app.planning_picker_route.focus(), PickerFocus::Prompt);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
     assert_eq!(app.input, "j", "prompt-focused picker accepts typing");
 
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
-    assert_eq!(app.picker_focus, PickerFocus::List);
+    assert_eq!(app.planning_picker_route.focus(), PickerFocus::List);
     assert_eq!(app.shell_view, ShellView::PlanningPicker);
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Map));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
     assert!(
         app.input.is_empty(),
         "leaving prompt focus clears hidden draft"
@@ -3095,8 +4154,8 @@ fn session_history_clear_load_resume_pause_and_story_are_explicit() {
 fn replay_latest_resolves_latest_run_pointer() {
     let tmp = tempfile::tempdir().unwrap();
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
-    fs::create_dir_all(tmp.path().join(".kuzushi")).unwrap();
-    fs::write(tmp.path().join(".kuzushi/latest"), "run-latest\n").unwrap();
+    fs::create_dir_all(tmp.path().join(".kuzushi/v3")).unwrap();
+    fs::write(tmp.path().join(".kuzushi/v3/latest"), "run-latest\n").unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
 
     app.handle_command(parse_command("replay latest"));
@@ -3133,6 +4192,7 @@ fn ask_dispatches_agent_question_through_explicit_runtime() {
         base_url: None,
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
+        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
         anthropic_oauth: None,
     };
     let mut app = ShellApp::new(config, None);
@@ -3483,6 +4543,7 @@ fn run_command_dispatches_agentic_sast_through_langgraph_runtime_bridge_and_pers
         base_url: None,
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
+        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
         anthropic_oauth: None,
     };
 
@@ -3525,6 +4586,7 @@ fn run_command_dispatches_variant_hunt_through_langgraph_runtime_bridge_and_pers
         base_url: None,
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
+        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
         anthropic_oauth: None,
     };
 
@@ -3567,6 +4629,7 @@ fn run_command_dispatches_ndiff_hunt_through_langgraph_runtime_bridge_and_persis
         base_url: None,
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
+        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
         anthropic_oauth: None,
     };
 
@@ -3609,32 +4672,33 @@ fn run_command_dispatches_taint_iris_through_langgraph_runtime_bridge_and_persis
         base_url: None,
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
+        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
         anthropic_oauth: None,
     };
 
     let mut app = ShellApp::new(config, Some(&workspace));
     app.trusted_workflow_auto_accept = true;
-    app.handle_command(ShellCommand::Use("taint-iris".to_string()));
     app.handle_command(ShellCommand::RunTool {
-        tool: None,
-        input: Some(r#"{"maxFindings":5}"#.to_string()),
+        tool: Some("taint-iris:hunt".to_string()),
+        input: Some(r#"{"maxFindings":5,"mcps":false}"#.to_string()),
     });
     drain_chain_with_auto_reuse(&mut app);
 
-    // Auto-open lands on the attack-path page once the taint flow is generated.
-    assert_eq!(
-        app.shell_view,
-        ShellView::Scene(crate::scene3d::VizPage::AttackPath)
-    );
-    assert!(app
-        .log
-        .iter()
-        .any(|line| { line.prefix == "result" && line.body.contains("taint-iris: 1 finding") }));
+    // The compatibility path now runs the taint-iris-next report shape. It
+    // persists findings, but emits no structured `data.flows[]`; the AttackPath
+    // page correctly stays closed rather than showing an empty visualization.
+    assert_eq!(app.shell_view, ShellView::Activity);
+    assert!(app.taint_flow.is_none());
+    assert!(app.log.iter().any(|line| {
+        line.prefix == "result"
+            && line.body.contains("Taint IRIS Next")
+            && line.body.contains("findings: 1")
+    }));
 
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     let findings = store.list_findings(10).unwrap();
     assert_eq!(findings.len(), 1);
-    assert_eq!(findings[0].tool, "taint-iris");
+    assert_eq!(findings[0].tool, "taint-iris-next");
 }
 
 #[cfg(unix)]
@@ -3672,6 +4736,7 @@ fn run_command_dispatches_legacy_taint_iris_next_hunt_through_langgraph_runtime_
         base_url: None,
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
+        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
         anthropic_oauth: None,
     };
 
@@ -3727,6 +4792,7 @@ fn run_command_dispatches_carlini_threat_hunt_through_langgraph_runtime_bridge_a
         base_url: None,
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
+        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
         anthropic_oauth: None,
     };
 
@@ -3767,6 +4833,7 @@ fn run_command_dispatches_systems_hunt_through_langgraph_runtime_bridge_and_pers
         base_url: None,
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
+        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
         anthropic_oauth: None,
     };
 
@@ -3795,7 +4862,7 @@ fn run_command_dispatches_findings_filters_through_registry() {
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     store
-        .insert_scan_run("run-1", workspace.root(), "completed")
+        .record_run_started("run-1", workspace.root(), "completed")
         .unwrap();
     let finding = Finding::new_semgrep(
         "demo.sql",
@@ -3839,10 +4906,10 @@ fn findings_filter_command_loads_filtered_rows_into_workbench() {
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     store
-        .insert_scan_run("scan-a", workspace.root(), "completed")
+        .record_run_started("scan-a", workspace.root(), "completed")
         .unwrap();
     store
-        .insert_scan_run("scan-b", workspace.root(), "completed")
+        .record_run_started("scan-b", workspace.root(), "completed")
         .unwrap();
     store
         .insert_finding(
@@ -3941,10 +5008,10 @@ fn workspace_with_revision_findings() -> (tempfile::TempDir, WorkspaceTarget) {
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     store
-        .insert_scan_run("scan-a", workspace.root(), "completed")
+        .record_run_started("scan-a", workspace.root(), "completed")
         .unwrap();
     store
-        .insert_scan_run("scan-b", workspace.root(), "completed")
+        .record_run_started("scan-b", workspace.root(), "completed")
         .unwrap();
     store
         .insert_finding(
@@ -4012,7 +5079,7 @@ fn run_command_dispatches_triage_through_langgraph_runtime_bridge_and_persists()
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     store
-        .insert_scan_run("run-1", workspace.root(), "completed")
+        .record_run_started("run-1", workspace.root(), "completed")
         .unwrap();
     let finding = Finding::new_semgrep(
         "demo.sql",
@@ -4032,6 +5099,7 @@ fn run_command_dispatches_triage_through_langgraph_runtime_bridge_and_persists()
         base_url: None,
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
+        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
         anthropic_oauth: None,
     };
 
@@ -4067,7 +5135,7 @@ fn run_command_dispatches_verify_through_langgraph_runtime_bridge() {
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     store
-        .insert_scan_run("run-1", workspace.root(), "completed")
+        .record_run_started("run-1", workspace.root(), "completed")
         .unwrap();
     let finding = Finding::new_semgrep(
         "demo.sql",
@@ -4098,6 +5166,7 @@ fn run_command_dispatches_verify_through_langgraph_runtime_bridge() {
         base_url: None,
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
+        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
         anthropic_oauth: None,
     };
 
@@ -4117,7 +5186,7 @@ fn run_command_dispatches_verify_through_langgraph_runtime_bridge() {
     assert!(app
         .log
         .iter()
-        .any(|line| line.prefix == "result" && line.body.contains("curl POST /admin")));
+        .any(|line| line.prefix == "result" && line.body.contains("fixture marker path")));
 }
 
 #[cfg(unix)]
@@ -4131,7 +5200,7 @@ fn run_command_dispatches_patch_through_langgraph_runtime_bridge_and_persists() 
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     store
-        .insert_scan_run("run-1", workspace.root(), "completed")
+        .record_run_started("run-1", workspace.root(), "completed")
         .unwrap();
     let finding = Finding::new_semgrep(
         "demo.sql",
@@ -4162,6 +5231,7 @@ fn run_command_dispatches_patch_through_langgraph_runtime_bridge_and_persists() 
         base_url: None,
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
+        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
         anthropic_oauth: None,
     };
 
@@ -4209,6 +5279,7 @@ fn run_command_dispatches_threat_model_build_through_langgraph_runtime_bridge() 
         base_url: None,
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
+        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
         anthropic_oauth: None,
     };
 
@@ -4248,6 +5319,7 @@ fn run_command_dispatches_x_ray_run_through_langgraph_runtime_bridge() {
         base_url: None,
         thinking_level: None,
         langgraph_bridge_command: Some(vec![bridge.display().to_string()]),
+        worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
         anthropic_oauth: None,
     };
 
@@ -4274,7 +5346,7 @@ fn open_command_selects_finding_by_prefix() {
     let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     store
-        .insert_scan_run("run-1", workspace.root(), "completed")
+        .record_run_started("run-1", workspace.root(), "completed")
         .unwrap();
     let finding = Finding::new_semgrep(
         "demo.rule",
@@ -4511,15 +5583,52 @@ fn map_phase_attach_row_opens_file_picker() {
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
 
     app.open_phase_picker(WorkflowPhase::Map);
-    app.planning_cursor = app
-        .planning_tasks
+    let cursor = app
+        .planning_picker_route
+        .tasks()
         .iter()
         .position(|row| row.id == PlanningTaskId::AttachFiles)
         .expect("attach files row");
+    app.planning_picker_route.set_cursor(cursor);
+    app.planning_picker_route
+        .selected_mut()
+        .insert(PlanningTaskId::AttachFiles);
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
     assert_eq!(app.shell_view, ShellView::FilePicker);
-    assert!(app.file_picker_files.contains(&"README.md".to_string()));
+    assert!(app
+        .file_picker_route
+        .files()
+        .contains(&"README.md".to_string()));
+}
+
+#[test]
+fn skipped_map_phase_attach_row_does_not_intercept_enter() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::write(temp.path().join("README.md"), "readme").unwrap();
+    let workspace = kuzushi_core::WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+    app.open_phase_picker(WorkflowPhase::Map);
+    let cursor = app
+        .planning_picker_route
+        .tasks()
+        .iter()
+        .position(|row| row.id == PlanningTaskId::AttachFiles)
+        .expect("attach files row");
+    app.planning_picker_route.set_cursor(cursor);
+    app.planning_picker_route.selected_mut().clear();
+    app.planning_picker_route
+        .selected_mut()
+        .insert(PlanningTaskId::GatherRepoContext);
+    app.planning_picker_route
+        .selected_mut()
+        .remove(&PlanningTaskId::AttachFiles);
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.engagement.running_tool(), Some("context:build"));
+    drain_tool(&mut app);
 }
 
 #[test]
@@ -4573,7 +5682,7 @@ fn fresh_target_can_auto_open_the_phase_picker() {
     app.open_fresh_planner_or_workbench();
 
     assert_eq!(app.shell_view, ShellView::PlanningPicker);
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Map));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
 }
 
 #[test]
@@ -4756,7 +5865,7 @@ fn command_history_round_trips_to_disk_per_workspace() {
     app.submit_line("modules");
     app.submit_line("tools");
 
-    let path = tmp.path().join(".kuzushi/v2/shell-history.txt");
+    let path = tmp.path().join(".kuzushi/v3/shell-history.txt");
     assert!(path.exists(), "history file should be written");
     let contents = std::fs::read_to_string(&path).unwrap();
     assert!(contents.contains("modules") && contents.contains("tools"));
@@ -4770,7 +5879,7 @@ fn command_history_round_trips_to_disk_per_workspace() {
 #[test]
 fn history_load_caps_at_limit() {
     let tmp = tempfile::tempdir().unwrap();
-    let path = tmp.path().join(".kuzushi/v2/shell-history.txt");
+    let path = tmp.path().join(".kuzushi/v3/shell-history.txt");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let lines: Vec<String> = (0..(COMMAND_HISTORY_CAP + 50))
         .map(|i| format!("cmd-{i}"))
@@ -4849,19 +5958,19 @@ fn next_command_opens_phase_picker_at_derived_phase() {
 
     app.handle_command(ShellCommand::Next);
     assert_eq!(app.shell_view, ShellView::PlanningPicker);
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Map));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
 
     std::fs::create_dir_all(dir.path().join(".kuzushi")).expect("kuzushi dir");
     std::fs::write(dir.path().join(".kuzushi/context-snapshot.json"), "{}")
         .expect("context snapshot");
-    app.workflow_phase = None;
+    app.engagement.clear_phase();
     app.handle_command(ShellCommand::Next);
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Hunt));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Hunt));
 
     app.findings = vec![make_finding(Severity::High, "fp-journey", "Unconfirmed")];
-    app.workflow_phase = None;
+    app.engagement.clear_phase();
     app.handle_command(ShellCommand::Next);
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Confirm));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Confirm));
 
     app.findings[0].triage = Some(TriageOutcome {
         verdict: TriageVerdict::TruePositive,
@@ -4869,9 +5978,9 @@ fn next_command_opens_phase_picker_at_derived_phase() {
         rationale: "confirmed".to_string(),
         cost_usd: 0.0,
     });
-    app.workflow_phase = None;
+    app.engagement.clear_phase();
     app.handle_command(ShellCommand::Next);
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Fix));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Fix));
 }
 
 #[test]
@@ -4883,9 +5992,10 @@ fn phase_command_opens_requested_phase_picker() {
     app.handle_command(ShellCommand::Phase(WorkflowPhase::Confirm));
 
     assert_eq!(app.shell_view, ShellView::PlanningPicker);
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Confirm));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Confirm));
     assert!(app
-        .planning_tasks
+        .planning_picker_route
+        .tasks()
         .iter()
         .all(|row| row.id.phase() == WorkflowPhase::Confirm));
 }
@@ -4898,12 +6008,12 @@ fn phase_stop_after_config_blocks_later_phase_picker() {
     config.phases.stop_after = Some(kuzushi_core::GuidedPhase::Map);
     let mut app = ShellApp::new(config, Some(&workspace));
     app.shell_view = ShellView::Catalog;
-    app.workflow_phase = None;
+    app.engagement.clear_phase();
 
     app.open_phase_picker(WorkflowPhase::Hunt);
 
     assert_ne!(app.shell_view, ShellView::PlanningPicker);
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Map));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
     assert!(app.log.iter().any(|line| {
         line.prefix == "phase"
             && line
@@ -4920,7 +6030,7 @@ fn planning_phase_navigation_clamps_at_rail_edges() {
     app.open_phase_picker(WorkflowPhase::Map);
 
     app.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::empty()));
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Map));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
     assert!(app
         .log
         .iter()
@@ -4928,7 +6038,7 @@ fn planning_phase_navigation_clamps_at_rail_edges() {
 
     app.open_phase_picker(WorkflowPhase::Fix);
     app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::empty()));
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Fix));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Fix));
     assert!(app
         .log
         .iter()
@@ -4944,12 +6054,12 @@ fn planning_phase_navigation_moves_horizontally_without_running() {
 
     app.handle_key(KeyEvent::new(KeyCode::Char('h'), KeyModifiers::empty()));
     assert_eq!(app.shell_view, ShellView::PlanningPicker);
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Hunt));
-    assert!(app.planning_run_queue.is_empty());
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Hunt));
+    assert!(app.engagement.planning_queues_empty());
 
     app.handle_key(KeyEvent::new(KeyCode::Right, KeyModifiers::empty()));
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Confirm));
-    assert!(app.planning_run_queue.is_empty());
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Confirm));
+    assert!(app.engagement.planning_queues_empty());
 }
 
 #[test]
@@ -4964,7 +6074,7 @@ fn planning_phase_navigation_logs_config_block_instead_of_silent_noop() {
     app.handle_key(KeyEvent::new(KeyCode::Char('l'), KeyModifiers::empty()));
 
     assert_eq!(app.shell_view, ShellView::PlanningPicker);
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Map));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
     assert!(app
         .log
         .iter()
@@ -4981,7 +6091,12 @@ fn hunt_phase_hides_systems_rows_for_plain_source_targets() {
 
     app.open_phase_picker(WorkflowPhase::Hunt);
 
-    let tasks: BTreeSet<PlanningTaskId> = app.planning_tasks.iter().map(|row| row.id).collect();
+    let tasks: BTreeSet<PlanningTaskId> = app
+        .planning_picker_route
+        .tasks()
+        .iter()
+        .map(|row| row.id)
+        .collect();
     assert!(tasks.contains(&PlanningTaskId::ScanAgenticSast));
     assert!(!tasks.contains(&PlanningTaskId::HuntSystems));
     assert!(!tasks.contains(&PlanningTaskId::HuntUseAfterFree));
@@ -4997,7 +6112,12 @@ fn hunt_phase_keeps_systems_hunt_for_rust_but_hides_c_uaf() {
 
     app.open_phase_picker(WorkflowPhase::Hunt);
 
-    let tasks: BTreeSet<PlanningTaskId> = app.planning_tasks.iter().map(|row| row.id).collect();
+    let tasks: BTreeSet<PlanningTaskId> = app
+        .planning_picker_route
+        .tasks()
+        .iter()
+        .map(|row| row.id)
+        .collect();
     assert!(tasks.contains(&PlanningTaskId::HuntSystems));
     assert!(!tasks.contains(&PlanningTaskId::HuntUseAfterFree));
 }
@@ -5016,7 +6136,12 @@ fn hunt_phase_keeps_c_family_specific_hunts_for_cpp_source() {
 
     app.open_phase_picker(WorkflowPhase::Hunt);
 
-    let tasks: BTreeSet<PlanningTaskId> = app.planning_tasks.iter().map(|row| row.id).collect();
+    let tasks: BTreeSet<PlanningTaskId> = app
+        .planning_picker_route
+        .tasks()
+        .iter()
+        .map(|row| row.id)
+        .collect();
     assert!(tasks.contains(&PlanningTaskId::HuntSystems));
     assert!(tasks.contains(&PlanningTaskId::HuntUseAfterFree));
 }
@@ -5030,17 +6155,18 @@ fn target_picker_enter_applies_candidate_and_leaves_the_picker() {
     let submodule_path = dir.path().join("libs/parser");
     std::fs::create_dir_all(&submodule_path).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target_candidates = vec![crate::app::TargetCandidate {
-        path: submodule_path.clone(),
-        label: "libs/parser".to_string(),
-        hint: "git submodule",
-        scope: Some(crate::app::TargetCandidateScope {
-            id: "submodule-libs-parser".to_string(),
-            kind: kuzushi_core::NestedProjectKind::Submodule,
-            rel_path: "libs/parser".to_string(),
-        }),
-    }];
-    app.target_picker_cursor = 0;
+    app.target_picker_route
+        .open(vec![crate::app::TargetCandidate {
+            path: submodule_path.clone(),
+            label: "libs/parser".to_string(),
+            hint: "git submodule",
+            scope: Some(crate::app::TargetCandidateScope {
+                id: "submodule-libs-parser".to_string(),
+                kind: kuzushi_core::NestedProjectKind::Submodule,
+                rel_path: "libs/parser".to_string(),
+            }),
+        }]);
+    app.target_picker_route.set_cursor(0);
     app.shell_view = ShellView::TargetPicker;
 
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
@@ -5056,9 +6182,37 @@ fn target_picker_enter_applies_candidate_and_leaves_the_picker() {
 }
 
 #[test]
+fn target_picker_d_starts_the_offline_fixture() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::TargetPicker;
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::empty()));
+
+    assert!(app.target.is_some(), "demo fixture target should be active");
+    assert_ne!(app.shell_view, ShellView::TargetPicker);
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.body.contains("offline fixture ready")));
+}
+
+#[test]
+fn target_activation_applies_ready_default_model_before_onboarding_continues() {
+    let _openai_key = EnvVarGuard::set("OPENAI_API_KEY", "test-key");
+    let _anthropic_key = EnvVarGuard::unset("ANTHROPIC_API_KEY");
+    let dir = tempfile::tempdir().expect("temp target");
+    let mut app = ShellApp::new(V2Config::default(), None);
+
+    app.handle_target_command(Some(&dir.path().display().to_string()));
+
+    assert!(app.config.model.is_some());
+    assert_ne!(app.shell_view, ShellView::ModelPicker);
+}
+
+#[test]
 fn target_picker_esc_defers_to_workbench_without_a_target() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target_candidates = Vec::new();
+    app.target_picker_route.open(Vec::new());
     app.shell_view = ShellView::TargetPicker;
 
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
@@ -5117,6 +6271,19 @@ fn finished_scan_marks_never_started_activity_tasks_not_run() {
     let skipped = &session.tasks["patch:finding"];
     assert_eq!(skipped.state, DagTaskState::Skipped);
     assert_eq!(skipped.last_label, "not run in this scan");
+}
+
+#[test]
+fn zero_finding_scan_does_not_rewind_confirm_or_fix_phase() {
+    for phase in [WorkflowPhase::Confirm, WorkflowPhase::Fix] {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.engagement.set_phase(phase);
+        app.activity = Some(ActivitySession::new("r-scan"));
+
+        app.apply_scan_finished("r-scan".to_string(), 0);
+
+        assert_eq!(app.engagement.current_phase(), Some(phase));
+    }
 }
 
 #[test]
@@ -5208,6 +6375,12 @@ fn make_finding(severity: Severity, fp: &str, title: &str) -> Finding {
         tool: "test".to_string(),
         ..Finding::default()
     }
+}
+
+fn make_projected_duplicate(severity: Severity, fp: &str, title: &str) -> Finding {
+    let mut finding = make_finding(severity, fp, title);
+    finding.dedup_key = Some("engagement:shared".to_string());
+    finding
 }
 
 fn key_event_for_trigger(trigger: HotkeyTrigger) -> KeyEvent {
@@ -5471,6 +6644,8 @@ fn target_command_switches_target_directory() {
 #[test]
 fn target_command_resumes_onboarding_after_deferred_picker() {
     let _skip_guard = EnvVarGuard::unset("KUZUSHI_SKIP_ONBOARDING");
+    let _openai_key = EnvVarGuard::set("OPENAI_API_KEY", "test-key");
+    let _anthropic_key = EnvVarGuard::unset("ANTHROPIC_API_KEY");
     let temp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Workbench;
@@ -5481,7 +6656,8 @@ fn target_command_resumes_onboarding_after_deferred_picker() {
 
     let canonical = std::fs::canonicalize(temp.path()).unwrap();
     assert_eq!(app.target.as_deref(), Some(canonical.as_path()));
-    assert_eq!(app.shell_view, ShellView::ModelPicker);
+    assert!(app.config.model.is_some());
+    assert_eq!(app.shell_view, ShellView::PlanningPicker);
 }
 
 #[test]
@@ -5583,17 +6759,17 @@ fn vi_cursor_navigates_findings_list() {
     ];
 
     app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
-    assert_eq!(app.findings_cursor, 1);
+    assert_eq!(app.findings_route.cursor(), 1);
     app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
-    assert_eq!(app.findings_cursor, 2);
+    assert_eq!(app.findings_route.cursor(), 2);
     app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
-    assert_eq!(app.findings_cursor, 2, "j should clamp at last row");
+    assert_eq!(app.findings_route.cursor(), 2, "j should clamp at last row");
     app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()));
-    assert_eq!(app.findings_cursor, 1);
+    assert_eq!(app.findings_route.cursor(), 1);
     app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
-    assert_eq!(app.findings_cursor, 0);
+    assert_eq!(app.findings_route.cursor(), 0);
     app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
-    assert_eq!(app.findings_cursor, 2);
+    assert_eq!(app.findings_route.cursor(), 2);
 }
 
 #[test]
@@ -5605,17 +6781,34 @@ fn findings_cursor_follows_selected_fingerprint_in_alias_order() {
         make_finding(Severity::Critical, "fp-critical", "first"),
     ];
     app.selected_finding = Some(selected);
-    app.findings_cursor = 0;
+    app.findings_route.set_cursor(0);
 
     app.sync_findings_cursor_to_selected();
 
-    assert_eq!(app.findings_cursor, 1);
+    assert_eq!(app.findings_route.cursor(), 1);
+}
+
+#[test]
+fn findings_cursor_follows_selected_engagement_key_in_projected_order() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let selected = make_projected_duplicate(Severity::Medium, "fp-duplicate-medium", "selected");
+    app.findings = vec![
+        selected.clone(),
+        make_projected_duplicate(Severity::High, "fp-duplicate-high", "representative"),
+        make_finding(Severity::Low, "fp-distinct-low", "distinct"),
+    ];
+    app.selected_finding = Some(selected);
+    app.findings_route.set_cursor(1);
+
+    app.sync_findings_cursor_to_selected();
+
+    assert_eq!(app.findings_route.cursor(), 0);
 }
 
 #[test]
 fn mouse_wheel_moves_findings_cursor_without_empty_underflow() {
     let mut app = app_with_findings(5);
-    app.findings_cursor = 1;
+    app.findings_route.set_cursor(1);
 
     app.handle_mouse(crossterm::event::MouseEvent {
         kind: crossterm::event::MouseEventKind::ScrollDown,
@@ -5623,7 +6816,7 @@ fn mouse_wheel_moves_findings_cursor_without_empty_underflow() {
         row: 0,
         modifiers: KeyModifiers::empty(),
     });
-    assert_eq!(app.findings_cursor, 2);
+    assert_eq!(app.findings_route.cursor(), 2);
 
     app.handle_mouse(crossterm::event::MouseEvent {
         kind: crossterm::event::MouseEventKind::ScrollUp,
@@ -5631,7 +6824,7 @@ fn mouse_wheel_moves_findings_cursor_without_empty_underflow() {
         row: 0,
         modifiers: KeyModifiers::empty(),
     });
-    assert_eq!(app.findings_cursor, 1);
+    assert_eq!(app.findings_route.cursor(), 1);
 }
 
 #[test]
@@ -5758,18 +6951,18 @@ fn up_arrow_recalls_command_history() {
 #[test]
 fn page_keys_scroll_view_offset() {
     // Help has its own dedicated scroll field — PageDown/PageUp must
-    // advance/retract it so `viewport_lines(..., app.help_scroll)` actually
+    // advance/retract it so `viewport_lines(..., app.help_route.scroll())` actually
     // shows the next page. Other views with their own scroll fields
     // (Tools, History, KnowledgeBase, Catalog when expanded) work the
     // same way; views without dedicated fields fall back to scroll_offset.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Help;
     app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
-    assert_eq!(app.help_scroll, 10);
+    assert_eq!(app.help_route.scroll(), 10);
     app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
-    assert_eq!(app.help_scroll, 20);
+    assert_eq!(app.help_route.scroll(), 20);
     app.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::empty()));
-    assert_eq!(app.help_scroll, 10);
+    assert_eq!(app.help_route.scroll(), 10);
 
     // Views without a dedicated scroll field still use scroll_offset.
     app.shell_view = ShellView::Tune;
@@ -5863,13 +7056,13 @@ fn pgdown_pgup_paginate_findings_cursor() {
         .map(|i| make_finding(Severity::High, &format!("fp-{i}"), "x"))
         .collect();
     app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
-    assert_eq!(app.findings_cursor, 10);
+    assert_eq!(app.findings_route.cursor(), 10);
     app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
-    assert_eq!(app.findings_cursor, 20);
+    assert_eq!(app.findings_route.cursor(), 20);
     app.handle_key(KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()));
-    assert_eq!(app.findings_cursor, 24);
+    assert_eq!(app.findings_route.cursor(), 24);
     app.handle_key(KeyEvent::new(KeyCode::PageUp, KeyModifiers::empty()));
-    assert_eq!(app.findings_cursor, 14);
+    assert_eq!(app.findings_route.cursor(), 14);
 }
 
 #[test]
@@ -5881,7 +7074,7 @@ fn viewport_enter_opens_cursor_finding_from_visible_list() {
         make_finding(Severity::High, "fp-0000", "first"),
         make_finding(Severity::High, "fp-0001", "second"),
     ];
-    app.findings_cursor = 1;
+    app.findings_route.set_cursor(1);
 
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
@@ -5893,6 +7086,30 @@ fn viewport_enter_opens_cursor_finding_from_visible_list() {
             .as_ref()
             .map(|finding| finding.title.as_str()),
         Some("second")
+    );
+}
+
+#[test]
+fn viewport_enter_opens_projected_cursor_finding_after_duplicate_group() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.workbench_focus = WorkbenchPane::Findings;
+    app.findings = vec![
+        make_projected_duplicate(Severity::Medium, "fp-duplicate-medium", "duplicate medium"),
+        make_projected_duplicate(Severity::High, "fp-duplicate-high", "duplicate high"),
+        make_finding(Severity::Low, "fp-distinct-low", "distinct low"),
+    ];
+    app.findings_route.set_cursor(1);
+
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.workbench_focus, WorkbenchPane::Details);
+    assert_eq!(
+        app.selected_finding
+            .as_ref()
+            .map(|finding| finding.title.as_str()),
+        Some("distinct low")
     );
 }
 
@@ -5915,6 +7132,7 @@ fn workbench_esc_returns_focus_to_findings_before_leaving() {
 #[test]
 fn workbench_tab_preserves_each_pane_scroll_position() {
     let mut app = app_with_findings(2);
+    app.input_mode = crate::InputMode::Navigate;
     app.workbench_focus = WorkbenchPane::Details;
     app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
     app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
@@ -5950,6 +7168,9 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
 
     for binding in advertised {
         let mut app = app_with_findings(25);
+        if binding.action != ViewHotkeyAction::Back {
+            app.input_mode = crate::InputMode::Navigate;
+        }
         match binding.action {
             ViewHotkeyAction::WorkbenchCyclePane => {
                 // app_with_findings starts on the FINDINGS pane; Tab advances
@@ -5962,24 +7183,24 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                 assert_eq!(app.workbench_focus, WorkbenchPane::Center);
             }
             ViewHotkeyAction::WorkbenchScrollNext => {
-                app.findings_cursor = 0;
+                app.findings_route.set_cursor(0);
                 app.handle_key(key_event_for_trigger(binding.trigger));
-                assert_eq!(app.findings_cursor, 1);
+                assert_eq!(app.findings_route.cursor(), 1);
             }
             ViewHotkeyAction::WorkbenchScrollPrev => {
-                app.findings_cursor = 1;
+                app.findings_route.set_cursor(1);
                 app.handle_key(key_event_for_trigger(binding.trigger));
-                assert_eq!(app.findings_cursor, 0);
+                assert_eq!(app.findings_route.cursor(), 0);
             }
             ViewHotkeyAction::WorkbenchScrollFirst => {
-                app.findings_cursor = 7;
+                app.findings_route.set_cursor(7);
                 app.handle_key(key_event_for_trigger(binding.trigger));
-                assert_eq!(app.findings_cursor, 0);
+                assert_eq!(app.findings_route.cursor(), 0);
             }
             ViewHotkeyAction::WorkbenchScrollLast => {
-                app.findings_cursor = 7;
+                app.findings_route.set_cursor(7);
                 app.handle_key(key_event_for_trigger(binding.trigger));
-                assert_eq!(app.findings_cursor, 24);
+                assert_eq!(app.findings_route.cursor(), 24);
             }
             ViewHotkeyAction::WorkbenchToggleCenter => {
                 app.workbench_focus = WorkbenchPane::Center;
@@ -6014,7 +7235,7 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                 assert_eq!(app.scene_page, VizPage::Dfd);
             }
             ViewHotkeyAction::WorkbenchOpen => {
-                app.findings_cursor = 2;
+                app.findings_route.set_cursor(2);
                 app.workbench_center_mode = WorkbenchCenterMode::Dfd;
                 let expected = app.findings[2].fingerprint.clone();
                 app.handle_key(key_event_for_trigger(binding.trigger));
@@ -6089,6 +7310,7 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
 #[test]
 fn non_review_workbench_pages_keep_tab_focus_on_visible_body() {
     let mut app = app_with_findings(2);
+    app.input_mode = crate::InputMode::Navigate;
     app.workbench_page = Some(WorkbenchPage::Coverage);
     app.workbench_focus = WorkbenchPane::Findings;
 
@@ -6441,6 +7663,7 @@ fn taskless_activity_task_keys_log_why_they_do_not_focus() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Activity;
     app.activity = Some(ActivitySession::new("run-1"));
+    app.input_mode = crate::InputMode::Navigate;
 
     app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
@@ -6589,7 +7812,7 @@ fn pending_plan_y_key_applies() {
         unsupported: vec![],
     });
     app.handle_key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::empty()));
-    assert!(app.pending_plan.is_none());
+    assert!(!app.engagement.has_pending_plan());
     assert!(app.log.iter().any(|line| line.body.contains("noted")));
 }
 
@@ -6605,7 +7828,7 @@ fn pending_plan_enter_applies_default() {
         unsupported: vec![],
     });
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
-    assert!(app.pending_plan.is_none());
+    assert!(!app.engagement.has_pending_plan());
     assert!(app
         .log
         .iter()
@@ -6622,11 +7845,35 @@ fn pending_plan_n_key_discards() {
         unsupported: vec![],
     });
     app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty()));
-    assert!(app.pending_plan.is_none());
+    assert!(!app.engagement.has_pending_plan());
     assert!(app
         .log
         .iter()
         .any(|line| line.prefix == "plan" && line.body.contains("discarded")));
+}
+
+#[test]
+fn plan_apply_without_pending_plan_explains_no_action() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+
+    app.handle_command(ShellCommand::PlanApply);
+
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.prefix == "plan" && line.body.contains("nothing to apply")));
+}
+
+#[test]
+fn plan_discard_without_pending_plan_explains_no_action() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+
+    app.handle_command(ShellCommand::PlanDiscard);
+
+    assert!(app
+        .log
+        .iter()
+        .any(|line| line.prefix == "plan" && line.body.contains("nothing to discard")));
 }
 
 #[test]
@@ -7456,7 +8703,8 @@ fn confirm_resolve_remember_writes_session_allowlist() {
     });
     app.resolve_confirm(true, true);
     assert!(app
-        .confirm_allowlist
+        .engagement
+        .confirm_allowlist()
         .contains("sandbox:run https://refund.acme/api"));
     assert!(app.advisory.pending_confirm.is_none());
 }
@@ -7479,7 +8727,7 @@ fn pending_confirm_enter_is_consumed_without_approval() {
 
     assert!(app.advisory.pending_confirm.is_some());
     assert_eq!(app.input, "help", "Enter must not submit behind the gate");
-    assert!(app.confirm_allowlist.is_empty());
+    assert!(app.engagement.confirm_allowlist().is_empty());
 }
 
 #[test]
@@ -7501,14 +8749,14 @@ fn pending_confirm_esc_denies_once_without_navigation() {
 
     assert_eq!(app.shell_view, ShellView::Tools);
     assert!(app.advisory.pending_confirm.is_none());
-    assert!(app.confirm_denylist.is_empty());
+    assert!(app.engagement.confirm_denylist().is_empty());
     assert!(app.log.iter().any(|line| line.body.contains("denied once")));
 }
 
 #[test]
 fn append_trace_step_writes_jsonl_under_target() {
     // The trace writer should land at
-    // <target>/.kuzushi/runs/<runId>/trace.jsonl with one JSON
+    // <target>/.kuzushi/v3/runs/<runId>/trace.jsonl with one JSON
     // object per line.
     let tmp = tempfile::tempdir().unwrap();
     append_trace_step(
@@ -7554,14 +8802,12 @@ fn append_trace_step_no_op_when_target_is_none() {
 fn write_run_summary_writes_canonical_run_metadata_under_target() {
     let tmp = tempfile::tempdir().unwrap();
     write_run_summary(Some(tmp.path()), "r-1", "complete", Some(11), "/tmp/demo");
-    for leaf in ["run.json", "summary.json"] {
-        let body = std::fs::read_to_string(run_dir(tmp.path(), "r-1").join(leaf))
-            .unwrap_or_else(|_| panic!("{leaf}"));
-        let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
-        assert_eq!(parsed["status"], "completed");
-        assert_eq!(parsed["findings"], 11);
-        assert_eq!(parsed["target"], "/tmp/demo");
-    }
+    let body =
+        std::fs::read_to_string(run_dir(tmp.path(), "r-1").join("run.json")).expect("run.json");
+    let parsed: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!(parsed["status"], "completed");
+    assert_eq!(parsed["findings"], 11);
+    assert_eq!(parsed["target"], "/tmp/demo");
 }
 
 #[test]
@@ -7634,7 +8880,7 @@ fn cache_tool_snapshot_populates_pending_patch_for_patch_run() {
         }
     });
     app.cache_tool_snapshot("patch:run", &result);
-    let patch = app.pending_patch.as_ref().expect("pending patch");
+    let patch = app.engagement.pending_patch().expect("pending patch");
     assert_eq!(patch.alias, "F-0001");
     assert!(patch.rationale.contains("sqlx::query!"));
     assert_eq!(patch.tests.len(), 2);
@@ -7643,6 +8889,26 @@ fn cache_tool_snapshot_populates_pending_patch_for_patch_run() {
         Some("approval.patches = human-required")
     );
     assert_eq!(app.shell_view, ShellView::Patch("F-0001".to_string()));
+}
+
+#[test]
+fn patch_reject_command_discards_pending_patch() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.engagement.set_pending_patch(PendingPatch {
+        alias: "F-0001".to_string(),
+        rationale: "guard tainted input".to_string(),
+        side_effect: None,
+        diff: "--- a/x.rs\n+++ b/x.rs\n".to_string(),
+        tests: Vec::new(),
+        guardrail: None,
+        staged_at: None,
+    });
+
+    app.handle_command(ShellCommand::Patch(PatchCommand::Reject));
+
+    assert!(app.engagement.pending_patch().is_none());
+    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.workbench_page, Some(WorkbenchPage::Ship));
 }
 
 #[test]
@@ -7815,15 +9081,15 @@ fn plan_cursor_navigation_and_skip_toggle() {
 
     app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
     app.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::empty()));
-    assert_eq!(app.plan_cursor, 2);
+    assert_eq!(app.plan_cursor_clamped(), 2);
     app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::empty()));
     assert!(app.plan_change_skipped(2));
     app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()));
-    assert_eq!(app.plan_cursor, 1);
+    assert_eq!(app.plan_cursor_clamped(), 1);
     app.discard_pending_plan();
-    assert!(app.pending_plan.is_none());
-    assert_eq!(app.plan_cursor, 0);
-    assert!(app.plan_skipped.is_empty());
+    assert!(!app.engagement.has_pending_plan());
+    assert_eq!(app.plan_cursor_clamped(), 0);
+    assert!((0..app.plan_change_count()).all(|idx| !app.plan_change_skipped(idx)));
 }
 
 #[test]
@@ -7843,7 +9109,7 @@ fn activity_command_opens_view_and_creates_session() {
 }
 
 #[test]
-fn manual_activity_without_live_run_renders_idle_panel() {
+fn manual_activity_without_run_job_renders_idle_panel() {
     let mut app = ShellApp::new(V2Config::default(), None);
 
     app.handle_command(ShellCommand::Activity);
@@ -7861,6 +9127,7 @@ fn manual_activity_without_live_run_renders_idle_panel() {
 fn activity_view_pause_verbose_reset_keys() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.handle_command(ShellCommand::Activity);
+    app.input_mode = crate::InputMode::Navigate;
 
     // Space freezes only the Activity feed presentation.
     app.handle_key(KeyEvent::new(KeyCode::Char(' '), KeyModifiers::empty()));
@@ -7883,6 +9150,7 @@ fn activity_p_key_pauses_real_scan_work_not_the_feed() {
     let cancel = ScanCancellation::default();
     app.shell_view = ShellView::Activity;
     app.activity = Some(ActivitySession::new("run-live"));
+    app.input_mode = crate::InputMode::Navigate;
     app.scan_cancel = Some(cancel.clone());
     app.scan = Some(ScanPanelState {
         run_id: Some("run-1".to_string()),
@@ -7905,11 +9173,12 @@ fn activity_p_key_pauses_real_scan_work_not_the_feed() {
 }
 
 #[test]
-fn reset_during_live_run_preserves_run_identity() {
+fn reset_during_run_job_preserves_run_identity() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Activity;
     app.set_running_tool_for_test("triage:run");
     app.activity = Some(ActivitySession::new("run-live"));
+    app.input_mode = crate::InputMode::Navigate;
     let session = app.activity.as_mut().unwrap();
     session.set_deck_page_by_user(super::view_state::ActivityDeckPage::Dfd);
     session.deck_cursor = 4;
@@ -7955,6 +9224,7 @@ fn reset_finished_activity_preserves_completed_run() {
     session.pane_focus = PaneFocus::Right;
     session.feed_auto_tail = true;
     app.activity = Some(session);
+    app.input_mode = crate::InputMode::Navigate;
 
     app.handle_key(KeyEvent::new(KeyCode::Char('x'), KeyModifiers::empty()));
 
@@ -7987,6 +9257,7 @@ fn reset_finished_activity_preserves_completed_run() {
 fn activity_bracket_keys_cycle_deck_pages_and_arrows_do_not() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.handle_command(ShellCommand::Activity);
+    app.input_mode = crate::InputMode::Navigate;
     assert!(!app.view_keybindings().iter().any(|binding| {
         binding.trigger == HotkeyTrigger::Char('n') || binding.trigger == HotkeyTrigger::Char('N')
     }));
@@ -8036,6 +9307,7 @@ fn activity_findings_key_opens_workbench_review() {
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.handle_command(ShellCommand::Activity);
+    app.input_mode = crate::InputMode::Navigate;
 
     app.handle_key(KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()));
 
@@ -8053,6 +9325,7 @@ fn activity_open_key_on_findings_opens_workbench_review() {
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.handle_command(ShellCommand::Activity);
+    app.input_mode = crate::InputMode::Navigate;
     app.activity
         .as_mut()
         .unwrap()
@@ -8073,6 +9346,7 @@ fn activity_open_carries_deck_selection_into_workbench() {
         make_finding(Severity::Medium, "fp-medium", "medium row"),
     ];
     app.handle_command(ShellCommand::Activity);
+    app.input_mode = crate::InputMode::Navigate;
     let expected = kuzushi_core::sorted_finding_aliases(&app.findings)[1]
         .1
         .fingerprint
@@ -8085,7 +9359,7 @@ fn activity_open_carries_deck_selection_into_workbench() {
 
     assert_eq!(app.shell_view, ShellView::Workbench);
     assert_eq!(app.workbench_focus, WorkbenchPane::Findings);
-    assert_eq!(app.findings_cursor, 1);
+    assert_eq!(app.findings_route.cursor(), 1);
     assert_eq!(
         app.selected_finding
             .as_ref()
@@ -8095,11 +9369,39 @@ fn activity_open_carries_deck_selection_into_workbench() {
 }
 
 #[test]
+fn activity_open_uses_projected_findings_deck_index() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.findings = vec![
+        make_projected_duplicate(Severity::Medium, "fp-duplicate-medium", "duplicate medium"),
+        make_projected_duplicate(Severity::High, "fp-duplicate-high", "duplicate high"),
+        make_finding(Severity::Low, "fp-distinct-low", "distinct low"),
+    ];
+    app.handle_command(ShellCommand::Activity);
+    app.input_mode = crate::InputMode::Navigate;
+    let session = app.activity.as_mut().expect("activity session");
+    session.set_deck_page(super::view_state::ActivityDeckPage::Findings);
+    session.deck_cursor = 1;
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.workbench_focus, WorkbenchPane::Findings);
+    assert_eq!(app.findings_route.cursor(), 1);
+    assert_eq!(
+        app.selected_finding
+            .as_ref()
+            .map(|finding| finding.title.as_str()),
+        Some("distinct low")
+    );
+}
+
+#[test]
 fn activity_open_key_on_visualization_returns_to_activity_with_q() {
     use crate::scene3d::VizPage;
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.handle_command(ShellCommand::Activity);
+    app.input_mode = crate::InputMode::Navigate;
     app.activity
         .as_mut()
         .unwrap()
@@ -8116,6 +9418,7 @@ fn activity_open_key_on_visualization_returns_to_activity_with_q() {
 fn activity_enter_on_artifact_task_switches_output_deck() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.handle_command(ShellCommand::Activity);
+    app.input_mode = crate::InputMode::Navigate;
     let session = app.activity.as_mut().unwrap();
     session.tasks.clear();
     session.task_cursor = 0;
@@ -8141,6 +9444,7 @@ fn activity_enter_on_artifact_task_switches_output_deck() {
 fn activity_enter_targets_the_visible_task_cursor() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.handle_command(ShellCommand::Activity);
+    app.input_mode = crate::InputMode::Navigate;
     let session = app.activity.as_mut().unwrap();
     session.tasks.clear();
     session.tasks.insert(
@@ -8218,8 +9522,8 @@ fn activity_view_renders_dag_rows_and_feed_events() {
     // Use the lower-level renderer directly since we already have an open
     // Activity view + populated session.
     let output = crate::renderer::render_plain_app(&app, 100);
-    assert!(output.contains("[semgrep:scan]"));
-    assert!(output.contains("[triage:run]"));
+    assert!(output.contains("semgrep:scan"));
+    assert!(output.contains("triage:run"));
     assert!(
         output.contains("subsystems"),
         "hidden pipeline:* events should collapse into the subsystems aggregate, output was: {output}"
@@ -8464,14 +9768,14 @@ fn planning_test_row(id: PlanningTaskId, state: PlanningArtifactState) -> Planni
         model_backed: id.is_model_backed(),
         required_cli: None,
         cli_available: true,
+        blocker: None,
     }
 }
 
 fn open_test_planning_picker(app: &mut ShellApp, rows: Vec<PlanningTaskRow>) {
-    app.planning_selected = rows.iter().map(|row| row.id).collect();
-    app.planning_tasks = rows;
-    app.planning_rebuild = std::collections::BTreeSet::new();
-    app.workflow_phase = Some(WorkflowPhase::Map);
+    let selected = rows.iter().map(|row| row.id).collect();
+    app.planning_picker_route.open(rows, selected);
+    app.engagement.set_phase(WorkflowPhase::Map);
     app.shell_view = ShellView::PlanningPicker;
 }
 
@@ -8495,7 +9799,7 @@ fn confirming_an_all_cached_selection_explains_instead_of_silently_advancing() {
 
     assert_eq!(app.shell_view, ShellView::PlanningPicker, "stays put");
     assert_eq!(
-        app.workflow_phase,
+        app.engagement.current_phase(),
         Some(WorkflowPhase::Map),
         "no phase jump"
     );
@@ -8519,7 +9823,7 @@ fn confirming_with_nothing_selected_names_the_skipped_phase() {
             PlanningArtifactState::Missing,
         )],
     );
-    app.planning_selected.clear();
+    app.planning_picker_route.selected_mut().clear();
 
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
@@ -8530,7 +9834,7 @@ fn confirming_with_nothing_selected_names_the_skipped_phase() {
         "names the skip"
     );
     assert_ne!(
-        app.workflow_phase,
+        app.engagement.current_phase(),
         Some(WorkflowPhase::Map),
         "an explicit empty selection still advances"
     );
@@ -8552,8 +9856,11 @@ fn planning_picker_esc_closes_without_recording_skip_or_advancing() {
     app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
     assert_eq!(app.shell_view, ShellView::Workbench);
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Map));
-    assert!(!app.planning_skipped_phases.contains(&WorkflowPhase::Map));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
+    assert!(!app
+        .engagement
+        .skipped_phases()
+        .contains(&WorkflowPhase::Map));
     assert!(app
         .log
         .iter()
@@ -8575,8 +9882,11 @@ fn planning_picker_s_records_skip_and_advances_phase() {
 
     app.handle_key(KeyEvent::new(KeyCode::Char('s'), KeyModifiers::empty()));
 
-    assert!(app.planning_skipped_phases.contains(&WorkflowPhase::Map));
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Hunt));
+    assert!(app
+        .engagement
+        .skipped_phases()
+        .contains(&WorkflowPhase::Map));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Hunt));
     assert!(app
         .log
         .iter()
@@ -8599,17 +9909,18 @@ fn planning_picker_number_keys_jump_directly_to_phases_without_running() {
     app.handle_key(KeyEvent::new(KeyCode::Char('3'), KeyModifiers::empty()));
 
     assert_eq!(app.shell_view, ShellView::PlanningPicker);
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Confirm));
-    assert!(app.planning_run_queue.is_empty());
-    assert_eq!(app.picker_focus, PickerFocus::List);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Confirm));
+    assert!(app.engagement.planning_queues_empty());
+    assert_eq!(app.planning_picker_route.focus(), PickerFocus::List);
 
-    app.picker_focus = PickerFocus::OptionsPane;
+    app.planning_picker_route
+        .set_focus(PickerFocus::OptionsPane);
     app.handle_key(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::empty()));
 
     assert_eq!(app.shell_view, ShellView::PlanningPicker);
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Map));
-    assert!(app.planning_run_queue.is_empty());
-    assert_eq!(app.picker_focus, PickerFocus::List);
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
+    assert!(app.engagement.planning_queues_empty());
+    assert_eq!(app.planning_picker_route.focus(), PickerFocus::List);
 }
 
 #[test]
@@ -8626,16 +9937,16 @@ fn planning_picker_tab_and_backtab_cycle_list_and_options_focus() {
     );
 
     app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
-    assert_eq!(app.picker_focus, PickerFocus::OptionsPane);
+    assert_eq!(app.planning_picker_route.focus(), PickerFocus::OptionsPane);
 
     app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
-    assert_eq!(app.picker_focus, PickerFocus::List);
+    assert_eq!(app.planning_picker_route.focus(), PickerFocus::List);
 
     app.handle_key(KeyEvent::new(KeyCode::BackTab, KeyModifiers::SHIFT));
-    assert_eq!(app.picker_focus, PickerFocus::OptionsPane);
+    assert_eq!(app.planning_picker_route.focus(), PickerFocus::OptionsPane);
 
     app.handle_key(KeyEvent::new(KeyCode::Tab, KeyModifiers::empty()));
-    assert_eq!(app.picker_focus, PickerFocus::List);
+    assert_eq!(app.planning_picker_route.focus(), PickerFocus::List);
 }
 
 #[test]
@@ -8658,7 +9969,7 @@ fn confirmed_plan_stalled_behind_running_tool_is_announced() {
     app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
 
     assert_eq!(
-        app.planning_run_queue.len(),
+        app.engagement.queued_task_count(),
         1,
         "the confirmed step stays queued"
     );
@@ -8682,7 +9993,7 @@ fn planning_completion_returns_to_workbench_without_auto_recommender() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.target = Some(dir.path().to_path_buf());
     app.shell_view = ShellView::Activity;
-    app.workflow_phase = None;
+    app.engagement.clear_phase();
 
     app.advance_to_next_phase();
 
@@ -8708,12 +10019,12 @@ fn phase_advance_does_not_steal_view_when_operator_navigated_away() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.target = Some(dir.path().to_path_buf());
     app.shell_view = ShellView::Workbench;
-    app.workflow_phase = Some(WorkflowPhase::Map);
+    app.engagement.set_phase(WorkflowPhase::Map);
 
     app.advance_to_next_phase();
 
     assert_eq!(app.shell_view, ShellView::Workbench);
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Hunt));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Hunt));
     let notice = app.advisory.notice.as_ref().expect("phase ready notice");
     assert_eq!(notice.severity, NoticeSeverity::Success);
     assert!(notice.message.contains("KUZUSHI"), "{}", notice.message);
@@ -8726,12 +10037,12 @@ fn phase_advance_opens_next_picker_while_operator_watches_activity() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.target = Some(dir.path().to_path_buf());
     app.shell_view = ShellView::Activity;
-    app.workflow_phase = Some(WorkflowPhase::Map);
+    app.engagement.set_phase(WorkflowPhase::Map);
 
     app.advance_to_next_phase();
 
     assert_eq!(app.shell_view, ShellView::PlanningPicker);
-    assert_eq!(app.workflow_phase, Some(WorkflowPhase::Hunt));
+    assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Hunt));
 }
 
 #[test]
@@ -8752,29 +10063,42 @@ fn planning_picker_uppercase_aliases_match_their_advertised_lowercase_keys() {
             planning_test_row(PlanningTaskId::BuildXRay, PlanningArtifactState::Cached),
         ],
     );
-    app.planning_selected.clear();
+    app.planning_picker_route.selected_mut().clear();
 
     app.handle_key(KeyEvent::new(KeyCode::Char('A'), KeyModifiers::SHIFT));
-    assert_eq!(app.planning_selected.len(), 2, "A selects all like a");
+    assert_eq!(
+        app.planning_picker_route.selected().len(),
+        2,
+        "A selects all like a"
+    );
 
     app.handle_key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT));
-    assert!(app.planning_selected.is_empty(), "N clears like n");
+    assert!(
+        app.planning_picker_route.selected().is_empty(),
+        "N clears like n"
+    );
 
-    app.planning_cursor = 1; // the cached row
+    app.planning_picker_route.set_cursor(1); // the cached row
     app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
     assert!(
-        app.planning_rebuild.contains(&PlanningTaskId::BuildXRay),
+        app.planning_picker_route
+            .rebuild()
+            .contains(&PlanningTaskId::BuildXRay),
         "g marks cached rows for rebuild"
     );
     app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
     assert!(
-        !app.planning_rebuild.contains(&PlanningTaskId::BuildXRay),
+        !app.planning_picker_route
+            .rebuild()
+            .contains(&PlanningTaskId::BuildXRay),
         "second g returns cached rows to reuse"
     );
 
     app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::SHIFT));
     assert!(
-        !app.planning_rebuild.contains(&PlanningTaskId::BuildXRay),
+        !app.planning_picker_route
+            .rebuild()
+            .contains(&PlanningTaskId::BuildXRay),
         "G is not an unadvertised rebuild alias"
     );
     assert!(app.input.is_empty(), "modal picker swallows inert G");
@@ -8782,7 +10106,79 @@ fn planning_picker_uppercase_aliases_match_their_advertised_lowercase_keys() {
     app.handle_key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()));
     assert_eq!(app.shell_view, ShellView::Workbench);
     assert!(
-        !app.planning_skipped_phases.contains(&WorkflowPhase::Map),
+        !app.engagement
+            .skipped_phases()
+            .contains(&WorkflowPhase::Map),
         "q closes like Esc without recording a skip"
     );
+}
+
+#[test]
+fn empty_prompt_characters_trigger_view_hotkeys_before_text_entry() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.findings = sample_two_findings();
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+
+    assert_eq!(app.input, "");
+    assert_eq!(app.findings_route.cursor(), 1);
+    assert_eq!(app.input_mode, crate::InputMode::Prompt);
+}
+
+#[test]
+fn non_empty_prompt_characters_type_instead_of_triggering_view_hotkeys() {
+    let temp = tempfile::tempdir().expect("temp target");
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+    app.shell_view = ShellView::Workbench;
+    app.findings = sample_two_findings();
+    app.input = "confi".to_string();
+    app.cursor = app.input.len();
+
+    app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
+    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view, ShellView::Config);
+    assert_ne!(app.tool_running.as_deref(), Some("exploit-chain:scan"));
+}
+
+#[test]
+fn navigate_mode_enables_view_hotkeys_and_esc_returns_to_prompt() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.findings = sample_two_findings();
+
+    app.handle_key(KeyEvent::new(KeyCode::F(2), KeyModifiers::empty()));
+    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+
+    assert_eq!(app.input, "");
+    assert_eq!(app.findings_route.cursor(), 1);
+    assert_eq!(app.input_mode, crate::InputMode::Navigate);
+
+    app.handle_key(KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
+
+    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.input_mode, crate::InputMode::Prompt);
+}
+
+fn sample_two_findings() -> Vec<kuzushi_core::Finding> {
+    vec![
+        kuzushi_core::Finding::new_semgrep(
+            "demo.a",
+            "src/a.rs",
+            1,
+            Some(1),
+            kuzushi_core::Severity::High,
+            "first",
+        ),
+        kuzushi_core::Finding::new_semgrep(
+            "demo.b",
+            "src/b.rs",
+            2,
+            Some(2),
+            kuzushi_core::Severity::Medium,
+            "second",
+        ),
+    ]
 }

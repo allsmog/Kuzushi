@@ -12,7 +12,6 @@
 import type Database from "better-sqlite3";
 import type { AgentRuntime } from "../agent-runtime/types.js";
 import type { MessageBus } from "../bus/types.js";
-import type { PrintSink } from "../copilot/print.js";
 import type { KuzushiConfig, SecurityProfile } from "../public-types.js";
 import type {
   HostInfo,
@@ -23,6 +22,7 @@ import type {
   ToolOptionStore,
   WorkspaceHandle,
 } from "./host-handles.js";
+import type { PrintSink } from "./print.js";
 import type { ModuleReference } from "./reference.js";
 import type { JSONSchema } from "./schema.js";
 
@@ -375,7 +375,7 @@ export interface ExecutionContext {
    */
   dag?: DagContext;
   /**
-   * Per-(runId, moduleId) artifact writer for `.kuzushi/runs/<runId>/<moduleId>/...`.
+   * Per-(runId, moduleId) artifact writer for `.kuzushi/v3/runs/<runId>/<moduleId>/...`.
    * Available only when both a DAG `runId` and a tool `moduleId` are present;
    * undefined elsewhere. Feature-probe with
    * `ctx.host?.capabilities.has("run-artifacts")` before use.

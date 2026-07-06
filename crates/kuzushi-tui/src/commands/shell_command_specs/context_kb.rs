@@ -68,13 +68,13 @@ pub(crate) const CONTEXT_KB_COMMANDS: &[ShellCommandSpec] = &[
         description: "show target and state status",
     },
     ShellCommandSpec {
-        command: "workspace export findings <path> [format]",
+        command: "workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]",
         aliases: &[
-            "/workspace export findings <path> [format]",
-            "findings export <path> [format]",
+            "/workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]",
+            "findings export <path> [format] [--completeness open|complete] [--allow-empty]",
         ],
         category: ShellCommandCategory::ContextKb,
-        description: "export findings; extensionless defaults to markdown-bundle, or pass json/jsonl/sarif/csv",
+        description: "export findings; choose all/open/complete and pass --allow-empty for metadata-only exports",
     },
     ShellCommandSpec {
         command: "workspace scope init",

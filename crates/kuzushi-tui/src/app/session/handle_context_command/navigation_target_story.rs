@@ -80,6 +80,7 @@ impl ShellApp {
         }
         self.refresh_findings(false);
         self.refresh_program_scope();
+        self.apply_ready_default_model_after_target_activation();
     }
 
     fn ensure_target_state_dir(&mut self, workspace: &WorkspaceTarget, root: &Path) -> bool {
@@ -154,7 +155,7 @@ impl ShellApp {
         };
         if matches!(raw, "all" | "clear" | "root" | ".") {
             self.active_scope = None;
-            self.findings_cursor = 0;
+            self.findings_route.reset();
             self.open_workbench(crate::app::WorkbenchPane::Findings);
             self.log("component", "cleared component filter");
             return;
@@ -168,7 +169,7 @@ impl ShellApp {
             return;
         };
         self.active_scope = Some(scope.clone());
-        self.findings_cursor = 0;
+        self.findings_route.reset();
         self.open_workbench(crate::app::WorkbenchPane::Findings);
         self.log(
             "component",

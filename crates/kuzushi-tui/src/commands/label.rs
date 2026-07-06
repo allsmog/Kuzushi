@@ -9,9 +9,10 @@ pub enum ShellCommand {
     Recommend,
     Tools(Option<String>),
     /// Open the Workbench command center with the given pane focused. The
-    /// shell's default landing surface; `findings`/`open`/`threats dfd` also
-    /// route here with the appropriate pane focus / selection.
+    /// shell's default landing surface; `findings` and `open` also route here
+    /// with the appropriate pane focus / selection.
     Workbench(WorkbenchPane),
+    Aim(Option<String>),
     Findings,
     FindingsFilter(String),
     Component(Option<String>),
@@ -82,6 +83,8 @@ pub enum ShellCommand {
     Context(ContextCommand),
     ProjectModel,
     Strategy(StrategyCommand),
+    ReviewDecision(ReviewDecisionCommand),
+    Patch(PatchCommand),
     Workspace(WorkspaceCommand),
     Pwn(PwnCommand),
     KnowledgeBase(Option<String>),

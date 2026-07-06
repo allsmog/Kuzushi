@@ -35,7 +35,7 @@ impl ShellApp {
     pub(super) fn submit_catalog_cursor_for_empty_enter(&mut self, raw: &str) -> bool {
         if !raw.is_empty()
             || !matches!(self.shell_view, ShellView::Catalog)
-            || !self.catalog_expanded
+            || !self.catalog_route.is_expanded()
         {
             return false;
         }
@@ -89,7 +89,7 @@ impl ShellApp {
 
     fn capture_auth_key_paste(&mut self, text: &str) -> bool {
         if !matches!(self.shell_view, ShellView::AuthMethodPicker(_))
-            || self.auth_picker_cursor != 0
+            || !self.auth_picker_route.is_api_key_row()
         {
             return false;
         }
@@ -97,7 +97,7 @@ impl ShellApp {
         if key.is_empty() {
             return true;
         }
-        self.auth_key_draft.push_str(key);
+        self.auth_picker_route.push_key_str(key);
         if text.contains('\n') {
             self.set_warn_notice(
                 "paste",
@@ -150,12 +150,10 @@ impl ShellApp {
     }
 
     fn move_findings_cursor(&mut self, amount: i32) {
-        if amount.is_negative() {
-            self.findings_cursor = self.findings_cursor.saturating_sub(1);
-        } else {
-            self.findings_cursor = (self.findings_cursor + 1)
-                .min(crate::ui_view_models::visible_findings_len(self).saturating_sub(1));
-        }
+        self.findings_route.step_direction(
+            amount as isize,
+            crate::ui_view_models::visible_findings_len(self),
+        );
     }
 
     fn workbench_pane_for_mouse(&self, column: u16, row: u16) -> Option<crate::app::WorkbenchPane> {
@@ -299,12 +297,20 @@ fn activity_pane_for_click(
     if !activity_body_contains_row(row, height, layout.header_rows, layout.footer_rows) {
         return None;
     }
+    let dag_percent = activity_dag_percent(width, layout);
     Some(activity_body_pane_for_column(
         column,
         width,
-        layout.dag_percent,
+        dag_percent,
         tasks_empty,
     ))
+}
+
+fn activity_dag_percent(width: u16, layout: crate::ui_view_models::ActivityFrameLayout) -> u16 {
+    if width >= layout.compact_breakpoint {
+        return (layout.wide_dag_width.saturating_mul(100) / width).max(1);
+    }
+    layout.compact_dag_percent
 }
 
 fn activity_body_contains_row(row: u16, height: u16, header_rows: u16, footer_rows: u16) -> bool {

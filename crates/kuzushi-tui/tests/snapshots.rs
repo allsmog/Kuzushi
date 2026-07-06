@@ -300,12 +300,12 @@ fn run_timeline_view_with_past_runs() {
     fs::create_dir_all(&completed_run_dir).unwrap();
     fs::create_dir_all(&failed_run_dir).unwrap();
     fs::write(
-        completed_run_dir.join("summary.json"),
-        r#"{"status":"complete","findings":18,"target":"~/work/acme-checkout"}"#,
+        completed_run_dir.join("run.json"),
+        r#"{"status":"completed","findings":18,"target":"~/work/acme-checkout"}"#,
     )
     .unwrap();
     fs::write(
-        failed_run_dir.join("summary.json"),
+        failed_run_dir.join("run.json"),
         r#"{"status":"failed","findings":0,"target":"~/work/acme-checkout"}"#,
     )
     .unwrap();

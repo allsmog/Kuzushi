@@ -25,9 +25,11 @@ use std::time::Duration;
 mod refresh_terminal_redraw_state;
 mod render_plain_scripted_session;
 mod run_shell;
+mod terminal_loop_event;
 #[cfg(test)]
 mod tests;
 pub(super) use render_plain_scripted_session::mouse_capture_setting_enabled;
 pub(super) use render_plain_scripted_session::render_plain_scripted_session;
 pub use run_shell::run_shell;
 pub use run_shell::run_shell_with_plain;
+pub(crate) use terminal_loop_event::*;

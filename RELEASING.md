@@ -71,6 +71,24 @@ npm view kuzushi version          # check published version
 npm install -g kuzushi && kuzushi --version   # install and verify
 ```
 
+## Surface Compatibility Migrations
+
+Before publishing a release that changes the registry surface, check
+`docs/api-compatibility.md` and the deferred-surface contract. Current
+compatibility folds intentionally keep old exact tool names runnable while
+removing them from catalog/recommender discovery:
+
+- `taint-iris:hunt` -> `taint-iris-next:hunt`
+- `full-mode:hunt` -> `agentic-sast:scan {"strategy":"chunked"}`
+- `deep-audit:run` -> `triage:run {"strategy":"deep"}`
+- `classifier-gate:score` -> `triage:run {"strategy":"gate-deep"}`
+- `verify:exploit` -> `verify:finding {"mode":"empirical"}`
+- `shinsa:*quick-check` -> `shinsa:*scan {"depth":"quick"}`
+- granular `android-apk:*` phase tools -> `android-apk:scan`
+
+`smoke:next-step` was a hidden runtime smoke-test helper and has no migration
+path.
+
 ## If a version is already published
 
 npm doesn't allow republishing the same version. Bump and try again:

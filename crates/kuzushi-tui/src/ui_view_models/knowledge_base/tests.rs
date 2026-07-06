@@ -28,7 +28,7 @@ fn knowledge_base_model_projects_default_store_and_supported_modules() {
     assert!(model.summary_rows.contains(&KnowledgeBaseSummaryRow {
         cells: [
             "store".to_string(),
-            ".kuzushi/v2/attachments.json".to_string(),
+            ".kuzushi/v3/attachments.json".to_string(),
         ],
     }));
     assert!(model
@@ -52,7 +52,7 @@ fn knowledge_base_model_projects_default_store_and_supported_modules() {
 fn knowledge_base_model_filters_attachments_to_active_module() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.kb_view.module_id = "x-ray".to_string();
-    app.kb_view.store_path = Some(PathBuf::from("/tmp/demo/.kuzushi/v2/attachments.json"));
+    app.kb_view.store_path = Some(PathBuf::from("/tmp/demo/.kuzushi/v3/attachments.json"));
     app.kb_view.artifacts = vec![KnownArtifact {
         module_id: "x-ray".to_string(),
         path: "crates/demo/src/lib.rs".to_string(),

@@ -3,20 +3,27 @@ use super::*;
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
+    Unknown,
     Info,
     Low,
     Medium,
     High,
     Critical,
-    Unknown,
 }
 
 impl Severity {
     pub fn from_semgrep(value: &str) -> Self {
-        match value.to_ascii_uppercase().as_str() {
-            "ERROR" => Self::High,
-            "WARNING" => Self::Medium,
-            "INFO" => Self::Low,
+        Self::from_label(value)
+    }
+
+    pub fn from_label(value: &str) -> Self {
+        match normalized_severity_label(value).as_str() {
+            "critical" | "crit" => Self::Critical,
+            "high" | "error" => Self::High,
+            "medium" | "med" | "warning" | "warn" => Self::Medium,
+            "low" => Self::Low,
+            "info" | "informational" | "note" => Self::Info,
+            "unknown" => Self::Unknown,
             _ => Self::Unknown,
         }
     }
@@ -37,15 +44,44 @@ impl TryFrom<&str> for Severity {
     type Error = anyhow::Error;
 
     fn try_from(value: &str) -> Result<Self> {
-        match value {
-            "info" => Ok(Self::Info),
-            "low" => Ok(Self::Low),
-            "medium" => Ok(Self::Medium),
-            "high" => Ok(Self::High),
-            "critical" => Ok(Self::Critical),
-            "unknown" => Ok(Self::Unknown),
-            other => anyhow::bail!("unknown severity {other:?}"),
+        let severity = Self::from_label(value);
+        if severity == Self::Unknown && normalized_severity_label(value) != "unknown" {
+            anyhow::bail!("unknown severity {value:?}");
         }
+        Ok(severity)
+    }
+}
+
+fn normalized_severity_label(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches('"')
+        .replace(['_', '-'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn severity_label_parser_maps_common_scanner_aliases() {
+        assert_eq!(Severity::from_label("ERROR"), Severity::High);
+        assert_eq!(Severity::from_label("warn"), Severity::Medium);
+        assert_eq!(Severity::from_label("informational"), Severity::Info);
+        assert_eq!(Severity::from_label("surprising"), Severity::Unknown);
+    }
+
+    #[test]
+    fn severity_order_treats_unknown_as_lowest_risk() {
+        assert!(Severity::Critical > Severity::High);
+        assert!(Severity::High > Severity::Medium);
+        assert!(Severity::Medium > Severity::Low);
+        assert!(Severity::Low > Severity::Info);
+        assert!(Severity::Info > Severity::Unknown);
     }
 }
 
@@ -55,8 +91,15 @@ pub enum VulnSource {
     /// Output from a SARIF-emitting scanner (semgrep, codeql, …).
     Sarif,
     /// LLM-driven per-file analysis (systems-hunt, carlini-threat-hunt).
+    #[serde(rename = "analysis", alias = "ainalysis")]
     Ainalysis,
     /// LLM-driven chunked whole-codebase pass (full-mode-multi).
+    #[serde(
+        rename = "analysis-multi",
+        alias = "analysis_multi",
+        alias = "ainalysis-multi",
+        alias = "ainalysis_multi"
+    )]
     AinalysisMulti,
     /// Diff-scoped scan (`--since <ref>`, variant-ndiff).
     DiffAnalyzer,

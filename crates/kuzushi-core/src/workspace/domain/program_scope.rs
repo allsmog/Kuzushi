@@ -120,20 +120,22 @@ fn unmatched_scope_verdict(has_allow_list: bool) -> ScopeVerdict {
 fn compile_patterns(list: &ProgramScopeList) -> Result<Vec<HostPattern>> {
     let mut compiled = Vec::with_capacity(list.hosts.len() + list.cidrs.len());
     for raw in &list.hosts {
-        let glob = Glob::new(raw)
-            .with_context(|| format!("invalid host glob in scope.toml: {raw}"))?;
+        let glob =
+            Glob::new(raw).with_context(|| format!("invalid host glob in scope.toml: {raw}"))?;
         compiled.push(HostPattern::HostGlob(glob));
     }
     for raw in &list.cidrs {
-        let cidr = IpNet::from_str(raw)
-            .with_context(|| format!("invalid cidr in scope.toml: {raw}"))?;
+        let cidr =
+            IpNet::from_str(raw).with_context(|| format!("invalid cidr in scope.toml: {raw}"))?;
         compiled.push(HostPattern::Cidr(cidr));
     }
     Ok(compiled)
 }
 
 fn matches_any(patterns: &[HostPattern], host: &str) -> bool {
-    patterns.iter().any(|pattern| matches_pattern(pattern, host))
+    patterns
+        .iter()
+        .any(|pattern| matches_pattern(pattern, host))
 }
 
 fn matches_pattern(pattern: &HostPattern, host: &str) -> bool {
@@ -152,7 +154,10 @@ fn matches_pattern(pattern: &HostPattern, host: &str) -> bool {
 /// match host globs.
 fn extract_host(target: &str) -> String {
     let trimmed = target.trim();
-    let after_scheme = trimmed.split_once("://").map(|(_, rest)| rest).unwrap_or(trimmed);
+    let after_scheme = trimmed
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(trimmed);
     let after_userinfo = after_scheme
         .rsplit_once('@')
         .map(|(_, rest)| rest)
@@ -169,9 +174,7 @@ fn strip_port(host: &str) -> &str {
     if let Some(bracket_end) = host.strip_prefix('[').and_then(|rest| rest.find(']')) {
         return &host[1..1 + bracket_end];
     }
-    host.rsplit_once(':')
-        .map(|(host, _)| host)
-        .unwrap_or(host)
+    host.rsplit_once(':').map(|(host, _)| host).unwrap_or(host)
 }
 
 #[cfg(test)]

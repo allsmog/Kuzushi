@@ -9,7 +9,7 @@ impl ShellApp {
         match self.nav_history.pop() {
             Some(ShellView::Home) => {
                 self.focused_module = None;
-                self.catalog_expanded = false;
+                self.catalog_route.collapse();
                 self.shell_view = ShellView::Home;
             }
             Some(target) => {

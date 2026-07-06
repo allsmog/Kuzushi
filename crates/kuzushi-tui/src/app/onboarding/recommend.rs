@@ -19,6 +19,8 @@ pub struct TargetProfile {
     pub kind: TargetKind,
     pub has_c_family_source: bool,
     pub has_rust_source: bool,
+    pub has_compile_commands: bool,
+    pub has_reverse_engineering_artifact: bool,
 }
 
 impl TargetProfile {
@@ -28,6 +30,8 @@ impl TargetProfile {
             kind,
             has_c_family_source: source.has_c_family_source,
             has_rust_source: source.has_rust_source,
+            has_compile_commands: has_compile_commands_json(target),
+            has_reverse_engineering_artifact: has_reverse_engineering_artifact(target),
         }
     }
 
@@ -37,6 +41,8 @@ impl TargetProfile {
             kind,
             has_c_family_source: false,
             has_rust_source: false,
+            has_compile_commands: false,
+            has_reverse_engineering_artifact: kind.is_reverse_engineering_target(),
         }
     }
 
@@ -102,7 +108,9 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
         | BuildCodeQlDatabase => missing_artifact(row),
         // Reverse-engineering artifacts only matter for binary/APK targets.
         BuildXRay => target.kind.is_reverse_engineering_target() && missing_artifact(row),
-        ReverseEngineerBinary => target.kind.is_reverse_engineering_target(),
+        ReverseEngineerBinary => {
+            target.kind.is_reverse_engineering_target() && target.has_reverse_engineering_artifact
+        }
         // Specialized / second-methodology builds are opt-in.
         BuildPastaThreatModel | ThreatIntelCves => false,
         // 崩 KUZUSHI · hunt — scan source surfaces; specialized systems hunts
@@ -111,7 +119,7 @@ fn should_preselect(row: &PlanningTaskRow, target: TargetProfile) -> bool {
         ScanSemgrep | ScanCodeql | ScanAgenticSast | HuntTaint => source_like(target.kind),
         HuntThreatModel => true,
         HuntSystems => false,
-        HuntUseAfterFree => target.has_c_family_source,
+        HuntUseAfterFree => target.has_c_family_source && target.has_compile_commands,
         // 作 TSUKURI · confirm — always triage then verify whatever was found.
         TriageFindings | VerifyFindings => true,
         // 掛 KAKE · fix — always report; patching is a deliberate opt-in.
@@ -144,6 +152,88 @@ fn source_like(kind: TargetKind) -> bool {
         kind,
         TargetKind::Source | TargetKind::JvmApp | TargetKind::AndroidApk
     )
+}
+
+pub(crate) fn has_compile_commands_json(target: &Path) -> bool {
+    ["compile_commands.json", "build/compile_commands.json"]
+        .iter()
+        .any(|relative| target.join(relative).is_file())
+}
+
+fn has_reverse_engineering_artifact(target: &Path) -> bool {
+    if target.is_file() {
+        return true;
+    }
+    if target.join("classes.dex").is_file() {
+        return true;
+    }
+    has_file_with_extension(target, &["so", "dylib", "dll", "exe", "bin", "elf", "apk"])
+}
+
+fn has_file_with_extension(target: &Path, extensions: &[&str]) -> bool {
+    let mut stack = vec![target.to_path_buf()];
+    let mut budget = SOURCE_SCAN_FILE_BUDGET;
+    while budget > 0 {
+        let Some(dir) = stack.pop() else {
+            return false;
+        };
+        if directory_has_file_with_extension(&dir, extensions, &mut stack, &mut budget) {
+            return true;
+        }
+    }
+    false
+}
+
+fn directory_has_file_with_extension(
+    dir: &Path,
+    extensions: &[&str],
+    stack: &mut Vec<PathBuf>,
+    budget: &mut usize,
+) -> bool {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        if !consume_scan_budget(budget) {
+            break;
+        }
+        if path_matches_extension_or_queues_dir(entry.path(), extensions, stack) {
+            return true;
+        }
+    }
+    false
+}
+
+fn consume_scan_budget(budget: &mut usize) -> bool {
+    if *budget == 0 {
+        return false;
+    }
+    *budget -= 1;
+    true
+}
+
+fn path_matches_extension_or_queues_dir(
+    path: PathBuf,
+    extensions: &[&str],
+    stack: &mut Vec<PathBuf>,
+) -> bool {
+    if path.is_dir() {
+        if !is_skippable_source_dir(&path) {
+            stack.push(path);
+        }
+        return false;
+    }
+    extension_matches(&path, extensions)
+}
+
+fn extension_matches(path: &Path, extensions: &[&str]) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .map(|ext| {
+            let ext = ext.to_ascii_lowercase();
+            extensions.iter().any(|candidate| *candidate == ext)
+        })
+        .unwrap_or(false)
 }
 
 fn detect_systems_source(target: &Path) -> SystemsSourceEvidence {
@@ -211,7 +301,14 @@ mod tests {
     fn rows_for(phase: WorkflowPhase) -> Vec<PlanningTaskRow> {
         PlanningTaskId::in_phase(phase)
             .into_iter()
-            .map(|task| PlanningTaskRow::for_task(task, Path::new("/nonexistent-target")))
+            .map(|task| {
+                let mut row = PlanningTaskRow::for_task(task, Path::new("/nonexistent-target"));
+                if task == PlanningTaskId::HuntUseAfterFree {
+                    row.cli_available = true;
+                    row.blocker = None;
+                }
+                row
+            })
             .collect()
     }
 
@@ -224,6 +321,8 @@ mod tests {
             kind: TargetKind::Source,
             has_c_family_source: true,
             has_rust_source: false,
+            has_compile_commands: true,
+            has_reverse_engineering_artifact: false,
         }
     }
 
@@ -232,6 +331,8 @@ mod tests {
             kind: TargetKind::Source,
             has_c_family_source: false,
             has_rust_source: true,
+            has_compile_commands: false,
+            has_reverse_engineering_artifact: false,
         }
     }
 
@@ -268,6 +369,17 @@ mod tests {
             recommended_tasks_for_phase(WorkflowPhase::Hunt, profile(TargetKind::Source), &rows);
         assert!(!source.contains(&PlanningTaskId::HuntUseAfterFree));
         assert!(source.contains(&PlanningTaskId::ScanAgenticSast));
+    }
+
+    #[test]
+    fn hunt_does_not_preselect_uaf_without_compile_commands() {
+        let rows = rows_for(WorkflowPhase::Hunt);
+        let mut c_source = c_profile();
+        c_source.has_compile_commands = false;
+        let picked = recommended_tasks_for_phase(WorkflowPhase::Hunt, c_source, &rows);
+        assert!(!picked.contains(&PlanningTaskId::HuntUseAfterFree));
+        assert!(applicable_tasks_for_phase(WorkflowPhase::Hunt, c_source)
+            .contains(&PlanningTaskId::HuntUseAfterFree));
     }
 
     #[test]

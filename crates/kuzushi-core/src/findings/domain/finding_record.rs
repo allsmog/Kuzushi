@@ -5,8 +5,8 @@ impl VulnSource {
     pub fn as_str(self) -> &'static str {
         match self {
             Self::Sarif => "sarif",
-            Self::Ainalysis => "ainalysis",
-            Self::AinalysisMulti => "ainalysis-multi",
+            Self::Ainalysis => "analysis",
+            Self::AinalysisMulti => "analysis-multi",
             Self::DiffAnalyzer => "diff-analyzer",
             Self::Infer => "infer",
             Self::Fuzzing => "fuzzing",
@@ -16,8 +16,10 @@ impl VulnSource {
     pub fn parse(value: &str) -> Option<Self> {
         match value.trim().to_ascii_lowercase().as_str() {
             "sarif" => Some(Self::Sarif),
-            "ainalysis" => Some(Self::Ainalysis),
-            "ainalysis-multi" | "ainalysis_multi" => Some(Self::AinalysisMulti),
+            "analysis" | "ainalysis" => Some(Self::Ainalysis),
+            "analysis-multi" | "analysis_multi" | "ainalysis-multi" | "ainalysis_multi" => {
+                Some(Self::AinalysisMulti)
+            }
             "diff-analyzer" | "diff_analyzer" => Some(Self::DiffAnalyzer),
             "infer" => Some(Self::Infer),
             "fuzzing" => Some(Self::Fuzzing),
@@ -79,6 +81,20 @@ pub struct FindingSource {
 pub struct Finding {
     pub id: Option<i64>,
     pub scan_id: Option<String>,
+    #[serde(
+        default,
+        rename = "identityId",
+        alias = "identity_id",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub identity_id: Option<String>,
+    #[serde(
+        default,
+        rename = "identityMatchTier",
+        alias = "identity_match_tier",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub identity_match_tier: Option<String>,
     pub fingerprint: String,
     pub rule_id: String,
     pub title: String,
@@ -100,9 +116,9 @@ pub struct Finding {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub triaged_by: Option<TriageAuthor>,
     /// Most-recent empirical verification, when present. Loaded by
-    /// `FindingStore::get_finding_by_*` from the `verifications` side
-    /// table; in-memory `Finding`s built via `Finding::new_tool` leave
-    /// this `None` until persisted.
+    /// `FindingStore::get_finding_by_*` from the v3 verification
+    /// projection; in-memory `Finding`s built via `Finding::new_tool`
+    /// leave this `None` until persisted.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub verification: Option<PersistedVerification>,
     pub created_at: String,
@@ -144,6 +160,8 @@ impl Default for Finding {
         Self {
             id: None,
             scan_id: None,
+            identity_id: None,
+            identity_match_tier: None,
             fingerprint: String::new(),
             rule_id: String::new(),
             title: String::new(),

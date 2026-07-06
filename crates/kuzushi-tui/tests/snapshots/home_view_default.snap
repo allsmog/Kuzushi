@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 89
 ---
- KUZUSHI > home · mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › home · mode:shell · target:none · ctx:not built · model:unconfigured
 
  -- HOME ---------------------------------------------------------------------------------------------------------------
 
@@ -15,7 +15,7 @@ assertion_line: 89
 
   RUN   none · no runs yet · artifacts 0/10 recorded
         ctx ■  surface ■  threat ■  recommend ■  strategy ■  findings ■  proof ■  failures ■  report ■  manifest ■
-        .kuzushi/runs/latest · `show runs` for detail
+        .kuzushi/v3/runs/latest · `show runs` for detail
 
   WORKSPACE   target none · modules 42 · context not built
 

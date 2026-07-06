@@ -11,10 +11,11 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         command: "findings filter <expr>",
         aliases: &[
             "findings filter state:new rank:high",
+            "findings filter decision:confirmed completeness:open",
             "/findings filter <expr>",
         ],
         category: ShellCommandCategory::FindingsEvidence,
-        description: "open filtered findings in the Workbench",
+        description: "open filtered findings by severity, review decision, or completeness",
     },
     ShellCommandSpec {
         command: "component <scope|path|all>",
@@ -31,6 +32,16 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         aliases: &["open F-0001", "/open <id>"],
         category: ShellCommandCategory::FindingsEvidence,
         description: "open a finding alias or fingerprint",
+    },
+    ShellCommandSpec {
+        command: "decision <verdict> <reason>",
+        aliases: &[
+            "decision confirmed reviewed source-linked evidence",
+            "decision suppressed accepted by policy owner",
+            "review rejected_false_positive reviewed data flow",
+        ],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "record a human review decision for the selected finding",
     },
     ShellCommandSpec {
         command: "show aliases [prefix]",
@@ -75,6 +86,24 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "latest bounded failure handoff",
     },
     ShellCommandSpec {
+        command: "patch apply",
+        aliases: &["/patch apply", "patch apply"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "apply the pending reviewed patch to the active target",
+    },
+    ShellCommandSpec {
+        command: "patch reject",
+        aliases: &["/patch reject", "patch discard"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "discard the pending reviewed patch",
+    },
+    ShellCommandSpec {
+        command: "patch regen [--style minimal|defensive]",
+        aliases: &["/patch regen", "patch regen --style defensive"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "regenerate the pending patch for the same finding",
+    },
+    ShellCommandSpec {
         command: "since <ref>",
         aliases: &["/since <ref>"],
         category: ShellCommandCategory::FindingsEvidence,
@@ -85,7 +114,6 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         aliases: &[
             "/threats [1-4]",
             "threats summary",
-            "threats dfd",
             "threats stride",
             "threats stories",
             "threats scope",

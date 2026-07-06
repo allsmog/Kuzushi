@@ -92,7 +92,7 @@ task, scan mode, and run artifact.
 
 Invariants:
 scan/shell/run converge on the same tool dispatch path; scan artifacts under
-`.kuzushi/runs/<runId>/` remain readable; `--ci` output is deterministic and
+`.kuzushi/v3/runs/<runId>/` remain readable; `--ci` output is deterministic and
 line-oriented.
 
 Allowed dependencies:

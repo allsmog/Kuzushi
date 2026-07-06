@@ -306,10 +306,10 @@ mod tests {
         let store = FindingStore::open_in_memory().unwrap();
         for (scan_id, finding) in scan_findings {
             store
-                .insert_scan_run(scan_id, Path::new("/tmp/repo"), "completed")
+                .record_run_started(scan_id, Path::new("/tmp/repo"), "completed")
                 .unwrap();
             store.insert_finding(scan_id, finding).unwrap();
-            store.complete_scan_run(scan_id, "completed", 1).unwrap();
+            store.record_run_finished(scan_id, "completed", 1).unwrap();
         }
         store
     }

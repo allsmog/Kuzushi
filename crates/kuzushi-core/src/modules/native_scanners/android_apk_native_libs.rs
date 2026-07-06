@@ -22,7 +22,7 @@ pub(in crate::modules) fn run_native_libs_scan(
                 "android-apk:native-libs",
                 &target,
                 error,
-            ))
+            ));
         }
     };
     let persisted = persist_tool_findings(
@@ -116,7 +116,10 @@ fn dangerous_imports_finding(lib: &NativeLibSummary, path: &str) -> Finding {
         Severity::Medium,
         format!(
             "Native library {} (ABI {}) imports {:?}. Check whether attacker-controlled input reaches these APIs (command injection, library injection, memory-corruption primitives).",
-            lib.path.file_name().and_then(|n| n.to_str()).unwrap_or("<unknown>"),
+            lib.path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("<unknown>"),
             lib.abi,
             lib.dangerous_imports
         ),
@@ -134,7 +137,10 @@ fn jni_exports_finding(lib: &NativeLibSummary, path: &str) -> Finding {
         Severity::Info,
         format!(
             "Native library {} (ABI {}) exports {} JNI functions. Attack surface — example exports: {}. Cross-reference against Java callsites in jadx sources to find unguarded entry points.",
-            lib.path.file_name().and_then(|n| n.to_str()).unwrap_or("<unknown>"),
+            lib.path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("<unknown>"),
             lib.abi,
             lib.jni_exports.len(),
             preview

@@ -30,7 +30,7 @@ fn workspace_model_formats_missing_workspace_defaults() {
 
     assert_eq!(model.target_label, "none");
     assert_eq!(model.state_label, workspace_state_relative_path());
-    assert_eq!(model.findings_db_label, ".kuzushi/v2/findings.sqlite3");
+    assert_eq!(model.findings_db_label, findings_db_relative_path());
     assert_eq!(model.findings_label, "none yet (run scan first)");
     assert_eq!(model.last_export_label, "none");
     assert!(model.empty);
@@ -82,11 +82,11 @@ fn plain_workspace_model_projects_missing_workspace_rows() {
     assert!(model.summary_rows.contains(&"target: none".to_string()));
     assert!(model
         .summary_rows
-        .contains(&"findings db: .kuzushi/v2/findings.sqlite3".to_string()));
+        .contains(&format!("findings db: {}", findings_db_relative_path())));
     assert!(model.empty_rows.is_empty());
     assert_eq!(
         model.next_hint,
-        "Next: workspace status, workspace scope init, workspace export findings <path> [format]"
+        "Next: workspace status, workspace scope init, workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]"
     );
 }
 

@@ -54,31 +54,16 @@ impl ShellApp {
 
     pub(crate) fn clamp_findings_cursor(&mut self) {
         let len = crate::ui_view_models::visible_findings_len(self);
-        if len == 0 {
-            self.findings_cursor = 0;
-        } else {
-            self.findings_cursor = self.findings_cursor.min(len - 1);
-        }
+        self.findings_route.clamp(len);
     }
 
     pub(crate) fn sync_findings_cursor_to_selected(&mut self) {
-        let Some(fingerprint) = self
-            .selected_finding
-            .as_ref()
-            .map(|finding| finding.fingerprint.as_str())
-        else {
+        let Some(selected) = self.selected_finding.as_ref() else {
             self.clamp_findings_cursor();
             return;
         };
-        if let Some(index) = crate::ui_view_models::visible_sorted_finding_alias_indices(self)
-            .into_iter()
-            .position(|(_, index)| {
-                self.findings
-                    .get(index)
-                    .is_some_and(|finding| finding.fingerprint == fingerprint)
-            })
-        {
-            self.findings_cursor = index;
+        if let Some(index) = crate::ui_view_models::visible_finding_position_for(self, selected) {
+            self.findings_route.set_cursor(index);
         } else {
             self.clamp_findings_cursor();
         }

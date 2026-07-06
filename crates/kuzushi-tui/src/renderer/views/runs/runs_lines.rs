@@ -79,7 +79,10 @@ fn run_timeline_status_style(status: PastRunStatus) -> Style {
     match status {
         PastRunStatus::Complete => theme::success(),
         PastRunStatus::Running => theme::warn(),
-        PastRunStatus::Partial | PastRunStatus::Paused => theme::warn(),
+        PastRunStatus::Partial | PastRunStatus::Paused | PastRunStatus::Interrupted => {
+            theme::warn()
+        }
+        PastRunStatus::Skipped => theme::muted(),
         PastRunStatus::Failed | PastRunStatus::Malformed => theme::danger(),
         PastRunStatus::Unknown => theme::muted(),
     }

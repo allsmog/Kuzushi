@@ -320,10 +320,13 @@ fn resolve_source_path(root: &Path, value: &str) -> PathBuf {
 
 fn looks_like_source_path(value: &str) -> bool {
     let value = value.trim();
-    value.starts_with("./")
-        || value.starts_with("../")
-        || value.starts_with('/')
-        || value.ends_with(".md")
+    if value.starts_with("./") || value.starts_with("../") || value.starts_with('/') {
+        return true;
+    }
+    if value.chars().any(char::is_whitespace) {
+        return false;
+    }
+    value.ends_with(".md")
         || value.ends_with(".txt")
         || value.ends_with(".prompt")
         || value.ends_with(".json")

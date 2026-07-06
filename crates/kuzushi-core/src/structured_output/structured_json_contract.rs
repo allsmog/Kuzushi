@@ -218,10 +218,12 @@ pub(crate) fn structured_json_value(
     if let Some(value) = response.structured.clone() {
         return Ok(value);
     }
-    parse_json_value_from_agent_text(&response.text).with_context(|| {
-        format!(
-            "{} expected LangGraph to return JSON for `{}`",
-            contract.tool_name, contract.schema_name
-        )
-    })
+    parse_json_value_from_agent_text_with_strategy(&response.text)
+        .map(|parsed| parsed.value)
+        .with_context(|| {
+            format!(
+                "{} expected LangGraph to return JSON for `{}`",
+                contract.tool_name, contract.schema_name
+            )
+        })
 }

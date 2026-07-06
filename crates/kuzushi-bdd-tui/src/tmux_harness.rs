@@ -184,7 +184,7 @@ fn write_v2_config_from_env(home: &std::path::Path, env: &HashMap<String, String
     let Some(model) = env.get("KUZUSHI_V2_CONFIG_MODEL") else {
         return Ok(());
     };
-    let dir = home.join(".kuzushi/v2");
+    let dir = home.join(".kuzushi/v3");
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("creating {} for scoped v2 config", dir.display()))?;
     let path = dir.join("config.toml");

@@ -19,7 +19,7 @@ async fn file_exists(world: &mut OnboardingWorld, relative: String) {
 #[then(regex = r#"^the config file contains "([^"]+)"$"#)]
 async fn config_contains(world: &mut OnboardingWorld, needle: String) {
     let home = world.require_session().home.clone();
-    let path = home.join(".kuzushi/v2/config.toml");
+    let path = home.join(".kuzushi/v3/config.toml");
     let deadline = Instant::now() + Duration::from_secs(5);
     while Instant::now() < deadline {
         if let Ok(body) = std::fs::read_to_string(&path) {

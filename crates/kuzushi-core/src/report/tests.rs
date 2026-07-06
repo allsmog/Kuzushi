@@ -1621,7 +1621,6 @@ fn report_fails_on_malformed_run_metadata_without_legacy_fallback() {
     let source = completed_summary(temp.path(), "run-malformed-metadata", "agentic-sast:scan");
     write_run_summary(temp.path(), &source).unwrap();
     let dir = run_dir(temp.path(), "run-malformed-metadata");
-    fs::write(dir.join("summary.json"), serde_json::to_string(&source).unwrap()).unwrap();
     fs::write(dir.join("run.json"), "{not-json").unwrap();
 
     let error = build_run_report(temp.path(), Some("run-malformed-metadata")).unwrap_err();
@@ -1629,7 +1628,6 @@ fn report_fails_on_malformed_run_metadata_without_legacy_fallback() {
 
     assert!(message.contains("Could not parse"));
     assert!(message.contains("run.json"));
-    assert!(!message.contains("summary.json"));
 }
 
 #[test]

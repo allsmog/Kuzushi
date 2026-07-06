@@ -188,7 +188,9 @@ pub(in crate::modules) fn require_triage_workspace<'a>(
     ctx: &'a ToolExecutionContext<'_>,
 ) -> Result<&'a WorkspaceTarget> {
     ctx.workspace
-        .context(crate::workspace::active_workspace_required_message("triage:run"))
+        .context(crate::workspace::active_workspace_required_message(
+            "triage:run",
+        ))
 }
 
 pub(in crate::modules) fn require_triage_store<'a>(
@@ -203,8 +205,7 @@ pub(in crate::modules) fn empty_triage_response(
     missing_fingerprints: Vec<String>,
 ) -> Value {
     let summary = "No findings matched triage input.";
-    let output =
-        "[-] No findings match. Run a scanner first (`kuzushi scan <repo>`) or pass explicit fingerprints.";
+    let output = "[-] No findings match. Run a scanner first (`kuzushi scan <repo>`) or pass explicit fingerprints.";
     let data = json!({
         "summary": "No findings matched triage input.",
         "triaged": 0,

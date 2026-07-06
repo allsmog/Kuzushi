@@ -12,11 +12,11 @@ pub(crate) fn persist_tool_findings(
     };
     workspace.ensure_state_dir()?;
     let run_id = format!("{tool_slug}-{}", Uuid::new_v4());
-    store.insert_scan_run(&run_id, target, "running")?;
+    store.record_run_started(&run_id, target, "running")?;
     for finding in findings {
         store.insert_finding(&run_id, finding)?;
     }
-    store.complete_scan_run(&run_id, "completed", findings.len())?;
+    store.record_run_finished(&run_id, "completed", findings.len())?;
     Ok(Some(GenericPersistedRun {
         run_id,
         findings_db: workspace.findings_db_path().display().to_string(),

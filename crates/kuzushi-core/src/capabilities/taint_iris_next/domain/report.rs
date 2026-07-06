@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaintIrisNextLabeledSpec {
     pub(crate) id: String,
@@ -20,7 +20,7 @@ pub(crate) struct TaintIrisNextLabeledSpec {
     pub(crate) catalog_signal: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaintIrisNextLinkedStory {
     pub(crate) id: String,
@@ -40,7 +40,7 @@ pub(crate) struct TaintIrisNextLinkedStory {
     pub(crate) callees: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaintIrisNextEvidenceResult {
     pub(crate) backend: String,
@@ -61,14 +61,14 @@ pub(crate) struct TaintIrisNextEvidenceResult {
     pub(crate) artifacts: Value,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaintIrisNextPersistedRun {
     pub(crate) run_id: String,
     pub(crate) findings_db: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaintIrisNextReport {
     pub(crate) target: String,

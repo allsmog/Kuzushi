@@ -14,7 +14,7 @@ use ratatui::widgets::Widget;
 
 const NODE_H: u16 = 3;
 const STEP_GAP: u16 = 1;
-const MAX_STEPS: usize = 3;
+const MAX_STEPS: usize = 4;
 
 pub(crate) struct TreeDiagram {
     pub model: AttackTree,
@@ -23,43 +23,86 @@ pub(crate) struct TreeDiagram {
 impl Widget for TreeDiagram {
     fn render(self, area: Rect, buf: &mut Buffer) {
         let w = area.width;
-        if w < 24 {
-            text(
-                buf,
-                area,
-                1,
-                0,
-                "widen terminal (≥24 cols) for the diagram",
-                diagram_muted(),
-            );
+        if render_width_hint(buf, area, w) {
             return;
         }
-        if let Some(hint) = &self.model.empty_hint {
-            text(buf, area, 2, 1, hint, diagram_muted());
+        if render_empty_tree(buf, area, &self.model) {
             return;
         }
-        let chains = &self.model.chains;
-        let cols = chains.len().max(1) as u16;
-        let col_w = w / cols;
-        let center = |i: u16| col_w * i + col_w / 2;
-        let box_w = col_w.saturating_sub(2).clamp(12, 30);
-        let left = |i: u16| center(i).saturating_sub(box_w / 2);
-        let root_cx = w / 2;
-        render_goal_and_or_gate(buf, area, w, box_w, root_cx);
+        let layout = TreeLayout::new(w, self.model.chains.len());
+        render_goal_and_or_gate(buf, area, w, layout.box_w, layout.root_cx);
+        self.render_chains(buf, area, layout);
+        render_hidden_chain_count(buf, area, self.model.hidden_chain_count);
+    }
+}
 
-        for (i, chain) in chains.iter().enumerate() {
-            self.render_chain(
-                buf,
-                area,
-                i as u16,
-                chain,
-                root_cx,
-                center(i as u16),
-                left(i as u16),
-                box_w,
-            );
+#[derive(Clone, Copy)]
+struct TreeLayout {
+    col_w: u16,
+    box_w: u16,
+    root_cx: u16,
+}
+
+impl TreeLayout {
+    fn new(width: u16, chain_count: usize) -> Self {
+        let col_w = width / chain_count.max(1) as u16;
+        Self {
+            col_w,
+            box_w: col_w.saturating_sub(2).clamp(12, 30),
+            root_cx: width / 2,
         }
     }
+
+    fn center(self, index: u16) -> u16 {
+        self.col_w * index + self.col_w / 2
+    }
+
+    fn left(self, index: u16) -> u16 {
+        self.center(index).saturating_sub(self.box_w / 2)
+    }
+}
+
+fn render_width_hint(buf: &mut Buffer, area: Rect, width: u16) -> bool {
+    if width >= 24 {
+        return false;
+    }
+    text(
+        buf,
+        area,
+        1,
+        0,
+        "widen terminal (≥24 cols) for the diagram",
+        diagram_muted(),
+    );
+    true
+}
+
+fn render_empty_tree(buf: &mut Buffer, area: Rect, model: &AttackTree) -> bool {
+    let Some(hint) = &model.empty_hint else {
+        return false;
+    };
+    render_empty_state_panel(
+        buf,
+        area,
+        "no exploit chain",
+        hint,
+        &[("exploit-chain:scan", "build entry-to-impact chains")],
+    );
+    true
+}
+
+fn render_hidden_chain_count(buf: &mut Buffer, area: Rect, hidden: usize) {
+    if hidden == 0 {
+        return;
+    }
+    text(
+        buf,
+        area,
+        2,
+        area.height.saturating_sub(2),
+        &format!("+{hidden} more chains"),
+        diagram_muted(),
+    );
 }
 
 /// Root goal box, centred, with the `OR` gate label beneath it.
@@ -87,11 +130,25 @@ fn render_goal_and_or_gate(buf: &mut Buffer, area: Rect, w: u16, box_w: u16, roo
 }
 
 impl TreeDiagram {
+    fn render_chains(&self, buf: &mut Buffer, area: Rect, layout: TreeLayout) {
+        for (index, chain) in self.model.chains.iter().enumerate() {
+            let index = index as u16;
+            self.render_chain(
+                buf,
+                area,
+                chain,
+                layout.root_cx,
+                layout.center(index),
+                layout.left(index),
+                layout.box_w,
+            );
+        }
+    }
+
     fn render_chain(
         &self,
         buf: &mut Buffer,
         area: Rect,
-        _i: u16,
         chain: &AttackChain,
         root_cx: u16,
         cx: u16,
@@ -138,6 +195,16 @@ fn render_steps(buf: &mut Buffer, area: Rect, chain: &AttackChain, cx: u16, left
         );
         prev_bottom = y + NODE_H - 1;
         y += NODE_H + STEP_GAP;
+    }
+    if chain.hidden_step_count > 0 {
+        text(
+            buf,
+            area,
+            left.saturating_add(1),
+            y,
+            &format!("+{} more steps", chain.hidden_step_count),
+            diagram_muted(),
+        );
     }
 }
 

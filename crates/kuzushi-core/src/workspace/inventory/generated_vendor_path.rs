@@ -43,19 +43,16 @@ pub(crate) enum VendorDirKind {
 
 pub(crate) fn vendor_dir_kind(name: &str) -> Option<VendorDirKind> {
     let name = name.to_ascii_lowercase();
-    matches!(
-        name.as_str(),
-        "node_modules" | ".venv" | "venv"
-    )
-    .then_some(VendorDirKind::DependencyRoot)
-    .or_else(|| {
-        matches!(
-            name.as_str(),
-            "vendor" | "third_party" | "third-party" | "external"
-        )
-        .then_some(VendorDirKind::VendoredRoot)
-    })
-    .or_else(|| (name == "__pycache__").then_some(VendorDirKind::PythonCache))
+    matches!(name.as_str(), "node_modules" | ".venv" | "venv")
+        .then_some(VendorDirKind::DependencyRoot)
+        .or_else(|| {
+            matches!(
+                name.as_str(),
+                "vendor" | "third_party" | "third-party" | "external"
+            )
+            .then_some(VendorDirKind::VendoredRoot)
+        })
+        .or_else(|| (name == "__pycache__").then_some(VendorDirKind::PythonCache))
 }
 
 pub(crate) fn generated_dir(name: &str) -> bool {

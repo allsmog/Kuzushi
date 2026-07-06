@@ -51,7 +51,7 @@ pub(crate) fn catalog_model(app: &ShellApp) -> CatalogModel {
     let focused_id = app.focused_module.as_deref();
     CatalogModel {
         module_count,
-        expanded: app.catalog_expanded,
+        expanded: app.catalog_route.is_expanded(),
         default_action,
         collapsed: collapsed_catalog_model(app),
         groups: catalog_groups(&modules, focused_id, cursor_id.as_deref()),
@@ -191,7 +191,11 @@ fn preferred_default_module(modules: &[CatalogActionModule]) -> Option<&CatalogA
 fn selected_cursor_id(app: &ShellApp, modules: &[CatalogActionModule]) -> Option<String> {
     let visible_ids = ordered_visible_module_ids(modules);
     visible_ids
-        .get(app.catalog_cursor.min(visible_ids.len().saturating_sub(1)))
+        .get(
+            app.catalog_route
+                .cursor()
+                .min(visible_ids.len().saturating_sub(1)),
+        )
         .cloned()
 }
 

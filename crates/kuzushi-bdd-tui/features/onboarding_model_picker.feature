@@ -22,5 +22,5 @@ Feature: First-run model picker
     And no model is configured
     When I launch the shell
     And I press "Esc"
-    Then I see "FINDINGS"
+    Then I see "AIM - ATTACK SURFACE"
     And the status segment shows "workbench"

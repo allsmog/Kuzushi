@@ -44,7 +44,7 @@ const requiredIdentityReferences = [
     needles: [
       "kuzushi>",
       "kz>",
-      ".kuzushi/runs/<runId>/",
+      ".kuzushi/v3/runs/<runId>/",
       "native/<platform>-<arch>/kuzushi",
       "native/<platform>-<arch>/kz",
     ],
@@ -80,7 +80,7 @@ const requiredIdentityReferences = [
   {
     label: "Rust CLI binary identity",
     file: "crates/kuzushi-cli/Cargo.toml",
-    needles: ['name = "kuzushi-cli"', 'name = "kuzushi"', 'name = "kz"', 'path = "src/main.rs"'],
+    needles: ['name = "kuzushi-cli"', 'name = "kuzushi"', 'path = "src/main.rs"'],
   },
   {
     label: "native staging alias identity",

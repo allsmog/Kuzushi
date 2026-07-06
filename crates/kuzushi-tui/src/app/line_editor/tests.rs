@@ -91,6 +91,16 @@ mod tests {
     }
 
     #[test]
+    fn completion_preview_names_fuzzy_candidate_when_suffix_is_not_enough() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_input("fnd");
+
+        let preview = app.completion_preview().expect("fuzzy preview");
+
+        assert!(preview.contains("findings"), "{preview}");
+    }
+
+    #[test]
     fn attach_completion_lists_workspace_files() {
         let temp = tempfile::tempdir().unwrap();
         std::fs::create_dir(temp.path().join("docs")).unwrap();

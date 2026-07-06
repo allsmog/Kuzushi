@@ -27,6 +27,11 @@ pub enum ToggleOutcome {
         task: PlanningTaskId,
         cli: &'static str,
     },
+    /// Tried to toggle a row whose workspace prerequisite is absent.
+    MissingPrereq {
+        task: PlanningTaskId,
+        reason: String,
+    },
 }
 
 pub fn toggle_planning_row(
@@ -39,6 +44,12 @@ pub fn toggle_planning_row(
         None => return ToggleOutcome::Off { task },
     };
     if !row.cli_available && !is_cached(row) {
+        if let Some(reason) = &row.blocker {
+            return ToggleOutcome::MissingPrereq {
+                task,
+                reason: reason.clone(),
+            };
+        }
         return ToggleOutcome::MissingCli {
             task,
             cli: row.required_cli.unwrap_or("required binary"),
@@ -169,6 +180,7 @@ mod tests {
             model_backed: id.is_model_backed(),
             required_cli: id.required_cli(),
             cli_available: id.required_cli().is_none(),
+            blocker: None,
         }
     }
 
@@ -319,6 +331,7 @@ mod tests {
             model_backed: false,
             required_cli: Some("joern-parse"),
             cli_available: false,
+            blocker: None,
         }];
         let mut selected = BTreeSet::new();
         let outcome = toggle_planning_row(BuildCodePropertyGraph, &rows, &mut selected);

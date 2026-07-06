@@ -5,19 +5,7 @@ pub(crate) fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if area.height == 0 {
         return;
     }
-    if matches!(app.shell_view, crate::ShellView::FilePicker) {
-        let line = Line::from(Span::styled(
-            "file picker active — type to filter · Enter attach · Esc close",
-            theme::disabled(),
-        ));
-        frame.render_widget(Paragraph::new(line), area);
-        return;
-    }
-    if app.is_picker_view() && !app.picker_prompt_focused() {
-        let line = Line::from(Span::styled(
-            "command prompt paused — : to type a command",
-            theme::disabled(),
-        ));
+    if let Some(line) = inactive_prompt_line(app) {
         frame.render_widget(Paragraph::new(line), area);
         return;
     }
@@ -30,6 +18,11 @@ pub(crate) fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         area.width as usize,
         " ",
     );
+    let hint = prompt
+        .placeholder
+        .clone()
+        .or_else(|| app.completion_preview())
+        .unwrap_or_default();
     let line = Line::from(vec![
         // Prompt prefix in c-muted per `design/mockups/_shared.jsx::footer`
         // (`<span className="c-muted">{promptText}</span>`). The Ratatui
@@ -40,6 +33,21 @@ pub(crate) fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
         Span::raw(segments.before_cursor),
         Span::styled(segments.cursor_text, theme::cursor_block()),
         Span::raw(segments.after_cursor),
+        Span::styled(hint, theme::subtle()),
     ]);
     frame.render_widget(Paragraph::new(line), area);
+}
+
+fn inactive_prompt_line(app: &ShellApp) -> Option<Line<'static>> {
+    if matches!(app.shell_view, crate::ShellView::FilePicker) {
+        return Some(disabled_prompt_line(
+            "file picker active — type to filter · Enter attach · Esc close",
+        ));
+    }
+    (app.is_picker_view() && !app.picker_prompt_focused())
+        .then(|| disabled_prompt_line("command prompt paused — : to type a command"))
+}
+
+fn disabled_prompt_line(text: &'static str) -> Line<'static> {
+    Line::from(Span::styled(text, theme::disabled()))
 }

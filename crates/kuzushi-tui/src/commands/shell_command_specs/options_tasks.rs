@@ -3,13 +3,7 @@ use super::*;
 pub(crate) const OPTIONS_TASK_COMMANDS: &[ShellCommandSpec] = &[
     ShellCommandSpec {
         command: "options [tool]",
-        aliases: &["/options [tool]"],
-        category: ShellCommandCategory::OptionsTasks,
-        description: "show tool options",
-    },
-    ShellCommandSpec {
-        command: "show options [tool]",
-        aliases: &["/show options [tool]"],
+        aliases: &["/options [tool]", "/show options [tool]"],
         category: ShellCommandCategory::OptionsTasks,
         description: "show tool options",
     },
@@ -63,15 +57,21 @@ pub(crate) const OPTIONS_TASK_COMMANDS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "strategy approve <id>",
-        aliases: &["/strategy approve <id>"],
+        aliases: &["/strategy approve <id>", "strategy keep <id>"],
         category: ShellCommandCategory::OptionsTasks,
-        description: "approve a queued strategy proposal",
+        description: "approve/keep a queued strategy proposal",
     },
     ShellCommandSpec {
         command: "strategy reject <id>",
-        aliases: &["/strategy reject <id>"],
+        aliases: &["/strategy reject <id>", "strategy skip <id>"],
         category: ShellCommandCategory::OptionsTasks,
-        description: "reject a queued strategy proposal",
+        description: "reject/skip a queued strategy proposal",
+    },
+    ShellCommandSpec {
+        command: "strategy fire",
+        aliases: &["/strategy fire", "strategy run"],
+        category: ShellCommandCategory::OptionsTasks,
+        description: "run the next approved strategy proposal",
     },
     ShellCommandSpec {
         command: "strategy correct <id> <strategy>",

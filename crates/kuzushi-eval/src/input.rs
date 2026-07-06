@@ -28,6 +28,10 @@ pub(crate) struct OracleEntry {
     pub(crate) kind: String,
     #[serde(default)]
     pub(crate) notes: String,
+    #[serde(default)]
+    pub(crate) expected_verdict: Option<String>,
+    #[serde(default)]
+    pub(crate) expected_severity: Option<String>,
 }
 
 #[allow(dead_code)]
@@ -57,4 +61,14 @@ pub(crate) struct FindingRow {
     pub(crate) vuln_source: Option<String>,
     #[serde(default, alias = "staticProofState")]
     pub(crate) static_proof_state: Option<String>,
+    #[serde(default)]
+    pub(crate) verdict: Option<String>,
+    #[serde(default)]
+    pub(crate) triage: Option<FindingTriageRow>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Deserialize, Clone)]
+pub(crate) struct FindingTriageRow {
+    pub(crate) verdict: String,
 }

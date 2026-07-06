@@ -70,15 +70,13 @@ fn workspace_export_findings_writes_valid_sarif() {
 
     let output_path = workspace_dir.path().join("out.sarif");
     let output = run_kuzushi(&[
-        "run",
-        "workspace:export-findings",
+        "export",
         "--target",
         workspace_dir.path().to_str().unwrap(),
-        "--input",
-        &format!(
-            r#"{{"output":"{}","format":"sarif"}}"#,
-            output_path.to_string_lossy()
-        ),
+        "--format",
+        "sarif",
+        "--out",
+        output_path.to_str().unwrap(),
     ]);
     assert!(
         output.status.success(),
@@ -107,6 +105,39 @@ fn workspace_export_findings_writes_valid_sarif() {
     );
     assert_eq!(first["ruleId"], "e2e/sql-injection");
     assert!(first["locations"][0]["physicalLocation"]["region"]["startLine"].is_number());
+}
+
+#[test]
+fn workspace_export_findings_writes_markdown_bundle_directory() {
+    let workspace_dir = tempfile::tempdir().expect("tempdir");
+    seed_workspace_with_one_finding(workspace_dir.path());
+
+    let output_dir = workspace_dir.path().join("bundle");
+    let output = run_kuzushi(&[
+        "export",
+        "--target",
+        workspace_dir.path().to_str().unwrap(),
+        "--format",
+        "markdown-bundle",
+        "--out",
+        output_dir.to_str().unwrap(),
+    ]);
+
+    assert!(
+        output.status.success(),
+        "markdown-bundle export must succeed; stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output_dir.is_dir(), "bundle output should be a directory");
+    assert!(output_dir.join("README.md").is_file());
+    assert!(output_dir.join("manifest.json").is_file());
+    assert!(
+        std::fs::read_dir(output_dir.join("findings"))
+            .expect("bundle directory readable")
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().starts_with("F-")),
+        "bundle should contain per-finding markdown files"
+    );
 }
 
 #[test]

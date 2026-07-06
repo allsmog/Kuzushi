@@ -24,7 +24,7 @@ don't expect the nth run to have zero new findings* — and its entire design is
 **two countermeasures**:
 
 > **Any single AI scan is flaky and noisy. The countermeasures are: union across
-> a permuted salvo (coverage from variance) and a separate adversarial verifier
+> a permuted sweep (coverage from variance) and a separate adversarial verifier
 > whose only job is to disprove findings (precision). Everything else — the
 > ledger, the cockpit, seeding — is lifecycle management around those two.**
 
@@ -36,7 +36,7 @@ data-flow, attack chains, and a findings ledger with an honest proof state.
 
 The 42 built-in modules are not a catalog to browse. They are **composable
 parts** — detectors, analysis oracles, signal generators, verifiers — that the
-operator (and the workflow) assemble into **strategies** and fire as **salvos**
+operator (and the workflow) assemble into **strategies** and fire as **sweeps**
 against a target, phase by phase.
 
 **The pieces already exist.** Kuzushi ships a deduping findings ledger with
@@ -44,11 +44,11 @@ corroboration counts, sticky human triage, a three-tier model router, per-op
 budget caps, batch triage, twelve MCP analysis servers, on-demand CPG/CodeQL
 builds, a five-page security-visualization gallery, attack chaining, and
 prompts-as-files. **What's missing is the room that composes and steers them:**
-the salvo, the mutable harness, saveable strategies, per-scan engine enablement,
+the sweep, the mutable harness, saveable strategies, per-scan engine enablement,
 and a deterministic seed plane. This PRD specifies that room.
 
 **One-sentence promise:** *point Kuzushi at a target, aim it, and fire
-controlled salvos of AI scans you can steer, price, corroborate, and see — until
+controlled sweeps of AI scans you can steer, price, corroborate, and see — until
 you have confirmed, evidence-backed findings you can defend.*
 
 ---
@@ -65,7 +65,7 @@ the way.**
 Two mechanisms recover signal from non-determinism, and both must be **operator-
 controllable**, not buried:
 
-1. **Sample** — fire a *salvo*: the same target hit from many angles
+1. **Sample** — fire a *sweep*: the same target hit from many angles
    (`focus × strategy × model × runs`), results **unioned and deduped** so
    coverage comes from variance instead of a single lucky pull.
 2. **Corroborate** — a separate **adversarial verifier** (guilty-until-proven-
@@ -87,7 +87,7 @@ or the current-state map:
 
 **A. You can't steer where the non-determinism spends.** Phase *execution* is a
 static 22-entry `PlanningTaskId` walker (`app/shellapp.rs`), not a signal-driven,
-priced **salvo**. There is no `focus × strategy × model × runs` matrix, no queue
+priced **sweep**. There is no `focus × strategy × model × runs` matrix, no queue
 of proposed permutations you approve under a budget. The `COVERAGE MATRIX` in the
 Workbench is display-only (`workbench/panes.rs`).
 
@@ -125,7 +125,7 @@ When the product's promise is *evidence*, a dishonest signifier is a defect.
 
 **G. It reads as an inventory.** 42 modules / ~67 tools surfaced as a phase-
 bucketed catalog is better than a flat wall, but the *default* is still "pick a
-tool" rather than "aim, then fire a salvo." Codenames stay opaque; tab-completion
+tool" rather than "aim, then fire a sweep." Codenames stay opaque; tab-completion
 is implemented but its ghost-text preview never renders.
 
 **H. The keyless first run is broken.** The offline `demo` win is invisible in
@@ -176,7 +176,7 @@ gap is composition and control, not greenfield capability.
 
 | Missing connective tissue | Status |
 | --- | --- |
-| Signal-driven, priced, budget-gated **salvo** (`focus × strategy × model × runs`) | **New** (only a static walker today) |
+| Signal-driven, priced, budget-gated **sweep** (`focus × strategy × model × runs`) | **New** (only a static walker today) |
 | A mutable, recon-seeded, operator-steerable **harness** object | **New** |
 | Named, saveable, replayable **strategies** | **New** |
 | Per-scan **engine enablement** UI (CPG/MCP/LSP toggle + cost estimate) | **New** (artifact-gated only) |
@@ -197,13 +197,13 @@ The user-facing model is two planes over one engagement folder and one ledger.
 Everything the operator turns, in one place (surfaced at the phase-boundary
 **steering gate**, §8 of the design spec):
 
-- **The salvo** — the unit of sampled non-determinism: `focus × strategy ×
+- **The sweep** — the unit of sampled non-determinism: `focus × strategy ×
   model × runs`. Fire N permuted scans at one target; **union + dedupe** the
   results into the ledger with a corroboration count. `runs` samples variance;
   `strategy`/`focus` aim it; `model` tiers it.
 - **Priced, budget-gated proposals** — signal generators (commit-archaeology
   incomplete-fix hunts, threat-model reachability audits, dependency-intel
-  footguns, prompt evolution, fuzz-recon) *propose* priced salvos ranked by
+  footguns, prompt evolution, fuzz-recon) *propose* priced sweeps ranked by
   yield. The operator approves under a hard budget cap; `$/round` self-calibrates
   from actuals. Cost is enforced **between** proposals; a single in-flight
   overshoot is surfaced, never hidden.
@@ -237,7 +237,7 @@ of this exists today — the PRD wires it to control-plane reality):
   (trust-tier graph), **attack tree**, **attack chains**, **findings table** with
   proof markers, **coverage matrix** — the five-page `/scene` gallery + the
   Workbench cockpit.
-- **Live salvo activity** — per-round DAG, which model, which strategy,
+- **Live sweep activity** — per-round DAG, which model, which strategy,
   **live cost**, agent tree, tool calls, latency; coverage growth for fuzz
   harnesses (`cov:`/`ft:`/`NEW`). The invisible spend made legible.
 - **Hotkeys/commands to regenerate** the threat model, chains, or the attack
@@ -257,11 +257,11 @@ The 42 modules are **parts of four kinds**, composed — never a catalog to shop
 | --- | --- | --- |
 | **Detectors** | `semgrep`, `codeql`, `static_review` (LLM), `secrets` (deterministic), `dynamic`/fuzz | turn a target into candidate findings |
 | **Analysis oracles** | tree-sitter, Joern CPG, CodeQL, clangd LSP, entry-points, (KLEE, opt-in) | answer reachability / callers / taint-path deterministically |
-| **Signal generators** | commit-archaeology, threat-model, dependency-intel, evolution, fuzz-recon | *propose* priced salvos from evidence about the target |
+| **Signal generators** | commit-archaeology, threat-model, dependency-intel, evolution, fuzz-recon | *propose* priced sweeps from evidence about the target |
 | **Verifiers** | multi-lens vote, metamorphic, PoV/crash | try to disprove; promote proof state |
 
 A **strategy** is a named, saveable, replayable recipe that composes parts — the
-salvo's **"variant" axis**:
+sweep's **"variant" axis**:
 
 ```
 strategies/deep.toml     = pattern(semgrep+codeql) + iris-taint(CPG) + review×2 + invariant-check
@@ -321,7 +321,7 @@ Three ways it mutates — this is the product's differentiator:
 
 | Persona | Wants | Fails them today |
 | --- | --- | --- |
-| **Bug-bounty hunter** | Aim at an in-scope repo, fire a cheap salvo, get confirmed reportable findings, export a bundle. | Auth wall before first finding; no salvo/budget control; confirmed-vs-guess not in the list; bundle unreachable via the friendly verb. |
+| **Bug-bounty hunter** | Aim at an in-scope repo, fire a cheap sweep, get confirmed reportable findings, export a bundle. | Auth wall before first finding; no sweep/budget control; confirmed-vs-guess not in the list; bundle unreachable via the friendly verb. |
 | **AppSec engineer (CI)** | Seed with the team's Semgrep/CodeQL, corroborate with an AI hunt, gate PRs on high-severity, keep FP rate *known*. | No external SARIF/Semgrep ingest; `--target` inconsistency + empty-stdout errors; verify all-or-nothing; no published FP number. |
 | **Security researcher** | Compose a deep strategy, enable a CPG + symbolic tier, steer by typed focus, mutate a fuzz harness, measure the run. | No composable strategy; engine enablement is hidden/artifact-gated; no "focus" steering; static walker; no measure/tune. |
 
@@ -333,9 +333,9 @@ corroborate it, see it — cheaply and defensibly.**
 ## 9. Product principles
 
 1. **Non-determinism is managed, never hidden.** Surface variance
-   (net-new vs re-found across runs), sample it (salvo), and corroborate it
+   (net-new vs re-found across runs), sample it (sweep), and corroborate it
    (verifier). Never present one stochastic pull as ground truth.
-2. **Sample + corroborate.** Union across a permuted salvo for coverage; a
+2. **Sample + corroborate.** Union across a permuted sweep for coverage; a
    separate guilty-until-proven-innocent verifier for precision. These are the
    two load-bearing mechanisms; everything else supports them.
 3. **Cost is always visible and gated.** Every run shows `$cost`; proposals are
@@ -364,18 +364,18 @@ corroborate it, see it — cheaply and defensibly.**
 
 One spine, over one engagement folder and one ledger. Each phase is where you
 compose parts and control non-determinism. Keep the honest phase *derivation*
-(`journey.rs`); rebuild phase *execution* around the salvo.
+(`journey.rs`); rebuild phase *execution* around the sweep.
 
 ```
    AIM (組)         HUNT (崩)          CONFIRM (作)        FIX (掛)          REPORT
-   map + build   →  fire salvos:    →  sample→corroborate →  patch + re-    →  export
+   map + build   →  fire sweeps:    →  sample→corroborate →  patch + re-    →  export
    the harness      focus×strategy×    →prove: votes,        verify (PoV       evidence
    (recon seeds     model×runs,        lenses, PoV/          re-attack)        (SARIF /
     focus areas,    priced, budget-    metamorphic;                            bundle /
     threat model,   gated proposals    sticky human                           ledger)
     engines)        + seed ingest      triage
       │                  │                   │                  │
-      └─ CONTROL PLANE (salvo · harness · budget · engines · depth · verify) ─┘
+      └─ CONTROL PLANE (sweep · harness · budget · engines · depth · verify) ─┘
       └─ VISUAL PLANE   (surface · DFD · threat model · tree · chains · ledger · live cost) ┘
                                           ▲
                                 MEASURE / TUNE — F1 vs a corpus, head-to-head
@@ -386,7 +386,7 @@ compose parts and control non-determinism. Keep the honest phase *derivation*
   (regenerable), map/focus areas, strategies, prompts, context — and **seed the
   harness** from recon. Feeds the generators' signals. Pick which engines to
   prepare (CPG/CodeQL DB) here, where the cost is a one-time build.
-- **Hunt (崩).** The **salvo**: signal generators propose priced permutations;
+- **Hunt (崩).** The **sweep**: signal generators propose priced permutations;
   approve under budget; fire `focus × strategy × model × runs`; **union + dedupe**
   into the ledger with corroboration. Live scanners and imported SARIF feed the
   same rows. This is the control plane's centerpiece.
@@ -407,7 +407,7 @@ compose parts and control non-determinism. Keep the honest phase *derivation*
 ## 11. Goals & non-goals
 
 ### Goals
-- G1. Fire a controlled, priced salvo and see net-new-vs-re-found across its runs.
+- G1. Fire a controlled, priced sweep and see net-new-vs-re-found across its runs.
 - G2. Steer a scan by typed intent ("focus on SQLi") and by editing one harness.
 - G3. Enable/disable analysis engines (CPG/CodeQL/MCP/LSP) per-scan with cost shown.
 - G4. Ingest an external Semgrep/CodeQL/SARIF file as a deterministic seed that
@@ -437,12 +437,12 @@ compose parts and control non-determinism. Keep the honest phase *derivation*
 `[Rn] statement → acceptance`. Status = **Exists** (wire/expose) / **Partial** /
 **New**. Wave tags map to §14.
 
-### 12.1 Non-determinism control — the salvo (New)
-- **[R1] Priced, budget-gated salvo.** `focus × strategy × model × runs`;
+### 12.1 Non-determinism control — the sweep (New)
+- **[R1] Priced, budget-gated sweep.** `focus × strategy × model × runs`;
   generators propose, operator approves under a cap, `$/round` self-calibrates.
   *Accept:* generators propose from git/manifest/graph fixtures; the queue
   prices, ranks by yield, refuses over-budget; EMA recalibrates after a fire.
-- **[R2] Union + engagement-scoped merge.** Salvo runs union into one ledger row
+- **[R2] Union + engagement-scoped merge.** Sweep runs union into one ledger row
   per defect, merging on `dedup_key` **across `scan_id`** with a corroboration
   count. *Accept:* two runs / two engines over one defect → one row, corroboration 2.
 - **[R3] Variance is visible.** A campaign shows **net-new vs re-found** per run.
@@ -459,7 +459,7 @@ compose parts and control non-determinism. Keep the honest phase *derivation*
   ranked harness without hand-authoring; a fuzzer is never handed `main()`.
 - **[R7] Typed-intent steering.** "Focus on SQLi" re-ranks focus areas, sets the
   oracle CWEs, and biases seeds. *Accept:* the same command measurably reorders
-  the harness plan and the next salvo's scope.
+  the harness plan and the next sweep's scope.
 - **[R8] Dynamic mutation.** Reachability prunes unreachable candidates; an
   LLM-authored fuzz harness runs a build-and-fix loop and coverage decides
   extend-vs-stop; only a PoV promotes to `proven`. *Accept:* a build failure
@@ -469,7 +469,7 @@ compose parts and control non-determinism. Keep the honest phase *derivation*
 ### 12.3 Composable strategies (New)
 - **[R9] Named, saveable, replayable strategies.** `engagement/strategies/*.toml`
   compose detectors + oracles + verifiers + tiers. *Accept:* `deep` expands into a
-  salvo spec; picking it fires the composed passes; editing persists.
+  sweep spec; picking it fires the composed passes; editing persists.
 - **[R10] Diversity ensemble.** A strategy can run several diverse
   detectors/patch-agents in parallel and merge/pick-best. *Accept:* two detectors
   in one strategy corroborate into shared rows.
@@ -538,9 +538,9 @@ compose parts and control non-determinism. Keep the honest phase *derivation*
 - **[R26] Regenerate on demand.** Hotkeys/commands regenerate threat model,
   chains, surface when they drift. *Accept:* `threats regen` / chain `r` rebuild
   from current findings.
-- **[R27] Live salvo introspection.** The activity view shows per-round model,
+- **[R27] Live sweep introspection.** The activity view shows per-round model,
   strategy, live cost, agent tree, tool calls, latency, and coverage growth.
-  *Accept:* a running salvo shows spend and per-step confidence live.
+  *Accept:* a running sweep shows spend and per-step confidence live.
 
 ### 12.9 Surface, first-run, discoverability (Partial)
 - **[R28] Home is the control room, not a catalog.** Landing is the aim→fire
@@ -614,15 +614,15 @@ Because most parts exist, the early waves are **expose + compose**, not build.
 | **W4 — Cost & tiering surfaced** | R21–R23 (per-role map exists; surface cost-per-confirmed; kill duplicate triage; prompt caching) | expose + fix |
 | **W5 — Cross-run ledger** | R2, R20 (engagement-scoped merge; protect sticky triage) | build |
 | **W6 — Configurable Confirm** | R17–R19 (votes/lenses/PoV over the existing verifier) | build |
-| **W7 — The salvo** | R1, R3–R4 (signal-driven priced proposal queue replaces the static walker) | build (deep) |
+| **W7 — The sweep** | R1, R3–R4 (signal-driven priced proposal queue replaces the static walker) | build (deep) |
 | **W8 — The harness** | R5–R8 (mutable, recon-seeded, typed-intent, dynamic fuzz build-and-fix) | build (deep) |
-| **W9 — Strategies** | R9–R10 (saveable composable recipes = the salvo variant axis) | build |
+| **W9 — Strategies** | R9–R10 (saveable composable recipes = the sweep variant axis) | build |
 | **W10 — Detection as a number** | R34–R35 (fold into `kuzushi-eval`) | build |
 | **cross** | R31–R32 (CI/terminal parity; R31's `recon:import` is a standing BLOCKER) | fix early |
 
 **Sequencing rule:** nothing here is worth doing while the ship-the-product work
 (publish, platform binaries, supply-chain — `ROADMAP.md` P0) is red. W0–W4 are
-mostly expose/fix and land early; W7/W8 (salvo + harness) are the deep new build
+mostly expose/fix and land early; W7/W8 (sweep + harness) are the deep new build
 and are de-risked by W5's ledger.
 
 ---
@@ -632,13 +632,13 @@ and are de-risked by W5's ledger.
 | Metric | Today | Target |
 | --- | --- | --- |
 | Fresh launch → first finding (no key) | auth wall | ≤ 60s via `demo` |
-| Steer a scan by typed intent | one-off `ask` | re-ranks the harness + next salvo |
+| Steer a scan by typed intent | one-off `ask` | re-ranks the harness + next sweep |
 | Enable an engine per-scan with cost shown | hidden/artifact-gated | explicit toggle + estimate |
 | Confirmed-vs-guess visible in the list | detail-only | 100% of rows (tier + oracle + votes) |
 | Cost per confirmed finding | not surfaced | shown live |
 | Duplicate LLM triage per unique fingerprint | up to ~11× | 1× |
 | Deterministic seed corroborates the hunt | no ingest path | one row, `sources[]` ≥ 2 |
-| Net-new vs re-found across a salvo | not shown | per-run counter |
+| Net-new vs re-found across a sweep | not shown | per-run counter |
 | Verify configurability | all-or-nothing | when / max / votes / PoV |
 | Published detection number | `baseline = {}` | F1 + head-to-head vs SARIF |
 | Signifier/trust-contract violations | ≥ 5 known | 0 |
@@ -652,12 +652,12 @@ and are de-risked by W5's ledger.
 - **Model safety (hard gate).** No ported path inherits a default model;
   `check-model-safety.mjs` stays green; per-role/tier routing goes through
   `resolve_tool_model`.
-- **Mode parity.** Salvo + harness + ledger + strategies live in `kuzushi-core`;
+- **Mode parity.** Sweep + harness + ledger + strategies live in `kuzushi-core`;
   the TUI gate is chrome over the same on-disk state. Update
   `docs/assessments/mode-parity.md` each wave.
 - **CPG cost is exponential.** `reachableByFlows` must keep its caps
   (sources/sinks/flows/per-CWE timeout); default CPG off for broad passes.
-- **Cap overshoot honesty.** A single in-flight salvo can exceed the cap; surface
+- **Cap overshoot honesty.** A single in-flight sweep can exceed the cap; surface
   it, don't pretend the cap is hard.
 - **Recon over-scaling.** More agents → more duplicates; the lever is **partition
   quality**, not agent count — cap fan-out.
@@ -669,7 +669,7 @@ and are de-risked by W5's ledger.
 - **Baseline red tests.** HEAD already fails some workspace tests (BDD onboarding
   + snapshot; findings-store drift); capture the known-red set before W5.
 - **CRAP gate.** New functions ≤ complexity 4, < 40 logical lines,
-  `quality:crap-risk` < 7 — the salvo/harness/merge code are the likely offenders.
+  `quality:crap-risk` < 7 — the sweep/harness/merge code are the likely offenders.
 
 **References**
 - cannon harness — `~/vibe-code/vuln-scan-cannon-harness` (`README.md`,
@@ -720,7 +720,7 @@ $ kuzushi --target ./acme-api
   ───────────────────────────────────────────────────────────────────────────
   組 aim ✓   崩 HUNT ▸   作 confirm   掛 fix   ▪ report
   ─────────────────────────────── CONTROL ──────────┬──────── VISUAL ─────────
-  SALVO   focus × strategy × model × runs            │ ATTACK SURFACE
+  SWEEP   focus × strategy × model × runs            │ ATTACK SURFACE
     ▸ P-001 incomplete-fix hunt  $0.40 · yield .82   │   3 routes · 2 untrusted
       strategy: deep   model: mid   runs: 2  [k/s]   │   ╱╲  webhook.ts  ● hot
       P-002 SSRF reachability      $0.30 · .74 [k/s] │  ╱  ╲ users.ts    ◇
@@ -728,12 +728,12 @@ $ kuzushi --target ./acme-api
     seed     + semgrep.sarif (imported, 4)           │ FINDINGS (ledger)
     focus ›  "focus on sqli"________              ↵  │  ✓ SQLi  users.ts:31
   ──────────────────────────────────────────────────┤    critical · path · ×2
-  NEXT ▸ approve salvos, then `next` to fire         │  ◇ SSRF  webhook.ts:47
+  NEXT ▸ approve sweeps, then `next` to fire         │  ◇ SSRF  webhook.ts:47
   steer: [m]odel [s]trategy [e]ngines [b]udget       │    high · linked · votes 1/2
   ───────────────────────────────────────────────────────────────────────────
   > _                                    demo · seed · measure · / for commands
 ```
 
 The 42 modules, the MCP oracles, the CPG, the bounty/recon intake — all still
-there as **parts**, composed into the strategy behind the salvo. The default is
+there as **parts**, composed into the strategy behind the sweep. The default is
 the control room.

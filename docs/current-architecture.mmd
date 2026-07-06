@@ -43,9 +43,9 @@ flowchart LR
   end
 
   subgraph Storage["Persistence and artifacts"]
-    Config["~/.kuzushi/v2/config.toml<br/>.kuzushi/v2/config.toml"]
-    Db[".kuzushi/v2/findings.sqlite3"]
-    Runs[".kuzushi/runs/&lt;runId&gt;/<br/>run.json, events.jsonl, trace.jsonl"]
+    Config["~/.kuzushi/v3/config.toml<br/>.kuzushi/v3/config.toml"]
+    Db[".kuzushi/v3/index.sqlite3"]
+    Runs[".kuzushi/v3/runs/&lt;runId&gt;/<br/>run.json, events.jsonl, trace.jsonl"]
     Artifacts["context-snapshot.json<br/>threat-model.json<br/>x-ray/ and module artifacts"]
   end
 

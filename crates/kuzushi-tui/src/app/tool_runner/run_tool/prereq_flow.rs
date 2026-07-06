@@ -213,6 +213,32 @@ impl ShellApp {
     }
 
     fn dispatch_prereq_step(&mut self, step: PrereqStep, workspace: WorkspaceTarget) {
+        let context = self.prereq_dispatch_context(&step);
+        self.log_prereq_dispatch(&step, &context.final_tool);
+        let status = tool_run_status(&step.tool);
+        let activity = live_activity_for_prereq_step(&step, &context.final_tool);
+        let input = match self.prepared_prereq_step_input(&step.tool, &workspace) {
+            Ok(input) => input,
+            Err(error) => {
+                self.log(
+                    "error",
+                    format!("{} prerequisite input invalid: {error}", step.tool),
+                );
+                self.pending_chain = None;
+                return;
+            }
+        };
+        self.start_background_tool_with_activity(
+            step.tool,
+            input,
+            workspace,
+            status,
+            context.thinking,
+            Some(activity),
+        );
+    }
+
+    fn prereq_dispatch_context(&mut self, step: &PrereqStep) -> PrereqDispatchContext {
         let final_tool = self
             .pending_chain
             .as_ref()
@@ -225,27 +251,20 @@ impl ShellApp {
         if let Some(chain) = self.pending_chain.as_mut() {
             chain.running_step = Some(step.tool.clone());
         }
+        PrereqDispatchContext {
+            final_tool,
+            thinking,
+        }
+    }
+
+    fn log_prereq_dispatch(&mut self, step: &PrereqStep, final_tool: &str) {
         self.log(
             "system",
             format!(
                 "{} required by {final_tool} - running after prerequisite approval; writes {}",
                 step.tool,
-                step.writes
-                    .iter()
-                    .map(|path| path.display().to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
+                prereq_writes_label(step)
             ),
-        );
-        let status = tool_run_status(&step.tool);
-        let activity = live_activity_for_prereq_step(&step, &final_tool);
-        self.start_background_tool_with_activity(
-            step.tool,
-            serde_json::json!({}),
-            workspace,
-            status,
-            thinking,
-            Some(activity),
         );
     }
 
@@ -263,6 +282,34 @@ impl ShellApp {
         let status = tool_run_status(&tool);
         self.start_background_tool(tool, input, workspace, status, thinking);
     }
+
+    fn prepared_prereq_step_input(
+        &self,
+        tool_name: &str,
+        workspace: &WorkspaceTarget,
+    ) -> anyhow::Result<serde_json::Value> {
+        let ctx = ToolExecutionContext {
+            config: &self.config,
+            workspace: Some(workspace),
+            findings_store: None,
+            trace: None,
+        };
+        self.registry
+            .prepare_tool_input_for_dispatch(tool_name, serde_json::json!({}), &ctx, None)
+    }
+}
+
+struct PrereqDispatchContext {
+    final_tool: String,
+    thinking: Option<String>,
+}
+
+fn prereq_writes_label(step: &PrereqStep) -> String {
+    step.writes
+        .iter()
+        .map(|path| path.display().to_string())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn prereq_plan_log_line(plan: &PendingPrereqPrompt) -> String {

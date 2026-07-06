@@ -21,8 +21,9 @@ pub fn build_whitebox_diff_scope_report(
         .iter()
         .map(|finding| tag_current_finding(finding, &changed_files))
         .collect::<Vec<_>>();
-    let fixed_findings = tag_fixed_findings(previous_findings, current_findings, &changed_files);
-    let summary = summarize_diff_scope(&changed_files, &context, &finding_tags, &fixed_findings);
+    let not_seen_findings =
+        tag_not_seen_findings(previous_findings, current_findings, &changed_files);
+    let summary = summarize_diff_scope(&changed_files, &context, &finding_tags, &not_seen_findings);
 
     Ok(WhiteboxDiffScopeReport {
         diff_base: diff_base.to_string(),
@@ -30,7 +31,7 @@ pub fn build_whitebox_diff_scope_report(
         changed_files,
         context,
         finding_tags,
-        fixed_findings,
+        not_seen_findings,
         summary,
         deterministic: true,
         no_remote_provider_required: true,

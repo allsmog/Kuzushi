@@ -35,9 +35,9 @@ productized today.
   descriptors, and migration references.
 - **Dynamic `file://`, local path, and `package:` module loading is supported
   through the native CLI's global `--load` flag for shell and headless `run`.**
-  The loader is trust-gated by `operator.trusted_modules`; pass
-  `--allow-untrusted-module` only for a one-shot local run you intentionally
-  trust.
+  The Node bridge is trusted-only: each specifier must be listed in
+  `operator.trusted_modules`. Untrusted analyzers must use the v3 sandbox
+  plugin path instead of the dynamic Node bridge.
 - **MCP servers and deferred plugin adapters are exact, explicit integrations.**
   Rust MCP servers are exposed through `kuzushi mcp serve <backend>` and the
   agent bridge. The legacy `mcp:` module specifier remains a parsed
@@ -379,15 +379,18 @@ indents the row under the phase header in the right pane. The scope is
 per-thread; nested scopes form a stack and pop in LIFO order on drop.
 
 Producers that already follow this pattern as canonical references:
-`triage:run`, `verify:finding`, `agentic-sast:scan`, `taint-iris:hunt`,
-`taint-iris-next:hunt`, `carlini-threat-hunt:run`, `patch:finding`,
+`triage:run`, `verify:finding`, `agentic-sast:scan`, `taint-iris-next:hunt`,
+`taint-iris-next:finding-review`, `carlini-threat-hunt:run`, `patch:finding`,
 `threat-model:build`, `x-ray:run`, `run_plugin_finding_adapter` (used
 by `vuln-scout:audit` / `tob:audit`), `shinsa:scan`, `prompt-armor:*`.
 
-**Hidden modules** (`pipeline:*`, `systems-hunt:*`, `context-lite:index`)
-collapse into one aggregated `subsystems` row in the Activity view. Their
-events also still flow through but are filtered out of the right-pane
-feed unless the operator presses `V` (verbose).
+**Hidden modules** (`pipeline:*`, `systems-hunt:*`, `context-lite:index`,
+compatibility aliases, and quarantined exact-only surfaces such as
+`full-mode:*`, `deep-audit:*`, `exploit-chain:*`, `pwn:*`, `threat-leads:*`,
+`chrome-rce:*`, and `vendor-assessment:*`) collapse into one aggregated
+`subsystems` row in the Activity view. Their events also still flow through
+but are filtered out of the right-pane feed unless the operator presses `V`
+(verbose).
 
 Headless `kuzushi run` creates a JSONL trace handle for run artifacts. Some
 test/eval or compatibility contexts may still leave `ctx.trace` as `None`; the
@@ -459,8 +462,9 @@ The native Rust CLI accepts dynamic module specifiers via the global
 `--load <specifier>` flag for `kuzushi shell` and `kuzushi run`. The loader
 delegates to `scripts/kuzushi-dynamic-module-host.mjs`, imports the module
 entry, and consumes the descriptor JSON returned by that host. Each specifier
-must either be listed under `[operator].trusted_modules` in the global config
-or be loaded with the one-shot `--allow-untrusted-module` flag.
+must be listed under `[operator].trusted_modules` in the global config.
+Untrusted third-party analyzers must be packaged for the v3 sandbox plugin
+runtime, where capabilities are explicit and ambient process access is denied.
 
 The retained TypeScript SDK parser also understands four compatibility
 prefixes:
@@ -611,5 +615,4 @@ export default defineModule({
 Ship it with a `module.manifest.json` as shown in §5 and build to
 `./dist/index.js`. Load it in the native shell or headless run path with
 `--load <specifier>` after adding the exact specifier to
-`operator.trusted_modules`, or use `--allow-untrusted-module` for a deliberate
-one-shot local test.
+`operator.trusted_modules`.

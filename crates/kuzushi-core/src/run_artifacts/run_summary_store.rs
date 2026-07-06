@@ -8,15 +8,12 @@ use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const LEGACY_SUMMARY_FILE: &str = "summary.json";
-
 pub fn write_run_summary(target: impl AsRef<Path>, summary: &RunSummary) -> Result<PathBuf> {
     let target = target.as_ref();
     let dir = run_dir(target, &summary.run_id);
     fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
     let summary = summary_with_dynamic_metadata(target, summary);
-    let summary_path = write_run_summary_file(&dir.join(LEGACY_SUMMARY_FILE), &summary)?;
-    write_run_summary_file(&dir.join(run_metadata_artifact_spec().leaf), &summary)?;
+    let summary_path = write_run_summary_file(&dir.join(run_metadata_artifact_spec().leaf), &summary)?;
     ensure_canonical_run_files(target, &summary.run_id, &summary.status)?;
     write_latest_run_id(target, &summary.run_id)?;
     Ok(summary_path)
@@ -68,8 +65,7 @@ fn is_directory_entry(entry: &fs::DirEntry) -> bool {
 fn read_run_metadata_entry(dir: &Path) -> Option<RunSummary> {
     match read_run_metadata_summary(&dir.join(run_metadata_artifact_spec().leaf)) {
         MetadataSummaryRead::Present(summary) => Some(summary),
-        MetadataSummaryRead::Missing => read_repaired_summary(&dir.join(LEGACY_SUMMARY_FILE)),
-        MetadataSummaryRead::Invalid => None,
+        MetadataSummaryRead::Missing | MetadataSummaryRead::Invalid => None,
     }
 }
 
@@ -114,9 +110,7 @@ fn readable_summary_path(target: impl AsRef<Path>, run_id: &str) -> Result<PathB
     if readable_run_metadata_exists(&canonical, "Run metadata")? {
         return Ok(canonical);
     }
-    let legacy = dir.join(LEGACY_SUMMARY_FILE);
-    reject_non_file_target(&legacy, "Legacy run summary")?;
-    Ok(legacy)
+    anyhow::bail!("Run metadata is missing: {}", canonical.display())
 }
 
 fn run_metadata_artifact_spec() -> &'static CanonicalRunArtifactSpec {
@@ -146,7 +140,9 @@ fn write_latest_run_id(target: &Path, run_id: &str) -> Result<()> {
         fs::create_dir_all(parent).with_context(|| format!("Could not create {}", parent.display()))?;
     }
     reject_non_file_target(&path, "Latest run pointer target")?;
-    fs::write(&path, format!("{run_id}\n"))
+    // The latest-run pointer is read to resolve the newest run; a torn write
+    // here would desync the whole run index, so it goes through the atomic path.
+    crate::fs_atomic::write_atomic(&path, &format!("{run_id}\n"))
         .with_context(|| format!("Could not write {}", path.display()))
 }
 
@@ -172,7 +168,9 @@ fn repair_stale_running_summary(summary_path: &Path, summary: RunSummary) -> Run
     }
     let repaired = interrupted_summary(summary, process_id);
     if let Ok(body) = serde_json::to_string_pretty(&repaired) {
-        let _ = fs::write(summary_path, format!("{body}\n"));
+        // Rewrite the repaired summary crash-safely: a torn rewrite here would
+        // replace a recoverable "running" summary with a corrupt one.
+        let _ = crate::fs_atomic::write_atomic(summary_path, &format!("{body}\n"));
     }
     repaired
 }

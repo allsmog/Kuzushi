@@ -6,7 +6,7 @@
  * concatenated text of every recorded line.
  */
 
-import type { PrintLevel, PrintSink } from "../../copilot/print.js";
+import type { PrintLevel, PrintSink } from "../../modules/print.js";
 
 export interface PrintRecord {
   level: PrintLevel;

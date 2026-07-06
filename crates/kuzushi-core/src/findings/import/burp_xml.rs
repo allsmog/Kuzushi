@@ -30,7 +30,7 @@ pub fn import_burp_xml(workspace: &WorkspaceTarget, path: &Path) -> Result<BurpI
     let scope = load_program_scope(workspace).context("Could not load scope.toml")?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let run_id = format!("burp-{}", Uuid::new_v4());
-    store.insert_scan_run(&run_id, workspace.root(), "completed")?;
+    store.record_run_started(&run_id, workspace.root(), "completed")?;
 
     let mut imported = 0usize;
     let mut skipped = 0usize;

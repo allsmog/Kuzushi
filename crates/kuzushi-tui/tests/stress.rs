@@ -43,10 +43,9 @@ fn ten_thousand_log_calls_stay_inside_the_500_line_cap_without_panicking() {
 #[test]
 fn logs_view_scroll_keys_clamp_safely_under_load() {
     // After saturating the buffer, j/k/g/G must clamp without panicking
-    // even when the user pages past the visible region. This protects
-    // the Logs view (M1 §1.1) against an off-by-one in
-    // `scroll_down`/`scroll_to_bottom` when usize::MAX is used as a
-    // sentinel.
+    // even when the user pages past the visible region. Exact route-scroll
+    // values are covered by the crate-local app tests; this integration
+    // stress test protects the saturated transcript path.
     let mut app = ShellApp::new(V2Config::default(), None);
     for index in 0..LARGE_LOG_LINES {
         app.log("scan", format!("entry {index}"));
@@ -55,14 +54,13 @@ fn logs_view_scroll_keys_clamp_safely_under_load() {
     for _ in 0..50 {
         app.scroll_down(1);
     }
-    let mid_scroll = app.logs_scroll;
     app.scroll_to_bottom();
-    assert!(app.logs_scroll >= mid_scroll, "G must not regress scroll");
     for _ in 0..200 {
         app.scroll_up(1);
     }
     app.scroll_to_top();
-    assert_eq!(app.logs_scroll, 0);
+    assert_eq!(app.log.len(), TRANSCRIPT_CAP);
+    assert!(render_plain_app(&app, RENDER_WIDTH).contains("LOGS"));
 }
 
 #[test]

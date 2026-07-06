@@ -68,7 +68,7 @@ fn catalog_collapsed_layout_uses_width_and_expand_toggle() {
     assert!(catalog_uses_collapsed_layout(&model, 80));
     assert!(!catalog_uses_collapsed_layout(&model, 120));
 
-    app.catalog_expanded = true;
+    app.catalog_route.expand();
     let model = catalog_model(&app);
     assert!(!catalog_uses_collapsed_layout(&model, 80));
 }

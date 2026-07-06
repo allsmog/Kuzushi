@@ -47,7 +47,7 @@ impl JourneyPhaseState {
     pub fn glyph(self) -> &'static str {
         match self {
             JourneyPhaseState::Done => "✓",
-            JourneyPhaseState::Current => "▸",
+            JourneyPhaseState::Current => "●",
             JourneyPhaseState::Failed => "!",
             JourneyPhaseState::Skipped => "⊘",
             JourneyPhaseState::Pending => "·",
@@ -127,13 +127,13 @@ pub fn journey_model(app: &ShellApp) -> Option<JourneyModel> {
         &app.findings,
     );
     let derived_current = progress.current_phase();
-    let current = app.workflow_phase.unwrap_or(derived_current);
+    let current = app.engagement.current_phase().unwrap_or(derived_current);
     let failed_phases = failed_phase_set(app);
     Some(JourneyModel {
         phases: phase_statuses(
             current,
             derived_current,
-            &app.planning_skipped_phases,
+            app.engagement.skipped_phases(),
             &failed_phases,
         ),
         current,
@@ -174,7 +174,8 @@ fn is_confirmed(finding: &Finding) -> bool {
 }
 
 fn failed_phase_set(app: &ShellApp) -> BTreeSet<WorkflowPhase> {
-    app.planning_failed
+    app.engagement
+        .failed_tasks()
         .iter()
         .map(|failed| failed.task.phase())
         .collect()

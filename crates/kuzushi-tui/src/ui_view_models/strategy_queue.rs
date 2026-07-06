@@ -20,9 +20,10 @@ const STRATEGY_QUEUE_HEADERS: [&str; 12] = [
     "runtime",
     "risk",
 ];
-const STRATEGY_QUEUE_COMMANDS: [&str; 6] = [
-    "strategy approve <id>",
-    "strategy reject <id>",
+const STRATEGY_QUEUE_COMMANDS: [&str; 7] = [
+    "strategy keep <id>",
+    "strategy skip <id>",
+    "strategy fire",
     "strategy correct <id> <strategy>",
     "recommend",
     "prompts",
@@ -36,7 +37,7 @@ pub(crate) struct StrategyQueueModel {
     pub(crate) detail_rows: Vec<StrategyQueueDetailRow>,
     pub(crate) summary: String,
     pub(crate) headers: [&'static str; 12],
-    pub(crate) commands: [&'static str; 6],
+    pub(crate) commands: [&'static str; 7],
     pub(crate) empty_state: StrategyQueueEmptyState,
     pub(crate) rows: Vec<StrategyQueueRow>,
 }
@@ -365,7 +366,7 @@ fn strategy_queue_empty_state(target_selected: bool) -> StrategyQueueEmptyState 
     StrategyQueueEmptyState {
         title: "no queued proposals",
         explanations: [
-            "strategy queue reads .kuzushi/v2/strategy-queue.jsonl.",
+            "strategy queue reads .kuzushi/v3/strategy-queue.jsonl.",
             "run the recommender to materialize review proposals before execution.",
         ],
         actions: [

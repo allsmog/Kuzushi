@@ -9,11 +9,12 @@ macro_rules! public_modules {
 #[rustfmt::skip]
 public_modules!(
     agent_router, artifact_kb, attachments, attack_surface, capabilities, carlini_threat_hunt,
-    classifier_gate, code_nav, concurrency, config, context, deep_auditor, demo, dep_hygiene, diff_scope,
-    events, evidence, findings, full_mode_multi, iac_scan, license_scan, modules, offense, options, patch,
-    pr_comment, prompt_stack, proof, recon, remediation, report, repository_inventory, run_artifacts, run_trace, runtime,
-    sbom_scan, scan, scanners, secret_scan, semgrep_rule_synthesis, source_span, spend, static_context,
-    static_evidence, static_narrative, static_proof_validator, static_ranking, static_registry,
+    classifier_gate, code_nav, concurrency, config, content_store, context, deep_auditor, demo, dep_hygiene, diff_scope,
+    engagement, event_log, events, evidence, findings, full_mode_multi, iac_scan, identity, incremental_index,
+    license_scan, modules, offense, options, patch, plugin_sandbox, pr_comment, prompt_stack, proof, recon,
+    remediation, report, repository_inventory, run_artifacts,
+    run_trace, runtime, sbom_scan, scan, scanners, secret_scan, semgrep_rule_synthesis, source_span, spend, static_context,
+    static_evidence, static_narrative, static_proof_validator, static_ranking, static_registry, storage_v3,
     strategy, systems_hunt, threat_leads, threat_model, triage, variant_ndiff, verification, verify,
     whitebox_static, whitebox_suppressions, workspace, x_ray,
 );

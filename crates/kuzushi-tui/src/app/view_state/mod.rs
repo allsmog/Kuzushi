@@ -10,8 +10,11 @@ pub(crate) use sast_task_row::*;
 use std::path::PathBuf;
 use std::time::Instant;
 mod activity;
+mod engagement;
+mod input_mode;
 mod label;
 mod rank;
+mod routes;
 mod sast_task_row;
 /// Cached structured snapshot of the most recent recon tool result. The TUI
 /// renderer prefers reading from this snapshot (when populated) rather than
@@ -21,6 +24,8 @@ mod sast_task_row;
 #[cfg(test)]
 mod tests;
 mod workbench_cache;
+mod workbench_nav;
+mod workbench_review_state;
 pub use activity::is_hidden_module_id;
 pub use activity::ActivityDeckPage;
 pub use activity::ActivitySession;
@@ -32,6 +37,8 @@ pub use activity::PaneFocus;
 pub use activity::RecordedTraceEvent;
 pub use activity::SubsystemAggregate;
 pub use activity::ACTIVITY_FEED_RING_CAPACITY;
+pub use engagement::EngagementState;
+pub use input_mode::InputMode;
 pub use label::ActorDetailFilter;
 pub use label::OptionsFilter;
 pub use label::OptionsView;
@@ -49,6 +56,11 @@ pub use rank::PlanChange;
 pub use rank::PlanProposal;
 pub use rank::ThrottleAdvisory;
 pub use rank::TuneAction;
+pub use routes::{
+    AuthPickerRouteState, CatalogRouteState, FilePickerRouteState, FindingsRouteState,
+    HelpRouteState, ModelPickerRouteState, PlanningPickerRouteState, ScrollRouteState,
+    TargetPickerRouteState, ToolsRouteState,
+};
 pub use sast_task_row::AuthLoginView;
 pub use sast_task_row::CompletionCycle;
 pub use sast_task_row::ContextSnapshotView;
@@ -65,5 +77,17 @@ pub use sast_task_row::WorkbenchPane;
 pub use sast_task_row::WorkbenchPaneScroll;
 pub use sast_task_row::WorkspaceView;
 pub(crate) use workbench_cache::{
-    JsonFileState, ProjectScopeTreeState, PromptMutationsState, StrategyQueueState, WorkbenchCache,
+    DfdModelCacheKey, JsonFileState, ProjectScopeTreeState, PromptMutationsState,
+    RiskByModuleCacheKey, StrategyQueueState, VisibleFindingProjection, VisibleFindingsCacheKey,
+    WorkbenchCache,
+};
+pub use workbench_nav::BoundedScroll;
+pub use workbench_nav::DrawerTab;
+pub use workbench_nav::FindingPane;
+pub use workbench_nav::NavBounds;
+pub use workbench_nav::NavEffect;
+pub use workbench_nav::WorkbenchDepth;
+pub use workbench_nav::WorkbenchNav;
+pub use workbench_review_state::{
+    PendingDecision, ReviewCommand, ReviewMode, ReviewRow, WorkbenchReviewState,
 };

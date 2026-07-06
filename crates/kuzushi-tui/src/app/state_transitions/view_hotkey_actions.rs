@@ -3,6 +3,9 @@ use std::path::{Component, Path};
 
 impl ShellApp {
     pub(super) fn handle_view_hotkey(&mut self, key: KeyEvent) -> bool {
+        if let Some(handled) = self.handle_workbench_depth_key(key) {
+            return handled;
+        }
         let Some(binding) = self
             .view_keybindings()
             .into_iter()
@@ -65,6 +68,44 @@ impl ShellApp {
             _ => return None,
         }
         Some(true)
+    }
+
+    /// Depth-stack review keys (opt-in `ui.workbench_depth_stack`). Returns
+    /// `Some(true)` when the depth stack consumed the key, `None` to fall
+    /// through to the standard view keybindings — so `Esc` at the list root
+    /// still leaves the view, while inner depths unwind first.
+    fn handle_workbench_depth_key(&mut self, key: KeyEvent) -> Option<bool> {
+        if !self.workbench_depth_stack_active() {
+            return None;
+        }
+        let bounds = crate::ui_view_models::workbench_depth_bounds(self, &self.workbench_nav);
+        match self.workbench_nav.apply_key(key, bounds) {
+            NavEffect::Ignored | NavEffect::Leave => None,
+            NavEffect::Handled => Some(true),
+            NavEffect::SelectStep(delta) => {
+                self.step_findings_cursor(delta);
+                Some(true)
+            }
+            NavEffect::SelectJump(to_start) => {
+                self.jump_findings_selection(to_start);
+                Some(true)
+            }
+            NavEffect::Yank => {
+                self.log("workbench", "record zoom (z) holds the full text");
+                Some(true)
+            }
+        }
+    }
+
+    fn workbench_depth_stack_active(&self) -> bool {
+        self.workbench_depth_stack
+            && self.shell_view == ShellView::Workbench
+            && self.workbench_is_review_page()
+    }
+
+    fn jump_findings_selection(&mut self, to_start: bool) {
+        self.findings_route
+            .jump(to_start, crate::ui_view_models::visible_findings_len(self));
     }
 
     fn set_workbench_page(&mut self, page: WorkbenchPage) {
@@ -161,12 +202,8 @@ impl ShellApp {
     }
 
     fn step_findings_cursor(&mut self, delta: isize) {
-        if delta >= 0 {
-            let max = crate::ui_view_models::visible_findings_len(self).saturating_sub(1);
-            self.findings_cursor = (self.findings_cursor + 1).min(max);
-        } else {
-            self.findings_cursor = self.findings_cursor.saturating_sub(1);
-        }
+        self.findings_route
+            .step_direction(delta, crate::ui_view_models::visible_findings_len(self));
     }
 
     fn workbench_jump(&mut self, to_start: bool) {
@@ -176,11 +213,8 @@ impl ShellApp {
         }
         match self.workbench_focus {
             WorkbenchPane::Findings => {
-                self.findings_cursor = if to_start {
-                    0
-                } else {
-                    crate::ui_view_models::visible_findings_len(self).saturating_sub(1)
-                };
+                self.findings_route
+                    .jump(to_start, crate::ui_view_models::visible_findings_len(self));
             }
             WorkbenchPane::Source | WorkbenchPane::Center | WorkbenchPane::Details => {
                 self.jump_scroll_region(to_start);
@@ -255,11 +289,7 @@ impl ShellApp {
     }
 
     fn current_workbench_finding(&self) -> Option<Finding> {
-        self.selected_finding.clone().or_else(|| {
-            crate::ui_view_models::visible_sorted_finding_alias_indices(self)
-                .get(self.findings_cursor)
-                .and_then(|(_, index)| self.findings.get(*index).cloned())
-        })
+        crate::ui_view_models::current_finding_for_detail(self).map(|(_, finding)| finding)
     }
 
     fn apply_scroll_hotkey(&mut self, action: ViewHotkeyAction) -> bool {
@@ -289,18 +319,14 @@ impl ShellApp {
     fn move_recommend_cursor(&mut self, delta: isize) {
         let count = crate::ui_view_models::recommendation_components(self).len();
         if count == 0 {
-            self.recommend_cursor = 0;
+            self.catalog_route.reset_recommend_cursor();
             self.log(
                 "component",
                 "no component recommendations yet — run `recommend` first",
             );
             return;
         }
-        if delta >= 0 {
-            self.recommend_cursor = (self.recommend_cursor + 1).min(count.saturating_sub(1));
-        } else {
-            self.recommend_cursor = self.recommend_cursor.saturating_sub(1);
-        }
+        self.catalog_route.move_recommend_cursor(delta, count);
     }
 
     fn scan_recommend_component(&mut self) {
@@ -365,9 +391,10 @@ impl ShellApp {
         &mut self,
     ) -> Option<crate::ui_view_models::ComponentRecommendationRow> {
         let components = crate::ui_view_models::recommendation_components(self);
-        let max = components.len().saturating_sub(1);
-        self.recommend_cursor = self.recommend_cursor.min(max);
-        components.get(self.recommend_cursor).cloned()
+        let selected = self
+            .catalog_route
+            .selected_recommend_cursor(components.len());
+        components.get(selected).cloned()
     }
 
     fn recommend_component_target_path(&self, rel_path: &str) -> Option<PathBuf> {
@@ -511,16 +538,16 @@ impl ShellApp {
         }) else {
             return;
         };
-        let aliases = crate::ui_view_models::visible_sorted_finding_alias_indices(self);
-        if aliases.is_empty() {
+        let visible_len = crate::ui_view_models::visible_findings_len(self);
+        if visible_len == 0 {
             return;
         }
-        let index = cursor.min(aliases.len() - 1);
-        let (_, finding_index) = aliases[index].clone();
-        let Some(finding) = self.findings.get(finding_index).cloned() else {
+        let index = cursor.min(visible_len - 1);
+        let Some((_, finding)) = crate::ui_view_models::visible_finding_at_index(self, index)
+        else {
             return;
         };
-        self.findings_cursor = index;
+        self.findings_route.set_cursor(index);
         self.selected_finding = Some(finding);
     }
 

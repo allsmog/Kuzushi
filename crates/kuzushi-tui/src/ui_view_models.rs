@@ -58,7 +58,11 @@ mod prompt_tuning;
 mod pwn;
 mod recent_module_activity;
 mod recommendation;
+mod report_preview;
 mod retry_card;
+mod review_conflicts;
+mod review_queue;
+mod review_state;
 mod routing;
 mod run_diff;
 mod run_paths;
@@ -85,13 +89,14 @@ mod transcript;
 mod view_status;
 mod viz_data;
 mod workbench;
+mod workbench_depth;
 mod workspace;
 pub(crate) use active_stage::active_stage_label;
 pub(crate) use activity_dag_rows::ActivityDagRowTone;
 pub(crate) use activity_empty_state::ActivityEmptyStateModel;
 pub(crate) use activity_feed_rows::ActivityFeedRowTone;
 pub(crate) use activity_footer::ActivityFooterHint;
-pub(crate) use activity_layout::activity_frame_layout;
+pub(crate) use activity_layout::{activity_frame_layout, ActivityFrameLayout};
 pub(crate) use activity_pane_chrome::{ActivityPaneTitle, ActivityPlainPaneHeaderCell};
 pub(crate) use activity_plain_rows::{
     ActivityPlainDagCell, ActivityPlainFeedCell, ActivityPlainPaneRow,
@@ -136,10 +141,11 @@ pub(crate) use finding_summary::{
     SeverityCounts,
 };
 pub(crate) use findings::{
-    findings_model, selected_finding_detail_model, visible_findings_len,
-    visible_sorted_finding_alias_indices, CleanScanEmptyState, FindingDetailModel,
-    FindingEvidenceRow, FindingListRow, FindingsEmptyState, FindingsModel, ProofTier,
-    TriageSummaryModel,
+    current_finding_for_detail, findings_model, selected_finding_detail_model,
+    visible_finding_at_cursor, visible_finding_at_index, visible_finding_position_for,
+    visible_findings_len, visible_sorted_finding_alias_indices, CleanScanEmptyState,
+    FilteredFindingsEmptyState, FindingDetailModel, FindingEvidenceRow, FindingListRow,
+    FindingsEmptyState, FindingsModel, ProofTier, TriageSummaryModel,
 };
 pub(crate) use health::{health_model, HealthModel, HealthRow, HealthTone};
 pub(crate) use help::{
@@ -204,13 +210,22 @@ pub(crate) use recommendation::{
     recommendation_artifact_needs_refresh, recommendation_components, recommendation_model,
     ComponentRecommendationRow, RecommendationModel, RecommendationRow,
 };
+pub(crate) use report_preview::{
+    report_preview_model, ReportPreviewCounts, ReportPreviewModel, ReportPreviewRow,
+};
 pub(crate) use retry_card::{retry_card_model, RetryCardModel, RetryCardRow};
+pub(crate) use review_queue::{
+    review_queue_model, ReviewQueueMode, ReviewQueueModel, ReviewQueueRow,
+};
 pub(crate) use routing::{
     has_run_activity, plain_render_mode, routing_mode, routing_mode_segment, uses_activity_frame,
     uses_scene_frame, uses_workbench_frame, PlainInteractiveOnlyModel, PlainRenderMode,
     RoutingMode,
 };
-pub(crate) use run_diff::{run_diff_model, RunDiffFindingRow, RunDiffModel};
+pub(crate) use run_diff::{
+    run_diff_model, RunDiffChangedRow, RunDiffDecisionSummary, RunDiffFindingRow,
+    RunDiffFindingState, RunDiffModel, RunDiffUncertainMatchRow,
+};
 pub(crate) use run_paths::{
     ui_latest_run_path, ui_latest_run_relative_path, ui_run_artifact_relative_path, ui_run_dir,
     ui_runs_root, ui_runs_root_relative_path,
@@ -261,15 +276,21 @@ pub(crate) use transcript::{
 };
 pub(crate) use view_status::view_status_segment;
 pub(crate) use viz_data::{
-    attack_tree, dfd_model, findings_heatmap, findings_heatmap_with_selection, risk_by_module,
-    selected_taint_flow_path, taint_flow_path, AttackChain, AttackTree, DfdFlowModel, DfdKind,
-    DfdModel, DfdNodeModel, FindingsHeatmap, ModuleRisk, RiskByModule, TaintFlowPath,
-    TaintStageModel,
+    attack_tree, cached_findings_heatmap, cached_findings_heatmap_with_selection,
+    cached_risk_by_module, dfd_model, findings_heatmap, findings_heatmap_with_selection,
+    risk_by_module, selected_taint_flow_path, taint_flow_path, AttackChain, AttackTree,
+    DfdFlowModel, DfdKind, DfdModel, DfdNodeModel, FindingsHeatmap, ModuleRisk, RiskByModule,
+    TaintFlowPath, TaintStageModel,
 };
 pub(crate) use workbench::{
-    active_workbench_page, workbench_view_model, WorkbenchCenter, WorkbenchCenterBody,
+    active_review_queue_mode, active_workbench_page, workbench_export_command,
+    workbench_report_command, workbench_view_model, WorkbenchCenter, WorkbenchCenterBody,
     WorkbenchCenterTab, WorkbenchHint, WorkbenchState, WorkbenchTopBar, WorkbenchViewModel,
     WORKBENCH_REPORT_COMMAND,
+};
+pub(crate) use workbench_depth::{
+    workbench_depth_bounds, workbench_depth_model, DrawerContent, FindingRow, LegKind, Stanza,
+    TraceLeg, Waypoint, WorkbenchModel,
 };
 pub(crate) use workspace::{
     findings_db_relative_path, plain_workspace_model, workspace_model, PlainWorkspaceModel,

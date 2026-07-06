@@ -2,11 +2,21 @@ use super::*;
 
 impl ShellApp {
     pub fn start_planner(&mut self, goal: &str) {
-        let Some(start) = self.prepare_planner_start(goal) else {
-            return;
-        };
+        let effects = self.reduce_planner_start(goal);
+        self.execute_effects(effects);
+    }
+
+    pub(crate) fn reduce_planner_start(&mut self, goal: &str) -> Vec<ShellEffect> {
+        self.prepare_planner_start(goal)
+            .map(|start| vec![ShellEffect::StartPlanner(start)])
+            .unwrap_or_default()
+    }
+
+    pub(crate) fn dispatch_planner(&mut self, start: PlannerStart) {
         let (tx, rx) = mpsc::channel();
         let cancel = ScanCancellation::default();
+        let generation = self.next_worker_generation();
+        self.plan_generation = Some(generation);
         self.plan_rx = Some(rx);
         self.plan_cancel = Some(cancel.clone());
         self.planner_running = true;
@@ -18,17 +28,30 @@ impl ShellApp {
             "asking model for a structured proposal",
         ));
 
-        thread::spawn(move || {
-            planner_worker(
-                start.config,
-                start.model,
-                start.thinking_level,
-                start.cwd,
-                start.goal,
-                tx,
-                cancel,
-            )
-        });
+        let failure_tx = tx.clone();
+        let wake = self.loop_wake.clone();
+        let watchdog_cancel = cancel.clone();
+        let handle = spawn_panic_safe_worker(
+            "planner",
+            failure_tx,
+            generation,
+            wake.clone(),
+            move || {
+                planner_worker(
+                    start.config,
+                    start.model,
+                    start.thinking_level,
+                    start.cwd,
+                    start.goal,
+                    tx,
+                    generation,
+                    cancel,
+                    wake,
+                )
+            },
+            |error| PlanEvent::Failed { error },
+        );
+        self.register_worker_handle_with_watchdog("planner", generation, handle, watchdog_cancel);
     }
 
     fn prepare_planner_start(&mut self, goal: &str) -> Option<PlannerStart> {
@@ -61,7 +84,7 @@ impl ShellApp {
             self.log("plan", "planner already running; wait for the proposal");
             return None;
         }
-        if self.pending_plan.is_some() {
+        if self.engagement.has_pending_plan() {
             self.log("plan", "discard the current pending plan first with /no");
             return None;
         }
@@ -93,7 +116,7 @@ impl ShellApp {
     }
 }
 
-struct PlannerStart {
+pub(crate) struct PlannerStart {
     config: V2Config,
     model: String,
     thinking_level: Option<String>,

@@ -43,7 +43,7 @@ serves one of those two planes.
 Shell (kuzushi)
 ├── Cockpit  ......... the home surface; phase rail + phase pane + steer + prompt
 │   ├── Aim pane ......... attack surface / engagement folder
-│   ├── Hunt pane ........ proposal queue (priced salvos) + live activity
+│   ├── Hunt pane ........ proposal queue (priced sweeps) + live activity
 │   ├── Confirm pane ..... findings list with proof markers + verify config
 │   ├── Fix pane ......... patch + re-verify
 │   └── Report pane ...... export targets (SARIF / markdown / ledger)
@@ -86,7 +86,7 @@ Wide terminal (≥ ~100 cols):
 │                              │                                              │
 │ budget: $0.85 / $2.00  ▓▓▓░░ │                                              │
 ├──────────────────────────────┴─────────────────────────────────────────────┤
-│ NEXT ▸ approve salvos, then `next` to fire   ·   steer: [m]odel [p]rompts   │  ← next-action + steer
+│ NEXT ▸ approve sweeps, then `next` to fire   ·   steer: [m]odel [p]rompts   │  ← next-action + steer
 │ [budget] [strategy: stride ▾]                                                │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ > _                                                          / for commands   │  ← prompt (always focused when non-empty)
@@ -147,7 +147,7 @@ prompt, never to view hotkeys.
   `engagement/harness.toml` — ranked focus areas (`{entry, input_surface,
   rank}`), detected toolchain/build system, an input vocabulary, and the default
   strategy/oracle. This is the mutable scan config the operator edits and the
-  Hunt salvo fires (PRD §7). A fuzzer is never handed `main()`.
+  Hunt sweep fires (PRD §7). A fuzzer is never handed `main()`.
 - **Prepare engines here, where cost is a one-time build.** `cpg:build` /
   `codeql-db:build` are surfaced as Aim actions with their build cost, so the
   scoped Confirm pass can enable the CPG oracle instantly (§8 steering gate).
@@ -166,7 +166,7 @@ proposal queue** (see cockpit mockup §2). Behavior:
 - A **budget bar** shows spend/cap. Proposals gate *between* firings; a single
   in-flight proposal that overshoots the cap is **surfaced** (`⚠ P-002 ran
   $0.05 over cap`), never hidden — honest about cannon's known edge.
-- `next` fires the kept salvos as a bounded fan-out with per-round checkpointing;
+- `next` fires the kept sweeps as a bounded fan-out with per-round checkpointing;
   Activity (right pane / auto-opened view) streams the live DAG.
 - **Detectors and imports feed one ledger.** Live `native_scanners`
   (Semgrep/CodeQL) and `findings seed <sarif>` both write the *same* row via
@@ -277,11 +277,11 @@ phase) or by a steer key. It is the interactive equivalent of the headless flags
 │  engines    cpg ✓ (~40s/scan)  codeql ○  clangd-lsp ○   [toggle]    │
 │  harness    focus: request handlers · seeds: 2 · oracle: reach      │
 │  focus  ›   "focus on sqli"________________________              ↵  │
-│  runs × variants   2 × {default, aggressive}   → 4-round salvo      │
+│  runs × variants   2 × {default, aggressive}   → 4-round sweep      │
 │  prompts    engagement/prompts/ · 2 overrides · base sha 9f3a…      │
 │  budget     $2.00 cap    ▓▓▓░░ $0.85 spent   · ~$0.75/round         │
 │  verify     when≥high · max 8 · votes 2         (Confirm phase)     │
-│  salvos     P-001 ✓  P-002 ✓  P-003 ○                               │
+│  sweeps     P-001 ✓  P-002 ✓  P-003 ○                               │
 │                                                                    │
 │  [enter] fire   [e] edit a lever   [a] advanced catalog   [esc] back│
 └────────────────────────────────────────────────────────────────────┘
@@ -292,8 +292,8 @@ phase) or by a steer key. It is the interactive equivalent of the headless flags
   and is validated against the runtime here (no `anthropic:` model on a codex
   backend passing silently). No silent fallback: an incompatible pick is rejected
   in the gate with the reason.
-- **Strategy** is the composed recipe = the salvo's variant axis (`deep = pattern
-  + iris-taint + review×2 + invariant`); picking it expands into the salvo matrix.
+- **Strategy** is the composed recipe = the sweep's variant axis (`deep = pattern
+  + iris-taint + review×2 + invariant`); picking it expands into the sweep matrix.
 - **Engines** toggles the analysis oracles for *this* pass (Joern CPG, CodeQL DB,
   clangd LSP) with a **cost/latency estimate shown before commit** — artifact-
   gated and honest; a missing prerequisite refuses with a build hint, never a
@@ -301,10 +301,10 @@ phase) or by a steer key. It is the interactive equivalent of the headless flags
   proven`) drives which engine is needed.
 - **Harness / focus** is the mutable scan config (§3): recon-seeded focus areas,
   seeds, oracle. Typing intent — *"focus on sqli"* — re-ranks focus areas, sets
-  the oracle CWEs, and biases seeds for the next salvo.
+  the oracle CWEs, and biases seeds for the next sweep.
 - **Prompts** shows the 3-level resolution (`project override → variant → base`)
   and the base sha — provenance the operator can trust and diff.
-- **Budget** prices the approved salvo; the cap is enforced between proposals with
+- **Budget** prices the approved sweep; the cap is enforced between proposals with
   a self-calibrating `$/round`; a single-proposal overshoot is surfaced.
 - **Verify** config shows only in/entering Confirm.
 - Everything here has a headless twin: `--model`/`MODEL_<ROLE>`, `--strategy`,
@@ -348,7 +348,7 @@ Fixing the audited interaction defects is part of this spec, not a follow-up.
 
 **Cancellation.** Two-stage Ctrl+C stays (it's honest today). Per-task cancel is
 added where per-task `enter`/`f`/`o` already exist, so a runaway proposal can be
-killed without aborting the salvo.
+killed without aborting the sweep.
 
 **Command grammar.** Converge on one grammar (`verb [subverb] [--flags | json]`);
 retire the alias sprawl (`studio`/`cc`/bare-`/`) and the unconditional

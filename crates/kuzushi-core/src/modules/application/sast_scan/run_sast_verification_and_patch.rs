@@ -243,7 +243,7 @@ mod tests {
             systems_hunt: None,
         };
         store
-            .insert_scan_run(&run_ids.primary, Path::new("/tmp/repo"), "completed")
+            .record_run_started(&run_ids.primary, Path::new("/tmp/repo"), "completed")
             .unwrap();
 
         let high = seed_verification_selection_findings(&store, &run_ids.primary);
@@ -266,6 +266,27 @@ mod tests {
             run_id,
             test_finding("semgrep", "rule/cwe-89", "src/db.rs", 10, Severity::High),
         );
+        insert_unverified_systems_hunt_finding(store, run_id);
+        insert_semgrep_true_positive(
+            store,
+            run_id,
+            "rule/cwe-78",
+            "src/cmd.rs",
+            50,
+            Severity::Critical,
+        );
+        insert_semgrep_true_positive(
+            store,
+            run_id,
+            "rule/cwe-79",
+            "src/view.rs",
+            30,
+            Severity::Medium,
+        );
+        high
+    }
+
+    fn insert_unverified_systems_hunt_finding(store: &FindingStore, run_id: &str) {
         store
             .insert_finding(
                 run_id,
@@ -278,17 +299,21 @@ mod tests {
                 ),
             )
             .unwrap();
+    }
+
+    fn insert_semgrep_true_positive(
+        store: &FindingStore,
+        run_id: &str,
+        rule_id: &str,
+        file_path: &str,
+        line: u32,
+        severity: Severity,
+    ) {
         insert_true_positive(
             store,
             run_id,
-            test_finding("semgrep", "rule/cwe-78", "src/cmd.rs", 50, Severity::Critical),
+            test_finding("semgrep", rule_id, file_path, line, severity),
         );
-        insert_true_positive(
-            store,
-            run_id,
-            test_finding("semgrep", "rule/cwe-79", "src/view.rs", 30, Severity::Medium),
-        );
-        high
     }
 
     fn test_finding(

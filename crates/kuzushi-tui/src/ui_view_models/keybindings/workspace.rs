@@ -45,8 +45,9 @@ fn workspace_status_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 fn strategy_queue_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     let mut bindings = Vec::new();
     push_view_keybindings(&mut bindings, app);
-    bindings.push(bind("strategy approve <id>", "approve"));
-    bindings.push(bind("strategy reject <id>", "reject"));
+    bindings.push(bind("strategy keep <id>", "approve"));
+    bindings.push(bind("strategy skip <id>", "reject"));
+    bindings.push(bind("strategy fire", "run approved"));
     bindings.push(bind("strategy correct <id>", "correct"));
     bindings.push(bind("recommend", "refresh proposals"));
     bindings

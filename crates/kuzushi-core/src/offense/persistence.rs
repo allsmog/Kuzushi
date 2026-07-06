@@ -31,13 +31,13 @@ pub fn persist_chain_finding(
         return Ok(None);
     }
     let run_id = Uuid::new_v4().to_string();
-    store.insert_scan_run(&run_id, workspace_root, "running")?;
+    store.record_run_started(&run_id, workspace_root, "running")?;
     let finding = build_chain_finding(target_host, outcome, &landed);
     let finding_id = store.insert_finding(&run_id, &finding)?;
     if outcome.completed {
         store.save_verification(finding_id, &exploited_verification(backend, outcome))?;
     }
-    store.complete_scan_run(&run_id, "completed", 1)?;
+    store.record_run_finished(&run_id, "completed", 1)?;
     Ok(Some(finding_id))
 }
 
@@ -135,7 +135,8 @@ mod tests {
 
     #[test]
     fn completed_chain_persists_an_exploited_critical_finding() {
-        let store = FindingStore::open_in_memory().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let store = FindingStore::open(temp.path().join(".kuzushi/v3/index.sqlite3")).unwrap();
         let id = persist_chain_finding(
             &store,
             Path::new("/tmp/ws"),

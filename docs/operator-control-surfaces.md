@@ -55,8 +55,9 @@ scan-gate policy, then go through the same preparation path as
 `kuzushi run sast:scan` where they are tool input.
 
 Global `--load <specifier>` is supported for shell and headless `run`.
-Specifier trust is controlled by `[operator].trusted_modules`; use
-`--allow-untrusted-module` only for a deliberate one-shot local test.
+Specifier trust is controlled by `[operator].trusted_modules`; the dynamic
+Node bridge only loads trusted specifiers. Untrusted analyzers belong in the
+v3 sandbox plugin path.
 
 ## Shell
 
@@ -77,16 +78,16 @@ format.
 
 | Scope | Path |
 | --- | --- |
-| Global | `~/.kuzushi/v2/options.json` |
-| Workspace | `<target>/.kuzushi/v2/options.json` |
+| Global | `~/.kuzushi/v3/options.json` |
+| Workspace | `<target>/.kuzushi/v3/options.json` |
 | Session | in memory only |
 
 Config uses separate paths:
 
 | Config | Path |
 | --- | --- |
-| Global config | `~/.kuzushi/v2/config.toml` |
-| Workspace config | `<target>/.kuzushi/v2/config.toml` |
+| Global config | `~/.kuzushi/v3/config.toml` |
+| Workspace config | `<target>/.kuzushi/v3/config.toml` |
 
 Use config for durable runtime/provider defaults and global policy, not for
 per-tool behavior. Current runtime/policy config includes:
@@ -96,6 +97,7 @@ model = "openai:gpt-4.1"
 
 [runtime]
 thinking_level = "high"
+worker_watchdog_timeout_ms = 21600000
 # langgraph_bridge_command = ["node", "scripts/langgraph-bridge.mjs"]
 
 [operator]
@@ -131,7 +133,7 @@ For descriptor-backed module tools that declare `model`, the effective model is:
 
 1. explicit tool input such as `--input '{"model":"openai:gpt-5.5"}'`;
 2. `KUZUSHI_MODEL` / `KUZUSHI_V2_MODEL`, canonicalized at the config boundary;
-3. global config `~/.kuzushi/v2/config.toml` `model = "provider:model"`.
+3. global config `~/.kuzushi/v3/config.toml` `model = "provider:model"`.
 
 Role-routed tools then resolve their role model with this precedence:
 
@@ -147,7 +149,7 @@ default placeholder so role-specific routes and `MODEL_<ROLE>` overrides still
 apply. This is intentional: callers pass the default model to preserve
 no-silent-fallback validation, while the router owns role selection.
 
-Target-local model control is rejected. `<target>/.kuzushi/v2/config.toml` must
+Target-local model control is rejected. `<target>/.kuzushi/v3/config.toml` must
 not set `model`, and `<target>/.kuzushi/models.toml` is not loaded. Put durable
 model policy in the operator's home config/models files, or pass a one-shot
 tool `model` input.

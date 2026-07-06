@@ -1,5 +1,7 @@
 use super::*;
 
+pub const DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS: u64 = 6 * 60 * 60 * 1_000;
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(default, deny_unknown_fields)]
 pub struct V2Config {
@@ -91,6 +93,7 @@ pub struct RuntimeConfig {
     pub langgraph_bridge_command: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub thinking_level: Option<String>,
+    pub worker_watchdog_timeout_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub anthropic_oauth: Option<AnthropicOauthConfig>,
 }
@@ -103,6 +106,7 @@ impl Default for RuntimeConfig {
             base_url: None,
             langgraph_bridge_command: None,
             thinking_level: None,
+            worker_watchdog_timeout_ms: Some(DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
             anthropic_oauth: None,
         }
     }

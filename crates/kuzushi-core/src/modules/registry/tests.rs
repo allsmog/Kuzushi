@@ -7,6 +7,7 @@ mod tests {
     use crate::options::{OptionScope, OptionTarget, ToolOptionStore};
     use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, TriageRequest};
     use crate::triage::TriageOutcome;
+    use crate::WorkspaceTarget;
     use serde_json::{json, Value};
     use std::fs;
 
@@ -157,6 +158,44 @@ mod tests {
     }
 
     #[test]
+    fn engagement_aim_writes_harness_through_registry() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool(
+                "engagement:aim",
+                json!({
+                    "focus": "ssrf",
+                    "engines": ["taint-iris:hunt"],
+                    "budgetUsd": 5.0
+                }),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(
+            result.pointer("/status").and_then(Value::as_str),
+            Some("completed")
+        );
+        assert_eq!(
+            result
+                .pointer("/data/harness/focus/kind")
+                .and_then(Value::as_str),
+            Some("ssrf")
+        );
+        assert!(workspace.root().join("engagement/harness.toml").exists());
+    }
+
+    #[test]
     fn filters_stored_options_by_tool_metadata_without_hiding_explicit_unknowns() {
         let registry = ModuleRegistry::with_v2_builtins();
         let mut store = ToolOptionStore::new();
@@ -231,6 +270,60 @@ mod tests {
                 .map(|tool| tool.runtime_requirement),
             Some(RuntimeRequirement::InputAware)
         );
+        assert_eq!(
+            registry
+                .resolve_tool("full-mode:hunt")
+                .map(|tool| tool.runtime_requirement),
+            Some(RuntimeRequirement::InputAware)
+        );
+        assert_eq!(
+            registry
+                .resolve_tool("threat-model:build")
+                .map(|tool| tool.runtime_requirement),
+            Some(RuntimeRequirement::InputAware)
+        );
+    }
+
+    #[test]
+    fn prepared_dispatch_enforces_descriptor_runtime_requirement() {
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: None,
+            findings_store: None,
+            trace: None,
+        };
+
+        let error = registry
+            .dispatch_prepared_tool_with_runtime("agentic-sast:scan", json!({}), &ctx, None)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("agentic-sast:scan requires an agent runtime"));
+    }
+
+    #[test]
+    fn prepare_for_dispatch_applies_prompt_file_default() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let prompt_dir = tmp.path().join(".kuzushi/prompts/triage");
+        fs::create_dir_all(&prompt_dir).unwrap();
+        fs::write(prompt_dir.join("run.md"), "custom triage prompt").unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let input = registry
+            .prepare_tool_input_for_dispatch("triage:run", json!({}), &ctx, None)
+            .unwrap();
+
+        assert_eq!(input["TRIAGE_PROMPT"], json!("custom triage prompt"));
     }
 
     #[test]
@@ -263,8 +356,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
-                    allow_untrusted: true,
-                    trusted_specifiers: Vec::new(),
+                    trusted_specifiers: vec![specifier.clone()],
                 },
             )
             .unwrap();
@@ -334,8 +426,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
-                    allow_untrusted: true,
-                    trusted_specifiers: Vec::new(),
+                    trusted_specifiers: vec![specifier.clone()],
                 },
             )
             .unwrap();
@@ -414,8 +505,7 @@ export default {
             .load_dynamic_module(
                 &specifier,
                 &DynamicModuleLoadOptions {
-                    allow_untrusted: true,
-                    trusted_specifiers: Vec::new(),
+                    trusted_specifiers: vec![specifier.clone()],
                 },
             )
             .unwrap();
@@ -590,16 +680,26 @@ export default {
             .unwrap()
             .iter()
             .any(|option| option["name"] == "config"));
+        assert_eq!(
+            tools
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| tool["name"] == "prompt-armor:attack"),
+            registry
+                .modules()
+                .any(|module| module.metadata().id == "prompt-armor")
+        );
         assert!(tools
             .as_array()
             .unwrap()
             .iter()
-            .all(|tool| tool["name"] != "prompt-armor:attack"));
+            .any(|tool| tool["name"] == "recon:nmap"));
         assert!(tools
             .as_array()
             .unwrap()
             .iter()
-            .all(|tool| tool["name"] != "recon:nmap"));
+            .all(|tool| tool["name"] != "smoke:next-step"));
         assert!(tools
             .as_array()
             .unwrap()
@@ -645,12 +745,12 @@ export default {
             "offense-review",
             "patch",
             "randori",
+            "recon",
             "report",
             "sast",
             "sbom-scan",
             "secret-scan",
             "semgrep",
-            "taint-iris",
             "taint-iris-next",
             "threat-model",
             "triage",
@@ -669,18 +769,20 @@ export default {
 
         for expected in [
             "carlini-threat-hunt",
+            "classifier-gate",
             "chrome-rce",
             "context-lite",
+            "deep-audit",
+            "exploit-chain",
+            "full-mode",
+            "offense",
             "pipeline",
-            "prompt-armor",
             "pwn",
-            "recon",
-            "shinsa",
             "systems-hunt",
-            "tob",
+            "taint-iris",
+            "threat-leads",
             "uaf-hunt",
             "vendor-assessment",
-            "vuln-scout",
         ] {
             assert!(
                 registry
@@ -705,39 +807,38 @@ export default {
             .collect::<Vec<_>>();
         for hidden_tool in [
             "carlini-threat-hunt:run",
-            "chrome-rce:scan",
+            "classifier-gate:score",
             "chrome-rce:review-trigger",
-            "prompt-armor:scan",
-            "prompt-armor:analyze",
-            "prompt-armor:attack",
-            "prompt-armor:diff",
-            "prompt-armor:report",
-            "prompt-armor:config",
+            "chrome-rce:scan",
+            "deep-audit:run",
+            "exploit-chain:scan",
+            "full-mode:hunt",
+            "offense:chain",
+            "pwn:auto-solve",
+            "pwn:calibrate-local",
+            "pwn:exploit-run",
+            "pwn:heap-uaf-scan",
+            "pwn:menu-probe",
             "pwn:profile-binary",
             "pwn:reverse",
-            "pwn:state",
-            "pwn:calibrate-local",
             "pwn:run-candidates",
-            "pwn:auto-solve",
-            "recon:nmap",
-            "recon:subdomain",
-            "recon:http-fingerprint",
-            "shinsa:scan",
-            "shinsa:quick-check",
-            "shinsa:nist-scan",
+            "pwn:state",
+            "randori:threat-model",
             "shinsa:nist-quick-check",
-            "shinsa:frameworks",
-            "taint-iris-next:hunt",
+            "shinsa:quick-check",
+            "taint-iris:hunt",
             "taint-iris-next:catalog",
             "taint-iris-next:codeql-db",
-            "tob:audit",
-            "tob:skills",
+            "taint-iris-next:hunt",
+            "threat-leads:build",
+            "threat-leads:read",
             "uaf-hunt:hunt",
-            "vendor-assessment:attach",
-            "vendor-assessment:scope",
-            "vendor-assessment:prompts",
             "vendor-assessment:assess",
-            "vuln-scout:audit",
+            "vendor-assessment:attach",
+            "vendor-assessment:prompts",
+            "vendor-assessment:scope",
+            "verify:exploit",
+            "x-ray:x-ray",
         ] {
             assert!(
                 !visible_tools.contains(&hidden_tool),
@@ -749,7 +850,57 @@ export default {
             );
         }
 
+        for (module_id, tools) in [
+            (
+                "prompt-armor",
+                &[
+                    "prompt-armor:scan",
+                    "prompt-armor:analyze",
+                    "prompt-armor:attack",
+                    "prompt-armor:diff",
+                    "prompt-armor:report",
+                    "prompt-armor:config",
+                ][..],
+            ),
+            (
+                "shinsa",
+                &["shinsa:scan", "shinsa:nist-scan", "shinsa:frameworks"][..],
+            ),
+            ("tob", &["tob:audit", "tob:skills"][..]),
+            ("vuln-scout", &["vuln-scout:audit"][..]),
+        ] {
+            let module_visible = registry
+                .modules()
+                .any(|module| module.metadata().id == module_id);
+            for tool in tools {
+                assert!(
+                    registry.resolve_tool(tool).is_some(),
+                    "optional adapter tool {tool} should remain exact-runnable"
+                );
+                assert_eq!(
+                    visible_tools.contains(tool),
+                    module_visible,
+                    "optional adapter tool {tool} visibility should follow module {module_id}"
+                );
+            }
+        }
+
+        for visible_tool in [
+            "recon:nmap",
+            "recon:subdomain",
+            "recon:http-fingerprint",
+            "recon:import",
+        ] {
+            assert!(
+                visible_tools.contains(&visible_tool),
+                "operator tool {visible_tool} should be user-visible"
+            );
+        }
+
         for hidden_dag_node in [
+            "pipeline:task-selector",
+            "pipeline:approval-before-verification",
+            "pipeline:taint-cwe-select",
             "systems-hunt:systems-context-gatherer",
             "systems-hunt:systems-invariant-extract",
             "systems-hunt:systems-trigger-synth",
@@ -764,6 +915,10 @@ export default {
             assert!(
                 registry.is_registered_dag_node(hidden_dag_node),
                 "hidden DAG node {hidden_dag_node} should remain internally registered"
+            );
+            assert!(
+                registry.resolve_tool(hidden_dag_node).is_some(),
+                "hidden DAG node {hidden_dag_node} should have a descriptor for input validation"
             );
         }
 
@@ -782,8 +937,8 @@ export default {
             .all_modules()
             .find(|registered_module| registered_module.metadata().id == "recon")
             .unwrap();
-        assert!(recon.is_hidden());
-        assert!(recon.dag_nodes().is_empty());
+        assert!(!recon.is_hidden());
+        assert!(!recon.dag_nodes().is_empty());
     }
 
     #[test]
@@ -827,10 +982,10 @@ export default {
             "triage:run",
             "verify:finding",
             "patch:finding",
+            "taint-iris-next:hunt",
             "taint-iris-next:dataflow-plan",
             "taint-iris-next:source-sink-trace",
             "taint-iris-next:finding-review",
-            "taint-iris-next:hunt",
             "taint-iris-next:catalog",
             "taint-iris-next:codeql-db",
             "pwn:auto-solve",

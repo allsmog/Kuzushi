@@ -11,6 +11,7 @@ repository.workspace = true
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
+blake3.workspace = true
 # csv powers RFC-4180 findings export (`workspace:export-findings`
 # with `format=csv`). Local dep — only kuzushi-core currently needs it.
 csv = "1.3"
@@ -66,10 +67,12 @@ tree-sitter-python = "0.23"
 tree-sitter-ruby = "0.23"
 tree-sitter-typescript = "0.23"
 uuid.workspace = true
+wasmtime.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread", "sync", "time"] }
+wat = "1.0"
 
 [lints]
 workspace = true

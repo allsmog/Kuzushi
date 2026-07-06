@@ -58,7 +58,7 @@ fn ready_workspace_status(
         findings_count,
         last_export,
         status: format!(
-            "workspace ready; {count_label} finding(s). Next: workspace scope init or workspace export findings <path> [format]"
+            "workspace ready; {count_label} finding(s). Next: workspace scope init or workspace export findings <path> [format] [--allow-empty]"
         ),
     }
 }

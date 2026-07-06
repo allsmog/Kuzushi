@@ -13,7 +13,15 @@ pub(super) fn inspect_jaxrs_route_line(
     remember_jaxrs_path(detail, lower, state);
     remember_jaxrs_class_prefix(lower, state);
     remember_jaxrs_method(lower, state);
-    emit_pending_jaxrs_route(source_file, framework, line_number, detail, lower, state, builder);
+    emit_pending_jaxrs_route(
+        source_file,
+        framework,
+        line_number,
+        detail,
+        lower,
+        state,
+        builder,
+    );
 }
 
 fn remember_jaxrs_path(detail: &str, lower: &str, state: &mut RouteScanState) {

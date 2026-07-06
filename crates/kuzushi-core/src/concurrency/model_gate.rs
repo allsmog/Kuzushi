@@ -47,12 +47,19 @@ impl ModelGate {
     /// on drop and wakes the next queue head.
     pub async fn acquire(&self, model: &str, priority: Priority) -> PriorityPermit {
         let slot = self.slot(model);
+        let band = priority.band();
         let notify = Arc::new(Notify::new());
 
         {
             let mut queues = slot.queues.lock().expect("queues poisoned");
-            queues[priority.band()].push_back(Arc::clone(&notify));
+            queues[band].push_back(Arc::clone(&notify));
         }
+
+        // Cancellation-safety: if this future is dropped at any `.await` below
+        // before it obtains a permit, `ticket` removes our waiter from the
+        // band and wakes the next live head. Without this, a cancelled head
+        // would strand the whole queue (see `QueueTicket`).
+        let mut ticket = QueueTicket::new(&slot, Arc::clone(&notify), band);
 
         loop {
             let head = queue_head(&slot.queues.lock().expect("queues poisoned"));
@@ -70,8 +77,10 @@ impl ModelGate {
                 Ok(permit) => {
                     {
                         let mut queues = slot.queues.lock().expect("queues poisoned");
-                        queues[priority.band()].pop_front();
+                        queues[band].pop_front();
                     }
+                    // We removed ourselves; the guard must not touch the queue.
+                    ticket.disarm();
                     self.notify_next_head(&slot);
                     return PriorityPermit {
                         permit: Some(permit),

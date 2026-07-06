@@ -94,9 +94,58 @@ impl WhiteboxArtifacts {
         let changed_files = json_pointer_u64(diff_report, "/summary/changedFiles");
         let new_findings = json_pointer_u64(diff_report, "/summary/newFindings");
         let changed_context = json_pointer_u64(diff_report, "/summary/changedContextFindings");
-        let fixed = json_pointer_u64(diff_report, "/summary/fixedFindings");
+        let not_seen = diff_report
+            .pointer("/summary/notSeenFindings")
+            .or_else(|| diff_report.pointer("/summary/fixedFindings"))
+            .and_then(Value::as_u64)
+            .unwrap_or_default();
         lines.push(format!(
-            "  Diff scope: {changed_files} changed file(s), {new_findings} new, {changed_context} changed-context, {fixed} fixed"
+            "  Diff scope: {changed_files} changed file(s), {new_findings} new, {changed_context} changed-context, {not_seen} not-seen"
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diff_line_prefers_not_seen_and_reads_legacy_fixed() {
+        let mut lines = Vec::new();
+        WhiteboxArtifacts {
+            whitebox_diff: Some(json!({
+                "summary": {
+                    "changedFiles": 1,
+                    "newFindings": 2,
+                    "changedContextFindings": 3,
+                    "notSeenFindings": 4,
+                    "fixedFindings": 99
+                }
+            })),
+            ..WhiteboxArtifacts::default()
+        }
+        .append_diff_line(&mut lines);
+        assert_eq!(
+            lines,
+            vec!["  Diff scope: 1 changed file(s), 2 new, 3 changed-context, 4 not-seen"]
+        );
+
+        let mut legacy_lines = Vec::new();
+        WhiteboxArtifacts {
+            whitebox_diff: Some(json!({
+                "summary": {
+                    "changedFiles": 1,
+                    "newFindings": 2,
+                    "changedContextFindings": 3,
+                    "fixedFindings": 5
+                }
+            })),
+            ..WhiteboxArtifacts::default()
+        }
+        .append_diff_line(&mut legacy_lines);
+        assert_eq!(
+            legacy_lines,
+            vec!["  Diff scope: 1 changed file(s), 2 new, 3 changed-context, 5 not-seen"]
+        );
     }
 }

@@ -21,14 +21,15 @@ pub use domain::{
     compute_dedup_key, compute_root_cause_key, compute_source_signature, extract_cwe,
     normalize_cwe, Finding, FindingEvidence, FindingSource, PatchAttempt, PatchResult, PatchStatus,
     PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, Severity,
-    StaticProofState, TriageAuthor, TriageOutcome, TriageVerdict, VulnSource,
+    ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict, StaticProofState,
+    StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict, VulnSource,
 };
 pub use persistence::FindingStore;
 pub use presentation::{
-    finding_next_action, format_finding_alias, parse_finding_alias, proof_ladder_state,
-    proof_state_label, resolve_finding_alias, runtime_validation_label, runtime_validation_summary,
-    sorted_finding_alias_indices, sorted_finding_aliases, stable_finding_alias,
-    static_proof_summary, FindingDetailReport, FindingListFilter, FindingListReport,
-    FindingNextAction, FindingVerdictFilter, ProofLadderState, RuntimeValidationSummary,
-    StaticProofSummary,
+    finding_lifecycle_status, finding_next_action, format_finding_alias, parse_finding_alias,
+    proof_ladder_state, proof_state_label, resolve_finding_alias, runtime_validation_label,
+    runtime_validation_summary, sorted_finding_alias_indices, sorted_finding_aliases,
+    stable_finding_alias, static_proof_summary, FindingDetailReport, FindingLifecycleStatusFilter,
+    FindingListFilter, FindingListReport, FindingNextAction, FindingReviewCompletenessFilter,
+    FindingVerdictFilter, ProofLadderState, RuntimeValidationSummary, StaticProofSummary,
 };

@@ -15,19 +15,14 @@ impl ShellApp {
             }
         };
         let (files, truncated) = workspace_file_candidates(workspace.root(), FILE_PICKER_MAX_FILES);
-        self.file_picker_files = files;
-        self.file_picker_query.clear();
-        self.file_picker_cursor = 0;
-        self.file_picker_truncated = truncated;
-        if !matches!(self.shell_view, ShellView::FilePicker) {
-            self.file_picker_return_view = Some(self.shell_view.clone());
-        }
+        self.file_picker_route
+            .open(files, truncated, &self.shell_view);
         self.shell_view = ShellView::FilePicker;
         self.log_file_picker_open(workspace.root());
     }
 
     fn log_file_picker_open(&mut self, root: &Path) {
-        let suffix = if self.file_picker_truncated {
+        let suffix = if self.file_picker_route.truncated() {
             format!(" (capped at {FILE_PICKER_MAX_FILES})")
         } else {
             String::new()
@@ -36,7 +31,7 @@ impl ShellApp {
             "files",
             format!(
                 "{} attachable file(s) under {}{suffix}",
-                self.file_picker_files.len(),
+                self.file_picker_route.files().len(),
                 root.display()
             ),
         );
@@ -44,25 +39,26 @@ impl ShellApp {
 
     pub(crate) fn handle_file_picker_key(&mut self, key: KeyEvent) -> bool {
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.move_file_picker_cursor(-1),
-            KeyCode::Down | KeyCode::Char('j') => self.move_file_picker_cursor(1),
-            KeyCode::PageUp => self.move_file_picker_cursor(-(FILE_PICKER_PAGE_STEP as isize)),
-            KeyCode::PageDown => self.move_file_picker_cursor(FILE_PICKER_PAGE_STEP as isize),
-            KeyCode::Backspace => self.pop_file_picker_query(),
-            KeyCode::Delete => self.clear_file_picker_query(),
+            KeyCode::Up | KeyCode::Char('k') => self.file_picker_route.move_cursor(-1),
+            KeyCode::Down | KeyCode::Char('j') => self.file_picker_route.move_cursor(1),
+            KeyCode::PageUp => self
+                .file_picker_route
+                .move_cursor(-(FILE_PICKER_PAGE_STEP as isize)),
+            KeyCode::PageDown => self
+                .file_picker_route
+                .move_cursor(FILE_PICKER_PAGE_STEP as isize),
+            KeyCode::Backspace => self.file_picker_route.pop_query(),
+            KeyCode::Delete => self.file_picker_route.clear_query(),
             KeyCode::Enter => self.accept_file_picker_selection(),
             KeyCode::Esc | KeyCode::Char('q') => self.close_file_picker(),
-            KeyCode::Char(ch) if !ch.is_control() => self.push_file_picker_query(ch),
+            KeyCode::Char(ch) if !ch.is_control() => self.file_picker_route.push_query(ch),
             _ => return false,
         }
         true
     }
 
     pub(crate) fn filtered_file_picker_paths(&self) -> Vec<String> {
-        crate::app::line_editor::rank_fuzzy(
-            crate::app::line_editor::dedupe_sorted(self.file_picker_files.clone()),
-            &self.file_picker_query,
-        )
+        self.file_picker_route.filtered_paths()
     }
 
     pub(crate) fn workspace_file_completion_values(&self) -> Vec<String> {
@@ -86,52 +82,17 @@ impl ShellApp {
         true
     }
 
-    fn move_file_picker_cursor(&mut self, delta: isize) {
-        let len = self.filtered_file_picker_paths().len();
-        if len == 0 {
-            self.file_picker_cursor = 0;
-            return;
-        }
-        let current = (self.file_picker_cursor.min(len - 1)) as isize;
-        self.file_picker_cursor = (current + delta).rem_euclid(len as isize) as usize;
-    }
-
-    fn push_file_picker_query(&mut self, ch: char) {
-        self.file_picker_query.push(ch);
-        self.clamp_file_picker_cursor();
-    }
-
-    fn pop_file_picker_query(&mut self) {
-        self.file_picker_query.pop();
-        self.clamp_file_picker_cursor();
-    }
-
-    fn clear_file_picker_query(&mut self) {
-        self.file_picker_query.clear();
-        self.file_picker_cursor = 0;
-    }
-
-    fn clamp_file_picker_cursor(&mut self) {
-        let len = self.filtered_file_picker_paths().len();
-        self.file_picker_cursor = self.file_picker_cursor.min(len.saturating_sub(1));
-    }
-
     fn accept_file_picker_selection(&mut self) {
-        let matches = self.filtered_file_picker_paths();
-        let Some(source) = matches.get(self.file_picker_cursor).cloned() else {
+        let Some(source) = self.file_picker_route.selected_path() else {
             self.log("files", "no file matches the current filter");
             return;
         };
-        self.file_picker_return_view = None;
+        self.file_picker_route.clear_return_view();
         self.attach_kb_source(&source);
     }
 
     fn close_file_picker(&mut self) {
-        let return_view = self
-            .file_picker_return_view
-            .take()
-            .unwrap_or(ShellView::KnowledgeBase);
-        self.shell_view = return_view;
+        self.shell_view = self.file_picker_route.close_return_view();
         self.log("files", "closed file picker");
     }
 }

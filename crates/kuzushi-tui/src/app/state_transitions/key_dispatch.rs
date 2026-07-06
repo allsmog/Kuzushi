@@ -20,8 +20,10 @@ impl ShellApp {
         let modifiers = KeyModifierState::new(key);
         self.reset_completion_cycle_for_key(key);
 
-        if self.handle_control_key(key, modifiers)
+        if self.handle_input_mode_key(key, modifiers)
+            || self.handle_control_key(key, modifiers)
             || self.handle_empty_input_view_key(key, modifiers)
+            || self.handle_unhandled_navigation_key(key, modifiers)
             || self.handle_cursor_key(key, modifiers)
             || self.handle_history_key(key, modifiers)
             || self.handle_text_key(key)
@@ -214,6 +216,63 @@ impl ShellApp {
             return false;
         };
         handler(self);
+        true
+    }
+
+    fn handle_input_mode_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
+        if !modifiers.no_modifiers {
+            return false;
+        }
+        match key.code {
+            KeyCode::F(2) => self.toggle_input_mode(),
+            KeyCode::Esc if self.input_mode == InputMode::Navigate => self.enter_prompt_mode(),
+            _ => return false,
+        }
+        true
+    }
+
+    fn toggle_input_mode(&mut self) {
+        match self.input_mode {
+            InputMode::Prompt => self.enter_navigate_mode(),
+            InputMode::Navigate => self.enter_prompt_mode(),
+        }
+    }
+
+    fn enter_navigate_mode(&mut self) {
+        if !self.input.is_empty() {
+            self.log(
+                "input",
+                "finish or clear the prompt before entering navigation mode",
+            );
+            return;
+        }
+        self.input_mode = InputMode::Navigate;
+        self.log("input", "navigation mode — Esc returns to prompt");
+    }
+
+    fn enter_prompt_mode(&mut self) {
+        self.input_mode = InputMode::Prompt;
+        self.log("input", "prompt mode — F2 returns to navigation");
+    }
+
+    fn handle_unhandled_navigation_key(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifierState,
+    ) -> bool {
+        if self.input_mode != InputMode::Navigate || !self.input.is_empty() || !modifiers.plain {
+            return false;
+        }
+        match key.code {
+            KeyCode::Char(ch) => self.log(
+                "input",
+                format!("no navigation action for `{ch}` here — Esc returns to prompt"),
+            ),
+            KeyCode::Enter | KeyCode::Tab | KeyCode::BackTab => {
+                self.log("input", "no navigation action here — Esc returns to prompt")
+            }
+            _ => return false,
+        }
         true
     }
 }

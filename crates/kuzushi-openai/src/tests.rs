@@ -16,6 +16,9 @@ mod tests {
             base_url: None,
             thinking_level: None,
             langgraph_bridge_command: Some(vec!["node".to_string(), "bridge.mjs".to_string()]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
             anthropic_oauth: None,
         };
 
@@ -23,6 +26,33 @@ mod tests {
         assert_eq!(
             bridge.command(),
             &["node".to_string(), "bridge.mjs".to_string()]
+        );
+    }
+
+    #[test]
+    fn anthropic_model_rejects_openai_env_without_explicit_operator_config() {
+        let runtime = RuntimeConfig {
+            kind: RuntimeKind::LangGraph,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            thinking_level: None,
+            langgraph_bridge_command: Some(vec!["node".to_string(), "bridge.mjs".to_string()]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
+            anthropic_oauth: None,
+        };
+        let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
+
+        let error = match bridge.credential_for_model("anthropic:claude-sonnet-4-6") {
+            Ok(_) => panic!("expected mismatched credential env to fail"),
+            Err(error) => error.to_string(),
+        };
+
+        assert!(error.contains("requires ANTHROPIC_API_KEY"), "{error}");
+        assert!(
+            error.contains("will not silently switch provider credentials"),
+            "{error}"
         );
     }
 
@@ -49,6 +79,9 @@ printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234
             base_url: None,
             thinking_level: None,
             langgraph_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -95,6 +128,9 @@ while :; do :; done
             base_url: None,
             thinking_level: None,
             langgraph_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
             anthropic_oauth: None,
         };
         let cancel = ScanCancellation::default();
@@ -161,6 +197,9 @@ printf '%s' '{"ok":true,"structured":{"verdict":"true_positive","confidence":0.9
             base_url: None,
             thinking_level: None,
             langgraph_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -184,6 +223,57 @@ printf '%s' '{"ok":true,"structured":{"verdict":"true_positive","confidence":0.9
 
         assert_eq!(outcome.verdict, kuzushi_core::TriageVerdict::TruePositive);
         assert!((outcome.cost_usd - 0.045).abs() < 1e-9);
+    }
+
+    #[test]
+    fn triage_bridge_rejects_malformed_text_verdict() {
+        let tmp = tempfile::tempdir().unwrap();
+        let bridge = tmp.path().join("bridge.sh");
+        std::fs::write(
+            &bridge,
+            r#"#!/bin/sh
+printf '%s' '{"ok":true,"text":"needs review because the model did not return JSON","costUsd":0.01}'
+"#,
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&bridge, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+
+        let runtime = RuntimeConfig {
+            kind: RuntimeKind::LangGraph,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            thinking_level: None,
+            langgraph_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
+            anthropic_oauth: None,
+        };
+        let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
+
+        let err = bridge
+            .triage_finding_blocking(TriageRequest {
+                model: "openai:gpt-5.5".to_string(),
+                cwd: ".".into(),
+                finding: Finding::new_tool(
+                    "semgrep",
+                    "demo",
+                    "src/db.ts",
+                    9,
+                    Some(9),
+                    Severity::High,
+                    "SQL injection in search",
+                ),
+                prompt_template: None,
+            })
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("not valid triage JSON"));
     }
 
     #[test]
@@ -221,6 +311,9 @@ fi
             base_url: None,
             thinking_level: None,
             langgraph_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -243,7 +336,7 @@ fi
 
         let step1 = bridge.next_step_blocking(&req, &[]).unwrap();
         match step1 {
-            kuzushi_core::AgentLoopStep::ToolCall { call } => {
+            kuzushi_core::AgentLoopStep::ToolCall { call, .. } => {
                 assert_eq!(call.name, "read_source");
                 assert_eq!(call.call_id, "c1");
                 assert_eq!(call.input["file"], "a.c");
@@ -287,6 +380,9 @@ fi
                 "printf '%s' '{\"ok\":false,\"error\":\"no Anthropic credentials\"}'; exit 1"
                     .to_string(),
             ]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -326,6 +422,7 @@ fi
                 "REQ=$(cat); case \"$REQ\" in *next-step-preflight*) printf '%s' '{\"ok\":false,\"error\":\"missing api.responses.write\"}' ;; *) printf '%s' '{\"ok\":true,\"step\":\"final\",\"text\":\"unexpected\"}' ;; esac"
                     .to_string(),
             ]),
+            worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -363,6 +460,7 @@ fi
                 "printf '%s' '{\"ok\":false,\"error\":\"install @earendil-works/LangGraph\"}'; exit 1"
                     .to_string(),
             ]),
+            worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -401,6 +499,7 @@ fi
                 "printf '%s' '{\"ok\":false,\"error\":\"next-step: no OpenAI credentials for openai-codex. Set up kuzushi auth login openai-codex\"}'"
                     .to_string(),
             ]),
+            worker_watchdog_timeout_ms: Some(kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS),
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -455,6 +554,9 @@ fi
             base_url: None,
             thinking_level: None,
             langgraph_bridge_command: Some(vec![bridge_script.to_string_lossy().into_owned()]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
@@ -499,6 +601,9 @@ printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
             base_url: None,
             thinking_level: Some("high".to_string()),
             langgraph_bridge_command: Some(vec![bridge_script.to_string_lossy().into_owned()]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
             anthropic_oauth: None,
         };
         let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();

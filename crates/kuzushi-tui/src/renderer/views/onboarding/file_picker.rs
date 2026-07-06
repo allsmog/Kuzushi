@@ -24,10 +24,10 @@ pub(crate) fn file_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>
 }
 
 fn file_picker_query_line(app: &ShellApp, width: u16) -> Line<'static> {
-    let query = if app.file_picker_query.is_empty() {
+    let query = if app.file_picker_route.query().is_empty() {
         "(all files)"
     } else {
-        &app.file_picker_query
+        app.file_picker_route.query()
     };
     Line::styled(
         fit(&format!("filter: {query}"), width as usize),
@@ -37,7 +37,7 @@ fn file_picker_query_line(app: &ShellApp, width: u16) -> Line<'static> {
 
 fn file_picker_count_line(app: &ShellApp, width: u16) -> Line<'static> {
     let matches = app.filtered_file_picker_paths().len();
-    let suffix = if app.file_picker_truncated {
+    let suffix = if app.file_picker_route.truncated() {
         " · capped"
     } else {
         ""
@@ -47,7 +47,7 @@ fn file_picker_count_line(app: &ShellApp, width: u16) -> Line<'static> {
             &format!(
                 "{} shown · {} indexed{suffix}",
                 matches,
-                app.file_picker_files.len()
+                app.file_picker_route.files().len()
             ),
             width as usize,
         ),
@@ -62,7 +62,7 @@ fn push_file_picker_rows(app: &ShellApp, area: Rect, lines: &mut Vec<Line<'stati
         return;
     }
     let visible = visible_row_count(area.height);
-    let start = row_window_start(app.file_picker_cursor, matches.len(), visible);
+    let start = row_window_start(app.file_picker_route.cursor(), matches.len(), visible);
     for (idx, path) in matches.iter().enumerate().skip(start).take(visible) {
         lines.push(file_picker_row(app, idx, path, area.width));
     }
@@ -80,7 +80,7 @@ fn row_window_start(cursor: usize, len: usize, visible: usize) -> usize {
 }
 
 fn file_picker_row(app: &ShellApp, idx: usize, path: &str, width: u16) -> Line<'static> {
-    let selected = idx == app.file_picker_cursor;
+    let selected = idx == app.file_picker_route.cursor();
     let marker = if selected { ">" } else { " " };
     let body = format!("  {marker} {path}");
     let style = if selected {

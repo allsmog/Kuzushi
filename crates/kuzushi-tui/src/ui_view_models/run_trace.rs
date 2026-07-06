@@ -3,7 +3,6 @@ use crate::ShellApp;
 use kuzushi_core::run_artifacts::canonical_run_artifact_spec;
 use std::path::{Path, PathBuf};
 
-const LEGACY_RUN_SUMMARY_FILE: &str = "summary.json";
 const RUN_TRIAGE_FILE: &str = "triage.jsonl";
 const RUN_VERIFY_FILE: &str = "verify.jsonl";
 
@@ -116,21 +115,10 @@ fn run_artifact_detail(
 }
 
 fn run_metadata_artifact_detail(app: &ShellApp, run_id: &str) -> RunArtifactPath {
-    let canonical = run_artifact_path(app, run_id, run_metadata_artifact_leaf());
-    let path = if artifact_state(&canonical) != RunArtifactState::Missing {
-        canonical
-    } else {
-        legacy_metadata_path(app, run_id).unwrap_or(canonical)
-    };
     RunArtifactPath {
         label: "metadata",
-        path,
+        path: run_artifact_path(app, run_id, run_metadata_artifact_leaf()),
     }
-}
-
-fn legacy_metadata_path(app: &ShellApp, run_id: &str) -> Option<PathBuf> {
-    let legacy = run_artifact_path(app, run_id, LEGACY_RUN_SUMMARY_FILE);
-    (artifact_state(&legacy) != RunArtifactState::Missing).then_some(legacy)
 }
 
 fn run_artifact_path(app: &ShellApp, run_id: &str, leaf: &str) -> PathBuf {

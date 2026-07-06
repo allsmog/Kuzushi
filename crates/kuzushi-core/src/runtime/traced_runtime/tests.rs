@@ -59,6 +59,7 @@ impl AgentRuntime for FakeRuntime {
                 input: serde_json::json!({"path": "src/lib.rs"}),
                 call_id: format!("call-{}", history.len()),
             },
+            cost_usd: None,
         })
     }
 }
@@ -164,7 +165,7 @@ fn traced_next_step_emits_tool_progress_then_done() {
 
     for _ in 0..3 {
         match traced.next_step_blocking(&request, &history).unwrap() {
-            AgentLoopStep::ToolCall { call } => {
+            AgentLoopStep::ToolCall { call, .. } => {
                 history.push(LoopHistoryEntry::AssistantToolCall(call.clone()));
                 history.push(LoopHistoryEntry::ToolResult(ToolResult {
                     call_id: call.call_id,
@@ -231,6 +232,8 @@ fn traced_triage_emits_reasoning_step() {
             finding: Finding {
                 id: None,
                 scan_id: None,
+                identity_id: None,
+                identity_match_tier: None,
                 fingerprint: "fp".to_string(),
                 rule_id: "test".to_string(),
                 title: "SQL injection".to_string(),

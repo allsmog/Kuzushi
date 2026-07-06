@@ -329,8 +329,8 @@ fn run_header_line(card: &HomeRunCard, width: usize) -> Line<'static> {
 
 fn run_status_style(status: &str) -> Style {
     match status {
-        "completed" | "complete" | "ok" => theme::success(),
-        "failed" | "error" => theme::danger(),
+        "completed" => theme::success(),
+        "failed" => theme::danger(),
         "no runs yet" => theme::muted(),
         _ => theme::primary(),
     }

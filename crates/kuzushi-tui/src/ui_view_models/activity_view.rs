@@ -16,6 +16,7 @@ use super::activity_plain_rows::{activity_plain_pane_rows, ActivityPlainPaneRow}
 use super::activity_scroll::{activity_feed_scroll_offset, activity_task_scroll_offset};
 use super::generated_views_feed::{activity_deck_plain_extra_rows, activity_deck_rows};
 use crate::{ActivitySession, DagTaskState, ShellApp};
+use kuzushi_core::RunSummary;
 use std::time::Instant;
 
 pub(crate) enum ActivityViewModel<'a> {
@@ -59,17 +60,48 @@ fn manual_activity_session_is_idle(app: &ShellApp, session: &ActivitySession) ->
 /// activity card (set by both scan refusals and tool failures) and only once
 /// nothing is still running, so an in-flight session never reads as failed.
 fn activity_run_outcome(app: &ShellApp, session: &ActivitySession) -> Option<ActivityRunOutcome> {
-    use crate::app::{DagTaskState, LiveActivityPhase};
-    let still_running = session
-        .tasks
-        .values()
-        .any(|row| row.state == DagTaskState::Active);
-    if still_running {
+    use crate::app::LiveActivityPhase;
+    if activity_session_still_running(app, session) {
         return None;
+    }
+    if let Some(summary) = activity_run_summary(app, session) {
+        if let Some(outcome) = activity_run_summary_outcome(summary) {
+            return Some(outcome);
+        }
     }
     let activity = app.live_activity.as_ref()?;
     matches!(activity.phase, LiveActivityPhase::Refused).then(|| ActivityRunOutcome::Failed {
         subject: activity.subject.clone(),
+    })
+}
+
+fn activity_session_still_running(app: &ShellApp, session: &ActivitySession) -> bool {
+    session
+        .tasks
+        .values()
+        .any(|row| row.state == DagTaskState::Active)
+        || app.running_tool_name().is_some()
+        || app.scan.as_ref().is_some_and(|scan| scan.running)
+}
+
+fn activity_run_summary(app: &ShellApp, session: &ActivitySession) -> Option<RunSummary> {
+    let target = app.target.as_deref()?;
+    app.workbench_cache
+        .borrow_mut()
+        .run_summary_index(Some(target), vec![session.run_id.clone()])
+        .get(&session.run_id)
+        .cloned()
+}
+
+fn activity_run_summary_outcome(summary: RunSummary) -> Option<ActivityRunOutcome> {
+    let status = summary.status.trim().to_ascii_lowercase();
+    if matches!(status.as_str(), "running" | "queued" | "started") || status.is_empty() {
+        return None;
+    }
+    Some(ActivityRunOutcome::Terminal {
+        status,
+        findings: summary.findings,
+        reason: summary.error,
     })
 }
 
@@ -240,7 +272,7 @@ fn activity_abort_subjects(app: &ShellApp) -> Vec<&'static str> {
 mod tests {
     use super::*;
     use crate::DagTaskRow;
-    use kuzushi_core::V2Config;
+    use kuzushi_core::{RunSummary, V2Config, WorkspaceTarget};
 
     #[test]
     fn activity_view_model_projects_inactive_state() {
@@ -278,6 +310,68 @@ mod tests {
         assert_eq!(model.pane_chrome().dag.block_title, "── TASKS ──");
         assert!(!model.plain_pane_rows(widths, Instant::now()).is_empty());
         assert!(model.footer(80).body.contains("hover [j/k]"));
+    }
+
+    #[test]
+    fn activity_header_uses_terminal_run_summary_status_and_findings() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        kuzushi_core::write_run_summary(
+            workspace.root(),
+            &RunSummary::running(
+                "run-finished",
+                "scan",
+                None,
+                workspace.root().display().to_string(),
+            )
+            .complete()
+            .with_findings(Some(2)),
+        )
+        .unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.activity = Some(ActivitySession::new("run-finished"));
+
+        let ActivityViewModel::Active(model) = activity_view_model(&app) else {
+            panic!("expected active activity model");
+        };
+
+        assert!(
+            model
+                .header()
+                .summary_title
+                .contains("✓ run completed · 2 findings"),
+            "{}",
+            model.header().summary_title
+        );
+    }
+
+    #[test]
+    fn activity_header_uses_partial_run_reason_from_summary() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut summary = RunSummary::running(
+            "run-partial",
+            "tool",
+            Some("sast:scan".to_string()),
+            workspace.root().display().to_string(),
+        )
+        .with_findings(Some(1));
+        summary.status = "partial".to_string();
+        summary.error = Some("triage stage did not complete".to_string());
+        kuzushi_core::write_run_summary(workspace.root(), &summary).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.activity = Some(ActivitySession::new("run-partial"));
+
+        let ActivityViewModel::Active(model) = activity_view_model(&app) else {
+            panic!("expected active activity model");
+        };
+
+        let title = model.header().summary_title;
+        assert!(title.contains("⚠ run partial · 1 finding"), "{title}");
+        assert!(
+            title.contains("reason: triage stage did not complete"),
+            "{title}"
+        );
     }
 
     #[test]

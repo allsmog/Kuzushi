@@ -50,6 +50,7 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "router:show" => Some(router_show_tool(input.clone(), ctx)),
         "workspace:status" => Some(Ok(workspace_status_json(ctx))),
         "workspace:export-findings" => Some(export_workspace_findings_tool(input.clone(), ctx)),
+        "engagement:aim" => Some(engagement_aim_tool(input, ctx)),
         "bounty:import-har" => Some(bounty_import_har_tool(input, ctx)),
         "bounty:import-burp" => Some(bounty_import_burp_tool(input, ctx)),
         "findings:list" => Some(list_findings_tool(input, ctx)),
@@ -57,6 +58,47 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "entry-points:extract" => Some(run_entry_points_extract(input, ctx)),
         _ => None,
     }
+}
+
+fn engagement_aim_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let workspace = ctx
+        .workspace
+        .context("engagement:aim requires an active workspace target")?;
+    let request = crate::engagement::EngagementHarnessRequest {
+        focus: string_input_any(input, &["focus"]),
+        engines: string_array_or_csv_input(input, &["engines"]).unwrap_or_default(),
+        budget_usd: optional_f64_input(input, &["budget", "budgetUsd", "budget_usd"])?,
+    };
+    let report = crate::engagement::write_engagement_harness(workspace, request)?;
+    let output = format!("engagement:aim wrote {}", report.path.display());
+    Ok(crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
+            "path": report.path.display().to_string(),
+            "harness": report.harness,
+        }),
+    ))
+}
+
+fn optional_f64_input(input: &Value, keys: &[&str]) -> Result<Option<f64>> {
+    for key in keys {
+        let Some(value) = input.get(*key) else {
+            continue;
+        };
+        if let Some(number) = value.as_f64() {
+            return Ok(Some(number));
+        }
+        if let Some(raw) = value.as_str() {
+            return raw
+                .trim()
+                .parse::<f64>()
+                .map(Some)
+                .with_context(|| format!("{key} must be a number"));
+        }
+        anyhow::bail!("{key} must be a number");
+    }
+    Ok(None)
 }
 
 pub(in crate::modules) fn config_show_json(ctx: &ToolExecutionContext<'_>) -> Value {
@@ -334,8 +376,9 @@ fn store_dep_hygiene_findings(
         ctx.workspace,
         ctx.findings_store,
     )?;
+    let core_findings = output_core_findings(findings, &persisted, ctx.findings_store)?;
     Ok(StoredCoreFindings {
-        core_findings: findings,
+        core_findings,
         persisted,
     })
 }
@@ -357,10 +400,26 @@ fn store_secret_scan_findings(
         ctx.workspace,
         ctx.findings_store,
     )?;
+    let core_findings = output_core_findings(findings, &persisted, ctx.findings_store)?;
     Ok(StoredCoreFindings {
-        core_findings: findings,
+        core_findings,
         persisted,
     })
+}
+
+fn output_core_findings(
+    findings: Vec<crate::findings::Finding>,
+    persisted: &Option<crate::findings::GenericPersistedRun>,
+    store: Option<&crate::findings::FindingStore>,
+) -> Result<Vec<crate::findings::Finding>> {
+    let Some(persisted) = persisted else {
+        return Ok(findings);
+    };
+    let Some(store) = store else {
+        return Ok(findings);
+    };
+    let stored = store.list_findings_for_scan_id(&persisted.run_id)?;
+    Ok(if stored.is_empty() { findings } else { stored })
 }
 
 fn output_with_core_findings(mut output: Value, store_result: StoredCoreFindings) -> Value {
@@ -378,6 +437,9 @@ pub(in crate::modules) fn dispatch_agentic_security_tool(
     runtime: Option<&dyn AgentRuntime>,
 ) -> ToolDispatchResult {
     match name {
+        "agentic-sast:scan" if agentic_sast_chunked_strategy(input) => {
+            Some(run_full_mode_hunt_tool(input.clone(), ctx, runtime))
+        }
         "agentic-sast:scan" => Some(run_agentic_sast_tool(input, ctx, runtime)),
         "variant:lift-pattern" => Some(run_variant_lift_pattern(input.clone(), ctx, runtime)),
         "variant:hunt" => Some(run_variant_hunt(input.clone(), ctx, runtime)),
@@ -403,6 +465,13 @@ pub(in crate::modules) fn dispatch_agentic_security_tool(
         }
         _ => None,
     }
+}
+
+fn agentic_sast_chunked_strategy(input: &Value) -> bool {
+    input
+        .get("strategy")
+        .and_then(Value::as_str)
+        .is_some_and(|strategy| strategy.trim().eq_ignore_ascii_case("chunked"))
 }
 
 pub(in crate::modules) fn run_agentic_sast_tool(

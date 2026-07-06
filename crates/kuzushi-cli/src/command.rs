@@ -12,13 +12,12 @@ pub(crate) use subcommands::{
 pub(crate) enum Command {
     /// Start the interactive shell.
     Shell {
-        #[arg(long)]
+        #[arg(long, help = crate::support::TARGET_HELP)]
         target: Option<PathBuf>,
     },
     /// Run configured scanners and persist findings.
     Scan {
-        /// Workspace/repository to scan. Optional when the global `--target`
-        /// is set; pass `.` for the current directory.
+        #[arg(help = crate::support::TARGET_HELP)]
         target: Option<PathBuf>,
         /// Scan mode: `standard` or `whitebox-static`.
         #[arg(long, value_enum)]
@@ -70,13 +69,22 @@ pub(crate) enum Command {
         /// Filter by triage verdict (e.g. confirmed, rejected, untriaged). Comma- or repeat-separated.
         #[arg(long, value_delimiter = ',')]
         verdict: Vec<String>,
+        /// Alias for --verdict using current review-decision terminology.
+        #[arg(long, value_delimiter = ',')]
+        decision: Vec<String>,
+        /// Filter by terminal review decision completeness: open or complete.
+        #[arg(long, value_delimiter = ',')]
+        completeness: Vec<String>,
+        /// Filter by lifecycle status, e.g. candidate, seen, runtime_verified, verified_static.
+        #[arg(long, value_delimiter = ',')]
+        status: Vec<String>,
         /// Filter by finding alias or rule name.
         #[arg(long)]
         name: Option<String>,
         /// Filter by source file path substring.
         #[arg(long = "file-path")]
         file_path: Option<String>,
-        /// Filter by discovery channel: sarif, ainalysis, ainalysis-multi,
+        /// Filter by discovery channel: sarif, analysis, analysis-multi,
         /// diff-analyzer, infer, fuzzing. Comma- or repeat-separated.
         #[arg(long = "vuln-source", value_delimiter = ',')]
         vuln_source: Vec<String>,
@@ -92,10 +100,42 @@ pub(crate) enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Inspect replayable run artifacts under `.kuzushi/runs`.
+    /// Record an append-only human review decision for a persisted finding.
+    Decision {
+        /// Finding alias (F-0001), full fingerprint, or fingerprint prefix.
+        reference: String,
+        /// Review decision: confirmed, rejected_false_positive, suppressed, deferred, accepted_risk, or needs_review.
+        #[arg(long)]
+        verdict: String,
+        /// Human rationale recorded with the decision.
+        #[arg(long)]
+        reason: String,
+        /// Emit the result as machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect replayable run artifacts under `.kuzushi/v3/runs`.
     Runs {
         #[command(subcommand)]
         command: RunsCommand,
+    },
+    /// Export persisted workspace findings.
+    Export {
+        /// Export format: json, jsonl, sarif, csv, or markdown-bundle.
+        #[arg(long)]
+        format: Option<String>,
+        /// Export findings by review-decision completeness: all, open, or complete.
+        #[arg(long, default_value = "all")]
+        completeness: String,
+        /// Render the selected export to stdout without writing the output path.
+        #[arg(long)]
+        preview: bool,
+        /// Permit writing a valid export when the selected completeness mode contains no findings.
+        #[arg(long)]
+        allow_empty: bool,
+        /// Output file or bundle directory. Relative paths resolve under the target root.
+        #[arg(long = "out")]
+        output: PathBuf,
     },
     /// Add an expiring, evidence-backed suppression for a finding.
     Suppress {
@@ -159,6 +199,7 @@ pub(crate) enum Command {
     /// Scan a vendored vulnerable fixture offline — no API key, no model,
     /// no external scanners. A real finding with evidence in seconds.
     Demo {
+        /// Emit the demo result as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },

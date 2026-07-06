@@ -112,7 +112,7 @@ mod tests {
     #[test]
     fn persistent_store_writes_only_when_save_is_explicit() {
         let tmp = tempfile::tempdir().unwrap();
-        let path = tmp.path().join(".kuzushi/v2/options.json");
+        let path = tmp.path().join(".kuzushi/v3/options.json");
         let mut store = ToolOptionStore::new();
         store.set_value(
             OptionScope::Global,
@@ -132,8 +132,8 @@ mod tests {
     #[test]
     fn persistent_store_loads_only_global_and_workspace_scopes() {
         let tmp = tempfile::tempdir().unwrap();
-        let global_path = tmp.path().join("home/.kuzushi/v2/options.json");
-        let workspace_path = tmp.path().join("repo/.kuzushi/v2/options.json");
+        let global_path = tmp.path().join("home/.kuzushi/v3/options.json");
+        let workspace_path = tmp.path().join("repo/.kuzushi/v3/options.json");
 
         let mut global = ToolOptionStore::new();
         global.set_value(
@@ -176,8 +176,8 @@ mod tests {
     #[test]
     fn persistent_store_saves_global_and_workspace_scopes_separately() {
         let tmp = tempfile::tempdir().unwrap();
-        let global_path = tmp.path().join("home/.kuzushi/v2/options.json");
-        let workspace_path = tmp.path().join("repo/.kuzushi/v2/options.json");
+        let global_path = tmp.path().join("home/.kuzushi/v3/options.json");
+        let workspace_path = tmp.path().join("repo/.kuzushi/v3/options.json");
         let mut store = ToolOptionStore::new();
         store.set_value(
             OptionScope::Global,

@@ -22,14 +22,14 @@ fn kuzushi_command(home: &std::path::Path) -> Command {
 }
 
 fn latest_run_id(repo: &std::path::Path) -> String {
-    std::fs::read_to_string(repo.join(".kuzushi/latest"))
+    std::fs::read_to_string(repo.join(".kuzushi/v3/latest"))
         .unwrap()
         .trim()
         .to_string()
 }
 
 fn run_json(repo: &std::path::Path, run_id: &str, leaf: &str) -> Value {
-    let path = repo.join(".kuzushi/runs").join(run_id).join(leaf);
+    let path = repo.join(".kuzushi/v3/runs").join(run_id).join(leaf);
     serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
 }
 
@@ -39,10 +39,9 @@ fn latest_run_json(repo: &std::path::Path, leaf: &str) -> Value {
 
 fn assert_latest_canonical_run_bundle(repo: &std::path::Path) {
     let run_id = latest_run_id(repo);
-    let run_dir = repo.join(".kuzushi/runs").join(&run_id);
+    let run_dir = repo.join(".kuzushi/v3/runs").join(&run_id);
     for leaf in [
         "run.json",
-        "summary.json",
         "events.jsonl",
         "trace.jsonl",
         "context.json",
@@ -422,40 +421,6 @@ esac
 }
 
 #[cfg(unix)]
-fn fake_taint_iris_bridge(dir: &std::path::Path) -> std::path::PathBuf {
-    use std::os::unix::fs::PermissionsExt;
-
-    let binary = dir.join("taint-iris-bridge.sh");
-    std::fs::write(
-        &binary,
-        r#"#!/bin/sh
-request="$(cat)"
-case "$request" in
-  *"Taint CWE selector"*)
-    cat <<'JSON'
-{"ok":true,"structured":{"cwes":[{"id":"CWE-89","name":"SQL Injection","reason":"database query uses request input"}]}}
-JSON
-    ;;
-  *"IRIS-style taint analysis"*)
-    cat <<'JSON'
-{"ok":true,"structured":{"findings":[{"title":"Request input reaches SQL query","cwe":"CWE-89","severity":"high","filePath":"src/db.ts","startLine":1,"message":"The request query is concatenated into a SQL query.","sourceSinkTrace":"req.query.q -> db.query","taintPath":[{"filePath":"src/db.ts","line":1,"message":"source and sink","snippet":"db.query(req.query.q)"}],"confidence":"high","exploitPreconditions":"attacker controls q"}]}}
-JSON
-    ;;
-  *)
-    echo '{"ok":false,"error":"unexpected taint-iris request"}'
-    exit 1
-    ;;
-esac
-"#,
-    )
-    .unwrap();
-    let mut permissions = std::fs::metadata(&binary).unwrap().permissions();
-    permissions.set_mode(0o755);
-    std::fs::set_permissions(&binary, permissions).unwrap();
-    binary
-}
-
-#[cfg(unix)]
 fn fake_taint_iris_next_bridge(dir: &std::path::Path) -> std::path::PathBuf {
     use std::os::unix::fs::PermissionsExt;
 
@@ -807,7 +772,7 @@ fn run_report_build_promotes_markdown_for_report_run() {
         Some("report:build")
     );
     let report_markdown = std::fs::read_to_string(
-        repo.join(".kuzushi/runs")
+        repo.join(".kuzushi/v3/runs")
             .join(&report_run)
             .join("report.md"),
     )
@@ -874,7 +839,7 @@ fn run_report_build_surfaces_failed_source_handoff() {
 
     let report_run = latest_run_id(&repo);
     let report_markdown = std::fs::read_to_string(
-        repo.join(".kuzushi/runs")
+        repo.join(".kuzushi/v3/runs")
             .join(&report_run)
             .join("report.md"),
     )
@@ -1093,7 +1058,7 @@ fn run_iac_scan_reaches_native_executor_and_persists() {
     assert!(body
         .pointer("/data/persisted/findingsDb")
         .and_then(Value::as_str)
-        .is_some_and(|path| path.ends_with(".kuzushi/v2/findings.sqlite3")));
+        .is_some_and(|path| path.ends_with(".kuzushi/v3/index.sqlite3")));
 
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
@@ -1203,7 +1168,7 @@ fn run_sast_scan_reaches_scan_runner_executor_and_persists() {
     assert!(body
         .pointer("/data/db")
         .and_then(Value::as_str)
-        .is_some_and(|path| path.ends_with(".kuzushi/v2/findings.sqlite3")));
+        .is_some_and(|path| path.ends_with(".kuzushi/v3/index.sqlite3")));
 
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
@@ -1250,7 +1215,7 @@ fn run_agentic_sast_scan_reaches_langgraph_runtime_bridge_and_persists() {
     assert!(body
         .pointer("/data/persisted/findingsDb")
         .and_then(Value::as_str)
-        .is_some_and(|path| path.ends_with(".kuzushi/v2/findings.sqlite3")));
+        .is_some_and(|path| path.ends_with(".kuzushi/v3/index.sqlite3")));
 
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
@@ -1571,8 +1536,17 @@ fn run_taint_iris_hunt_reaches_langgraph_runtime_bridge_and_persists() {
     let home = temp.path().join("home");
     std::fs::create_dir_all(repo.join("src")).unwrap();
     std::fs::create_dir_all(&home).unwrap();
-    std::fs::write(repo.join("src/db.ts"), "db.query(req.query.q)\n").unwrap();
-    let bridge = fake_taint_iris_bridge(temp.path());
+    std::fs::write(
+        repo.join("package.json"),
+        r#"{"dependencies":{"express":"latest","prisma":"latest"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        repo.join("src/routes.ts"),
+        "const sql = `SELECT * FROM users WHERE id = ${req.query.id}`;\ndb.query(sql);\n",
+    )
+    .unwrap();
+    let bridge = fake_taint_iris_next_bridge(temp.path());
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
@@ -1582,7 +1556,7 @@ fn run_taint_iris_hunt_reaches_langgraph_runtime_bridge_and_persists() {
         .arg("run")
         .arg("taint-iris:hunt")
         .arg("--input")
-        .arg(r#"{"maxFindings":5}"#)
+        .arg(r#"{"maxFindings":5,"mcps":false}"#)
         .output()
         .unwrap();
 
@@ -1594,26 +1568,30 @@ fn run_taint_iris_hunt_reaches_langgraph_runtime_bridge_and_persists() {
     let body: Value = serde_json::from_slice(&output.stdout).unwrap();
 
     assert_eq!(body.get("ok").and_then(Value::as_bool), Some(true));
-    assert_eq!(body.pointer("/data/count").and_then(Value::as_u64), Some(1));
     assert_eq!(
-        body.pointer("/data/cwes/0/id").and_then(Value::as_str),
+        body.pointer("/data/status").and_then(Value::as_str),
+        Some("hunted")
+    );
+    assert_eq!(
+        body.pointer("/data/selectedCwes/0/cwe")
+            .and_then(Value::as_str),
         Some("CWE-89")
     );
     assert_eq!(
         body.pointer("/data/findings/0/rule_id")
             .and_then(Value::as_str),
-        Some("taint-iris/cwe-89")
+        Some("taint-iris-next/cwe-89")
     );
     assert!(body
         .pointer("/data/persisted/findingsDb")
         .and_then(Value::as_str)
-        .is_some_and(|path| path.ends_with(".kuzushi/v2/findings.sqlite3")));
+        .is_some_and(|path| path.ends_with(".kuzushi/v3/index.sqlite3")));
 
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     let findings = store.list_findings(10).unwrap();
     assert_eq!(findings.len(), 1);
-    assert_eq!(findings[0].tool, "taint-iris");
+    assert_eq!(findings[0].tool, "taint-iris-next");
 }
 
 #[cfg(unix)]
@@ -1623,9 +1601,19 @@ fn scan_tasks_taint_iris_reaches_same_taint_iris_executor() {
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
     std::fs::create_dir_all(repo.join("src")).unwrap();
+    seed_taint_iris_next_mcp_artifacts(&repo);
     std::fs::create_dir_all(&home).unwrap();
-    std::fs::write(repo.join("src/db.ts"), "db.query(req.query.q)\n").unwrap();
-    let bridge = fake_taint_iris_bridge(temp.path());
+    std::fs::write(
+        repo.join("package.json"),
+        r#"{"dependencies":{"express":"latest","prisma":"latest"}}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        repo.join("src/routes.ts"),
+        "const sql = `SELECT * FROM users WHERE id = ${req.query.id}`;\ndb.query(sql);\n",
+    )
+    .unwrap();
+    let bridge = fake_taint_iris_next_bridge(temp.path());
 
     let output = kuzushi_command(&home)
         .env("KUZUSHI_MODEL", "openai:gpt-4.1")
@@ -1650,7 +1638,7 @@ fn scan_tasks_taint_iris_reaches_same_taint_iris_executor() {
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     let findings = store.list_findings(10).unwrap();
     assert_eq!(findings.len(), 1);
-    assert_eq!(findings[0].tool, "taint-iris");
+    assert_eq!(findings[0].tool, "taint-iris-next");
 }
 
 #[cfg(unix)]
@@ -1713,7 +1701,7 @@ fn run_taint_iris_next_hunt_reaches_langgraph_runtime_bridge_and_persists() {
     assert!(body
         .pointer("/data/persisted/findingsDb")
         .and_then(Value::as_str)
-        .is_some_and(|path| path.ends_with(".kuzushi/v2/findings.sqlite3")));
+        .is_some_and(|path| path.ends_with(".kuzushi/v3/index.sqlite3")));
 
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
@@ -1824,7 +1812,7 @@ fn run_carlini_threat_hunt_reaches_langgraph_runtime_bridge_and_persists() {
     assert!(body
         .pointer("/data/persisted/findingsDb")
         .and_then(Value::as_str)
-        .is_some_and(|path| path.ends_with(".kuzushi/v2/findings.sqlite3")));
+        .is_some_and(|path| path.ends_with(".kuzushi/v3/index.sqlite3")));
 
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
@@ -2048,14 +2036,19 @@ fn run_taint_iris_without_model_fails_without_silent_fallback() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
-    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::create_dir_all(repo.join("src")).unwrap();
     std::fs::create_dir_all(&home).unwrap();
+    std::fs::write(repo.join("src/routes.ts"), "db.query(req.query.id)\n").unwrap();
+    let bridge = fake_taint_iris_next_bridge(temp.path());
 
     let output = kuzushi_command(&home)
+        .env("KUZUSHI_LANGGRAPH_BRIDGE", bridge.display().to_string())
         .arg("--target")
         .arg(&repo)
         .arg("run")
         .arg("taint-iris:hunt")
+        .arg("--input")
+        .arg(r#"{"mcps":false}"#)
         .output()
         .unwrap();
 
@@ -2202,7 +2195,7 @@ fn run_semgrep_scan_reaches_subprocess_executor_and_persists() {
     assert!(body
         .pointer("/data/persisted/findingsDb")
         .and_then(Value::as_str)
-        .is_some_and(|path| path.ends_with(".kuzushi/v2/findings.sqlite3")));
+        .is_some_and(|path| path.ends_with(".kuzushi/v3/index.sqlite3")));
 
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
@@ -2290,7 +2283,7 @@ fn run_codeql_scan_reaches_subprocess_executor_and_persists() {
     assert!(body
         .pointer("/data/persisted/findingsDb")
         .and_then(Value::as_str)
-        .is_some_and(|path| path.ends_with(".kuzushi/v2/findings.sqlite3")));
+        .is_some_and(|path| path.ends_with(".kuzushi/v3/index.sqlite3")));
 
     let workspace = WorkspaceTarget::new(&repo).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
@@ -2298,7 +2291,7 @@ fn run_codeql_scan_reaches_subprocess_executor_and_persists() {
     assert_latest_static_artifacts(&repo, "codeql");
     let run_id = latest_run_id(&repo);
     let sarif_path = repo
-        .join(".kuzushi/runs")
+        .join(".kuzushi/v3/runs")
         .join(&run_id)
         .join("report.sarif");
     let sarif = std::fs::read_to_string(sarif_path).unwrap();
@@ -2934,7 +2927,7 @@ fn run_threat_model_read_loads_pasta_artifacts_without_runtime() {
     let temp = tempfile::tempdir().unwrap();
     let repo = temp.path().join("repo");
     let home = temp.path().join("home");
-    let artifact_dir = repo.join(".kuzushi/runs/run-1/threat-model-output");
+    let artifact_dir = repo.join(".kuzushi/v3/runs/run-1/threat-model-output");
     std::fs::create_dir_all(&artifact_dir).unwrap();
     std::fs::create_dir_all(&home).unwrap();
     std::fs::write(
@@ -2959,7 +2952,7 @@ fn run_threat_model_read_loads_pasta_artifacts_without_runtime() {
         .arg("run")
         .arg("threat-model:read")
         .arg("--input")
-        .arg(r#"{"outputDir":".kuzushi/runs/run-1/threat-model-output","methodology":"dread"}"#)
+        .arg(r#"{"outputDir":".kuzushi/v3/runs/run-1/threat-model-output","methodology":"dread"}"#)
         .output()
         .unwrap();
 

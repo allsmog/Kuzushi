@@ -25,7 +25,7 @@ pub(crate) struct ScreenSelectedItem {
     pub(crate) line: u32,
     pub(crate) rank: String,
     pub(crate) state: String,
-    pub(crate) confirmation: String,
+    pub(crate) runtime_verification: String,
     pub(crate) triage: Option<ScreenTriageContext>,
     pub(crate) proof: ScreenProofContext,
     pub(crate) evidence: Vec<ScreenEvidenceContext>,
@@ -147,7 +147,7 @@ impl ScreenSelectedItem {
             "line": self.line,
             "rank": self.rank,
             "state": self.state,
-            "confirmation": self.confirmation,
+            "runtimeVerification": self.runtime_verification,
             "triage": self.triage.as_ref().map(ScreenTriageContext::as_json_value),
             "proof": self.proof.as_json_value(),
             "evidence": self

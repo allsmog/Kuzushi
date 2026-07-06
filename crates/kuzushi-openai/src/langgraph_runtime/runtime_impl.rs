@@ -1,8 +1,8 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use kuzushi_core::{
-    AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentToolLoopRequest,
-    LoopHistoryEntry, TriageOutcome, TriageRequest, TriageVerdict,
+    AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentStructuredOutput,
+    AgentToolLoopRequest, LoopHistoryEntry, TriageOutcome, TriageRequest,
 };
 
 use super::bridge_payloads::{BridgeRequest, BridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION};
@@ -10,7 +10,7 @@ use super::bridge_process::{public_bridge_error, run_bridge};
 use super::next_step_bridge::next_step_blocking as run_next_step_blocking;
 use super::next_step_bridge::preflight_tool_loop_blocking as run_preflight_tool_loop_blocking;
 use super::runtime_config::LangGraphRuntime;
-use super::triage::{clamp_outcome, fallback_triage_outcome, triage_prompt, TRIAGE_SYSTEM_PROMPT};
+use super::triage::{clamp_outcome, triage_prompt, TRIAGE_SYSTEM_PROMPT};
 use std::thread;
 use std::time::Duration;
 
@@ -21,7 +21,7 @@ fn clamp_token_count_u32(value: u64) -> u32 {
 #[async_trait]
 impl AgentRuntime for LangGraphRuntime {
     fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
-        kuzushi_core::runtime::validate_model_api_key_env(&request.model, &self.api_key_env)?;
+        let credential = self.credential_for_model(&request.model)?;
         let structured_output = request.structured_output;
         let runtime_options = request.runtime_options;
         let thinking_level = request
@@ -34,8 +34,8 @@ impl AgentRuntime for LangGraphRuntime {
             system_prompt: request.system_prompt,
             prompt: request.prompt,
             structured_output,
-            api_key_env: self.api_key_env.clone(),
-            api_key: self.api_key.clone(),
+            api_key_env: credential.env,
+            api_key: credential.value,
             base_url: self.base_url.clone(),
             thinking_level,
             max_output_tokens: request.max_output_tokens,
@@ -63,13 +63,17 @@ impl AgentRuntime for LangGraphRuntime {
 
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
         let prompt = triage_prompt(&request.finding, request.prompt_template.as_deref())?;
-        let response = self.query_blocking(AgentQueryRequest::new(
-            request.model,
-            request.cwd,
-            TRIAGE_SYSTEM_PROMPT.to_string(),
-            prompt,
-        ))?;
-        Ok(triage_outcome_from_response(response))
+        let response = self.query_blocking(
+            AgentQueryRequest::new(
+                request.model,
+                request.cwd,
+                TRIAGE_SYSTEM_PROMPT.to_string(),
+                prompt,
+            )
+            .with_structured_output(triage_structured_output())
+            .with_temperature(0.0),
+        )?;
+        triage_outcome_from_response(response)
     }
 
     fn supports_tools(&self) -> bool {
@@ -89,6 +93,25 @@ impl AgentRuntime for LangGraphRuntime {
 
     fn preflight_tool_loop_blocking(&self, request: &AgentToolLoopRequest) -> Result<()> {
         run_preflight_tool_loop_blocking(self, request)
+    }
+}
+
+pub(crate) struct ModelCredential {
+    pub(crate) env: String,
+    pub(crate) value: Option<String>,
+}
+
+impl LangGraphRuntime {
+    pub(crate) fn credential_for_model(&self, model: &str) -> Result<ModelCredential> {
+        let env = kuzushi_core::runtime::bridge_api_key_env_for_model(model, &self.api_key_env)?;
+        let value = if env == self.api_key_env {
+            self.api_key.clone()
+        } else {
+            std::env::var(&env)
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        };
+        Ok(ModelCredential { env, value })
     }
 }
 
@@ -191,47 +214,75 @@ pub(super) fn is_transient_bridge_error(message: &str) -> bool {
     .any(|needle| lower.contains(needle))
 }
 
-fn triage_outcome_from_response(response: AgentQueryResponse) -> TriageOutcome {
+pub(crate) fn triage_outcome_from_response(response: AgentQueryResponse) -> Result<TriageOutcome> {
     let call_cost = response.cost_usd;
-    structured_triage_outcome(response.structured, call_cost)
-        .or_else(|| text_triage_outcome(response.text, call_cost))
-        .unwrap_or_else(empty_triage_outcome)
+    if let Some(structured) = response.structured {
+        return structured_triage_outcome(structured, call_cost);
+    }
+    text_triage_outcome(response, call_cost)
 }
 
 fn structured_triage_outcome(
-    structured: Option<serde_json::Value>,
+    structured: serde_json::Value,
     call_cost: f64,
-) -> Option<TriageOutcome> {
-    let structured = structured?;
-    serde_json::from_value::<TriageOutcome>(structured)
-        .ok()
-        .map(|mut outcome| {
-            outcome.cost_usd = call_cost;
-            clamp_outcome(outcome)
-        })
+) -> Result<TriageOutcome> {
+    let mut outcome = serde_json::from_value::<TriageOutcome>(structured)
+        .map_err(|error| anyhow::anyhow!("LangGraph triage JSON violated schema: {error}"))?;
+    outcome.cost_usd = call_cost;
+    Ok(clamp_outcome(outcome))
 }
 
-fn text_triage_outcome(text: String, call_cost: f64) -> Option<TriageOutcome> {
+fn text_triage_outcome(response: AgentQueryResponse, call_cost: f64) -> Result<TriageOutcome> {
+    if response.truncated {
+        let stop_reason = response.stop_reason.as_deref().unwrap_or("length");
+        anyhow::bail!(
+            "LangGraph triage response was truncated (stopReason: {stop_reason:?}); refusing to synthesize a verdict"
+        );
+    }
+    let text = response.text.trim();
     if text.is_empty() {
-        return None;
+        anyhow::bail!("LangGraph bridge returned no triage content");
     }
     let mut outcome =
-        parsed_text_triage_outcome(&text).unwrap_or_else(|| fallback_triage_outcome(text));
+        serde_json::from_str::<TriageOutcome>(strip_whole_json_fence(text)).map_err(|error| {
+            anyhow::anyhow!(
+                "LangGraph triage response was not valid triage JSON: {error}; raw response: {text}"
+            )
+        })?;
     outcome.cost_usd = call_cost;
-    Some(outcome)
+    Ok(clamp_outcome(outcome))
 }
 
-fn parsed_text_triage_outcome(text: &str) -> Option<TriageOutcome> {
-    serde_json::from_str::<TriageOutcome>(text)
-        .ok()
-        .map(clamp_outcome)
+fn strip_whole_json_fence(text: &str) -> &str {
+    let Some(without_open) = text.strip_prefix("```") else {
+        return text;
+    };
+    let without_lang = without_open
+        .strip_prefix("json")
+        .or_else(|| without_open.strip_prefix("JSON"))
+        .unwrap_or(without_open)
+        .trim_start();
+    without_lang
+        .strip_suffix("```")
+        .map(str::trim)
+        .unwrap_or(text)
 }
 
-fn empty_triage_outcome() -> TriageOutcome {
-    TriageOutcome {
-        verdict: TriageVerdict::NeedsReview,
-        confidence: 0.0,
-        rationale: "LangGraph bridge returned no triage content".to_string(),
-        ..Default::default()
-    }
+fn triage_structured_output() -> AgentStructuredOutput {
+    AgentStructuredOutput::json_schema(
+        "kuzushi_triage_outcome",
+        serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["verdict", "confidence", "rationale"],
+            "properties": {
+                "verdict": {
+                    "type": "string",
+                    "enum": ["true_positive", "false_positive", "needs_review"]
+                },
+                "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "rationale": {"type": "string"}
+            }
+        }),
+    )
 }

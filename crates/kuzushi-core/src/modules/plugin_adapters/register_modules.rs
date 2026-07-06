@@ -2,10 +2,39 @@ use super::*;
 
 use crate::modules::registry::ToolExecutor;
 
-pub(in crate::modules) fn register_modules(registry: &mut ModuleRegistry, executor: ToolExecutor) {
-    registry.register(vuln_scout_module().with_executor(executor).deferred());
-    registry.register(tob_module().with_executor(executor).deferred());
-    registry.register(shinsa_module().with_executor(executor).deferred());
+#[derive(Debug, Clone, Copy, Default)]
+pub(in crate::modules) struct PluginAdapterVisibility {
+    pub(in crate::modules) shinsa: bool,
+    pub(in crate::modules) tob: bool,
+    pub(in crate::modules) vuln_scout: bool,
+}
+
+pub(in crate::modules) fn register_modules(
+    registry: &mut ModuleRegistry,
+    executor: ToolExecutor,
+    visibility: PluginAdapterVisibility,
+) {
+    registry.register(wasm_plugin_module().with_executor(executor));
+    registry.register(visible_when(
+        vuln_scout_module().with_executor(executor),
+        visibility.vuln_scout,
+    ));
+    registry.register(visible_when(
+        tob_module().with_executor(executor),
+        visibility.tob,
+    ));
+    registry.register(visible_when(
+        shinsa_module().with_executor(executor),
+        visibility.shinsa,
+    ));
+}
+
+fn visible_when(module: BuiltinModule, visible: bool) -> BuiltinModule {
+    if visible {
+        module
+    } else {
+        module.deferred()
+    }
 }
 
 pub(in crate::modules) fn execute_tool(
@@ -15,6 +44,7 @@ pub(in crate::modules) fn execute_tool(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
     match tool_name {
+        "wasm-plugin:analyze" => run_wasm_plugin_analyze(input, ctx),
         "vuln-scout:audit" => run_vuln_scout_audit(input, ctx, runtime),
         "tob:audit" => run_tob_audit(input, ctx, runtime),
         "tob:skills" => list_tob_skills(input),
@@ -34,7 +64,7 @@ pub(in crate::modules) fn vuln_scout_module() -> BuiltinModule {
         "Whitebox pentest wrapper around the @kuzushi/vuln-scout Claude Code plugin.",
         vec![tool_with_options(
             "vuln-scout:audit",
-            "Run the Vuln Scout audit plugin.",
+            "Run the optional Vuln Scout whitebox-audit plugin against the target repository.",
             vec![target_option(), plugin_root_option(), model_option()],
         )],
         vec![dag("vuln-scout:audit", "findings", &["context:build"])],

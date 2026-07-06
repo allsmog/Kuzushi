@@ -250,7 +250,7 @@ mod tests {
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let run_id = "run-variant";
         store
-            .insert_scan_run(run_id, workspace.root(), "running")
+            .record_run_started(run_id, workspace.root(), "running")
             .unwrap();
         let finding = Finding::new_tool(
             "semgrep",
@@ -274,7 +274,7 @@ mod tests {
                 },
             )
             .unwrap();
-        store.complete_scan_run(run_id, "completed", 1).unwrap();
+        store.record_run_finished(run_id, "completed", 1).unwrap();
         (temp, workspace, store, fingerprint)
     }
 
@@ -497,7 +497,7 @@ mod tests {
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         store
-            .insert_scan_run("run-variant", workspace.root(), "running")
+            .record_run_started("run-variant", workspace.root(), "running")
             .unwrap();
         let finding = Finding::new_tool(
             "semgrep",

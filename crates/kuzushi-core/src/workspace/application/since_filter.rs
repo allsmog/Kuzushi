@@ -58,8 +58,7 @@ mod tests {
     #[test]
     fn falls_back_to_branch_filter_for_named_ref() {
         let expression =
-            findings_since_filter_expression(Some(Path::new("/missing")), "Feature/Thing")
-                .unwrap();
+            findings_since_filter_expression(Some(Path::new("/missing")), "Feature/Thing").unwrap();
 
         assert_eq!(expression, "branch:feature/thing");
     }
@@ -82,7 +81,10 @@ mod tests {
         git(repo.path(), &["config", "user.name", "Kuzushi Test"]);
         fs::write(repo.path().join("tracked.txt"), "initial\n").unwrap();
         git(repo.path(), &["add", "tracked.txt"]);
-        git(repo.path(), &["-c", "commit.gpgsign=false", "commit", "-m", "initial"]);
+        git(
+            repo.path(),
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
         Some(repo)
     }
 

@@ -1,0 +1,555 @@
+<title>Kuzushi — Control Room for Non-Deterministic Scans (PRD)</title>
+<style>
+  :root {
+    --serif: "Iowan Old Style", "Palatino Linotype", Charter, Georgia, "Times New Roman", serif;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: "SF Mono", ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace;
+
+    --bg: #F4F4F1; --surface: #FBFBF9; --surface-2: #EEEEE9; --ink: #17181C;
+    --ink-soft: #494C57; --faint: #8A8D97; --rule: #E2E2DB;
+    --accent: #2F4A8C; --accent-soft: #E7EBF5;      /* 藍 indigo — structure/control */
+    --pop: #C63A29; --pop-soft: #F7E7E2;            /* 朱 cinnabar — live/critical/visual */
+    --ok: #2E7D57; --ok-soft: #E4F0EA;
+    --warn: #A9701A; --warn-soft: #F4EBDA;
+    --slate: #5B6472; --slate-soft: #E9EBEE;
+    --bad: #B03A2E; --bad-soft: #F5E4E1;
+    --measure: 68ch; }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0D0F13; --surface: #14171D; --surface-2: #1B1F27; --ink: #E9EAE4;
+      --ink-soft: #AAAEB9; --faint: #6C7079; --rule: #262A33;
+      --accent: #8AA0F0; --accent-soft: #1A2133; --pop: #F0574A; --pop-soft: #2A1816;
+      --ok: #52B98C; --ok-soft: #14231C; --warn: #E0A94A; --warn-soft: #241E12;
+      --slate: #98A1B0; --slate-soft: #1A1E26; --bad: #E5675A; --bad-soft: #251715; } }
+  :root[data-theme="light"] {
+    --bg: #F4F4F1; --surface: #FBFBF9; --surface-2: #EEEEE9; --ink: #17181C;
+    --ink-soft: #494C57; --faint: #8A8D97; --rule: #E2E2DB; --accent: #2F4A8C;
+    --accent-soft: #E7EBF5; --pop: #C63A29; --pop-soft: #F7E7E2; --ok: #2E7D57;
+    --ok-soft: #E4F0EA; --warn: #A9701A; --warn-soft: #F4EBDA; --slate: #5B6472;
+    --slate-soft: #E9EBEE; --bad: #B03A2E; --bad-soft: #F5E4E1; }
+  :root[data-theme="dark"] {
+    --bg: #0D0F13; --surface: #14171D; --surface-2: #1B1F27; --ink: #E9EAE4;
+    --ink-soft: #AAAEB9; --faint: #6C7079; --rule: #262A33; --accent: #8AA0F0;
+    --accent-soft: #1A2133; --pop: #F0574A; --pop-soft: #2A1816; --ok: #52B98C;
+    --ok-soft: #14231C; --warn: #E0A94A; --warn-soft: #241E12; --slate: #98A1B0;
+    --slate-soft: #1A1E26; --bad: #E5675A; --bad-soft: #251715; }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce){ html{scroll-behavior:auto;} }
+  body { margin:0; background:var(--bg); color:var(--ink); font-family:var(--serif);
+    font-size:17px; line-height:1.66; -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility; }
+
+  .railbar { position:sticky; top:0; z-index:20; background:color-mix(in srgb, var(--bg) 88%, transparent);
+    backdrop-filter:blur(8px); border-bottom:1px solid var(--rule); }
+  .railbar-inner { max-width:1120px; margin:0 auto; padding:.55rem 1.5rem; display:flex; align-items:center; gap:1rem; flex-wrap:wrap; }
+  .brand { font-family:var(--mono); font-size:.82rem; letter-spacing:.04em; color:var(--ink); font-weight:600; white-space:nowrap; }
+  .brand b { color:var(--pop); }
+  .rail { display:flex; gap:.15rem; flex-wrap:wrap; margin-left:auto; }
+  .rail a { font-family:var(--mono); font-size:.7rem; letter-spacing:.02em; text-decoration:none; color:var(--ink-soft); padding:.2rem .45rem; border-radius:5px; white-space:nowrap; }
+  .rail a:hover { background:var(--accent-soft); color:var(--accent); }
+  .rail a .k { color:var(--faint); margin-right:.22rem; }
+
+  main { max-width:1120px; margin:0 auto; padding:0 1.5rem 6rem; }
+  .col { max-width:var(--measure); }
+  section { padding-top:3.4rem; }
+  .sec-head { display:flex; gap:1rem; align-items:baseline; margin:0 0 1.2rem; }
+  .sec-num { font-family:var(--mono); font-size:.8rem; color:var(--pop); font-weight:600; letter-spacing:.04em; min-width:2.4rem; padding-top:.35rem; }
+  h1,h2,h3,h4 { font-family:var(--sans); font-weight:700; text-wrap:balance; color:var(--ink); }
+  h2 { font-size:1.62rem; letter-spacing:-0.01em; line-height:1.2; margin:0; }
+  h3 { font-size:1.14rem; letter-spacing:-0.005em; margin:2.2rem 0 .6rem; }
+  h4 { font-size:.96rem; margin:1.6rem 0 .5rem; }
+  p { margin:0 0 1.05rem; }
+  a { color:var(--accent); text-decoration-thickness:1px; text-underline-offset:2px; }
+  strong { font-weight:600; color:var(--ink); }
+  em { color:var(--ink); }
+  code,.mono { font-family:var(--mono); font-size:.86em; }
+  p code,li code,td code { background:var(--surface-2); padding:.06em .34em; border-radius:4px; color:var(--ink); border:1px solid var(--rule); }
+  .eyebrow { font-family:var(--mono); font-size:.72rem; letter-spacing:.16em; text-transform:uppercase; color:var(--faint); margin:0 0 .5rem; }
+
+  .masthead { padding:3.4rem 0 1rem; }
+  .masthead h1 { font-size:clamp(2.2rem,5.2vw,3.4rem); line-height:1.05; margin:.3rem 0 0; letter-spacing:-0.02em; max-width:20ch; }
+  .masthead .lede { font-size:1.22rem; color:var(--ink-soft); margin-top:1.1rem; max-width:44ch; }
+  .kanji-mark { font-family:var(--mono); font-size:1.05rem; letter-spacing:.5em; color:var(--accent); }
+  .metastrip { display:flex; flex-wrap:wrap; gap:.5rem; margin-top:1.8rem; }
+  .chip { font-family:var(--mono); font-size:.72rem; letter-spacing:.02em; padding:.28rem .6rem; border-radius:100px; border:1px solid var(--rule); background:var(--surface); color:var(--ink-soft); white-space:nowrap; }
+  .chip b { color:var(--ink); font-weight:600; }
+
+  .promise { border-left:3px solid var(--pop); background:var(--surface); padding:1.1rem 1.3rem; border-radius:0 8px 8px 0; margin:1.6rem 0 0; font-size:1.08rem; }
+  .promise .eyebrow { color:var(--pop); }
+
+  .loadbearing { max-width:1000px; background:var(--accent-soft); border:1px solid color-mix(in srgb, var(--accent) 28%, var(--rule));
+    border-radius:12px; padding:1.4rem 1.6rem; }
+  .loadbearing .eyebrow { color:var(--accent); }
+  .loadbearing p { font-size:1.16rem; margin:0; color:var(--ink); }
+  .loadbearing .two { display:flex; gap:1.5rem; margin-top:1.1rem; flex-wrap:wrap; }
+  .loadbearing .two > div { flex:1; min-width:240px; }
+  .loadbearing .two b { font-family:var(--mono); font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; display:block; margin-bottom:.2rem; }
+  .loadbearing .two .s1 b { color:var(--accent); } .loadbearing .two .s2 b { color:var(--pop); }
+  .loadbearing .two p { font-size:.95rem; color:var(--ink-soft); }
+
+  /* two planes */
+  .planes { display:grid; grid-template-columns:1fr 1fr; gap:1rem; max-width:1040px; }
+  .plane { border:1px solid var(--rule); border-radius:12px; overflow:hidden; background:var(--surface); }
+  .plane > .ph { padding:.85rem 1.15rem; font-family:var(--mono); font-size:.76rem; letter-spacing:.1em; text-transform:uppercase; font-weight:600; color:#fff; }
+  .plane.control > .ph { background:var(--accent); }
+  .plane.visual > .ph { background:var(--pop); }
+  .plane .body { padding:.4rem 1.15rem 1rem; }
+  .plane .row { padding:.62rem 0; border-bottom:1px solid var(--rule); }
+  .plane .row:last-child { border-bottom:0; }
+  .plane .row b { font-family:var(--sans); font-weight:700; font-size:.92rem; display:block; }
+  .plane .row span { font-size:.9rem; color:var(--ink-soft); }
+
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:1rem; max-width:1040px; }
+  .card { background:var(--surface); border:1px solid var(--rule); border-radius:10px; padding:1.15rem 1.25rem; }
+  .card h4 { margin-top:0; } .card p:last-child { margin-bottom:0; }
+  .card .tag { font-family:var(--mono); font-size:.68rem; letter-spacing:.08em; text-transform:uppercase; color:var(--pop); display:block; margin-bottom:.4rem; }
+
+  .cluster { display:grid; grid-template-columns:auto 1fr; gap:.1rem 1.1rem; max-width:1040px; margin-bottom:1rem; padding-bottom:1rem; border-bottom:1px solid var(--rule); }
+  .cluster:last-child { border-bottom:0; }
+  .cluster .lt { font-family:var(--sans); font-weight:800; font-size:1.25rem; color:var(--pop); grid-row:1 / span 2; line-height:1; padding-top:.15rem; }
+  .cluster h4 { margin:0 0 .35rem; font-size:1.0rem; }
+  .cluster p { margin:0; color:var(--ink-soft); font-size:.96rem; }
+
+  .tablewrap { overflow-x:auto; max-width:1040px; margin:.5rem 0 0; border:1px solid var(--rule); border-radius:10px; }
+  table { border-collapse:collapse; width:100%; font-size:.9rem; }
+  th,td { text-align:left; padding:.55rem .8rem; vertical-align:top; border-bottom:1px solid var(--rule); }
+  thead th { font-family:var(--mono); font-size:.66rem; letter-spacing:.08em; text-transform:uppercase; color:var(--faint); font-weight:600; background:var(--surface-2); white-space:nowrap; }
+  tbody tr:last-child td { border-bottom:0; }
+  tbody tr:nth-child(even) { background:color-mix(in srgb, var(--surface) 55%, transparent); }
+  td.mono,.tnum { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  .st { font-family:var(--mono); font-size:.66rem; font-weight:600; padding:.1rem .4rem; border-radius:4px; white-space:nowrap; }
+  .st.ex { background:var(--ok-soft); color:var(--ok); }
+  .st.pa { background:var(--warn-soft); color:var(--warn); }
+  .st.nw { background:var(--pop-soft); color:var(--pop); }
+
+  .req { max-width:1040px; }
+  .reqgroup { margin-top:1.6rem; }
+  .reqgroup > .gh { font-family:var(--mono); font-size:.74rem; letter-spacing:.06em; text-transform:uppercase; color:var(--accent); border-bottom:1px solid var(--rule); padding-bottom:.4rem; margin-bottom:.3rem; display:flex; justify-content:space-between; gap:1rem; }
+  .reqgroup > .gh .gs { color:var(--faint); }
+  .r { display:grid; grid-template-columns:auto 1fr; gap:.9rem; padding:.68rem 0; border-bottom:1px solid var(--rule); align-items:baseline; }
+  .r:last-child { border-bottom:0; }
+  .rid { font-family:var(--mono); font-size:.72rem; font-weight:600; color:var(--pop); background:var(--pop-soft); padding:.12rem .45rem; border-radius:5px; white-space:nowrap; }
+  .r .rt { font-size:.95rem; }
+  .r .ac { display:block; margin-top:.25rem; font-family:var(--mono); font-size:.76rem; color:var(--ink-soft); }
+  .r .ac::before { content:"accept ▸ "; color:var(--ok); }
+
+  .parts { max-width:1040px; }
+  .markers { display:flex; flex-wrap:wrap; gap:.5rem; margin:1rem 0; }
+  .pm { display:inline-flex; align-items:center; gap:.45rem; font-family:var(--mono); font-size:.8rem; padding:.3rem .6rem; border-radius:6px; border:1px solid var(--rule); }
+  .pm .g { font-weight:700; font-size:.95rem; }
+  .pm.ok { background:var(--ok-soft); color:var(--ok); } .pm.cand { background:var(--warn-soft); color:var(--warn); }
+  .pm.unv { background:var(--slate-soft); color:var(--slate); } .pm.rej { background:var(--bad-soft); color:var(--bad); }
+
+  ul.clean { list-style:none; padding-left:0; max-width:var(--measure); }
+  ul.clean li { position:relative; padding-left:1.3rem; margin-bottom:.55rem; }
+  ul.clean li::before { content:"›"; position:absolute; left:0; color:var(--accent); font-family:var(--mono); font-weight:700; }
+  ol.spec { max-width:var(--measure); padding-left:1.3rem; } ol.spec li { margin-bottom:.55rem; }
+  .split { display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; max-width:1040px; } .split h4 { margin-top:0; }
+
+  pre.code { font-family:var(--mono); font-size:.78rem; line-height:1.5; background:var(--surface-2); border:1px solid var(--rule);
+    border-radius:8px; padding:1rem 1.15rem; overflow-x:auto; max-width:1040px; color:var(--ink); margin:.6rem 0 1.2rem; }
+  pre.code .c { color:var(--faint); }
+
+  .term { font-family:var(--mono); font-size:.76rem; line-height:1.55; background:#0D0F13; color:#C9CCC4; border-radius:10px;
+    padding:1.1rem 1.2rem; overflow-x:auto; border:1px solid #262A33; max-width:1040px; }
+  .term .c-dim{color:#6C7079;} .term .c-pop{color:#F0574A;} .term .c-acc{color:#8AA0F0;} .term .c-ok{color:#52B98C;} .term .c-warn{color:#E0A94A;} .term .c-ink{color:#E9EAE4;}
+
+  .flow-wrap { max-width:1040px; }
+  .flow { display:grid; grid-template-columns:repeat(5,1fr); gap:.55rem; }
+  .flow-node { background:var(--surface); border:1px solid var(--rule); border-radius:10px; padding:1rem .85rem; position:relative; }
+  .flow-node .k { font-family:var(--mono); font-size:1.5rem; color:var(--accent); line-height:1; display:block; }
+  .flow-node .nm { font-family:var(--sans); font-weight:700; font-size:.95rem; margin-top:.5rem; }
+  .flow-node .sub { font-family:var(--mono); font-size:.66rem; color:var(--ink-soft); line-height:1.5; margin-top:.35rem; }
+  .flow-node.here { border-color:var(--pop); box-shadow:inset 0 0 0 1px var(--pop); } .flow-node.here .k { color:var(--pop); }
+  .flow-base { font-family:var(--mono); font-size:.72rem; color:var(--ink-soft); text-align:center; margin-top:.7rem; padding:.55rem; border:1px dashed var(--rule); border-radius:8px; background:var(--surface); }
+  .flow-base b { color:var(--accent); } .flow-base .v { color:var(--pop); }
+
+  footer { max-width:1040px; margin:4rem auto 0; padding:1.6rem 0 0; border-top:1px solid var(--rule); font-family:var(--mono); font-size:.74rem; color:var(--faint); }
+  footer a { color:var(--accent); }
+
+  @media (max-width:760px){
+    .planes,.grid2,.split { grid-template-columns:1fr; }
+    .flow { grid-template-columns:1fr 1fr; }
+    .sec-head { gap:.7rem; } .sec-num { min-width:auto; }
+    body { font-size:16px; } }
+</style>
+
+<div class="railbar">
+  <div class="railbar-inner">
+    <span class="brand">崩 kuzushi · <b>control-room PRD</b></span>
+    <nav class="rail">
+      <a href="#idea"><span class="k">01</span>the idea</a>
+      <a href="#problem"><span class="k">02</span>problem</a>
+      <a href="#exists"><span class="k">03</span>what exists</a>
+      <a href="#planes"><span class="k">04</span>two planes</a>
+      <a href="#parts"><span class="k">05</span>parts</a>
+      <a href="#harness"><span class="k">06</span>the harness</a>
+      <a href="#flow"><span class="k">07</span>the flow</a>
+      <a href="#reqs"><span class="k">08</span>requirements</a>
+      <a href="#trust"><span class="k">09</span>trust</a>
+      <a href="#rollout"><span class="k">10</span>rollout</a>
+      <a href="#metrics"><span class="k">11</span>metrics</a>
+    </nav>
+  </div>
+</div>
+
+<main>
+  <header class="masthead col">
+    <div class="kanji-mark">組 崩 作 掛</div>
+    <div class="eyebrow" style="margin-top:1rem;">Product Requirements · local-first security workbench</div>
+    <h1>A control room for non-deterministic scans.</h1>
+    <p class="lede">An LLM security scan is stochastic and costs money every run. Kuzushi makes it governable — a control plane to steer it, a visual plane to see it.</p>
+    <div class="metastrip">
+      <span class="chip">status <b>proposal — awaiting review</b></span>
+      <span class="chip">grounded in <b>cannon · defending-code · AIxCC · IRIS · OSS-Fuzz-Gen</b></span>
+    </div>
+    <div class="promise">
+      <div class="eyebrow">The promise</div>
+      Point Kuzushi at a target, aim it, and fire controlled sweeps of AI scans you can <em>steer, price, corroborate, and see</em> — until you have confirmed, evidence-backed findings you can defend.
+    </div>
+  </header>
+
+  <section id="idea">
+    <div class="col">
+      <div class="sec-head"><span class="sec-num">01</span><h2>The load-bearing idea</h2></div>
+      <p>The same agent, pointed at the same code, surfaces different findings run to run — and each run spends tokens. That non-determinism isn&rsquo;t a bug to fix; it&rsquo;s the material the product is made of. Anthropic&rsquo;s own reference harness says it plainly, and its entire design is two countermeasures:</p>
+    </div>
+    <div class="loadbearing">
+      <div class="eyebrow">why this product exists</div>
+      <p>Any single AI scan is flaky and noisy. The countermeasures are <strong>union across a permuted sweep</strong> (coverage from variance) and a <strong>separate adversarial verifier</strong> whose only job is to disprove findings (precision). Everything else — the ledger, the cockpit, seeding — is lifecycle management around those two.</p>
+      <div class="two">
+        <div class="s1"><b>Sample</b><p>Fire a <em>sweep</em> — <code>focus × strategy × model × runs</code> — and union + dedupe the results. Coverage comes from variance, not one lucky pull.</p></div>
+        <div class="s2"><b>Corroborate</b><p>A guilty-until-proven-innocent verifier, multi-vote and blind, ideally crash/PoV-backed. In the reference harness this roughly halved false positives; a required PoC drove them near zero.</p></div>
+      </div>
+    </div>
+    <div class="col">
+      <p style="margin-top:1.4rem;">Discovery is easy to parallelize; the bottleneck has moved to <strong>verification, triage, and patching</strong>. A product that just fires more agents makes more noise. The value is the loop that turns noisy, stochastic, expensive output into a small set of corroborated, proven findings — <em>without clobbering the human&rsquo;s judgment.</em> Both mechanisms must be <strong>operator-controllable</strong>, not buried. That control — plus the visibility to see the invisible agent reasoning — is the whole product.</p>
+    </div>
+  </section>
+
+  <section id="problem">
+    <div class="col">
+      <div class="sec-head"><span class="sec-num">02</span><h2>The problem: the parts, but no control room</h2></div>
+      <p>Kuzushi works, and most of the machinery is real. The failure is that it presents the <em>parts</em> but not the room that lets you <em>govern a non-deterministic scan</em>. Each symptom is traceable to an audit or the current-state map.</p>
+    </div>
+    <div class="cluster"><div class="lt">A</div><h4>You can&rsquo;t steer where the non-determinism spends.</h4><p>Phase execution is a static 22-entry <code>PlanningTaskId</code> walker — not a signal-driven, priced <strong>sweep</strong>. No <code>focus × strategy × model × runs</code> matrix, no queue of proposals you approve under a budget. The <code>COVERAGE MATRIX</code> is display-only.</p></div>
+    <div class="cluster"><div class="lt">B</div><h4>You can&rsquo;t shape the scan — the harness is frozen.</h4><p>Engine wiring, detector set, and tool graph are compile-time. Prompt <em>text</em> is editable, but you can&rsquo;t mutate the <strong>harness</strong> — seed it from recon, retarget it by typing <em>&ldquo;focus on SQLi&rdquo;</em>, or let coverage feedback evolve it.</p></div>
+    <div class="cluster"><div class="lt">C</div><h4>Engines you own aren&rsquo;t controllable per-scan.</h4><p>12 MCP oracles, <code>cpg:build</code>, <code>codeql-db:build</code> — but enablement is artifact-presence-gated behind the scenes, never an explicit, cost-estimated toggle. No way to say <em>&ldquo;turn on Joern + CodeQL for this confirm pass&rdquo;</em> and see the cost.</p></div>
+    <div class="cluster"><div class="lt">D</div><h4>The two planes are conflated.</h4><p>A deterministic seed (Semgrep/CodeQL/SARIF) and a non-deterministic hunt are different evidence that should <em>corroborate</em> one row. The ledger already merges them — but nothing lets you <strong>ingest an external SARIF/Semgrep file</strong>, and nothing steers the two planes.</p></div>
+    <div class="cluster"><div class="lt">E</div><h4>You can&rsquo;t compose or save a strategy.</h4><p>No named, replayable recipe (<code>deep = pattern + iris-taint + review×2 + invariant</code>). The parts exist — <code>variant</code>, <code>ndiff</code>, overrides, phases — but don&rsquo;t compose into a stored strategy object.</p></div>
+    <div class="cluster"><div class="lt">F</div><h4>You can&rsquo;t fully trust or see the output.</h4><p>Confirmed-vs-guess is detail-only; a canceled task can flip to <code>✓ done</code>; the Workbench fabricates a phase chip with no target and tracks the viewed page, not reality; the DAG legend names a state rows can&rsquo;t show.</p></div>
+    <div class="col"><p style="margin-top:1.4rem;">Plus the standing friction: an inventory-shaped surface (42 modules / ~67 tools), a keyless first run that hits an auth wall before any finding, token waste from duplicate triage, CI-blocking headless edges (<code>recon:import</code> unreachable, <code>--target</code> three ways), and detection quality that&rsquo;s a claim (<code>baseline.json = {}</code>) not a number.</p></div>
+  </section>
+
+  <section id="exists">
+    <div class="col">
+      <div class="sec-head"><span class="sec-num">03</span><h2>What already exists</h2></div>
+      <p>Grounding for every requirement — verified against the current tree. The gap is <strong>composition and control</strong>, not greenfield capability. We build the room, not the parts.</p>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th style="width:52%;">Capability</th><th>Status</th><th>Where</th></tr></thead>
+        <tbody>
+          <tr><td>Deduping ledger · corroboration count · severity-max merge</td><td><span class="st ex">exists</span></td><td class="mono">findings/persistence</td></tr>
+          <tr><td>Sticky human triage · suppress / snooze</td><td><span class="st ex">exists</span></td><td class="mono">triage_and_verification.rs</td></tr>
+          <tr><td>Three-tier model routing (Cheap/Mid/Deep) + per-role overrides</td><td><span class="st ex">exists</span></td><td class="mono">runtime/response_and_roles.rs</td></tr>
+          <tr><td>Per-op budget caps + spend ledger + cost-cap halt card</td><td><span class="st ex">exists</span></td><td class="mono">spend/drop.rs</td></tr>
+          <tr><td>Batch triage over all findings · concurrency · <code>costCapUsd</code></td><td><span class="st ex">exists</span></td><td class="mono">modules/triage/</td></tr>
+          <tr><td>Live Semgrep + CodeQL detectors</td><td><span class="st ex">exists</span></td><td class="mono">native_scanners/</td></tr>
+          <tr><td>Attack chaining → attack-tree viz</td><td><span class="st ex">exists</span></td><td class="mono">engines/exploit_chain/</td></tr>
+          <tr><td>Threat-model build + TUI regenerate</td><td><span class="st ex">exists</span></td><td class="mono">capabilities/threat_model/</td></tr>
+          <tr><td>5-page viz gallery (3D surface · DFD · chain · path · heatmap)</td><td><span class="st ex">exists</span></td><td class="mono">renderer/views/scene/</td></tr>
+          <tr><td>12 MCP oracle servers (tree-sitter · Joern · CodeQL · clangd · …)</td><td><span class="st ex">exists</span></td><td class="mono">crates/kuzushi-mcp-*</td></tr>
+          <tr><td>On-demand CPG + CodeQL DB build</td><td><span class="st ex">exists</span></td><td class="mono">modules/cpg_module.rs</td></tr>
+          <tr><td>Neuro-symbolic taint (LLM specs → CPG flows → LLM triage)</td><td><span class="st ex">exists</span></td><td class="mono">capabilities/taint_iris_next/</td></tr>
+          <tr><td>Prompts-as-files + mutation ledger</td><td><span class="st ex">exists</span></td><td class="mono">options/prompt_paths.rs</td></tr>
+          <tr><td>Phase derivation 組→崩→作→掛 from workspace reality</td><td><span class="st ex">exists</span></td><td class="mono">ui_view_models/journey.rs</td></tr>
+          <tr><td><b>Signal-driven priced sweep</b> (focus×strategy×model×runs)</td><td><span class="st nw">new</span></td><td class="mono">— static walker today</td></tr>
+          <tr><td><b>Mutable, recon-seeded, steerable harness</b></td><td><span class="st nw">new</span></td><td class="mono">—</td></tr>
+          <tr><td><b>Named, saveable strategies</b></td><td><span class="st nw">new</span></td><td class="mono">—</td></tr>
+          <tr><td><b>Per-scan engine enablement UI</b> (+ cost estimate)</td><td><span class="st pa">partial</span></td><td class="mono">artifact-gated only</td></tr>
+          <tr><td><b>Deterministic seed ingest</b> (external SARIF/Semgrep → ledger)</td><td><span class="st nw">new</span></td><td class="mono">live-run only</td></tr>
+          <tr><td><b>Engagement-scoped cross-run merge</b></td><td><span class="st pa">partial</span></td><td class="mono">per-scan_id today</td></tr>
+          <tr><td><b>Confirmed-vs-guess in the findings list</b></td><td><span class="st pa">partial</span></td><td class="mono">detail-only today</td></tr>
+          <tr><td><b>LLM-authored fuzz harness build-and-fix loop</b> (PoV proof)</td><td><span class="st nw">new</span></td><td class="mono">—</td></tr>
+          <tr><td><b>Detection as a number</b> (F1 + head-to-head + gate + tune)</td><td><span class="st pa">partial</span></td><td class="mono">kuzushi-eval standalone</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="planes">
+    <div class="col">
+      <div class="sec-head"><span class="sec-num">04</span><h2>The two planes</h2></div>
+      <p>The user-facing model is two planes over one engagement folder and one ledger: a <strong style="color:var(--accent);">control plane</strong> to steer <em>where</em> the non-determinism spends and <em>how hard</em> to corroborate, and a <strong style="color:var(--pop);">visual plane</strong> to <em>see</em> the otherwise-invisible agent reasoning.</p>
+    </div>
+    <div class="planes">
+      <div class="plane control">
+        <div class="ph">Control plane — steer</div>
+        <div class="body">
+          <div class="row"><b>The sweep</b><span>the unit of sampled non-determinism: <code>focus × strategy × model × runs</code>, unioned + deduped with a corroboration count.</span></div>
+          <div class="row"><b>Priced, budget-gated proposals</b><span>generators propose sweeps ranked by yield; approve under a cap; <code>$/round</code> self-calibrates; overshoot surfaced, not hidden.</span></div>
+          <div class="row"><b>The harness</b><span>the mutable scan config — engines, strategy, tiers, focus, oracle, seeds.</span></div>
+          <div class="row"><b>Per-scan engine enablement</b><span>turn on the CPG / CodeQL DB / MCP oracles / clangd LSP for this pass, with a cost estimate; artifact-gated and honest.</span></div>
+          <div class="row"><b>The depth ladder</b><span><code>structural → linked → path(CPG) → proven(PoV)</code>; you pick depth, Kuzushi picks the engine.</span></div>
+          <div class="row"><b>Verify · tiering · seed · judgment</b><span>votes/lenses/PoV; cheap models for easy work; ingest deterministic scans; sticky human FP/confirm.</span></div>
+        </div>
+      </div>
+      <div class="plane visual">
+        <div class="ph">Visual plane — see</div>
+        <div class="body">
+          <div class="row"><b>Attack surface · DFD · threat model</b><span>3D terrain, data-flow, trust-tier graph — the target rendered.</span></div>
+          <div class="row"><b>Attack tree · chains</b><span>how primitives connect into multi-step attacks.</span></div>
+          <div class="row"><b>Findings ledger</b><span>the table with proof markers, evidence tier, oracle, corroboration — confirmed-vs-guess at a glance.</span></div>
+          <div class="row"><b>Live sweep introspection</b><span>per-round DAG, model, strategy, <em>live cost</em>, agent tree, tool calls, coverage growth. The spend made legible.</span></div>
+          <div class="row"><b>Regenerate on demand</b><span>hotkeys/commands rebuild the threat model, chains, surface when they drift.</span></div>
+          <div class="row"><b>The proof story</b><span>each finding shows the oracle that produced it and its vote breakdown — evidence, not opinion.</span></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section id="parts">
+    <div class="col">
+      <div class="sec-head"><span class="sec-num">05</span><h2>Composable parts → strategies</h2></div>
+      <p>The 42 modules aren&rsquo;t a catalog to shop. They&rsquo;re <strong>parts of four kinds</strong>, composed into strategies and fired as sweeps.</p>
+    </div>
+    <div class="parts tablewrap">
+      <table>
+        <thead><tr><th>Kind</th><th>Parts (examples)</th><th>Role in a scan</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Detectors</strong></td><td class="mono">semgrep · codeql · static_review · secrets · dynamic/fuzz</td><td>turn a target into candidate findings</td></tr>
+          <tr><td><strong>Analysis oracles</strong></td><td class="mono">tree-sitter · Joern CPG · CodeQL · clangd LSP · entry-points · (KLEE)</td><td>answer reachability / callers / taint-path deterministically</td></tr>
+          <tr><td><strong>Signal generators</strong></td><td class="mono">commit-archaeology · threat-model · dep-intel · evolution · fuzz-recon</td><td><em>propose</em> priced sweeps from evidence about the target</td></tr>
+          <tr><td><strong>Verifiers</strong></td><td class="mono">multi-lens vote · metamorphic · PoV/crash</td><td>try to disprove; promote proof state</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="col">
+      <p style="margin-top:1.3rem;">A <strong>strategy</strong> is a named, saveable, replayable recipe that composes parts — the sweep&rsquo;s &ldquo;variant&rdquo; axis:</p>
+    </div>
+    <pre class="code"><span class="c"># engagement/strategies/*.toml</span>
+deep      = pattern(semgrep+codeql) + iris-taint(CPG) + review×2 + invariant-check
+quick     = secrets + static_review×1
+pr-review = diff-scope + review + reachability-vote      <span class="c"># Full vs Delta mode</span></pre>
+    <div class="col">
+      <p>Diversity + merge beats one pipeline — every AIxCC winner runs many diverse engines in parallel and funnels into one dedup/score gate (theori merges five vuln sources; atlantis ensembles input-generators and three diverse patch agents). Strategies make that composition an operator-owned object.</p>
+    </div>
+  </section>
+
+  <section id="harness">
+    <div class="col">
+      <div class="sec-head"><span class="sec-num">06</span><h2>The harness — the mutable unit of a scan</h2></div>
+      <p>&ldquo;The harness&rdquo; is the whole configuration of a non-deterministic scan, modeled as <strong>one versioned, editable artifact</strong> — not scattered flags.</p>
+    </div>
+    <pre class="code">harness = {
+  focus_areas[]     <span class="c"># ranked {entry(file:function:line), input_surface, rank}</span>
+  strategy          <span class="c"># the composed recipe</span>
+  engines_enabled   <span class="c"># cpg? codeql-db? which MCP oracles? clangd LSP?</span>
+  model_tiers       <span class="c"># {find: mid, triage: cheap, verify: deep, patch: deep}</span>
+  runs / variants   <span class="c"># the sampling matrix</span>
+  oracle            <span class="c"># ASan crash | asserted invariant | reachability</span>
+  seeds[]           <span class="c"># corpus seeds / operator hunches / imported findings</span>
+  budget            <span class="c"># cap + priced proposals</span>
+}</pre>
+    <div class="col">
+      <p>Three ways it mutates — this is the differentiator:</p>
+      <ol class="spec">
+        <li><strong>Recon seeds it.</strong> A discover pass clusters attacker-reachable code into ranked focus areas, detects the toolchain/build system, and extracts an input vocabulary — pre-populating a partitioned plan. A fuzzer is never handed <code>main()</code>.</li>
+        <li><strong>The operator edits it — by typing intent.</strong> <em>&ldquo;Focus on SQLi&rdquo;</em> is a first-class steering input that re-ranks focus areas, sets the oracle&rsquo;s CWEs, and biases seeds. (This is the knob the fuzz-plugin sources lack and the reference harness only gestures at.) You can also hand-edit the harness or attach a design doc as provenance-tagged <code>&lt;untrusted-source&gt;</code> evidence.</li>
+        <li><strong>Feedback mutates it dynamically.</strong> Reachability prunes unreachable candidates. An LLM-authored fuzz harness runs a build-and-fix loop (compiler rejects → LLM fixes); coverage (<code>cov:</code>/<code>ft:</code>/<code>NEW</code>) decides extend-vs-stop; an escalation ladder pushes a clean crash toward a controllable OOB write. Only a reproducing PoV promotes a finding to <code>proven</code> — the OSS-Fuzz-Gen / Big Sleep mechanic, productized.</li>
+      </ol>
+    </div>
+  </section>
+
+  <section id="flow">
+    <div class="col">
+      <div class="sec-head"><span class="sec-num">07</span><h2>The flow — phases as control loci</h2></div>
+      <p>One spine over one engagement folder and one ledger. Each phase is where you compose parts and control non-determinism. Keep the honest phase <em>derivation</em>; rebuild phase <em>execution</em> around the sweep.</p>
+    </div>
+    <div class="flow-wrap">
+      <div class="flow">
+        <div class="flow-node here"><span class="k">組</span><div class="nm">Aim</div><div class="sub">map + build the harness; recon seeds focus areas; prepare engines</div></div>
+        <div class="flow-node"><span class="k">崩</span><div class="nm">Hunt</div><div class="sub">fire sweeps: priced, budget-gated proposals + seed ingest</div></div>
+        <div class="flow-node"><span class="k">作</span><div class="nm">Confirm</div><div class="sub">sample→corroborate→prove: votes, lenses, PoV; sticky triage</div></div>
+        <div class="flow-node"><span class="k">掛</span><div class="nm">Fix</div><div class="sub">patch + re-verify (PoV re-attack) against the same row</div></div>
+        <div class="flow-node"><span class="k">▪</span><div class="nm">Report</div><div class="sub">export evidence — SARIF · bundle · ledger</div></div>
+      </div>
+      <div class="flow-base">
+        <b>CONTROL</b> sweep · harness · budget · engines · depth · verify &nbsp;+&nbsp; <b>VISUAL</b> surface · DFD · threat model · tree · chains · ledger · live cost
+        <br><span class="v">▲ Measure / Tune</span> — F1 vs a corpus · head-to-head vs SARIF · regression gate · prompt self-tune
+      </div>
+    </div>
+  </section>
+
+  <section id="reqs">
+    <div class="col">
+      <div class="sec-head"><span class="sec-num">08</span><h2>Requirements</h2></div>
+      <p>Grouped, with status — <span class="st ex">exists</span> (wire/expose) · <span class="st pa">partial</span> · <span class="st nw">new</span>. Full acceptance criteria in the source doc; the highest-leverage items:</p>
+    </div>
+    <div class="req">
+      <div class="reqgroup">
+        <div class="gh"><span>8.1 · Non-determinism control — the sweep</span><span class="gs">new</span></div>
+        <div class="r"><span class="rid">R1</span><div class="rt"><b>Priced, budget-gated sweep.</b> <code>focus × strategy × model × runs</code>; generators propose, operator approves under a cap, <code>$/round</code> self-calibrates.<span class="ac">the queue prices, ranks by yield, refuses over-budget; EMA recalibrates.</span></div></div>
+        <div class="r"><span class="rid">R2</span><div class="rt"><b>Union + engagement-scoped merge.</b> Runs union into one row per defect, merging on <code>dedup_key</code> across <code>scan_id</code> with corroboration.<span class="ac">two runs / two engines over one defect → one row, corroboration 2.</span></div></div>
+        <div class="r"><span class="rid">R3</span><div class="rt"><b>Variance is visible.</b> A campaign shows net-new vs re-found per run.<span class="ac">a second run reports new vs corroborated counts.</span></div></div>
+      </div>
+      <div class="reqgroup">
+        <div class="gh"><span>8.2 · The harness — mutable, seeded, steerable</span><span class="gs">new</span></div>
+        <div class="r"><span class="rid">R5</span><div class="rt"><b>One versioned artifact.</b> <code>engagement/harness.toml</code> captures focus/strategy/engines/tiers/runs/oracle/seeds/budget.<span class="ac">round-trips: generate → edit → re-read → re-fire.</span></div></div>
+        <div class="r"><span class="rid">R6</span><div class="rt"><b>Recon seeds it.</b> A discover pass pre-populates ranked focus areas, toolchain, input vocabulary.<span class="ac">a fresh target yields a partitioned plan; a fuzzer is never handed <code>main()</code>.</span></div></div>
+        <div class="r"><span class="rid">R7</span><div class="rt"><b>Typed-intent steering.</b> &ldquo;Focus on SQLi&rdquo; re-ranks focus areas, sets oracle CWEs, biases seeds.<span class="ac">the command measurably reorders the harness and the next sweep&rsquo;s scope.</span></div></div>
+        <div class="r"><span class="rid">R8</span><div class="rt"><b>Dynamic mutation.</b> Reachability prunes; an LLM fuzz harness runs a build-and-fix loop; coverage decides extend-vs-stop; only a PoV promotes to <code>proven</code>.<span class="ac">signed-overflow stays <code>candidate</code>; a reproducing OOB-write becomes <code>proven</code>.</span></div></div>
+      </div>
+      <div class="reqgroup">
+        <div class="gh"><span>8.3 · Composable strategies</span><span class="gs">new</span></div>
+        <div class="r"><span class="rid">R9</span><div class="rt"><b>Named, saveable, replayable strategies</b> compose detectors + oracles + verifiers + tiers.<span class="ac"><code>deep</code> expands into a sweep spec; editing persists.</span></div></div>
+        <div class="r"><span class="rid">R10</span><div class="rt"><b>Diversity ensemble.</b> A strategy runs several diverse detectors/patch-agents in parallel and merges/picks-best.<span class="ac">two detectors in one strategy corroborate into shared rows.</span></div></div>
+      </div>
+      <div class="reqgroup">
+        <div class="gh"><span>8.4 · Analysis engines per-scan</span><span class="gs">exists → expose</span></div>
+        <div class="r"><span class="rid">R11</span><div class="rt"><b>Explicit enablement with cost estimate.</b> Toggle CPG / CodeQL / MCP oracles / clangd LSP; show latency/cost before commit; default off for broad, on for scoped confirm.<span class="ac">enabling the CPG shows an estimate; disabling falls back to structural with no silent spin-up.</span></div></div>
+        <div class="r"><span class="rid">R12</span><div class="rt"><b>Analysis-depth ladder</b> <code>structural → linked → path → proven</code> as the user knob.<span class="ac">raising depth enables the reaching engine, or refuses-with-hint.</span></div></div>
+        <div class="r"><span class="rid">R14</span><div class="rt"><b>Optional symbolic (KLEE) deepest tier</b> for C/C++, only when a CPG confirmed a reachable sink.<span class="ac">KLEE promotes <code>path → proven</code> with a concrete input, or is absent honestly.</span></div></div>
+      </div>
+      <div class="reqgroup">
+        <div class="gh"><span>8.5 · Deterministic seed plane</span><span class="gs">new</span></div>
+        <div class="r"><span class="rid">R15</span><div class="rt"><b>Ingest external SARIF/Semgrep/CodeQL files.</b> <code>findings seed &lt;file&gt;</code> tags <code>sources[]</code>, sets <code>triaged_by="imported"</code>, dedups.<span class="ac">seeding over an existing row adds a source, not a duplicate.</span></div></div>
+        <div class="r"><span class="rid">R16</span><div class="rt"><b>Seed corroborates the hunt.</b> An imported deterministic finding and an AI-hunt finding over the same defect share one row.<span class="ac">corroboration reflects both planes.</span></div></div>
+      </div>
+      <div class="reqgroup">
+        <div class="gh"><span>8.6 · Confirm / verify</span><span class="gs">partial → configure</span></div>
+        <div class="r"><span class="rid">R17</span><div class="rt"><b>Configurable verification.</b> <code>--when severity&gt;=X --max N --votes K</code>; bare scan verifies nothing.<span class="ac">filter/cap/votes tested; bare-scan-verifies-nothing holds.</span></div></div>
+        <div class="r"><span class="rid">R18</span><div class="rt"><b>Adversarial, blind, multi-vote.</b> Guilty-until-proven; each verifier starts from code not the finder&rsquo;s claim; majority rules.<span class="ac">the verifier context excludes the finder&rsquo;s reasoning; the vote breakdown is recorded.</span></div></div>
+        <div class="r"><span class="rid">R19</span><div class="rt"><b>Proof over opinion.</b> Promote via a reproducing PoV / crash oracle or metamorphic perturbation, not a model claim.<span class="ac"><code>proven</code> requires a reproducing artifact; a post-patch re-attack is its own gate.</span></div></div>
+        <div class="r"><span class="rid">R20</span><div class="rt"><b>Sticky human triage + batch triage.</b> Manual FP/confirm survives re-runs; triage runs over all findings, deduped, skipping persisted verdicts.<span class="ac">the sticky test passes; a repeat issues one call per unique un-triaged fingerprint.</span></div></div>
+      </div>
+      <div class="reqgroup">
+        <div class="gh"><span>8.7 · Model tiering &amp; cost</span><span class="gs">exists → surface</span></div>
+        <div class="r"><span class="rid">R21</span><div class="rt"><b>Per-role/tier map + presets.</b> Cheap models for dedup/classify/easy-triage, strong for root-cause/patch/PoV; same-role fallback on error.<span class="ac">a weak↔best preset switch; cost per role accounted.</span></div></div>
+        <div class="r"><span class="rid">R22</span><div class="rt"><b>Cost-per-confirmed surfaced; budget per-call.</b><span class="ac">the run shows $/confirmed; a codex-backend run (<code>cost_usd 0.0</code>) still halts via call-count/token fallback.</span></div></div>
+        <div class="r"><span class="rid">R23</span><div class="rt"><b>No duplicate triage; prompt caching.</b><span class="ac">repeat runs over unchanged context show cache hits; no re-triage of duplicates.</span></div></div>
+      </div>
+      <div class="reqgroup">
+        <div class="gh"><span>8.8 · The visual plane</span><span class="gs">exists → wire to reality</span></div>
+        <div class="r"><span class="rid">R24</span><div class="rt"><b>Confirmed-vs-guess in every list.</b> Each row shows proof marker, evidence tier, oracle, corroboration.<span class="ac">100% of rows carry the signal, not just detail.</span></div></div>
+        <div class="r"><span class="rid">R27</span><div class="rt"><b>Live sweep introspection.</b> Per-round model, strategy, live cost, agent tree, tool calls, latency, coverage growth.<span class="ac">a running sweep shows spend and per-step confidence live.</span></div></div>
+      </div>
+      <div class="reqgroup">
+        <div class="gh"><span>8.9–8.11 · Surface · first-run · CI parity · measure</span><span class="gs">partial / new</span></div>
+        <div class="r"><span class="rid">R28</span><div class="rt"><b>Home is the control room</b>, not a catalog; the 42-module catalog is one advanced, phase-grouped view with rendered tab-completion.</div></div>
+        <div class="r"><span class="rid">R29</span><div class="rt"><b>Keyless first run reaches value</b> — <code>demo</code> first-class; offline model choice; typed <code>target</code> runs the same onboarding.<span class="ac">no key + no network → a finding via <code>demo</code> in ~60s.</span></div></div>
+        <div class="r"><span class="rid">R31</span><div class="rt"><b>Headless CI edges closed</b> — <code>recon:import</code> reachable (BLOCKER), <code>--target</code> consistent, <code>run</code> errors valid JSON, export honors format+dirs.</div></div>
+        <div class="r"><span class="rid">R34</span><div class="rt"><b>Detection is a number.</b> <code>kuzushi measure</code> reports F1 + head-to-head vs SARIF; <code>--gate</code> fails CI on regression; <code>tune</code> self-optimizes prompts.</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section id="trust">
+    <div class="col">
+      <div class="sec-head"><span class="sec-num">09</span><h2>The signifier &amp; trust contract</h2></div>
+      <p>Because the promise is <em>governed evidence</em>, the finding surface has a hard, release-gating contract. Confirmed-vs-guess is visible in every list:</p>
+    </div>
+    <div class="markers">
+      <span class="pm ok"><span class="g">✓</span> confirmed · path/PoV</span>
+      <span class="pm cand"><span class="g">◇</span> candidate · linked</span>
+      <span class="pm unv"><span class="g">?</span> unverified</span>
+      <span class="pm rej"><span class="g">!</span> rejected</span>
+    </div>
+    <div class="col">
+      <ul class="clean">
+        <li>Each finding shows its <strong>evidence tier</strong>, the <strong>oracle</strong> that produced it (structural / tree-sitter / Joern / CodeQL / PoV), its <strong>corroboration count</strong>, and its <strong>vote breakdown</strong>.</li>
+        <li><strong>Cost and corroboration are always on screen</strong> during a run — the operator never spends blind.</li>
+        <li>The phase chip/rail reflects <strong>engagement reality</strong>, never the viewed page, and never renders without a target.</li>
+        <li>A terminal state is terminal: <strong>canceled never becomes done</strong>.</li>
+        <li><strong>Verification independence is a visible badge</strong> — the verifier saw only the evidence (PoC/path), not the finder&rsquo;s reasoning (the two-container trust boundary).</li>
+      </ul>
+      <p style="color:var(--ink-soft);">A change that regresses this contract is a release blocker.</p>
+    </div>
+  </section>
+
+  <section id="rollout">
+    <div class="col">
+      <div class="sec-head"><span class="sec-num">10</span><h2>Rollout</h2></div>
+      <p>Because most parts exist, the early waves are <strong>expose + compose</strong>, not build. Each ends green (tests + <code>quality:crap-risk</code>).</p>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Wave</th><th>Delivers</th><th>Nature</th></tr></thead>
+        <tbody>
+          <tr><td class="mono"><b>W0</b> Honest surface &amp; trust</td><td>R24, R28, R33 + signifier fixes; gallery from real state</td><td>expose/fix</td></tr>
+          <tr><td class="mono"><b>W1</b> Keyless value</td><td>R29–R30</td><td>onboarding</td></tr>
+          <tr><td class="mono"><b>W2</b> Engine controls</td><td>R11–R14 (surface the CPG/MCP/LSP + depth ladder)</td><td>expose</td></tr>
+          <tr><td class="mono"><b>W3</b> Seed plane</td><td>R15–R16 (external SARIF/Semgrep ingest)</td><td>build (small)</td></tr>
+          <tr><td class="mono"><b>W4</b> Cost &amp; tiering surfaced</td><td>R21–R23</td><td>expose + fix</td></tr>
+          <tr><td class="mono"><b>W5</b> Cross-run ledger</td><td>R2, R20 (engagement-scoped merge; protect sticky)</td><td>build</td></tr>
+          <tr><td class="mono"><b>W6</b> Configurable Confirm</td><td>R17–R19 (votes/lenses/PoV)</td><td>build</td></tr>
+          <tr><td class="mono"><b>W7</b> The sweep</td><td>R1, R3–R4 (priced proposal queue replaces the walker)</td><td>build (deep)</td></tr>
+          <tr><td class="mono"><b>W8</b> The harness</td><td>R5–R8 (recon-seeded, typed-intent, dynamic fuzz loop)</td><td>build (deep)</td></tr>
+          <tr><td class="mono"><b>W9</b> Strategies</td><td>R9–R10 (saveable composable recipes)</td><td>build</td></tr>
+          <tr><td class="mono"><b>W10</b> Detection as a number</td><td>R34–R35 (fold into kuzushi-eval)</td><td>build</td></tr>
+          <tr><td class="mono"><b>cross</b> CI/terminal parity</td><td>R31–R32 (recon:import = standing BLOCKER)</td><td>fix early</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="col"><p style="margin-top:1.2rem;"><strong>Sequencing rule:</strong> nothing here is worth doing while the ship-the-product work (publish, platform binaries, supply-chain — ROADMAP P0) is red. W0–W4 are mostly expose/fix and land early; W7/W8 (sweep + harness) are the deep new build, de-risked by W5&rsquo;s ledger.</p></div>
+  </section>
+
+  <section id="metrics">
+    <div class="col">
+      <div class="sec-head"><span class="sec-num">11</span><h2>Success metrics</h2></div>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th style="width:46%;">Metric</th><th>Today</th><th>Target</th></tr></thead>
+        <tbody>
+          <tr><td>Fresh launch → first finding (no key)</td><td class="mono">auth wall</td><td class="mono">≤ 60s via demo</td></tr>
+          <tr><td>Steer a scan by typed intent</td><td>one-off <code>ask</code></td><td>re-ranks harness + sweep</td></tr>
+          <tr><td>Enable an engine per-scan with cost shown</td><td>hidden/artifact-gated</td><td>explicit toggle + estimate</td></tr>
+          <tr><td>Confirmed-vs-guess visible in the list</td><td>detail-only</td><td>100% (tier + oracle + votes)</td></tr>
+          <tr><td>Cost per confirmed finding</td><td>not surfaced</td><td>shown live</td></tr>
+          <tr><td>Duplicate LLM triage per fingerprint</td><td class="mono">up to ~11×</td><td class="mono">1×</td></tr>
+          <tr><td>Deterministic seed corroborates the hunt</td><td>no ingest path</td><td>one row, <code>sources[]</code> ≥ 2</td></tr>
+          <tr><td>Net-new vs re-found across a sweep</td><td>not shown</td><td>per-run counter</td></tr>
+          <tr><td>Verify configurability</td><td>all-or-nothing</td><td>when / max / votes / PoV</td></tr>
+          <tr><td>Published detection number</td><td class="mono">baseline = {}</td><td>F1 + head-to-head vs SARIF</td></tr>
+          <tr><td>Signifier/trust-contract violations</td><td class="mono">≥ 5 known</td><td class="mono">0</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="appendix">
+    <div class="col">
+      <div class="sec-head"><span class="sec-num">◆</span><h2>The control room, one screen</h2></div>
+    </div>
+    <div class="term">
+<span class="c-dim">$</span> kuzushi --target ./acme-api
+
+  <span class="c-ink">Kuzushi · acme-api · Node/Express ·</span> <span class="c-pop">LIVE</span>            崩 hunt 2/5   <span class="c-warn">$0.85/$2.00</span>
+  <span class="c-dim">───────────────────────────────────────────────────────────────────────────</span>
+  組 aim <span class="c-ok">✓</span>   <span class="c-pop">崩 HUNT ▸</span>   作 confirm   掛 fix   ▪ report
+  <span class="c-dim">─────────────────────────── CONTROL ──────────────┬──────── VISUAL ─────────</span>
+  <span class="c-acc">SWEEP</span>   focus × strategy × model × runs            │ <span class="c-acc">ATTACK SURFACE</span>
+    ▸ P-001 incomplete-fix hunt  $0.40 · yield .82   │   3 routes · 2 untrusted
+      strategy: deep   model: mid   runs: 2  [k/s]   │  ╱╲  webhook.ts  <span class="c-pop">● hot</span>
+      P-002 SSRF reachability      $0.30 · .74 [k/s] │ ╱  ╲ users.ts    <span class="c-warn">◇</span>
+    <span class="c-acc">harness</span>  engines: cpg <span class="c-ok">✓</span> codeql ○ lsp ○  [edit]   │ <span class="c-dim">─────────────────────────</span>
+    <span class="c-acc">seed</span>     + semgrep.sarif (imported, 4)           │ <span class="c-acc">FINDINGS</span> (ledger)
+    <span class="c-acc">focus</span> ›  "focus on sqli"________              ↵  │  <span class="c-ok">✓</span> SQLi  users.ts:31
+  <span class="c-dim">──────────────────────────────────────────────────┤</span>    critical · path · ×2
+  NEXT ▸ approve sweeps, then `next` to fire         │  <span class="c-warn">◇</span> SSRF  webhook.ts:47
+  steer: [m]odel [s]trategy [e]ngines [b]udget       │    high · linked · votes 1/2
+  <span class="c-dim">───────────────────────────────────────────────────────────────────────────</span>
+  <span class="c-dim">></span> _                            demo · seed · measure · / for commands
+    </div>
+    <div class="col"><p style="margin-top:1rem; color:var(--ink-soft);">The 42 modules, the MCP oracles, the CPG, the bounty/recon intake — all still there as <em>parts</em>, composed into the strategy behind the sweep. The default is the control room.</p></div>
+  </section>
+
+  <footer>
+    Kuzushi · control-room PRD · proposal, awaiting review<br>
+    source — docs/plans/product-flow-prd.md · design spec — docs/design/product-flow-design-spec.md · seams — docs/plans/cannon-port-plan.md<br>
+    grounded in cannon · Anthropic defending-code harness · AIxCC (atlantis/buttercup/theori) · IRIS neuro-symbolic taint · OSS-Fuzz-Gen / Big Sleep · a file-map of current Kuzushi.
+  </footer>
+</main>

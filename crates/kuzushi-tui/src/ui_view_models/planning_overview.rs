@@ -278,6 +278,7 @@ mod tests {
             model_backed: id.is_model_backed(),
             required_cli: None,
             cli_available: true,
+            blocker: None,
         }
     }
 

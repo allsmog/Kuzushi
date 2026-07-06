@@ -16,7 +16,7 @@ KUZUSHI mode:shell · view:home · target:none ·...
         ctx ■  surface ■  threat ■  recommend ■  strategy ■
         findings ■  proof ■  failures ■  report ■
         manifest ■
-        .kuzushi/runs/latest · `show runs` for detail
+        .kuzushi/v3/runs/latest · `show runs` for detail
 
   WORKSPACE   target none · modules 42 · context not built
 

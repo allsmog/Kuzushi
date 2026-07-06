@@ -66,6 +66,14 @@ const SNAPSHOT_CACHES: &[SnapshotCache] = &[
     cache_patch_snapshot,
 ];
 
+const MAX_EXPLOIT_CHAIN_SNAPSHOTS: usize = 25;
+const MAX_EXPLOIT_CHAIN_STEPS: usize = 20;
+const MAX_EXPLOIT_CHAIN_PRECONDITIONS: usize = 10;
+const MAX_TAINT_FLOW_STAGES: usize = 25;
+const MAX_RECON_HOSTS: usize = 200;
+const MAX_RECON_SERVICES: usize = 500;
+const MAX_RECON_NOTES: usize = 200;
+
 fn cache_recon_snapshot(app: &mut ShellApp, tool_name: &str, data: &serde_json::Value) -> bool {
     if !tool_name.starts_with("recon:") {
         return false;
@@ -98,7 +106,13 @@ fn cache_exploit_chain_snapshot(
 fn exploit_chain_details(data: &serde_json::Value) -> Vec<ExploitChainDetail> {
     data.get("chains")
         .and_then(serde_json::Value::as_array)
-        .map(|chains| chains.iter().filter_map(exploit_chain_detail).collect())
+        .map(|chains| {
+            chains
+                .iter()
+                .take(MAX_EXPLOIT_CHAIN_SNAPSHOTS)
+                .filter_map(exploit_chain_detail)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -114,11 +128,21 @@ fn exploit_chain_detail(chain: &serde_json::Value) -> Option<ExploitChainDetail>
         ),
         narrative: data_string(chain, "narrative"),
         impact_description: data_string(chain, "impactDescription"),
-        preconditions: string_array(chain, "preconditions"),
+        preconditions: limited_string_array(
+            chain,
+            "preconditions",
+            MAX_EXPLOIT_CHAIN_PRECONDITIONS,
+        ),
         steps: chain
             .get("steps")
             .and_then(serde_json::Value::as_array)
-            .map(|steps| steps.iter().filter_map(exploit_chain_step).collect())
+            .map(|steps| {
+                steps
+                    .iter()
+                    .take(MAX_EXPLOIT_CHAIN_STEPS)
+                    .filter_map(exploit_chain_step)
+                    .collect()
+            })
             .unwrap_or_default(),
     })
 }
@@ -163,7 +187,13 @@ fn taint_flow_from_data(data: &serde_json::Value) -> Option<TaintFlowSnapshot> {
         stages: flow
             .get("stages")
             .and_then(serde_json::Value::as_array)
-            .map(|stages| stages.iter().filter_map(taint_stage).collect())
+            .map(|stages| {
+                stages
+                    .iter()
+                    .take(MAX_TAINT_FLOW_STAGES)
+                    .filter_map(taint_stage)
+                    .collect()
+            })
             .unwrap_or_default(),
     })
 }
@@ -183,13 +213,14 @@ fn taint_stage(stage: &serde_json::Value) -> Option<TaintStage> {
     })
 }
 
-fn string_array(value: &serde_json::Value, key: &str) -> Vec<String> {
+fn limited_string_array(value: &serde_json::Value, key: &str, limit: usize) -> Vec<String> {
     value
         .get(key)
         .and_then(serde_json::Value::as_array)
         .map(|items| {
             items
                 .iter()
+                .take(limit)
                 .filter_map(serde_json::Value::as_str)
                 .map(str::to_string)
                 .collect()
@@ -200,7 +231,13 @@ fn string_array(value: &serde_json::Value, key: &str) -> Vec<String> {
 fn exploit_chain_aliases(data: &serde_json::Value) -> Vec<ExploitChain> {
     data.get("chains")
         .and_then(serde_json::Value::as_array)
-        .map(|chains| chains.iter().filter_map(exploit_chain_alias).collect())
+        .map(|chains| {
+            chains
+                .iter()
+                .take(MAX_EXPLOIT_CHAIN_SNAPSHOTS)
+                .filter_map(exploit_chain_alias)
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -254,7 +291,7 @@ fn cache_patch_snapshot(app: &mut ShellApp, tool_name: &str, data: &serde_json::
     }
     if let Some(patch) = parse_pending_patch(data) {
         let alias = patch.alias.clone();
-        app.pending_patch = Some(patch);
+        app.engagement.set_pending_patch(patch);
         app.shell_view = ShellView::Patch(alias);
     }
     true
@@ -265,21 +302,27 @@ fn is_threat_hunt_snapshot_tool(tool_name: &str) -> bool {
 }
 
 fn recon_hosts(data: &serde_json::Value) -> Vec<ReconHost> {
-    data.get("hosts")
+    let hosts = data
+        .get("hosts")
         .and_then(|value| serde_json::from_value(value.clone()).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    capped_vec(hosts, MAX_RECON_HOSTS)
 }
 
 fn recon_services(data: &serde_json::Value) -> Vec<ReconService> {
-    data.get("services")
+    let services = data
+        .get("services")
         .and_then(|value| serde_json::from_value(value.clone()).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    capped_vec(services, MAX_RECON_SERVICES)
 }
 
 fn recon_notes(data: &serde_json::Value) -> Vec<ReconNote> {
-    data.get("notes")
+    let notes = data
+        .get("notes")
         .and_then(|value| serde_json::from_value(value.clone()).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    capped_vec(notes, MAX_RECON_NOTES)
 }
 
 fn data_string(data: &serde_json::Value, key: &str) -> Option<String> {
@@ -288,43 +331,10 @@ fn data_string(data: &serde_json::Value, key: &str) -> Option<String> {
         .map(ToString::to_string)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use kuzushi_core::V2Config;
-    use serde_json::json;
-
-    #[test]
-    fn hydrate_reloads_persisted_taint_and_exploit_snapshots() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        kuzushi_core::capabilities::save_persistent_taint_flow(
-            dir.path(),
-            &json!({ "flows": [{
-                "cwe": "CWE-89", "severity": "critical",
-                "stages": [{ "message": "order_id", "filePath": "orders.rs", "line": 1 }]
-            }] }),
-        )
-        .expect("save taint");
-        kuzushi_core::capabilities::save_persistent_exploit_chains(
-            dir.path(),
-            &json!({ "chains": [{
-                "id": "c1", "name": "SQLi", "overallSeverity": "critical",
-                "steps": [{ "role": "source", "description": "unsanitised id",
-                    "filePath": "a.rs", "startLine": 2 }]
-            }] }),
-        )
-        .expect("save chains");
-
-        // A fresh app (as on a new session) starts empty, then hydrates the
-        // repo's persisted viz snapshots — proving they survive a restart.
-        let mut app = ShellApp::new(V2Config::default(), None);
-        assert!(app.taint_flow.is_none());
-        assert!(app.exploit_chains.is_empty());
-
-        app.hydrate_persisted_scene_snapshots(Some(dir.path()));
-
-        assert_eq!(app.taint_flow.as_ref().expect("taint flow").cwe, "CWE-89");
-        assert_eq!(app.exploit_chains.len(), 1);
-        assert_eq!(app.exploit_chains[0].title, "SQLi");
-    }
+fn capped_vec<T>(mut values: Vec<T>, limit: usize) -> Vec<T> {
+    values.truncate(limit);
+    values
 }
+
+#[cfg(test)]
+mod tests;

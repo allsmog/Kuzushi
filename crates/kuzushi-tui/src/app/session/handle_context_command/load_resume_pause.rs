@@ -25,7 +25,6 @@ impl ShellApp {
         }
 
         let options = DynamicModuleLoadOptions {
-            allow_untrusted: false,
             trusted_specifiers: self.config.operator.trusted_modules.clone(),
         };
         match self.registry.load_dynamic_module(&specifier, &options) {

@@ -24,6 +24,8 @@ pub enum WorkspaceCommand {
     ExportFindings {
         output: PathBuf,
         format: Option<String>,
+        completeness: Option<String>,
+        allow_empty: bool,
     },
     Unsupported(String),
 }
@@ -33,12 +35,27 @@ pub enum StrategyCommand {
     Show,
     Approve(String),
     Reject(String),
+    Fire,
     Correct {
         id: String,
         to_strategy: String,
         reason: Option<String>,
         scope: StrategyCorrectionCommandScope,
     },
+    Unsupported(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PatchCommand {
+    Apply,
+    Reject,
+    Regen { style: Option<String> },
+    Unsupported(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReviewDecisionCommand {
+    Record { verdict: String, reason: String },
     Unsupported(String),
 }
 

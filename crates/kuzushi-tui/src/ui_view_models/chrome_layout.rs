@@ -46,7 +46,7 @@ pub(crate) fn status_footer_chrome_height(app: &ShellApp, terminal_height: u16) 
 fn hides_transcript_chrome(view: &ShellView) -> bool {
     matches!(
         view,
-        ShellView::ModuleRun | ShellView::Quickstart | ShellView::Logs
+        ShellView::ModuleRun | ShellView::Quickstart | ShellView::Logs | ShellView::Workbench
     )
 }
 
@@ -78,6 +78,14 @@ mod tests {
 
         app.shell_view = ShellView::Logs;
         assert_eq!(transcript_chrome_height(&app, 24), 0);
+    }
+
+    #[test]
+    fn transcript_chrome_height_hides_for_workbench() {
+        assert_eq!(
+            transcript_chrome_height(&app_in_view(ShellView::Workbench), 24),
+            0
+        );
     }
 
     #[test]

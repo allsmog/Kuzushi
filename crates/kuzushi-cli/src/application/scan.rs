@@ -5,14 +5,13 @@ use super::scan_prepare::{
 use crate::command::ScanModeArg;
 use crate::presentation::{emit_scan_ci_start, emit_scan_output, scan_result_or_report_ci_error};
 use anyhow::{Context, Result};
-use kuzushi_core::modules::wants_sast_runtime;
 use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::run_artifacts::{
     record_tool_run_failed, record_tool_run_started_with_reproducibility, ToolRunRecord,
 };
 use kuzushi_core::{
-    config_hash, load_config_for_target, AgentRuntime, FindingStore, ModuleRegistry,
-    ToolOptionStore, TraceHandle, WorkspaceTarget,
+    config_hash, load_config_for_target, tool_wants_runtime, AgentRuntime, FindingStore,
+    ModuleRegistry, ToolOptionStore, TraceHandle, WorkspaceTarget,
 };
 use kuzushi_openai::LangGraphRuntime;
 use std::path::{Path, PathBuf};
@@ -138,7 +137,7 @@ struct ScanToolExecution<'a> {
 
 fn execute_scan_tool(execution: ScanToolExecution<'_>) -> Result<serde_json::Value> {
     let failure_input = execution.input.clone();
-    let result = execution.registry.execute_tool_with_runtime(
+    let result = execution.registry.dispatch_prepared_tool_with_runtime(
         SCAN_TOOL,
         execution.input,
         execution.ctx,
@@ -273,20 +272,22 @@ async fn scan_apk_command(apk: PathBuf, json: bool, ci: bool, gate: ScanGatePoli
     let config = load_config_for_target(Some(workspace.root()))?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let registry = ModuleRegistry::with_v2_builtins();
-    let input = registry.prepare_tool_input(
-        "android-apk:scan",
-        apk_scan_tool_input(&apk, &workspace_dir),
-        None,
-    )?;
     let ctx = ToolExecutionContext {
         config: &config,
         workspace: Some(&workspace),
         findings_store: Some(&store),
         trace: None,
     };
+    let input = registry.prepare_tool_input_for_dispatch(
+        "android-apk:scan",
+        apk_scan_tool_input(&apk, &workspace_dir),
+        &ctx,
+        None,
+    )?;
     let started = std::time::Instant::now();
     emit_scan_ci_start(ci, started, &apk, &config, &Vec::new());
-    let result = registry.execute_tool_with_runtime("android-apk:scan", input, &ctx, None);
+    let result =
+        registry.dispatch_prepared_tool_with_runtime("android-apk:scan", input, &ctx, None);
     let elapsed = started.elapsed();
     let result = scan_result_or_report_ci_error(result, ci, started, elapsed)?;
     emit_scan_output(&workspace, &result, json, ci, started, elapsed)?;
@@ -332,7 +333,7 @@ pub(crate) fn scan_runtime(
     config: &kuzushi_core::V2Config,
     input: &serde_json::Value,
 ) -> Result<Option<LangGraphRuntime>> {
-    if wants_sast_runtime(input) {
+    if tool_wants_runtime(SCAN_TOOL, input, config) {
         Ok(Some(LangGraphRuntime::from_config(
             config,
             std::env::current_dir()?,

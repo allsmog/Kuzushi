@@ -26,7 +26,7 @@ pub(crate) fn scoped_target_path_label(app: &ShellApp) -> String {
         .map(|path| compact_target_path(&path.display().to_string()))
         .unwrap_or_else(|| "none".to_string());
     active_project_scope_label(app)
-        .map(|scope| format!("{target} ▸ {scope}"))
+        .map(|scope| format!("{target} › {scope}"))
         .unwrap_or(target)
 }
 

@@ -152,33 +152,45 @@ pub(crate) fn x_ray_module() -> BuiltinModule {
         "x-ray",
         "X-Ray",
         ModuleKind::Intel,
-        "Pashov X-Ray repository analysis and report artifacts.",
+        "Repository architecture review that maps entry points, invariants, attack surface, and risk verdicts.",
         vec![
             tool_with_options(
                 "x-ray:run",
-                "Run repository X-Ray analysis.",
-                vec![
-                    target_option(),
-                    model_option(),
-                    opt(
-                        "effort",
-                        OptionType::String,
-                        "Runtime reasoning effort hint.",
-                    )
-                    .advanced(),
-                    opt(
-                        "maxBudgetUsd",
-                        OptionType::Float,
-                        "Maximum runtime budget for the X-Ray request.",
-                    )
-                    .aliases(&["max_budget_usd"])
-                    .advanced(),
-                ],
+                "Analyze repository structure, entry points, invariants, and attack surface; persist the report artifact.",
+                x_ray_options(),
             ),
-            tool("x-ray:read", "Read the latest X-Ray analysis report."),
+            hidden_tool_with_options(
+                "x-ray:x-ray",
+                "Compatibility alias for x-ray:run.",
+                x_ray_options(),
+            ),
+            tool(
+                "x-ray:read",
+                "Read the latest repository architecture and attack-surface report.",
+            ),
         ],
         vec![dag("x-ray:x-ray", "report", &["context:build"])],
     )
+}
+
+fn x_ray_options() -> Vec<OptionSpec> {
+    vec![
+        target_option(),
+        model_option(),
+        opt(
+            "effort",
+            OptionType::String,
+            "Runtime reasoning effort hint.",
+        )
+        .advanced(),
+        opt(
+            "maxBudgetUsd",
+            OptionType::Float,
+            "Maximum runtime budget for the X-Ray request.",
+        )
+        .aliases(&["max_budget_usd"])
+        .advanced(),
+    ]
 }
 
 pub(crate) fn dep_hygiene_module() -> BuiltinModule {
@@ -189,7 +201,7 @@ pub(crate) fn dep_hygiene_module() -> BuiltinModule {
         "Check dependency manifests for stale, vulnerable, or policy-risky packages.",
         vec![tool_with_options(
             "dep-hygiene:check",
-            "Run dependency hygiene checks.",
+            "Inspect dependency manifests for stale versions, known-vulnerability signals, and supply-chain policy risks.",
             vec![target_option()],
         )],
         vec![dag("dep-hygiene:check", "findings", &["context:build"])],
