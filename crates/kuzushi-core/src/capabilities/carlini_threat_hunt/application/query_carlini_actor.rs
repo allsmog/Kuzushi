@@ -125,7 +125,7 @@ fn carlini_actor_request(
     let request = AgentQueryRequest::new(
         model.to_string(),
         target.to_path_buf(),
-        SYSTEM_PROMPT.to_string(),
+        carlini_system_prompt(),
         prompt,
     )
     .with_tool_policy(whitebox_static_policy_for_target(target))

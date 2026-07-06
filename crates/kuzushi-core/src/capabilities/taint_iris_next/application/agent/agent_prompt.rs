@@ -80,28 +80,7 @@ pub(in crate::capabilities::taint_iris_next) fn build_taint_iris_next_agent_prom
 
 fn append_false_positive_patterns(lines: &mut Vec<String>) {
     lines.push("## False-Positive Patterns".to_string());
-    lines.push(
-        "Before promoting a candidate, reject by-design flows only with explicit rationale. Use tree-sitter to read function signatures and Joern/CodeQL to distinguish attacker-controlled fragments from intentional whole-input APIs.".to_string(),
-    );
-    lines.push(String::new());
-    lines.push(
-        "- Documented passthrough execution: a text/string parameter named sql, sqlquery, query, select_query, cmd, script, or expression passed as the entire input to SPI_execute, SPI_prepare, eval, Function(), exec(), or Runtime.exec is not injection by itself. Real injection requires attacker input to be concatenated or formatted into a larger command/query fragment.".to_string(),
-    );
-    lines.push(
-        "- Role-gated privileged primitives: dlopen, system, or file I/O reachable only after has_privs_of_role, superuser, admin, or role-membership checks can be documented privileged functionality rather than a vulnerability.".to_string(),
-    );
-    lines.push(
-        "- Superuser-only configuration: archive_command, restore_command, shell command settings, and similar operator-only configuration paths are not findings unless the evidence shows unprivileged control.".to_string(),
-    );
-    lines.push(
-        "- Offline tooling: build tools, migration utilities, test harnesses, and argv-only CLI paths outside the runtime attack surface should be rejected unless the evidence ties them to attacker-reachable execution.".to_string(),
-    );
-    lines.push(
-        "- String-literal sink arguments are not attacker-controlled when syntax evidence confirms the risky argument is constant.".to_string(),
-    );
-    lines.push(
-        "- Sanitizer-shaped names are hypotheses, not proof. Before rejecting a corroborated flow because it passes through names such as get_safe_path, check_*, validate_*, sanitize_*, is_safe, or safe_*, inspect the definition for skipped checks, pre-concatenation-only validation, prefix-only whitelists, canonicalization after validation, or trusted branches that still process caller-controlled input. If the body is not inspected, keep the item as a candidate.".to_string(),
-    );
+    lines.push(crate::prompts::FALSE_POSITIVE_TAXONOMY.to_string());
 }
 
 fn append_sanitizer_bodies_section(

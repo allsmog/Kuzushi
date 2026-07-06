@@ -32,7 +32,7 @@ pub use policy_contract::AnalysisMode;
 pub use policy_contract::WhiteboxStaticPolicy;
 pub use policy_contract::WHITEBOX_STATIC_AGENT_TOOL_PROFILE;
 pub use policy_contract::WHITEBOX_STATIC_READ_ONLY_AGENT_TOOLS;
+pub use policy_contract::whitebox_static_triage_system_prompt_text;
 pub use policy_contract::WHITEBOX_STATIC_TRIAGE_PROMPT_BLOCK;
-pub use policy_contract::WHITEBOX_STATIC_TRIAGE_SYSTEM_PROMPT;
 pub use whitebox_static_proof_state_from_input::mark_whitebox_static_findings;
 pub use whitebox_static_proof_state_from_input::whitebox_static_proof_state_from_input;

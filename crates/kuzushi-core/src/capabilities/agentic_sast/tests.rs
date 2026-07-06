@@ -253,6 +253,19 @@ mod tests {
     }
 
     #[test]
+    fn agentic_sast_system_prompt_imports_the_spine() {
+        let system = agentic_sast_system_prompt(false);
+        // Attacker methodology, false-positive taxonomy, confidence calibration,
+        // and the empty-findings-success line are all restored.
+        assert!(system.contains("trace data flow from source to sink"));
+        assert!(system.contains("false-DISMISSAL traps"));
+        assert!(system.contains("Assign confidence by evidence"));
+        assert!(system.contains("Reporting zero findings is a correct, valued outcome"));
+        // The old inlined severity/JSON schema is gone from the prompt prose.
+        assert!(!system.contains("ERROR|WARNING|INFO"));
+    }
+
+    #[test]
     fn malicious_repo_snippet_is_wrapped_and_does_not_strip_methodology() {
         let input = AgenticSastInput::from_tool_input(&json!({})).unwrap();
 

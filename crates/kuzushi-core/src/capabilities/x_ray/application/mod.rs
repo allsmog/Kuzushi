@@ -6,7 +6,7 @@ pub(crate) use artifacts::{
     render_x_ray_read_summary, render_x_ray_run_summary, write_x_ray_artifacts,
 };
 pub(crate) use run_request::{
-    build_x_ray_prompt, x_ray_artifact_schema, XRayRunInput, X_RAY_SYSTEM_PROMPT,
+    build_x_ray_prompt, x_ray_artifact_schema, x_ray_system_prompt, XRayRunInput,
 };
 
 use crate::capabilities::x_ray::domain::*;
