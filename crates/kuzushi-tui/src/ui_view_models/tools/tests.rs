@@ -28,7 +28,9 @@ fn tools_model_lists_registry_tools() {
 #[test]
 fn tools_model_filters_by_query_tokens() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.router.tools_mut().open(Some("semgrep scan".to_string()));
+    app.router
+        .tools_mut()
+        .open(Some("semgrep scan".to_string()));
 
     let model = tools_model(&app);
 
@@ -45,7 +47,8 @@ fn tools_model_filters_by_query_tokens() {
 #[test]
 fn tools_model_preserves_empty_filtered_state() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.tools_route
+    app.router
+        .tools_mut()
         .open(Some("not-a-real-tool-token".to_string()));
 
     let model = tools_model(&app);

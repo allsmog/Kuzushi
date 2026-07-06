@@ -60,17 +60,21 @@ fn threat_run_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'s
 
 fn system_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'static>>> {
     Some(match &app.shell_view {
-        ShellView::Help => {
-            viewport_lines(help_lines(app, area), area.height, app.router.help().scroll())
-        }
+        ShellView::Help => viewport_lines(
+            help_lines(app, area),
+            area.height,
+            app.router.help().scroll(),
+        ),
         ShellView::Quickstart => viewport_lines(
             quickstart_lines(app, area),
             area.height,
             app.router.help().scroll(),
         ),
-        ShellView::Logs => {
-            viewport_lines(logs_lines(app, area), area.height, app.router.logs().scroll())
-        }
+        ShellView::Logs => viewport_lines(
+            logs_lines(app, area),
+            area.height,
+            app.router.logs().scroll(),
+        ),
         ShellView::Config => config_lines(app, area),
         ShellView::Health => viewport_lines(
             health_lines(app, area),
