@@ -15,6 +15,7 @@ pub mod patch_edits;
 pub mod prompt_spine;
 pub mod runtime;
 pub mod untrusted;
+pub mod validator_catalogs;
 pub mod verdict_chain;
 pub mod votes;
 
@@ -25,11 +26,14 @@ pub use fanout::{
 };
 pub use manifest::{EngagementPhase, RunbookManifest, RunbookStepKind, RunbookStepManifest};
 pub use map_artifacts::{FocusArea, MapRunbookOutput, OpenQuestion};
-pub use patch_edits::{PatchAuthorOutput, PatchDecision, PatchReviewDecision, PatchReviewOutput, StructuredPatchEdit};
+pub use patch_edits::{
+    PatchAuthorOutput, PatchDecision, PatchReviewDecision, PatchReviewOutput, StructuredPatchEdit,
+};
 pub use runtime::RunbookRuntime;
 pub use untrusted::{
     render_untrusted_derived_block, render_untrusted_repo_block, render_untrusted_repo_blocks,
 };
+pub use validator_catalogs::{validator_catalog, ValidatorCatalogKind};
 pub use verdict_chain::{SnippetShown, VerdictChainArtifact, VerifierVoteRecord};
 pub use votes::{
     tally_votes, ConfirmFinalVerdict, ConfirmVoteVerdict, NoiseTolerance, VerifierPromptVariant,
