@@ -18,7 +18,7 @@ pub(crate) fn run_x_ray(
         AgentQueryRequest::new(
             input.model.clone(),
             input.target.clone(),
-            X_RAY_SYSTEM_PROMPT.to_string(),
+            x_ray_system_prompt(),
             prompt,
         ),
         StructuredJsonContract::new("x-ray:run", "XRayArtifactContent", x_ray_artifact_schema()),

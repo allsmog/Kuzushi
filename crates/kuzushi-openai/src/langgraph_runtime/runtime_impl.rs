@@ -10,7 +10,7 @@ use super::bridge_process::{public_bridge_error, run_bridge};
 use super::next_step_bridge::next_step_blocking as run_next_step_blocking;
 use super::next_step_bridge::preflight_tool_loop_blocking as run_preflight_tool_loop_blocking;
 use super::runtime_config::LangGraphRuntime;
-use super::triage::{clamp_outcome, triage_prompt, TRIAGE_SYSTEM_PROMPT};
+use super::triage::{clamp_outcome, triage_prompt, triage_system_prompt};
 use std::thread;
 use std::time::Duration;
 
@@ -64,14 +64,9 @@ impl AgentRuntime for LangGraphRuntime {
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome> {
         let prompt = triage_prompt(&request.finding, request.prompt_template.as_deref())?;
         let response = self.query_blocking(
-            AgentQueryRequest::new(
-                request.model,
-                request.cwd,
-                TRIAGE_SYSTEM_PROMPT.to_string(),
-                prompt,
-            )
-            .with_structured_output(triage_structured_output())
-            .with_temperature(0.0),
+            AgentQueryRequest::new(request.model, request.cwd, triage_system_prompt(), prompt)
+                .with_structured_output(triage_structured_output())
+                .with_temperature(0.0),
         )?;
         triage_outcome_from_response(response)
     }

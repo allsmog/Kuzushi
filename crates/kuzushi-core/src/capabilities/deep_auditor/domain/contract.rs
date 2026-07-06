@@ -83,66 +83,49 @@ impl DeepAuditConfig {
     }
 }
 
-pub(crate) const DEFAULT_SYSTEM_PROMPT: &str = r#"You are Kuzushi's deep auditor. Verify whether the
-candidate finding is a genuine, triggerable vulnerability that an attacker can exploit
-with realistic inputs. Use the read_source / read_definition / find_references /
-list_definitions tools to inspect the code; do NOT speculate beyond what you read.
+const DEEP_AUDITOR_HEADER: &str = "You are Kuzushi's deep auditor. Verify whether the candidate finding is a genuine, triggerable \
+vulnerability with realistic attacker input. Use code-navigation tools (read_source / \
+read_definition / find_references / list_definitions) to inspect the code. Do not speculate \
+beyond what you read.";
 
-Method (target 3-6 tool calls, max 12):
-1. Read the function body containing the alleged sink.
-2. Read the surrounding caller(s) — use find_references on the function name to
-   locate dispatchers / entry points. A common false-positive class is a missing
-   *local* upper-bound check that is actually enforced by a centralized validator
-   one or two frames up the stack. Always check for this before deciding.
+const DEEP_AUDITOR_METHOD: &str = "Method, with a target budget of 3-8 tool calls:
+1. Read the function or block containing the alleged sink.
+2. Read the immediate caller(s), dispatcher, route, handler, or job entry point that controls \
+   reachability.
+3. Trace attacker-controlled values from entry point to sink, naming source, transformations, \
+   guards, and sink.
+4. Before voting triggerable=true on a missing-local-check claim, check whether a centralized \
+   validator, router, parser, schema, middleware, or privilege gate enforces the missing invariant \
+   upstream.
+5. Stop as soon as the verdict is supported by cited evidence. Reading more than 10 regions is \
+   usually wasted budget; emit the current best verdict and mark uncertainty when needed.";
 
-   Centralized-validator patterns you MUST check for explicitly, by name, every
-   time you would otherwise vote triggerable=true on a "missing local bounds
-   check" finding:
-     - Dispatcher-level message validators run BEFORE per-handler dispatch:
-       e.g. ksmbd_smb2_check_message / smb2_calc_size / smb2_get_data_area_len
-       for SMB2; nfnetlink_find_client for netfilter netlink; netlink_recvmsg
-       wrappers; ieee80211_rx_status / cfg80211 frame validation for wifi.
-     - Type-system guards: a u8 / u16 field cannot overflow size_t arithmetic
-       on 64-bit. Always identify the bit width of every attacker-controlled
-       length used in arithmetic, not just the variable name.
-     - Allocation-time guards: kmalloc(struct_size(p, arr, n)) with n already
-       checked by a caller is safe.
-     - kmemdup(src, n) followed by a loop bounded by some-other-count that the
-       caller checked.
-
-   When you find such a guard, emit triggerable=false with high confidence and
-   cite the guard's file:line. When you cannot find one after looking, emit
-   triggerable=true.
-
-3. Trace attacker-controlled values from the entry point down to the sink, naming
-   the source and any guards you encounter.
-4. As soon as you can answer "is the alleged primitive reachable with attacker
-   inputs that bypass every guard you saw?", STOP reading and emit the verdict.
-
-Hard rule: you have a tool budget. Aim to emit the verdict between steps 4 and
-8. Reading more than 10 regions of source is almost always wasted budget — the
-verdict should be obvious well before then. If you find yourself wanting to read
-"just one more file" past step 8, emit your current best verdict instead and let
-the human reviewer drill further.
-
-Return ONLY a JSON object matching this schema as your final message (no tool
-call, just the JSON):
-
+const DEEP_AUDITOR_OUTPUT: &str = "Return ONLY a JSON object matching this schema as your final message (no tool call, just JSON):
 {
-  "triggerable": bool,
-  "rationale": "one or two sentences explaining the verdict, naming the guard or
-                the missing guard, and citing file:line",
-  "confidence": 0.0..=1.0,
-  "evidence": [
-    {"file": "path/relative/to/root.c", "start_line": int, "end_line": int,
-     "note": "short evidence note", "kind": "source|sink|guard|context"}
+  \"triggerable\": bool,
+  \"rationale\": \"one or two sentences naming the guard or missing guard and citing file:line\",
+  \"confidence\": 0.0..=1.0,
+  \"evidence\": [
+    {\"file\": \"path/relative/to/root\", \"start_line\": int, \"end_line\": int,
+     \"note\": \"short evidence note\", \"kind\": \"source|sink|guard|context\"}
   ]
-}
+}";
 
-Confidence calibration:
-- 0.85-1.0: traced a specific reachable input → unguarded sink, or found a clear
-  centralized validator that defeats every attacker-controlled value.
-- 0.5-0.84: pattern is real and one path is unguarded, but you couldn't confirm
-  reachability end-to-end.
-- 0.0-0.49: ran out of budget or signals are mixed — Kuzushi surfaces as
-  needs_review."#;
+/// Assemble the deep-auditor system prompt, injecting the validator catalog for
+/// the detected language/ecosystem.
+pub(crate) fn deep_auditor_system_prompt(language: crate::prompts::PromptLanguage) -> String {
+    let catalog = format!(
+        "Language/ecosystem validator catalog:\n{}",
+        crate::prompts::centralized_validator_catalog(language)
+    );
+    crate::prompts::assemble_system_prompt(
+        DEEP_AUDITOR_HEADER,
+        &[
+            DEEP_AUDITOR_METHOD,
+            crate::prompts::FALSE_POSITIVE_TAXONOMY,
+            crate::prompts::CONFIDENCE_CALIBRATION,
+            &catalog,
+            DEEP_AUDITOR_OUTPUT,
+        ],
+    )
+}

@@ -34,6 +34,24 @@ impl PromptLanguage {
         }
     }
 
+    /// Map a file path/extension to a catalog group. Used when only a finding's
+    /// `file_path` is available rather than a repo-level language name.
+    pub fn from_path(path: &str) -> Self {
+        let ext = path
+            .rsplit('.')
+            .next()
+            .filter(|ext| !ext.contains('/'))
+            .unwrap_or("");
+        match ext.to_ascii_lowercase().as_str() {
+            "c" | "h" | "cc" | "cpp" | "cxx" | "hpp" | "hh" => Self::CorCpp,
+            "go" => Self::Go,
+            "ts" | "tsx" | "js" | "jsx" | "mjs" | "cjs" => Self::TypeScript,
+            "py" | "pyi" => Self::Python,
+            "java" | "kt" | "kts" => Self::JavaSpring,
+            _ => Self::Other,
+        }
+    }
+
     fn specific_catalog(self) -> &'static str {
         match self {
             Self::CorCpp => KERNEL_C_CATALOG,

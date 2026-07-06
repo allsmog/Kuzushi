@@ -218,7 +218,7 @@ pub(crate) fn synthesize_patch(
         AgentQueryRequest::new(
             model.to_string(),
             repo_root.to_path_buf(),
-            PATCH_SYSTEM_PROMPT.to_string(),
+            patch_system_prompt(),
             prompt,
         ),
         StructuredJsonContract::new("patch:finding", "PatchSynthesis", patch_synthesis_schema()),
