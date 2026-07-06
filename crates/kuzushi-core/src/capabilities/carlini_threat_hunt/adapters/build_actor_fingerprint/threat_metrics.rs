@@ -1,13 +1,7 @@
 use super::*;
 
 pub(in crate::capabilities::carlini_threat_hunt) fn carlini_severity(value: &str) -> Severity {
-    match value.trim().to_ascii_uppercase().as_str() {
-        "CRITICAL" => Severity::Critical,
-        "ERROR" | "HIGH" => Severity::High,
-        "WARNING" | "MEDIUM" => Severity::Medium,
-        "INFO" | "LOW" => Severity::Low,
-        _ => Severity::Unknown,
-    }
+    Severity::from_scanner_label(value)
 }
 
 pub(in crate::capabilities::carlini_threat_hunt) fn critical_count(threats: &[Value]) -> usize {

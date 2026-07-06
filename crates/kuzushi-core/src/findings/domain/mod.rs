@@ -2,6 +2,7 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+mod confidence_band;
 mod extract_cwe;
 mod finding_identity;
 mod finding_record;
@@ -13,6 +14,7 @@ mod review_decision;
 mod static_proof_state;
 mod triage_outcome;
 
+pub use confidence_band::ConfidenceBand;
 pub use extract_cwe::extract_cwe;
 pub use finding_identity::{
     compute_finding_identity_id, finding_identity_alias, FindingIdentityMatchTier,

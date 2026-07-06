@@ -1,12 +1,13 @@
 use crate::runtime::{AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentStructuredOutput};
 use anyhow::{Context, Result};
 use serde_json::Value;
+mod finding_output;
 mod parse_json_value_from_agent_text;
 mod structured_json_contract;
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
+pub(crate) use finding_output::FindingsOutput;
 pub(crate) use parse_json_value_from_agent_text::parse_json_value_from_agent_text;
 pub(crate) use parse_json_value_from_agent_text::{
     balanced_json_slices, parse_json_value_from_agent_text_with_strategy,

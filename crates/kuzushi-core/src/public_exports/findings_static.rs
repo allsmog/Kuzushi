@@ -5,11 +5,11 @@ pub use crate::findings::{
     parse_finding_alias, project_finding, proof_ladder_state, proof_state_label,
     resolve_finding_alias, runtime_validation_label, runtime_validation_summary, severity_badge,
     severity_icon, sorted_finding_alias_indices, sorted_finding_aliases, stable_finding_alias,
-    static_proof_summary, Finding, FindingDetailReport, FindingEvidence, FindingListFilter,
-    FindingListReport, FindingNextAction, FindingProjection, FindingStore, FindingVerdictFilter,
-    PatchAttempt, PatchResult, PatchStatus, PersistedProofVerdict, PersistedSandboxBackend,
-    PersistedVerification, ProofLadderState, RuntimeValidationSummary, Severity, StaticProofState,
-    StaticProofSummary, TriageOutcome, TriageVerdict, VulnSource,
+    static_proof_summary, ConfidenceBand, Finding, FindingDetailReport, FindingEvidence,
+    FindingListFilter, FindingListReport, FindingNextAction, FindingProjection, FindingStore,
+    FindingVerdictFilter, PatchAttempt, PatchResult, PatchStatus, PersistedProofVerdict,
+    PersistedSandboxBackend, PersistedVerification, ProofLadderState, RuntimeValidationSummary,
+    Severity, StaticProofState, StaticProofSummary, TriageOutcome, TriageVerdict, VulnSource,
 };
 pub use crate::pr_comment::{
     build_pr_comment, PrCommentChain, PrCommentChainStep, PrCommentInput, PrCommentPhaseCost,

@@ -44,6 +44,7 @@ roxmltree = "0.21"
 # per-architecture variants without shelling out to nm/objdump.
 goblin = { version = "0.10", default-features = false, features = ["std", "elf32", "elf64", "endian_fd"] }
 rusqlite.workspace = true
+schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 serde_yaml = "0.9"
