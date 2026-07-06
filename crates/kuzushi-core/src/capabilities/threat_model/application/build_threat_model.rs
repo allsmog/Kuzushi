@@ -266,7 +266,7 @@ fn query_threat_model_document(
         AgentQueryRequest::new(
             input.model.clone(),
             input.target.clone(),
-            THREAT_MODEL_SYSTEM_PROMPT.to_string(),
+            threat_model_system_prompt(),
             prompt,
         ),
         StructuredJsonContract::new(

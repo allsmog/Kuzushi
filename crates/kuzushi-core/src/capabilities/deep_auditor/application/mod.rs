@@ -1,5 +1,5 @@
 use super::domain::{
-    DeepAuditConfig, DeepAuditOutcome, EvidenceCitation, VulnAnalysis, DEFAULT_SYSTEM_PROMPT,
+    deep_auditor_system_prompt, DeepAuditConfig, DeepAuditOutcome, EvidenceCitation, VulnAnalysis,
 };
 use crate::agent_router::{AgentRole, RoutedRuntime};
 use crate::code_nav::{code_nav_tool_specs, code_nav_toolbox, CodeNavConfig};

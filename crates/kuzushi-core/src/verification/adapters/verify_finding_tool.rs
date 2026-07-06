@@ -1,6 +1,6 @@
 use super::{
     build_verify_prompt, normalize_verification_result, verification_result_schema,
-    VerifyFindingInput, VERIFY_SYSTEM_PROMPT,
+    verify_system_prompt, VerifyFindingInput,
 };
 use crate::findings::FindingStore;
 use crate::runtime::{AgentQueryRequest, AgentRuntime};
@@ -94,7 +94,7 @@ fn verify_agent_query_request(
     let mut request = AgentQueryRequest::new(
         model,
         workspace_root.to_path_buf(),
-        VERIFY_SYSTEM_PROMPT.to_string(),
+        verify_system_prompt(),
         prompt.to_string(),
     );
     if input.mcps {

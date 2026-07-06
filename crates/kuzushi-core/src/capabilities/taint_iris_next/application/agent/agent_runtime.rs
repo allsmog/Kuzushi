@@ -102,7 +102,7 @@ pub(in crate::capabilities::taint_iris_next) fn run_taint_iris_next_agent_prompt
     let mut request = AgentQueryRequest::new(
         model.to_string(),
         plan.repo_root.clone(),
-        TAINT_IRIS_NEXT_SYSTEM_PROMPT.to_string(),
+        taint_iris_next_system_prompt(),
         prompt,
     )
     .with_tool_policy(agent_tool_policy);

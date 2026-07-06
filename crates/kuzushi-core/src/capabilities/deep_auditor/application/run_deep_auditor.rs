@@ -102,10 +102,11 @@ fn build_deep_audit_request(
     AgentToolLoopRequest {
         model,
         cwd: cfg.workspace_root.clone(),
-        system_prompt: cfg
-            .system_prompt
-            .clone()
-            .unwrap_or_else(|| DEFAULT_SYSTEM_PROMPT.to_string()),
+        system_prompt: cfg.system_prompt.clone().unwrap_or_else(|| {
+            deep_auditor_system_prompt(crate::prompts::PromptLanguage::from_path(
+                &finding.file_path,
+            ))
+        }),
         prompt: deep_audit_user_prompt(cfg, finding),
         tools: code_nav_tool_specs(),
         max_steps: cfg.max_steps.max(1),

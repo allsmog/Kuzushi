@@ -66,8 +66,8 @@ pub fn agentic_hunter_thinking_level(input: &Value) -> String {
     "high".to_string()
 }
 
-pub fn whitebox_static_triage_system_prompt() -> &'static str {
-    WHITEBOX_STATIC_TRIAGE_SYSTEM_PROMPT
+pub fn whitebox_static_triage_system_prompt() -> String {
+    whitebox_static_triage_system_prompt_text()
 }
 
 pub fn whitebox_static_triage_prompt_block() -> &'static str {
