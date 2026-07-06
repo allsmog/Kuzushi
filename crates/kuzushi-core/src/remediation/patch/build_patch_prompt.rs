@@ -11,7 +11,9 @@ pub(crate) fn build_patch_prompt(
     let finding_json =
         serde_json::to_string_pretty(finding).context("Could not serialize finding")?;
     let triage_json = serde_json::to_string_pretty(triage).context("Could not serialize triage")?;
-    let source_context = read_source_context(repo_root, &finding.file_path)?;
+    let source_body = read_source_context(repo_root, &finding.file_path)?;
+    let source_context =
+        crate::prompts::render_untrusted_many(&[(finding.file_path.clone(), source_body)]);
     let history_block = if history.is_empty() {
         "No previous patch attempts.".to_string()
     } else {
@@ -64,7 +66,7 @@ pub(crate) fn read_source_context(repo_root: &Path, file_path: &str) -> Result<S
     } else {
         raw
     };
-    Ok(format!("File: {file_path}\n```text\n{content}\n```"))
+    Ok(content)
 }
 
 pub(crate) fn parse_patch_synthesis(raw: Value) -> Result<PatchSynthesis> {
