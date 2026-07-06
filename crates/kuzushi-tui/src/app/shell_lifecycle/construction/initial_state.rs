@@ -57,8 +57,6 @@ macro_rules! shell_app_initial_state {
             advisory: AdvisoryState::default(),
             live_activity: None,
             trusted_workflow_auto_accept: $trusted_workflow_auto_accept,
-            pending_chain: None,
-            pending_prereq_prompt: None,
             palette_query: String::new(),
             palette_cursor: 0,
             model_picker_route: ModelPickerRouteState::default(),

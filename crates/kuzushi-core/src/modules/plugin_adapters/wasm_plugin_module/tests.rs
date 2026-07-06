@@ -17,7 +17,9 @@ fn registry_runs_wasm_plugin_and_commits_v3_observation() {
         Some("completed")
     );
     assert_eq!(
-        result.pointer("/data/committedFindings").and_then(Value::as_u64),
+        result
+            .pointer("/data/committedFindings")
+            .and_then(Value::as_u64),
         Some(1)
     );
     assert_finding_observed(fixture.target.path());

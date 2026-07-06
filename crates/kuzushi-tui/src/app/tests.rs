@@ -84,11 +84,11 @@ fn drain_tool(app: &mut ShellApp) {
 #[allow(dead_code)]
 fn drain_chain_with_auto_reuse(app: &mut ShellApp) {
     loop {
-        if app.pending_prereq_prompt.is_some() {
+        if app.engagement.has_pending_prereq_prompt() {
             app.resolve_prereq_prompt(true);
             continue;
         }
-        if app.tool_running.is_none() && app.pending_chain.is_none() {
+        if app.tool_running.is_none() && !app.engagement.has_pending_chain() {
             return;
         }
         app.drain_next_tool_event_for_test(Duration::from_secs(15))
@@ -111,7 +111,7 @@ fn missing_model_backed_prereqs_block_without_auto_accept_or_model_fallback() {
         input: Some(r#"{"maxActors":1,"runsPerActor":1}"#.to_string()),
     });
 
-    let plan = app.pending_prereq_prompt.as_ref().unwrap();
+    let plan = app.engagement.pending_prereq_prompt().unwrap();
     assert_eq!(app.tool_running.as_deref(), None);
     assert_eq!(app.config.model, None);
     assert_eq!(plan.final_tool, "offense-review:threat-hunt");
@@ -159,12 +159,15 @@ fn prereq_plan_cancel_aborts_chain_before_dispatch() {
     );
     app.handle_key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::empty()));
 
-    assert!(app.pending_chain.is_some(), "c must not mean cancel here");
+    assert!(
+        app.engagement.has_pending_chain(),
+        "c must not mean cancel here"
+    );
 
     app.handle_key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty()));
 
-    assert!(app.pending_chain.is_none());
-    assert!(app.pending_prereq_prompt.is_none());
+    assert!(!app.engagement.has_pending_chain());
+    assert!(!app.engagement.has_pending_prereq_prompt());
     assert_eq!(app.tool_running.as_deref(), None);
     assert!(app.log.iter().any(|line| {
         line.prefix == "system" && line.body.contains("prerequisite plan cancelled")
@@ -189,7 +192,7 @@ fn cached_prereq_reuse_skips_prereq_and_dispatches_final_tool() {
     app.handle_key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::empty()));
 
     assert_eq!(app.tool_running.as_deref(), Some("findings:list"));
-    assert!(app.pending_prereq_prompt.is_none());
+    assert!(!app.engagement.has_pending_prereq_prompt());
     assert!(app.log.iter().any(|line| {
         line.prefix == "system" && line.body.contains("reusing cached context snapshot")
     }));
@@ -214,7 +217,7 @@ fn cached_prereq_regenerate_runs_prereq_after_approval() {
     app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
 
     assert_eq!(app.tool_running.as_deref(), Some("context:build"));
-    assert!(app.pending_prereq_prompt.is_none());
+    assert!(!app.engagement.has_pending_prereq_prompt());
     assert!(app.log.iter().any(|line| {
         line.prefix == "system" && line.body.contains("running after prerequisite approval")
     }));
@@ -240,7 +243,7 @@ fn trusted_workflow_auto_accept_explicitly_starts_missing_prereq() {
     );
 
     assert_eq!(app.tool_running.as_deref(), Some("context:build"));
-    assert!(app.pending_prereq_prompt.is_none());
+    assert!(!app.engagement.has_pending_prereq_prompt());
     assert!(app.log.iter().any(|line| {
         line.prefix == "system" && line.body.contains("trusted workflow auto-accepted")
     }));
@@ -379,7 +382,7 @@ fn threat_dependent_run_waits_for_pending_threat_review_decision() {
     });
 
     assert_eq!(app.tool_running.as_deref(), None);
-    assert!(app.pending_chain.is_none());
+    assert!(!app.engagement.has_pending_chain());
     assert!(matches!(
         app.shell_view,
         ShellView::Threat(ThreatView::Summary)
@@ -411,7 +414,7 @@ fn offense_review_threat_hunt_waits_for_pending_threat_review_decision() {
     });
 
     assert_eq!(app.tool_running.as_deref(), None);
-    assert!(app.pending_chain.is_none());
+    assert!(!app.engagement.has_pending_chain());
     assert!(matches!(
         app.shell_view,
         ShellView::Threat(ThreatView::Summary)

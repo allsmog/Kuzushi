@@ -26,8 +26,8 @@ pub(crate) struct PlainPrereqPlanModel {
 }
 
 pub(crate) fn prereq_prompt_model(app: &ShellApp) -> Option<PrereqPromptModel> {
-    app.pending_prereq_prompt
-        .as_ref()
+    app.engagement
+        .pending_prereq_prompt()
         .map(PrereqPromptModel::from_prompt)
 }
 

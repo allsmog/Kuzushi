@@ -227,11 +227,7 @@ fn persist_deep_audit_outcome(
         return Ok(());
     };
     run.store.save_triage(id, &outcome.triage)?;
-    crate::capabilities::deep_auditor::save_evidence(
-        &run.workspace.findings_db_path(),
-        id,
-        &outcome.evidence,
-    )
+    crate::capabilities::deep_auditor::record_evidence(&run.store, id, &outcome.evidence)
 }
 
 fn deep_audit_response(

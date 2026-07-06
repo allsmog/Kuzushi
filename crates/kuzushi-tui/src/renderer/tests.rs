@@ -3070,7 +3070,7 @@ fn prereq_plan_card_shows_cached_missing_writes_risk_cost_and_actions() {
         serde_json::json!({}),
         None,
     );
-    app.pending_prereq_prompt = Some(chain.plan());
+    app.engagement.set_pending_prereq_prompt(chain.plan());
     app.shell_view = ShellView::ModuleRun;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -3105,7 +3105,7 @@ fn prereq_plan_card_explains_invalid_artifacts_before_reuse() {
         serde_json::json!({}),
         None,
     );
-    app.pending_prereq_prompt = Some(chain.plan());
+    app.engagement.set_pending_prereq_prompt(chain.plan());
     app.shell_view = ShellView::ModuleRun;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -3130,7 +3130,7 @@ fn plain_prereq_plan_has_no_ansi_or_box_drawing() {
         serde_json::json!({}),
         None,
     );
-    app.pending_prereq_prompt = Some(chain.plan());
+    app.engagement.set_pending_prereq_prompt(chain.plan());
 
     let rendered = render_plain_app(&app, 80);
 

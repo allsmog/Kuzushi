@@ -14,4 +14,4 @@ pub use domain::DEFAULT_DEPOSIT_USD;
 pub use domain::DEFAULT_MAX_STEPS;
 pub use domain::DEFAULT_PASSES;
 pub use domain::DEFAULT_TEMPERATURE;
-pub use persistence::save_evidence;
+pub use persistence::record_evidence;

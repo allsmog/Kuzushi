@@ -81,8 +81,6 @@ pub struct ShellApp {
     pub advisory: AdvisoryState,
     pub live_activity: Option<LiveActivity>,
     pub trusted_workflow_auto_accept: bool,
-    pub pending_chain: Option<PrereqChain>,
-    pub pending_prereq_prompt: Option<PendingPrereqPrompt>,
     /// Command-palette (Ctrl+G) fuzzy query and cursor. Persisted on the app
     /// so typing/arrowing survives re-renders.
     pub palette_query: String,

@@ -244,20 +244,27 @@ mod tests {
     }
 
     #[test]
-    fn insert_finding_rolls_back_header_and_evidence_when_a_later_write_fails() {
+    fn insert_finding_does_not_project_observation_when_projection_write_fails() {
         let store = FindingStore::open_in_memory().unwrap();
         let run = "run-rollback";
         store
             .record_run_started(run, Path::new("/tmp"), "running")
             .unwrap();
 
-        // Force a dependent write (static_proof_history) to fail after the
-        // header row has been written inside the same transaction. If
-        // participation were not atomic, the header would leak; the explicit
-        // transaction must roll all of it back and must not project evidence.
+        // Force the primary projection statement to fail. The v3 observation
+        // event is emitted only after the projection transaction commits, so a
+        // failed projection write must not leak an observation row.
         store
             .conn
-            .execute_batch("drop table static_proof_history;")
+            .execute_batch(
+                r#"
+                create trigger fail_finding_projection_insert
+                after insert on finding_projection_rows
+                begin
+                  select raise(fail, 'forced projection failure');
+                end;
+                "#,
+            )
             .unwrap();
 
         let mut finding = Finding::new_tool(
@@ -282,12 +289,9 @@ mod tests {
         finding.static_proof_state = Some(StaticProofState::StaticallyConfirmed);
 
         let result = store.insert_finding(run, &finding);
-        assert!(
-            result.is_err(),
-            "insert must fail when a dependent write fails"
-        );
+        assert!(result.is_err(), "insert must fail when projection fails");
 
-        // Whole unit rolled back: no orphan header, no projected evidence JSON.
+        // No orphan projection row and no projected v3 observation.
         let header_count: i64 = store
             .conn
             .query_row("select count(*) from finding_projection_rows", [], |row| {
@@ -296,7 +300,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             header_count, 0,
-            "header row must not survive a failed insert"
+            "projection row must not survive a failed insert"
         );
         let observation_count: i64 = store
             .conn
@@ -1026,7 +1030,7 @@ mod tests {
     }
 
     #[test]
-    fn static_proof_state_events_append_only_when_state_changes() {
+    fn static_proof_history_is_derived_from_observation_state_changes() {
         let store = FindingStore::open_in_memory().unwrap();
         let run = "run-static-proof-events";
         store

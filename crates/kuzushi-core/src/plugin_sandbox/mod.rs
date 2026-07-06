@@ -100,9 +100,21 @@ pub fn validate_candidate(
     candidate: UntrustedFindingCandidate,
     grant: &GrantedSnapshot,
 ) -> Result<ValidatedFindingCandidate> {
+    validate_candidate_with_field_cap(candidate, grant, SandboxPolicy::default().max_field_bytes)
+}
+
+fn validate_candidate_with_field_cap(
+    candidate: UntrustedFindingCandidate,
+    grant: &GrantedSnapshot,
+    max_field_bytes: u64,
+) -> Result<ValidatedFindingCandidate> {
     require_non_empty("rule_id", &candidate.rule_id)?;
     require_non_empty("title", &candidate.title)?;
     require_non_empty("message", &candidate.message)?;
+    require_field_cap("rule_id", &candidate.rule_id, max_field_bytes)?;
+    require_field_cap("title", &candidate.title, max_field_bytes)?;
+    require_field_cap("severity", &candidate.severity, max_field_bytes)?;
+    require_field_cap("message", &candidate.message, max_field_bytes)?;
     require_severity(&candidate.severity)?;
     let Some(blob_size) = grant.blob_size(&candidate.blob_hash) else {
         bail!("plugin finding references a blob outside its granted snapshot");
@@ -139,6 +151,16 @@ fn require_non_empty(field: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+fn require_field_cap(field: &str, value: &str, max_field_bytes: u64) -> Result<()> {
+    if value.len() as u64 > max_field_bytes {
+        bail!(
+            "plugin finding {field} is {} bytes, exceeding policy cap {max_field_bytes}",
+            value.len()
+        );
+    }
+    Ok(())
+}
+
 fn require_severity(value: &str) -> Result<()> {
     match value {
         "critical" | "high" | "medium" | "low" | "info" => Ok(()),
@@ -154,11 +176,7 @@ async fn run_plugin_invocation_with_backend(
     let output = sandbox_exec(backend, sandbox_options(&invocation)?)
         .await
         .context("plugin sandbox execution failed")?;
-    plugin_result_from_output(
-        output,
-        &invocation.grant,
-        invocation.policy.max_findings_returned,
-    )
+    plugin_result_from_output(output, &invocation.grant, &invocation.policy)
 }
 
 fn sandbox_options(invocation: &PluginSandboxInvocation) -> Result<SandboxExecOptions> {
@@ -182,7 +200,7 @@ fn sandbox_options(invocation: &PluginSandboxInvocation) -> Result<SandboxExecOp
 fn plugin_result_from_output(
     output: SandboxExecResult,
     grant: &GrantedSnapshot,
-    max_findings: u32,
+    policy: &SandboxPolicy,
 ) -> Result<PluginSandboxResult> {
     if output.outcome != ExitOutcome::Exited || output.exit_code != Some(0) {
         bail!(
@@ -190,7 +208,7 @@ fn plugin_result_from_output(
             output.stderr.trim()
         );
     }
-    let findings = validate_plugin_stdout(&output.stdout, grant, max_findings)?;
+    let findings = validate_plugin_stdout(&output.stdout, grant, policy)?;
     Ok(PluginSandboxResult {
         backend: PluginSandboxBackend::Process(output.backend),
         duration_ms: output.duration_ms,
@@ -201,21 +219,30 @@ fn plugin_result_from_output(
 pub(super) fn validate_plugin_stdout(
     stdout: &str,
     grant: &GrantedSnapshot,
-    max_findings: u32,
+    policy: &SandboxPolicy,
 ) -> Result<Vec<ValidatedFindingCandidate>> {
+    if stdout.len() as u64 > policy.max_output_bytes {
+        bail!(
+            "plugin returned {} output bytes, exceeding policy cap {}",
+            stdout.len(),
+            policy.max_output_bytes
+        );
+    }
     let stdout: PluginStdout =
         serde_json::from_str(stdout).context("plugin returned invalid JSON")?;
-    if stdout.findings.len() > max_findings as usize {
+    if stdout.findings.len() > policy.max_findings_returned as usize {
         bail!(
             "plugin returned {} findings, exceeding policy cap {}",
             stdout.findings.len(),
-            max_findings
+            policy.max_findings_returned
         );
     }
     stdout
         .findings
         .into_iter()
-        .map(|candidate| validate_candidate(candidate, grant))
+        .map(|candidate| {
+            validate_candidate_with_field_cap(candidate, grant, policy.max_field_bytes)
+        })
         .collect()
 }
 

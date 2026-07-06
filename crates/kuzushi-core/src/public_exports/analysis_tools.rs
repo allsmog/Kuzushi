@@ -6,7 +6,7 @@ pub use crate::capabilities::classifier_gate::{
     ClassifierConfig, LikelyVulnClassifier, QuantileEstimator, Score,
 };
 pub use crate::capabilities::deep_auditor::{
-    run_deep_auditor, save_evidence, DeepAuditConfig, DeepAuditOutcome, EvidenceCitation,
+    record_evidence, run_deep_auditor, DeepAuditConfig, DeepAuditOutcome, EvidenceCitation,
     VulnAnalysis,
 };
 pub use crate::capabilities::full_mode_multi::{
