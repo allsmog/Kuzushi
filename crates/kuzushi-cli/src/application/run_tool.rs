@@ -3,11 +3,13 @@ pub(crate) use super::run_tool_prepare::start_cli_tool_run_with_loaded_modules;
 use super::run_tool_prepare::{prepare_cli_tool_run, PreparedCliToolRun};
 use crate::tool_run_artifacts::{fail_cli_tool_run, finish_cli_tool_run};
 use anyhow::Result;
-use kuzushi_core::modules::ToolExecutionContext;
 use kuzushi_core::run_artifacts::{
     load_run_artifacts, load_run_summary, output_with_run_fallback_context,
 };
-use kuzushi_core::{AgentRuntime, ToolOptionStore, TraceHandle, WorkspaceTarget};
+use kuzushi_core::{
+    failed_tool_output, tool_wants_runtime, AgentRuntime, ToolExecutionContext, ToolOptionStore,
+    TraceHandle, WorkspaceTarget,
+};
 use kuzushi_openai::LangGraphRuntime;
 use std::path::{Path, PathBuf};
 
@@ -17,11 +19,10 @@ pub(crate) fn run_tool_command(
     options: Vec<String>,
     target: Option<PathBuf>,
     load: Vec<String>,
-    allow_untrusted_module: bool,
 ) -> Result<()> {
     let input = resolve_run_input(input)?;
     let tool_label = tool.clone();
-    match prepare_cli_tool_run(tool, input, options, target, load, allow_untrusted_module) {
+    match prepare_cli_tool_run(tool, input, options, target, load) {
         Ok(run) => {
             let output = execute_cli_tool_run(&run)?;
             println!("{}", serde_json::to_string_pretty(&output)?);
@@ -56,14 +57,7 @@ fn resolve_run_input(input: String) -> Result<String> {
 }
 
 fn prepare_failure_output(tool: &str, error: &str) -> serde_json::Value {
-    serde_json::json!({
-        "ok": false,
-        "status": "failed",
-        "summary": format!("{tool} failed"),
-        "artifacts": [],
-        "warnings": [],
-        "errors": [error],
-    })
+    failed_tool_output(tool, error, serde_json::json!([]))
 }
 
 fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
@@ -83,14 +77,17 @@ fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
         findings_store: run.store.as_ref(),
         trace: trace.as_ref(),
     };
-    let result =
-        run.registry
-            .execute_tool_with_runtime(&run.tool, run.input.clone(), &ctx, runtime_ref);
+    let result = run.registry.dispatch_prepared_tool_with_runtime(
+        &run.tool,
+        run.input.clone(),
+        &ctx,
+        runtime_ref,
+    );
     handle_cli_tool_result(run, result)
 }
 
 fn cli_tool_runtime(run: &PreparedCliToolRun) -> Result<Option<LangGraphRuntime>> {
-    if run.registry.tool_needs_runtime(&run.tool, &run.input) {
+    if tool_wants_runtime(&run.tool, &run.input, &run.config) {
         return Ok(Some(LangGraphRuntime::from_config(
             &run.config,
             std::env::current_dir()?,
@@ -138,14 +135,7 @@ fn cli_failed_output_with_fallback_context(
 }
 
 fn cli_failed_tool_output(run: &PreparedCliToolRun, error: &str) -> serde_json::Value {
-    serde_json::json!({
-        "ok": false,
-        "status": "failed",
-        "summary": format!("{} failed", run.tool),
-        "artifacts": cli_run_artifacts(run),
-        "warnings": [],
-        "errors": [error],
-    })
+    failed_tool_output(&run.tool, error, cli_run_artifacts(run))
 }
 
 fn cli_run_artifacts(run: &PreparedCliToolRun) -> serde_json::Value {

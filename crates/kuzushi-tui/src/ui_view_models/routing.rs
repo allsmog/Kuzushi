@@ -151,7 +151,7 @@ fn has_agent_activity(app: &ShellApp) -> bool {
 }
 
 fn has_plan_activity(app: &ShellApp) -> bool {
-    app.planner_running || app.pending_plan.is_some()
+    app.planner_running || app.engagement.has_pending_plan()
 }
 
 #[cfg(test)]

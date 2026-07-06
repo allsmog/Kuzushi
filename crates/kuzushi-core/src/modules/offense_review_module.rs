@@ -18,7 +18,7 @@ pub(crate) fn offense_review_module() -> BuiltinModule {
 fn threat_hunt_tool() -> ToolDescriptor {
     tool_with_options(
         "offense-review:threat-hunt",
-        "Run threat-model-scoped offensive review agents.",
+        "Run bounded offensive review agents over selected actors and threats from the active threat model.",
         carlini_threat_hunt_options(),
     )
 }

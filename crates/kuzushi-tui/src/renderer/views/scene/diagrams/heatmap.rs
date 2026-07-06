@@ -6,11 +6,10 @@ use super::*;
 use crate::theme;
 use crate::ui_view_models::{FindingsHeatmap, ModuleRisk};
 
-const NAME_W: usize = 14;
 const CELL_W: usize = 7;
 const COLUMNS: [Sev; 5] = [Sev::Critical, Sev::High, Sev::Medium, Sev::Low, Sev::Info];
 
-pub(crate) fn heatmap_lines(_width: usize, model: &FindingsHeatmap) -> Vec<Line<'static>> {
+pub(crate) fn heatmap_lines(width: usize, model: &FindingsHeatmap) -> Vec<Line<'static>> {
     if let Some(hint) = &model.empty_hint {
         return scene_empty_state_lines(
             "no heatmap data",
@@ -18,8 +17,9 @@ pub(crate) fn heatmap_lines(_width: usize, model: &FindingsHeatmap) -> Vec<Line<
             &[("scan", "populate findings by module and severity")],
         );
     }
-    let mut lines = vec![header_row(), blank_grid_row()];
-    lines.extend(model.rows.iter().map(|row| data_row(row, model)));
+    let name_w = heatmap_name_width(width);
+    let mut lines = vec![header_row(name_w), blank_grid_row(name_w)];
+    lines.extend(model.rows.iter().map(|row| data_row(row, model, name_w)));
     lines.push(blank());
     lines.push(line(vec![
         span("  legend  ", theme::label()),
@@ -31,9 +31,15 @@ pub(crate) fn heatmap_lines(_width: usize, model: &FindingsHeatmap) -> Vec<Line<
     lines
 }
 
-fn header_row() -> Line<'static> {
+fn heatmap_name_width(width: usize) -> usize {
+    width
+        .saturating_sub(2 + COLUMNS.len() * CELL_W)
+        .clamp(14, 40)
+}
+
+fn header_row(name_w: usize) -> Line<'static> {
     let mut spans = vec![span(
-        format!("  {}", fixed("module", NAME_W)),
+        format!("  {}", fixed("module", name_w)),
         theme::label(),
     )];
     for sev in COLUMNS {
@@ -42,23 +48,23 @@ fn header_row() -> Line<'static> {
     line(spans)
 }
 
-fn blank_grid_row() -> Line<'static> {
-    let total = NAME_W + CELL_W * COLUMNS.len();
+fn blank_grid_row(name_w: usize) -> Line<'static> {
+    let total = name_w + CELL_W * COLUMNS.len();
     line(vec![span(
         format!("  {}", "─".repeat(total)),
         theme::subtle(),
     )])
 }
 
-fn data_row(row: &ModuleRisk, model: &FindingsHeatmap) -> Line<'static> {
+fn data_row(row: &ModuleRisk, model: &FindingsHeatmap, name_w: usize) -> Line<'static> {
     let selected = model
         .selected_module
         .as_ref()
         .map_or(false, |module| module == &row.module);
-    let marker = if selected { "▌ " } else { "  " };
+    let marker = "  ";
     let mut spans = vec![
         span(marker, selected_row_style(selected)),
-        span(fixed(&row.module, NAME_W), selected_row_style(selected)),
+        span(fixed(&row.module, name_w), selected_row_style(selected)),
     ];
     for (count, sev) in row.counts.iter().zip(COLUMNS) {
         spans.push(cell(*count, sev));
@@ -68,7 +74,7 @@ fn data_row(row: &ModuleRisk, model: &FindingsHeatmap) -> Line<'static> {
 
 fn selected_row_style(selected: bool) -> ratatui::style::Style {
     if selected {
-        theme::accent()
+        theme::selection()
     } else {
         theme::primary()
     }

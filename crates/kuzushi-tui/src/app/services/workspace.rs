@@ -2,7 +2,8 @@ use super::*;
 use anyhow::Result;
 use kuzushi_core::workspace::write_program_scope_scaffold;
 use kuzushi_core::{
-    export_workspace_findings, workspace_status_for_target, WorkspaceExportFormat,
+    export_workspace_findings_with_options, workspace_status_for_target,
+    WorkspaceExportCompleteness, WorkspaceExportFormat, WorkspaceExportOptions,
     WorkspaceFindingsExport, WorkspaceStatus,
 };
 
@@ -28,11 +29,20 @@ pub(crate) fn export_findings_for_target(
     target: Option<&PathBuf>,
     output: &PathBuf,
     format: Option<&str>,
+    completeness: Option<&str>,
+    allow_empty: bool,
 ) -> Result<WorkspaceFindingsExport> {
     let workspace = explicit_workspace_for_target(target)?;
     let output = workspace_output_path(&workspace, output);
     let format = format.map(WorkspaceExportFormat::from_input).transpose()?;
-    export_workspace_findings(&workspace, &output, format)
+    let completeness = completeness
+        .map(WorkspaceExportCompleteness::from_input)
+        .transpose()?
+        .unwrap_or_default();
+    let options = WorkspaceExportOptions::new(format)
+        .with_completeness(completeness)
+        .with_allow_empty(allow_empty);
+    export_workspace_findings_with_options(&workspace, &output, options)
 }
 
 pub(crate) fn init_scope_for_target(target: Option<&PathBuf>) -> Result<PathBuf> {

@@ -97,7 +97,7 @@ pub(crate) fn infer_module_id(source_path: &str, absolute: &Path) -> Result<Stri
     if let Some(module_id) = infer_static_artifact_module_id(source_path) {
         return Ok(module_id);
     }
-    if source_path.ends_with("summary.json") {
+    if source_path.ends_with("run.json") {
         return Ok(infer_summary_artifact_module_id(absolute));
     }
     Ok("artifact".to_string())
@@ -163,7 +163,10 @@ mod tests {
             persistent_workspace_artifact_paths(root),
             vec![
                 relative_workspace_path(root, &crate::context::context_snapshot_path(root)),
-                relative_workspace_path(root, &crate::capabilities::persistent_threat_model_path(root)),
+                relative_workspace_path(
+                    root,
+                    &crate::capabilities::persistent_threat_model_path(root)
+                ),
             ]
         );
     }
@@ -182,19 +185,16 @@ mod tests {
     #[test]
     fn run_artifact_source_prefix_uses_runs_root() {
         let root = Path::new("/repo");
-        let source_path = relative_workspace_path(root, &crate::run_artifacts::run_dir(root, "run-1").join("report.md"));
+        let source_path = relative_workspace_path(
+            root,
+            &crate::run_artifacts::run_dir(root, "run-1").join("report.md"),
+        );
 
         assert_eq!(
             run_artifact_source_prefix(root),
-            format!(
-                "{}/",
-                relative_workspace_path(root, &runs_root(root))
-            )
+            format!("{}/", relative_workspace_path(root, &runs_root(root)))
         );
         assert!(is_run_artifact_source_path(root, &source_path));
-        assert_eq!(
-            infer_run_id(&source_path),
-            Some("run-1".to_string())
-        );
+        assert_eq!(infer_run_id(&source_path), Some("run-1".to_string()));
     }
 }

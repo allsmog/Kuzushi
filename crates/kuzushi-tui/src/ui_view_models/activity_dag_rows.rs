@@ -33,25 +33,77 @@ pub(crate) fn activity_dag_pane_rows(
     now: Instant,
     running_tool: Option<&str>,
 ) -> Vec<ActivityDagPaneRow> {
-    let mut rows = session
+    let mut rows = task_status_rows(session, width, now);
+    append_subsystem_row(&mut rows, session, width);
+    append_task_legend_row(&mut rows, session, width);
+    append_activity_tail_rows(&mut rows, session, width, running_tool, now);
+    ensure_activity_rows(rows)
+}
+
+fn task_status_rows(
+    session: &ActivitySession,
+    width: usize,
+    now: Instant,
+) -> Vec<ActivityDagPaneRow> {
+    session
         .tasks
         .values()
         .enumerate()
         .flat_map(|(index, row)| task_pane_rows(session, row, index, width, now))
-        .collect::<Vec<_>>();
+        .collect()
+}
+
+fn append_subsystem_row(
+    rows: &mut Vec<ActivityDagPaneRow>,
+    session: &ActivitySession,
+    width: usize,
+) {
     if let Some(text) = dag_subsystems_row_text(session, width) {
         rows.push(ActivityDagPaneRow {
             text,
             tone: subsystem_row_tone(session.subsystem_aggregate.state),
         });
     }
+}
+
+fn append_task_legend_row(
+    rows: &mut Vec<ActivityDagPaneRow>,
+    session: &ActivitySession,
+    width: usize,
+) {
     if !session.tasks.is_empty() {
         rows.push(ActivityDagPaneRow {
             text: activity_legend_row(width),
             tone: ActivityDagRowTone::Muted,
         });
     }
-    rows.extend(action_pane_rows(session, width, running_tool));
+}
+
+fn append_activity_tail_rows(
+    rows: &mut Vec<ActivityDagPaneRow>,
+    session: &ActivitySession,
+    width: usize,
+    running_tool: Option<&str>,
+    now: Instant,
+) {
+    if should_show_taskless_live_row(rows, session, running_tool) {
+        rows.push(ActivityDagPaneRow {
+            text: taskless_row(running_tool),
+            tone: ActivityDagRowTone::Muted,
+        });
+    }
+    rows.extend(action_pane_rows(session, width, running_tool, now));
+}
+
+fn should_show_taskless_live_row(
+    rows: &[ActivityDagPaneRow],
+    session: &ActivitySession,
+    running_tool: Option<&str>,
+) -> bool {
+    rows.is_empty() && running_tool.is_some() && !session.paused && session.events.is_empty()
+}
+
+fn ensure_activity_rows(mut rows: Vec<ActivityDagPaneRow>) -> Vec<ActivityDagPaneRow> {
     if rows.is_empty() {
         rows.push(ActivityDagPaneRow {
             text: " (no task rows yet)".to_string(),
@@ -61,10 +113,15 @@ pub(crate) fn activity_dag_pane_rows(
     rows
 }
 
+fn taskless_row(running_tool: Option<&str>) -> String {
+    running_tool
+        .map(|tool| format!(" (single tool: {tool})"))
+        .unwrap_or_else(|| " (no task rows yet)".to_string())
+}
+
 fn activity_legend_row(width: usize) -> String {
-    // The active glyph must match what active rows actually render — the
-    // braille spinner — not `●` (which the rows never use and which means
-    // "idle" elsewhere in the shell).
+    // The active glyph must match what active rows actually render: the
+    // braille spinner, not an idle-status symbol used elsewhere.
     fit(
         &format!(
             " legend: ✓ done · {} active · ! fail · × canceled · ⊘ skipped · · queued",
@@ -78,9 +135,15 @@ fn action_pane_rows(
     session: &ActivitySession,
     width: usize,
     running_tool: Option<&str>,
+    now: Instant,
 ) -> Vec<ActivityDagPaneRow> {
     let feed_width = width.saturating_sub(5).max(16);
-    let feed_rows = latest_action_rows(activity_feed_pane_rows(session, feed_width, running_tool));
+    let feed_rows = latest_action_rows(activity_feed_pane_rows(
+        session,
+        feed_width,
+        running_tool,
+        now,
+    ));
     if feed_rows.is_empty() {
         return Vec::new();
     }
@@ -107,9 +170,10 @@ fn action_row_tone(tone: ActivityFeedRowTone) -> ActivityDagRowTone {
     match tone {
         ActivityFeedRowTone::Primary => ActivityDagRowTone::Active,
         ActivityFeedRowTone::Success => ActivityDagRowTone::Done,
-        ActivityFeedRowTone::Danger => ActivityDagRowTone::Failing,
-        ActivityFeedRowTone::Warn => ActivityDagRowTone::Failing,
-        ActivityFeedRowTone::Muted | ActivityFeedRowTone::Subtle => ActivityDagRowTone::Muted,
+        ActivityFeedRowTone::Danger | ActivityFeedRowTone::Warn => ActivityDagRowTone::Failing,
+        ActivityFeedRowTone::Label | ActivityFeedRowTone::Muted | ActivityFeedRowTone::Subtle => {
+            ActivityDagRowTone::Muted
+        }
     }
 }
 

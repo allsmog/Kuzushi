@@ -108,6 +108,31 @@ mod tests {
     }
 
     #[test]
+    fn reports_extraction_strategy_for_audits() {
+        let parsed = parse_json_value_from_agent_text_with_strategy(
+            "analysis {not json}\n```json\n{\"verdict\":\"ok\"}\n```",
+        )
+        .unwrap();
+
+        assert_eq!(parsed.value["verdict"], "ok");
+        assert_eq!(parsed.strategy.as_str(), "last_fenced_block");
+    }
+
+    #[test]
+    fn malformed_json_like_text_errors_instead_of_fabricating_a_value() {
+        let err = parse_json_value_from_agent_text("{\"verdict\": true trailing")
+            .unwrap_err()
+            .to_string();
+
+        assert!(
+            err.contains("did not contain a JSON object or array")
+                || err.contains("JSON-looking text"),
+            "{err}"
+        );
+        assert!(err.contains("strategies attempted"), "{err}");
+    }
+
+    #[test]
     fn typed_helper_round_trips_simple_struct() {
         #[derive(serde::Deserialize, Debug, PartialEq)]
         struct Verdict {

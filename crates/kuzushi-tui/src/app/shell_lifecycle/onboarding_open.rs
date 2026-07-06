@@ -37,11 +37,9 @@ impl ShellApp {
     }
 
     pub(crate) fn open_model_picker(&mut self) {
-        self.picker_focus = crate::app::PickerFocus::List;
         let visible = visible_model_choices(self.config.model.as_deref());
-        self.model_picker_cursor = self
-            .model_picker_cursor
-            .min(visible.len().saturating_sub(1));
+        self.model_picker_route
+            .open(preferred_model_choice_index(&self.config), visible.len());
         self.shell_view = ShellView::ModelPicker;
         self.log(
             "onboarding",
@@ -50,9 +48,7 @@ impl ShellApp {
     }
 
     pub(crate) fn open_auth_method_picker(&mut self, provider: String) {
-        self.picker_focus = crate::app::PickerFocus::List;
-        self.auth_picker_cursor = 0;
-        self.auth_key_draft.clear();
+        self.auth_picker_route.open();
         self.log(
             "onboarding",
             format!("{provider} supports multiple auth methods — paste an API key or pick OAuth"),
@@ -73,10 +69,9 @@ impl ShellApp {
     /// the interactive terminal path — never construction — so headless
     /// and test apps keep their targetless default.
     pub(crate) fn open_target_picker(&mut self) {
-        self.picker_focus = crate::app::PickerFocus::List;
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        self.target_candidates = crate::app::discover_target_candidates(&cwd);
-        self.target_picker_cursor = 0;
+        self.target_picker_route
+            .open(crate::app::discover_target_candidates(&cwd));
         self.shell_view = ShellView::TargetPicker;
         self.log(
             "onboarding",
@@ -103,15 +98,8 @@ impl ShellApp {
         self.merge_model_recommendations(phase, &rows, &mut selected);
         self.drop_failed_dependents(&mut selected);
         self.drop_model_backed_without_model(&rows, &mut selected);
-        self.planning_tasks = rows;
-        self.planning_selected = selected;
-        self.planning_rebuild = BTreeSet::new();
-        self.planning_cursor = 0;
-        self.picker_focus = crate::app::PickerFocus::List;
-        self.planning_option_cursor = 0;
-        self.planning_option_edit = None;
-        self.planning_option_error = None;
-        self.workflow_phase = Some(phase);
+        self.planning_picker_route.open(rows, selected);
+        self.engagement.set_phase(phase);
         self.shell_view = ShellView::PlanningPicker;
         self.log(
             "phase",
@@ -137,7 +125,7 @@ impl ShellApp {
         if phase <= stop_after {
             return false;
         }
-        self.workflow_phase = Some(stop_after);
+        self.engagement.set_phase(stop_after);
         self.log(
             "phase",
             format!(
@@ -158,7 +146,7 @@ impl ShellApp {
         rows: &[PlanningTaskRow],
         selected: &mut BTreeSet<PlanningTaskId>,
     ) {
-        let Some(model_tasks) = self.model_recommended_tasks.as_ref() else {
+        let Some(model_tasks) = self.engagement.model_recommendations() else {
             return;
         };
         let phase_tasks: BTreeSet<PlanningTaskId> = rows.iter().map(|row| row.id).collect();
@@ -195,11 +183,10 @@ impl ShellApp {
     /// Drop preselections blocked by an earlier-phase failure: a task that
     /// itself failed, or whose prerequisite failed, shouldn't be auto-checked.
     fn drop_failed_dependents(&self, selected: &mut BTreeSet<PlanningTaskId>) {
-        if self.planning_failed.is_empty() {
+        if !self.engagement.has_failed_tasks() {
             return;
         }
-        let failed: BTreeSet<PlanningTaskId> =
-            self.planning_failed.iter().map(|item| item.task).collect();
+        let failed = self.engagement.failed_task_ids();
         selected.retain(|task| {
             !failed.contains(task)
                 && !transitive_dependencies(*task)
@@ -216,11 +203,11 @@ impl ShellApp {
 
     /// Classify the target once and cache it; reused across phase pickers.
     fn ensure_target_kind(&mut self, target_root: &std::path::Path) -> kuzushi_core::TargetKind {
-        if let Some(kind) = self.target_kind {
+        if let Some(kind) = self.engagement.target_kind() {
             return kind;
         }
         let kind = kuzushi_core::classify_target_kind(target_root);
-        self.target_kind = Some(kind);
+        self.engagement.set_target_kind(kind);
         self.log("phase", format!("target looks like: {}", kind.as_str()));
         kind
     }
@@ -258,6 +245,27 @@ impl ShellApp {
         } else {
             self.open_workbench(WorkbenchPane::Findings);
         }
+    }
+
+    pub(crate) fn apply_ready_default_model_after_target_activation(&mut self) {
+        let Some(index) = ready_default_model_choice_index(self.config.model.as_deref()) else {
+            return;
+        };
+        let Some(choice) = model_choices().get(index) else {
+            return;
+        };
+        self.config.model = Some(choice.id.to_string());
+        self.session_thinking_level = Some(choice.thinking_level.to_string());
+        self.selected_model_index = preferred_model_choice_index(&self.config);
+        self.model_picker_route
+            .open(self.selected_model_index, model_choices().len());
+        self.log(
+            "model",
+            format!(
+                "{} selected from available credentials",
+                display_model_selector(choice.id)
+            ),
+        );
     }
 
     fn workspace_is_fresh_for_auto_planner(&self) -> bool {

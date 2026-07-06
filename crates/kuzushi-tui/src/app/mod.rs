@@ -9,8 +9,10 @@ pub(crate) use background_events::*;
 pub(crate) use catalog::*;
 pub(crate) use command_router::*;
 pub(crate) use ctrl_c_arm_window::*;
+pub(crate) use effects::*;
 pub(crate) use file_picker::*;
 pub(crate) use findings::*;
+pub(crate) use jobs::*;
 pub(crate) use line_editor::*;
 pub(crate) use live_activity::*;
 pub(crate) use log::*;
@@ -42,8 +44,10 @@ mod background_events;
 mod catalog;
 mod command_palette;
 mod command_router;
+mod effects;
 mod file_picker;
 mod findings;
+mod jobs;
 mod line_editor;
 mod live_activity;
 mod log;
@@ -100,6 +104,7 @@ pub use agent_chat::ChatTurn;
 pub use approval::{ConfirmKind, PendingConfirm, PendingPatch};
 pub use live_activity::{LiveActivity, LiveActivityPhase};
 pub use log::LogLine;
+pub(crate) use onboarding::PlanningRunStep;
 pub use onboarding::{
     applicable_tasks_for_phase, artifact_state as planning_artifact_state, build_execution_plan,
     cli_is_on_path, direct_dependencies, direct_dependents, discover_target_candidates,
@@ -127,9 +132,12 @@ pub use task_durations::TaskDurationStore;
 pub use view_state::{
     ActivitySession, ActorDetailFilter, AdvisoryState, AuthLoginView, BudgetHalt, CompletionCycle,
     ContextSnapshotView, DagTaskDetail, DagTaskDetailState, DagTaskRow, DagTaskState, ExploitChain,
-    HistorySearch, KnowledgeBaseView, Notice, NoticeSeverity, OptionsFilter, OptionsView,
-    PaneFocus, PlanChange, PlanProposal, PromptsAction, PwnView, ReconSnapshot, RecordedTraceEvent,
-    ScanPanelState, ShellView, SubsystemAggregate, ThreatPatch, ThreatView, ThrottleAdvisory,
-    TuneAction, WorkbenchPage, WorkbenchPane, WorkbenchPaneScroll, WorkspaceView,
+    HistorySearch, InputMode, KnowledgeBaseView, Notice, NoticeSeverity, OptionsFilter,
+    OptionsView, PaneFocus, PlanChange, PlanProposal, PromptsAction, PwnView, ReconSnapshot,
+    RecordedTraceEvent, ScanPanelState, ShellView, SubsystemAggregate, ThreatPatch, ThreatView,
+    ThrottleAdvisory, TuneAction, WorkbenchPage, WorkbenchPane, WorkbenchPaneScroll, WorkspaceView,
 };
-pub(crate) use view_state::{SastTaskMode, SastTaskRow};
+pub use view_state::{
+    BoundedScroll, DrawerTab, FindingPane, NavBounds, NavEffect, WorkbenchDepth, WorkbenchNav,
+};
+pub(crate) use view_state::{PlanningPickerRouteState, SastTaskMode, SastTaskRow};

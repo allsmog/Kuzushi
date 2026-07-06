@@ -362,6 +362,7 @@ done
                 input: json!({"file": "src.c", "line": 1, "column": 6}),
                 call_id: "clang-1".to_string(),
             },
+            cost_usd: None,
         },
         AgentLoopStep::ToolCall {
             call: ToolCall {
@@ -369,6 +370,7 @@ done
                 input: json!({"pattern": "malloc", "globs": ["*.c"], "maxResults": 5}),
                 call_id: "grep-1".to_string(),
             },
+            cost_usd: None,
         },
         AgentLoopStep::ToolCall {
             call: ToolCall {
@@ -376,6 +378,7 @@ done
                 input: json!({"file": "src.c", "startLine": 1, "endLine": 1}),
                 call_id: "read-1".to_string(),
             },
+            cost_usd: None,
         },
         AgentLoopStep::ToolCall {
             call: ToolCall {
@@ -383,6 +386,7 @@ done
                 input: json!({"path": "."}),
                 call_id: "list-1".to_string(),
             },
+            cost_usd: None,
         },
         AgentLoopStep::Final {
             text: String::new(),

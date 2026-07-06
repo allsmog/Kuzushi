@@ -1,0 +1,169 @@
+<title>Kuzushi TUI Kit — Control Room components</title>
+<style>
+  /* Kuzushi TUI Kit tokens — copied verbatim from src/tokens.ts / styles.css.
+     JetBrains Mono is the kit's grid font; a CDN font can't load under the
+     artifact CSP, so we fall back to the platform monospace stack. */
+  :root{
+    --kz-term-bg:#0b0d10; --kz-term-bg-elev:#0f1115; --kz-chrome-bg:#15181d;
+    --kz-primary:#cfd6e0; --kz-muted:#7d8794; --kz-subtle:#3d4654; --kz-accent:#7fb8ff;
+    --kz-label:#a6cdff; --kz-heading:#ffffff; --kz-success:#57c479; --kz-warn:#e2c14a; --kz-danger:#e25c5c;
+    --kz-sel-fg:#0b0d10; --kz-sel-bg:#7fb8ff;
+    --kz-sev-critical:#e25c5c; --kz-sev-high:#ff8b8b; --kz-sev-medium:#e2c14a; --kz-sev-low:#8aa6c4;
+    --kz-font:'JetBrains Mono',ui-monospace,'SFMono-Regular',Menlo,Consolas,monospace;
+    --kz-font-size:12.5px; --kz-line-height:1.28;
+    --page:#07080a; --page-soft:#0f1115; --ink:#cfd6e0; --ink-dim:#7d8794; --ink-faint:#4d5663; --hair:#1b1f26;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:
+      radial-gradient(1200px 600px at 50% -10%, #12151b 0%, var(--page) 60%);
+    color:var(--ink); font-family:var(--kz-font);
+    -webkit-font-smoothing:antialiased; min-height:100vh; padding:0 0 5rem;}
+  .wrap{max-width:1000px;margin:0 auto;padding:0 1.25rem;}
+
+  header.masthead{padding:3.4rem 0 1.6rem;}
+  .eyebrow{font-size:.72rem;letter-spacing:.22em;text-transform:uppercase;color:var(--kz-accent);margin:0 0 .9rem;}
+  h1{font-size:clamp(1.7rem,4vw,2.5rem);line-height:1.1;margin:0;color:#fff;font-weight:700;letter-spacing:-.01em;}
+  .sub{color:var(--ink-dim);margin:.9rem 0 0;max-width:60ch;font-size:.95rem;line-height:1.6;}
+  .meta{display:flex;flex-wrap:wrap;gap:.5rem;margin-top:1.4rem;}
+  .pill{font-size:.7rem;letter-spacing:.02em;color:var(--ink-dim);border:1px solid var(--hair);
+    background:var(--page-soft);border-radius:100px;padding:.28rem .65rem;}
+  .pill b{color:var(--ink);}
+  .pill .k{color:var(--kz-accent);}
+
+  h2{font-size:.74rem;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);
+    margin:3rem 0 1rem;border-top:1px solid var(--hair);padding-top:1.3rem;font-weight:600;}
+  .lead{color:var(--ink-dim);font-size:.92rem;line-height:1.6;margin:0 0 1.3rem;max-width:64ch;}
+
+  /* ── terminal frame (mirrors .kz-frame / .kz-chrome / .kz-term) ── */
+  .frame{display:inline-flex;flex-direction:column;background:var(--kz-term-bg);border-radius:8px;overflow:hidden;
+    box-shadow:0 1px 0 rgba(255,255,255,.04) inset,0 18px 60px rgba(0,0,0,.45),0 0 0 1px rgba(0,0,0,.6);max-width:100%;}
+  .chrome{display:flex;align-items:center;gap:6px;padding:8px 12px;background:var(--kz-chrome-bg);
+    border-bottom:1px solid rgba(255,255,255,.04);font-size:11px;color:rgba(255,255,255,.5);}
+  .dot{width:11px;height:11px;border-radius:50%;}
+  .dot.r{background:#ff5f57;} .dot.y{background:#febc2e;} .dot.g{background:#28c840;}
+  .ctitle{margin-left:auto;margin-right:auto;transform:translateX(-22px);}
+  .term{font-family:var(--kz-font);font-feature-settings:"calt" 0,"liga" 0;font-variant-ligatures:none;
+    background:var(--kz-term-bg);color:var(--kz-primary);padding:12px 14px;line-height:var(--kz-line-height);
+    white-space:pre;overflow-x:auto;font-size:var(--kz-font-size);}
+  .row{display:block;}
+  .sel{color:var(--kz-sel-fg);background:var(--kz-sel-bg);font-weight:700;}
+
+  .t-primary{color:var(--kz-primary);} .t-muted{color:var(--kz-muted);} .t-subtle{color:var(--kz-subtle);}
+  .t-accent{color:var(--kz-accent);} .t-label{color:var(--kz-label);font-weight:700;} .t-heading{color:#fff;font-weight:700;}
+  .t-success{color:var(--kz-success);} .t-warn{color:var(--kz-warn);} .t-danger{color:var(--kz-danger);}
+  .t-critical{color:var(--kz-sev-critical);font-weight:700;} .t-high{color:var(--kz-sev-high);}
+  .t-medium{color:var(--kz-sev-medium);} .t-low{color:var(--kz-sev-low);}
+  .b{font-weight:700;}
+
+  .cockpit .frame{width:100%;}
+  .cockpit .term{width:100%;}
+
+  /* component gallery */
+  .gallery{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:1rem;align-items:start;}
+  .card{border:1px solid var(--hair);border-radius:10px;background:var(--page-soft);overflow:hidden;}
+  .card .cap{padding:.7rem .9rem .2rem;}
+  .card .nm{font-size:.86rem;color:#fff;font-weight:700;}
+  .card .desc{font-size:.74rem;color:var(--ink-dim);line-height:1.5;margin-top:.2rem;}
+  .card .render{padding:.7rem .9rem 1rem;}
+  .card .frame{width:100%;}
+  .card .term{width:100%;}
+
+  footer{margin-top:3rem;border-top:1px solid var(--hair);padding-top:1.4rem;color:var(--ink-faint);font-size:.74rem;line-height:1.7;}
+  footer code{color:var(--ink-dim);}
+  footer b{color:var(--ink-dim);}
+
+  @media (max-width:640px){ .gallery{grid-template-columns:1fr;} }
+</style>
+
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">Kuzushi TUI Kit · Claude Design</p>
+    <h1>Control room, in components.</h1>
+    <p class="sub">Five new primitives added to the <b>@kuzushi/tui-kit</b> design system — the vocabulary the PRD's control room is built from. Each reuses the kit's 8-role tone theme and JetBrains-Mono grid, so they read exactly like the live Rust Ratatui shell.</p>
+    <div class="meta">
+      <span class="pill"><span class="k">+5</span> components</span>
+      <span class="pill">group <b>control-room</b></span>
+      <span class="pill">builds clean <b>tsc ✓</b></span>
+      <span class="pill">reuses existing tokens — <b>no new CSS</b></span>
+    </div>
+  </header>
+
+  <!-- ── the composed cockpit ── -->
+  <h2>The control room, composed</h2>
+  <p class="lead">The five new components stacked with the existing kit (TermFrame · StatusStrip · SectionHeader · Row · Glyph · SeverityBadge · Footer) into the hunt-phase cockpit — a control side you steer and a visual side you read.</p>
+
+  <div class="cockpit">
+    <div class="frame">
+      <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="ctitle">kuzushi · acme-api</span></div>
+      <div class="term"><span class="row"> <span class="t-heading">KUZUSHI</span>  <span class="t-muted">target </span><span class="t-primary">~/scan/acme-api</span>  <span class="t-muted">ctx </span><span class="t-success">✓ </span><span class="t-primary">fresh</span>  <span class="t-muted">model </span><span class="t-primary">tiered</span>  <span class="t-muted">cost </span><span class="t-warn">$0.85</span></span>
+<span class="row"> </span>
+<span class="row"> <span class="t-success">組 aim</span><span class="t-success"> ✓</span>   <span class="t-accent b">崩 HUNT</span><span class="t-accent"> ▸</span>   <span class="t-subtle">作 confirm</span>   <span class="t-subtle">掛 fix</span>   <span class="t-subtle">▪ report</span></span>
+<span class="row"> </span>
+<span class="row"> <span class="t-label">── CONTROL · hunt </span><span class="t-subtle">──────────────────────────────────</span></span>
+<span class="row"> <span class="t-muted">engines  </span><span class="t-primary">cpg</span> <span class="t-success">✓</span><span class="t-subtle"> ~40s</span><span class="t-subtle">   </span><span class="t-muted">codeql</span> <span class="t-subtle">○</span><span class="t-subtle">   </span><span class="t-muted">lsp</span> <span class="t-subtle">○</span></span>
+<span class="row"> </span>
+<span class="row"> <span class="t-success">✓</span> <span class="t-accent">P-001</span>  <span class="t-primary">incomplete-fix hunt</span><span class="t-muted">  commits · $0.40 · yield .82</span></span>
+<span class="sel row"> ▸ P-002  SSRF reachability  threat-model · $0.30 · yield .74   [k/s]</span>
+<span class="row"> <span class="t-accent">▸</span> <span class="t-accent">P-003</span>  <span class="t-primary">dep footguns</span><span class="t-muted">  intel · $0.15 · yield .40</span><span class="t-muted">   [k/s]</span></span>
+<span class="row"> </span>
+<span class="row"> <span class="t-muted">budget </span><span class="t-warn">▓▓▓</span><span class="t-subtle">░░░░░░░░░</span><span class="t-primary">  $0.85 / $2.00</span></span>
+<span class="row"> <span class="t-muted">focus  › </span><span class="t-primary">focus on sqli</span><span class="sel">_</span></span>
+<span class="row"> </span>
+<span class="row"> <span class="t-label">── VISUAL · findings ledger </span><span class="t-subtle">──────────────────────────</span></span>
+<span class="row"> <span class="t-success">✓ confirmed</span>  <span class="t-critical"> CRITICAL </span> <span class="t-primary">SQLi   users.ts:31</span><span class="t-muted">   path · ×2</span></span>
+<span class="row"> <span class="t-warn">◇ candidate</span>  <span class="t-high"> HIGH </span> <span class="t-primary">SSRF   webhook.ts:47</span><span class="t-muted">   linked · votes 1/2</span></span>
+<span class="row"> <span class="t-muted">? unverified</span> <span class="t-medium"> MEDIUM </span> <span class="t-primary">XSS    render.ts:88</span><span class="t-muted">   structural</span></span>
+<span class="row"> <span class="t-danger">! rejected</span>   <span class="t-low"> LOW </span> <span class="t-primary">ReDoS  parse.ts:12</span><span class="t-muted">   (human)</span></span>
+<span class="row"> </span>
+<span class="row"><span class="t-subtle">────────────────────────────────────────────────────────────────────</span></span>
+<span class="row"> <span class="t-muted">stage hunt · 3 proposals · routing tiered</span></span>
+<span class="row"> <span class="t-accent">next</span> <span class="t-muted">approve + fire</span>   <span class="t-accent">[m]</span> <span class="t-muted">model</span>   <span class="t-accent">[s]</span> <span class="t-muted">strategy</span>   <span class="t-accent">[e]</span> <span class="t-muted">engines</span>   <span class="t-accent">[b]</span> <span class="t-muted">budget</span></span>
+<span class="row"> <span class="t-muted">kuzushi (hunt)> </span><span class="sel"> </span></span></div>
+    </div>
+  </div>
+
+  <!-- ── the 5 new components ── -->
+  <h2>The five new components</h2>
+  <p class="lead">Each ships as a real React component (<code style="color:var(--ink-dim)">src/&lt;Name&gt;.tsx</code>) with a typed prop contract and a JSDoc example — the same shape as the kit's existing eight.</p>
+
+  <div class="gallery">
+
+    <div class="card">
+      <div class="cap"><div class="nm">PhaseRail</div><div class="desc">The 組→崩→作→掛→report spine. done ✓, the single current phase accent + ▸ + upper-cased, todo subtle — state from engagement reality, never fabricated.</div></div>
+      <div class="render"><div class="frame"><div class="term"><span class="row"><span class="t-success">組 aim ✓</span>   <span class="t-accent b">崩 HUNT ▸</span>   <span class="t-subtle">作 confirm</span>   <span class="t-subtle">掛 fix</span>   <span class="t-subtle">▪ report</span></span></div></div></div>
+    </div>
+
+    <div class="card">
+      <div class="cap"><div class="nm">ProofBadge</div><div class="desc">The confirmed-vs-guess trust marker for a finding: ✓ confirmed / ◇ candidate / ? unverified / ! rejected. Put one on every ledger row.</div></div>
+      <div class="render"><div class="frame"><div class="term"><span class="row"><span class="t-success">✓ confirmed</span></span>
+<span class="row"><span class="t-warn">◇ candidate</span></span>
+<span class="row"><span class="t-muted">? unverified</span></span>
+<span class="row"><span class="t-danger">! rejected</span></span></div></div></div>
+    </div>
+
+    <div class="card">
+      <div class="cap"><div class="nm">MeterBar</div><div class="desc">A ▓▓▓░░ meter for a bounded quantity — budget, coverage, a verify pass. Filled cells take a tone (warn/danger near the cap); cost is always on screen.</div></div>
+      <div class="render"><div class="frame"><div class="term"><span class="row"><span class="t-muted">budget </span><span class="t-warn">▓▓▓</span><span class="t-subtle">░░░░░░░░░</span><span class="t-primary">  $0.85 / $2.00</span></span>
+<span class="row"><span class="t-muted">coverage </span><span class="t-accent">▓▓▓▓▓▓▓▓▓</span><span class="t-subtle">░░░░░░░</span><span class="t-primary">  7 / 12</span></span></div></div></div>
+    </div>
+
+    <div class="card">
+      <div class="cap"><div class="nm">ProposalRow</div><div class="desc">One priced, budget-gated hunt proposal: id · title · generator · $price · yield, a keep/skip hint, and a proposed ▸ / kept ✓ / skipped ✗ marker.</div></div>
+      <div class="render"><div class="frame"><div class="term"><span class="row"> <span class="t-success">✓</span> <span class="t-accent">P-001</span>  <span class="t-primary">incomplete-fix hunt</span><span class="t-muted">  commits · $0.40 · yield .82</span></span>
+<span class="row"> <span class="t-accent">▸</span> <span class="t-accent">P-002</span>  <span class="t-primary">SSRF reachability</span><span class="t-muted">  threat-model · $0.30 · yield .74</span><span class="t-muted">   [k/s]</span></span>
+<span class="row"> <span class="t-subtle">✗</span> <span class="t-accent">P-004</span>  <span class="t-primary">dep footguns</span><span class="t-muted">  intel · $0.15 · yield .40</span></span></div></div></div>
+    </div>
+
+    <div class="card">
+      <div class="cap"><div class="nm">EngineChips</div><div class="desc">The per-scan engine-enablement row — the control plane's analysis toggles. Enabled reads primary + ✓ with a cost estimate; disabled reads muted + ○.</div></div>
+      <div class="render"><div class="frame"><div class="term"><span class="row"> <span class="t-muted">engines  </span><span class="t-primary">cpg</span> <span class="t-success">✓</span><span class="t-subtle"> ~40s</span><span class="t-subtle">   </span><span class="t-muted">codeql</span> <span class="t-subtle">○</span><span class="t-subtle">   </span><span class="t-muted">lsp</span> <span class="t-subtle">○</span></span></div></div></div>
+    </div>
+
+  </div>
+
+  <footer>
+    <b>Where this lives:</b> <code>~/vibe-code/kuzushi-tui-overhaul/packages/kuzushi-tui-kit/src/{PhaseRail,ProofBadge,MeterBar,ProposalRow,EngineChips}.tsx</code>, exported from <code>index.tsx</code>, built with <code>tsc</code>.<br>
+    <b>To publish into the “Kuzushi TUI Kit” Claude Design project:</b> run <code>/design-sync</code> on the package — it rebuilds the bundle, generates the preview cards, and pushes the five new components alongside the existing eight.<br>
+    <b>Note:</b> the real kit renders in JetBrains Mono; this preview falls back to the platform monospace font (a CDN font can't load under the artifact sandbox), so glyph spacing differs slightly from the shipped look.
+  </footer>
+</div>

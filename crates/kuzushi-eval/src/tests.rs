@@ -17,6 +17,8 @@ mod tests {
             tool: "semgrep".to_string(),
             vuln_source: None,
             static_proof_state: None,
+            verdict: None,
+            triage: None,
         }
     }
 
@@ -74,6 +76,8 @@ mod tests {
                 cwe: vec!["CWE-78".to_string()],
                 kind: String::new(),
                 notes: String::new(),
+                expected_verdict: None,
+                expected_severity: None,
             }],
             expected_min_recall: None,
             notes: None,
@@ -163,6 +167,8 @@ mod tests {
                 cwe: vec!["CWE-78".to_string()],
                 kind: String::new(),
                 notes: String::new(),
+                expected_verdict: None,
+                expected_severity: None,
             }],
             expected_min_recall: None,
             notes: None,
@@ -196,6 +202,8 @@ mod tests {
                     cwe: vec!["CWE-78".to_string()],
                     kind: String::new(),
                     notes: String::new(),
+                    expected_verdict: None,
+                    expected_severity: None,
                 },
                 OracleEntry {
                     file: "src/b.c".to_string(),
@@ -205,6 +213,8 @@ mod tests {
                     cwe: vec!["CWE-78".to_string()],
                     kind: String::new(),
                     notes: String::new(),
+                    expected_verdict: None,
+                    expected_severity: None,
                 },
                 OracleEntry {
                     file: "src/c.c".to_string(),
@@ -214,6 +224,8 @@ mod tests {
                     cwe: vec!["CWE-78".to_string()],
                     kind: String::new(),
                     notes: String::new(),
+                    expected_verdict: None,
+                    expected_severity: None,
                 },
             ],
             expected_min_recall: None,
@@ -236,5 +248,64 @@ mod tests {
         assert_eq!(report.proof_state_breakdown.llm_only, 1);
         assert_eq!(report.vuln_source_breakdown.get("ainalysis"), Some(&1));
         assert_eq!(report.vuln_source_breakdown.get("unknown"), Some(&2));
+    }
+
+    #[test]
+    fn score_reports_verdict_and_severity_label_accuracy() {
+        let oracle = Oracle {
+            cve: "CVE-TEST".to_string(),
+            slice: Some("test".to_string()),
+            name: None,
+            commit: None,
+            ground_truth: vec![
+                OracleEntry {
+                    file: "src/a.c".to_string(),
+                    function: String::new(),
+                    line_start: 10,
+                    line_end: 10,
+                    cwe: vec!["CWE-78".to_string()],
+                    kind: String::new(),
+                    notes: String::new(),
+                    expected_verdict: Some("true_positive".to_string()),
+                    expected_severity: Some("high".to_string()),
+                },
+                OracleEntry {
+                    file: "src/b.c".to_string(),
+                    function: String::new(),
+                    line_start: 20,
+                    line_end: 20,
+                    cwe: vec!["CWE-79".to_string()],
+                    kind: String::new(),
+                    notes: String::new(),
+                    expected_verdict: Some("false_positive".to_string()),
+                    expected_severity: Some("medium".to_string()),
+                },
+            ],
+            expected_min_recall: None,
+            notes: None,
+        };
+        let mut correct = finding_row("src/a.c", 10, "CWE-78 exec");
+        correct.severity = "ERROR".to_string();
+        correct.triage = Some(FindingTriageRow {
+            verdict: "tp".to_string(),
+        });
+        let mut wrong = finding_row("src/b.c", 20, "CWE-79 reflected");
+        wrong.severity = "low".to_string();
+        wrong.verdict = Some("true_positive".to_string());
+        let dump = FindingsDump {
+            count: 2,
+            findings: vec![correct, wrong],
+        };
+
+        let report = score(&cli(), &oracle, &dump, Path::new("/tmp"));
+
+        assert_eq!(report.label_accuracy.verdict_labeled, 2);
+        assert_eq!(report.label_accuracy.verdict_correct, 1);
+        assert_eq!(report.label_accuracy.verdict_accuracy, Some(0.5));
+        assert_eq!(report.label_accuracy.severity_labeled, 2);
+        assert_eq!(report.label_accuracy.severity_correct, 1);
+        assert_eq!(report.label_accuracy.severity_accuracy, Some(0.5));
+        assert_eq!(report.matches[0].verdict_match, Some(true));
+        assert_eq!(report.matches[1].severity_match, Some(false));
     }
 }

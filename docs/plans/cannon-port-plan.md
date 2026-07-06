@@ -39,7 +39,7 @@ Before planning, four premises from the artifacts must be corrected — each cha
 |---|---|---|
 | "55 registered / **42** shown / **121** tools / **42** ShellViews / 21 planning tasks" | 55 registered ✓, **41** shown, **67** visible tools (121 = total name-space incl. 14 hidden modules), **43** ShellView variants, **22** `PlanningTaskId` entries | Numbers in copy/tests must use 41/67/43/22. 14 modules are *already* hidden — the reframe adds 7, not "cuts to the low teens" from scratch. |
 | "5 engine arms (semgrep/codeql/LLM/secrets/dynamic)" | cannon dispatch is **3 arms** — `static_review`/`secrets`/`dynamic` (`cannon:src/detector.rs:17`). Semgrep/CodeQL/SARIF enter cannon only as **ingested SARIF** via `src/seed.rs`; cannon never runs them live. | Kuzushi's `native_scanners` (runs semgrep/codeql live) is a genuine **superset**. The port keeps them as live detector arms *and* adds cannon's seed-ingest path — it does not replace one with the other. |
-| "Adopt cannon's ledger schema" (implicitly a new store) | cannon's ledger is **JSON + Markdown round-trip + SARIF export, no SQLite** (`cannon:src/ledger.rs:156`). Kuzushi already has a deduping **SQLite** store (`.kuzushi/v2/findings.sqlite3`). | The port is a **schema reconciliation of the existing `FindingStore`**, not a new ledger. Keep SQLite; add the missing columns/child tables. Do **not** import cannon's JSON ledger. |
+| "Adopt cannon's ledger schema" (implicitly a new store) | cannon's ledger is **JSON + Markdown round-trip + SARIF export, no SQLite** (`cannon:src/ledger.rs:156`). Kuzushi already has a deduping **SQLite** store (`.kuzushi/v3/index.sqlite3`). | The port is a **schema reconciliation of the existing `FindingStore`**, not a new ledger. Keep SQLite; add the missing columns/child tables. Do **not** import cannon's JSON ledger. |
 | "measure/tune is the thing Kuzushi has no answer for" | Kuzushi ships **`crates/kuzushi-eval/`** — precision/recall/F1 vs oracle JSON, OWASP Benchmark + Juice Shop + CVE corpus, `benchmarks/{regression-check,sarif-diff,freeze-baseline}.ts` + `baseline.json` | measure/tune is a **reconciliation**: fold cannon's precision-F1 + `--against SARIF` + train/test `tune` into `kuzushi-eval`, and wire a CLI verb (today `kuzushi-eval` has a standalone `main.rs`, no `kuzushi`-CLI entry). |
 
 There is also a **model-safety constraint** the artifacts ignore: cannon passes `--model`
@@ -68,7 +68,7 @@ Each row is where a cannon mechanism lands in Kuzushi, and the gap to close.
 | Sticky triage | `triaged_by: "auto"\|"human"\|"imported"`, guarded in `merge`/`apply_verdicts`/`sync_from_md` by `triaged_by != "human"` (`ledger.rs:274`) | `TriageOutcome` has **no** author flag; upsert is last-writer-wins (`persistence/open/triage_and_verification.rs`) → an AI re-run overwrites a human verdict | **add `triaged_by`/`triage_source` column** + gate every write path so human decisions survive re-runs. Port all **three** guard sites, not just merge. |
 | Corroboration | `corroboration: usize` + `rounds: Vec<String>` (`ledger.rs:61`) | merge collapses collisions (higher severity wins), count lost (`merge_finding_collision`, `finding_writes.rs:66`) | **derive `corroboration_count` at merge time**; needed for verify `--votes`. |
 | Merge scope | repo-wide (one ledger per target) | only within one `scan_id` — each `persist_*` mints its own `run_id`, so semgrep & codeql **don't cross-merge** at persist (`find_collision … where scan_id=?1`, `finding_writes.rs:126`) | **introduce an engagement-scoped merge** (merge on `dedup_key` across `scan_id`, or an engagement-level scan id) so many engines corroborate one row. |
-| On disk | `.cannon/ledger.json` ↔ `VULN_FINDINGS.md` ↔ `findings.sarif` | `.kuzushi/v2/findings.sqlite3` (+ `workspace:export-findings` already emits SARIF/CSV/MD) | keep SQLite; optionally add a `VULN_FINDINGS.md` round-trip later (nice-to-have, not required). |
+| On disk | `.cannon/ledger.json` ↔ `VULN_FINDINGS.md` ↔ `findings.sarif` | `.kuzushi/v3/index.sqlite3` (+ `workspace:export-findings` already emits SARIF/CSV/MD) | keep SQLite; optionally add a `VULN_FINDINGS.md` round-trip later (nice-to-have, not required). |
 
 **Port note:** the seam is clean — same `open/insert_finding/find_collision` shape and a
 near-identical key. All changes are **additive schema** + a merge-scope change. This is the
@@ -106,7 +106,7 @@ spine; do it first among the engine phases.
 
 ### 2.7 Surface & engagement folder
 
-- Reframe: `Catalog`/`Recommend`/`Module`/`ModuleRun` (`app/view_state/sast_task_row.rs:82-86`) collapse into one advanced catalog; Workbench is **already** the landing (`app/runtime/run_shell.rs:72` `open_start_view`). `findings`/`open <id>`/`threats dfd` already fold into Workbench.
+- Reframe: `Catalog`/`Recommend`/`Module`/`ModuleRun` (`app/view_state/sast_task_row.rs:82-86`) collapse into one advanced catalog; Workbench is **already** the landing (`app/runtime/run_shell.rs:72` `open_start_view`). `findings` and `open <id>` already fold into Workbench.
 - Hide 7 plumbing modules by flipping `builtin_module(` → `hidden_module(` in 7 builders (see Phase 0). Every "N modules" surface funnels through `ModuleRegistry::modules()` (`builtins/with_v2_builtins/lookup.rs:4`), so one lever moves them all.
 - engagement folder: paths are centralized in `workspace/domain/workspace_target.rs` + `options/prompt_paths.rs`, **but** Map-phase artifact paths are hard-coded a second time in `PlanningTaskId::artifact_relative_path` (`task_id.rs:183`) — a reorg must update both or prior-run reuse detection breaks.
 
@@ -153,7 +153,7 @@ remain executable-by-name; snapshot the new Workbench-home routing.
 **Goal:** one findings row per real defect, many `sources[]`, sticky human triage,
 corroboration count, engagement-scoped merge. Unblocks verify-votes and measure.
 
-**Do (additive schema on `findings.sqlite3`):**
+**Do (additive schema on `index.sqlite3`):**
 - `finding_sources` child table (finding_id, source) + merge helper appends on collision
   (`persistence/store_rows/merge_helpers.rs`, `finding_writes.rs:66`).
 - `triaged_by` column on `triage` (`auto|human|imported`); gate every triage write on
@@ -289,8 +289,8 @@ without a fitness score first (cannon does exactly this — seed genomes at yiel
 - **CRAP / clean-code gate.** New functions ≤ complexity 4, < 40 logical lines,
   `pnpm quality:crap-risk` < 7. The planner and merge code are the likeliest offenders — keep
   generators small and side-effect-free (the maps confirm cannon's are pure-core).
-- **Dedup-key migration.** Changing the key touches every existing row; gate behind the
-  additive `open/init` migration and the one-time `migrate_legacy_fingerprints` pattern.
+- **Dedup-key cutover.** Changing the key touches every row; v3 should rebuild disposable
+  projections from source facts/events instead of adding another compatibility migration.
 - **Baseline red tests.** Capture the current known-failing set (BDD onboarding + snapshot)
   before Phase 0 so new work is attributable; fix or explicitly quarantine.
 - **Cap overshoot honesty.** Preserve cannon's between-proposals gating and surface the

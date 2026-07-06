@@ -43,7 +43,7 @@ impl ModuleRegistry {
         match requirement {
             RuntimeRequirement::Never => false,
             RuntimeRequirement::Always => true,
-            RuntimeRequirement::InputAware => wants_sast_runtime(input),
+            RuntimeRequirement::InputAware => tool_needs_runtime(name, input),
         }
     }
 

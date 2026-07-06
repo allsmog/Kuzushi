@@ -23,7 +23,7 @@ pub(crate) fn patch_lines(app: &ShellApp, area: Rect, alias: &str) -> Vec<Line<'
 fn push_empty_patch_lines(lines: &mut Vec<Line<'static>>, alias: &str, width: u16) {
     lines.push(divider(&format!("PATCH · {alias} · empty"), width));
     let staged_detail = format!(
-        "patches are produced by `patch:run` and staged under {}/.",
+        "patches are produced by `patch:finding` and staged under {}/.",
         ui_runs_root_relative_path()
     );
     lines.extend(empty_state_panel(
@@ -35,7 +35,7 @@ fn push_empty_patch_lines(lines: &mut Vec<Line<'static>>, alias: &str, width: u1
         &[
             ("use patch", "focus the patch module"),
             (
-                "run patch:run --finding F-…",
+                "run patch:finding {\"fingerprint\":\"F-...\"}",
                 "stage a patch for a verified finding",
             ),
             ("findings", "browse persisted findings to pick one"),

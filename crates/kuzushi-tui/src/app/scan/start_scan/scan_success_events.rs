@@ -23,11 +23,7 @@ impl ShellApp {
         self.refresh_findings(false);
         let target_root = self.target.clone();
         self.hydrate_persisted_scene_snapshots(target_root.as_deref());
-        self.workflow_phase = if findings_count == 0 {
-            Some(crate::app::WorkflowPhase::Hunt)
-        } else {
-            None
-        };
+        self.update_workflow_phase_after_scan(findings_count);
         self.log_scan_alias_hint();
         self.log_scan_completion(&run_id, findings_count);
         self.log_scan_result(
@@ -41,6 +37,20 @@ impl ShellApp {
         self.record_scan_task_durations();
         self.notify_scan_completion(findings_count);
         self.maybe_open_scan_findings_output(findings_count);
+    }
+
+    fn update_workflow_phase_after_scan(&mut self, findings_count: usize) {
+        if findings_count > 0 {
+            self.engagement.clear_phase();
+            return;
+        }
+        if self
+            .engagement
+            .current_phase()
+            .is_none_or(|phase| phase <= crate::app::WorkflowPhase::Hunt)
+        {
+            self.engagement.set_phase(crate::app::WorkflowPhase::Hunt);
+        }
     }
 
     fn maybe_open_scan_findings_output(&mut self, findings_count: usize) {

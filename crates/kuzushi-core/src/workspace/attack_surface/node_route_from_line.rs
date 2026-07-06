@@ -124,7 +124,12 @@ const FRAMEWORK_DETECTORS: &[FrameworkDetector] = &[
     },
     FrameworkDetector {
         languages: &["JavaScript", "TypeScript"],
-        needles: &["from 'hono'", "from \"hono\"", "require('hono')", "new hono"],
+        needles: &[
+            "from 'hono'",
+            "from \"hono\"",
+            "require('hono')",
+            "new hono",
+        ],
         framework: "Hono",
     },
     FrameworkDetector {

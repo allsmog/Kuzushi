@@ -34,7 +34,7 @@ pub fn import_har(workspace: &WorkspaceTarget, path: &Path) -> Result<HarImportS
     let scope = load_program_scope(workspace).context("Could not load scope.toml")?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let run_id = format!("har-{}", Uuid::new_v4());
-    store.insert_scan_run(&run_id, workspace.root(), "completed")?;
+    store.record_run_started(&run_id, workspace.root(), "completed")?;
 
     let mut imported = 0usize;
     let mut skipped = 0usize;

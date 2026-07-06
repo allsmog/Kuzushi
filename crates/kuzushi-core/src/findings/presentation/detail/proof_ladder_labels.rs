@@ -30,7 +30,7 @@ const PROOF_LADDER_TEXTS: &[(ProofLadderKind, ProofLadderText)] = &[
         ProofLadderText {
             stage: "verified",
             label: "verified - empirical runtime evidence recorded",
-            reason: "runtime verification reproduced exploitability",
+            reason: "runtime verification recorded empirical evidence for this finding",
             next_step: "patch the finding and re-run verification",
         },
     ),
@@ -56,7 +56,7 @@ const PROOF_LADDER_TEXTS: &[(ProofLadderKind, ProofLadderText)] = &[
         ProofLadderKind::Rejected,
         ProofLadderText {
             stage: "rejected",
-            label: "rejected - evidence does not support exploitability",
+            label: "rejected - evidence does not support the scanner claim",
             reason: "triage or static proof rejected the issue",
             next_step: "suppress with expiry if the operator accepts the evidence",
         },

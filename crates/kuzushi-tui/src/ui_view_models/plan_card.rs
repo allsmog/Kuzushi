@@ -18,7 +18,7 @@ pub(crate) struct PlanChangeRow {
 }
 
 pub(crate) fn plan_card_model(app: &ShellApp) -> Option<PlanCardModel> {
-    let plan = app.pending_plan.as_ref()?;
+    let plan = app.engagement.pending_plan()?;
     Some(PlanCardModel::from_app(app, plan))
 }
 

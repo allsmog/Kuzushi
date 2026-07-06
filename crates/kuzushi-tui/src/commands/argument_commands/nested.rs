@@ -21,6 +21,8 @@ pub(crate) fn parse_nested_shell_command(
         "project" => parse_project_command(args),
         "runs" => parse_runs_command(args),
         "strategy" | "strategies" => parse_strategy_command(args),
+        "decision" | "review" => parse_review_decision_command(args),
+        "patch" => parse_patch_command(args),
         "workspace" => parse_workspace_command(args.to_vec()),
         "pwn" => parse_pwn_command(args),
         _ => return None,
@@ -50,18 +52,19 @@ fn parse_project_command(args: &[&str]) -> ShellCommand {
 fn parse_strategy_command(args: &[&str]) -> ShellCommand {
     match args.first().copied() {
         None | Some("queue") => ShellCommand::Strategy(StrategyCommand::Show),
-        Some("approve") | Some("accept") => args
+        Some("approve") | Some("accept") | Some("keep") => args
             .get(1)
             .map(|id| ShellCommand::Strategy(StrategyCommand::Approve((*id).to_string())))
             .unwrap_or_else(|| {
                 ShellCommand::Strategy(StrategyCommand::Unsupported("strategy approve".to_string()))
             }),
-        Some("reject") | Some("deny") => args
+        Some("reject") | Some("deny") | Some("skip") => args
             .get(1)
             .map(|id| ShellCommand::Strategy(StrategyCommand::Reject((*id).to_string())))
             .unwrap_or_else(|| {
                 ShellCommand::Strategy(StrategyCommand::Unsupported("strategy reject".to_string()))
             }),
+        Some("fire") | Some("run") => ShellCommand::Strategy(StrategyCommand::Fire),
         Some("correct") | Some("correction") => parse_strategy_correction_command(args),
         Some(other) => {
             ShellCommand::Strategy(StrategyCommand::Unsupported(format!("strategy {other}")))
@@ -100,6 +103,54 @@ fn parse_strategy_correction_command(args: &[&str]) -> ShellCommand {
         reason: (!reason.is_empty()).then(|| reason.join(" ")),
         scope,
     })
+}
+
+fn parse_review_decision_command(args: &[&str]) -> ShellCommand {
+    let Some(verdict) = args.first().copied() else {
+        return ShellCommand::ReviewDecision(ReviewDecisionCommand::Unsupported(
+            "decision".to_string(),
+        ));
+    };
+    let reason = args.get(1..).unwrap_or_default().join(" ");
+    if reason.trim().is_empty() {
+        return ShellCommand::ReviewDecision(ReviewDecisionCommand::Unsupported(format!(
+            "decision {verdict}"
+        )));
+    }
+    ShellCommand::ReviewDecision(ReviewDecisionCommand::Record {
+        verdict: verdict.to_string(),
+        reason,
+    })
+}
+
+fn parse_patch_command(args: &[&str]) -> ShellCommand {
+    match args.first().copied() {
+        Some("apply") => ShellCommand::Patch(PatchCommand::Apply),
+        Some("reject" | "discard") => ShellCommand::Patch(PatchCommand::Reject),
+        Some("regen" | "regenerate") => ShellCommand::Patch(PatchCommand::Regen {
+            style: parse_patch_regen_style(args.get(1..).unwrap_or_default()),
+        }),
+        Some(other) => ShellCommand::Patch(PatchCommand::Unsupported(format!("patch {other}"))),
+        None => ShellCommand::Patch(PatchCommand::Unsupported("patch".to_string())),
+    }
+}
+
+fn parse_patch_regen_style(args: &[&str]) -> Option<String> {
+    let mut iter = args.iter();
+    while let Some(token) = iter.next() {
+        if let Some(style) = token.strip_prefix("--style=") {
+            return non_empty_style(style);
+        }
+        if *token == "--style" {
+            return iter.next().and_then(|style| non_empty_style(style));
+        }
+    }
+    None
+}
+
+fn non_empty_style(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_string())
 }
 
 pub(crate) fn options_command(args: &[&str], filter: OptionsFilter) -> ShellCommand {

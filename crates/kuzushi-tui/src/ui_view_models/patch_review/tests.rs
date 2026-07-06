@@ -4,7 +4,7 @@ use crate::ui_view_models::ui_run_artifact_relative_path;
 #[test]
 fn patch_review_model_copies_pending_patch_for_matching_alias() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.pending_patch = Some(PendingPatch {
+    app.engagement.set_pending_patch(PendingPatch {
         alias: "F-0001".to_string(),
         rationale: "replace string-built SQL".to_string(),
         side_effect: Some("closes finding".to_string()),
@@ -32,7 +32,7 @@ fn patch_review_model_copies_pending_patch_for_matching_alias() {
 #[test]
 fn patch_review_model_ignores_other_aliases() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.pending_patch = Some(PendingPatch {
+    app.engagement.set_pending_patch(PendingPatch {
         alias: "F-0001".to_string(),
         rationale: "rationale".to_string(),
         side_effect: None,

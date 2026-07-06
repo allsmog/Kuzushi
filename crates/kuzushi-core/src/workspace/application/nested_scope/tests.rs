@@ -213,7 +213,7 @@ fn scope_tree_round_trips_scopes_json() {
 
     assert_eq!(
         path,
-        temp.path().join(".kuzushi/v2/project-model/scopes.json")
+        temp.path().join(".kuzushi/v3/project-model/scopes.json")
     );
     assert_eq!(loaded, tree);
 }

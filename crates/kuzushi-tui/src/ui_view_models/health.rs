@@ -51,12 +51,14 @@ fn model_runtime_row(app: &ShellApp) -> HealthRow {
             "run `model <n>` before LLM-backed tools",
         );
     };
-    match kuzushi_core::runtime::validate_model_api_key_env(model, &app.config.runtime.api_key_env)
-    {
-        Ok(()) => health_row(
+    match kuzushi_core::runtime::bridge_api_key_env_for_model(
+        model,
+        &app.config.runtime.api_key_env,
+    ) {
+        Ok(api_key_env) => health_row(
             HealthTone::Pass,
             "model/runtime",
-            format!("{model} matches {}", app.config.runtime.api_key_env),
+            format!("{model} uses {api_key_env}"),
             "run tools normally",
         ),
         Err(error) => health_row(
@@ -69,7 +71,7 @@ fn model_runtime_row(app: &ShellApp) -> HealthRow {
 }
 
 fn credential_row(app: &ShellApp) -> HealthRow {
-    let api_key_env = app.config.runtime.api_key_env.as_str();
+    let api_key_env = effective_credential_env(app);
     if env_is_set(api_key_env) {
         return health_row(
             HealthTone::Pass,
@@ -84,6 +86,20 @@ fn credential_row(app: &ShellApp) -> HealthRow {
         format!("{api_key_env}=missing"),
         "export the key or run `auth`",
     )
+}
+
+fn effective_credential_env(app: &ShellApp) -> &str {
+    let Some(model) = app.config.model.as_deref() else {
+        return app.config.runtime.api_key_env.as_str();
+    };
+    match kuzushi_core::runtime::bridge_api_key_env_for_model(
+        model,
+        &app.config.runtime.api_key_env,
+    ) {
+        Ok(env) if env == "ANTHROPIC_API_KEY" => "ANTHROPIC_API_KEY",
+        Ok(env) if env == "OPENAI_API_KEY" => "OPENAI_API_KEY",
+        _ => app.config.runtime.api_key_env.as_str(),
+    }
 }
 
 fn scanner_row(check: &'static str, result: anyhow::Result<()>) -> HealthRow {

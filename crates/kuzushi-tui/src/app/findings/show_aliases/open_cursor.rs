@@ -2,16 +2,15 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn open_finding_at_cursor(&mut self) {
-        let aliases = crate::ui_view_models::visible_sorted_finding_alias_indices(self);
-        if aliases.is_empty() {
+        let visible_len = crate::ui_view_models::visible_findings_len(self);
+        if visible_len == 0 {
             return;
         }
-        let cursor = self.findings_cursor.min(aliases.len() - 1);
-        let (alias, index) = aliases[cursor].clone();
-        let Some(finding) = self.findings.get(index).cloned() else {
+        let cursor = self.findings_route.cursor().min(visible_len - 1);
+        self.findings_route.set_cursor(cursor);
+        let Some((alias, finding)) = crate::ui_view_models::visible_finding_at_cursor(self) else {
             return;
         };
-        self.findings_cursor = cursor;
         self.selected_finding = Some(finding.clone());
         // The Workbench DETAILS pane is where a selected finding now reads;
         // put focus there so j/k scrolls evidence immediately after Enter.

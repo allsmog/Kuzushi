@@ -1,5 +1,5 @@
 use super::*;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 impl ShellApp {
     pub(crate) fn refresh_findings(&mut self, announce: bool) {
@@ -12,7 +12,7 @@ impl ShellApp {
         };
 
         match store.list_findings(200) {
-            Ok(findings) => self.replace_findings(findings, announce),
+            Ok(findings) => self.replace_findings_from_store(&store, findings, announce),
             Err(error) => self.log_refresh_findings_error(error.into(), announce),
         }
     }
@@ -41,7 +41,7 @@ impl ShellApp {
                 match self.filter_findings_by_provenance(report.findings, report.count, &filter) {
                     Ok((findings, count)) => {
                         let findings = findings.into_iter().take(requested_limit).collect();
-                        self.replace_filtered_findings(findings, expression, count);
+                        self.replace_filtered_findings(&store, findings, expression, count);
                     }
                     Err(error) => self.log("error", format!("invalid findings filter: {error}")),
                 }
@@ -74,8 +74,25 @@ impl ShellApp {
         Ok((findings, count))
     }
 
-    fn replace_findings(&mut self, findings: Vec<Finding>, announce: bool) {
+    fn replace_findings_from_store(
+        &mut self,
+        store: &FindingStore,
+        findings: Vec<Finding>,
+        announce: bool,
+    ) {
+        let decisions = self.load_review_decisions_for_findings(store, &findings);
+        self.replace_findings(findings, decisions, announce);
+    }
+
+    fn replace_findings(
+        &mut self,
+        findings: Vec<Finding>,
+        review_decisions: Vec<kuzushi_core::findings::ReviewDecisionRecord>,
+        announce: bool,
+    ) {
         self.findings = findings;
+        self.review_decisions = review_decisions;
+        self.active_findings_filter = None;
         self.reselect_current_finding();
         self.sync_findings_cursor_to_selected();
         if announce {
@@ -93,13 +110,14 @@ impl ShellApp {
 
     fn replace_filtered_findings(
         &mut self,
+        store: &FindingStore,
         findings: Vec<Finding>,
         expression: &str,
         count: usize,
     ) {
-        self.findings = findings;
-        self.reselect_current_finding();
-        self.sync_findings_cursor_to_selected();
+        let decisions = self.load_review_decisions_for_findings(store, &findings);
+        self.replace_findings(findings, decisions, false);
+        self.active_findings_filter = Some(expression.to_string());
         self.log(
             "findings",
             format!(
@@ -107,6 +125,26 @@ impl ShellApp {
                 self.findings.len()
             ),
         );
+    }
+
+    fn load_review_decisions_for_findings(
+        &mut self,
+        store: &FindingStore,
+        findings: &[Finding],
+    ) -> Vec<kuzushi_core::findings::ReviewDecisionRecord> {
+        match review_decisions_for_findings(store, findings) {
+            Ok(decisions) => decisions,
+            Err(error) => {
+                self.log(
+                    "error",
+                    with_next_step(
+                        format!("could not load review decisions: {error}"),
+                        "workspace status",
+                    ),
+                );
+                Vec::new()
+            }
+        }
     }
 
     fn reselect_current_finding(&mut self) {
@@ -129,4 +167,28 @@ impl ShellApp {
             );
         }
     }
+}
+
+fn review_decisions_for_findings(
+    store: &FindingStore,
+    findings: &[Finding],
+) -> Result<Vec<kuzushi_core::findings::ReviewDecisionRecord>> {
+    let mut seen = BTreeSet::new();
+    let mut decisions = Vec::new();
+    for finding in findings {
+        let Some(finding_id) = finding.id else {
+            continue;
+        };
+        for decision in store.list_review_decisions_for_finding_identity(finding_id)? {
+            if seen.insert(decision.id) {
+                decisions.push(decision);
+            }
+        }
+    }
+    decisions.sort_by(|left, right| {
+        left.created_at
+            .cmp(&right.created_at)
+            .then_with(|| left.id.cmp(&right.id))
+    });
+    Ok(decisions)
 }

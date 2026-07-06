@@ -17,9 +17,13 @@ pub(crate) fn offense_module() -> BuiltinModule {
 
 fn offense_chain_tool() -> ToolDescriptor {
     let mut options = vec![
-        opt("target", OptionType::String, "Target host (IP or hostname) to operate against.")
-            .aliases(&["targetHost", "target_host"])
-            .required(),
+        opt(
+            "target",
+            OptionType::String,
+            "Target host (IP or hostname) to operate against.",
+        )
+        .aliases(&["targetHost", "target_host"])
+        .required(),
         opt(
             "chain",
             OptionType::Json,
@@ -100,7 +104,9 @@ fn run_offense_chain(
 ) -> Result<Value> {
     let workspace = ctx
         .workspace
-        .context(crate::workspace::active_workspace_required_message("offense:chain"))?;
+        .context(crate::workspace::active_workspace_required_message(
+            "offense:chain",
+        ))?;
     let observer = TraceHopObserver { trace: ctx.trace };
     let goal = input
         .get("goal")

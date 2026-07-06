@@ -8,8 +8,7 @@ use std::path::PathBuf;
 // release binary and a working-tree build are distinguishable at a glance.
 #[command(about = "Kuzushi security-native code agent", version = kuzushi_tui::build_version_static())]
 pub(crate) struct Cli {
-    /// Workspace/repository target. Required for findings, runs, exports, and workspace tools; pass `--target .` to explicitly opt into the current directory.
-    #[arg(long, global = true)]
+    #[arg(long, global = true, help = crate::support::TARGET_HELP)]
     pub(crate) target: Option<PathBuf>,
     /// Force line-oriented output with no ANSI, animation, or box drawing.
     #[arg(long, global = true)]
@@ -17,9 +16,6 @@ pub(crate) struct Cli {
     /// Load a trusted dynamic JS module specifier (file://, path, or package:<name>).
     #[arg(long, global = true)]
     pub(crate) load: Vec<String>,
-    /// Allow --load for specifiers not listed in operator.trusted_modules.
-    #[arg(long, global = true)]
-    pub(crate) allow_untrusted_module: bool,
 
     #[command(subcommand)]
     pub(crate) command: Option<Command>,

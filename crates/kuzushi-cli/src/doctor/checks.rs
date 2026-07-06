@@ -32,7 +32,7 @@ pub(crate) fn check_findings_db(workspace: &WorkspaceTarget) -> DoctorCheck {
         Err(error) => DoctorCheck::fail(
             "findings-db",
             format!("{} could not be opened: {error}", db_path.display()),
-            "Fix .kuzushi/v2 permissions or move the workspace to a writable path.",
+            "Fix .kuzushi/v3 permissions or move the workspace to a writable path.",
         ),
     };
     if !existed {

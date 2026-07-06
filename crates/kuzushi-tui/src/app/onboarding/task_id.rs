@@ -113,7 +113,7 @@ impl PlanningTaskId {
             HuntSystems => "Systems-level semantic hunt",
             HuntUseAfterFree => "Use-after-free hunt (C/C++)",
             TriageFindings => "Triage findings",
-            VerifyFindings => "Verify exploitability",
+            VerifyFindings => "Verify findings",
             PatchFindings => "Patch findings",
             BuildReport => "Build report",
         }

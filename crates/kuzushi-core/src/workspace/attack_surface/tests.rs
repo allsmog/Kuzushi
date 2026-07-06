@@ -154,11 +154,7 @@ mod tests {
         assert!(map.summary.high_risk > 0);
         assert_eq!(map.summary.max_risk_score, 100);
         assert_eq!(
-            map.summary
-                .by_risk_tier
-                .values()
-                .copied()
-                .sum::<usize>(),
+            map.summary.by_risk_tier.values().copied().sum::<usize>(),
             map.summary.total
         );
         assert_ranked_by_risk(&map);
@@ -204,7 +200,10 @@ mod tests {
                 && surface.method.as_deref() == Some("POST")
                 && surface.route.as_deref() == Some("/api/admin/:userId")
                 && surface.framework.as_deref() == Some("Next.js")
-                && surface.risk.reasons.contains(&"mutating request method".to_string())
+                && surface
+                    .risk
+                    .reasons
+                    .contains(&"mutating request method".to_string())
         }));
         assert!(map.surfaces.iter().any(|surface| {
             surface.kind == AttackSurfaceKind::HttpRoute
@@ -616,11 +615,7 @@ mod tests {
         let map = build_attack_surface_map(temp.path()).unwrap();
 
         assert!(map.surfaces.iter().all(|surface| {
-            surface
-                .metadata
-                .pointer("/source")
-                .and_then(Value::as_str)
-                != Some("source_line")
+            surface.metadata.pointer("/source").and_then(Value::as_str) != Some("source_line")
         }));
     }
 
@@ -641,7 +636,8 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            temp.path().join("app/Http/Controllers/ImportController.php"),
+            temp.path()
+                .join("app/Http/Controllers/ImportController.php"),
             "<?php\nuse Illuminate\\Http\\UploadedFile;\nuse Illuminate\\Support\\Facades\\Http;\n",
         )
         .unwrap();
@@ -649,11 +645,7 @@ mod tests {
         let map = build_attack_surface_map(temp.path()).unwrap();
 
         assert!(map.surfaces.iter().all(|surface| {
-            surface
-                .metadata
-                .pointer("/source")
-                .and_then(Value::as_str)
-                != Some("source_line")
+            surface.metadata.pointer("/source").and_then(Value::as_str) != Some("source_line")
         }));
     }
 
@@ -675,11 +667,7 @@ mod tests {
         let map = build_attack_surface_map(temp.path()).unwrap();
 
         assert!(map.surfaces.iter().all(|surface| {
-            surface
-                .metadata
-                .pointer("/source")
-                .and_then(Value::as_str)
-                != Some("source_line")
+            surface.metadata.pointer("/source").and_then(Value::as_str) != Some("source_line")
         }));
     }
 
@@ -709,11 +697,7 @@ mod tests {
         let map = build_attack_surface_map(temp.path()).unwrap();
 
         assert!(map.surfaces.iter().all(|surface| {
-            surface
-                .metadata
-                .pointer("/source")
-                .and_then(Value::as_str)
-                != Some("source_line")
+            surface.metadata.pointer("/source").and_then(Value::as_str) != Some("source_line")
         }));
     }
 
@@ -1510,36 +1494,16 @@ mod tests {
             "/oauth/callback",
             "route touches auth or admin workflow",
         );
-        assert_route_risk_reason(
-            &map,
-            "/oauth/callback",
-            "route accepts rich external input",
-        );
-        assert_route_risk_reason(
-            &map,
-            "/webhooks/proxy",
-            "route accepts rich external input",
-        );
-        assert_route_risk_reason(
-            &map,
-            "/auth/redirect",
-            "route accepts rich external input",
-        );
+        assert_route_risk_reason(&map, "/oauth/callback", "route accepts rich external input");
+        assert_route_risk_reason(&map, "/webhooks/proxy", "route accepts rich external input");
+        assert_route_risk_reason(&map, "/auth/redirect", "route accepts rich external input");
         assert_route_risk_reason(
             &map,
             "/login/return-to",
             "route accepts rich external input",
         );
-        assert_route_risk_reason(
-            &map,
-            "/fetch/proxy",
-            "route accepts rich external input",
-        );
-        assert_route_risk_reason(
-            &map,
-            "/admin/users",
-            "route touches auth or admin workflow",
-        );
+        assert_route_risk_reason(&map, "/fetch/proxy", "route accepts rich external input");
+        assert_route_risk_reason(&map, "/admin/users", "route touches auth or admin workflow");
         assert_route_risk_reason(
             &map,
             "/tenants/:tenantId/members",
@@ -1566,7 +1530,11 @@ mod tests {
             "route touches auth or admin workflow",
         );
         assert_route_risk_reason(&map, "/saml/acs", "route touches auth or admin workflow");
-        assert_route_risk_reason(&map, "/oidc/connect", "route touches auth or admin workflow");
+        assert_route_risk_reason(
+            &map,
+            "/oidc/connect",
+            "route touches auth or admin workflow",
+        );
         assert_route_risk_reason(&map, "/oidc/connect", "route accepts rich external input");
         assert_route_risk_reason(
             &map,
@@ -2271,7 +2239,8 @@ mod tests {
         fs::create_dir_all(temp.path().join("src/main/java/app")).unwrap();
         fs::write(temp.path().join("build.gradle"), "plugins { id 'java' }\n").unwrap();
         fs::write(
-            temp.path().join("src/main/java/app/RememberMeSessions.java"),
+            temp.path()
+                .join("src/main/java/app/RememberMeSessions.java"),
             r#"
               import org.springframework.security.web.authentication.RememberMeServices;
               class RememberMeSessions {
@@ -2480,7 +2449,8 @@ mod tests {
         fs::create_dir_all(temp.path().join("src/main/java/app")).unwrap();
         fs::write(temp.path().join("build.gradle"), "plugins { id 'java' }\n").unwrap();
         fs::write(
-            temp.path().join("src/main/java/app/RequestTrustConfig.java"),
+            temp.path()
+                .join("src/main/java/app/RequestTrustConfig.java"),
             r#"
               import org.springframework.web.filter.ForwardedHeaderFilter;
               import org.springframework.web.reactive.function.client.ExchangeFilterFunction;
@@ -2669,7 +2639,8 @@ mod tests {
         fs::create_dir_all(temp.path().join("src/main/java/app")).unwrap();
         fs::write(temp.path().join("build.gradle"), "plugins { id 'java' }\n").unwrap();
         fs::write(
-            temp.path().join("src/main/java/app/RequestInputController.java"),
+            temp.path()
+                .join("src/main/java/app/RequestInputController.java"),
             r#"
               import org.springframework.web.bind.annotation.PostMapping;
               class RequestInputController {
@@ -2734,7 +2705,11 @@ mod tests {
     fn attack_surface_preserves_kotlin_spring_request_mapping_methods() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("src/main/kotlin/app")).unwrap();
-        fs::write(temp.path().join("build.gradle.kts"), "plugins { kotlin(\"jvm\") }\n").unwrap();
+        fs::write(
+            temp.path().join("build.gradle.kts"),
+            "plugins { kotlin(\"jvm\") }\n",
+        )
+        .unwrap();
         fs::write(
             temp.path().join("src/main/kotlin/app/ImportController.kt"),
             "import org.springframework.web.bind.annotation.RequestMapping\nclass ImportController {\n@RequestMapping(value = [\"/imports/file\"], method = [RequestMethod.POST])\nfun importFile(importFile: MultipartFile) {}\n}\n",
@@ -3020,7 +2995,11 @@ mod tests {
     fn attack_surface_detects_jvm_ktor_routes() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("src/main/kotlin/app")).unwrap();
-        fs::write(temp.path().join("build.gradle.kts"), "plugins { kotlin(\"jvm\") }\n").unwrap();
+        fs::write(
+            temp.path().join("build.gradle.kts"),
+            "plugins { kotlin(\"jvm\") }\n",
+        )
+        .unwrap();
         fs::write(
             temp.path().join("src/main/kotlin/app/Routing.kt"),
             r#"
@@ -3223,12 +3202,10 @@ mod tests {
                 && surface.route.as_deref() == Some("/teams/status")
         }));
         assert!(routes.iter().any(|surface| {
-            surface.method.as_deref() == Some("ANY")
-                && surface.route.as_deref() == Some("/admin/*")
+            surface.method.as_deref() == Some("ANY") && surface.route.as_deref() == Some("/admin/*")
         }));
         assert!(routes.iter().any(|surface| {
-            surface.method.as_deref() == Some("ANY")
-                && surface.route.as_deref() == Some("/audit/*")
+            surface.method.as_deref() == Some("ANY") && surface.route.as_deref() == Some("/audit/*")
         }));
     }
 
@@ -3363,7 +3340,8 @@ mod tests {
         fs::create_dir_all(temp.path().join("src/main/java/app")).unwrap();
         fs::write(temp.path().join("build.gradle"), "plugins { id 'java' }\n").unwrap();
         fs::write(
-            temp.path().join("src/main/java/app/VertxHttpMethodRoutes.java"),
+            temp.path()
+                .join("src/main/java/app/VertxHttpMethodRoutes.java"),
             r#"
               import io.vertx.core.http.HttpMethod;
               import io.vertx.ext.web.Router;
@@ -3455,30 +3433,29 @@ mod tests {
             surface.method.as_deref() == Some("ANY")
                 && surface.route.as_deref() == Some("/accounts/{id}")
         }));
-        assert!(routes
-            .iter()
-            .any(|surface| { surface.method.as_deref() == Some("ANY")
-                && surface.route.as_deref() == Some("/accounts/recovery") }));
-        assert!(routes
-            .iter()
-            .any(|surface| { surface.method.as_deref() == Some("ANY")
-                && surface.route.as_deref() == Some("/admin") }));
+        assert!(routes.iter().any(|surface| {
+            surface.method.as_deref() == Some("ANY")
+                && surface.route.as_deref() == Some("/accounts/recovery")
+        }));
+        assert!(routes.iter().any(|surface| {
+            surface.method.as_deref() == Some("ANY") && surface.route.as_deref() == Some("/admin")
+        }));
         assert!(routes.iter().any(|surface| {
             surface.method.as_deref() == Some("GET")
                 && surface.route.as_deref() == Some("/accounts")
         }));
-        assert!(routes
-            .iter()
-            .any(|surface| { surface.method.as_deref() == Some("POST")
-                && surface.route.as_deref() == Some("/accounts/import") }));
+        assert!(routes.iter().any(|surface| {
+            surface.method.as_deref() == Some("POST")
+                && surface.route.as_deref() == Some("/accounts/import")
+        }));
         assert!(routes.iter().any(|surface| {
             surface.method.as_deref() == Some("HEAD")
                 && surface.route.as_deref() == Some("/accounts/status")
         }));
-        assert!(routes
-            .iter()
-            .any(|surface| { surface.method.as_deref() == Some("ANY")
-                && surface.route.as_deref() == Some("/accounts/audit") }));
+        assert!(routes.iter().any(|surface| {
+            surface.method.as_deref() == Some("ANY")
+                && surface.route.as_deref() == Some("/accounts/audit")
+        }));
     }
 
     #[test]
@@ -3658,26 +3635,26 @@ mod tests {
             surface.method.as_deref() == Some("ANY")
                 && surface.route.as_deref() == Some("/accounts/{id}")
         }));
-        assert!(routes
-            .iter()
-            .any(|surface| { surface.method.as_deref() == Some("ANY")
-                && surface.route.as_deref() == Some("/accounts/recovery") }));
+        assert!(routes.iter().any(|surface| {
+            surface.method.as_deref() == Some("ANY")
+                && surface.route.as_deref() == Some("/accounts/recovery")
+        }));
         assert!(routes.iter().any(|surface| {
             surface.method.as_deref() == Some("GET")
                 && surface.route.as_deref() == Some("/accounts")
         }));
-        assert!(routes
-            .iter()
-            .any(|surface| { surface.method.as_deref() == Some("POST")
-                && surface.route.as_deref() == Some("/accounts/import") }));
+        assert!(routes.iter().any(|surface| {
+            surface.method.as_deref() == Some("POST")
+                && surface.route.as_deref() == Some("/accounts/import")
+        }));
         assert!(routes.iter().any(|surface| {
             surface.method.as_deref() == Some("HEAD")
                 && surface.route.as_deref() == Some("/accounts/status")
         }));
-        assert!(routes
-            .iter()
-            .any(|surface| { surface.method.as_deref() == Some("OPTIONS")
-                && surface.route.as_deref() == Some("/accounts/preflight") }));
+        assert!(routes.iter().any(|surface| {
+            surface.method.as_deref() == Some("OPTIONS")
+                && surface.route.as_deref() == Some("/accounts/preflight")
+        }));
     }
 
     #[test]
@@ -4981,7 +4958,8 @@ mod tests {
         fs::create_dir_all(temp.path().join("src/main/java/app")).unwrap();
         fs::write(temp.path().join("build.gradle"), "plugins { id 'java' }\n").unwrap();
         fs::write(
-            temp.path().join("src/main/java/app/ServiceRpcHandlers.java"),
+            temp.path()
+                .join("src/main/java/app/ServiceRpcHandlers.java"),
             r#"
               import org.apache.dubbo.config.annotation.DubboService;
               @DubboService
@@ -5027,7 +5005,8 @@ mod tests {
         fs::create_dir_all(temp.path().join("src/main/java/app")).unwrap();
         fs::write(temp.path().join("build.gradle"), "plugins { id 'java' }\n").unwrap();
         fs::write(
-            temp.path().join("src/main/java/app/StreamingController.java"),
+            temp.path()
+                .join("src/main/java/app/StreamingController.java"),
             r#"
               import org.springframework.web.bind.annotation.GetMapping;
               class StreamingController {
@@ -5140,7 +5119,10 @@ mod tests {
                 && surface.method.as_deref() == Some("ANY")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
                 && surface.boundary.as_deref() == Some("remote_rpc")
-                && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
                     == Some("dotnet.graphql")
         }));
         assert!(map.surfaces.iter().any(|surface| {
@@ -5149,7 +5131,10 @@ mod tests {
                 && surface.method.as_deref() == Some("ANY")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
                 && surface.boundary.as_deref() == Some("remote_rpc")
-                && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
                     == Some("dotnet.graphql")
         }));
         assert!(map.surfaces.iter().any(|surface| {
@@ -5186,7 +5171,10 @@ mod tests {
                 && surface.method.as_deref() == Some("ANY")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
                 && surface.boundary.as_deref() == Some("remote_rpc")
-                && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
                     == Some("dotnet.signalr-hub")
         }));
         assert!(map.surfaces.iter().any(|surface| {
@@ -5195,7 +5183,10 @@ mod tests {
                 && surface.method.as_deref() == Some("ANY")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
                 && surface.boundary.as_deref() == Some("remote_rpc")
-                && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
                     == Some("dotnet.blazor-hub")
         }));
         assert!(map.surfaces.iter().any(|surface| {
@@ -5204,7 +5195,10 @@ mod tests {
                 && surface.method.as_deref() == Some("ANY")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
                 && surface.boundary.as_deref() == Some("remote_rpc")
-                && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
                     == Some("dotnet.blazor-hub")
         }));
         assert!(map.surfaces.iter().any(|surface| {
@@ -5219,7 +5213,10 @@ mod tests {
                 && surface.method.as_deref() == Some("ANY")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
                 && surface.boundary.as_deref() == Some("rpc_handler")
-                && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
                     == Some("dotnet.grpc-service")
         }));
         assert!(map.surfaces.iter().any(|surface| {
@@ -6264,8 +6261,7 @@ mod tests {
         }));
         assert!(map.surfaces.iter().any(|surface| {
             surface.kind == AttackSurfaceKind::HttpRoute
-                && surface.route.as_deref()
-                    == Some("/docs/custom/{documentName}/swagger.json")
+                && surface.route.as_deref() == Some("/docs/custom/{documentName}/swagger.json")
                 && surface.method.as_deref() == Some("GET")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
         }));
@@ -6275,7 +6271,10 @@ mod tests {
                 && surface.method.as_deref() == Some("ANY")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
                 && surface.boundary.as_deref() == Some("remote_rpc")
-                && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
                     == Some("dotnet.graphql")
         }));
         assert!(map.surfaces.iter().any(|surface| {
@@ -6284,13 +6283,15 @@ mod tests {
                 && surface.method.as_deref() == Some("ANY")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
                 && surface.boundary.as_deref() == Some("remote_rpc")
-                && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
                     == Some("dotnet.graphql")
         }));
         assert!(map.surfaces.iter().any(|surface| {
             surface.kind == AttackSurfaceKind::HttpRoute
-                && surface.route.as_deref()
-                    == Some("/internal/docs/openapi/{documentName}.json")
+                && surface.route.as_deref() == Some("/internal/docs/openapi/{documentName}.json")
                 && surface.method.as_deref() == Some("GET")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
         }));
@@ -6300,20 +6301,21 @@ mod tests {
                 && surface.method.as_deref() == Some("ANY")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
                 && surface.boundary.as_deref() == Some("remote_rpc")
-                && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
                     == Some("dotnet.graphql")
         }));
         assert!(map.surfaces.iter().any(|surface| {
             surface.kind == AttackSurfaceKind::HttpRoute
-                && surface.route.as_deref()
-                    == Some("/assigned/docs/openapi/{documentName}.json")
+                && surface.route.as_deref() == Some("/assigned/docs/openapi/{documentName}.json")
                 && surface.method.as_deref() == Some("GET")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
         }));
         assert!(map.surfaces.iter().any(|surface| {
             surface.kind == AttackSurfaceKind::HttpRoute
-                && surface.route.as_deref()
-                    == Some("/assigned/docs/custom/{documentName}.json")
+                && surface.route.as_deref() == Some("/assigned/docs/custom/{documentName}.json")
                 && surface.method.as_deref() == Some("GET")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
         }));
@@ -6323,7 +6325,10 @@ mod tests {
                 && surface.method.as_deref() == Some("ANY")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
                 && surface.boundary.as_deref() == Some("remote_rpc")
-                && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
                     == Some("dotnet.graphql")
         }));
     }
@@ -6356,7 +6361,10 @@ mod tests {
                 && surface.method.as_deref() == Some("ANY")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
                 && surface.boundary.as_deref() == Some("remote_rpc")
-                && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
                     == Some("dotnet.blazor-hub")
         }));
         assert!(map.surfaces.iter().any(|surface| {
@@ -6365,7 +6373,10 @@ mod tests {
                 && surface.method.as_deref() == Some("ANY")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
                 && surface.boundary.as_deref() == Some("remote_rpc")
-                && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
                     == Some("dotnet.blazor-hub")
         }));
         assert!(map.surfaces.iter().any(|surface| {
@@ -6386,7 +6397,10 @@ mod tests {
                 && surface.method.as_deref() == Some("ANY")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
                 && surface.boundary.as_deref() == Some("remote_rpc")
-                && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
                     == Some("dotnet.blazor-hub")
         }));
         assert!(map.surfaces.iter().any(|surface| {
@@ -6401,7 +6415,10 @@ mod tests {
                 && surface.method.as_deref() == Some("ANY")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
                 && surface.boundary.as_deref() == Some("remote_rpc")
-                && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
                     == Some("dotnet.blazor-hub")
         }));
         assert!(map.surfaces.iter().any(|surface| {
@@ -6661,7 +6678,8 @@ mod tests {
         fs::create_dir_all(temp.path().join("src/main/java/app")).unwrap();
         fs::write(temp.path().join("build.gradle"), "plugins { id 'java' }\n").unwrap();
         fs::write(
-            temp.path().join("src/main/java/app/IntegrationHandlers.java"),
+            temp.path()
+                .join("src/main/java/app/IntegrationHandlers.java"),
             r#"
               import org.springframework.integration.annotation.InboundChannelAdapter;
               import org.springframework.integration.annotation.ServiceActivator;
@@ -6937,7 +6955,10 @@ mod tests {
                         && surface.method.as_deref() == Some("ANY")
                         && surface.framework.as_deref() == Some("ASP.NET Core")
                         && surface.boundary.as_deref() == Some("remote_rpc")
-                        && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                        && surface
+                            .metadata
+                            .pointer("/detector")
+                            .and_then(Value::as_str)
                             == Some("dotnet.signalr-hub")
                 }),
                 "missing grouped SignalR hub route: {route}"
@@ -7004,7 +7025,10 @@ mod tests {
                 && surface.method.as_deref() == Some("ANY")
                 && surface.framework.as_deref() == Some("ASP.NET Core")
                 && surface.boundary.as_deref() == Some("rpc_handler")
-                && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                && surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
                     == Some("dotnet.grpc-service")
         }));
         for route in ["/grpc", "/internal/grpc", "/assigned/grpc"] {
@@ -7015,7 +7039,10 @@ mod tests {
                         && surface.method.as_deref() == Some("ANY")
                         && surface.framework.as_deref() == Some("ASP.NET Core")
                         && surface.boundary.as_deref() == Some("rpc_handler")
-                        && surface.metadata.pointer("/detector").and_then(Value::as_str)
+                        && surface
+                            .metadata
+                            .pointer("/detector")
+                            .and_then(Value::as_str)
                             == Some("dotnet.grpc-service")
                 }),
                 "missing grouped gRPC service route: {route}"
@@ -7557,8 +7584,11 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("routes")).unwrap();
         fs::create_dir_all(temp.path().join("app/Http/Controllers")).unwrap();
-        fs::write(temp.path().join("composer.json"), r#"{"require":{"laravel/framework":"^10"}}"#)
-            .unwrap();
+        fs::write(
+            temp.path().join("composer.json"),
+            r#"{"require":{"laravel/framework":"^10"}}"#,
+        )
+        .unwrap();
         fs::write(
             temp.path().join("routes/web.php"),
             r#"
@@ -7741,7 +7771,9 @@ mod tests {
                         .and_then(Value::as_str)
                         == Some("php.file-upload")
             })
-            .unwrap_or_else(|| panic!("missing Symfony request file upload in {:#?}", map.surfaces));
+            .unwrap_or_else(|| {
+                panic!("missing Symfony request file upload in {:#?}", map.surfaces)
+            });
 
         assert!(upload_surface
             .risk
@@ -7780,7 +7812,11 @@ mod tests {
     #[test]
     fn attack_surface_preserves_django_as_view_methods() {
         let temp = tempfile::tempdir().unwrap();
-        fs::write(temp.path().join("requirements.txt"), "django\ndjangorestframework\n").unwrap();
+        fs::write(
+            temp.path().join("requirements.txt"),
+            "django\ndjangorestframework\n",
+        )
+        .unwrap();
         fs::write(
             temp.path().join("urls.py"),
             "from django.urls import path\nurlpatterns = [path('imports/file/', ImportView.as_view({'post': 'create'}))]\n",
@@ -8172,7 +8208,9 @@ mod tests {
                         .and_then(Value::as_str)
                         == Some("python.request-trust")
             })
-            .unwrap_or_else(|| panic!("missing Django request META surface in {:#?}", map.surfaces));
+            .unwrap_or_else(|| {
+                panic!("missing Django request META surface in {:#?}", map.surfaces)
+            });
         assert!(surface
             .risk
             .reasons
@@ -8500,11 +8538,7 @@ mod tests {
     fn attack_surface_detects_aspnet_antiforgery_as_request_trust() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("Controllers")).unwrap();
-        fs::write(
-            temp.path().join("Program.cs"),
-            "app.UseAntiforgery();\n",
-        )
-        .unwrap();
+        fs::write(temp.path().join("Program.cs"), "app.UseAntiforgery();\n").unwrap();
         fs::write(
             temp.path().join("Controllers/CheckoutController.cs"),
             r#"
@@ -8933,7 +8967,10 @@ mod tests {
                     .count()
             )
         );
-        assert_eq!(first.surfaces.first().map(|surface| surface.risk.rank), Some(1));
+        assert_eq!(
+            first.surfaces.first().map(|surface| surface.risk.rank),
+            Some(1)
+        );
         assert_ranked_by_risk(&first);
         assert_eq!(
             first.summary.by_kind.get("http_route"),
@@ -8979,7 +9016,11 @@ mod tests {
     fn assert_detector(map: &AttackSurfaceMap, detector: &str) {
         assert!(
             map.surfaces.iter().any(|surface| {
-                surface.metadata.pointer("/detector").and_then(Value::as_str) == Some(detector)
+                surface
+                    .metadata
+                    .pointer("/detector")
+                    .and_then(Value::as_str)
+                    == Some(detector)
             }),
             "missing detector {detector:?} in {:#?}",
             map.surfaces

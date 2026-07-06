@@ -9,6 +9,8 @@ pub(crate) fn row_to_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Findin
     Ok(Finding {
         id: row.id,
         scan_id: row.scan_id,
+        identity_id: row.identity_id,
+        identity_match_tier: row.identity_match_tier,
         fingerprint: row.fingerprint,
         rule_id: row.rule_id,
         title: row.title,
@@ -40,6 +42,8 @@ pub(crate) fn row_to_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Findin
 struct FindingRow {
     id: Option<i64>,
     scan_id: Option<String>,
+    identity_id: Option<String>,
+    identity_match_tier: Option<String>,
     fingerprint: String,
     rule_id: String,
     title: String,
@@ -71,6 +75,8 @@ fn finding_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FindingRow> {
     Ok(FindingRow {
         id: identity.id,
         scan_id: identity.scan_id,
+        identity_id: identity.identity_id,
+        identity_match_tier: identity.identity_match_tier,
         fingerprint: identity.fingerprint,
         rule_id: identity.rule_id,
         title: identity.title,
@@ -99,6 +105,8 @@ fn finding_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FindingRow> {
 struct FindingIdentityRow {
     id: Option<i64>,
     scan_id: Option<String>,
+    identity_id: Option<String>,
+    identity_match_tier: Option<String>,
     fingerprint: String,
     rule_id: String,
     title: String,
@@ -108,6 +116,8 @@ fn finding_identity_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<FindingIden
     Ok(FindingIdentityRow {
         id: row.get(0)?,
         scan_id: row.get(1)?,
+        identity_id: row.get(27).ok(),
+        identity_match_tier: row.get(28).ok(),
         fingerprint: row.get(2)?,
         rule_id: row.get(3)?,
         title: row.get(4)?,

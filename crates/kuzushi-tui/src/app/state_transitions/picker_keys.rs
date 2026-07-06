@@ -76,7 +76,7 @@ impl ShellApp {
     }
 
     pub(crate) fn picker_prompt_focused(&self) -> bool {
-        self.is_picker_view() && self.picker_focus == PickerFocus::Prompt
+        self.is_picker_view() && self.current_picker_focus() == PickerFocus::Prompt
     }
 
     fn handle_picker_prompt_focus_key(&mut self, key: KeyEvent) -> bool {
@@ -90,13 +90,13 @@ impl ShellApp {
     fn should_enter_picker_prompt(&self, key: KeyEvent) -> bool {
         key.modifiers.is_empty()
             && key.code == KeyCode::Char(':')
-            && self.planning_option_edit.is_none()
+            && self.planning_picker_route.option_edit().is_none()
     }
 
     fn enter_picker_prompt_focus(&mut self) {
-        self.picker_focus = PickerFocus::Prompt;
-        self.planning_option_edit = None;
-        self.planning_option_error = None;
+        self.set_current_picker_focus(PickerFocus::Prompt);
+        self.planning_picker_route.set_option_edit(None);
+        self.planning_picker_route.clear_option_error();
     }
 
     fn leave_picker_prompt_focus(&mut self) {
@@ -106,7 +106,27 @@ impl ShellApp {
             self.cursor = 0;
             self.history_index = None;
         }
-        self.picker_focus = PickerFocus::List;
+        self.set_current_picker_focus(PickerFocus::List);
+    }
+
+    fn current_picker_focus(&self) -> PickerFocus {
+        match self.shell_view {
+            ShellView::ModelPicker => self.model_picker_route.focus(),
+            ShellView::AuthMethodPicker(_) => self.auth_picker_route.focus(),
+            ShellView::TargetPicker => self.target_picker_route.focus(),
+            ShellView::PlanningPicker => self.planning_picker_route.focus(),
+            _ => PickerFocus::List,
+        }
+    }
+
+    fn set_current_picker_focus(&mut self, focus: PickerFocus) {
+        match self.shell_view {
+            ShellView::ModelPicker => self.model_picker_route.set_focus(focus),
+            ShellView::AuthMethodPicker(_) => self.auth_picker_route.set_focus(focus),
+            ShellView::TargetPicker => self.target_picker_route.set_focus(focus),
+            ShellView::PlanningPicker => self.planning_picker_route.set_focus(focus),
+            _ => {}
+        }
     }
 
     fn handle_model_picker_key(&mut self, code: KeyCode) -> bool {
@@ -137,16 +157,12 @@ impl ShellApp {
 
     fn move_model_picker_cursor(&mut self, delta: isize) {
         let len = visible_model_choices(self.config.model.as_deref()).len();
-        if len == 0 {
-            return;
-        }
-        let current = (self.model_picker_cursor.min(len - 1)) as isize;
-        self.model_picker_cursor = (current + delta).rem_euclid(len as isize) as usize;
+        self.model_picker_route.move_cursor(delta, len);
     }
 
     fn accept_model_picker_choice(&mut self) {
         let choices = visible_model_choices(self.config.model.as_deref());
-        let Some(choice) = choices.get(self.model_picker_cursor).copied() else {
+        let Some(choice) = choices.get(self.model_picker_route.cursor()).copied() else {
             self.log("error", "no model choices available");
             return;
         };
@@ -193,6 +209,10 @@ impl ShellApp {
                 self.accept_target_picker_choice();
                 true
             }
+            KeyCode::Char('d') => {
+                self.start_offline_demo_fixture_scan();
+                true
+            }
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.defer_target_picker();
                 true
@@ -202,21 +222,16 @@ impl ShellApp {
     }
 
     fn move_target_picker_cursor(&mut self, delta: isize) {
-        let len = self.target_candidates.len();
-        if len == 0 {
-            return;
-        }
-        let current = (self.target_picker_cursor.min(len - 1)) as isize;
-        self.target_picker_cursor = (current + delta).rem_euclid(len as isize) as usize;
+        self.target_picker_route.move_cursor(delta);
     }
 
     fn accept_target_picker_choice(&mut self) {
-        let Some(candidate) = self.target_candidates.get(self.target_picker_cursor) else {
+        let Some(candidate) = self.target_picker_route.selected().cloned() else {
             self.log("error", "no target candidates available");
             return;
         };
         let path = candidate.path.display().to_string();
-        let selected_scope = candidate.scope.clone();
+        let selected_scope = candidate.scope;
         // Same wiring as the `target <path>` verb: workspace root, state
         // dir, findings, and program scope all refresh together.
         self.handle_target_command(Some(&path));
@@ -286,25 +301,26 @@ impl ShellApp {
     }
 
     fn handle_auth_api_key_draft_key(&mut self, code: KeyCode) -> bool {
-        if self.auth_picker_cursor != 0 {
+        if !self.auth_picker_route.is_api_key_row() {
             return false;
         }
         match code {
             KeyCode::Char(ch)
-                if self.auth_key_draft.is_empty() && matches!(ch, 'j' | 'k' | 'q') =>
+                if self.auth_picker_route.key_draft().is_empty()
+                    && matches!(ch, 'j' | 'k' | 'q') =>
             {
                 false
             }
             KeyCode::Char(ch) if !ch.is_control() && !ch.is_whitespace() => {
-                self.auth_key_draft.push(ch);
+                self.auth_picker_route.push_key_char(ch);
                 true
             }
             KeyCode::Backspace => {
-                self.auth_key_draft.pop();
+                self.auth_picker_route.pop_key_char();
                 true
             }
             KeyCode::Delete => {
-                self.auth_key_draft.clear();
+                self.auth_picker_route.clear_key_draft();
                 true
             }
             _ => false,
@@ -312,9 +328,7 @@ impl ShellApp {
     }
 
     fn move_auth_picker_cursor(&mut self, delta: isize) {
-        let len = 3usize; // API key + OAuth + offline demo
-        let current = (self.auth_picker_cursor.min(len - 1)) as isize;
-        self.auth_picker_cursor = (current + delta).rem_euclid(len as isize) as usize;
+        self.auth_picker_route.move_cursor(delta);
     }
 
     fn accept_auth_picker_choice(&mut self) {
@@ -322,12 +336,12 @@ impl ShellApp {
             ShellView::AuthMethodPicker(provider) => provider.clone(),
             _ => return,
         };
-        if self.auth_picker_cursor == 2 {
-            self.auth_key_draft.clear();
+        if self.auth_picker_route.is_offline_demo_row() {
+            self.auth_picker_route.clear_key_draft();
             self.start_offline_demo_fixture_scan();
             return;
         }
-        if self.auth_picker_cursor == 0 {
+        if self.auth_picker_route.is_api_key_row() {
             self.accept_auth_api_key_choice(&provider);
         } else {
             self.accept_auth_oauth_choice(&provider);
@@ -336,7 +350,7 @@ impl ShellApp {
 
     fn accept_auth_api_key_choice(&mut self, provider: &str) {
         let api_key_provider = api_key_auth_provider(provider);
-        if !self.auth_key_draft.trim().is_empty() {
+        if !self.auth_picker_route.key_draft_trimmed().is_empty() {
             self.accept_pasted_auth_api_key(provider, api_key_provider);
             return;
         }
@@ -358,8 +372,7 @@ impl ShellApp {
 
     fn accept_pasted_auth_api_key(&mut self, provider: &str, api_key_provider: &str) {
         let env_var = api_key_env_var(api_key_provider);
-        let key = self.auth_key_draft.trim().to_string();
-        self.auth_key_draft.clear();
+        let key = self.auth_picker_route.take_key_draft_trimmed();
         // In-session only: this removes the relaunch wall without writing a
         // secret to shell history, command history, config, or logs.
         unsafe {
@@ -431,7 +444,7 @@ impl ShellApp {
     }
 
     fn defer_auth_picker(&mut self) {
-        self.auth_key_draft.clear();
+        self.auth_picker_route.clear_key_draft();
         self.log(
             "onboarding",
             "auth deferred — set credentials and re-run /onboarding when ready",
@@ -447,7 +460,7 @@ impl ShellApp {
         if self.handle_planning_option_edit_key(key.code) {
             return true;
         }
-        match self.picker_focus {
+        match self.planning_picker_route.focus() {
             PickerFocus::List => self.handle_planning_step_key(key.code),
             PickerFocus::OptionsPane => self.handle_planning_options_key(key.code),
             PickerFocus::Prompt => false,
@@ -455,7 +468,7 @@ impl ShellApp {
     }
 
     fn handle_planning_option_edit_key(&mut self, code: KeyCode) -> bool {
-        if self.planning_option_edit.is_none() {
+        if self.planning_picker_route.option_edit().is_none() {
             return false;
         }
         match code {
@@ -472,7 +485,7 @@ impl ShellApp {
                 true
             }
             KeyCode::Delete => {
-                if let Some(edit) = self.planning_option_edit.as_mut() {
+                if let Some(edit) = self.planning_picker_route.option_edit_mut() {
                     edit.draft.clear();
                 }
                 true
@@ -609,7 +622,7 @@ impl ShellApp {
     /// `g` on a cached Map artifact row toggles it between reuse (default) and
     /// rebuild. Rebuild marks the row to re-run even though its artifact exists.
     fn toggle_rebuild_current_row(&mut self) {
-        let Some(row) = self.planning_tasks.get(self.planning_cursor) else {
+        let Some(row) = self.planning_picker_route.current_row().cloned() else {
             return;
         };
         let id = row.id;
@@ -634,29 +647,23 @@ impl ShellApp {
             );
             return;
         }
-        if self.planning_rebuild.remove(&id) {
-            self.planning_selected.remove(&id);
-            self.log("phase", format!("[reuse] {} (cached)", id.label()));
-        } else {
-            self.planning_rebuild.insert(id);
-            self.planning_selected.insert(id);
+        if self.planning_picker_route.toggle_rebuild(id) {
             self.log("phase", format!("[rebuild] {}", id.label()));
+        } else {
+            self.log("phase", format!("[reuse] {} (cached)", id.label()));
         }
     }
 
     fn move_planning_cursor(&mut self, delta: isize) {
-        let len = self.planning_tasks.len();
-        if len == 0 {
+        if self.planning_picker_route.tasks().is_empty() {
             return;
         }
-        let current = (self.planning_cursor.min(len - 1)) as isize;
-        self.planning_cursor = (current + delta).rem_euclid(len as isize) as usize;
+        self.planning_picker_route.move_cursor(delta);
         self.clamp_planning_option_cursor();
-        self.planning_option_error = None;
     }
 
     fn move_planning_phase(&mut self, delta: isize) {
-        let Some(current) = self.workflow_phase else {
+        let Some(current) = self.engagement.current_phase() else {
             return;
         };
         let next = if delta < 0 {
@@ -672,80 +679,36 @@ impl ShellApp {
     }
 
     fn toggle_planning_current_row(&mut self) {
-        let Some(task) = self
-            .planning_tasks
-            .get(self.planning_cursor)
-            .map(|row| row.id)
-        else {
+        let Some(task) = self.planning_picker_route.current_row().map(|row| row.id) else {
             return;
         };
-        let outcome = toggle_planning_row(task, &self.planning_tasks, &mut self.planning_selected);
+        let tasks = self.planning_picker_route.tasks().to_vec();
+        let outcome = toggle_planning_row(task, &tasks, self.planning_picker_route.selected_mut());
         self.log_toggle_outcome(&outcome);
     }
 
     fn log_toggle_outcome(&mut self, outcome: &ToggleOutcome) {
-        match outcome {
-            ToggleOutcome::On { task, auto_added } => {
-                if auto_added.is_empty() {
-                    self.log("planning", format!("[x] {}", task.label()));
-                } else {
-                    let deps = auto_added
-                        .iter()
-                        .map(|dep| dep.label())
-                        .collect::<Vec<_>>()
-                        .join(", ");
-                    self.log(
-                        "planning",
-                        format!("[x] {} — auto-selected {}", task.label(), deps),
-                    );
-                }
-            }
-            ToggleOutcome::Off { task } => {
-                self.log("planning", format!("[ ] {}", task.label()));
-            }
-            ToggleOutcome::Blocked { task, dependents } => {
-                let deps = dependents
-                    .iter()
-                    .map(|dep| dep.label())
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                self.log(
-                    "planning",
-                    format!(
-                        "cannot uncheck {} — still required by: {} (uncheck those first)",
-                        task.label(),
-                        deps
-                    ),
-                );
-            }
-            ToggleOutcome::MissingCli { task, cli } => {
-                self.log(
-                    "planning",
-                    format!(
-                        "{} needs `{cli}` on PATH — install it or set KUZUSHI_*_BIN",
-                        task.label()
-                    ),
-                );
-            }
-        }
+        self.log("planning", toggle_outcome_message(outcome));
     }
 
     fn select_all_planning_rows(&mut self) {
-        for row in &self.planning_tasks {
+        let rows = self.planning_picker_route.tasks().to_vec();
+        let selected = self.planning_picker_route.selected_mut();
+        for row in &rows {
             if row.cli_available
                 || matches!(
                     row.artifact_state,
                     crate::app::PlanningArtifactState::Cached
                 )
             {
-                self.planning_selected.insert(row.id);
+                selected.insert(row.id);
             }
         }
         self.log("planning", "selected all available rows");
     }
 
     fn clear_planning_selection(&mut self) {
-        self.planning_selected.clear();
+        self.planning_picker_route.selected_mut().clear();
         self.log("planning", "cleared selection");
     }
 
@@ -753,10 +716,11 @@ impl ShellApp {
         if self.open_file_picker_for_attach_only_plan() {
             return;
         }
+        self.drop_failed_dependency_selection();
         let plan = build_execution_plan(
-            &self.planning_tasks,
-            &self.planning_selected,
-            &self.planning_rebuild,
+            self.planning_picker_route.tasks(),
+            self.planning_picker_route.selected(),
+            self.planning_picker_route.rebuild(),
         );
         if plan.is_empty() {
             self.explain_empty_planning_confirm();
@@ -771,13 +735,13 @@ impl ShellApp {
             "planning",
             format!("running {} {}: {labels}", plan.len(), step_word(plan.len())),
         );
-        self.planning_run_queue = plan.into_iter().collect();
+        self.engagement.queue_plan(plan);
         let Ok(workspace) = self.current_workspace() else {
             self.log(
                 "error",
                 "cannot run planning queue without an active workspace",
             );
-            self.planning_run_queue.clear();
+            self.engagement.clear_planning_queue();
             return;
         };
         // A committed phase run always shows live progress — even when ad-hoc
@@ -787,11 +751,57 @@ impl ShellApp {
         self.dispatch_next_planning_task(workspace);
     }
 
+    fn drop_failed_dependency_selection(&mut self) {
+        if !self.engagement.has_failed_tasks() {
+            return;
+        }
+        let failed = self.engagement.failed_task_ids();
+        let blocked = self
+            .planning_picker_route
+            .selected()
+            .iter()
+            .copied()
+            .filter(|task| Self::failed_selection_blocks(*task, &failed))
+            .collect::<Vec<_>>();
+        if blocked.is_empty() {
+            return;
+        }
+        for task in &blocked {
+            self.planning_picker_route.selected_mut().remove(task);
+        }
+        let labels = blocked
+            .iter()
+            .map(|task| task.tool_name())
+            .collect::<Vec<_>>()
+            .join(", ");
+        self.log(
+            "phase",
+            format!("skipping blocked downstream task(s): {labels}"),
+        );
+    }
+
+    fn failed_selection_blocks(
+        task: PlanningTaskId,
+        failed: &std::collections::BTreeSet<PlanningTaskId>,
+    ) -> bool {
+        failed.contains(&task)
+            || transitive_dependencies(task)
+                .into_iter()
+                .any(|dependency| failed.contains(&dependency))
+    }
+
     fn open_file_picker_for_current_planning_row(&mut self) -> bool {
-        let Some(row) = self.planning_tasks.get(self.planning_cursor) else {
+        let Some(row) = self.planning_picker_route.current_row() else {
             return false;
         };
         if row.id != PlanningTaskId::AttachFiles {
+            return false;
+        }
+        if !self
+            .planning_picker_route
+            .selected()
+            .contains(&PlanningTaskId::AttachFiles)
+        {
             return false;
         }
         self.open_file_picker();
@@ -799,9 +809,10 @@ impl ShellApp {
     }
 
     fn open_file_picker_for_attach_only_plan(&mut self) -> bool {
-        if self.planning_selected.len() != 1
+        if self.planning_picker_route.selected().len() != 1
             || !self
-                .planning_selected
+                .planning_picker_route
+                .selected()
                 .contains(&PlanningTaskId::AttachFiles)
         {
             return false;
@@ -815,15 +826,14 @@ impl ShellApp {
     /// the phase — say what happened instead, and only advance when the
     /// operator selected nothing at all (an explicit "skip this phase").
     fn explain_empty_planning_confirm(&mut self) {
-        if self.planning_selected.is_empty() {
+        if self.planning_picker_route.selected().is_empty() {
             let phase = self
-                .workflow_phase
+                .engagement
+                .current_phase()
                 .map(|phase| phase.label())
                 .unwrap_or("planning");
             self.log("phase", format!("nothing selected — skipping {phase}"));
-            if let Some(phase) = self.workflow_phase {
-                self.planning_skipped_phases.insert(phase);
-            }
+            self.engagement.mark_current_phase_skipped();
             self.advance_to_next_phase();
             return;
         }
@@ -832,27 +842,27 @@ impl ShellApp {
             format!(
                 "nothing to run — all {} checked {} are cached and will be reused; \
                  press g to rebuild one, or s to skip this phase",
-                self.planning_selected.len(),
-                task_word(self.planning_selected.len())
+                self.planning_picker_route.selected().len(),
+                task_word(self.planning_picker_route.selected().len())
             ),
         );
     }
 
     fn skip_planning_phase(&mut self) {
         let phase = self
-            .workflow_phase
+            .engagement
+            .current_phase()
             .map(|phase| phase.label())
             .unwrap_or("planning");
         self.log("phase", format!("skipped {phase}"));
-        if let Some(phase) = self.workflow_phase {
-            self.planning_skipped_phases.insert(phase);
-        }
+        self.engagement.mark_current_phase_skipped();
         self.advance_to_next_phase();
     }
 
     fn close_planning_picker(&mut self) {
         let phase = self
-            .workflow_phase
+            .engagement
+            .current_phase()
             .map(|phase| phase.label())
             .unwrap_or("planning");
         self.log("phase", format!("closed {phase} picker"));
@@ -905,6 +915,50 @@ fn api_key_auth_provider(provider: &str) -> &str {
         "openai-codex" => "openai",
         other => other,
     }
+}
+
+fn toggle_outcome_message(outcome: &ToggleOutcome) -> String {
+    match outcome {
+        ToggleOutcome::On { task, auto_added } => toggle_on_message(*task, auto_added),
+        ToggleOutcome::Off { task } => format!("[ ] {}", task.label()),
+        ToggleOutcome::Blocked { task, dependents } => blocked_toggle_message(*task, dependents),
+        ToggleOutcome::MissingCli { task, cli } => {
+            format!(
+                "{} needs `{cli}` on PATH — install it or set KUZUSHI_*_BIN",
+                task.label()
+            )
+        }
+        ToggleOutcome::MissingPrereq { task, reason } => {
+            format!("{} unavailable — {reason}", task.label())
+        }
+    }
+}
+
+fn toggle_on_message(task: PlanningTaskId, auto_added: &[PlanningTaskId]) -> String {
+    if auto_added.is_empty() {
+        return format!("[x] {}", task.label());
+    }
+    format!(
+        "[x] {} — auto-selected {}",
+        task.label(),
+        planning_task_labels(auto_added)
+    )
+}
+
+fn blocked_toggle_message(task: PlanningTaskId, dependents: &[PlanningTaskId]) -> String {
+    format!(
+        "cannot uncheck {} — still required by: {} (uncheck those first)",
+        task.label(),
+        planning_task_labels(dependents)
+    )
+}
+
+fn planning_task_labels(tasks: &[PlanningTaskId]) -> String {
+    tasks
+        .iter()
+        .map(|dep| dep.label())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn api_key_env_var(provider: &str) -> &'static str {

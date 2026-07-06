@@ -13,15 +13,10 @@ default-run = "kuzushi"
 name = "kuzushi"
 path = "src/main.rs"
 
-[[bin]]
-name = "kz"
-path = "src/bin/kz.rs"
-
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
 kuzushi-core = { path = "../kuzushi-core" }
-kuzushi-mcp-common = { path = "../kuzushi-mcp-common" }
 kuzushi-openai = { path = "../kuzushi-openai" }
 kuzushi-tui = { path = "../kuzushi-tui" }
 serde_json.workspace = true

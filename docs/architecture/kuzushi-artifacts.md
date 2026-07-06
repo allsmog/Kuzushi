@@ -3,14 +3,14 @@
 Kuzushi runs are replayable evidence bundles under:
 
 ```text
-<target>/.kuzushi/runs/<runId>/
+<target>/.kuzushi/v3/runs/<runId>/
 ```
 
 The run artifact contract is intentionally independent of the TUI. Shell, run,
 and scan mode should all write artifacts through the same Rust substrate.
 When `kuzushi run` executes a targetless tool such as `config:show`, artifacts
 are rooted at the process current directory so the run still has a durable
-`.kuzushi/runs/<runId>/` bundle.
+`.kuzushi/v3/runs/<runId>/` bundle.
 
 ## Canonical Per-Run Files
 
@@ -36,7 +36,7 @@ Every run should converge on these files:
 The target should also maintain:
 
 ```text
-<target>/.kuzushi/latest
+<target>/.kuzushi/v3/latest
 ```
 
 `latest` points to the most recent run id for quick shell, replay, and failure
@@ -45,11 +45,11 @@ handoff lookup.
 Operators can prune accumulated run directories with
 `kuzushi runs prune --older-than-days <n>` and/or `--keep-last <n>`.
 `--dry-run` reports the selected run ids without deleting them. The Rust CLI
-repairs `.kuzushi/latest` after deletion so replay and failure handoff keep
+repairs `.kuzushi/v3/latest` after deletion so replay and failure handoff keep
 pointing at the newest remaining run.
 
 `schemas/run.summary.schema.json` is the machine-readable contract for
-canonical `run.json` and legacy `summary.json` metadata. It covers required run
+canonical `run.json` metadata. It covers required run
 identity/status/timing fields, optional tool/model/cost/error/reproducibility
 fields, LLM audit call metadata, malformed trace JSONL row counts when present,
 target git metadata, and artifact manifest entries embedded in the run summary.
@@ -144,28 +144,27 @@ prioritize boundaries without reimplementing scoring.
 
 The current Rust substrate already writes:
 
-- `.kuzushi/latest`
-- `.kuzushi/runs/<runId>/run.json`
-- `.kuzushi/runs/<runId>/summary.json`
-- `.kuzushi/runs/<runId>/events.jsonl`
-- `.kuzushi/runs/<runId>/trace.jsonl`
-- `.kuzushi/runs/<runId>/input.json`
-- `.kuzushi/runs/<runId>/result.json`
-- `.kuzushi/runs/<runId>/context.json`
-- `.kuzushi/runs/<runId>/attack-surface.json`
-- `.kuzushi/runs/<runId>/threat-model.json`
-- `.kuzushi/runs/<runId>/recommendations.json`
-- `.kuzushi/runs/<runId>/strategy.json`
-- `.kuzushi/runs/<runId>/findings.json`
-- `.kuzushi/runs/<runId>/proof.json`
-- `.kuzushi/runs/<runId>/failures.json`
-- `.kuzushi/runs/<runId>/report.md`; the recorder writes a deterministic
+- `.kuzushi/v3/latest`
+- `.kuzushi/v3/runs/<runId>/run.json`
+- `.kuzushi/v3/runs/<runId>/events.jsonl`
+- `.kuzushi/v3/runs/<runId>/trace.jsonl`
+- `.kuzushi/v3/runs/<runId>/input.json`
+- `.kuzushi/v3/runs/<runId>/result.json`
+- `.kuzushi/v3/runs/<runId>/context.json`
+- `.kuzushi/v3/runs/<runId>/attack-surface.json`
+- `.kuzushi/v3/runs/<runId>/threat-model.json`
+- `.kuzushi/v3/runs/<runId>/recommendations.json`
+- `.kuzushi/v3/runs/<runId>/strategy.json`
+- `.kuzushi/v3/runs/<runId>/findings.json`
+- `.kuzushi/v3/runs/<runId>/proof.json`
+- `.kuzushi/v3/runs/<runId>/failures.json`
+- `.kuzushi/v3/runs/<runId>/report.md`; the recorder writes a deterministic
   placeholder when no producer report is available and replaces it when a
   producer returns `reportMarkdown`, `report_markdown`,
   `data.reportMarkdown`, or `data.report_markdown`
-- `.kuzushi/runs/<runId>/report.sarif` when a producer returns
+- `.kuzushi/v3/runs/<runId>/report.sarif` when a producer returns
   `reportSarif`, `report_sarif`, `data.reportSarif`, or `data.report_sarif`
-- `.kuzushi/runs/<runId>/artifacts.json`
+- `.kuzushi/v3/runs/<runId>/artifacts.json`
 
 This is sufficient for current run replay and failure handoff, but it is not
 the final canonical contract. Context, attack-surface, threat-model,
@@ -177,19 +176,16 @@ ad-hoc side files. `module-recommender:recommend` results are preserved as the
 full recommendation report, including repository signals and capability
 coverage, rather than only the recommendation list. It also records
 producer-declared artifacts from top-level
-`artifacts` and nested `data.artifacts` into both `summary.json` and
-`artifacts.json`, so module-owned reports and sidecar outputs stay discoverable
-even when they are not one of the canonical filenames. Those replacements must
-not break existing `summary.json` or `trace.jsonl` readers. Readers that need
-run metadata should prefer canonical `run.json` and use `summary.json` only as
-a legacy fallback.
+`artifacts` and nested `data.artifacts` into `run.json` and `artifacts.json`,
+so module-owned reports and sidecar outputs stay discoverable even when they
+are not one of the canonical filenames.
 
 TUI synthetic scan and agent runs also append explicit `sast:scan` and
 `agent:ask` success/failure lifecycle events to `events.jsonl` when the panel
 resolves, including failed runs that exist only to carry bounded failure handoff
 context.
 
-`run.json` and the legacy `summary.json` include `houseRules` when
+`run.json` includes `houseRules` when
 `<target>/.kuzushi/house-rules/*.md` exists and `promptOverrides` when
 `<target>/.kuzushi/prompts/<module>/<verb>.md` exists. Each entry records the
 module id, relative path, and `sha256:` digest, plus the prompt verb where

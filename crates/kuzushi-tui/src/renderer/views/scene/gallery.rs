@@ -7,7 +7,7 @@ use super::*;
 use crate::scene3d::VizPage;
 use crate::theme;
 use crate::ui_view_models::{
-    attack_tree, dfd_model, findings_heatmap, taint_flow_path, AttackTree, DfdKind, DfdModel,
+    attack_tree, cached_findings_heatmap, dfd_model, taint_flow_path, AttackTree, DfdKind, DfdModel,
 };
 use crate::ChainSeverity;
 use ratatui::layout::Rect;
@@ -43,7 +43,7 @@ fn page_body_lines(app: &ShellApp, area: Rect, page: VizPage) -> Vec<Line<'stati
     let width = area.width as usize;
     match page {
         VizPage::AttackPath => attack_path_lines(width, &taint_flow_path(app)),
-        VizPage::Heatmap => heatmap_lines(width, &findings_heatmap(&app.findings)),
+        VizPage::Heatmap => heatmap_lines(width, &cached_findings_heatmap(app)),
         // Frame-rendered pages (3D terrain + box-drawing graph/tree) can't draw
         // in the line/plain path; show a short note instead.
         VizPage::AttackSurface => attack_surface_plain_lines(app, width),
@@ -54,13 +54,14 @@ fn page_body_lines(app: &ShellApp, area: Rect, page: VizPage) -> Vec<Line<'stati
 
 fn exploit_chain_plain_lines(width: usize, model: &AttackTree) -> Vec<Line<'static>> {
     if let Some(hint) = &model.empty_hint {
-        return vec![Line::from(vec![Span::styled(
-            fit_plain(hint, width),
-            theme::muted(),
-        )])];
+        return crate::renderer::empty_state_panel(
+            "no exploit chain",
+            &[hint],
+            &[("exploit-chain:scan", "build entry-to-impact chains")],
+        );
     }
     let mut lines = vec![Line::from(vec![Span::styled(
-        format!("ATTACK TREE · {} chains", model.chains.len()),
+        attack_tree_count_label(model),
         theme::accent(),
     )])];
     for (index, chain) in model.chains.iter().enumerate() {
@@ -74,9 +75,28 @@ fn exploit_chain_plain_lines(width: usize, model: &AttackTree) -> Vec<Line<'stat
             chain.narrative.as_deref(),
             &chain.preconditions,
             &chain.steps,
+            chain.hidden_step_count,
         );
     }
+    if model.hidden_chain_count > 0 {
+        lines.push(Line::styled(
+            format!("  +{} more chains", model.hidden_chain_count),
+            theme::muted(),
+        ));
+    }
     lines
+}
+
+fn attack_tree_count_label(model: &AttackTree) -> String {
+    let total = model.chains.len() + model.hidden_chain_count;
+    if model.hidden_chain_count == 0 {
+        format!("ATTACK TREE · {total} chains")
+    } else {
+        format!(
+            "ATTACK TREE · {total} chains · showing {}",
+            model.chains.len()
+        )
+    }
 }
 
 fn append_exploit_chain_lines(
@@ -89,8 +109,22 @@ fn append_exploit_chain_lines(
     narrative: Option<&str>,
     preconditions: &[String],
     steps: &[String],
+    hidden_step_count: usize,
 ) {
-    lines.push(plain_line(
+    lines.push(chain_header_line(width, index, title, severity));
+    append_optional_chain_line(lines, width, "impact", impact);
+    append_optional_chain_line(lines, width, "narrative", narrative);
+    append_precondition_lines(lines, width, preconditions);
+    append_step_lines(lines, width, steps, hidden_step_count);
+}
+
+fn chain_header_line(
+    width: usize,
+    index: usize,
+    title: &str,
+    severity: ChainSeverity,
+) -> Line<'static> {
+    plain_line(
         width,
         format!(
             "  {}. [{}] {}",
@@ -98,19 +132,38 @@ fn append_exploit_chain_lines(
             chain_severity_label(severity),
             title
         ),
-    ));
-    append_optional_chain_line(lines, width, "impact", impact);
-    append_optional_chain_line(lines, width, "narrative", narrative);
+    )
+}
+
+fn append_precondition_lines(
+    lines: &mut Vec<Line<'static>>,
+    width: usize,
+    preconditions: &[String],
+) {
     for precondition in preconditions.iter().take(3) {
         lines.push(plain_line(
             width,
             format!("      precondition: {precondition}"),
         ));
     }
+}
+
+fn append_step_lines(
+    lines: &mut Vec<Line<'static>>,
+    width: usize,
+    steps: &[String],
+    hidden_step_count: usize,
+) {
     for (step_index, step) in steps.iter().enumerate() {
         lines.push(plain_line(
             width,
             format!("      {}. {}", step_index + 1, step),
+        ));
+    }
+    if hidden_step_count > 0 {
+        lines.push(plain_line(
+            width,
+            format!("      +{hidden_step_count} more steps"),
         ));
     }
 }
@@ -140,10 +193,11 @@ fn chain_severity_label(severity: ChainSeverity) -> &'static str {
 
 fn dfd_plain_lines(width: usize, model: &DfdModel) -> Vec<Line<'static>> {
     if let Some(hint) = &model.empty_hint {
-        return vec![Line::from(vec![Span::styled(
-            fit_plain(hint, width),
-            theme::muted(),
-        )])];
+        return crate::renderer::empty_state_panel(
+            "no data-flow diagram",
+            &[hint],
+            &[("threat-model:build", "map trust zones and flows")],
+        );
     }
     let mut lines = vec![Line::from(vec![Span::styled(
         format!(
@@ -216,12 +270,9 @@ fn page_tagline(page: VizPage) -> &'static str {
 }
 
 fn nav_spans(app: &ShellApp, page: VizPage) -> Vec<Span<'static>> {
-    let index = VizPage::ALL.iter().position(|p| *p == page).unwrap_or(0) + 1;
-    let total = VizPage::ALL.len();
-    let mut spans = vec![
-        Span::styled(format!("page {index}/{total}"), theme::accent()),
-        Span::styled("  ·  Tab cycles".to_string(), theme::muted()),
-    ];
+    let mut spans = vec![Span::styled("pages  ".to_string(), theme::muted())];
+    append_page_tabs(&mut spans, app, page);
+    spans.push(Span::styled("  ·  Tab cycles".to_string(), theme::muted()));
     if page.is_3d() {
         let motion = if app.scene_paused {
             "paused"
@@ -242,26 +293,53 @@ fn nav_spans(app: &ShellApp, page: VizPage) -> Vec<Span<'static>> {
     spans
 }
 
-fn attack_surface_plain_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
-    if app.findings.is_empty() {
-        return vec![Line::from(vec![Span::styled(
-            fit_plain(
-                "no risk surface yet — run `scan` to populate findings.",
-                width,
-            ),
-            theme::muted(),
-        )])];
+fn append_page_tabs(spans: &mut Vec<Span<'static>>, app: &ShellApp, active: VizPage) {
+    for (index, page) in VizPage::ALL.iter().copied().enumerate() {
+        if index > 0 {
+            spans.push(Span::styled(" · ".to_string(), theme::subtle()));
+        }
+        spans.push(page_tab_span(app, page, active));
     }
-    frame_only_lines("3D relief")
 }
 
-/// Plain / non-TTY fallback for the frame-rendered pages (their braille/half-
-/// block graphics only paint in a real terminal).
-fn frame_only_lines(kind: &str) -> Vec<Line<'static>> {
-    vec![Line::from(vec![Span::styled(
-        format!("the {kind} renders only in an interactive truecolor terminal."),
+fn page_tab_span(app: &ShellApp, page: VizPage, active: VizPage) -> Span<'static> {
+    let mut label = page_nav_label(page).to_string();
+    if !page_has_content(app, page) {
+        label.push('·');
+    }
+    if page == active {
+        Span::styled(format!("[{label}]"), theme::accent())
+    } else {
+        Span::styled(label, theme::muted())
+    }
+}
+
+fn page_nav_label(page: VizPage) -> &'static str {
+    match page {
+        VizPage::AttackSurface => "terrain",
+        VizPage::AttackPath => "path",
+        VizPage::Dfd => "dfd",
+        VizPage::Heatmap => "heatmap",
+        VizPage::ExploitChain => "chain",
+    }
+}
+
+fn page_has_content(app: &ShellApp, page: VizPage) -> bool {
+    match page {
+        VizPage::AttackSurface | VizPage::Heatmap => !app.findings.is_empty(),
+        VizPage::AttackPath => app.taint_flow.is_some(),
+        VizPage::Dfd => dfd_model(app).empty_hint.is_none(),
+        VizPage::ExploitChain => !app.exploit_chains.is_empty(),
+    }
+}
+
+fn attack_surface_plain_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![Line::from(vec![Span::styled(
+        "3D terrain renders in a TTY — showing the module heatmap instead",
         theme::muted(),
-    )])]
+    )])];
+    lines.extend(heatmap_lines(width, &cached_findings_heatmap(app)));
+    lines
 }
 
 #[cfg(test)]
@@ -305,8 +383,28 @@ mod tests {
         let lines = scene_page_lines(&app, Rect::new(0, 0, 80, 24), VizPage::AttackSurface);
         let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
 
-        assert!(text.contains("no risk surface yet"), "{text}");
+        assert!(text.contains("no heatmap data"), "{text}");
         assert!(text.contains("run `scan`"), "{text}");
+    }
+
+    #[test]
+    fn attack_surface_plain_lines_project_heatmap_data() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.findings = vec![kuzushi_core::Finding::new_semgrep(
+            "rule.high",
+            "src/auth/login.rs",
+            10,
+            Some(10),
+            kuzushi_core::Severity::High,
+            "auth bug",
+        )];
+
+        let lines = scene_page_lines(&app, Rect::new(0, 0, 80, 24), VizPage::AttackSurface);
+        let text = lines.iter().map(line_text).collect::<Vec<_>>().join("\n");
+
+        assert!(text.contains("module"), "{text}");
+        assert!(text.contains("auth"), "{text}");
+        assert!(!text.contains("renders only in an interactive"), "{text}");
     }
 
     #[test]

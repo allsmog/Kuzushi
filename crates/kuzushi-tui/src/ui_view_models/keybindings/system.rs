@@ -22,7 +22,7 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
 }
 
 fn planning_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
-    match app.picker_focus {
+    match app.planning_picker_route.focus() {
         crate::app::PickerFocus::Prompt => picker_prompt_keybindings(),
         crate::app::PickerFocus::OptionsPane => vec![
             bind("KEYS", "j/k option"),
@@ -51,7 +51,7 @@ fn planning_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 }
 
 fn choice_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
-    if app.picker_focus == crate::app::PickerFocus::Prompt {
+    if choice_picker_prompt_focused(app) {
         return picker_prompt_keybindings();
     }
     vec![
@@ -61,6 +61,19 @@ fn choice_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         bind("Enter", "select"),
         bind("Esc", "skip"),
     ]
+}
+
+fn choice_picker_prompt_focused(app: &ShellApp) -> bool {
+    match app.shell_view {
+        ShellView::ModelPicker => app.model_picker_route.focus() == crate::app::PickerFocus::Prompt,
+        ShellView::AuthMethodPicker(_) => {
+            app.auth_picker_route.focus() == crate::app::PickerFocus::Prompt
+        }
+        ShellView::TargetPicker => {
+            app.target_picker_route.focus() == crate::app::PickerFocus::Prompt
+        }
+        _ => false,
+    }
 }
 
 fn picker_prompt_keybindings() -> Vec<FooterKeybinding> {

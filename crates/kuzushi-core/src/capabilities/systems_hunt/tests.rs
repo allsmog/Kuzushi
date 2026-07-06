@@ -130,6 +130,18 @@ mod tests {
     }
 
     #[test]
+    fn systems_hunt_unknown_severity_stays_unknown() {
+        assert_eq!(
+            parse_severity("unsupported scanner label".to_string()),
+            crate::findings::Severity::Unknown
+        );
+        assert_eq!(
+            parse_severity("ERROR".to_string()),
+            crate::findings::Severity::High
+        );
+    }
+
+    #[test]
     fn gathers_ranked_systems_surfaces() {
         let temp = tempdir().unwrap();
         fs::create_dir_all(temp.path().join("src")).unwrap();

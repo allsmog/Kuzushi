@@ -2,28 +2,28 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 89
 ---
- KUZUSHI > activity · mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › activity · mode:shell · target:none · ctx:not built · model:unconfigured
 
  -- ACTIVITY  run r-snapshot  ·  2/3 done  ·  1 running ----------------------------------------------------------------
- -- TASKS                                      |  -- OUTPUT
-# + context:build                          <1… | views  [findings·]  surface·   dfd·   heatmap·   path·   chain·
-  + semgrep:scan                           <1… |   [/] views · j/k item · o open findings · dots mean no artifact
-  * triage:run                             <1… |
-     + triage start                            | -- FINDINGS ------------------------------------------------
-     + evidence-collect                        |   opens the guided workflow for the target.
-     + stage1 kept 14/14                       |
-     ↳ verdict=likely-tp severity=high         |
- ⤳ subsystems (1)  active · hidden — V to exp… |
- legend: + done · * active · ! fail · x cance… |
-  ACTIONS                                      |
-     22:13:20  ⏵ [context:build] context:buil… |
-     22:13:20  + [context:build] context:buil… |
-     22:13:20  ⏵ [semgrep:scan] semgrep start  |
-     22:13:20  + [semgrep:scan] semgrep compl… |
-     22:13:20  ⏵ [triage:run] triage start     |
-     22:13:20   ↳ … [triage:run] evidence-col… |
-     22:13:20   ↳ … [triage:run] verdict=like… |
+ -- TASKS                                    |  -- OUTPUT
+# + context:build                        <1… | views  [findings·]  surface·   dfd·   heatmap·   path·   chain·
+  + semgrep:scan                         <1… | -- FINDINGS ------------------------------------------------
+  * triage:run                           <1… |   opens the guided workflow for the target.
+     + triage start                          |
+     + evidence-collect                      |
+     + stage1 kept 14/14                     |
+     ↳ verdict=likely-tp severity=high       |
+ ⤳ subsystems (1)  active · hidden — V to e… |
+ legend: + done · * active · ! fail · x can… |
+  ACTIONS                                    |
+     22:13:20  ⏵ [context:build] context:bu… |
+     22:13:20  + [context:build] context:bu… |
+     22:13:20  ⏵ [semgrep:scan] semgrep sta… |
+     22:13:20  + [semgrep:scan] semgrep com… |
+     22:13:20  ⏵ [triage:run] triage start   |
+     22:13:20   ↳ … [triage:run] evidence-c… |
+     22:13:20   ↳ … [triage:run] verdict=li… |
 
- > FOCUS  hover [j/k] to inspect a task
+ * FOCUS  hover [j/k] to inspect a task
  j/k/g/G scroll   Tab pane   [/] views   f findings   o open   V verbose   Space pause   x reset view   Enter focus
  Esc leave

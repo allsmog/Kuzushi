@@ -82,15 +82,15 @@ pub(crate) fn background_tool_worker(
     input: serde_json::Value,
     run_id: String,
     thinking_level: Option<String>,
-    tx: Sender<ToolEvent>,
+    sink: JobEventSink,
     trace_handle: Option<TraceHandle>,
     cancel: ScanCancellation,
 ) {
     if cancel.is_cancelled() {
-        let _ = tx.send(ToolEvent::Failed {
+        sink.send(ShellEvent::Tool(ToolEvent::Failed {
             tool_name,
             error: "tool run cancelled before start".to_string(),
-        });
+        }));
         return;
     }
     let result = run_background_tool(
@@ -104,18 +104,29 @@ pub(crate) fn background_tool_worker(
         trace_handle,
         cancel.clone(),
     );
-    let event = match result {
+    send_tool_event(&sink, tool_result_event(tool_name, result));
+}
+
+fn send_tool_event(sink: &JobEventSink, event: ToolEvent) {
+    sink.send(ShellEvent::Tool(event));
+}
+
+fn tool_result_event(tool_name: String, result: Result<serde_json::Value>) -> ToolEvent {
+    match result {
         Ok(result) => ToolEvent::Finished { tool_name, result },
-        Err(error) => ToolEvent::Failed {
-            tool_name,
-            // `{:#}` walks the full anyhow chain so operators see the
-            // underlying provider/bridge cause (e.g. "Anthropic API 429
-            // Too Many Requests"), not just the topmost wrap
-            // ("agent loop step 0 failed"). Without this, debugging
-            // model-side failures from the shell requires digging into
-            // `.kuzushi/runs/<id>/trace.jsonl` or rerunning under `kuzushi run`.
-            error: format!("{error:#}"),
-        },
-    };
-    let _ = tx.send(event);
+        Err(error) => failed_tool_event(tool_name, error),
+    }
+}
+
+fn failed_tool_event(tool_name: String, error: anyhow::Error) -> ToolEvent {
+    ToolEvent::Failed {
+        tool_name,
+        // `{:#}` walks the full anyhow chain so operators see the
+        // underlying provider/bridge cause (e.g. "Anthropic API 429
+        // Too Many Requests"), not just the topmost wrap
+        // ("agent loop step 0 failed"). Without this, debugging
+        // model-side failures from the shell requires digging into
+        // `.kuzushi/v3/runs/<id>/trace.jsonl` or rerunning under `kuzushi run`.
+        error: format!("{error:#}"),
+    }
 }

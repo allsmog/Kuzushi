@@ -16,13 +16,13 @@ pub fn run_semgrep_scan(
     workspace.ensure_state_dir()?;
 
     let run_id = Uuid::new_v4().to_string();
-    store.insert_scan_run(&run_id, workspace.root(), "running")?;
+    store.record_run_started(&run_id, workspace.root(), "running")?;
 
     let findings = scanner.scan(workspace.root())?;
     for finding in &findings {
         store.insert_finding(&run_id, finding)?;
     }
-    store.complete_scan_run(&run_id, "completed", findings.len())?;
+    store.record_run_finished(&run_id, "completed", findings.len())?;
 
     Ok(ScanRun {
         id: run_id,

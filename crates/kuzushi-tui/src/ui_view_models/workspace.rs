@@ -72,7 +72,7 @@ impl PlainWorkspaceModel {
             ],
             empty_rows: plain_workspace_empty_rows(model.empty),
             next_hint:
-                "Next: workspace status, workspace scope init, workspace export findings <path> [format]",
+                "Next: workspace status, workspace scope init, workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]",
         }
     }
 }

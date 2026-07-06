@@ -47,6 +47,7 @@ pub(crate) enum McpCommand {
     },
     /// Print a JSON health summary for the chosen backend (no MCP loop).
     Health {
+        /// Which backend to inspect.
         #[arg(value_enum)]
         backend: McpBackend,
     },
@@ -56,42 +57,50 @@ pub(crate) enum McpCommand {
 pub(crate) enum RunsCommand {
     /// List run summaries.
     List {
-        #[arg(long)]
+        #[arg(long, help = crate::support::TARGET_HELP)]
         target: Option<PathBuf>,
         /// Filter by run status: running, completed, failed, interrupted, partial, skipped.
         #[arg(long, value_delimiter = ',')]
         status: Vec<String>,
+        /// Emit the run list as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// Show one run summary.
     Show {
+        /// Run id under the target's `.kuzushi/v3/runs` directory.
         run_id: String,
-        #[arg(long)]
+        #[arg(long, help = crate::support::TARGET_HELP)]
         target: Option<PathBuf>,
+        /// Emit the run summary as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// Print a run's trace JSONL.
     Trace {
+        /// Run id under the target's `.kuzushi/v3/runs` directory.
         run_id: String,
-        #[arg(long)]
+        #[arg(long, help = crate::support::TARGET_HELP)]
         target: Option<PathBuf>,
+        /// Emit parsed trace events as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// Compare finding snapshots from two runs.
     Diff {
+        /// Baseline run id.
         base_run_id: String,
+        /// Comparison run id.
         compare_run_id: String,
-        #[arg(long)]
+        #[arg(long, help = crate::support::TARGET_HELP)]
         target: Option<PathBuf>,
+        /// Emit the diff as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// Delete old run artifact directories.
     Prune {
-        #[arg(long)]
+        #[arg(long, help = crate::support::TARGET_HELP)]
         target: Option<PathBuf>,
         /// Delete runs older than this many days.
         #[arg(long = "older-than-days")]
@@ -102,6 +111,7 @@ pub(crate) enum RunsCommand {
         /// Report what would be deleted without removing files.
         #[arg(long)]
         dry_run: bool,
+        /// Emit the prune report as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
@@ -163,6 +173,7 @@ pub(crate) enum ConfigCommand {
     Show,
     /// Write the global config if it does not already exist.
     Init {
+        /// Overwrite an existing global config file.
         #[arg(long)]
         force: bool,
     },

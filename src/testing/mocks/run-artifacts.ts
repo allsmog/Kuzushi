@@ -31,7 +31,7 @@ export function createMockRunArtifactStore(
 ): MockRunArtifactStore {
   const runId = opts.runId ?? "test-run";
   const moduleId = opts.moduleId ?? "test-module";
-  const root = opts.root ?? `/virtual/.kuzushi/runs/${runId}/${moduleId}`;
+  const root = opts.root ?? `/virtual/.kuzushi/v3/runs/${runId}/${moduleId}`;
   const writes: RunArtifactWrite[] = [];
 
   function resolveSafe(name: string): string {

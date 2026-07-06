@@ -14,13 +14,13 @@ pub(crate) fn triage_module() -> BuiltinModule {
 fn triage_run_tool() -> ToolDescriptor {
     tool_with_options(
         "triage:run",
-        "Triage findings with LangGraph.",
+        "Review scanner findings with evidence-backed model verdicts and persist triage state.",
         triage_run_options(),
     )
 }
 
 fn triage_run_options() -> Vec<OptionSpec> {
-    vec![
+    let mut options = vec![
         opt("scanId", OptionType::String, "Scan run id to triage.").aliases(&["scan_id"]),
         triage_fingerprint_option(),
         triage_fingerprints_option(),
@@ -29,9 +29,13 @@ fn triage_run_options() -> Vec<OptionSpec> {
         triage_prefilter_option(),
         triage_retriage_option(),
         triage_stage2_tier_option(),
+        triage_strategy_option(),
+        deep_triage_options(),
         triage_prompt_option(),
         model_option(),
-    ]
+    ];
+    options.extend(deep_triage_advanced_options());
+    options
 }
 
 fn triage_fingerprint_option() -> OptionSpec {
@@ -103,6 +107,52 @@ fn triage_stage2_tier_option() -> OptionSpec {
     .choices(&["cheap", "mid", "deep"])
     .default(json!("cheap"))
     .advanced()
+}
+
+fn triage_strategy_option() -> OptionSpec {
+    opt("strategy", OptionType::Enum, "Triage strategy.")
+        .choices(&["standard", "deep", "gate-deep"])
+        .default(json!("standard"))
+        .advanced()
+}
+
+fn deep_triage_options() -> OptionSpec {
+    opt(
+        "findingFingerprint",
+        OptionType::String,
+        "Fingerprint used by deep or gate-deep triage strategies.",
+    )
+    .aliases(&["finding_fingerprint"])
+    .advanced()
+}
+
+fn deep_triage_advanced_options() -> Vec<OptionSpec> {
+    vec![
+        opt("maxSteps", OptionType::Int, "Deep triage step limit.")
+            .aliases(&["max_steps"])
+            .advanced(),
+        opt(
+            "depositUsd",
+            OptionType::Float,
+            "Deep triage spend deposit.",
+        )
+        .aliases(&["deposit_usd"])
+        .advanced(),
+        opt("passes", OptionType::Int, "Deep triage pass count.").advanced(),
+        opt(
+            "temperature",
+            OptionType::Float,
+            "Deep triage model temperature.",
+        )
+        .advanced(),
+        opt(
+            "targetPercentile",
+            OptionType::Float,
+            "Gate-deep classifier target percentile.",
+        )
+        .aliases(&["target_percentile"])
+        .advanced(),
+    ]
 }
 
 fn triage_prompt_option() -> OptionSpec {

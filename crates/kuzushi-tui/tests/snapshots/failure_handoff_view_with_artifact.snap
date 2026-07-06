@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 0
 ---
- KUZUSHI > failure-handoff · mode:shell · target:./failure · phase:組 map 1/4 · ctx:not built · model:unconfigured
+ KUZUSHI › failure-handoff · mode:shell · target:./failure · phase:組 map 1/4 · ctx:not built · model:unconfigured
 
  -- FAILURE HANDOFF ----------------------------------------------------------------------------------------------------
 stage              semgrep:scan

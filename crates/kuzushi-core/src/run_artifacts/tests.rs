@@ -1030,6 +1030,37 @@ mod tests {
         assert_eq!(loaded.findings, Some(0));
     }
 
+    #[test]
+    fn summary_survives_torn_write_leftover_and_next_read_recovers() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-torn-write";
+        // A committed, well-formed summary written through the atomic path.
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("agentic:test".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+
+        // Simulate a crash mid-write: a truncated temp sibling left in the run
+        // directory that was never renamed into place. Because `write_atomic`
+        // only publishes via rename, this leftover must never be observed by a
+        // reader — the previously committed file stays authoritative.
+        let run_json = run_artifact_path(tmp.path(), run_id, "run.json");
+        let dir = run_json.parent().unwrap();
+        fs::write(dir.join(".run.json.tmp-999999-0-0"), "{ this is a torn writ").unwrap();
+
+        // The committed summary is still fully intact and parseable.
+        let loaded = load_run_summary(tmp.path(), run_id).unwrap();
+        assert_eq!(loaded.run_id, run_id);
+        assert_eq!(loaded.status, "completed");
+
+        // Listing ignores the temp leftover and returns exactly one run.
+        let all = list_run_summaries(tmp.path()).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].run_id, run_id);
+    }
+
     fn write_house_rule(target: &Path, module: &str, body: &str) {
         let path = crate::house_rule_path(target, module);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -2137,6 +2168,27 @@ mod tests {
         assert_eq!(json.kind, "json");
         assert_eq!(markdown.label, "report");
         assert_eq!(markdown.kind, "markdown");
+
+        let manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(run_artifact_path(tmp.path(), run_id, "artifacts.json")).unwrap(),
+        )
+        .unwrap();
+        let objects = manifest["objects"].as_array().unwrap();
+        assert_eq!(objects.len(), 2);
+        let result_object = objects
+            .iter()
+            .find(|object| object["label"] == "tool result")
+            .unwrap();
+        let hash = result_object["objectRef"]["hash"].as_str().unwrap();
+        assert!(cas_object_path(tmp.path(), hash).is_file());
+    }
+
+    fn cas_object_path(target: &Path, hash: &str) -> PathBuf {
+        crate::workspace::workspace_objects_dir(target)
+            .join("blake3")
+            .join(&hash[0..2])
+            .join(&hash[2..4])
+            .join(hash)
     }
 
     #[test]
@@ -2241,7 +2293,7 @@ mod tests {
         );
 
         let summary_path = write_run_summary(tmp.path(), &summary).unwrap();
-        assert!(summary_path.ends_with("summary.json"));
+        assert!(summary_path.ends_with("run.json"));
         assert_canonical_run_files_exist(tmp.path(), &run_id);
         let running_manifest_artifacts = load_run_artifacts(tmp.path(), &run_id).unwrap();
         assert_manifest_has_canonical_run_artifacts(&running_manifest_artifacts);
@@ -2253,7 +2305,7 @@ mod tests {
         assert!(placeholder_report.contains(&format!("# Kuzushi Run {run_id}")));
         assert!(placeholder_report.contains("No report was recorded for this run."));
         assert_eq!(
-            fs::read_to_string(tmp.path().join(".kuzushi/latest")).unwrap(),
+            fs::read_to_string(tmp.path().join(".kuzushi/v3/latest")).unwrap(),
             format!("{run_id}\n")
         );
         let result = serde_json::json!({"ok": true});
@@ -2394,18 +2446,17 @@ mod tests {
     }
 
     #[test]
-    fn load_run_summary_rejects_non_file_legacy_summary() {
+    fn load_run_summary_rejects_missing_run_metadata() {
         let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-load-non-file-legacy-summary";
+        let run_id = "run-load-missing-metadata";
         let dir = run_dir(tmp.path(), run_id);
         fs::create_dir_all(&dir).unwrap();
-        fs::create_dir(dir.join("summary.json")).unwrap();
 
         let error = load_run_summary(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Legacy run summary is not a file"));
-        assert!(message.contains("summary.json"));
+        assert!(message.contains("Run metadata is missing"));
+        assert!(message.contains("run.json"));
     }
 
     #[test]
@@ -2431,7 +2482,7 @@ mod tests {
     fn write_run_summary_rejects_non_file_latest_pointer_target() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-non-file-latest-pointer";
-        fs::create_dir_all(tmp.path().join(".kuzushi/latest")).unwrap();
+        fs::create_dir_all(tmp.path().join(".kuzushi/v3/latest")).unwrap();
         let summary = RunSummary::running(run_id, "tool", Some("context:build".to_string()), "target");
 
         let error = write_run_summary(tmp.path(), &summary).unwrap_err();
@@ -2439,7 +2490,7 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Latest run pointer target is not a file"));
-        assert!(error.to_string().contains(".kuzushi/latest"));
+        assert!(error.to_string().contains(".kuzushi/v3/latest"));
     }
 
     #[test]
@@ -2574,7 +2625,6 @@ mod tests {
         let dir = run_dir(target, run_id);
         for leaf in [
             "run.json",
-            "summary.json",
             "events.jsonl",
             "trace.jsonl",
             "context.json",
@@ -3564,7 +3614,7 @@ mod tests {
         let run_id = "tool-declared-artifacts";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "sast:scan");
         let report = tmp.path().join("report.md");
-        let summary_json = tmp.path().join("summary.json");
+        let analysis_json = tmp.path().join("analysis.json");
 
         record_tool_run_started(record, &serde_json::json!({}));
         record_tool_run_complete(
@@ -3577,7 +3627,7 @@ mod tests {
                 ],
                 "data": {
                     "artifacts": {
-                        "summary": summary_json.display().to_string()
+                        "analysis": analysis_json.display().to_string()
                     }
                 }
             }),
@@ -3588,7 +3638,7 @@ mod tests {
             artifact.label == "report" && artifact.path == report.display().to_string()
         }));
         assert!(summary.artifacts.iter().any(|artifact| {
-            artifact.label == "summary" && artifact.path == summary_json.display().to_string()
+            artifact.label == "analysis" && artifact.path == analysis_json.display().to_string()
         }));
         let manifest = load_run_artifacts(tmp.path(), run_id).unwrap();
         assert!(manifest
@@ -3596,7 +3646,7 @@ mod tests {
             .any(|artifact| artifact.path == report.display().to_string()));
         assert!(manifest
             .iter()
-            .any(|artifact| artifact.path == summary_json.display().to_string()));
+            .any(|artifact| artifact.path == analysis_json.display().to_string()));
     }
 
     #[test]
@@ -3757,7 +3807,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_run_status_aliases_are_trimmed_and_case_insensitive() {
+    fn tool_run_failed_status_writes_failure_handoff() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-status-alias";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "semgrep:scan");
@@ -3767,7 +3817,7 @@ mod tests {
             record,
             &serde_json::json!({
                 "ok": false,
-                "status": " ERROR ",
+                "status": "failed",
                 "summary": "scanner failed",
             }),
         );
@@ -3833,8 +3883,8 @@ mod tests {
         let root = runs_root(tmp.path());
         fs::write(root.join("not-a-run"), "ignored").unwrap();
         fs::create_dir_all(root.join("missing-summary")).unwrap();
-        fs::create_dir_all(root.join("invalid-summary")).unwrap();
-        fs::write(root.join("invalid-summary").join("summary.json"), "{").unwrap();
+        fs::create_dir_all(root.join("invalid-run-metadata")).unwrap();
+        fs::write(root.join("invalid-run-metadata").join("run.json"), "{").unwrap();
         fs::create_dir_all(root.join("run-c")).unwrap();
         fs::write(
             root.join("run-c").join("run.json"),
@@ -3850,66 +3900,6 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert_eq!(run_ids, vec!["run-c", "run-b", "run-a"]);
-    }
-
-    #[test]
-    fn run_metadata_reads_run_json_before_legacy_summary_json() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = runs_root(tmp.path());
-        fs::create_dir_all(root.join("run-canonical")).unwrap();
-        fs::write(
-            root.join("run-canonical").join("summary.json"),
-            serde_json::to_string(&RunSummary::running(
-                "run-canonical",
-                "legacy",
-                None,
-                "legacy-target",
-            ))
-            .unwrap(),
-        )
-        .unwrap();
-        fs::write(
-            root.join("run-canonical").join("run.json"),
-            serde_json::to_string(&RunSummary::running(
-                "run-canonical",
-                "tool",
-                Some("context:build".to_string()),
-                "canonical-target",
-            ))
-            .unwrap(),
-        )
-        .unwrap();
-
-        let loaded = load_run_summary(tmp.path(), "run-canonical").unwrap();
-        assert_eq!(loaded.kind, "tool");
-        assert_eq!(loaded.target, "canonical-target");
-
-        let listed = list_run_summaries(tmp.path()).unwrap();
-        assert_eq!(listed[0].kind, "tool");
-        assert_eq!(listed[0].target, "canonical-target");
-    }
-
-    #[test]
-    fn list_run_summaries_does_not_fallback_to_legacy_when_run_json_is_invalid() {
-        let tmp = tempfile::tempdir().unwrap();
-        let root = runs_root(tmp.path());
-        fs::create_dir_all(root.join("run-invalid-canonical")).unwrap();
-        fs::write(
-            root.join("run-invalid-canonical").join("summary.json"),
-            serde_json::to_string(&RunSummary::running(
-                "run-invalid-canonical",
-                "tool",
-                None,
-                "legacy-target",
-            ))
-            .unwrap(),
-        )
-        .unwrap();
-        fs::create_dir(root.join("run-invalid-canonical").join("run.json")).unwrap();
-
-        let listed = list_run_summaries(tmp.path()).unwrap();
-
-        assert!(listed.is_empty());
     }
 
     fn run_summary_schema() -> serde_json::Value {
@@ -4044,6 +4034,7 @@ mod tests {
                 path: representative_run_artifact_path("run-schema", "run.json"),
                 kind: "json".to_string(),
             }],
+            objects: Vec::new(),
         }
     }
 

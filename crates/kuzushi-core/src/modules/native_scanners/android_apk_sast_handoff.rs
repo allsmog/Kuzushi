@@ -15,7 +15,7 @@ pub(in crate::modules) fn run_sast_handoff(
                 "android-apk:sast-handoff",
                 &target,
                 error,
-            ))
+            ));
         }
     };
     emit_step(ctx, "done", "handoff", "android-apk:sast-handoff complete");

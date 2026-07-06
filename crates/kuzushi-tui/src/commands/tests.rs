@@ -14,6 +14,11 @@ mod tests {
         assert_eq!(parse_command("/show modules"), ShellCommand::Modules);
         assert_eq!(parse_command("/recommend"), ShellCommand::Recommend);
         assert_eq!(parse_command("rec"), ShellCommand::Recommend);
+        assert_eq!(parse_command("aim"), ShellCommand::Aim(None));
+        assert_eq!(
+            parse_command("aim sql injection"),
+            ShellCommand::Aim(Some("sql injection".to_string()))
+        );
         assert_eq!(parse_command("doctor"), ShellCommand::Health);
         assert_eq!(parse_command("/health"), ShellCommand::Health);
         assert_eq!(parse_command("/tools"), ShellCommand::Tools(None));
@@ -33,10 +38,32 @@ mod tests {
             ShellCommand::FindingsFilter("state:new rank:high run:scan-1".to_string())
         );
         assert_eq!(
+            parse_command("decision suppressed reviewed under policy"),
+            ShellCommand::ReviewDecision(ReviewDecisionCommand::Record {
+                verdict: "suppressed".to_string(),
+                reason: "reviewed under policy".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_command("review confirmed source-linked evidence reviewed"),
+            ShellCommand::ReviewDecision(ReviewDecisionCommand::Record {
+                verdict: "confirmed".to_string(),
+                reason: "source-linked evidence reviewed".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_command("decision suppressed"),
+            ShellCommand::ReviewDecision(ReviewDecisionCommand::Unsupported(
+                "decision suppressed".to_string(),
+            ))
+        );
+        assert_eq!(
             parse_command("findings export /tmp/findings.json"),
             ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
                 output: PathBuf::from("/tmp/findings.json"),
                 format: None,
+                completeness: None,
+                allow_empty: false,
             })
         );
         assert_eq!(
@@ -44,6 +71,26 @@ mod tests {
             ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
                 output: PathBuf::from("/tmp/findings-bundle"),
                 format: Some("markdown-bundle".to_string()),
+                completeness: None,
+                allow_empty: false,
+            })
+        );
+        assert_eq!(
+            parse_command("findings export /tmp/empty.json --allow-empty"),
+            ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+                output: PathBuf::from("/tmp/empty.json"),
+                format: None,
+                completeness: None,
+                allow_empty: true,
+            })
+        );
+        assert_eq!(
+            parse_command("findings export /tmp/open.json --completeness open"),
+            ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+                output: PathBuf::from("/tmp/open.json"),
+                format: None,
+                completeness: Some("open".to_string()),
+                allow_empty: false,
             })
         );
         assert_eq!(parse_command("runs"), ShellCommand::ShowRuns);
@@ -348,8 +395,20 @@ mod tests {
             ShellCommand::Strategy(StrategyCommand::Approve("review-codeql-scan".to_string()))
         );
         assert_eq!(
+            parse_command("strategy keep review-codeql-scan"),
+            ShellCommand::Strategy(StrategyCommand::Approve("review-codeql-scan".to_string()))
+        );
+        assert_eq!(
             parse_command("strategy reject review-codeql-scan"),
             ShellCommand::Strategy(StrategyCommand::Reject("review-codeql-scan".to_string()))
+        );
+        assert_eq!(
+            parse_command("strategy skip review-codeql-scan"),
+            ShellCommand::Strategy(StrategyCommand::Reject("review-codeql-scan".to_string()))
+        );
+        assert_eq!(
+            parse_command("strategy fire"),
+            ShellCommand::Strategy(StrategyCommand::Fire)
         );
         assert_eq!(
             parse_command(
@@ -360,6 +419,30 @@ mod tests {
                 to_strategy: "run codeql:scan with authz focus".to_string(),
                 reason: Some("tighten authz paths".to_string()),
                 scope: StrategyCorrectionCommandScope::Workspace,
+            })
+        );
+        assert_eq!(
+            parse_command("patch apply"),
+            ShellCommand::Patch(PatchCommand::Apply)
+        );
+        assert_eq!(
+            parse_command("/patch reject"),
+            ShellCommand::Patch(PatchCommand::Reject)
+        );
+        assert_eq!(
+            parse_command("patch discard"),
+            ShellCommand::Patch(PatchCommand::Reject)
+        );
+        assert_eq!(
+            parse_command("patch regen --style defensive"),
+            ShellCommand::Patch(PatchCommand::Regen {
+                style: Some("defensive".to_string())
+            })
+        );
+        assert_eq!(
+            parse_command("patch regenerate --style=minimal"),
+            ShellCommand::Patch(PatchCommand::Regen {
+                style: Some("minimal".to_string())
             })
         );
         assert_eq!(
@@ -375,6 +458,8 @@ mod tests {
             ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
                 output: PathBuf::from("out.json"),
                 format: None,
+                completeness: None,
+                allow_empty: false,
             })
         );
         assert_eq!(
@@ -382,6 +467,17 @@ mod tests {
             ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
                 output: PathBuf::from("bundle-dir"),
                 format: Some("markdown-bundle".to_string()),
+                completeness: None,
+                allow_empty: false,
+            })
+        );
+        assert_eq!(
+            parse_command("workspace export findings out.csv scope=complete"),
+            ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+                output: PathBuf::from("out.csv"),
+                format: None,
+                completeness: Some("complete".to_string()),
+                allow_empty: false,
             })
         );
         assert_eq!(
@@ -512,6 +608,24 @@ mod tests {
     }
 
     #[test]
+    fn retired_navigation_aliases_do_not_route() {
+        for input in [
+            "studio",
+            "cc",
+            "setup",
+            "plan-stage",
+            "diagram",
+            "3d",
+            "threats dfd",
+        ] {
+            assert!(
+                matches!(parse_command(input), ShellCommand::Unknown(_)),
+                "retired alias {input:?} still routes"
+            );
+        }
+    }
+
+    #[test]
     fn command_catalog_advertises_only_routed_commands() {
         for spec in shell_command_specs() {
             let mut forms = vec![spec.command];
@@ -541,6 +655,7 @@ mod tests {
         let expected = std::collections::BTreeSet::from([
             "activity",
             "actor",
+            "aim",
             "attach",
             "ask",
             "auth",
@@ -573,6 +688,7 @@ mod tests {
             "open",
             "options",
             "pause",
+            "patch",
             "permissions",
             "phase",
             "plan",
@@ -582,12 +698,14 @@ mod tests {
             "prompt",
             "provider",
             "project-model",
+            "pwn",
             "quickstart",
             "recommend",
             "quit",
             "reparse",
             "replay",
             "resume",
+            "review-decision",
             "run-diff",
             "run-tool",
             "scan",
@@ -657,6 +775,7 @@ mod tests {
             ShellCommand::Recommend => "recommend",
             ShellCommand::Tools(_) => "tools",
             ShellCommand::Workbench(_) => "workbench",
+            ShellCommand::Aim(_) => "aim",
             ShellCommand::Findings => "findings",
             ShellCommand::FindingsFilter(_) => "findings-filter",
             ShellCommand::Component(_) => "component",
@@ -711,6 +830,8 @@ mod tests {
             ShellCommand::Context(_) => "context",
             ShellCommand::Workspace(_) => "workspace",
             ShellCommand::Strategy(_) => "strategy",
+            ShellCommand::ReviewDecision(_) => "review-decision",
+            ShellCommand::Patch(_) => "patch",
             ShellCommand::Pwn(_) => "pwn",
             ShellCommand::KnowledgeBase(_) => "kb",
             ShellCommand::FilePicker => "file-picker",
@@ -762,6 +883,9 @@ mod tests {
                 "[1-4]" => "4".to_string(),
                 "[choice]" => "1".to_string(),
                 "[runId]" => "run-123".to_string(),
+                "[--completeness" => "--completeness".to_string(),
+                "open|complete]" => "open".to_string(),
+                "[--allow-empty]" => "--allow-empty".to_string(),
                 "auto|manual|toggle" => "auto".to_string(),
                 other => other.to_string(),
             })

@@ -69,6 +69,7 @@ struct FindingListToolFinding {
     message: String,
     tool: String,
     static_proof_state: Option<String>,
+    review_decision: Option<String>,
     triaged_by: Option<TriageAuthor>,
     source_signature: Option<String>,
     corroboration_count: u32,
@@ -94,6 +95,7 @@ impl FindingListToolFinding {
             static_proof_state: finding
                 .static_proof_state
                 .map(|state| state.as_str().to_string()),
+            review_decision: review_decision_label(finding),
             triaged_by: finding.triaged_by,
             source_signature: finding.source_signature.clone(),
             corroboration_count: finding.corroboration_count,
@@ -108,6 +110,16 @@ impl FindingListToolFinding {
                 .collect(),
         }
     }
+}
+
+fn review_decision_label(finding: &Finding) -> Option<String> {
+    let triage = finding.triage.as_ref()?;
+    Some(
+        ReviewDecision::from_triage(triage, finding.triaged_by)
+            .verdict
+            .as_str()
+            .to_string(),
+    )
 }
 
 #[derive(Debug, Serialize)]

@@ -135,11 +135,8 @@ fn pane_focus_label(pane: PaneFocus) -> &'static str {
 }
 
 fn selected_item(app: &ShellApp) -> Option<ScreenSelectedItem> {
-    let finding = app
-        .selected_finding
-        .as_ref()
-        .or_else(|| app.findings.get(app.findings_cursor))?;
-    Some(selected_item_from_finding(app, finding))
+    let (_, finding) = super::current_finding_for_detail(app)?;
+    Some(selected_item_from_finding(app, &finding))
 }
 
 fn selected_item_from_finding(app: &ShellApp, finding: &Finding) -> ScreenSelectedItem {
@@ -152,7 +149,7 @@ fn selected_item_from_finding(app: &ShellApp, finding: &Finding) -> ScreenSelect
         line: finding.start_line,
         rank: finding.severity.as_str().to_string(),
         state: classification_state(finding),
-        confirmation: confirmation_state(finding),
+        runtime_verification: runtime_verification_state(finding),
         triage: triage_context(finding),
         proof: proof_context(finding, alias.as_deref()),
         evidence: evidence_context(finding),
@@ -249,12 +246,12 @@ fn classification_state(finding: &Finding) -> String {
         .unwrap_or_else(|| "untriaged".to_string())
 }
 
-fn confirmation_state(finding: &Finding) -> String {
+fn runtime_verification_state(finding: &Finding) -> String {
     finding
         .verification
         .as_ref()
         .map(|verification| verification.proof_verdict.as_str().to_string())
-        .unwrap_or_else(|| "unconfirmed".to_string())
+        .unwrap_or_else(|| "not_verified".to_string())
 }
 
 fn selected_run(app: &ShellApp) -> Option<String> {
@@ -365,7 +362,7 @@ fn proof_state_bucket(finding: &Finding) -> String {
                 .static_proof_state
                 .map(|state| state.as_str().to_string())
         })
-        .unwrap_or_else(|| "unconfirmed".to_string())
+        .unwrap_or_else(|| "not_verified".to_string())
 }
 
 fn visible_rows(app: &ShellApp) -> Vec<String> {
@@ -413,15 +410,31 @@ fn visible_run_rows(app: &ShellApp) -> Vec<String> {
 fn visible_run_diff_rows(app: &ShellApp, left: &str, right: &str) -> Vec<String> {
     let model = super::run_diff_model(app, left, right);
     model
-        .added
+        .new_findings
         .iter()
-        .map(|row| format!("added {} {} {}", row.severity, row.title, row.location))
-        .chain(
-            model
-                .removed
-                .iter()
-                .map(|row| format!("removed {} {} {}", row.severity, row.title, row.location)),
-        )
+        .map(|row| format!("new {} {} {}", row.state.severity, row.title, row.location))
+        .chain(model.changed_findings.iter().map(|row| {
+            format!(
+                "changed {}->{} {} {}",
+                row.before.severity, row.after.severity, row.title, row.location
+            )
+        }))
+        .chain(model.uncertain_matches.iter().map(|row| {
+            format!(
+                "uncertain_match {}->{} {} {} -> {}",
+                row.before.severity,
+                row.after.severity,
+                row.title,
+                row.left_location,
+                row.right_location
+            )
+        }))
+        .chain(model.not_seen.iter().map(|row| {
+            format!(
+                "not_seen {} {} {}",
+                row.state.severity, row.title, row.location
+            )
+        }))
         .take(VISIBLE_ROW_LIMIT)
         .map(bounded_row)
         .collect()
@@ -501,7 +514,7 @@ fn bounded_prompt_list(values: &[String]) -> Vec<String> {
 fn active_cursor_row(app: &ShellApp) -> usize {
     match app.shell_view {
         ShellView::Workbench => match app.workbench_focus {
-            WorkbenchPane::Findings => app.findings_cursor,
+            WorkbenchPane::Findings => app.findings_route.cursor(),
             pane => app.workbench_scroll.get(pane) as usize,
         },
         ShellView::Runs => app.scroll_offset as usize,

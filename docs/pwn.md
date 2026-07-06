@@ -8,7 +8,8 @@ keeps every step as an auditable artifact.
 
 Use it when the target is a binary (ELF challenge, shared object, firmware
 extract) rather than a source repository. For source targets, start with
-`scan`, `taint-iris-next:hunt`, or `uaf-hunt:hunt` instead.
+`scan`, `taint-iris-next:dataflow-plan`, or `taint-iris-next:finding-review`
+instead.
 
 ## Tools
 

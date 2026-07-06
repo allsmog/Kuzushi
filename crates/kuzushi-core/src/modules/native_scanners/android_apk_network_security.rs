@@ -16,7 +16,7 @@ pub(in crate::modules) fn run_network_security_config_scan(
                 "android-apk:network-security-config",
                 &target,
                 error,
-            ))
+            ));
         }
     };
     let persisted = persist_tool_findings(

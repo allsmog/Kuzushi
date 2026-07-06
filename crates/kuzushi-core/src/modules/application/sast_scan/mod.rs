@@ -1,9 +1,10 @@
 use super::*;
 
-use self::agentic_sast::{run_agentic_sast_report, split_agentic_sast_tasks, AgenticSastReport};
+use self::agentic_sast::{split_agentic_sast_tasks, AgenticSastReport};
 use self::input::{bool_input, parse_sast_severity_filter, parse_sast_tasks, string_input_any};
-use crate::capabilities::systems_hunt::{run_systems_hunt_report, SystemsHuntReport};
-use crate::carlini_threat_hunt::{run_carlini_threat_hunt_report, CarliniThreatHuntReport};
+use crate::capabilities::systems_hunt::SystemsHuntReport;
+use crate::carlini_threat_hunt::CarliniThreatHuntReport;
+use crate::findings::Finding;
 use crate::findings::StaticProofState;
 use crate::proof::whitebox_policy::{apply_whitebox_static_sast_policy, WhiteboxStaticPolicy};
 use crate::scan::{

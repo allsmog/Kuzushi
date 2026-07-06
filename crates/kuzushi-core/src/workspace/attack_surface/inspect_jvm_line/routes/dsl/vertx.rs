@@ -11,7 +11,15 @@ pub(super) fn inspect_vertx_route_line(
     builder: &mut AttackSurfaceBuilder,
 ) {
     remember_vertx_router_scope(lower, state);
-    emit_vertx_route(source_file, framework, line_number, detail, lower, state, builder);
+    emit_vertx_route(
+        source_file,
+        framework,
+        line_number,
+        detail,
+        lower,
+        state,
+        builder,
+    );
 }
 
 fn remember_vertx_router_scope(lower: &str, state: &mut RouteScanState) {

@@ -7,7 +7,7 @@ pub(in crate::renderer) use super::*;
 
 /// `/patch <alias>` view — RATIONALE / DIFF / TESTS / GUARDRAIL
 /// matching `design/mockups/patch.jsx`.  Pulls from
-/// `app.pending_patch` when the alias matches; otherwise renders an
+/// engagement pending patch state when the alias matches; otherwise renders an
 /// empty state advising how to stage a patch.
 
 /// Render a single 30-cell budget bar matching

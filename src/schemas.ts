@@ -606,14 +606,15 @@ export type ScanOptsZ = z.infer<typeof ScanOptsSchema>;
 
 // Agent runtime config — single flat slot (LangChain is the only backend).
 
-export const AgentRuntimeCredentialsSchema = z.object({
+const AgentRuntimeCredentialFields = {
   apiKey: z.string().optional(),
   apiKeyFile: z.string().optional(),
   authToken: z.string().optional(),
   baseUrl: z.string().optional(),
-});
+};
 
-export const AgentRuntimeConfigSchema = AgentRuntimeCredentialsSchema;
+export const AgentRuntimeCredentialsSchema = z.object(AgentRuntimeCredentialFields);
+export const AgentRuntimeConfigSchema = z.object(AgentRuntimeCredentialFields);
 
 export type AgentRuntimeCredentialsZ = z.infer<typeof AgentRuntimeCredentialsSchema>;
 export type AgentRuntimeConfigZ = z.infer<typeof AgentRuntimeConfigSchema>;

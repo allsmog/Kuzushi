@@ -422,6 +422,81 @@ mod tests {
     }
 
     #[test]
+    fn threat_model_build_context_off_disables_default_sources() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({"contextMode": "off"}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(
+            result
+                .pointer("/data/sources")
+                .and_then(Value::as_array)
+                .map(Vec::len),
+            Some(0)
+        );
+    }
+
+    #[test]
+    fn threat_model_build_treats_sentence_ending_in_extension_as_inline_seed() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
+        let runtime = MockThreatRuntime::new(json!({"document": sample_document()}));
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        registry
+            .execute_tool_with_runtime(
+                "threat-model:build",
+                json!({
+                    "sources": ["none"],
+                    "seed": ["Focus on the flow described in design.md"],
+                }),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        let prompt = runtime.requests()[0].prompt.clone();
+        assert!(prompt.contains(r#"path="inline""#), "{prompt}");
+        assert!(prompt.contains("Focus on the flow described in design.md"));
+    }
+
+    #[test]
     fn threat_model_build_rejects_unknown_source_artifacts() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(
@@ -738,6 +813,98 @@ mod tests {
             Some("deterministic")
         );
         assert!(runtime.requests().is_empty());
+    }
+
+    #[test]
+    fn threat_model_no_runtime_allows_auto_prompt_file_default() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let prompt_path =
+            crate::options::prompt_override_path(workspace.root(), "threat-model", "build");
+        fs::create_dir_all(prompt_path.parent().unwrap()).unwrap();
+        fs::write(&prompt_path, "focus callback replay threats\n").unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let degraded = registry
+            .execute_tool("threat-model:build", json!({}), &ctx)
+            .unwrap();
+
+        assert_eq!(
+            degraded.pointer("/data/provider").and_then(Value::as_str),
+            Some("deterministic")
+        );
+    }
+
+    #[test]
+    fn threat_model_no_runtime_allows_reordered_default_sources() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let degraded = registry
+            .execute_tool(
+                "threat-model:build",
+                json!({"sources": ["threat-model", "context"]}),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(
+            degraded.pointer("/data/provider").and_then(Value::as_str),
+            Some("deterministic")
+        );
+    }
+
+    #[test]
+    fn threat_model_no_runtime_allows_context_mode_off_with_default_sources() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join("package.json"),
+            r#"{"dependencies":{"express":"4"}}"#,
+        )
+        .unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+
+        let degraded = registry
+            .execute_tool("threat-model:build", json!({"contextMode": "off"}), &ctx)
+            .unwrap();
+
+        assert_eq!(
+            degraded.pointer("/data/provider").and_then(Value::as_str),
+            Some("deterministic")
+        );
     }
 
     #[test]

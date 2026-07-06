@@ -6,7 +6,9 @@ pub(in crate::modules) fn build_context_snapshot(
 ) -> Result<Value> {
     let workspace = ctx
         .workspace
-        .context(crate::workspace::active_workspace_required_message("context:build"))?;
+        .context(crate::workspace::active_workspace_required_message(
+            "context:build",
+        ))?;
     let options = context_build_options(&input)?;
 
     emit_context_build_start(ctx, workspace.root());
@@ -58,9 +60,7 @@ fn build_context_snapshot_for_root_with_options(
     let file_sample = collect_context_file_sample(root, options.sample_limit)?;
     let snapshot = context_snapshot_value(root, options, &file_sample)?;
     save_context_snapshot(root, &snapshot)?;
-    Ok(ContextSnapshotBuild {
-        snapshot,
-    })
+    Ok(ContextSnapshotBuild { snapshot })
 }
 
 struct ContextBuildOptions {

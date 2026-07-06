@@ -11,7 +11,6 @@ use self::runtime_protocol::run_dynamic_host_with_runtime;
 
 #[derive(Debug, Clone, Default)]
 pub struct DynamicModuleLoadOptions {
-    pub allow_untrusted: bool,
     pub trusted_specifiers: Vec<String>,
 }
 
@@ -92,16 +91,15 @@ fn ensure_dynamic_module_trusted(
     specifier: &str,
     options: &DynamicModuleLoadOptions,
 ) -> Result<()> {
-    if options.allow_untrusted
-        || options
-            .trusted_specifiers
-            .iter()
-            .any(|entry| entry == specifier)
+    if options
+        .trusted_specifiers
+        .iter()
+        .any(|entry| entry == specifier)
     {
         return Ok(());
     }
     anyhow::bail!(
-        "dynamic module {specifier:?} is not trusted. Add it to operator.trusted_modules in $HOME/.kuzushi/v2/config.toml or pass --allow-untrusted-module for this run."
+        "dynamic module {specifier:?} is not trusted. Add it to operator.trusted_modules in $HOME/.kuzushi/v3/config.toml."
     )
 }
 

@@ -31,8 +31,6 @@ fn legacy_openai_oauth_selector_command() -> ShellCommand {
 pub(crate) fn parse_threat_command(args: &[&str]) -> ShellCommand {
     match args.first().copied() {
         None | Some("summary") | Some("4") => ShellCommand::Threat(ThreatView::Summary),
-        // The DFD now lives in the Workbench command center's center pane.
-        Some("dfd") => ShellCommand::Workbench(WorkbenchPane::Center),
         Some("stride") | Some("1") => ShellCommand::Threat(ThreatView::Stride),
         Some("stories") | Some("2") => ShellCommand::Threat(ThreatView::Stories),
         Some("scope") | Some("3") => ShellCommand::Threat(ThreatView::Scope),
@@ -123,21 +121,38 @@ pub(crate) fn parse_workspace_findings_export_args(
     args: &[&str],
     missing_label: &str,
 ) -> ShellCommand {
-    let Some((output, format)) = workspace_findings_export_args(args) else {
+    let Some((output, format, completeness, allow_empty)) = workspace_findings_export_args(args)
+    else {
         return ShellCommand::Unknown(missing_label.to_string());
     };
-    ShellCommand::Workspace(WorkspaceCommand::ExportFindings { output, format })
+    ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+        output,
+        format,
+        completeness,
+        allow_empty,
+    })
 }
 
-fn workspace_findings_export_args(args: &[&str]) -> Option<(PathBuf, Option<String>)> {
+fn workspace_findings_export_args(
+    args: &[&str],
+) -> Option<(PathBuf, Option<String>, Option<String>, bool)> {
     let mut output: Option<PathBuf> = None;
     let mut format: Option<String> = None;
+    let mut completeness: Option<String> = None;
+    let mut allow_empty = false;
     let mut index = 0;
     while index < args.len() {
-        let consumed = apply_workspace_export_arg(args, index, &mut output, &mut format)?;
+        let consumed = apply_workspace_export_arg(
+            args,
+            index,
+            &mut output,
+            &mut format,
+            &mut completeness,
+            &mut allow_empty,
+        )?;
         index += consumed;
     }
-    output.map(|output| (output, format))
+    output.map(|output| (output, format, completeness, allow_empty))
 }
 
 fn apply_workspace_export_arg(
@@ -145,10 +160,80 @@ fn apply_workspace_export_arg(
     index: usize,
     output: &mut Option<PathBuf>,
     format: &mut Option<String>,
+    completeness: &mut Option<String>,
+    allow_empty: &mut bool,
 ) -> Option<usize> {
     let token = args.get(index).copied()?;
+    if apply_allow_empty_export_arg(token, allow_empty) {
+        return Some(1);
+    }
+    if let Some(consumed) = apply_completeness_style_export_arg(args, index, token, completeness) {
+        return Some(consumed);
+    }
     apply_format_style_export_arg(args, index, token, format)
         .or_else(|| apply_positional_export_arg(args, token, output, format))
+}
+
+fn apply_allow_empty_export_arg(token: &str, allow_empty: &mut bool) -> bool {
+    match token {
+        "--allow-empty" | "allow-empty" | "allowEmpty" | "allow_empty" => {
+            *allow_empty = true;
+            true
+        }
+        _ => explicit_allow_empty_value(token).is_some_and(|value| {
+            *allow_empty = value;
+            true
+        }),
+    }
+}
+
+fn explicit_allow_empty_value(token: &str) -> Option<bool> {
+    token
+        .strip_prefix("--allow-empty=")
+        .or_else(|| token.strip_prefix("allowEmpty="))
+        .or_else(|| token.strip_prefix("allow_empty="))
+        .and_then(parse_bool_token)
+}
+
+fn parse_bool_token(value: &str) -> Option<bool> {
+    match value {
+        "true" | "1" | "yes" => Some(true),
+        "false" | "0" | "no" => Some(false),
+        _ => None,
+    }
+}
+
+fn apply_completeness_style_export_arg(
+    args: &[&str],
+    index: usize,
+    token: &str,
+    completeness: &mut Option<String>,
+) -> Option<usize> {
+    if let Some(value) = explicit_completeness_value(token) {
+        *completeness = Some(value.to_string());
+        return Some(1);
+    }
+    if workspace_export_completeness_flag(token) {
+        *completeness = Some(args.get(index + 1).map(|value| (*value).to_string())?);
+        return Some(2);
+    }
+    None
+}
+
+fn explicit_completeness_value(token: &str) -> Option<&str> {
+    token
+        .strip_prefix("--completeness=")
+        .or_else(|| token.strip_prefix("completeness="))
+        .or_else(|| token.strip_prefix("--scope="))
+        .or_else(|| token.strip_prefix("scope="))
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn workspace_export_completeness_flag(token: &str) -> bool {
+    matches!(
+        token,
+        "--completeness" | "completeness" | "--scope" | "scope"
+    )
 }
 
 fn apply_format_style_export_arg(

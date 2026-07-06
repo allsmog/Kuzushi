@@ -123,7 +123,7 @@ fn effective_triage_scan_id(
 ) -> Result<Option<String>> {
     match &input.scan_id {
         Some(scan_id) => Ok(Some(scan_id.clone())),
-        None => store.latest_scan_run_id(),
+        None => store.latest_run_id(),
     }
 }
 

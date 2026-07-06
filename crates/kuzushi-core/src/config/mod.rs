@@ -33,6 +33,7 @@ mod tests;
 
 pub use config_model::AnthropicOauthConfig;
 pub use config_model::ConfigPaths;
+pub use config_model::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS;
 pub use config_model::GuidedPhase;
 pub use config_model::GuidedPhaseConfig;
 pub use config_model::OAUTH_CREDENTIALS_FILE;

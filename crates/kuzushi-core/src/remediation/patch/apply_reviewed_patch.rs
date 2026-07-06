@@ -1,0 +1,187 @@
+use super::*;
+use std::path::Component;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReviewedPatchApplyReport {
+    pub checked: bool,
+    pub applied: bool,
+    pub touched_paths: Vec<String>,
+}
+
+pub fn apply_reviewed_patch(repo_root: &Path, diff: &str) -> Result<ReviewedPatchApplyReport> {
+    ensure_git_repository(repo_root)?;
+    let touched_paths = validated_diff_paths(diff)?;
+    run_git_with_input(repo_root, &["apply", "--check"], diff)
+        .with_context(|| "reviewed patch did not pass `git apply --check`")?;
+    run_git_with_input(repo_root, &["apply"], diff)
+        .with_context(|| "reviewed patch failed during `git apply`")?;
+    Ok(ReviewedPatchApplyReport {
+        checked: true,
+        applied: true,
+        touched_paths,
+    })
+}
+
+fn validated_diff_paths(diff: &str) -> Result<Vec<String>> {
+    let mut paths = Vec::new();
+    for raw in candidate_diff_paths(diff) {
+        let Some(path) = normalize_patch_path(raw)? else {
+            continue;
+        };
+        if !paths.contains(&path) {
+            paths.push(path);
+        }
+    }
+    if paths.is_empty() {
+        anyhow::bail!("reviewed patch did not name any repository-relative file paths");
+    }
+    Ok(paths)
+}
+
+fn candidate_diff_paths(diff: &str) -> Vec<&str> {
+    diff.lines()
+        .flat_map(candidate_paths_from_line)
+        .collect::<Vec<_>>()
+}
+
+fn candidate_paths_from_line(line: &str) -> Vec<&str> {
+    if let Some(rest) = line.strip_prefix("diff --git ") {
+        return diff_git_paths(rest);
+    }
+    for prefix in ["--- ", "+++ ", "rename from ", "rename to ", "copy from ", "copy to "] {
+        if let Some(rest) = line.strip_prefix(prefix) {
+            return vec![trim_diff_metadata(rest)];
+        }
+    }
+    Vec::new()
+}
+
+fn diff_git_paths(rest: &str) -> Vec<&str> {
+    let mut parts = rest.split_whitespace();
+    match (parts.next(), parts.next()) {
+        (Some(left), Some(right)) => vec![left, right],
+        _ => Vec::new(),
+    }
+}
+
+fn trim_diff_metadata(value: &str) -> &str {
+    value.split('\t').next().unwrap_or(value).trim()
+}
+
+fn normalize_patch_path(raw: &str) -> Result<Option<String>> {
+    let raw = trim_diff_metadata(raw);
+    if raw == "/dev/null" {
+        return Ok(None);
+    }
+    let path = raw.strip_prefix("a/").or_else(|| raw.strip_prefix("b/")).unwrap_or(raw);
+    validate_repository_relative_path(path)?;
+    Ok(Some(path.to_string()))
+}
+
+fn validate_repository_relative_path(path: &str) -> Result<()> {
+    if path.trim().is_empty() {
+        anyhow::bail!("reviewed patch contains an empty file path");
+    }
+    let candidate = Path::new(path);
+    if candidate.is_absolute() {
+        anyhow::bail!("reviewed patch path {path:?} must be repository-relative");
+    }
+    for component in candidate.components() {
+        validate_repository_path_component(component, path)?;
+    }
+    Ok(())
+}
+
+fn validate_repository_path_component(component: Component<'_>, path: &str) -> Result<()> {
+    match component {
+        Component::Normal(value) if value == std::ffi::OsStr::new(".git") => {
+            anyhow::bail!("reviewed patch must not write inside .git");
+        }
+        Component::Normal(_) | Component::CurDir => Ok(()),
+        Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+            anyhow::bail!("reviewed patch path {path:?} escapes the repository root");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn apply_reviewed_patch_updates_active_worktree() {
+        if git_is_unavailable() {
+            return;
+        }
+        let temp = tempfile::tempdir().unwrap();
+        let repo = temp.path();
+        initialize_repo(repo);
+
+        let report = apply_reviewed_patch(repo, demo_diff()).unwrap();
+
+        assert!(report.checked);
+        assert!(report.applied);
+        assert_eq!(report.touched_paths, vec!["demo.txt"]);
+        assert_eq!(std::fs::read_to_string(repo.join("demo.txt")).unwrap(), "after\n");
+    }
+
+    #[test]
+    fn reviewed_patch_rejects_path_traversal() {
+        let error = validated_diff_paths(
+            "diff --git a/../outside.txt b/../outside.txt\n\
+             --- a/../outside.txt\n\
+             +++ b/../outside.txt\n",
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("escapes the repository root"));
+    }
+
+    #[test]
+    fn reviewed_patch_rejects_git_dir_writes() {
+        let error = validated_diff_paths(
+            "diff --git a/.git/config b/.git/config\n\
+             --- a/.git/config\n\
+             +++ b/.git/config\n",
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains(".git"));
+    }
+
+    fn initialize_repo(repo: &Path) {
+        run_git(repo, &["init"]);
+        std::fs::write(repo.join("demo.txt"), "before\n").unwrap();
+        run_git(repo, &["add", "demo.txt"]);
+        run_git(repo, &["commit", "-m", "initial"]);
+    }
+
+    fn git_is_unavailable() -> bool {
+        Command::new("git").arg("--version").output().is_err()
+    }
+
+    fn run_git(repo: &Path, args: &[&str]) {
+        let status = Command::new("git")
+            .args(["-c", "user.email=kuzushi@example.invalid"])
+            .args(["-c", "user.name=Kuzushi Test"])
+            .args(["-c", "commit.gpgsign=false"])
+            .args(args)
+            .current_dir(repo)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?} failed");
+    }
+
+    fn demo_diff() -> &'static str {
+        "diff --git a/demo.txt b/demo.txt\n\
+         --- a/demo.txt\n\
+         +++ b/demo.txt\n\
+         @@ -1 +1 @@\n\
+         -before\n\
+         +after\n"
+    }
+}

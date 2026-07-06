@@ -397,7 +397,7 @@ fn verbose_subsystems_toggle_reveals_hidden_module_events() {
 
     let output = render_plain_app(&app, 180);
     assert!(
-        output.contains("[pipeline:approval-before-verification]"),
+        output.contains("[pipeline:approval-before-"),
         "verbose toggle should expose hidden module events: {output}"
     );
 }

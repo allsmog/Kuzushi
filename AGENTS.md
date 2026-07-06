@@ -239,10 +239,10 @@ Forbidden behaviors (caught by enforcement):
 - Tool-local model env vars such as `MODEL_<ROLE>` read directly from the
   process environment. Per-role model overrides must flow through
   `models.toml` or declared option-store keys such as `setg MODEL_<ROLE>`.
-- Target-local model steering. `<target>/.kuzushi/v2/config.toml` must not set
+- Target-local model steering. `<target>/.kuzushi/v3/config.toml` must not set
   `model`, and `<target>/.kuzushi/models.toml` is rejected; model policy belongs
   to operator-owned config/models files, env bootstrap, or explicit tool input.
-- Target-local model steering. `<target>/.kuzushi/v2/config.toml` must not set
+- Target-local model steering. `<target>/.kuzushi/v3/config.toml` must not set
   `model`, and `<target>/.kuzushi/models.toml` is rejected; model policy belongs
   to operator-owned config/models files, env bootstrap, or explicit tool input.
 
@@ -334,8 +334,8 @@ is expected to behave identically and should be filed as a parity bug.
   transcript, actor-detail view, tune view** — interactive only. They
   live in the Rust Ratatui shell under `crates/kuzushi-tui`; plain/scripted
   output belongs in `crates/kuzushi-tui/src/renderer/plain/`.
-- **Workbench command center (`ShellView::Workbench`, verbs
-  `workbench`/`studio`/`cc`)** — the shell's default landing surface (set in
+- **Workbench command center (`ShellView::Workbench`, verb `workbench`)** —
+  the shell's default landing surface (set in
   `run_shell::open_start_view`, after the onboarding/target/model gates). A
   frame-rendered cockpit: wide terminals show
   `[SOURCE tree | CODE/DFD | FINDINGS | DETAILS]`; compact terminals collapse
@@ -344,7 +344,7 @@ is expected to behave identically and should be filed as a parity bug.
   `Shift+Tab` reverses it, `j/k` move the focused pane, and `Enter` pins or
   opens the focused finding. It folds the
   old standalone findings, finding-detail, and threat-DFD-tab surfaces — the
-  `findings`, `open <id>`, and `threats dfd` verbs route here. Interactive-only
+  `findings` and `open <id>` verbs route here. Interactive-only
   fidelity (bordered panes), but degrades to text via
   `renderer/views/workbench/render_workbench_view.rs::workbench_lines` for
   plain/non-TTY. `LIVE` lights only on real run activity (same `has_run_activity`
@@ -367,7 +367,7 @@ is expected to behave identically and should be filed as a parity bug.
   compact `組 map 1/4` style chip, and `next` (typed alias `continue`) reopens
   the phase walker at the derived phase. All of it is target-gated: no
   `--target`, no journey chrome.
-- **Security-viz gallery (`/scene`, `/viz`, `/diagram`)** — interactive only
+- **Security-viz gallery (`/scene`, `/viz`)** — interactive only
   (the rendering is TTY-bound), but **ungated and fed real Kuzushi data**. A
   `Tab`-cycled gallery of five pages (`scene3d::VizPage`). Pure view-model
   builders in `ui_view_models/viz_data.rs` turn `ShellApp` state into each
@@ -416,7 +416,7 @@ is expected to behave identically and should be filed as a parity bug.
   machine-readable JSON on stdout; the shell is interactive by definition.
   Don't add `--ci` or `--json` to `run`.
 - **`/replay <runId>` and `/trace <runId>` are shell-only operator
-  surfaces** that *consume* shared `.kuzushi/runs/<runId>/`
+  surfaces** that *consume* shared `.kuzushi/v3/runs/<runId>/`
   artefacts. They are read-only over a shared on-disk format.
 - **Pipeline-only artefacts are scan-only.** `kuzushi run` and shell tool
   dispatch now mint a `runId` and write `summary.json`, `trace.jsonl`,
@@ -550,7 +550,7 @@ plumbed through `ToolExecutionContext.trace`.
 - **Producer authoring**: see `docs/modules.md` §7.1. Every DAG-participating
   Rust module emits at least `start` + `done` steps; multi-phase modules
   (`triage:run`, `verify:finding`, `agentic-sast:scan`, `taint-iris:hunt`,
-  `carlini-threat-hunt:run`, etc.) emit reasoning sub-steps via
+  `taint-iris-next:finding-review`, `carlini-threat-hunt:run`, etc.) emit reasoning sub-steps via
   `trace.child(parent)`.
 - **Hidden modules** (`pipeline:*`, `systems-hunt:*`, `context-lite:index`)
   collapse into one aggregated `subsystems` row. Their events stay out of
@@ -605,7 +605,7 @@ drop(_scope);
 ```
 
 Canonical references: `triage:run`, `verify:finding`,
-`agentic-sast:scan`, `taint-iris:hunt`, `taint-iris-next:hunt`,
+`agentic-sast:scan`, `taint-iris:hunt`, `taint-iris-next:finding-review`,
 `carlini-threat-hunt:run`, `patch:finding`, `threat-model:build`,
 `x-ray:run`, `run_plugin_finding_adapter`, `shinsa:scan`,
 `prompt-armor:*`.

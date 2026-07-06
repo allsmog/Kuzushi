@@ -76,7 +76,7 @@ fn workbench_context_includes_focus_selected_item_and_visible_rows() {
     assert_eq!(selected.line, 42);
     assert_eq!(selected.rank, "high");
     assert_eq!(selected.state, "needs_review");
-    assert_eq!(selected.confirmation, "not_reproduced");
+    assert_eq!(selected.runtime_verification, "not_reproduced");
     let triage = selected.triage.as_ref().expect("triage context");
     assert_eq!(triage.confidence, "0.75");
     assert_eq!(triage.rationale, "needs human review");
@@ -152,7 +152,7 @@ fn scope_chip_prefers_selected_finding_then_phase_and_revision() {
             line: 1,
             rank: "high".to_string(),
             state: "true_positive".to_string(),
-            confirmation: "unconfirmed".to_string(),
+            runtime_verification: "not_verified".to_string(),
             triage: None,
             proof: ScreenProofContext {
                 static_label: "not recorded".to_string(),

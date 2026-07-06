@@ -74,7 +74,7 @@ passing fixture check only marks them ready for operator review, not enabled.
 ## False-Positive Memory
 
 Whitebox-static suppression memory lives under
-`.kuzushi/v2/whitebox-suppressions.json`. Each suppression records scope,
+`.kuzushi/v3/whitebox-suppressions.json`. Each suppression records scope,
 source evidence, reason, author, creation time, and expiration. Suppression
 matching is snippet-hash guarded: when the cited source span changes, the
 suppression becomes stale and no longer applies.

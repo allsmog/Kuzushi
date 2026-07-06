@@ -76,9 +76,11 @@ impl SastPipelineReports {
 }
 
 pub(in crate::modules) fn run_sast_pipeline_reports(
+    registry: &ModuleRegistry,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
+    option_store: &crate::options::ToolOptionStore,
     workspace: &crate::workspace::WorkspaceTarget,
     store: &crate::findings::FindingStore,
     options: &ScanRunOptions,
@@ -95,7 +97,15 @@ pub(in crate::modules) fn run_sast_pipeline_reports(
         systems_hunt: None,
         engine_ids: selected.engine_ids.clone(),
     };
-    fill_agentic_reports(&mut reports, &selected, input, ctx, runtime)?;
+    fill_agentic_reports(
+        registry,
+        option_store,
+        &mut reports,
+        &selected,
+        input,
+        ctx,
+        runtime,
+    )?;
     Ok(reports)
 }
 

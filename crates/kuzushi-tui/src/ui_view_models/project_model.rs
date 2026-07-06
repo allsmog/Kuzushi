@@ -248,7 +248,7 @@ fn dfd_row(dfd: &super::DfdModel) -> ProjectModelRow {
                 dfd.zones.join(", ")
             )
         }),
-        action: "threats dfd",
+        action: "workbench",
     }
 }
 

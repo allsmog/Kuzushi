@@ -22,10 +22,7 @@ impl FindingListFilter {
         self.apply_filter_expression_input(input)?;
         self.severity
             .extend(parsed_severities(string_values(input, "severity")?)?);
-        self.verdict
-            .extend(parsed_verdicts(string_values(input, "verdict")?)?);
-        self.triage_state
-            .extend(parsed_triage_states(string_values(input, "state")?)?);
+        self.apply_review_filter_input(input)?;
         self.name =
             merge_optional_field(self.name.take(), normalized_optional_string(input, "name")?);
         self.file_path = merge_optional_field(self.file_path.take(), file_path_input(input)?);
@@ -50,6 +47,26 @@ impl FindingListFilter {
         Ok(())
     }
 
+    fn apply_review_filter_input(&mut self, input: &Value) -> Result<()> {
+        self.verdict.extend(parsed_verdicts(string_values_any(
+            input,
+            &["verdict", "decision"],
+        )?)?);
+        self.triage_state
+            .extend(parsed_triage_states(string_values(input, "state")?)?);
+        self.completeness
+            .extend(parsed_completeness_filters(string_values_any(
+                input,
+                &["completeness", "reviewCompleteness", "review_completeness"],
+            )?)?);
+        self.lifecycle_status
+            .extend(parsed_lifecycle_status_filters(string_values_any(
+                input,
+                &["status", "lifecycleStatus", "lifecycle_status"],
+            )?)?);
+        Ok(())
+    }
+
     fn apply_filter_expression_input(&mut self, input: &Value) -> Result<()> {
         if let Some(expr) = normalized_optional_string(input, "filter")? {
             self.apply_filter_expression(&expr)?;
@@ -64,7 +81,16 @@ impl FindingListFilter {
         file_path: Option<String>,
         limit: usize,
     ) -> Result<Self> {
-        Self::from_parts_full(severity, verdict, name, file_path, Vec::new(), limit)
+        Self::from_parts_full(
+            severity,
+            verdict,
+            name,
+            file_path,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            limit,
+        )
     }
 
     pub fn from_parts_full(
@@ -73,12 +99,16 @@ impl FindingListFilter {
         name: Option<String>,
         file_path: Option<String>,
         vuln_source: Vec<String>,
+        completeness: Vec<String>,
+        lifecycle_status: Vec<String>,
         limit: usize,
     ) -> Result<Self> {
         Ok(Self {
             severity: parsed_part_severities(severity)?,
             verdict: parsed_part_verdicts(verdict)?,
             triage_state: Vec::new(),
+            completeness: parsed_part_completeness_filters(completeness)?,
+            lifecycle_status: parsed_part_lifecycle_status_filters(lifecycle_status)?,
             name: normalize_string(name),
             text_terms: Vec::new(),
             file_path: normalize_string(file_path),
@@ -128,6 +158,10 @@ impl FindingListFilter {
             FilterKey::Rank => self.severity.extend(parsed_severities(values)?),
             FilterKey::Verdict => self.verdict.extend(parsed_verdicts(values)?),
             FilterKey::State => self.triage_state.extend(parsed_triage_states(values)?),
+            FilterKey::Completeness => self.completeness.extend(parsed_completeness_filters(values)?),
+            FilterKey::Status => self
+                .lifecycle_status
+                .extend(parsed_lifecycle_status_filters(values)?),
             FilterKey::Source => self.vuln_source.extend(parsed_sources(values)?),
             FilterKey::File => {
                 self.file_path = merge_optional_contains(self.file_path.take(), values)
@@ -144,10 +178,16 @@ impl FindingListFilter {
         Ok(())
     }
 
-    pub(in crate::findings) fn matches(&self, finding: &Finding) -> bool {
+    pub fn matches_with_review_decision(
+        &self,
+        finding: &Finding,
+        review_decision: Option<&ReviewDecision>,
+    ) -> bool {
         severity_matches(self, finding)
             && triage_state_filter_matches(self, finding)
-            && verdict_matches(self, finding)
+            && verdict_matches(self, finding, review_decision)
+            && review_completeness_matches(self, finding, review_decision)
+            && lifecycle_status_matches(self, finding)
             && name_matches(self, finding)
             && text_terms_match(self, finding)
             && source_matches(self, finding)
@@ -195,6 +235,26 @@ fn parsed_part_verdicts(values: Vec<String>) -> Result<Vec<FindingVerdictFilter>
         .collect()
 }
 
+fn parsed_part_completeness_filters(
+    values: Vec<String>,
+) -> Result<Vec<FindingReviewCompletenessFilter>> {
+    values
+        .into_iter()
+        .flat_map(split_csv)
+        .map(|value| FindingReviewCompletenessFilter::from_input(&value))
+        .collect()
+}
+
+fn parsed_part_lifecycle_status_filters(
+    values: Vec<String>,
+) -> Result<Vec<FindingLifecycleStatusFilter>> {
+    values
+        .into_iter()
+        .flat_map(split_csv)
+        .map(|value| FindingLifecycleStatusFilter::from_input(&value))
+        .collect()
+}
+
 fn parsed_part_sources(values: Vec<String>) -> Result<Vec<VulnSource>> {
     values
         .into_iter()
@@ -225,11 +285,70 @@ fn triage_state_filter_matches(filter: &FindingListFilter, finding: &Finding) ->
             .any(|state| triage_state_matches(*state, finding))
 }
 
-fn verdict_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
+fn verdict_matches(
+    filter: &FindingListFilter,
+    finding: &Finding,
+    review_decision: Option<&ReviewDecision>,
+) -> bool {
     filter.verdict.is_empty()
+        || filter.verdict.contains(&effective_verdict_filter(
+            finding,
+            review_decision,
+        ))
+}
+
+fn effective_verdict_filter(
+    finding: &Finding,
+    review_decision: Option<&ReviewDecision>,
+) -> FindingVerdictFilter {
+    review_decision
+        .map(|decision| FindingVerdictFilter::from_review_decision(decision.verdict))
+        .unwrap_or_else(|| FindingVerdictFilter::from_finding(finding))
+}
+
+fn review_completeness_matches(
+    filter: &FindingListFilter,
+    finding: &Finding,
+    review_decision: Option<&ReviewDecision>,
+) -> bool {
+    filter.completeness.is_empty()
         || filter
-            .verdict
-            .contains(&FindingVerdictFilter::from_finding(finding))
+            .completeness
+            .iter()
+            .any(|state| review_completeness_state_matches(*state, finding, review_decision))
+}
+
+fn review_completeness_state_matches(
+    state: FindingReviewCompletenessFilter,
+    finding: &Finding,
+    review_decision: Option<&ReviewDecision>,
+) -> bool {
+    let complete = effective_review_decision(finding, review_decision)
+        .is_some_and(|decision| decision.verdict.is_terminal());
+    match state {
+        FindingReviewCompletenessFilter::Open => !complete,
+        FindingReviewCompletenessFilter::Complete => complete,
+    }
+}
+
+fn effective_review_decision(
+    finding: &Finding,
+    review_decision: Option<&ReviewDecision>,
+) -> Option<ReviewDecision> {
+    review_decision.cloned().or_else(|| {
+        finding
+            .triage
+            .as_ref()
+            .map(|triage| ReviewDecision::from_triage(triage, finding.triaged_by))
+    })
+}
+
+fn lifecycle_status_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
+    filter.lifecycle_status.is_empty()
+        || filter
+            .lifecycle_status
+            .iter()
+            .any(|status| status.as_str() == finding_lifecycle_status(finding))
 }
 
 fn name_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
@@ -364,6 +483,24 @@ fn parsed_triage_states(values: Vec<String>) -> Result<Vec<FindingTriageStateFil
         .collect()
 }
 
+fn parsed_completeness_filters(
+    values: Vec<String>,
+) -> Result<Vec<FindingReviewCompletenessFilter>> {
+    values
+        .into_iter()
+        .map(|value| FindingReviewCompletenessFilter::from_input(&value))
+        .collect()
+}
+
+fn parsed_lifecycle_status_filters(
+    values: Vec<String>,
+) -> Result<Vec<FindingLifecycleStatusFilter>> {
+    values
+        .into_iter()
+        .map(|value| FindingLifecycleStatusFilter::from_input(&value))
+        .collect()
+}
+
 fn parsed_sources(values: Vec<String>) -> Result<Vec<VulnSource>> {
     values
         .into_iter()
@@ -378,6 +515,8 @@ enum FilterKey {
     Rank,
     Verdict,
     State,
+    Completeness,
+    Status,
     Source,
     File,
     Name,
@@ -392,8 +531,10 @@ impl FilterKey {
     fn parse(key: &str) -> Result<Self> {
         match normalize_filter_key(key).as_str() {
             "rank" | "severity" => Ok(Self::Rank),
-            "verdict" | "conf" | "confirmation" => Ok(Self::Verdict),
+            "verdict" | "decision" | "conf" | "confirmation" => Ok(Self::Verdict),
             "state" | "triage" => Ok(Self::State),
+            "completeness" | "review" | "reviewstate" => Ok(Self::Completeness),
+            "status" | "lifecycle" | "lifecyclestatus" => Ok(Self::Status),
             "source" | "channel" => Ok(Self::Source),
             "file" | "path" => Ok(Self::File),
             "name" | "title" | "q" => Ok(Self::Name),

@@ -18,8 +18,8 @@ pub(crate) struct PatchReviewTestRow {
 }
 
 pub(crate) fn patch_review_model(app: &ShellApp, alias: &str) -> Option<PatchReviewModel> {
-    app.pending_patch
-        .as_ref()
+    app.engagement
+        .pending_patch()
         .filter(|patch| patch.alias == alias)
         .map(PatchReviewModel::from_patch)
 }

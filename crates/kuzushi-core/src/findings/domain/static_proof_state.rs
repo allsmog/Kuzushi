@@ -107,3 +107,14 @@ pub(crate) fn is_runtime_proof_state(state: &str) -> bool {
             | "execution_rejected"
     )
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StaticProofStateEvent {
+    pub id: i64,
+    pub finding_id: i64,
+    pub scan_id: String,
+    pub previous_state: Option<StaticProofState>,
+    pub next_state: StaticProofState,
+    pub source: String,
+    pub created_at: String,
+}

@@ -1,5 +1,6 @@
 use crate::command::RunsCommand;
 use crate::presentation::{runs_list_output, runs_show_output, runs_trace_output};
+use crate::support::require_cli_target;
 use anyhow::{bail, Context, Result};
 use kuzushi_core::run_artifacts::canonical_run_artifact_spec;
 use kuzushi_core::{
@@ -15,29 +16,25 @@ use super::runs_prune::runs_prune_command;
 pub(crate) fn runs_command(command: RunsCommand, global_target: Option<PathBuf>) -> Result<()> {
     match command {
         RunsCommand::List { target, status, json } => {
-            runs_list_command(target.or(global_target), status, json)
+            runs_list_command(require_cli_target("runs list", target, global_target)?, status, json)
         }
         RunsCommand::Show { run_id, target, json } => {
-            runs_show_command(target.or(global_target), &run_id, json)
+            runs_show_command(require_cli_target("runs show", target, global_target)?, &run_id, json)
         }
         RunsCommand::Trace { run_id, target, json } => {
-            runs_trace_command(target.or(global_target), &run_id, json)
+            runs_trace_command(require_cli_target("runs trace", target, global_target)?, &run_id, json)
         }
         RunsCommand::Diff { base_run_id, compare_run_id, target, json } => {
-            runs_diff_command(target.or(global_target), &base_run_id, &compare_run_id, json)
+            runs_diff_command(require_cli_target("runs diff", target, global_target)?, &base_run_id, &compare_run_id, json)
         }
         RunsCommand::Prune { target, older_than_days, keep_last, dry_run, json } => {
-            runs_prune_command(target.or(global_target), older_than_days, keep_last, dry_run, json)
+            runs_prune_command(require_cli_target("runs prune", target, global_target)?, older_than_days, keep_last, dry_run, json)
         }
     }
 }
 
-pub(crate) fn runs_list_command(
-    target: Option<PathBuf>,
-    status: Vec<String>,
-    json: bool,
-) -> Result<()> {
-    let workspace = WorkspaceTarget::new(target.unwrap_or_else(|| PathBuf::from(".")))?;
+pub(crate) fn runs_list_command(target: PathBuf, status: Vec<String>, json: bool) -> Result<()> {
+    let workspace = WorkspaceTarget::new(target)?;
     let runs = list_run_summaries(workspace.root())?;
     let filtered = filter_runs_by_status(runs, &status)?;
     print!("{}", runs_list_output(&workspace, &filtered, json)?);
@@ -54,8 +51,13 @@ pub(crate) fn filter_runs_by_status(
     }
     Ok(runs
         .into_iter()
-        .filter(|run| filters.iter().any(|status| status == &run.status))
+        .filter(|run| run_matches_status_filter(run, &filters))
         .collect())
+}
+
+fn run_matches_status_filter(run: &RunSummary, filters: &[String]) -> bool {
+    let status = normalized_status_text(&run.status);
+    filters.iter().any(|filter| filter == &status)
 }
 
 fn normalize_status_filters(status: &[String]) -> Result<Vec<String>> {
@@ -66,11 +68,15 @@ fn normalize_status_filters(status: &[String]) -> Result<Vec<String>> {
 }
 
 fn normalize_run_status(status: &str) -> Result<String> {
-    let normalized = status.trim().to_ascii_lowercase();
+    let normalized = normalized_status_text(status);
     if run_status_allowed(&normalized) {
         return Ok(normalized);
     }
     bail!("unknown run status {status:?}; expected running, completed, failed, interrupted, partial, or skipped")
+}
+
+fn normalized_status_text(status: &str) -> String {
+    status.trim().to_ascii_lowercase()
 }
 
 fn run_status_allowed(status: &str) -> bool {
@@ -80,8 +86,8 @@ fn run_status_allowed(status: &str) -> bool {
     )
 }
 
-pub(crate) fn runs_show_command(target: Option<PathBuf>, run_id: &str, json: bool) -> Result<()> {
-    let workspace = WorkspaceTarget::new(target.unwrap_or_else(|| PathBuf::from(".")))?;
+pub(crate) fn runs_show_command(target: PathBuf, run_id: &str, json: bool) -> Result<()> {
+    let workspace = WorkspaceTarget::new(target)?;
     let summary = load_run_summary(workspace.root(), run_id).with_context(|| {
         format!(
             "no run summary found for {run_id:?} under {}",
@@ -92,8 +98,8 @@ pub(crate) fn runs_show_command(target: Option<PathBuf>, run_id: &str, json: boo
     Ok(())
 }
 
-pub(crate) fn runs_trace_command(target: Option<PathBuf>, run_id: &str, json: bool) -> Result<()> {
-    let workspace = WorkspaceTarget::new(target.unwrap_or_else(|| PathBuf::from(".")))?;
+pub(crate) fn runs_trace_command(target: PathBuf, run_id: &str, json: bool) -> Result<()> {
+    let workspace = WorkspaceTarget::new(target)?;
     let trace_path = run_trace_path(&workspace, run_id);
     let body = fs::read_to_string(&trace_path)
         .with_context(|| format!("Could not read {}", trace_path.display()))?;

@@ -4,10 +4,12 @@
 //! artifact hasn't been generated, the model carries an `empty_hint` so the
 //! renderer can draw a single guidance line instead of dummy content.
 
-use super::threat_dfd_diagram::{parse_flows, parse_nodes, zones_in_order};
-use crate::{ChainSeverity, ExploitChainStep, ShellApp, TaintFlowSnapshot};
+use crate::{ChainSeverity, ExploitChainStep, RiskByModuleCacheKey, ShellApp, TaintFlowSnapshot};
 use kuzushi_core::{Finding, Severity};
 use std::collections::BTreeMap;
+
+mod dfd;
+pub(crate) use dfd::{dfd_model, DfdFlowModel, DfdKind, DfdModel, DfdNodeModel};
 
 // ── Risk by module (shared by heatmap + terrain) ──────────────────────────
 
@@ -83,6 +85,18 @@ pub(crate) fn risk_by_module(findings: &[Finding]) -> RiskByModule {
     RiskByModule { modules }
 }
 
+pub(crate) fn cached_risk_by_module(app: &ShellApp) -> RiskByModule {
+    let key = RiskByModuleCacheKey::from_findings(&app.findings);
+    if let Some(cached) = app.workbench_cache.borrow().risk_by_module(&key) {
+        return cached;
+    }
+    let risk = risk_by_module(&app.findings);
+    app.workbench_cache
+        .borrow_mut()
+        .cache_risk_by_module(key, risk.clone());
+    risk
+}
+
 // ── Findings heatmap ───────────────────────────────────────────────────────
 
 const MAX_HEATMAP_ROWS: usize = 10;
@@ -103,6 +117,21 @@ pub(crate) fn findings_heatmap_with_selection(
     selected: Option<&Finding>,
 ) -> FindingsHeatmap {
     let risk = risk_by_module(findings);
+    findings_heatmap_from_risk(risk, selected)
+}
+
+pub(crate) fn cached_findings_heatmap(app: &ShellApp) -> FindingsHeatmap {
+    cached_findings_heatmap_with_selection(app, None)
+}
+
+pub(crate) fn cached_findings_heatmap_with_selection(
+    app: &ShellApp,
+    selected: Option<&Finding>,
+) -> FindingsHeatmap {
+    findings_heatmap_from_risk(cached_risk_by_module(app), selected)
+}
+
+fn findings_heatmap_from_risk(risk: RiskByModule, selected: Option<&Finding>) -> FindingsHeatmap {
     if risk.modules.is_empty() {
         return FindingsHeatmap {
             rows: Vec::new(),
@@ -117,90 +146,6 @@ pub(crate) fn findings_heatmap_with_selection(
     }
 }
 
-// ── Data-flow diagram ──────────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum DfdKind {
-    Entity,
-    Process,
-    Store,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct DfdNodeModel {
-    pub name: String,
-    pub zone: String,
-    pub kind: DfdKind,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct DfdFlowModel {
-    pub from: String,
-    pub to: String,
-    pub crosses: bool,
-    pub label: String,
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub(crate) struct DfdModel {
-    pub zones: Vec<String>,
-    pub nodes: Vec<DfdNodeModel>,
-    pub flows: Vec<DfdFlowModel>,
-    pub empty_hint: Option<String>,
-}
-
-fn dfd_kind(raw: &str) -> DfdKind {
-    let kind = raw.to_ascii_lowercase();
-    if kind.contains("entity") || kind.contains("actor") || kind.contains("external") {
-        DfdKind::Entity
-    } else if kind.contains("store") || kind.contains("data") {
-        DfdKind::Store
-    } else {
-        DfdKind::Process
-    }
-}
-
-pub(crate) fn dfd_model(app: &ShellApp) -> DfdModel {
-    let Some(doc) = super::threat_model_doc(app) else {
-        return DfdModel {
-            empty_hint: Some(
-                "no threat model yet — run `threat-model:build` to populate".to_string(),
-            ),
-            ..Default::default()
-        };
-    };
-    let nodes = parse_nodes(&doc);
-    if nodes.is_empty() {
-        return DfdModel {
-            empty_hint: Some("threat model has no data-flow diagram yet".to_string()),
-            ..Default::default()
-        };
-    }
-    let flows = parse_flows(&doc, &nodes);
-    let zones = zones_in_order(&nodes);
-    DfdModel {
-        nodes: nodes
-            .iter()
-            .map(|n| DfdNodeModel {
-                name: n.name.clone(),
-                zone: n.zone.clone(),
-                kind: dfd_kind(&n.kind),
-            })
-            .collect(),
-        flows: flows
-            .iter()
-            .map(|f| DfdFlowModel {
-                from: f.source.clone(),
-                to: f.target.clone(),
-                crosses: f.crosses,
-                label: f.label.clone(),
-            })
-            .collect(),
-        zones,
-        empty_hint: None,
-    }
-}
-
 // ── Attack tree (exploit chains) ───────────────────────────────────────────
 
 #[derive(Debug, Clone, PartialEq)]
@@ -211,11 +156,13 @@ pub(crate) struct AttackChain {
     pub impact_description: Option<String>,
     pub preconditions: Vec<String>,
     pub steps: Vec<String>,
+    pub hidden_step_count: usize,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub(crate) struct AttackTree {
     pub chains: Vec<AttackChain>,
+    pub hidden_chain_count: usize,
     pub empty_hint: Option<String>,
 }
 
@@ -237,10 +184,12 @@ pub(crate) fn attack_tree(app: &ShellApp) -> AttackTree {
             impact_description: chain.impact_description.clone(),
             preconditions: chain.preconditions.clone(),
             steps: chain.steps.iter().take(4).map(step_label).collect(),
+            hidden_step_count: chain.steps.len().saturating_sub(4),
         })
         .collect();
     AttackTree {
         chains,
+        hidden_chain_count: app.exploit_chains.len().saturating_sub(3),
         empty_hint: None,
     }
 }

@@ -99,18 +99,37 @@ mod tests {
     }
 
     #[test]
-    fn governance_rejects_model_credential_backend_mismatch() {
+    fn governance_accepts_provider_models_with_default_credential_envs() {
         assert!(validate_model_api_key_env("anthropic:claude-sonnet-4-6", "ANTHROPIC_API_KEY")
             .is_ok());
         assert!(validate_model_api_key_env("openai:gpt-5.5", "OPENAI_API_KEY").is_ok());
 
-        let error = validate_model_api_key_env("anthropic:claude-sonnet-4-6", "OPENAI_API_KEY")
+        assert_eq!(
+            bridge_api_key_env_for_model("anthropic:claude-sonnet-4-6", "ANTHROPIC_API_KEY")
+                .unwrap(),
+            "ANTHROPIC_API_KEY"
+        );
+        assert_eq!(
+            bridge_api_key_env_for_model("openai:gpt-5.5", "OPENAI_API_KEY").unwrap(),
+            "OPENAI_API_KEY"
+        );
+        let custom =
+            validate_model_api_key_env("anthropic:claude-sonnet-4-6", "CUSTOM_KEY")
+                .unwrap_err()
+                .to_string();
+        assert!(custom.contains("requires ANTHROPIC_API_KEY"));
+
+        let mismatch =
+            validate_model_api_key_env("anthropic:claude-sonnet-4-6", "OPENAI_API_KEY")
+                .unwrap_err()
+                .to_string();
+        assert!(mismatch.contains("requires ANTHROPIC_API_KEY"));
+        assert!(mismatch.contains("will not silently switch"));
+
+        let error = validate_model_api_key_env("other:model", "OPENAI_API_KEY")
             .unwrap_err()
             .to_string();
-
-        assert!(error.contains("model provider \"anthropic\""));
-        assert!(error.contains("runtime.api_key_env=\"OPENAI_API_KEY\""));
-        assert!(error.contains("ANTHROPIC_API_KEY"));
+        assert!(error.contains("does not support model provider"));
     }
 
     #[test]
@@ -142,6 +161,7 @@ mod tests {
                     input: serde_json::json!({ "path": "src/foo.rs" }),
                     call_id: "call_1".to_string(),
                 },
+                cost_usd: None,
             },
             AgentLoopStep::Final {
                 text: "saw foo".to_string(),
@@ -179,6 +199,81 @@ mod tests {
     }
 
     #[test]
+    fn driver_accumulates_cost_across_intermediate_rounds() {
+        // Cost must be settled per round, not only at Final.
+        let runtime = ScriptedRuntime::new(vec![
+            AgentLoopStep::ToolCall {
+                call: ToolCall {
+                    name: "read_source".to_string(),
+                    input: serde_json::Value::Null,
+                    call_id: "c1".to_string(),
+                },
+                cost_usd: Some(0.01),
+            },
+            AgentLoopStep::ToolCall {
+                call: ToolCall {
+                    name: "read_source".to_string(),
+                    input: serde_json::Value::Null,
+                    call_id: "c2".to_string(),
+                },
+                cost_usd: Some(0.02),
+            },
+            AgentLoopStep::Final {
+                text: "done".to_string(),
+                structured: None,
+                cost_usd: Some(0.03),
+            },
+        ]);
+        let mut tb = ToolBox::new();
+        tb.register("read_source", |call| {
+            Ok(ToolResult {
+                call_id: call.call_id.clone(),
+                output: serde_json::Value::Null,
+                is_error: false,
+            })
+        });
+        let outcome = run_tool_loop(&runtime, &req(), &mut tb).unwrap();
+        assert!((outcome.cost_usd - 0.06).abs() < 1e-9, "got {}", outcome.cost_usd);
+    }
+
+    #[test]
+    fn driver_reports_intermediate_cost_even_when_truncated() {
+        // Two costed tool rounds, max_steps=2 → truncates with no Final, but the
+        // spend already incurred must still be reported.
+        let runtime = ScriptedRuntime::new(vec![
+            AgentLoopStep::ToolCall {
+                call: ToolCall {
+                    name: "read_source".to_string(),
+                    input: serde_json::Value::Null,
+                    call_id: "c1".to_string(),
+                },
+                cost_usd: Some(0.05),
+            },
+            AgentLoopStep::ToolCall {
+                call: ToolCall {
+                    name: "read_source".to_string(),
+                    input: serde_json::Value::Null,
+                    call_id: "c2".to_string(),
+                },
+                cost_usd: Some(0.05),
+            },
+        ]);
+        let mut tb = ToolBox::new();
+        tb.register("read_source", |call| {
+            Ok(ToolResult {
+                call_id: call.call_id.clone(),
+                output: serde_json::Value::Null,
+                is_error: false,
+            })
+        });
+        let mut request = req();
+        request.max_steps = 2;
+        let outcome = run_tool_loop(&runtime, &request, &mut tb).unwrap();
+        assert!(outcome.truncated);
+        assert!((outcome.cost_usd - 0.10).abs() < 1e-9, "got {}", outcome.cost_usd);
+    }
+
+    #[test]
     fn driver_marks_truncation_at_max_steps() {
         // Five tool calls in a row, max_steps=3 → truncate after 3rd ToolCall.
         let runtime = ScriptedRuntime::new(
@@ -189,6 +284,7 @@ mod tests {
                         input: serde_json::Value::Null,
                         call_id: format!("call_{i}"),
                     },
+                    cost_usd: None,
                 })
                 .collect(),
         );
@@ -216,6 +312,7 @@ mod tests {
                     input: serde_json::Value::Null,
                     call_id: "call_x".to_string(),
                 },
+                cost_usd: None,
             },
             AgentLoopStep::Final {
                 text: "ok".to_string(),
@@ -254,6 +351,7 @@ mod tests {
                     input: serde_json::Value::Null,
                     call_id: "c1".to_string(),
                 },
+                cost_usd: None,
             },
             AgentLoopStep::Final {
                 text: "ok".to_string(),

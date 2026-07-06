@@ -7,13 +7,13 @@ use std::path::{Path, PathBuf};
 const DAY_SECONDS: u64 = 86_400;
 
 pub(crate) fn runs_prune_command(
-    target: Option<PathBuf>,
+    target: PathBuf,
     older_than_days: Option<u64>,
     keep_last: Option<usize>,
     dry_run: bool,
     json: bool,
 ) -> Result<()> {
-    let workspace = WorkspaceTarget::new(target.unwrap_or_else(|| PathBuf::from(".")))?;
+    let workspace = WorkspaceTarget::new(target)?;
     let runs = list_run_summaries(workspace.root())?;
     let plan = runs_prune_plan(&runs, older_than_days, keep_last, now_unix_for_prune())?;
     let report = apply_runs_prune(workspace.root(), &plan, dry_run)?;

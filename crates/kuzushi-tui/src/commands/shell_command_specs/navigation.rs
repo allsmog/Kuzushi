@@ -15,9 +15,15 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "workbench",
-        aliases: &["/workbench", "/studio", "/cc", "workbench", "studio", "cc"],
+        aliases: &["/workbench", "workbench"],
         category: ShellCommandCategory::Navigation,
         description: "open the split-pane command center",
+    },
+    ShellCommandSpec {
+        command: "aim [focus]",
+        aliases: &["aim", "/aim", "aim sqli", "aim idor"],
+        category: ShellCommandCategory::Navigation,
+        description: "seed the engagement harness from the Workbench AIM page",
     },
     ShellCommandSpec {
         command: "modules",
@@ -63,7 +69,7 @@ pub(crate) const NAVIGATION_COMMANDS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "onboarding",
-        aliases: &["/onboarding", "/setup", "/planning", "/plan-stage"],
+        aliases: &["/onboarding", "/planning"],
         category: ShellCommandCategory::Navigation,
         description: "open the planning-stage multi-select picker",
     },

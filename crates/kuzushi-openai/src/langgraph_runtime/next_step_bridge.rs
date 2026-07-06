@@ -65,7 +65,7 @@ pub(crate) fn preflight_tool_loop_blocking(
 }
 
 fn validate_runtime_model(runtime: &LangGraphRuntime, model: &str) -> Result<()> {
-    kuzushi_core::runtime::validate_model_api_key_env(model, &runtime.api_key_env)
+    runtime.credential_for_model(model).map(|_| ())
 }
 
 fn ensure_not_cancelled(runtime: &LangGraphRuntime) -> Result<()> {
@@ -84,6 +84,9 @@ fn next_step_bridge_request(
     request: &AgentToolLoopRequest,
     history: &[LoopHistoryEntry],
 ) -> NextStepBridgeRequest {
+    let credential = runtime
+        .credential_for_model(&request.model)
+        .expect("model credential was validated before building bridge request");
     NextStepBridgeRequest {
         protocol_version: LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
         envelope_type: "next-step",
@@ -101,8 +104,8 @@ fn next_step_bridge_request(
             })
             .collect(),
         max_tokens: 4096,
-        api_key_env: runtime.api_key_env.clone(),
-        api_key: runtime.api_key.clone(),
+        api_key_env: credential.env,
+        api_key: credential.value,
         base_url: runtime.base_url.clone(),
         runtime_options: request.runtime_options.clone(),
         temperature: request.temperature,
@@ -151,6 +154,7 @@ fn step_from_bridge_response(response: NextStepBridgeResponse) -> Result<AgentLo
 }
 
 fn tool_call_step(response: NextStepBridgeResponse) -> Result<AgentLoopStep> {
+    let cost_usd = response.cost_usd;
     let call = response
         .call
         .context("next-step: tool_call missing call body")?;
@@ -160,5 +164,8 @@ fn tool_call_step(response: NextStepBridgeResponse) -> Result<AgentLoopStep> {
             input: call.input,
             call_id: call.call_id,
         },
+        // The bridge reports per-round cost on tool-call turns too; forward it
+        // so the driver settles spend incrementally instead of only at Final.
+        cost_usd,
     })
 }

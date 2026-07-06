@@ -2,16 +2,26 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn set_option(&mut self, global: bool, name: &str, value: &str) {
-        if self.set_shell_option(global, name, value) {
-            return;
+        let effects = self.reduce_set_option(global, name, value);
+        self.execute_effects(effects);
+    }
+
+    pub(crate) fn reduce_set_option(
+        &mut self,
+        global: bool,
+        name: &str,
+        value: &str,
+    ) -> Vec<ShellEffect> {
+        if let Some(effects) = self.reduce_set_shell_option(global, name, value) {
+            return effects;
         }
         let Some(option) = self.resolve_tool_option(name) else {
-            return;
+            return Vec::new();
         };
         let Some(value) = self.coerce_tool_option_value(&option, value) else {
-            return;
+            return Vec::new();
         };
-        self.store_tool_option(global, option, value);
+        self.store_tool_option(global, option, value)
     }
 
     fn store_tool_option(
@@ -19,7 +29,7 @@ impl ShellApp {
         global: bool,
         option: ResolvedToolOption,
         value: serde_json::Value,
-    ) {
+    ) -> Vec<ShellEffect> {
         let ToolOptionWriteTarget {
             scope,
             target,
@@ -28,7 +38,6 @@ impl ShellApp {
         self.option_store
             .set_value(scope, target, option.canonical_name.clone(), value.clone());
         self.clear_legacy_global_tool_option(global, &option.canonical_name);
-        self.persist_option_store(scope);
         self.shell_view = ShellView::Options(OptionsView {
             tool_name: option.tool_name.clone(),
             filter: self.current_options_filter(),
@@ -42,19 +51,25 @@ impl ShellApp {
                 format_option_value(&value)
             ),
         );
+        persist_option_effects(scope)
     }
 
     pub(crate) fn unset_option(&mut self, global: bool, name: &str) {
-        if self.unset_shell_option(global, name) {
-            return;
-        }
-        let Some(option) = self.resolve_tool_option(name) else {
-            return;
-        };
-        self.remove_tool_option(global, option);
+        let effects = self.reduce_unset_option(global, name);
+        self.execute_effects(effects);
     }
 
-    fn remove_tool_option(&mut self, global: bool, option: ResolvedToolOption) {
+    pub(crate) fn reduce_unset_option(&mut self, global: bool, name: &str) -> Vec<ShellEffect> {
+        if let Some(effects) = self.reduce_unset_shell_option(global, name) {
+            return effects;
+        }
+        let Some(option) = self.resolve_tool_option(name) else {
+            return Vec::new();
+        };
+        self.remove_tool_option(global, option)
+    }
+
+    fn remove_tool_option(&mut self, global: bool, option: ResolvedToolOption) -> Vec<ShellEffect> {
         let ToolOptionWriteTarget {
             scope,
             target,
@@ -64,7 +79,6 @@ impl ShellApp {
             .option_store
             .unset_value(scope, &target, &option.canonical_name);
         let legacy_removed = self.clear_legacy_global_tool_option(global, &option.canonical_name);
-        self.persist_option_store(scope);
         self.shell_view = ShellView::Options(OptionsView {
             tool_name: option.tool_name.clone(),
             filter: self.current_options_filter(),
@@ -73,6 +87,7 @@ impl ShellApp {
             prefix,
             removed_tool_option_message(&option, removed || legacy_removed),
         );
+        persist_option_effects(scope)
     }
 
     fn resolve_tool_option(&mut self, name: &str) -> Option<ResolvedToolOption> {
@@ -113,9 +128,14 @@ impl ShellApp {
             .ok()
     }
 
-    fn set_shell_option(&mut self, global: bool, name: &str, value: &str) -> bool {
+    fn reduce_set_shell_option(
+        &mut self,
+        global: bool,
+        name: &str,
+        value: &str,
+    ) -> Option<Vec<ShellEffect>> {
         let Some(canonical_name) = canonical_shell_option(name) else {
-            return false;
+            return None;
         };
         let Some(value) = parse_bool_pref(value) else {
             self.log(
@@ -124,7 +144,7 @@ impl ShellApp {
                     "invalid value for {canonical_name}: expected true/false, on/off, yes/no, or 1/0"
                 ),
             );
-            return true;
+            return Some(Vec::new());
         };
         let scope = if global {
             OptionScope::Global
@@ -137,18 +157,17 @@ impl ShellApp {
             canonical_name,
             serde_json::Value::Bool(value),
         );
-        self.persist_option_store(scope);
         refresh_auto_open_prefs_from_store(self);
         self.log(
             if global { "setg" } else { "set" },
             format!("{canonical_name} = {value}"),
         );
-        true
+        Some(persist_option_effects(scope))
     }
 
-    fn unset_shell_option(&mut self, global: bool, name: &str) -> bool {
+    fn reduce_unset_shell_option(&mut self, global: bool, name: &str) -> Option<Vec<ShellEffect>> {
         let Some(canonical_name) = canonical_shell_option(name) else {
-            return false;
+            return None;
         };
         let scope = if global {
             OptionScope::Global
@@ -158,7 +177,6 @@ impl ShellApp {
         let removed = self
             .option_store
             .unset_value(scope, &OptionTarget::All, canonical_name);
-        self.persist_option_store(scope);
         refresh_auto_open_prefs_from_store(self);
         self.log(
             if global { "unsetg" } else { "unset" },
@@ -168,7 +186,7 @@ impl ShellApp {
                 format!("{canonical_name} was not set")
             },
         );
-        true
+        Some(persist_option_effects(scope))
     }
 
     pub(crate) fn persist_option_store(&mut self, scope: OptionScope) {
@@ -205,6 +223,9 @@ fn canonical_shell_option(name: &str) -> Option<&'static str> {
     match name.trim() {
         UI_AUTO_OPEN_ACTIVITY_OPTION | "auto_open_activity" => Some(UI_AUTO_OPEN_ACTIVITY_OPTION),
         UI_AUTO_OPEN_VIZ_OPTION | "auto_open_viz" => Some(UI_AUTO_OPEN_VIZ_OPTION),
+        UI_WORKBENCH_DEPTH_STACK_OPTION | "workbench_depth_stack" => {
+            Some(UI_WORKBENCH_DEPTH_STACK_OPTION)
+        }
         _ => None,
     }
 }
@@ -238,6 +259,14 @@ fn tool_option_write_target(
         scope: OptionScope::Session,
         target: OptionTarget::Tool(tool_name.to_string()),
         prefix: session_prefix,
+    }
+}
+
+fn persist_option_effects(scope: OptionScope) -> Vec<ShellEffect> {
+    if scope == OptionScope::Session {
+        Vec::new()
+    } else {
+        vec![ShellEffect::PersistOptions(scope)]
     }
 }
 

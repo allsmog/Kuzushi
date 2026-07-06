@@ -26,7 +26,7 @@ fn vendor_assessment_tools() -> Vec<ToolDescriptor> {
         ),
         tool_with_options(
             "vendor-assessment:assess",
-            "Run vendor assessment.",
+            "Assess attached vendor evidence against the configured product scope and produce a risk summary.",
             vendor_assessment_assess_options(),
         ),
     ]

@@ -7,8 +7,8 @@ use crate::tool_run_artifacts::fail_cli_tool_run;
 use anyhow::Result;
 use kuzushi_core::run_artifacts::{record_tool_run_started_with_reproducibility, ToolRunRecord};
 use kuzushi_core::{
-    config_hash, load_config_for_target, new_run_id, FindingStore, ModuleRegistry, ToolOptionStore,
-    WorkspaceTarget,
+    config_hash, load_config_for_target, new_run_id, FindingStore, ModuleRegistry,
+    ToolExecutionContext, ToolOptionStore, WorkspaceTarget,
 };
 use std::path::{Path, PathBuf};
 
@@ -46,11 +46,10 @@ pub(crate) fn prepare_cli_tool_run(
     options: Vec<String>,
     target: Option<PathBuf>,
     load: Vec<String>,
-    allow_untrusted_module: bool,
 ) -> Result<PreparedCliToolRun> {
     let bootstrap = CliToolRunBootstrap::new(tool, target, &input)?;
     let config = bootstrap.load_config_or_record_failure(&input)?;
-    let setup = bootstrap.with_config(config, load, allow_untrusted_module, &input)?;
+    let setup = bootstrap.with_config(config, load, &input)?;
     let input = setup.parse_input(&input)?;
     let option_store = setup.option_store(&input, &options)?;
     let input = setup.prepare_input(input, &option_store)?;
@@ -127,12 +126,9 @@ impl CliToolRunBootstrap {
         mut self,
         config: kuzushi_core::V2Config,
         load: Vec<String>,
-        allow_untrusted_module: bool,
         raw_input: &str,
     ) -> Result<CliToolRunSetup> {
-        if let Err(error) =
-            load_dynamic_modules(&mut self.registry, &config, &load, allow_untrusted_module)
-        {
+        if let Err(error) = load_dynamic_modules(&mut self.registry, &config, &load) {
             self.record_pre_config_failure(raw_input, &error.to_string());
             return Err(error);
         }
@@ -173,8 +169,14 @@ impl CliToolRunSetup {
         input: serde_json::Value,
         option_store: &ToolOptionStore,
     ) -> Result<serde_json::Value> {
+        let ctx = ToolExecutionContext {
+            config: &self.config,
+            workspace: self.workspace.as_ref(),
+            findings_store: None,
+            trace: None,
+        };
         self.registry
-            .prepare_tool_input(&self.tool, input.clone(), Some(option_store))
+            .prepare_tool_input_for_dispatch(&self.tool, input.clone(), &ctx, Some(option_store))
             .inspect_err(|error| self.record_prepare_failure(&input, error))
     }
 

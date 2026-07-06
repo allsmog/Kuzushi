@@ -312,8 +312,14 @@ impl ActivitySession {
             step,
             observed_at: Instant::now(),
         };
+        self.push_recorded_event(event);
+    }
+
+    fn push_recorded_event(&mut self, event: RecordedTraceEvent) {
         if self.events.len() >= ACTIVITY_FEED_RING_CAPACITY {
-            self.events.pop_front();
+            if let Some(evicted) = self.events.pop_front() {
+                self.step_task_ids.remove(&evicted.step.n);
+            }
         }
         self.events.push_back(event);
     }
@@ -858,11 +864,12 @@ fn next_activity_row_state(
     rolled_up_child: bool,
 ) -> DagTaskState {
     match (step.severity.as_deref(), step.kind.as_str(), current) {
-        (Some("danger"), _, _) => DagTaskState::Failing,
-        (_, "done" | "tool-complete", _) if !rolled_up_child => DagTaskState::Done,
-        (_, _, DagTaskState::Queued) => DagTaskState::Active,
         (_, _, DagTaskState::Canceled) => DagTaskState::Canceled,
         (_, _, DagTaskState::Skipped) => DagTaskState::Skipped,
+        (Some("danger"), _, _) => DagTaskState::Failing,
+        (_, _, DagTaskState::Failing) => DagTaskState::Failing,
+        (_, "done" | "tool-complete", _) if !rolled_up_child => DagTaskState::Done,
+        (_, _, DagTaskState::Queued) => DagTaskState::Active,
         (_, _, state) => state,
     }
 }
@@ -1143,8 +1150,20 @@ mod tests {
         session.mark_active_tasks_canceled();
 
         // Most tools don't honor mid-flight cancel: the worker still returns a
-        // result, which drives mark_task_done. The canceled row must stay canceled.
+        // result, which drives mark_task_done and can also emit late trace
+        // steps. The canceled row must stay canceled.
         session.mark_task_done("triage:run");
+        session.apply_step(
+            RunTraceStep::new(2, "done", "triage complete")
+                .with_module_id("triage")
+                .with_verb("run"),
+        );
+        session.apply_step(
+            RunTraceStep::new(3, "tool", "late failure")
+                .with_module_id("triage")
+                .with_verb("run")
+                .with_severity("danger"),
+        );
 
         let row = session.tasks.get("triage:run").unwrap();
         assert_eq!(row.state, DagTaskState::Canceled);
@@ -1180,6 +1199,11 @@ mod tests {
             );
         }
         assert_eq!(session.events.len(), ACTIVITY_FEED_RING_CAPACITY);
+        assert_eq!(session.step_task_ids.len(), ACTIVITY_FEED_RING_CAPACITY);
+        assert!(!session.step_task_ids.contains_key(&0));
+        assert!(session
+            .step_task_ids
+            .contains_key(&(ACTIVITY_FEED_RING_CAPACITY + 4)));
         // Per-task aggregates survive eviction.
         let row = session.tasks.get("semgrep:scan").unwrap();
         assert_eq!(row.steps_done, ACTIVITY_FEED_RING_CAPACITY + 5);

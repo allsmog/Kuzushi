@@ -1,7 +1,7 @@
 use super::*;
 use crate::run_artifacts::run_dir;
-use std::sync::mpsc;
 use std::sync::Mutex;
+use std::sync::mpsc;
 
 #[derive(Default)]
 struct VecSink {
@@ -29,6 +29,24 @@ fn step_assigns_monotonic_n_and_stamps_module_id() {
     assert_eq!(steps[0].module_id.as_deref(), Some("semgrep"));
     assert_eq!(steps[0].verb.as_deref(), Some("scan"));
     assert!(steps[0].started_at_ms.is_some());
+}
+
+#[test]
+fn delayed_builder_does_not_reserve_trace_number() {
+    let sink = Arc::new(VecSink::default());
+    let handle = TraceHandle::new(sink.clone()).for_tool("semgrep:scan");
+
+    let delayed = handle.step("tool", "scan", "created first");
+    let emitted_first = handle.step("tool", "scan", "emitted first").emit();
+    let emitted_second = delayed.emit();
+
+    assert_eq!((emitted_first, emitted_second), (1, 2));
+    let steps = sink.steps.lock().unwrap();
+    let labels: Vec<_> = steps
+        .iter()
+        .map(|step| (step.n, step.label.as_str()))
+        .collect();
+    assert_eq!(labels, vec![(1, "emitted first"), (2, "created first")]);
 }
 
 #[test]
@@ -140,4 +158,150 @@ fn seeded_broadcast_handle_continues_existing_trace_numbering() {
 fn module_id_from_tool_name_handles_unprefixed_tools() {
     assert_eq!(module_id_from_tool_name("catalog"), "catalog");
     assert_eq!(module_id_from_tool_name("systems-hunt:run"), "systems-hunt");
+}
+
+#[tokio::test]
+async fn task_local_parent_scope_survives_await() {
+    let sink = Arc::new(VecSink::default());
+    let handle = TraceHandle::new(sink.clone()).for_module("verify");
+    let parent = handle.step("tool", "finding", "evidence-pull").emit();
+
+    handle
+        .with_parent_scope(parent, async {
+            // A scheduler yield mid-scope is exactly where the old thread-local
+            // stack could lose the parent; the task-local must carry it through.
+            tokio::task::yield_now().await;
+            let _ = handle.step("reasoning", "finding", "after await").emit();
+        })
+        .await;
+
+    // Back outside the scope.
+    let _ = handle.step("done", "finding", "complete").emit();
+
+    let steps = sink.steps.lock().unwrap();
+    assert_eq!(steps[1].parent_step, Some(parent));
+    assert_eq!(steps[2].parent_step, None);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn task_local_parent_scope_survives_thread_hops() {
+    let sink = Arc::new(VecSink::default());
+    let handle = TraceHandle::new(sink.clone()).for_module("triage");
+    let parent = handle.step("tool", "run", "root").emit();
+
+    with_parent_step(parent, async {
+        // Many yields give the multi-thread scheduler opportunities to resume
+        // this task on a different worker thread; parent linkage must hold.
+        for _ in 0..64 {
+            tokio::task::yield_now().await;
+        }
+        let _ = handle.step("reasoning", "run", "child").emit();
+    })
+    .await;
+
+    let steps = sink.steps.lock().unwrap();
+    assert_eq!(steps[1].parent_step, Some(parent));
+}
+
+#[tokio::test]
+async fn explicit_child_handle_links_inside_spawned_task() {
+    // `tokio::spawn` does not inherit task-locals, so a detached task must be
+    // handed an explicit `child` handle — its parent linkage is `Send` and
+    // travels with the handle.
+    let sink = Arc::new(VecSink::default());
+    let handle = TraceHandle::new(sink.clone()).for_module("verify");
+    let parent = handle.step("tool", "finding", "root").emit();
+    let child = handle.child(parent);
+
+    tokio::spawn(async move {
+        let _ = child.step("reasoning", "finding", "in spawn").emit();
+    })
+    .await
+    .unwrap();
+
+    let steps = sink.steps.lock().unwrap();
+    assert_eq!(steps[1].parent_step, Some(parent));
+}
+
+#[test]
+fn multiple_jsonl_handles_share_monotonic_step_numbers() {
+    let tmp = tempfile::tempdir().unwrap();
+    // Two independent roots for the same run — previously each seeded its own
+    // counter and could mint colliding step numbers.
+    let h1 = TraceHandle::jsonl(tmp.path(), "run-shared").for_tool("triage:run");
+    let h2 = TraceHandle::jsonl(tmp.path(), "run-shared").for_tool("verify:finding");
+
+    let a = h1.step("tool", "run", "a").emit();
+    let b = h2.step("tool", "finding", "b").emit();
+    let c = h1.step("tool", "run", "c").emit();
+    let d = h2.step("tool", "finding", "d").emit();
+
+    assert_eq!((a, b, c, d), (1, 2, 3, 4));
+
+    let trace =
+        std::fs::read_to_string(run_dir(tmp.path(), "run-shared").join("trace.jsonl")).unwrap();
+    let numbers: Vec<u64> = trace
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .map(|line| {
+            serde_json::from_str::<serde_json::Value>(line).unwrap()["n"]
+                .as_u64()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(numbers, vec![1, 2, 3, 4]);
+}
+
+#[test]
+fn concurrent_trace_appends_do_not_tear_lines() {
+    use std::thread;
+
+    let tmp = tempfile::tempdir().unwrap();
+    let target = Arc::new(tmp.path().to_path_buf());
+
+    let mut handles = Vec::new();
+    for worker in 0..8u64 {
+        let target = Arc::clone(&target);
+        handles.push(thread::spawn(move || {
+            for i in 0..50u64 {
+                let step = RunTraceStep::new(
+                    (worker * 100 + i + 1) as usize,
+                    "tool",
+                    format!("w{worker}-i{i}"),
+                );
+                append_run_trace_step(target.as_path(), "run-cc", &step).unwrap();
+            }
+        }));
+    }
+    for handle in handles {
+        handle.join().unwrap();
+    }
+
+    let trace =
+        std::fs::read_to_string(run_dir(target.as_path(), "run-cc").join("trace.jsonl")).unwrap();
+    let lines: Vec<&str> = trace
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
+    assert_eq!(lines.len(), 8 * 50);
+    // Serialized appends mean every line is a whole record — never two writes
+    // spliced together.
+    for line in lines {
+        serde_json::from_str::<RunTraceStep>(line).expect("each appended line must be intact");
+    }
+}
+
+#[test]
+fn jsonl_sink_surfaces_append_failure_instead_of_swallowing() {
+    let tmp = tempfile::tempdir().unwrap();
+    // Block the run directory by planting a file where the dir must be, so the
+    // append fails. The sink must record the failure, not drop it silently.
+    let runs = crate::run_artifacts::runs_root(tmp.path());
+    std::fs::create_dir_all(&runs).unwrap();
+    std::fs::write(runs.join("run-bad"), "not a directory").unwrap();
+
+    let sink = JsonlSink::new(tmp.path().to_path_buf(), "run-bad");
+    sink.record(&RunTraceStep::new(1, "tool", "will fail"));
+
+    assert_eq!(sink.append_failures(), 1);
 }

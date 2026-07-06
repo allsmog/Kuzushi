@@ -182,12 +182,28 @@ fn spring_functional_route_method(line: &str) -> Option<&'static str> {
         ("GET", "route(get(", "requestpredicates.get(", ".get("),
         ("POST", "route(post(", "requestpredicates.post(", ".post("),
         ("PUT", "route(put(", "requestpredicates.put(", ".put("),
-        ("PATCH", "route(patch(", "requestpredicates.patch(", ".patch("),
-        ("DELETE", "route(delete(", "requestpredicates.delete(", ".delete("),
+        (
+            "PATCH",
+            "route(patch(",
+            "requestpredicates.patch(",
+            ".patch(",
+        ),
+        (
+            "DELETE",
+            "route(delete(",
+            "requestpredicates.delete(",
+            ".delete(",
+        ),
         ("HEAD", "route(head(", "requestpredicates.head(", ".head("),
-        ("OPTIONS", "route(options(", "requestpredicates.options(", ".options("),
+        (
+            "OPTIONS",
+            "route(options(",
+            "requestpredicates.options(",
+            ".options(",
+        ),
     ] {
-        if line.contains(direct) || line.contains(predicate) || is_route_builder_call(line, builder) {
+        if line.contains(direct) || line.contains(predicate) || is_route_builder_call(line, builder)
+        {
             return Some(method);
         }
     }

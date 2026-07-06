@@ -96,6 +96,7 @@ fn validate_model(model: &Option<String>) -> Result<()> {
 fn validate_runtime(runtime: &RuntimeConfig) -> Result<()> {
     validate_api_key_env(&runtime.api_key_env)?;
     validate_langgraph_bridge_command(&runtime.langgraph_bridge_command)?;
+    validate_worker_watchdog_timeout(runtime.worker_watchdog_timeout_ms)?;
     validate_thinking_level(&runtime.thinking_level)
 }
 
@@ -163,6 +164,13 @@ fn validate_thinking_level(thinking_level: &Option<String>) -> Result<()> {
         .is_some_and(|level| !is_supported_thinking_level(level))
     {
         anyhow::bail!("runtime.thinking_level must be one of low|medium|high|xhigh");
+    }
+    Ok(())
+}
+
+fn validate_worker_watchdog_timeout(timeout_ms: Option<u64>) -> Result<()> {
+    if timeout_ms.is_some_and(|timeout_ms| timeout_ms == 0) {
+        anyhow::bail!("runtime.worker_watchdog_timeout_ms must be greater than zero");
     }
     Ok(())
 }

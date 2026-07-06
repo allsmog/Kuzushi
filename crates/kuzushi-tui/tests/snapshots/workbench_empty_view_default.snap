@@ -2,10 +2,10 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 33
 ---
- KUZUSHI > workbench · mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › workbench · mode:shell · target:none · ctx:not built · model:unconfigured
 
-Kuzushi > workbench · target:no target · page:review · o idle · modules:all modules
- type next guided workflow   type scan guided workflow   type options sast:scan tune scanners   type ask ask the agent
+Kuzushi › workbench · target:no target · page:confirm · o idle · modules:all modules
+ type next guided workflow   type scan run scan   type options sast:scan tune scanners   type ask ask the agent
 
  -- SOURCE · 0 files ---------------------------------------------------------------------------------------------------
        ∅  no source tree
@@ -20,13 +20,14 @@ Kuzushi > workbench · target:no target · page:review · o idle · modules:all 
        > scan                  populate findings
        > open <id>             pin a finding
 
- -- FINDINGS · 0 -------------------------------------------------------------------------------------------------------
-       ∅  no findings yet
-       the findings ledger is empty for this target.
-       ledger: .kuzushi/v2/findings.sqlite3
+ -- REVIEW QUEUE - showing 0 of 0 - 0 open - 0 complete ----------------------------------------------------------------
+       ∅  review queue empty
+       no findings loaded for review
+       scanner findings were not changed; only this review queue is empty.
+       REVIEW QUEUE - showing 0 of 0 - 0 open - 0 complete
 
-       > scan                  opens the guided workflow for the target.
-       > context build         optional: index the repo first for richer analysis.
+       > findings              clear the filter and reload all findings
+       > findings filter completeness:open  show findings still awaiting review
 
  -- DETAILS ------------------------------------------------------------------------------------------------------------
 no finding selected — move through FINDINGS to preview details here.

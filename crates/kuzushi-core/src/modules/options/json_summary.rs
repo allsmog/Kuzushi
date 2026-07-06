@@ -135,7 +135,7 @@ fn common_prefix_len(left: &str, right: &str) -> usize {
         .count()
 }
 
-pub(in crate::modules) fn coerce_option_value(spec: &OptionSpec, value: Value) -> Result<Value> {
+pub fn coerce_option_value(spec: &OptionSpec, value: Value) -> Result<Value> {
     match spec.option_type {
         OptionType::String | OptionType::Path => coerce_string_option(value),
         OptionType::StringList => coerce_string_list_option(value),

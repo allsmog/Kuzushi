@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use super::super::domain::fingerprint_parts;
+    use super::super::domain::{
+        compute_finding_identity_id, finding_identity_key_for_finding, FindingEvidence,
+    };
     use super::super::persistence::merge_tool_list;
     use super::super::*;
     use crate::run_artifacts::{RunSummary, RunTargetGitMetadata};
@@ -126,6 +128,19 @@ mod tests {
         ] {
             assert_eq!(VulnSource::parse(src.as_str()), Some(src));
         }
+        assert_eq!(VulnSource::parse("ainalysis"), Some(VulnSource::Ainalysis));
+        assert_eq!(
+            VulnSource::parse("ainalysis-multi"),
+            Some(VulnSource::AinalysisMulti)
+        );
+        assert_eq!(
+            serde_json::to_string(&VulnSource::Ainalysis).unwrap(),
+            "\"analysis\""
+        );
+        assert_eq!(
+            serde_json::from_str::<VulnSource>("\"ainalysis\"").unwrap(),
+            VulnSource::Ainalysis
+        );
     }
 
     #[test]
@@ -182,7 +197,7 @@ mod tests {
         let store = FindingStore::open_in_memory().unwrap();
         let run = "run-dedup";
         store
-            .insert_scan_run(run, std::path::Path::new("/tmp"), "running")
+            .record_run_started(run, std::path::Path::new("/tmp"), "running")
             .unwrap();
 
         // Two findings on the same file/line/CWE from different channels.
@@ -229,11 +244,78 @@ mod tests {
     }
 
     #[test]
+    fn insert_finding_rolls_back_header_and_evidence_when_a_later_write_fails() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let run = "run-rollback";
+        store
+            .record_run_started(run, Path::new("/tmp"), "running")
+            .unwrap();
+
+        // Force a dependent write (static_proof_history) to fail after the
+        // header row has been written inside the same transaction. If
+        // participation were not atomic, the header would leak; the explicit
+        // transaction must roll all of it back and must not project evidence.
+        store
+            .conn
+            .execute_batch("drop table static_proof_history;")
+            .unwrap();
+
+        let mut finding = Finding::new_tool(
+            "semgrep",
+            "rule-x",
+            "src/foo.c",
+            10,
+            Some(10),
+            Severity::High,
+            "boom CWE-89",
+        );
+        finding.evidence = vec![FindingEvidence {
+            kind: "code".to_string(),
+            file_path: "src/foo.c".to_string(),
+            line: 10,
+            snippet: "sink(x)".to_string(),
+            rationale: "reaches sink".to_string(),
+            confidence: 90,
+            request_blob: None,
+            response_blob: None,
+        }];
+        finding.static_proof_state = Some(StaticProofState::StaticallyConfirmed);
+
+        let result = store.insert_finding(run, &finding);
+        assert!(
+            result.is_err(),
+            "insert must fail when a dependent write fails"
+        );
+
+        // Whole unit rolled back: no orphan header, no projected evidence JSON.
+        let header_count: i64 = store
+            .conn
+            .query_row("select count(*) from finding_projection_rows", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            header_count, 0,
+            "header row must not survive a failed insert"
+        );
+        let observation_count: i64 = store
+            .conn
+            .query_row("select count(*) from finding_observations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(
+            observation_count, 0,
+            "v3 observation must not survive a failed insert"
+        );
+    }
+
+    #[test]
     fn cross_channel_dedup_preserves_existing_when_lower_severity_arrives() {
         let store = FindingStore::open_in_memory().unwrap();
         let run = "run-dedup-2";
         store
-            .insert_scan_run(run, std::path::Path::new("/tmp"), "running")
+            .record_run_started(run, std::path::Path::new("/tmp"), "running")
             .unwrap();
 
         let high = Finding::new_tool(
@@ -265,13 +347,13 @@ mod tests {
     }
 
     #[test]
-    fn cross_run_dedup_accumulates_sources_without_changing_bucket_identity() {
+    fn cross_run_dedup_keeps_rows_visible_to_each_scan_id() {
         let store = FindingStore::open_in_memory().unwrap();
         store
-            .insert_scan_run("run-source-1", Path::new("/tmp"), "completed")
+            .record_run_started("run-source-1", Path::new("/tmp"), "completed")
             .unwrap();
         store
-            .insert_scan_run("run-source-2", Path::new("/tmp"), "completed")
+            .record_run_started("run-source-2", Path::new("/tmp"), "completed")
             .unwrap();
 
         let semgrep = Finding::new_tool(
@@ -298,14 +380,14 @@ mod tests {
 
         let id2 = store.insert_finding("run-source-2", &systems).unwrap();
 
-        assert_eq!(id1, id2);
+        assert_ne!(id1, id2);
         let listed = store.list_findings(10).unwrap();
-        assert_eq!(listed.len(), 1);
-        assert_eq!(listed[0].corroboration_count, 2);
-        assert_eq!(listed[0].sources.len(), 2);
-        assert!(listed[0].tool.contains("semgrep"));
-        assert!(listed[0].tool.contains("systems-hunt"));
-        assert!(listed[0]
+        assert_eq!(listed.len(), 2);
+        let rerun = store.list_findings_for_scan_id("run-source-2").unwrap();
+        assert_eq!(rerun.len(), 1);
+        assert_eq!(rerun[0].severity, Severity::High);
+        assert_eq!(rerun[0].tool, "systems-hunt");
+        assert!(rerun[0]
             .sources
             .iter()
             .any(|source| source.last_scan_id == "run-source-2"));
@@ -316,7 +398,7 @@ mod tests {
         let store = FindingStore::open_in_memory().unwrap();
         let run_id = "run-1";
         store
-            .insert_scan_run(run_id, Path::new("/tmp/repo"), "running")
+            .record_run_started(run_id, Path::new("/tmp/repo"), "running")
             .unwrap();
         let finding = Finding::new_semgrep(
             "demo.rule",
@@ -349,10 +431,486 @@ mod tests {
     }
 
     #[test]
+    fn file_backed_insert_records_v3_observation_event_and_projection() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let log_path = temp.path().join(".kuzushi/v3/log");
+        let store = FindingStore::open(&db_path).unwrap();
+        let run_id = "run-v3-observation";
+        store
+            .record_run_started(run_id, Path::new("/tmp/repo"), "running")
+            .unwrap();
+
+        let finding = Finding::new_tool(
+            "semgrep",
+            "rules.cwe-89",
+            "src/app.rs",
+            42,
+            Some(42),
+            Severity::High,
+            "SQL injection reaches query builder, CWE-89",
+        );
+        store.insert_finding(run_id, &finding).unwrap();
+        let stored = store.list_findings_for_scan_id(run_id).unwrap();
+        let stable_fp = stored[0]
+            .identity_id
+            .as_deref()
+            .expect("stored finding should have a v3 identity");
+
+        let log = crate::event_log::EventLog::open(&log_path).unwrap();
+        let events = log.read_all().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events[0].event_kind,
+            crate::event_log::EventKind::RunStarted
+        );
+        assert_eq!(
+            events[1].event_kind,
+            crate::event_log::EventKind::FindingObserved
+        );
+        assert_eq!(events[1].payload["stableFp"].as_str(), Some(stable_fp));
+
+        let conn = rusqlite::Connection::open(db_path).unwrap();
+        let observation_count: i64 = conn
+            .query_row(
+                "select count(*) from finding_observations where stable_fp = ?1",
+                rusqlite::params![stable_fp],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let applied_seq: String = conn
+            .query_row("select value from meta where key = 'applied_seq'", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(observation_count, 1);
+        assert_eq!(applied_seq, "2");
+    }
+
+    #[test]
+    fn file_backed_save_verification_records_v3_event_and_projection() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let log_path = temp.path().join(".kuzushi/v3/log");
+        let store = FindingStore::open(&db_path).unwrap();
+        let run_id = "run-v3-verification";
+        store
+            .record_run_started(run_id, Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "verify-test",
+            "rules.cwe-89",
+            "src/app.rs",
+            42,
+            Some(42),
+            Severity::High,
+            "SQL injection reaches query builder",
+        );
+        let finding_id = store.insert_finding(run_id, &finding).unwrap();
+        let stable_fp = store.list_findings_for_scan_id(run_id).unwrap()[0]
+            .identity_id
+            .clone()
+            .unwrap();
+
+        store
+            .save_verification(
+                finding_id,
+                &PersistedVerification {
+                    proof_level: 4,
+                    proof_verdict: PersistedProofVerdict::Exploited,
+                    backend: PersistedSandboxBackend::Bwrap,
+                    language: Some("rust".to_string()),
+                    harness_path: Some("/tmp/harness".to_string()),
+                    crash_evidence: Some("panic: sink reached".to_string()),
+                    duration_ms: 250,
+                    cost_usd: 0.125,
+                    notes: vec!["empirical proof".to_string()],
+                    created_at: String::new(),
+                },
+            )
+            .unwrap();
+
+        let log = crate::event_log::EventLog::open(&log_path).unwrap();
+        let events = log.read_all().unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(
+            events[2].event_kind,
+            crate::event_log::EventKind::VerificationRecorded
+        );
+        assert_eq!(events[2].payload["stableFp"].as_str(), Some(stable_fp.as_str()));
+
+        let conn = rusqlite::Connection::open(db_path).unwrap();
+        let projected: (String, i64, String) = conn
+            .query_row(
+                "select stable_fp, proof_level, proof_verdict from verification_events",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(projected, (stable_fp, 4, "exploited".to_string()));
+        let legacy_table_count: i64 = conn
+            .query_row(
+                "select count(*) from sqlite_master where type = 'table' and name = 'verifications'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_table_count, 0);
+    }
+
+    #[test]
+    fn file_backed_insert_patch_result_records_v3_event_projection_and_diff_object() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let log_path = temp.path().join(".kuzushi/v3/log");
+        let store = FindingStore::open(&db_path).unwrap();
+        let run_id = "run-v3-patch";
+        store
+            .record_run_started(run_id, Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "patch-test",
+            "rules.cwe-89",
+            "src/app.rs",
+            42,
+            Some(42),
+            Severity::High,
+            "SQL injection reaches query builder",
+        );
+        store.insert_finding(run_id, &finding).unwrap();
+        let stable_fp = store.list_findings_for_scan_id(run_id).unwrap()[0]
+            .identity_id
+            .clone()
+            .unwrap();
+
+        store
+            .insert_patch_result(&PatchResult {
+                patch_run_id: "patch-run-v3".to_string(),
+                fingerprint: finding.fingerprint.clone(),
+                repo: "/tmp/repo".to_string(),
+                diff: Some("diff --git a/src/app.rs b/src/app.rs\n".to_string()),
+                status: PatchStatus::Verified,
+                iterations: 2,
+                build_command: Some("cargo build".to_string()),
+                test_command: Some("cargo test".to_string()),
+                worktree_path: Some("/tmp/worktree".to_string()),
+                cost_usd: Some(0.25),
+                validator_log: Some("tests passed".to_string()),
+                history: vec![PatchAttempt {
+                    attempt: 1,
+                    diff: "diff".to_string(),
+                    status: PatchStatus::Sound,
+                    output: "ok".to_string(),
+                }],
+                created_at: None,
+                updated_at: None,
+            })
+            .unwrap();
+
+        let log = crate::event_log::EventLog::open(&log_path).unwrap();
+        let events = log.read_all().unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(
+            events[2].event_kind,
+            crate::event_log::EventKind::PatchAttemptRecorded
+        );
+        assert_eq!(events[2].payload["stableFp"].as_str(), Some(stable_fp.as_str()));
+
+        let conn = rusqlite::Connection::open(db_path).unwrap();
+        let projected: (String, String, String) = conn
+            .query_row(
+                "select stable_fp, patch_run_id, diff_object from patch_attempt_events",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(projected.0, stable_fp);
+        assert_eq!(projected.1, "patch-run-v3");
+        assert!(projected.2.len() >= 4);
+        assert!(
+            temp.path()
+                .join(".kuzushi/v3/objects/blake3")
+                .join(&projected.2[0..2])
+                .join(&projected.2[2..4])
+                .join(&projected.2)
+                .is_file()
+        );
+        let read_back = store
+            .get_patch_results_for_finding(&finding.fingerprint)
+            .unwrap();
+        assert_eq!(read_back.len(), 1);
+        assert_eq!(read_back[0].status, PatchStatus::Verified);
+        assert_eq!(read_back[0].diff.as_deref(), Some("diff --git a/src/app.rs b/src/app.rs\n"));
+        let legacy_table_count: i64 = conn
+            .query_row(
+                "select count(*) from sqlite_master where type = 'table' and name = 'patch_results'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(legacy_table_count, 0);
+    }
+
+    #[test]
+    fn file_backed_store_records_schema_version() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+
+        drop(FindingStore::open(&db_path).unwrap());
+
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        let version: i32 = conn
+            .query_row("pragma user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, 1);
+    }
+
+    #[test]
+    fn stored_findings_receive_target_scoped_identity() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-identity-1", Path::new("/tmp/repo-a"), "running")
+            .unwrap();
+        store
+            .record_run_started("run-identity-2", Path::new("/tmp/repo-a"), "running")
+            .unwrap();
+        store
+            .record_run_started("run-identity-3", Path::new("/tmp/repo-b"), "running")
+            .unwrap();
+
+        let finding = Finding::new_semgrep(
+            "demo.identity",
+            "src/app.ts",
+            12,
+            Some(12),
+            Severity::High,
+            "User input reaches sink",
+        );
+        let finding_id = store.insert_finding("run-identity-1", &finding).unwrap();
+        store.insert_finding("run-identity-2", &finding).unwrap();
+        store.insert_finding("run-identity-3", &finding).unwrap();
+
+        let first = store.list_findings_for_scan_id("run-identity-1").unwrap();
+        let second = store.list_findings_for_scan_id("run-identity-2").unwrap();
+        let third = store.list_findings_for_scan_id("run-identity-3").unwrap();
+        let expected = identity_id_for_target_and_finding("/tmp/repo-a", &finding);
+
+        assert_eq!(first[0].identity_id.as_deref(), Some(expected.as_str()));
+        assert_eq!(second[0].identity_id, first[0].identity_id);
+        assert_ne!(third[0].identity_id, first[0].identity_id);
+        assert_eq!(first[0].identity_match_tier.as_deref(), Some("stable_fp"));
+
+        store
+            .save_triage(
+                finding_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::NeedsReview,
+                    confidence: 0.42,
+                    rationale: "needs dataflow confirmation".to_string(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let decisions = store.list_review_decisions(finding_id).unwrap();
+        assert_eq!(decisions[0].identity_id.as_deref(), Some(expected.as_str()));
+    }
+
+    #[test]
+    fn v3_identity_carries_same_snippet_across_line_shifts() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-line-shift-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .record_run_started("run-line-shift-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+
+        let first = line_shift_finding(12);
+        let second = line_shift_finding(44);
+        assert_eq!(
+            first.fingerprint, second.fingerprint,
+            "v3 stable fingerprints ignore display line numbers"
+        );
+
+        let first_id = store.insert_finding("run-line-shift-a", &first).unwrap();
+        let second_id = store.insert_finding("run-line-shift-b", &second).unwrap();
+        let first_row = store.list_findings_for_scan_id("run-line-shift-a").unwrap();
+        let second_row = store.list_findings_for_scan_id("run-line-shift-b").unwrap();
+
+        assert_eq!(
+            first_row[0].identity_id, second_row[0].identity_id,
+            "same evidence at a shifted line is one stable finding"
+        );
+        assert_eq!(
+            first_row[0].identity_match_tier.as_deref(),
+            Some("stable_fp")
+        );
+        assert_eq!(
+            second_row[0].identity_match_tier.as_deref(),
+            Some("stable_fp")
+        );
+
+        store
+            .save_triage_with_author(
+                first_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.91,
+                    rationale: "operator confirmed stable evidence".to_string(),
+                    ..Default::default()
+                },
+                TriageAuthor::Human,
+            )
+            .unwrap();
+
+        let carried = store
+            .latest_review_decision_for_finding_identity(second_id)
+            .unwrap();
+        assert!(
+            carried.is_some(),
+            "operator decisions carry across line shifts"
+        );
+    }
+
+    #[test]
+    fn dedup_collision_records_incoming_fingerprint_under_existing_identity() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let run = "run-identity-collision";
+        store
+            .record_run_started(run, Path::new("/tmp/repo"), "running")
+            .unwrap();
+
+        let semgrep = Finding::new_tool(
+            "semgrep",
+            "java.injection.tainted-system-call",
+            "src/foo.c",
+            42,
+            Some(42),
+            Severity::Medium,
+            "user-controlled exec, CWE-78",
+        );
+        store.insert_finding(run, &semgrep).unwrap();
+
+        let systems = Finding::new_tool(
+            "systems-hunt",
+            "systems/cwe-78",
+            "src/foo.c",
+            43,
+            Some(43),
+            Severity::High,
+            "exec reaches shell with attacker input, CWE-78",
+        );
+        assert_eq!(semgrep.dedup_key, systems.dedup_key);
+        assert_ne!(semgrep.fingerprint, systems.fingerprint);
+
+        store.insert_finding(run, &systems).unwrap();
+        let listed = store.list_findings_for_scan_id(run).unwrap();
+        let identity_id = listed[0]
+            .identity_id
+            .as_deref()
+            .expect("merged finding identity");
+
+        let exact_count: i64 = store
+            .conn
+            .query_row(
+                "select count(*) from finding_identity_fingerprints
+                 where identity_id = ?1 and fingerprint = ?2 and match_basis = ?3",
+                rusqlite::params![identity_id, semgrep.fingerprint, "stable_fp"],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let collision_count: i64 = store
+            .conn
+            .query_row(
+                "select count(*) from finding_identity_fingerprints
+                 where identity_id = ?1 and fingerprint = ?2 and match_basis = ?3",
+                rusqlite::params![identity_id, systems.fingerprint, "dedup_collision"],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        assert_eq!(exact_count, 1);
+        assert_eq!(collision_count, 1);
+    }
+
+    fn line_shift_finding(start_line: u32) -> Finding {
+        Finding::new_tool(
+            "semgrep",
+            "rules/cwe-89",
+            "src/db.rs",
+            start_line,
+            Some(start_line),
+            Severity::High,
+            "SQL injection reaches query builder, CWE-89",
+        )
+        .with_evidence(vec![FindingEvidence {
+            kind: "code".to_string(),
+            file_path: "src/db.rs".to_string(),
+            line: start_line,
+            snippet: "let rows = db.query(user_controlled_filter);".to_string(),
+            rationale: "observed source-to-sink statement".to_string(),
+            confidence: 90,
+            request_blob: None,
+            response_blob: None,
+        }])
+    }
+
+    fn identity_id_for_target_and_finding(target: &str, finding: &Finding) -> String {
+        let identity_key = finding_identity_key_for_finding(finding);
+        compute_finding_identity_id(target, &identity_key.key)
+    }
+
+    #[test]
+    fn identity_backfill_carries_same_snippet_across_line_shifts() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-backfill-line-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .record_run_started("run-backfill-line-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+
+        store
+            .insert_finding("run-backfill-line-a", &line_shift_finding(12))
+            .unwrap();
+        store
+            .insert_finding("run-backfill-line-b", &line_shift_finding(44))
+            .unwrap();
+
+        store
+            .conn
+            .execute(
+                "update finding_projection_rows set identity_id = null, identity_match_tier = null",
+                [],
+            )
+            .unwrap();
+        store
+            .conn
+            .execute("delete from finding_identity_fingerprints", [])
+            .unwrap();
+        store
+            .conn
+            .execute("delete from finding_identities", [])
+            .unwrap();
+
+        store.init().unwrap();
+
+        let first = store
+            .list_findings_for_scan_id("run-backfill-line-a")
+            .unwrap();
+        let second = store
+            .list_findings_for_scan_id("run-backfill-line-b")
+            .unwrap();
+        assert_eq!(first[0].identity_id, second[0].identity_id);
+        assert_eq!(first[0].identity_match_tier.as_deref(), Some("stable_fp"));
+        assert_eq!(second[0].identity_match_tier.as_deref(), Some("stable_fp"));
+    }
+
+    #[test]
     fn human_triage_is_sticky_against_auto_updates() {
         let store = FindingStore::open_in_memory().unwrap();
         store
-            .insert_scan_run("run-human-triage", Path::new("/tmp/repo"), "running")
+            .record_run_started("run-human-triage", Path::new("/tmp/repo"), "running")
             .unwrap();
         let finding = Finding::new_semgrep(
             "demo.rule",
@@ -369,7 +927,7 @@ mod tests {
                 &TriageOutcome {
                     verdict: TriageVerdict::TruePositive,
                     confidence: 0.95,
-                    rationale: "operator confirmed exploitability".to_string(),
+                    rationale: "operator confirmed scanner claim".to_string(),
                     ..Default::default()
                 },
                 TriageAuthor::Human,
@@ -391,7 +949,349 @@ mod tests {
         let triage = stored[0].triage.as_ref().unwrap();
         assert_eq!(triage.verdict, TriageVerdict::TruePositive);
         assert_eq!(stored[0].triaged_by, Some(TriageAuthor::Human));
-        assert_eq!(triage.rationale, "operator confirmed exploitability");
+        assert_eq!(triage.rationale, "operator confirmed scanner claim");
+    }
+
+    #[test]
+    fn review_decisions_append_only_for_accepted_triage_changes() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-review-decisions", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.rule",
+            "src/app.ts",
+            12,
+            Some(12),
+            Severity::High,
+            "User input reaches sink",
+        );
+        let finding_id = store
+            .insert_finding("run-review-decisions", &finding)
+            .unwrap();
+        store
+            .save_triage(
+                finding_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::NeedsReview,
+                    confidence: 0.4,
+                    rationale: "automated review needs more evidence".to_string(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        store
+            .save_triage_with_author(
+                finding_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.95,
+                    rationale: "operator confirmed source-to-sink evidence".to_string(),
+                    ..Default::default()
+                },
+                TriageAuthor::Human,
+            )
+            .unwrap();
+        store
+            .save_triage(
+                finding_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::FalsePositive,
+                    confidence: 0.1,
+                    rationale: "automated rerun disagreed".to_string(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let decisions = store.list_review_decisions(finding_id).unwrap();
+        assert_eq!(decisions.len(), 2);
+        assert_eq!(
+            decisions[0].decision.verdict,
+            ReviewDecisionVerdict::NeedsReview
+        );
+        assert_eq!(decisions[0].decision.author, TriageAuthor::Auto);
+        assert_eq!(
+            decisions[1].decision.verdict,
+            ReviewDecisionVerdict::Confirmed
+        );
+        assert_eq!(decisions[1].decision.author, TriageAuthor::Human);
+
+        let latest = store
+            .latest_review_decision(finding_id)
+            .unwrap()
+            .expect("latest review decision");
+        assert_eq!(latest.decision.verdict, ReviewDecisionVerdict::Confirmed);
+        assert_eq!(latest.triage_verdict, Some(TriageVerdict::TruePositive));
+    }
+
+    #[test]
+    fn static_proof_state_events_append_only_when_state_changes() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let run = "run-static-proof-events";
+        store
+            .record_run_started(run, Path::new("/tmp/repo"), "running")
+            .unwrap();
+
+        let initial = Finding::new_semgrep(
+            "demo.static-proof",
+            "src/app.ts",
+            12,
+            Some(12),
+            Severity::High,
+            "User input reaches sink",
+        )
+        .with_static_proof_state(StaticProofState::SignalOnly);
+        let finding_id = store.insert_finding(run, &initial).unwrap();
+
+        let mut upgraded = initial.clone();
+        upgraded.set_static_proof_state(StaticProofState::SourceSinkLinked);
+        store.insert_finding(run, &upgraded).unwrap();
+        store.insert_finding(run, &upgraded).unwrap();
+
+        let events = store.list_static_proof_history(finding_id).unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].previous_state, None);
+        assert_eq!(events[0].next_state, StaticProofState::SignalOnly);
+        assert_eq!(events[0].source, "semgrep");
+        assert_eq!(events[1].previous_state, Some(StaticProofState::SignalOnly));
+        assert_eq!(events[1].next_state, StaticProofState::SourceSinkLinked);
+    }
+
+    #[test]
+    fn review_decisions_can_be_read_by_durable_identity() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-decision-a", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        store
+            .record_run_started("run-decision-b", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.identity-decision",
+            "src/app.ts",
+            12,
+            Some(12),
+            Severity::High,
+            "User input reaches sink",
+        );
+        let first_id = store.insert_finding("run-decision-a", &finding).unwrap();
+        let second_id = store.insert_finding("run-decision-b", &finding).unwrap();
+
+        store
+            .save_triage_with_author(
+                first_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.95,
+                    rationale: "operator confirmed source-to-sink evidence".to_string(),
+                    ..Default::default()
+                },
+                TriageAuthor::Human,
+            )
+            .unwrap();
+
+        let second_row_decisions = store.list_review_decisions(second_id).unwrap();
+        assert!(
+            second_row_decisions.is_empty(),
+            "row-scoped compatibility reader stays per occurrence"
+        );
+
+        let second_identity_decisions = store
+            .list_review_decisions_for_finding_identity(second_id)
+            .unwrap();
+        assert_eq!(second_identity_decisions.len(), 1);
+        assert_eq!(
+            second_identity_decisions[0].decision.verdict,
+            ReviewDecisionVerdict::Confirmed
+        );
+        assert_eq!(second_identity_decisions[0].finding_id, first_id);
+        assert_eq!(
+            second_identity_decisions[0].identity_id,
+            store.list_findings_for_scan_id("run-decision-b").unwrap()[0].identity_id
+        );
+
+        let latest = store
+            .latest_review_decision_for_finding_identity(second_id)
+            .unwrap()
+            .expect("latest identity decision");
+        assert_eq!(latest.decision.author, TriageAuthor::Human);
+    }
+
+    #[test]
+    fn user_review_decision_can_append_without_triage_verdict() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-user-review", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.suppressed",
+            "src/app.ts",
+            12,
+            Some(12),
+            Severity::Medium,
+            "reviewed under policy",
+        );
+        let finding_id = store.insert_finding("run-user-review", &finding).unwrap();
+
+        store
+            .append_user_review_decision(
+                finding_id,
+                &ReviewDecision {
+                    verdict: ReviewDecisionVerdict::Suppressed,
+                    author: TriageAuthor::Human,
+                    confidence: 1.0,
+                    rationale: "suppressed by approved review policy".to_string(),
+                },
+            )
+            .unwrap();
+
+        let latest = store
+            .latest_review_decision(finding_id)
+            .unwrap()
+            .expect("latest review decision");
+        assert_eq!(latest.decision.verdict, ReviewDecisionVerdict::Suppressed);
+        assert_eq!(latest.decision.author, TriageAuthor::Human);
+        assert_eq!(latest.triage_verdict, None);
+        assert_eq!(
+            store.list_findings(10).unwrap()[0].triage,
+            None,
+            "user decisions must not mutate scanner triage compatibility rows"
+        );
+    }
+
+    #[test]
+    fn user_review_decision_rejects_automated_author() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-auto-review", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.auto-review",
+            "src/app.ts",
+            12,
+            Some(12),
+            Severity::Medium,
+            "reviewed by automation",
+        );
+        let finding_id = store.insert_finding("run-auto-review", &finding).unwrap();
+
+        let result = store.append_user_review_decision(
+            finding_id,
+            &ReviewDecision {
+                verdict: ReviewDecisionVerdict::Deferred,
+                author: TriageAuthor::Auto,
+                confidence: 0.5,
+                rationale: "automation tried to defer".to_string(),
+            },
+        );
+
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("automated triage must use save_triage"));
+        assert!(store.list_review_decisions(finding_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn user_review_decision_rejects_empty_reason() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-empty-review", Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_semgrep(
+            "demo.empty-review",
+            "src/app.ts",
+            12,
+            Some(12),
+            Severity::Medium,
+            "reviewed without rationale",
+        );
+        let finding_id = store.insert_finding("run-empty-review", &finding).unwrap();
+
+        let result = store.append_user_review_decision(
+            finding_id,
+            &ReviewDecision {
+                verdict: ReviewDecisionVerdict::Deferred,
+                author: TriageAuthor::Human,
+                confidence: 1.0,
+                rationale: "   ".to_string(),
+            },
+        );
+
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("review decision reason cannot be empty"));
+        assert!(store.list_review_decisions(finding_id).unwrap().is_empty());
+    }
+
+    #[test]
+    fn review_decision_verdict_preserves_triage_semantics() {
+        assert_eq!(
+            ReviewDecisionVerdict::from_triage_verdict(TriageVerdict::TruePositive),
+            ReviewDecisionVerdict::Confirmed
+        );
+        assert_eq!(
+            ReviewDecisionVerdict::from_triage_verdict(TriageVerdict::FalsePositive),
+            ReviewDecisionVerdict::RejectedFalsePositive
+        );
+        assert_eq!(
+            ReviewDecisionVerdict::from_triage_verdict(TriageVerdict::ByDesign),
+            ReviewDecisionVerdict::AcceptedRisk
+        );
+        assert_eq!(
+            ReviewDecisionVerdict::from_triage_verdict(TriageVerdict::NeedsReview),
+            ReviewDecisionVerdict::NeedsReview
+        );
+        assert_eq!(
+            ReviewDecisionVerdict::Confirmed.to_triage_verdict(),
+            Some(TriageVerdict::TruePositive)
+        );
+        assert_eq!(
+            ReviewDecisionVerdict::RejectedFalsePositive.to_triage_verdict(),
+            Some(TriageVerdict::FalsePositive)
+        );
+        assert_eq!(
+            ReviewDecisionVerdict::AcceptedRisk.to_triage_verdict(),
+            Some(TriageVerdict::ByDesign)
+        );
+        assert_eq!(
+            ReviewDecisionVerdict::NeedsReview.to_triage_verdict(),
+            Some(TriageVerdict::NeedsReview)
+        );
+        assert_eq!(ReviewDecisionVerdict::Suppressed.to_triage_verdict(), None);
+        assert_eq!(ReviewDecisionVerdict::Deferred.to_triage_verdict(), None);
+        assert_eq!(
+            ReviewDecisionVerdict::AcceptedRisk.as_str(),
+            "accepted_risk"
+        );
+        assert_eq!(ReviewDecisionVerdict::Suppressed.as_str(), "suppressed");
+        assert_eq!(ReviewDecisionVerdict::Deferred.as_str(), "deferred");
+        assert!(ReviewDecisionVerdict::Confirmed.is_terminal());
+        assert!(ReviewDecisionVerdict::Suppressed.is_terminal());
+        assert!(ReviewDecisionVerdict::Deferred.is_terminal());
+        assert!(!ReviewDecisionVerdict::NeedsReview.is_terminal());
+    }
+
+    #[test]
+    fn review_decision_projection_keeps_author_confidence_and_rationale() {
+        let triage = TriageOutcome {
+            verdict: TriageVerdict::FalsePositive,
+            confidence: 0.8,
+            rationale: "model signal did not match reachable code".to_string(),
+            cost_usd: 0.12,
+        };
+
+        let decision = ReviewDecision::from_triage(&triage, Some(TriageAuthor::Human));
+
+        assert_eq!(
+            decision.verdict,
+            ReviewDecisionVerdict::RejectedFalsePositive
+        );
+        assert_eq!(decision.author, TriageAuthor::Human);
+        assert_eq!(decision.confidence, 0.8);
+        assert_eq!(decision.rationale, triage.rationale);
     }
 
     #[test]
@@ -399,7 +1299,7 @@ mod tests {
         let store = FindingStore::open_in_memory().unwrap();
         let run_id = "run-evidence";
         store
-            .insert_scan_run(run_id, Path::new("/tmp/repo"), "running")
+            .record_run_started(run_id, Path::new("/tmp/repo"), "running")
             .unwrap();
         let finding = Finding::new_tool(
             "exploit-chain",
@@ -459,11 +1359,71 @@ mod tests {
     }
 
     #[test]
+    fn insertion_downgrades_code_evidence_when_snippet_is_not_on_disk() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(
+            temp.path().join("src/app.rs"),
+            "fn handler(user: &str) {\n    render(user);\n}\n",
+        )
+        .unwrap();
+
+        let store = FindingStore::open_in_memory().unwrap();
+        let run_id = "run-evidence-disk";
+        store
+            .record_run_started(run_id, temp.path(), "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "agentic-sast",
+            "agentic-sast/cwe-79",
+            "src/app.rs",
+            2,
+            None,
+            Severity::High,
+            "HTML injection reaches render",
+        )
+        .with_evidence(vec![
+            FindingEvidence {
+                kind: "code".to_string(),
+                file_path: "src/app.rs".to_string(),
+                line: 2,
+                snippet: "render(user);".to_string(),
+                rationale: "observed sink".to_string(),
+                confidence: 90,
+                ..Default::default()
+            },
+            FindingEvidence {
+                kind: "code".to_string(),
+                file_path: "src/app.rs".to_string(),
+                line: 2,
+                snippet: "eval(user);".to_string(),
+                rationale: "claimed sink".to_string(),
+                confidence: 90,
+                ..Default::default()
+            },
+        ]);
+
+        store.insert_finding(run_id, &finding).unwrap();
+
+        let resolved = store
+            .get_finding_by_fingerprint(&finding.fingerprint)
+            .unwrap()
+            .unwrap();
+        assert_eq!(resolved.evidence[0].kind, "code");
+        assert_eq!(resolved.evidence[0].confidence, 90);
+        assert_eq!(resolved.evidence[1].kind, "reasoning");
+        assert_eq!(resolved.evidence[1].confidence, 25);
+        assert!(resolved.evidence[1]
+            .rationale
+            .contains("citation-unverified"));
+    }
+
+    #[test]
     fn stores_optional_finding_lifecycle_metadata() {
         let store = FindingStore::open_in_memory().unwrap();
         let run_id = "run-finding-metadata";
         store
-            .insert_scan_run(run_id, Path::new("/tmp/repo"), "running")
+            .record_run_started(run_id, Path::new("/tmp/repo"), "running")
             .unwrap();
         let mut finding = Finding::new_tool(
             "semgrep",
@@ -545,7 +1505,7 @@ mod tests {
     fn static_proof_state_round_trips_through_findings_store() {
         let store = FindingStore::open_in_memory().unwrap();
         store
-            .insert_scan_run("run-static", Path::new("/tmp/repo"), "completed")
+            .record_run_started("run-static", Path::new("/tmp/repo"), "completed")
             .unwrap();
         let finding = Finding::new_semgrep(
             "demo.static",
@@ -574,7 +1534,7 @@ mod tests {
         let store = FindingStore::open_in_memory().unwrap();
         let run_id = "run-1";
         store
-            .insert_scan_run(run_id, Path::new("/tmp/repo"), "running")
+            .record_run_started(run_id, Path::new("/tmp/repo"), "running")
             .unwrap();
         let finding = Finding::new_semgrep(
             "demo.rule",
@@ -594,9 +1554,11 @@ mod tests {
 
     #[test]
     fn reference_resolution_attaches_latest_verification_for_prefix() {
-        let store = FindingStore::open_in_memory().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let store = FindingStore::open(&db_path).unwrap();
         store
-            .insert_scan_run("run-verify-prefix", Path::new("/tmp/repo"), "completed")
+            .record_run_started("run-verify-prefix", Path::new("/tmp/repo"), "completed")
             .unwrap();
         let finding = Finding::new_semgrep(
             "demo.verify",
@@ -657,10 +1619,10 @@ mod tests {
             backend: PersistedSandboxBackend::Bwrap,
             language: Some("javascript".to_string()),
             harness_path: Some("/tmp/harness.js".to_string()),
-            crash_evidence: Some("<script>alert(1)</script>".to_string()),
+            crash_evidence: Some("runtime fixture recorded marker".to_string()),
             duration_ms: 321,
             cost_usd: 0.0,
-            notes: vec!["browser fixture confirmed execution".to_string()],
+            notes: vec!["browser fixture recorded runtime evidence".to_string()],
             created_at: "now".to_string(),
         });
 
@@ -669,7 +1631,7 @@ mod tests {
 
         assert!(output.contains("Finding F-0001"));
         assert!(output.contains("Proof state: source_sink_linked"));
-        assert!(output.contains("Runtime validation: execution_confirmed"));
+        assert!(output.contains("Runtime validation: runtime_verified"));
         assert!(output.contains("Proof ladder: verified"));
         assert!(output.contains("Next action: patch"));
         assert_eq!(report.next_action, FindingNextAction::Patch);
@@ -687,6 +1649,16 @@ mod tests {
         let linked = static_proof_summary(Some(StaticProofState::SourceSinkLinked));
         assert_eq!(linked.label, "path-linked");
         assert!(linked.explanation.contains("links source to sink"));
+
+        let strong_static = static_proof_summary(Some(StaticProofState::StaticallyConfirmed));
+        assert_eq!(strong_static.label, "static-supported");
+        assert!(strong_static
+            .explanation
+            .contains("supports the scanner claim"));
+        assert!(
+            proof_state_label(Some(StaticProofState::StaticallyConfirmed))
+                .contains("Strong static evidence supports the scanner claim")
+        );
 
         let missing = static_proof_summary(None);
         assert_eq!(missing.label, "not recorded");
@@ -715,7 +1687,7 @@ mod tests {
         };
         let verified = runtime_validation_summary(Some(&verification));
         assert_eq!(verified.label, "verified L4");
-        assert!(verified.explanation.contains("reproduced exploitability"));
+        assert!(verified.explanation.contains("empirical evidence"));
     }
 
     #[test]
@@ -808,7 +1780,7 @@ mod tests {
     }
 
     #[test]
-    fn finding_aliases_sort_confirmed_before_guesses_within_severity() {
+    fn finding_aliases_stay_stable_when_triage_proof_changes() {
         let mut guessed = Finding::new_semgrep(
             "demo.guess",
             "src/guess.ts",
@@ -834,11 +1806,16 @@ mod tests {
             cost_usd: 0.0,
         });
 
-        let aliases = sorted_finding_aliases(&[guessed.clone(), confirmed.clone()]);
+        let mut before_triage = confirmed.clone();
+        before_triage.triage = None;
+        let before = sorted_finding_aliases(&[guessed.clone(), before_triage]);
+        let after = sorted_finding_aliases(&[guessed.clone(), confirmed.clone()]);
 
-        assert_eq!(aliases[0].0, "F-0001");
-        assert_eq!(aliases[0].1.fingerprint, confirmed.fingerprint);
-        assert_eq!(aliases[1].1.fingerprint, guessed.fingerprint);
+        assert_eq!(before[0].1.fingerprint, guessed.fingerprint);
+        assert_eq!(before[1].1.fingerprint, confirmed.fingerprint);
+        assert_eq!(after[0].1.fingerprint, guessed.fingerprint);
+        assert_eq!(after[1].1.fingerprint, confirmed.fingerprint);
+        assert_eq!(before[1].0, after[1].0);
     }
 
     #[test]
@@ -876,6 +1853,13 @@ mod tests {
             "http",
         );
         finding.set_static_proof_state(StaticProofState::SourceSinkLinked);
+        finding.triage = Some(TriageOutcome {
+            verdict: TriageVerdict::TruePositive,
+            confidence: 0.9,
+            rationale: "reviewed source-linked evidence".to_string(),
+            cost_usd: 0.0,
+        });
+        finding.triaged_by = Some(TriageAuthor::Human);
         finding.evidence.push(FindingEvidence {
             kind: "http-request".to_string(),
             file_path: "captures/login.har".to_string(),
@@ -895,6 +1879,7 @@ mod tests {
 
         assert!(output.contains("requestBlobPresent"));
         assert!(output.contains("responseBlobPresent"));
+        assert!(output.contains(r#""review_decision":"confirmed""#));
         assert!(output.contains(r#""static_proof_state":"source_sink_linked""#));
         assert!(!output.contains("RAW REQUEST BODY"));
         assert!(!output.contains("RAW RESPONSE BODY"));
@@ -904,7 +1889,7 @@ mod tests {
     fn filters_findings_by_severity_name_file_and_limit() {
         let store = FindingStore::open_in_memory().unwrap();
         store
-            .insert_scan_run("run-1", Path::new("/tmp/repo"), "completed")
+            .record_run_started("run-1", Path::new("/tmp/repo"), "completed")
             .unwrap();
 
         for (rule, file, severity, message) in [
@@ -954,7 +1939,7 @@ mod tests {
     fn filters_findings_by_legacy_verdict_values() {
         let store = FindingStore::open_in_memory().unwrap();
         store
-            .insert_scan_run("run-1", Path::new("/tmp/repo"), "completed")
+            .record_run_started("run-1", Path::new("/tmp/repo"), "completed")
             .unwrap();
 
         let true_positive = Finding::new_semgrep(
@@ -1026,13 +2011,200 @@ mod tests {
     }
 
     #[test]
+    fn filters_findings_by_decision_alias_and_review_completeness() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-1", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+
+        let confirmed = Finding::new_semgrep(
+            "demo.confirmed",
+            "src/a.ts",
+            1,
+            Some(1),
+            Severity::High,
+            "confirmed issue",
+        );
+        let needs_review = Finding::new_semgrep(
+            "demo.needs_review",
+            "src/b.ts",
+            1,
+            Some(1),
+            Severity::Medium,
+            "needs review issue",
+        );
+        let untriaged = Finding::new_semgrep(
+            "demo.untriaged",
+            "src/c.ts",
+            1,
+            Some(1),
+            Severity::Low,
+            "untriaged issue",
+        );
+        let confirmed_id = store.insert_finding("run-1", &confirmed).unwrap();
+        let needs_review_id = store.insert_finding("run-1", &needs_review).unwrap();
+        store.insert_finding("run-1", &untriaged).unwrap();
+        store
+            .save_triage(
+                confirmed_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.9,
+                    rationale: "human confirmed".to_string(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        store
+            .save_triage(
+                needs_review_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::NeedsReview,
+                    confidence: 0.5,
+                    rationale: "more evidence required".to_string(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let complete = store
+            .list_findings_filtered(
+                &FindingListFilter::from_tool_input(&json!({
+                    "decision": ["confirmed"],
+                    "completeness": ["complete"]
+                }))
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(complete.count, 1);
+        assert_eq!(complete.findings[0].rule_id, "demo.confirmed");
+
+        let open = store
+            .list_findings_filtered(
+                &FindingListFilter::from_filter_expression(
+                    "decision:needs_review state:triaged completeness:open",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(open.count, 1);
+        assert!(open
+            .findings
+            .iter()
+            .any(|finding| finding.rule_id == "demo.needs_review"));
+
+        let all_open = store
+            .list_findings_filtered(
+                &FindingListFilter::from_filter_expression("completeness:open").unwrap(),
+            )
+            .unwrap();
+        assert_eq!(all_open.count, 2);
+        assert!(all_open
+            .findings
+            .iter()
+            .any(|finding| finding.rule_id == "demo.untriaged"));
+
+        let suppressed = Finding::new_semgrep(
+            "demo.suppressed",
+            "src/d.ts",
+            1,
+            Some(1),
+            Severity::Low,
+            "suppressed issue",
+        );
+        let suppressed_id = store.insert_finding("run-1", &suppressed).unwrap();
+        store
+            .append_user_review_decision(
+                suppressed_id,
+                &ReviewDecision {
+                    verdict: ReviewDecisionVerdict::Suppressed,
+                    author: TriageAuthor::Human,
+                    confidence: 1.0,
+                    rationale: "suppressed by approved review policy".to_string(),
+                },
+            )
+            .unwrap();
+
+        let suppressed_complete = store
+            .list_findings_filtered(
+                &FindingListFilter::from_filter_expression(
+                    "decision:suppressed completeness:complete",
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        assert_eq!(suppressed_complete.count, 1);
+        assert_eq!(suppressed_complete.findings[0].rule_id, "demo.suppressed");
+        assert!(
+            suppressed_complete.findings[0].triage.is_none(),
+            "decision filters must not require mutating scanner triage"
+        );
+
+        let open_after_suppression = store
+            .list_findings_filtered(
+                &FindingListFilter::from_filter_expression("completeness:open").unwrap(),
+            )
+            .unwrap();
+        assert_eq!(open_after_suppression.count, 2);
+        assert!(!open_after_suppression
+            .findings
+            .iter()
+            .any(|finding| finding.rule_id == "demo.suppressed"));
+    }
+
+    #[test]
+    fn filters_findings_by_lifecycle_status_without_using_review_decision() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("run-1", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+
+        let seen = Finding::new_tool(
+            "fixture",
+            "demo.seen",
+            "src/a.ts",
+            1,
+            Some(1),
+            Severity::High,
+            "seen scanner finding",
+        );
+        let supported = Finding::new_semgrep(
+            "demo.supported",
+            "src/b.ts",
+            2,
+            Some(2),
+            Severity::Medium,
+            "source-linked scanner finding",
+        )
+        .with_static_proof_state(StaticProofState::SourceSinkLinked);
+        store.insert_finding("run-1", &seen).unwrap();
+        store.insert_finding("run-1", &supported).unwrap();
+
+        let status_seen = store
+            .list_findings_filtered(
+                &FindingListFilter::from_tool_input(&json!({"status": ["seen"]})).unwrap(),
+            )
+            .unwrap();
+        assert_eq!(status_seen.count, 1);
+        assert_eq!(status_seen.findings[0].rule_id, "demo.seen");
+
+        let status_supported = store
+            .list_findings_filtered(
+                &FindingListFilter::from_filter_expression("status:statically_supported").unwrap(),
+            )
+            .unwrap();
+        assert_eq!(status_supported.count, 1);
+        assert_eq!(status_supported.findings[0].rule_id, "demo.supported");
+    }
+
+    #[test]
     fn filter_expression_matches_state_rank_text_run_and_source() {
         let store = FindingStore::open_in_memory().unwrap();
         store
-            .insert_scan_run("run-2026-alpha", Path::new("/tmp/repo"), "completed")
+            .record_run_started("run-2026-alpha", Path::new("/tmp/repo"), "completed")
             .unwrap();
         store
-            .insert_scan_run("run-other", Path::new("/tmp/repo"), "completed")
+            .record_run_started("run-other", Path::new("/tmp/repo"), "completed")
             .unwrap();
 
         let wanted = Finding::new_semgrep(
@@ -1118,9 +2290,11 @@ mod tests {
 
     #[test]
     fn save_and_get_verification_round_trip() {
-        let store = FindingStore::open_in_memory().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let store = FindingStore::open(&db_path).unwrap();
         store
-            .insert_scan_run("run-v1", Path::new("/repo"), "running")
+            .record_run_started("run-v1", Path::new("/repo"), "running")
             .unwrap();
         let finding = Finding::new_tool(
             "verify-test",
@@ -1166,9 +2340,11 @@ mod tests {
 
     #[test]
     fn get_latest_verification_returns_most_recent_row() {
-        let store = FindingStore::open_in_memory().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let store = FindingStore::open(&db_path).unwrap();
         store
-            .insert_scan_run("run-v2", Path::new("/repo"), "running")
+            .record_run_started("run-v2", Path::new("/repo"), "running")
             .unwrap();
         let finding = Finding::new_tool(
             "verify-test",
@@ -1215,9 +2391,11 @@ mod tests {
 
     #[test]
     fn get_latest_verification_rejects_unknown_verdict_and_backend() {
-        let store = FindingStore::open_in_memory().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let store = FindingStore::open(&db_path).unwrap();
         store
-            .insert_scan_run("run-v-bad", Path::new("/repo"), "running")
+            .record_run_started("run-v-bad", Path::new("/repo"), "running")
             .unwrap();
         let finding = Finding::new_tool(
             "verify-test",
@@ -1233,10 +2411,15 @@ mod tests {
             .conn
             .execute(
                 r#"
-                insert into verifications (
-                  finding_id, proof_level, proof_verdict, backend, duration_ms,
-                  cost_usd, notes_json, created_at
-                ) values (?1, 4, 'surprise', 'plain', 0, 0.0, '[]', '2026-01-01T00:00:00Z')
+                insert into verification_events (
+                  event_hash, seq, stable_fp, finding_id, proof_level,
+                  proof_verdict, backend, duration_ms, cost_usd, notes_json,
+                  actor, created_at, payload_json
+                ) values (
+                  'bad-verdict', 999, 'fp_bad_verdict', ?1, 4,
+                  'surprise', 'plain', 0, 0.0, '[]',
+                  'test', '2026-01-01T00:00:00Z', '{}'
+                )
                 "#,
                 rusqlite::params![finding_id],
             )
@@ -1250,7 +2433,7 @@ mod tests {
         store
             .conn
             .execute(
-                "update verifications set proof_verdict = 'exploited', backend = 'mystery'",
+                "update verification_events set proof_verdict = 'exploited', backend = 'mystery'",
                 [],
             )
             .unwrap();
@@ -1262,9 +2445,11 @@ mod tests {
 
     #[test]
     fn list_findings_attaches_latest_verification() {
-        let store = FindingStore::open_in_memory().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let store = FindingStore::open(&db_path).unwrap();
         store
-            .insert_scan_run("run-v-list", Path::new("/repo"), "running")
+            .record_run_started("run-v-list", Path::new("/repo"), "running")
             .unwrap();
         let finding = Finding::new_tool(
             "verify-test",
@@ -1316,7 +2501,7 @@ mod tests {
         // Err and never silently corrupt the triage table.
         let store = FindingStore::open_in_memory().unwrap();
         store
-            .insert_scan_run("run-fk", Path::new("/repo"), "running")
+            .record_run_started("run-fk", Path::new("/repo"), "running")
             .unwrap();
         let stale_id: i64 = 9_999_999;
         let outcome = TriageOutcome {
@@ -1344,7 +2529,7 @@ mod tests {
         // the FK is satisfied. This is the contract callers must keep.
         let store = FindingStore::open_in_memory().unwrap();
         store
-            .insert_scan_run("run-fk-ok", Path::new("/repo"), "running")
+            .record_run_started("run-fk-ok", Path::new("/repo"), "running")
             .unwrap();
         let finding = Finding::new_tool(
             "triage-test",
@@ -1373,7 +2558,7 @@ mod tests {
     fn get_latest_verification_returns_none_when_no_rows() {
         let store = FindingStore::open_in_memory().unwrap();
         store
-            .insert_scan_run("run-v3", Path::new("/repo"), "running")
+            .record_run_started("run-v3", Path::new("/repo"), "running")
             .unwrap();
         let finding = Finding::new_tool(
             "verify-test",
@@ -1389,46 +2574,7 @@ mod tests {
     }
 
     #[test]
-    fn legacy_fingerprints_migrate_to_stable_v2_identity() {
-        let store = FindingStore::open_in_memory().unwrap();
-        store
-            .insert_scan_run("run-legacy", Path::new("/tmp"), "running")
-            .unwrap();
-        // Two legacy rows for the same rule/file/line whose 16-char
-        // DefaultHasher fingerprints differed only because the message was
-        // hashed: under v2 identity they are the same finding.
-        for (legacy_fp, message) in [
-            ("00000000aaaaaaaa", "SQLi reachable from request param"),
-            ("00000000bbbbbbbb", "SQLi reachable (review pass wording)"),
-        ] {
-            store
-                .conn
-                .execute(
-                    "insert into findings(scan_id, fingerprint, rule_id, title, severity,
-                        file_path, start_line, message, tool, created_at)
-                     values('run-legacy', ?1, 'demo.sqli', 'SQLi', 'high',
-                        'src/db.rs', 42, ?2, 'semgrep', 'now')",
-                    rusqlite::params![legacy_fp, message],
-                )
-                .unwrap();
-        }
-
-        // Re-running init applies the one-time migration.
-        store.init().unwrap();
-
-        let findings = store.list_findings_for_scan_id("run-legacy").unwrap();
-        assert_eq!(findings.len(), 1, "colliding legacy rows must collapse");
-        let migrated = &findings[0].fingerprint;
-        assert_eq!(migrated.len(), 32, "v2 fingerprints are 32 hex chars");
-        assert_eq!(
-            *migrated,
-            fingerprint_parts("demo.sqli", "src/db.rs", 42),
-            "migrated identity must match what new_tool computes today"
-        );
-    }
-
-    #[test]
-    fn fingerprint_is_stable_and_message_independent() {
+    fn fingerprint_is_v3_stable_line_and_message_independent() {
         let one = Finding::new_tool(
             "semgrep",
             "demo.sqli",
@@ -1448,10 +2594,7 @@ mod tests {
             "completely different wording",
         );
         assert_eq!(one.fingerprint, two.fingerprint);
-        assert_eq!(
-            one.fingerprint,
-            fingerprint_parts("demo.sqli", "src/db.rs", 42)
-        );
+        assert!(one.fingerprint.starts_with("fp3_"));
         let other_line = Finding::new_tool(
             "semgrep",
             "demo.sqli",
@@ -1461,6 +2604,7 @@ mod tests {
             Severity::High,
             "first wording",
         );
-        assert_ne!(one.fingerprint, other_line.fingerprint);
+        assert_eq!(one.fingerprint, other_line.fingerprint);
     }
+
 }

@@ -2,11 +2,11 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 265
 ---
- KUZUSHI > kb · mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › kb · mode:shell · target:none · ctx:not built · model:unconfigured
 
  -- KB ATTACHMENTS -----------------------------------------------------------------------------------------------------
 module: context
-store: .kuzushi/v2/attachments.json
+store: .kuzushi/v3/attachments.json
 supported: context, threat-model, offense-review, x-ray
 
  -- KNOWN ARTIFACTS ----------------------------------------------------------------------------------------------------

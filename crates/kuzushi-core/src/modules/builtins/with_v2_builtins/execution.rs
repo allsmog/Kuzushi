@@ -29,10 +29,19 @@ impl ModuleRegistry {
         runtime: Option<&dyn AgentRuntime>,
         option_store: Option<&ToolOptionStore>,
     ) -> Result<Value> {
-        let input = self.prepare_tool_input(name, input, option_store)?;
-        let input = input_with_prompt_file_default(name, input, ctx)?;
-
+        let input = self.prepare_tool_input_for_dispatch(name, input, ctx, option_store)?;
         self.dispatch_prepared_tool_with_runtime(name, input, ctx, runtime)
+    }
+
+    pub fn prepare_tool_input_for_dispatch(
+        &self,
+        name: &str,
+        input: Value,
+        ctx: &ToolExecutionContext<'_>,
+        option_store: Option<&ToolOptionStore>,
+    ) -> Result<Value> {
+        let input = self.prepare_tool_input(name, input, option_store)?;
+        input_with_prompt_file_default(name, input, ctx)
     }
 
     pub fn prepare_tool_input(
@@ -43,7 +52,9 @@ impl ModuleRegistry {
     ) -> Result<Value> {
         let tool = self.resolve_tool(name);
         if tool.is_none() && !self.is_registered_dag_node(name) {
-            anyhow::bail!("unknown tool {name:?}. Next: run catalog:tools or use the Rust shell `tools` command");
+            anyhow::bail!(
+                "unknown tool {name:?}. Next: run catalog:tools or use the Rust shell `tools` command"
+            );
         }
         let input = prepare_input_with_stored_options(name, input, option_store, tool)?;
         Ok(if let Some(tool) = tool {
@@ -53,13 +64,14 @@ impl ModuleRegistry {
         })
     }
 
-    pub(in crate::modules) fn dispatch_prepared_tool_with_runtime(
+    pub fn dispatch_prepared_tool_with_runtime(
         &self,
         name: &str,
         input: Value,
         ctx: &ToolExecutionContext<'_>,
         runtime: Option<&dyn AgentRuntime>,
     ) -> Result<Value> {
+        self.enforce_runtime_requirement(name, &input, runtime)?;
         let scoped_trace = scoped_tool_trace(ctx, name);
         let scoped_ctx;
         let ctx: &ToolExecutionContext<'_> = if let Some(handle) = scoped_trace.as_ref() {
@@ -77,6 +89,36 @@ impl ModuleRegistry {
         let result = executor(self, name, &input, ctx, runtime);
         return result.map(|output| normalize_tool_output_contract(name, output));
     }
+
+    fn enforce_runtime_requirement(
+        &self,
+        name: &str,
+        input: &Value,
+        runtime: Option<&dyn AgentRuntime>,
+    ) -> Result<()> {
+        if runtime.is_some() || !self.tool_needs_runtime(name, input) {
+            return Ok(());
+        }
+        if runtime_requirement_is_deferred_to_executor(name) {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "{name} requires an agent runtime; configure a model/runtime before running it"
+        )
+    }
+}
+
+fn runtime_requirement_is_deferred_to_executor(name: &str) -> bool {
+    matches!(
+        name,
+        "carlini-threat-hunt:run"
+            | "offense-review:threat-hunt"
+            | "patch:finding"
+            | "prompt-armor:analyze"
+            | "prompt-armor:attack"
+            | "prompt-armor:scan"
+            | "verify:finding"
+    )
 }
 
 fn prepare_input_with_stored_options(

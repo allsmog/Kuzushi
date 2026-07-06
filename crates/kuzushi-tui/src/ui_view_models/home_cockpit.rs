@@ -1,5 +1,5 @@
 use super::findings::{cached_sorted_finding_alias_indices, relativize_location, target_base};
-use super::journey::is_reviewed_finding;
+use super::review_state::{indexed_review_decision_complete, EffectiveReviewStateIndex};
 use super::{
     attack_surface_risk_model, context_snapshot_state, journey_model, ui_latest_run_path,
     ui_run_dir, AttackSurfaceRiskModel, JourneyModel, SeverityCounts, SeverityTone,
@@ -103,7 +103,7 @@ pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
         title: "HOME",
         attack_surface: home_attack_surface_model(&run.run_dir, &artifacts),
         next_card: home_next_card(journey.as_ref()),
-        findings_card: home_findings_card(&app.findings),
+        findings_card: home_findings_card(app),
         top_risks: home_top_risks(app),
         run_card: home_run_card(&run, &artifacts),
         workspace_line: home_workspace_line(app, module_count),
@@ -138,25 +138,31 @@ fn journey_next_card(journey: &JourneyModel) -> HomeNextCard {
     }
 }
 
-fn home_findings_card(findings: &[Finding]) -> HomeFindingsCard {
+fn home_findings_card(app: &ShellApp) -> HomeFindingsCard {
+    let findings = &app.findings;
+    let review_index =
+        EffectiveReviewStateIndex::from_findings_and_decisions(findings, &app.review_decisions);
     let reviewed = findings
         .iter()
-        .filter(|finding| is_reviewed_finding(finding))
+        .filter(|finding| indexed_review_decision_complete(&review_index, finding))
         .count();
     HomeFindingsCard {
         total: findings.len(),
         reviewed,
         unreviewed: findings.len().saturating_sub(reviewed),
         counts: SeverityCounts::from_findings(findings),
-        reviewed_counts: reviewed_severity_counts(findings),
+        reviewed_counts: reviewed_severity_counts(findings, &review_index),
     }
 }
 
-fn reviewed_severity_counts(findings: &[Finding]) -> SeverityCounts {
+fn reviewed_severity_counts(
+    findings: &[Finding],
+    review_index: &EffectiveReviewStateIndex,
+) -> SeverityCounts {
     let mut counts = SeverityCounts::default();
     for finding in findings
         .iter()
-        .filter(|finding| is_reviewed_finding(finding))
+        .filter(|finding| indexed_review_decision_complete(review_index, finding))
     {
         counts.add(finding.severity);
     }
@@ -336,9 +342,9 @@ fn artifact_status_from_value(value: &serde_json::Value) -> Option<String> {
 
 fn state_for_status(status: &str) -> Option<HomeArtifactState> {
     match status {
-        "completed" | "complete" | "ok" => Some(HomeArtifactState::recorded()),
+        "completed" => Some(HomeArtifactState::recorded()),
         "partial" => Some(HomeArtifactState::partial()),
-        "failed" | "error" => Some(HomeArtifactState::failed()),
+        "failed" => Some(HomeArtifactState::failed()),
         "skipped" => Some(HomeArtifactState::placeholder()),
         _ => None,
     }

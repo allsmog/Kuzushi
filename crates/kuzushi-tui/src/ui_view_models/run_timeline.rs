@@ -6,7 +6,6 @@ use std::path::{Path, PathBuf};
 
 const RUN_TIMELINE_COLUMN_COUNT: usize = 5;
 const RUN_ID_CELL: usize = 0;
-const LEGACY_RUN_SUMMARY_FILE: &str = "summary.json";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PastRunStatus {
@@ -14,6 +13,8 @@ pub(crate) enum PastRunStatus {
     Running,
     Partial,
     Paused,
+    Interrupted,
+    Skipped,
     Failed,
     Malformed,
     Unknown,
@@ -46,6 +47,8 @@ impl PastRun {
             PastRunStatus::Running => "running",
             PastRunStatus::Partial => "partial",
             PastRunStatus::Paused => "paused",
+            PastRunStatus::Interrupted => "interrupted",
+            PastRunStatus::Skipped => "skipped",
             PastRunStatus::Failed => "failed",
             PastRunStatus::Malformed => "malformed",
             PastRunStatus::Unknown => "—",
@@ -173,26 +176,17 @@ fn past_run_from_entry(entry: std::fs::DirEntry) -> Option<PastRun> {
 
 fn read_past_run_metadata(run_dir: &Path) -> (PastRunStatus, Option<u64>, String, String) {
     let metadata_leaf = run_metadata_artifact_leaf();
-    let value = match read_run_artifact_json(&run_dir.join(metadata_leaf)) {
-        JsonArtifactRead::Present(value) => Some(value),
+    match read_run_artifact_json(&run_dir.join(metadata_leaf)) {
+        JsonArtifactRead::Present(value) => past_run_metadata_from_value(&value),
         JsonArtifactRead::Malformed => return malformed_past_run_metadata(metadata_leaf),
         JsonArtifactRead::NonFile => return non_file_past_run_metadata(metadata_leaf),
-        JsonArtifactRead::Missing => {
-            match read_run_artifact_json(&run_dir.join(LEGACY_RUN_SUMMARY_FILE)) {
-                JsonArtifactRead::Present(value) => Some(value),
-                JsonArtifactRead::Malformed => {
-                    return malformed_past_run_metadata(LEGACY_RUN_SUMMARY_FILE)
-                }
-                JsonArtifactRead::NonFile => {
-                    return non_file_past_run_metadata(LEGACY_RUN_SUMMARY_FILE)
-                }
-                JsonArtifactRead::Missing => None,
-            }
-        }
-    };
-    let Some(value) = value else {
-        return empty_past_run_metadata();
-    };
+        JsonArtifactRead::Missing => empty_past_run_metadata(),
+    }
+}
+
+fn past_run_metadata_from_value(
+    value: &serde_json::Value,
+) -> (PastRunStatus, Option<u64>, String, String) {
     (
         value
             .get("status")
@@ -290,11 +284,13 @@ fn non_file_past_run_metadata(file: &str) -> (PastRunStatus, Option<u64>, String
 
 fn parse_past_run_status(status: &str) -> PastRunStatus {
     match status.to_ascii_lowercase().as_str() {
-        "completed" | "complete" | "done" | "ok" | "success" => PastRunStatus::Complete,
-        "running" | "started" => PastRunStatus::Running,
+        "completed" => PastRunStatus::Complete,
+        "running" => PastRunStatus::Running,
         "partial" => PastRunStatus::Partial,
         "paused" => PastRunStatus::Paused,
-        "failed" | "error" => PastRunStatus::Failed,
+        "failed" => PastRunStatus::Failed,
+        "interrupted" => PastRunStatus::Interrupted,
+        "skipped" => PastRunStatus::Skipped,
         _ => PastRunStatus::Unknown,
     }
 }

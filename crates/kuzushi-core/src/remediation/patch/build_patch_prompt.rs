@@ -6,6 +6,7 @@ pub(crate) fn build_patch_prompt(
     finding: &Finding,
     triage: &TriageOutcome,
     history: &[PatchAttempt],
+    style: PatchStyle,
 ) -> Result<String> {
     let finding_json =
         serde_json::to_string_pretty(finding).context("Could not serialize finding")?;
@@ -30,14 +31,16 @@ pub(crate) fn build_patch_prompt(
     };
 
     Ok(format!(
-        "Generate a minimal unified diff that fixes this confirmed security finding.\n\
+        "Generate a unified diff that fixes this confirmed security finding.\n\
+         {style_instruction}\n\
          The diff must apply with `git apply` from the repository root and use a/ and b/ paths.\n\n\
          ## Repository\n{repo_name}\n\n\
          ## Finding JSON\n{finding_json}\n\n\
          ## Triage JSON\n{triage_json}\n\n\
          ## Vulnerable Source Context\n{source_context}\n\n\
          ## Previous Attempts\n{history_block}\n\n\
-         ## Output\nReturn only a JSON object with string fields `diff` and `explanation`."
+         ## Output\nReturn only a JSON object with string fields `diff` and `explanation`.",
+        style_instruction = style.prompt_instruction(),
     ))
 }
 

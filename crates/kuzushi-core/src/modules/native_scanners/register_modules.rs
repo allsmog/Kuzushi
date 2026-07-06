@@ -10,7 +10,7 @@ pub(in crate::modules) fn register_modules(registry: &mut ModuleRegistry, execut
     registry.register(govulncheck_module().with_executor(executor));
     registry.register(license_scan_module().with_executor(executor));
     registry.register(sbom_scan_module().with_executor(executor));
-    registry.register(exploit_chain_module().with_executor(executor));
+    registry.register(exploit_chain_module().with_executor(executor).deferred());
     registry.register(android_apk_module().with_executor(executor));
 }
 

@@ -116,20 +116,20 @@ fn focus_body(
 fn tasked_body(session: &ActivitySession) -> String {
     if session.effective_pane_focus() == crate::PaneFocus::Right {
         return format!(
-            " ▸ OUTPUT  {} · j/k item · f findings · o open",
+            " ● OUTPUT  {} · j/k item · f findings · o open",
             session.deck_page.label()
         );
     }
     match session.focus_task.as_ref() {
         Some(task_id) => focused_task_body(session, task_id),
-        None => " ▸ FOCUS  hover [j/k] to inspect a task".to_string(),
+        None => " ● FOCUS  hover [j/k] to inspect a task".to_string(),
     }
 }
 
 fn taskless_body(running_tool: Option<&str>) -> String {
     match running_tool {
-        Some(tool) => format!(" ▸ RUNNING  {tool} — output streams above · Ctrl+C aborts"),
-        None => " ▸ FOCUS  no task rows this run".to_string(),
+        Some(tool) => format!(" ● RUNNING  {tool} — output streams above · Ctrl+C aborts"),
+        None => " ● FOCUS  no task rows this run".to_string(),
     }
 }
 
@@ -138,12 +138,12 @@ fn focused_task_body(session: &ActivitySession, task_id: &str) -> String {
         .tasks
         .get(task_id)
         .map(focused_task_row_body)
-        .unwrap_or_else(|| format!(" ▸ FOCUS  {task_id}  (not yet recorded)"))
+        .unwrap_or_else(|| format!(" ● FOCUS  {task_id}  (not yet recorded)"))
 }
 
 fn focused_task_row_body(row: &crate::DagTaskRow) -> String {
     format!(
-        " ▸ FOCUS  {task}  {state:?}  steps {n}  {label}",
+        " ● FOCUS  {task}  {state:?}  steps {n}  {label}",
         task = row.task_id,
         state = row.state,
         n = row.steps_done,
@@ -192,7 +192,7 @@ mod tests {
 
         assert_eq!(
             model.body,
-            " ▸ FOCUS  triage:run  Active  steps 3  reviewing evidence"
+            " ● FOCUS  triage:run  Active  steps 3  reviewing evidence"
         );
         assert_eq!(model.body_line, model.body);
         assert_eq!(
@@ -246,11 +246,11 @@ mod tests {
         let session = ActivitySession::new("r-1");
         assert_eq!(
             activity_footer_model(&session, 80, Some("threat-model:build"), false).body,
-            " ▸ RUNNING  threat-model:build — output streams above · Ctrl+C aborts"
+            " ● RUNNING  threat-model:build — output streams above · Ctrl+C aborts"
         );
         assert_eq!(
             activity_footer_model(&session, 80, None, false).body,
-            " ▸ FOCUS  no task rows this run"
+            " ● FOCUS  no task rows this run"
         );
     }
 
@@ -284,7 +284,7 @@ mod tests {
 
         assert_eq!(
             activity_footer_model(&session, 100, None, false).body,
-            " ▸ OUTPUT  dfd · j/k item · f findings · o open"
+            " ● OUTPUT  dfd · j/k item · f findings · o open"
         );
     }
 
@@ -298,17 +298,17 @@ mod tests {
         );
         assert_eq!(
             activity_footer_model(&session, 80, None, false).body,
-            " ▸ FOCUS  hover [j/k] to inspect a task"
+            " ● FOCUS  hover [j/k] to inspect a task"
         );
         assert_eq!(
             activity_footer_model(&session, 18, None, false).body_line,
-            " ▸ FOCUS  hover […"
+            " ● FOCUS  hover […"
         );
 
         session.focus_task = Some("patch:finding".to_string());
         assert_eq!(
             activity_footer_model(&session, 80, None, false).body,
-            " ▸ FOCUS  patch:finding  (not yet recorded)"
+            " ● FOCUS  patch:finding  (not yet recorded)"
         );
         assert_eq!(
             plain_keys(&activity_footer_model(&session, 80, None, false)),

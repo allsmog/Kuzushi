@@ -22,97 +22,227 @@ pub(in crate::modules) fn pwn_module() -> BuiltinModule {
         "Pwn",
         ModuleKind::Offense,
         "Binary exploitation workflow support: profiling, reverse-engineering, exploit-state tracking, calibration, and candidate orchestration.",
+        pwn_tools(),
+        vec![],
+    )
+}
+
+fn pwn_tools() -> Vec<ToolDescriptor> {
+    vec![
+        pwn_profile_binary_tool(),
+        pwn_reverse_tool(),
+        pwn_state_tool(),
+        pwn_calibrate_local_tool(),
+        pwn_run_candidates_tool(),
+        pwn_auto_solve_tool(),
+        pwn_menu_probe_tool(),
+        pwn_exploit_run_tool(),
+        pwn_heap_uaf_scan_tool(),
+    ]
+}
+
+fn pwn_profile_binary_tool() -> ToolDescriptor {
+    tool_with_options(
+        "pwn:profile-binary",
+        "Profile ELF/checksec/libc/loader/RPATH/architecture facts for a challenge binary.",
         vec![
-            tool_with_options(
-                "pwn:profile-binary",
-                "Profile ELF/checksec/libc/loader/RPATH/architecture facts for a challenge binary.",
-                vec![
-                    opt("binary", OptionType::Path, "Binary to profile.").required(),
-                    opt("libc", OptionType::Path, "Optional libc paired with the challenge binary.").advanced(),
-                    opt("ld", OptionType::Path, "Optional dynamic loader paired with the challenge binary.").advanced(),
-                ],
+            opt("binary", OptionType::Path, "Binary to profile.").required(),
+            opt(
+                "libc",
+                OptionType::Path,
+                "Optional libc paired with the challenge binary.",
+            )
+            .advanced(),
+            opt(
+                "ld",
+                OptionType::Path,
+                "Optional dynamic loader paired with the challenge binary.",
+            )
+            .advanced(),
+        ],
+    )
+}
+
+fn pwn_reverse_tool() -> ToolDescriptor {
+    tool_with_options(
+        "pwn:reverse",
+        "Use rev.ng-backed reverse engineering plus host strings/symbol summaries to identify functions, loops, alloc/free sites, and dangerous IO.",
+        vec![
+            opt("binary", OptionType::Path, "Binary to reverse.").required(),
+            opt("backend", OptionType::Enum, "Reverse-engineering backend.")
+                .choices(&["revng"])
+                .default(json!("revng")),
+            opt("function", OptionType::String, "Optional function to decompile.").advanced(),
+            opt(
+                "revngImage",
+                OptionType::String,
+                "Container image used when native rev.ng is unavailable.",
+            )
+            .aliases(&["revng_image"])
+            .default(json!(DEFAULT_REVNG_IMAGE))
+            .advanced(),
+            opt(
+                "revngNative",
+                OptionType::Path,
+                "Explicit native rev.ng binary path.",
+            )
+            .aliases(&["revng_native"])
+            .advanced(),
+            opt(
+                "revngContainerRuntime",
+                OptionType::String,
+                "Explicit container runtime for rev.ng (docker or podman).",
+            )
+            .aliases(&["revng_container_runtime"])
+            .advanced(),
+        ],
+    )
+}
+
+fn pwn_state_tool() -> ToolDescriptor {
+    tool_with_options(
+        "pwn:state",
+        "Read or update structured exploit state for a binary hash.",
+        vec![
+            opt(
+                "binary",
+                OptionType::Path,
+                "Binary whose pwn state should be read or updated.",
             ),
-            tool_with_options(
-                "pwn:reverse",
-                "Use rev.ng-backed reverse engineering plus host strings/symbol summaries to identify functions, loops, alloc/free sites, and dangerous IO.",
-                vec![
-                    opt("binary", OptionType::Path, "Binary to reverse.").required(),
-                    opt("backend", OptionType::Enum, "Reverse-engineering backend.").choices(&["revng"]).default(json!("revng")),
-                    opt("function", OptionType::String, "Optional function to decompile.").advanced(),
-                ],
+            opt(
+                "stateId",
+                OptionType::String,
+                "Existing state id or binary hash.",
+            )
+            .aliases(&["state_id"]),
+            opt("action", OptionType::Enum, "State action.")
+                .choices(&["read", "merge", "write", "record-failed"])
+                .default(json!("read")),
+            opt(
+                "state",
+                OptionType::Json,
+                "Full replacement or merge patch state payload.",
             ),
-            tool_with_options(
-                "pwn:state",
-                "Read or update structured exploit state for a binary hash.",
-                vec![
-                    opt("binary", OptionType::Path, "Binary whose pwn state should be read or updated."),
-                    opt("stateId", OptionType::String, "Existing state id or binary hash.").aliases(&["state_id"]),
-                    opt("action", OptionType::Enum, "State action.").choices(&["read", "merge", "write", "record-failed"]).default(json!("read")),
-                    opt("state", OptionType::Json, "Full replacement or merge patch state payload."),
-                    opt("strategy", OptionType::String, "Failed strategy name for record-failed."),
-                    opt("reason", OptionType::String, "Failure reason for record-failed."),
-                ],
+            opt(
+                "strategy",
+                OptionType::String,
+                "Failed strategy name for record-failed.",
             ),
-            tool_with_options(
-                "pwn:calibrate-local",
-                "Run a local binary briefly and capture /proc/<pid>/maps plus script output for leak/base calibration.",
-                vec![
-                    opt("binary", OptionType::Path, "Local binary to run.").required(),
-                    opt("argv", OptionType::StringList, "Additional argv values."),
-                    opt("env", OptionType::Json, "Environment object for the process."),
-                    opt("script", OptionType::String, "Bytes sent to stdin after spawn."),
-                ],
-            ),
-            tool_with_options(
-                "pwn:run-candidates",
-                "Record and bound candidate exploit attempts against a local or remote target.",
-                vec![
-                    opt("target", OptionType::String, "Local command or remote endpoint label.").required(),
-                    opt("stateId", OptionType::String, "State id returned by profile/state.").aliases(&["state_id"]).required(),
-                    opt("maxAttempts", OptionType::Int, "Maximum candidate attempts to record.").aliases(&["max_attempts"]).default(json!(10)),
-                    opt("parallelism", OptionType::Int, "Planned parallelism for remote-safe orchestration.").default(json!(1)).advanced(),
-                ],
-            ),
-            tool_with_options(
-                "pwn:auto-solve",
-                "Use the configured LLM runtime to plan a pwn workflow for an arbitrary target.",
-                vec![
-                    opt("target", OptionType::Path, "Target binary, shared object, or challenge directory.").required(),
-                    model_option(),
-                ],
-            ),
-            tool_with_options(
-                "pwn:menu-probe",
-                "Spawn a menu-driven challenge binary and probe each numbered choice to capture prompts, response shape, and refcount/UAF hints.",
-                vec![
-                    opt("binary", OptionType::Path, "Binary or loader+binary path to probe.").required(),
-                    opt("argv", OptionType::StringList, "Additional argv values for the loader/binary."),
-                    opt("env", OptionType::Json, "Environment object for the process (e.g. {\"LD_LIBRARY_PATH\":\".\"})."),
-                    opt("maxChoices", OptionType::Int, "Upper bound on menu choices to probe.").aliases(&["max_choices"]).default(json!(10)),
-                    opt("timeoutMs", OptionType::Int, "Per-probe wall-clock timeout in milliseconds.").aliases(&["timeout_ms"]).default(json!(400)),
-                ],
-            ),
-            tool_with_options(
-                "pwn:exploit-run",
-                "Execute a pwntools-style exploit script under a wall-clock timeout and capture stdout/stderr plus any LEAK/FLAG markers.",
-                vec![
-                    opt("script", OptionType::Path, "Python exploit script to invoke.").required(),
-                    opt("python", OptionType::String, "Interpreter to invoke (default: python3).").default(json!("python3")),
-                    opt("argv", OptionType::StringList, "Additional argv passed to the script."),
-                    opt("env", OptionType::Json, "Environment object for the script invocation."),
-                    opt("workdir", OptionType::Path, "Working directory (default: parent of script)."),
-                    opt("timeoutMs", OptionType::Int, "Wall-clock timeout in milliseconds.").aliases(&["timeout_ms"]).default(json!(15000)),
-                ],
-            ),
-            tool_with_options(
-                "pwn:heap-uaf-scan",
-                "Scan a binary for refcount-based free patterns and other heap UAF indicators (atomic dec, free without alive-flag clear, tcache-sized allocations).",
-                vec![
-                    opt("binary", OptionType::Path, "Binary to scan.").required(),
-                ],
+            opt(
+                "reason",
+                OptionType::String,
+                "Failure reason for record-failed.",
             ),
         ],
-        vec![],
+    )
+}
+
+fn pwn_calibrate_local_tool() -> ToolDescriptor {
+    tool_with_options(
+        "pwn:calibrate-local",
+        "Run a local binary briefly and capture /proc/<pid>/maps plus script output for leak/base calibration.",
+        vec![
+            opt("binary", OptionType::Path, "Local binary to run.").required(),
+            opt("argv", OptionType::StringList, "Additional argv values."),
+            opt("env", OptionType::Json, "Environment object for the process."),
+            opt("script", OptionType::String, "Bytes sent to stdin after spawn."),
+        ],
+    )
+}
+
+fn pwn_run_candidates_tool() -> ToolDescriptor {
+    tool_with_options(
+        "pwn:run-candidates",
+        "Record and bound candidate exploit attempts against a local or remote target.",
+        vec![
+            opt(
+                "target",
+                OptionType::String,
+                "Local command or remote endpoint label.",
+            )
+            .required(),
+            opt(
+                "stateId",
+                OptionType::String,
+                "State id returned by profile/state.",
+            )
+            .aliases(&["state_id"])
+            .required(),
+            opt(
+                "maxAttempts",
+                OptionType::Int,
+                "Maximum candidate attempts to record.",
+            )
+            .aliases(&["max_attempts"])
+            .default(json!(10)),
+            opt(
+                "parallelism",
+                OptionType::Int,
+                "Planned parallelism for remote-safe orchestration.",
+            )
+            .default(json!(1))
+            .advanced(),
+        ],
+    )
+}
+
+fn pwn_auto_solve_tool() -> ToolDescriptor {
+    tool_with_options(
+        "pwn:auto-solve",
+        "Use the configured LLM runtime to plan a pwn workflow for an arbitrary target.",
+        vec![
+            opt(
+                "target",
+                OptionType::Path,
+                "Target binary, shared object, or challenge directory.",
+            )
+            .required(),
+            model_option(),
+        ],
+    )
+}
+
+fn pwn_menu_probe_tool() -> ToolDescriptor {
+    tool_with_options(
+        "pwn:menu-probe",
+        "Spawn a menu-driven challenge binary and probe each numbered choice to capture prompts, response shape, and refcount/UAF hints.",
+        vec![
+            opt("binary", OptionType::Path, "Binary or loader+binary path to probe.").required(),
+            opt("argv", OptionType::StringList, "Additional argv values for the loader/binary."),
+            opt("env", OptionType::Json, "Environment object for the process."),
+            opt("maxChoices", OptionType::Int, "Upper bound on menu choices to probe.")
+                .aliases(&["max_choices"])
+                .default(json!(10)),
+            opt("timeoutMs", OptionType::Int, "Per-probe wall-clock timeout in milliseconds.")
+                .aliases(&["timeout_ms"])
+                .default(json!(400)),
+        ],
+    )
+}
+
+fn pwn_exploit_run_tool() -> ToolDescriptor {
+    tool_with_options(
+        "pwn:exploit-run",
+        "Execute a pwntools-style exploit script under a wall-clock timeout and capture stdout/stderr plus any LEAK/FLAG markers.",
+        vec![
+            opt("script", OptionType::Path, "Python exploit script to invoke.").required(),
+            opt("python", OptionType::String, "Interpreter to invoke.")
+                .default(json!("python3")),
+            opt("argv", OptionType::StringList, "Additional argv passed to the script."),
+            opt("env", OptionType::Json, "Environment object for the script invocation."),
+            opt("workdir", OptionType::Path, "Working directory."),
+            opt("timeoutMs", OptionType::Int, "Wall-clock timeout in milliseconds.")
+                .aliases(&["timeout_ms"])
+                .default(json!(15000)),
+        ],
+    )
+}
+
+fn pwn_heap_uaf_scan_tool() -> ToolDescriptor {
+    tool_with_options(
+        "pwn:heap-uaf-scan",
+        "Scan a binary for refcount-based free patterns and other heap UAF indicators.",
+        vec![opt("binary", OptionType::Path, "Binary to scan.").required()],
     )
 }
 
@@ -255,33 +385,92 @@ fn profile_binary(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value
 }
 
 fn reverse_binary(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
-    let binary = required_file(input, "binary")?;
-    let function = input.get("function").and_then(Value::as_str);
+    let request = ReverseBinaryRequest::from_input(input)?;
+    emit_reverse_start(ctx, &request.binary, request.function.as_deref());
+    let hash = file_hash(&request.binary)?;
+    let strings = reverse_strings(&request.binary);
+    let symbols = reverse_symbols(&request.binary);
+    let dangerous_io = dangerous_io_hits(&strings, &symbols);
+    let revng = run_revng(
+        &request.binary,
+        request.function.as_deref(),
+        &request.revng_options,
+    );
+    update_reverse_state(ctx, &hash)?;
+    Ok(reverse_binary_response(
+        &request.binary,
+        &hash,
+        request.function.as_deref(),
+        revng,
+        strings,
+        symbols,
+        dangerous_io,
+    ))
+}
+
+struct ReverseBinaryRequest {
+    binary: PathBuf,
+    function: Option<String>,
+    revng_options: RevngOptions,
+}
+
+impl ReverseBinaryRequest {
+    fn from_input(input: &Value) -> Result<Self> {
+        Ok(Self {
+            binary: required_file(input, "binary")?,
+            function: input
+                .get("function")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            revng_options: RevngOptions::from_input(input)?,
+        })
+    }
+}
+
+fn emit_reverse_start(ctx: &ToolExecutionContext<'_>, binary: &Path, function: Option<&str>) {
     if let Some(trace) = ctx.trace {
         let label = function
             .map(|function| format!("revng decompile {function}"))
             .unwrap_or_else(|| format!("reverse {}", binary.display()));
         let _ = trace.step("tool-progress", "reverse", label).emit();
     }
-    let hash = file_hash(&binary)?;
-    let strings = run_optional("strings", &[binary.as_os_str()]).unwrap_or_default();
-    let symbols = run_optional("nm", &[std::ffi::OsStr::new("-an"), binary.as_os_str()])
+}
+
+fn reverse_strings(binary: &Path) -> String {
+    run_optional("strings", &[binary.as_os_str()]).unwrap_or_default()
+}
+
+fn reverse_symbols(binary: &Path) -> String {
+    run_optional("nm", &[std::ffi::OsStr::new("-an"), binary.as_os_str()])
         .or_else(|| {
             run_optional(
                 "readelf",
                 &[std::ffi::OsStr::new("-Ws"), binary.as_os_str()],
             )
         })
-        .unwrap_or_default();
-    let dangerous_io = dangerous_io_hits(&strings, &symbols);
-    let revng = run_revng(&binary, function);
-    let state_path = state_path_for(ctx, &hash)?;
+        .unwrap_or_default()
+}
+
+fn update_reverse_state(ctx: &ToolExecutionContext<'_>, hash: &str) -> Result<()> {
+    let state_path = state_path_for(ctx, hash)?;
     if state_path.exists() {
         let mut state = read_state(&state_path)?;
         state.artifacts.push(format!("reverse:{}", now_unix()));
         save_state(&state_path, &state)?;
     }
-    Ok(json!({
+    Ok(())
+}
+
+fn reverse_binary_response(
+    binary: &Path,
+    hash: &str,
+    function: Option<&str>,
+    revng: Value,
+    strings: String,
+    symbols: String,
+    dangerous_io: Vec<String>,
+) -> Value {
+    json!({
         "binary": binary.display().to_string(),
         "stateId": hash,
         "function": function,
@@ -292,7 +481,29 @@ fn reverse_binary(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value
         "allocatorHints": allocator_hints(&symbols),
         "strings": strings.lines().take(120).collect::<Vec<_>>(),
         "symbols": symbols.lines().take(160).collect::<Vec<_>>(),
-    }))
+    })
+}
+
+#[derive(Debug, Clone)]
+struct RevngOptions {
+    image: String,
+    native: Option<PathBuf>,
+    container_runtime: Option<String>,
+}
+
+impl RevngOptions {
+    fn from_input(input: &Value) -> Result<Self> {
+        Ok(Self {
+            image: optional_string_input(input, &["revngImage", "revng_image"])?
+                .unwrap_or_else(|| DEFAULT_REVNG_IMAGE.to_string()),
+            native: optional_string_input(input, &["revngNative", "revng_native"])?
+                .map(PathBuf::from),
+            container_runtime: optional_string_input(
+                input,
+                &["revngContainerRuntime", "revng_container_runtime"],
+            )?,
+        })
+    }
 }
 
 fn state_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
@@ -510,7 +721,13 @@ fn run_candidates(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value
 fn menu_probe(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
     let config = MenuProbeConfig::from_input(input)?;
     emit_menu_probe_start(ctx, &config.binary);
-    let initial = run_menu_probe_step(&config.binary, &config.argv, config.env, b"", config.timeout)?;
+    let initial = run_menu_probe_step(
+        &config.binary,
+        &config.argv,
+        config.env,
+        b"",
+        config.timeout,
+    )?;
     let prompts = extract_menu_prompts(&initial);
     let probes = collect_menu_probes(&config)?;
     Ok(menu_probe_output(&config.binary, &initial, prompts, probes))
@@ -1888,8 +2105,8 @@ fn allocator_hints(symbols: &str) -> Vec<String> {
         .collect()
 }
 
-fn run_revng(binary: &Path, function: Option<&str>) -> Value {
-    match run_revng_inner(binary, function) {
+fn run_revng(binary: &Path, function: Option<&str>, options: &RevngOptions) -> Value {
+    match run_revng_inner(binary, function, options) {
         Ok(output) => json!({"ok": true, "output": output.chars().take(12000).collect::<String>()}),
         Err(error) => json!({
             "ok": false,
@@ -1899,21 +2116,23 @@ fn run_revng(binary: &Path, function: Option<&str>) -> Value {
     }
 }
 
-fn run_revng_inner(binary: &Path, function: Option<&str>) -> Result<String> {
-    let output = if let Some(revng) = native_revng() {
+fn run_revng_inner(
+    binary: &Path,
+    function: Option<&str>,
+    options: &RevngOptions,
+) -> Result<String> {
+    let output = if let Some(revng) = native_revng(options)? {
         run_native_revng(&revng, binary)?
     } else {
-        run_container_revng(binary)?
+        run_container_revng(binary, options)?
     };
     Ok(function
         .map(|name| extract_revng_function_excerpt(&output, name))
         .unwrap_or(output))
 }
 
-fn run_container_revng(binary: &Path) -> Result<String> {
-    let runtime = container_runtime().context("no Docker/Podman runtime found")?;
-    let image =
-        std::env::var("KUZUSHI_REVNG_IMAGE").unwrap_or_else(|_| DEFAULT_REVNG_IMAGE.to_string());
+fn run_container_revng(binary: &Path, options: &RevngOptions) -> Result<String> {
+    let runtime = container_runtime(options).context("no Docker/Podman runtime found")?;
     let parent = binary.parent().context("binary path has no parent")?;
     let name = binary
         .file_name()
@@ -1925,7 +2144,7 @@ fn run_container_revng(binary: &Path) -> Result<String> {
         "--pull=never".to_string(),
         "-v".to_string(),
         format!("{}:/input:ro", parent.display()),
-        image,
+        options.image.clone(),
         "revng".to_string(),
         "artifact".to_string(),
         "--analyze".to_string(),
@@ -2015,42 +2234,60 @@ fn strip_ptml_excerpt(input: &str, limit: usize) -> String {
         .replace("&gt;", ">")
 }
 
-fn native_revng() -> Option<PathBuf> {
-    if let Ok(value) = std::env::var("KUZUSHI_REVNG_NATIVE") {
-        let path = PathBuf::from(value.trim());
-        if path.is_file() {
-            return Some(path);
-        }
+fn native_revng(options: &RevngOptions) -> Result<Option<PathBuf>> {
+    if let Some(path) = explicit_native_revng(options)? {
+        return Ok(Some(path));
     }
-    if Command::new("revng")
+    if revng_on_path() {
+        return Ok(Some(PathBuf::from("revng")));
+    }
+    Ok(installed_revng().or_else(local_revng))
+}
+
+fn explicit_native_revng(options: &RevngOptions) -> Result<Option<PathBuf>> {
+    let Some(path) = options.native.as_ref() else {
+        return Ok(None);
+    };
+    if path.is_file() {
+        return Ok(Some(path.clone()));
+    }
+    anyhow::bail!(
+        "revngNative points to a missing rev.ng binary: {}",
+        path.display()
+    );
+}
+
+fn revng_on_path() -> bool {
+    Command::new("revng")
         .arg("--version")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
         .is_ok()
-    {
-        return Some(PathBuf::from("revng"));
-    }
-    if let Ok(home) = std::env::var("HOME") {
-        let installed = PathBuf::from(home)
-            .join(".local")
-            .join("share")
-            .join("kuzushi")
-            .join("revng")
-            .join("revng");
-        if installed.is_file() {
-            return Some(installed);
-        }
-    }
-    let local = std::env::current_dir().ok()?.join("revng").join("revng");
-    local.is_file().then_some(local)
 }
 
-fn container_runtime() -> Option<String> {
-    if let Ok(value) = std::env::var("KUZUSHI_REVNG_CONTAINER_RUNTIME") {
-        if !value.trim().is_empty() {
-            return Some(value);
+fn installed_revng() -> Option<PathBuf> {
+    let installed = PathBuf::from(std::env::var("HOME").ok()?)
+        .join(".local")
+        .join("share")
+        .join("kuzushi")
+        .join("revng")
+        .join("revng");
+    installed.is_file().then_some(installed)
+}
+
+fn local_revng() -> Option<PathBuf> {
+    std::env::current_dir()
+        .ok()
+        .map(|cwd| cwd.join("revng").join("revng"))
+        .filter(|path| path.is_file())
+}
+
+fn container_runtime(options: &RevngOptions) -> Option<String> {
+    if let Some(runtime) = options.container_runtime.as_deref() {
+        if !runtime.trim().is_empty() {
+            return container_runtime_is_usable(runtime).then(|| runtime.to_string());
         }
     }
     ["podman", "docker"]
@@ -2131,6 +2368,25 @@ mod tests {
         assert!(names.contains(&"pwn:menu-probe"));
         assert!(names.contains(&"pwn:exploit-run"));
         assert!(names.contains(&"pwn:heap-uaf-scan"));
+    }
+
+    #[test]
+    fn pwn_reverse_declares_revng_options_instead_of_env_knobs() {
+        let module = pwn_module();
+        let reverse = module
+            .tools()
+            .iter()
+            .find(|tool| tool.name == "pwn:reverse")
+            .unwrap();
+        let option_names = reverse
+            .options
+            .iter()
+            .map(|option| option.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert!(option_names.contains(&"revngImage"));
+        assert!(option_names.contains(&"revngNative"));
+        assert!(option_names.contains(&"revngContainerRuntime"));
     }
 
     #[test]

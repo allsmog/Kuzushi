@@ -101,7 +101,7 @@ mod tests {
     fn store_with(severities: &[Severity]) -> FindingStore {
         let store = FindingStore::open_in_memory().unwrap();
         store
-            .insert_scan_run("scan-1", std::path::Path::new("/tmp"), "running")
+            .record_run_started("scan-1", std::path::Path::new("/tmp"), "running")
             .unwrap();
         for (index, severity) in severities.iter().enumerate() {
             let finding = Finding::new_tool(

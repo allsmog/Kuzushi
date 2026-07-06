@@ -54,9 +54,11 @@ struct SastScanExecutionInput<'a> {
 impl SastScanExecutionInput<'_> {
     fn reports(&self) -> Result<SastPipelineReports> {
         run_sast_pipeline_reports(
+            self.registry,
             self.input,
             self.ctx,
             self.runtime,
+            self.option_store,
             self.workspace,
             self.store,
             self.options,
@@ -197,7 +199,9 @@ fn sast_workspace<'a>(
     ctx: &'a ToolExecutionContext<'_>,
 ) -> Result<&'a crate::workspace::WorkspaceTarget> {
     ctx.workspace
-        .context(crate::workspace::active_workspace_required_message("sast:scan"))
+        .context(crate::workspace::active_workspace_required_message(
+            "sast:scan",
+        ))
 }
 
 fn sast_store<'a>(ctx: &'a ToolExecutionContext<'_>) -> Result<&'a crate::findings::FindingStore> {

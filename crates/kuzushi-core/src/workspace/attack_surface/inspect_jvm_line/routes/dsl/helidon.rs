@@ -12,7 +12,15 @@ pub(super) fn inspect_helidon_route_line(
 ) {
     remember_helidon_scope(lower, state);
     remember_helidon_prefix(detail, lower, state);
-    emit_helidon_route(source_file, framework, line_number, detail, lower, state, builder);
+    emit_helidon_route(
+        source_file,
+        framework,
+        line_number,
+        detail,
+        lower,
+        state,
+        builder,
+    );
 }
 
 fn remember_helidon_scope(lower: &str, state: &mut RouteScanState) {

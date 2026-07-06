@@ -76,8 +76,8 @@ mod routed_runtime_option_tests {
     fn test_config_paths(root: &std::path::Path) -> crate::config::ConfigPaths {
         let home = root.join("home");
         let target = root.join("repo");
-        std::fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
-        std::fs::create_dir_all(target.join(".kuzushi/v2")).unwrap();
+        std::fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        std::fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
         crate::config::ConfigPaths {
             home_dir: home,
             target_dir: Some(target),
@@ -132,11 +132,11 @@ pub(crate) fn persist_full_mode_report(
     };
     let store = FindingStore::open(workspace.findings_db_path())?;
     let scan_id = format!("full-mode-{}", uuid::Uuid::new_v4());
-    store.insert_scan_run(&scan_id, workspace.root(), "running")?;
+    store.record_run_started(&scan_id, workspace.root(), "running")?;
     for finding in &report.findings {
         let _ = store.insert_finding(&scan_id, finding)?;
     }
-    store.complete_scan_run(&scan_id, "completed", report.findings.len())?;
+    store.record_run_finished(&scan_id, "completed", report.findings.len())?;
     Ok(())
 }
 

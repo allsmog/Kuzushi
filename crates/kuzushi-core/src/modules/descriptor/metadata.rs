@@ -28,7 +28,6 @@ impl BuiltinModule {
 
     pub(in crate::modules) fn deferred(mut self) -> Self {
         self.hidden = true;
-        self.dag_nodes.clear();
         self
     }
 

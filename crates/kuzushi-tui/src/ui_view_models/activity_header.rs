@@ -1,10 +1,9 @@
-use crate::{ActivitySession, DagTaskState, PaneFocus};
+use crate::{ActivitySession, DagTaskState};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActivityHeaderModel {
     pub(crate) detailed_title: String,
     pub(crate) summary_title: String,
-    pub(crate) focus_label: &'static str,
 }
 
 /// Terminal outcome of the run behind the Activity view. While work is in
@@ -13,7 +12,14 @@ pub(crate) struct ActivityHeaderModel {
 /// "0/30 done · 0 running" wall wondering whether anything is still alive.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ActivityRunOutcome {
-    Failed { subject: String },
+    Terminal {
+        status: String,
+        findings: Option<u64>,
+        reason: Option<String>,
+    },
+    Failed {
+        subject: String,
+    },
 }
 
 /// The tool currently executing behind a taskless (single-tool) run, with
@@ -47,7 +53,6 @@ pub(crate) fn activity_header_model(
             "ACTIVITY  run {run_id}  ·  {progress}",
             run_id = session.run_id
         ),
-        focus_label: pane_focus_label(session.effective_pane_focus()),
     }
 }
 
@@ -57,6 +62,11 @@ fn progress_segment(
     live_tool: Option<&ActivityLiveTool>,
 ) -> String {
     match outcome {
+        Some(ActivityRunOutcome::Terminal {
+            status,
+            findings,
+            reason,
+        }) => terminal_outcome_segment(status, *findings, reason.as_deref()),
         Some(ActivityRunOutcome::Failed { subject }) => {
             format!("✗ run failed — {subject} · see error banner")
         }
@@ -64,6 +74,37 @@ fn progress_segment(
         // run has no DAG tasks — name the tool and tick instead.
         None if counts.total == 0 => taskless_progress(live_tool),
         None => task_progress(counts),
+    }
+}
+
+fn terminal_outcome_segment(status: &str, findings: Option<u64>, reason: Option<&str>) -> String {
+    let mut parts = vec![
+        terminal_status_segment(status),
+        finding_count_segment(findings),
+    ];
+    if let Some(reason) = reason.map(str::trim).filter(|reason| !reason.is_empty()) {
+        parts.push(format!("reason: {reason}"));
+    }
+    parts.join(" · ")
+}
+
+fn terminal_status_segment(status: &str) -> String {
+    match status {
+        "completed" => "✓ run completed".to_string(),
+        "partial" => "⚠ run partial".to_string(),
+        "failed" => "✗ run failed".to_string(),
+        "interrupted" => "× run interrupted".to_string(),
+        "canceled" | "cancelled" => "× run canceled".to_string(),
+        "skipped" => "⊘ run skipped".to_string(),
+        other => format!("run {other}"),
+    }
+}
+
+fn finding_count_segment(findings: Option<u64>) -> String {
+    match findings {
+        Some(1) => "1 finding".to_string(),
+        Some(count) => format!("{count} findings"),
+        None => "findings unknown".to_string(),
     }
 }
 
@@ -172,13 +213,6 @@ fn verbose_segment(verbose: bool) -> &'static str {
     verbose.then_some("  ·  V verbose").unwrap_or("")
 }
 
-fn pane_focus_label(focus: PaneFocus) -> &'static str {
-    match focus {
-        PaneFocus::Left => "[tasks focused]",
-        PaneFocus::Right => "[output focused]",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,7 +231,6 @@ mod tests {
         );
         session.paused = true;
         session.verbose_subsystems = true;
-        session.pane_focus = PaneFocus::Right;
 
         let model = activity_header_model(&session, None, None);
 
@@ -208,7 +241,6 @@ mod tests {
         assert!(model.detailed_title.contains("…d602a576"));
         assert!(model.detailed_title.contains("cost $0.3750"));
         assert!(model.detailed_title.contains("feed paused"));
-        assert_eq!(model.focus_label, "[output focused]");
     }
 
     #[test]
@@ -221,9 +253,6 @@ mod tests {
             .summary_title
             .contains("no task rows — streaming tool output"));
         assert!(!model.summary_title.contains("0/0 done"));
-        // With no TASKS pane on screen the stored Left focus is meaningless;
-        // the label must follow the only visible pane.
-        assert_eq!(model.focus_label, "[output focused]");
     }
 
     #[test]
@@ -298,6 +327,97 @@ mod tests {
         assert!(model.detailed_title.contains("see error banner"));
         assert!(!model.detailed_title.contains("done"));
         assert!(model.summary_title.contains("✗ run failed"));
+    }
+
+    #[test]
+    fn terminal_completed_zero_result_reports_status_and_count() {
+        let session = ActivitySession::new("run-1");
+
+        let model = activity_header_model(
+            &session,
+            Some(ActivityRunOutcome::Terminal {
+                status: "completed".to_string(),
+                findings: Some(0),
+                reason: None,
+            }),
+            None,
+        );
+
+        assert!(
+            model.summary_title.contains("✓ run completed · 0 findings"),
+            "{}",
+            model.summary_title
+        );
+        assert!(!model.summary_title.contains("clean"));
+    }
+
+    #[test]
+    fn terminal_completed_status_uses_completed_wording() {
+        let session = ActivitySession::new("run-1");
+
+        let model = activity_header_model(
+            &session,
+            Some(ActivityRunOutcome::Terminal {
+                status: "completed".to_string(),
+                findings: Some(3),
+                reason: None,
+            }),
+            None,
+        );
+
+        assert!(
+            model.summary_title.contains("✓ run completed · 3 findings"),
+            "{}",
+            model.summary_title
+        );
+    }
+
+    #[test]
+    fn terminal_partial_result_reports_reason_without_clean_language() {
+        let session = ActivitySession::new("run-1");
+
+        let model = activity_header_model(
+            &session,
+            Some(ActivityRunOutcome::Terminal {
+                status: "partial".to_string(),
+                findings: Some(7),
+                reason: Some("semgrep timed out".to_string()),
+            }),
+            None,
+        );
+
+        assert!(
+            model
+                .summary_title
+                .contains("⚠ run partial · 7 findings · reason: semgrep timed out"),
+            "{}",
+            model.summary_title
+        );
+        assert!(!model.summary_title.contains("clean"));
+    }
+
+    #[test]
+    fn terminal_cancelled_result_reports_unknown_count_without_reason_when_absent() {
+        let session = ActivitySession::new("run-1");
+
+        let model = activity_header_model(
+            &session,
+            Some(ActivityRunOutcome::Terminal {
+                status: "cancelled".to_string(),
+                findings: None,
+                reason: None,
+            }),
+            None,
+        );
+
+        assert!(
+            model
+                .summary_title
+                .contains("× run canceled · findings unknown"),
+            "{}",
+            model.summary_title
+        );
+        assert!(!model.summary_title.contains("reason:"));
     }
 
     #[test]

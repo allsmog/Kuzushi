@@ -14,6 +14,11 @@ program as the concrete example.
 Kuzushi cannot scan a binary `.apk` directly — its scanners expect a directory
 tree of source code. The `android-apk` module bridges that gap:
 
+The catalog-visible entry point is `android-apk:scan`, which orchestrates the
+APK phases below. The granular `android-apk:*` phase tools remain executable by
+exact name for debugging or scripted recovery, but they no longer appear as
+separate catalog rows.
+
 1. **`android-apk:check-env`** verifies that `jadx`, `apktool`, and `unzip`
    are available.
 2. **`android-apk:prepare`** validates the APK, unzips raw resources, and
@@ -36,8 +41,9 @@ tree of source code. The `android-apk` module bridges that gap:
    and clipboard credential leaks against the decompiled jadx tree.
 7. **`android-apk:sast-handoff`** returns the canonical scan target
    plus next-step commands so downstream scanners
-   (`semgrep:scan`, `codeql:scan`, `exploit-chain:scan`,
-   `agentic-sast:scan`, `taint-iris-next:hunt`, `secret-scan:scan`)
+   (`semgrep:scan`, `codeql:scan`, `agentic-sast:scan`,
+   `taint-iris-next:dataflow-plan`,
+   `taint-iris-next:finding-review`, `secret-scan:scan`)
    can be invoked against the right subtrees.
 8. **`android-apk:native-libs`** enumerates `.so` files under
    `<workspace>/android-decompiled/raw/lib/<abi>/`, parses their ELF
@@ -49,8 +55,9 @@ tree of source code. The `android-apk` module bridges that gap:
    when to follow up on the embedded JS/Dart bundle.
 
 The existing scanners (`semgrep:scan`, `codeql:scan`, `secret-scan:scan`,
-`exploit-chain:scan`, `agentic-sast:scan`, `taint-iris-next:hunt`,
-`triage:run`, `verify:finding`) consume the decompiled tree.
+`agentic-sast:scan`, `taint-iris-next:dataflow-plan`,
+`taint-iris-next:finding-review`, `triage:run`, `verify:finding`) consume the
+decompiled tree.
 
 Future work tracked in the plan: full smali fallback for code that's so
 heavily obfuscated `jadx` produces unusable Java; deeper revng MCP
@@ -220,7 +227,7 @@ Or run individual engines for faster iteration:
 ```bash
 kuzushi run semgrep:scan       --input '{"target":"./android-decompiled/jadx"}'
 kuzushi run secret-scan:scan   --input '{"target":"./android-decompiled/raw"}'
-kuzushi run exploit-chain:scan --input '{"target":"./android-decompiled/jadx"}'
+kuzushi run agentic-sast:scan  --input '{"target":"./android-decompiled/jadx"}'
 ```
 
 ### 6. Review findings
@@ -248,8 +255,8 @@ today:
 
 - **Structural rules** — Semgrep patterns matched on AST shape (call sites,
   method-chain shapes) survive renaming.
-- **Data-flow** — `exploit-chain:scan` and `taint-iris-next:hunt` use
-  CodeQL/Joern through their MCP servers. Joern's `joern.taint_paths` is
+- **Data-flow** — `taint-iris-next:source-sink-trace` can use CodeQL/Joern
+  through its MCP servers. Joern's `joern.taint_paths` is
   agnostic to identifier names; it traces actual edges in the code property
   graph.
 - **apktool smali fallback** — when an interesting source location in jadx

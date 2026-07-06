@@ -2,23 +2,49 @@ use super::*;
 
 impl ShellApp {
     pub fn apply_pending_plan(&mut self) {
-        let Some(plan) = self.pending_plan.take() else {
+        let Some(plan) = self.take_pending_plan_for_apply() else {
             return;
         };
+        self.apply_plan(plan);
+    }
+
+    fn take_pending_plan_for_apply(&mut self) -> Option<PlanProposal> {
+        match self.engagement.take_pending_plan() {
+            Some(plan) => Some(plan),
+            None => {
+                self.log("plan", "nothing to apply - no plan is pending");
+                None
+            }
+        }
+    }
+
+    fn apply_plan(&mut self, plan: PlanProposal) {
         let total = plan.changes.len();
+        let applied = self.apply_supported_plan_changes(plan.changes);
+        self.log("plan", format!("applied {applied}/{total} change(s)"));
+        self.reset_plan_review_state();
+        self.log_unsupported_plan_changes(plan.unsupported);
+    }
+
+    fn apply_supported_plan_changes(&mut self, changes: Vec<PlanChange>) -> usize {
         let mut applied = 0usize;
-        for (idx, change) in plan.changes.into_iter().enumerate() {
-            if self.plan_skipped.contains(&idx) {
+        for (idx, change) in changes.into_iter().enumerate() {
+            if self.engagement.plan_change_skipped(idx) {
                 continue;
             }
             if self.apply_plan_change(change) {
                 applied += 1;
             }
         }
-        self.log("plan", format!("applied {applied}/{total} change(s)"));
-        self.plan_cursor = 0;
-        self.plan_skipped.clear();
-        for line in plan.unsupported {
+        applied
+    }
+
+    fn reset_plan_review_state(&mut self) {
+        self.engagement.reset_plan_review_state();
+    }
+
+    fn log_unsupported_plan_changes(&mut self, unsupported: Vec<String>) {
+        for line in unsupported {
             self.log("plan-skip", line);
         }
     }
@@ -64,10 +90,10 @@ impl ShellApp {
     }
 
     pub fn discard_pending_plan(&mut self) {
-        if self.pending_plan.take().is_some() {
-            self.plan_cursor = 0;
-            self.plan_skipped.clear();
+        if self.engagement.discard_pending_plan() {
             self.log("plan", "discarded pending plan");
+        } else {
+            self.log("plan", "nothing to discard - no plan is pending");
         }
     }
 }

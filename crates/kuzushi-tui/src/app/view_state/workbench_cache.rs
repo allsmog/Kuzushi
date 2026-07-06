@@ -1,21 +1,35 @@
 use super::*;
+use crate::ui_view_models::{DfdModel, RiskByModule};
+use cache_entries::{
+    canonical_target_base, project_scope_tree_for_target, read_json_file,
+    run_summary_index_for_target, source_file_stamp, GitMetadataCache, JsonFileCache,
+    PromptMutationsCache, RunSummaryCache, RunSummaryCacheKey, ScopeTreeCache, SourceFileCache,
+    StrategyQueueCache, TargetBaseCache,
+};
 use finding_alias_cache::FindingAliasCache;
 use kuzushi_core::{
-    list_run_summaries, Finding, NestedProjectScopeTree, PromptMutation, RunSummary,
-    RunTargetGitMetadata, StrategyProposal, WorkspaceTarget,
+    Finding, NestedProjectScopeTree, RunSummary, RunTargetGitMetadata, WorkspaceTarget,
 };
 use map_artifacts_cache::MapArtifactsCache;
 use prompt_override_cache::PromptOverrideCache;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant, SystemTime};
+use std::time::Instant;
+use view_model_fragments::ViewModelFragmentCache;
 
+mod cache_entries;
 mod finding_alias_cache;
 mod map_artifacts_cache;
 mod prompt_override_cache;
-
-const GIT_METADATA_TTL: Duration = Duration::from_secs(2);
-const SCOPE_TREE_TTL: Duration = Duration::from_secs(2);
+#[cfg(test)]
+mod tests;
+mod view_model_fragments;
+pub(crate) use cache_entries::{
+    JsonFileState, ProjectScopeTreeState, PromptMutationsState, StrategyQueueState,
+};
+pub(crate) use view_model_fragments::{
+    DfdModelCacheKey, RiskByModuleCacheKey, VisibleFindingProjection, VisibleFindingsCacheKey,
+};
 
 #[derive(Debug, Default)]
 pub(crate) struct WorkbenchCache {
@@ -30,6 +44,7 @@ pub(crate) struct WorkbenchCache {
     map_artifacts: MapArtifactsCache,
     prompt_overrides: PromptOverrideCache,
     finding_aliases: FindingAliasCache,
+    view_models: ViewModelFragmentCache,
 }
 
 impl WorkbenchCache {
@@ -244,233 +259,35 @@ impl WorkbenchCache {
     ) -> Vec<(String, usize)> {
         self.finding_aliases.sorted_indices(findings)
     }
-}
 
-fn canonical_target_base(target: &Path) -> String {
-    target
-        .canonicalize()
-        .unwrap_or_else(|_| target.to_path_buf())
-        .to_string_lossy()
-        .into_owned()
-}
-
-fn run_summary_index_for_target(target: &Path) -> BTreeMap<String, RunSummary> {
-    list_run_summaries(target)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|summary| (summary.run_id.clone(), summary))
-        .collect()
-}
-
-fn project_scope_tree_for_target(target: &Path) -> ProjectScopeTreeState {
-    match kuzushi_core::load_nested_project_scopes(target) {
-        Ok(Some(tree)) => ProjectScopeTreeState::Persisted(tree),
-        Ok(None) => ProjectScopeTreeState::RootOnly,
-        Err(error) => ProjectScopeTreeState::Unreadable(error.to_string()),
-    }
-}
-
-fn read_json_file(path: &Path) -> JsonFileState {
-    match std::fs::metadata(path) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return JsonFileState::NonFile,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return JsonFileState::Missing;
-        }
-        Err(_) => return JsonFileState::Unreadable,
-    };
-    let raw = match std::fs::read_to_string(path) {
-        Ok(raw) => raw,
-        Err(_) => return JsonFileState::Unreadable,
-    };
-    serde_json::from_str::<serde_json::Value>(&raw)
-        .map(JsonFileState::Present)
-        .unwrap_or(JsonFileState::Malformed)
-}
-
-fn source_file_stamp(path: &Path) -> std::io::Result<SourceFileStamp> {
-    let metadata = std::fs::metadata(path)?;
-    Ok(SourceFileStamp {
-        len: metadata.len(),
-        modified: metadata.modified().ok(),
-    })
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum ProjectScopeTreeState {
-    Persisted(NestedProjectScopeTree),
-    RootOnly,
-    Unreadable(String),
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum StrategyQueueState {
-    Ready(Vec<StrategyProposal>),
-    Unreadable(String),
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum PromptMutationsState {
-    Ready(Vec<PromptMutation>),
-    Unreadable,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) enum JsonFileState {
-    Present(serde_json::Value),
-    Missing,
-    NonFile,
-    Malformed,
-    Unreadable,
-}
-
-#[derive(Debug)]
-struct TargetBaseCache {
-    target: PathBuf,
-    base: String,
-}
-
-#[derive(Debug)]
-struct RunSummaryCache {
-    key: RunSummaryCacheKey,
-    summaries: BTreeMap<String, RunSummary>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct RunSummaryCacheKey {
-    target: PathBuf,
-    scan_ids: Vec<String>,
-}
-
-#[derive(Debug)]
-struct SourceFileCache {
-    path: PathBuf,
-    stamp: SourceFileStamp,
-    contents: String,
-}
-
-#[derive(Debug)]
-struct GitMetadataCache {
-    target: PathBuf,
-    cached_at: Instant,
-    metadata: Option<RunTargetGitMetadata>,
-}
-
-#[derive(Debug)]
-struct ScopeTreeCache {
-    target: PathBuf,
-    cached_at: Instant,
-    state: ProjectScopeTreeState,
-}
-
-#[derive(Debug)]
-struct StrategyQueueCache {
-    target: PathBuf,
-    stamp: Option<SourceFileStamp>,
-    state: StrategyQueueState,
-}
-
-#[derive(Debug)]
-struct PromptMutationsCache {
-    target: PathBuf,
-    stamp: Option<SourceFileStamp>,
-    state: PromptMutationsState,
-}
-
-#[derive(Debug)]
-struct JsonFileCache {
-    stamp: Option<SourceFileStamp>,
-    state: JsonFileState,
-}
-
-impl GitMetadataCache {
-    fn fresh_at(&self, now: Instant) -> bool {
-        now.duration_since(self.cached_at) <= GIT_METADATA_TTL
-    }
-}
-
-impl ScopeTreeCache {
-    fn fresh_at(&self, now: Instant) -> bool {
-        now.duration_since(self.cached_at) <= SCOPE_TREE_TTL
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct SourceFileStamp {
-    len: u64,
-    modified: Option<SystemTime>,
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use kuzushi_core::write_run_summary;
-
-    #[test]
-    fn source_file_cache_refreshes_when_size_changes() {
-        let temp = tempfile::tempdir().unwrap();
-        let path = temp.path().join("src.rs");
-        std::fs::write(&path, "one").unwrap();
-        let mut cache = WorkbenchCache::default();
-
-        assert_eq!(cache.read_source_file(&path).unwrap(), "one");
-        std::fs::write(&path, "two lines").unwrap();
-
-        assert_eq!(cache.read_source_file(&path).unwrap(), "two lines");
+    pub(crate) fn visible_findings(
+        &self,
+        key: &VisibleFindingsCacheKey,
+    ) -> Option<Vec<VisibleFindingProjection>> {
+        self.view_models.visible_findings(key)
     }
 
-    #[test]
-    fn run_summary_cache_refreshes_when_scan_ids_change() {
-        let temp = tempfile::tempdir().unwrap();
-        let mut cache = WorkbenchCache::default();
-        assert!(cache
-            .run_summary_index(Some(temp.path()), Vec::new())
-            .is_empty());
-
-        let summary = RunSummary::running("scan-a", "scan", None, "target");
-        write_run_summary(temp.path(), &summary).unwrap();
-
-        let indexed = cache.run_summary_index(Some(temp.path()), vec!["scan-a".to_string()]);
-        assert!(indexed.contains_key("scan-a"));
+    pub(crate) fn cache_visible_findings(
+        &mut self,
+        key: VisibleFindingsCacheKey,
+        projected: Vec<VisibleFindingProjection>,
+    ) {
+        self.view_models.cache_visible_findings(key, projected);
     }
 
-    #[test]
-    fn project_scope_tree_does_not_discover_on_cache_miss() {
-        let temp = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(temp.path().join("libs/parser/.git")).unwrap();
-        std::fs::write(
-            temp.path().join(".gitmodules"),
-            r#"
-            [submodule "libs/parser"]
-                path = libs/parser
-            "#,
-        )
-        .unwrap();
-        let mut cache = WorkbenchCache::default();
-
-        let state = cache.project_scope_tree(Some(temp.path())).unwrap();
-
-        assert_eq!(state, ProjectScopeTreeState::RootOnly);
+    pub(crate) fn risk_by_module(&self, key: &RiskByModuleCacheKey) -> Option<RiskByModule> {
+        self.view_models.risk_by_module(key)
     }
 
-    #[test]
-    fn project_scope_tree_reads_persisted_scope_map() {
-        let temp = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(temp.path().join("libs/parser/.git")).unwrap();
-        std::fs::write(
-            temp.path().join(".gitmodules"),
-            r#"
-            [submodule "libs/parser"]
-                path = libs/parser
-            "#,
-        )
-        .unwrap();
-        let tree = kuzushi_core::discover_nested_project_scopes(temp.path());
-        kuzushi_core::save_nested_project_scopes(temp.path(), &tree).unwrap();
-        let mut cache = WorkbenchCache::default();
+    pub(crate) fn cache_risk_by_module(&mut self, key: RiskByModuleCacheKey, risk: RiskByModule) {
+        self.view_models.cache_risk_by_module(key, risk);
+    }
 
-        let state = cache.project_scope_tree(Some(temp.path())).unwrap();
+    pub(crate) fn dfd_model(&self, key: &DfdModelCacheKey) -> Option<DfdModel> {
+        self.view_models.dfd_model(key)
+    }
 
-        assert!(matches!(state, ProjectScopeTreeState::Persisted(_)));
+    pub(crate) fn cache_dfd_model(&mut self, key: DfdModelCacheKey, model: DfdModel) {
+        self.view_models.cache_dfd_model(key, model);
     }
 }

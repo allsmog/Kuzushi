@@ -28,8 +28,8 @@ pub fn switch_target_revision(target: &Path, reference: &str) -> Result<TargetRe
         .with_context(|| format!("could not resolve git revision {reference:?}"))?;
     run_git_checked(target, &["checkout", "--detach", &resolved])
         .with_context(|| format!("could not switch target to {resolved}"))?;
-    let current =
-        target_git_metadata(target).context("target revision switched but metadata is unavailable")?;
+    let current = target_git_metadata(target)
+        .context("target revision switched but metadata is unavailable")?;
     Ok(TargetRevisionSwitch { previous, current })
 }
 
@@ -127,7 +127,10 @@ mod tests {
         let first = git_head(repo.path()).unwrap();
         fs::write(repo.path().join("tracked.txt"), "second\n").unwrap();
         git(repo.path(), &["add", "tracked.txt"]);
-        git(repo.path(), &["-c", "commit.gpgsign=false", "commit", "-m", "second"]);
+        git(
+            repo.path(),
+            &["-c", "commit.gpgsign=false", "commit", "-m", "second"],
+        );
         let second = git_head(repo.path()).unwrap();
 
         let outcome = switch_target_revision(repo.path(), &first).unwrap();
@@ -159,9 +162,13 @@ mod tests {
         let first = git_head(repo.path()).unwrap();
         fs::write(repo.path().join("tracked.txt"), "second\n").unwrap();
         git(repo.path(), &["add", "tracked.txt"]);
-        git(repo.path(), &["-c", "commit.gpgsign=false", "commit", "-m", "second"]);
-        fs::create_dir_all(repo.path().join(".kuzushi/runs/run-1")).unwrap();
-        fs::write(repo.path().join(".kuzushi/runs/run-1/run.json"), "{}").unwrap();
+        git(
+            repo.path(),
+            &["-c", "commit.gpgsign=false", "commit", "-m", "second"],
+        );
+        let run_dir = crate::run_artifacts::run_dir(repo.path(), "run-1");
+        fs::create_dir_all(&run_dir).unwrap();
+        fs::write(run_dir.join("run.json"), "{}").unwrap();
 
         let outcome = switch_target_revision(repo.path(), &first).unwrap();
 
@@ -173,8 +180,9 @@ mod tests {
         let Some(repo) = temp_git_repo() else {
             return;
         };
-        fs::create_dir_all(repo.path().join(".kuzushi/runs/run-1")).unwrap();
-        fs::write(repo.path().join(".kuzushi/runs/run-1/run.json"), "{}").unwrap();
+        let run_dir = crate::run_artifacts::run_dir(repo.path(), "run-1");
+        fs::create_dir_all(&run_dir).unwrap();
+        fs::write(run_dir.join("run.json"), "{}").unwrap();
 
         let metadata = target_git_metadata(repo.path()).unwrap();
 
@@ -192,7 +200,10 @@ mod tests {
         git(repo.path(), &["config", "user.name", "Kuzushi Test"]);
         fs::write(repo.path().join("tracked.txt"), "initial\n").unwrap();
         git(repo.path(), &["add", "tracked.txt"]);
-        git(repo.path(), &["-c", "commit.gpgsign=false", "commit", "-m", "initial"]);
+        git(
+            repo.path(),
+            &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+        );
         Some(repo)
     }
 

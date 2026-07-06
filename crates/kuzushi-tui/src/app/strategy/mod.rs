@@ -19,6 +19,7 @@ impl ShellApp {
                 kuzushi_core::StrategyProposalStatus::Rejected,
                 "rejected",
             ),
+            StrategyCommand::Fire => self.fire_next_approved_strategy(),
             StrategyCommand::Correct {
                 id,
                 to_strategy,
@@ -38,6 +39,110 @@ impl ShellApp {
                 "unknown strategy command: {raw}; try strategy approve <id> or strategy correct <id> <strategy>"
             ),
         );
+    }
+
+    fn fire_next_approved_strategy(&mut self) {
+        let Some(workspace) = self.strategy_workspace("running") else {
+            return;
+        };
+        let Some((mut proposals, index, proposal)) = self.next_strategy_to_run(&workspace) else {
+            return;
+        };
+        if self.strategy_exceeds_budget(&proposal) {
+            return;
+        }
+        if !self.mark_strategy_running(&workspace, &mut proposals, index) {
+            return;
+        }
+        self.run_strategy_proposal(proposal);
+    }
+
+    fn next_strategy_to_run(
+        &mut self,
+        workspace: &kuzushi_core::WorkspaceTarget,
+    ) -> Option<(
+        Vec<kuzushi_core::StrategyProposal>,
+        usize,
+        kuzushi_core::StrategyProposal,
+    )> {
+        let proposals = self.load_strategy_queue_for_run(workspace)?;
+        let Some(index) = proposals.iter().position(approved_runnable_strategy) else {
+            self.log(
+                "strategy",
+                "no approved runnable strategy proposal; use `strategy keep <id>` first",
+            );
+            return None;
+        };
+        let proposal = proposals[index].clone();
+        Some((proposals, index, proposal))
+    }
+
+    fn load_strategy_queue_for_run(
+        &mut self,
+        workspace: &kuzushi_core::WorkspaceTarget,
+    ) -> Option<Vec<kuzushi_core::StrategyProposal>> {
+        match kuzushi_core::load_strategy_queue(workspace) {
+            Ok(proposals) => Some(proposals),
+            Err(error) => {
+                self.log(
+                    "strategy",
+                    format!("could not read strategy queue: {error}"),
+                );
+                None
+            }
+        }
+    }
+
+    fn mark_strategy_running(
+        &mut self,
+        workspace: &kuzushi_core::WorkspaceTarget,
+        proposals: &mut [kuzushi_core::StrategyProposal],
+        index: usize,
+    ) -> bool {
+        proposals[index].mark_running();
+        if let Err(error) = kuzushi_core::save_strategy_queue(workspace, proposals) {
+            self.log(
+                "strategy",
+                format!("could not mark strategy running: {error}"),
+            );
+            return false;
+        }
+        self.workbench_cache
+            .borrow_mut()
+            .invalidate_strategy_queue();
+        true
+    }
+
+    fn run_strategy_proposal(&mut self, proposal: kuzushi_core::StrategyProposal) {
+        let tool = proposal.tool.clone().expect("runnable strategy has a tool");
+        self.log("strategy", format!("firing {} via {tool}", proposal.id));
+        self.run_tool(
+            Some(tool),
+            proposal.next_input.map(|input| input.to_string()),
+        );
+    }
+
+    fn strategy_exceeds_budget(&mut self, proposal: &kuzushi_core::StrategyProposal) -> bool {
+        let Some(cap) = self.session_budget_usd else {
+            return false;
+        };
+        let estimated = proposal
+            .approved_cost_usd
+            .or(proposal.expected_cost_usd)
+            .unwrap_or(0.0)
+            .max(0.0);
+        let remaining = (cap - self.session_cost_usd).max(0.0);
+        if estimated <= remaining {
+            return false;
+        }
+        self.log(
+            "strategy",
+            format!(
+                "proposal {} estimates ${estimated:.4}, above remaining session budget ${remaining:.4}",
+                proposal.id
+            ),
+        );
+        true
     }
 
     fn update_strategy_proposal_status(
@@ -209,4 +314,13 @@ fn strategy_correction_reason(reason: Option<&str>) -> &str {
     reason
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("operator correction from Strategy Queue")
+}
+
+fn approved_runnable_strategy(proposal: &kuzushi_core::StrategyProposal) -> bool {
+    proposal.status == kuzushi_core::StrategyProposalStatus::Approved
+        && proposal
+            .tool
+            .as_deref()
+            .is_some_and(|tool| !tool.trim().is_empty())
+        && proposal.preflight.status != kuzushi_core::StrategyPreflightStatus::Blocked
 }

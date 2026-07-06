@@ -7,7 +7,7 @@ fn strategy_queue_path_lives_under_workspace_v2_state() {
 
     assert_eq!(
         strategy_queue_path(&workspace),
-        workspace.root().join(".kuzushi/v2/strategy-queue.jsonl")
+        workspace.root().join(".kuzushi/v3/strategy-queue.jsonl")
     );
 }
 

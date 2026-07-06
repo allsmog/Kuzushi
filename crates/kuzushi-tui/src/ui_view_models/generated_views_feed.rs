@@ -6,11 +6,12 @@
 use super::activity_feed_rows::{ActivityFeedPaneRow, ActivityFeedRowTone};
 use super::findings::{findings_model, FindingListRow};
 use super::viz_data::{
-    attack_tree, dfd_model, findings_heatmap, risk_by_module, taint_flow_path, AttackTree,
-    DfdFlowModel, DfdModel, FindingsHeatmap, ModuleRisk, RiskByModule, TaintFlowPath,
+    attack_tree, cached_findings_heatmap, cached_risk_by_module, dfd_model, taint_flow_path,
+    AttackTree, DfdFlowModel, DfdModel, FindingsHeatmap, ModuleRisk, RiskByModule, TaintFlowPath,
 };
 use super::SeverityTone;
 use crate::{ActivityDeckPage, ActivitySession, ChainSeverity, ShellApp};
+use kuzushi_core::RunSummary;
 
 const DECK_WINDOW_ROWS: usize = 7;
 
@@ -43,11 +44,11 @@ fn activity_deck_page_rows(
     rows.extend(match session.deck_page {
         ActivityDeckPage::Findings => findings_deck_rows(app, session.deck_cursor, width),
         ActivityDeckPage::AttackSurface => {
-            attack_surface_deck_rows(&risk_by_module(&app.findings), session.deck_cursor, width)
+            attack_surface_deck_rows(&cached_risk_by_module(app), session.deck_cursor, width)
         }
         ActivityDeckPage::Dfd => dfd_deck_rows(&dfd_model(app), session.deck_cursor, width),
         ActivityDeckPage::Heatmap => {
-            heatmap_deck_rows(&findings_heatmap(&app.findings), session.deck_cursor, width)
+            heatmap_deck_rows(&cached_findings_heatmap(app), session.deck_cursor, width)
         }
         ActivityDeckPage::AttackPath => {
             attack_path_deck_rows(&taint_flow_path(app), session.deck_cursor, width)
@@ -64,19 +65,16 @@ fn activity_deck_page_rows(
 fn activity_deck_header_rows(
     app: &ShellApp,
     session: &ActivitySession,
-    width: usize,
+    _width: usize,
 ) -> Vec<ActivityFeedPaneRow> {
-    vec![
-        row(
-            deck_tabs(app, session.deck_page),
-            ActivityFeedRowTone::Primary,
-        ),
-        row(
-            deck_hint(session.deck_page, width),
-            ActivityFeedRowTone::Muted,
-        ),
-        row(String::new(), ActivityFeedRowTone::Subtle),
-    ]
+    let mut rows = vec![row(
+        deck_tabs(app, session.deck_page),
+        ActivityFeedRowTone::Primary,
+    )];
+    if let Some(status) = artifact_source_status_row(app, session) {
+        rows.push(status);
+    }
+    rows
 }
 
 fn deck_tabs(app: &ShellApp, active: ActivityDeckPage) -> String {
@@ -110,14 +108,62 @@ fn deck_page_has_content(app: &ShellApp, page: ActivityDeckPage) -> bool {
     }
 }
 
-fn deck_hint(page: ActivityDeckPage, width: usize) -> String {
-    let hint = match page {
-        ActivityDeckPage::Findings => {
-            "[/] views · j/k item · o open findings · dots mean no artifact"
-        }
-        _ => "[/] views · j/k item · f findings · o open · dots mean no artifact",
-    };
-    format!("  {}", truncate(hint, width.saturating_sub(2)))
+fn artifact_source_status_row(
+    app: &ShellApp,
+    session: &ActivitySession,
+) -> Option<ActivityFeedPaneRow> {
+    let summary = active_run_summary(app, session)?;
+    let status = summary.status.trim().to_ascii_lowercase();
+    artifact_source_status_text(&status, summary.error.as_deref()).map(|text| {
+        let tone = artifact_source_status_tone(&status);
+        row(
+            format!("  artifact source: run {} {text}", session.run_id),
+            tone,
+        )
+    })
+}
+
+fn active_run_summary(app: &ShellApp, session: &ActivitySession) -> Option<RunSummary> {
+    let target = app.target.as_deref()?;
+    app.workbench_cache
+        .borrow_mut()
+        .run_summary_index(Some(target), vec![session.run_id.clone()])
+        .get(&session.run_id)
+        .cloned()
+}
+
+fn artifact_source_status_text(status: &str, reason: Option<&str>) -> Option<String> {
+    let label = artifact_source_status_label(status)?;
+    let mut text = format!("{label}; output may be incomplete");
+    if let Some(reason) = reason.map(str::trim).filter(|reason| !reason.is_empty()) {
+        text.push_str(&format!(" · reason: {reason}"));
+    }
+    Some(text)
+}
+
+fn artifact_source_status_label(status: &str) -> Option<String> {
+    match status {
+        "partial" => Some("is partial".to_string()),
+        "failed" => Some("failed".to_string()),
+        "interrupted" => Some("was interrupted".to_string()),
+        "canceled" | "cancelled" => Some("was canceled".to_string()),
+        "paused" => Some("was paused or canceled".to_string()),
+        "skipped" => Some("was skipped".to_string()),
+        other if terminal_but_not_success(other) => Some(format!("ended as {other}")),
+        _ => None,
+    }
+}
+
+fn terminal_but_not_success(status: &str) -> bool {
+    !status.is_empty() && !matches!(status, "running" | "queued" | "started" | "completed")
+}
+
+fn artifact_source_status_tone(status: &str) -> ActivityFeedRowTone {
+    if status == "failed" {
+        ActivityFeedRowTone::Danger
+    } else {
+        ActivityFeedRowTone::Warn
+    }
 }
 
 // ── Activity artifact pages ───────────────────────────────────────────────
@@ -444,7 +490,10 @@ fn exploit_chain_header_rows(model: &AttackTree, width: usize) -> Vec<ActivityFe
     vec![
         row(rule("EXPLOIT CHAIN", width), ActivityFeedRowTone::Success),
         row(
-            format!("  attacker goal · {} chains", model.chains.len()),
+            format!(
+                "  attacker goal · {} chains",
+                model.chains.len() + model.hidden_chain_count
+            ),
             ActivityFeedRowTone::Danger,
         ),
         row("  CHAINS".to_string(), ActivityFeedRowTone::Primary),
@@ -540,13 +589,19 @@ fn selected_chain_precondition_rows(
         })
 }
 
-fn selected_chain_step_rows(
-    selected: &super::viz_data::AttackChain,
-) -> impl Iterator<Item = ActivityFeedPaneRow> + '_ {
-    selected
+fn selected_chain_step_rows(selected: &super::viz_data::AttackChain) -> Vec<ActivityFeedPaneRow> {
+    let mut rows = selected
         .steps
         .iter()
         .map(|step| row(format!("    → {step}"), ActivityFeedRowTone::Subtle))
+        .collect::<Vec<_>>();
+    if selected.hidden_step_count > 0 {
+        rows.push(row(
+            format!("    +{} more steps", selected.hidden_step_count),
+            ActivityFeedRowTone::Muted,
+        ));
+    }
+    rows
 }
 
 fn chain_list_tone(severity: ChainSeverity, active: bool) -> ActivityFeedRowTone {
@@ -594,7 +649,7 @@ fn finding_tone(tone: SeverityTone) -> ActivityFeedRowTone {
 
 fn empty_deck_rows(title: &str, hint: &str, width: usize) -> Vec<ActivityFeedPaneRow> {
     vec![
-        row(rule(title, width), ActivityFeedRowTone::Success),
+        row(rule(title, width), ActivityFeedRowTone::Label),
         row(format!("  {hint}"), ActivityFeedRowTone::Muted),
     ]
 }
@@ -822,4 +877,90 @@ fn clip(text: String, width: usize) -> String {
         .take(width.saturating_sub(1))
         .chain(std::iter::once('…'))
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kuzushi_core::{write_run_summary, V2Config, WorkspaceTarget};
+
+    #[test]
+    fn activity_deck_labels_partial_run_artifacts() {
+        let fixture = app_with_run_summary("run-partial", |mut summary| {
+            summary.status = "partial".to_string();
+            summary.error = Some("scanner timeout after collecting partial findings".to_string());
+            summary
+        });
+
+        let rows = activity_deck_page_rows(&fixture.app, &fixture.session, 160);
+
+        let status = artifact_source_status(&rows).expect("artifact source status row");
+        assert_eq!(status.tone, ActivityFeedRowTone::Warn);
+        assert!(
+            status.text.contains("run run-partial is partial"),
+            "{status:?}"
+        );
+        assert!(
+            status.text.contains("output may be incomplete"),
+            "{status:?}"
+        );
+        assert!(status.text.contains("scanner timeout"), "{status:?}");
+    }
+
+    #[test]
+    fn activity_deck_labels_failed_run_artifacts_as_danger() {
+        let fixture = app_with_run_summary("run-failed", |summary| {
+            summary.failed("semgrep exited nonzero")
+        });
+
+        let rows = activity_deck_page_rows(&fixture.app, &fixture.session, 160);
+
+        let status = artifact_source_status(&rows).expect("artifact source status row");
+        assert_eq!(status.tone, ActivityFeedRowTone::Danger);
+        assert!(status.text.contains("run run-failed failed"), "{status:?}");
+        assert!(status.text.contains("semgrep exited nonzero"), "{status:?}");
+    }
+
+    #[test]
+    fn activity_deck_omits_artifact_warning_for_completed_runs() {
+        let fixture = app_with_run_summary("run-completed", kuzushi_core::RunSummary::complete);
+
+        let rows = activity_deck_page_rows(&fixture.app, &fixture.session, 160);
+
+        assert!(artifact_source_status(&rows).is_none(), "{rows:?}");
+    }
+
+    fn app_with_run_summary(
+        run_id: &str,
+        update: impl FnOnce(RunSummary) -> RunSummary,
+    ) -> ActivityDeckFixture {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let summary = update(RunSummary::running(
+            run_id,
+            "scan",
+            Some("sast:scan".to_string()),
+            workspace.root().display().to_string(),
+        ));
+        write_run_summary(workspace.root(), &summary).unwrap();
+
+        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+        let session = ActivitySession::new(run_id);
+        ActivityDeckFixture {
+            _temp: temp,
+            app,
+            session,
+        }
+    }
+
+    struct ActivityDeckFixture {
+        _temp: tempfile::TempDir,
+        app: ShellApp,
+        session: ActivitySession,
+    }
+
+    fn artifact_source_status(rows: &[ActivityFeedPaneRow]) -> Option<&ActivityFeedPaneRow> {
+        rows.iter()
+            .find(|row| row.text.contains("artifact source:"))
+    }
 }

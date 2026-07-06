@@ -88,7 +88,7 @@ fn pane_title_style(cell: &ActivityPlainPaneHeaderCell) -> ratatui::style::Style
     if cell.focused {
         return theme::accent();
     }
-    theme::label()
+    theme::muted()
 }
 
 fn pane_header_cell_span(cell: &ActivityPlainPaneHeaderCell) -> Span<'static> {

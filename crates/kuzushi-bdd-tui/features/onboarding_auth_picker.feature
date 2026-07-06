@@ -24,5 +24,5 @@ Feature: Auth-method picker
     And I press "Down"
     And I press "Enter"
     And I press "Esc"
-    Then I see "FINDINGS"
+    Then I see "AIM - ATTACK SURFACE"
     And the status segment shows "workbench"

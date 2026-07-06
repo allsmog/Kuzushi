@@ -95,6 +95,96 @@ mod tests {
         assert_eq!(default_concurrency_for("anthropic:unknown-99"), 16);
     }
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn canceled_queue_head_does_not_strand_later_waiters() {
+        use std::time::Duration;
+        use tokio::time::timeout;
+
+        let gate = ModelGate::new();
+        gate.set_cap("test:m", 1);
+
+        // Hold the only permit so every subsequent acquire has to queue.
+        let hold = gate.acquire("test:m", Priority::Normal).await;
+
+        // High-priority waiter becomes the queue head immediately.
+        let g_hi = gate.clone();
+        let hi = tokio::spawn(async move {
+            let _p = g_hi.acquire("test:m", Priority::High).await;
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        // Lower-priority waiter parks behind the head.
+        let g_lo = gate.clone();
+        let acquired = Arc::new(AtomicUsize::new(0));
+        let acquired_lo = Arc::clone(&acquired);
+        let lo = tokio::spawn(async move {
+            let _p = g_lo.acquire("test:m", Priority::Normal).await;
+            acquired_lo.fetch_add(1, Ordering::SeqCst);
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        // Cancel the queue HEAD while it is parked. Before the fix this
+        // stranded the queue: the dead head was never popped and no live
+        // waiter could ever become head.
+        hi.abort();
+        let _ = hi.await;
+        tokio::time::sleep(Duration::from_millis(20)).await;
+
+        // Releasing the permit must now let the surviving waiter proceed.
+        drop(hold);
+        timeout(Duration::from_secs(2), lo)
+            .await
+            .expect("surviving waiter must make forward progress after head cancellation")
+            .unwrap();
+        assert_eq!(acquired.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn canceling_middle_waiter_preserves_priority_order() {
+        use std::time::Duration;
+        use tokio::time::timeout;
+
+        let gate = ModelGate::new();
+        gate.set_cap("test:m", 1);
+        let hold = gate.acquire("test:m", Priority::Normal).await;
+
+        let order = Arc::new(Mutex::new(Vec::new()));
+
+        // Enqueue High, then Normal, then Lowest.
+        let g_hi = gate.clone();
+        let hi = tokio::spawn(async move {
+            let _p = g_hi.acquire("test:m", Priority::High).await;
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let g_norm = gate.clone();
+        let order_norm = Arc::clone(&order);
+        let norm = tokio::spawn(async move {
+            let _p = g_norm.acquire("test:m", Priority::Normal).await;
+            order_norm.lock().unwrap().push("norm");
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        let g_low = gate.clone();
+        let order_low = Arc::clone(&order);
+        let low = tokio::spawn(async move {
+            let _p = g_low.acquire("test:m", Priority::Lowest).await;
+            order_low.lock().unwrap().push("low");
+        });
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        // Cancel the current head (High). Normal must still preempt Lowest.
+        hi.abort();
+        let _ = hi.await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        drop(hold);
+        timeout(Duration::from_secs(2), norm).await.unwrap().unwrap();
+        timeout(Duration::from_secs(2), low).await.unwrap().unwrap();
+
+        assert_eq!(order.lock().unwrap().as_slice(), &["norm", "low"]);
+    }
+
     #[test]
     fn set_cap_is_idempotent_and_persists_across_acquires() {
         let gate = ModelGate::new();

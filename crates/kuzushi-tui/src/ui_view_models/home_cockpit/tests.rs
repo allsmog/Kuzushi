@@ -24,6 +24,17 @@ fn reviewed(mut finding: Finding) -> Finding {
     finding
 }
 
+fn identity_finding(
+    rule: &str,
+    severity: kuzushi_core::Severity,
+    line: u32,
+    identity_id: &str,
+) -> Finding {
+    let mut finding = finding(rule, severity, line);
+    finding.identity_id = Some(identity_id.to_string());
+    finding
+}
+
 #[test]
 fn artifact_state_maps_home_rail_glyphs() {
     assert_eq!(
@@ -319,4 +330,32 @@ fn findings_card_counts_reviewed_queue_and_top_risks() {
         .top_risks
         .iter()
         .any(|row| row.rule == "sql-injection" && row.location == "src/lib.rs:88"));
+}
+
+#[test]
+fn findings_card_counts_reviewed_by_durable_identity() {
+    let identity_id = "fi_0123456789abcdef0123456789abcdef";
+    let reviewed_row = reviewed(identity_finding(
+        "command-injection",
+        kuzushi_core::Severity::High,
+        12,
+        identity_id,
+    ));
+    let rerun = identity_finding(
+        "command-injection-rerun",
+        kuzushi_core::Severity::Medium,
+        20,
+        identity_id,
+    );
+    assert!(rerun.triage.is_none());
+    let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+    app.findings = vec![reviewed_row, rerun];
+
+    let model = home_cockpit_model(&app);
+
+    assert_eq!(model.findings_card.total, 2);
+    assert_eq!(model.findings_card.reviewed, 2);
+    assert_eq!(model.findings_card.unreviewed, 0);
+    assert_eq!(model.findings_card.reviewed_counts.high, 1);
+    assert_eq!(model.findings_card.reviewed_counts.medium, 1);
 }

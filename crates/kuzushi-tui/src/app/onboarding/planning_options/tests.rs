@@ -25,11 +25,11 @@ fn planning_overrides_are_scoped_to_the_task_preset() {
 
     let stride = planning_task_explicit_input(
         PlanningTaskId::BuildStrideThreatModel,
-        &app.planning_option_overrides,
+        app.engagement.option_overrides(),
     );
     let pasta = planning_task_explicit_input(
         PlanningTaskId::BuildPastaThreatModel,
-        &app.planning_option_overrides,
+        app.engagement.option_overrides(),
     );
     assert_eq!(stride["methodology"], json!("stride"));
     assert_eq!(stride["model"], json!("openai:gpt-5.5"));

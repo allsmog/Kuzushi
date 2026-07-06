@@ -1,6 +1,6 @@
 use super::detail_pane::detail_pane_lines;
 use super::panes::{
-    center_pane_lines, coverage_matrix_lines, findings_pane_lines, sep, ship_chain_lines,
+    center_pane_lines, hunt_control_lines, review_queue_pane_lines, sep, ship_chain_lines,
     ship_export_lines, ship_patch_lines, source_pane_lines, source_title,
     terrain_attack_surface_lines, terrain_material_lines, terrain_visual_lines,
 };
@@ -8,7 +8,7 @@ use super::*;
 use crate::app::{WorkbenchPage, WorkbenchPane};
 use crate::renderer::views::scene::{DfdDiagram, TreeDiagram};
 use crate::ui_view_models::{
-    attack_tree, dfd_model, workbench_view_model, FindingsModel, JourneyPhaseStatus,
+    attack_tree, dfd_model, workbench_view_model, JourneyPhaseStatus, ReviewQueueModel,
     WorkbenchCenter, WorkbenchCenterTab, WorkbenchHint, WorkbenchTopBar, WorkbenchViewModel,
 };
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
@@ -48,6 +48,21 @@ fn render_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp, model: &Workbe
         render_phase_page_body(frame, area, app, model);
         return;
     }
+    render_review_body(frame, area, app, model);
+}
+
+/// The Review page: the opt-in depth stack, else the responsive four-pane ring.
+fn render_review_body(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+) {
+    if app.workbench_depth_stack {
+        let depth_model = crate::ui_view_models::workbench_depth_model(app);
+        super::depth_stack::render_workbench_depth(frame, area, &app.workbench_nav, &depth_model);
+        return;
+    }
     match workbench_layout(area) {
         WorkbenchLayout::FourColumn => render_four_column_body(frame, area, app, model),
         WorkbenchLayout::ReviewGrid => render_review_grid_body(frame, area, app, model),
@@ -67,8 +82,8 @@ fn render_phase_page_body(
         WorkbenchPage::Coverage => render_single_page_pane(
             frame,
             area,
-            "COVERAGE MATRIX",
-            coverage_matrix_lines(app, area.width.saturating_sub(2) as usize),
+            "HUNT CONTROL",
+            hunt_control_lines(app, area.width.saturating_sub(2) as usize),
             app,
             model,
         ),
@@ -100,7 +115,7 @@ fn render_compact_terrain(
     render_single_page_pane(
         frame,
         area,
-        "TERRAIN",
+        "AIM",
         combined_page_lines([
             terrain_attack_surface_lines(app, width),
             terrain_visual_lines(app, width),
@@ -128,7 +143,7 @@ fn render_terrain_columns(
     render_page_pane(
         frame,
         cols[0],
-        "ATTACK SURFACE",
+        "AIM - ATTACK SURFACE",
         terrain_attack_surface_lines(app, cols[0].width.saturating_sub(2) as usize),
         app,
         model,
@@ -136,7 +151,7 @@ fn render_terrain_columns(
     render_page_pane(
         frame,
         cols[1],
-        "DFD / TERRAIN",
+        "DFD / AIM",
         terrain_visual_lines(app, cols[1].width.saturating_sub(2) as usize),
         app,
         model,
@@ -144,7 +159,7 @@ fn render_terrain_columns(
     render_page_pane(
         frame,
         cols[2],
-        "RECON & MATERIALS",
+        "SEEDS & MATERIALS",
         terrain_material_lines(app, cols[2].width.saturating_sub(2) as usize),
         app,
         model,
@@ -169,7 +184,7 @@ fn render_compact_ship(
     render_single_page_pane(
         frame,
         area,
-        "SHIP",
+        "FIX/REPORT",
         combined_page_lines([
             ship_chain_lines(app, width),
             ship_patch_lines(app, width),
@@ -299,10 +314,10 @@ fn render_four_column_body(
         .split(area);
     render_source(frame, cols[0], app, model);
     render_center(frame, cols[1], app, model);
-    render_findings_pane(
+    render_review_queue_pane(
         frame,
         cols[2],
-        &model.right_list,
+        &model.review_queue,
         model.focus == WorkbenchPane::Findings,
     );
     render_detail_pane(frame, cols[3], app, model);
@@ -327,10 +342,10 @@ fn render_review_grid_body(
         .constraints([Constraint::Percentage(56), Constraint::Percentage(44)])
         .split(cols[1]);
     render_source(frame, left_rows[0], app, model);
-    render_findings_pane(
+    render_review_queue_pane(
         frame,
         left_rows[1],
-        &model.right_list,
+        &model.review_queue,
         model.focus == WorkbenchPane::Findings,
     );
     render_center(frame, right_rows[0], app, model);
@@ -345,17 +360,33 @@ fn render_stacked_body(
 ) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints(stacked_constraints(model))
+        .constraints(stacked_constraints())
         .split(area);
-    render_source(frame, rows[0], app, model);
-    render_center(frame, rows[1], app, model);
-    render_findings_pane(
+    render_borderless_section(
         frame,
-        rows[2],
-        &model.right_list,
+        rows[0],
+        &model.center.title,
+        center_pane_lines(app, &model.center, rows[0].width as usize),
+        pane_scroll(app, model, WorkbenchPane::Center),
+    );
+    render_findings_section(
+        frame,
+        rows[1],
+        &model.review_queue.header,
+        &model.review_queue,
         model.focus == WorkbenchPane::Findings,
     );
-    render_detail_pane(frame, rows[3], app, model);
+    render_borderless_section(
+        frame,
+        rows[2],
+        &detail_pane_title(&model.right_detail),
+        detail_pane_lines(
+            &model.right_detail,
+            rows[2].width as usize,
+            report_command(model),
+        ),
+        pane_scroll(app, model, WorkbenchPane::Details),
+    );
 }
 
 fn render_short_review_body(
@@ -366,36 +397,24 @@ fn render_short_review_body(
 ) {
     let rows = Layout::default()
         .direction(Direction::Vertical)
-        .constraints([
-            Constraint::Length(1),
-            Constraint::Percentage(48),
-            Constraint::Percentage(52),
-        ])
+        .constraints([Constraint::Percentage(48), Constraint::Percentage(52)])
         .split(area);
-    frame.render_widget(Paragraph::new(hidden_panes_stub()), rows[0]);
-    render_findings_pane(
+    let findings_title = format!("{} · 2/4 panes", model.review_queue.header);
+    render_review_queue_pane_with_title(
         frame,
-        rows[1],
-        &model.right_list,
+        rows[0],
+        &findings_title,
+        &model.review_queue,
         model.focus == WorkbenchPane::Findings,
     );
-    render_detail_pane(frame, rows[2], app, model);
+    render_detail_pane(frame, rows[1], app, model);
 }
 
-fn hidden_panes_stub() -> Line<'static> {
-    muted(concat!(
-        " SOURCE+CENTER hidden · need >=100 cols for the review grid; ",
-        "2/4 shown",
-    ))
-}
-
-fn stacked_constraints(model: &WorkbenchViewModel) -> [Constraint; 4] {
-    let _ = model;
+fn stacked_constraints() -> [Constraint; 3] {
     [
-        Constraint::Percentage(14),
         Constraint::Percentage(30),
+        Constraint::Percentage(40),
         Constraint::Percentage(30),
-        Constraint::Percentage(26),
     ]
 }
 
@@ -467,9 +486,9 @@ fn render_pane(
 
 fn bordered_block(title: &str, focused: bool) -> Block<'static> {
     let title_style = if focused {
-        theme::accent()
+        theme::accent().add_modifier(Modifier::BOLD)
     } else {
-        theme::label()
+        theme::muted()
     };
     Block::default()
         .borders(Borders::ALL)
@@ -524,7 +543,7 @@ fn center_tab_span(tab: &WorkbenchCenterTab, focused: bool) -> Span<'static> {
     } else if tab.empty {
         theme::subtle()
     } else if focused {
-        theme::label()
+        theme::muted()
     } else {
         theme::muted()
     };
@@ -653,15 +672,78 @@ fn detail_title(detail: &crate::ui_view_models::FindingDetailModel) -> String {
     )
 }
 
-fn report_command(model: &WorkbenchViewModel) -> Option<&'static str> {
-    model.report_cta.map(|cta| cta.verb)
+fn report_command(model: &WorkbenchViewModel) -> Option<&str> {
+    model.report_cta.as_ref().map(|cta| cta.verb.as_ref())
 }
 
-fn render_findings_pane(frame: &mut Frame<'_>, area: Rect, model: &FindingsModel, focused: bool) {
-    let block = bordered_block(&pane_title(&model.header, focused), focused);
+fn render_review_queue_pane(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    model: &ReviewQueueModel,
+    focused: bool,
+) {
+    render_review_queue_pane_with_title(frame, area, &model.header, model, focused);
+}
+
+fn render_review_queue_pane_with_title(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &str,
+    model: &ReviewQueueModel,
+    focused: bool,
+) {
+    let block = bordered_block(&pane_title(title, focused), focused);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    frame.render_widget(Paragraph::new(findings_pane_lines(model, inner)), inner);
+    frame.render_widget(Paragraph::new(review_queue_pane_lines(model, inner)), inner);
+}
+
+fn render_findings_section(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &str,
+    model: &ReviewQueueModel,
+    focused: bool,
+) {
+    let _ = focused;
+    render_borderless_section(
+        frame,
+        area,
+        title,
+        review_queue_pane_lines(model, section_body_area(area)),
+        0,
+    );
+}
+
+fn render_borderless_section(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    title: &str,
+    lines: Vec<Line<'static>>,
+    scroll: u16,
+) {
+    if area.height == 0 {
+        return;
+    }
+    let rows = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([Constraint::Length(1), Constraint::Min(0)])
+        .split(area);
+    frame.render_widget(Paragraph::new(divider(title, area.width)), rows[0]);
+    let body = rows[1];
+    let scroll = clamped_paragraph_scroll(scroll, lines.len(), body.height);
+    let para = Paragraph::new(lines)
+        .scroll((scroll, 0))
+        .wrap(Wrap { trim: false });
+    frame.render_widget(para, body);
+}
+
+fn section_body_area(area: Rect) -> Rect {
+    Rect {
+        y: area.y.saturating_add(1),
+        height: area.height.saturating_sub(1),
+        ..area
+    }
 }
 
 fn pane_title(title: &str, focused: bool) -> String {
@@ -690,16 +772,18 @@ fn identity_line(top: &WorkbenchTopBar) -> Line<'static> {
     let mut spans = vec![
         Span::styled(top.brand.to_string(), theme::heading()),
         Span::raw(" "),
-        Span::styled("▸ ", theme::subtle()),
+        Span::styled("› ", theme::subtle()),
         Span::styled("workbench".to_string(), theme::accent()),
         sep(),
         Span::styled("target:".to_string(), theme::muted()),
         Span::styled(top.project.clone(), theme::label()),
     ];
-    if let Some(phase) = &top.phase {
-        spans.push(sep());
-        spans.push(Span::styled("phase:".to_string(), theme::muted()));
-        spans.push(Span::styled(phase.clone(), theme::accent()));
+    if top.phase_rail.is_empty() {
+        if let Some(phase) = &top.phase {
+            spans.push(sep());
+            spans.push(Span::styled("phase:".to_string(), theme::muted()));
+            spans.push(Span::styled(phase.clone(), theme::accent()));
+        }
     }
     spans.push(sep());
     spans.push(Span::styled("page:".to_string(), theme::muted()));
@@ -731,7 +815,10 @@ fn command_hint_line(hints: &[WorkbenchHint]) -> Line<'static> {
         if index > 0 {
             spans.push(Span::raw("   "));
         }
-        spans.push(Span::styled(hint_prefix(hint.verb), theme::subtle()));
+        spans.push(Span::styled(
+            hint_prefix(hint.verb.as_ref()),
+            theme::subtle(),
+        ));
         spans.push(Span::styled(hint.verb.to_string(), theme::accent()));
         spans.push(Span::raw(" "));
         spans.push(Span::styled(hint.label.to_string(), theme::muted()));
@@ -792,8 +879,27 @@ pub(crate) fn workbench_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> 
     lines.push(blank());
     if model.page != WorkbenchPage::Review {
         append_phase_page_plain_lines(&mut lines, app, &model, area);
-        return lines;
+    } else if app.workbench_depth_stack {
+        let depth_model = crate::ui_view_models::workbench_depth_model(app);
+        lines.extend(super::depth_stack::workbench_depth_lines(
+            &app.workbench_nav,
+            &depth_model,
+            area.width,
+        ));
+    } else {
+        append_review_plain_lines(&mut lines, app, &model, area);
     }
+    lines
+}
+
+/// The four-pane review plain projection (SOURCE / CENTER / FINDINGS / DETAILS
+/// dividers), used when the depth stack is off.
+fn append_review_plain_lines(
+    lines: &mut Vec<Line<'static>>,
+    app: &ShellApp,
+    model: &WorkbenchViewModel,
+    area: Rect,
+) {
     lines.push(divider(
         &pane_title(
             &source_title(&model.left),
@@ -811,15 +917,14 @@ pub(crate) fn workbench_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> 
     lines.push(blank());
     lines.push(divider(
         &pane_title(
-            &model.right_list.header,
+            &model.review_queue.header,
             model.focus == WorkbenchPane::Findings,
         ),
         area.width,
     ));
-    lines.extend(findings_pane_lines(&model.right_list, area));
+    lines.extend(review_queue_pane_lines(&model.review_queue, area));
     lines.push(blank());
-    append_detail_plain_lines(&mut lines, &model, area);
-    lines
+    append_detail_plain_lines(lines, model, area);
 }
 
 fn append_phase_page_plain_lines(
@@ -831,18 +936,18 @@ fn append_phase_page_plain_lines(
     let width = area.width as usize;
     match model.page {
         WorkbenchPage::Terrain => {
-            lines.push(divider("ATTACK SURFACE", area.width));
+            lines.push(divider("AIM - ATTACK SURFACE", area.width));
             lines.extend(terrain_attack_surface_lines(app, width));
             lines.push(blank());
-            lines.push(divider("DFD / TERRAIN", area.width));
+            lines.push(divider("DFD / AIM", area.width));
             lines.extend(terrain_visual_lines(app, width));
             lines.push(blank());
-            lines.push(divider("RECON & MATERIALS", area.width));
+            lines.push(divider("SEEDS & MATERIALS", area.width));
             lines.extend(terrain_material_lines(app, width));
         }
         WorkbenchPage::Coverage => {
-            lines.push(divider("COVERAGE MATRIX", area.width));
-            lines.extend(coverage_matrix_lines(app, width));
+            lines.push(divider("HUNT CONTROL", area.width));
+            lines.extend(hunt_control_lines(app, width));
         }
         WorkbenchPage::Review => {}
         WorkbenchPage::Ship => {

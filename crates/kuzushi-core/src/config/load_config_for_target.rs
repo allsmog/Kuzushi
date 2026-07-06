@@ -8,6 +8,7 @@ pub(crate) struct PartialRuntimeConfig {
     pub(crate) base_url: Option<Option<String>>,
     pub(crate) langgraph_bridge_command: Option<Option<Vec<String>>>,
     pub(crate) thinking_level: Option<Option<String>>,
+    pub(crate) worker_watchdog_timeout_ms: Option<Option<u64>>,
     pub(crate) anthropic_oauth: Option<Option<AnthropicOauthConfig>>,
 }
 
@@ -46,9 +47,9 @@ pub fn load_config_for_target(target: Option<&Path>) -> Result<V2Config> {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ConfigSource {
-    /// Operator-owned config under `$HOME/.kuzushi/v2/`. Trusted.
+    /// Operator-owned config under `$HOME/.kuzushi/v3/`. Trusted.
     Global,
-    /// Config under `<target>/.kuzushi/v2/`. Untrusted: a scanned repository
+    /// Config under `<target>/.kuzushi/v3/`. Untrusted: a scanned repository
     /// can include this file, so model/runtime/operator fields must never be
     /// honored from this source.
     Project,
@@ -148,11 +149,11 @@ pub(crate) fn merge_file(config: &mut V2Config, path: &Path, source: ConfigSourc
     Ok(())
 }
 
-/// A target repository's `.kuzushi/v2/config.toml` is loaded as part of the
+/// A target repository's `.kuzushi/v3/config.toml` is loaded as part of the
 /// effective configuration, but it must not be able to redirect model choice,
 /// the agent bridge, API endpoint, credential env var, OAuth config, or
 /// operator safety knobs — those are operator decisions that must come from
-/// the global config under `$HOME/.kuzushi/v2/`. Without this gate a malicious
+/// the global config under `$HOME/.kuzushi/v3/`. Without this gate a malicious
 /// target repo could steer spend/model safety or swap `langgraph_bridge_command`
 /// for an exfil binary that receives the operator's API key over stdin.
 fn reject_untrusted_runtime_overrides(
@@ -169,7 +170,7 @@ fn reject_untrusted_runtime_overrides(
     }
     anyhow::bail!(
         "project config at {} sets operator-only fields ({}). These can only \
-         come from the global config at $HOME/.kuzushi/v2/config.toml — a \
+         come from the global config at $HOME/.kuzushi/v3/config.toml — a \
          target repository must not be able to redirect credentials or \
          process execution. Move these settings to the global config, or \
          remove them from the project file.",
@@ -201,6 +202,10 @@ fn forbidden_runtime_fields(runtime: Option<&PartialRuntimeConfig>) -> Vec<&'sta
             runtime.langgraph_bridge_command.is_some(),
         ),
         ("runtime.thinking_level", runtime.thinking_level.is_some()),
+        (
+            "runtime.worker_watchdog_timeout_ms",
+            runtime.worker_watchdog_timeout_ms.is_some(),
+        ),
         ("runtime.anthropic_oauth", runtime.anthropic_oauth.is_some()),
     ]
     .into_iter()
@@ -257,6 +262,10 @@ fn merge_runtime_config(config: &mut RuntimeConfig, patch: PartialRuntimeConfig)
         patch.langgraph_bridge_command,
     );
     apply_patch_field(&mut config.thinking_level, patch.thinking_level);
+    apply_patch_field(
+        &mut config.worker_watchdog_timeout_ms,
+        patch.worker_watchdog_timeout_ms,
+    );
     apply_patch_field(&mut config.anthropic_oauth, patch.anthropic_oauth);
 }
 

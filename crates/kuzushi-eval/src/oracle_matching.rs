@@ -89,6 +89,8 @@ pub(crate) fn match_row(
     oracle: &Oracle,
     cwe_re: &Regex,
 ) -> MatchRow {
+    let entry = &oracle.ground_truth[oracle_idx];
+    let labels = match_label_fields(finding, entry);
     MatchRow {
         oracle_idx,
         finding_fingerprint: finding.fingerprint.clone(),
@@ -96,14 +98,51 @@ pub(crate) fn match_row(
         finding_tool: finding.tool.clone(),
         file: finding.file_path.clone(),
         finding_line: finding.start_line,
-        oracle_line: oracle.ground_truth[oracle_idx].line_start,
+        oracle_line: entry.line_start,
         delta,
         best_tolerance: tolerance.as_str().to_string(),
         cwe_match,
         finding_cwes: extract_cwes(cwe_re, finding),
-        oracle_cwes: oracle.ground_truth[oracle_idx].cwe.clone(),
+        oracle_cwes: entry.cwe.clone(),
         vuln_source: finding.vuln_source.clone(),
         static_proof_state: finding.static_proof_state.clone(),
+        finding_verdict: labels.finding_verdict,
+        expected_verdict: labels.expected_verdict,
+        verdict_match: labels.verdict_match,
+        finding_severity: labels.finding_severity,
+        expected_severity: labels.expected_severity,
+        severity_match: labels.severity_match,
+    }
+}
+
+struct MatchLabelFields {
+    finding_verdict: Option<String>,
+    expected_verdict: Option<String>,
+    verdict_match: Option<bool>,
+    finding_severity: String,
+    expected_severity: Option<String>,
+    severity_match: Option<bool>,
+}
+
+fn match_label_fields(finding: &FindingRow, entry: &OracleEntry) -> MatchLabelFields {
+    let finding_verdict = finding.verdict_label();
+    let expected_verdict = entry.expected_verdict.clone();
+    let expected_severity = entry.expected_severity.clone();
+    MatchLabelFields {
+        verdict_match: label_match(
+            finding_verdict.as_deref(),
+            expected_verdict.as_deref(),
+            normalize_verdict_label,
+        ),
+        severity_match: label_match(
+            Some(finding.severity.as_str()),
+            expected_severity.as_deref(),
+            normalize_severity_label,
+        ),
+        finding_severity: finding.severity.clone(),
+        finding_verdict,
+        expected_verdict,
+        expected_severity,
     }
 }
 
@@ -124,6 +163,64 @@ pub(crate) fn recall_by_tolerance(counts_by_tol: [usize; 4], oracle_n: usize) ->
         function_: counts_by_tol[2] as f64 / oracle_n as f64,
         file_only: counts_by_tol[3] as f64 / oracle_n as f64,
     }
+}
+
+impl FindingRow {
+    pub(crate) fn verdict_label(&self) -> Option<String> {
+        self.verdict
+            .as_deref()
+            .or_else(|| self.triage.as_ref().map(|triage| triage.verdict.as_str()))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    }
+}
+
+fn label_match(
+    observed: Option<&str>,
+    expected: Option<&str>,
+    normalize: fn(&str) -> String,
+) -> Option<bool> {
+    let expected = expected.map(str::trim).filter(|value| !value.is_empty())?;
+    let observed = observed.map(str::trim).filter(|value| !value.is_empty());
+    Some(observed.is_some_and(|value| normalize(value) == normalize(expected)))
+}
+
+fn normalize_verdict_label(value: &str) -> String {
+    match normalized_label(value).as_str() {
+        "tp" | "true positive" | "truepositive" | "true_positive" | "confirmed" => "true_positive",
+        "fp" | "false positive" | "falsepositive" | "false_positive" | "rejected" => {
+            "false_positive"
+        }
+        "needs review" | "needsreview" | "needs_review" | "unknown" => "needs_review",
+        "by design" | "bydesign" | "by_design" | "accepted risk" | "acceptedrisk" => "by_design",
+        other => other,
+    }
+    .to_string()
+}
+
+fn normalize_severity_label(value: &str) -> String {
+    match normalized_label(value).as_str() {
+        "critical" | "crit" => "critical",
+        "high" | "error" => "high",
+        "medium" | "med" | "warning" | "warn" => "medium",
+        "low" => "low",
+        "info" | "informational" | "note" => "info",
+        "unknown" => "unknown",
+        other => other,
+    }
+    .to_string()
+}
+
+fn normalized_label(value: &str) -> String {
+    value
+        .trim()
+        .trim_matches('"')
+        .replace(['-', '_'], " ")
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .to_ascii_lowercase()
 }
 
 pub(crate) fn precision_for_hits(hits: usize, findings_total: usize) -> f64 {

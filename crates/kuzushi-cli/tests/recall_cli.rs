@@ -4,7 +4,7 @@
 //!
 //! 1. Creates a synthetic mini-slice whose layout mirrors the oracle's
 //!    file references (so path matching is exercised, not stubbed).
-//! 2. Pre-populates `<slice>/.kuzushi/v2/findings.sqlite3` with a
+//! 2. Pre-populates `<slice>/.kuzushi/v3/index.sqlite3` with a
 //!    finding that the scorer should classify as a hit.
 //! 3. Pipes `kuzushi findings --json` into the `kuzushi-eval` scorer.
 //! 4. Asserts at least one match at the user-chosen primary tolerance

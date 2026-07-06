@@ -46,7 +46,9 @@ struct PatchResources<'a> {
 fn patch_resources<'a>(ctx: &'a ToolExecutionContext<'a>) -> Result<PatchResources<'a>> {
     let workspace = ctx
         .workspace
-        .context(crate::workspace::active_workspace_required_message("patch:finding"))?;
+        .context(crate::workspace::active_workspace_required_message(
+            "patch:finding",
+        ))?;
     let store = ctx
         .findings_store
         .context("patch:finding requires a findings store for the active workspace")?;
@@ -119,6 +121,7 @@ struct PatchExecution<'a> {
     model: String,
     plan: PatchValidationPlan,
     repo_name: String,
+    style: PatchStyle,
 }
 
 fn patch_execution<'a>(
@@ -149,6 +152,7 @@ fn patch_execution<'a>(
         model,
         plan,
         repo_name,
+        style: input.style,
     })
 }
 
@@ -327,6 +331,7 @@ fn synthesize_patch_with_scope(
         &candidate.finding,
         &candidate.triage,
         history,
+        execution.style,
     )?;
     drop(attempt_scope);
     Ok(synthesis)

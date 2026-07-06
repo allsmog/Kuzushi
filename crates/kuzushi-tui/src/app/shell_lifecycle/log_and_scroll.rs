@@ -1,10 +1,12 @@
 use super::*;
 
+pub(crate) const LOG_LINE_CAPACITY: usize = 500;
+
 impl ShellApp {
     pub fn log(&mut self, prefix: impl Into<String>, body: impl Into<String>) {
         self.log.push(LogLine::new(prefix, body));
-        if self.log.len() > 500 {
-            let overflow = self.log.len() - 500;
+        if self.log.len() > LOG_LINE_CAPACITY {
+            let overflow = self.log.len() - LOG_LINE_CAPACITY;
             self.log.drain(0..overflow);
         }
     }
@@ -15,9 +17,7 @@ impl ShellApp {
             ScrollTarget::WorkbenchPane => self
                 .workbench_scroll
                 .shift(self.workbench_focus, -(amount as i32)),
-            ScrollTarget::Logs => {
-                self.logs_scroll = self.logs_scroll.saturating_sub(amount as usize)
-            }
+            ScrollTarget::Logs => self.logs_route.scroll_up(amount as usize),
             ScrollTarget::Default => self.scroll_offset = self.scroll_offset.saturating_sub(amount),
         }
     }
@@ -28,9 +28,7 @@ impl ShellApp {
             ScrollTarget::WorkbenchPane => self
                 .workbench_scroll
                 .shift(self.workbench_focus, amount as i32),
-            ScrollTarget::Logs => {
-                self.logs_scroll = self.logs_scroll.saturating_add(amount as usize)
-            }
+            ScrollTarget::Logs => self.logs_route.scroll_down(amount as usize),
             ScrollTarget::Default => self.scroll_offset = self.scroll_offset.saturating_add(amount),
         }
     }
@@ -41,7 +39,7 @@ impl ShellApp {
                 self.activity.as_mut().map(focused_pane_to_top);
             }
             ScrollTarget::WorkbenchPane => self.workbench_scroll.set(self.workbench_focus, 0),
-            ScrollTarget::Logs => self.logs_scroll = 0,
+            ScrollTarget::Logs => self.logs_route.open(),
             ScrollTarget::Default => self.scroll_offset = 0,
         }
     }
@@ -52,7 +50,7 @@ impl ShellApp {
             ScrollTarget::WorkbenchPane => {
                 self.workbench_scroll.set(self.workbench_focus, u16::MAX)
             }
-            ScrollTarget::Logs => self.logs_scroll = usize::MAX,
+            ScrollTarget::Logs => self.logs_route.set_scroll(usize::MAX),
             ScrollTarget::Default => self.scroll_offset = u16::MAX,
         }
     }
@@ -95,14 +93,12 @@ impl ShellApp {
         };
         match session.deck_page {
             ActivityDeckPage::Findings => self.findings.len().saturating_sub(1),
-            ActivityDeckPage::AttackSurface => {
-                crate::ui_view_models::risk_by_module(&self.findings)
-                    .modules
-                    .len()
-                    .saturating_sub(1)
-            }
+            ActivityDeckPage::AttackSurface => crate::ui_view_models::cached_risk_by_module(self)
+                .modules
+                .len()
+                .saturating_sub(1),
             ActivityDeckPage::Dfd => threat_dfd_selectable_count(self).saturating_sub(1),
-            ActivityDeckPage::Heatmap => crate::ui_view_models::risk_by_module(&self.findings)
+            ActivityDeckPage::Heatmap => crate::ui_view_models::cached_risk_by_module(self)
                 .modules
                 .len()
                 .min(10)

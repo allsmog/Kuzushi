@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, ModelTier, TriageOutcome, TriageRequest,
-    TriageVerdict,
+    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentStructuredOutput, ModelTier,
+    TriageOutcome, TriageRequest,
 };
 use serde_json::Value;
 
@@ -42,54 +42,57 @@ impl AgentRuntime for AnthropicOAuthRuntime {
     async fn triage_finding(&self, request: TriageRequest) -> Result<TriageOutcome> {
         let prompt = build_triage_prompt(&request)?;
         let response = self
-            .send_messages(AgentQueryRequest::new(
-                request.model,
-                request.cwd,
-                TRIAGE_SYSTEM_PROMPT,
-                prompt,
-            ))
+            .send_messages(
+                AgentQueryRequest::new(request.model, request.cwd, TRIAGE_SYSTEM_PROMPT, prompt)
+                    .with_structured_output(triage_structured_output())
+                    .with_temperature(0.0),
+            )
             .await?;
 
-        Ok(triage_outcome_from_response(response))
+        triage_outcome_from_response(response)
     }
 }
 
-pub(crate) fn triage_outcome_from_response(response: AgentQueryResponse) -> TriageOutcome {
+pub(crate) fn triage_outcome_from_response(response: AgentQueryResponse) -> Result<TriageOutcome> {
     let call_cost = response.cost_usd;
-    if let Some(outcome) = structured_triage_outcome(response.structured.as_ref(), call_cost) {
-        return outcome;
+    if let Some(structured) = response.structured {
+        return structured_triage_outcome(structured, call_cost);
     }
-    text_triage_outcome(response.text, call_cost)
+    text_triage_outcome(response, call_cost)
 }
 
 pub(crate) fn structured_triage_outcome(
-    structured: Option<&Value>,
+    structured: Value,
     call_cost: f64,
-) -> Option<TriageOutcome> {
-    let mut outcome = serde_json::from_value::<TriageOutcome>(structured?.clone()).ok()?;
+) -> Result<TriageOutcome> {
+    let mut outcome = serde_json::from_value::<TriageOutcome>(structured)
+        .map_err(|error| anyhow::anyhow!("Anthropic OAuth triage JSON violated schema: {error}"))?;
     outcome.cost_usd = call_cost;
-    Some(clamp_outcome(outcome))
+    Ok(clamp_outcome(outcome))
 }
 
-pub(crate) fn text_triage_outcome(text: String, call_cost: f64) -> TriageOutcome {
+pub(crate) fn text_triage_outcome(
+    response: AgentQueryResponse,
+    call_cost: f64,
+) -> Result<TriageOutcome> {
+    if response.truncated {
+        let stop_reason = response.stop_reason.as_deref().unwrap_or("max_tokens");
+        anyhow::bail!(
+            "Anthropic OAuth triage response was truncated (stopReason: {stop_reason:?}); refusing to synthesize a verdict"
+        );
+    }
+    let text = response.text.trim();
     if text.is_empty() {
-        return TriageOutcome {
-            verdict: TriageVerdict::NeedsReview,
-            confidence: 0.0,
-            rationale: "AnthropicOAuthRuntime returned no triage content".to_string(),
-            cost_usd: call_cost,
-        };
+        anyhow::bail!("AnthropicOAuthRuntime returned no triage content");
     }
-    if let Ok(mut outcome) = serde_json::from_str::<TriageOutcome>(&text) {
-        outcome.cost_usd = call_cost;
-        return clamp_outcome(outcome);
-    }
-    TriageOutcome {
-        verdict: TriageVerdict::NeedsReview,
-        confidence: 0.25,
-        rationale: text,
-        cost_usd: call_cost,
-    }
+    let mut outcome = serde_json::from_str::<TriageOutcome>(strip_whole_json_fence(text))
+        .map_err(|error| {
+            anyhow::anyhow!(
+                "Anthropic OAuth triage response was not valid triage JSON: {error}; raw response: {text}"
+            )
+        })?;
+    outcome.cost_usd = call_cost;
+    Ok(clamp_outcome(outcome))
 }
 
 pub(crate) fn build_triage_prompt(request: &TriageRequest) -> Result<String> {
@@ -102,4 +105,38 @@ pub(crate) fn build_triage_prompt(request: &TriageRequest) -> Result<String> {
 pub(crate) fn clamp_outcome(mut outcome: TriageOutcome) -> TriageOutcome {
     outcome.confidence = outcome.confidence.clamp(0.0, 1.0);
     outcome
+}
+
+fn strip_whole_json_fence(text: &str) -> &str {
+    let Some(without_open) = text.strip_prefix("```") else {
+        return text;
+    };
+    let without_lang = without_open
+        .strip_prefix("json")
+        .or_else(|| without_open.strip_prefix("JSON"))
+        .unwrap_or(without_open)
+        .trim_start();
+    without_lang
+        .strip_suffix("```")
+        .map(str::trim)
+        .unwrap_or(text)
+}
+
+fn triage_structured_output() -> AgentStructuredOutput {
+    AgentStructuredOutput::json_schema(
+        "kuzushi_triage_outcome",
+        serde_json::json!({
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["verdict", "confidence", "rationale"],
+            "properties": {
+                "verdict": {
+                    "type": "string",
+                    "enum": ["true_positive", "false_positive", "needs_review"]
+                },
+                "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "rationale": {"type": "string"}
+            }
+        }),
+    )
 }

@@ -9,7 +9,9 @@ pub(in crate::modules) fn run_verify_finding(
 ) -> Result<Value> {
     let workspace = ctx
         .workspace
-        .context(crate::workspace::active_workspace_required_message("verify:finding"))?;
+        .context(crate::workspace::active_workspace_required_message(
+            "verify:finding",
+        ))?;
     let store = ctx
         .findings_store
         .context("verify:finding requires a findings store for the active workspace")?;
@@ -109,7 +111,9 @@ pub(in crate::modules) fn run_verify_exploit(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     ctx.workspace
-        .context(crate::workspace::active_workspace_required_message("verify:exploit"))?;
+        .context(crate::workspace::active_workspace_required_message(
+            "verify:exploit",
+        ))?;
     let store = ctx
         .findings_store
         .context("verify:exploit requires a findings store for the active workspace")?;

@@ -23,7 +23,7 @@ pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
         command: "pause",
         aliases: &["/pause"],
         category: ShellCommandCategory::Session,
-        description: "document live-control absence",
+        description: "pause a running scan when scan cancellation is available",
     },
     ShellCommandSpec {
         command: "cancel",
@@ -35,7 +35,7 @@ pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
         command: "resume [runId]",
         aliases: &["/resume [runId]"],
         category: ShellCommandCategory::Session,
-        description: "document checkpoint-resume absence",
+        description: "resume a paused scan or open a run replay by id",
     },
     ShellCommandSpec {
         command: "story",
@@ -87,9 +87,23 @@ pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "scene",
-        aliases: &["/scene", "/viz", "viz", "3d", "/3d", "/diagram"],
+        aliases: &["/scene", "/viz", "viz"],
         category: ShellCommandCategory::Session,
         description: "security-viz gallery — risk heatmap, attack path/tree, DFD",
+    },
+    ShellCommandSpec {
+        command: "pwn",
+        aliases: &[
+            "/pwn",
+            "pwn target <path>",
+            "pwn profile",
+            "pwn reverse [function]",
+            "pwn auto",
+            "pwn state",
+            "pwn candidates <target>",
+        ],
+        category: ShellCommandCategory::Session,
+        description: "binary exploitation dashboard and pwn:* workflow actions",
     },
     ShellCommandSpec {
         command: "quit",

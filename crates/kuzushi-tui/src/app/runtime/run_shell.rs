@@ -96,9 +96,14 @@ pub(crate) fn terminal_shell_loop(
     app: &mut ShellApp,
 ) -> Result<()> {
     let mut state = TerminalLoopState::default();
+    let (input, wake) = TerminalLoopInbox::spawn_crossterm_reader();
+    app.loop_wake = Some(wake.clone());
+    app.jobs.set_wake(Some(wake));
     while !app.should_quit {
-        terminal_shell_step(terminal, app, &mut state)?;
+        terminal_shell_step(terminal, app, &mut state, &input)?;
     }
+    app.jobs.set_wake(None);
+    app.loop_wake = None;
     Ok(())
 }
 
@@ -117,8 +122,9 @@ pub(crate) fn terminal_shell_step(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     app: &mut ShellApp,
     state: &mut TerminalLoopState,
+    input: &TerminalLoopInbox,
 ) -> Result<()> {
     refresh_terminal_redraw_state(terminal, app, state)?;
-    state.needs_redraw |= poll_terminal_event(app)?;
+    state.needs_redraw |= wait_for_terminal_loop_event(app, input)?;
     Ok(())
 }

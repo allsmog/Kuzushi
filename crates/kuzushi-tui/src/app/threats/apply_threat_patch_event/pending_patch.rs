@@ -1,34 +1,20 @@
 use super::*;
 
 impl ShellApp {
-    pub fn apply_pending_threat_patch(&mut self) {
-        let Some(patch) = self.pending_threat_patch.take() else {
+    pub(crate) fn reduce_threat_apply(&mut self) -> Vec<ShellEffect> {
+        let Some(patch) = self.pending_threat_patch.clone() else {
             self.log("threats", "no pending patch; run /threats regen first");
-            return;
+            return Vec::new();
         };
-        let cwd = self
-            .target
-            .clone()
-            .or_else(|| std::env::current_dir().ok())
-            .unwrap_or_else(|| PathBuf::from("."));
-        let mut document =
-            load_persistent_threat_model(&cwd).unwrap_or_else(|| serde_json::json!({}));
-        merge_json(&mut document, &patch.patch);
-        match save_persistent_threat_model(&cwd, &document, true) {
-            Ok(_) => {
-                self.log(
-                    "threats",
-                    format!(
-                        "applied patch ({} unsupported note(s))",
-                        patch.unsupported.len()
-                    ),
-                );
-                for note in patch.unsupported {
-                    self.log("threats-skip", note);
-                }
-            }
-            Err(error) => self.log("error", format!("failed to write threat model: {error}")),
-        }
+        vec![ShellEffect::ApplyThreatPatch(ThreatPatchApply {
+            patch,
+            target: self.target.clone(),
+        })]
+    }
+
+    pub fn apply_pending_threat_patch(&mut self) {
+        let effects = self.reduce_threat_apply();
+        self.execute_effects(effects);
     }
 
     pub fn discard_pending_threat_patch(&mut self) {

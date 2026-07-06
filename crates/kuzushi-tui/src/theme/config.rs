@@ -18,11 +18,26 @@
 #[cfg(not(test))]
 use std::sync::OnceLock;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColorDepth {
+    TrueColor,
+    Ansi256,
+    Ansi16,
+    None,
+}
+
+impl Default for ColorDepth {
+    fn default() -> Self {
+        Self::TrueColor
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct ThemeConfig {
     pub high_contrast: bool,
     pub no_color: bool,
     pub reduced_motion: bool,
+    pub color_depth: ColorDepth,
 }
 
 impl ThemeConfig {
@@ -30,32 +45,34 @@ impl ThemeConfig {
     /// to seed the `OnceLock` at startup; tests construct values
     /// directly via the public field assignment.
     pub fn from_env() -> Self {
+        Self::from_env_values(
+            std::env::var("KUZUSHI_THEME").ok().as_deref(),
+            std::env::var_os("NO_COLOR").is_some(),
+            std::env::var("KUZUSHI_REDUCED_MOTION").ok().as_deref(),
+            std::env::var("COLORTERM").ok().as_deref(),
+            std::env::var("TERM").ok().as_deref(),
+        )
+    }
+
+    pub fn from_env_values(
+        theme: Option<&str>,
+        no_color_present: bool,
+        reduced_motion: Option<&str>,
+        color_term: Option<&str>,
+        term: Option<&str>,
+    ) -> Self {
+        let color_depth = color_depth_from_values(no_color_present, color_term, term);
         Self {
-            high_contrast: high_contrast_from_env(),
-            no_color: no_color_from_env(),
-            reduced_motion: reduced_motion_from_env(),
+            high_contrast: high_contrast_from_value(theme),
+            no_color: color_depth == ColorDepth::None,
+            reduced_motion: reduced_motion_from_value(reduced_motion),
+            color_depth,
         }
     }
 }
 
-fn high_contrast_from_env() -> bool {
-    high_contrast_from_value(std::env::var("KUZUSHI_THEME").ok().as_deref())
-}
-
 fn high_contrast_from_value(value: Option<&str>) -> bool {
     value.is_some_and(|value| value.trim().eq_ignore_ascii_case("high-contrast"))
-}
-
-fn no_color_from_env() -> bool {
-    no_color_from_presence(std::env::var_os("NO_COLOR").is_some())
-}
-
-fn no_color_from_presence(present: bool) -> bool {
-    present
-}
-
-fn reduced_motion_from_env() -> bool {
-    reduced_motion_from_value(std::env::var("KUZUSHI_REDUCED_MOTION").ok().as_deref())
 }
 
 fn reduced_motion_from_value(value: Option<&str>) -> bool {
@@ -65,6 +82,43 @@ fn reduced_motion_from_value(value: Option<&str>) -> bool {
             "1" | "true" | "yes" | "on"
         )
     })
+}
+
+fn color_depth_from_values(
+    no_color_present: bool,
+    color_term: Option<&str>,
+    term: Option<&str>,
+) -> ColorDepth {
+    if no_color_present || term_lacks_color(term) {
+        return ColorDepth::None;
+    }
+    color_depth_for_capable_terminal(color_term, term)
+}
+
+fn color_depth_for_capable_terminal(color_term: Option<&str>, term: Option<&str>) -> ColorDepth {
+    if value_mentions_truecolor(color_term) || value_mentions_truecolor(term) {
+        return ColorDepth::TrueColor;
+    }
+    if value_contains(term, "256color") {
+        return ColorDepth::Ansi256;
+    }
+    ColorDepth::Ansi16
+}
+
+fn term_lacks_color(term: Option<&str>) -> bool {
+    term.is_none_or(term_is_blank_or_dumb)
+}
+
+fn term_is_blank_or_dumb(term: &str) -> bool {
+    term.trim().is_empty() || term.trim().eq_ignore_ascii_case("dumb")
+}
+
+fn value_mentions_truecolor(value: Option<&str>) -> bool {
+    value_contains(value, "truecolor") || value_contains(value, "24bit")
+}
+
+fn value_contains(value: Option<&str>, needle: &str) -> bool {
+    value.is_some_and(|value| value.to_ascii_lowercase().contains(needle))
 }
 
 #[cfg(not(test))]
@@ -94,6 +148,7 @@ mod tests {
         assert!(!config.high_contrast);
         assert!(!config.no_color);
         assert!(!config.reduced_motion);
+        assert_eq!(config.color_depth, ColorDepth::TrueColor);
     }
 
     #[test]
@@ -118,7 +173,39 @@ mod tests {
 
     #[test]
     fn no_color_env_uses_standard_presence_semantics() {
-        assert!(no_color_from_presence(true));
-        assert!(!no_color_from_presence(false));
+        assert_eq!(
+            ThemeConfig::from_env_values(
+                None,
+                true,
+                None,
+                Some("truecolor"),
+                Some("xterm-256color")
+            )
+            .color_depth,
+            ColorDepth::None
+        );
+        assert!(ThemeConfig::from_env_values(None, true, None, Some("truecolor"), None).no_color);
+    }
+
+    #[test]
+    fn color_depth_uses_terminal_capabilities() {
+        assert_eq!(
+            ThemeConfig::from_env_values(None, false, None, Some("truecolor"), Some("xterm"))
+                .color_depth,
+            ColorDepth::TrueColor
+        );
+        assert_eq!(
+            ThemeConfig::from_env_values(None, false, None, None, Some("xterm-256color"))
+                .color_depth,
+            ColorDepth::Ansi256
+        );
+        assert_eq!(
+            ThemeConfig::from_env_values(None, false, None, None, Some("vt100")).color_depth,
+            ColorDepth::Ansi16
+        );
+        assert_eq!(
+            ThemeConfig::from_env_values(None, false, None, None, Some("dumb")).color_depth,
+            ColorDepth::None
+        );
     }
 }

@@ -5,7 +5,7 @@ pub(crate) fn carlini_threat_hunt_module() -> BuiltinModule {
         "carlini-threat-hunt",
         "Carlini Threat Hunt",
         ModuleKind::Offense,
-        "Hunt threats from the active threat-model document via parallel scoped agents.",
+        "Compatibility alias for the offense-review threat-model hunt executor.",
         vec![carlini_threat_hunt_tool()],
         vec![dag(
             "carlini-threat-hunt:run",
@@ -18,7 +18,7 @@ pub(crate) fn carlini_threat_hunt_module() -> BuiltinModule {
 fn carlini_threat_hunt_tool() -> ToolDescriptor {
     tool_with_options(
         "carlini-threat-hunt:run",
-        "Run threat-model-scoped offensive hunting agents.",
+        "Compatibility alias for offense-review:threat-hunt; runs scoped agents over the active threat model.",
         carlini_threat_hunt_options(),
     )
 }
@@ -88,9 +88,9 @@ pub(crate) fn taint_iris_module() -> BuiltinModule {
         "Taint IRIS",
         ModuleKind::Defense,
         "LLM-driven taint analysis selecting relevant CWEs then tracing source to sink.",
-        vec![tool_with_options(
+        vec![hidden_tool_with_options(
             "taint-iris:hunt",
-            "Run IRIS-style taint hunting over the current target.",
+            "Compatibility alias for taint-iris-next:hunt in hunt mode.",
             vec![
                 target_option(),
                 max_findings_option(20),
@@ -111,6 +111,7 @@ pub(crate) fn taint_iris_module() -> BuiltinModule {
                 )
                 .advanced(),
                 opt("cwe", OptionType::StringList, "Explicit CWE(s) to hunt.").advanced(),
+                mcps_option(),
                 model_option(),
             ],
         )],
@@ -153,7 +154,7 @@ fn taint_iris_next_hunt_tool() -> ToolDescriptor {
     );
     hidden_tool_with_options(
         "taint-iris-next:hunt",
-        "Run the legacy bundled plan-or-hunt pipeline.",
+        "Run the bundled plan-or-hunt taint evidence pipeline.",
         options,
     )
 }
@@ -288,18 +289,26 @@ fn codeql_analyze_timeout_option() -> OptionSpec {
 }
 
 fn min_evidence_level_option() -> OptionSpec {
-    opt("minEvidenceLevel", OptionType::Enum, "Minimum evidence level.")
-        .aliases(&["min_evidence_level"])
-        .choices(&["path", "linked", "candidate"])
-        .default(json!("linked"))
-        .advanced()
+    opt(
+        "minEvidenceLevel",
+        OptionType::Enum,
+        "Minimum evidence level.",
+    )
+    .aliases(&["min_evidence_level"])
+    .choices(&["path", "linked", "candidate"])
+    .default(json!("linked"))
+    .advanced()
 }
 
 fn max_catalog_entries_option() -> OptionSpec {
-    opt("maxCatalogEntries", OptionType::Int, "Maximum catalog entries.")
-        .aliases(&["maxCwes", "max_catalog_entries", "max_cwes"])
-        .default(json!(24))
-        .advanced()
+    opt(
+        "maxCatalogEntries",
+        OptionType::Int,
+        "Maximum catalog entries.",
+    )
+    .aliases(&["maxCwes", "max_catalog_entries", "max_cwes"])
+    .default(json!(24))
+    .advanced()
 }
 
 fn max_candidates_per_cwe_option() -> OptionSpec {
@@ -325,10 +334,14 @@ fn max_evidence_per_cwe_option() -> OptionSpec {
 }
 
 fn max_files_per_query_option() -> OptionSpec {
-    opt("maxFilesPerQuery", OptionType::Int, "Maximum files per query.")
-        .aliases(&["max_files_per_query"])
-        .default(json!(120))
-        .advanced()
+    opt(
+        "maxFilesPerQuery",
+        OptionType::Int,
+        "Maximum files per query.",
+    )
+    .aliases(&["max_files_per_query"])
+    .default(json!(120))
+    .advanced()
 }
 
 fn max_specs_per_cwe_option() -> OptionSpec {
@@ -339,9 +352,13 @@ fn max_specs_per_cwe_option() -> OptionSpec {
 }
 
 fn max_agent_findings_option() -> OptionSpec {
-    opt("maxAgentFindings", OptionType::Int, "Maximum agent findings.")
-        .aliases(&["max_agent_findings"])
-        .advanced()
+    opt(
+        "maxAgentFindings",
+        OptionType::Int,
+        "Maximum agent findings.",
+    )
+    .aliases(&["max_agent_findings"])
+    .advanced()
 }
 
 fn taint_iris_next_agent_knobs() -> Vec<OptionSpec> {
@@ -364,9 +381,155 @@ pub(crate) fn systems_hunt_module() -> BuiltinModule {
         "Systems Hunt",
         ModuleKind::Internal,
         "Internal DAG nodes for memory-safety and low-level protocol bug hunting.",
-        vec![],
+        systems_hunt_tools(),
         systems_hunt_dag_nodes(),
     )
+}
+
+fn systems_hunt_tools() -> Vec<ToolDescriptor> {
+    systems_hunt_tool_specs()
+        .into_iter()
+        .map(|(name, description)| {
+            hidden_tool_with_options(name, description, systems_hunt_options())
+        })
+        .collect()
+}
+
+fn systems_hunt_tool_specs() -> Vec<(&'static str, &'static str)> {
+    vec![
+        (
+            "systems-hunt:systems-context-gatherer",
+            "Gather ranked systems-programming attack surfaces.",
+        ),
+        (
+            "systems-hunt:systems-invariant-extract",
+            "Extract invariants from gathered systems context.",
+        ),
+        (
+            "systems-hunt:systems-trigger-synth",
+            "Synthesize trigger hypotheses from systems invariants.",
+        ),
+        (
+            "systems-hunt:systems-hunt",
+            "Run the bundled systems invariant and trigger hunt.",
+        ),
+        (
+            "systems-hunt:deep-semantic-cwe-select",
+            "Select deep-semantic CWE classes for systems hunting.",
+        ),
+        (
+            "systems-hunt:deep-semantic-hunt",
+            "Run deep-semantic systems finding review.",
+        ),
+    ]
+}
+
+fn systems_hunt_options() -> Vec<OptionSpec> {
+    let mut options = vec![target_option(), max_findings_option(30)];
+    options.extend(systems_hunt_limit_options());
+    options.extend(systems_hunt_handoff_options());
+    options.extend(systems_hunt_runtime_options());
+    options.push(model_option());
+    options
+}
+
+fn systems_hunt_limit_options() -> Vec<OptionSpec> {
+    let mut options = systems_hunt_numeric_limit_options();
+    options.push(include_non_production_option());
+    options.push(systems_hunt_artifact_dir_option());
+    options
+}
+
+fn systems_hunt_numeric_limit_options() -> Vec<OptionSpec> {
+    vec![
+        int_option(
+            "maxSurfaces",
+            "Maximum ranked surfaces.",
+            50,
+            &["max_surfaces"],
+        ),
+        int_option(
+            "maxFiles",
+            "Maximum files to inspect.",
+            5000,
+            &["max_files"],
+        ),
+        int_option(
+            "headBytes",
+            "Bytes to read from each file.",
+            16384,
+            &["head_bytes"],
+        ),
+        int_option(
+            "maxTriggerHypothesesPerSurface",
+            "Maximum trigger hypotheses per selected surface.",
+            3,
+            &["max_trigger_hypotheses_per_surface"],
+        ),
+        int_option(
+            "maxCweClasses",
+            "Maximum deep-semantic CWE classes.",
+            6,
+            &["max_cwe_classes"],
+        ),
+    ]
+}
+
+fn include_non_production_option() -> OptionSpec {
+    opt(
+        "includeNonProduction",
+        OptionType::Bool,
+        "Include docs, examples, and tests in surface discovery.",
+    )
+    .aliases(&["include_non_production"])
+    .default(json!(false))
+    .advanced()
+}
+
+fn systems_hunt_artifact_dir_option() -> OptionSpec {
+    opt("artifactDir", OptionType::String, "Artifact directory.")
+        .aliases(&["artifact_dir"])
+        .default(json!(".kuzushi/systems-hunt"))
+        .advanced()
+}
+
+fn systems_hunt_handoff_options() -> Vec<OptionSpec> {
+    vec![
+        opt("context", OptionType::Json, "Systems context handoff.")
+            .aliases(&["systemsContext", "systems_context"])
+            .advanced(),
+        opt("systemsInvariants", OptionType::Json, "Invariant handoff.")
+            .aliases(&["invariants", "systems_invariants"])
+            .advanced(),
+        opt("triggers", OptionType::Json, "Trigger handoff.").advanced(),
+        opt("cwes", OptionType::Json, "Deep-semantic CWE handoff.").advanced(),
+    ]
+}
+
+fn systems_hunt_runtime_options() -> Vec<OptionSpec> {
+    vec![
+        opt(
+            "thinkingLevel",
+            OptionType::String,
+            "Agent reasoning level.",
+        )
+        .aliases(&["reasoningEffort", "effort"])
+        .advanced(),
+        opt(
+            "whiteboxStatic",
+            OptionType::Json,
+            "Whitebox static analysis policy.",
+        )
+        .aliases(&["whitebox_static"])
+        .advanced(),
+    ]
+}
+
+fn int_option(name: &str, description: &str, default: i64, aliases: &[&str]) -> OptionSpec {
+    opt(name, OptionType::Int, description)
+        .aliases(aliases)
+        .default(json!(default))
+        .advanced()
 }
 
 fn systems_hunt_dag_nodes() -> Vec<DagNodeDescriptor> {

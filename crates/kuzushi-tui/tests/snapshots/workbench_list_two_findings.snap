@@ -2,10 +2,10 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 164
 ---
- KUZUSHI > workbench · mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › workbench · mode:shell · target:none · ctx:not built · model:unconfigured
 
-Kuzushi > workbench · target:no target · page:review · o idle · modules:all modules
- type next guided workflow   type scan guided workflow   type options sast:scan tune scanners   type ask ask the...
+Kuzushi › workbench · target:no target · page:confirm · o idle · modules:all modules
+ type next guided workflow   type scan run scan   type options sast:scan tune scanners   type ask ask the agent...
 
  -- SOURCE · 2 files ---------------------------------------------------------------------------------------------------
 apps/  · 2
@@ -20,34 +20,57 @@ apps/  · 2
 
        > open <id>             select another finding with source context
 
- -- FINDINGS · 2 · 1C · 1H ---------------------------------------------------------------------------------------------
-proof + runtime · ◇ reviewed/static · ? guess · ! rejected
-# F-0001  C ◇tp91%   sql injection via order_id concatenation
-  F-0002  H ?        path traversal in /assets/<file>
+ -- REVIEW QUEUE - showing 2 of 2 - 1 open - 1 complete ----------------------------------------------------------------
+REVIEW QUEUE - showing 2 of 2 - 1 open - 1 complete · mode:all · filter:decision:all
+>F-0001  C unassigned review-order:1 decision:confirmed source-linked...                      sql injection via...
+ F-0002  H unassigned review-order:2 decision:needs_review source-linked next:validate...     path traversal in...
 
  -- DETAILS ------------------------------------------------------------------------------------------------------------
 sql injection via order_id concatenation
 
-STATUS
-  confirmation: ◇ triaged-tp
-  static: signal-only - scanner signal only; no source-grounded evidence recorded
-  runtime: not verified - runtime verification has not run
-NEXT
+-- CLAIM --
+alias: F-0001
+rule: demo.sqli
+location: apps/api/orders.rs:142
+producing tool: semgrep
+
+-- SIGNALS --
+severity: critical
+lifecycle status: candidate
+evidence state: source-linked
+  proof summary: ? signal-only
+  current decision: confirmed
+  decision confidence: 91%
+
+-- EVIDENCE --
+  no evidence rows recorded
+
+-- ANALYSIS --
+  static proof: signal-only - scanner signal only; no source-grounded evidence recorded
+
+-- VERIFICATION --
+  runtime verification: not verified - runtime verification has not run
+
+-- DECISION --
+  current decision: confirmed
+  decision source: selected finding
+  decision history: latest loaded decision from selected finding
+  review decision: confirmed · confidence 91% · by auto · source selected finding
+  legacy triage verdict: true_positive
+  automated/model-generated review reasoning: concatenated input
+
+-- NEXT --
   validate: `verify F-0001`
   collect runtime proof or stronger source evidence before patching
   report: `workspace export findings report.sarif`
-TRIAGE
-  true_positive · confidence 0.91 · by unknown
-  concatenated input
-EVIDENCE
-  no evidence rows recorded
-SCANNER MESSAGE
+
+-- SCANNER MESSAGE --
   sql injection via order_id concatenation
 
-location: apps/api/orders.rs:142
-rule: demo.sqli
-tool: semgrep
+-- PROVENANCE --
+run: run:unknown
+revision: rev:unknown
 source signature: orders.rs:142:sql-injection-via-order-id-concatenation
 corroboration: 1
-fingerprint: 2289b7586b0fd07896fc43d80bdb025d
-ids like F-0001 are aliases · show aliases to list
+identity: unassigned
+fingerprint: fp3_1830c2feac278d109cb914b7eec9844d1e15dd48b57ce1e494f4b3c621f5d4b1

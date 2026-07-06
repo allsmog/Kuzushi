@@ -14,6 +14,9 @@ pub(crate) fn patch_module() -> BuiltinModule {
                 opt("maxIterations", OptionType::Int, "Maximum patch attempts.")
                     .aliases(&["max_iterations"])
                     .default(json!(3)),
+                opt("style", OptionType::Enum, "Patch generation style.")
+                    .choices(&["minimal", "defensive"])
+                    .default(json!("minimal")),
                 opt(
                     "buildCmd",
                     OptionType::String,

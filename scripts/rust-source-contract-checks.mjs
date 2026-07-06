@@ -41,12 +41,10 @@ const JSON_SNAPSHOT_FILES: &[(&str, &str)] = &[
 
 function checkStringConstantsParser() {
   const source = `
-const LEGACY_SUMMARY_FILE: &str = "summary.json";
 const RUN_METADATA_FILE: &str = "run.json";
 `;
-  const constants = rustStringConstants(source, ["RUN_METADATA_FILE", "LEGACY_SUMMARY_FILE"]);
-  return constants.RUN_METADATA_FILE === "run.json" &&
-    constants.LEGACY_SUMMARY_FILE === "summary.json"
+  const constants = rustStringConstants(source, ["RUN_METADATA_FILE"]);
+  return constants.RUN_METADATA_FILE === "run.json"
     ? []
     : ["rust source parser: string constants parser drift"];
 }
@@ -67,10 +65,10 @@ pub(crate) const ARTIFACT_PATH_KEYS: [&str; 3] = [
 
 function checkStringSliceConstantParser() {
   const source = `
-const FOLLOW_UP_RUN_FILES: &[&str] = &["artifacts.json", "run.json", "summary.json"];
+const FOLLOW_UP_RUN_FILES: &[&str] = &["artifacts.json", "run.json"];
 `;
   const aliases = rustStringArrayConstant(source, "FOLLOW_UP_RUN_FILES");
-  return sameList(aliases, ["artifacts.json", "run.json", "summary.json"])
+  return sameList(aliases, ["artifacts.json", "run.json"])
     ? []
     : ["rust source parser: string-slice constant parser drift"];
 }

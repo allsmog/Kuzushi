@@ -39,8 +39,10 @@ impl Finding {
         let rule_id = rule_id.into();
         let file_path = file_path.into();
         let message = message.into();
-        let fingerprint = fingerprint_parts(&rule_id, &file_path, start_line);
         let title = finding_title(&message, &rule_id);
+        let fingerprint = crate::identity::stable_fingerprint_for_tool(
+            &tool, &rule_id, &file_path, &title, &message,
+        );
         let cwe = extract_cwe(&rule_id, &title, &message);
         let (dedup_key, source_signature) =
             finding_identity(&file_path, start_line, cwe.as_deref(), &title);

@@ -1,5 +1,5 @@
 use anyhow::Result;
-use kuzushi_core::{Finding, TriageOutcome, TriageVerdict};
+use kuzushi_core::{Finding, TriageOutcome};
 
 pub(crate) const TRIAGE_SYSTEM_PROMPT: &str = r#"You are Kuzushi's security triage agent.
 Return only JSON matching:
@@ -12,13 +12,4 @@ pub(crate) fn triage_prompt(finding: &Finding, template: Option<&str>) -> Result
 pub(crate) fn clamp_outcome(mut outcome: TriageOutcome) -> TriageOutcome {
     outcome.confidence = outcome.confidence.clamp(0.0, 1.0);
     outcome
-}
-
-pub(crate) fn fallback_triage_outcome(text: String) -> TriageOutcome {
-    TriageOutcome {
-        verdict: TriageVerdict::NeedsReview,
-        confidence: 0.25,
-        rationale: text,
-        ..Default::default()
-    }
 }

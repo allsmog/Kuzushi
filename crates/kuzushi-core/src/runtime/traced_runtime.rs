@@ -74,8 +74,9 @@ impl<'a> TracedRuntime<'a> {
     ) {
         let provider = model_provider(model);
         match result {
-            Ok(AgentLoopStep::ToolCall { call }) => self.record_tool_call_step(
+            Ok(AgentLoopStep::ToolCall { call, cost_usd }) => self.record_tool_call_step(
                 call,
+                *cost_usd,
                 elapsed_ms,
                 history_len,
                 model,
@@ -100,13 +101,14 @@ impl<'a> TracedRuntime<'a> {
     fn record_tool_call_step(
         &self,
         call: &ToolCall,
+        cost_usd: Option<f64>,
         elapsed_ms: u64,
         history_len: usize,
         model: &str,
         provider: &str,
         prompt_hash: &str,
     ) {
-        let _ = self
+        let mut step = self
             .trace
             .step(
                 "tool-progress",
@@ -114,8 +116,11 @@ impl<'a> TracedRuntime<'a> {
                 tool_call_label(call, history_len),
             )
             .with_latency_ms(elapsed_ms)
-            .with_model_metadata(model, provider, prompt_hash)
-            .emit();
+            .with_model_metadata(model, provider, prompt_hash);
+        if let Some(cost) = cost_usd.filter(|cost| *cost > 0.0) {
+            step = step.with_cost_usd(cost);
+        }
+        let _ = step.emit();
     }
 
     fn record_final_step(

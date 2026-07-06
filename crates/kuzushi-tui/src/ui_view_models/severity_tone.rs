@@ -1,12 +1,13 @@
 use kuzushi_core::Severity;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub(crate) enum SeverityTone {
     Critical,
     High,
     Medium,
     Low,
     Info,
+    #[default]
     Unknown,
 }
 

@@ -7,6 +7,7 @@ use crate::ui_view_models::{
 };
 use ratatui::layout::{Alignment, Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
+use ratatui::style::Modifier;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use std::time::Instant;
 
@@ -22,11 +23,11 @@ use std::time::Instant;
 /// ├──────────────────────────────────────────────────────────┤
 /// │ ┌─ DAG ────────────┬─ FEED ───────────────────────────┐  │
 /// │ │ ✓ context:build  │ 15:09:39 [triage:run]            │  │
-/// │ │ ▸ patch:finding  │ 15:09:42 [verify:fnd]            │  │
+/// │ │ · patch:finding  │ 15:09:42 [verify:fnd]            │  │
 /// │ │ ⤳ subsystems     │ 15:09:48 [patch:fnd]             │  │
 /// │ └──────────────────┴──────────────────────────────────┘  │
 /// ├─ focus footer (1 row) ───────────────────────────────────┤
-/// │ ▸ FOCUS  patch:finding  running 6s · $0.04                │
+/// │ ● FOCUS  patch:finding  running 6s · $0.04                │
 /// └──────────────────────────────────────────────────────────┘
 /// ```
 pub(crate) fn render_activity_view(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
@@ -75,10 +76,7 @@ fn render_active_activity_view(
     } else {
         let panes = Layout::default()
             .direction(Direction::Horizontal)
-            .constraints([
-                Constraint::Percentage(layout.dag_percent),
-                Constraint::Percentage(layout.feed_percent),
-            ])
+            .constraints(activity_pane_constraints(area.width, layout))
             .split(outer[1]);
         render_dag_pane_widget(frame, panes[0], activity, &pane_chrome.dag);
         render_feed_pane_widget(frame, panes[1], activity, &pane_chrome.feed);
@@ -99,10 +97,6 @@ fn activity_header_lines(activity: &ActiveActivityViewModel<'_>) -> Vec<Line<'st
         Line::from(vec![Span::styled(
             activity.context_line().to_string(),
             theme::muted(),
-        )]),
-        Line::from(vec![Span::styled(
-            model.focus_label.to_string(),
-            theme::accent(),
         )]),
     ];
     if let Some(banner) = activity.abort_banner() {
@@ -125,7 +119,11 @@ fn render_dag_pane_widget(
     // c-label, trailing fill in c-subtle.
     let block = Block::default()
         .borders(Borders::RIGHT)
-        .border_style(theme::subtle())
+        .border_style(if title.focused {
+            theme::accent()
+        } else {
+            theme::subtle()
+        })
         .title(Span::styled(
             title.block_title.clone(),
             pane_title_style(title),
@@ -176,9 +174,26 @@ fn render_feed_pane_widget(
 
 fn pane_title_style(title: &ActivityPaneTitle) -> ratatui::style::Style {
     if title.focused {
-        return theme::accent();
+        return theme::accent().add_modifier(Modifier::BOLD);
     }
-    theme::label()
+    theme::muted()
+}
+
+fn activity_pane_constraints(
+    width: u16,
+    layout: crate::ui_view_models::ActivityFrameLayout,
+) -> [Constraint; 2] {
+    if width >= layout.compact_breakpoint {
+        [
+            Constraint::Length(layout.wide_dag_width),
+            Constraint::Min(0),
+        ]
+    } else {
+        [
+            Constraint::Percentage(layout.compact_dag_percent),
+            Constraint::Min(0),
+        ]
+    }
 }
 
 fn feed_pane_lines(

@@ -30,7 +30,7 @@ mod tests {
         );
         assert_eq!(
             coerce_raw_option_value(&option_spec(OptionType::StringList), "one,two").unwrap(),
-            json!("one,two")
+            json!(["one", "two"])
         );
         assert_eq!(
             coerce_raw_option_value(&option_spec(OptionType::Bool), "yes").unwrap(),
@@ -52,6 +52,10 @@ mod tests {
             json!("manual")
         );
         assert!(coerce_raw_option_value(&enum_spec, "other").is_err());
+        assert_eq!(
+            coerce_raw_option_value(&option_spec(OptionType::Json), r#"{"enabled":true}"#).unwrap(),
+            json!({"enabled": true})
+        );
     }
 
     #[test]

@@ -1,7 +1,7 @@
 # Replay / Trace / Audit — Critical Assessment
 
 Status: Rust-current replay/trace assessment. Rust scan, shell tool
-dispatch, and headless `kuzushi run` write shared `.kuzushi/runs/<runId>/`
+dispatch, and headless `kuzushi run` write shared `.kuzushi/v3/runs/<runId>/`
 artifacts; older design examples below are retained only where explicitly
 marked as proposals.
 
@@ -12,7 +12,7 @@ past runs from disk alone?**
 
 ## 1 · Inventory of what is persisted
 
-### 1.1 Per-run dir — `.kuzushi/runs/<runId>/`
+### 1.1 Per-run dir — `.kuzushi/v3/runs/<runId>/`
 
 | File              | Producer                                | Trigger              | Always-on? |
 | ----------------- | --------------------------------------- | -------------------- | ---------- |
@@ -34,10 +34,10 @@ past runs from disk alone?**
 | `report.sarif`    | optional SARIF-capable producers        | producer output      | optional |
 | `artifacts.json`  | Rust artifact manifest writer           | artifact registration | **yes** |
 
-### 1.2 SQLite — `.kuzushi/findings.sqlite3`
+### 1.2 SQLite — `.kuzushi/index.sqlite3`
 
 The Rust findings store carries finding rows and supporting workspace state.
-Run-level reproducibility and trace data live under `.kuzushi/runs/<runId>/`;
+Run-level reproducibility and trace data live under `.kuzushi/v3/runs/<runId>/`;
 CLI and TUI replay surfaces consume that on-disk format directly.
 
 ### 1.3 Field-level reproducibility / queryability gaps
@@ -69,7 +69,7 @@ shape varies by `eventType`).
 
 Retention is now operator-controlled through `kuzushi runs prune` with
 `--older-than-days`, `--keep-last`, and `--dry-run`. The command deletes only
-safe run-id directories, repairs `.kuzushi/latest`, and is covered by focused
+safe run-id directories, repairs `.kuzushi/v3/latest`, and is covered by focused
 Rust CLI tests. A disk-budget policy is still future work.
 
 ---
@@ -80,11 +80,11 @@ Rust CLI tests. A disk-budget policy is still future work.
 | - | ------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------- | ---------- |
 | 1 | Keep `summary.json` always-on with reproducibility metadata. Rust now covers version, platform, build git ids, target git metadata, model, config hash, LLM-call metadata, bounded/redacted CLI argv, env fingerprints, prompt override fingerprints, house-rules fingerprints, and threat-model digest. | `crates/kuzushi-core/src/run_artifacts/` | **high** |
 | 2 | Keep canonical run artifacts always-on and independent of optional producer output. | `crates/kuzushi-core/src/run_artifacts/` | **high** |
-| 3 | Add `kuzushi runs prune --older-than-days <n>` and `--keep-last <n>`, with `--dry-run`. Implemented in Rust with safe run-id checks and `.kuzushi/latest` repair. | `crates/kuzushi-cli/src/application/runs.rs` | **high** |
+| 3 | Add `kuzushi runs prune --older-than-days <n>` and `--keep-last <n>`, with `--dry-run`. Implemented in Rust with safe run-id checks and `.kuzushi/v3/latest` repair. | `crates/kuzushi-cli/src/application/runs.rs` | **high** |
 | 4 | Add `kuzushi runs diff <a> <b>` showing new / fixed / drifted findings. Implemented in Rust against canonical `findings.json` snapshots with plain and JSON output. | `crates/kuzushi-cli/src/application/runs_diff.rs` | **high** |
 | 5 | Improve `/show runs` to surface duration, finding count, status. Rust CLI `kuzushi runs list` and `kuzushi runs show` now show completed-run duration; `kuzushi runs list --status <status[,status]>` filters by run status with explicit status validation. | `crates/kuzushi-tui/src/ui_view_models/run_trace.rs`, `crates/kuzushi-cli/src/application/runs.rs`, and `crates/kuzushi-cli/src/presentation/runs_output.rs` | **high** |
 | 6 | Keep `kuzushi runs trace <runId> --json` jq-friendly and consider an `--all` variant only if trace/event files diverge. | `crates/kuzushi-cli/src/application/runs.rs` | **high** |
-| 7 | Shell `/replay <runId>` and `/trace <runId>` should keep consuming the same `.kuzushi/runs/<runId>/` artifacts as CLI `kuzushi runs show/trace`. | `crates/kuzushi-tui/src/ui_view_models/run_trace.rs` | **high** |
+| 7 | Shell `/replay <runId>` and `/trace <runId>` should keep consuming the same `.kuzushi/v3/runs/<runId>/` artifacts as CLI `kuzushi runs show/trace`. | `crates/kuzushi-tui/src/ui_view_models/run_trace.rs` | **high** |
 | 8 | If SQL-level run queries become product scope, add Rust migrations for selected run metadata instead of reintroducing retired store paths. | future Rust persistence migration | medium |
 
 Out-of-scope but worth mentioning:
@@ -136,7 +136,7 @@ Out-of-scope but worth mentioning:
     "loadedModules": ["builtin:core-sast", "file:///abs/path"]
   },
 
-  // Findings — denormalised summary, full list still in findings.sqlite3
+  // Findings — denormalised summary, full list still in index.sqlite3
   "findings": {
     "total": 17,
     "bySeverity": { "critical": 1, "high": 4, "medium": 8, "low": 4 },
@@ -159,7 +159,7 @@ fields are additive; nothing in the v0 schema is renamed or removed.
 
 ## 4 · Diff surface — `kuzushi runs diff <a> <b>`
 
-Reads `.kuzushi/runs/<runId>/findings.json` for both runs, fingerprint-keys
+Reads `.kuzushi/v3/runs/<runId>/findings.json` for both runs, fingerprint-keys
 the canonical finding snapshots, and emits four sets:
 
 - **new** — fingerprint present in B, absent from A
@@ -179,7 +179,7 @@ Two retention strategies are implemented and can be combined:
 - `--older-than-days <n>` — wall-clock retention against run `startedAt`.
 - `--keep-last <n>` — preserves N most recent runs per repo.
 
-Implementation deletes the run dir under `.kuzushi/runs/<runId>/` and the
+Implementation deletes the run dir under `.kuzushi/v3/runs/<runId>/` and the
 latest pointer is repaired to the newest remaining run, or removed when no runs
 remain. `--dry-run` lists what would be deleted without touching disk. The
 implementation refuses unsafe run ids containing empty, relative, or path

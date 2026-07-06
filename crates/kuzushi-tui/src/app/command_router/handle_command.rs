@@ -3,6 +3,11 @@ use super::*;
 impl ShellApp {
     pub fn handle_command(&mut self, command: ShellCommand) {
         let previous_view = self.shell_view.clone();
+        if let Some(effects) = self.reduce_command_effects(&command) {
+            self.execute_effects(effects);
+            self.discard_stashed_input_after_view_change(&previous_view);
+            return;
+        }
         for handler in COMMAND_HANDLERS {
             if handler(self, &command) {
                 self.discard_stashed_input_after_view_change(&previous_view);
@@ -21,7 +26,8 @@ impl ShellApp {
         }
         self.last_cleared_input = None;
         self.log(">", raw.to_string());
-        self.remember_command(trimmed);
+        let history_effects = self.reduce_remember_command(trimmed);
+        self.execute_effects(history_effects);
         if self.handle_subverb_query(trimmed) {
             return;
         }
@@ -47,13 +53,17 @@ impl ShellApp {
         true
     }
 
-    fn remember_command(&mut self, trimmed: &str) {
+    pub(crate) fn reduce_remember_command(&mut self, trimmed: &str) -> Vec<ShellEffect> {
         self.command_history.push(trimmed.to_string());
         if self.command_history.len() > COMMAND_HISTORY_CAP {
             let overflow = self.command_history.len() - COMMAND_HISTORY_CAP;
             self.command_history.drain(0..overflow);
         }
-        self.persist_command_history();
+        if self.history_file_path().is_some() {
+            vec![ShellEffect::PersistCommandHistory]
+        } else {
+            Vec::new()
+        }
     }
 
     fn handle_editor_local_command(&mut self, trimmed: &str) -> bool {
@@ -107,7 +117,7 @@ pub(crate) fn handle_home_command(app: &mut ShellApp, command: &ShellCommand) ->
         return false;
     };
     app.focused_module = None;
-    app.catalog_expanded = false;
+    app.catalog_route.collapse();
     app.shell_view = ShellView::Home;
     app.log("home", "showing Kuzushi cockpit");
     true
@@ -118,8 +128,7 @@ pub(crate) fn handle_help_command(app: &mut ShellApp, command: &ShellCommand) ->
         return false;
     };
     app.shell_view = ShellView::Help;
-    app.help_scroll = 0;
-    app.help_filter = query.clone();
+    app.help_route.open(query.clone());
     app.log("help", help_log_summary(query.as_deref()));
     true
 }
@@ -153,8 +162,8 @@ pub(crate) fn handle_modules_command(app: &mut ShellApp, command: &ShellCommand)
         return false;
     };
     app.shell_view = ShellView::Catalog;
-    app.catalog_expanded = true;
-    app.modules_scroll = 0;
+    app.catalog_route.expand();
+    app.modules_route.open();
     let count = app.registry.modules().count();
     app.log(
         "module",
@@ -170,24 +179,8 @@ pub(crate) fn handle_recommend_command(app: &mut ShellApp, command: &ShellComman
     let ShellCommand::Recommend = command else {
         return false;
     };
-    app.shell_view = ShellView::Recommend;
-    app.recommend_cursor = 0;
-    if app.target.is_none() {
-        app.log(
-            "recommend",
-            "choose a target with `target <path>` or run `demo` for the offline fixture",
-        );
-        return true;
-    }
-    if crate::ui_view_models::recommendation_artifact_needs_refresh(app) {
-        app.log(
-            "recommend",
-            "running module-recommender:recommend for the active target",
-        );
-        app.run_tool(Some("module-recommender:recommend".to_string()), None);
-        return true;
-    }
-    app.log("recommend", "latest module recommendations");
+    let effects = app.reduce_recommend();
+    app.execute_effects(effects);
     true
 }
 
@@ -196,8 +189,7 @@ pub(crate) fn handle_tools_command(app: &mut ShellApp, command: &ShellCommand) -
         return false;
     };
     app.shell_view = ShellView::Tools;
-    app.tools_scroll = 0;
-    app.tools_filter = filter.clone();
+    app.tools_route.open(filter.clone());
     let model = crate::ui_view_models::tools_model(app);
     let suffix = filter
         .as_ref()
@@ -236,6 +228,15 @@ pub(crate) fn handle_workbench_command(app: &mut ShellApp, command: &ShellComman
         return false;
     };
     app.open_workbench(*pane);
+    true
+}
+
+pub(crate) fn handle_aim_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Aim(focus) = command else {
+        return false;
+    };
+    let effects = app.reduce_aim(focus);
+    app.execute_effects(effects);
     true
 }
 

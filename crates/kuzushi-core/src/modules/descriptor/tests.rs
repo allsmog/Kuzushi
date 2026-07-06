@@ -39,7 +39,7 @@ mod tests {
         .deferred();
         assert!(deferred.is_hidden());
         assert_eq!(deferred.tools()[0].name, "deferred-demo:run");
-        assert!(deferred.dag_nodes().is_empty());
+        assert_eq!(deferred.dag_nodes()[0].id, "deferred-demo:run");
 
         let hidden_tool = hidden_tool_with_options("demo:legacy", "Legacy demo.", vec![]);
         assert!(hidden_tool.hidden);

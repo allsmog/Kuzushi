@@ -189,7 +189,7 @@ mod tests {
 
         assert!(error.contains("missing preflight failed"));
         assert!(error.contains("missing scanner binary"));
-        assert_eq!(store.latest_scan_run_id().unwrap(), None);
+        assert_eq!(store.latest_run_id().unwrap(), None);
     }
 
     #[test]
