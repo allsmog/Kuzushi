@@ -15,7 +15,7 @@ use std::time::SystemTime;
 pub(crate) fn planning_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines: Vec<Line<'static>> = Vec::new();
     push_phase_header(app, area.width, &mut lines);
-    if app.planning_picker_route.tasks().is_empty() {
+    if app.engagement.planning_picker().tasks().is_empty() {
         lines.push(muted("(no tasks in this phase)"));
         return lines;
     }
@@ -154,14 +154,14 @@ fn fit_spans(spans: Vec<Span<'static>>, width: usize) -> Line<'static> {
 /// Tell a returning operator, up front, whether Kuzushi found prior work for
 /// this target — the single biggest missing signal in the old picker.
 fn prior_state_banner(app: &ShellApp) -> Line<'static> {
-    let last_activity = latest_cached_modified(app.planning_picker_route.tasks())
+    let last_activity = latest_cached_modified(app.engagement.planning_picker().tasks())
         .and_then(|then| format_relative_age(SystemTime::now(), then));
     let map_artifacts_built = app
         .workbench_cache
         .borrow_mut()
         .map_artifacts_built(app.target.as_deref());
     match workspace_history(
-        app.planning_picker_route.tasks(),
+        app.engagement.planning_picker().tasks(),
         app.findings.len(),
         map_artifacts_built,
         last_activity,
@@ -202,11 +202,12 @@ fn prior_state_line(app: &ShellApp, headline: String) -> Line<'static> {
 fn revisiting_cached_artifact_phase(app: &ShellApp) -> bool {
     app.engagement.current_phase().is_some()
         && app
-            .planning_picker_route
+            .engagement
+            .planning_picker()
             .tasks()
             .iter()
             .any(|row| matches!(row.artifact_state, PlanningArtifactState::Cached))
-        && app.planning_picker_route.tasks().iter().all(|row| {
+        && app.engagement.planning_picker().tasks().iter().all(|row| {
             matches!(
                 row.artifact_state,
                 PlanningArtifactState::Cached | PlanningArtifactState::Action
@@ -291,7 +292,7 @@ fn task_list_lines(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
     if let Some(header) = column_header(width) {
         lines.push(header);
     }
-    for (idx, row) in app.planning_picker_route.tasks().iter().enumerate() {
+    for (idx, row) in app.engagement.planning_picker().tasks().iter().enumerate() {
         lines.push(planning_row_line(app, idx, row, width));
     }
     lines
@@ -299,7 +300,7 @@ fn task_list_lines(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
 
 fn task_list_pane_lines(app: &ShellApp, width: u16) -> Vec<Line<'static>> {
     let width = (width as usize).max(24);
-    let focused = app.planning_picker_route.focus() == PickerFocus::List;
+    let focused = app.engagement.planning_picker().focus() == PickerFocus::List;
     let border_style = pane_border_style(focused);
     let mut lines = vec![border_line(
         "┌",
@@ -351,8 +352,8 @@ fn planning_row_line(
 ) -> Line<'static> {
     let disposition = row_disposition(
         row,
-        app.planning_picker_route.selected(),
-        app.planning_picker_route.rebuild(),
+        app.engagement.planning_picker().selected(),
+        app.engagement.planning_picker().rebuild(),
     );
     let outcome = RowOutcome::from_disposition(disposition);
     let marker = planning_row_marker(app, idx);
@@ -364,7 +365,7 @@ fn planning_row_line(
 }
 
 fn planning_row_marker(app: &ShellApp, idx: usize) -> &'static str {
-    if idx == app.planning_picker_route.cursor() {
+    if idx == app.engagement.planning_picker().cursor() {
         ">"
     } else {
         " "
@@ -438,7 +439,7 @@ fn missing_model_note(app: &ShellApp, row: &PlanningTaskRow) -> Option<String> {
 
 fn outcome_row_note(app: &ShellApp, row: &PlanningTaskRow, outcome: RowOutcome) -> String {
     match outcome {
-        RowOutcome::Run if app.planning_picker_route.rebuild().contains(&row.id) => {
+        RowOutcome::Run if app.engagement.planning_picker().rebuild().contains(&row.id) => {
             with_cost(row, "rebuild (overwrites cache)")
         }
         RowOutcome::Run | RowOutcome::Skip => with_cost(row, artifact_reason(row)),
@@ -468,10 +469,10 @@ fn with_cost(row: &PlanningTaskRow, base: &str) -> String {
 
 fn planning_options_pane_lines(app: &ShellApp, width: usize) -> Vec<Line<'static>> {
     let width = width.max(24);
-    let Some(row) = app.planning_picker_route.current_row() else {
+    let Some(row) = app.engagement.planning_picker().current_row() else {
         return bordered_message("options", "no focused step", width);
     };
-    let focused = app.planning_picker_route.focus() == PickerFocus::OptionsPane;
+    let focused = app.engagement.planning_picker().focus() == PickerFocus::OptionsPane;
     let border_style = pane_border_style(focused);
     let title = pane_title(&format!(" {} ", row.tool_name), focused);
     let Some(tool) = app.registry.resolve_tool(row.tool_name) else {
@@ -521,7 +522,7 @@ fn append_option_pane_rows(
             "no declared options",
             width,
             theme::muted(),
-            pane_border_style(app.planning_picker_route.focus() == PickerFocus::OptionsPane),
+            pane_border_style(app.engagement.planning_picker().focus() == PickerFocus::OptionsPane),
         ));
         return;
     }
@@ -544,7 +545,7 @@ fn append_option_pane_error(
     border_style: Style,
     width: usize,
 ) {
-    if let Some(error) = app.planning_picker_route.option_error() {
+    if let Some(error) = app.engagement.planning_picker().option_error() {
         lines.push(pane_body_line(
             &fit(error, width.saturating_sub(4)),
             width,
@@ -571,10 +572,11 @@ fn option_pane_row(
     resolved: Option<&Value>,
     width: usize,
 ) -> Line<'static> {
-    let selected = app.planning_picker_route.focus() == PickerFocus::OptionsPane
-        && idx == app.planning_picker_route.option_cursor();
+    let selected = app.engagement.planning_picker().focus() == PickerFocus::OptionsPane
+        && idx == app.engagement.planning_picker().option_cursor();
     let editing = app
-        .planning_picker_route
+        .engagement
+        .planning_picker()
         .option_edit()
         .is_some_and(|edit| edit.task == row.id && edit.option_name == spec.name);
     let marker = if selected { ">" } else { " " };
@@ -588,7 +590,7 @@ fn option_pane_row(
         &fit(&row_text, body_width),
         width,
         style,
-        pane_border_style(app.planning_picker_route.focus() == PickerFocus::OptionsPane),
+        pane_border_style(app.engagement.planning_picker().focus() == PickerFocus::OptionsPane),
     )
 }
 
@@ -639,7 +641,8 @@ fn option_display_value(
 ) -> String {
     if editing {
         let draft = app
-            .planning_picker_route
+            .engagement
+            .planning_picker()
             .option_edit()
             .map(|edit| edit.draft.as_str())
             .unwrap_or_default();
@@ -734,7 +737,7 @@ fn input_preview_line(app: &ShellApp, row: &PlanningTaskRow, width: usize) -> Li
         &fit(&preview, width.saturating_sub(4)),
         width,
         style,
-        pane_border_style(app.planning_picker_route.focus() == PickerFocus::OptionsPane),
+        pane_border_style(app.engagement.planning_picker().focus() == PickerFocus::OptionsPane),
     )
 }
 
@@ -810,9 +813,9 @@ fn pane_title_style(focused: bool) -> Style {
 /// runs — a reused/skipped-only plan stays muted so the colour can't overclaim.
 fn enter_summary_line(app: &ShellApp) -> Line<'static> {
     let plan = enter_plan(
-        app.planning_picker_route.tasks(),
-        app.planning_picker_route.selected(),
-        app.planning_picker_route.rebuild(),
+        app.engagement.planning_picker().tasks(),
+        app.engagement.planning_picker().selected(),
+        app.engagement.planning_picker().rebuild(),
     );
     let style = if plan.run > 0 {
         theme::success().add_modifier(Modifier::BOLD)
@@ -840,7 +843,7 @@ fn planning_row_style(app: &ShellApp, idx: usize, outcome: RowOutcome) -> Style 
         RowOutcome::Skip => theme::primary(),
         RowOutcome::Blocked => theme::disabled(),
     };
-    if idx == app.planning_picker_route.cursor() {
+    if idx == app.engagement.planning_picker().cursor() {
         return planning_cursor_style(base, outcome);
     }
     base

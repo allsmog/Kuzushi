@@ -1,7 +1,7 @@
 use crate::app::{
     FailedPlanningTask, PendingPatch, PendingPrereqPrompt, PlanningOptionOverrides,
-    PlanningRunStep, PlanningTaskId, PrereqChain, PrereqPlanAction, PrereqStep, RetryAdjustment,
-    WorkflowPhase,
+    PlanningPickerRouteState, PlanningRunStep, PlanningTaskId, PrereqChain, PrereqPlanAction,
+    PrereqStep, RetryAdjustment, ThreatPatch, WorkflowPhase,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -13,9 +13,11 @@ pub struct EngagementState {
     planning_run_queue: VecDeque<PlanningTaskId>,
     planning_expanded_queue: VecDeque<PlanningRunStep>,
     planning_running_tool: Option<String>,
+    planning_picker_route: PlanningPickerRouteState,
     pending_chain: Option<PrereqChain>,
     pending_prereq_prompt: Option<PendingPrereqPrompt>,
     pending_patch: Option<PendingPatch>,
+    pending_threat_patch: Option<ThreatPatch>,
     confirm_allowlist: BTreeSet<String>,
     confirm_denylist: BTreeSet<String>,
     pending_plan: Option<PlanProposal>,
@@ -199,6 +201,14 @@ impl EngagementState {
         self.planning_running_tool = None;
     }
 
+    pub(crate) fn planning_picker(&self) -> &PlanningPickerRouteState {
+        &self.planning_picker_route
+    }
+
+    pub(crate) fn planning_picker_mut(&mut self) -> &mut PlanningPickerRouteState {
+        &mut self.planning_picker_route
+    }
+
     pub(crate) fn set_pending_chain(&mut self, chain: PrereqChain) {
         self.pending_chain = Some(chain);
     }
@@ -331,6 +341,26 @@ impl EngagementState {
 
     pub(crate) fn clear_pending_patch(&mut self) {
         self.pending_patch = None;
+    }
+
+    pub(crate) fn pending_threat_patch(&self) -> Option<&ThreatPatch> {
+        self.pending_threat_patch.as_ref()
+    }
+
+    pub(crate) fn set_pending_threat_patch(&mut self, patch: ThreatPatch) {
+        self.pending_threat_patch = Some(patch);
+    }
+
+    pub(crate) fn take_pending_threat_patch(&mut self) -> Option<ThreatPatch> {
+        self.pending_threat_patch.take()
+    }
+
+    pub(crate) fn clear_pending_threat_patch(&mut self) {
+        self.pending_threat_patch = None;
+    }
+
+    pub(crate) fn has_pending_threat_patch(&self) -> bool {
+        self.pending_threat_patch.is_some()
     }
 
     pub(crate) fn confirm_allowlist(&self) -> &BTreeSet<String> {

@@ -398,7 +398,7 @@ fn observation_write(
     stable_fp: String,
 ) -> Result<ObservationWrite> {
     let raw_result_hash = raw_result_hash(scan_id, finding)?;
-    let snapshot_hash = legacy_scan_snapshot_hash(scan_id);
+    let snapshot_hash = run_snapshot_hash(scan_id);
     let finding_json =
         serde_json::to_string(finding).context("Could not serialize v3 finding projection row")?;
     Ok(ObservationWrite {
@@ -451,7 +451,7 @@ fn raw_result_hash(scan_id: &str, finding: &Finding) -> Result<String> {
         .to_string())
 }
 
-fn legacy_scan_snapshot_hash(scan_id: &str) -> String {
+fn run_snapshot_hash(scan_id: &str) -> String {
     format!(
         "snapshot_{}",
         hash_parts("legacy-scan-snapshot", &[scan_id.as_bytes()]).as_str()

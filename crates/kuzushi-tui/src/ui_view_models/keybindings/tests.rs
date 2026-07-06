@@ -132,7 +132,8 @@ fn planning_picker_footer_separates_phase_navigation_skip_and_close() {
     assert!(!bindings.contains(&bind("Esc", "close")));
     assert!(!bindings.contains(&bind("workbench", "command center")));
 
-    app.planning_picker_route
+    app.engagement
+        .planning_picker_mut()
         .set_focus(crate::app::PickerFocus::OptionsPane);
     let bindings = footer_keybindings(&app);
 

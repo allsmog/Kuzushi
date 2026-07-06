@@ -90,13 +90,13 @@ impl ShellApp {
     fn should_enter_picker_prompt(&self, key: KeyEvent) -> bool {
         key.modifiers.is_empty()
             && key.code == KeyCode::Char(':')
-            && self.planning_picker_route.option_edit().is_none()
+            && self.engagement.planning_picker().option_edit().is_none()
     }
 
     fn enter_picker_prompt_focus(&mut self) {
         self.set_current_picker_focus(PickerFocus::Prompt);
-        self.planning_picker_route.set_option_edit(None);
-        self.planning_picker_route.clear_option_error();
+        self.engagement.planning_picker_mut().set_option_edit(None);
+        self.engagement.planning_picker_mut().clear_option_error();
     }
 
     fn leave_picker_prompt_focus(&mut self) {
@@ -114,7 +114,7 @@ impl ShellApp {
             ShellView::ModelPicker => self.model_picker_route.focus(),
             ShellView::AuthMethodPicker(_) => self.auth_picker_route.focus(),
             ShellView::TargetPicker => self.target_picker_route.focus(),
-            ShellView::PlanningPicker => self.planning_picker_route.focus(),
+            ShellView::PlanningPicker => self.engagement.planning_picker().focus(),
             _ => PickerFocus::List,
         }
     }
@@ -124,7 +124,7 @@ impl ShellApp {
             ShellView::ModelPicker => self.model_picker_route.set_focus(focus),
             ShellView::AuthMethodPicker(_) => self.auth_picker_route.set_focus(focus),
             ShellView::TargetPicker => self.target_picker_route.set_focus(focus),
-            ShellView::PlanningPicker => self.planning_picker_route.set_focus(focus),
+            ShellView::PlanningPicker => self.engagement.planning_picker_mut().set_focus(focus),
             _ => {}
         }
     }
@@ -460,7 +460,7 @@ impl ShellApp {
         if self.handle_planning_option_edit_key(key.code) {
             return true;
         }
-        match self.planning_picker_route.focus() {
+        match self.engagement.planning_picker().focus() {
             PickerFocus::List => self.handle_planning_step_key(key.code),
             PickerFocus::OptionsPane => self.handle_planning_options_key(key.code),
             PickerFocus::Prompt => false,
@@ -468,7 +468,7 @@ impl ShellApp {
     }
 
     fn handle_planning_option_edit_key(&mut self, code: KeyCode) -> bool {
-        if self.planning_picker_route.option_edit().is_none() {
+        if self.engagement.planning_picker().option_edit().is_none() {
             return false;
         }
         match code {
@@ -485,7 +485,7 @@ impl ShellApp {
                 true
             }
             KeyCode::Delete => {
-                if let Some(edit) = self.planning_picker_route.option_edit_mut() {
+                if let Some(edit) = self.engagement.planning_picker_mut().option_edit_mut() {
                     edit.draft.clear();
                 }
                 true
@@ -622,7 +622,7 @@ impl ShellApp {
     /// `g` on a cached Map artifact row toggles it between reuse (default) and
     /// rebuild. Rebuild marks the row to re-run even though its artifact exists.
     fn toggle_rebuild_current_row(&mut self) {
-        let Some(row) = self.planning_picker_route.current_row().cloned() else {
+        let Some(row) = self.engagement.planning_picker().current_row().cloned() else {
             return;
         };
         let id = row.id;
@@ -647,7 +647,7 @@ impl ShellApp {
             );
             return;
         }
-        if self.planning_picker_route.toggle_rebuild(id) {
+        if self.engagement.planning_picker_mut().toggle_rebuild(id) {
             self.log("phase", format!("[rebuild] {}", id.label()));
         } else {
             self.log("phase", format!("[reuse] {} (cached)", id.label()));
@@ -655,10 +655,10 @@ impl ShellApp {
     }
 
     fn move_planning_cursor(&mut self, delta: isize) {
-        if self.planning_picker_route.tasks().is_empty() {
+        if self.engagement.planning_picker().tasks().is_empty() {
             return;
         }
-        self.planning_picker_route.move_cursor(delta);
+        self.engagement.planning_picker_mut().move_cursor(delta);
         self.clamp_planning_option_cursor();
     }
 
@@ -679,11 +679,20 @@ impl ShellApp {
     }
 
     fn toggle_planning_current_row(&mut self) {
-        let Some(task) = self.planning_picker_route.current_row().map(|row| row.id) else {
+        let Some(task) = self
+            .engagement
+            .planning_picker()
+            .current_row()
+            .map(|row| row.id)
+        else {
             return;
         };
-        let tasks = self.planning_picker_route.tasks().to_vec();
-        let outcome = toggle_planning_row(task, &tasks, self.planning_picker_route.selected_mut());
+        let tasks = self.engagement.planning_picker().tasks().to_vec();
+        let outcome = toggle_planning_row(
+            task,
+            &tasks,
+            self.engagement.planning_picker_mut().selected_mut(),
+        );
         self.log_toggle_outcome(&outcome);
     }
 
@@ -692,8 +701,8 @@ impl ShellApp {
     }
 
     fn select_all_planning_rows(&mut self) {
-        let rows = self.planning_picker_route.tasks().to_vec();
-        let selected = self.planning_picker_route.selected_mut();
+        let rows = self.engagement.planning_picker().tasks().to_vec();
+        let selected = self.engagement.planning_picker_mut().selected_mut();
         for row in &rows {
             if row.cli_available
                 || matches!(
@@ -708,7 +717,7 @@ impl ShellApp {
     }
 
     fn clear_planning_selection(&mut self) {
-        self.planning_picker_route.selected_mut().clear();
+        self.engagement.planning_picker_mut().selected_mut().clear();
         self.log("planning", "cleared selection");
     }
 
@@ -718,9 +727,9 @@ impl ShellApp {
         }
         self.drop_failed_dependency_selection();
         let plan = build_execution_plan(
-            self.planning_picker_route.tasks(),
-            self.planning_picker_route.selected(),
-            self.planning_picker_route.rebuild(),
+            self.engagement.planning_picker().tasks(),
+            self.engagement.planning_picker().selected(),
+            self.engagement.planning_picker().rebuild(),
         );
         if plan.is_empty() {
             self.explain_empty_planning_confirm();
@@ -757,7 +766,8 @@ impl ShellApp {
         }
         let failed = self.engagement.failed_task_ids();
         let blocked = self
-            .planning_picker_route
+            .engagement
+            .planning_picker()
             .selected()
             .iter()
             .copied()
@@ -767,7 +777,10 @@ impl ShellApp {
             return;
         }
         for task in &blocked {
-            self.planning_picker_route.selected_mut().remove(task);
+            self.engagement
+                .planning_picker_mut()
+                .selected_mut()
+                .remove(task);
         }
         let labels = blocked
             .iter()
@@ -791,14 +804,15 @@ impl ShellApp {
     }
 
     fn open_file_picker_for_current_planning_row(&mut self) -> bool {
-        let Some(row) = self.planning_picker_route.current_row() else {
+        let Some(row) = self.engagement.planning_picker().current_row() else {
             return false;
         };
         if row.id != PlanningTaskId::AttachFiles {
             return false;
         }
         if !self
-            .planning_picker_route
+            .engagement
+            .planning_picker()
             .selected()
             .contains(&PlanningTaskId::AttachFiles)
         {
@@ -809,9 +823,10 @@ impl ShellApp {
     }
 
     fn open_file_picker_for_attach_only_plan(&mut self) -> bool {
-        if self.planning_picker_route.selected().len() != 1
+        if self.engagement.planning_picker().selected().len() != 1
             || !self
-                .planning_picker_route
+                .engagement
+                .planning_picker()
                 .selected()
                 .contains(&PlanningTaskId::AttachFiles)
         {
@@ -826,7 +841,7 @@ impl ShellApp {
     /// the phase — say what happened instead, and only advance when the
     /// operator selected nothing at all (an explicit "skip this phase").
     fn explain_empty_planning_confirm(&mut self) {
-        if self.planning_picker_route.selected().is_empty() {
+        if self.engagement.planning_picker().selected().is_empty() {
             let phase = self
                 .engagement
                 .current_phase()
@@ -842,8 +857,8 @@ impl ShellApp {
             format!(
                 "nothing to run — all {} checked {} are cached and will be reused; \
                  press g to rebuild one, or s to skip this phase",
-                self.planning_picker_route.selected().len(),
-                task_word(self.planning_picker_route.selected().len())
+                self.engagement.planning_picker().selected().len(),
+                task_word(self.engagement.planning_picker().selected().len())
             ),
         );
     }

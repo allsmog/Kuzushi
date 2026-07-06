@@ -10,7 +10,7 @@ const HELP_DESCRIPTION_COLUMN: usize = 2;
 
 pub(crate) fn help_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
-    let model = help_model(app.help_route.filter());
+    let model = help_model(app.router.help().filter());
     lines.extend(help_header_lines(
         model.intro,
         model.glossary,

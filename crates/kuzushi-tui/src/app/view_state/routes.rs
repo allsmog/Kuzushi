@@ -5,6 +5,66 @@ pub use pickers::{
 };
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RouterState {
+    help: HelpRouteState,
+    tools: ToolsRouteState,
+    history: ScrollRouteState,
+    kb: ScrollRouteState,
+    modules: ScrollRouteState,
+    logs: ScrollRouteState,
+}
+
+impl RouterState {
+    pub(crate) fn help(&self) -> &HelpRouteState {
+        &self.help
+    }
+
+    pub(crate) fn help_mut(&mut self) -> &mut HelpRouteState {
+        &mut self.help
+    }
+
+    pub(crate) fn tools(&self) -> &ToolsRouteState {
+        &self.tools
+    }
+
+    pub(crate) fn tools_mut(&mut self) -> &mut ToolsRouteState {
+        &mut self.tools
+    }
+
+    pub(crate) fn history(&self) -> &ScrollRouteState {
+        &self.history
+    }
+
+    pub(crate) fn history_mut(&mut self) -> &mut ScrollRouteState {
+        &mut self.history
+    }
+
+    pub(crate) fn kb(&self) -> &ScrollRouteState {
+        &self.kb
+    }
+
+    pub(crate) fn kb_mut(&mut self) -> &mut ScrollRouteState {
+        &mut self.kb
+    }
+
+    pub(crate) fn modules(&self) -> &ScrollRouteState {
+        &self.modules
+    }
+
+    pub(crate) fn modules_mut(&mut self) -> &mut ScrollRouteState {
+        &mut self.modules
+    }
+
+    pub(crate) fn logs(&self) -> &ScrollRouteState {
+        &self.logs
+    }
+
+    pub(crate) fn logs_mut(&mut self) -> &mut ScrollRouteState {
+        &mut self.logs
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CatalogRouteState {
     expanded: bool,
     cursor: usize,

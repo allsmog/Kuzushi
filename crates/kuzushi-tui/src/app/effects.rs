@@ -180,7 +180,7 @@ impl ShellApp {
 
     fn apply_threat_patch_effect(&mut self, apply: ThreatPatchApply) {
         let target = threat_patch_target_root(apply.target);
-        self.pending_threat_patch = None;
+        self.engagement.clear_pending_threat_patch();
         let mut document = kuzushi_core::load_persistent_threat_model(&target)
             .unwrap_or_else(|| serde_json::json!({}));
         merge_json(&mut document, &apply.patch.patch);

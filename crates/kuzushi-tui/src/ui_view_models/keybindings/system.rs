@@ -22,7 +22,7 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
 }
 
 fn planning_picker_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
-    match app.planning_picker_route.focus() {
+    match app.engagement.planning_picker().focus() {
         crate::app::PickerFocus::Prompt => picker_prompt_keybindings(),
         crate::app::PickerFocus::OptionsPane => vec![
             bind("KEYS", "j/k option"),

@@ -102,12 +102,12 @@ impl ShellApp {
 
     fn page_scroll_mut(&mut self, kind: PageScrollKind) -> &mut usize {
         match kind {
-            PageScrollKind::Help => self.help_route.scroll_mut(),
-            PageScrollKind::Tools => self.tools_route.scroll_mut(),
-            PageScrollKind::History => self.history_route.scroll_mut(),
-            PageScrollKind::KnowledgeBase => self.kb_route.scroll_mut(),
-            PageScrollKind::Modules => self.modules_route.scroll_mut(),
-            PageScrollKind::Logs => self.logs_route.scroll_mut(),
+            PageScrollKind::Help => self.router.help_mut().scroll_mut(),
+            PageScrollKind::Tools => self.router.tools_mut().scroll_mut(),
+            PageScrollKind::History => self.router.history_mut().scroll_mut(),
+            PageScrollKind::KnowledgeBase => self.router.kb_mut().scroll_mut(),
+            PageScrollKind::Modules => self.router.modules_mut().scroll_mut(),
+            PageScrollKind::Logs => self.router.logs_mut().scroll_mut(),
         }
     }
 
