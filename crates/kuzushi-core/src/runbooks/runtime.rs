@@ -1,12 +1,16 @@
-use super::fanout::{CompletedWorkItem, FailedWorkItem, FanoutOutcome, PartialFailurePolicy, WorkItem, WorkItemKey};
+use super::fanout::{
+    CompletedWorkItem, FailedWorkItem, FanoutOutcome, PartialFailurePolicy, WorkItem, WorkItemKey,
+};
 use super::manifest::RunbookManifest;
 use anyhow::{Context, Result};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::{json, Value};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use crate::run_artifacts::{run_artifact_path, write_run_artifact_json, ParentScope, RunArtifact, TraceHandle};
+use crate::run_artifacts::{
+    run_artifact_path, write_run_artifact_json, ParentScope, RunArtifact, TraceHandle,
+};
 
 pub struct RunbookRuntime<'a> {
     target: &'a Path,
@@ -78,7 +82,11 @@ impl<'a> RunbookRuntime<'a> {
         label: impl Into<String>,
         value: &Value,
     ) -> Result<RunArtifact> {
-        let leaf = format!("runbooks/{}/{}", self.manifest.id, leaf.trim_start_matches('/'));
+        let leaf = format!(
+            "runbooks/{}/{}",
+            self.manifest.id,
+            leaf.trim_start_matches('/')
+        );
         let value = with_runbook_metadata(value.clone(), self.manifest, self.run_id);
         write_run_artifact_json(self.target, self.run_id, &leaf, label, &value)
     }
@@ -141,7 +149,11 @@ impl<'a> RunbookRuntime<'a> {
         step_id: &str,
         key: &WorkItemKey,
     ) -> Result<Option<T>> {
-        let path = run_artifact_path(self.target, self.run_id, &item_leaf(self.manifest.id, step_id, key));
+        let path = run_artifact_path(
+            self.target,
+            self.run_id,
+            &item_leaf(self.manifest.id, step_id, key),
+        );
         let Ok(text) = fs::read_to_string(&path) else {
             return Ok(None);
         };
@@ -158,7 +170,12 @@ impl<'a> RunbookRuntime<'a> {
             .map(Some)
     }
 
-    fn write_completed_item<T: Serialize>(&self, step_id: &str, key: &WorkItemKey, value: &T) -> Result<()> {
+    fn write_completed_item<T: Serialize>(
+        &self,
+        step_id: &str,
+        key: &WorkItemKey,
+        value: &T,
+    ) -> Result<()> {
         let payload = json!({
             "status": "completed",
             "key": key,
@@ -201,16 +218,16 @@ fn item_leaf(runbook_id: &str, step_id: &str, key: &WorkItemKey) -> String {
     )
 }
 
-fn with_runbook_metadata(mut value: Value, manifest: &RunbookManifest, run_id: &str) -> Value {
-    match &mut value {
-        Value::Object(object) => {
+fn with_runbook_metadata(value: Value, manifest: &RunbookManifest, run_id: &str) -> Value {
+    match value {
+        Value::Object(mut object) => {
             object.insert("schemaVersion".to_string(), json!(manifest.output_schema_version));
             object.insert("runbookId".to_string(), json!(manifest.id));
             object.insert("runbookVersion".to_string(), json!(manifest.version));
             object.insert("toolName".to_string(), json!(manifest.owner_tool));
             object.insert("phase".to_string(), json!(manifest.phase.as_str()));
             object.insert("runId".to_string(), json!(run_id));
-            value
+            Value::Object(object)
         }
         other => json!({
             "schemaVersion": manifest.output_schema_version,
