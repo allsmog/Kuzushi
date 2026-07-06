@@ -22,7 +22,7 @@ mod tests {
             unsupported: vec!["manual review".to_string()],
         }));
         assert!(!app.threat_worker_running);
-        assert!(app.pending_threat_patch.is_some());
+        assert!(app.engagement.has_pending_threat_patch());
         assert!(app
             .log
             .iter()

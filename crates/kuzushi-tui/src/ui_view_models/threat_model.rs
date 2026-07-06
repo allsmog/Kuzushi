@@ -25,17 +25,14 @@ pub(crate) struct ThreatSummaryReview {
 }
 
 pub(crate) fn threat_summary_review(app: &ShellApp) -> ThreatSummaryReview {
+    let patch = app.engagement.pending_threat_patch();
     match read_threat_model_artifact(app) {
         ThreatModelArtifact::Present(doc) if !doc.is_null() => {
-            ThreatSummaryReview::from_doc(Some(&doc), app.pending_threat_patch.as_ref())
+            ThreatSummaryReview::from_doc(Some(&doc), patch)
         }
-        ThreatModelArtifact::Malformed => {
-            ThreatSummaryReview::malformed(app.pending_threat_patch.as_ref())
-        }
-        ThreatModelArtifact::NonFile => {
-            ThreatSummaryReview::non_file(app.pending_threat_patch.as_ref())
-        }
-        _ => ThreatSummaryReview::unknown(app.pending_threat_patch.as_ref()),
+        ThreatModelArtifact::Malformed => ThreatSummaryReview::malformed(patch),
+        ThreatModelArtifact::NonFile => ThreatSummaryReview::non_file(patch),
+        _ => ThreatSummaryReview::unknown(patch),
     }
 }
 

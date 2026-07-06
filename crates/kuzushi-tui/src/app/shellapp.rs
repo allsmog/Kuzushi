@@ -97,28 +97,21 @@ pub struct ShellApp {
     /// Fuzzy file attach picker route state. Paths are repo-relative and rooted
     /// at the active target so accepting a row can reuse `attach <path>`.
     pub file_picker_route: FilePickerRouteState,
-    /// Route-local planning picker state: rows, cursor, checked tasks,
-    /// rebuild flags, pane focus, and option editor/error state.
-    pub planning_picker_route: PlanningPickerRouteState,
     /// Engagement-scoped planning runtime state: current phase, queued steps,
-    /// failures/retries, target classification, and per-run option overlays.
+    /// failures/retries, target classification, planning picker route state,
+    /// and per-run option overlays.
     pub engagement: EngagementState,
     pub tune_cursor: usize,
     pub prompts_cursor: usize,
     pub actor_detail_filter: ActorDetailFilter,
     pub planner_running: bool,
     pub plan_abort_requested: bool,
-    pub pending_threat_patch: Option<ThreatPatch>,
     pub threat_worker_running: bool,
     pub threat_abort_requested: bool,
     pub chains: Vec<ExploitChain>,
     pub story_return_view: Option<ShellView>,
-    pub help_route: HelpRouteState,
-    pub tools_route: ToolsRouteState,
-    pub history_route: ScrollRouteState,
-    pub kb_route: ScrollRouteState,
-    pub modules_route: ScrollRouteState,
-    pub logs_route: ScrollRouteState,
+    /// Route-local scroll/filter state for simple stacked shell surfaces.
+    pub router: RouterState,
     /// Last handled keyboard interaction. Viz auto-open uses this as a grace
     /// window so a finishing tool does not yank a recently navigated view.
     pub last_char_at: Option<Instant>,

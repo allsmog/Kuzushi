@@ -45,23 +45,29 @@ impl ShellApp {
 
     pub(crate) fn clamp_planning_option_cursor(&mut self) {
         let count = self.planning_option_count_for_current_row();
-        self.planning_picker_route.clamp_option_cursor(count);
+        self.engagement
+            .planning_picker_mut()
+            .clamp_option_cursor(count);
     }
 
     pub(crate) fn enter_planning_options_pane(&mut self) {
         if self.planning_option_count_for_current_row() == 0 {
-            self.planning_picker_route
+            self.engagement
+                .planning_picker_mut()
                 .set_option_error("focused step has no declared options");
             return;
         }
-        self.planning_picker_route
+        self.engagement
+            .planning_picker_mut()
             .set_focus(PickerFocus::OptionsPane);
         self.clamp_planning_option_cursor();
     }
 
     pub(crate) fn leave_planning_options_pane(&mut self) {
-        self.planning_picker_route.set_focus(PickerFocus::List);
-        self.planning_picker_route.set_option_edit(None);
+        self.engagement
+            .planning_picker_mut()
+            .set_focus(PickerFocus::List);
+        self.engagement.planning_picker_mut().set_option_edit(None);
     }
 
     pub(crate) fn move_planning_option_cursor(&mut self, delta: isize) {
@@ -69,7 +75,9 @@ impl ShellApp {
         if count == 0 {
             return;
         }
-        self.planning_picker_route.move_option_cursor(delta, count);
+        self.engagement
+            .planning_picker_mut()
+            .move_option_cursor(delta, count);
     }
 
     pub(crate) fn begin_planning_option_edit(&mut self) {
@@ -77,7 +85,8 @@ impl ShellApp {
             return;
         };
         if self.option_locked_by_planning_preset(task, &spec.name) {
-            self.planning_picker_route
+            self.engagement
+                .planning_picker_mut()
                 .set_option_error(format!("{} is locked by this step preset", spec.name));
             return;
         }
@@ -87,51 +96,54 @@ impl ShellApp {
             .and_then(|input| input.get(&spec.name).cloned())
             .map(|value| format_option_value(&value))
             .unwrap_or_default();
-        self.planning_picker_route
+        self.engagement
+            .planning_picker_mut()
             .set_option_edit(Some(PlanningOptionEdit {
                 task,
                 option_name: spec.name,
                 draft,
             }));
-        self.planning_picker_route.clear_option_error();
+        self.engagement.planning_picker_mut().clear_option_error();
     }
 
     pub(crate) fn edit_planning_option_draft(&mut self, ch: char) {
-        if let Some(edit) = self.planning_picker_route.option_edit_mut() {
+        if let Some(edit) = self.engagement.planning_picker_mut().option_edit_mut() {
             edit.draft.push(ch);
         }
     }
 
     pub(crate) fn backspace_planning_option_draft(&mut self) {
-        if let Some(edit) = self.planning_picker_route.option_edit_mut() {
+        if let Some(edit) = self.engagement.planning_picker_mut().option_edit_mut() {
             edit.draft.pop();
         }
     }
 
     pub(crate) fn cancel_planning_option_edit(&mut self) {
-        self.planning_picker_route.set_option_edit(None);
-        self.planning_picker_route.clear_option_error();
+        self.engagement.planning_picker_mut().set_option_edit(None);
+        self.engagement.planning_picker_mut().clear_option_error();
     }
 
     pub(crate) fn commit_planning_option_edit(&mut self) {
-        let Some(edit) = self.planning_picker_route.option_edit().cloned() else {
+        let Some(edit) = self.engagement.planning_picker().option_edit().cloned() else {
             return;
         };
         let Some(spec) = self.planning_option_spec(edit.task, &edit.option_name) else {
-            self.planning_picker_route
+            self.engagement
+                .planning_picker_mut()
                 .set_option_error("selected option disappeared");
-            self.planning_picker_route.set_option_edit(None);
+            self.engagement.planning_picker_mut().set_option_edit(None);
             return;
         };
         match coerce_raw_option_value(&spec, &edit.draft)
             .and_then(|value| self.set_planning_option_override(edit.task, &spec, value))
         {
             Ok(()) => {
-                self.planning_picker_route.set_option_edit(None);
-                self.planning_picker_route.clear_option_error();
+                self.engagement.planning_picker_mut().set_option_edit(None);
+                self.engagement.planning_picker_mut().clear_option_error();
             }
             Err(error) => {
-                self.planning_picker_route
+                self.engagement
+                    .planning_picker_mut()
                     .set_option_error(error.to_string());
             }
         }
@@ -142,7 +154,8 @@ impl ShellApp {
             return;
         };
         if self.option_locked_by_planning_preset(task, &spec.name) {
-            self.planning_picker_route
+            self.engagement
+                .planning_picker_mut()
                 .set_option_error(format!("{} is locked by this step preset", spec.name));
             return;
         }
@@ -150,16 +163,18 @@ impl ShellApp {
             OptionType::Bool => self.cycle_bool_planning_option(task, &spec),
             OptionType::Enum => self.cycle_enum_planning_option(task, &spec),
             _ => {
-                self.planning_picker_route
+                self.engagement
+                    .planning_picker_mut()
                     .set_option_error("Enter edits this option; Space cycles bool/enum only");
                 return;
             }
         };
         if let Err(error) = result {
-            self.planning_picker_route
+            self.engagement
+                .planning_picker_mut()
                 .set_option_error(error.to_string());
         } else {
-            self.planning_picker_route.clear_option_error();
+            self.engagement.planning_picker_mut().clear_option_error();
         }
     }
 
@@ -198,17 +213,17 @@ impl ShellApp {
     }
 
     fn current_planning_tool_options(&self) -> Option<&[OptionSpec]> {
-        let row = self.planning_picker_route.current_row()?;
+        let row = self.engagement.planning_picker().current_row()?;
         let tool = self.registry.resolve_tool(row.tool_name)?;
         Some(tool.options.as_slice())
     }
 
     pub(super) fn selected_planning_option_spec(&self) -> Option<(PlanningTaskId, OptionSpec)> {
-        let row = self.planning_picker_route.current_row()?;
+        let row = self.engagement.planning_picker().current_row()?;
         let tool = self.registry.resolve_tool(row.tool_name)?;
         let spec = tool
             .options
-            .get(self.planning_picker_route.option_cursor())?
+            .get(self.engagement.planning_picker().option_cursor())?
             .clone();
         Some((row.id, spec))
     }

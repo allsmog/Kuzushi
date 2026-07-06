@@ -552,14 +552,14 @@ mod tests {
             )
             .unwrap();
         assert_eq!(projected, (stable_fp, 4, "exploited".to_string()));
-        let legacy_table_count: i64 = conn
+        let old_table_count: i64 = conn
             .query_row(
                 "select count(*) from sqlite_master where type = 'table' and name = 'verifications'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(legacy_table_count, 0);
+        assert_eq!(old_table_count, 0);
     }
 
     #[test]
@@ -645,14 +645,14 @@ mod tests {
         assert_eq!(read_back.len(), 1);
         assert_eq!(read_back[0].status, PatchStatus::Verified);
         assert_eq!(read_back[0].diff.as_deref(), Some("diff --git a/src/app.rs b/src/app.rs\n"));
-        let legacy_table_count: i64 = conn
+        let old_table_count: i64 = conn
             .query_row(
                 "select count(*) from sqlite_master where type = 'table' and name = 'patch_results'",
                 [],
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(legacy_table_count, 0);
+        assert_eq!(old_table_count, 0);
     }
 
     #[test]
@@ -865,20 +865,20 @@ mod tests {
     }
 
     #[test]
-    fn identity_backfill_carries_same_snippet_across_line_shifts() {
+    fn identity_links_same_snippet_across_line_shifts() {
         let store = FindingStore::open_in_memory().unwrap();
         store
-            .record_run_started("run-backfill-line-a", Path::new("/tmp/repo"), "running")
+            .record_run_started("run-identity-line-a", Path::new("/tmp/repo"), "running")
             .unwrap();
         store
-            .record_run_started("run-backfill-line-b", Path::new("/tmp/repo"), "running")
+            .record_run_started("run-identity-line-b", Path::new("/tmp/repo"), "running")
             .unwrap();
 
         store
-            .insert_finding("run-backfill-line-a", &line_shift_finding(12))
+            .insert_finding("run-identity-line-a", &line_shift_finding(12))
             .unwrap();
         store
-            .insert_finding("run-backfill-line-b", &line_shift_finding(44))
+            .insert_finding("run-identity-line-b", &line_shift_finding(44))
             .unwrap();
 
         store
@@ -900,10 +900,10 @@ mod tests {
         store.init().unwrap();
 
         let first = store
-            .list_findings_for_scan_id("run-backfill-line-a")
+            .list_findings_for_scan_id("run-identity-line-a")
             .unwrap();
         let second = store
-            .list_findings_for_scan_id("run-backfill-line-b")
+            .list_findings_for_scan_id("run-identity-line-b")
             .unwrap();
         assert_eq!(first[0].identity_id, second[0].identity_id);
         assert_eq!(first[0].identity_match_tier.as_deref(), Some("stable_fp"));
@@ -1098,7 +1098,7 @@ mod tests {
         let second_row_decisions = store.list_review_decisions(second_id).unwrap();
         assert!(
             second_row_decisions.is_empty(),
-            "row-scoped compatibility reader stays per occurrence"
+            "row-scoped v3 reader stays per occurrence"
         );
 
         let second_identity_decisions = store
@@ -1160,7 +1160,7 @@ mod tests {
         assert_eq!(
             store.list_findings(10).unwrap()[0].triage,
             None,
-            "user decisions must not mutate scanner triage compatibility rows"
+            "user decisions must not mutate scanner triage projection rows"
         );
     }
 
@@ -1940,7 +1940,7 @@ mod tests {
     }
 
     #[test]
-    fn filters_findings_by_legacy_verdict_values() {
+    fn filters_findings_by_short_verdict_values() {
         let store = FindingStore::open_in_memory().unwrap();
         store
             .record_run_started("run-1", Path::new("/tmp/repo"), "completed")
@@ -2348,7 +2348,7 @@ mod tests {
         let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
         let store = FindingStore::open(&db_path).unwrap();
         store
-            .record_run_started("run-v2", Path::new("/repo"), "running")
+            .record_run_started("run-v3-secondary", Path::new("/repo"), "running")
             .unwrap();
         let finding = Finding::new_tool(
             "verify-test",
@@ -2359,7 +2359,7 @@ mod tests {
             Severity::High,
             "test",
         );
-        let finding_id = store.insert_finding("run-v2", &finding).unwrap();
+        let finding_id = store.insert_finding("run-v3-secondary", &finding).unwrap();
 
         let earlier = PersistedVerification {
             proof_level: 2,

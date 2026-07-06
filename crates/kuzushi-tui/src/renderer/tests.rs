@@ -126,7 +126,7 @@ fn planning_picker_announces_prior_state_and_plain_language_outcomes() {
         ),
         planning_row_fixture(PlanningTaskId::BuildXRay, PlanningArtifactState::Missing),
     ];
-    app.planning_picker_route.open(
+    app.engagement.planning_picker_mut().open(
         rows,
         [PlanningTaskId::GatherRepoContext, PlanningTaskId::BuildXRay]
             .into_iter()
@@ -195,13 +195,14 @@ fn planning_picker_options_focus_marks_the_options_pane() {
         PlanningTaskId::BuildStrideThreatModel,
         PlanningArtifactState::Missing,
     )];
-    app.planning_picker_route.open(
+    app.engagement.planning_picker_mut().open(
         rows,
         [PlanningTaskId::BuildStrideThreatModel]
             .into_iter()
             .collect(),
     );
-    app.planning_picker_route
+    app.engagement
+        .planning_picker_mut()
         .set_focus(PickerFocus::OptionsPane);
     app.shell_view = ShellView::PlanningPicker;
 
@@ -232,7 +233,7 @@ fn planning_picker_is_vertically_centered_on_tall_terminals() {
         PlanningTaskId::GatherRepoContext,
         PlanningArtifactState::Missing,
     )];
-    app.planning_picker_route.open(
+    app.engagement.planning_picker_mut().open(
         rows,
         [PlanningTaskId::GatherRepoContext].into_iter().collect(),
     );
@@ -267,7 +268,7 @@ fn planning_picker_revisit_banner_names_cached_artifact_behavior() {
         PlanningTaskId::GatherRepoContext,
         PlanningArtifactState::Cached,
     )];
-    app.planning_picker_route.open(
+    app.engagement.planning_picker_mut().open(
         rows,
         [PlanningTaskId::GatherRepoContext].into_iter().collect(),
     );
@@ -290,9 +291,13 @@ fn planning_picker_prompt_focus_renders_live_prompt() {
         PlanningTaskId::GatherRepoContext,
         PlanningArtifactState::Missing,
     )];
-    app.planning_picker_route.open(rows, Default::default());
+    app.engagement
+        .planning_picker_mut()
+        .open(rows, Default::default());
     app.shell_view = ShellView::PlanningPicker;
-    app.planning_picker_route.set_focus(PickerFocus::Prompt);
+    app.engagement
+        .planning_picker_mut()
+        .set_focus(PickerFocus::Prompt);
     app.set_input("help");
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -319,7 +324,7 @@ fn planning_picker_reuses_cached_artifact_when_rebuild_cli_is_missing() {
     );
     row.required_cli = Some("codeql");
     row.cli_available = false;
-    app.planning_picker_route.open(
+    app.engagement.planning_picker_mut().open(
         vec![row],
         [PlanningTaskId::BuildCodeQlDatabase].into_iter().collect(),
     );
@@ -2121,7 +2126,7 @@ fn viewport_help_remains_navigable_at_24_rows() {
     assert!(first_page.contains("HELP"));
     assert!(first_page.contains("NAVIGATION"));
 
-    *app.help_route.scroll_mut() = usize::MAX;
+    *app.router.help_mut().scroll_mut() = usize::MAX;
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let last_page = format!("{:?}", terminal.backend().buffer());
     assert!(last_page.contains("quit"), "{last_page}");
@@ -2141,7 +2146,7 @@ fn viewport_tools_remain_navigable_at_24_rows() {
         .cells[0]
         .clone();
     app.shell_view = ShellView::Tools;
-    *app.tools_route.scroll_mut() = usize::MAX;
+    *app.router.tools_mut().scroll_mut() = usize::MAX;
 
     let backend = TestBackend::new(110, 24);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -2171,7 +2176,7 @@ fn viewport_expanded_modules_remain_navigable_at_24_rows() {
         .clone();
     app.shell_view = ShellView::Catalog;
     app.catalog_route.expand();
-    *app.modules_route.scroll_mut() = usize::MAX;
+    *app.router.modules_mut().scroll_mut() = usize::MAX;
 
     let backend = TestBackend::new(110, 24);
     let mut terminal = Terminal::new(backend).unwrap();

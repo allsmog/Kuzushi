@@ -154,6 +154,28 @@ impl ContentStore {
         fs::read(&path).with_context(|| format!("Could not read {}", path.display()))
     }
 
+    pub fn get_object(&self, object_ref: &ObjectRef) -> Result<Vec<u8>> {
+        let bytes = self.get(&object_ref.hash)?;
+        let actual_size = bytes.len() as u64;
+        if actual_size != object_ref.size_bytes {
+            anyhow::bail!(
+                "CAS object {} size mismatch: expected {}, got {}",
+                object_ref.hash,
+                object_ref.size_bytes,
+                actual_size
+            );
+        }
+        let actual_hash = object_hash(object_ref.kind, &bytes);
+        if actual_hash != object_ref.hash {
+            anyhow::bail!(
+                "CAS object {} failed {} integrity check",
+                object_ref.hash,
+                object_ref.kind.as_str()
+            );
+        }
+        Ok(bytes)
+    }
+
     pub fn contains(&self, hash: &Blake3Hash) -> bool {
         self.object_path(hash).is_file()
     }
@@ -200,6 +222,18 @@ mod tests {
         let report = object_hash(ObjectKind::ReportMarkdown, b"same");
 
         assert_ne!(blob, report);
+    }
+
+    #[test]
+    fn verified_read_rejects_mutated_object_bytes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = ContentStore::open(tmp.path()).unwrap();
+        let object_ref = store.put_blob(b"original").unwrap();
+        fs::write(store.object_path(&object_ref.hash), b"mutated").unwrap();
+
+        let error = store.get_object(&object_ref).unwrap_err();
+
+        assert!(error.to_string().contains("size mismatch"));
     }
 
     #[test]

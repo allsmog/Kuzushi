@@ -13,7 +13,7 @@ impl ShellApp {
             Ok(()) => {
                 self.focused_module = Some(module_id.clone());
                 self.shell_view = ShellView::KnowledgeBase;
-                self.kb_route.open();
+                self.router.kb_mut().open();
                 self.log(
                     "kb",
                     format!(

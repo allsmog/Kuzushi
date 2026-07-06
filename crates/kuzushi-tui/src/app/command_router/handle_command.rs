@@ -128,7 +128,7 @@ pub(crate) fn handle_help_command(app: &mut ShellApp, command: &ShellCommand) ->
         return false;
     };
     app.shell_view = ShellView::Help;
-    app.help_route.open(query.clone());
+    app.router.help_mut().open(query.clone());
     app.log("help", help_log_summary(query.as_deref()));
     true
 }
@@ -163,7 +163,7 @@ pub(crate) fn handle_modules_command(app: &mut ShellApp, command: &ShellCommand)
     };
     app.shell_view = ShellView::Catalog;
     app.catalog_route.expand();
-    app.modules_route.open();
+    app.router.modules_mut().open();
     let count = app.registry.modules().count();
     app.log(
         "module",
@@ -189,7 +189,7 @@ pub(crate) fn handle_tools_command(app: &mut ShellApp, command: &ShellCommand) -
         return false;
     };
     app.shell_view = ShellView::Tools;
-    app.tools_route.open(filter.clone());
+    app.router.tools_mut().open(filter.clone());
     let model = crate::ui_view_models::tools_model(app);
     let suffix = filter
         .as_ref()

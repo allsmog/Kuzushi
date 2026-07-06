@@ -59,7 +59,7 @@ pub use rank::TuneAction;
 pub use routes::{
     AuthPickerRouteState, CatalogRouteState, FilePickerRouteState, FindingsRouteState,
     HelpRouteState, ModelPickerRouteState, PlanningPickerRouteState, ScrollRouteState,
-    TargetPickerRouteState, ToolsRouteState,
+    RouterState, TargetPickerRouteState, ToolsRouteState,
 };
 pub use sast_task_row::AuthLoginView;
 pub use sast_task_row::CompletionCycle;

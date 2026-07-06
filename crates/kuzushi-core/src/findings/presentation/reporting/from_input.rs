@@ -47,7 +47,7 @@ impl FindingVerdictFilter {
         }
     }
 
-    pub(in crate::findings) fn as_legacy_str(self) -> &'static str {
+    pub(in crate::findings) fn as_export_str(self) -> &'static str {
         match self {
             Self::TruePositive => "tp",
             Self::FalsePositive => "fp",

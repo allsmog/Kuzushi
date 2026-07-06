@@ -98,7 +98,7 @@ impl ShellApp {
         self.merge_model_recommendations(phase, &rows, &mut selected);
         self.drop_failed_dependents(&mut selected);
         self.drop_model_backed_without_model(&rows, &mut selected);
-        self.planning_picker_route.open(rows, selected);
+        self.engagement.planning_picker_mut().open(rows, selected);
         self.engagement.set_phase(phase);
         self.shell_view = ShellView::PlanningPicker;
         self.log(

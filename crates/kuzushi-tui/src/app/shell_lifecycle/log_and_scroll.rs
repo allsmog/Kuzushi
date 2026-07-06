@@ -17,7 +17,7 @@ impl ShellApp {
             ScrollTarget::WorkbenchPane => self
                 .workbench_scroll
                 .shift(self.workbench_focus, -(amount as i32)),
-            ScrollTarget::Logs => self.logs_route.scroll_up(amount as usize),
+            ScrollTarget::Logs => self.router.logs_mut().scroll_up(amount as usize),
             ScrollTarget::Default => self.scroll_offset = self.scroll_offset.saturating_sub(amount),
         }
     }
@@ -28,7 +28,7 @@ impl ShellApp {
             ScrollTarget::WorkbenchPane => self
                 .workbench_scroll
                 .shift(self.workbench_focus, amount as i32),
-            ScrollTarget::Logs => self.logs_route.scroll_down(amount as usize),
+            ScrollTarget::Logs => self.router.logs_mut().scroll_down(amount as usize),
             ScrollTarget::Default => self.scroll_offset = self.scroll_offset.saturating_add(amount),
         }
     }
@@ -39,7 +39,7 @@ impl ShellApp {
                 self.activity.as_mut().map(focused_pane_to_top);
             }
             ScrollTarget::WorkbenchPane => self.workbench_scroll.set(self.workbench_focus, 0),
-            ScrollTarget::Logs => self.logs_route.open(),
+            ScrollTarget::Logs => self.router.logs_mut().open(),
             ScrollTarget::Default => self.scroll_offset = 0,
         }
     }
@@ -50,7 +50,7 @@ impl ShellApp {
             ScrollTarget::WorkbenchPane => {
                 self.workbench_scroll.set(self.workbench_focus, u16::MAX)
             }
-            ScrollTarget::Logs => self.logs_route.set_scroll(usize::MAX),
+            ScrollTarget::Logs => self.router.logs_mut().set_scroll(usize::MAX),
             ScrollTarget::Default => self.scroll_offset = u16::MAX,
         }
     }
