@@ -101,41 +101,95 @@ fn completed_wasm_plugin_result(
 fn wasm_plugin_options() -> Vec<OptionSpec> {
     vec![
         target_option(),
-        opt("modulePath", OptionType::Path, "Path to the Wasm analyzer module.")
-            .aliases(&["module_path", "wasmPath", "wasm_path"])
-            .required(),
+        wasm_module_path_option(),
         max_findings_option(100),
-        opt(
-            "maxBytesServed",
-            OptionType::Int,
-            "Maximum source bytes the host may serve to the Wasm plugin.",
-        )
-        .aliases(&["max_bytes_served"])
-        .default(json!(16 * 1024 * 1024))
-        .advanced(),
-        opt(
-            "memoryLimitMb",
-            OptionType::Int,
-            "Maximum Wasm linear memory in MiB.",
-        )
-        .aliases(&["memory_limit_mb"])
-        .default(json!(256))
-        .advanced(),
-        opt("fuelLimit", OptionType::Int, "Maximum Wasm fuel for analysis.")
-            .aliases(&["fuel_limit"])
-            .default(json!(10_000_000))
-            .advanced(),
+        max_bytes_served_option(),
+        max_output_bytes_option(),
+        max_field_bytes_option(),
+        wasm_memory_limit_option(),
+        wasm_fuel_limit_option(),
     ]
 }
 
+fn wasm_module_path_option() -> OptionSpec {
+    opt(
+        "modulePath",
+        OptionType::Path,
+        "Path to the Wasm analyzer module.",
+    )
+    .aliases(&["module_path", "wasmPath", "wasm_path"])
+    .required()
+}
+
+fn max_bytes_served_option() -> OptionSpec {
+    opt(
+        "maxBytesServed",
+        OptionType::Int,
+        "Maximum source bytes the host may serve to the Wasm plugin.",
+    )
+    .aliases(&["max_bytes_served"])
+    .default(json!(16 * 1024 * 1024))
+    .advanced()
+}
+
+fn max_output_bytes_option() -> OptionSpec {
+    opt(
+        "maxOutputBytes",
+        OptionType::Int,
+        "Maximum JSON output bytes the Wasm plugin may return.",
+    )
+    .aliases(&["max_output_bytes"])
+    .default(json!(1024 * 1024))
+    .advanced()
+}
+
+fn max_field_bytes_option() -> OptionSpec {
+    opt(
+        "maxFieldBytes",
+        OptionType::Int,
+        "Maximum bytes for each returned finding text field.",
+    )
+    .aliases(&["max_field_bytes"])
+    .default(json!(16 * 1024))
+    .advanced()
+}
+
+fn wasm_memory_limit_option() -> OptionSpec {
+    opt(
+        "memoryLimitMb",
+        OptionType::Int,
+        "Maximum Wasm linear memory in MiB.",
+    )
+    .aliases(&["memory_limit_mb"])
+    .default(json!(256))
+    .advanced()
+}
+
+fn wasm_fuel_limit_option() -> OptionSpec {
+    opt(
+        "fuelLimit",
+        OptionType::Int,
+        "Maximum Wasm fuel for analysis.",
+    )
+    .aliases(&["fuel_limit"])
+    .default(json!(10_000_000))
+    .advanced()
+}
+
 fn required_input_path(input: &Value, target: &Path) -> Result<PathBuf> {
-    let raw = string_input_any(input, &["modulePath", "module_path", "wasmPath", "wasm_path"])
-        .context("wasm-plugin:analyze requires modulePath")?;
+    let raw = string_input_any(
+        input,
+        &["modulePath", "module_path", "wasmPath", "wasm_path"],
+    )
+    .context("wasm-plugin:analyze requires modulePath")?;
     let path = resolve_input_path(target, &raw);
     if path.is_file() {
         Ok(path)
     } else {
-        anyhow::bail!("wasm-plugin:analyze modulePath is not a file: {}", path.display())
+        anyhow::bail!(
+            "wasm-plugin:analyze modulePath is not a file: {}",
+            path.display()
+        )
     }
 }
 
@@ -159,14 +213,20 @@ fn sandbox_policy_from_input(input: &Value) -> Result<SandboxPolicy> {
             &["maxBytesServed", "max_bytes_served"],
             16 * 1024 * 1024,
         )?,
-        max_findings_returned: optional_u64_input(
+        max_output_bytes: optional_u64_input(
             input,
-            &["maxFindings", "max_findings"],
-            100,
-        )?
-        .min(1_000)
-        .try_into()
-        .unwrap_or(1_000),
+            &["maxOutputBytes", "max_output_bytes"],
+            1024 * 1024,
+        )?,
+        max_field_bytes: optional_u64_input(
+            input,
+            &["maxFieldBytes", "max_field_bytes"],
+            16 * 1024,
+        )?,
+        max_findings_returned: optional_u64_input(input, &["maxFindings", "max_findings"], 100)?
+            .min(1_000)
+            .try_into()
+            .unwrap_or(1_000),
     })
 }
 
@@ -207,7 +267,9 @@ fn observation_context(
 ) -> PluginObservationContext {
     PluginObservationContext {
         snapshot_hash: snapshot.snapshot_hash.clone(),
-        run_id: ctx.run_id().unwrap_or_else(|| "wasm-plugin-run".to_string()),
+        run_id: ctx
+            .run_id()
+            .unwrap_or_else(|| "wasm-plugin-run".to_string()),
         tool: TOOL_NAME.to_string(),
         tool_version: None,
         rule_set_hash: None,

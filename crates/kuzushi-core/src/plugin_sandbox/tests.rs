@@ -100,6 +100,42 @@ async fn sandbox_invocation_validates_stdout_candidates() {
 }
 
 #[tokio::test]
+async fn sandbox_invocation_rejects_oversized_stdout() {
+    let hash = blob_hash();
+    let grant = GrantedSnapshot::new(BTreeMap::from([(hash.clone(), 11)]));
+    let stdout = serde_json::json!({ "findings": [candidate(hash)] }).to_string();
+    let mut invocation = invocation_for_stdout(stdout, grant);
+    invocation.policy.max_output_bytes = 8;
+
+    let error = run_plugin_invocation_with_backend(invocation, SandboxBackend::Plain)
+        .await
+        .unwrap_err();
+
+    assert!(error.to_string().contains("output bytes"));
+}
+
+#[test]
+fn plugin_candidate_text_fields_obey_policy_cap() {
+    let hash = blob_hash();
+    let grant = GrantedSnapshot::new(BTreeMap::from([(hash.clone(), 11)]));
+    let oversized = UntrustedFindingCandidate {
+        rule_id: "r1".to_string(),
+        title: "too long".to_string(),
+        ..candidate(hash)
+    };
+    let stdout = serde_json::json!({ "findings": [oversized] }).to_string();
+    let policy = SandboxPolicy {
+        max_field_bytes: 4,
+        ..SandboxPolicy::default()
+    };
+
+    let error = validate_plugin_stdout(&stdout, &grant, &policy).unwrap_err();
+
+    assert!(error.to_string().contains("title"));
+    assert!(error.to_string().contains("exceeding policy cap"));
+}
+
+#[tokio::test]
 async fn sandbox_invocation_rejects_spoofed_blob_candidate() {
     let granted = blob_hash();
     let spoofed = hash_parts("other-blob", &[b"other"]);
@@ -227,6 +263,31 @@ fn wasm_plugin_blob_budget_is_enforced() {
     .unwrap_err();
 
     assert!(error.to_string().contains("outside the granted blob"));
+}
+
+#[test]
+fn wasm_plugin_output_budget_is_enforced() {
+    let tmp = tempfile::tempdir().unwrap();
+    let object_path = tmp.path().join("object");
+    let source = b"hello dangerous world\n";
+    std::fs::write(&object_path, source).unwrap();
+    let hash = blob_hash();
+    let module_path = tmp.path().join("plugin.wasm");
+    std::fs::write(&module_path, wasm_plugin_bytes(hash.as_str())).unwrap();
+    let grant = GrantedSnapshot::with_objects([(hash.clone(), source.len() as u64, object_path)]);
+
+    let error = run_wasm_plugin_invocation(WasmPluginInvocation {
+        module_path,
+        policy: SandboxPolicy {
+            read_snapshot: true,
+            max_output_bytes: 8,
+            ..SandboxPolicy::default()
+        },
+        grant,
+    })
+    .unwrap_err();
+
+    assert!(error.to_string().contains("output exceeds policy cap"));
 }
 
 fn wasm_plugin_bytes(hash: &str) -> Vec<u8> {

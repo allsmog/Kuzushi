@@ -271,7 +271,7 @@ fn auto_triage_full_mode_findings(
         .findings
         .iter()
         .map(|finding| {
-            auto_triage_candidate_cost(finding, routed, Some(&spend), &audit_cfg, store, workspace)
+            auto_triage_candidate_cost(finding, routed, Some(&spend), &audit_cfg, store)
         })
         .sum())
 }
@@ -320,7 +320,6 @@ fn auto_triage_candidate_cost(
     spend: Option<&crate::spend::SpendLimiter>,
     audit_cfg: &crate::capabilities::deep_auditor::DeepAuditConfig,
     store: &crate::findings::FindingStore,
-    workspace: &crate::workspace::WorkspaceTarget,
 ) -> f64 {
     use crate::capabilities::deep_auditor::run_deep_auditor;
 
@@ -332,7 +331,7 @@ fn auto_triage_candidate_cost(
     }
     run_deep_auditor(routed, spend, audit_cfg, finding)
         .map(|outcome| {
-            persist_auto_triage_outcome(finding, store, workspace, &outcome);
+            persist_auto_triage_outcome(finding, store, &outcome);
             outcome.cost_usd
         })
         .unwrap_or(0.0)
@@ -341,13 +340,12 @@ fn auto_triage_candidate_cost(
 fn persist_auto_triage_outcome(
     finding: &crate::findings::Finding,
     store: &crate::findings::FindingStore,
-    workspace: &crate::workspace::WorkspaceTarget,
     outcome: &crate::capabilities::deep_auditor::DeepAuditOutcome,
 ) {
-    use crate::capabilities::deep_auditor::save_evidence;
+    use crate::capabilities::deep_auditor::record_evidence;
 
     if let Some(id) = finding.id {
         let _ = store.save_triage(id, &outcome.triage);
-        let _ = save_evidence(&workspace.findings_db_path(), id, &outcome.evidence);
+        let _ = record_evidence(store, id, &outcome.evidence);
     }
 }

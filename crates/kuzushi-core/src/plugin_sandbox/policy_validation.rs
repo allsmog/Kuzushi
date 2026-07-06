@@ -10,7 +10,17 @@ pub(super) fn validate_sandbox_policy(policy: &SandboxPolicy) -> Result<()> {
     deny_workspace_writes(policy.write_workspace)?;
     deny_network(policy.network)?;
     deny_environment(policy.env)?;
-    deny_subprocess(policy.subprocess)
+    deny_subprocess(policy.subprocess)?;
+    require_positive_limit("memoryLimitBytes", policy.memory_limit_bytes)?;
+    require_positive_limit("fuelLimit", policy.fuel_limit)?;
+    require_positive_limit("timeoutMs", policy.timeout_ms)?;
+    require_positive_limit("maxBytesServed", policy.max_bytes_served)?;
+    require_positive_limit("maxOutputBytes", policy.max_output_bytes)?;
+    require_positive_limit("maxFieldBytes", policy.max_field_bytes)?;
+    if policy.max_findings_returned == 0 {
+        bail!("plugin sandbox policy maxFindingsReturned must be positive");
+    }
+    Ok(())
 }
 
 fn require_command(command: &[String]) -> Result<()> {
@@ -44,6 +54,13 @@ fn deny_environment(env: EnvPolicy) -> Result<()> {
 fn deny_subprocess(subprocess: SubprocessPolicy) -> Result<()> {
     if subprocess != SubprocessPolicy::None {
         bail!("plugin sandbox policy cannot grant subprocess capability");
+    }
+    Ok(())
+}
+
+fn require_positive_limit(name: &str, value: u64) -> Result<()> {
+    if value == 0 {
+        bail!("plugin sandbox policy {name} must be positive");
     }
     Ok(())
 }

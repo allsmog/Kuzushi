@@ -55,20 +55,11 @@ impl FindingStore {
         }
 
         let identity = self.identity_assignment_for_finding(tx, scan_id, finding)?;
-        let previous_static_proof_state =
-            self.existing_static_proof_state(tx, scan_id, &finding.fingerprint)?;
         self.upsert_finding(tx, scan_id, finding, &identity)?;
         let id: i64 = tx.query_row(
             "select id from finding_projection_rows where run_id = ?1 and fingerprint = ?2",
             params![scan_id, finding.fingerprint],
             |row| row.get(0),
-        )?;
-        self.record_static_proof_state_change(
-            tx,
-            scan_id,
-            id,
-            finding,
-            previous_static_proof_state,
         )?;
         let evidence = self.verified_finding_evidence(tx, scan_id, &finding.evidence)?;
         Ok(FindingInsertOutcome {
@@ -189,52 +180,6 @@ impl FindingStore {
             params![merged_tool, merged_source.map(|s| s.as_str()), id],
         )?;
         Ok(())
-    }
-
-    fn existing_static_proof_state(
-        &self,
-        tx: &Connection,
-        scan_id: &str,
-        fingerprint: &str,
-    ) -> Result<Option<StaticProofState>> {
-        let raw = tx
-            .query_row(
-                "select static_proof_state from finding_projection_rows where run_id = ?1 and fingerprint = ?2",
-                params![scan_id, fingerprint],
-                |row| row.get::<_, Option<String>>(0),
-            )
-            .optional()?
-            .flatten();
-        raw.as_deref()
-            .map(StaticProofState::try_from)
-            .transpose()
-            .context("Could not parse stored static proof state")
-    }
-
-    fn record_static_proof_state_change(
-        &self,
-        tx: &Connection,
-        scan_id: &str,
-        finding_id: i64,
-        finding: &Finding,
-        previous_state: Option<StaticProofState>,
-    ) -> Result<()> {
-        let Some(next_state) = finding.static_proof_state else {
-            return Ok(());
-        };
-        if previous_state == Some(next_state) {
-            return Ok(());
-        }
-        let created_at = static_proof_event_created_at(finding);
-        self.append_static_proof_state_event(
-            tx,
-            finding_id,
-            scan_id,
-            previous_state,
-            next_state,
-            &finding.tool,
-            &created_at,
-        )
     }
 
     /// Look up an existing finding in this scan run that shares the dedup_key.
@@ -493,14 +438,6 @@ fn observation_hash(
         snapshot_hash: Some(snapshot_hash),
         raw_result_hash,
     })
-}
-
-fn static_proof_event_created_at(finding: &Finding) -> String {
-    if finding.created_at.trim().is_empty() {
-        now_isoish()
-    } else {
-        finding.created_at.clone()
-    }
 }
 
 fn raw_result_hash(scan_id: &str, finding: &Finding) -> Result<String> {

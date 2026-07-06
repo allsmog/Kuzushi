@@ -1,5 +1,6 @@
 use super::*;
 
+mod audit_events;
 mod connection_and_schema;
 mod finding_evidence;
 mod finding_identities;

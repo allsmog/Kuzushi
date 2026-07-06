@@ -1,69 +1,75 @@
 use super::*;
 
 impl FindingStore {
-    pub fn list_static_proof_history(
-        &self,
-        finding_id: i64,
-    ) -> Result<Vec<StaticProofStateEvent>> {
+    pub fn list_static_proof_history(&self, finding_id: i64) -> Result<Vec<StaticProofStateEvent>> {
+        let Some(identity) = self.finding_identity_for_id(finding_id, "static proof history")?
+        else {
+            return Ok(Vec::new());
+        };
         let mut stmt = self.conn.prepare(
             r#"
-            select id, finding_id, scan_id, previous_state, next_state, source, created_at
-              from static_proof_history
-             where finding_id = ?1
-             order by created_at asc, id asc
+            select run_id, tool, finding_json, created_seq, created_at
+              from finding_observations
+             where stable_fp = ?1
+               and finding_json is not null
+             order by created_seq asc
             "#,
         )?;
-        let rows = stmt.query_map(params![finding_id], static_proof_state_event_from_row)?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .context("Could not list static proof state events")
-    }
-
-    pub(in crate::findings::persistence::open) fn append_static_proof_state_event(
-        &self,
-        tx: &Connection,
-        finding_id: i64,
-        scan_id: &str,
-        previous_state: Option<StaticProofState>,
-        next_state: StaticProofState,
-        source: &str,
-        created_at: &str,
-    ) -> Result<()> {
-        tx.execute(
-            r#"
-            insert into static_proof_history(
-              finding_id, scan_id, previous_state, next_state, source, created_at
-            )
-            values (?1, ?2, ?3, ?4, ?5, ?6)
-            "#,
-            params![
-                finding_id,
-                scan_id,
-                previous_state.map(StaticProofState::as_str),
-                next_state.as_str(),
-                source,
-                created_at,
-            ],
-        )?;
-        Ok(())
+        let rows = stmt.query_map(params![identity.stable_fp()], static_proof_observation_row)?;
+        static_proof_history_from_observations(finding_id, rows)
     }
 }
 
-fn static_proof_state_event_from_row(
+struct StaticProofObservation {
+    run_id: String,
+    tool: String,
+    finding_json: String,
+    created_seq: i64,
+    created_at: String,
+}
+
+fn static_proof_observation_row(
     row: &rusqlite::Row<'_>,
-) -> rusqlite::Result<StaticProofStateEvent> {
-    let previous_state: Option<String> = row.get(3)?;
-    let next_state: String = row.get(4)?;
-    Ok(StaticProofStateEvent {
-        id: row.get(0)?,
-        finding_id: row.get(1)?,
-        scan_id: row.get(2)?,
-        previous_state: previous_state
-            .as_deref()
-            .map(StaticProofState::try_from)
-            .transpose()
-            .map_err(to_sql_error)?,
-        next_state: StaticProofState::try_from(next_state.as_str()).map_err(to_sql_error)?,
-        source: row.get(5)?,
-        created_at: row.get(6)?,
+) -> rusqlite::Result<StaticProofObservation> {
+    Ok(StaticProofObservation {
+        run_id: row.get(0)?,
+        tool: row.get(1)?,
+        finding_json: row.get(2)?,
+        created_seq: row.get(3)?,
+        created_at: row.get(4)?,
     })
+}
+
+fn static_proof_history_from_observations(
+    finding_id: i64,
+    rows: impl Iterator<Item = rusqlite::Result<StaticProofObservation>>,
+) -> Result<Vec<StaticProofStateEvent>> {
+    let mut history = Vec::new();
+    let mut previous = None;
+    for row in rows {
+        let row = row?;
+        let Some(next_state) = static_proof_state_from_json(&row.finding_json)? else {
+            continue;
+        };
+        if previous == Some(next_state) {
+            continue;
+        }
+        history.push(StaticProofStateEvent {
+            id: row.created_seq,
+            finding_id,
+            scan_id: row.run_id,
+            previous_state: previous,
+            next_state,
+            source: row.tool,
+            created_at: row.created_at,
+        });
+        previous = Some(next_state);
+    }
+    Ok(history)
+}
+
+fn static_proof_state_from_json(raw: &str) -> Result<Option<StaticProofState>> {
+    let finding: Finding =
+        serde_json::from_str(raw).context("Could not parse v3 finding static proof history")?;
+    Ok(finding.static_proof_state)
 }
