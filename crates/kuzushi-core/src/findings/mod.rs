@@ -19,10 +19,11 @@ pub(crate) use application::{
 pub(crate) use domain::is_runtime_proof_state;
 pub use domain::{
     compute_dedup_key, compute_root_cause_key, compute_source_signature, extract_cwe,
-    normalize_cwe, Finding, FindingEvidence, FindingSource, PatchAttempt, PatchResult, PatchStatus,
-    PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification, Severity,
-    ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict, StaticProofState,
-    StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict, VulnSource,
+    normalize_cwe, ConfidenceBand, Finding, FindingEvidence, FindingSource, PatchAttempt,
+    PatchResult, PatchStatus, PersistedProofVerdict, PersistedSandboxBackend,
+    PersistedVerification, ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict, Severity,
+    StaticProofState, StaticProofStateEvent, TriageAuthor, TriageOutcome, TriageVerdict,
+    VulnSource,
 };
 pub use persistence::FindingStore;
 pub use presentation::{

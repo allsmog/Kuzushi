@@ -10,7 +10,9 @@ use super::bridge_process::{public_bridge_error, run_bridge};
 use super::next_step_bridge::next_step_blocking as run_next_step_blocking;
 use super::next_step_bridge::preflight_tool_loop_blocking as run_preflight_tool_loop_blocking;
 use super::runtime_config::LangGraphRuntime;
-use super::triage::{clamp_outcome, triage_prompt, triage_system_prompt};
+use super::triage::{
+    clamp_outcome, normalize_triage_confidence, triage_prompt, triage_system_prompt,
+};
 use std::thread;
 use std::time::Duration;
 
@@ -218,9 +220,10 @@ pub(crate) fn triage_outcome_from_response(response: AgentQueryResponse) -> Resu
 }
 
 fn structured_triage_outcome(
-    structured: serde_json::Value,
+    mut structured: serde_json::Value,
     call_cost: f64,
 ) -> Result<TriageOutcome> {
+    normalize_triage_confidence(&mut structured);
     let mut outcome = serde_json::from_value::<TriageOutcome>(structured)
         .map_err(|error| anyhow::anyhow!("LangGraph triage JSON violated schema: {error}"))?;
     outcome.cost_usd = call_cost;
@@ -238,12 +241,18 @@ fn text_triage_outcome(response: AgentQueryResponse, call_cost: f64) -> Result<T
     if text.is_empty() {
         anyhow::bail!("LangGraph bridge returned no triage content");
     }
-    let mut outcome =
-        serde_json::from_str::<TriageOutcome>(strip_whole_json_fence(text)).map_err(|error| {
+    let mut value = serde_json::from_str::<serde_json::Value>(strip_whole_json_fence(text))
+        .map_err(|error| {
             anyhow::anyhow!(
                 "LangGraph triage response was not valid triage JSON: {error}; raw response: {text}"
             )
         })?;
+    normalize_triage_confidence(&mut value);
+    let mut outcome = serde_json::from_value::<TriageOutcome>(value).map_err(|error| {
+        anyhow::anyhow!(
+            "LangGraph triage response violated triage schema: {error}; raw response: {text}"
+        )
+    })?;
     outcome.cost_usd = call_cost;
     Ok(clamp_outcome(outcome))
 }
@@ -275,7 +284,12 @@ fn triage_structured_output() -> AgentStructuredOutput {
                     "type": "string",
                     "enum": ["true_positive", "false_positive", "needs_review"]
                 },
-                "confidence": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "confidence": {
+                    "oneOf": [
+                        {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                        {"type": "string", "enum": ["high", "medium", "low"]}
+                    ]
+                },
                 "rationale": {"type": "string"}
             }
         }),

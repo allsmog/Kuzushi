@@ -20,10 +20,9 @@ pub(crate) fn query_agentic_sast_findings_with_cost(
             ),
         )
         .with_tool_policy(run.tool_policy.clone()),
-        StructuredJsonContract::new(
+        StructuredJsonContract::from_schema::<crate::structured_output::FindingsOutput>(
             "agentic-sast:scan",
             "AgenticSastFindings",
-            findings_array_schema(),
         ),
         |raw| {
             require_json_object(raw).and_then(|raw| {
