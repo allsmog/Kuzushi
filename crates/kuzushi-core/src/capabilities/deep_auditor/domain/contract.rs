@@ -111,6 +111,24 @@ const DEEP_AUDITOR_OUTPUT: &str = "Return ONLY a JSON object matching this schem
   ]
 }";
 
+#[cfg(test)]
+mod system_prompt_tests {
+    use super::deep_auditor_system_prompt;
+    use crate::prompts::PromptLanguage;
+
+    #[test]
+    fn validator_catalog_varies_by_detected_language() {
+        let c = deep_auditor_system_prompt(PromptLanguage::CorCpp);
+        let py = deep_auditor_system_prompt(PromptLanguage::Python);
+        assert!(c.contains("netlink, ioctl"));
+        assert!(!c.contains("Django/Flask/FastAPI"));
+        assert!(py.contains("Django/Flask/FastAPI"));
+        // Spine blocks are present regardless of language.
+        assert!(c.contains("false-DISMISSAL traps"));
+        assert!(py.contains("Assign confidence by evidence"));
+    }
+}
+
 /// Assemble the deep-auditor system prompt, injecting the validator catalog for
 /// the detected language/ecosystem.
 pub(crate) fn deep_auditor_system_prompt(language: crate::prompts::PromptLanguage) -> String {
