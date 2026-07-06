@@ -120,16 +120,16 @@ fn append_sanitizer_bodies_section(
         "Audit these sanitizer-shaped functions for bypasses before rejecting linked flows."
             .to_string(),
     );
-    for body in bodies {
-        lines.push(String::new());
-        lines.push(format!(
-            "### {} at {}:{}",
-            body.name, body.file_path, body.start_line
-        ));
-        lines.push("```c".to_string());
-        lines.push(body.source);
-        lines.push("```".to_string());
-    }
+    let wrapped: Vec<(String, String)> = bodies
+        .into_iter()
+        .map(|body| {
+            (
+                format!("{} at {}:{}", body.name, body.file_path, body.start_line),
+                body.source,
+            )
+        })
+        .collect();
+    lines.push(crate::prompts::render_untrusted_many(&wrapped));
 }
 
 fn sanitizer_body_candidates(
