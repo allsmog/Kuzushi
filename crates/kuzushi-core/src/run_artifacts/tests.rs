@@ -399,6 +399,10 @@ mod tests {
             loaded.kuzushi_version.as_deref(),
             Some(env!("CARGO_PKG_VERSION"))
         );
+        assert_eq!(
+            loaded.prompt_spine_version.as_deref(),
+            Some(crate::prompts::PROMPT_SPINE_VERSION)
+        );
         assert_eq!(loaded.platform, Some(runtime_platform_label()));
         assert_eq!(loaded.model.as_deref(), Some("openai:gpt-test"));
         assert_eq!(loaded.config_hash.as_deref(), Some("sha256:abc123"));

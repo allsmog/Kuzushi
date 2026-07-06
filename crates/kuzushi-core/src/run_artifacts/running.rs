@@ -80,6 +80,12 @@ pub struct RunSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(alias = "kuzushi_version")]
     pub kuzushi_version: Option<String>,
+    /// Version of the shared agentic prompt spine that produced this run's
+    /// prompts. Bumped whenever spine blocks, the untrusted-data boundary,
+    /// the false-positive taxonomy, or validator catalogs change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(alias = "prompt_spine_version")]
+    pub prompt_spine_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[serde(alias = "git_sha")]
     pub git_sha: Option<String>,
@@ -148,6 +154,7 @@ impl RunSummary {
             error: None,
             process_id: None,
             kuzushi_version: Some(env!("CARGO_PKG_VERSION").to_string()),
+            prompt_spine_version: Some(crate::prompts::PROMPT_SPINE_VERSION.to_string()),
             git_sha: build_git_sha(),
             git_branch: build_git_branch(),
             model: None,
@@ -216,6 +223,7 @@ impl RunSummary {
 
     pub fn with_reproducibility_from(mut self, source: &Self) -> Self {
         self.kuzushi_version = source.kuzushi_version.clone();
+        self.prompt_spine_version = source.prompt_spine_version.clone();
         self.git_sha = source.git_sha.clone();
         self.git_branch = source.git_branch.clone();
         self.model = source.model.clone();
