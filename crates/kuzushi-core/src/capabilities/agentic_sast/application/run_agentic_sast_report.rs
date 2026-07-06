@@ -110,6 +110,21 @@ fn apply_agentic_sast_whitebox_profile(
     Ok(())
 }
 
+fn agentic_sast_report(
+    run: &AgenticSastRun,
+    findings: Vec<Finding>,
+    persisted: Option<AgenticSastPersistedRun>,
+    cost_usd: f64,
+) -> AgenticSastReport {
+    AgenticSastReport {
+        target: run.target.display().to_string(),
+        count: findings.len(),
+        findings,
+        persisted,
+        cost_usd,
+    }
+}
+
 fn emit_agentic_sast_start(ctx: &ToolExecutionContext<'_>, run: &AgenticSastRun) -> Option<usize> {
     ctx.trace.map(|trace| {
         trace
@@ -117,9 +132,9 @@ fn emit_agentic_sast_start(ctx: &ToolExecutionContext<'_>, run: &AgenticSastRun)
                 "tool",
                 "scan",
                 format!(
-                    "agentic-sast start · target={} maxFindings={}",
+                    "agentic-sast start · target={} inventory={}",
                     run.target.display(),
-                    run.options.max_findings,
+                    run.inventory.len()
                 ),
             )
             .emit()
@@ -129,7 +144,7 @@ fn emit_agentic_sast_start(ctx: &ToolExecutionContext<'_>, run: &AgenticSastRun)
 fn emit_agentic_sast_validation_count(
     ctx: &ToolExecutionContext<'_>,
     parent_step: Option<usize>,
-    count: usize,
+    finding_count: usize,
 ) {
     if let (Some(trace), Some(parent)) = (ctx.trace, parent_step) {
         let _ = trace
@@ -137,20 +152,106 @@ fn emit_agentic_sast_validation_count(
             .step(
                 "reasoning",
                 "scan",
-                format!("static-validation · {count} candidate findings"),
+                format!("static-validation · {finding_count} candidate findings"),
             )
             .emit();
     }
 }
 
-fn emit_agentic_sast_done(ctx: &ToolExecutionContext<'_>, count: usize) {
+fn begin_agentic_sast_child_scope(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    label: &str,
+) -> Option<crate::run_artifacts::ParentScope> {
+    let trace = ctx.trace?;
+    let parent = parent_step?;
+    let phase = trace.child(parent).step("reasoning", "scan", label).emit();
+    Some(trace.parent_scope(phase))
+}
+
+fn emit_agentic_sast_done(ctx: &ToolExecutionContext<'_>, finding_count: usize) {
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(
                 "done",
                 "scan",
-                format!("agentic-sast complete · {count} findings"),
+                format!("agentic-sast complete · {finding_count} findings"),
             )
             .emit();
+    }
+}
+
+pub(crate) struct AgenticSastRun {
+    pub(crate) target: PathBuf,
+    pub(crate) options: AgenticSastInput,
+    pub(crate) model: String,
+    pub(crate) system_prompt: String,
+    pub(crate) tool_policy: AgentToolPolicy,
+    pub(crate) whitebox_static: bool,
+    pub(crate) inventory: Vec<(String, String)>,
+}
+
+impl AgenticSastRun {
+    pub(crate) fn from_input(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Self> {
+        let target = resolve_agentic_sast_target(input, ctx)?;
+        let options = AgenticSastInput::from_tool_input(input)?;
+        let model = agentic_sast_model(input, ctx)?;
+        let whitebox_static = whitebox_static_profile_requested(input)?;
+        let system_prompt = agentic_sast_system_prompt(whitebox_static);
+        let tool_policy = agent_tool_policy_for_input_and_target(input, &target)?;
+        let inventory = collect_agentic_repo_inventory_with_filters(
+            &target,
+            options.max_inventory_files,
+            options.max_bytes_per_file,
+            &options.include_patterns,
+            &options.exclude_patterns,
+        )?;
+        Ok(Self {
+            target,
+            options,
+            model,
+            system_prompt,
+            tool_policy,
+            whitebox_static,
+            inventory,
+        })
+    }
+}
+
+pub(crate) fn required_agentic_sast_runtime(
+    runtime: Option<&dyn AgentRuntime>,
+) -> Result<&dyn AgentRuntime> {
+    runtime.context(
+        "agentic-sast:scan requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies.",
+    )
+}
+
+pub(crate) fn resolve_agentic_sast_target(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<PathBuf> {
+    let target = resolve_tool_target(input, ctx)?;
+    if !target.is_dir() {
+        anyhow::bail!(
+            "agentic-sast: target is not a directory: {}",
+            target.display()
+        );
+    }
+    Ok(target)
+}
+
+pub(crate) fn agentic_sast_model(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<String> {
+    crate::runtime::resolve_explicit_model(
+        "agentic-sast:scan",
+        optional_nonempty_string(input, "model")?,
+        ctx.config.model.as_deref(),
+    )
+}
+
+pub(crate) fn agentic_sast_system_prompt(whitebox_static: bool) -> String {
+    if whitebox_static {
+        whitebox_static_triage_system_prompt().to_string()
+    } else {
+        AGENTIC_SAST_SYSTEM_PROMPT.to_string()
     }
 }
