@@ -1,6 +1,8 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, schemars::JsonSchema,
+)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
     Unknown,
@@ -24,6 +26,22 @@ impl Severity {
             "low" => Self::Low,
             "info" | "informational" | "note" => Self::Info,
             "unknown" => Self::Unknown,
+            _ => Self::Unknown,
+        }
+    }
+
+    /// Canonicalize any scanner-native or LLM-emitted severity label to the
+    /// canonical band. Handles Semgrep (`ERROR`/`WARNING`/`INFO`) and legacy /
+    /// CodeQL-style (`CRITICAL`/`HIGH`/`MEDIUM`/`LOW`) vocabularies in one place.
+    /// Unknown labels fail closed to [`Severity::Unknown`] rather than being
+    /// silently mapped to a plausible band.
+    pub fn from_scanner_label(value: &str) -> Self {
+        match value.trim().to_ascii_uppercase().as_str() {
+            "CRITICAL" => Self::Critical,
+            "ERROR" | "HIGH" => Self::High,
+            "WARNING" | "MEDIUM" | "MED" => Self::Medium,
+            "LOW" => Self::Low,
+            "INFO" | "INFORMATION" | "INFORMATIONAL" => Self::Info,
             _ => Self::Unknown,
         }
     }
@@ -82,6 +100,26 @@ mod tests {
         assert!(Severity::Medium > Severity::Low);
         assert!(Severity::Low > Severity::Info);
         assert!(Severity::Info > Severity::Unknown);
+    }
+}
+
+#[cfg(test)]
+mod scanner_label_tests {
+    use super::Severity;
+
+    #[test]
+    fn semgrep_and_legacy_labels_normalize_to_canonical_bands() {
+        // Semgrep-native
+        assert_eq!(Severity::from_scanner_label("ERROR"), Severity::High);
+        assert_eq!(Severity::from_scanner_label("WARNING"), Severity::Medium);
+        assert_eq!(Severity::from_scanner_label("INFO"), Severity::Info);
+        // Legacy / CodeQL-style
+        assert_eq!(Severity::from_scanner_label("HIGH"), Severity::High);
+        assert_eq!(Severity::from_scanner_label("medium"), Severity::Medium);
+        assert_eq!(Severity::from_scanner_label("Low"), Severity::Low);
+        assert_eq!(Severity::from_scanner_label("CRITICAL"), Severity::Critical);
+        // Fail closed on unknown labels rather than guessing a band.
+        assert_eq!(Severity::from_scanner_label("bogus"), Severity::Unknown);
     }
 }
 

@@ -112,13 +112,7 @@ pub(crate) fn normalize_file_path(root: &Path, file_path: &str) -> String {
 }
 
 pub(crate) fn severity_from_agent(value: &str) -> Severity {
-    match value.trim().to_ascii_uppercase().as_str() {
-        "CRITICAL" => Severity::Critical,
-        "ERROR" | "HIGH" => Severity::High,
-        "WARNING" | "MEDIUM" => Severity::Medium,
-        "INFO" | "LOW" => Severity::Low,
-        _ => Severity::Unknown,
-    }
+    Severity::from_scanner_label(value)
 }
 
 pub(crate) fn read_object_value<'a>(

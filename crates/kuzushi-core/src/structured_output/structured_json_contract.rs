@@ -20,6 +20,18 @@ impl StructuredJsonContract {
         }
     }
 
+    /// Build a contract whose JSON schema is generated from a Rust type via
+    /// `schemars`, so the canonical enum vocabularies (severity, confidence)
+    /// are the single source of truth and drift is caught by schema tests.
+    pub(crate) fn from_schema<T: schemars::JsonSchema>(
+        tool_name: impl Into<String>,
+        schema_name: impl Into<String>,
+    ) -> Self {
+        let schema = serde_json::to_value(schemars::schema_for!(T))
+            .unwrap_or_else(|_| serde_json::json!({"type": "object"}));
+        Self::new(tool_name, schema_name, schema)
+    }
+
     pub(crate) fn runtime_contract(&self) -> AgentStructuredOutput {
         AgentStructuredOutput::json_schema(self.schema_name.clone(), self.schema.clone())
     }
