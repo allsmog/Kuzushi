@@ -36,7 +36,7 @@ Every run should converge on these files:
 
 | File | Purpose |
 | --- | --- |
-| `run.json` | Run metadata: run id, kind, tool, target, status, started/completed times, model/provider/prompt hashes/cost where relevant, and reproducibility fingerprints such as house rules. |
+| `run.json` | Run metadata: canonical `runId`, kind, tool, target, status, `startedAtUnix`/completed time, model/provider/prompt hashes/cost where relevant, and reproducibility fingerprints such as house rules. |
 | `events.jsonl` | Ordered run events for replay and plain progress. |
 | `trace.jsonl` | Runtime trace steps, including LLM model, provider, prompt hash, latency, and cost when a model call occurs. |
 | `context.json` | Derived repository context export used by the run, or deterministic absence marker. |
@@ -87,11 +87,9 @@ claims.
 `schemas/run.events.schema.json` is the machine-readable contract for each
 JSON line in `events.jsonl`, including sequence number, kind, status, message,
 timestamp, optional tool, and optional artifact pointer.
-Report readers accept `toolName` and `tool_name` compatibility spellings when
-summarizing older or producer-authored event streams.
-Rust event readers also normalize `toolName` and `tool_name` back to `tool`
-for replay and TUI consumers. Event artifacts use the canonical `artifact`
-object with `"label"`, `"path"`, and `"kind"` fields.
+Run events use canonical `atUnix`, `tool`, and `artifact` fields only; obsolete
+event aliases are rejected instead of normalized. Event artifacts use the
+canonical `artifact` object with `"label"`, `"path"`, and `"kind"` fields.
 `schemas/run.trace.schema.json` is the machine-readable contract for each JSON
 line in `trace.jsonl`, including trace step identity, optional module/verb
 metadata, parent-step linkage, severity, timing, and LLM audit metadata.
@@ -137,13 +135,12 @@ under `coreFindings`, `core_findings`, or `findings`.
 summaries, verification proof snapshots, proof levels, verdicts, runtime proof
 flags, state counts, and proof finding entries. Static and verification
 snapshots may also be wrapped under `proof`, `proofs`, or `verification`.
-The schema contract intentionally accepts both standard camelCase artifact
-fields and the snake_case aliases already supported by Rust readers for run
-metadata, artifact manifests, and failure handoff payloads. The architecture
-gate checks that alias fields are declared and, where they identify required
-metadata such as `runId`/`run_id`, `startedAtUnix`/`started_at_unix`,
-`promptHash`/`prompt_hash`, and `agentThreadContext`/
-`agent_thread_context`, that the schema requires at least one spelling.
+The schema contract uses canonical run metadata and event fields only. Remaining
+alias coverage is limited to external producer payloads that have not been
+converted in the current slice, such as failure handoff `agentThreadContext` /
+`agent_thread_context` and trace stream metadata aliases. The architecture gate
+checks that those temporary alias fields are explicit and that canonical
+artifact fields stay required.
 The same gate also checks vocabulary fields that must stay aligned with Rust
 producers: artifact kind, run/failure/snapshot status, run kind, event and
 trace kind/severity, LLM audit call kind, route path shape, attack-surface

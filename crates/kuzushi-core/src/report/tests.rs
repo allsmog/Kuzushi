@@ -217,7 +217,7 @@ fn report_summarizes_run_event_and_trace_jsonl_shapes() {
         dir.join("events.jsonl"),
         [
             r#"{"n":1,"kind":"tool","status":"started","message":"started","atUnix":1,"tool":"agentic-sast:scan"}"#,
-            r#"{"n":2,"kind":"tool","status":"completed","message":"done","at_unix":6,"tool":"agentic-sast:scan","artifact":{"label":"findings","path":"findings.json","kind":"json"}}"#,
+            r#"{"n":2,"kind":"tool","status":"completed","message":"done","atUnix":6,"tool":"agentic-sast:scan","artifact":{"label":"findings","path":"findings.json","kind":"json"}}"#,
         ]
         .join("\n"),
     )
@@ -374,22 +374,22 @@ fn report_marks_non_object_canonical_json_as_malformed() {
 }
 
 #[test]
-fn report_summarizes_event_tool_name_aliases() {
+fn report_summarizes_canonical_event_tools() {
     let temp = tempdir().unwrap();
-    let source = completed_summary(temp.path(), "run-event-aliases", "agent:ask");
+    let source = completed_summary(temp.path(), "run-event-canonical", "agent:ask");
     write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-event-aliases");
+    let dir = run_dir(temp.path(), "run-event-canonical");
     fs::write(
         dir.join("events.jsonl"),
         [
-            r#"{"n":1,"kind":"tool","status":"started","message":"ask","atUnix":1,"toolName":"agent:ask"}"#,
-            r#"{"n":2,"kind":"tool","status":"completed","message":"scan","at_unix":2,"tool_name":"sast:scan"}"#,
+            r#"{"n":1,"kind":"tool","status":"started","message":"ask","atUnix":1,"tool":"agent:ask"}"#,
+            r#"{"n":2,"kind":"tool","status":"completed","message":"scan","atUnix":2,"tool":"sast:scan"}"#,
         ]
         .join("\n"),
     )
     .unwrap();
 
-    let report = build_run_report(temp.path(), Some("run-event-aliases")).unwrap();
+    let report = build_run_report(temp.path(), Some("run-event-canonical")).unwrap();
 
     assert!(report.report_markdown.contains(
         "events.jsonl: present - 2 event(s), kinds tool=2, status completed=1, started=1, tools agent:ask, sast:scan"
@@ -406,7 +406,7 @@ fn report_counts_event_artifact_objects() {
         dir.join("events.jsonl"),
         [
             r#"{"n":1,"kind":"tool","status":"started","message":"scan","atUnix":1,"tool":"sast:scan","artifact":{"label":"tool input","path":"input.json","kind":"json"}}"#,
-            r#"{"n":2,"kind":"tool","status":"completed","message":"done","at_unix":2,"tool":"sast:scan","artifact":{"label":"tool result","path":"result.json","kind":"json"}}"#,
+            r#"{"n":2,"kind":"tool","status":"completed","message":"done","atUnix":2,"tool":"sast:scan","artifact":{"label":"tool result","path":"result.json","kind":"json"}}"#,
         ]
         .join("\n"),
     )
@@ -888,38 +888,38 @@ fn report_summarizes_run_metadata_and_artifact_manifest() {
 }
 
 #[test]
-fn report_summarizes_snake_case_run_metadata_and_canonical_manifest() {
+fn report_summarizes_canonical_run_metadata_and_manifest() {
     let temp = tempdir().unwrap();
-    let source = completed_summary(temp.path(), "run-metadata-snake", "agentic-sast:scan");
+    let source = completed_summary(temp.path(), "run-metadata-canonical", "agentic-sast:scan");
     write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-metadata-snake");
+    let dir = run_dir(temp.path(), "run-metadata-canonical");
     fs::write(
         dir.join("run.json"),
         serde_json::to_string_pretty(&json!({
-            "runId": "run-metadata-snake",
+            "runId": "run-metadata-canonical",
             "kind": "tool",
             "status": "completed",
             "tool": "agentic-sast:scan",
             "target": "target",
-            "started_at_unix": 1,
-            "completed_at_unix": 9,
+            "startedAtUnix": 1,
+            "completedAtUnix": 9,
             "findings": 3,
             "model": "openai:gpt-test",
-            "config_hash": "sha256:def",
-            "house_rules": [{"module": "triage", "path": ".kuzushi/house-rules/triage.md", "sha256": "sha256:rule"}],
-            "prompt_overrides": [{"module": "triage", "verb": "run", "path": ".kuzushi/prompts/triage/run.md", "sha256": "sha256:prompt"}],
-            "scan_args": ["--target", "target"],
-            "loaded_module_specifiers": ["builtin:triage"],
-            "env_fingerprint": [{"key": "KUZUSHI_TEST", "fingerprint": "sha256:env"}],
-            "target_git": {"sha": "abcdef123456", "branch": "main", "dirty": true},
-            "llm_calls": [{
+            "configHash": "sha256:def",
+            "houseRules": [{"module": "triage", "path": ".kuzushi/house-rules/triage.md", "sha256": "sha256:rule"}],
+            "promptOverrides": [{"module": "triage", "verb": "run", "path": ".kuzushi/prompts/triage/run.md", "sha256": "sha256:prompt"}],
+            "cliArgs": ["--target", "target"],
+            "loadedModules": ["builtin:triage"],
+            "envFingerprint": [{"key": "KUZUSHI_TEST", "fingerprint": "sha256:env"}],
+            "targetGit": {"sha": "abcdef123456", "branch": "main", "dirty": true},
+            "llmCalls": [{
                 "n": 1,
                 "kind": "reasoning",
                 "model": "openai:gpt-test",
                 "provider": "openai",
-                "prompt_hash": "fnv1a64:abc123"
+                "promptHash": "fnv1a64:abc123"
             }],
-            "cost_usd": 0.5
+            "costUsd": 0.5
         }))
         .unwrap(),
     )
@@ -927,7 +927,7 @@ fn report_summarizes_snake_case_run_metadata_and_canonical_manifest() {
     fs::write(
         dir.join("artifacts.json"),
         serde_json::to_string_pretty(&json!({
-            "runId": "run-metadata-snake",
+            "runId": "run-metadata-canonical",
             "artifacts": [
                 {"label": "run metadata", "path": "run.json", "kind": "json"},
                 {"label": "run events", "path": "events.jsonl", "kind": "jsonl"},
@@ -938,11 +938,11 @@ fn report_summarizes_snake_case_run_metadata_and_canonical_manifest() {
     )
     .unwrap();
 
-    let report = build_run_report(temp.path(), Some("run-metadata-snake")).unwrap();
+    let report = build_run_report(temp.path(), Some("run-metadata-canonical")).unwrap();
 
     assert!(
         report.report_markdown.contains(
-            "run.json: present - run run-metadata-snake, status completed, duration 8s, tool agentic-sast:scan, findings 3, model openai:gpt-test, config sha256:def, llm calls 1, cost $0.500000, house rules 1, prompt overrides 1, scan args 2, module specifiers 1, env 1, target git abcdef123456 dirty"
+            "run.json: present - run run-metadata-canonical, status completed, duration 8s, tool agentic-sast:scan, findings 3, model openai:gpt-test, config sha256:def, llm calls 1, cost $0.500000, house rules 1, prompt overrides 1, cli args 2, loaded modules 1, env 1, target git abcdef123456 dirty"
         ),
         "{}",
         report.report_markdown

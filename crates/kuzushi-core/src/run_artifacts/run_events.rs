@@ -8,10 +8,8 @@ pub struct RunEvent {
     pub kind: String,
     pub status: String,
     pub message: String,
-    #[serde(alias = "at_unix")]
     pub at_unix: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "toolName", alias = "tool_name")]
     pub tool: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifact: Option<RunArtifact>,

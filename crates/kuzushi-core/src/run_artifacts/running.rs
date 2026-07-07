@@ -9,13 +9,10 @@ pub struct RunLlmCallAudit {
     pub verb: Option<String>,
     pub model: String,
     pub provider: String,
-    #[serde(alias = "prompt_hash")]
     pub prompt_hash: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "latency_ms")]
     pub latency_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "cost_usd")]
     pub cost_usd: Option<f64>,
 }
 
@@ -55,80 +52,57 @@ pub struct RunTargetGitMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RunSummary {
-    #[serde(alias = "run_id")]
     pub run_id: String,
     pub kind: String,
     pub status: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tool: Option<String>,
     pub target: String,
-    #[serde(alias = "started_at_unix")]
     pub started_at_unix: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "completed_at_unix")]
     pub completed_at_unix: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub findings: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "cost_usd")]
     pub cost_usd: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "process_id")]
     pub process_id: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "kuzushi_version")]
     pub kuzushi_version: Option<String>,
     /// Version of the shared agentic prompt spine that produced this run's
     /// prompts. Bumped whenever spine blocks, the untrusted-data boundary,
     /// the false-positive taxonomy, or validator catalogs change.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "prompt_spine_version")]
     pub prompt_spine_version: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "git_sha")]
     pub git_sha: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "git_branch")]
     pub git_branch: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "config_hash")]
     pub config_hash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub platform: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[serde(alias = "house_rules")]
     pub house_rules: Vec<RunHouseRuleFingerprint>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[serde(alias = "prompt_overrides")]
     pub prompt_overrides: Vec<RunPromptOverrideFingerprint>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "threat_model_sha256")]
     pub threat_model_sha256: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[serde(alias = "env_fingerprint")]
     pub env_fingerprint: Vec<RunEnvFingerprint>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "target_git")]
     pub target_git: Option<RunTargetGitMetadata>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[serde(alias = "llm_calls")]
     pub llm_calls: Vec<RunLlmCallAudit>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "trace_malformed_lines")]
     pub trace_malformed_lines: Option<usize>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[serde(alias = "cli_args", alias = "scanArgs", alias = "scan_args")]
     pub cli_args: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    #[serde(
-        alias = "loaded_modules",
-        alias = "loadedModuleSpecifiers",
-        alias = "loaded_module_specifiers"
-    )]
     pub loaded_modules: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub artifacts: Vec<RunArtifact>,

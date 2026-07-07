@@ -108,14 +108,14 @@ fn count_segment(label: &str, counts: BTreeMap<String, usize>) -> Option<String>
 }
 
 fn tool_segment(events: &[Value]) -> Option<String> {
-    let tools = unique_string_values_at(events, &["tool", "toolName", "tool_name"]);
+    let tools = unique_string_values_at(events, &["tool"]);
     (!tools.is_empty()).then(|| format!("tools {}", tools.join(", ")))
 }
 
 fn event_span_segment(events: &[Value]) -> Option<String> {
     let times = events
         .iter()
-        .filter_map(|event| u64_at(event, &["atUnix", "at_unix"]))
+        .filter_map(|event| u64_at(event, &["atUnix"]))
         .collect::<Vec<_>>();
     let start = times.iter().min()?;
     let end = times.iter().max()?;

@@ -2,50 +2,18 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://kuzushi.dev/schemas/run.summary.schema.json",
   "title": "Kuzushi Run Summary",
-  "description": "Canonical schema for .kuzushi/runs/<runId>/run.json and legacy summary.json metadata.",
+  "description": "Canonical schema for .kuzushi/v3/runs/<runId>/run.json metadata.",
   "type": "object",
   "additionalProperties": true,
   "required": [
+    "runId",
     "kind",
     "status",
-    "target"
-  ],
-  "allOf": [
-    {
-      "anyOf": [
-        {
-          "required": [
-            "runId"
-          ]
-        },
-        {
-          "required": [
-            "run_id"
-          ]
-        }
-      ]
-    },
-    {
-      "anyOf": [
-        {
-          "required": [
-            "startedAtUnix"
-          ]
-        },
-        {
-          "required": [
-            "started_at_unix"
-          ]
-        }
-      ]
-    }
+    "target",
+    "startedAtUnix"
   ],
   "properties": {
     "runId": {
-      "type": "string",
-      "minLength": 1
-    },
-    "run_id": {
       "type": "string",
       "minLength": 1
     },
@@ -74,15 +42,7 @@
       "type": "integer",
       "minimum": 0
     },
-    "started_at_unix": {
-      "type": "integer",
-      "minimum": 0
-    },
     "completedAtUnix": {
-      "type": "integer",
-      "minimum": 0
-    },
-    "completed_at_unix": {
       "type": "integer",
       "minimum": 0
     },
@@ -94,10 +54,6 @@
       "type": "number",
       "minimum": 0
     },
-    "cost_usd": {
-      "type": "number",
-      "minimum": 0
-    },
     "error": {
       "type": "string"
     },
@@ -105,41 +61,22 @@
       "type": "integer",
       "minimum": 0
     },
-    "process_id": {
-      "type": "integer",
-      "minimum": 0
-    },
     "kuzushiVersion": {
-      "type": "string"
-    },
-    "kuzushi_version": {
       "type": "string"
     },
     "promptSpineVersion": {
       "type": "string"
     },
-    "prompt_spine_version": {
-      "type": "string"
-    },
     "gitSha": {
       "type": "string"
     },
-    "git_sha": {
-      "type": "string"
-    },
     "gitBranch": {
-      "type": "string"
-    },
-    "git_branch": {
       "type": "string"
     },
     "model": {
       "type": "string"
     },
     "configHash": {
-      "type": "string"
-    },
-    "config_hash": {
       "type": "string"
     },
     "platform": {
@@ -151,19 +88,7 @@
         "$ref": "#/definitions/houseRuleFingerprint"
       }
     },
-    "house_rules": {
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/houseRuleFingerprint"
-      }
-    },
     "promptOverrides": {
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/promptOverrideFingerprint"
-      }
-    },
-    "prompt_overrides": {
       "type": "array",
       "items": {
         "$ref": "#/definitions/promptOverrideFingerprint"
@@ -172,16 +97,7 @@
     "threatModelSha256": {
       "type": "string"
     },
-    "threat_model_sha256": {
-      "type": "string"
-    },
     "envFingerprint": {
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/envFingerprint"
-      }
-    },
-    "env_fingerprint": {
       "type": "array",
       "items": {
         "$ref": "#/definitions/envFingerprint"
@@ -190,16 +106,7 @@
     "targetGit": {
       "$ref": "#/definitions/targetGit"
     },
-    "target_git": {
-      "$ref": "#/definitions/targetGit"
-    },
     "llmCalls": {
-      "type": "array",
-      "items": {
-        "$ref": "#/definitions/llmCall"
-      }
-    },
-    "llm_calls": {
       "type": "array",
       "items": {
         "$ref": "#/definitions/llmCall"
@@ -209,53 +116,13 @@
       "type": "integer",
       "minimum": 1
     },
-    "trace_malformed_lines": {
-      "type": "integer",
-      "minimum": 1
-    },
     "cliArgs": {
       "type": "array",
       "items": {
         "type": "string"
       }
     },
-    "cli_args": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "scanArgs": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "scan_args": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
     "loadedModules": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "loaded_modules": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "loadedModuleSpecifiers": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    },
-    "loaded_module_specifiers": {
       "type": "array",
       "items": {
         "type": "string"
@@ -364,19 +231,8 @@
         "n",
         "kind",
         "model",
-        "provider"
-      ],
-      "anyOf": [
-        {
-          "required": [
-            "promptHash"
-          ]
-        },
-        {
-          "required": [
-            "prompt_hash"
-          ]
-        }
+        "provider",
+        "promptHash"
       ],
       "properties": {
         "n": {
@@ -398,22 +254,11 @@
         "promptHash": {
           "type": "string"
         },
-        "prompt_hash": {
-          "type": "string"
-        },
         "latencyMs": {
           "type": "integer",
           "minimum": 0
         },
-        "latency_ms": {
-          "type": "integer",
-          "minimum": 0
-        },
         "costUsd": {
-          "type": "number",
-          "minimum": 0
-        },
-        "cost_usd": {
           "type": "number",
           "minimum": 0
         }

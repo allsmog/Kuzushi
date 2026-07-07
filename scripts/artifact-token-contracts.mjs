@@ -275,9 +275,9 @@ export const tokenChecks = [
     ],
   },
   {
-    label: "run event reader canonical artifact object",
+    label: "run event reader canonical tool and artifact fields",
     file: "crates/kuzushi-core/src/run_artifacts/run_events.rs",
-    tokens: ["toolName", "tool_name", "pub artifact: Option<RunArtifact>"],
+    tokens: ["pub tool: Option<String>", "pub artifact: Option<RunArtifact>"],
   },
   {
     label: "report JSONL alias architecture doc",

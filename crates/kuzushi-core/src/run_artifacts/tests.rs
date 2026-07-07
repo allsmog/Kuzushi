@@ -127,7 +127,7 @@ mod tests {
                 r#"{"n":1,"kind":"tool","status":"started","message":"start","atUnix":1}"#,
                 "",
                 "not-json",
-                r#"{"n":7,"kind":"tool","status":"completed","message":"done","at_unix":2}"#,
+                r#"{"n":7,"kind":"tool","status":"completed","message":"done","atUnix":2}"#,
             ]
             .join("\n"),
         )
@@ -201,18 +201,18 @@ mod tests {
     }
 
     #[test]
-    fn run_event_accepts_tool_name_aliases() {
-        let camel: RunEvent = serde_json::from_str(
-            r#"{"n":1,"kind":"tool","status":"started","message":"ask","atUnix":1,"toolName":"agent:ask"}"#,
+    fn run_event_rejects_obsolete_tool_and_time_aliases() {
+        let obsolete = serde_json::from_str::<RunEvent>(
+            r#"{"n":1,"kind":"tool","status":"started","message":"ask","at_unix":1,"tool_name":"agent:ask"}"#,
         )
-        .unwrap();
-        let snake: RunEvent = serde_json::from_str(
-            r#"{"n":2,"kind":"tool","status":"completed","message":"scan","at_unix":2,"tool_name":"sast:scan"}"#,
+        .unwrap_err();
+        let canonical: RunEvent = serde_json::from_str(
+            r#"{"n":2,"kind":"tool","status":"completed","message":"scan","atUnix":2,"tool":"sast:scan"}"#,
         )
         .unwrap();
 
-        assert_eq!(camel.tool.as_deref(), Some("agent:ask"));
-        assert_eq!(snake.tool.as_deref(), Some("sast:scan"));
+        assert!(obsolete.to_string().contains("missing field `atUnix`"));
+        assert_eq!(canonical.tool.as_deref(), Some("sast:scan"));
     }
 
     #[test]
@@ -423,18 +423,26 @@ mod tests {
     }
 
     #[test]
-    fn run_summary_schema_covers_snake_case_metadata_aliases() {
+    fn run_summary_schema_declares_only_canonical_metadata_fields() {
         let schema = run_summary_schema();
-        let value = representative_snake_case_run_summary();
+        let value = serde_json::to_value(representative_run_summary()).unwrap();
 
         assert_serialized_fields_are_declared(&schema, &value);
         assert_run_summary_llm_entries_match_schema(&schema, &value);
-        assert_schema_allows_required_alias_pair(&schema, ["runId", "run_id"]);
-        assert_schema_allows_required_alias_pair(
+        assert_schema_requires_fields(&schema, &["runId", "startedAtUnix"]);
+        assert_schema_declares_no_fields(
             &schema,
-            ["startedAtUnix", "started_at_unix"],
+            &[
+                "run_id",
+                "started_at_unix",
+                "completed_at_unix",
+                "cost_usd",
+                "cli_args",
+                "scanArgs",
+                "loaded_module_specifiers",
+            ],
         );
-        assert_llm_call_schema_requires_prompt_hash_aliases(&schema);
+        assert_llm_call_schema_requires_canonical_prompt_hash(&schema);
     }
 
     #[test]
@@ -566,11 +574,11 @@ mod tests {
     }
 
     #[test]
-    fn run_event_schema_covers_reader_aliases() {
+    fn run_event_schema_declares_only_canonical_event_fields() {
         let schema = run_event_schema();
 
-        assert_schema_allows_required_alias_pair(&schema, ["atUnix", "at_unix"]);
-        assert_schema_declares_fields(&schema, &["toolName", "tool_name"]);
+        assert_schema_requires_fields(&schema, &["atUnix"]);
+        assert_schema_declares_no_fields(&schema, &["at_unix", "toolName", "tool_name"]);
     }
 
     #[test]
@@ -1017,7 +1025,7 @@ mod tests {
     }
 
     #[test]
-    fn load_run_summary_accepts_snake_case_metadata_aliases() {
+    fn load_run_summary_rejects_obsolete_metadata_aliases() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-snake-metadata";
         write_run_summary(
@@ -1064,26 +1072,10 @@ mod tests {
         )
         .unwrap();
 
-        let loaded = load_run_summary(tmp.path(), run_id).unwrap();
+        let error = load_run_summary(tmp.path(), run_id).unwrap_err();
 
-        assert_eq!(loaded.run_id, run_id);
-        assert_eq!(loaded.started_at_unix, 1);
-        assert_eq!(loaded.completed_at_unix, Some(2));
-        assert_eq!(loaded.cost_usd, Some(0.5));
-        assert_eq!(loaded.process_id, Some(99));
-        assert_eq!(loaded.kuzushi_version.as_deref(), Some("1.2.3-test"));
-        assert_eq!(loaded.git_sha.as_deref(), Some("abc123"));
-        assert_eq!(loaded.git_branch.as_deref(), Some("main"));
-        assert_eq!(loaded.model.as_deref(), Some("openai:gpt-test"));
-        assert_eq!(loaded.config_hash.as_deref(), Some("sha256:def456"));
-        assert_eq!(loaded.platform.as_deref(), Some("darwin-arm64"));
-        assert_eq!(
-            loaded.loaded_modules,
-            vec!["builtin:agentic-sast", "builtin:context"]
-        );
-        assert_eq!(loaded.llm_calls[0].prompt_hash, "fnv1a64:abc123");
-        assert_eq!(loaded.llm_calls[0].latency_ms, Some(42));
-        assert_eq!(loaded.llm_calls[0].cost_usd, Some(0.25));
+        assert!(error.to_string().contains("Could not parse"));
+        assert!(format!("{error:#}").contains("missing field `runId`"));
     }
 
     #[test]
@@ -4009,58 +4001,6 @@ mod tests {
         }
     }
 
-    fn representative_snake_case_run_summary() -> serde_json::Value {
-        serde_json::json!({
-            "run_id": "run-schema",
-            "kind": "tool",
-            "status": "completed",
-            "tool": "agentic:test",
-            "target": "target",
-            "started_at_unix": 1,
-            "completed_at_unix": 2,
-            "cost_usd": 0.42,
-            "process_id": 42,
-            "kuzushi_version": "0.24.0-alpha.0",
-            "git_sha": "abcdef123456",
-            "git_branch": "main",
-            "model": "openai:gpt-test",
-            "config_hash": "sha256:cfg",
-            "platform": "darwin-arm64",
-            "house_rules": [{
-                "module": "triage",
-                "path": ".kuzushi/house-rules/triage.md",
-                "sha256": "sha256:rules"
-            }],
-            "prompt_overrides": [{
-                "module": "triage",
-                "verb": "run",
-                "path": ".kuzushi/prompts/triage/run.md",
-                "sha256": "sha256:prompt"
-            }],
-            "threat_model_sha256": "sha256:threat",
-            "env_fingerprint": [{"key": "KUZUSHI_TEST", "fingerprint": "sha256:env"}],
-            "target_git": {"sha": "abcdef123456", "branch": "main", "dirty": true},
-            "cli_args": ["kuzushi", "run", "context:build"],
-            "loaded_modules": ["builtin:agentic-sast", "builtin:context"],
-            "trace_malformed_lines": 1,
-            "llm_calls": [{
-                "n": 1,
-                "kind": "reasoning",
-                "verb": "run",
-                "model": "openai:gpt-test",
-                "provider": "openai",
-                "prompt_hash": "fnv1a64:abc",
-                "latency_ms": 12,
-                "cost_usd": 0.01
-            }],
-            "artifacts": [{
-                "label": "result",
-                "path": representative_run_artifact_path("run-schema", "result.json"),
-                "kind": "json"
-            }]
-        })
-    }
-
     fn representative_run_failures() -> RunFailures {
         RunFailures {
             run_id: "run-failed".to_string(),
@@ -4448,6 +4388,13 @@ mod tests {
         }
     }
 
+    fn assert_schema_requires_fields(schema: &serde_json::Value, fields: &[&str]) {
+        let required = required_fields(schema);
+        for field in fields {
+            assert!(required.contains(field), "schema missing required field {field}");
+        }
+    }
+
     fn assert_failure_schema_requires_any_context_key(schema: &serde_json::Value) {
         let failure_schema = &schema["definitions"]["failure"];
         assert_schema_requires_any_field(
@@ -4509,6 +4456,16 @@ mod tests {
         let properties = schema["properties"].as_object().unwrap();
         for field in fields {
             assert!(properties.contains_key(*field), "schema missing field {field}");
+        }
+    }
+
+    fn assert_schema_declares_no_fields(schema: &serde_json::Value, fields: &[&str]) {
+        let properties = schema["properties"].as_object().unwrap();
+        for field in fields {
+            assert!(
+                !properties.contains_key(*field),
+                "schema still declares obsolete field {field}"
+            );
         }
     }
 
@@ -4633,9 +4590,10 @@ mod tests {
         }
     }
 
-    fn assert_llm_call_schema_requires_prompt_hash_aliases(schema: &serde_json::Value) {
+    fn assert_llm_call_schema_requires_canonical_prompt_hash(schema: &serde_json::Value) {
         let llm_schema = &schema["definitions"]["llmCall"];
-        assert_schema_requires_any_field(llm_schema, &["promptHash", "prompt_hash"]);
+        assert_schema_requires_fields(llm_schema, &["promptHash"]);
+        assert_schema_declares_no_fields(llm_schema, &["prompt_hash", "latency_ms", "cost_usd"]);
     }
 
     fn assert_failure_entries_match_schema(schema: &serde_json::Value, value: &serde_json::Value) {

@@ -28,7 +28,7 @@ const requiredAliasGroupsBySchema = {
     ...artifactFieldGroups,
   ],
   "schemas/run.events.schema.json": [
-    { path: [], kind: "allOfAnyOf", fields: ["atUnix", "at_unix"] },
+    { path: [], kind: "required", fields: ["atUnix"] },
     ...artifactFieldGroups,
   ],
   "schemas/run.failures.schema.json": [
@@ -86,14 +86,13 @@ const requiredAliasGroupsBySchema = {
     ...artifactFieldGroups,
   ],
   "schemas/run.summary.schema.json": [
-    { path: [], kind: "allOfAnyOf", fields: ["runId", "run_id"] },
-    { path: [], kind: "allOfAnyOf", fields: ["startedAtUnix", "started_at_unix"] },
-    { path: [], kind: "declared", fields: ["traceMalformedLines", "trace_malformed_lines"] },
-    { path: ["definitions", "llmCall"], kind: "anyOf", fields: ["promptHash", "prompt_hash"] },
+    { path: [], kind: "required", fields: ["runId", "startedAtUnix"] },
+    { path: [], kind: "declared", fields: ["traceMalformedLines"] },
+    { path: ["definitions", "llmCall"], kind: "required", fields: ["promptHash"] },
     {
       path: ["definitions", "llmCall"],
       kind: "declared",
-      fields: ["latencyMs", "latency_ms", "costUsd", "cost_usd"],
+      fields: ["latencyMs", "costUsd"],
     },
     ...artifactFieldGroups,
   ],

@@ -9,23 +9,8 @@
     "n",
     "kind",
     "status",
-    "message"
-  ],
-  "allOf": [
-    {
-      "anyOf": [
-        {
-          "required": [
-            "atUnix"
-          ]
-        },
-        {
-          "required": [
-            "at_unix"
-          ]
-        }
-      ]
-    }
+    "message",
+    "atUnix"
   ],
   "properties": {
     "n": {
@@ -45,17 +30,7 @@
       "type": "integer",
       "minimum": 0
     },
-    "at_unix": {
-      "type": "integer",
-      "minimum": 0
-    },
     "tool": {
-      "type": "string"
-    },
-    "toolName": {
-      "type": "string"
-    },
-    "tool_name": {
       "type": "string"
     },
     "artifact": {
