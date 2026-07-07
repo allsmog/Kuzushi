@@ -12,6 +12,7 @@ mod tests {
     fn uses_configured_bridge_command() {
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
+            agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
@@ -33,6 +34,7 @@ mod tests {
     fn anthropic_model_rejects_openai_env_without_explicit_operator_config() {
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
+            agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
@@ -75,6 +77,7 @@ printf '%s' '{"ok":true,"text":"done","structured":{"ok":true},"cost_usd":0.1234
 
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
+            agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
@@ -124,6 +127,7 @@ while :; do :; done
 
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
+            agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
@@ -193,6 +197,7 @@ printf '%s' '{"ok":true,"structured":{"verdict":"true_positive","confidence":0.9
 
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
+            agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
@@ -244,6 +249,7 @@ printf '%s' '{"ok":true,"text":"needs review because the model did not return JS
 
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
+            agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
@@ -307,6 +313,7 @@ fi
 
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
+            agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
             api_key_env: "ANTHROPIC_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
@@ -371,6 +378,7 @@ fi
         use kuzushi_core::{AgentTool, AgentToolLoopRequest};
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
+            agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
             api_key_env: "ANTHROPIC_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
@@ -413,6 +421,7 @@ fi
         use kuzushi_core::{AgentTool, AgentToolLoopRequest};
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
+            agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
@@ -451,6 +460,7 @@ fi
     fn bridge_failure_json_is_returned_as_actionable_error() {
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
+            agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
@@ -490,6 +500,7 @@ fi
     fn bridge_failure_rewrites_internal_openai_oauth_provider() {
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
+            agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
@@ -550,6 +561,7 @@ fi
 
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
+            agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: None,
@@ -597,6 +609,7 @@ printf '%s' '{{"ok":true,"text":"done","costUsd":0.0}}'
         }
         let runtime = RuntimeConfig {
             kind: RuntimeKind::LangGraph,
+            agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             thinking_level: Some("high".to_string()),

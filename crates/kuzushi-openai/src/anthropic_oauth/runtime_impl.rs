@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use kuzushi_core::{
-    AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentStructuredOutput, ModelTier,
-    TriageOutcome, TriageRequest,
+    AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime, AgentStructuredOutput,
+    AgentToolLoopRequest, LoopHistoryEntry, ModelTier, TriageOutcome, TriageRequest,
 };
 use serde_json::Value;
 
@@ -50,6 +50,28 @@ impl AgentRuntime for AnthropicOAuthRuntime {
             .await?;
 
         triage_outcome_from_response(response)
+    }
+
+    fn supports_tools(&self) -> bool {
+        // Native Anthropic Messages tool-use loop (see `tool_loop.rs`). Reaches
+        // parity with the LangGraph bridge's `next-step` envelope for
+        // Anthropic-backed models.
+        true
+    }
+
+    fn next_step_blocking(
+        &self,
+        request: &AgentToolLoopRequest,
+        history: &[LoopHistoryEntry],
+    ) -> Result<AgentLoopStep> {
+        // Mirror `query_blocking`: the shared driver reaches this via
+        // `block_in_place`, so a fresh current-thread runtime can drive the
+        // single async round-trip without nesting inside another executor.
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .context("AnthropicOAuthRuntime: could not start a tokio runtime")?;
+        runtime.block_on(self.run_tool_loop_step(request, history))
     }
 }
 

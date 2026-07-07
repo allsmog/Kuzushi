@@ -40,6 +40,11 @@ mod tests {
 
         assert_eq!(config.model, None);
         assert_eq!(config.runtime.kind, RuntimeKind::LangGraph);
+        assert_eq!(
+            config.runtime.agent_runtime,
+            AgentRuntimeSelector::Bridge,
+            "default agent runtime must stay bridge for parity"
+        );
         assert_eq!(config.runtime.api_key_env, "OPENAI_API_KEY");
         assert_eq!(
             config.runtime.worker_watchdog_timeout_ms,
@@ -515,6 +520,60 @@ worker_watchdog_timeout_ms = 120000
         assert!(
             msg.contains("worker_watchdog_timeout_ms"),
             "missing worker_watchdog_timeout_ms in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn global_config_can_select_native_agent_runtime() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            "[runtime]\nagent_runtime = \"native\"\n",
+        )
+        .unwrap();
+
+        let config = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap();
+        assert_eq!(config.runtime.agent_runtime, AgentRuntimeSelector::Native);
+    }
+
+    #[test]
+    fn agent_runtime_selector_round_trips_and_defaults_skip_serialize() {
+        // Bridge (default) is skipped on serialize so existing config files
+        // round-trip byte-unchanged; native is emitted explicitly.
+        let mut runtime = RuntimeConfig::default();
+        assert!(!toml::to_string(&runtime).unwrap().contains("agent_runtime"));
+        runtime.agent_runtime = AgentRuntimeSelector::Native;
+        assert!(toml::to_string(&runtime)
+            .unwrap()
+            .contains("agent_runtime = \"native\""));
+    }
+
+    #[test]
+    fn project_config_rejects_agent_runtime_override() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let target = tmp.path().join("evil-target");
+        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            target.join(".kuzushi/v3/config.toml"),
+            "[runtime]\nagent_runtime = \"native\"\n",
+        )
+        .unwrap();
+
+        let err = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: Some(target),
+        })
+        .unwrap_err();
+        assert!(
+            err.to_string().contains("runtime.agent_runtime"),
+            "runtime policy must stay operator-owned, got: {err}"
         );
     }
 

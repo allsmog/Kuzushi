@@ -107,6 +107,52 @@ fn non_empty_string_field(entry: &serde_json::Value, name: &str) -> bool {
         .is_some_and(|s| !s.is_empty())
 }
 
+/// Resolve a usable Anthropic OAuth access token for the native runtime, or a
+/// clear, actionable error. Never falls back silently: a missing, invalid, or
+/// expired credential is surfaced so the operator can re-auth or select the
+/// bridge runtime explicitly. Token refresh is not yet ported to Rust (the
+/// Node bridge owns it), so an expired token is a hard error here rather than a
+/// silent stale-token use.
+pub fn native_anthropic_access_token(cfg: &AnthropicOauthConfig) -> Result<String> {
+    let path = resolve_credentials_path(cfg)?;
+    match probe_path(&path)? {
+        OauthReadiness::Ready { .. } => read_anthropic_access_field(&path),
+        OauthReadiness::Expired { .. } => anyhow::bail!(
+            "native agent runtime: Anthropic OAuth access token at {} is expired and \
+             native refresh is not yet implemented; run `kuzushi auth` to refresh, or set \
+             `runtime.agent_runtime = \"bridge\"`",
+            path.display()
+        ),
+        OauthReadiness::Missing { searched } => anyhow::bail!(
+            "native agent runtime: no Anthropic OAuth credentials at {}; run `kuzushi auth`, \
+             or set `runtime.agent_runtime = \"bridge\"`",
+            searched.display()
+        ),
+        OauthReadiness::Invalid { searched, reason } => anyhow::bail!(
+            "native agent runtime: Anthropic OAuth credentials at {} are unusable: {reason}",
+            searched.display()
+        ),
+    }
+}
+
+fn read_anthropic_access_field(path: &Path) -> Result<String> {
+    let raw = fs::read_to_string(path)
+        .with_context(|| format!("could not read OAuth credentials at {}", path.display()))?;
+    let bag: serde_json::Value = serde_json::from_str(&raw)
+        .with_context(|| format!("OAuth credentials at {} are not valid JSON", path.display()))?;
+    bag.get("anthropic")
+        .and_then(|entry| entry.get("access"))
+        .and_then(serde_json::Value::as_str)
+        .filter(|token| !token.is_empty())
+        .map(str::to_string)
+        .with_context(|| {
+            format!(
+                "OAuth credentials at {} have no non-empty anthropic.access token",
+                path.display()
+            )
+        })
+}
+
 pub fn resolve_credentials_path(cfg: &AnthropicOauthConfig) -> Result<PathBuf> {
     if let Some(path) = &cfg.credentials_path {
         if path.is_absolute() {

@@ -2,6 +2,7 @@ mod client;
 mod options;
 mod response;
 mod runtime_impl;
+mod tool_loop;
 
 #[cfg(test)]
 mod tests;
@@ -16,3 +17,5 @@ pub(crate) use client::{
 pub(crate) use response::{maybe_parse_json, strip_provider_prefix};
 #[cfg(test)]
 pub(crate) use runtime_impl::{build_triage_prompt, clamp_outcome, triage_outcome_from_response};
+#[cfg(test)]
+pub(crate) use tool_loop::{anthropic_tool_loop_body, parse_tool_loop_response};

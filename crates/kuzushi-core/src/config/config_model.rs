@@ -82,10 +82,46 @@ pub struct OperatorConfig {
     pub trusted_modules: Vec<String>,
 }
 
+/// Which agent runtime backs tool-augmented model calls.
+///
+/// `bridge` spawns the Node LangGraph bridge (`scripts/langgraph-bridge.mjs`)
+/// and is the default so existing installs are unchanged. `native` selects the
+/// in-process Rust runtime (`kuzushi-openai`'s `AnthropicOAuthRuntime`), the
+/// zero-Node path. Both ship during parity testing; the default flips to
+/// `native` only once golden-run parity is proven (see
+/// `docs/typescript-removal/STATUS.md`).
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentRuntimeSelector {
+    #[default]
+    Bridge,
+    Native,
+}
+
+impl AgentRuntimeSelector {
+    /// True for the default (`bridge`) selection. Used to keep serialized
+    /// config unchanged when the operator has not opted into `native`.
+    pub fn is_bridge(&self) -> bool {
+        matches!(self, Self::Bridge)
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Bridge => "bridge",
+            Self::Native => "native",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(default, deny_unknown_fields)]
 pub struct RuntimeConfig {
     pub kind: RuntimeKind,
+    /// Agent-runtime backend selector (`bridge` | `native`). Defaults to
+    /// `bridge`; skipped on serialize when default so existing config files
+    /// round-trip unchanged.
+    #[serde(default, skip_serializing_if = "AgentRuntimeSelector::is_bridge")]
+    pub agent_runtime: AgentRuntimeSelector,
     pub api_key_env: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub base_url: Option<String>,
@@ -102,6 +138,7 @@ impl Default for RuntimeConfig {
     fn default() -> Self {
         Self {
             kind: RuntimeKind::LangGraph,
+            agent_runtime: AgentRuntimeSelector::Bridge,
             api_key_env: "OPENAI_API_KEY".to_string(),
             base_url: None,
             langgraph_bridge_command: None,

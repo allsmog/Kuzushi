@@ -15,6 +15,21 @@ pub(crate) fn anthropic_response_text(parsed: &ApiResponse) -> String {
         .join("")
 }
 
+/// First `tool_use` block in the response, if the model requested a tool.
+/// Anthropic sets `stop_reason == "tool_use"` and emits one or more
+/// `tool_use` blocks; the tool loop executes the first and threads its
+/// result back on the next turn.
+pub(crate) fn anthropic_response_tool_use(
+    parsed: &ApiResponse,
+) -> Option<(&str, &str, &Value)> {
+    parsed.content.iter().find_map(|block| match block {
+        ApiContentBlock::ToolUse { id, name, input } => {
+            Some((id.as_str(), name.as_str(), input))
+        }
+        _ => None,
+    })
+}
+
 pub(crate) fn anthropic_response_usage(parsed: &ApiResponse) -> (u32, u32) {
     parsed
         .usage
@@ -95,6 +110,12 @@ pub(crate) struct ApiResponse {
 pub(crate) enum ApiContentBlock {
     Text {
         text: String,
+    },
+    ToolUse {
+        id: String,
+        name: String,
+        #[serde(default)]
+        input: Value,
     },
     #[serde(other)]
     Other,

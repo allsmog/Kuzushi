@@ -10,7 +10,7 @@ use kuzushi_core::{
     failed_tool_output, tool_wants_runtime, AgentRuntime, ToolExecutionContext, ToolOptionStore,
     TraceHandle, WorkspaceTarget,
 };
-use kuzushi_openai::LangGraphRuntime;
+use kuzushi_openai::build_agent_runtime;
 use std::path::{Path, PathBuf};
 
 pub(crate) fn run_tool_command(
@@ -70,7 +70,8 @@ fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
         }
     };
     let trace = cli_tool_trace(run);
-    let runtime_ref = active_cli_tool_runtime(runtime.as_ref());
+    // Box<dyn AgentRuntime> derefs to the trait object the dispatcher wants.
+    let runtime_ref = runtime.as_deref();
     let ctx = ToolExecutionContext {
         config: &run.config,
         workspace: run.workspace.as_ref(),
@@ -86,9 +87,11 @@ fn execute_cli_tool_run(run: &PreparedCliToolRun) -> Result<serde_json::Value> {
     handle_cli_tool_result(run, result)
 }
 
-fn cli_tool_runtime(run: &PreparedCliToolRun) -> Result<Option<LangGraphRuntime>> {
+fn cli_tool_runtime(run: &PreparedCliToolRun) -> Result<Option<Box<dyn AgentRuntime>>> {
     if tool_wants_runtime(&run.tool, &run.input, &run.config) {
-        return Ok(Some(LangGraphRuntime::from_config(
+        // Select bridge/native per `config.runtime.agent_runtime` (default
+        // bridge). Run mode is the first mode wired through the factory.
+        return Ok(Some(build_agent_runtime(
             &run.config,
             std::env::current_dir()?,
         )?));
@@ -102,12 +105,6 @@ fn cli_tool_trace(run: &PreparedCliToolRun) -> Option<TraceHandle> {
             .for_tool(&run.tool)
             .child(1),
     )
-}
-
-fn active_cli_tool_runtime<'a>(
-    runtime: Option<&'a LangGraphRuntime>,
-) -> Option<&'a dyn AgentRuntime> {
-    runtime.map(|runtime| runtime as &dyn AgentRuntime)
 }
 
 fn handle_cli_tool_result(

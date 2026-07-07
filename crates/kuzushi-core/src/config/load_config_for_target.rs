@@ -4,6 +4,7 @@ use super::*;
 #[serde(default, deny_unknown_fields)]
 pub(crate) struct PartialRuntimeConfig {
     pub(crate) kind: Option<RuntimeKind>,
+    pub(crate) agent_runtime: Option<AgentRuntimeSelector>,
     pub(crate) api_key_env: Option<String>,
     pub(crate) base_url: Option<Option<String>>,
     pub(crate) langgraph_bridge_command: Option<Option<Vec<String>>>,
@@ -195,6 +196,7 @@ fn forbidden_runtime_fields(runtime: Option<&PartialRuntimeConfig>) -> Vec<&'sta
     };
     [
         ("runtime.kind", runtime.kind.is_some()),
+        ("runtime.agent_runtime", runtime.agent_runtime.is_some()),
         ("runtime.api_key_env", runtime.api_key_env.is_some()),
         ("runtime.base_url", runtime.base_url.is_some()),
         (
@@ -255,6 +257,7 @@ pub(crate) fn merge_config(config: &mut V2Config, patch: PartialConfig) {
 
 fn merge_runtime_config(config: &mut RuntimeConfig, patch: PartialRuntimeConfig) {
     apply_patch_field(&mut config.kind, patch.kind);
+    apply_patch_field(&mut config.agent_runtime, patch.agent_runtime);
     apply_patch_field(&mut config.api_key_env, patch.api_key_env);
     apply_patch_field(&mut config.base_url, patch.base_url);
     apply_patch_field(

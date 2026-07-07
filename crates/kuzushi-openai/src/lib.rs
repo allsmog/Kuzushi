@@ -8,6 +8,7 @@ pub mod oauth;
 pub mod runtime;
 
 mod messages;
+pub mod runtime_factory;
 #[cfg(test)]
 mod tests;
 mod triage_prompt;
@@ -15,3 +16,4 @@ mod triage_prompt;
 pub use anthropic_oauth::{AnthropicOAuthRuntime, AnthropicOAuthRuntimeOptions};
 pub use langgraph_runtime::{default_langgraph_bridge_command, LangGraphRuntime};
 pub use oauth::{probe as probe_anthropic_oauth, OauthReadiness};
+pub use runtime_factory::build_agent_runtime;

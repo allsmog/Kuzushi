@@ -31,6 +31,7 @@ mod load_config_for_target;
 #[cfg(test)]
 mod tests;
 
+pub use config_model::AgentRuntimeSelector;
 pub use config_model::AnthropicOauthConfig;
 pub use config_model::ConfigPaths;
 pub use config_model::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS;

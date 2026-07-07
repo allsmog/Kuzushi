@@ -4210,6 +4210,7 @@ fn ask_dispatches_agent_question_through_explicit_runtime() {
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
         kind: RuntimeKind::LangGraph,
+        agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
         thinking_level: None,
@@ -4561,6 +4562,7 @@ fn run_command_dispatches_agentic_sast_through_langgraph_runtime_bridge_and_pers
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
         kind: RuntimeKind::LangGraph,
+        agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
         thinking_level: None,
@@ -4604,6 +4606,7 @@ fn run_command_dispatches_variant_hunt_through_langgraph_runtime_bridge_and_pers
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
         kind: RuntimeKind::LangGraph,
+        agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
         thinking_level: None,
@@ -4647,6 +4650,7 @@ fn run_command_dispatches_ndiff_hunt_through_langgraph_runtime_bridge_and_persis
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
         kind: RuntimeKind::LangGraph,
+        agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
         thinking_level: None,
@@ -4690,6 +4694,7 @@ fn run_command_dispatches_taint_iris_through_langgraph_runtime_bridge_and_persis
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
         kind: RuntimeKind::LangGraph,
+        agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
         thinking_level: None,
@@ -4754,6 +4759,7 @@ fn run_command_dispatches_legacy_taint_iris_next_hunt_through_langgraph_runtime_
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
         kind: RuntimeKind::LangGraph,
+        agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
         thinking_level: None,
@@ -4810,6 +4816,7 @@ fn run_command_dispatches_carlini_threat_hunt_through_langgraph_runtime_bridge_a
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
         kind: RuntimeKind::LangGraph,
+        agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
         thinking_level: None,
@@ -4851,6 +4858,7 @@ fn run_command_dispatches_systems_hunt_through_langgraph_runtime_bridge_and_pers
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
         kind: RuntimeKind::LangGraph,
+        agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
         thinking_level: None,
@@ -5117,6 +5125,7 @@ fn run_command_dispatches_triage_through_langgraph_runtime_bridge_and_persists()
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
         kind: RuntimeKind::LangGraph,
+        agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
         thinking_level: None,
@@ -5184,6 +5193,7 @@ fn run_command_dispatches_verify_through_langgraph_runtime_bridge() {
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
         kind: RuntimeKind::LangGraph,
+        agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
         thinking_level: None,
@@ -5249,6 +5259,7 @@ fn run_command_dispatches_patch_through_langgraph_runtime_bridge_and_persists() 
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
         kind: RuntimeKind::LangGraph,
+        agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
         thinking_level: None,
@@ -5297,6 +5308,7 @@ fn run_command_dispatches_threat_model_build_through_langgraph_runtime_bridge() 
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
         kind: RuntimeKind::LangGraph,
+        agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
         thinking_level: None,
@@ -5337,6 +5349,7 @@ fn run_command_dispatches_x_ray_run_through_langgraph_runtime_bridge() {
     config.model = Some("openai:gpt-4.1".to_string());
     config.runtime = RuntimeConfig {
         kind: RuntimeKind::LangGraph,
+        agent_runtime: kuzushi_core::AgentRuntimeSelector::Bridge,
         api_key_env: "OPENAI_API_KEY".to_string(),
         base_url: None,
         thinking_level: None,

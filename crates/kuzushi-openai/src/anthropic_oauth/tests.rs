@@ -3,8 +3,8 @@ mod tests {
     use super::super::response::{anthropic_model_for_tier, estimate_cost_usd};
     use super::super::*;
     use kuzushi_core::{
-        AgentQueryRequest, AgentQueryResponse, AgentRuntime, ModelTier, TriageOutcome,
-        TriageRequest, TriageVerdict,
+        AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime, LoopHistoryEntry,
+        ModelTier, TriageOutcome, TriageRequest, TriageVerdict,
     };
     use serde_json::json;
 
@@ -284,5 +284,160 @@ mod tests {
         .unwrap();
         let model = runtime.model_for_tier(ModelTier::Cheap, "anthropic:claude-opus-4-7");
         assert_eq!(model, "anthropic:claude-opus-4-7");
+    }
+
+    // ── Native tool loop (parity with the LangGraph bridge `next-step`) ──
+
+    fn sample_tool_loop_request() -> kuzushi_core::AgentToolLoopRequest {
+        kuzushi_core::AgentToolLoopRequest {
+            model: "anthropic:claude-opus-4-7".to_string(),
+            cwd: std::path::PathBuf::from("/work"),
+            system_prompt: "You are an auditor.".to_string(),
+            prompt: "Audit db.rs".to_string(),
+            tools: vec![kuzushi_core::AgentTool {
+                name: "read_source".to_string(),
+                description: "Read a file".to_string(),
+                input_schema: json!({"type": "object", "properties": {"path": {"type": "string"}}}),
+            }],
+            max_steps: 8,
+            runtime_options: None,
+            temperature: Some(0.0),
+        }
+    }
+
+    #[test]
+    fn tool_loop_body_forwards_tools_system_and_conversation() {
+        let request = sample_tool_loop_request();
+        let history = vec![
+            LoopHistoryEntry::AssistantToolCall(kuzushi_core::ToolCall {
+                name: "read_source".to_string(),
+                input: json!({"path": "db.rs"}),
+                call_id: "call-1".to_string(),
+            }),
+            LoopHistoryEntry::ToolResult(kuzushi_core::ToolResult {
+                call_id: "call-1".to_string(),
+                output: json!("fn main() {}"),
+                is_error: false,
+            }),
+        ];
+        let body = anthropic_tool_loop_body("claude-opus-4-7", 4096, &request, &history);
+
+        assert_eq!(body["model"], "claude-opus-4-7");
+        assert_eq!(body["max_tokens"], 4096);
+        assert_eq!(body["system"], "You are an auditor.");
+        assert_eq!(body["temperature"], 0.0);
+        // tools forwarded verbatim as Anthropic tool definitions.
+        assert_eq!(body["tools"][0]["name"], "read_source");
+        assert_eq!(body["tools"][0]["input_schema"]["type"], "object");
+        // conversation = user prompt, then the rendered history turns.
+        let messages = body["messages"].as_array().expect("messages array");
+        assert_eq!(messages.len(), 3);
+        assert_eq!(messages[0]["role"], "user");
+        assert_eq!(messages[0]["content"], "Audit db.rs");
+        assert_eq!(messages[1]["role"], "assistant");
+        assert_eq!(messages[1]["content"][0]["type"], "tool_use");
+        assert_eq!(messages[1]["content"][0]["id"], "call-1");
+        assert_eq!(messages[2]["role"], "user");
+        assert_eq!(messages[2]["content"][0]["type"], "tool_result");
+        assert_eq!(messages[2]["content"][0]["tool_use_id"], "call-1");
+    }
+
+    #[test]
+    fn tool_loop_body_omits_temperature_when_unset() {
+        let mut request = sample_tool_loop_request();
+        request.temperature = None;
+        let body = anthropic_tool_loop_body("claude-opus-4-7", 4096, &request, &[]);
+        assert!(body.get("temperature").is_none());
+    }
+
+    #[test]
+    fn parse_tool_loop_response_maps_tool_use_to_tool_call() {
+        let raw = json!({
+            "content": [
+                {"type": "text", "text": "let me look"},
+                {"type": "tool_use", "id": "toolu_42", "name": "read_source",
+                 "input": {"path": "db.rs"}}
+            ],
+            "stop_reason": "tool_use",
+            "usage": {"input_tokens": 1000, "output_tokens": 200}
+        })
+        .to_string();
+
+        match parse_tool_loop_response("claude-opus-4-7", &raw).unwrap() {
+            AgentLoopStep::ToolCall { call, cost_usd } => {
+                assert_eq!(call.name, "read_source");
+                assert_eq!(call.call_id, "toolu_42");
+                assert_eq!(call.input, json!({"path": "db.rs"}));
+                // opus pricing: 1000/1k*0.015 + 200/1k*0.075 = 0.03
+                let cost = cost_usd.expect("cost surfaced on tool-call turns");
+                assert!((cost - 0.03).abs() < 1e-9, "cost was {cost}");
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_tool_loop_response_maps_text_to_final_with_embedded_json() {
+        let raw = json!({
+            "content": [{"type": "text", "text": "Result: {\"ok\": true}"}],
+            "stop_reason": "end_turn",
+            "usage": {"input_tokens": 10, "output_tokens": 5}
+        })
+        .to_string();
+
+        match parse_tool_loop_response("claude-opus-4-7", &raw).unwrap() {
+            AgentLoopStep::Final {
+                text,
+                structured,
+                cost_usd,
+            } => {
+                assert_eq!(text, "Result: {\"ok\": true}");
+                assert_eq!(structured, Some(json!({"ok": true})));
+                assert!(cost_usd.is_some());
+            }
+            other => panic!("expected Final, got {other:?}"),
+        }
+    }
+
+    // ── Structured-output contract parity with the LangGraph bridge ──
+    //
+    // `append_structured_output_contract` must emit the exact system-prompt
+    // suffix the bridge's `appendStructuredOutputContract` (model.mjs) sent, so
+    // the native runtime does not silently change what the model is told. The
+    // golden is produced by `testdata/regenerate_structured_output_contract.mjs`
+    // (a verbatim copy of the JS function).
+
+    #[test]
+    fn structured_output_contract_matches_langgraph_bridge_golden() {
+        let golden = include_str!("testdata/structured_output_contract.golden")
+            .strip_suffix('\n')
+            .expect("golden file is POSIX newline-terminated");
+        // Key order + integer values chosen so serde_json and JSON.stringify agree.
+        let schema = json!({
+            "additionalProperties": false,
+            "properties": {
+                "confidence": {"maximum": 1, "minimum": 0, "type": "number"},
+                "rationale": {"type": "string"},
+                "verdict": {"enum": ["true_positive", "false_positive", "needs_review"],
+                            "type": "string"}
+            },
+            "required": ["verdict", "confidence", "rationale"],
+            "type": "object"
+        });
+        let contract =
+            kuzushi_core::AgentStructuredOutput::json_schema("kuzushi_triage_outcome", schema);
+        let rendered = kuzushi_core::append_structured_output_contract(
+            "You are a triage agent.",
+            Some(&contract),
+        );
+        assert_eq!(rendered, golden, "native contract drifted from bridge golden");
+    }
+
+    #[test]
+    fn structured_output_contract_without_schema_returns_prompt_unchanged() {
+        // Matches the JS `if (!contract) return String(systemPrompt)` branch.
+        let rendered =
+            kuzushi_core::append_structured_output_contract("just the prompt", None);
+        assert_eq!(rendered, "just the prompt");
     }
 }
