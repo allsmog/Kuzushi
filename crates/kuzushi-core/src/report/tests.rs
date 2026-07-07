@@ -2644,10 +2644,10 @@ fn report_markdown_surfaces_failure_handoff_bounds() {
 }
 
 #[test]
-fn report_summarizes_snake_case_failure_handoff_stage() {
+fn report_summarizes_canonical_failure_handoff_stage() {
     let temp = tempdir().unwrap();
     let source = RunSummary::running(
-        "run-failed-snake",
+        "run-failed-canonical",
         "tool",
         Some("semgrep:scan".to_string()),
         "target",
@@ -2656,34 +2656,34 @@ fn report_summarizes_snake_case_failure_handoff_stage() {
     write_run_summary(temp.path(), &source).unwrap();
     write_run_artifact_json(
         temp.path(),
-        "run-failed-snake",
+        "run-failed-canonical",
         "failures.json",
         "failure handoff",
         &json!({
-            "run_id": "run-failed-snake",
+            "runId": "run-failed-canonical",
             "status": "failed",
             "failures": [
                 {
                     "tool": "semgrep:scan",
                     "status": "failed",
                     "error": "scanner missing",
-                    "agent_thread_context": {
-                        "failed_stage": "semgrep:scan",
+                    "agentThreadContext": {
+                        "failedStage": "semgrep:scan",
                         "cause": "scanner missing",
-                        "what_failed": "semgrep:scan did not complete successfully",
-                        "artifacts_available": [
+                        "whatFailed": "semgrep:scan did not complete successfully",
+                        "artifactsAvailable": [
                             {
                                 "label": "result",
                                 "path": "result.json",
                                 "kind": "json"
                             }
                         ],
-                        "missing_artifacts": ["proof.json"],
-                        "allowed_proof_level": "artifact-review-only",
-                        "next_files_or_artifacts_to_inspect": ["result.json"],
-                        "recovery_options": ["rerun semgrep"],
-                        "fallback_prompt": "Inspect result.json before retrying.",
-                        "claims_forbidden": ["exploit proven"]
+                        "missingArtifacts": ["proof.json"],
+                        "allowedProofLevel": "artifact-review-only",
+                        "nextFilesOrArtifactsToInspect": ["result.json"],
+                        "recoveryOptions": ["rerun semgrep"],
+                        "fallbackPrompt": "Inspect result.json before retrying.",
+                        "claimsForbidden": ["exploit proven"]
                     }
                 }
             ]
@@ -2691,7 +2691,7 @@ fn report_summarizes_snake_case_failure_handoff_stage() {
     )
     .unwrap();
 
-    let report = build_run_report(temp.path(), Some("run-failed-snake")).unwrap();
+    let report = build_run_report(temp.path(), Some("run-failed-canonical")).unwrap();
 
     assert!(
         report
@@ -2761,27 +2761,27 @@ fn report_reads_failure_handoff_canonical_available_artifacts() {
         "failures.json",
         "failure handoff",
         &json!({
-            "run_id": "run-failed-canonical-artifacts",
+            "runId": "run-failed-canonical-artifacts",
             "status": "failed",
             "failures": [{
                 "tool": "triage:run",
                 "status": "failed",
                 "error": "triage failed",
-                "agent_thread_context": {
-                    "failed_stage": "triage:run",
+                "agentThreadContext": {
+                    "failedStage": "triage:run",
                     "cause": "triage failed",
-                    "what_failed": "triage did not complete successfully",
-                    "artifacts_available": [{
+                    "whatFailed": "triage did not complete successfully",
+                    "artifactsAvailable": [{
                         "label": "triage transcript",
                         "path": "triage/transcript.json",
                         "kind": "json"
                     }],
-                    "missing_artifacts": ["proof.json"],
-                    "allowed_proof_level": "artifact-review-only",
-                    "next_files_or_artifacts_to_inspect": ["triage/transcript.json"],
-                    "recovery_options": ["rerun triage"],
-                    "fallback_prompt": "Inspect the triage transcript.",
-                    "claims_forbidden": ["verified claim"]
+                    "missingArtifacts": ["proof.json"],
+                    "allowedProofLevel": "artifact-review-only",
+                    "nextFilesOrArtifactsToInspect": ["triage/transcript.json"],
+                    "recoveryOptions": ["rerun triage"],
+                    "fallbackPrompt": "Inspect the triage transcript.",
+                    "claimsForbidden": ["verified claim"]
                 }
             }]
         }),
@@ -2800,10 +2800,10 @@ fn report_reads_failure_handoff_canonical_available_artifacts() {
 }
 
 #[test]
-fn report_repairs_failure_handoff_stage_and_cause_from_failure_record() {
+fn report_rejects_failure_handoff_missing_stage_and_cause() {
     let temp = tempdir().unwrap();
     let source = RunSummary::running(
-        "run-failed-legacy",
+        "run-failed-missing-context-fields",
         "tool",
         Some("semgrep:scan".to_string()),
         "target",
@@ -2812,11 +2812,11 @@ fn report_repairs_failure_handoff_stage_and_cause_from_failure_record() {
     write_run_summary(temp.path(), &source).unwrap();
     write_run_artifact_json(
         temp.path(),
-        "run-failed-legacy",
+        "run-failed-missing-context-fields",
         "failures.json",
         "failure handoff",
         &json!({
-            "runId": "run-failed-legacy",
+            "runId": "run-failed-missing-context-fields",
             "status": "failed",
             "failures": [{
                 "tool": "semgrep:scan",
@@ -2837,16 +2837,15 @@ fn report_repairs_failure_handoff_stage_and_cause_from_failure_record() {
     )
     .unwrap();
 
-    let report = build_run_report(temp.path(), Some("run-failed-legacy")).unwrap();
+    let error = build_run_report(temp.path(), Some("run-failed-missing-context-fields")).unwrap_err();
+    let message = error.to_string();
 
-    assert!(report.report_markdown.contains("Failed Stage: semgrep:scan"));
-    assert!(report.report_markdown.contains("Cause: scanner missing"));
-    assert_eq!(report.failure_handoffs[0].failed_stage, "semgrep:scan");
-    assert_eq!(report.failure_handoffs[0].cause, "scanner missing");
+    assert!(message.contains("failed to parse"));
+    assert!(message.contains("failures.json"));
 }
 
 #[test]
-fn report_bounds_failure_handoff_lists_for_legacy_artifacts() {
+fn report_bounds_failure_handoff_lists_for_canonical_artifacts() {
     let temp = tempdir().unwrap();
     let source = RunSummary::running(
         "run-failed-many",
@@ -2871,6 +2870,8 @@ fn report_bounds_failure_handoff_lists_for_legacy_artifacts() {
                 "status": "failed",
                 "error": "scanner missing",
                 "agentThreadContext": {
+                    "failedStage": "semgrep:scan",
+                    "cause": "scanner missing",
                     "whatFailed": "semgrep:scan did not complete successfully",
                     "artifactsAvailable": available,
                     "missingArtifacts": numbered_strings("missing", 15),

@@ -41,9 +41,6 @@ fn failed_stage_summary(failures: &[Value]) -> Option<String> {
 fn failed_stage(failure: &Value) -> Option<String> {
     failure
         .pointer("/agentThreadContext/failedStage")
-        .or_else(|| failure.pointer("/agent_thread_context/failed_stage"))
-        .or_else(|| failure.get("failedStage"))
-        .or_else(|| failure.get("failed_stage"))
         .or_else(|| failure.get("tool"))
         .and_then(Value::as_str)
         .filter(|stage| !stage.trim().is_empty())
@@ -51,35 +48,31 @@ fn failed_stage(failure: &Value) -> Option<String> {
 }
 
 fn available_artifact_count(failure: &Value) -> usize {
-    context_array_len(failure, "artifactsAvailable", "artifacts_available")
+    context_array_len(failure, "artifactsAvailable")
 }
 
 fn missing_artifact_count(failure: &Value) -> usize {
-    context_array_len(failure, "missingArtifacts", "missing_artifacts")
+    context_array_len(failure, "missingArtifacts")
 }
 
 fn next_artifact_count(failure: &Value) -> usize {
-    context_array_len(
-        failure,
-        "nextFilesOrArtifactsToInspect",
-        "next_files_or_artifacts_to_inspect",
-    )
+    context_array_len(failure, "nextFilesOrArtifactsToInspect")
 }
 
 fn what_failed_count(failure: &Value) -> usize {
-    context_string_present(failure, "whatFailed", "what_failed")
+    context_string_present(failure, "whatFailed")
 }
 
 fn recovery_option_count(failure: &Value) -> usize {
-    context_array_len(failure, "recoveryOptions", "recovery_options")
+    context_array_len(failure, "recoveryOptions")
 }
 
 fn fallback_prompt_count(failure: &Value) -> usize {
-    context_string_present(failure, "fallbackPrompt", "fallback_prompt")
+    context_string_present(failure, "fallbackPrompt")
 }
 
 fn forbidden_claim_count(failure: &Value) -> usize {
-    context_array_len(failure, "claimsForbidden", "claims_forbidden")
+    context_array_len(failure, "claimsForbidden")
 }
 
 fn allowed_proof_level_summary(failures: &[Value]) -> Option<String> {
@@ -93,35 +86,29 @@ fn allowed_proof_level_summary(failures: &[Value]) -> Option<String> {
 
 fn allowed_proof_level(failure: &Value) -> Option<String> {
     failure_context(failure)
-        .and_then(|context| {
-            context
-                .get("allowedProofLevel")
-                .or_else(|| context.get("allowed_proof_level"))
-        })
+        .and_then(|context| context.get("allowedProofLevel"))
         .and_then(Value::as_str)
         .filter(|level| !level.trim().is_empty())
         .map(str::to_string)
 }
 
-fn context_array_len(failure: &Value, camel: &str, snake: &str) -> usize {
+fn context_array_len(failure: &Value, field: &str) -> usize {
     failure_context(failure)
-        .and_then(|context| context.get(camel).or_else(|| context.get(snake)))
+        .and_then(|context| context.get(field))
         .and_then(Value::as_array)
         .map(Vec::len)
         .unwrap_or(0)
 }
 
-fn context_string_present(failure: &Value, camel: &str, snake: &str) -> usize {
+fn context_string_present(failure: &Value, field: &str) -> usize {
     usize::from(
         failure_context(failure)
-            .and_then(|context| context.get(camel).or_else(|| context.get(snake)))
+            .and_then(|context| context.get(field))
             .and_then(Value::as_str)
             .is_some_and(|text| !text.trim().is_empty()),
     )
 }
 
 fn failure_context(failure: &Value) -> Option<&Value> {
-    failure
-        .get("agentThreadContext")
-        .or_else(|| failure.get("agent_thread_context"))
+    failure.get("agentThreadContext")
 }

@@ -5,38 +5,25 @@ const failureArrayLimit = 12;
 const boundedFailureArrays = [
   "properties.failures",
   "definitions.failureContext.properties.artifactsAvailable",
-  "definitions.failureContext.properties.artifacts_available",
   "definitions.failureContext.properties.missingArtifacts",
-  "definitions.failureContext.properties.missing_artifacts",
   "definitions.failureContext.properties.nextFilesOrArtifactsToInspect",
-  "definitions.failureContext.properties.next_files_or_artifacts_to_inspect",
   "definitions.failureContext.properties.recoveryOptions",
-  "definitions.failureContext.properties.recovery_options",
   "definitions.failureContext.properties.claimsForbidden",
-  "definitions.failureContext.properties.claims_forbidden",
 ];
 
 const nonEmptyFailureStrings = [
   "definitions.failureContext.properties.failedStage",
-  "definitions.failureContext.properties.failed_stage",
   "definitions.failureContext.properties.cause",
   "definitions.failureContext.properties.whatFailed",
-  "definitions.failureContext.properties.what_failed",
   "definitions.failureContext.properties.allowedProofLevel",
-  "definitions.failureContext.properties.allowed_proof_level",
   "definitions.failureContext.properties.fallbackPrompt",
-  "definitions.failureContext.properties.fallback_prompt",
 ];
 
 const nonEmptyFailureArrayItems = [
   "definitions.failureContext.properties.missingArtifacts",
-  "definitions.failureContext.properties.missing_artifacts",
   "definitions.failureContext.properties.nextFilesOrArtifactsToInspect",
-  "definitions.failureContext.properties.next_files_or_artifacts_to_inspect",
   "definitions.failureContext.properties.recoveryOptions",
-  "definitions.failureContext.properties.recovery_options",
   "definitions.failureContext.properties.claimsForbidden",
-  "definitions.failureContext.properties.claims_forbidden",
 ];
 
 export function checkFailureSchemaBounds(root) {

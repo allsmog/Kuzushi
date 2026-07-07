@@ -20,8 +20,8 @@ pub(super) fn load_report_failure_handoffs(
 fn failure_handoff_summary(failure: RunFailure) -> ReportFailureHandoff {
     let context = failure.agent_thread_context;
     ReportFailureHandoff {
-        failed_stage: fallback_string(context.failed_stage, failure.tool),
-        cause: fallback_string(context.cause, failure.error),
+        failed_stage: context.failed_stage,
+        cause: context.cause,
         artifacts_available: context.artifacts_available,
         allowed_proof_level: context.allowed_proof_level,
         missing_artifacts: context.missing_artifacts,
@@ -29,13 +29,5 @@ fn failure_handoff_summary(failure: RunFailure) -> ReportFailureHandoff {
         recovery_options: context.recovery_options,
         fallback_prompt: context.fallback_prompt,
         claims_forbidden: context.claims_forbidden,
-    }
-}
-
-fn fallback_string(primary: String, fallback: String) -> String {
-    if primary.trim().is_empty() {
-        fallback
-    } else {
-        primary
     }
 }

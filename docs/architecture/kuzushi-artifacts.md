@@ -135,12 +135,11 @@ under `coreFindings`, `core_findings`, or `findings`.
 summaries, verification proof snapshots, proof levels, verdicts, runtime proof
 flags, state counts, and proof finding entries. Static and verification
 snapshots may also be wrapped under `proof`, `proofs`, or `verification`.
-The schema contract uses canonical run metadata and event fields only. Remaining
-alias coverage is limited to external producer payloads that have not been
-converted in the current slice, such as failure handoff `agentThreadContext` /
-`agent_thread_context` and trace stream metadata aliases. The architecture gate
-checks that those temporary alias fields are explicit and that canonical
-artifact fields stay required.
+The schema contract uses canonical run metadata, event, and failure handoff
+fields only. Remaining alias coverage is limited to external producer payloads
+that have not been converted in the current slice, such as trace stream metadata
+aliases. The architecture gate checks that those temporary alias fields are
+explicit and that canonical artifact fields stay required.
 The same gate also checks vocabulary fields that must stay aligned with Rust
 producers: artifact kind, run/failure/snapshot status, run kind, event and
 trace kind/severity, LLM audit call kind, route path shape, attack-surface

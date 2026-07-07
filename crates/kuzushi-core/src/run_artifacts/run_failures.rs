@@ -7,7 +7,6 @@ use crate::artifact_contract::{
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RunFailures {
-    #[serde(alias = "run_id")]
     pub run_id: String,
     pub status: String,
     pub failures: Vec<RunFailure>,
@@ -19,32 +18,21 @@ pub struct RunFailure {
     pub tool: String,
     pub status: String,
     pub error: String,
-    #[serde(alias = "agent_thread_context")]
     pub agent_thread_context: FailureToLlmContext,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct FailureToLlmContext {
-    #[serde(default, alias = "failed_stage")]
     pub failed_stage: String,
-    #[serde(default, alias = "cause")]
     pub cause: String,
-    #[serde(alias = "what_failed")]
     pub what_failed: String,
-    #[serde(alias = "artifacts_available")]
     pub artifacts_available: Vec<RunArtifact>,
-    #[serde(default, alias = "missing_artifacts")]
     pub missing_artifacts: Vec<String>,
-    #[serde(alias = "allowed_proof_level")]
     pub allowed_proof_level: String,
-    #[serde(alias = "next_files_or_artifacts_to_inspect")]
     pub next_files_or_artifacts_to_inspect: Vec<String>,
-    #[serde(default, alias = "recovery_options")]
     pub recovery_options: Vec<String>,
-    #[serde(default, alias = "fallback_prompt")]
     pub fallback_prompt: String,
-    #[serde(alias = "claims_forbidden")]
     pub claims_forbidden: Vec<String>,
 }
 

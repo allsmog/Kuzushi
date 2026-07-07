@@ -544,15 +544,13 @@ mod tests {
     }
 
     #[test]
-    fn run_failures_schema_covers_snake_case_aliases() {
+    fn run_failures_schema_declares_only_canonical_failure_fields() {
         let schema = run_failures_schema();
-        let value = representative_snake_case_run_failures();
 
-        assert_serialized_fields_are_declared(&schema, &value);
-        assert_failure_entries_match_schema(&schema, &value);
-        assert_schema_requires_any_field(&schema, &["runId", "run_id"]);
-        assert_failure_schema_requires_any_context_key(&schema);
-        assert_failure_context_schema_requires_alias_pairs(&schema);
+        assert_schema_requires_fields(&schema, &["runId"]);
+        assert_schema_declares_no_fields(&schema, &["run_id"]);
+        assert_failure_schema_requires_canonical_context_key(&schema);
+        assert_failure_context_schema_requires_canonical_fields(&schema);
     }
 
     #[test]
@@ -2168,27 +2166,27 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "failures.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
-                "status": "failed",
-                "failures": [{
-                    "tool": "triage:run",
+                    "runId": run_id,
                     "status": "failed",
-                    "error": "runtime unavailable",
-                    "agent_thread_context": {
-                        "failed_stage": "triage:run",
+                    "failures": [{
+                        "tool": "triage:run",
+                        "status": "failed",
+                        "error": "runtime unavailable",
+                    "agentThreadContext": {
+                        "failedStage": "triage:run",
                         "cause": "runtime unavailable",
-                        "what_failed": "triage did not complete",
-                        "artifacts_available": [{
+                        "whatFailed": "triage did not complete",
+                        "artifactsAvailable": [{
                             "label": " triage transcript ",
                             "path": format!(" {triage_path} "),
                             "kind": " JSON "
                         }],
-                        "missing_artifacts": ["proof.json"],
-                        "allowed_proof_level": "artifact-review-only",
-                        "next_files_or_artifacts_to_inspect": ["failures.json"],
-                        "recovery_options": ["rerun triage"],
-                        "fallback_prompt": "continue the run",
-                        "claims_forbidden": ["verified claim"]
+                        "missingArtifacts": ["proof.json"],
+                        "allowedProofLevel": "artifact-review-only",
+                        "nextFilesOrArtifactsToInspect": ["failures.json"],
+                        "recoveryOptions": ["rerun triage"],
+                        "fallbackPrompt": "continue the run",
+                        "claimsForbidden": ["verified claim"]
                     }
                 }]
             }))
@@ -2202,6 +2200,29 @@ mod tests {
         assert_eq!(artifact.label, "triage transcript");
         assert_eq!(artifact.path, triage_path);
         assert_eq!(artifact.kind, "json");
+    }
+
+    #[test]
+    fn load_run_failures_rejects_obsolete_failure_aliases() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-failure-obsolete-aliases";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("triage:run".to_string()), "target")
+                .failed("runtime unavailable"),
+        )
+        .unwrap();
+        fs::write(
+            run_artifact_path(tmp.path(), run_id, "failures.json"),
+            serde_json::to_string_pretty(&representative_snake_case_run_failures()).unwrap(),
+        )
+        .unwrap();
+
+        let error = load_run_failures(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
+
+        assert!(message.contains("failed to parse"));
+        assert!(message.contains("failures.json"));
     }
 
     #[test]
@@ -4376,18 +4397,6 @@ mod tests {
         }
     }
 
-    fn assert_schema_requires_any_field(schema: &serde_json::Value, fields: &[&str]) {
-        let any_of = schema["anyOf"].as_array().unwrap();
-        for field in fields {
-            assert!(
-                any_of
-                    .iter()
-                    .any(|entry| required_fields(entry).contains(field)),
-                "schema missing alias requirement for {field}"
-            );
-        }
-    }
-
     fn assert_schema_requires_fields(schema: &serde_json::Value, fields: &[&str]) {
         let required = required_fields(schema);
         for field in fields {
@@ -4395,44 +4404,42 @@ mod tests {
         }
     }
 
-    fn assert_failure_schema_requires_any_context_key(schema: &serde_json::Value) {
+    fn assert_failure_schema_requires_canonical_context_key(schema: &serde_json::Value) {
         let failure_schema = &schema["definitions"]["failure"];
-        assert_schema_requires_any_field(
-            failure_schema,
-            &["agentThreadContext", "agent_thread_context"],
-        );
+        assert_schema_requires_fields(failure_schema, &["agentThreadContext"]);
+        assert_schema_declares_no_fields(failure_schema, &["agent_thread_context"]);
     }
 
-    fn assert_failure_context_schema_requires_alias_pairs(schema: &serde_json::Value) {
+    fn assert_failure_context_schema_requires_canonical_fields(schema: &serde_json::Value) {
         let context_schema = &schema["definitions"]["failureContext"];
-        for field_pair in [
-            ["failedStage", "failed_stage"],
-            ["whatFailed", "what_failed"],
-            ["artifactsAvailable", "artifacts_available"],
-            ["missingArtifacts", "missing_artifacts"],
-            ["allowedProofLevel", "allowed_proof_level"],
-            [
+        assert_schema_requires_fields(
+            context_schema,
+            &[
+                "failedStage",
+                "cause",
+                "whatFailed",
+                "artifactsAvailable",
+                "missingArtifacts",
+                "allowedProofLevel",
                 "nextFilesOrArtifactsToInspect",
-                "next_files_or_artifacts_to_inspect",
+                "recoveryOptions",
+                "fallbackPrompt",
+                "claimsForbidden",
             ],
-            ["recoveryOptions", "recovery_options"],
-            ["fallbackPrompt", "fallback_prompt"],
-            ["claimsForbidden", "claims_forbidden"],
-        ] {
-            assert_schema_allows_required_alias_pair(context_schema, field_pair);
-        }
-    }
-
-    fn assert_schema_allows_required_alias_pair(schema: &serde_json::Value, fields: [&str; 2]) {
-        let all_of = schema["allOf"].as_array().unwrap();
-        assert!(
-            all_of.iter().any(|entry| {
-                let any_of = entry["anyOf"].as_array().unwrap();
-                fields
-                    .iter()
-                    .all(|field| any_of.iter().any(|branch| required_fields(branch).contains(field)))
-            }),
-            "schema missing alias requirement pair {fields:?}"
+        );
+        assert_schema_declares_no_fields(
+            context_schema,
+            &[
+                "failed_stage",
+                "what_failed",
+                "artifacts_available",
+                "missing_artifacts",
+                "allowed_proof_level",
+                "next_files_or_artifacts_to_inspect",
+                "recovery_options",
+                "fallback_prompt",
+                "claims_forbidden",
+            ],
         );
     }
 
@@ -4612,7 +4619,6 @@ mod tests {
             }
             let context = failure
                 .get("agentThreadContext")
-                .or_else(|| failure.get("agent_thread_context"))
                 .unwrap();
             for field in context.as_object().unwrap().keys() {
                 assert!(
