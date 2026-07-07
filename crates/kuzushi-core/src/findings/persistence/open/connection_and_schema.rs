@@ -39,7 +39,6 @@ impl FindingStore {
         configure_connection(&self.conn)?;
         create_schema(&self.conn)?;
         crate::storage_v3::create_projection_schema(&self.conn)?;
-        create_static_proof_history_schema(&self.conn)?;
         record_schema_version(&self.conn)?;
         Ok(())
     }
@@ -69,26 +68,7 @@ fn create_schema(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
-fn create_static_proof_history_schema(conn: &Connection) -> Result<()> {
-    conn.execute_batch(STATIC_PROOF_HISTORY_SCHEMA)?;
-    Ok(())
-}
-
 const FINDINGS_SCHEMA: &str = r#"
 pragma foreign_keys = on;
 
-"#;
-
-const STATIC_PROOF_HISTORY_SCHEMA: &str = r#"
-create table if not exists static_proof_history (
-  id integer primary key autoincrement,
-  finding_id integer not null,
-  scan_id text not null,
-  previous_state text,
-  next_state text not null,
-  source text not null,
-  created_at text not null
-);
-create index if not exists idx_static_proof_history_finding
-  on static_proof_history(finding_id, created_at asc, id asc);
 "#;

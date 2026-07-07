@@ -302,7 +302,22 @@ mod tests {
                 |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(legacy_table_count, 0, "new v3 stores must not create legacy finding rows");
+        assert_eq!(
+            legacy_table_count, 0,
+            "new v3 stores must not create legacy finding rows"
+        );
+        let static_history_table_count: i64 = store
+            .conn
+            .query_row(
+                "select count(*) from sqlite_master where type = 'table' and name = 'static_proof_history'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            static_history_table_count, 0,
+            "static proof history is derived from observations, not a separate table"
+        );
 
         let finding = Finding::new_tool(
             "semgrep",
