@@ -13,8 +13,7 @@ mod writes;
 
 pub use commands::{StorageWriterActor, StorageWriterActorConfig, StorageWriterActorHandle};
 pub use commands::{
-    ControlCommand, DecisionCommand, WatcherCommand, WriteEnvelope, WriteLane, WriterCommand,
-    WriterLaneScheduler,
+    ControlCommand, DecisionCommand, WatcherCommand, WriteLane, WriterCommand, WriterLaneScheduler,
 };
 use lifecycle::require_state;
 pub use lifecycle::{WriterActorState, WriterLifecycle};

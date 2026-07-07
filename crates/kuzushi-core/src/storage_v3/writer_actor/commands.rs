@@ -81,30 +81,6 @@ impl WriterCommand {
 }
 
 #[derive(Debug)]
-pub struct WriteEnvelope {
-    pub command_id: uuid::Uuid,
-    pub read_watermark: Option<u64>,
-    pub command: WriterCommand,
-    pub reply: mpsc::Sender<Result<super::WriteReceipt>>,
-}
-
-impl WriteEnvelope {
-    pub fn new(
-        command_id: uuid::Uuid,
-        read_watermark: Option<u64>,
-        command: WriterCommand,
-        reply: mpsc::Sender<Result<super::WriteReceipt>>,
-    ) -> Self {
-        Self {
-            command_id,
-            read_watermark,
-            command,
-            reply,
-        }
-    }
-}
-
-#[derive(Debug)]
 pub struct WriterLaneScheduler {
     decision_budget: usize,
     control: VecDeque<WriterCommand>,
