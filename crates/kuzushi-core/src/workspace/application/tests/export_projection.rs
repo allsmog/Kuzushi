@@ -178,6 +178,8 @@ fn export_record_does_not_project_non_triage_decision_as_triage() {
             author: TriageAuthor::Human,
             confidence: 1.0,
             rationale: "reviewed under approved suppression policy".to_string(),
+            dismiss_reason: None,
+            actor: None,
         },
         ReviewDecisionVerdict::Suppressed.to_triage_verdict(),
     );

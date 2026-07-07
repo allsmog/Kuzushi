@@ -12,6 +12,8 @@ fn decision(stable_fp: &str, read_watermark: u64) -> DecisionWrite {
         confidence_millis: 1000,
         read_watermark,
         updates_finding_triage: false,
+        dismiss_reason: None,
+        dismissed_by: None,
     }
 }
 
@@ -123,6 +125,9 @@ fn finding_lifecycle(event_kind: EventKind) -> FindingLifecycleWrite {
         reason: Some("state transition test".to_string()),
         actor: "state-machine".to_string(),
         run_id: None,
+        tool: None,
+        last_seen_run_id: None,
+        reconciled_against_run_id: None,
     }
 }
 

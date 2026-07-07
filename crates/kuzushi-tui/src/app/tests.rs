@@ -4230,6 +4230,8 @@ fn refresh_findings_loads_review_decisions_without_mutating_triage() {
                 author: kuzushi_core::findings::TriageAuthor::Human,
                 confidence: 1.0,
                 rationale: "suppressed by approved review policy".to_string(),
+                dismiss_reason: None,
+                actor: None,
             },
         )
         .unwrap();

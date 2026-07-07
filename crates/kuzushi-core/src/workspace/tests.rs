@@ -2,8 +2,9 @@
 mod tests {
     use super::super::*;
     use crate::findings::{
-        Finding, FindingEvidence, FindingStore, ReviewDecision, ReviewDecisionVerdict, Severity,
-        StaticProofState, TriageAuthor, TriageOutcome, TriageVerdict,
+        DismissReason, Finding, FindingEvidence, FindingStore, ReviewDecision,
+        ReviewDecisionVerdict, Severity, StaticProofState, TriageAuthor, TriageOutcome,
+        TriageVerdict,
     };
     use crate::run_artifacts::{write_run_summary, RunSummary};
     use std::fs;
@@ -77,6 +78,8 @@ mod tests {
                 author: TriageAuthor::Human,
                 confidence: 1.0,
                 rationale: "reviewed under approved suppression policy".to_string(),
+                dismiss_reason: None,
+                actor: None,
             },
         )
         .unwrap();
@@ -500,6 +503,53 @@ mod tests {
         assert!(first["properties"]["kuzushiDerivedSourcePresent"].is_boolean());
         assert!(first["properties"]["kuzushiAutomatedReasoningPresent"].is_boolean());
         assert!(first["properties"]["kuzushiRawHttpBlobPresent"].is_boolean());
+    }
+
+    #[test]
+    fn sarif_export_emits_suppression_for_dismissed_finding() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        seed_workspace_with_findings(&workspace, 2);
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let dismissed_id = store.list_findings(10).unwrap()[0]
+            .id
+            .expect("persisted finding id");
+        store
+            .append_dismissal(
+                dismissed_id,
+                DismissReason::FalsePositive,
+                "sanitized upstream",
+                "alice",
+            )
+            .unwrap();
+
+        let output = tmp.path().join("out.sarif");
+        export_workspace_findings(&workspace, &output, None).unwrap();
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
+
+        let results = document["runs"][0]["results"].as_array().unwrap();
+        let suppressed: Vec<&serde_json::Value> = results
+            .iter()
+            .filter(|result| result.get("suppressions").is_some())
+            .collect();
+        assert_eq!(suppressed.len(), 1, "exactly one dismissed finding");
+        let suppression = &suppressed[0]["suppressions"][0];
+        assert_eq!(suppression["kind"], "external");
+        assert_eq!(suppression["status"], "accepted");
+        assert_eq!(
+            suppression["justification"],
+            "false_positive: sanitized upstream"
+        );
+        assert_eq!(
+            suppression["properties"]["kuzushiDismissReason"],
+            "false_positive"
+        );
+        assert_eq!(suppression["properties"]["kuzushiDismissedBy"], "alice");
+        // Non-dismissed results carry no suppressions key at all.
+        assert!(results
+            .iter()
+            .any(|result| result.get("suppressions").is_none()));
     }
 
     #[test]

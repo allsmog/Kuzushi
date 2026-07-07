@@ -109,6 +109,8 @@ fn effective_review_index_prefers_loaded_append_only_decisions() {
             author: TriageAuthor::Human,
             confidence: 1.0,
             rationale: "suppressed by approved review policy".to_string(),
+            dismiss_reason: None,
+            actor: None,
         },
         triage_verdict: None,
         created_at: "2026-07-02T00:00:00Z".to_string(),
@@ -203,6 +205,8 @@ fn non_triage_review_decision_has_no_legacy_triage_verdict() {
             author: TriageAuthor::Human,
             confidence: 1.0,
             rationale: "suppressed by approved review policy".to_string(),
+            dismiss_reason: None,
+            actor: None,
         },
         source: EffectiveReviewDecisionSource::DurableIdentity,
     };
