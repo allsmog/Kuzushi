@@ -79,7 +79,7 @@ export const tokenChecks = [
   {
     label: "report proof snapshot envelope aliases",
     file: "crates/kuzushi-core/src/report/artifact_summary/proof.rs",
-    tokens: ["/data/proof", "/data/proofs", "/data/verification"],
+    tokens: ["/data/proof"],
   },
   {
     label: "report recommendation envelope aliases",

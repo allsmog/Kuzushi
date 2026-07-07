@@ -20,28 +20,18 @@
       "items": { "type": "string" }
     },
     "proof": { "type": "object" },
-    "proofs": { "type": ["object", "array"] },
-    "verification": { "type": "object" },
     "source": { "type": "string" },
     "kind": { "$ref": "#/definitions/proofKind" },
     "proofLevel": { "$ref": "#/definitions/proofLevel" },
-    "proof_level": { "$ref": "#/definitions/proofLevel" },
     "proofVerdict": { "$ref": "#/definitions/proofVerdict" },
-    "proof_verdict": { "$ref": "#/definitions/proofVerdict" },
     "runtimeVerification": { "type": "boolean" },
-    "runtime_verification": { "type": "boolean" },
     "countsByState": { "type": "object" },
-    "counts_by_state": { "type": "object" },
     "findings": {
       "type": "array",
       "items": { "$ref": "#/definitions/proofFinding" }
     },
     "verified": { "type": "integer", "minimum": 0 },
-    "verifiedCount": { "type": "integer", "minimum": 0 },
-    "verified_count": { "type": "integer", "minimum": 0 },
-    "results": { "type": "array" },
-    "verificationResults": { "type": "array" },
-    "verification_results": { "type": "array" }
+    "results": { "type": "array" }
   },
   "definitions": {
     "runStatus": {
@@ -91,13 +81,9 @@
         "fingerprint": { "type": "string" },
         "tool": { "type": "string" },
         "ruleId": { "type": "string" },
-        "rule_id": { "type": "string" },
         "filePath": { "type": "string" },
-        "file_path": { "type": "string" },
         "startLine": { "type": ["integer", "null"], "minimum": 1 },
-        "start_line": { "type": ["integer", "null"], "minimum": 1 },
-        "staticProofState": { "$ref": "#/definitions/proofState" },
-        "static_proof_state": { "$ref": "#/definitions/proofState" }
+        "staticProofState": { "$ref": "#/definitions/proofState" }
       }
     },
     "proofState": {

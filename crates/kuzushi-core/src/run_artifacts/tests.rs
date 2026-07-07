@@ -697,13 +697,11 @@ mod tests {
         let marker = representative_missing_proof_snapshot();
         let rich = representative_rich_proof_snapshot();
         let verification = representative_verification_proof_snapshot();
-        let snake_verification = representative_snake_case_verification_proof_snapshot();
 
         assert_snapshot_marker_fields_are_declared(&schema);
         assert_serialized_fields_are_declared(&schema, &marker);
         assert_serialized_fields_are_declared(&schema, &rich);
         assert_serialized_fields_are_declared(&schema, &verification);
-        assert_serialized_fields_are_declared(&schema, &snake_verification);
         assert_proof_finding_entries_match_schema(&schema, &rich);
     }
 
@@ -3334,9 +3332,9 @@ mod tests {
     }
 
     #[test]
-    fn tool_run_complete_promotes_root_proofs_snapshot() {
+    fn tool_run_complete_promotes_root_proof_snapshot() {
         let tmp = tempfile::tempdir().unwrap();
-        let run_id = "tool-root-proofs";
+        let run_id = "tool-root-proof";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "verify:finding");
 
         record_tool_run_started(record, &serde_json::json!({}));
@@ -3344,7 +3342,7 @@ mod tests {
             record,
             &serde_json::json!({
                 "ok": true,
-                "proofs": {
+                "proof": {
                     "proofLevel": 3,
                     "proofVerdict": "needs-runtime-evidence"
                 }
@@ -3363,7 +3361,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_run_complete_promotes_root_verification_snapshot() {
+    fn tool_run_complete_ignores_root_verification_snapshot() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-root-verification";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "verify:finding");
@@ -3384,12 +3382,16 @@ mod tests {
             fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
         let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
 
-        assert_eq!(proof["verified"], serde_json::json!(1));
-        assert_eq!(proof["results"][0]["findingId"], serde_json::json!("F-1"));
+        assert_eq!(
+            proof["summary"],
+            serde_json::json!("No proof snapshot was recorded for this run.")
+        );
+        assert!(proof.get("verified").is_none());
+        assert!(proof.get("results").is_none());
     }
 
     #[test]
-    fn tool_run_complete_promotes_snake_case_verification_snapshot() {
+    fn tool_run_complete_ignores_snake_case_verification_snapshot() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-snake-verification";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "verify:finding");
@@ -3410,8 +3412,12 @@ mod tests {
             fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
         let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
 
-        assert_eq!(proof["verified_count"], serde_json::json!(1));
-        assert_eq!(proof["verification_results"][0]["finding_id"], serde_json::json!("F-1"));
+        assert_eq!(
+            proof["summary"],
+            serde_json::json!("No proof snapshot was recorded for this run.")
+        );
+        assert!(proof.get("verified_count").is_none());
+        assert!(proof.get("verification_results").is_none());
     }
 
     #[test]
@@ -4372,16 +4378,6 @@ mod tests {
             "proofVerdict": "exploited",
             "verified": 1,
             "results": [{"findingId": "F-1", "verdict": "confirmed"}]
-        })
-    }
-
-    fn representative_snake_case_verification_proof_snapshot() -> serde_json::Value {
-        serde_json::json!({
-            "kind": "verification",
-            "proof_level": 2,
-            "proof_verdict": "needs-runtime-evidence",
-            "verified_count": 1,
-            "verification_results": [{"finding_id": "F-1", "verdict": "confirmed"}]
         })
     }
 

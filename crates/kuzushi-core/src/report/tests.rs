@@ -2167,9 +2167,9 @@ fn report_summarizes_canonical_proof_snapshots() {
                 },
                 {
                     "tool": "codeql:scan",
-                    "rule_id": "js/xss",
-                    "file_path": "src/view.ts",
-                    "start_line": 9
+                    "ruleId": "js/xss",
+                    "filePath": "src/view.ts",
+                    "startLine": 9
                 }
             ]
         }),
@@ -2218,7 +2218,7 @@ fn report_infers_runtime_proof_summary_from_runtime_state_counts() {
 }
 
 #[test]
-fn report_summarizes_snake_case_proof_snapshots() {
+fn report_ignores_snake_case_proof_fields() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-proof-snake", "semgrep:scan");
     write_run_summary(temp.path(), &source).unwrap();
@@ -2238,9 +2238,11 @@ fn report_summarizes_snake_case_proof_snapshots() {
 
     let report = build_run_report(temp.path(), Some("run-proof-snake")).unwrap();
 
-    assert!(report.report_markdown.contains(
-        "proof.json: present - normalized-findings; proofLevel=runtime-and-static; runtimeVerification=true; states signal_only=1, source_sink_linked=1"
-    ));
+    assert!(report
+        .report_markdown
+        .contains("proof.json: present - 4 top-level field(s)"));
+    assert!(!report.report_markdown.contains("runtime-and-static"));
+    assert!(!report.report_markdown.contains("source_sink_linked=1"));
 }
 
 #[test]
@@ -2312,14 +2314,14 @@ fn report_summarizes_enveloped_verification_proof_snapshot() {
         "proof",
         &json!({
             "data": {
-                "verification": {
+                "proof": {
                     "kind": "verification",
-                    "proof_level": 3,
-                    "proof_verdict": "confirmed",
-                    "verified_count": 2,
-                    "verification_results": [
-                        {"finding_id": "F-1", "proof_verdict": "confirmed"},
-                        {"finding_id": "F-2", "proof_verdict": "not_reproduced"}
+                    "proofLevel": 3,
+                    "proofVerdict": "confirmed",
+                    "verified": 2,
+                    "results": [
+                        {"findingId": "F-1", "verdict": "confirmed"},
+                        {"findingId": "F-2", "verdict": "not_reproduced"}
                     ]
                 }
             }
@@ -2335,7 +2337,7 @@ fn report_summarizes_enveloped_verification_proof_snapshot() {
 }
 
 #[test]
-fn report_summarizes_snake_case_verification_proof_snapshots() {
+fn report_ignores_snake_case_verification_proof_fields() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-verify-proof-snake", "verify:finding");
     write_run_summary(temp.path(), &source).unwrap();
@@ -2358,7 +2360,10 @@ fn report_summarizes_snake_case_verification_proof_snapshots() {
 
     assert!(report
         .report_markdown
-        .contains("proof.json: present - kind=verification, proofLevel=2, verdict=needs-runtime-evidence, verified=1, results=1, result verdicts needs-runtime-evidence=1, result findings=1"));
+        .contains("proof.json: present - 5 top-level field(s)"));
+    assert!(!report
+        .report_markdown
+        .contains("needs-runtime-evidence, verified=1"));
 }
 
 #[test]

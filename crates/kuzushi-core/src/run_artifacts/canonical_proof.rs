@@ -3,40 +3,17 @@ use std::collections::BTreeMap;
 
 use crate::findings::{is_runtime_proof_state, StaticProofState};
 
-const EXPLICIT_PROOF_POINTERS: &[&str] = &["/data/proof", "/data/proofs", "/proof", "/proofs"];
-const VERIFICATION_POINTERS: &[&str] = &["/data/verification", "/verification"];
+const EXPLICIT_PROOF_POINTERS: &[&str] = &["/data/proof", "/proof"];
 
 const FINDING_POINTERS: &[&str] = &["/data/coreFindings", "/data/findings", "/coreFindings", "/findings"];
 
 pub(crate) fn proof_snapshot_value(output: &Value) -> Option<Value> {
     explicit_proof_snapshot(output)
-        .or_else(|| meaningful_verification_snapshot(output))
         .or_else(|| static_proof_snapshot(output))
 }
 
 fn explicit_proof_snapshot(output: &Value) -> Option<Value> {
     value_at(output, EXPLICIT_PROOF_POINTERS).cloned()
-}
-
-fn meaningful_verification_snapshot(output: &Value) -> Option<Value> {
-    let verification = value_at(output, VERIFICATION_POINTERS)?;
-    verification_has_results(verification).then(|| verification.clone())
-}
-
-fn verification_has_results(verification: &Value) -> bool {
-    value_at(verification, &["/verified", "/verifiedCount", "/verified_count"])
-        .and_then(Value::as_u64)
-        .is_some_and(|count| count > 0)
-        || value_at(
-            verification,
-            &[
-                "/results",
-                "/verificationResults",
-                "/verification_results",
-            ],
-        )
-            .and_then(Value::as_array)
-            .is_some_and(|results| !results.is_empty())
 }
 
 fn static_proof_snapshot(output: &Value) -> Option<Value> {
