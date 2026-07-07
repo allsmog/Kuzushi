@@ -35,7 +35,7 @@ function PlanView() {
     window.blankRow(W, 'b1'),
     window.row([T('  '), m('goal      '), p('umbrella sast scan since '), p('v1.2.0'), m('  ·  scope '), p('apps/, libs/, jobs/')], W, 'h1'),
     window.row([T('  '), m('budget    '), p('$5.00'), m('  ·  '), m('est cost '), p('$1.74'), m('  ·  '), m('est wall '), p('~6m20s')], W, 'h2'),
-    window.row([T('  '), m('routing   '), p('direct'), m('  ·  '), m('triage '), [' on ', 'c-success'], m('  ·  '), m('parallel '), [' off ', 'c-subtle')], W, 'h3'),
+    window.row([T('  '), m('routing   '), p('direct'), m('  ·  '), m('triage '), [' on ', 'c-success'], m('  ·  '), m('parallel '), [' off ', 'c-subtle']], W, 'h3'),
     window.blankRow(W, 'b2'),
     window.sectionHeader('PLANNED STEPS · 9', W, 's1'),
     wrap(step(false,'1','context',     'context:read snapshot',          '0.0s · $0',   'auto',   'no rebuild required (fresh 3m ago)'), 'a'),

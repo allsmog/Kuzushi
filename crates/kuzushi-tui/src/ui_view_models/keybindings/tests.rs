@@ -12,7 +12,7 @@ fn unmapped_leaf_views_advertise_the_exit_path() {
     for view in [
         ShellView::Auth,
         ShellView::Cost,
-        ShellView::Patch("F-0001".to_string()),
+        ShellView::Patch,
         ShellView::FailureHandoff,
     ] {
         let mut app = ShellApp::new(V2Config::default(), None);
@@ -43,7 +43,7 @@ fn workbench_footer_advertises_esc_back_and_run_path() {
 fn workbench_footer_advertises_export_when_findings_exist() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Workbench;
-    app.findings = vec![kuzushi_core::Finding::new_semgrep(
+    *app.findings_mut() = vec![kuzushi_core::Finding::new_semgrep(
         "demo.rule",
         "src/app.rs",
         1,
@@ -75,7 +75,7 @@ fn footer_keybindings_include_shell_completion_prefix() {
 #[test]
 fn footer_keybindings_show_scan_abort_action_when_running() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.scan = Some(scan_state(true, false));
+    app.set_scan_panel(Some(scan_state(true, false)));
 
     let bindings = footer_keybindings(&app);
 
@@ -87,7 +87,7 @@ fn footer_keybindings_show_scan_abort_action_when_running() {
 #[test]
 fn footer_keybindings_show_wait_cleanup_after_abort_request() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.scan = Some(scan_state(true, true));
+    app.set_scan_panel(Some(scan_state(true, true)));
 
     let bindings = footer_keybindings(&app);
 
@@ -98,7 +98,7 @@ fn footer_keybindings_show_wait_cleanup_after_abort_request() {
 fn footer_keybindings_deduplicate_view_bindings() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Workbench;
-    app.findings = vec![kuzushi_core::Finding::new_semgrep(
+    *app.findings_mut() = vec![kuzushi_core::Finding::new_semgrep(
         "demo.rule",
         "src/app.rs",
         1,
@@ -192,7 +192,7 @@ fn previously_empty_views_now_show_scroll_and_back_in_footer() {
 fn footers_do_not_relabel_back_as_home() {
     for view in [
         ShellView::Recommend,
-        ShellView::Threat(crate::ThreatView::Summary),
+        ShellView::Threat,
         ShellView::ModuleRun,
         ShellView::AgentChat,
     ] {
@@ -209,7 +209,8 @@ fn footers_do_not_relabel_back_as_home() {
 #[test]
 fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Scene(VizPage::Dfd);
+    app.router.scene_mut().set_page(VizPage::Dfd);
+    app.shell_view = ShellView::Scene;
 
     let dfd_bindings = footer_keybindings(&app);
     assert!(dfd_bindings.contains(&bind("j/k/g/G", "scroll")));
@@ -220,7 +221,8 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     assert!(!dfd_bindings.contains(&bind("space/p", "pause")));
     assert!(!dfd_bindings.contains(&bind("r", "reset")));
 
-    app.shell_view = ShellView::Scene(VizPage::AttackSurface);
+    app.router.scene_mut().set_page(VizPage::AttackSurface);
+    app.shell_view = ShellView::Scene;
     let terrain_bindings = footer_keybindings(&app);
     assert!(!terrain_bindings.contains(&bind("j/k/g/G", "scroll")));
     assert!(terrain_bindings.contains(&bind("h/l/j/k", "orbit 3D")));

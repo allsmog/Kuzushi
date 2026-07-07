@@ -1664,6 +1664,7 @@ dependencies = [
  "async-trait",
  "dirs",
  "kuzushi-core",
+ "libc",
  "reqwest",
  "serde",
  "serde_json",

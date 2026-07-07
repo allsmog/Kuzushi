@@ -41,17 +41,18 @@ fn workspace_model_formats_missing_workspace_defaults() {
 #[test]
 fn workspace_model_projects_workspace_summary_and_rollup() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.workspace_view = crate::app::WorkspaceView {
-        root: Some(PathBuf::from("/tmp/kuzushi-demo")),
-        state_dir: Some(PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v2")),
-        findings_db: Some(PathBuf::from(
-            "/tmp/kuzushi-demo/.kuzushi/v2/findings.sqlite3",
-        )),
-        findings_count: Some(3),
-        last_export: Some(PathBuf::from("/tmp/findings.json")),
-        status: "workspace ready".to_string(),
-    };
-    app.findings = vec![
+    app.domain_mut()
+        .set_workspace_view(crate::app::WorkspaceView {
+            root: Some(PathBuf::from("/tmp/kuzushi-demo")),
+            state_dir: Some(PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v2")),
+            findings_db: Some(PathBuf::from(
+                "/tmp/kuzushi-demo/.kuzushi/v2/findings.sqlite3",
+            )),
+            findings_count: Some(3),
+            last_export: Some(PathBuf::from("/tmp/findings.json")),
+            status: "workspace ready".to_string(),
+        });
+    *app.findings_mut() = vec![
         finding_with_severity(Severity::Critical),
         finding_with_severity(Severity::High),
         finding_with_severity(Severity::Low),
@@ -93,16 +94,17 @@ fn plain_workspace_model_projects_missing_workspace_rows() {
 #[test]
 fn plain_workspace_model_projects_active_workspace_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.workspace_view = crate::app::WorkspaceView {
-        root: Some(PathBuf::from("/tmp/kuzushi-demo")),
-        state_dir: Some(PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v2")),
-        findings_db: Some(PathBuf::from(
-            "/tmp/kuzushi-demo/.kuzushi/v2/findings.sqlite3",
-        )),
-        findings_count: Some(3),
-        last_export: Some(PathBuf::from("/tmp/findings.json")),
-        status: "workspace ready".to_string(),
-    };
+    app.domain_mut()
+        .set_workspace_view(crate::app::WorkspaceView {
+            root: Some(PathBuf::from("/tmp/kuzushi-demo")),
+            state_dir: Some(PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v2")),
+            findings_db: Some(PathBuf::from(
+                "/tmp/kuzushi-demo/.kuzushi/v2/findings.sqlite3",
+            )),
+            findings_count: Some(3),
+            last_export: Some(PathBuf::from("/tmp/findings.json")),
+            status: "workspace ready".to_string(),
+        });
 
     let model = plain_workspace_model(&app);
 

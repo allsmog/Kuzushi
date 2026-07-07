@@ -1,11 +1,16 @@
 use super::*;
 
 impl ShellApp {
-    pub(crate) fn prompt_list(&mut self) {
+    pub(crate) fn reduce_prompt_list(&mut self) -> Vec<ShellEffect> {
         let Some((module, target)) = self.prompt_list_scope() else {
-            return;
+            return Vec::new();
         };
         let dir = kuzushi_core::module_prompt_root(target, &module);
+        vec![ShellEffect::ListPromptOverrides(PromptOverrideList { dir })]
+    }
+
+    pub(crate) fn list_prompt_overrides_effect(&mut self, list: PromptOverrideList) {
+        let dir = list.dir;
         if !dir.exists() {
             self.log_missing_prompt_override_dir(&dir);
             return;
@@ -21,14 +26,14 @@ impl ShellApp {
     }
 
     fn prompt_list_scope(&mut self) -> Option<(String, std::path::PathBuf)> {
-        let module = self.focused_module.clone().or_else(|| {
+        let module = self.focused_module_owned().or_else(|| {
             self.log(
                 "prompt",
                 "list requires a focused module. Next: /use <module>",
             );
             None
         })?;
-        let target = self.target.clone().or_else(|| {
+        let target = self.target_owned().or_else(|| {
             self.log("prompt", "list requires a workspace target");
             None
         })?;

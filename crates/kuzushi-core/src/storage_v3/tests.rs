@@ -45,6 +45,57 @@ fn review_decision_updates_search_projection() {
 }
 
 #[test]
+fn review_decision_requires_confidence_millis() {
+    let db = ProjectionDb::open_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let log = EventLog::open(tmp.path()).unwrap();
+    let event = log
+        .append(
+            EventKind::TriageDecided,
+            "human",
+            Some("run-1".to_string()),
+            None,
+            serde_json::json!({
+                "stableFp": "fp3_search",
+                "findingId": 7,
+                "identityId": "fi_search",
+                "verdict": "confirmed",
+                "rationale": "verified sink evidence",
+                "author": "human",
+            }),
+        )
+        .unwrap();
+
+    let error = db.apply_event(&event).unwrap_err();
+
+    assert!(error.to_string().contains("confidenceMillis"));
+}
+
+#[test]
+fn rekey_projection_requires_confidence() {
+    let db = ProjectionDb::open_in_memory().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let log = EventLog::open(tmp.path()).unwrap();
+    let event = log
+        .append(
+            EventKind::FindingRekeyed,
+            "rekeyer",
+            None,
+            None,
+            serde_json::json!({
+                "oldFp": "fp3_old",
+                "newFp": "fp3_new",
+                "method": "exact_content",
+            }),
+        )
+        .unwrap();
+
+    let error = db.apply_event(&event).unwrap_err();
+
+    assert!(error.to_string().contains("confidence"));
+}
+
+#[test]
 fn snapshot_and_file_events_project_inventory_rows() {
     let db = ProjectionDb::open_in_memory().unwrap();
     let tmp = tempfile::tempdir().unwrap();
@@ -130,6 +181,50 @@ fn stable_finding_reads_reject_stale_projection_when_required() {
         error
             .to_string()
             .contains("projection watermark 0 is behind required read seq 1")
+    );
+}
+
+#[test]
+fn stable_finding_reads_wait_for_projection_watermark() {
+    let tmp = tempfile::tempdir().unwrap();
+    let db_path = tmp.path().join("index.sqlite3");
+    let reader = ProjectionDb::open(&db_path).unwrap();
+    let writer_path = db_path.clone();
+    let writer = std::thread::spawn(move || {
+        let writer = ProjectionDb::open(writer_path).unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(25));
+        writer.set_applied_seq(2).unwrap();
+    });
+
+    let read = reader
+        .list_stable_findings(ReadOptions::wait_for_min_seq_with_poll(
+            2,
+            std::time::Duration::from_secs(1),
+            std::time::Duration::from_millis(5),
+        ))
+        .unwrap();
+    writer.join().unwrap();
+
+    assert_eq!(read.applied_seq, 2);
+    assert!(read.rows.is_empty());
+}
+
+#[test]
+fn stable_finding_reads_wait_timeout_is_explicit() {
+    let db = ProjectionDb::open_in_memory().unwrap();
+
+    let error = db
+        .list_stable_findings(ReadOptions::wait_for_min_seq_with_poll(
+            1,
+            std::time::Duration::from_millis(0),
+            std::time::Duration::from_millis(0),
+        ))
+        .unwrap_err();
+
+    assert!(
+        error
+            .to_string()
+            .contains("timed out waiting for projection watermark 0 to reach required read seq 1")
     );
 }
 

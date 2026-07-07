@@ -22,14 +22,14 @@ pub(crate) struct PlainCommandResultModel {
 
 pub(crate) fn transcript_model(app: &ShellApp, visible_count: usize) -> TranscriptModel {
     TranscriptModel {
-        rows: transcript_rows(&app.log, visible_count),
+        rows: transcript_rows(app.log_lines(), visible_count),
     }
 }
 
 pub(crate) fn transcript_model_from_log_index(app: &ShellApp, log_start: usize) -> TranscriptModel {
-    let log_start = log_start.min(app.log.len());
+    let log_start = log_start.min(app.log_len());
     TranscriptModel {
-        rows: transcript_rows_all(&app.log[log_start..]),
+        rows: transcript_rows_all(&app.log_lines()[log_start..]),
     }
 }
 

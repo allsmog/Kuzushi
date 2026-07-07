@@ -48,10 +48,10 @@ pub(crate) fn catalog_model(app: &ShellApp) -> CatalogModel {
     let module_count = modules.len();
     let default_action = preferred_default_module(&modules).cloned();
     let cursor_id = selected_cursor_id(app, &modules);
-    let focused_id = app.focused_module.as_deref();
+    let focused_id = app.focused_module();
     CatalogModel {
         module_count,
-        expanded: app.catalog_route.is_expanded(),
+        expanded: app.router.catalog().is_expanded(),
         default_action,
         collapsed: collapsed_catalog_model(app),
         groups: catalog_groups(&modules, focused_id, cursor_id.as_deref()),
@@ -108,16 +108,16 @@ fn collapsed_catalog_model(app: &ShellApp) -> CatalogCollapsedModel {
     CatalogCollapsedModel {
         target_warning: collapsed_target_warning(app),
         next_hint: catalog_next_hint(app),
-        scan_hint: app.findings.is_empty().then(|| app.first_finding_hint()),
+        scan_hint: app.findings().is_empty().then(|| app.first_finding_hint()),
         scan_command: app.first_finding_scan_command(),
     }
 }
 
 fn collapsed_target_warning(app: &ShellApp) -> Option<&'static str> {
-    if app.target.is_none() {
+    if app.target().is_none() {
         return Some("[!] no target selected; run `target .`, then `next`");
     }
-    app.findings
+    app.findings()
         .is_empty()
         .then_some("[!] active target has no persisted findings yet")
 }
@@ -151,23 +151,31 @@ fn critical_finding_hint(app: &ShellApp) -> Option<String> {
 }
 
 fn findings_waiting_hint(app: &ShellApp) -> Option<String> {
-    (!app.findings.is_empty()).then(|| {
-        let count = app.findings.len();
+    (!app.findings().is_empty()).then(|| {
+        let count = app.findings_total_count();
+        let loaded = app.findings().len();
+        let count_label = if count > loaded {
+            format!("{loaded}/{count} findings loaded")
+        } else {
+            format!(
+                "{count} {}",
+                if count == 1 { "finding" } else { "findings" }
+            )
+        };
         format!(
-            "{count} {} waiting · `findings` to triage · `threats regen` for STRIDE refresh.",
-            if count == 1 { "finding" } else { "findings" }
+            "{count_label} waiting · `findings` to triage · `threats regen` for STRIDE refresh."
         )
     })
 }
 
 fn has_critical_finding(app: &ShellApp) -> bool {
-    app.findings
+    app.findings()
         .iter()
         .any(|finding| finding.severity == Severity::Critical)
 }
 
 fn catalog_modules(app: &ShellApp) -> Vec<CatalogActionModule> {
-    app.registry
+    app.registry()
         .modules()
         .map(|module| {
             let metadata = module.metadata();
@@ -190,12 +198,9 @@ fn preferred_default_module(modules: &[CatalogActionModule]) -> Option<&CatalogA
 
 fn selected_cursor_id(app: &ShellApp, modules: &[CatalogActionModule]) -> Option<String> {
     let visible_ids = ordered_visible_module_ids(modules);
+    let cursor = app.router.catalog().cursor();
     visible_ids
-        .get(
-            app.catalog_route
-                .cursor()
-                .min(visible_ids.len().saturating_sub(1)),
-        )
+        .get(cursor.min(visible_ids.len().saturating_sub(1)))
         .cloned()
 }
 

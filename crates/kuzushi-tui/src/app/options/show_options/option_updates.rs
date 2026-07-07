@@ -1,11 +1,6 @@
 use super::*;
 
 impl ShellApp {
-    pub(crate) fn set_option(&mut self, global: bool, name: &str, value: &str) {
-        let effects = self.reduce_set_option(global, name, value);
-        self.execute_effects(effects);
-    }
-
     pub(crate) fn reduce_set_option(
         &mut self,
         global: bool,
@@ -35,13 +30,18 @@ impl ShellApp {
             target,
             prefix,
         } = tool_option_write_target(global, &option.tool_name, "set", "setg");
-        self.option_store
-            .set_value(scope, target, option.canonical_name.clone(), value.clone());
+        self.option_store_mut().set_value(
+            scope,
+            target,
+            option.canonical_name.clone(),
+            value.clone(),
+        );
         self.clear_legacy_global_tool_option(global, &option.canonical_name);
-        self.shell_view = ShellView::Options(OptionsView {
+        self.router.set_options(OptionsView {
             tool_name: option.tool_name.clone(),
             filter: self.current_options_filter(),
         });
+        self.shell_view = ShellView::Options;
         self.log(
             prefix,
             format!(
@@ -52,11 +52,6 @@ impl ShellApp {
             ),
         );
         persist_option_effects(scope)
-    }
-
-    pub(crate) fn unset_option(&mut self, global: bool, name: &str) {
-        let effects = self.reduce_unset_option(global, name);
-        self.execute_effects(effects);
     }
 
     pub(crate) fn reduce_unset_option(&mut self, global: bool, name: &str) -> Vec<ShellEffect> {
@@ -76,13 +71,14 @@ impl ShellApp {
             prefix,
         } = tool_option_write_target(global, &option.tool_name, "unset", "unsetg");
         let removed = self
-            .option_store
+            .option_store_mut()
             .unset_value(scope, &target, &option.canonical_name);
         let legacy_removed = self.clear_legacy_global_tool_option(global, &option.canonical_name);
-        self.shell_view = ShellView::Options(OptionsView {
+        self.router.set_options(OptionsView {
             tool_name: option.tool_name.clone(),
             filter: self.current_options_filter(),
         });
+        self.shell_view = ShellView::Options;
         self.log(
             prefix,
             removed_tool_option_message(&option, removed || legacy_removed),
@@ -98,7 +94,7 @@ impl ShellApp {
                 return None;
             }
         };
-        let Some(tool) = self.registry.resolve_tool(&tool_name) else {
+        let Some(tool) = self.registry().resolve_tool(&tool_name) else {
             self.log("error", format!("unknown tool {tool_name:?}. Next: tools"));
             return None;
         };
@@ -151,7 +147,7 @@ impl ShellApp {
         } else {
             OptionScope::Session
         };
-        self.option_store.set_value(
+        self.option_store_mut().set_value(
             scope,
             OptionTarget::All,
             canonical_name,
@@ -174,9 +170,9 @@ impl ShellApp {
         } else {
             OptionScope::Session
         };
-        let removed = self
-            .option_store
-            .unset_value(scope, &OptionTarget::All, canonical_name);
+        let removed =
+            self.option_store_mut()
+                .unset_value(scope, &OptionTarget::All, canonical_name);
         refresh_auto_open_prefs_from_store(self);
         self.log(
             if global { "unsetg" } else { "unset" },
@@ -193,7 +189,11 @@ impl ShellApp {
         if scope == OptionScope::Session {
             return;
         }
-        let paths = match kuzushi_core::ConfigPaths::from_target(self.target.as_deref()) {
+        #[cfg(test)]
+        if !self.option_persistence_enabled_for_test {
+            return;
+        }
+        let paths = match kuzushi_core::ConfigPaths::from_target(self.target()) {
             Ok(paths) => paths,
             Err(error) => {
                 self.log(
@@ -203,7 +203,7 @@ impl ShellApp {
                 return;
             }
         };
-        if let Err(error) = self.option_store.save_persistent(
+        if let Err(error) = self.option_store_mut().save_persistent(
             &paths.global_options_path(),
             paths.project_options_path().as_deref(),
         ) {
@@ -214,7 +214,7 @@ impl ShellApp {
     fn clear_legacy_global_tool_option(&mut self, global: bool, name: &str) -> bool {
         global
             && self
-                .option_store
+                .option_store_mut()
                 .unset_value(OptionScope::Global, &OptionTarget::All, name)
     }
 }

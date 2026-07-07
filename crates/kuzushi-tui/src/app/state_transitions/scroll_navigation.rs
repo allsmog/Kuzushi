@@ -20,16 +20,16 @@ impl ShellApp {
     }
 
     fn handle_catalog_row_hotkey(&mut self, key: KeyEvent) -> bool {
-        if !matches!(self.shell_view, ShellView::Catalog) || !self.catalog_route.is_expanded() {
+        if !matches!(self.shell_view, ShellView::Catalog) || !self.router.catalog().is_expanded() {
             return false;
         }
         match key.code {
             KeyCode::Char('j') => self.move_catalog_cursor(1),
             KeyCode::Char('k') => self.move_catalog_cursor(-1),
-            KeyCode::Char('g') => self.catalog_route.jump_start(),
+            KeyCode::Char('g') => self.router.catalog_mut().jump_start(),
             KeyCode::Char('G') => {
                 let total = self.catalog_module_count();
-                self.catalog_route.jump_end(total);
+                self.router.catalog_mut().jump_end(total);
             }
             _ => return false,
         }
@@ -41,7 +41,8 @@ impl ShellApp {
         if self.page_findings_down() {
             return;
         }
-        if let Some(kind) = page_scroll_kind(&self.shell_view, self.catalog_route.is_expanded()) {
+        if let Some(kind) = page_scroll_kind(&self.shell_view, self.router.catalog().is_expanded())
+        {
             self.add_page_scroll(kind, step);
             return;
         }
@@ -55,7 +56,8 @@ impl ShellApp {
         if self.page_findings_up() {
             return;
         }
-        if let Some(kind) = page_scroll_kind(&self.shell_view, self.catalog_route.is_expanded()) {
+        if let Some(kind) = page_scroll_kind(&self.shell_view, self.router.catalog().is_expanded())
+        {
             self.subtract_page_scroll(kind, step);
             return;
         }
@@ -70,7 +72,9 @@ impl ShellApp {
         }
         let len = crate::ui_view_models::visible_findings_len(self);
         if len > 0 {
-            self.findings_route.page_down(FINDINGS_PAGE_ROWS, len);
+            self.router
+                .findings_mut()
+                .page_down(FINDINGS_PAGE_ROWS, len);
         }
         true
     }
@@ -79,7 +83,7 @@ impl ShellApp {
         if !self.workbench_findings_paging() {
             return false;
         }
-        self.findings_route.page_up(FINDINGS_PAGE_ROWS);
+        self.router.findings_mut().page_up(FINDINGS_PAGE_ROWS);
         true
     }
 
@@ -87,7 +91,7 @@ impl ShellApp {
     /// focused; otherwise paging falls through to line/section scrolling.
     fn workbench_findings_paging(&self) -> bool {
         matches!(self.shell_view, ShellView::Workbench)
-            && self.workbench_focus == crate::app::WorkbenchPane::Findings
+            && self.router.workbench().focus() == crate::app::WorkbenchPane::Findings
     }
 
     fn add_page_scroll(&mut self, kind: PageScrollKind, step: usize) {
@@ -113,17 +117,18 @@ impl ShellApp {
 
     pub(super) fn is_scrollable_view(&self) -> bool {
         match &self.shell_view {
-            ShellView::Catalog => self.catalog_route.is_expanded(),
+            ShellView::Catalog => self.router.catalog().is_expanded(),
             ShellView::Help
             | ShellView::Quickstart
             | ShellView::Logs
             | ShellView::Health
+            | ShellView::Keymap
             | ShellView::Tools
-            | ShellView::Options(_)
+            | ShellView::Options
             | ShellView::Runs
-            | ShellView::RunDiff { .. }
-            | ShellView::Replay(_)
-            | ShellView::Trace(_)
+            | ShellView::RunDiff
+            | ShellView::Replay
+            | ShellView::Trace
             | ShellView::Activity
             | ShellView::SastTasks
             | ShellView::Context
@@ -134,15 +139,15 @@ impl ShellApp {
             | ShellView::AgentChat
             | ShellView::History
             | ShellView::Story
-            | ShellView::Threat(_)
+            | ShellView::Threat
             | ShellView::ThreatEditor
             | ShellView::PromptsEditor
             | ShellView::Pwn
             | ShellView::Tune
-            | ShellView::ActorDetail(_)
+            | ShellView::ActorDetail
             | ShellView::ModuleRun
             | ShellView::Workbench => true,
-            ShellView::Scene(page) => !page.is_3d(),
+            ShellView::Scene => !self.router.scene().page().is_3d(),
             _ => false,
         }
     }

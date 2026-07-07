@@ -51,9 +51,9 @@ pub(crate) struct PlainConfigModelRow {
 }
 
 pub(crate) fn config_model(app: &ShellApp) -> ConfigModel {
-    let backend = crate::app::runtime_backend_label(&app.config).to_string();
+    let backend = crate::app::runtime_backend_label(app.config()).to_string();
     let model = active_model_label(app);
-    let reasoning_override = app.session_thinking_level.clone();
+    let reasoning_override = app.session_thinking_level_owned();
     let reasoning = active_reasoning_label(app);
     let summary_rows = config_summary_rows(app, &backend, &model, reasoning);
     ConfigModel {
@@ -168,7 +168,7 @@ fn config_summary_rows(
         config_summary_row("auth envs", auth_env_summary(app)),
         config_summary_row("oauth", oauth_summary()),
         config_summary_row("base url", base_url_detail(app)),
-        config_summary_row("bridge", crate::app::bridge_command_status(&app.config)),
+        config_summary_row("bridge", crate::app::bridge_command_status(app.config())),
         config_summary_row("cost", cost_detail(app)),
     ];
     if let Some(onboarding) = onboarding_detail(app) {
@@ -184,7 +184,7 @@ fn config_summary_row(label: &'static str, value: impl Into<String>) -> ConfigSu
 }
 
 fn active_model_label(app: &ShellApp) -> String {
-    app.config
+    app.config()
         .model
         .as_deref()
         .map(crate::app::display_model_selector)
@@ -192,18 +192,17 @@ fn active_model_label(app: &ShellApp) -> String {
 }
 
 fn active_reasoning_label(app: &ShellApp) -> &str {
-    app.session_thinking_level
-        .as_deref()
+    app.session_thinking_level()
         .or_else(|| {
             crate::app::model_choices()
-                .get(app.selected_model_index)
+                .get(app.router.model_catalog().selected_index())
                 .map(|choice| choice.thinking_level)
         })
         .unwrap_or("default")
 }
 
 fn base_url_detail(app: &ShellApp) -> String {
-    app.config
+    app.config()
         .runtime
         .base_url
         .as_deref()
@@ -212,10 +211,11 @@ fn base_url_detail(app: &ShellApp) -> String {
 }
 
 fn cost_detail(app: &ShellApp) -> String {
-    if let Some(last) = app.last_tool_cost_usd {
+    if let Some(last) = app.session().last_tool_cost_usd() {
         format!(
             "session ${:.4}; last tool ${:.4}",
-            app.session_cost_usd, last
+            app.session().session_cost_usd(),
+            last
         )
     } else {
         "unavailable until a tool reports costUsd".to_string()
@@ -223,15 +223,18 @@ fn cost_detail(app: &ShellApp) -> String {
 }
 
 fn onboarding_detail(app: &ShellApp) -> Option<String> {
-    app.config.model.is_none().then(|| {
+    app.config().model.is_none().then(|| {
         "Up/Down selects a model; Enter activates it. OAuth availability is shown below."
             .to_string()
     })
 }
 
 fn config_model_rows(app: &ShellApp) -> Vec<ConfigModelRow> {
-    let visible_indexes = crate::app::visible_model_choice_indexes(app.config.model.as_deref());
-    let selected_index = visible_selected_model_index(&visible_indexes, app.selected_model_index);
+    let visible_indexes = crate::app::visible_model_choice_indexes(app.config().model.as_deref());
+    let selected_index = visible_selected_model_index(
+        &visible_indexes,
+        app.router.model_catalog().selected_index(),
+    );
     visible_indexes
         .into_iter()
         .filter_map(|index| {

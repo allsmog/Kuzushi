@@ -66,36 +66,19 @@ impl FindingStore {
         author: TriageAuthor,
         created_at: &str,
     ) -> Result<()> {
-        if self.apply_triage_to_v3_projection(finding_id, triage, author)? {
+        if self.triage_update_allowed(finding_id, author)? {
             self.append_review_decision_from_triage(finding_id, triage, author, created_at)?;
         }
         Ok(())
     }
 
-    fn apply_triage_to_v3_projection(
-        &self,
-        finding_id: i64,
-        triage: &TriageOutcome,
-        author: TriageAuthor,
-    ) -> Result<bool> {
-        let Some(mut finding) = self.v3_finding_by_projected_id(finding_id)? else {
+    fn triage_update_allowed(&self, finding_id: i64, author: TriageAuthor) -> Result<bool> {
+        let Some(finding) = self.v3_finding_by_projected_id(finding_id)? else {
             anyhow::bail!("finding constraint violation: missing projected finding id {finding_id}");
         };
         if finding.triaged_by == Some(TriageAuthor::Human) && author != TriageAuthor::Human {
             return Ok(false);
         }
-        finding.triage = Some(triage.clone());
-        finding.triaged_by = Some(author);
-        let finding_json = serde_json::to_string(&finding)
-            .context("Could not serialize v3 triage projection")?;
-        self.conn.execute(
-            r#"
-            update finding_observations
-               set finding_json = ?1
-             where json_extract(finding_json, '$.id') = ?2
-            "#,
-            params![finding_json, finding_id],
-        )?;
         Ok(true)
     }
 
@@ -120,8 +103,7 @@ impl FindingStore {
             return Ok(None);
         };
         crate::storage_v3::ProjectionDb::open(db_path)?;
-        let conn = rusqlite::Connection::open(db_path)
-            .with_context(|| format!("Could not open {}", db_path.display()))?;
+        let conn = crate::sqlite_connection::open_file(db_path)?;
         let mut stmt = conn.prepare(
             r#"
             select proof_level, proof_verdict, backend, language,

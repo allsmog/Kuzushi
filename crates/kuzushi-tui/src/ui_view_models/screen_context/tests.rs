@@ -51,11 +51,11 @@ fn workbench_context_includes_focus_selected_item_and_visible_rows() {
         request_blob: None,
         response_blob: None,
     }];
-    app.findings = vec![finding.clone()];
-    app.selected_finding = Some(finding);
+    *app.findings_mut() = vec![finding.clone()];
+    *app.selected_finding_mut() = Some(finding);
     app.shell_view = ShellView::Workbench;
-    app.workbench_focus = WorkbenchPane::Details;
-    app.scan = Some(ScanPanelState {
+    app.router.workbench_mut().set_focus(WorkbenchPane::Details);
+    app.set_scan_panel(Some(ScanPanelState {
         run_id: Some("scan-run-1".to_string()),
         target: PathBuf::from("."),
         stage: "done".to_string(),
@@ -63,7 +63,7 @@ fn workbench_context_includes_focus_selected_item_and_visible_rows() {
         running: false,
         abort_requested: false,
         error: None,
-    });
+    }));
 
     let context = screen_context_model(&app);
 
@@ -189,11 +189,11 @@ fn scope_chip_prefers_selected_finding_then_phase_and_revision() {
 #[test]
 fn screen_context_prefers_active_nested_scope() {
     let mut app = app();
-    app.active_scope = Some(crate::app::TargetCandidateScope {
+    app.set_active_scope(Some(crate::app::TargetCandidateScope {
         id: "submodule-libs-parser".to_string(),
         kind: kuzushi_core::NestedProjectKind::Submodule,
         rel_path: "libs/parser".to_string(),
-    });
+    }));
 
     let model = screen_context_model(&app);
 

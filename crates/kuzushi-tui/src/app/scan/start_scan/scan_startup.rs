@@ -1,14 +1,19 @@
 use super::*;
 
 impl ShellApp {
-    pub(crate) fn open_guided_scan(&mut self, target: Option<PathBuf>) {
-        if self.scan.as_ref().is_some_and(|scan| scan.running) {
+    pub(crate) fn open_guided_scan(&mut self, target: Option<PathBuf>) -> Vec<ShellEffect> {
+        if self.scan().is_some_and(|scan| scan.running) {
             self.log("scan", "scan already running");
-            return;
+            return Vec::new();
         }
-        if !self.activate_guided_scan_target(target) {
-            return;
-        }
+        let Some(mut effects) = self.guided_scan_target_effects(target) else {
+            return Vec::new();
+        };
+        effects.push(ShellEffect::FinalizeGuidedScanOpen);
+        effects
+    }
+
+    pub(crate) fn finalize_guided_scan_open_effect(&mut self) {
         self.workbench_cache.borrow_mut().invalidate_map_artifacts();
         let Some(journey) = crate::ui_view_models::journey_model(self) else {
             self.log(
@@ -24,56 +29,30 @@ impl ShellApp {
         self.open_phase_picker(journey.current);
     }
 
-    fn activate_guided_scan_target(&mut self, target: Option<PathBuf>) -> bool {
+    fn guided_scan_target_effects(&mut self, target: Option<PathBuf>) -> Option<Vec<ShellEffect>> {
         let Some(target) = target else {
             if self.current_workspace().is_ok() {
-                return true;
+                return Some(Vec::new());
             }
             self.log(
                 "scan",
                 "no active workspace target; run `target <path>` first, or `scan .` to use cwd",
             );
-            return false;
+            return None;
         };
         match WorkspaceTarget::new(&target) {
-            Ok(workspace) => {
-                self.activate_target(workspace);
-                true
-            }
+            Ok(_) => Some(vec![ShellEffect::ActivateTarget(TargetActivation {
+                path: target,
+                selected_scope: None,
+                source: TargetActivationSource::Command,
+            })]),
             Err(error) => {
                 self.log(
                     "error",
                     format!("invalid target {}: {error}", target.display()),
                 );
-                false
+                None
             }
-        }
-    }
-
-    pub(crate) fn start_umbrella_sast_scan(&mut self, target: Option<PathBuf>) {
-        let effects = self.reduce_scan_start(target, None);
-        self.execute_effects(effects);
-    }
-
-    pub(crate) fn start_offline_demo_scan(&mut self, target: PathBuf) {
-        let effects =
-            self.reduce_scan_start(Some(target), Some(kuzushi_core::offline_demo_scan_input()));
-        self.execute_effects(effects);
-    }
-
-    pub(crate) fn start_offline_demo_fixture_scan(&mut self) {
-        match kuzushi_core::prepare_demo_fixture() {
-            Ok(demo_dir) => {
-                self.log(
-                    "demo",
-                    format!(
-                        "offline fixture ready at {} — deterministic engines only; no key or model required",
-                        demo_dir.display()
-                    ),
-                );
-                self.start_offline_demo_scan(demo_dir);
-            }
-            Err(error) => self.log("error", format!("could not prepare demo fixture: {error}")),
         }
     }
 
@@ -82,14 +61,14 @@ impl ShellApp {
         target: Option<PathBuf>,
         explicit_input: Option<serde_json::Value>,
     ) -> Vec<ShellEffect> {
-        self.prepare_scan_start(target, explicit_input)
-            .map(|request| vec![ShellEffect::StartScan(request)])
-            .unwrap_or_default()
+        vec![ShellEffect::PrepareScan(ScanStartPreparation {
+            target,
+            explicit_input,
+        })]
     }
 
     pub(crate) fn start_prepared_scan(&mut self, request: ScanStartRequest) {
         let ticket = self.jobs.start(JobKind::Run, "scan");
-        let generation = ticket.generation();
         let trace_budget = self.jobs.trace_budget();
         let trace_handle = scan_trace_handle(
             &request.target_root,
@@ -99,7 +78,7 @@ impl ShellApp {
         );
         let cancel = ticket.cancel.clone();
 
-        self.begin_scan_state(&request, generation, cancel.clone());
+        self.begin_scan_state(&request, cancel.clone());
         self.spawn_scan_worker(request, ticket, trace_handle, cancel);
     }
 
@@ -128,36 +107,42 @@ impl ShellApp {
         self.register_worker_handle_with_watchdog("scan", generation, handle, watchdog_cancel);
     }
 
-    fn begin_scan_state(
+    pub(crate) fn prepare_scan_start_effect(
         &mut self,
-        request: &ScanStartRequest,
-        generation: WorkerGeneration,
-        cancel: ScanCancellation,
-    ) {
-        self.target = Some(request.target_root.clone());
-        self.scan = Some(queued_scan_panel(&request.target_root, &request.run_id));
-        self.scan_generation = Some(generation);
-        self.scan_rx = None;
-        self.trace_generation = Some(generation);
-        self.trace_rx = None;
-        self.scan_cancel = Some(cancel);
-        self.findings.clear();
-        self.selected_finding = None;
+        prepare: ScanStartPreparation,
+    ) -> Vec<ShellEffect> {
+        self.prepare_scan_start(prepare.target, prepare.explicit_input)
+            .map(|request| vec![ShellEffect::StartScan(request)])
+            .unwrap_or_default()
+    }
+
+    fn begin_scan_state(&mut self, request: &ScanStartRequest, cancel: ScanCancellation) {
+        self.set_target(Some(request.target_root.clone()));
+        self.set_scan_panel(Some(queued_scan_panel(
+            &request.target_root,
+            &request.run_id,
+        )));
+        self.set_scan_cancel(Some(cancel));
+        self.findings_mut().clear();
+        *self.selected_finding_mut() = None;
         self.engagement.set_phase(crate::app::WorkflowPhase::Hunt);
-        self.active_model_override = active_model_override_from_input(&request.input, &self.config);
-        self.activity = Some(self.pending_scan_activity(&request.run_id));
+        self.set_active_model_override(active_model_override_from_input(
+            &request.input,
+            self.config(),
+        ));
+        self.set_activity(Some(self.pending_scan_activity(&request.run_id)));
         self.shell_view = self.scan_shell_view();
         self.log_scan_start(&request.target_root, &request.effective_options);
     }
 
     fn pending_scan_activity(&self, run_id: &str) -> ActivitySession {
         let mut session = ActivitySession::new(run_id);
-        session.seed_from_registry(&self.registry);
+        session.seed_from_registry(self.registry());
         session
     }
 
     fn scan_shell_view(&self) -> ShellView {
-        if self.auto_open_activity {
+        if self.ui().auto_open_activity() {
             ShellView::Activity
         } else {
             ShellView::ModuleRun
@@ -175,7 +160,7 @@ impl ShellApp {
             "setup: `tasks` chooses scanners · `options sast:scan` tunes inputs · Ctrl+G opens commands",
         );
         self.log("scan", scan_options_log_message(effective_options));
-        if self.auto_open_activity {
+        if self.ui().auto_open_activity() {
             self.log(
                 "view",
                 "opened activity — Ctrl+C requests abort; type `back` to leave (disable: setg ui.auto_open_activity false)",
@@ -193,7 +178,7 @@ impl ShellApp {
         target: Option<PathBuf>,
         explicit_input: Option<serde_json::Value>,
     ) -> Option<ScanStartRequest> {
-        if self.scan.as_ref().is_some_and(|scan| scan.running) {
+        if self.scan().is_some_and(|scan| scan.running) {
             self.log("scan", "scan already running");
             return None;
         }
@@ -211,7 +196,7 @@ impl ShellApp {
         let effective_options = if explicit_input.is_some() {
             Vec::new()
         } else {
-            effective_scan_options(&self.registry, &self.option_store)
+            effective_scan_options(self.registry(), self.option_store())
         };
         let input =
             scan_input_with_run_id(self.scan_input_or_log(explicit_input, &workspace)?, &run_id);
@@ -221,15 +206,15 @@ impl ShellApp {
             db_path: workspace.findings_db_path(),
             input,
             effective_options,
-            registry: self.registry.clone(),
-            config: self.config.clone(),
-            thinking_level: self.session_thinking_level.clone(),
+            registry: self.registry().clone(),
+            config: self.config().clone(),
+            thinking_level: self.session_thinking_level_owned(),
         })
     }
 
     fn scan_target_path(&self, target: Option<PathBuf>) -> PathBuf {
         target
-            .or_else(|| self.target.clone())
+            .or_else(|| self.target_owned())
             .unwrap_or_else(|| PathBuf::from("."))
     }
 
@@ -270,16 +255,16 @@ impl ShellApp {
     ) -> Result<serde_json::Value> {
         let use_stored_options = explicit_input.is_none();
         let ctx = ToolExecutionContext {
-            config: &self.config,
+            config: self.config(),
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
         };
-        self.registry.prepare_tool_input_for_dispatch(
+        self.registry().prepare_tool_input_for_dispatch(
             "sast:scan",
             explicit_input.unwrap_or_else(|| serde_json::json!({})),
             &ctx,
-            use_stored_options.then_some(&self.option_store),
+            use_stored_options.then_some(self.option_store()),
         )
     }
 }

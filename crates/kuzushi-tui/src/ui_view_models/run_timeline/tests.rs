@@ -10,8 +10,8 @@ fn test_run_dir(root: &Path, run_id: &str) -> PathBuf {
 fn run_timeline_model_includes_active_scan_row() {
     let temp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
-    app.scan = Some(ScanPanelState {
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.set_scan_panel(Some(ScanPanelState {
         run_id: Some("r-08e1aa".to_string()),
         target: PathBuf::from("/tmp/demo"),
         stage: "complete".to_string(),
@@ -19,7 +19,7 @@ fn run_timeline_model_includes_active_scan_row() {
         running: false,
         abort_requested: false,
         error: None,
-    });
+    }));
 
     let model = run_timeline_model(&app, 20);
 
@@ -40,6 +40,26 @@ fn run_timeline_model_includes_active_scan_row() {
 }
 
 #[test]
+fn run_timeline_model_does_not_show_zero_findings_while_scan_is_running() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.set_scan_panel(Some(ScanPanelState {
+        run_id: Some("r-08e1aa".to_string()),
+        target: PathBuf::from("/tmp/demo"),
+        stage: "queued".to_string(),
+        findings_count: 0,
+        running: true,
+        abort_requested: false,
+        error: None,
+    }));
+
+    let model = run_timeline_model(&app, 20);
+
+    assert_eq!(model.rows[0].cells[2], "—");
+}
+
+#[test]
 fn run_timeline_model_filters_active_scan_from_past_runs() {
     let temp = tempfile::tempdir().unwrap();
     let run_dir = test_run_dir(temp.path(), "r-2026-05-06T14-31");
@@ -51,8 +71,8 @@ fn run_timeline_model_filters_active_scan_from_past_runs() {
     .unwrap();
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
-    app.scan = Some(ScanPanelState {
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.set_scan_panel(Some(ScanPanelState {
         run_id: Some("r-2026-05-06T14-31".to_string()),
         target: temp.path().to_path_buf(),
         stage: "running".to_string(),
@@ -60,7 +80,7 @@ fn run_timeline_model_filters_active_scan_from_past_runs() {
         running: true,
         abort_requested: false,
         error: None,
-    });
+    }));
 
     let model = run_timeline_model(&app, 20);
 
@@ -83,7 +103,7 @@ fn run_timeline_model_surfaces_run_revision_metadata() {
     .unwrap();
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = run_timeline_model(&app, 20);
 
@@ -102,7 +122,7 @@ fn run_timeline_model_preserves_persisted_terminal_statuses() {
     write_status_run(temp.path(), "r-e-paused", "paused", 5);
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = run_timeline_model(&app, 20);
 
@@ -138,7 +158,7 @@ fn run_timeline_model_marks_missing_run_metadata_unknown() {
     std::fs::create_dir_all(&run_dir).unwrap();
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = run_timeline_model(&app, 20);
 
@@ -156,7 +176,7 @@ fn run_timeline_model_surfaces_malformed_run_metadata() {
     std::fs::write(run_dir.join(run_metadata_artifact_leaf()), "{not-json").unwrap();
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = run_timeline_model(&app, 20);
 
@@ -180,7 +200,7 @@ fn run_timeline_model_surfaces_non_object_run_metadata() {
     std::fs::write(run_dir.join(run_metadata_artifact_leaf()), "[]").unwrap();
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = run_timeline_model(&app, 20);
 
@@ -203,7 +223,7 @@ fn run_timeline_model_surfaces_non_file_run_metadata() {
     std::fs::create_dir(run_dir.join(run_metadata_artifact_leaf())).unwrap();
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = run_timeline_model(&app, 20);
 
@@ -225,7 +245,7 @@ fn run_timeline_model_surfaces_missing_run_metadata() {
     std::fs::create_dir_all(&run_dir).unwrap();
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = run_timeline_model(&app, 20);
 

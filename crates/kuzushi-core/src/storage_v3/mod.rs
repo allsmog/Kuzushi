@@ -3,6 +3,7 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::BTreeSet;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 mod projection_projectors;
 mod projection_audit;
@@ -41,6 +42,10 @@ pub struct ProjectionApplyReceipt {
 pub enum StalenessPolicy {
     AllowStale,
     RejectStale,
+    Wait {
+        timeout: Duration,
+        poll_interval: Duration,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +66,30 @@ impl ReadOptions {
         Self {
             min_seq: Some(min_seq),
             staleness: StalenessPolicy::RejectStale,
+        }
+    }
+
+    pub fn wait_for_min_seq(min_seq: u64, timeout: Duration) -> Self {
+        Self {
+            min_seq: Some(min_seq),
+            staleness: StalenessPolicy::Wait {
+                timeout,
+                poll_interval: Duration::from_millis(25),
+            },
+        }
+    }
+
+    pub fn wait_for_min_seq_with_poll(
+        min_seq: u64,
+        timeout: Duration,
+        poll_interval: Duration,
+    ) -> Self {
+        Self {
+            min_seq: Some(min_seq),
+            staleness: StalenessPolicy::Wait {
+                timeout,
+                poll_interval,
+            },
         }
     }
 }
@@ -241,8 +270,7 @@ impl ProjectionDb {
         &self,
         options: ReadOptions,
     ) -> Result<ProjectionRead<Vec<StableFindingRead>>> {
-        let meta = self.meta()?;
-        require_read_watermark(meta, options)?;
+        let meta = self.meta_for_read(options)?;
         let mut stmt = self.conn.prepare(
             "select stable_fp, current_status, canonical_severity, canonical_title,
                     canonical_path, first_seen_seq, last_seen_seq, last_observation_hash
@@ -259,20 +287,76 @@ impl ProjectionDb {
             rows,
         })
     }
+
+    fn meta_for_read(&self, options: ReadOptions) -> Result<ProjectionMeta> {
+        let meta = self.meta()?;
+        let Some(min_seq) = options.min_seq else {
+            return Ok(meta);
+        };
+        if meta.applied_seq >= min_seq || options.staleness == StalenessPolicy::AllowStale {
+            return Ok(meta);
+        }
+        match options.staleness {
+            StalenessPolicy::AllowStale => Ok(meta),
+            StalenessPolicy::RejectStale => reject_stale_projection(meta, min_seq),
+            StalenessPolicy::Wait {
+                timeout,
+                poll_interval,
+            } => self.wait_for_read_watermark(min_seq, timeout, poll_interval),
+        }
+    }
+
+    fn wait_for_read_watermark(
+        &self,
+        min_seq: u64,
+        timeout: Duration,
+        poll_interval: Duration,
+    ) -> Result<ProjectionMeta> {
+        let started = Instant::now();
+        let poll_interval = nonzero_poll_interval(poll_interval);
+        loop {
+            let meta = self.meta()?;
+            if meta.applied_seq >= min_seq {
+                return Ok(meta);
+            }
+            sleep_before_next_watermark_poll(started, timeout, poll_interval, meta, min_seq)?;
+        }
+    }
 }
 
-fn require_read_watermark(meta: ProjectionMeta, options: ReadOptions) -> Result<()> {
-    let Some(min_seq) = options.min_seq else {
-        return Ok(());
-    };
-    if meta.applied_seq >= min_seq || options.staleness == StalenessPolicy::AllowStale {
-        return Ok(());
-    }
+fn reject_stale_projection<T>(meta: ProjectionMeta, min_seq: u64) -> Result<T> {
     anyhow::bail!(
         "projection watermark {} is behind required read seq {}",
         meta.applied_seq,
         min_seq
     )
+}
+
+fn sleep_before_next_watermark_poll(
+    started: Instant,
+    timeout: Duration,
+    poll_interval: Duration,
+    meta: ProjectionMeta,
+    min_seq: u64,
+) -> Result<()> {
+    let elapsed = started.elapsed();
+    if elapsed >= timeout {
+        anyhow::bail!(
+            "timed out waiting for projection watermark {} to reach required read seq {}",
+            meta.applied_seq,
+            min_seq
+        );
+    }
+    std::thread::sleep(poll_interval.min(timeout - elapsed));
+    Ok(())
+}
+
+fn nonzero_poll_interval(poll_interval: Duration) -> Duration {
+    if poll_interval.is_zero() {
+        Duration::from_millis(1)
+    } else {
+        poll_interval
+    }
 }
 
 fn stable_finding_read_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StableFindingRead> {

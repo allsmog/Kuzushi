@@ -4,19 +4,23 @@ impl ShellApp {
     /// Cache structured snapshot of a tool result for the renderer to read
     /// instead of grepping the freeform `app.log` lines. Keeps recon /
     /// offense-review / agentic-sast snapshots reachable across log truncation.
-    pub(crate) fn cache_tool_snapshot(&mut self, tool_name: &str, result: &serde_json::Value) {
+    pub(crate) fn cache_tool_snapshot(
+        &mut self,
+        tool_name: &str,
+        result: &serde_json::Value,
+    ) -> Vec<ShellEffect> {
         if tool_name.starts_with("pwn:") {
-            self.cache_pwn_snapshot(tool_name, result.get("data").unwrap_or(result));
-            return;
+            return self.cache_pwn_snapshot(tool_name, result.get("data").unwrap_or(result));
         }
         let Some(data) = result.get("data") else {
-            return;
+            return Vec::new();
         };
         for cache in SNAPSHOT_CACHES {
             if cache(self, tool_name, data) {
-                return;
+                return Vec::new();
             }
         }
+        Vec::new()
     }
 
     /// Reload the per-repo taint-flow + exploit-chain viz snapshots a previous
@@ -38,7 +42,7 @@ impl ShellApp {
             .as_ref()
             .and_then(taint_flow_from_data)
         {
-            self.taint_flow = Some(flow);
+            self.domain_mut().set_taint_flow(Some(flow));
         }
     }
 
@@ -49,8 +53,8 @@ impl ShellApp {
         };
         let details = exploit_chain_details(&chain_data);
         if !details.is_empty() {
-            self.exploit_chains = details;
-            self.chains = exploit_chain_aliases(&chain_data);
+            self.domain_mut().set_exploit_chains(details);
+            self.set_chain_aliases(exploit_chain_aliases(&chain_data));
         }
     }
 }
@@ -78,7 +82,7 @@ fn cache_recon_snapshot(app: &mut ShellApp, tool_name: &str, data: &serde_json::
     if !tool_name.starts_with("recon:") {
         return false;
     }
-    app.recon_snapshot = Some(ReconSnapshot {
+    app.domain_mut().set_recon_snapshot(ReconSnapshot {
         hosts: recon_hosts(data),
         services: recon_services(data),
         notes: recon_notes(data),
@@ -96,8 +100,9 @@ fn cache_exploit_chain_snapshot(
     if tool_name != "exploit-chain:scan" {
         return false;
     }
-    app.chains = exploit_chain_aliases(data);
-    app.exploit_chains = exploit_chain_details(data);
+    app.set_chain_aliases(exploit_chain_aliases(data));
+    app.domain_mut()
+        .set_exploit_chains(exploit_chain_details(data));
     true
 }
 
@@ -171,7 +176,7 @@ fn cache_taint_flow_snapshot(
         return false;
     }
     if let Some(flow) = taint_flow_from_data(data) {
-        app.taint_flow = Some(flow);
+        app.domain_mut().set_taint_flow(Some(flow));
     }
     true
 }
@@ -266,7 +271,7 @@ fn cache_threat_hunt_snapshot(
         return false;
     }
     if let Ok(report) = serde_json::from_value::<CarliniThreatHuntReport>(data.clone()) {
-        app.carlini_snapshot = Some(report);
+        app.domain_mut().set_carlini_snapshot(report);
     }
     true
 }
@@ -280,7 +285,7 @@ fn cache_agentic_sast_snapshot(
         return false;
     }
     if let Ok(report) = serde_json::from_value::<AgenticSastReport>(data.clone()) {
-        app.agentic_sast_snapshot = Some(report);
+        app.domain_mut().set_agentic_sast_snapshot(report);
     }
     true
 }
@@ -292,7 +297,8 @@ fn cache_patch_snapshot(app: &mut ShellApp, tool_name: &str, data: &serde_json::
     if let Some(patch) = parse_pending_patch(data) {
         let alias = patch.alias.clone();
         app.engagement.set_pending_patch(patch);
-        app.shell_view = ShellView::Patch(alias);
+        app.router.patch_mut().open(alias);
+        app.shell_view = ShellView::Patch;
     }
     true
 }

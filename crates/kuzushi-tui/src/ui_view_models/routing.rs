@@ -65,16 +65,22 @@ pub(crate) fn uses_workbench_frame(app: &ShellApp) -> bool {
 /// Frame-level gallery pages (3D terrain + the Canvas graph/tree diagrams) own
 /// the full body region. Attack-path and heatmap use the shared line path.
 pub(crate) fn uses_scene_frame(app: &ShellApp) -> bool {
-    matches!(app.shell_view, ShellView::Scene(page) if page.is_frame_rendered())
+    matches!(app.shell_view, ShellView::Scene) && app.router.scene().page().is_frame_rendered()
 }
 
 pub(crate) fn plain_render_mode(app: &ShellApp) -> PlainRenderMode<'_> {
-    if let Some(model) = interactive_only_plain_model(&app.shell_view) {
+    if app.auth_screen_snapshot().is_some() {
+        return PlainRenderMode::LineBased {
+            include_context_strip: false,
+        };
+    }
+
+    if let Some(model) = interactive_only_plain_model(app) {
         return PlainRenderMode::InteractiveOnly(model);
     }
 
     match &app.shell_view {
-        ShellView::Options(view) => PlainRenderMode::Options(view),
+        ShellView::Options => PlainRenderMode::Options(app.router.options()),
         ShellView::SastTasks => PlainRenderMode::SastTasks,
         ShellView::Context => PlainRenderMode::Context,
         ShellView::ProjectModel => PlainRenderMode::ProjectModel,
@@ -92,18 +98,19 @@ pub(crate) fn plain_render_mode(app: &ShellApp) -> PlainRenderMode<'_> {
     }
 }
 
-fn interactive_only_plain_model(view: &ShellView) -> Option<PlainInteractiveOnlyModel> {
-    match view {
+fn interactive_only_plain_model(app: &ShellApp) -> Option<PlainInteractiveOnlyModel> {
+    match &app.shell_view {
         ShellView::ModelPicker => Some(PlainInteractiveOnlyModel {
             title: "MODEL PICKER",
             next: "This picker needs an interactive terminal. Use `model <id>` or `config` in plain mode.".to_string(),
         }),
-        ShellView::AuthMethodPicker(provider) => Some(PlainInteractiveOnlyModel {
-                title: "AUTH PICKER",
-                next: format!(
-                    "This picker needs an interactive terminal. Use `auth login {provider}` or set credentials before relaunch."
-                ),
-            }),
+        ShellView::AuthMethodPicker => Some(PlainInteractiveOnlyModel {
+            title: "AUTH PICKER",
+            next: format!(
+                "This picker needs an interactive terminal. Use `auth login {}` or set credentials before relaunch.",
+                app.router.auth_picker().provider()
+            ),
+        }),
         ShellView::TargetPicker => Some(PlainInteractiveOnlyModel {
             title: "TARGET PICKER",
             next: "This picker needs an interactive terminal. Use `target <path>` in plain mode.".to_string(),
@@ -124,10 +131,6 @@ fn interactive_only_plain_model(view: &ShellView) -> Option<PlainInteractiveOnly
             title: "PROMPTS EDITOR",
             next: "This editor needs an interactive terminal. Use `prompt show <tool>` or edit `.kuzushi/prompts/` directly.".to_string(),
         }),
-        ShellView::CommandPalette => Some(PlainInteractiveOnlyModel {
-            title: "COMMAND PALETTE",
-            next: "This palette needs an interactive terminal. Use `help <query>` in plain mode.".to_string(),
-        }),
         _ => None,
     }
 }
@@ -137,21 +140,21 @@ fn routing_state(app: &ShellApp) -> (bool, bool, bool, bool) {
         has_run_activity(app),
         has_agent_activity(app),
         has_plan_activity(app),
-        app.focused_module.is_some(),
+        app.focused_module().is_some(),
     )
 }
 
 pub(crate) fn has_run_activity(app: &ShellApp) -> bool {
-    app.scan.as_ref().is_some_and(|scan| scan.running) || app.running_tool_name().is_some()
+    app.scan().is_some_and(|scan| scan.running) || app.running_tool_name().is_some()
 }
 
 fn has_agent_activity(app: &ShellApp) -> bool {
     matches!(app.shell_view, ShellView::AgentChat)
-        || app.agent_chat.as_ref().is_some_and(|agent| agent.running)
+        || app.agent_chat().is_some_and(|agent| agent.running)
 }
 
 fn has_plan_activity(app: &ShellApp) -> bool {
-    app.planner_running || app.engagement.has_pending_plan()
+    app.planner_running() || app.engagement.has_pending_plan()
 }
 
 #[cfg(test)]

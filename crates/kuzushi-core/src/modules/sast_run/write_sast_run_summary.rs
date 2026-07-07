@@ -88,12 +88,12 @@ fn append_sast_run_trace(
 ) -> Result<()> {
     append_sast_started_trace_if_empty(workspace, run_id)?;
     let step = crate::run_artifacts::RunTraceStep::new(
-        crate::run_artifacts::next_run_trace_step_number(workspace.root(), run_id),
+        0,
         "done",
         format!("sast:scan complete · {findings_count} finding(s)"),
     )
     .with_tool_name("sast:scan");
-    crate::run_artifacts::append_run_trace_step(workspace.root(), run_id, &step)?;
+    crate::run_artifacts::append_run_trace_step_with_next_number(workspace.root(), run_id, &step)?;
     Ok(())
 }
 
@@ -101,9 +101,9 @@ fn append_sast_started_trace_if_empty(workspace: &WorkspaceTarget, run_id: &str)
     if crate::run_artifacts::next_run_trace_step_number(workspace.root(), run_id) != 1 {
         return Ok(());
     }
-    let step = crate::run_artifacts::RunTraceStep::new(1, "tool", "sast:scan started")
+    let step = crate::run_artifacts::RunTraceStep::new(0, "tool", "sast:scan started")
         .with_tool_name("sast:scan");
-    crate::run_artifacts::append_run_trace_step(workspace.root(), run_id, &step)?;
+    crate::run_artifacts::append_run_trace_step_with_next_number(workspace.root(), run_id, &step)?;
     Ok(())
 }
 

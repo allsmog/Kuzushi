@@ -24,6 +24,7 @@ pub(crate) mod codeql_build_mode;
 pub(crate) mod fs_atomic;
 pub(crate) mod module_result;
 pub(crate) mod process_lookup;
+pub(crate) mod sqlite_connection;
 pub(crate) mod structured_output;
 #[cfg(test)]
 pub(crate) mod test_env;

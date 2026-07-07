@@ -46,7 +46,7 @@ pub(crate) fn auth_provider_rows(app: &ShellApp) -> Vec<AuthProviderRow> {
 }
 
 pub(crate) fn auth_login_model(app: &ShellApp) -> Option<AuthLoginModel> {
-    app.auth_login.as_ref().map(|login| AuthLoginModel {
+    app.router.auth().login().map(|login| AuthLoginModel {
         provider: login.provider.clone(),
         method: login.method.clone(),
         status: login.status.clone(),
@@ -65,7 +65,7 @@ pub(crate) fn model_auth_status(choice: &crate::app::ModelChoice) -> String {
 }
 
 pub(crate) fn auth_env_summary(app: &ShellApp) -> String {
-    let api_key_env = app.config.runtime.api_key_env.as_str();
+    let api_key_env = app.config().runtime.api_key_env.as_str();
     let auth_status = hidden_env_status(api_key_env);
     let anthropic_status = hidden_env_status("ANTHROPIC_API_KEY");
     format!("{api_key_env} ({auth_status}); ANTHROPIC_API_KEY ({anthropic_status})")
@@ -92,7 +92,7 @@ fn oauth_short_status(provider: &str) -> String {
 }
 
 fn runtime_env_row(app: &ShellApp) -> AuthProviderRow {
-    let api_key_env = app.config.runtime.api_key_env.as_str();
+    let api_key_env = app.config().runtime.api_key_env.as_str();
     let env_set = std::env::var_os(api_key_env).is_some();
     auth_provider_row(
         "LangGraph",

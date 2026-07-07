@@ -15,7 +15,7 @@ use super::activity_pane_chrome::{
 use super::activity_plain_rows::{activity_plain_pane_rows, ActivityPlainPaneRow};
 use super::activity_scroll::{activity_feed_scroll_offset, activity_task_scroll_offset};
 use super::generated_views_feed::{activity_deck_plain_extra_rows, activity_deck_rows};
-use crate::{ActivitySession, DagTaskState, ShellApp};
+use crate::{ActivityRouteState, ActivitySession, DagTaskState, ShellApp};
 use kuzushi_core::RunSummary;
 use std::time::Instant;
 
@@ -27,17 +27,19 @@ pub(crate) enum ActivityViewModel<'a> {
 pub(crate) struct ActiveActivityViewModel<'a> {
     app: &'a ShellApp,
     session: &'a ActivitySession,
+    route: &'a ActivityRouteState,
     context_line: String,
 }
 
 pub(crate) fn activity_view_model(app: &ShellApp) -> ActivityViewModel<'_> {
-    match app.activity.as_ref() {
+    match app.activity() {
         Some(session) if manual_activity_session_is_idle(app, session) => {
             ActivityViewModel::Inactive(activity_empty_state_model())
         }
         Some(session) => ActivityViewModel::Active(ActiveActivityViewModel {
             app,
             session,
+            route: app.activity_route(),
             context_line: activity_context_line(app),
         }),
         None => ActivityViewModel::Inactive(activity_empty_state_model()),
@@ -47,7 +49,7 @@ pub(crate) fn activity_view_model(app: &ShellApp) -> ActivityViewModel<'_> {
 fn manual_activity_session_is_idle(app: &ShellApp, session: &ActivitySession) -> bool {
     session.run_id.starts_with("manual-")
         && app.running_tool_name().is_none()
-        && !app.scan.as_ref().is_some_and(|scan| scan.running)
+        && !app.scan().is_some_and(|scan| scan.running)
         && session.events.is_empty()
         && session
             .tasks
@@ -69,7 +71,7 @@ fn activity_run_outcome(app: &ShellApp, session: &ActivitySession) -> Option<Act
             return Some(outcome);
         }
     }
-    let activity = app.live_activity.as_ref()?;
+    let activity = app.live_activity()?;
     matches!(activity.phase, LiveActivityPhase::Refused).then(|| ActivityRunOutcome::Failed {
         subject: activity.subject.clone(),
     })
@@ -81,11 +83,11 @@ fn activity_session_still_running(app: &ShellApp, session: &ActivitySession) -> 
         .values()
         .any(|row| row.state == DagTaskState::Active)
         || app.running_tool_name().is_some()
-        || app.scan.as_ref().is_some_and(|scan| scan.running)
+        || app.scan().is_some_and(|scan| scan.running)
 }
 
 fn activity_run_summary(app: &ShellApp, session: &ActivitySession) -> Option<RunSummary> {
-    let target = app.target.as_deref()?;
+    let target = app.target()?;
     app.workbench_cache
         .borrow_mut()
         .run_summary_index(Some(target), vec![session.run_id.clone()])
@@ -124,6 +126,7 @@ impl<'a> ActiveActivityViewModel<'a> {
     pub(crate) fn header(&self) -> ActivityHeaderModel {
         activity_header_model(
             self.session,
+            self.route,
             activity_run_outcome(self.app, self.session),
             self.live_tool().as_ref(),
         )
@@ -164,7 +167,7 @@ impl<'a> ActiveActivityViewModel<'a> {
     }
 
     pub(crate) fn pane_chrome(&self) -> ActivityPaneChromeModel {
-        activity_pane_chrome_model(self.session)
+        activity_pane_chrome_model(self.session, self.route)
     }
 
     pub(crate) fn plain_pane_widths(&self, width: u16) -> ActivityPaneWidths {
@@ -175,7 +178,7 @@ impl<'a> ActiveActivityViewModel<'a> {
         &self,
         widths: ActivityPaneWidths,
     ) -> ActivityPlainPaneHeaderModel {
-        activity_plain_pane_header_model(self.session, widths.dag, widths.feed)
+        activity_plain_pane_header_model(self.session, self.route, widths.dag, widths.feed)
     }
 
     pub(crate) fn plain_pane_rows(
@@ -183,9 +186,11 @@ impl<'a> ActiveActivityViewModel<'a> {
         widths: ActivityPaneWidths,
         now: Instant,
     ) -> Vec<ActivityPlainPaneRow> {
-        let output_rows = activity_deck_plain_extra_rows(self.app, self.session, widths.feed);
+        let output_rows =
+            activity_deck_plain_extra_rows(self.app, self.session, self.route, widths.feed);
         activity_plain_pane_rows(
             self.session,
+            self.route,
             widths.dag,
             widths.feed,
             now,
@@ -199,7 +204,13 @@ impl<'a> ActiveActivityViewModel<'a> {
         inner_width: usize,
         now: Instant,
     ) -> Vec<ActivityDagPaneRow> {
-        activity_dag_pane_rows(self.session, inner_width, now, self.app.running_tool_name())
+        activity_dag_pane_rows(
+            self.session,
+            self.route,
+            inner_width,
+            now,
+            self.app.running_tool_name(),
+        )
     }
 
     /// The right pane is an output strip: one selected artifact/review page at
@@ -210,22 +221,24 @@ impl<'a> ActiveActivityViewModel<'a> {
         activity_deck_rows(
             self.app,
             self.session,
+            self.route,
             inner_width,
             self.app.running_tool_name(),
         )
     }
 
     pub(crate) fn task_scroll_offset(&self, rows: usize, viewport_rows: usize) -> usize {
-        activity_task_scroll_offset(self.session, rows, viewport_rows)
+        activity_task_scroll_offset(self.route, rows, viewport_rows)
     }
 
     pub(crate) fn feed_scroll_offset(&self, rows: usize, viewport_rows: usize) -> usize {
-        activity_feed_scroll_offset(self.session, rows, viewport_rows)
+        activity_feed_scroll_offset(self.route, rows, viewport_rows)
     }
 
     pub(crate) fn footer(&self, width: u16) -> ActivityFooterModel {
         activity_footer_model(
             self.session,
+            self.route,
             width,
             self.app.running_tool_name(),
             activity_abort_pending(self.app),
@@ -249,19 +262,14 @@ fn activity_abort_pending(app: &ShellApp) -> bool {
 
 fn activity_abort_subjects(app: &ShellApp) -> Vec<&'static str> {
     [
-        (
-            app.scan.as_ref().is_some_and(|scan| scan.abort_requested),
-            "scan",
-        ),
+        (app.scan().is_some_and(|scan| scan.abort_requested), "scan"),
         (app.tool_abort_requested(), "tool"),
         (
-            app.agent_chat
-                .as_ref()
-                .is_some_and(|agent| agent.abort_requested),
+            app.agent_chat().is_some_and(|agent| agent.abort_requested),
             "agent",
         ),
-        (app.plan_abort_requested, "plan"),
-        (app.threat_abort_requested, "threat model"),
+        (app.plan_abort_requested(), "plan"),
+        (app.threat_abort_requested(), "threat model"),
     ]
     .into_iter()
     .filter_map(|(active, subject)| active.then_some(subject))
@@ -296,7 +304,7 @@ mod tests {
             "context:build".to_string(),
             DagTaskRow::queued("context:build".into(), "context".into(), Vec::new()),
         );
-        app.activity = Some(session);
+        app.set_activity(Some(session));
 
         let ActivityViewModel::Active(model) = activity_view_model(&app) else {
             panic!("expected active activity model");
@@ -329,7 +337,7 @@ mod tests {
         )
         .unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-        app.activity = Some(ActivitySession::new("run-finished"));
+        app.set_activity(Some(ActivitySession::new("run-finished")));
 
         let ActivityViewModel::Active(model) = activity_view_model(&app) else {
             panic!("expected active activity model");
@@ -360,7 +368,7 @@ mod tests {
         summary.error = Some("triage stage did not complete".to_string());
         kuzushi_core::write_run_summary(workspace.root(), &summary).unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-        app.activity = Some(ActivitySession::new("run-partial"));
+        app.set_activity(Some(ActivitySession::new("run-partial")));
 
         let ActivityViewModel::Active(model) = activity_view_model(&app) else {
             panic!("expected active activity model");
@@ -377,16 +385,17 @@ mod tests {
     #[test]
     fn activity_deck_shows_selected_artifact_regardless_of_session_tasks() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.taint_flow = Some(crate::TaintFlowSnapshot {
-            cwe: "CWE-89".to_string(),
-            severity: "critical".to_string(),
-            stages: vec![crate::TaintStage {
-                message: "order_id".to_string(),
-                file: "orders.rs".to_string(),
-                line: 1,
-                snippet: None,
-            }],
-        });
+        app.domain_mut()
+            .set_taint_flow(Some(crate::TaintFlowSnapshot {
+                cwe: "CWE-89".to_string(),
+                severity: "critical".to_string(),
+                stages: vec![crate::TaintStage {
+                    message: "order_id".to_string(),
+                    file: "orders.rs".to_string(),
+                    line: 1,
+                    snippet: None,
+                }],
+            }));
         // The active session ran only an unrelated task — no taint-iris and no
         // threat-model — yet the persisted attack path must still pin to the
         // OUTPUT feed, since the views now persist across phases from app state.
@@ -395,10 +404,8 @@ mod tests {
             "context:build".to_string(),
             DagTaskRow::queued("context:build".into(), "context".into(), Vec::new()),
         );
-        app.activity = Some(session);
-        app.activity
-            .as_mut()
-            .unwrap()
+        app.set_activity(Some(session));
+        app.activity_route_mut()
             .set_deck_page(crate::ActivityDeckPage::AttackPath);
 
         let ActivityViewModel::Active(model) = activity_view_model(&app) else {

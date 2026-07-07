@@ -8,7 +8,7 @@ pub(super) fn active_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>
 }
 
 fn active_scan_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
-    let scan = app.scan.as_ref()?;
+    let scan = app.scan()?;
     scan.running.then(|| {
         let mut bindings = vec![abort_binding(scan.abort_requested)];
         push_view_keybindings(&mut bindings, app);
@@ -40,17 +40,15 @@ fn active_tool_keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
 }
 
 fn has_agentic_work(app: &ShellApp) -> bool {
-    app.agent_chat.as_ref().is_some_and(|agent| agent.running)
-        || app.planner_running
-        || app.threat_worker_running
+    app.agent_chat().is_some_and(|agent| agent.running)
+        || app.planner_running()
+        || app.threat_worker_running()
 }
 
 fn agentic_abort_requested(app: &ShellApp) -> bool {
-    app.agent_chat
-        .as_ref()
-        .is_some_and(|agent| agent.abort_requested)
-        || app.plan_abort_requested
-        || app.threat_abort_requested
+    app.agent_chat().is_some_and(|agent| agent.abort_requested)
+        || app.plan_abort_requested()
+        || app.threat_abort_requested()
 }
 
 fn abort_binding(abort_requested: bool) -> FooterKeybinding {

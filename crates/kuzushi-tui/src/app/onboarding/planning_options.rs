@@ -183,8 +183,8 @@ impl ShellApp {
         task: PlanningTaskId,
     ) -> Result<Value> {
         let explicit = planning_task_explicit_input(task, self.engagement.option_overrides());
-        self.registry
-            .prepare_tool_input(task.tool_name(), explicit, Some(&self.option_store))
+        self.registry()
+            .prepare_tool_input(task.tool_name(), explicit, Some(self.option_store()))
     }
 
     pub(crate) fn resolved_input_for_planning_task(&self, task: PlanningTaskId) -> Result<Value> {
@@ -197,7 +197,7 @@ impl ShellApp {
         spec: &OptionSpec,
     ) -> Option<OptionScope> {
         option_storage_names(spec).into_iter().find_map(|name| {
-            self.option_store
+            self.option_store()
                 .effective_stored_value_scope(tool_name, name)
         })
     }
@@ -214,13 +214,13 @@ impl ShellApp {
 
     fn current_planning_tool_options(&self) -> Option<&[OptionSpec]> {
         let row = self.engagement.planning_picker().current_row()?;
-        let tool = self.registry.resolve_tool(row.tool_name)?;
+        let tool = self.registry().resolve_tool(row.tool_name)?;
         Some(tool.options.as_slice())
     }
 
     pub(super) fn selected_planning_option_spec(&self) -> Option<(PlanningTaskId, OptionSpec)> {
         let row = self.engagement.planning_picker().current_row()?;
-        let tool = self.registry.resolve_tool(row.tool_name)?;
+        let tool = self.registry().resolve_tool(row.tool_name)?;
         let spec = tool
             .options
             .get(self.engagement.planning_picker().option_cursor())?
@@ -229,7 +229,7 @@ impl ShellApp {
     }
 
     fn planning_option_spec(&self, task: PlanningTaskId, option_name: &str) -> Option<OptionSpec> {
-        let tool = self.registry.resolve_tool(task.tool_name())?;
+        let tool = self.registry().resolve_tool(task.tool_name())?;
         tool.options
             .iter()
             .find(|spec| spec.name == option_name)
@@ -258,11 +258,11 @@ impl ShellApp {
         let overrides = self
             .engagement
             .option_overrides_with(task, spec.name.clone(), value);
-        self.registry
+        self.registry()
             .prepare_tool_input(
                 task.tool_name(),
                 planning_task_explicit_input(task, &overrides),
-                Some(&self.option_store),
+                Some(self.option_store()),
             )?
             .as_object()
             .cloned()

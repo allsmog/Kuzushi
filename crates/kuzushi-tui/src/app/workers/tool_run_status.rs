@@ -22,10 +22,8 @@ pub(crate) fn agent_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     question: String,
-    tx: Sender<StampedEvent<AgentEvent>>,
-    generation: WorkerGeneration,
+    sink: JobEventSink,
     cancel: ScanCancellation,
-    wake: Option<TerminalLoopWake>,
 ) {
     let audit = AgentCallAudit::for_prompt(&model, ASK_SYSTEM_PROMPT, &question);
     let result = run_agent_worker(config, model, thinking_level, cwd, question, cancel);
@@ -39,8 +37,7 @@ pub(crate) fn agent_worker(
             audit,
         },
     };
-    let _ = tx.send(StampedEvent::new(generation, event));
-    notify_terminal_loop(&wake);
+    sink.send(ShellEvent::Agent(event));
 }
 
 pub(crate) struct AgentWorkerAnswer {
@@ -103,10 +100,8 @@ pub(crate) fn planner_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     goal: String,
-    tx: Sender<StampedEvent<PlanEvent>>,
-    generation: WorkerGeneration,
+    sink: JobEventSink,
     cancel: ScanCancellation,
-    wake: Option<TerminalLoopWake>,
 ) {
     let event = match run_planner_worker(config, model, thinking_level, cwd, &goal, cancel) {
         Ok(plan) => PlanEvent::Proposed(plan),
@@ -114,8 +109,7 @@ pub(crate) fn planner_worker(
             error: error.to_string(),
         },
     };
-    let _ = tx.send(StampedEvent::new(generation, event));
-    notify_terminal_loop(&wake);
+    sink.send(ShellEvent::Plan(event));
 }
 
 pub(crate) fn run_planner_worker(

@@ -2,7 +2,7 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn apply_plan_event(&mut self, event: PlanEvent) {
-        self.planner_running = false;
+        self.set_planner_running(false);
         if self.discard_aborted_plan_event() {
             return;
         }
@@ -10,15 +10,15 @@ impl ShellApp {
     }
 
     fn discard_aborted_plan_event(&mut self) -> bool {
-        if !self.plan_abort_requested {
+        if !self.plan_abort_requested() {
             return false;
         }
-        self.plan_abort_requested = false;
+        self.set_plan_abort_requested(false);
         self.log(
             "plan",
             "LangGraph response arrived after abort request; discarded",
         );
-        self.set_paused_activity("plan", "proposal discarded after abort request");
+        self.set_refused_activity("plan", "proposal discarded after abort request");
         true
     }
 
@@ -43,7 +43,7 @@ impl ShellApp {
     }
 
     pub fn set_pending_plan(&mut self, plan: PlanProposal) {
-        self.planner_running = false;
+        self.set_planner_running(false);
         self.engagement.set_pending_plan(plan);
     }
 }

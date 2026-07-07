@@ -32,7 +32,6 @@ impl FindingStore {
         configure_connection(&self.conn)?;
         create_schema(&self.conn)?;
         crate::storage_v3::create_projection_schema(&self.conn)?;
-        create_review_decisions_schema(&self.conn)?;
         create_finding_identities_schema(&self.conn)?;
         create_static_proof_history_schema(&self.conn)?;
         record_schema_version(&self.conn)?;
@@ -66,17 +65,6 @@ fn create_schema(conn: &Connection) -> Result<()> {
 
 fn create_finding_identities_schema(conn: &Connection) -> Result<()> {
     conn.execute_batch(FINDING_IDENTITIES_SCHEMA)?;
-    Ok(())
-}
-
-fn create_review_decisions_schema(conn: &Connection) -> Result<()> {
-    conn.execute_batch(REVIEW_DECISIONS_SCHEMA)?;
-    ensure_column(
-        conn,
-        "review_decisions",
-        "identity_id",
-        "alter table review_decisions add column identity_id text",
-    )?;
     Ok(())
 }
 
@@ -151,25 +139,6 @@ create table if not exists finding_identity_fingerprints (
 );
 create index if not exists idx_finding_identity_fingerprints_fingerprint
   on finding_identity_fingerprints(fingerprint);
-"#;
-
-const REVIEW_DECISIONS_SCHEMA: &str = r#"
-create table if not exists review_decisions (
-  id integer primary key autoincrement,
-  finding_id integer not null,
-  identity_id text,
-  decision_verdict text not null,
-  triage_verdict text,
-  confidence real not null,
-  rationale text not null,
-  author text not null,
-  created_at text not null
-);
-create index if not exists idx_review_decisions_finding
-  on review_decisions(finding_id, created_at desc, id desc);
-create index if not exists idx_review_decisions_identity
-  on review_decisions(identity_id, created_at desc, id desc)
-  where identity_id is not null;
 "#;
 
 const STATIC_PROOF_HISTORY_SCHEMA: &str = r#"

@@ -11,14 +11,15 @@ impl ShellApp {
         };
         match self.refresh_kb_view(&module_id) {
             Ok(()) => {
-                self.focused_module = Some(module_id.clone());
+                self.set_focused_module(Some(module_id.clone()));
                 self.shell_view = ShellView::KnowledgeBase;
                 self.router.kb_mut().open();
                 self.log(
                     "kb",
                     format!(
                         "{} attachment(s) for {module_id}. Next: attach <path-or-url>",
-                        self.kb_view
+                        self.domain()
+                            .kb_view()
                             .attachments
                             .iter()
                             .filter(|record| record.module_id == module_id)
@@ -48,7 +49,7 @@ impl ShellApp {
         match attach_source(&workspace, &module_id, source) {
             Ok(record) => {
                 let _ = self.refresh_kb_view(&module_id);
-                self.focused_module = Some(module_id);
+                self.set_focused_module(Some(module_id));
                 self.shell_view = ShellView::KnowledgeBase;
                 self.log(
                     "attach",

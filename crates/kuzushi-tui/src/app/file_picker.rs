@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::state_transitions::InputUpdate;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -15,14 +16,17 @@ impl ShellApp {
             }
         };
         let (files, truncated) = workspace_file_candidates(workspace.root(), FILE_PICKER_MAX_FILES);
-        self.file_picker_route
-            .open(files, truncated, &self.shell_view);
+        self.router
+            .navigation_mut()
+            .push_overlay_origin(self.shell_view.clone());
+        self.router.file_picker_mut().open(files, truncated);
         self.shell_view = ShellView::FilePicker;
         self.log_file_picker_open(workspace.root());
     }
 
     fn log_file_picker_open(&mut self, root: &Path) {
-        let suffix = if self.file_picker_route.truncated() {
+        let route = self.router.file_picker();
+        let suffix = if route.truncated() {
             format!(" (capped at {FILE_PICKER_MAX_FILES})")
         } else {
             String::new()
@@ -31,70 +35,77 @@ impl ShellApp {
             "files",
             format!(
                 "{} attachable file(s) under {}{suffix}",
-                self.file_picker_route.files().len(),
+                route.files().len(),
                 root.display()
             ),
         );
     }
 
-    pub(crate) fn handle_file_picker_key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn handle_file_picker_key(&mut self, key: KeyEvent) -> InputUpdate {
+        let query_empty = self.router.file_picker().query().is_empty();
         match key.code {
-            KeyCode::Up | KeyCode::Char('k') => self.file_picker_route.move_cursor(-1),
-            KeyCode::Down | KeyCode::Char('j') => self.file_picker_route.move_cursor(1),
+            KeyCode::Up => self.router.file_picker_mut().move_cursor(-1),
+            KeyCode::Down => self.router.file_picker_mut().move_cursor(1),
+            KeyCode::Char('k') if query_empty => self.router.file_picker_mut().move_cursor(-1),
+            KeyCode::Char('j') if query_empty => self.router.file_picker_mut().move_cursor(1),
             KeyCode::PageUp => self
-                .file_picker_route
+                .router
+                .file_picker_mut()
                 .move_cursor(-(FILE_PICKER_PAGE_STEP as isize)),
             KeyCode::PageDown => self
-                .file_picker_route
+                .router
+                .file_picker_mut()
                 .move_cursor(FILE_PICKER_PAGE_STEP as isize),
-            KeyCode::Backspace => self.file_picker_route.pop_query(),
-            KeyCode::Delete => self.file_picker_route.clear_query(),
-            KeyCode::Enter => self.accept_file_picker_selection(),
-            KeyCode::Esc | KeyCode::Char('q') => self.close_file_picker(),
-            KeyCode::Char(ch) if !ch.is_control() => self.file_picker_route.push_query(ch),
-            _ => return false,
+            KeyCode::Backspace => self.router.file_picker_mut().pop_query(),
+            KeyCode::Delete => self.router.file_picker_mut().clear_query(),
+            KeyCode::Enter => return self.accept_file_picker_selection(),
+            KeyCode::Esc => self.close_file_picker(),
+            KeyCode::Char('q') if query_empty => self.close_file_picker(),
+            KeyCode::Char(ch) if !ch.is_control() => self.router.file_picker_mut().push_query(ch),
+            _ => return InputUpdate::ignored(),
         }
-        true
+        InputUpdate::handled()
     }
 
     pub(crate) fn filtered_file_picker_paths(&self) -> Vec<String> {
-        self.file_picker_route.filtered_paths()
+        self.router.file_picker().filtered_paths()
     }
 
     pub(crate) fn workspace_file_completion_values(&self) -> Vec<String> {
-        let Some(root) = self.target.as_deref() else {
+        let Some(root) = self.target() else {
             return Vec::new();
         };
         workspace_file_candidates(root, FILE_PICKER_MAX_FILES).0
     }
 
-    pub(crate) fn attach_workspace_files_from_paste(&mut self, text: &str) -> bool {
+    pub(crate) fn attachment_effects_from_paste(&mut self, text: &str) -> Option<Vec<ShellEffect>> {
         let workspace = match self.current_workspace() {
             Ok(workspace) => workspace,
-            Err(_) => return false,
+            Err(_) => return None,
         };
-        let Some(files) = pasted_workspace_files(text, workspace.root()) else {
-            return false;
-        };
-        for source in files {
-            self.attach_kb_source(&source);
-        }
-        true
+        pasted_workspace_files(text, workspace.root()).map(attachment_effects)
     }
 
-    fn accept_file_picker_selection(&mut self) {
-        let Some(source) = self.file_picker_route.selected_path() else {
+    fn accept_file_picker_selection(&mut self) -> InputUpdate {
+        let Some(source) = self.router.file_picker().selected_path() else {
             self.log("files", "no file matches the current filter");
-            return;
+            return InputUpdate::handled();
         };
-        self.file_picker_route.clear_return_view();
-        self.attach_kb_source(&source);
+        InputUpdate::handled_with_effects(vec![attachment_effect(source)])
     }
 
     fn close_file_picker(&mut self) {
-        self.shell_view = self.file_picker_route.close_return_view();
+        self.go_back();
         self.log("files", "closed file picker");
     }
+}
+
+fn attachment_effects(files: Vec<String>) -> Vec<ShellEffect> {
+    files.into_iter().map(attachment_effect).collect()
+}
+
+fn attachment_effect(source: String) -> ShellEffect {
+    ShellEffect::AttachKnowledgeBaseSource(KnowledgeBaseAttach { source })
 }
 
 pub(crate) fn file_completion_values_for(app: &ShellApp) -> Vec<String> {

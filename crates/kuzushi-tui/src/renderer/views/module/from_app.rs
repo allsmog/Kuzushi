@@ -78,18 +78,7 @@ pub(in crate::renderer::views) fn append_run_status(
         Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
         Span::raw(summary.stage.clone()),
         Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
-        Span::styled(
-            format!(
-                "{} {}",
-                summary.findings,
-                if summary.findings == 1 {
-                    "finding"
-                } else {
-                    "findings"
-                }
-            ),
-            theme::muted(),
-        ),
+        Span::styled(summary.findings_label.clone(), theme::muted()),
         Span::styled(theme::STATUS_SEPARATOR, theme::subtle()),
         Span::styled(summary.run.clone(), theme::muted()),
     ]));

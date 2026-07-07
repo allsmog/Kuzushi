@@ -1,5 +1,5 @@
 pub(in crate::renderer) use super::*;
-pub(crate) use crate::ui_view_models::{findings_count_summary, SeverityCounts, SeverityTone};
+pub(crate) use crate::ui_view_models::{SeverityCounts, SeverityTone};
 
 pub(crate) fn compact_finding_row(
     alias: &str,

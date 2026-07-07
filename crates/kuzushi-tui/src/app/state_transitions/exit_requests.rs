@@ -1,14 +1,20 @@
 use super::*;
 
 impl ShellApp {
-    pub(crate) fn request_exit(&mut self) {
+    pub(crate) fn request_exit_abort_effect(&mut self) {
         self.request_active_abort();
         self.cancel_active_tokens();
+    }
+
+    pub(crate) fn wait_for_abort_cleanup_effect(&mut self) {
         self.wait_briefly_for_abort_cleanup();
-        if !self.should_quit {
+    }
+
+    pub(crate) fn finish_shell_quit_effect(&mut self) {
+        if !self.should_quit() {
             self.log("system", "exit requested; closing shell");
         }
-        self.should_quit = true;
+        self.request_shell_quit();
     }
 
     pub(crate) fn request_active_abort(&mut self) -> bool {
@@ -19,7 +25,7 @@ impl ShellApp {
         requested |= self.request_plan_abort();
         requested |= self.request_threat_abort();
         if requested {
-            if let Some(session) = self.activity.as_mut() {
+            if let Some(session) = self.activity_mut() {
                 session.mark_active_tasks_canceled();
             }
         }
@@ -27,20 +33,21 @@ impl ShellApp {
     }
 
     pub(super) fn request_scan_abort(&mut self) -> bool {
-        if !self.scan.as_ref().is_some_and(|scan| scan.running) {
-            return false;
-        }
-        if self.scan.as_ref().is_some_and(|scan| scan.abort_requested) {
+        if !self.can_request_scan_abort() {
             return false;
         }
 
-        if let Some(cancel) = &self.scan_cancel {
-            cancel.cancel();
-        }
-        if let Some(scan) = &mut self.scan {
-            scan.stage = "abort requested".to_string();
-            scan.abort_requested = true;
-        }
+        self.apply_scan_abort_request();
+        true
+    }
+
+    fn apply_scan_abort_request(&mut self) {
+        self.cancel_run_job_or_scan_token();
+        self.mark_scan_abort_requested();
+        self.announce_scan_abort_requested();
+    }
+
+    fn announce_scan_abort_requested(&mut self) {
         self.log(
             "scan",
             "abort requested; waiting for scanner subprocess to stop (not claiming it was killed)",
@@ -49,20 +56,34 @@ impl ShellApp {
             "sast:scan",
             "abort requested; waiting for scanner subprocess",
         );
-        true
+    }
+
+    fn can_request_scan_abort(&self) -> bool {
+        self.scan()
+            .is_some_and(|scan| scan.running && !scan.abort_requested)
+    }
+
+    fn cancel_run_job_or_scan_token(&mut self) {
+        let cancel = self.scan_cancel_token().cloned();
+        self.cancel_job_or_token(JobKind::Run, cancel);
+    }
+
+    fn mark_scan_abort_requested(&mut self) {
+        if let Some(scan) = self.scan_mut() {
+            scan.stage = "abort requested".to_string();
+            scan.abort_requested = true;
+        }
     }
 
     pub(super) fn request_tool_abort(&mut self) -> bool {
-        let Some(tool_name) = self.tool_running.clone() else {
+        let Some(tool_name) = self.running_tool_name_owned() else {
             return false;
         };
-        if self.tool_abort_requested {
+        if self.tool_abort_requested() {
             return false;
         }
-        if let Some(cancel) = &self.tool_cancel {
-            cancel.cancel();
-        }
-        self.tool_abort_requested = true;
+        self.cancel_run_job_or_tool_token();
+        self.request_tool_abort_flag();
         self.log(
             "tool",
             format!("{tool_name} cancel requested; waiting for the worker to stop"),
@@ -71,17 +92,22 @@ impl ShellApp {
         true
     }
 
+    fn cancel_run_job_or_tool_token(&mut self) {
+        let cancel = self.tool_cancel_token().cloned();
+        self.cancel_job_or_token(JobKind::Run, cancel);
+    }
+
     pub(super) fn request_agent_abort(&mut self) -> bool {
-        let Some(agent) = &mut self.agent_chat else {
-            return false;
-        };
-        if !agent.running || agent.abort_requested {
+        let should_abort = self
+            .agent_chat()
+            .is_some_and(|agent| agent.running && !agent.abort_requested);
+        if !should_abort {
             return false;
         }
-        if let Some(cancel) = &self.agent_cancel {
-            cancel.cancel();
+        self.cancel_agent_job_or_token();
+        if let Some(agent) = self.agent_chat_mut() {
+            agent.abort_requested = true;
         }
-        agent.abort_requested = true;
         self.log(
             "agent",
             "abort requested; waiting for LangGraph to return (process kill not confirmed)",
@@ -91,13 +117,11 @@ impl ShellApp {
     }
 
     pub(super) fn request_plan_abort(&mut self) -> bool {
-        if !self.planner_running || self.plan_abort_requested {
+        if !self.planner_running() || self.plan_abort_requested() {
             return false;
         }
-        if let Some(cancel) = &self.plan_cancel {
-            cancel.cancel();
-        }
-        self.plan_abort_requested = true;
+        self.cancel_plan_job_or_token();
+        self.set_plan_abort_requested(true);
         self.log(
             "plan",
             "abort requested; waiting for LangGraph planner to return (process kill not confirmed)",
@@ -107,13 +131,11 @@ impl ShellApp {
     }
 
     pub(super) fn request_threat_abort(&mut self) -> bool {
-        if !self.threat_worker_running || self.threat_abort_requested {
+        if !self.threat_worker_running() || self.threat_abort_requested() {
             return false;
         }
-        if let Some(cancel) = &self.threat_cancel {
-            cancel.cancel();
-        }
-        self.threat_abort_requested = true;
+        self.cancel_threat_job_or_token();
+        self.set_threat_abort_requested(true);
         self.log(
             "threats",
             "abort requested; waiting for LangGraph threat worker to return (process kill not confirmed)",
@@ -125,18 +147,27 @@ impl ShellApp {
         true
     }
 
-    pub(super) fn handle_quit_chord(&mut self) {
-        if self.request_active_abort() {
-            self.ctrl_c_armed_at = None;
-            return;
+    pub(super) fn reduce_quit_chord(&mut self) -> InputUpdate {
+        if self.has_abortable_work() {
+            self.set_ctrl_c_armed_at(None);
+            return InputUpdate::handled_with_effects(vec![ShellEffect::CancelActiveJobs]);
         }
         if self.exit_or_arm_while_work_is_running() {
-            return;
+            return InputUpdate::handled();
         }
-        if self.consume_armed_quit_chord() {
-            return;
+        if self.armed_quit_chord_ready() {
+            return InputUpdate::handled_with_effects(vec![ShellEffect::RequestShellQuit]);
         }
         self.arm_quit_chord();
+        InputUpdate::handled()
+    }
+
+    fn has_abortable_work(&self) -> bool {
+        self.can_request_scan_abort()
+            || self.can_request_tool_abort()
+            || self.can_request_agent_abort()
+            || self.can_request_plan_abort()
+            || self.can_request_threat_abort()
     }
 
     fn exit_or_arm_while_work_is_running(&mut self) -> bool {
@@ -155,22 +186,58 @@ impl ShellApp {
     }
 
     fn abort_request_pending(&self) -> bool {
-        self.scan.as_ref().is_some_and(|scan| scan.abort_requested)
-            || self.tool_abort_requested
-            || self
-                .agent_chat
-                .as_ref()
-                .is_some_and(|agent| agent.abort_requested)
-            || self.plan_abort_requested
-            || self.threat_abort_requested
+        self.scan().is_some_and(|scan| scan.abort_requested)
+            || self.tool_abort_requested()
+            || self.agent_chat().is_some_and(|agent| agent.abort_requested)
+            || self.plan_abort_requested()
+            || self.threat_abort_requested()
     }
 
-    fn cancel_active_tokens(&self) {
-        cancel_token(self.scan_cancel.as_ref());
-        cancel_token(self.tool_cancel.as_ref());
-        cancel_token(self.agent_cancel.as_ref());
-        cancel_token(self.plan_cancel.as_ref());
-        cancel_token(self.threat_cancel.as_ref());
+    fn can_request_tool_abort(&self) -> bool {
+        self.running_tool_name().is_some() && !self.tool_abort_requested()
+    }
+
+    fn can_request_agent_abort(&self) -> bool {
+        self.agent_chat()
+            .is_some_and(|agent| agent.running && !agent.abort_requested)
+    }
+
+    fn can_request_plan_abort(&self) -> bool {
+        self.planner_running() && !self.plan_abort_requested()
+    }
+
+    fn can_request_threat_abort(&self) -> bool {
+        self.threat_worker_running() && !self.threat_abort_requested()
+    }
+
+    fn cancel_active_tokens(&mut self) {
+        self.cancel_run_job_or_scan_token();
+        self.cancel_run_job_or_tool_token();
+        self.cancel_agent_job_or_token();
+        self.cancel_plan_job_or_token();
+        self.cancel_threat_job_or_token();
+    }
+
+    fn cancel_agent_job_or_token(&mut self) {
+        let cancel = self.agent_cancel_token().cloned();
+        self.cancel_job_or_token(JobKind::Agent, cancel);
+    }
+
+    fn cancel_plan_job_or_token(&mut self) {
+        let cancel = self.plan_cancel_token().cloned();
+        self.cancel_job_or_token(JobKind::Plan, cancel);
+    }
+
+    fn cancel_threat_job_or_token(&mut self) {
+        let cancel = self.threat_cancel_token().cloned();
+        self.cancel_job_or_token(JobKind::Threat, cancel);
+    }
+
+    fn cancel_job_or_token(&mut self, kind: JobKind, cancel: Option<ScanCancellation>) {
+        if self.jobs.cancel(kind) {
+            return;
+        }
+        cancel_token(cancel.as_ref());
     }
 
     fn wait_briefly_for_abort_cleanup(&mut self) {
@@ -179,31 +246,25 @@ impl ShellApp {
         }
         let deadline = Instant::now() + Duration::from_millis(200);
         while self.has_running_work() && Instant::now() < deadline {
-            self.drain_background_events();
+            apply_pending_background_events(self);
             std::thread::sleep(Duration::from_millis(25));
         }
-        self.drain_background_events();
+        apply_pending_background_events(self);
     }
 
     fn has_worker_channels(&self) -> bool {
         self.jobs.is_running(JobKind::Run)
-            || self.scan_rx.is_some()
-            || self.tool_rx.is_some()
-            || self.agent_rx.is_some()
-            || self.plan_rx.is_some()
-            || self.threat_rx.is_some()
+            || self.jobs.is_running(JobKind::Agent)
+            || self.jobs.is_running(JobKind::Plan)
+            || self.jobs.is_running(JobKind::Threat)
     }
 
-    fn consume_armed_quit_chord(&mut self) -> bool {
-        if !self.ctrl_c_armed() {
-            return false;
-        }
-        self.should_quit = true;
-        true
+    fn armed_quit_chord_ready(&self) -> bool {
+        self.ctrl_c_armed()
     }
 
     fn arm_quit_chord(&mut self) {
-        self.ctrl_c_armed_at = Some(Instant::now());
+        self.set_ctrl_c_armed_at(Some(Instant::now()));
         self.log(
             "system",
             "press Ctrl+C again within 2s to exit (any other key cancels)",

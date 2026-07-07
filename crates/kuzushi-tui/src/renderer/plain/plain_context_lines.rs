@@ -5,11 +5,59 @@ use crate::ui_view_models::{
 };
 
 pub(crate) fn plain_context_lines(app: &ShellApp, width: usize) -> Vec<String> {
+    if let Some(snapshot) = app.context_screen_snapshot() {
+        return plain_context_snapshot_lines(snapshot.clone(), width);
+    }
+
     let mut lines = plain_context_strip(app, width);
     let model = plain_context_model(app);
 
     push_plain_context_summary(&mut lines, &model, width);
     lines
+}
+
+fn plain_context_snapshot_lines(snapshot: ContextScreenSnapshot, width: usize) -> Vec<String> {
+    let mut lines = vec![
+        format!(
+            " KUZUSHI  target {}  ctx ✓ {}  model {}  module {}  cost {}",
+            snapshot.status.target,
+            snapshot.status.ctx,
+            snapshot.status.model,
+            snapshot.status.module,
+            snapshot.status.cost
+        ),
+        "─".repeat(width),
+        String::new(),
+    ];
+    lines.extend(snapshot.body_rows);
+    lines.push(String::new());
+    lines.push("─".repeat(width));
+    lines.push(context_footer_stage_line(width, &snapshot.footer));
+    lines.push(context_footer_keybind_line(&snapshot.footer));
+    lines.push(match snapshot.footer.prompt_module {
+        Some(module) => format!(" kuzushi ({module})>"),
+        None => " kuzushi>".to_string(),
+    });
+    lines
+}
+
+fn context_footer_stage_line(width: usize, footer: &ContextScreenFooter) -> String {
+    let left = format!(" stage {} · routing direct", footer.stage);
+    let right = format!("Ctrl+C quit · findings {}", footer.findings);
+    let gap = width
+        .saturating_sub(left.chars().count() + right.chars().count())
+        .saturating_sub(1);
+    format!("{left}{}{right}", " ".repeat(gap))
+}
+
+fn context_footer_keybind_line(footer: &ContextScreenFooter) -> String {
+    let body = footer
+        .keybinds
+        .iter()
+        .map(|(key, label)| format!("{key} {label}"))
+        .collect::<Vec<_>>()
+        .join("   ");
+    format!(" {body}")
 }
 
 fn push_plain_context_summary(lines: &mut Vec<String>, model: &PlainContextModel, width: usize) {

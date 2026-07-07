@@ -31,10 +31,10 @@ pub(crate) fn spawn_auth_login_process(
         .status()
 }
 
-pub(crate) fn repaint_after_auth_login(force_full_redraw: &mut bool) {
+pub(crate) fn repaint_after_auth_login(ui: &mut crate::app::UiPrefs) {
     let mut stdout = io::stdout();
     let _ = execute!(stdout, Clear(ClearType::All), MoveTo(0, 0));
-    *force_full_redraw = true;
+    ui.request_full_redraw();
 }
 
 pub(in crate::app) fn auth_login_status_message(

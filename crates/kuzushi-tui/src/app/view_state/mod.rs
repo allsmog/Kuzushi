@@ -3,19 +3,35 @@ pub(crate) use super::*;
 
 use self::PendingConfirm;
 pub(crate) use activity::*;
+pub(crate) use boot_splash::*;
 use kuzushi_core::{AttachmentRecord, KnownArtifact, ReconHost, ReconNote, ReconService};
 pub(crate) use label::*;
+pub(crate) use quit_confirm::*;
 pub(crate) use rank::*;
 pub(crate) use sast_task_row::*;
 use std::path::PathBuf;
 use std::time::Instant;
 mod activity;
+mod auth_screen;
+mod boot_splash;
+mod command_palette;
+mod config_screen;
+mod confirm_dialog;
+mod context_screen;
+mod cost_screen;
 mod engagement;
+mod health;
+mod help_screen;
 mod input_mode;
+mod interruption;
+mod keymap;
 mod label;
+mod options_screen;
+mod quit_confirm;
 mod rank;
 mod routes;
 mod sast_task_row;
+mod sast_tasks_snapshot;
 /// Cached structured snapshot of the most recent recon tool result. The TUI
 /// renderer prefers reading from this snapshot (when populated) rather than
 /// grepping the freeform log lines, so transcript truncation does not erase
@@ -23,11 +39,14 @@ mod sast_task_row;
 
 #[cfg(test)]
 mod tests;
+mod theme_picker;
+mod update_available;
 mod workbench_cache;
 mod workbench_nav;
 mod workbench_review_state;
 pub use activity::is_hidden_module_id;
 pub use activity::ActivityDeckPage;
+pub use activity::ActivityRouteState;
 pub use activity::ActivitySession;
 pub use activity::DagTaskDetail;
 pub use activity::DagTaskDetailState;
@@ -37,8 +56,19 @@ pub use activity::PaneFocus;
 pub use activity::RecordedTraceEvent;
 pub use activity::SubsystemAggregate;
 pub use activity::ACTIVITY_FEED_RING_CAPACITY;
+pub use auth_screen::{AuthScreenFooter, AuthScreenSnapshot, AuthScreenStatus};
+pub use boot_splash::{BootSplashCheck, BootSplashCheckState, BootSplashSnapshot};
+pub use command_palette::{CommandPaletteFooter, CommandPaletteSnapshot, CommandPaletteStatus};
+pub use config_screen::{ConfigScreenFooter, ConfigScreenSnapshot, ConfigScreenStatus};
+pub use confirm_dialog::{ConfirmDialogFooter, ConfirmDialogSnapshot, ConfirmDialogStatus};
+pub use context_screen::{ContextScreenFooter, ContextScreenSnapshot, ContextScreenStatus};
+pub use cost_screen::{CostScreenFooter, CostScreenSnapshot, CostScreenStatus};
 pub use engagement::EngagementState;
+pub use health::{HealthFooter, HealthSnapshot, HealthStatus};
+pub use help_screen::{HelpScreenFooter, HelpScreenSnapshot, HelpScreenStatus};
 pub use input_mode::InputMode;
+pub use interruption::{InterruptionFooter, InterruptionSnapshot, InterruptionStatus};
+pub use keymap::{KeymapBindingRow, KeymapFooter, KeymapSection, KeymapSnapshot, KeymapStatus};
 pub use label::ActorDetailFilter;
 pub use label::OptionsFilter;
 pub use label::OptionsView;
@@ -46,6 +76,10 @@ pub use label::PromptsAction;
 pub(crate) use label::SastTaskMode;
 pub use label::ScanPanelState;
 pub use label::ThreatPatch;
+pub use options_screen::{OptionsScreenFooter, OptionsScreenSnapshot, OptionsScreenStatus};
+pub use quit_confirm::{
+    QuitConfirmFooter, QuitConfirmSection, QuitConfirmSnapshot, QuitConfirmStatus,
+};
 pub use rank::AdvisoryState;
 pub use rank::BudgetHalt;
 pub use rank::ChainSeverity;
@@ -57,14 +91,17 @@ pub use rank::PlanProposal;
 pub use rank::ThrottleAdvisory;
 pub use rank::TuneAction;
 pub use routes::{
-    AuthPickerRouteState, CatalogRouteState, FilePickerRouteState, FindingsRouteState,
-    HelpRouteState, ModelPickerRouteState, PlanningPickerRouteState, RouterState, ScrollRouteState,
-    TargetPickerRouteState, ToolsRouteState,
+    AuthPickerRouteState, AuthRouteState, CatalogRouteState, CommandPaletteRouteState,
+    DefaultScrollRouteState, FilePickerRouteState, FindingsRouteState, HelpRouteState,
+    ModelCatalogRouteState, ModelPickerRouteState, NavigationRouteState, PlanningPickerRouteState,
+    PwnRouteState, RouterState, SceneRouteState, ScrollRouteState, TargetPickerRouteState,
+    ToolsRouteState, WorkbenchRouteState,
 };
 pub use sast_task_row::AuthLoginView;
 pub use sast_task_row::CompletionCycle;
 pub use sast_task_row::ContextSnapshotView;
 pub use sast_task_row::HistorySearch;
+pub use sast_task_row::InterruptionView;
 pub use sast_task_row::KnowledgeBaseView;
 pub use sast_task_row::PwnView;
 pub use sast_task_row::ReconSnapshot;
@@ -76,6 +113,11 @@ pub use sast_task_row::WorkbenchPage;
 pub use sast_task_row::WorkbenchPane;
 pub use sast_task_row::WorkbenchPaneScroll;
 pub use sast_task_row::WorkspaceView;
+pub use sast_tasks_snapshot::{SastTasksFooter, SastTasksSnapshot, SastTasksStatus};
+pub use theme_picker::{
+    ThemePaletteRow, ThemePickerFooter, ThemePickerSnapshot, ThemePickerStatus,
+};
+pub use update_available::{UpdateAvailableFooter, UpdateAvailableSnapshot, UpdateAvailableStatus};
 pub(crate) use workbench_cache::{
     DfdModelCacheKey, JsonFileState, ProjectScopeTreeState, PromptMutationsState,
     RiskByModuleCacheKey, StrategyQueueState, VisibleFindingProjection, VisibleFindingsCacheKey,

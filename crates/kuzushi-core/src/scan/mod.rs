@@ -51,7 +51,7 @@ pub use engines::sbom_scan::{
     scan_sbom, SbomComponent, SbomDependencyEdge, SbomLockfile, SbomScanReport,
 };
 pub(in crate::scan) use engines::semgrep::*;
-pub use subprocess::ScanCancellation;
+pub use subprocess::{RegisteredChild, ScanCancellation};
 use subprocess::{
     capture_scanner_process_pipes, child_process_group_id, configure_scanner_process_group,
     configure_scanner_subprocess_env, join_scanner_process_readers, wait_for_scanner_process,

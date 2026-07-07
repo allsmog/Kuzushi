@@ -2,14 +2,16 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn show_workspace_status(&mut self) {
-        self.workspace_view = self.build_workspace_view(None);
+        let workspace_view = self.build_workspace_view(None);
+        let status = workspace_view.status.clone();
+        self.domain_mut().set_workspace_view(workspace_view);
         self.shell_view = ShellView::Workspace;
-        self.focused_module = Some("workspace".to_string());
-        self.log("workspace", self.workspace_view.status.clone());
+        self.set_focused_module(Some("workspace".to_string()));
+        self.log("workspace", status);
     }
 
     pub(crate) fn build_workspace_view(&self, last_export: Option<PathBuf>) -> WorkspaceView {
-        workspace_view_for_target(self.target.as_ref(), last_export)
+        workspace_view_for_target(self.target_path_buf(), last_export)
     }
 }
 

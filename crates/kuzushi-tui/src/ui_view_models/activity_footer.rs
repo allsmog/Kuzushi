@@ -1,4 +1,4 @@
-use crate::ActivitySession;
+use crate::{ActivityRouteState, ActivitySession};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct ActivityFooterModel {
@@ -58,12 +58,13 @@ const TASKLESS_HINTS: &[ActivityFooterHint] = &[
 
 pub(crate) fn activity_footer_model(
     session: &ActivitySession,
+    route: &ActivityRouteState,
     width: u16,
     running_tool: Option<&str>,
     abort_pending: bool,
 ) -> ActivityFooterModel {
     let hints = footer_hints(session);
-    let body = focus_body(session, running_tool, abort_pending);
+    let body = focus_body(session, route, running_tool, abort_pending);
     ActivityFooterModel {
         body_line: fit(&body, width as usize),
         body,
@@ -99,6 +100,7 @@ fn hint_display_width(hint: &ActivityFooterHint) -> usize {
 
 fn focus_body(
     session: &ActivitySession,
+    route: &ActivityRouteState,
     running_tool: Option<&str>,
     abort_pending: bool,
 ) -> String {
@@ -110,17 +112,17 @@ fn focus_body(
     if session.tasks.is_empty() {
         return taskless_body(running_tool);
     }
-    tasked_body(session)
+    tasked_body(session, route)
 }
 
-fn tasked_body(session: &ActivitySession) -> String {
-    if session.effective_pane_focus() == crate::PaneFocus::Right {
+fn tasked_body(session: &ActivitySession, route: &ActivityRouteState) -> String {
+    if route.effective_pane_focus(session) == crate::PaneFocus::Right {
         return format!(
             " ● OUTPUT  {} · j/k item · f findings · o open",
-            session.deck_page.label()
+            route.deck_page.label()
         );
     }
-    match session.focus_task.as_ref() {
+    match route.focus_task.as_ref() {
         Some(task_id) => focused_task_body(session, task_id),
         None => " ● FOCUS  hover [j/k] to inspect a task".to_string(),
     }
@@ -176,19 +178,20 @@ fn fit(value: &str, width: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{DagTaskRow, DagTaskState, PaneFocus};
+    use crate::{ActivityDeckPage, DagTaskRow, DagTaskState, PaneFocus};
 
     #[test]
     fn activity_footer_model_projects_focused_task() {
         let mut session = ActivitySession::new("r-1");
+        let mut route = ActivityRouteState::default();
         let mut row = DagTaskRow::queued("triage:run".into(), "triage".into(), Vec::new());
         row.state = DagTaskState::Active;
         row.steps_done = 3;
         row.last_label = "reviewing evidence".to_string();
-        session.focus_task = Some(row.task_id.clone());
+        route.focus_task = Some(row.task_id.clone());
         session.tasks.insert(row.task_id.clone(), row);
 
-        let model = activity_footer_model(&session, 120, None, false);
+        let model = activity_footer_model(&session, &route, 120, None, false);
 
         assert_eq!(
             model.body,
@@ -212,10 +215,11 @@ mod tests {
     #[test]
     fn hints_wrap_to_extra_rows_on_narrow_terminals_without_losing_keys() {
         let session = ActivitySession::new("r-1");
-        let wide = activity_footer_model(&session, 160, None, false);
+        let route = ActivityRouteState::default();
+        let wide = activity_footer_model(&session, &route, 160, None, false);
         assert_eq!(wide.hint_rows.len(), 1, "wide terminals keep one row");
 
-        let narrow = activity_footer_model(&session, 40, None, false);
+        let narrow = activity_footer_model(&session, &route, 40, None, false);
         assert!(narrow.hint_rows.len() > 1, "narrow terminals wrap");
         let total: usize = narrow.hint_rows.iter().map(Vec::len).sum();
         assert_eq!(total, narrow.hints.len(), "every key survives the wrap");
@@ -226,7 +230,8 @@ mod tests {
         // With no DAG tasks the TASKS pane is collapsed and focus is pinned to
         // OUTPUT — Tab and Enter are task controls, so they must not appear.
         let taskless = ActivitySession::new("r-1");
-        let keys = plain_keys(&activity_footer_model(&taskless, 120, None, false));
+        let route = ActivityRouteState::default();
+        let keys = plain_keys(&activity_footer_model(&taskless, &route, 120, None, false));
         assert!(!keys.contains(&"Tab"), "{keys:?}");
         assert!(!keys.contains(&"Enter"), "{keys:?}");
 
@@ -235,7 +240,13 @@ mod tests {
             "triage:run".to_string(),
             DagTaskRow::queued("triage:run".into(), "triage".into(), Vec::new()),
         );
-        let keys = plain_keys(&activity_footer_model(&with_tasks, 120, None, false));
+        let keys = plain_keys(&activity_footer_model(
+            &with_tasks,
+            &route,
+            120,
+            None,
+            false,
+        ));
         assert!(keys.contains(&"Tab"), "{keys:?}");
         assert!(keys.contains(&"Enter"), "{keys:?}");
     }
@@ -244,12 +255,13 @@ mod tests {
     fn taskless_footer_names_the_running_tool_or_states_the_absence() {
         // Never tell the operator to inspect tasks that don't exist.
         let session = ActivitySession::new("r-1");
+        let route = ActivityRouteState::default();
         assert_eq!(
-            activity_footer_model(&session, 80, Some("threat-model:build"), false).body,
+            activity_footer_model(&session, &route, 80, Some("threat-model:build"), false).body,
             " ● RUNNING  threat-model:build — output streams above · Ctrl+C aborts"
         );
         assert_eq!(
-            activity_footer_model(&session, 80, None, false).body,
+            activity_footer_model(&session, &route, 80, None, false).body,
             " ● FOCUS  no task rows this run"
         );
     }
@@ -257,12 +269,13 @@ mod tests {
     #[test]
     fn abort_pending_footer_overrides_focus_body() {
         let mut session = ActivitySession::new("r-1");
+        let route = ActivityRouteState::default();
         session.tasks.insert(
             "triage:run".to_string(),
             DagTaskRow::queued("triage:run".into(), "triage".into(), Vec::new()),
         );
 
-        let model = activity_footer_model(&session, 80, Some("triage:run"), true);
+        let model = activity_footer_model(&session, &route, 80, Some("triage:run"), true);
 
         assert!(model.body.contains("ABORT REQUESTED"));
         assert!(model.body.contains("Ctrl+C stays here"));
@@ -271,6 +284,7 @@ mod tests {
     #[test]
     fn artifact_deck_footer_names_right_pane_navigation() {
         let mut session = ActivitySession::new("r-1");
+        let mut route = ActivityRouteState::default();
         session.tasks.insert(
             "threat-model:build".to_string(),
             DagTaskRow::queued(
@@ -279,11 +293,11 @@ mod tests {
                 Vec::new(),
             ),
         );
-        session.set_deck_page(crate::ActivityDeckPage::Dfd);
-        session.pane_focus = PaneFocus::Right;
+        route.set_deck_page(ActivityDeckPage::Dfd);
+        route.pane_focus = PaneFocus::Right;
 
         assert_eq!(
-            activity_footer_model(&session, 100, None, false).body,
+            activity_footer_model(&session, &route, 100, None, false).body,
             " ● OUTPUT  dfd · j/k item · f findings · o open"
         );
     }
@@ -291,27 +305,28 @@ mod tests {
     #[test]
     fn activity_footer_model_handles_empty_and_missing_focus() {
         let mut session = ActivitySession::new("r-1");
+        let mut route = ActivityRouteState::default();
         // With tasks present, the hover hint and focus drill return.
         session.tasks.insert(
             "triage:run".to_string(),
             DagTaskRow::queued("triage:run".into(), "triage".into(), Vec::new()),
         );
         assert_eq!(
-            activity_footer_model(&session, 80, None, false).body,
+            activity_footer_model(&session, &route, 80, None, false).body,
             " ● FOCUS  hover [j/k] to inspect a task"
         );
         assert_eq!(
-            activity_footer_model(&session, 18, None, false).body_line,
+            activity_footer_model(&session, &route, 18, None, false).body_line,
             " ● FOCUS  hover […"
         );
 
-        session.focus_task = Some("patch:finding".to_string());
+        route.focus_task = Some("patch:finding".to_string());
         assert_eq!(
-            activity_footer_model(&session, 80, None, false).body,
+            activity_footer_model(&session, &route, 80, None, false).body,
             " ● FOCUS  patch:finding  (not yet recorded)"
         );
         assert_eq!(
-            plain_keys(&activity_footer_model(&session, 80, None, false)),
+            plain_keys(&activity_footer_model(&session, &route, 80, None, false)),
             vec!["j/k/g/G", "Tab", "[/]", "f", "o", "V", "Space", "x", "Enter", "Esc"]
         );
     }
@@ -319,13 +334,14 @@ mod tests {
     #[test]
     fn activity_footer_model_exposes_deck_hint_pairs() {
         let mut session = ActivitySession::new("r-1");
+        let route = ActivityRouteState::default();
         session.tasks.insert(
             "triage:run".to_string(),
             DagTaskRow::queued("triage:run".into(), "triage".into(), Vec::new()),
         );
 
         assert_eq!(
-            plain_pairs(&activity_footer_model(&session, 80, None, false)),
+            plain_pairs(&activity_footer_model(&session, &route, 80, None, false)),
             vec![
                 ("j/k/g/G", "scroll"),
                 ("Tab", "pane"),

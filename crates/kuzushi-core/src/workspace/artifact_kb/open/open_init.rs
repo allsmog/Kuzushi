@@ -8,12 +8,7 @@ impl ArtifactKnowledgeStore {
 
     pub fn open_path(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref();
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Could not create {}", parent.display()))?;
-        }
-        let conn =
-            Connection::open(path).with_context(|| format!("Could not open {}", path.display()))?;
+        let conn = crate::sqlite_connection::open_file(path)?;
         let store = Self {
             conn,
             db_path: path.display().to_string(),

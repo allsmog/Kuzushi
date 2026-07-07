@@ -14,7 +14,7 @@ pub(crate) struct PlainLiveActivityModel {
 }
 
 pub(crate) fn live_activity_model(app: &ShellApp) -> Option<LiveActivityModel> {
-    let activity = app.live_activity.as_ref()?;
+    let activity = app.live_activity()?;
     Some(LiveActivityModel {
         phase_label: activity.phase.label(),
         subject: activity.subject.clone(),
@@ -49,11 +49,11 @@ mod tests {
     #[test]
     fn live_activity_model_projects_display_fields() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.live_activity = Some(LiveActivity::new(
+        app.set_live_activity_state(Some(LiveActivity::new(
             LiveActivityPhase::Thinking,
             "triage:run",
             "reviewing finding evidence",
-        ));
+        )));
 
         let model = live_activity_model(&app).expect("live activity");
 
@@ -66,11 +66,11 @@ mod tests {
     fn plain_live_activity_model_projects_plain_lines() {
         let mut app = ShellApp::new(V2Config::default(), None);
         let detail = format!("writes {}", threat_model_relative_path());
-        app.live_activity = Some(LiveActivity::new(
+        app.set_live_activity_state(Some(LiveActivity::new(
             LiveActivityPhase::WritingArtifact,
             "threat-model:build",
             detail,
-        ));
+        )));
 
         let model = plain_live_activity_model(&app).expect("live activity model");
         let expected_detail = format!("detail: writes {}", threat_model_relative_path());

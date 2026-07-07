@@ -7,7 +7,7 @@ mod tests {
     fn umbrella_scan_reports_already_running_without_spawning_worker() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.scan = Some(ScanPanelState {
+        app.set_scan_panel(Some(ScanPanelState {
             run_id: None,
             target: temp.path().to_path_buf(),
             stage: "running".to_string(),
@@ -15,12 +15,13 @@ mod tests {
             running: true,
             abort_requested: false,
             error: None,
-        });
+        }));
 
-        app.start_umbrella_sast_scan(Some(temp.path().to_path_buf()));
+        let effects = app.reduce_scan_start(Some(temp.path().to_path_buf()), None);
+        EffectRuntime::execute(&mut app, effects);
 
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("scan already running")));
     }
@@ -32,10 +33,11 @@ mod tests {
         std::fs::write(&file_target, "x").unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
 
-        app.start_umbrella_sast_scan(Some(file_target));
+        let effects = app.reduce_scan_start(Some(file_target), None);
+        EffectRuntime::execute(&mut app, effects);
 
-        assert!(app.scan.is_none());
-        assert!(app.log.iter().any(|line| line.prefix == "error"));
+        assert!(app.scan_is_none());
+        assert!(app.log_lines().iter().any(|line| line.prefix == "error"));
     }
 
     #[test]
@@ -43,14 +45,24 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
 
-        app.open_guided_scan(Some(temp.path().to_path_buf()));
+        let effects = app.open_guided_scan(Some(temp.path().to_path_buf()));
+
+        assert!(matches!(
+            &effects[..],
+            [
+                ShellEffect::ActivateTarget(TargetActivation { .. }),
+                ShellEffect::FinalizeGuidedScanOpen
+            ]
+        ));
+
+        EffectRuntime::execute(&mut app, effects);
 
         assert_eq!(app.shell_view, ShellView::PlanningPicker);
         assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
-        assert!(app.target.is_some());
-        assert!(app.scan.is_none());
+        assert!(app.target().is_some());
+        assert!(app.scan_is_none());
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.prefix == "scan" && line.body.contains("guided workflow")));
     }
@@ -61,25 +73,34 @@ mod tests {
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
 
-        app.open_guided_scan(None);
+        let effects = app.open_guided_scan(None);
+
+        assert!(matches!(
+            &effects[..],
+            [ShellEffect::FinalizeGuidedScanOpen]
+        ));
+
+        EffectRuntime::execute(&mut app, effects);
 
         assert_eq!(app.shell_view, ShellView::PlanningPicker);
         assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
-        assert_eq!(app.target.as_deref(), Some(workspace.root()));
-        assert!(app.scan.is_none());
+        assert_eq!(app.target(), Some(workspace.root()));
+        assert!(app.scan_is_none());
     }
 
     #[test]
     fn bare_guided_scan_without_target_refuses_to_use_cwd() {
         let mut app = ShellApp::new(V2Config::default(), None);
 
-        app.open_guided_scan(None);
+        let effects = app.open_guided_scan(None);
+
+        assert!(effects.is_empty());
 
         assert_eq!(app.shell_view, ShellView::Catalog);
-        assert!(app.target.is_none());
-        assert!(app.scan.is_none());
+        assert!(app.target().is_none());
+        assert!(app.scan_is_none());
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.prefix == "scan" && line.body.contains("scan .")));
     }

@@ -1,7 +1,7 @@
 use super::*;
 
 impl RegisteredChild {
-    pub(in crate::scan) fn try_wait(&self) -> Result<Option<ExitStatus>> {
+    pub fn try_wait(&self) -> Result<Option<ExitStatus>> {
         let mut children = self
             .children
             .lock()
@@ -16,7 +16,7 @@ impl RegisteredChild {
         Ok(status)
     }
 
-    pub(in crate::scan) fn kill_and_wait(&self) -> Result<()> {
+    pub fn kill_and_wait(&self) -> Result<()> {
         let mut children = self
             .children
             .lock()
