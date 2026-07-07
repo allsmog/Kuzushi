@@ -287,31 +287,22 @@ mod tests {
     }
 
     #[test]
-    fn v3_observation_payload_ignores_legacy_projection_row_shape() {
+    fn v3_observation_payload_uses_current_finding_json() {
         let store = FindingStore::open_in_memory().unwrap();
         let run = "run-v3-native-payload";
         store
             .record_run_started(run, Path::new("/tmp"), "running")
             .unwrap();
-        store
+
+        let legacy_table_count: i64 = store
             .conn
-            .execute_batch(
-                r#"
-                create trigger poison_legacy_projection_after_insert
-                after insert on finding_projection_rows
-                begin
-                  update finding_projection_rows
-                     set title = 'legacy poison',
-                         severity = 'low',
-                         file_path = 'legacy/poison.rs',
-                         start_line = 999,
-                         message = 'legacy poison',
-                         tool = 'legacy-tool'
-                   where id = new.id;
-                end;
-                "#,
+            .query_row(
+                "select count(*) from sqlite_master where type = 'table' and name = 'finding_projection_rows'",
+                [],
+                |row| row.get(0),
             )
             .unwrap();
+        assert_eq!(legacy_table_count, 0, "new v3 stores must not create legacy finding rows");
 
         let finding = Finding::new_tool(
             "semgrep",
@@ -324,37 +315,18 @@ mod tests {
         );
         let id = store.insert_finding(run, &finding).unwrap();
 
-        let legacy: (String, String, String, i64, String, String) = store
+        let current_json: String = store
             .conn
             .query_row(
-                "select title, severity, file_path, start_line, message, tool
-                   from finding_projection_rows
-                  where id = ?1",
+                "select finding_json from finding_current where id = ?1",
                 rusqlite::params![id],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                        row.get(5)?,
-                    ))
-                },
+                |row| row.get(0),
             )
             .unwrap();
-        assert_eq!(
-            legacy,
-            (
-                "legacy poison".to_string(),
-                "low".to_string(),
-                "legacy/poison.rs".to_string(),
-                999,
-                "legacy poison".to_string(),
-                "legacy-tool".to_string(),
-            ),
-            "test trigger must prove the legacy row is not trustworthy"
-        );
+        let current: Finding = serde_json::from_str(&current_json).unwrap();
+        assert_eq!(current.id, Some(id));
+        assert_eq!(current.title, finding.title);
+        assert_eq!(current.identity_match_tier.as_deref(), Some("stable_fp"));
 
         let rows = store.list_findings_for_scan_id(run).unwrap();
         assert_eq!(rows.len(), 1);
@@ -381,10 +353,10 @@ mod tests {
             .conn
             .execute_batch(
                 r#"
-                create trigger fail_finding_projection_insert
-                after insert on finding_projection_rows
+                create trigger fail_current_finding_insert
+                after insert on finding_current
                 begin
-                  select raise(fail, 'forced projection failure');
+                  select raise(fail, 'forced current finding failure');
                 end;
                 "#,
             )
@@ -414,16 +386,14 @@ mod tests {
         let result = store.insert_finding(run, &finding);
         assert!(result.is_err(), "insert must fail when projection fails");
 
-        // No orphan projection row and no projected v3 observation.
-        let header_count: i64 = store
+        // No orphan current row and no projected v3 observation.
+        let current_count: i64 = store
             .conn
-            .query_row("select count(*) from finding_projection_rows", [], |row| {
-                row.get(0)
-            })
+            .query_row("select count(*) from finding_current", [], |row| row.get(0))
             .unwrap();
         assert_eq!(
-            header_count, 0,
-            "projection row must not survive a failed insert"
+            current_count, 0,
+            "current v3 finding must not survive a failed insert"
         );
         let observation_count: i64 = store
             .conn
@@ -1152,24 +1122,6 @@ mod tests {
             .insert_finding("run-identity-line-b", &line_shift_finding(44))
             .unwrap();
 
-        store
-            .conn
-            .execute(
-                "update finding_projection_rows set identity_id = null, identity_match_tier = null",
-                [],
-            )
-            .unwrap();
-        store
-            .conn
-            .execute("delete from finding_identity_fingerprints", [])
-            .unwrap();
-        store
-            .conn
-            .execute("delete from finding_identities", [])
-            .unwrap();
-
-        store.init().unwrap();
-
         let first = store
             .list_findings_for_scan_id("run-identity-line-a")
             .unwrap();
@@ -1431,7 +1383,7 @@ mod tests {
         assert_eq!(
             store.list_findings(10).unwrap()[0].triage,
             None,
-            "user decisions must not mutate scanner triage projection rows"
+            "user decisions must not mutate scanner triage projection"
         );
     }
 

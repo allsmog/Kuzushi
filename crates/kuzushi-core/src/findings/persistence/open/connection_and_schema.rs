@@ -83,41 +83,25 @@ fn create_static_proof_history_schema(conn: &Connection) -> Result<()> {
 const FINDINGS_SCHEMA: &str = r#"
 pragma foreign_keys = on;
 
-create table if not exists finding_projection_rows (
+create table if not exists finding_current (
   id integer primary key autoincrement,
   run_id text not null,
-  identity_id text,
-  identity_match_tier text,
+  identity_id text not null,
+  identity_match_tier text not null,
   fingerprint text not null,
-  rule_id text not null,
-  title text not null,
-  severity text not null,
-  file_path text not null,
-  start_line integer not null,
-  end_line integer,
-  message text not null,
-  tool text not null,
-  actor_fingerprint text,
-  static_proof_state text,
   created_at text not null,
-  vuln_source text,
+  updated_at text not null,
   dedup_key text,
   source_signature text,
-  corroboration_count integer not null default 1,
-  suppressed integer not null default 0,
-  snoozed_until text,
-  remediation text,
-  references_json text,
+  finding_json text not null,
   unique(run_id, fingerprint)
 );
-create index if not exists idx_finding_projection_rows_dedup_key
-  on finding_projection_rows(dedup_key) where dedup_key is not null;
-create index if not exists idx_finding_projection_rows_run_dedup_key
-  on finding_projection_rows(run_id, dedup_key) where dedup_key is not null;
-create index if not exists idx_finding_projection_rows_vuln_source
-  on finding_projection_rows(vuln_source) where vuln_source is not null;
-create index if not exists idx_finding_projection_rows_identity_id
-  on finding_projection_rows(identity_id) where identity_id is not null;
+create index if not exists idx_finding_current_dedup_key
+  on finding_current(dedup_key) where dedup_key is not null;
+create index if not exists idx_finding_current_run_dedup_key
+  on finding_current(run_id, dedup_key) where dedup_key is not null;
+create index if not exists idx_finding_current_identity_id
+  on finding_current(identity_id);
 
 "#;
 

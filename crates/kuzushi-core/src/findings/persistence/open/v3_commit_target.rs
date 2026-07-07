@@ -73,7 +73,7 @@ impl FindingStore {
     ) -> Result<Option<V3IdentityRef>> {
         self.conn
             .query_row(
-                "select fingerprint, identity_id from finding_projection_rows where id = ?1",
+                "select fingerprint, identity_id from finding_current where id = ?1",
                 params![finding_id],
                 |row| {
                     Ok(V3IdentityRef {
@@ -95,7 +95,7 @@ impl FindingStore {
             .query_row(
                 r#"
                 select fingerprint, identity_id
-                  from finding_projection_rows
+                  from finding_current
                  where fingerprint = ?1
                  order by id desc
                  limit 1
