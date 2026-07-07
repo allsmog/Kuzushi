@@ -1,5 +1,6 @@
 use super::*;
 use kuzushi_core::findings::ReviewDecision;
+use kuzushi_core::incremental_index::WorkspaceIndexUpdate;
 use kuzushi_core::DynamicModuleLoadOptions;
 use kuzushi_core::OptionScope;
 use std::path::{Path, PathBuf};
@@ -175,6 +176,7 @@ pub(crate) struct WorkspaceExportFindings {
 
 pub(crate) struct WorkspaceReindex {
     pub(crate) target: Option<PathBuf>,
+    pub(crate) changes: Vec<kuzushi_core::incremental_index::WorkspaceChange>,
 }
 
 pub(crate) struct WorkspaceScopeInit {
@@ -496,20 +498,16 @@ impl ShellApp {
     }
 
     pub(super) fn reindex_workspace_effect(&mut self, reindex: WorkspaceReindex) {
-        match reindex_workspace_for_target(reindex.target.as_ref()) {
-            Ok(indexed) => {
+        match reindex_workspace_for_target(reindex.target.as_ref(), &reindex.changes) {
+            Ok(update) => {
                 let workspace_view = self.build_workspace_view(None);
                 self.domain_mut().set_workspace_view(workspace_view);
-                self.clear_workspace_stale();
+                if workspace_reindex_clears_stale(&update) {
+                    self.clear_workspace_stale();
+                }
                 self.set_shell_view(ShellView::Workspace);
                 self.set_focused_module(Some("workspace".to_string()));
-                self.log(
-                    "workspace",
-                    format!(
-                        "indexed {} files at seq {} ({})",
-                        indexed.file_count, indexed.applied_seq, indexed.snapshot_hash
-                    ),
-                );
+                self.log("workspace", workspace_reindex_message(&update));
             }
             Err(error) => {
                 let workspace_view = self.build_workspace_view(None);
@@ -843,10 +841,30 @@ fn applied_patch_message(
     format!("applied reviewed patch for {alias} to {files}")
 }
 
+fn workspace_reindex_message(update: &WorkspaceIndexUpdate) -> String {
+    match update {
+        WorkspaceIndexUpdate::Noop { change_count } => {
+            format!("no index update needed for {change_count} pending changes")
+        }
+        WorkspaceIndexUpdate::Incremental(indexed) => format!(
+            "incrementally indexed {} files at seq {} ({})",
+            indexed.file_count, indexed.applied_seq, indexed.snapshot_hash
+        ),
+        WorkspaceIndexUpdate::Full(indexed) => format!(
+            "indexed {} files at seq {} ({})",
+            indexed.file_count, indexed.applied_seq, indexed.snapshot_hash
+        ),
+    }
+}
+
+fn workspace_reindex_clears_stale(update: &WorkspaceIndexUpdate) -> bool {
+    !matches!(update, WorkspaceIndexUpdate::Noop { .. })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuzushi_core::incremental_index::{ReindexPlan, WorkspaceChange};
+    use kuzushi_core::incremental_index::{index_workspace_snapshot, ReindexPlan, WorkspaceChange};
     use kuzushi_core::V2Config;
 
     #[test]
@@ -912,9 +930,13 @@ mod tests {
         );
 
         let target = app.target_owned();
+        let changes = app.workspace_pending_changes();
         EffectRuntime::execute(
             &mut app,
-            vec![ShellEffect::WorkspaceReindex(WorkspaceReindex { target })],
+            vec![ShellEffect::WorkspaceReindex(WorkspaceReindex {
+                target,
+                changes,
+            })],
         );
 
         assert!(app.workspace_stale().is_none());
@@ -922,6 +944,60 @@ mod tests {
         assert!(workspace.objects_dir().join("blake3").is_dir());
         assert!(app.log_lines().iter().any(|entry| {
             entry.prefix == "workspace" && entry.body.contains("indexed 1 files")
+        }));
+    }
+
+    #[test]
+    fn workspace_reindex_effect_uses_pending_file_changes_incrementally() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join("src")).unwrap();
+        std::fs::write(temp.path().join("src/app.rs"), "fn main() {}\n").unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        index_workspace_snapshot(&workspace).unwrap();
+        std::fs::write(
+            temp.path().join("src/app.rs"),
+            "fn main() { println!(\"changed\"); }\n",
+        )
+        .unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.apply_workspace_changes(&[WorkspaceChange::FileChanged("src/app.rs".into())]);
+
+        let target = app.target_owned();
+        let changes = app.workspace_pending_changes();
+        EffectRuntime::execute(
+            &mut app,
+            vec![ShellEffect::WorkspaceReindex(WorkspaceReindex {
+                target,
+                changes,
+            })],
+        );
+
+        assert!(app.workspace_stale().is_none());
+        assert!(app.log_lines().iter().any(|entry| {
+            entry.prefix == "workspace" && entry.body.contains("incrementally indexed 1 files")
+        }));
+    }
+
+    #[test]
+    fn workspace_reindex_effect_keeps_stale_state_after_noop_update() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.apply_workspace_changes(&[WorkspaceChange::PromptOrHouseRuleChanged]);
+
+        let target = app.target_owned();
+        let changes = app.workspace_pending_changes();
+        EffectRuntime::execute(
+            &mut app,
+            vec![ShellEffect::WorkspaceReindex(WorkspaceReindex {
+                target,
+                changes,
+            })],
+        );
+
+        assert!(app.workspace_stale().is_some());
+        assert!(app.log_lines().iter().any(|entry| {
+            entry.prefix == "workspace" && entry.body.contains("no index update needed")
         }));
     }
 }

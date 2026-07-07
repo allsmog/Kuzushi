@@ -264,10 +264,118 @@ fn workspace_snapshot_records_git_metadata_and_dirty_hash() {
     assert!(dirty_hash.is_some());
 }
 
+#[test]
+fn workspace_changes_incrementally_refresh_changed_file_facts() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(tmp.path().join("src/app.rs"), "fn main() {}\n").unwrap();
+    fs::write(tmp.path().join("src/lib.rs"), "pub fn helper() {}\n").unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    let initial = index_workspace_snapshot(&workspace).unwrap();
+    let original_app_blob =
+        projected_indexed_blob(&workspace.findings_db_path(), &initial.snapshot_hash, "src/app.rs");
+    let original_lib_blob =
+        projected_indexed_blob(&workspace.findings_db_path(), &initial.snapshot_hash, "src/lib.rs");
+
+    fs::write(tmp.path().join("src/app.rs"), "fn main() { println!(\"changed\"); }\n").unwrap();
+    let update = index_workspace_changes(
+        &workspace,
+        &[WorkspaceChange::FileChanged("src/app.rs".into())],
+    )
+    .unwrap();
+
+    let WorkspaceIndexUpdate::Incremental(updated) = update else {
+        panic!("expected incremental update");
+    };
+    assert_ne!(updated.snapshot_hash, initial.snapshot_hash);
+    assert_eq!(updated.file_count, 2);
+    assert_eq!(
+        projected_indexed_file_count(&workspace.findings_db_path(), &updated.snapshot_hash),
+        2
+    );
+    assert_ne!(
+        projected_indexed_blob(&workspace.findings_db_path(), &updated.snapshot_hash, "src/app.rs"),
+        original_app_blob
+    );
+    assert_eq!(
+        projected_indexed_blob(&workspace.findings_db_path(), &updated.snapshot_hash, "src/lib.rs"),
+        original_lib_blob
+    );
+}
+
+#[test]
+fn workspace_changes_incrementally_records_deleted_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(tmp.path().join("src/app.rs"), "fn main() {}\n").unwrap();
+    fs::write(tmp.path().join("src/lib.rs"), "pub fn helper() {}\n").unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+    index_workspace_snapshot(&workspace).unwrap();
+
+    fs::remove_file(tmp.path().join("src/lib.rs")).unwrap();
+    let update = index_workspace_changes(
+        &workspace,
+        &[WorkspaceChange::FileDeleted("src/lib.rs".into())],
+    )
+    .unwrap();
+
+    let WorkspaceIndexUpdate::Incremental(updated) = update else {
+        panic!("expected incremental update");
+    };
+    assert_eq!(updated.file_count, 1);
+    assert_eq!(
+        projected_indexed_file_count(&workspace.findings_db_path(), &updated.snapshot_hash),
+        1
+    );
+    assert_eq!(
+        projected_file_deletion_count(&workspace.findings_db_path(), &updated.snapshot_hash),
+        1
+    );
+}
+
+#[test]
+fn workspace_changes_fall_back_to_full_snapshot_when_no_projection_exists() {
+    let tmp = tempfile::tempdir().unwrap();
+    fs::create_dir_all(tmp.path().join("src")).unwrap();
+    fs::write(tmp.path().join("src/app.rs"), "fn main() {}\n").unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+
+    let update = index_workspace_changes(
+        &workspace,
+        &[WorkspaceChange::FileChanged("src/app.rs".into())],
+    )
+    .unwrap();
+
+    let WorkspaceIndexUpdate::Full(indexed) = update else {
+        panic!("expected full snapshot fallback");
+    };
+    assert_eq!(indexed.file_count, 1);
+}
+
 fn projected_indexed_file_count(db_path: &Path, snapshot_hash: &str) -> i64 {
     let conn = rusqlite::Connection::open(db_path).unwrap();
     conn.query_row(
         "select count(*) from indexed_files where snapshot_hash = ?1",
+        rusqlite::params![snapshot_hash],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
+fn projected_indexed_blob(db_path: &Path, snapshot_hash: &str, path: &str) -> String {
+    let conn = rusqlite::Connection::open(db_path).unwrap();
+    conn.query_row(
+        "select blob_hash from indexed_files where snapshot_hash = ?1 and path = ?2",
+        rusqlite::params![snapshot_hash, path],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
+fn projected_file_deletion_count(db_path: &Path, snapshot_hash: &str) -> i64 {
+    let conn = rusqlite::Connection::open(db_path).unwrap();
+    conn.query_row(
+        "select count(*) from file_deletions where snapshot_hash = ?1",
         rusqlite::params![snapshot_hash],
         |row| row.get(0),
     )

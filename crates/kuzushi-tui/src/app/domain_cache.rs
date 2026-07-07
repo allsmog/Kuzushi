@@ -5,30 +5,32 @@ use super::{
 };
 use kuzushi_core::{
     findings::ReviewDecisionRecord,
-    incremental_index::{plan_for_change, ReindexPlan, WorkspaceChange},
+    incremental_index::{coalesce_changes, plan_for_change, ReindexPlan, WorkspaceChange},
     AgenticSastReport, CarliniThreatHuntReport, Finding, ProgramScope, ScanProgress,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct WorkspaceStaleSummary {
-    change_count: usize,
     strongest_plan: ReindexPlan,
+    pending_changes: Vec<WorkspaceChange>,
 }
 
 impl WorkspaceStaleSummary {
     pub(crate) fn from_changes(changes: &[WorkspaceChange]) -> Option<Self> {
-        let strongest_plan = changes
+        let pending_changes = coalesce_changes(changes.iter().cloned());
+        let strongest_plan = pending_changes
             .iter()
             .map(plan_for_change)
             .max_by_key(|plan| reindex_plan_priority(*plan))?;
         Some(Self {
-            change_count: changes.len(),
             strongest_plan,
+            pending_changes,
         })
     }
 
     pub(crate) fn merge(&mut self, other: Self) {
-        self.change_count += other.change_count;
+        self.pending_changes.extend(other.pending_changes);
+        self.pending_changes = coalesce_changes(std::mem::take(&mut self.pending_changes));
         if reindex_plan_priority(other.strongest_plan) > reindex_plan_priority(self.strongest_plan)
         {
             self.strongest_plan = other.strongest_plan;
@@ -43,11 +45,15 @@ impl WorkspaceStaleSummary {
     }
 
     pub(crate) fn change_count(&self) -> usize {
-        self.change_count
+        self.pending_changes.len()
     }
 
     pub(crate) fn strongest_plan(&self) -> ReindexPlan {
         self.strongest_plan
+    }
+
+    pub(crate) fn pending_changes(&self) -> &[WorkspaceChange] {
+        &self.pending_changes
     }
 }
 

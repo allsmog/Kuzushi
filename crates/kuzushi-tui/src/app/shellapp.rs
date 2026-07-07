@@ -604,6 +604,12 @@ impl ShellApp {
         self.domain.workspace_stale()
     }
 
+    pub(crate) fn workspace_pending_changes(&self) -> Vec<WorkspaceChange> {
+        self.workspace_stale()
+            .map(|stale| stale.pending_changes().to_vec())
+            .unwrap_or_default()
+    }
+
     pub(crate) fn apply_workspace_changes(&mut self, changes: &[WorkspaceChange]) {
         self.domain.apply_workspace_changes(changes);
     }

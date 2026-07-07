@@ -10,6 +10,7 @@ impl ShellApp {
             WorkspaceCommand::Reindex => {
                 Some(vec![ShellEffect::WorkspaceReindex(WorkspaceReindex {
                     target: self.target_owned(),
+                    changes: self.workspace_pending_changes(),
                 })])
             }
             WorkspaceCommand::ScopeInit => {
@@ -79,6 +80,7 @@ impl ShellApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kuzushi_core::incremental_index::WorkspaceChange;
     use kuzushi_core::V2Config;
 
     #[test]
@@ -86,6 +88,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.apply_workspace_changes(&[WorkspaceChange::FileChanged("src/app.rs".into())]);
 
         let effects = app
             .reduce_workspace_command_effects(&WorkspaceCommand::Reindex)
@@ -95,6 +98,10 @@ mod tests {
         match &effects[0] {
             ShellEffect::WorkspaceReindex(reindex) => {
                 assert_eq!(reindex.target.as_deref(), Some(workspace.root()));
+                assert_eq!(
+                    reindex.changes,
+                    vec![WorkspaceChange::FileChanged("src/app.rs".into())]
+                );
             }
             _ => panic!("expected workspace reindex effect"),
         }

@@ -1,10 +1,14 @@
-use crate::content_store::{ContentStore, ObjectRef, TargetSnapshot, TreeEntry, TreeEntryKind};
-use crate::identity::hash_parts;
+use crate::content_store::{
+    ContentStore, ObjectKind, ObjectRef, TargetSnapshot, TreeEntry, TreeEntryKind,
+};
+use crate::identity::{hash_parts, Blake3Hash};
 use crate::storage_v3::writer_actor::{
-    FileFactWrite, SnapshotWrite, StorageWriterActor, WatcherCommand, WriterCommand,
+    FileDeletedWrite, FileFactWrite, SnapshotWrite, StorageWriterActor, WatcherCommand,
+    WriterCommand,
 };
 use crate::workspace::{target_git_metadata, WorkspaceTarget};
 use anyhow::{Context, Result};
+use rusqlite::{params, OptionalExtension};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
@@ -53,6 +57,36 @@ pub struct IndexedWorkspaceSnapshot {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WorkspaceIndexUpdate {
+    Noop { change_count: usize },
+    Incremental(IndexedWorkspaceSnapshot),
+    Full(IndexedWorkspaceSnapshot),
+}
+
+impl WorkspaceIndexUpdate {
+    pub fn applied_seq(&self) -> Option<u64> {
+        match self {
+            Self::Noop { .. } => None,
+            Self::Incremental(snapshot) | Self::Full(snapshot) => Some(snapshot.applied_seq),
+        }
+    }
+
+    pub fn file_count(&self) -> Option<usize> {
+        match self {
+            Self::Noop { .. } => None,
+            Self::Incremental(snapshot) | Self::Full(snapshot) => Some(snapshot.file_count),
+        }
+    }
+
+    pub fn snapshot_hash(&self) -> Option<&str> {
+        match self {
+            Self::Noop { .. } => None,
+            Self::Incremental(snapshot) | Self::Full(snapshot) => Some(&snapshot.snapshot_hash),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IndexedSnapshotFile {
     pub path: String,
     pub blob_hash: String,
@@ -98,15 +132,62 @@ pub fn index_workspace_snapshot(workspace: &WorkspaceTarget) -> Result<IndexedWo
     commit_index_projection(workspace, &snapshot, &tree, &metadata, &files)
 }
 
+pub fn index_workspace_changes(
+    workspace: &WorkspaceTarget,
+    changes: &[WorkspaceChange],
+) -> Result<WorkspaceIndexUpdate> {
+    let changes = coalesce_changes(changes.iter().cloned());
+    match index_mode_for_changes(&changes) {
+        ChangeIndexMode::Noop => Ok(WorkspaceIndexUpdate::Noop {
+            change_count: changes.len(),
+        }),
+        ChangeIndexMode::FullSnapshot => {
+            index_workspace_snapshot(workspace).map(WorkspaceIndexUpdate::Full)
+        }
+        ChangeIndexMode::FileFacts => index_file_fact_changes_or_full_snapshot(workspace, &changes),
+    }
+}
+
+enum ChangeIndexMode {
+    Noop,
+    FileFacts,
+    FullSnapshot,
+}
+
+fn index_mode_for_changes(changes: &[WorkspaceChange]) -> ChangeIndexMode {
+    if changes.is_empty()
+        || changes
+            .iter()
+            .all(|change| matches!(plan_for_change(change), ReindexPlan::MarkStaleOnly))
+    {
+        return ChangeIndexMode::Noop;
+    }
+    if changes_require_full_snapshot(changes) {
+        return ChangeIndexMode::FullSnapshot;
+    }
+    ChangeIndexMode::FileFacts
+}
+
+fn index_file_fact_changes_or_full_snapshot(
+    workspace: &WorkspaceTarget,
+    changes: &[WorkspaceChange],
+) -> Result<WorkspaceIndexUpdate> {
+    match index_workspace_file_fact_changes(workspace, changes) {
+        Ok(snapshot) => Ok(WorkspaceIndexUpdate::Incremental(snapshot)),
+        Err(_) => index_workspace_snapshot(workspace).map(WorkspaceIndexUpdate::Full),
+    }
+}
+
 pub fn plan_for_change(change: &WorkspaceChange) -> ReindexPlan {
     match change {
         WorkspaceChange::FileChanged(path) if is_route_or_controller(path) => {
             ReindexPlan::FileFactsAndLocalAttackSurface
         }
-        WorkspaceChange::FileChanged(_) | WorkspaceChange::FileMoved { .. } => {
+        WorkspaceChange::FileChanged(_)
+        | WorkspaceChange::FileDeleted(_)
+        | WorkspaceChange::FileMoved { .. } => {
             ReindexPlan::FileFacts
         }
-        WorkspaceChange::FileDeleted(_) => ReindexPlan::FullInventory,
         WorkspaceChange::ManifestChanged(_) | WorkspaceChange::LockfileChanged(_) => {
             ReindexPlan::DependencyIndex
         }
@@ -115,6 +196,42 @@ pub fn plan_for_change(change: &WorkspaceChange) -> ReindexPlan {
         WorkspaceChange::RuleSetChanged => ReindexPlan::FullDeterministicScan,
         WorkspaceChange::PromptOrHouseRuleChanged => ReindexPlan::MarkStaleOnly,
     }
+}
+
+fn changes_require_full_snapshot(changes: &[WorkspaceChange]) -> bool {
+    changes.iter().any(|change| {
+        !matches!(
+            plan_for_change(change),
+            ReindexPlan::FileFacts | ReindexPlan::FileFactsAndLocalAttackSurface
+        )
+    })
+}
+
+fn index_workspace_file_fact_changes(
+    workspace: &WorkspaceTarget,
+    changes: &[WorkspaceChange],
+) -> Result<IndexedWorkspaceSnapshot> {
+    workspace.ensure_state_dir()?;
+    let store = ContentStore::open(workspace.objects_dir())?;
+    let mut files = latest_projected_snapshot(workspace)?;
+    for change in changes {
+        apply_file_fact_change(workspace.root(), &store, &mut files, change)?;
+    }
+    files.sort_by(|left, right| left.path.cmp(&right.path));
+    let tree = store.put_tree(tree_entries(&files))?;
+    let metadata = snapshot_metadata(workspace.root(), &files);
+    let snapshot = store.put_snapshot(&TargetSnapshot {
+        tree_hash: tree.hash.clone(),
+        workspace_root_fingerprint: metadata.workspace_root_fingerprint.clone(),
+        git_commit: metadata.git_commit.clone(),
+        git_branch: metadata.git_branch.clone(),
+        dirty_hash: metadata.dirty_hash.clone(),
+        index_hash: None,
+        config_hash: None,
+        rule_set_hashes: Vec::new(),
+        created_at: "snapshot-content-addressed".to_string(),
+    })?;
+    commit_incremental_projection(workspace, &snapshot, &tree, &metadata, &files, changes)
 }
 
 pub fn should_ignore_path(path: &Path) -> bool {
@@ -165,6 +282,97 @@ fn collect_indexed_files_from(
     Ok(())
 }
 
+fn latest_projected_snapshot(workspace: &WorkspaceTarget) -> Result<Vec<IndexedFile>> {
+    let conn = rusqlite::Connection::open(workspace.findings_db_path())?;
+    let snapshot_hash = conn
+        .query_row(
+            "select snapshot_hash from target_snapshots order by created_at desc, rowid desc limit 1",
+            [],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?
+        .context("workspace has no indexed snapshot yet")?;
+    let mut statement = conn.prepare(
+        r#"
+        select indexed_files.path, indexed_files.blob_hash, indexed_files.file_size,
+               indexed_files.mtime_ns, indexed_files.language, blobs.storage_path
+        from indexed_files
+        left join blobs on blobs.blob_hash = indexed_files.blob_hash
+        where snapshot_hash = ?1
+        order by indexed_files.path
+        "#,
+    )?;
+    let rows = statement.query_map(params![snapshot_hash], projected_indexed_file)?;
+    Ok(rows.collect::<rusqlite::Result<Vec<_>>>()?)
+}
+
+fn projected_indexed_file(row: &rusqlite::Row<'_>) -> rusqlite::Result<IndexedFile> {
+    let blob_hash: String = row.get(1)?;
+    let file_size_i64: i64 = row.get(2)?;
+    let file_size = u64::try_from(file_size_i64).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            2,
+            rusqlite::types::Type::Integer,
+            Box::new(error),
+        )
+    })?;
+    let hash = Blake3Hash::new(blob_hash)
+        .map_err(|error| rusqlite::Error::ToSqlConversionFailure(error.into()))?;
+    Ok(IndexedFile {
+        path: row.get(0)?,
+        blob: ObjectRef {
+            kind: ObjectKind::Blob,
+            hash,
+            size_bytes: file_size,
+        },
+        storage_path: row
+            .get::<_, Option<String>>(5)?
+            .map(PathBuf::from)
+            .unwrap_or_default(),
+        file_size,
+        mtime_ns: row.get(3)?,
+        language: row.get(4)?,
+    })
+}
+
+fn apply_file_fact_change(
+    root: &Path,
+    store: &ContentStore,
+    files: &mut Vec<IndexedFile>,
+    change: &WorkspaceChange,
+) -> Result<()> {
+    match change {
+        WorkspaceChange::FileChanged(path) => replace_indexed_file(root, store, files, path),
+        WorkspaceChange::FileMoved { from, to } => {
+            remove_indexed_file(files, from);
+            replace_indexed_file(root, store, files, to)
+        }
+        WorkspaceChange::FileDeleted(path) => {
+            remove_indexed_file(files, path);
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn replace_indexed_file(
+    root: &Path,
+    store: &ContentStore,
+    files: &mut Vec<IndexedFile>,
+    relative_path: &Path,
+) -> Result<()> {
+    let absolute_path = root.join(relative_path);
+    let indexed = index_file(root, &absolute_path, store)?;
+    remove_indexed_file(files, relative_path);
+    files.push(indexed);
+    Ok(())
+}
+
+fn remove_indexed_file(files: &mut Vec<IndexedFile>, relative_path: &Path) {
+    let path = relative_path.to_string_lossy().replace('\\', "/");
+    files.retain(|file| file.path != path);
+}
+
 fn index_file(root: &Path, path: &Path, store: &ContentStore) -> Result<IndexedFile> {
     let bytes = fs::read(path).with_context(|| format!("Could not read {}", path.display()))?;
     let metadata = fs::metadata(path).with_context(|| format!("Could not stat {}", path.display()))?;
@@ -177,6 +385,36 @@ fn index_file(root: &Path, path: &Path, store: &ContentStore) -> Result<IndexedF
         file_size: metadata.len(),
         mtime_ns: modified_time_ns(&metadata),
         language: language::language_for_path(path),
+    })
+}
+
+fn commit_incremental_projection(
+    workspace: &WorkspaceTarget,
+    snapshot: &ObjectRef,
+    tree: &ObjectRef,
+    metadata: &SnapshotMetadata,
+    files: &[IndexedFile],
+    changes: &[WorkspaceChange],
+) -> Result<IndexedWorkspaceSnapshot> {
+    let mut commands = Vec::with_capacity(files.len() + changes.len() + 1);
+    commands.push(WriterCommand::Watcher(WatcherCommand::SnapshotIndexed(
+        snapshot_write(snapshot, tree, metadata),
+    )));
+    commands.extend(files.iter().map(|file| {
+        WriterCommand::Watcher(WatcherCommand::FileIndexed(file_write(snapshot, file)))
+    }));
+    commands.extend(changes.iter().filter_map(|change| deleted_file_write(snapshot, change)));
+    let receipts = StorageWriterActor::commit_blocking_many(
+        workspace.event_log_dir(),
+        workspace.findings_db_path(),
+        commands,
+    )?;
+    Ok(IndexedWorkspaceSnapshot {
+        snapshot_hash: snapshot.hash.as_str().to_string(),
+        tree_hash: tree.hash.as_str().to_string(),
+        file_count: files.len(),
+        applied_seq: receipts.last().map_or(0, |receipt| receipt.committed_seq),
+        files: files.iter().map(indexed_snapshot_file).collect(),
     })
 }
 
@@ -245,6 +483,21 @@ fn file_write(snapshot: &ObjectRef, file: &IndexedFile) -> FileFactWrite {
         ast_hash: None,
         actor: "incremental-index".to_string(),
     }
+}
+
+fn deleted_file_write(snapshot: &ObjectRef, change: &WorkspaceChange) -> Option<WriterCommand> {
+    let path = match change {
+        WorkspaceChange::FileDeleted(path) => path,
+        WorkspaceChange::FileMoved { from, .. } => from,
+        _ => return None,
+    };
+    Some(WriterCommand::Watcher(WatcherCommand::FileDeleted(
+        FileDeletedWrite {
+            snapshot_hash: snapshot.hash.as_str().to_string(),
+            path: path.to_string_lossy().replace('\\', "/"),
+            actor: "incremental-index".to_string(),
+        },
+    )))
 }
 
 fn tree_entries(files: &[IndexedFile]) -> Vec<TreeEntry> {
