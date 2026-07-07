@@ -98,7 +98,7 @@ fn sarif_rules(records: &[&WorkspaceFindingExportRecord]) -> Vec<serde_json::Val
 }
 
 fn sarif_result(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
-    json!({
+    let mut result = json!({
         "ruleId": record.rule_id,
         "level": sarif_level(&record.severity),
         "message": { "text": record.message },
@@ -113,7 +113,29 @@ fn sarif_result(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
             }
         }],
         "properties": sarif_properties(record),
-    })
+    });
+    // Emit `suppressions[]` only for dismissed findings. SARIF semantics treat
+    // an empty array as "checked, none found" — subtly different from absent —
+    // so we never assert a suppression check we did not perform.
+    if let Some(suppression) = sarif_suppression(record) {
+        result["suppressions"] = json!([suppression]);
+    }
+    result
+}
+
+fn sarif_suppression(record: &WorkspaceFindingExportRecord) -> Option<serde_json::Value> {
+    let dismissal = record.dismissal.as_ref()?;
+    Some(json!({
+        "kind": "external",
+        "status": "accepted",
+        "justification": format!("{}: {}", dismissal.reason, dismissal.note),
+        "properties": {
+            "kuzushiDismissReason": dismissal.reason,
+            "kuzushiDismissedBy": dismissal.actor,
+            "kuzushiNote": dismissal.note,
+            "kuzushiTriageState": record.triage_state,
+        },
+    }))
 }
 
 fn sarif_region(record: &WorkspaceFindingExportRecord) -> serde_json::Value {

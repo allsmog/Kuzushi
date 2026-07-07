@@ -42,6 +42,8 @@ impl ShellApp {
             author: TriageAuthor::Human,
             confidence: 1.0,
             rationale: reason,
+            dismiss_reason: None,
+            actor: None,
         };
         let read_watermark = self
             .router

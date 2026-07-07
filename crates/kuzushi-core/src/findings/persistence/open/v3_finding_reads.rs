@@ -20,6 +20,31 @@ impl FindingStore {
         self.hydrate_v3_findings(dedupe_latest_by_projected_id(findings))
     }
 
+    /// Projected machine lifecycle for a finding (`stable_findings.current_status`).
+    /// Missing rows default to `Open` — the attention-preserving default.
+    pub(crate) fn stable_lifecycle_status_for_finding(
+        &self,
+        finding: &Finding,
+    ) -> Result<StableLifecycleStatus> {
+        let stable_fp = finding
+            .identity_id
+            .clone()
+            .unwrap_or_else(|| finding.fingerprint.clone());
+        let status: Option<String> = self
+            .conn
+            .query_row(
+                "select current_status from stable_findings where stable_fp = ?1",
+                params![stable_fp],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("Could not load stable finding lifecycle status")?;
+        Ok(status
+            .as_deref()
+            .map(StableLifecycleStatus::from_current_status)
+            .unwrap_or(StableLifecycleStatus::Open))
+    }
+
     pub(crate) fn v3_all_findings(&self) -> Result<Vec<Finding>> {
         let mut stmt = self.conn.prepare(
             r#"

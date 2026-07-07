@@ -54,6 +54,7 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "bounty:import-har" => Some(bounty_import_har_tool(input, ctx)),
         "bounty:import-burp" => Some(bounty_import_burp_tool(input, ctx)),
         "findings:list" => Some(list_findings_tool(input, ctx)),
+        "findings:dismiss" => Some(dismiss_finding_tool(input, ctx)),
         "report:build" => Some(build_report_tool(input, ctx)),
         "entry-points:extract" => Some(run_entry_points_extract(input, ctx)),
         _ => None,
@@ -210,6 +211,60 @@ pub(in crate::modules) fn list_findings_tool(
         findings: findings.into_iter().take(requested_limit).collect(),
     }
     .to_tool_json())
+}
+
+pub(in crate::modules) fn dismiss_finding_tool(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    let store = ctx
+        .findings_store
+        .context("findings:dismiss requires a findings store")?;
+    let reference = string_input_any(input, &["fingerprint", "finding", "reference", "id"])
+        .context("findings:dismiss requires fingerprint=<ref>")?;
+    let reason_raw = string_input_any(input, &["reason"])
+        .context("findings:dismiss requires reason=<false_positive|acceptable_risk|wont_fix|used_in_tests|no_time_to_fix>")?;
+    let reason = crate::findings::DismissReason::from_str(&reason_raw)
+        .with_context(|| format!("unknown dismissal reason {reason_raw:?}"))?;
+    let note = string_input_any(input, &["note"]).context("findings:dismiss requires note=<text>")?;
+    let author = string_input_any(input, &["author"]).unwrap_or_else(|| "operator".to_string());
+    let finding = resolve_dismiss_target(store, &reference)?;
+    let finding_id = finding
+        .id
+        .context("dismiss target has no persisted finding id")?;
+    let decision_id = store.append_dismissal(finding_id, reason, &note, &author)?;
+    let output = format!(
+        "dismissed {} as {} (decision #{decision_id})",
+        finding.fingerprint,
+        reason.as_str(),
+    );
+    Ok(crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
+            "decisionId": decision_id,
+            "findingId": finding_id,
+            "fingerprint": finding.fingerprint,
+            "identityId": finding.identity_id,
+            "reason": reason.as_str(),
+            "note": note,
+            "dismissedBy": author,
+        }),
+    ))
+}
+
+fn resolve_dismiss_target(
+    store: &crate::findings::FindingStore,
+    reference: &str,
+) -> Result<crate::findings::Finding> {
+    if let Some(finding) = store.get_finding_by_reference(reference)? {
+        return Ok(finding);
+    }
+    let all = store
+        .list_findings_filtered(&FindingListFilter::with_limit(FindingListFilter::MAX_LIMIT))?
+        .findings;
+    crate::findings::resolve_finding_alias(&all, reference)
+        .with_context(|| format!("no finding found for {reference:?}"))
 }
 
 fn findings_provenance_target(

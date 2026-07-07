@@ -13,6 +13,7 @@ mod persisted_results;
 mod review_decision;
 mod static_proof_state;
 mod triage_outcome;
+mod triage_state;
 
 pub use confidence_band::ConfidenceBand;
 pub use extract_cwe::extract_cwe;
@@ -31,7 +32,10 @@ pub use persisted_results::{
     PatchAttempt, PatchResult, PersistedProofVerdict, PersistedSandboxBackend,
     PersistedVerification, TriageAuthor, TriageVerdict,
 };
-pub use review_decision::{ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict};
+pub use review_decision::{
+    DismissReason, ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict,
+};
 pub(crate) use static_proof_state::is_runtime_proof_state;
 pub use static_proof_state::{StaticProofState, StaticProofStateEvent};
 pub use triage_outcome::TriageOutcome;
+pub use triage_state::{derive_triage_state, FindingTriageState, StableLifecycleStatus};

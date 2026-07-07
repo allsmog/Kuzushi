@@ -30,6 +30,10 @@ impl FindingStore {
             findings_count: Some(findings_count as u64),
             actor: "finding-store".to_string(),
         })?;
+        // Only a successful re-scan can honestly retire a prior finding.
+        if status != "failed" && self.v3_storage_paths().is_some() {
+            self.reconcile_disappeared_findings(id)?;
+        }
         Ok(())
     }
 

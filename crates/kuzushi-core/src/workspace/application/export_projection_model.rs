@@ -18,6 +18,12 @@ pub struct WorkspaceFindingExportRecord {
     pub priority: String,
     pub lifecycle_status: String,
     pub review_decision: String,
+    /// Operator-facing triage-lifecycle state derived from the latest human
+    /// decision. Re-scan-derived `fixed`/`removed` are surfaced by the
+    /// store-backed `findings --state` query, not by this projection.
+    pub triage_state: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub dismissal: Option<WorkspaceDismissalExportSummary>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub review_decision_conflict: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -45,6 +51,15 @@ pub struct WorkspaceFindingExportRecord {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub references: Vec<String>,
     pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceDismissalExportSummary {
+    pub reason: String,
+    pub note: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub actor: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, PartialEq)]

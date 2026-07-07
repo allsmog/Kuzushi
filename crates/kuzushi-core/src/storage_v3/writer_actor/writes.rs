@@ -16,6 +16,11 @@ pub struct DecisionWrite {
     pub confidence_millis: u16,
     pub read_watermark: u64,
     pub updates_finding_triage: bool,
+    /// SARIF-ecosystem dismissal reason (`used_in_tests`, ...) when this
+    /// decision dismisses the finding. `None` for ordinary triage decisions.
+    pub dismiss_reason: Option<String>,
+    /// Resolved operator name for a dismissal (labeling default, not a role).
+    pub dismissed_by: Option<String>,
 }
 
 impl DecisionWrite {
@@ -38,6 +43,8 @@ impl DecisionWrite {
             "confidenceMillis": self.confidence_millis,
             "readWatermark": self.read_watermark,
             "updatesFindingTriage": self.updates_finding_triage,
+            "dismissReason": self.dismiss_reason,
+            "dismissedBy": self.dismissed_by,
         })
     }
 }
@@ -190,6 +197,10 @@ pub struct FindingLifecycleWrite {
     pub reason: Option<String>,
     pub actor: String,
     pub run_id: Option<String>,
+    /// Per-tool scoping evidence emitted by the re-scan reconciler.
+    pub tool: Option<String>,
+    pub last_seen_run_id: Option<String>,
+    pub reconciled_against_run_id: Option<String>,
 }
 
 impl FindingLifecycleWrite {
@@ -197,6 +208,9 @@ impl FindingLifecycleWrite {
         json!({
             "stableFp": self.stable_fp,
             "reason": self.reason,
+            "tool": self.tool,
+            "lastSeenRunId": self.last_seen_run_id,
+            "reconciledAgainstRunId": self.reconciled_against_run_id,
         })
     }
 }

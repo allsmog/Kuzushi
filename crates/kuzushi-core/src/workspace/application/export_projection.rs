@@ -1,6 +1,7 @@
 use crate::findings::{
-    finding_lifecycle_status, proof_state_label, runtime_validation_label, Finding,
-    PersistedVerification, StaticProofState, VulnSource,
+    derive_triage_state, finding_lifecycle_status, proof_state_label, runtime_validation_label,
+    Finding, FindingTriageState, PersistedVerification, StableLifecycleStatus, StaticProofState,
+    VulnSource,
 };
 use std::collections::HashMap;
 
@@ -8,8 +9,8 @@ use super::export_evidence_origin::{
     evidence_origin_counts, evidence_state_label, EvidenceOriginCounts,
 };
 use super::export_projection_model::{
-    WorkspaceAnalysisExportSummary, WorkspaceEvidenceExportSummary,
-    WorkspaceFindingExportLocation, WorkspaceFindingExportRecord,
+    WorkspaceAnalysisExportSummary, WorkspaceDismissalExportSummary,
+    WorkspaceEvidenceExportSummary, WorkspaceFindingExportLocation, WorkspaceFindingExportRecord,
     WorkspaceFindingProvenanceSummary, WorkspaceRunExportContext,
     WorkspaceVerificationExportSummary,
 };
@@ -18,6 +19,8 @@ use super::export_review_context::WorkspaceFindingReviewContext;
 struct WorkspaceReviewExportSummary {
     confidence: Option<f32>,
     review_decision: String,
+    triage_state: String,
+    dismissal: Option<WorkspaceDismissalExportSummary>,
     review_decision_conflict: Option<String>,
     review_decision_reason: Option<String>,
     review_decision_author: Option<String>,
@@ -112,6 +115,8 @@ fn apply_review_summary(
 ) {
     record.confidence = review.confidence;
     record.review_decision = review.review_decision;
+    record.triage_state = review.triage_state;
+    record.dismissal = review.dismissal;
     record.review_decision_conflict = review.review_decision_conflict;
     record.review_decision_reason = review.review_decision_reason;
     record.review_decision_author = review.review_decision_author;
@@ -131,11 +136,16 @@ fn review_summary(
             fallback_review.as_ref()
         }
     };
+    let derived = review
+        .map(|review| derive_triage_state(StableLifecycleStatus::Open, Some(&review.decision)))
+        .unwrap_or(FindingTriageState::Open);
     WorkspaceReviewExportSummary {
         confidence: review.map(|review| review.decision.confidence),
         review_decision: review
             .map(|review| review.decision.verdict.as_str().to_string())
             .unwrap_or_else(|| "needs_review".to_string()),
+        triage_state: derived.as_str().to_string(),
+        dismissal: review.and_then(|review| dismissal_summary(&review.decision)),
         review_decision_conflict: review.and_then(|review| {
             review
                 .decision_conflict_label(finding)
@@ -147,6 +157,17 @@ fn review_summary(
             .and_then(|review| review.triage_verdict)
             .map(|verdict| verdict.as_str().to_string()),
     }
+}
+
+fn dismissal_summary(
+    decision: &crate::findings::ReviewDecision,
+) -> Option<WorkspaceDismissalExportSummary> {
+    let reason = decision.effective_dismiss_reason()?;
+    Some(WorkspaceDismissalExportSummary {
+        reason: reason.as_str().to_string(),
+        note: decision.rationale.clone(),
+        actor: decision.actor.clone(),
+    })
 }
 
 fn vuln_source_label(finding: &Finding) -> String {

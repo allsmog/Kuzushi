@@ -195,6 +195,27 @@ impl FindingListFilter {
             && run_id_matches(self, finding)
     }
 
+    /// True when the filter constrains derived triage-lifecycle states
+    /// (`open`/`reviewing`/`confirmed`/`to_fix`/`dismissed`/`fixed`/`removed`).
+    pub fn has_derived_triage_state_filter(&self) -> bool {
+        self.triage_state.iter().any(|state| state.is_derived())
+    }
+
+    /// Derived phase: whether the finding's derived triage state satisfies the
+    /// derived filter states. Legacy states are ignored (matched separately).
+    pub fn matches_triage_lifecycle(&self, derived: &FindingTriageState) -> bool {
+        let derived_filters: Vec<FindingTriageStateFilter> = self
+            .triage_state
+            .iter()
+            .copied()
+            .filter(|state| state.is_derived())
+            .collect();
+        derived_filters.is_empty()
+            || derived_filters
+                .iter()
+                .any(|state| state.matches_derived(derived))
+    }
+
     pub fn has_provenance_filter(&self) -> bool {
         !self.revision_sha.is_empty() || !self.branch.is_empty() || self.dirty.is_some()
     }
@@ -266,10 +287,12 @@ fn parsed_part_sources(values: Vec<String>) -> Result<Vec<VulnSource>> {
         .collect()
 }
 
-fn triage_state_matches(state: FindingTriageStateFilter, finding: &Finding) -> bool {
+fn legacy_triage_state_matches(state: FindingTriageStateFilter, finding: &Finding) -> bool {
     match state {
         FindingTriageStateFilter::Untriaged => finding.triage.is_none(),
         FindingTriageStateFilter::Triaged => finding.triage.is_some(),
+        // Derived states are evaluated in the store layer via the lifecycle fold.
+        _ => false,
     }
 }
 
@@ -277,12 +300,20 @@ fn severity_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
     filter.severity.is_empty() || filter.severity.contains(&finding.severity)
 }
 
+/// Pure phase: only the legacy `untriaged`/`triaged` filter states are
+/// evaluated here. Derived states (`open`/`dismissed`/`fixed`/...) are matched
+/// against the projected lifecycle in `FindingListFilter::matches_triage_lifecycle`.
 fn triage_state_filter_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
-    filter.triage_state.is_empty()
-        || filter
-            .triage_state
+    let legacy: Vec<FindingTriageStateFilter> = filter
+        .triage_state
+        .iter()
+        .copied()
+        .filter(|state| !state.is_derived())
+        .collect();
+    legacy.is_empty()
+        || legacy
             .iter()
-            .any(|state| triage_state_matches(*state, finding))
+            .any(|state| legacy_triage_state_matches(*state, finding))
 }
 
 fn verdict_matches(

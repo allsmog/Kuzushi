@@ -46,6 +46,13 @@ fn push_matching_finding(
     if !filter.matches_with_review_decision(&finding, review_decision.as_ref()) {
         return Ok(false);
     }
+    if filter.has_derived_triage_state_filter() {
+        let lifecycle = store.stable_lifecycle_status_for_finding(&finding)?;
+        let derived = derive_triage_state(lifecycle, review_decision.as_ref());
+        if !filter.matches_triage_lifecycle(&derived) {
+            return Ok(false);
+        }
+    }
     if findings.len() < filter.limit {
         findings.push(finding);
     }

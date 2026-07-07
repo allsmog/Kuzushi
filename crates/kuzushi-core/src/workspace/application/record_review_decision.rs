@@ -48,6 +48,8 @@ pub fn record_user_review_decision_for_finding_at_watermark(
             confidence_millis: (decision.confidence.clamp(0.0, 1.0) * 1000.0).round() as u16,
             read_watermark,
             updates_finding_triage: false,
+            dismiss_reason: decision.dismiss_reason.map(|reason| reason.as_str().to_string()),
+            dismissed_by: decision.actor.clone(),
         })),
     )?;
     Ok(receipt
