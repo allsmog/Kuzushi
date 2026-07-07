@@ -305,35 +305,29 @@ fn runtime_platform() -> String {
 // schema v2: adds module/feed metadata and optional LLM audit fields. All new
 // fields are optional so older trace.jsonl files round-trip without rewrites.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub struct RunTraceStep {
     pub n: usize,
     pub kind: String,
     pub label: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "latencyMs")]
     pub latency_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "costUsd")]
     pub cost_usd: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "moduleId")]
     pub module_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub verb: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "parentStep")]
     pub parent_step: Option<usize>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub severity: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "startedAtMs")]
     pub started_at_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[serde(alias = "promptHash")]
     pub prompt_hash: Option<String>,
 }

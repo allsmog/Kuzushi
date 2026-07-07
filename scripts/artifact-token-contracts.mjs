@@ -57,7 +57,7 @@ export const tokenChecks = [
     ],
   },
   {
-    label: "report JSONL reader aliases",
+    label: "report JSONL reader canonical trace fields",
     file: "crates/kuzushi-core/src/report/artifact_summary/jsonl.rs",
     tokens: reportJsonlAliasFields,
   },
@@ -280,9 +280,9 @@ export const tokenChecks = [
     tokens: ["pub tool: Option<String>", "pub artifact: Option<RunArtifact>"],
   },
   {
-    label: "report JSONL alias architecture doc",
+    label: "report JSONL canonical trace architecture doc",
     file: "docs/architecture/kuzushi-artifacts.md",
-    tokens: ["Report readers", ...reportJsonlAliasFields],
+    tokens: ["Trace streams use canonical snake_case fields only", ...reportJsonlAliasFields],
   },
   {
     label: "CLI run entrypoint starts canonical artifact recording",

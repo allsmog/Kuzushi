@@ -161,7 +161,7 @@ fn trace_label(step: &Value) -> Option<&str> {
 }
 
 fn trace_module_segment(steps: &[Value]) -> Option<String> {
-    let modules = unique_string_values_at(steps, &["module_id", "moduleId"]);
+    let modules = unique_string_values_at(steps, &["module_id"]);
     (!modules.is_empty()).then(|| format!("modules {}", modules.join(", ")))
 }
 
@@ -173,7 +173,7 @@ fn trace_verb_segment(steps: &[Value]) -> Option<String> {
 fn trace_child_step_segment(steps: &[Value]) -> Option<String> {
     let count = steps
         .iter()
-        .filter(|step| u64_at(step, &["parent_step", "parentStep"]).is_some())
+        .filter(|step| u64_at(step, &["parent_step"]).is_some())
         .count();
     (count > 0).then(|| format!("child steps {count}"))
 }
@@ -187,13 +187,13 @@ fn llm_call_segment(steps: &[Value]) -> Option<String> {
 }
 
 fn trace_step_has_llm_metadata(step: &Value) -> bool {
-    string_at(step, &["model", "provider", "prompt_hash", "promptHash"]).is_some()
+    string_at(step, &["model", "provider", "prompt_hash"]).is_some()
 }
 
 fn trace_latency_segment(steps: &[Value]) -> Option<String> {
     let latency = steps
         .iter()
-        .filter_map(|step| u64_at(step, &["latency_ms", "latencyMs"]))
+        .filter_map(|step| u64_at(step, &["latency_ms"]))
         .sum::<u64>();
     (latency > 0).then(|| format!("latency {latency}ms"))
 }
@@ -201,7 +201,7 @@ fn trace_latency_segment(steps: &[Value]) -> Option<String> {
 fn trace_cost_segment(steps: &[Value]) -> Option<String> {
     let cost = steps
         .iter()
-        .filter_map(|step| number_at(step, &["cost_usd", "costUsd"]))
+        .filter_map(|step| number_at(step, &["cost_usd"]))
         .sum::<f64>();
     (cost > 0.0).then(|| format!("cost ${cost:.6}"))
 }

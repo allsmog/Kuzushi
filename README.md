@@ -492,9 +492,9 @@ not silently succeed and they do not substitute a different model.
 
 Machine-readable run schemas live under `schemas/run.*.schema.json` and ship
 through the npm subpath `kuzushi/schemas/*`. They document the canonical
-camelCase artifact fields and the snake_case aliases accepted by Rust readers,
-including `runId`/`run_id`, `startedAtUnix`/`started_at_unix`,
-`promptHash`/`prompt_hash`, and `agentThreadContext`/`agent_thread_context`.
+camelCase run metadata/event/failure fields such as `runId` and
+`startedAtUnix`, plus canonical snake_case trace fields. Obsolete compatibility
+aliases are rejected instead of normalized.
 
 See [docs/rust-migration-status.md](docs/rust-migration-status.md) for the
 module-by-module cutover ledger, intentional removals, artifact compatibility

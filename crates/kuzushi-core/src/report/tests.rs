@@ -226,7 +226,7 @@ fn report_summarizes_run_event_and_trace_jsonl_shapes() {
         dir.join("trace.jsonl"),
         [
             r#"{"n":1,"kind":"reasoning","label":"plan","severity":"info","verb":"query","model":"openai:gpt-test","provider":"openai","latency_ms":40,"parent_step":0,"cost_usd":0.01}"#,
-            r#"{"n":2,"kind":"tool-progress","label":"scan","severity":"warn","verb":"scan","latencyMs":2,"parentStep":0}"#,
+            r#"{"n":2,"kind":"tool-progress","label":"scan","severity":"warn","verb":"scan","latency_ms":2,"parent_step":0}"#,
             r#"{"n":3,"kind":"done","label":"complete"}"#,
         ]
         .join("\n"),
@@ -444,22 +444,22 @@ fn report_ignores_empty_event_artifacts() {
 }
 
 #[test]
-fn report_summarizes_camel_case_trace_cost_alias() {
+fn report_summarizes_canonical_trace_cost() {
     let temp = tempdir().unwrap();
-    let source = completed_summary(temp.path(), "run-trace-aliases", "agentic-sast:scan");
+    let source = completed_summary(temp.path(), "run-trace-cost", "agentic-sast:scan");
     write_run_summary(temp.path(), &source).unwrap();
-    let dir = run_dir(temp.path(), "run-trace-aliases");
+    let dir = run_dir(temp.path(), "run-trace-cost");
     fs::write(
         dir.join("trace.jsonl"),
         [
-            r#"{"n":1,"kind":"reasoning","label":"plan","model":"openai:gpt-test","provider":"openai","costUsd":0.02}"#,
+            r#"{"n":1,"kind":"reasoning","label":"plan","model":"openai:gpt-test","provider":"openai","cost_usd":0.02}"#,
             r#"{"n":2,"kind":"done","label":"complete","cost_usd":0.01}"#,
         ]
         .join("\n"),
     )
     .unwrap();
 
-    let report = build_run_report(temp.path(), Some("run-trace-aliases")).unwrap();
+    let report = build_run_report(temp.path(), Some("run-trace-cost")).unwrap();
 
     assert!(report.report_markdown.contains(
         "trace.jsonl: present - 2 step(s), kinds done=1, reasoning=1, llm calls 1, cost $0.030000"
@@ -475,7 +475,7 @@ fn report_counts_prompt_hash_only_trace_llm_calls() {
     fs::write(
         dir.join("trace.jsonl"),
         [
-            r#"{"n":1,"kind":"reasoning","label":"plan","promptHash":"fnv1a64:abc"}"#,
+            r#"{"n":1,"kind":"reasoning","label":"plan","prompt_hash":"fnv1a64:abc"}"#,
             r#"{"n":2,"kind":"reasoning","label":"review","prompt_hash":"fnv1a64:def"}"#,
             r#"{"n":3,"kind":"done","label":"complete"}"#,
         ]
@@ -499,7 +499,7 @@ fn report_ignores_empty_trace_llm_metadata() {
     fs::write(
         dir.join("trace.jsonl"),
         [
-            r#"{"n":1,"kind":"reasoning","label":"plan","promptHash":"  "}"#,
+            r#"{"n":1,"kind":"reasoning","label":"plan","prompt_hash":"  "}"#,
             r#"{"n":2,"kind":"reasoning","label":"review","provider":""}"#,
             r#"{"n":3,"kind":"done","label":"complete","prompt_hash":"fnv1a64:def"}"#,
         ]
@@ -515,7 +515,7 @@ fn report_ignores_empty_trace_llm_metadata() {
 }
 
 #[test]
-fn report_summarizes_trace_module_id_aliases() {
+fn report_summarizes_canonical_trace_modules() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-trace-modules", "triage:run");
     write_run_summary(temp.path(), &source).unwrap();
@@ -524,7 +524,7 @@ fn report_summarizes_trace_module_id_aliases() {
         dir.join("trace.jsonl"),
         [
             r#"{"n":1,"kind":"tool","label":"triage started","module_id":"triage"}"#,
-            r#"{"n":2,"kind":"reasoning","label":"verify evidence","moduleId":"verify"}"#,
+            r#"{"n":2,"kind":"reasoning","label":"verify evidence","module_id":"verify"}"#,
             r#"{"n":3,"kind":"done","label":"triage done","module_id":"triage"}"#,
         ]
         .join("\n"),

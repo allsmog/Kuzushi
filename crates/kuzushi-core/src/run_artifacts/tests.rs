@@ -64,7 +64,7 @@ mod tests {
     }
 
     #[test]
-    fn trace_step_accepts_camel_case_reader_aliases() {
+    fn trace_step_rejects_obsolete_camel_case_reader_aliases() {
         let json = serde_json::json!({
             "n": 4,
             "kind": "reasoning",
@@ -81,14 +81,9 @@ mod tests {
             "promptHash": "fnv1a64:abc"
         });
 
-        let parsed: RunTraceStep = serde_json::from_value(json).unwrap();
+        let error = serde_json::from_value::<RunTraceStep>(json).unwrap_err();
 
-        assert_eq!(parsed.latency_ms, Some(25));
-        assert_eq!(parsed.cost_usd, Some(0.02));
-        assert_eq!(parsed.module_id.as_deref(), Some("triage"));
-        assert_eq!(parsed.parent_step, Some(3));
-        assert_eq!(parsed.started_at_ms, Some(1_700_000_000_000));
-        assert_eq!(parsed.prompt_hash.as_deref(), Some("fnv1a64:abc"));
+        assert!(error.to_string().contains("unknown field"));
     }
 
     #[test]
@@ -597,10 +592,21 @@ mod tests {
     }
 
     #[test]
-    fn run_trace_schema_covers_reader_aliases() {
+    fn run_trace_schema_declares_only_canonical_fields() {
         let schema = run_trace_schema();
 
         assert_schema_declares_fields(
+            &schema,
+            &[
+                "latency_ms",
+                "cost_usd",
+                "module_id",
+                "parent_step",
+                "started_at_ms",
+                "prompt_hash",
+            ],
+        );
+        assert_schema_declares_no_fields(
             &schema,
             &[
                 "latencyMs",

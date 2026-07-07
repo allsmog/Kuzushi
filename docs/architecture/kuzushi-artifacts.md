@@ -93,11 +93,9 @@ canonical `artifact` object with `"label"`, `"path"`, and `"kind"` fields.
 `schemas/run.trace.schema.json` is the machine-readable contract for each JSON
 line in `trace.jsonl`, including trace step identity, optional module/verb
 metadata, parent-step linkage, severity, timing, and LLM audit metadata.
-Report readers summarize `moduleId`/`module_id`, `costUsd`/`cost_usd`, and
-`promptHash`/`prompt_hash` compatibility spellings from trace streams.
-Rust trace readers accept camelCase compatibility aliases such as `moduleId`,
-`parentStep`, `startedAtMs`, and `promptHash`, but Kuzushi writers continue to
-emit the canonical snake_case trace fields.
+Trace streams use canonical snake_case fields only, including `module_id`,
+`parent_step`, `started_at_ms`, `cost_usd`, and `prompt_hash`; obsolete
+camelCase trace aliases are rejected instead of normalized.
 `schemas/run.context.schema.json` is the machine-readable contract for
 `context.json`, covering the deterministic absence marker plus known rich
 context snapshot fields such as indexed file counts, repository context, and
@@ -135,11 +133,11 @@ under `coreFindings`, `core_findings`, or `findings`.
 summaries, verification proof snapshots, proof levels, verdicts, runtime proof
 flags, state counts, and proof finding entries. Static and verification
 snapshots may also be wrapped under `proof`, `proofs`, or `verification`.
-The schema contract uses canonical run metadata, event, and failure handoff
-fields only. Remaining alias coverage is limited to external producer payloads
-that have not been converted in the current slice, such as trace stream metadata
-aliases. The architecture gate checks that those temporary alias fields are
-explicit and that canonical artifact fields stay required.
+The schema contract uses canonical run metadata, event, failure handoff, and
+trace fields only. Remaining alias coverage is limited to external producer
+payloads that have not been converted in the current slice. The architecture
+gate checks that those temporary alias fields are explicit and that canonical
+artifact fields stay required.
 The same gate also checks vocabulary fields that must stay aligned with Rust
 producers: artifact kind, run/failure/snapshot status, run kind, event and
 trace kind/severity, LLM audit call kind, route path shape, attack-surface

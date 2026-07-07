@@ -39,11 +39,8 @@ export const schemaAliasContractFields = [
 ];
 
 export const reportJsonlAliasFields = [
-  "moduleId",
   "module_id",
-  "costUsd",
   "cost_usd",
-  "promptHash",
   "prompt_hash",
 ];
 
@@ -408,19 +405,13 @@ export const runTraceSchemaFields = [
   "kind",
   "label",
   "latency_ms",
-  "latencyMs",
   "cost_usd",
-  "costUsd",
   "module_id",
-  "moduleId",
   "verb",
   "parent_step",
-  "parentStep",
   "severity",
   "started_at_ms",
-  "startedAtMs",
   "model",
   "provider",
   "prompt_hash",
-  "promptHash",
 ];
