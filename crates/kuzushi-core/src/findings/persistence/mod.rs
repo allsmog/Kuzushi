@@ -9,4 +9,5 @@ mod open;
 mod store_rows;
 
 pub use finding_store::FindingStore;
+pub use open::SuppressionLifecycleEvent;
 pub(in crate::findings) use store_rows::*;

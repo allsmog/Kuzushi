@@ -190,13 +190,32 @@ pub struct FindingLifecycleWrite {
     pub reason: Option<String>,
     pub actor: String,
     pub run_id: Option<String>,
+    /// Rule-originated suppression metadata. Only populated for the
+    /// `Suppression*` event kinds; `None` for `FindingDisappeared` /
+    /// `FindingReopened`. The projector reads only `stableFp`, so these
+    /// fields are additive audit context ignored by existing consumers.
+    pub suppression: Option<SuppressionEventMeta>,
+}
+
+/// Rich audit context carried on a rule-based suppression lifecycle event.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct SuppressionEventMeta {
+    pub rule_id: Option<String>,
+    pub statement: Option<String>,
+    pub origin: Option<String>,
+    pub expires_at_unix: Option<u64>,
 }
 
 impl FindingLifecycleWrite {
     pub(super) fn payload(&self) -> Value {
+        let meta = self.suppression.clone().unwrap_or_default();
         json!({
             "stableFp": self.stable_fp,
             "reason": self.reason,
+            "ruleId": meta.rule_id,
+            "statement": meta.statement,
+            "origin": meta.origin,
+            "expiresAtUnix": meta.expires_at_unix,
         })
     }
 }

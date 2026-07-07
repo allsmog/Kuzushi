@@ -145,6 +145,7 @@ fn require_finding_lifecycle_event_kind(event_kind: EventKind) -> Result<()> {
         event_kind,
         EventKind::FindingDisappeared
             | EventKind::FindingReopened
+            | EventKind::SuppressionAdded
             | EventKind::SuppressionExpired
             | EventKind::SuppressionRemoved
     ) {

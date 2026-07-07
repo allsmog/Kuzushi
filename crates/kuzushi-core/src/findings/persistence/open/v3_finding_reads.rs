@@ -109,8 +109,33 @@ impl FindingStore {
     }
 
     fn hydrate_v3_findings_in_place(&self, findings: &mut [Finding]) -> Result<()> {
-        self.attach_latest_verifications_to_findings(findings)
+        self.attach_latest_verifications_to_findings(findings)?;
+        self.hydrate_suppressed_flag(findings)
     }
+
+    /// Project `stable_findings.current_status` onto `Finding.suppressed`.
+    /// This is what makes the `status:suppressed` / `verdict:suppressed`
+    /// filter tokens and the export "suppressed" column functional.
+    fn hydrate_suppressed_flag(&self, findings: &mut [Finding]) -> Result<()> {
+        let stable_fps = findings
+            .iter()
+            .map(finding_stable_fp)
+            .collect::<Vec<_>>();
+        let statuses = self.current_statuses_for(&stable_fps)?;
+        for finding in findings {
+            let stable_fp = finding_stable_fp(finding);
+            finding.suppressed = statuses.get(&stable_fp).map(String::as_str) == Some("suppressed");
+        }
+        Ok(())
+    }
+}
+
+/// Stable projection key: identity id when present, else fingerprint.
+fn finding_stable_fp(finding: &Finding) -> String {
+    finding
+        .identity_id
+        .clone()
+        .unwrap_or_else(|| finding.fingerprint.clone())
 }
 
 fn row_to_v3_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {

@@ -26,6 +26,8 @@ pub(in crate::modules) use recon_module::*;
 pub(in crate::modules) use report_module::*;
 pub(in crate::modules) use resolve_tool_model::*;
 pub(in crate::modules) use router_module::*;
+pub(in crate::modules) use suppress_module::*;
+pub(in crate::modules) use suppress_run::*;
 pub(in crate::modules) use router_show_tool::*;
 pub(in crate::modules) use run_deep_audit_tool::*;
 pub(in crate::modules) use sast_run::*;
@@ -91,6 +93,8 @@ mod resolve_tool_model;
 mod router_module;
 mod router_show_tool;
 mod run_deep_audit_tool;
+mod suppress_module;
+mod suppress_run;
 #[cfg(test)]
 mod tests;
 mod threat_intel_module;
