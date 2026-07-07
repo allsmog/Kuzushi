@@ -298,7 +298,7 @@ fn prompt_mutation_layer_state(
         Err(_) => return PromptMutationLayerState::Unreadable,
     };
     match app
-        .workbench_cache
+        .workbench_cache()
         .borrow_mut()
         .prompt_mutations(Some(&workspace))
     {
@@ -347,7 +347,11 @@ fn prompt_override_layer_state(
         return PromptOverrideLayerState::NoTarget { path: relative };
     };
     let path = kuzushi_core::prompt_override_path(target, module, verb);
-    match app.workbench_cache.borrow_mut().prompt_override_hash(&path) {
+    match app
+        .workbench_cache()
+        .borrow_mut()
+        .prompt_override_hash(&path)
+    {
         Ok(Some(hash)) => PromptOverrideLayerState::Present {
             path: relative,
             hash,

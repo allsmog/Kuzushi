@@ -42,7 +42,7 @@ impl ShellApp {
     }
 
     fn log_recorded_prompt_mutation(&mut self, mutation: &kuzushi_core::PromptMutation) {
-        self.workbench_cache
+        self.workbench_cache()
             .borrow_mut()
             .invalidate_prompt_mutations();
         self.log(
@@ -120,7 +120,7 @@ impl ShellApp {
     ) {
         match kuzushi_core::approve_prompt_mutation(workspace, id, reason) {
             Ok(Some(_)) => {
-                self.workbench_cache
+                self.workbench_cache()
                     .borrow_mut()
                     .invalidate_prompt_mutations();
                 self.log("prompt", format!("approved prompt mutation {id}"));
@@ -142,7 +142,7 @@ impl ShellApp {
     ) {
         match kuzushi_core::set_prompt_mutation_status(workspace, id, status, reason) {
             Ok(true) => {
-                self.workbench_cache
+                self.workbench_cache()
                     .borrow_mut()
                     .invalidate_prompt_mutations();
                 self.log("prompt", format!("{} prompt mutation {id}", status.label()));

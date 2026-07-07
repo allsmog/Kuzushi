@@ -308,7 +308,7 @@ struct RunDiffMetadata {
 
 fn run_metadata(app: &ShellApp, run_dir: &Path) -> RunDiffMetadata {
     let run_state = app
-        .workbench_cache
+        .workbench_cache()
         .borrow_mut()
         .json_file(&run_dir.join(RUN_FILE));
     RunDiffMetadata {
@@ -333,7 +333,7 @@ fn load_run_findings(
     warnings: &mut Vec<String>,
 ) -> BTreeMap<String, RunDiffFindingRow> {
     let path = run_dir.join(FINDINGS_FILE);
-    let value = match app.workbench_cache.borrow_mut().json_file(&path) {
+    let value = match app.workbench_cache().borrow_mut().json_file(&path) {
         JsonFileState::Present(value) => value,
         JsonFileState::Missing => {
             warnings.push(format!("{run_id}: missing {FINDINGS_FILE}"));

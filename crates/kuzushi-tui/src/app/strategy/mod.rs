@@ -159,7 +159,7 @@ impl ShellApp {
             );
             return false;
         }
-        self.workbench_cache
+        self.workbench_cache()
             .borrow_mut()
             .invalidate_strategy_queue();
         true
@@ -209,7 +209,7 @@ impl ShellApp {
         };
         match kuzushi_core::set_strategy_proposal_status(&workspace, &update.id, update.status) {
             Ok(true) => {
-                self.workbench_cache
+                self.workbench_cache()
                     .borrow_mut()
                     .invalidate_strategy_queue();
                 self.log("strategy", format!("{} {}", update.label, update.id));
@@ -328,7 +328,7 @@ impl ShellApp {
     ) {
         match kuzushi_core::record_and_apply_strategy_correction(workspace, correction) {
             Ok(()) => {
-                self.workbench_cache
+                self.workbench_cache()
                     .borrow_mut()
                     .invalidate_strategy_queue();
                 self.log_strategy_correction(id, correction);

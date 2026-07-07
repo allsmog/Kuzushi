@@ -278,7 +278,7 @@ fn selected_run(app: &ShellApp) -> Option<String> {
 }
 
 fn selected_revision(app: &ShellApp) -> Option<ScreenRevision> {
-    app.workbench_cache
+    app.workbench_cache()
         .borrow_mut()
         .git_metadata(app.target())
         .map(ScreenRevision::from)

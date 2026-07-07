@@ -42,7 +42,7 @@ impl CodePaneModel {
         let path_label = relativize_location(finding.file_path.clone(), base);
         let title = code_title(alias, &path_label, finding.start_line, finding.end_line);
         match app
-            .workbench_cache
+            .workbench_cache()
             .borrow_mut()
             .read_source_file(&source_path)
         {

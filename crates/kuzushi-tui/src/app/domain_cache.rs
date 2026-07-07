@@ -1,22 +1,24 @@
 use super::{
     ActivitySession, AgentChatState, AgentChatView, ContextSnapshotView, ExploitChain,
-    ExploitChainDetail, KnowledgeBaseView, LiveActivity, PwnView, ReconSnapshot, ScanPanelState,
-    ScanState, TaintFlowSnapshot, TaskDurationStore, WorkspaceView,
+    ExploitChainDetail, KnowledgeBaseView, LiveActivity, LogLine, LogState, PwnView, ReconSnapshot,
+    ScanPanelState, ScanState, TaintFlowSnapshot, TaskDurationStore, WorkbenchCache, WorkspaceView,
 };
 use kuzushi_core::{
     findings::ReviewDecisionRecord, AgenticSastReport, CarliniThreatHuntReport, Finding,
     ProgramScope, ScanProgress,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct DomainCache {
     context_view: ContextSnapshotView,
     workspace_view: WorkspaceView,
     kb_view: KnowledgeBaseView,
+    log: LogState,
     pwn_view: PwnView,
     agent_chat: AgentChatState,
     scan: ScanState,
     task_durations: TaskDurationStore,
+    workbench_cache: std::cell::RefCell<WorkbenchCache>,
     activity: Option<ActivitySession>,
     live_activity: Option<LiveActivity>,
     recon_snapshot: Option<ReconSnapshot>,
@@ -43,10 +45,12 @@ impl DomainCache {
             context_view,
             workspace_view,
             kb_view,
+            log: LogState::default(),
             pwn_view: PwnView::default(),
             agent_chat: AgentChatState::default(),
             scan: ScanState::default(),
             task_durations,
+            workbench_cache: std::cell::RefCell::new(WorkbenchCache::default()),
             activity: None,
             live_activity: None,
             recon_snapshot: None,
@@ -97,6 +101,32 @@ impl DomainCache {
         self.kb_view = kb_view;
     }
 
+    pub(crate) fn push_log(&mut self, prefix: impl Into<String>, body: impl Into<String>) {
+        self.log.push(prefix, body);
+    }
+
+    pub(crate) fn log_lines(&self) -> &[LogLine] {
+        self.log.lines()
+    }
+
+    pub(crate) fn log_len(&self) -> usize {
+        self.log.len()
+    }
+
+    pub(crate) fn clear_log(&mut self) {
+        self.log.clear();
+    }
+
+    #[doc(hidden)]
+    pub(crate) fn replace_log_for_test(&mut self, lines: Vec<LogLine>) {
+        self.log.replace_for_test(lines);
+    }
+
+    #[doc(hidden)]
+    pub(crate) fn log_lines_mut_for_test(&mut self) -> &mut [LogLine] {
+        self.log.lines_mut_for_test()
+    }
+
     pub(crate) fn pwn_view(&self) -> &PwnView {
         &self.pwn_view
     }
@@ -143,6 +173,10 @@ impl DomainCache {
 
     pub(crate) fn record_task_duration_secs(&mut self, task_id: &str, secs: u64) {
         self.task_durations.record_secs(task_id, secs);
+    }
+
+    pub(crate) fn workbench_cache(&self) -> &std::cell::RefCell<WorkbenchCache> {
+        &self.workbench_cache
     }
 
     pub(crate) fn activity(&self) -> Option<&ActivitySession> {

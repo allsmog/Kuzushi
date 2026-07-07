@@ -204,7 +204,7 @@ fn empty_hint(no_rows: bool) -> Option<&'static str> {
 fn component_roots(app: &ShellApp) -> Vec<SourceTreeComponentRoot> {
     let mut roots = recommendation_component_roots(app);
     let scope_state = app
-        .workbench_cache
+        .workbench_cache()
         .borrow_mut()
         .project_scope_tree(app.target());
     if let Some(scope_state) = scope_state {

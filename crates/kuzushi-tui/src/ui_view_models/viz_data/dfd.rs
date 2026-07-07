@@ -34,11 +34,11 @@ pub(crate) struct DfdModel {
 pub(crate) fn dfd_model(app: &ShellApp) -> DfdModel {
     let doc = super::super::threat_model_doc(app);
     let key = DfdModelCacheKey::from_threat_doc(doc.as_ref());
-    if let Some(cached) = app.workbench_cache.borrow().dfd_model(&key) {
+    if let Some(cached) = app.workbench_cache().borrow().dfd_model(&key) {
         return cached;
     }
     let model = dfd_model_from_doc(doc.as_ref());
-    app.workbench_cache
+    app.workbench_cache()
         .borrow_mut()
         .cache_dfd_model(key, model.clone());
     model

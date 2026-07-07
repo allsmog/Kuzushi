@@ -129,7 +129,7 @@ fn artifact_source_status_row(
 
 fn active_run_summary(app: &ShellApp, session: &ActivitySession) -> Option<RunSummary> {
     let target = app.target()?;
-    app.workbench_cache
+    app.workbench_cache()
         .borrow_mut()
         .run_summary_index(Some(target), vec![session.run_id.clone()])
         .get(&session.run_id)

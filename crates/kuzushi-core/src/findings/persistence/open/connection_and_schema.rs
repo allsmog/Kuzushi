@@ -13,16 +13,23 @@ impl FindingStore {
             conn,
             db_path: Some(path.to_path_buf()),
             event_log_dir: path.parent().map(|parent| parent.join("log")),
+            _ephemeral_dir: None,
         };
         store.init()?;
         Ok(store)
     }
 
     pub fn open_in_memory() -> Result<Self> {
+        // Kept as a test-facing convenience name, but backed by a temporary
+        // v3 store so writes still flow through the event log and writer actor.
+        let ephemeral_dir = tempfile::tempdir().context("Could not create ephemeral findings DB")?;
+        let path = ephemeral_dir.path().join("findings.sqlite3");
         let store = Self {
-            conn: Connection::open_in_memory().context("Could not open in-memory findings DB")?,
-            db_path: None,
-            event_log_dir: None,
+            conn: Connection::open(&path)
+                .with_context(|| format!("Could not open {}", path.display()))?,
+            db_path: Some(path.clone()),
+            event_log_dir: path.parent().map(|parent| parent.join("log")),
+            _ephemeral_dir: Some(ephemeral_dir),
         };
         store.init()?;
         Ok(store)

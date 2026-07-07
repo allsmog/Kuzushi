@@ -52,9 +52,8 @@ impl FindingStore {
         triage: &TriageOutcome,
         author: TriageAuthor,
     ) -> Result<()> {
-        let created_at = now_isoish();
         for finding_id in finding_ids {
-            self.upsert_triage_for_finding_id(finding_id, triage, author, &created_at)?;
+            self.upsert_triage_for_finding_id(finding_id, triage, author)?;
         }
         Ok(())
     }
@@ -64,10 +63,9 @@ impl FindingStore {
         finding_id: i64,
         triage: &TriageOutcome,
         author: TriageAuthor,
-        created_at: &str,
     ) -> Result<()> {
         if self.triage_update_allowed(finding_id, author)? {
-            self.append_review_decision_from_triage(finding_id, triage, author, created_at)?;
+            self.append_review_decision_from_triage(finding_id, triage, author)?;
         }
         Ok(())
     }

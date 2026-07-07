@@ -379,7 +379,7 @@ fn finding_rows(
 }
 
 pub(crate) fn cached_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
-    app.workbench_cache
+    app.workbench_cache()
         .borrow_mut()
         .sorted_finding_alias_indices(app.findings())
 }
@@ -472,7 +472,7 @@ fn cached_alias_for_fingerprint(app: &ShellApp, fingerprint: &str) -> Option<Str
 /// the list shows `crates/foo.rs:12` instead of a full `/Users/...` path. Shared
 /// with the Workbench SOURCE tree so both surfaces relativize identically.
 pub(crate) fn target_base(app: &ShellApp) -> Option<String> {
-    app.workbench_cache.borrow_mut().target_base(app.target())
+    app.workbench_cache().borrow_mut().target_base(app.target())
 }
 
 /// Strip the target prefix from a `path:line` location when present, leaving a
@@ -491,11 +491,11 @@ type ProjectedFinding = VisibleFindingProjection;
 
 pub(crate) fn projected_visible_findings(app: &ShellApp) -> Vec<ProjectedFinding> {
     let key = visible_findings_cache_key(app);
-    if let Some(cached) = app.workbench_cache.borrow().visible_findings(&key) {
+    if let Some(cached) = app.workbench_cache().borrow().visible_findings(&key) {
         return cached;
     }
     let projected = engagement_projected_findings(app, visible_sorted_finding_alias_indices(app));
-    app.workbench_cache
+    app.workbench_cache()
         .borrow_mut()
         .cache_visible_findings(key, projected.clone());
     projected
@@ -648,7 +648,7 @@ fn active_component_rel_path(app: &ShellApp) -> Option<String> {
     }
     let target = app.target()?;
     let state = app
-        .workbench_cache
+        .workbench_cache()
         .borrow_mut()
         .project_scope_tree(Some(target))?;
     let tree = match &state {
@@ -911,7 +911,7 @@ struct FindingRunProvenance {
 }
 
 fn run_summary_index(app: &ShellApp) -> BTreeMap<String, RunSummary> {
-    app.workbench_cache
+    app.workbench_cache()
         .borrow_mut()
         .run_summary_index(app.target(), finding_scan_ids(app))
 }

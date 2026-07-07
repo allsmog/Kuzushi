@@ -3,11 +3,9 @@ use super::*;
 #[derive(Debug)]
 pub struct ShellApp {
     pub(crate) editor: EditorState,
-    pub(in crate::app) log: LogState,
     pub shell_view: ShellView,
     pub(crate) session: SessionState,
     pub(crate) domain: DomainCache,
-    pub(crate) workbench_cache: std::cell::RefCell<WorkbenchCache>,
     /// Engagement-scoped planning runtime state: current phase, queued steps,
     /// failures/retries, target classification, planning picker route state,
     /// and per-run option overlays.
@@ -32,19 +30,19 @@ impl ShellApp {
     }
 
     pub fn log(&mut self, prefix: impl Into<String>, body: impl Into<String>) {
-        self.log.push(prefix, body);
+        self.domain.push_log(prefix, body);
     }
 
     pub fn log_lines(&self) -> &[LogLine] {
-        self.log.lines()
+        self.domain.log_lines()
     }
 
     pub fn log_len(&self) -> usize {
-        self.log.len()
+        self.domain.log_len()
     }
 
     pub fn clear_log(&mut self) {
-        self.log.clear();
+        self.domain.clear_log();
     }
 
     pub(crate) fn auth_screen_snapshot(&self) -> Option<&AuthScreenSnapshot> {
@@ -319,12 +317,12 @@ impl ShellApp {
 
     #[doc(hidden)]
     pub fn replace_log_for_test(&mut self, lines: Vec<LogLine>) {
-        self.log.replace_for_test(lines);
+        self.domain.replace_log_for_test(lines);
     }
 
     #[doc(hidden)]
     pub fn log_lines_mut_for_test(&mut self) -> &mut [LogLine] {
-        self.log.lines_mut_for_test()
+        self.domain.log_lines_mut_for_test()
     }
 
     pub fn target(&self) -> Option<&std::path::Path> {
@@ -545,6 +543,10 @@ impl ShellApp {
 
     pub(crate) fn domain_mut(&mut self) -> &mut DomainCache {
         &mut self.domain
+    }
+
+    pub(crate) fn workbench_cache(&self) -> &std::cell::RefCell<WorkbenchCache> {
+        self.domain.workbench_cache()
     }
 
     pub(crate) fn findings(&self) -> &[Finding] {

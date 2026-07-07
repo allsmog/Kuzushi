@@ -92,7 +92,7 @@ fn strategy_queue_snapshot(app: &ShellApp, source: &StrategyQueueSource) -> Stra
         };
     };
     match app
-        .workbench_cache
+        .workbench_cache()
         .borrow_mut()
         .strategy_queue(source.workspace.as_ref())
     {
