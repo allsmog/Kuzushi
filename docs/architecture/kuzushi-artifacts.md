@@ -116,8 +116,7 @@ degradation metadata.
 module recommender report shape, including signals, capabilities, recommended
 tools, priorities, runtime requirements, and next-input hints. It also
 documents full-report envelopes under `data`, `recommendationReport`, and
-`recommendation_report`, plus nested `data.recommendationReport` and
-`data.recommendation_report` producer envelopes.
+nested `data.recommendationReport` producer envelopes.
 `schemas/run.strategy.schema.json` is the machine-readable contract for
 `strategy.json`, covering the deterministic absence marker plus strategy
 proposal snapshots, phase, base/recommended/corrected strategy lineage,

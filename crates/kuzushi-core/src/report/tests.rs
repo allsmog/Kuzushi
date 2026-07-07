@@ -1835,7 +1835,7 @@ fn report_summarizes_recommendation_report_envelope() {
         &json!({
             "status": "completed",
             "data": {
-                "recommendation_report": {
+                "recommendationReport": {
                     "summary": "Prioritize scanner and runtime review.",
                     "capabilities": {
                         "available_tool_count": 6,

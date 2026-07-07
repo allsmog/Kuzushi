@@ -86,9 +86,7 @@ export const tokenChecks = [
     file: "crates/kuzushi-core/src/report/artifact_summary/recommendations.rs",
     tokens: [
       "recommendationReport",
-      "recommendation_report",
       "/data/recommendationReport",
-      "/data/recommendation_report",
       "/data/recommendations",
     ],
   },
@@ -98,9 +96,7 @@ export const tokenChecks = [
     tokens: [
       "/data",
       "/recommendationReport",
-      "/recommendation_report",
       "/data/recommendationReport",
-      "/data/recommendation_report",
     ],
   },
   {
@@ -109,9 +105,7 @@ export const tokenChecks = [
     tokens: [
       "recommendation_report_data",
       "recommendationReport",
-      "recommendation_report",
       "/data/recommendationReport",
-      "/data/recommendation_report",
       "recommendation_model_reads_data_wrapped_latest_artifact",
     ],
   },

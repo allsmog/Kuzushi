@@ -276,9 +276,7 @@ fn malformed_recommendations_view() -> RecommendationView {
 fn recommendation_report_value(value: &serde_json::Value) -> &serde_json::Value {
     value
         .get("recommendationReport")
-        .or_else(|| value.get("recommendation_report"))
         .or_else(|| value.pointer("/data/recommendationReport"))
-        .or_else(|| value.pointer("/data/recommendation_report"))
         .or_else(|| recommendation_report_data(value))
         .unwrap_or(value)
 }
@@ -618,14 +616,12 @@ mod tests {
     #[test]
     fn recommendation_values_read_recommendation_report_envelope() {
         let artifact = json!({
-            "data": {
-                "recommendation_report": {
-                    "summary": "1 recommendation for /repo",
-                    "recommendations": [{
-                        "tool": "threat-model:build",
-                        "signals": ["frameworks: Falcon, Litestar, Sanic"]
-                    }]
-                }
+            "recommendationReport": {
+                "summary": "1 recommendation for /repo",
+                "recommendations": [{
+                    "tool": "threat-model:build",
+                    "signals": ["frameworks: Falcon, Litestar, Sanic"]
+                }]
             }
         });
         let report = recommendation_report_value(&artifact);

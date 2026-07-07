@@ -89,9 +89,7 @@ fn recommendation_items(value: &Value) -> Option<&[Value]> {
 fn recommendation_report(value: &Value) -> &Value {
     value
         .get("recommendationReport")
-        .or_else(|| value.get("recommendation_report"))
         .or_else(|| value.pointer("/data/recommendationReport"))
-        .or_else(|| value.pointer("/data/recommendation_report"))
         .or_else(|| recommendation_report_data(value))
         .unwrap_or(value)
 }

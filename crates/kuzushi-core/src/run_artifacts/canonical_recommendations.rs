@@ -11,9 +11,7 @@ fn full_recommendation_report_value(output: &Value) -> Option<&Value> {
     full_recommendation_report_at(output, "")
         .or_else(|| full_recommendation_report_at(output, "/data"))
         .or_else(|| full_recommendation_report_at(output, "/recommendationReport"))
-        .or_else(|| full_recommendation_report_at(output, "/recommendation_report"))
         .or_else(|| full_recommendation_report_at(output, "/data/recommendationReport"))
-        .or_else(|| full_recommendation_report_at(output, "/data/recommendation_report"))
 }
 
 fn full_recommendation_report_at<'a>(output: &'a Value, pointer: &str) -> Option<&'a Value> {

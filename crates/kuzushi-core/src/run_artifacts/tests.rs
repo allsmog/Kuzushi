@@ -3480,7 +3480,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_run_complete_promotes_snake_case_recommendation_report() {
+    fn tool_run_complete_rejects_snake_case_recommendation_report() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-snake-recommendations";
         let record = ToolRunRecord::new(
@@ -3525,16 +3525,12 @@ mod tests {
             fs::read_to_string(run_artifact_path(tmp.path(), run_id, "recommendations.json")).unwrap();
         let report = serde_json::from_str::<serde_json::Value>(&body).unwrap();
 
-        assert_eq!(report["summary"], serde_json::json!("1 recommendation for /repo"));
-        assert_eq!(report["signals"]["source_files"], serde_json::json!(3));
         assert_eq!(
-            report["capabilities"]["available_tool_count"],
-            serde_json::json!(4)
+            report["summary"],
+            serde_json::json!("No module recommendations were recorded for this run.")
         );
-        assert_eq!(
-            report["recommendations"][0]["tool"],
-            serde_json::json!("semgrep:scan")
-        );
+        assert_eq!(report["status"], serde_json::json!("skipped"));
+        assert!(report.get("recommendations").is_none());
     }
 
     #[test]
@@ -4669,18 +4665,17 @@ mod tests {
     }
 
     fn assert_recommendation_report_envelope_aliases_match_schema(schema: &serde_json::Value) {
+        let properties = schema["properties"].as_object().unwrap();
         let report_schema = schema["definitions"]["recommendationReport"]["properties"]
             .as_object()
             .unwrap();
 
+        assert!(properties.get("recommendation_report").is_none());
         assert_eq!(
             report_schema["recommendationReport"]["$ref"],
             serde_json::json!("#/definitions/recommendationReport")
         );
-        assert_eq!(
-            report_schema["recommendation_report"]["$ref"],
-            serde_json::json!("#/definitions/recommendationReport")
-        );
+        assert!(report_schema.get("recommendation_report").is_none());
     }
 
     fn assert_recommendations_match_schema(

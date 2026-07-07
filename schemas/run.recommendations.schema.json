@@ -22,7 +22,6 @@
     "ok": { "type": "boolean" },
     "data": { "$ref": "#/definitions/recommendationReport" },
     "recommendationReport": { "$ref": "#/definitions/recommendationReport" },
-    "recommendation_report": { "$ref": "#/definitions/recommendationReport" },
     "target": { "type": "string" },
     "signals": { "type": "object" },
     "capabilities": { "$ref": "#/definitions/capabilities" },
@@ -77,8 +76,7 @@
           "type": "array",
           "items": { "type": "string" }
         },
-        "recommendationReport": { "$ref": "#/definitions/recommendationReport" },
-        "recommendation_report": { "$ref": "#/definitions/recommendationReport" }
+        "recommendationReport": { "$ref": "#/definitions/recommendationReport" }
       }
     },
     "capabilities": {

@@ -194,7 +194,6 @@ const fieldShapeSpecs = {
     ...snapshotMarkerShapeSpecs,
     { path: ["properties", "data"], ref: "#/definitions/recommendationReport" },
     { path: ["properties", "recommendationReport"], ref: "#/definitions/recommendationReport" },
-    { path: ["properties", "recommendation_report"], ref: "#/definitions/recommendationReport" },
     { path: ["properties", "ok"], type: "boolean" },
     { path: ["properties", "target"], type: "string" },
     { path: ["properties", "availableToolCount"], type: "integer", minimum: 0 },
@@ -279,10 +278,6 @@ const fieldShapeSpecs = {
     },
     {
       path: ["definitions", "recommendationReport", "properties", "recommendationReport"],
-      ref: "#/definitions/recommendationReport",
-    },
-    {
-      path: ["definitions", "recommendationReport", "properties", "recommendation_report"],
       ref: "#/definitions/recommendationReport",
     },
     { path: ["properties", "signals"], type: "object" },

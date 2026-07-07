@@ -119,7 +119,6 @@ const snapshotEnvelopeFieldsBySchema = {
   "schemas/run.recommendations.schema.json": [
     "data",
     "recommendationReport",
-    "recommendation_report",
   ],
 };
 

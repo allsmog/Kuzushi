@@ -178,7 +178,6 @@ export const runRecommendationsSchemaFields = [
   "skipped_missing_tools",
   "data",
   "recommendationReport",
-  "recommendation_report",
   "recommendations",
   "moduleId",
   "module_id",
