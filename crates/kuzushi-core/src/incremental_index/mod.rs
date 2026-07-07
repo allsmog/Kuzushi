@@ -3,11 +3,12 @@ use crate::content_store::{
 };
 use crate::identity::{hash_parts, Blake3Hash};
 use crate::storage_v3::writer_actor::{
-    FileDeletedWrite, FileFactWrite, SnapshotWrite, StorageWriterActor, WatcherCommand,
-    WriterCommand,
+    AuditWrite, FileDeletedWrite, FileFactWrite, SnapshotWrite, StorageWriterActor,
+    WatcherCommand, WriterCommand,
 };
 use crate::workspace::{target_git_metadata, WorkspaceTarget};
 use anyhow::{Context, Result};
+use serde_json::json;
 use rusqlite::{params, OptionalExtension};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -59,6 +60,11 @@ pub struct IndexedWorkspaceSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkspaceIndexUpdate {
     Noop { change_count: usize },
+    Invalidated {
+        change_count: usize,
+        applied_seq: u64,
+        summary: String,
+    },
     Incremental(IndexedWorkspaceSnapshot),
     Full(IndexedWorkspaceSnapshot),
 }
@@ -67,20 +73,21 @@ impl WorkspaceIndexUpdate {
     pub fn applied_seq(&self) -> Option<u64> {
         match self {
             Self::Noop { .. } => None,
+            Self::Invalidated { applied_seq, .. } => Some(*applied_seq),
             Self::Incremental(snapshot) | Self::Full(snapshot) => Some(snapshot.applied_seq),
         }
     }
 
     pub fn file_count(&self) -> Option<usize> {
         match self {
-            Self::Noop { .. } => None,
+            Self::Noop { .. } | Self::Invalidated { .. } => None,
             Self::Incremental(snapshot) | Self::Full(snapshot) => Some(snapshot.file_count),
         }
     }
 
     pub fn snapshot_hash(&self) -> Option<&str> {
         match self {
-            Self::Noop { .. } => None,
+            Self::Noop { .. } | Self::Invalidated { .. } => None,
             Self::Incremental(snapshot) | Self::Full(snapshot) => Some(&snapshot.snapshot_hash),
         }
     }
@@ -141,6 +148,7 @@ pub fn index_workspace_changes(
         ChangeIndexMode::Noop => Ok(WorkspaceIndexUpdate::Noop {
             change_count: changes.len(),
         }),
+        ChangeIndexMode::Invalidate => record_workspace_invalidation(workspace, &changes),
         ChangeIndexMode::FullSnapshot => {
             index_workspace_snapshot(workspace).map(WorkspaceIndexUpdate::Full)
         }
@@ -151,19 +159,19 @@ pub fn index_workspace_changes(
 enum ChangeIndexMode {
     Noop,
     FileFacts,
+    Invalidate,
     FullSnapshot,
 }
 
 fn index_mode_for_changes(changes: &[WorkspaceChange]) -> ChangeIndexMode {
-    if changes.is_empty()
-        || changes
-            .iter()
-            .all(|change| matches!(plan_for_change(change), ReindexPlan::MarkStaleOnly))
-    {
+    if changes.is_empty() {
         return ChangeIndexMode::Noop;
     }
     if changes_require_full_snapshot(changes) {
         return ChangeIndexMode::FullSnapshot;
+    }
+    if changes_require_invalidation(changes) {
+        return ChangeIndexMode::Invalidate;
     }
     ChangeIndexMode::FileFacts
 }
@@ -200,11 +208,92 @@ pub fn plan_for_change(change: &WorkspaceChange) -> ReindexPlan {
 
 fn changes_require_full_snapshot(changes: &[WorkspaceChange]) -> bool {
     changes.iter().any(|change| {
-        !matches!(
-            plan_for_change(change),
-            ReindexPlan::FileFacts | ReindexPlan::FileFactsAndLocalAttackSurface
+        matches!(
+            change,
+            WorkspaceChange::GitHeadChanged | WorkspaceChange::GitIndexChanged
         )
     })
+}
+
+fn changes_require_invalidation(changes: &[WorkspaceChange]) -> bool {
+    changes.iter().any(|change| {
+        matches!(
+            plan_for_change(change),
+            ReindexPlan::DependencyIndex
+                | ReindexPlan::FullInventory
+                | ReindexPlan::FullDeterministicScan
+                | ReindexPlan::MarkStaleOnly
+        )
+    })
+}
+
+fn record_workspace_invalidation(
+    workspace: &WorkspaceTarget,
+    changes: &[WorkspaceChange],
+) -> Result<WorkspaceIndexUpdate> {
+    workspace.ensure_state_dir()?;
+    let summary = workspace_invalidation_summary(changes);
+    let receipts = StorageWriterActor::commit_blocking_many(
+        workspace.event_log_dir(),
+        workspace.findings_db_path(),
+        vec![WriterCommand::Decision(
+            crate::storage_v3::writer_actor::DecisionCommand::RecordAudit(AuditWrite {
+                event_kind: crate::event_log::EventKind::DiagnosticRecorded,
+                actor: "incremental-index".to_string(),
+                run_id: None,
+                stable_fp: None,
+                subject: Some("workspace-invalidation".to_string()),
+                summary: summary.clone(),
+                details: json!({
+                    "code": "workspace.invalidation",
+                    "changes": changes.iter().map(workspace_change_label).collect::<Vec<_>>(),
+                    "plans": changes.iter().map(|change| format!("{:?}", plan_for_change(change))).collect::<Vec<_>>(),
+                }),
+            }),
+        )],
+    )?;
+    Ok(WorkspaceIndexUpdate::Invalidated {
+        change_count: changes.len(),
+        applied_seq: receipts.last().map_or(0, |receipt| receipt.committed_seq),
+        summary,
+    })
+}
+
+fn workspace_invalidation_summary(changes: &[WorkspaceChange]) -> String {
+    if changes.iter().any(|change| matches!(change, WorkspaceChange::RuleSetChanged)) {
+        return "rule-set changed; deterministic scanner observations marked stale".to_string();
+    }
+    if changes.iter().any(|change| {
+        matches!(
+            change,
+            WorkspaceChange::ManifestChanged(_) | WorkspaceChange::LockfileChanged(_)
+        )
+    }) {
+        return "dependency inputs changed; dependency index marked stale".to_string();
+    }
+    if changes
+        .iter()
+        .any(|change| matches!(change, WorkspaceChange::PromptOrHouseRuleChanged))
+    {
+        return "prompt or house-rule changed; model-derived results marked stale".to_string();
+    }
+    "workspace inputs changed; derived indexes marked stale".to_string()
+}
+
+fn workspace_change_label(change: &WorkspaceChange) -> String {
+    match change {
+        WorkspaceChange::FileChanged(path) => format!("file-changed:{}", path.display()),
+        WorkspaceChange::FileDeleted(path) => format!("file-deleted:{}", path.display()),
+        WorkspaceChange::FileMoved { from, to } => {
+            format!("file-moved:{}->{}", from.display(), to.display())
+        }
+        WorkspaceChange::ManifestChanged(path) => format!("manifest-changed:{}", path.display()),
+        WorkspaceChange::LockfileChanged(path) => format!("lockfile-changed:{}", path.display()),
+        WorkspaceChange::GitHeadChanged => "git-head-changed".to_string(),
+        WorkspaceChange::GitIndexChanged => "git-index-changed".to_string(),
+        WorkspaceChange::RuleSetChanged => "rule-set-changed".to_string(),
+        WorkspaceChange::PromptOrHouseRuleChanged => "prompt-or-house-rule-changed".to_string(),
+    }
 }
 
 fn index_workspace_file_fact_changes(

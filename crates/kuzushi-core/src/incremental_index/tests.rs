@@ -352,11 +352,87 @@ fn workspace_changes_fall_back_to_full_snapshot_when_no_projection_exists() {
     assert_eq!(indexed.file_count, 1);
 }
 
+#[test]
+fn workspace_changes_record_dependency_invalidation_event() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+
+    let update = index_workspace_changes(
+        &workspace,
+        &[WorkspaceChange::ManifestChanged("Cargo.toml".into())],
+    )
+    .unwrap();
+
+    let WorkspaceIndexUpdate::Invalidated {
+        applied_seq,
+        summary,
+        ..
+    } = update
+    else {
+        panic!("expected invalidation update");
+    };
+    assert_eq!(applied_seq, 1);
+    assert!(summary.contains("dependency index marked stale"));
+    assert_eq!(
+        projected_audit_summary(&workspace.findings_db_path()),
+        "dependency inputs changed; dependency index marked stale"
+    );
+}
+
+#[test]
+fn workspace_changes_record_ruleset_invalidation_event() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+
+    let update = index_workspace_changes(&workspace, &[WorkspaceChange::RuleSetChanged]).unwrap();
+
+    let WorkspaceIndexUpdate::Invalidated { summary, .. } = update else {
+        panic!("expected invalidation update");
+    };
+    assert!(summary.contains("deterministic scanner observations marked stale"));
+    assert_eq!(projected_audit_count(&workspace.findings_db_path()), 1);
+}
+
+#[test]
+fn workspace_changes_record_prompt_invalidation_event() {
+    let tmp = tempfile::tempdir().unwrap();
+    let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+
+    let update =
+        index_workspace_changes(&workspace, &[WorkspaceChange::PromptOrHouseRuleChanged]).unwrap();
+
+    let WorkspaceIndexUpdate::Invalidated { summary, .. } = update else {
+        panic!("expected invalidation update");
+    };
+    assert!(summary.contains("model-derived results marked stale"));
+    assert_eq!(projected_audit_count(&workspace.findings_db_path()), 1);
+}
+
 fn projected_indexed_file_count(db_path: &Path, snapshot_hash: &str) -> i64 {
     let conn = rusqlite::Connection::open(db_path).unwrap();
     conn.query_row(
         "select count(*) from indexed_files where snapshot_hash = ?1",
         rusqlite::params![snapshot_hash],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
+fn projected_audit_summary(db_path: &Path) -> String {
+    let conn = rusqlite::Connection::open(db_path).unwrap();
+    conn.query_row(
+        "select summary from audit_events where subject = 'workspace-invalidation'",
+        [],
+        |row| row.get(0),
+    )
+    .unwrap()
+}
+
+fn projected_audit_count(db_path: &Path) -> i64 {
+    let conn = rusqlite::Connection::open(db_path).unwrap();
+    conn.query_row(
+        "select count(*) from audit_events where subject = 'workspace-invalidation'",
+        [],
         |row| row.get(0),
     )
     .unwrap()

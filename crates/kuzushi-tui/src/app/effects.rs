@@ -846,6 +846,13 @@ fn workspace_reindex_message(update: &WorkspaceIndexUpdate) -> String {
         WorkspaceIndexUpdate::Noop { change_count } => {
             format!("no index update needed for {change_count} pending changes")
         }
+        WorkspaceIndexUpdate::Invalidated {
+            change_count,
+            applied_seq,
+            summary,
+        } => format!(
+            "recorded workspace invalidation for {change_count} pending changes at seq {applied_seq}: {summary}"
+        ),
         WorkspaceIndexUpdate::Incremental(indexed) => format!(
             "incrementally indexed {} files at seq {} ({})",
             indexed.file_count, indexed.applied_seq, indexed.snapshot_hash
@@ -979,7 +986,7 @@ mod tests {
     }
 
     #[test]
-    fn workspace_reindex_effect_keeps_stale_state_after_noop_update() {
+    fn workspace_reindex_effect_records_prompt_invalidation_and_clears_stale_state() {
         let temp = tempfile::tempdir().unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
@@ -995,9 +1002,9 @@ mod tests {
             })],
         );
 
-        assert!(app.workspace_stale().is_some());
+        assert!(app.workspace_stale().is_none());
         assert!(app.log_lines().iter().any(|entry| {
-            entry.prefix == "workspace" && entry.body.contains("no index update needed")
+            entry.prefix == "workspace" && entry.body.contains("recorded workspace invalidation")
         }));
     }
 }
