@@ -2,18 +2,22 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn run_tool(&mut self, tool: Option<String>, input: Option<String>) {
+        let effects = self.reduce_run_tool(tool, input);
+        self.execute_effects(effects);
+    }
+
+    pub(crate) fn reduce_run_tool(
+        &mut self,
+        tool: Option<String>,
+        input: Option<String>,
+    ) -> Vec<ShellEffect> {
         if self.blocked_by_running_tool() {
-            return;
+            return Vec::new();
         }
         let Some(request) = self.prepare_run_tool_request(tool, input) else {
-            return;
+            return Vec::new();
         };
-        self.dispatch_run_tool(
-            request.tool_name,
-            request.input,
-            request.workspace,
-            request.thinking_level,
-        );
+        vec![ShellEffect::DispatchRunTool(request.into_launch())]
     }
 
     fn prepare_run_tool_request(
@@ -24,15 +28,15 @@ impl ShellApp {
         let Some(tool_name) = self.resolve_run_tool_name(tool) else {
             return None;
         };
-        let Some(input) = self.parse_and_prepare_run_input(&tool_name, input) else {
+        let Some(workspace) = self.run_tool_workspace() else {
+            return None;
+        };
+        let Some(input) = self.parse_and_prepare_run_input(&tool_name, input, &workspace) else {
             return None;
         };
         if self.run_launch_deferred(&tool_name, &input) {
             return None;
         }
-        let Some(workspace) = self.run_tool_workspace() else {
-            return None;
-        };
         Some(RunToolRequest {
             thinking_level: thinking_level_from_input(&input)
                 .or_else(|| self.session_thinking_level.clone()),
@@ -47,7 +51,7 @@ impl ShellApp {
             || self.request_run_confirmation(tool_name, input)
     }
 
-    fn dispatch_run_tool(
+    pub(crate) fn dispatch_run_tool(
         &mut self,
         tool_name: String,
         input: serde_json::Value,
@@ -118,12 +122,21 @@ impl ShellApp {
         &mut self,
         tool_name: &str,
         input: Option<String>,
+        workspace: &WorkspaceTarget,
     ) -> Option<serde_json::Value> {
-        let input = self.parse_run_input(input)?;
-        match self
-            .registry
-            .prepare_tool_input(tool_name, input, Some(&self.option_store))
-        {
+        let input = self.parse_run_input_for_tool(tool_name, input)?;
+        let ctx = ToolExecutionContext {
+            config: &self.config,
+            workspace: Some(workspace),
+            findings_store: None,
+            trace: None,
+        };
+        match self.registry.prepare_tool_input_for_dispatch(
+            tool_name,
+            input,
+            &ctx,
+            Some(&self.option_store),
+        ) {
             Ok(input) => Some(input),
             Err(error) => {
                 self.log(
@@ -132,6 +145,17 @@ impl ShellApp {
                 );
                 None
             }
+        }
+    }
+
+    fn parse_run_input_for_tool(
+        &mut self,
+        tool_name: &str,
+        input: Option<String>,
+    ) -> Option<serde_json::Value> {
+        match input {
+            Some(raw) if !raw.trim().is_empty() => self.parse_run_input(Some(raw)),
+            _ => Some(self.default_run_input_for_tool(tool_name)),
         }
     }
 
@@ -151,8 +175,19 @@ impl ShellApp {
         }
     }
 
+    fn default_run_input_for_tool(&self, tool_name: &str) -> serde_json::Value {
+        if tool_name == "patch:finding" {
+            if let Some((_, finding)) = crate::ui_view_models::current_finding_for_detail(self) {
+                return serde_json::json!({ "fingerprint": finding.fingerprint });
+            }
+        }
+        serde_json::json!({})
+    }
+
     fn request_run_confirmation(&mut self, tool_name: &str, input: &serde_json::Value) -> bool {
-        let Some(request) = confirm_gate_for_tool(tool_name, input, &self.confirm_allowlist) else {
+        let Some(request) =
+            confirm_gate_for_tool(tool_name, input, self.engagement.confirm_allowlist())
+        else {
             return false;
         };
         self.log(
@@ -196,4 +231,15 @@ struct RunToolRequest {
     input: serde_json::Value,
     workspace: WorkspaceTarget,
     thinking_level: Option<String>,
+}
+
+impl RunToolRequest {
+    fn into_launch(self) -> RunToolLaunch {
+        RunToolLaunch {
+            tool_name: self.tool_name,
+            input: self.input,
+            workspace: self.workspace,
+            thinking_level: self.thinking_level,
+        }
+    }
 }

@@ -171,7 +171,43 @@ fn pair_len((key, label): (&str, &str)) -> usize {
 }
 
 fn push_binding_pair(spans: &mut Vec<Span<'static>>, (key, label): (&'static str, &'static str)) {
-    spans.push(Span::styled(key.to_string(), theme::accent()));
+    spans.push(Span::styled(key.to_string(), binding_key_style(key)));
     spans.push(Span::raw(" "));
     spans.push(Span::styled(label.to_string(), theme::muted()));
+}
+
+fn binding_key_style(key: &str) -> ratatui::style::Style {
+    if looks_like_typed_command(key) {
+        theme::warn()
+    } else {
+        theme::accent()
+    }
+}
+
+fn looks_like_typed_command(key: &str) -> bool {
+    !looks_like_physical_key(key)
+        && key
+            .chars()
+            .any(|ch| ch.is_ascii_alphabetic() && ch.is_ascii_lowercase())
+        && key.chars().count() > 1
+}
+
+fn looks_like_physical_key(key: &str) -> bool {
+    key.chars().count() == 1
+        || key.contains('/')
+        || key.contains('+')
+        || matches!(
+            key,
+            "Tab"
+                | "Shift+Tab"
+                | "Enter"
+                | "Esc"
+                | "Space"
+                | "Backspace"
+                | "PgUp"
+                | "PgDn"
+                | "PgUp/PgDn"
+                | "Up"
+                | "Down"
+        )
 }

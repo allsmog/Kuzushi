@@ -1,12 +1,12 @@
-use super::*;
 use super::inspect_dotnet_route_groups::{
     add_dotnet_route_group, dotnet_chained_group_prefix, dotnet_chained_group_route,
     dotnet_route_group_for_line,
 };
+use super::inspect_dotnet_route_methods::dotnet_route_methods;
 use super::inspect_dotnet_route_paths::{
     combine_dotnet_routes, dotnet_route_attribute, dotnet_route_path_for_line,
 };
-use super::inspect_dotnet_route_methods::dotnet_route_methods;
+use super::*;
 
 pub(crate) fn inspect_dotnet_routes(
     source_file: &InventorySourceFile,

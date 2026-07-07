@@ -3,13 +3,7 @@ use super::*;
 pub(crate) const OPTIONS_TASK_COMMANDS: &[ShellCommandSpec] = &[
     ShellCommandSpec {
         command: "options [tool]",
-        aliases: &["/options [tool]"],
-        category: ShellCommandCategory::OptionsTasks,
-        description: "show tool options",
-    },
-    ShellCommandSpec {
-        command: "show options [tool]",
-        aliases: &["/show options [tool]"],
+        aliases: &["/options [tool]", "/show options [tool]"],
         category: ShellCommandCategory::OptionsTasks,
         description: "show tool options",
     },
@@ -29,31 +23,64 @@ pub(crate) const OPTIONS_TASK_COMMANDS: &[ShellCommandSpec] = &[
         command: "set <key> <value>",
         aliases: &["/set <key> <value>"],
         category: ShellCommandCategory::OptionsTasks,
-        description: "set a session option",
+        description: "set a session option or shell preference",
     },
     ShellCommandSpec {
         command: "setg <key> <value>",
         aliases: &["/setg <key> <value>"],
         category: ShellCommandCategory::OptionsTasks,
-        description: "set a global option",
+        description: "set a persistent option or shell preference",
     },
     ShellCommandSpec {
         command: "unset <key>",
         aliases: &["/unset <key>"],
         category: ShellCommandCategory::OptionsTasks,
-        description: "clear a session option",
+        description: "clear a session option or shell preference",
     },
     ShellCommandSpec {
         command: "unsetg <key>",
         aliases: &["/unsetg <key>"],
         category: ShellCommandCategory::OptionsTasks,
-        description: "clear a global option",
+        description: "clear a persistent option or shell preference",
     },
     ShellCommandSpec {
         command: "tasks",
         aliases: &["/tasks"],
         category: ShellCommandCategory::OptionsTasks,
         description: "choose SAST scanner tasks",
+    },
+    ShellCommandSpec {
+        command: "strategy",
+        aliases: &["/strategy", "strategies", "strategy queue"],
+        category: ShellCommandCategory::OptionsTasks,
+        description: "show proposed phase strategies",
+    },
+    ShellCommandSpec {
+        command: "strategy approve <id>",
+        aliases: &["/strategy approve <id>", "strategy keep <id>"],
+        category: ShellCommandCategory::OptionsTasks,
+        description: "approve/keep a queued strategy proposal",
+    },
+    ShellCommandSpec {
+        command: "strategy reject <id>",
+        aliases: &["/strategy reject <id>", "strategy skip <id>"],
+        category: ShellCommandCategory::OptionsTasks,
+        description: "reject/skip a queued strategy proposal",
+    },
+    ShellCommandSpec {
+        command: "strategy fire",
+        aliases: &["/strategy fire", "strategy run"],
+        category: ShellCommandCategory::OptionsTasks,
+        description: "run the next approved strategy proposal",
+    },
+    ShellCommandSpec {
+        command: "strategy correct <id> <strategy>",
+        aliases: &[
+            "/strategy correct <id> <strategy>",
+            "strategy correct <id> <strategy> --workspace",
+        ],
+        category: ShellCommandCategory::OptionsTasks,
+        description: "record a strategy correction",
     },
     ShellCommandSpec {
         command: "task block <id>",

@@ -15,6 +15,7 @@ pub(crate) struct MatchReport {
     pub(crate) recall: RecallByTolerance,
     pub(crate) proof_state_breakdown: ProofStateBreakdown,
     pub(crate) vuln_source_breakdown: BTreeMap<String, usize>,
+    pub(crate) label_accuracy: LabelAccuracy,
     pub(crate) matches: Vec<MatchRow>,
     pub(crate) missed_oracle: Vec<MissedOracle>,
     pub(crate) expected_min_recall: f64,
@@ -47,6 +48,12 @@ pub(crate) struct MatchRow {
     pub(crate) oracle_cwes: Vec<String>,
     pub(crate) vuln_source: Option<String>,
     pub(crate) static_proof_state: Option<String>,
+    pub(crate) finding_verdict: Option<String>,
+    pub(crate) expected_verdict: Option<String>,
+    pub(crate) verdict_match: Option<bool>,
+    pub(crate) finding_severity: String,
+    pub(crate) expected_severity: Option<String>,
+    pub(crate) severity_match: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Default)]
@@ -54,6 +61,16 @@ pub(crate) struct ProofStateBreakdown {
     pub(crate) validated: usize,
     pub(crate) other_static: usize,
     pub(crate) llm_only: usize,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub(crate) struct LabelAccuracy {
+    pub(crate) verdict_labeled: usize,
+    pub(crate) verdict_correct: usize,
+    pub(crate) verdict_accuracy: Option<f64>,
+    pub(crate) severity_labeled: usize,
+    pub(crate) severity_correct: usize,
+    pub(crate) severity_accuracy: Option<f64>,
 }
 
 #[derive(Debug, Serialize)]

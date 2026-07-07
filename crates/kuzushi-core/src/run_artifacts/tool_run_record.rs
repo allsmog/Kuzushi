@@ -249,10 +249,10 @@ fn tool_run_output_status(output: &Value) -> &'static str {
 
 fn canonical_tool_output_status(status: &str) -> &'static str {
     match status.trim().to_ascii_lowercase().as_str() {
-        "complete" | "completed" | "ok" | "success" => "completed",
+        "completed" => "completed",
         "partial" => "partial",
-        "skipped" | "skip" => "skipped",
-        "failed" | "error" => "failed",
+        "skipped" => "skipped",
+        "failed" => "failed",
         _ => "completed",
     }
 }

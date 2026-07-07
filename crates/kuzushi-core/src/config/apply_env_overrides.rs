@@ -66,6 +66,7 @@ pub(crate) fn validate_config(config: &V2Config) -> Result<()> {
     validate_model(&config.model)?;
     validate_runtime(&config.runtime)?;
     validate_operator(&config.operator)?;
+    validate_phases(&config.phases)?;
     Ok(())
 }
 
@@ -95,6 +96,7 @@ fn validate_model(model: &Option<String>) -> Result<()> {
 fn validate_runtime(runtime: &RuntimeConfig) -> Result<()> {
     validate_api_key_env(&runtime.api_key_env)?;
     validate_langgraph_bridge_command(&runtime.langgraph_bridge_command)?;
+    validate_worker_watchdog_timeout(runtime.worker_watchdog_timeout_ms)?;
     validate_thinking_level(&runtime.thinking_level)
 }
 
@@ -105,6 +107,38 @@ fn validate_operator(operator: &OperatorConfig) -> Result<()> {
         operator.spend_hard_ceiling_usd,
     )?;
     validate_trusted_modules(&operator.trusted_modules)
+}
+
+fn validate_phases(phases: &GuidedPhaseConfig) -> Result<()> {
+    validate_phase_template("phases.map", &phases.map)?;
+    validate_phase_template("phases.hunt", &phases.hunt)?;
+    validate_phase_template("phases.confirm", &phases.confirm)?;
+    validate_phase_template("phases.fix", &phases.fix)
+}
+
+fn validate_phase_template(name: &str, template: &PhaseTemplateConfig) -> Result<()> {
+    validate_optional_usd(&format!("{name}.budget_usd"), template.budget_usd)?;
+    validate_positive_usize(&format!("{name}.concurrency"), template.concurrency)?;
+    validate_positive_usize(&format!("{name}.strategy_cap"), template.strategy_cap)?;
+    validate_optional_non_empty(
+        &format!("{name}.confirmation_depth"),
+        &template.confirmation_depth,
+    )?;
+    validate_optional_non_empty(&format!("{name}.prompt_variant"), &template.prompt_variant)
+}
+
+fn validate_positive_usize(name: &str, value: Option<usize>) -> Result<()> {
+    if value.is_some_and(|value| value == 0) {
+        anyhow::bail!("{name} must be greater than zero");
+    }
+    Ok(())
+}
+
+fn validate_optional_non_empty(name: &str, value: &Option<String>) -> Result<()> {
+    if value.as_deref().is_some_and(|value| value.trim().is_empty()) {
+        anyhow::bail!("{name} must not be empty");
+    }
+    Ok(())
 }
 
 fn validate_api_key_env(api_key_env: &str) -> Result<()> {
@@ -130,6 +164,13 @@ fn validate_thinking_level(thinking_level: &Option<String>) -> Result<()> {
         .is_some_and(|level| !is_supported_thinking_level(level))
     {
         anyhow::bail!("runtime.thinking_level must be one of low|medium|high|xhigh");
+    }
+    Ok(())
+}
+
+fn validate_worker_watchdog_timeout(timeout_ms: Option<u64>) -> Result<()> {
+    if timeout_ms.is_some_and(|timeout_ms| timeout_ms == 0) {
+        anyhow::bail!("runtime.worker_watchdog_timeout_ms must be greater than zero");
     }
     Ok(())
 }

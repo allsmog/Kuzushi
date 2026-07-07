@@ -4,6 +4,7 @@ use crate::artifact_contract::{
     tool_result_artifact_spec, CanonicalRunArtifactSpec, ARTIFACT_KIND_KEYS, ARTIFACT_LABEL_KEYS,
     ARTIFACT_PATH_KEYS, CANONICAL_RUN_ARTIFACTS,
 };
+use crate::content_store::ObjectRef;
 use serde_json::{Map, Value};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -12,6 +13,16 @@ pub struct RunArtifactManifest {
     #[serde(alias = "run_id")]
     pub run_id: String,
     pub artifacts: Vec<RunArtifact>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub objects: Vec<RunArtifactObject>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RunArtifactObject {
+    pub label: String,
+    pub path: String,
+    pub object_ref: ObjectRef,
 }
 
 pub fn load_run_artifacts(target: impl AsRef<Path>, run_id: &str) -> Result<Vec<RunArtifact>> {
@@ -39,6 +50,28 @@ pub(crate) fn record_run_artifact(
         .normalized()
         .context("run artifact path must not be empty")?;
     upsert_artifact(&mut manifest.artifacts, artifact);
+    write_manifest(target, &manifest)
+}
+
+pub(crate) fn record_run_artifact_object(
+    target: impl AsRef<Path>,
+    run_id: &str,
+    artifact: &RunArtifact,
+    object_ref: ObjectRef,
+) -> Result<PathBuf> {
+    let mut manifest = load_manifest(&target, run_id)?;
+    let artifact = artifact
+        .normalized()
+        .context("run artifact path must not be empty")?;
+    upsert_artifact(&mut manifest.artifacts, artifact.clone());
+    upsert_artifact_object(
+        &mut manifest.objects,
+        RunArtifactObject {
+            label: artifact.label,
+            path: artifact.path,
+            object_ref,
+        },
+    );
     write_manifest(target, &manifest)
 }
 
@@ -380,6 +413,7 @@ fn empty_manifest(run_id: &str) -> RunArtifactManifest {
     RunArtifactManifest {
         run_id: run_id.to_string(),
         artifacts: Vec::new(),
+        objects: Vec::new(),
     }
 }
 
@@ -399,6 +433,14 @@ fn upsert_artifact(artifacts: &mut Vec<RunArtifact>, artifact: RunArtifact) {
         *existing = artifact;
     } else {
         artifacts.push(artifact);
+    }
+}
+
+fn upsert_artifact_object(objects: &mut Vec<RunArtifactObject>, object: RunArtifactObject) {
+    if let Some(existing) = objects.iter_mut().find(|item| item.path == object.path) {
+        *existing = object;
+    } else {
+        objects.push(object);
     }
 }
 

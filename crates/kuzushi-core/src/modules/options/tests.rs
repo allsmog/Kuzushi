@@ -97,6 +97,39 @@ mod tests {
         assert!(error.contains("target"), "{error}");
         assert!(error.contains("maxFindings"), "{error}");
         assert!(error.contains("max_findings"), "{error}");
+        assert!(!error.contains("Declare it in option metadata"), "{error}");
+    }
+
+    #[test]
+    fn unknown_option_reports_close_match() {
+        let descriptor = tool_with_options(
+            "test:demo",
+            "exercise strict option validation",
+            vec![opt("maxFindings", OptionType::Int, "aliased option")],
+        );
+
+        let error = validate_tool_input_options(&descriptor, json!({"maxFinding": 7})).unwrap_err();
+        let error = format!("{error:#}");
+
+        assert!(error.contains("Did you mean `maxFindings`?"), "{error}");
+        assert!(error.contains("Next: use one of: maxFindings"), "{error}");
+    }
+
+    #[test]
+    fn rejects_non_empty_input_when_no_options_are_declared() {
+        let descriptor = tool_with_options("test:empty", "no input", vec![]);
+
+        let empty = validate_tool_input_options(&descriptor, json!({})).unwrap();
+        assert_eq!(empty, json!({}));
+
+        let null = validate_tool_input_options(&descriptor, Value::Null).unwrap();
+        assert_eq!(null, json!({}));
+
+        let error = validate_tool_input_options(&descriptor, json!({ "extra": true }))
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("unknown option \"extra\""), "{error}");
+        assert!(error.contains("no options are declared"), "{error}");
     }
 
     #[test]

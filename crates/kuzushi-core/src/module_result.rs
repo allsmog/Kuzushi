@@ -3,6 +3,7 @@ use serde_json::{json, Map, Value};
 
 mod envelope;
 
+pub use envelope::failed_tool_output;
 pub(crate) use envelope::{
     completed_output_result, failed_output_result, partial_output_result, skipped_output_result,
 };
@@ -138,10 +139,10 @@ fn nested_status(object: &Map<String, Value>) -> Option<&'static str> {
 
 fn canonical_status(status: &str) -> Option<&'static str> {
     match status.trim().to_ascii_lowercase().as_str() {
-        "completed" | "complete" | "ok" | "success" => Some("completed"),
+        "completed" => Some("completed"),
         "partial" => Some("partial"),
-        "skipped" | "skip" => Some("skipped"),
-        "failed" | "error" => Some("failed"),
+        "skipped" => Some("skipped"),
+        "failed" => Some("failed"),
         _ => None,
     }
 }

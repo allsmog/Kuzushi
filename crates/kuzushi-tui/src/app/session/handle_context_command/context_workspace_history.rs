@@ -10,24 +10,56 @@ impl ShellApp {
     }
 
     pub(crate) fn handle_workspace_command(&mut self, command: WorkspaceCommand) {
+        if let Some(effects) = self.reduce_workspace_command_effects(&command) {
+            self.execute_effects(effects);
+            return;
+        }
         match command {
             WorkspaceCommand::Status => self.show_workspace_status(),
-            WorkspaceCommand::ExportFindings { output } => self.export_workspace_findings(&output),
             WorkspaceCommand::Unsupported(raw) => {
                 self.shell_view = ShellView::Workspace;
                 self.log(
                     "error",
                     format!(
-                        "{raw} is not supported by the Rust workspace bridge yet. Supported: workspace status, workspace export findings <path>.json"
+                        "{raw} is not supported by the Rust workspace bridge yet. Supported: workspace status, workspace scope init, workspace export findings <path> [json|jsonl|sarif|csv|markdown-bundle] [--completeness open|complete] [--allow-empty]"
                     ),
                 );
             }
+            WorkspaceCommand::ScopeInit | WorkspaceCommand::ExportFindings { .. } => {}
+        }
+    }
+
+    pub(crate) fn reduce_workspace_command_effects(
+        &mut self,
+        command: &WorkspaceCommand,
+    ) -> Option<Vec<ShellEffect>> {
+        match command {
+            WorkspaceCommand::ScopeInit => {
+                Some(vec![ShellEffect::WorkspaceScopeInit(WorkspaceScopeInit {
+                    target: self.target.clone(),
+                })])
+            }
+            WorkspaceCommand::ExportFindings {
+                output,
+                format,
+                completeness,
+                allow_empty,
+            } => Some(vec![ShellEffect::WorkspaceExportFindings(
+                WorkspaceExportFindings {
+                    allow_empty: *allow_empty,
+                    completeness: completeness.clone(),
+                    format: format.clone(),
+                    output: output.clone(),
+                    target: self.target.clone(),
+                },
+            )]),
+            WorkspaceCommand::Status | WorkspaceCommand::Unsupported(_) => None,
         }
     }
 
     pub(crate) fn show_history(&mut self) {
         self.shell_view = ShellView::History;
-        self.history_scroll = 0;
+        self.history_route.open();
         let count = self.command_history.len();
         self.log(
             "history",

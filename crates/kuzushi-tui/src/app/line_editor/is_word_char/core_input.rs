@@ -21,20 +21,23 @@ impl ShellApp {
     ///   1. If a completion cycle is active, restore the operator's
     ///      original prefix and close the popup.
     ///   2. Otherwise clear an in-progress draft, stashing it for
-    ///      one-shot undo.
-    ///   3. If the draft is already empty, restore the most recently
-    ///      cleared draft so a single mis-tapped Esc doesn't lose
-    ///      carefully-typed input.
-    pub fn esc_clear_or_restore(&mut self) {
+    ///      explicit undo via Ctrl+_ / Ctrl+/.
+    ///   3. Empty-prompt Esc is not consumed here; view navigation owns it.
+    pub fn esc_clear_input_or_completion(&mut self) -> bool {
         if self.restore_completion_prefix() {
-            return;
+            return true;
         }
         if !self.input.is_empty() {
             self.last_cleared_input = Some(std::mem::take(&mut self.input));
             self.cursor = 0;
             self.history_index = None;
-            return;
+            self.log("input", "draft cleared — Ctrl+_ restores; Esc goes back");
+            return true;
         }
+        false
+    }
+
+    pub fn restore_last_cleared_input(&mut self) {
         if let Some(stashed) = self.last_cleared_input.take() {
             self.input = stashed;
             self.cursor = self.char_count();

@@ -38,9 +38,8 @@ impl ShellApp {
 
     pub(crate) fn open_model_picker(&mut self) {
         let visible = visible_model_choices(self.config.model.as_deref());
-        self.model_picker_cursor = self
-            .model_picker_cursor
-            .min(visible.len().saturating_sub(1));
+        self.model_picker_route
+            .open(preferred_model_choice_index(&self.config), visible.len());
         self.shell_view = ShellView::ModelPicker;
         self.log(
             "onboarding",
@@ -49,20 +48,16 @@ impl ShellApp {
     }
 
     pub(crate) fn open_auth_method_picker(&mut self, provider: String) {
-        self.auth_picker_cursor = 0;
+        self.auth_picker_route.open();
         self.log(
             "onboarding",
-            format!(
-                "{provider} supports multiple auth methods — pick one with ↑/↓/Enter (Esc to defer)"
-            ),
+            format!("{provider} supports multiple auth methods — paste an API key or pick OAuth"),
         );
         self.shell_view = ShellView::AuthMethodPicker(provider);
     }
 
-    /// Open the launch picker at the first phase (組 KUMI-KATA · map). The
-    /// session-model ranking is kicked off separately by the interactive launch
-    /// path (`request_model_recommendations`), so constructing an app in tests
-    /// never spawns a background tool here.
+    /// Open the launch picker at the first phase (組 KUMI-KATA · map).
+    /// Constructing an app in tests never spawns a background tool here.
     pub(crate) fn open_planning_picker(&mut self) {
         self.open_phase_picker(crate::app::WorkflowPhase::Map);
     }
@@ -75,8 +70,8 @@ impl ShellApp {
     /// and test apps keep their targetless default.
     pub(crate) fn open_target_picker(&mut self) {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        self.target_candidates = crate::app::discover_target_candidates(&cwd);
-        self.target_picker_cursor = 0;
+        self.target_picker_route
+            .open(crate::app::discover_target_candidates(&cwd));
         self.shell_view = ShellView::TargetPicker;
         self.log(
             "onboarding",
@@ -89,21 +84,22 @@ impl ShellApp {
     /// Map artifacts stay unchecked — reused, not rebuilt, unless the operator
     /// presses `g` to regenerate.
     pub(crate) fn open_phase_picker(&mut self, phase: crate::app::WorkflowPhase) {
+        if self.phase_blocked_by_config(phase) {
+            return;
+        }
         let target_root = self.phase_target_root();
         let kind = self.ensure_target_kind(&target_root);
-        let rows: Vec<PlanningTaskRow> = PlanningTaskId::in_phase(phase)
+        let target = crate::app::TargetProfile::detect(&target_root, kind);
+        let rows: Vec<PlanningTaskRow> = crate::app::applicable_tasks_for_phase(phase, target)
             .into_iter()
             .map(|task| PlanningTaskRow::for_task(task, &target_root))
             .collect();
-        let mut selected = phase_preselection(phase, kind, &rows);
+        let mut selected = phase_preselection(phase, target, &rows);
         self.merge_model_recommendations(phase, &rows, &mut selected);
         self.drop_failed_dependents(&mut selected);
         self.drop_model_backed_without_model(&rows, &mut selected);
-        self.planning_tasks = rows;
-        self.planning_selected = selected;
-        self.planning_rebuild = BTreeSet::new();
-        self.planning_cursor = 0;
-        self.workflow_phase = Some(phase);
+        self.planning_picker_route.open(rows, selected);
+        self.engagement.set_phase(phase);
         self.shell_view = ShellView::PlanningPicker;
         self.log(
             "phase",
@@ -115,10 +111,30 @@ impl ShellApp {
                 phase.intent()
             ),
         );
+    }
+
+    fn phase_blocked_by_config(&mut self, phase: crate::app::WorkflowPhase) -> bool {
+        let Some(stop_after) = self
+            .config
+            .phases
+            .stop_after
+            .map(guided_phase_to_workflow_phase)
+        else {
+            return false;
+        };
+        if phase <= stop_after {
+            return false;
+        }
+        self.engagement.set_phase(stop_after);
         self.log(
             "phase",
-            "Space toggle · g rebuild cached · Enter run · Esc skip phase",
+            format!(
+                "{} stopped by config phases.stop_after={}",
+                phase.word(),
+                stop_after.word()
+            ),
         );
+        true
     }
 
     /// Fold this phase's session-model recommendations into the preselection
@@ -130,7 +146,7 @@ impl ShellApp {
         rows: &[PlanningTaskRow],
         selected: &mut BTreeSet<PlanningTaskId>,
     ) {
-        let Some(model_tasks) = self.model_recommended_tasks.as_ref() else {
+        let Some(model_tasks) = self.engagement.model_recommendations() else {
             return;
         };
         let phase_tasks: BTreeSet<PlanningTaskId> = rows.iter().map(|row| row.id).collect();
@@ -167,11 +183,10 @@ impl ShellApp {
     /// Drop preselections blocked by an earlier-phase failure: a task that
     /// itself failed, or whose prerequisite failed, shouldn't be auto-checked.
     fn drop_failed_dependents(&self, selected: &mut BTreeSet<PlanningTaskId>) {
-        if self.planning_failed.is_empty() {
+        if !self.engagement.has_failed_tasks() {
             return;
         }
-        let failed: BTreeSet<PlanningTaskId> =
-            self.planning_failed.iter().map(|item| item.task).collect();
+        let failed = self.engagement.failed_task_ids();
         selected.retain(|task| {
             !failed.contains(task)
                 && !transitive_dependencies(*task)
@@ -188,11 +203,11 @@ impl ShellApp {
 
     /// Classify the target once and cache it; reused across phase pickers.
     fn ensure_target_kind(&mut self, target_root: &std::path::Path) -> kuzushi_core::TargetKind {
-        if let Some(kind) = self.target_kind {
+        if let Some(kind) = self.engagement.target_kind() {
             return kind;
         }
         let kind = kuzushi_core::classify_target_kind(target_root);
-        self.target_kind = Some(kind);
+        self.engagement.set_target_kind(kind);
         self.log("phase", format!("target looks like: {}", kind.as_str()));
         kind
     }
@@ -220,7 +235,76 @@ impl ShellApp {
             self.target.as_deref(),
             auth_ready,
             has_multiple_auth,
+            self.workspace_is_fresh_for_auto_planner(),
         )
+    }
+
+    pub(crate) fn open_fresh_planner_or_workbench(&mut self) {
+        if self.workspace_is_fresh_for_auto_planner() {
+            self.open_planning_picker();
+        } else {
+            self.open_workbench(WorkbenchPane::Findings);
+        }
+    }
+
+    pub(crate) fn apply_ready_default_model_after_target_activation(&mut self) {
+        let Some(index) = ready_default_model_choice_index(self.config.model.as_deref()) else {
+            return;
+        };
+        let Some(choice) = model_choices().get(index) else {
+            return;
+        };
+        self.config.model = Some(choice.id.to_string());
+        self.session_thinking_level = Some(choice.thinking_level.to_string());
+        self.selected_model_index = preferred_model_choice_index(&self.config);
+        self.model_picker_route
+            .open(self.selected_model_index, model_choices().len());
+        self.log(
+            "model",
+            format!(
+                "{} selected from available credentials",
+                display_model_selector(choice.id)
+            ),
+        );
+    }
+
+    fn workspace_is_fresh_for_auto_planner(&self) -> bool {
+        let Some(target) = self.target.as_deref() else {
+            return false;
+        };
+        !workspace_has_persisted_findings_for_startup(target)
+            && !map_artifact_exists_for_startup(target)
+            && !run_summary_exists_for_startup(target)
+    }
+}
+
+fn workspace_has_persisted_findings_for_startup(target: &std::path::Path) -> bool {
+    let db_path = kuzushi_core::workspace_findings_db_path(target);
+    if !db_path.is_file() {
+        return false;
+    }
+    kuzushi_core::FindingStore::open(&db_path)
+        .and_then(|store| store.list_findings(1))
+        .is_ok_and(|findings| !findings.is_empty())
+}
+
+fn map_artifact_exists_for_startup(target: &std::path::Path) -> bool {
+    crate::app::PlanningTaskId::in_phase(crate::app::WorkflowPhase::Map)
+        .into_iter()
+        .filter_map(crate::app::PlanningTaskId::artifact_relative_path)
+        .any(|relative| target.join(relative).exists())
+}
+
+fn run_summary_exists_for_startup(target: &std::path::Path) -> bool {
+    kuzushi_core::list_run_summaries(target).is_ok_and(|runs| !runs.is_empty())
+}
+
+fn guided_phase_to_workflow_phase(phase: kuzushi_core::GuidedPhase) -> crate::app::WorkflowPhase {
+    match phase {
+        kuzushi_core::GuidedPhase::Map => crate::app::WorkflowPhase::Map,
+        kuzushi_core::GuidedPhase::Hunt => crate::app::WorkflowPhase::Hunt,
+        kuzushi_core::GuidedPhase::Confirm => crate::app::WorkflowPhase::Confirm,
+        kuzushi_core::GuidedPhase::Fix => crate::app::WorkflowPhase::Fix,
     }
 }
 
@@ -229,10 +313,10 @@ impl ShellApp {
 /// satisfied by earlier phases and excluded here.
 fn phase_preselection(
     phase: crate::app::WorkflowPhase,
-    kind: kuzushi_core::TargetKind,
+    target: crate::app::TargetProfile,
     rows: &[PlanningTaskRow],
 ) -> BTreeSet<PlanningTaskId> {
-    let mut selected = crate::app::recommended_tasks_for_phase(phase, kind, rows);
+    let mut selected = crate::app::recommended_tasks_for_phase(phase, target, rows);
     let phase_tasks: BTreeSet<PlanningTaskId> = rows.iter().map(|row| row.id).collect();
     for task in selected.iter().copied().collect::<Vec<_>>() {
         for dep in transitive_dependencies(task) {
@@ -248,15 +332,48 @@ fn phase_preselection(
 /// either via environment variables or via the stored OAuth credentials.
 pub(crate) fn auth_ready_for_provider(provider: &str) -> bool {
     match provider {
-        "anthropic" => {
-            std::env::var_os("ANTHROPIC_API_KEY").is_some()
-                || oauth_provider_status("anthropic").starts_with("stored")
+        "anthropic" => provider_auth_ready(
+            provider,
+            std::env::var_os("ANTHROPIC_API_KEY").is_some(),
+            &oauth_provider_status("anthropic"),
+        ),
+        "openai" => provider_auth_ready(
+            provider,
+            std::env::var_os("OPENAI_API_KEY").is_some(),
+            &oauth_provider_status("openai-codex"),
+        ),
+        "openai-codex" => {
+            provider_auth_ready(provider, false, &oauth_provider_status("openai-codex"))
         }
-        "openai" => {
-            std::env::var_os("OPENAI_API_KEY").is_some()
-                || oauth_provider_status("openai-codex").starts_with("stored")
-        }
-        "openai-codex" => oauth_provider_status("openai-codex").starts_with("stored"),
         _ => true,
+    }
+}
+
+fn provider_auth_ready(provider: &str, api_key_ready: bool, oauth_status: &str) -> bool {
+    match provider {
+        "anthropic" => api_key_ready || oauth_status.starts_with("stored"),
+        "openai" => api_key_ready,
+        "openai-codex" => oauth_status.starts_with("stored"),
+        _ => true,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn openai_oauth_does_not_satisfy_plain_openai_api_key_auth() {
+        assert!(!provider_auth_ready(
+            "openai",
+            false,
+            "stored; value hidden"
+        ));
+        assert!(provider_auth_ready(
+            "openai-codex",
+            false,
+            "stored; value hidden"
+        ));
+        assert!(provider_auth_ready("openai", true, "missing"));
     }
 }

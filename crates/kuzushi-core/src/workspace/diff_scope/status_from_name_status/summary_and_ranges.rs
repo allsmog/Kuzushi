@@ -4,7 +4,7 @@ pub(in crate::workspace::diff_scope) fn summarize_diff_scope(
     changed_files: &[ChangedFile],
     context: &[DiffContext],
     finding_tags: &[DiffFindingTag],
-    fixed_findings: &[DiffFindingTag],
+    not_seen_findings: &[DiffFindingTag],
 ) -> DiffScopeSummary {
     let mut summary = DiffScopeSummary {
         changed_files: changed_files.len(),
@@ -17,14 +17,14 @@ pub(in crate::workspace::diff_scope) fn summarize_diff_scope(
             .map(|file| file.deleted_ranges.len())
             .sum(),
         context_items: context.len(),
-        fixed_findings: fixed_findings.len(),
+        not_seen_findings: not_seen_findings.len(),
         ..DiffScopeSummary::default()
     };
     for tag in finding_tags {
         match tag.status {
             DiffFindingStatus::New => summary.new_findings += 1,
             DiffFindingStatus::Existing => summary.existing_findings += 1,
-            DiffFindingStatus::Fixed => summary.fixed_findings += 1,
+            DiffFindingStatus::NotSeen => summary.not_seen_findings += 1,
             DiffFindingStatus::ChangedContext => summary.changed_context_findings += 1,
         }
     }

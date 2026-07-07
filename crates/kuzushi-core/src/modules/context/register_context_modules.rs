@@ -1,8 +1,13 @@
 use super::*;
 
-pub(in crate::modules) fn register_context_modules(registry: &mut ModuleRegistry) {
-    registry.register(context_module());
-    registry.register(context_lite_module());
+use crate::modules::registry::ToolExecutor;
+
+pub(in crate::modules) fn register_context_modules(
+    registry: &mut ModuleRegistry,
+    executor: ToolExecutor,
+) {
+    registry.register(context_module().with_executor(executor));
+    registry.register(context_lite_module().with_executor(executor));
 }
 
 pub(in crate::modules) fn context_module() -> BuiltinModule {

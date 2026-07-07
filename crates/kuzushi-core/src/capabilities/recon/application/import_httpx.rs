@@ -9,9 +9,9 @@ pub(crate) fn run_recon_import_httpx(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<ReconReport> {
-    let workspace = ctx.workspace.context(
-        "recon:import needs an active workspace. Pass --target <repo> or start the shell with --target.",
-    )?;
+    let workspace = ctx
+        .workspace
+        .context(crate::workspace::active_workspace_required_message("recon:import"))?;
     let (path, body) = read_jsonl_path(input, "recon:import httpx needs a `path` field")?;
     let mut context = ReconImportContext::open(workspace)?;
     for (lineno, line) in body.lines().enumerate() {

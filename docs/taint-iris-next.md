@@ -19,7 +19,10 @@ The engine design also follows the concepts reviewed from `/Users/operator/Deskt
 
 ## Engine V1
 
-The public tool is `taint-iris-next:hunt`.
+The public tools are `taint-iris-next:dataflow-plan`,
+`taint-iris-next:source-sink-trace`, and
+`taint-iris-next:finding-review`. `taint-iris-next:hunt` is retained as an
+exact-invocation compatibility entry for older workflows.
 
 - `mode=plan` runs deterministic planning, candidate extraction, typed spec seeding, and optional backend path detection. It returns the ranked catalog, structural query seeds, candidates, labeled specs, evidence rows, backend choice, and the bounded prompt that hunt mode would send to the agent.
 - `mode=hunt` runs the same deterministic prepass, then sends one bounded agent session the context summary, threat-model summary, CWE Candidate Catalog, candidate/spec counts, evidence bundles, and internal evidence tools.

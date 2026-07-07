@@ -1,0 +1,33 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+assertion_line: 33
+---
+ KUZUSHI › workbench · mode:shell · target:none · ctx:not built · model:unconfigured
+
+Kuzushi › workbench · target:no target · page:confirm · o idle · modules:all modules
+ type next guided workflow   type scan run scan   type options sast:scan tune scanners   type ask ask the agent
+
+ -- SOURCE · 0 files ---------------------------------------------------------------------------------------------------
+       ∅  no source tree
+       no finding-bearing files yet — run `scan` to populate the tree.
+
+       > scan                  populate finding-bearing files
+
+ -- [CODE·] |  DFD·  |  CHAIN·  |  FLOW·  |  RISK·  --------------------------------------------------------------------
+       ∅  no finding selected
+       select a finding to show source context.
+
+       > scan                  populate findings
+       > open <id>             pin a finding
+
+ -- REVIEW QUEUE - showing 0 of 0 - 0 open - 0 complete ----------------------------------------------------------------
+       ∅  review queue empty
+       no findings loaded for review
+       scanner findings were not changed; only this review queue is empty.
+       REVIEW QUEUE - showing 0 of 0 - 0 open - 0 complete
+
+       > findings              clear the filter and reload all findings
+       > findings filter completeness:open  show findings still awaiting review
+
+ -- DETAILS ------------------------------------------------------------------------------------------------------------
+no finding selected — move through FINDINGS to preview details here.

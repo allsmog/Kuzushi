@@ -72,10 +72,7 @@ pub fn mcp_attachment_plan_for_target(target: &Path) -> Vec<McpAttachment> {
     for spec in MCP_ARTIFACT_TABLE {
         let path = target.join(spec.artifact_relative_path);
         if artifact_state(&path).is_cached() {
-            plan.push(McpAttachment::new(
-                spec.name,
-                path.display().to_string(),
-            ));
+            plan.push(McpAttachment::new(spec.name, path.display().to_string()));
         }
     }
     plan
@@ -153,11 +150,7 @@ mod tests {
     fn plan_ordering_is_stable() {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(tmp.path().join(".kuzushi")).unwrap();
-        std::fs::write(
-            tmp.path().join(".kuzushi/context-snapshot.json"),
-            "{}",
-        )
-        .unwrap();
+        std::fs::write(tmp.path().join(".kuzushi/context-snapshot.json"), "{}").unwrap();
         std::fs::write(tmp.path().join(".kuzushi/cpg.bin"), b"CPG").unwrap();
         let first = mcp_attachment_plan_for_target(tmp.path());
         let second = mcp_attachment_plan_for_target(tmp.path());

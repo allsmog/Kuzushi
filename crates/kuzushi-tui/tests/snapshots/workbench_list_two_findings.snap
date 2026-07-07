@@ -1,0 +1,76 @@
+---
+source: crates/kuzushi-tui/tests/snapshots.rs
+assertion_line: 164
+---
+ KUZUSHI › workbench · mode:shell · target:none · ctx:not built · model:unconfigured
+
+Kuzushi › workbench · target:no target · page:confirm · o idle · modules:all modules
+ type next guided workflow   type scan run scan   type options sast:scan tune scanners   type ask ask the agent...
+
+ -- SOURCE · 2 files ---------------------------------------------------------------------------------------------------
+apps/  · 2
+  api/  · 1
+    orders.rs  · 1
+  web/  · 1
+    server.ts  · 1
+
+ -- [CODE·] |  DFD·  |  CHAIN·  |  FLOW·  |  RISK  -- F-0001 · apps/api/orders.rs:142 ----------------------------------
+       ∅  source unavailable
+       could not read source file apps/api/orders.rs: No such file or directory (os error 2)
+
+       > open <id>             select another finding with source context
+
+ -- REVIEW QUEUE - showing 2 of 2 - 1 open - 1 complete ----------------------------------------------------------------
+REVIEW QUEUE - showing 2 of 2 - 1 open - 1 complete · mode:all · filter:decision:all
+>F-0001  C unassigned review-order:1 decision:confirmed source-linked...                      sql injection via...
+ F-0002  H unassigned review-order:2 decision:needs_review source-linked next:validate...     path traversal in...
+
+ -- DETAILS ------------------------------------------------------------------------------------------------------------
+sql injection via order_id concatenation
+
+-- CLAIM --
+alias: F-0001
+rule: demo.sqli
+location: apps/api/orders.rs:142
+producing tool: semgrep
+
+-- SIGNALS --
+severity: critical
+lifecycle status: candidate
+evidence state: source-linked
+  proof summary: ? signal-only
+  current decision: confirmed
+  decision confidence: 91%
+
+-- EVIDENCE --
+  no evidence rows recorded
+
+-- ANALYSIS --
+  static proof: signal-only - scanner signal only; no source-grounded evidence recorded
+
+-- VERIFICATION --
+  runtime verification: not verified - runtime verification has not run
+
+-- DECISION --
+  current decision: confirmed
+  decision source: selected finding
+  decision history: latest loaded decision from selected finding
+  review decision: confirmed · confidence 91% · by auto · source selected finding
+  legacy triage verdict: true_positive
+  automated/model-generated review reasoning: concatenated input
+
+-- NEXT --
+  validate: `verify F-0001`
+  collect runtime proof or stronger source evidence before patching
+  report: `workspace export findings report.sarif`
+
+-- SCANNER MESSAGE --
+  sql injection via order_id concatenation
+
+-- PROVENANCE --
+run: run:unknown
+revision: rev:unknown
+source signature: orders.rs:142:sql-injection-via-order-id-concatenation
+corroboration: 1
+identity: unassigned
+fingerprint: fp3_1830c2feac278d109cb914b7eec9844d1e15dd48b57ce1e494f4b3c621f5d4b1

@@ -2,10 +2,16 @@ use super::*;
 
 pub(crate) const RUN_SCAN_COMMANDS: &[ShellCommandSpec] = &[
     ShellCommandSpec {
+        command: "demo",
+        aliases: &["demo", "/demo"],
+        category: ShellCommandCategory::RunScan,
+        description: "run a 90-second offline fixture scan; no key, model, or external scanner",
+    },
+    ShellCommandSpec {
         command: "scan [target]",
         aliases: &["scan .", "/scan [target]"],
         category: ShellCommandCategory::RunScan,
-        description: "run configured scanners",
+        description: "open the guided workflow for a target; `scan .` opts into cwd",
     },
     ShellCommandSpec {
         command: "run <tool> [json]",

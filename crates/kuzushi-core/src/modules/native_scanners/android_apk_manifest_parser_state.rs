@@ -46,7 +46,10 @@ impl ParserState {
 
     pub(in crate::modules) fn on_close_owned(&mut self, element: &quick_xml::events::BytesEnd<'_>) {
         let name = String::from_utf8_lossy(element.name().as_ref()).to_string();
-        let local = name.rsplit_once(':').map(|(_, l)| l.to_string()).unwrap_or(name);
+        let local = name
+            .rsplit_once(':')
+            .map(|(_, l)| l.to_string())
+            .unwrap_or(name);
         self.finalize_close(&local);
     }
 
@@ -62,10 +65,9 @@ impl ParserState {
     }
 
     fn flush_intent_filter(&mut self) {
-        if let (Some(filter), Some(component)) = (
-            self.current_filter.take(),
-            self.current_component.as_mut(),
-        ) {
+        if let (Some(filter), Some(component)) =
+            (self.current_filter.take(), self.current_component.as_mut())
+        {
             component.intent_filters.push(filter);
         }
     }
@@ -193,7 +195,9 @@ pub(in crate::modules) fn attr_value(
         let attr = attr?;
         let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
         if attr_matches(&key, qualified) {
-            return Ok(Some(String::from_utf8_lossy(attr.value.as_ref()).to_string()));
+            return Ok(Some(
+                String::from_utf8_lossy(attr.value.as_ref()).to_string(),
+            ));
         }
     }
     Ok(None)

@@ -12,6 +12,9 @@ pub(crate) fn attack_surface_risk_model(run_dir: &Path) -> Option<AttackSurfaceR
         AttackSurfaceRead::Malformed => return Some(malformed_attack_surface_model()),
         AttackSurfaceRead::NonFile => return Some(non_file_attack_surface_model()),
     };
+    if attack_surface_status(&value).as_deref() == Some("skipped") {
+        return None;
+    }
     let risk_tiers = summary_risk_tiers(&value);
     let frameworks = framework_counts(&value);
     let top_surface = top_surface_label(&value);
@@ -67,6 +70,14 @@ fn attack_surface_artifact_leaf() -> &'static str {
     kuzushi_core::run_artifacts::canonical_run_artifact_spec("attack-surface.json")
         .expect("attack-surface artifact must be in shared canonical spec")
         .leaf
+}
+
+fn attack_surface_status(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("status")
+        .or_else(|| value.pointer("/summary/status"))
+        .and_then(serde_json::Value::as_str)
+        .map(|status| status.to_ascii_lowercase())
 }
 
 fn summary_usize(value: &serde_json::Value, key: &str) -> usize {
@@ -296,6 +307,18 @@ mod tests {
     #[test]
     fn attack_surface_model_keeps_missing_artifact_empty() {
         let temp = tempfile::tempdir().unwrap();
+
+        assert!(attack_surface_risk_model(temp.path()).is_none());
+    }
+
+    #[test]
+    fn attack_surface_model_keeps_skipped_placeholder_empty() {
+        let temp = tempfile::tempdir().unwrap();
+        fs::write(
+            temp.path().join(attack_surface_artifact_leaf()),
+            r#"{"status":"skipped"}"#,
+        )
+        .unwrap();
 
         assert!(attack_surface_risk_model(temp.path()).is_none());
     }

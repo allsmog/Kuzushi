@@ -78,12 +78,3 @@ pub(crate) fn empty_context() -> SystemsContextOutput {
         },
     }
 }
-
-#[allow(dead_code)]
-pub(crate) fn now_isoish() -> String {
-    let seconds = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    format!("{seconds}")
-}

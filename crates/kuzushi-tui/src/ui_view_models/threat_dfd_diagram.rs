@@ -1,8 +1,9 @@
 //! Draws the threat model's data-flow diagram as ASCII boxes grouped by trust
 //! zone, with the flows listed as labelled arrows below. Pure projection over
-//! the persisted `threat-model.json` (`/dfd/{nodes,flows}`); both the Activity
-//! OUTPUT pane and the Threat view's DFD tab render the same lines.
+//! the persisted `threat-model.json` (`/dfd/{nodes,flows}`); Threat and
+//! Workbench consume the same role-tagged lines.
 
+#[cfg(test)]
 use super::activity_feed_rows::{ActivityFeedPaneRow, ActivityFeedRowTone};
 
 const MAX_NODES: usize = 18;
@@ -71,6 +72,7 @@ pub(crate) fn threat_dfd_diagram_lines(
 }
 
 /// The same diagram, mapped to Activity OUTPUT-pane feed rows.
+#[cfg(test)]
 pub(crate) fn threat_dfd_diagram_feed_rows(
     doc: &serde_json::Value,
     width: usize,
@@ -83,6 +85,7 @@ pub(crate) fn threat_dfd_diagram_feed_rows(
 
 /// Title + summary only — for panes too narrow to draw the node boxes.
 /// A clipped box diagram reads as noise; the counts still orient.
+#[cfg(test)]
 pub(crate) fn threat_dfd_summary_feed_rows(
     doc: &serde_json::Value,
     width: usize,
@@ -97,6 +100,7 @@ pub(crate) fn threat_dfd_summary_feed_rows(
     }
 }
 
+#[cfg(test)]
 fn diagram_feed_row(line: DfdDiagramLine) -> ActivityFeedPaneRow {
     ActivityFeedPaneRow {
         text: line.text,
@@ -104,6 +108,7 @@ fn diagram_feed_row(line: DfdDiagramLine) -> ActivityFeedPaneRow {
     }
 }
 
+#[cfg(test)]
 fn diagram_tone(kind: DfdLineKind) -> ActivityFeedRowTone {
     match kind {
         DfdLineKind::Title => ActivityFeedRowTone::Primary,

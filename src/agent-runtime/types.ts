@@ -109,6 +109,14 @@ export interface AgentResultSuccessMessage {
   structuredOutput?: unknown;
   durationMs?: number;
   numTurns?: number;
+  /**
+   * Total spend for the whole tool loop. Invariant (mirrors the native
+   * `AgentLoopOutcome.cost_usd`): this equals the sum of per-round costs across
+   * *every* step, not just the terminal one. The native driver settles cost on
+   * each `ToolCall` round as well as the `Final`, so a loop that truncates at
+   * `max_steps` still reports the cost it already incurred. Keep this contract
+   * when mirroring native accounting into the retained stream surface.
+   */
   totalCostUsd?: number;
 }
 

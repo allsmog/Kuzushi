@@ -42,7 +42,9 @@ pub(crate) fn joern_available() -> bool {
 
 /// Resolve the absolute path to the Joern REPL launcher.
 pub(crate) fn joern_launcher_path() -> Option<PathBuf> {
-    configured_joern_launcher().or_else(first_standard_joern_launcher)
+    configured_joern_launcher()
+        .or_else(|| crate::process_lookup::executable_on_path("joern"))
+        .or_else(first_standard_joern_launcher)
 }
 
 fn configured_joern_launcher() -> Option<PathBuf> {
@@ -624,15 +626,6 @@ mod tests {
         assert_eq!(escape_regex_meta("plain"), "plain");
     }
 
-    /// `resolve_joern_cpg_path` and related env-var tests share the
-    /// process env. Serialise them through this mutex so concurrent
-    /// test threads can't observe each other's `KUZUSHI_JOERN_CPG`
-    /// mutations. Mirrors the pattern in `run_taint_iris_next_report::tests`.
-    fn cpg_env_lock() -> &'static std::sync::Mutex<()> {
-        static LOCK: OnceLock<std::sync::Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| std::sync::Mutex::new(()))
-    }
-
     fn joern_dataflow_test_plan(scan_root: PathBuf) -> TaintIrisNextPlan {
         TaintIrisNextPlan {
             target: scan_root.clone(),
@@ -683,50 +676,83 @@ mod tests {
     #[test]
     #[cfg(unix)]
     fn run_joern_flows_invokes_cli_and_parses_jsonl() {
-        let _guard = cpg_env_lock().lock().unwrap();
+        let _guard = crate::test_env::joern_env_lock();
         let temp = tempfile::tempdir().unwrap();
         let cpg = temp.path().join(".kuzushi/cpg.bin");
         std::fs::create_dir_all(cpg.parent().unwrap()).unwrap();
         std::fs::write(&cpg, "fake cpg").unwrap();
 
-        let fake_joern = temp.path().join("joern");
-        std::fs::write(
-            &fake_joern,
-            r#"#!/usr/bin/env bash
-set -euo pipefail
-printf '{"cwe":"CWE-89","taintClass":"sql-injection","filePath":"src/db.c","sourceLine":4,"sinkLine":12,"sourceCode":"input = arg;","sinkCode":"query(input);","steps":[{"file":"src/db.c","line":4,"code":"input = arg;"},{"file":"src/db.c","line":12,"code":"query(input);"}]}\n'
-"#,
-        )
-        .unwrap();
-        let fake_script = temp.path().join("flows.sc");
-        std::fs::write(&fake_script, "// fake").unwrap();
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let mut perms = std::fs::metadata(&fake_joern).unwrap().permissions();
-            perms.set_mode(0o755);
-            std::fs::set_permissions(&fake_joern, perms).unwrap();
-        }
-
-        let previous_bin = std::env::var_os("KUZUSHI_JOERN_BIN");
-        let previous_script = std::env::var_os("KUZUSHI_JOERN_FLOW_SCRIPT");
-        let previous_cpg = std::env::var_os("KUZUSHI_JOERN_CPG");
-        std::env::set_var("KUZUSHI_JOERN_BIN", &fake_joern);
-        std::env::set_var("KUZUSHI_JOERN_FLOW_SCRIPT", &fake_script);
-        std::env::remove_var("KUZUSHI_JOERN_CPG");
+        let (fake_joern, fake_script) = write_fake_joern_fixture(temp.path());
+        let env = JoernEnvSnapshot::set_fake_fixture(&fake_joern, &fake_script);
 
         let flows = run_joern_flows(&joern_dataflow_test_plan(temp.path().to_path_buf()))
             .unwrap()
             .expect("joern flows");
 
-        restore_env("KUZUSHI_JOERN_BIN", previous_bin);
-        restore_env("KUZUSHI_JOERN_FLOW_SCRIPT", previous_script);
-        restore_env("KUZUSHI_JOERN_CPG", previous_cpg);
+        env.restore();
+        assert_single_joern_flow(&flows);
+    }
 
+    #[cfg(unix)]
+    fn write_fake_joern_fixture(temp: &Path) -> (PathBuf, PathBuf) {
+        let fake_joern = temp.join("joern");
+        std::fs::write(&fake_joern, fake_joern_script()).unwrap();
+        make_executable(&fake_joern);
+
+        let fake_script = temp.join("flows.sc");
+        std::fs::write(&fake_script, "// fake").unwrap();
+        (fake_joern, fake_script)
+    }
+
+    #[cfg(unix)]
+    fn fake_joern_script() -> &'static str {
+        r#"#!/usr/bin/env bash
+set -euo pipefail
+printf '{"cwe":"CWE-89","taintClass":"sql-injection","filePath":"src/db.c","sourceLine":4,"sinkLine":12,"sourceCode":"input = arg;","sinkCode":"query(input);","steps":[{"file":"src/db.c","line":4,"code":"input = arg;"},{"file":"src/db.c","line":12,"code":"query(input);"}]}\n'
+"#
+    }
+
+    #[cfg(unix)]
+    fn make_executable(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let mut perms = std::fs::metadata(path).unwrap().permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(path, perms).unwrap();
+    }
+
+    fn assert_single_joern_flow(flows: &[JoernFlow]) {
         assert_eq!(flows.len(), 1);
         assert_eq!(flows[0].cwe, "CWE-89");
         assert_eq!(flows[0].source_line, 4);
         assert_eq!(flows[0].sink_line, 12);
         assert_eq!(flows[0].steps.len(), 2);
+    }
+
+    struct JoernEnvSnapshot {
+        bin: Option<std::ffi::OsString>,
+        script: Option<std::ffi::OsString>,
+        cpg: Option<std::ffi::OsString>,
+    }
+
+    impl JoernEnvSnapshot {
+        fn set_fake_fixture(fake_joern: &Path, fake_script: &Path) -> Self {
+            let snapshot = Self {
+                bin: std::env::var_os("KUZUSHI_JOERN_BIN"),
+                script: std::env::var_os("KUZUSHI_JOERN_FLOW_SCRIPT"),
+                cpg: std::env::var_os("KUZUSHI_JOERN_CPG"),
+            };
+            std::env::set_var("KUZUSHI_JOERN_BIN", fake_joern);
+            std::env::set_var("KUZUSHI_JOERN_FLOW_SCRIPT", fake_script);
+            std::env::remove_var("KUZUSHI_JOERN_CPG");
+            snapshot
+        }
+
+        fn restore(self) {
+            restore_env("KUZUSHI_JOERN_BIN", self.bin);
+            restore_env("KUZUSHI_JOERN_FLOW_SCRIPT", self.script);
+            restore_env("KUZUSHI_JOERN_CPG", self.cpg);
+        }
     }
 
     fn restore_env(name: &str, previous: Option<std::ffi::OsString>) {
@@ -738,7 +764,7 @@ printf '{"cwe":"CWE-89","taintClass":"sql-injection","filePath":"src/db.c","sour
 
     #[test]
     fn resolve_joern_cpg_path_prefers_env_override() {
-        let _guard = cpg_env_lock().lock().unwrap();
+        let _guard = crate::test_env::joern_env_lock();
         std::env::set_var("KUZUSHI_JOERN_CPG", "/tmp/alt-cpg.bin");
         let resolved = resolve_joern_cpg_path(Path::new("/some/scan/root"));
         assert_eq!(resolved, PathBuf::from("/tmp/alt-cpg.bin"));
@@ -747,7 +773,7 @@ printf '{"cwe":"CWE-89","taintClass":"sql-injection","filePath":"src/db.c","sour
 
     #[test]
     fn resolve_joern_cpg_path_falls_back_to_canonical_when_env_unset() {
-        let _guard = cpg_env_lock().lock().unwrap();
+        let _guard = crate::test_env::joern_env_lock();
         std::env::remove_var("KUZUSHI_JOERN_CPG");
         let resolved = resolve_joern_cpg_path(Path::new("/some/scan/root"));
         assert_eq!(resolved, PathBuf::from("/some/scan/root/.kuzushi/cpg.bin"),);
@@ -755,7 +781,7 @@ printf '{"cwe":"CWE-89","taintClass":"sql-injection","filePath":"src/db.c","sour
 
     #[test]
     fn resolve_joern_cpg_path_ignores_empty_env_value() {
-        let _guard = cpg_env_lock().lock().unwrap();
+        let _guard = crate::test_env::joern_env_lock();
         std::env::set_var("KUZUSHI_JOERN_CPG", "");
         let resolved = resolve_joern_cpg_path(Path::new("/some/scan/root"));
         assert_eq!(resolved, PathBuf::from("/some/scan/root/.kuzushi/cpg.bin"),);

@@ -4,6 +4,7 @@ mod tests {
     use crossterm::event::{
         KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
     };
+    use std::sync::mpsc;
 
     #[test]
     fn plain_shell_detection_covers_forced_non_tty_and_tty_modes() {
@@ -41,5 +42,46 @@ mod tests {
             })
         ));
         assert!(!apply_terminal_event(&mut app, Event::FocusGained));
+    }
+
+    #[test]
+    fn terminal_loop_inbox_applies_forwarded_terminal_events() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(Ok(TerminalLoopEvent::Terminal(Event::Paste(
+            "abc".to_string(),
+        ))))
+        .unwrap();
+        let inbox = TerminalLoopInbox::from_receiver(rx);
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        assert!(wait_for_terminal_loop_event(&mut app, &inbox).unwrap());
+
+        assert_eq!(app.input, "abc");
+    }
+
+    #[test]
+    fn terminal_loop_wake_unblocks_without_mutating_app() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(Ok(TerminalLoopEvent::Wake)).unwrap();
+        let inbox = TerminalLoopInbox::from_receiver(rx);
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        assert!(!wait_for_terminal_loop_event(&mut app, &inbox).unwrap());
+
+        assert!(app.input.is_empty());
+    }
+
+    #[test]
+    fn terminal_loop_reader_error_is_reported() {
+        let (tx, rx) = mpsc::channel();
+        tx.send(Err("boom".to_string())).unwrap();
+        let inbox = TerminalLoopInbox::from_receiver(rx);
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let error = wait_for_terminal_loop_event(&mut app, &inbox)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("terminal event reader failed: boom"));
     }
 }

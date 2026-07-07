@@ -74,19 +74,25 @@ impl ShellApp {
     /// is mid-line. Empty inputs return `None` so the cold-start prompt isn't
     /// noisy.
     pub fn completion_preview(&self) -> Option<String> {
-        if self.input.is_empty() {
-            return None;
-        }
-        if self.cursor != self.input.chars().count() {
-            return None;
-        }
-        let candidate = self.completion_candidates(&self.input).into_iter().next()?;
-        if candidate == self.input {
-            return None;
-        }
-        candidate
-            .strip_prefix(&self.input)
-            .filter(|tail| !tail.is_empty())
-            .map(str::to_string)
+        let candidate = self.completion_preview_candidate()?;
+        completion_preview_tail(&self.input, &candidate)
     }
+
+    fn completion_preview_candidate(&self) -> Option<String> {
+        if self.input.is_empty() || self.cursor != self.input.chars().count() {
+            return None;
+        }
+        self.completion_candidates(&self.input).into_iter().next()
+    }
+}
+
+fn completion_preview_tail(input: &str, candidate: &str) -> Option<String> {
+    if candidate == input {
+        return None;
+    }
+    candidate
+        .strip_prefix(input)
+        .filter(|tail| !tail.is_empty())
+        .map(str::to_string)
+        .or_else(|| Some(format!(" -> {candidate}")))
 }

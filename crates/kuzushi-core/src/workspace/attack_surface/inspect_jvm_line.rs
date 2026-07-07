@@ -19,8 +19,22 @@ pub(crate) fn inspect_jvm_line(
         return;
     }
     let lower = detail.to_ascii_lowercase();
-    add_spring_routes(source_file, framework, line_number, &detail, &lower, builder);
-    add_jvm_detector_surfaces(source_file, framework, line_number, &detail, &lower, builder);
+    add_spring_routes(
+        source_file,
+        framework,
+        line_number,
+        &detail,
+        &lower,
+        builder,
+    );
+    add_jvm_detector_surfaces(
+        source_file,
+        framework,
+        line_number,
+        &detail,
+        &lower,
+        builder,
+    );
 }
 
 fn add_jvm_detector_surfaces(

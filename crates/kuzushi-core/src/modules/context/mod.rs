@@ -16,3 +16,4 @@ mod register_context_modules;
 #[cfg(test)]
 mod tests;
 pub(in crate::modules) use build_context_snapshot::build_context_snapshot;
+pub(crate) use build_context_snapshot::build_context_snapshot_for_root;

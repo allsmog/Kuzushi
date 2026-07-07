@@ -10,9 +10,9 @@ fn catalog_collapsed_model_steers_context_then_findings() {
     assert!(model.collapsed.next_hint.contains("context build"));
     assert_eq!(
         model.collapsed.target_warning,
-        Some("[!] no target selected; `scan .` uses the current directory")
+        Some("[!] no target selected; run `target .`, then `next`")
     );
-    assert_eq!(model.collapsed.scan_command, "scan .");
+    assert_eq!(model.collapsed.scan_command, "target .; next");
 
     app.target = Some(PathBuf::from("."));
     app.context_view.exists = true;
@@ -22,7 +22,7 @@ fn catalog_collapsed_model_steers_context_then_findings() {
         model.collapsed.target_warning,
         Some("[!] active target has no persisted findings yet")
     );
-    assert_eq!(model.collapsed.scan_command, "scan");
+    assert_eq!(model.collapsed.scan_command, "next");
 }
 
 #[test]
@@ -68,7 +68,7 @@ fn catalog_collapsed_layout_uses_width_and_expand_toggle() {
     assert!(catalog_uses_collapsed_layout(&model, 80));
     assert!(!catalog_uses_collapsed_layout(&model, 120));
 
-    app.catalog_expanded = true;
+    app.catalog_route.expand();
     let model = catalog_model(&app);
     assert!(!catalog_uses_collapsed_layout(&model, 80));
 }

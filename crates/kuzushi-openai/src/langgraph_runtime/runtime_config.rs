@@ -1,5 +1,5 @@
 use anyhow::Result;
-use kuzushi_core::{RuntimeConfig, V2Config};
+use kuzushi_core::{RuntimeConfig, ScanCancellation, V2Config};
 use std::path::Path;
 
 use super::bridge_process::default_langgraph_bridge_command;
@@ -11,6 +11,7 @@ pub struct LangGraphRuntime {
     pub(crate) api_key: Option<String>,
     pub(crate) base_url: Option<String>,
     pub(crate) thinking_level: Option<String>,
+    pub(crate) cancellation: Option<ScanCancellation>,
 }
 
 impl LangGraphRuntime {
@@ -44,6 +45,7 @@ impl LangGraphRuntime {
                 .clone()
                 .map(|value| value.trim().to_string())
                 .filter(|value| !value.is_empty()),
+            cancellation: None,
         })
     }
 
@@ -55,6 +57,11 @@ impl LangGraphRuntime {
         self.thinking_level = thinking_level
             .map(|value| value.trim().to_string())
             .filter(|value| !value.is_empty());
+        self
+    }
+
+    pub fn with_cancellation(mut self, cancellation: ScanCancellation) -> Self {
+        self.cancellation = Some(cancellation);
         self
     }
 }

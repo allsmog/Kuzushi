@@ -8,10 +8,21 @@ pub(in crate::modules) fn run_hybrid_detect(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
-    emit_step(ctx, "tool", "scan", &format!("hybrid-detect start · target={}", target.display()));
+    emit_step(
+        ctx,
+        "tool",
+        "scan",
+        &format!("hybrid-detect start · target={}", target.display()),
+    );
     let outcome = match detect_hybrid_frameworks(&input, &target) {
         Ok(outcome) => outcome,
-        Err(error) => return Ok(failed_tool_output("android-apk:hybrid-detect", &target, error)),
+        Err(error) => {
+            return Ok(failed_tool_output(
+                "android-apk:hybrid-detect",
+                &target,
+                error,
+            ));
+        }
     };
     let persisted = persist_tool_findings(
         "android-apk",
@@ -20,7 +31,12 @@ pub(in crate::modules) fn run_hybrid_detect(
         ctx.workspace,
         ctx.findings_store,
     )?;
-    emit_step(ctx, "done", "scan", &format!("hybrid-detect complete · frameworks={:?}", outcome.detected));
+    emit_step(
+        ctx,
+        "done",
+        "scan",
+        &format!("hybrid-detect complete · frameworks={:?}", outcome.detected),
+    );
     Ok(hybrid_detect_output(&outcome, persisted))
 }
 
@@ -140,11 +156,15 @@ fn hybrid_finding(evidence: &HybridEvidence) -> Finding {
     let path = evidence.indicator_path.display().to_string();
     let message = format!(
         "Detected {} hybrid app via {} (CWE-915-adjacent attack surface). Audit the JavaScript bundle for hardcoded secrets, insecure URL loading, and JS-bridge methods that touch sensitive APIs from the device side. Lyft's apps and other production Android targets often embed React Native / Cordova partials behind native shells.",
-        evidence.framework, evidence.indicator_path.display()
+        evidence.framework,
+        evidence.indicator_path.display()
     );
     Finding::new_tool(
         "android-apk",
-        &format!("android-apk:hybrid-{}", evidence.framework.to_lowercase().replace(' ', "-")),
+        &format!(
+            "android-apk:hybrid-{}",
+            evidence.framework.to_lowercase().replace(' ', "-")
+        ),
         &path,
         1,
         None,

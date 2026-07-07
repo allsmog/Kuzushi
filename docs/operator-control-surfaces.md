@@ -26,6 +26,14 @@ Precedence is:
 Explicit input therefore wins over `--option`, shell `set`, and persisted
 options.
 
+Within each stored scope there is also a target axis. Values are merged in
+specificity order: `all` first, then `module:<id>`, then `tool:<module:verb>`.
+That means a tool-specific value beats a module value, and a module value beats
+an all-tools value within the same scope. Shell `set <key> <value>` writes a
+session value for the focused tool; `setg <key> <value>` writes a global
+all-tools value, so use it only for names that should apply to every tool that
+declares the same option.
+
 ## CLI
 
 `kuzushi run` accepts repeatable session-scoped overrides:
@@ -41,8 +49,15 @@ tool's descriptor. Use `--input` for structured values that are easier to read
 as JSON. If both are present for the same canonical option, `--input` wins.
 
 `kuzushi scan` is a shorthand for `sast:scan`. Flags such as `--mode`,
-`--tasks`, and `--triage` compile into sparse `sast:scan` JSON input, then go
-through the same preparation path as `kuzushi run sast:scan`.
+`--tasks`, `--triage`, `--budget`, `--since`, `--include-worktree`,
+`--fail-on`, and `--sarif` compile into sparse `sast:scan` JSON input or
+scan-gate policy, then go through the same preparation path as
+`kuzushi run sast:scan` where they are tool input.
+
+Global `--load <specifier>` is supported for shell and headless `run`.
+Specifier trust is controlled by `[operator].trusted_modules`; the dynamic
+Node bridge only loads trusted specifiers. Untrusted analyzers belong in the
+v3 sandbox plugin path.
 
 ## Shell
 
@@ -63,16 +78,16 @@ format.
 
 | Scope | Path |
 | --- | --- |
-| Global | `~/.kuzushi/v2/options.json` |
-| Workspace | `<target>/.kuzushi/v2/options.json` |
+| Global | `~/.kuzushi/v3/options.json` |
+| Workspace | `<target>/.kuzushi/v3/options.json` |
 | Session | in memory only |
 
 Config uses separate paths:
 
 | Config | Path |
 | --- | --- |
-| Global config | `~/.kuzushi/v2/config.toml` |
-| Workspace config | `<target>/.kuzushi/v2/config.toml` |
+| Global config | `~/.kuzushi/v3/config.toml` |
+| Workspace config | `<target>/.kuzushi/v3/config.toml` |
 
 Use config for durable runtime/provider defaults and global policy, not for
 per-tool behavior. Current runtime/policy config includes:
@@ -82,13 +97,78 @@ model = "openai:gpt-4.1"
 
 [runtime]
 thinking_level = "high"
+worker_watchdog_timeout_ms = 21600000
 # langgraph_bridge_command = ["node", "scripts/langgraph-bridge.mjs"]
 
 [operator]
 session_budget_usd = 2.50
 spend_hard_ceiling_usd = 10.00
 trusted_workflow_auto_accept = false
+trusted_modules = ["file:///absolute/path/to/my-module"]
+
+[phases]
+# Optional phase boundary for guided runs: map, hunt, confirm, or fix.
+stop_after = "hunt"
+
+[phases.hunt]
+budget_usd = 1.25
+concurrency = 2
+strategy_cap = 3
+prompt_variant = "deep"
+confirmation_depth = "sampled"
 ```
+
+Phase templates are the durable guided-workflow surface. They belong in
+config, not environment variables. Project configs may set `[phases]` fields;
+`model`, runtime, and `[operator]` fields remain global-only because a target
+repository must not redirect model choice, credentials, process execution, or
+operator trust policy.
+
+## Model Selection
+
+Runtime-backed tools never choose a fallback model. They use an explicit
+provider:model value or fail before calling the runtime.
+
+For descriptor-backed module tools that declare `model`, the effective model is:
+
+1. explicit tool input such as `--input '{"model":"openai:gpt-5.5"}'`;
+2. `KUZUSHI_MODEL` / `KUZUSHI_V2_MODEL`, canonicalized at the config boundary;
+3. global config `~/.kuzushi/v3/config.toml` `model = "provider:model"`.
+
+Role-routed tools then resolve their role model with this precedence:
+
+1. the request's explicit model, when it is non-empty and different from the
+   operator default;
+2. global option-store role override, e.g. `setg MODEL_DEEP_AUDITOR openai:gpt-5.5`;
+3. home `~/.kuzushi/models.toml` `[roles.<role>] primary`;
+4. the operator default from config/env/tool input;
+5. home `~/.kuzushi/models.toml` `default_model`.
+
+If a request model is exactly the operator default, the router treats it as the
+default placeholder so role-specific routes and `MODEL_<ROLE>` overrides still
+apply. This is intentional: callers pass the default model to preserve
+no-silent-fallback validation, while the router owns role selection.
+
+Target-local model control is rejected. `<target>/.kuzushi/v3/config.toml` must
+not set `model`, and `<target>/.kuzushi/models.toml` is not loaded. Put durable
+model policy in the operator's home config/models files, or pass a one-shot
+tool `model` input.
+
+Program scope is a separate durable target policy file, not an option-store
+entry:
+
+```toml
+# <target>/.kuzushi/scope.toml
+[in_scope]
+hosts = ["example.com", "*.example.com"]
+cidrs = ["10.0.0.0/8"]
+
+[out_of_scope]
+hosts = ["admin.example.com"]
+```
+
+When an allow list is present, unmatched hosts/IPs are out of scope. With only
+deny rules, unmatched targets remain unknown rather than explicitly allowed.
 
 ## Environment Variables
 
@@ -103,7 +183,15 @@ Ordinary product behavior should not depend on new env vars. Prefer:
 - config for runtime/provider defaults, model, bridge command, thinking level,
   budgets, and approval policy.
 
-Compatibility env vars such as `KUZUSHI_MODEL`, `KUZUSHI_LANGGRAPH_BRIDGE`, and
-legacy plugin root variables may still be read at config or adapter boundaries,
-but modules and domain code should receive resolved values instead of reading
-the process environment directly.
+Compatibility env vars such as `KUZUSHI_MODEL`, `KUZUSHI_V2_MODEL`,
+`KUZUSHI_API_KEY_ENV`, `KUZUSHI_BASE_URL`, `KUZUSHI_LANGGRAPH_BRIDGE`,
+`KUZUSHI_ANTHROPIC_OAUTH`, and `KUZUSHI_ANTHROPIC_OAUTH_CREDENTIALS` may still
+be read at config boundaries. Presentation flags such as `KUZUSHI_PLAIN`,
+`KUZUSHI_SCREEN_READER`, and terminal accessibility variables remain
+presentation concerns.
+
+Some existing scanner/tool adapters still read compatibility env vars for
+local binaries, caches, timeouts, or external toolchain integration (for
+example CodeQL, Joern, Clang, rev.ng, and MCP bridge knobs). Treat those as
+legacy adapter-boundary exceptions: do not add new product behavior env vars,
+and migrate touched knobs toward declared options or config.

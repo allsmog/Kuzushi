@@ -42,6 +42,34 @@ pub enum TriageVerdict {
     ByDesign,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TriageAuthor {
+    Human,
+    Auto,
+    Imported,
+}
+
+impl TriageAuthor {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Human => "human",
+            Self::Auto => "auto",
+            Self::Imported => "imported",
+        }
+    }
+
+    #[allow(clippy::should_implement_trait)]
+    pub fn from_str(value: &str) -> Option<Self> {
+        Some(match value {
+            "human" => Self::Human,
+            "auto" => Self::Auto,
+            "imported" => Self::Imported,
+            _ => return None,
+        })
+    }
+}
+
 impl TriageVerdict {
     pub fn as_str(self) -> &'static str {
         match self {

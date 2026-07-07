@@ -6,110 +6,147 @@ pub(in crate::modules) fn module() -> BuiltinModule {
         "Vendor Assessment",
         ModuleKind::Governance,
         "Vendor security assessment workspace: attach docs, set scope, generate prompts, assess.",
-        vec![
-            tool_with_options(
-                "vendor-assessment:attach",
-                "Attach vendor evidence documents.",
-                vec![
-                    opt("source", OptionType::String, "Evidence source path or URL."),
-                    opt("path", OptionType::Path, "Evidence document path."),
-                    opt("url", OptionType::String, "Evidence document URL."),
-                    opt(
-                        "target",
-                        OptionType::String,
-                        "Legacy evidence source alias.",
-                    )
-                    .deprecated_aliases(&["input"])
-                    .advanced(),
-                    opt("kind", OptionType::String, "Evidence kind.").advanced(),
-                    opt("title", OptionType::String, "Evidence title.").advanced(),
-                    opt("vendorName", OptionType::String, "Vendor name.")
-                        .aliases(&["vendor_name"])
-                        .advanced(),
-                    opt("productName", OptionType::String, "Product name.")
-                        .aliases(&["product_name"])
-                        .advanced(),
-                    opt("vendor", OptionType::String, "Legacy vendor name alias.").advanced(),
-                    opt(
-                        "primaryDomain",
-                        OptionType::String,
-                        "Primary vendor domain.",
-                    )
-                    .aliases(&["domain", "primary_domain"])
-                    .advanced(),
-                    opt("useCase", OptionType::String, "Vendor use case.")
-                        .aliases(&["use_case"])
-                        .advanced(),
-                    opt(
-                        "dataClasses",
-                        OptionType::StringList,
-                        "Data classes in scope.",
-                    )
-                    .aliases(&["data_classes"])
-                    .advanced(),
-                    opt(
-                        "integrations",
-                        OptionType::StringList,
-                        "Vendor integrations.",
-                    )
-                    .advanced(),
-                    opt("profile", OptionType::String, "Assessment profile.").advanced(),
-                ],
-            ),
-            tool_with_options(
-                "vendor-assessment:scope",
-                "Set or inspect assessment scope.",
-                vec![
-                    opt("vendorName", OptionType::String, "Vendor name."),
-                    opt("productName", OptionType::String, "Product name.")
-                        .aliases(&["product_name"]),
-                    opt("vendor", OptionType::String, "Legacy vendor name alias.")
-                        .deprecated_aliases(&["vendor_name"])
-                        .advanced(),
-                    opt(
-                        "primaryDomain",
-                        OptionType::String,
-                        "Primary vendor domain.",
-                    )
-                    .aliases(&["domain", "primary_domain"])
-                    .advanced(),
-                    opt("useCase", OptionType::String, "Vendor use case.")
-                        .aliases(&["use_case"])
-                        .advanced(),
-                    opt(
-                        "dataClasses",
-                        OptionType::StringList,
-                        "Data classes in scope.",
-                    )
-                    .aliases(&["data_classes"])
-                    .advanced(),
-                    opt(
-                        "integrations",
-                        OptionType::StringList,
-                        "Vendor integrations.",
-                    )
-                    .advanced(),
-                    opt("profile", OptionType::String, "Assessment profile.")
-                        .default(json!("enterprise-ai")),
-                ],
-            ),
-            tool(
-                "vendor-assessment:prompts",
-                "Generate assessment prompt packets.",
-            ),
-            tool_with_options(
-                "vendor-assessment:assess",
-                "Run vendor assessment.",
-                vec![
-                    model_option(),
-                    opt("runId", OptionType::String, "Assessment run id.")
-                        .aliases(&["run_id"])
-                        .advanced(),
-                ],
-            ),
-        ],
+        vendor_assessment_tools(),
         vec![],
     )
+}
+
+fn vendor_assessment_tools() -> Vec<ToolDescriptor> {
+    vec![
+        vendor_assessment_attach_tool(),
+        tool_with_options(
+            "vendor-assessment:scope",
+            "Set or inspect assessment scope.",
+            vendor_assessment_scope_options(),
+        ),
+        tool_with_options(
+            "vendor-assessment:prompts",
+            "Generate assessment prompt packets.",
+            vendor_assessment_prompt_options(),
+        ),
+        tool_with_options(
+            "vendor-assessment:assess",
+            "Assess attached vendor evidence against the configured product scope and produce a risk summary.",
+            vendor_assessment_assess_options(),
+        ),
+    ]
+}
+
+fn vendor_assessment_attach_tool() -> ToolDescriptor {
+    tool_with_options(
+        "vendor-assessment:attach",
+        "Attach vendor evidence documents.",
+        vendor_assessment_attach_options(),
+    )
+}
+
+fn vendor_assessment_attach_options() -> Vec<OptionSpec> {
+    let mut options = vec![
+        opt("source", OptionType::String, "Evidence source path or URL."),
+        opt("path", OptionType::Path, "Evidence document path."),
+        opt("url", OptionType::String, "Evidence document URL."),
+        deprecated_target_option(),
+        opt("kind", OptionType::String, "Evidence kind.").advanced(),
+        opt("title", OptionType::String, "Evidence title.").advanced(),
+    ];
+    options.extend(vendor_assessment_attach_metadata_options());
+    options
+}
+
+fn deprecated_target_option() -> OptionSpec {
+    opt(
+        "target",
+        OptionType::String,
+        "Legacy evidence source alias.",
+    )
+    .deprecated_aliases(&["input"])
+    .advanced()
+}
+
+fn vendor_assessment_scope_options() -> Vec<OptionSpec> {
+    vec![
+        vendor_name_option(),
+        opt("productName", OptionType::String, "Product name.").aliases(&["product_name"]),
+        primary_domain_option(),
+        use_case_option(),
+        data_classes_option(),
+        integrations_option(),
+        opt("profile", OptionType::String, "Assessment profile.").default(json!("enterprise-ai")),
+    ]
+}
+
+fn vendor_name_option() -> OptionSpec {
+    opt("vendorName", OptionType::String, "Vendor name.")
+        .aliases(&["vendor"])
+        .deprecated_aliases(&["vendor_name"])
+}
+
+fn vendor_assessment_attach_metadata_options() -> Vec<OptionSpec> {
+    vec![
+        vendor_name_option().advanced(),
+        opt("productName", OptionType::String, "Product name.")
+            .aliases(&["product_name"])
+            .advanced(),
+        primary_domain_option(),
+        use_case_option(),
+        data_classes_option(),
+        integrations_option(),
+        opt("profile", OptionType::String, "Assessment profile.").advanced(),
+    ]
+}
+
+fn primary_domain_option() -> OptionSpec {
+    opt(
+        "primaryDomain",
+        OptionType::String,
+        "Primary vendor domain.",
+    )
+    .aliases(&["domain", "primary_domain"])
+    .advanced()
+}
+
+fn use_case_option() -> OptionSpec {
+    opt("useCase", OptionType::String, "Vendor use case.")
+        .aliases(&["use_case"])
+        .advanced()
+}
+
+fn data_classes_option() -> OptionSpec {
+    opt(
+        "dataClasses",
+        OptionType::StringList,
+        "Data classes in scope.",
+    )
+    .aliases(&["data_classes"])
+    .advanced()
+}
+
+fn integrations_option() -> OptionSpec {
+    opt(
+        "integrations",
+        OptionType::StringList,
+        "Vendor integrations.",
+    )
+    .advanced()
+}
+
+fn vendor_assessment_prompt_options() -> Vec<OptionSpec> {
+    let mut options = vendor_assessment_scope_options();
+    options.push(vendor_assessment_run_id_option());
+    options
+}
+
+fn vendor_assessment_assess_options() -> Vec<OptionSpec> {
+    let mut options = vec![model_option()];
+    options.extend(vendor_assessment_scope_options());
+    options.push(vendor_assessment_run_id_option());
+    options
+}
+
+fn vendor_assessment_run_id_option() -> OptionSpec {
+    opt("runId", OptionType::String, "Assessment run id.")
+        .aliases(&["run_id"])
+        .advanced()
 }
 
 pub(in crate::modules) fn execute_tool(
@@ -189,7 +226,7 @@ fn scope_tool(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
 
 fn prompts_tool(input: Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
     let root = root(&input, ctx)?;
-    let run_id = string_input_any(&input, &["runId", "run_id"]);
+    let run_id = string_input_any(&input, &["runId"]);
     vendor_assessment_capability::prompts(&root, scope_update_from_input(&input), run_id)
 }
 
@@ -199,9 +236,75 @@ fn assess_tool(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
     let root = root(&input, ctx)?;
-    vendor_assessment_capability::assess(&root, scope_update_from_input(&input), runtime, || {
-        resolve_tool_model("vendor-assessment:assess", &input, ctx)
+    let parent_step = emit_vendor_assessment_start(ctx, &root);
+    emit_vendor_assessment_progress(ctx, parent_step, "scope · load documents and prompts");
+    let _assessment_scope = begin_vendor_assessment_scope(ctx, parent_step);
+    let result = vendor_assessment_capability::assess(
+        &root,
+        scope_update_from_input(&input),
+        runtime,
+        || resolve_tool_model("vendor-assessment:assess", &input, ctx),
+    )?;
+    drop(_assessment_scope);
+    emit_vendor_assessment_progress(ctx, parent_step, "artifacts · write report");
+    emit_vendor_assessment_done(ctx, &result);
+    Ok(result)
+}
+
+fn emit_vendor_assessment_start(ctx: &ToolExecutionContext<'_>, root: &Path) -> Option<usize> {
+    ctx.trace.map(|trace| {
+        trace
+            .step(
+                "tool",
+                "assess",
+                format!("vendor-assessment:assess start · target={}", root.display()),
+            )
+            .emit()
     })
+}
+
+fn emit_vendor_assessment_progress(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    label: impl Into<String>,
+) {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return;
+    };
+    let _ = trace
+        .child(parent)
+        .step("tool-progress", "assess", label.into())
+        .emit();
+}
+
+fn begin_vendor_assessment_scope(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+) -> Option<crate::run_artifacts::ParentScope> {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return None;
+    };
+    let phase = trace
+        .child(parent)
+        .step("reasoning", "assess", "document review · risk assessment")
+        .emit();
+    Some(trace.parent_scope(phase))
+}
+
+fn emit_vendor_assessment_done(ctx: &ToolExecutionContext<'_>, result: &Value) {
+    if let Some(trace) = ctx.trace {
+        let risk = result
+            .pointer("/data/report/overallRisk")
+            .and_then(Value::as_str)
+            .unwrap_or("complete");
+        let _ = trace
+            .step(
+                "done",
+                "assess",
+                format!("vendor-assessment:assess complete · {risk}"),
+            )
+            .emit();
+    }
 }
 
 fn root(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
@@ -213,9 +316,9 @@ fn root(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<PathBuf> {
 
 fn scope_update_from_input(input: &Value) -> vendor_assessment_capability::ScopeUpdate {
     vendor_assessment_capability::ScopeUpdate {
-        vendor_name: string_input_any(input, &["vendorName", "vendor"]),
+        vendor_name: string_input_any(input, &["vendorName"]),
         product_name: string_input_any(input, &["productName"]),
-        primary_domain: string_input_any(input, &["primaryDomain", "domain"]),
+        primary_domain: string_input_any(input, &["primaryDomain"]),
         use_case: string_input_any(input, &["useCase"]),
         profile: string_input_any(input, &["profile"]),
         data_classes: string_array_or_csv_input(input, &["dataClasses"]),

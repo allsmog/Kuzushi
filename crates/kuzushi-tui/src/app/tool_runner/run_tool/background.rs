@@ -1,4 +1,12 @@
+use self::dispatch::{
+    prepare_background_tool_dispatch, BackgroundToolDispatch, BackgroundToolRun,
+    BackgroundToolWorkerLaunch,
+};
+use self::preflight::langgraph_bridge_preflight_error;
 use super::*;
+
+mod dispatch;
+mod preflight;
 
 impl ShellApp {
     pub(crate) fn start_background_tool(
@@ -31,35 +39,65 @@ impl ShellApp {
         if self.reject_background_tool_overlap(&tool_name) {
             return;
         }
+        if self.reject_pending_prompt_mutation(&workspace, &tool_name) {
+            return;
+        }
+        if let Some(error) = self.langgraph_background_tool_launch_blocker(&tool_name, &input) {
+            self.log("error", error);
+            return;
+        }
 
-        let dispatch = prepare_background_tool_dispatch(
-            &self.registry,
-            &self.config,
-            &workspace,
-            &tool_name,
-            &input,
-        );
-        let BackgroundToolDispatch {
-            registry,
-            config,
-            tx,
-            rx,
-            trace_rx,
-            run,
-        } = dispatch;
-        self.attach_background_tool_run(&run, rx, trace_rx, &tool_name, status, activity);
-        start_prepared_background_worker(
-            registry,
-            config,
-            tx,
-            run,
+        let ticket = self.jobs.start(JobKind::Run, tool_name.clone());
+        let dispatch = self.background_tool_dispatch(&workspace, &tool_name, &input, ticket);
+        self.launch_prepared_background_tool(
+            dispatch,
             workspace,
             tool_name,
             input,
             thinking_level,
+            status,
+            activity,
         );
-
         self.open_activity_for_started_background_tool();
+    }
+
+    fn background_tool_dispatch(
+        &self,
+        workspace: &WorkspaceTarget,
+        tool_name: &str,
+        input: &serde_json::Value,
+        ticket: JobTicket,
+    ) -> BackgroundToolDispatch {
+        prepare_background_tool_dispatch(
+            &self.registry,
+            &self.config,
+            workspace,
+            tool_name,
+            input,
+            ticket,
+            self.jobs.trace_budget(),
+        )
+    }
+
+    fn launch_prepared_background_tool(
+        &mut self,
+        dispatch: BackgroundToolDispatch,
+        workspace: WorkspaceTarget,
+        tool_name: String,
+        input: serde_json::Value,
+        thinking_level: Option<String>,
+        status: &str,
+        activity: Option<LiveActivity>,
+    ) {
+        let model_override = active_model_override_from_input(&input, &dispatch.config);
+        BackgroundToolWorkerLaunch::from_dispatch(
+            dispatch,
+            workspace,
+            tool_name,
+            input,
+            thinking_level,
+        )
+        .attach_and_start(self, status, activity, model_override);
     }
 
     fn reject_background_tool_overlap(&mut self, tool_name: &str) -> bool {
@@ -73,6 +111,50 @@ impl ShellApp {
         true
     }
 
+    fn reject_pending_prompt_mutation(
+        &mut self,
+        workspace: &WorkspaceTarget,
+        tool_name: &str,
+    ) -> bool {
+        let (module_id, verb) = tool_name.split_once(':').unwrap_or((tool_name, "run"));
+        match kuzushi_core::latest_prompt_mutation(workspace, module_id, verb) {
+            Ok(Some(mutation))
+                if mutation.status == kuzushi_core::PromptMutationStatus::Pending =>
+            {
+                self.focused_module = Some(module_id.to_string());
+                self.shell_view = ShellView::PromptsEditor;
+                self.log(
+                    "prompt",
+                    format!(
+                        "{tool_name} blocked by pending prompt mutation {}; approve or reject it first",
+                        mutation.id
+                    ),
+                );
+                true
+            }
+            Ok(_) => false,
+            Err(error) => {
+                self.shell_view = ShellView::PromptsEditor;
+                self.log(
+                    "error",
+                    format!("could not read prompt mutations before {tool_name}: {error}"),
+                );
+                true
+            }
+        }
+    }
+
+    pub(crate) fn langgraph_background_tool_launch_blocker(
+        &self,
+        tool_name: &str,
+        input: &serde_json::Value,
+    ) -> Option<String> {
+        if !self.registry.tool_needs_runtime(tool_name, input) {
+            return None;
+        }
+        langgraph_bridge_preflight_error(&self.config, tool_name)
+    }
+
     fn open_activity_for_started_background_tool(&mut self) {
         // Auto-open AFTER the worker thread spawns. Earlier, the flip happened
         // before the worker existed, so a fast dispatch error could strand the
@@ -82,7 +164,7 @@ impl ShellApp {
             self.shell_view = ShellView::Activity;
             self.log(
                 "view",
-                "opened activity — Esc/back to leave (disable: setg ui.auto_open_activity false)",
+                "opened activity — Ctrl+C requests abort; type `back` to leave (disable: setg ui.auto_open_activity false)",
             );
         }
     }
@@ -90,18 +172,23 @@ impl ShellApp {
     fn attach_background_tool_run(
         &mut self,
         run: &BackgroundToolRun,
-        rx: Receiver<ToolEvent>,
-        trace_rx: Receiver<RunTraceStep>,
+        generation: WorkerGeneration,
+        cancel: ScanCancellation,
         tool_name: &str,
         status: &str,
         activity: Option<LiveActivity>,
+        model_override: Option<String>,
     ) {
         self.target = Some(run.target.clone());
-        self.tool_rx = Some(rx);
-        self.trace_rx = Some(trace_rx);
+        self.tool_generation = Some(generation);
+        self.tool_rx = None;
+        self.trace_generation = Some(generation);
+        self.trace_rx = None;
         self.activity = Some(ActivitySession::new(run.run_id.clone()));
         self.tool_running = Some(tool_name.to_string());
+        self.tool_cancel = Some(cancel);
         self.tool_run_id = Some(run.run_id.clone());
+        self.active_model_override = model_override;
         self.tool_abort_requested = false;
         self.log(
             "tool",
@@ -114,139 +201,4 @@ impl ShellApp {
             activity.unwrap_or_else(|| live_activity_for_tool(tool_name, status)),
         );
     }
-}
-
-fn start_prepared_background_worker(
-    registry: ModuleRegistry,
-    config: V2Config,
-    tx: mpsc::Sender<ToolEvent>,
-    run: BackgroundToolRun,
-    workspace: WorkspaceTarget,
-    tool_name: String,
-    input: serde_json::Value,
-    thinking_level: Option<String>,
-) {
-    spawn_background_tool_worker(
-        registry,
-        config,
-        workspace,
-        tool_name,
-        input,
-        run.run_id,
-        thinking_level,
-        tx,
-        run.trace_handle,
-    );
-}
-
-struct BackgroundToolRun {
-    target: PathBuf,
-    run_id: String,
-    target_label: String,
-    trace_handle: TraceHandle,
-}
-
-struct BackgroundToolDispatch {
-    registry: ModuleRegistry,
-    config: V2Config,
-    tx: mpsc::Sender<ToolEvent>,
-    rx: mpsc::Receiver<ToolEvent>,
-    trace_rx: mpsc::Receiver<RunTraceStep>,
-    run: BackgroundToolRun,
-}
-
-fn prepare_background_tool_dispatch(
-    registry: &ModuleRegistry,
-    config: &V2Config,
-    workspace: &WorkspaceTarget,
-    tool_name: &str,
-    input: &serde_json::Value,
-) -> BackgroundToolDispatch {
-    let registry = registry.clone();
-    let config = config.clone();
-    let (tx, rx) = mpsc::channel();
-    let (trace_tx, trace_rx) = mpsc::channel::<RunTraceStep>();
-    let loaded_modules = registry.loaded_module_specifiers();
-    let run = prepare_background_tool_run(
-        workspace,
-        tool_name,
-        input,
-        &config,
-        loaded_modules,
-        trace_tx,
-    );
-    BackgroundToolDispatch {
-        registry,
-        config,
-        tx,
-        rx,
-        trace_rx,
-        run,
-    }
-}
-
-fn prepare_background_tool_run(
-    workspace: &WorkspaceTarget,
-    tool_name: &str,
-    input: &serde_json::Value,
-    config: &V2Config,
-    loaded_modules: Vec<String>,
-    trace_tx: std::sync::mpsc::Sender<RunTraceStep>,
-) -> BackgroundToolRun {
-    let target = workspace.root().to_path_buf();
-    let run_id = new_run_id("tool");
-    let target_label = target.display().to_string();
-    let record =
-        kuzushi_core::run_artifacts::ToolRunRecord::new(&target, &run_id, "tool", tool_name);
-    kuzushi_core::run_artifacts::record_tool_run_started_with_reproducibility(
-        record,
-        input,
-        config.model.clone(),
-        config_hash(config).ok(),
-        loaded_modules,
-    );
-    let trace_handle = background_tool_trace_handle(&target, &run_id, trace_tx);
-    BackgroundToolRun {
-        target,
-        run_id,
-        target_label,
-        trace_handle,
-    }
-}
-
-fn background_tool_trace_handle(
-    target: &std::path::Path,
-    run_id: &str,
-    trace_tx: std::sync::mpsc::Sender<RunTraceStep>,
-) -> TraceHandle {
-    let inner_sink: Arc<dyn TraceSink> = Arc::new(JsonlSink::new(target.to_path_buf(), run_id));
-    let broadcast_sink: Arc<dyn TraceSink> = Arc::new(BroadcastSink::new(inner_sink, trace_tx));
-    let initial_step_number = next_run_trace_step_number(target, run_id).saturating_sub(1);
-    TraceHandle::with_initial_step_number(broadcast_sink, initial_step_number)
-}
-
-fn spawn_background_tool_worker(
-    registry: ModuleRegistry,
-    config: V2Config,
-    workspace: WorkspaceTarget,
-    tool_name: String,
-    input: serde_json::Value,
-    run_id: String,
-    thinking_level: Option<String>,
-    tx: std::sync::mpsc::Sender<ToolEvent>,
-    trace_handle: TraceHandle,
-) {
-    thread::spawn(move || {
-        background_tool_worker(
-            registry,
-            config,
-            workspace,
-            tool_name,
-            input,
-            run_id,
-            thinking_level,
-            tx,
-            Some(trace_handle),
-        )
-    });
 }

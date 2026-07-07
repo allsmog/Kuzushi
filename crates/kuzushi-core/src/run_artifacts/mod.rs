@@ -52,8 +52,8 @@ pub use tool_run_record::{
     tool_run_output_cost_usd, tool_run_output_findings_count, ToolRunRecord,
 };
 pub use trace_handle::{
-    current_parent_step, BroadcastSink, JsonlSink, ParentScope, TraceHandle, TraceSink,
-    TraceStepBuilder,
+    current_parent_step, with_parent_step, BroadcastSink, JsonlSink, ParentScope, TraceHandle,
+    TraceSink, TraceStepBuilder,
 };
 pub use write_run_artifact_json::{
     append_run_trace_step, next_run_trace_step_number, write_run_artifact_json,

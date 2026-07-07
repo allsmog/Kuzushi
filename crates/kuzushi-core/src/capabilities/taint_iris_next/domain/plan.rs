@@ -81,7 +81,7 @@ pub(crate) struct TaintIrisNextPlan {
     pub(crate) discovered_signals: DiscoveredSignals,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaintIrisNextCandidate {
     pub(crate) id: String,
@@ -100,7 +100,7 @@ pub(crate) struct TaintIrisNextCandidate {
     pub(crate) source: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaintIrisNextEvidence {
     pub(crate) cwe: String,

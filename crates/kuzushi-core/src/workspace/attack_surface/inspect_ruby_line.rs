@@ -12,7 +12,14 @@ pub(crate) fn inspect_ruby_line(
         return;
     }
     let lower = detail.to_ascii_lowercase();
-    add_rails_route(source_file, framework, line_number, &detail, &lower, builder);
+    add_rails_route(
+        source_file,
+        framework,
+        line_number,
+        &detail,
+        &lower,
+        builder,
+    );
     for detector in RUBY_LINE_DETECTORS {
         if detector.matches(&lower) {
             builder.add(detector.surface(source_file, framework, line_number, &detail));
@@ -148,7 +155,13 @@ const RUBY_LINE_DETECTORS: &[RubyLineDetector] = &[
         title: "Session state boundary",
         boundary: "session_state",
         detector: "ruby.session-state",
-        needles: &["session[", "cookies[", "cookies.signed", "jwt.decode", "jwt.encode"],
+        needles: &[
+            "session[",
+            "cookies[",
+            "cookies.signed",
+            "jwt.decode",
+            "jwt.encode",
+        ],
     },
     RubyLineDetector {
         kind: AttackSurfaceKind::RequestTrustBoundary,

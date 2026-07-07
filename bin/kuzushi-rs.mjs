@@ -32,14 +32,16 @@ if (nativeOverride) {
 
 // The npm package ships one binary per platform (`kuzushi`); `kz` resolves to
 // it and the displayed usage name comes from argv0 (clap derives it from the
-// invocation). Cargo build outputs still provide a real `kz` for checkouts.
+// invocation). Cargo checkouts also use the single `kuzushi` build output.
 const fallbackExe = process.platform === "win32" ? "kuzushi.exe" : "kuzushi";
 const candidates = [
   nativeOverride,
   join(root, "native", `${process.platform}-${process.arch}`, exe),
   join(root, "native", `${process.platform}-${process.arch}`, fallbackExe),
   join(root, "target", "release", exe),
+  join(root, "target", "release", fallbackExe),
   join(root, "target", "debug", exe),
+  join(root, "target", "debug", fallbackExe),
 ].filter(Boolean);
 
 const binary = candidates.find(isNativeBinaryFile);

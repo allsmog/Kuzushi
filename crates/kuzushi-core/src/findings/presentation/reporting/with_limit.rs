@@ -1,4 +1,6 @@
 use super::*;
+use crate::run_artifacts::RunSummary;
+use std::collections::BTreeMap;
 
 impl FindingListFilter {
     pub const MAX_LIMIT: usize = 500;
@@ -12,21 +14,64 @@ impl FindingListFilter {
 
     pub fn from_tool_input(input: &Value) -> Result<Self> {
         let mut filter = Self::default();
-
-        filter.severity = string_values(input, "severity")?
-            .into_iter()
-            .map(|value| Severity::try_from(value.as_str()))
-            .collect::<Result<Vec<_>>>()?;
-        filter.verdict = string_values(input, "verdict")?
-            .into_iter()
-            .map(|value| FindingVerdictFilter::from_input(&value))
-            .collect::<Result<Vec<_>>>()?;
-        filter.name = normalized_optional_string(input, "name")?;
-        filter.file_path = normalized_optional_string(input, "filePath")?
-            .or(normalized_optional_string(input, "file_path")?);
-        filter.limit = parsed_limit(input.get("limit"), filter.limit)?;
-
+        filter.apply_filter_input(input)?;
         Ok(filter)
+    }
+
+    fn apply_filter_input(&mut self, input: &Value) -> Result<()> {
+        self.apply_filter_expression_input(input)?;
+        self.severity
+            .extend(parsed_severities(string_values(input, "severity")?)?);
+        self.apply_review_filter_input(input)?;
+        self.name =
+            merge_optional_field(self.name.take(), normalized_optional_string(input, "name")?);
+        self.file_path = merge_optional_field(self.file_path.take(), file_path_input(input)?);
+        self.run_id.extend(
+            string_values_any(input, &["runId", "run_id", "run"])?
+                .into_iter()
+                .map(normalize_filter_value),
+        );
+        self.revision_sha
+            .extend(normalized_filter_values(string_values_any(
+                input,
+                &["sha", "rev", "revision"],
+            )?));
+        self.branch
+            .extend(normalized_filter_values(string_values(input, "branch")?));
+        self.dirty = merge_dirty_filter(self.dirty, string_values(input, "dirty")?)?;
+        self.vuln_source.extend(parsed_sources(string_values_any(
+            input,
+            &["source", "vulnSource", "vuln_source"],
+        )?)?);
+        self.limit = parsed_limit(input.get("limit"), self.limit)?;
+        Ok(())
+    }
+
+    fn apply_review_filter_input(&mut self, input: &Value) -> Result<()> {
+        self.verdict.extend(parsed_verdicts(string_values_any(
+            input,
+            &["verdict", "decision"],
+        )?)?);
+        self.triage_state
+            .extend(parsed_triage_states(string_values(input, "state")?)?);
+        self.completeness
+            .extend(parsed_completeness_filters(string_values_any(
+                input,
+                &["completeness", "reviewCompleteness", "review_completeness"],
+            )?)?);
+        self.lifecycle_status
+            .extend(parsed_lifecycle_status_filters(string_values_any(
+                input,
+                &["status", "lifecycleStatus", "lifecycle_status"],
+            )?)?);
+        Ok(())
+    }
+
+    fn apply_filter_expression_input(&mut self, input: &Value) -> Result<()> {
+        if let Some(expr) = normalized_optional_string(input, "filter")? {
+            self.apply_filter_expression(&expr)?;
+        }
+        Ok(())
     }
 
     pub fn from_parts(
@@ -36,7 +81,16 @@ impl FindingListFilter {
         file_path: Option<String>,
         limit: usize,
     ) -> Result<Self> {
-        Self::from_parts_full(severity, verdict, name, file_path, Vec::new(), limit)
+        Self::from_parts_full(
+            severity,
+            verdict,
+            name,
+            file_path,
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            limit,
+        )
     }
 
     pub fn from_parts_full(
@@ -45,75 +99,536 @@ impl FindingListFilter {
         name: Option<String>,
         file_path: Option<String>,
         vuln_source: Vec<String>,
+        completeness: Vec<String>,
+        lifecycle_status: Vec<String>,
         limit: usize,
     ) -> Result<Self> {
-        let severity = severity
-            .into_iter()
-            .flat_map(split_csv)
-            .map(|value| Severity::try_from(value.as_str()))
-            .collect::<Result<Vec<_>>>()?;
-        let verdict = verdict
-            .into_iter()
-            .flat_map(split_csv)
-            .map(|value| FindingVerdictFilter::from_input(&value))
-            .collect::<Result<Vec<_>>>()?;
-        let vuln_source = vuln_source
-            .into_iter()
-            .flat_map(split_csv)
-            .map(|value| {
-                VulnSource::parse(&value)
-                    .ok_or_else(|| anyhow::anyhow!("unknown vuln source {value:?}"))
-            })
-            .collect::<Result<Vec<_>>>()?;
-
         Ok(Self {
-            severity,
-            verdict,
+            severity: parsed_part_severities(severity)?,
+            verdict: parsed_part_verdicts(verdict)?,
+            triage_state: Vec::new(),
+            completeness: parsed_part_completeness_filters(completeness)?,
+            lifecycle_status: parsed_part_lifecycle_status_filters(lifecycle_status)?,
             name: normalize_string(name),
+            text_terms: Vec::new(),
             file_path: normalize_string(file_path),
-            vuln_source,
+            run_id: Vec::new(),
+            revision_sha: Vec::new(),
+            branch: Vec::new(),
+            dirty: None,
+            vuln_source: parsed_part_sources(vuln_source)?,
             limit: limit.min(Self::MAX_LIMIT),
         })
     }
 
-    pub(in crate::findings) fn matches(&self, finding: &Finding) -> bool {
-        if !self.severity.is_empty() && !self.severity.contains(&finding.severity) {
-            return false;
-        }
-
-        if !self.verdict.is_empty()
-            && !self
-                .verdict
-                .contains(&FindingVerdictFilter::from_finding(finding))
-        {
-            return false;
-        }
-
-        if let Some(name) = &self.name {
-            let title = finding.title.to_ascii_lowercase();
-            if !title.contains(name) {
-                return false;
-            }
-        }
-
-        if !self.vuln_source.is_empty() {
-            let observed = finding
-                .vuln_source
-                .unwrap_or_else(|| VulnSource::from_tool(&finding.tool));
-            if !self.vuln_source.contains(&observed) {
-                return false;
-            }
-        }
-
-        if let Some(file_path) = &self.file_path {
-            let path = finding.file_path.to_ascii_lowercase();
-            if !path.contains(file_path) {
-                return false;
-            }
-        }
-
-        true
+    pub fn from_filter_expression(expression: &str) -> Result<Self> {
+        let mut filter = Self::default();
+        filter.apply_filter_expression(expression)?;
+        Ok(filter)
     }
+
+    fn apply_filter_expression(&mut self, expression: &str) -> Result<()> {
+        for token in expression.split_whitespace() {
+            self.apply_filter_token(token)?;
+        }
+        Ok(())
+    }
+
+    fn apply_filter_token(&mut self, token: &str) -> Result<()> {
+        if token.trim().is_empty() {
+            return Ok(());
+        }
+        if token.starts_with('-') {
+            anyhow::bail!("findings:list filter negation is not supported yet: {token:?}");
+        }
+        let Some((key, raw_value)) = token.split_once(':') else {
+            self.text_terms
+                .push(normalize_filter_value(token.to_string()));
+            return Ok(());
+        };
+        let values = split_csv(raw_value.to_string()).collect::<Vec<_>>();
+        if values.is_empty() {
+            anyhow::bail!("findings:list filter {key:?} requires a value");
+        }
+        self.apply_keyed_filter(key, values)
+    }
+
+    fn apply_keyed_filter(&mut self, key: &str, values: Vec<String>) -> Result<()> {
+        match FilterKey::parse(key)? {
+            FilterKey::Rank => self.severity.extend(parsed_severities(values)?),
+            FilterKey::Verdict => self.verdict.extend(parsed_verdicts(values)?),
+            FilterKey::State => self.triage_state.extend(parsed_triage_states(values)?),
+            FilterKey::Completeness => self.completeness.extend(parsed_completeness_filters(values)?),
+            FilterKey::Status => self
+                .lifecycle_status
+                .extend(parsed_lifecycle_status_filters(values)?),
+            FilterKey::Source => self.vuln_source.extend(parsed_sources(values)?),
+            FilterKey::File => {
+                self.file_path = merge_optional_contains(self.file_path.take(), values)
+            }
+            FilterKey::Name => self.name = merge_optional_contains(self.name.take(), values),
+            FilterKey::Revision => self.revision_sha.extend(normalized_filter_values(values)),
+            FilterKey::Branch => self.branch.extend(normalized_filter_values(values)),
+            FilterKey::Dirty => self.dirty = merge_dirty_filter(self.dirty, values)?,
+            FilterKey::Run => self
+                .run_id
+                .extend(values.into_iter().map(normalize_filter_value)),
+            FilterKey::Limit => self.limit = parse_limit_token(values)?,
+        }
+        Ok(())
+    }
+
+    pub fn matches_with_review_decision(
+        &self,
+        finding: &Finding,
+        review_decision: Option<&ReviewDecision>,
+    ) -> bool {
+        severity_matches(self, finding)
+            && triage_state_filter_matches(self, finding)
+            && verdict_matches(self, finding, review_decision)
+            && review_completeness_matches(self, finding, review_decision)
+            && lifecycle_status_matches(self, finding)
+            && name_matches(self, finding)
+            && text_terms_match(self, finding)
+            && source_matches(self, finding)
+            && file_path_matches(self, finding)
+            && run_id_matches(self, finding)
+    }
+
+    pub fn has_provenance_filter(&self) -> bool {
+        !self.revision_sha.is_empty() || !self.branch.is_empty() || self.dirty.is_some()
+    }
+
+    pub fn matches_run_provenance(
+        &self,
+        finding: &Finding,
+        runs: &BTreeMap<String, RunSummary>,
+    ) -> bool {
+        if !self.has_provenance_filter() {
+            return true;
+        }
+        let Some(summary) = finding.scan_id.as_ref().and_then(|run_id| runs.get(run_id)) else {
+            return false;
+        };
+        let Some(git) = summary.target_git.as_ref() else {
+            return false;
+        };
+        revision_sha_matches(self, &git.sha)
+            && branch_matches(self, git.branch.as_deref())
+            && dirty_matches(self, git.dirty)
+    }
+}
+
+fn parsed_part_severities(values: Vec<String>) -> Result<Vec<Severity>> {
+    values
+        .into_iter()
+        .flat_map(split_csv)
+        .map(|value| Severity::try_from(value.as_str()))
+        .collect()
+}
+
+fn parsed_part_verdicts(values: Vec<String>) -> Result<Vec<FindingVerdictFilter>> {
+    values
+        .into_iter()
+        .flat_map(split_csv)
+        .map(|value| FindingVerdictFilter::from_input(&value))
+        .collect()
+}
+
+fn parsed_part_completeness_filters(
+    values: Vec<String>,
+) -> Result<Vec<FindingReviewCompletenessFilter>> {
+    values
+        .into_iter()
+        .flat_map(split_csv)
+        .map(|value| FindingReviewCompletenessFilter::from_input(&value))
+        .collect()
+}
+
+fn parsed_part_lifecycle_status_filters(
+    values: Vec<String>,
+) -> Result<Vec<FindingLifecycleStatusFilter>> {
+    values
+        .into_iter()
+        .flat_map(split_csv)
+        .map(|value| FindingLifecycleStatusFilter::from_input(&value))
+        .collect()
+}
+
+fn parsed_part_sources(values: Vec<String>) -> Result<Vec<VulnSource>> {
+    values
+        .into_iter()
+        .flat_map(split_csv)
+        .map(|value| {
+            VulnSource::parse(&value)
+                .ok_or_else(|| anyhow::anyhow!("unknown vuln source {value:?}"))
+        })
+        .collect()
+}
+
+fn triage_state_matches(state: FindingTriageStateFilter, finding: &Finding) -> bool {
+    match state {
+        FindingTriageStateFilter::Untriaged => finding.triage.is_none(),
+        FindingTriageStateFilter::Triaged => finding.triage.is_some(),
+    }
+}
+
+fn severity_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
+    filter.severity.is_empty() || filter.severity.contains(&finding.severity)
+}
+
+fn triage_state_filter_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
+    filter.triage_state.is_empty()
+        || filter
+            .triage_state
+            .iter()
+            .any(|state| triage_state_matches(*state, finding))
+}
+
+fn verdict_matches(
+    filter: &FindingListFilter,
+    finding: &Finding,
+    review_decision: Option<&ReviewDecision>,
+) -> bool {
+    filter.verdict.is_empty()
+        || filter.verdict.contains(&effective_verdict_filter(
+            finding,
+            review_decision,
+        ))
+}
+
+fn effective_verdict_filter(
+    finding: &Finding,
+    review_decision: Option<&ReviewDecision>,
+) -> FindingVerdictFilter {
+    review_decision
+        .map(|decision| FindingVerdictFilter::from_review_decision(decision.verdict))
+        .unwrap_or_else(|| FindingVerdictFilter::from_finding(finding))
+}
+
+fn review_completeness_matches(
+    filter: &FindingListFilter,
+    finding: &Finding,
+    review_decision: Option<&ReviewDecision>,
+) -> bool {
+    filter.completeness.is_empty()
+        || filter
+            .completeness
+            .iter()
+            .any(|state| review_completeness_state_matches(*state, finding, review_decision))
+}
+
+fn review_completeness_state_matches(
+    state: FindingReviewCompletenessFilter,
+    finding: &Finding,
+    review_decision: Option<&ReviewDecision>,
+) -> bool {
+    let complete = effective_review_decision(finding, review_decision)
+        .is_some_and(|decision| decision.verdict.is_terminal());
+    match state {
+        FindingReviewCompletenessFilter::Open => !complete,
+        FindingReviewCompletenessFilter::Complete => complete,
+    }
+}
+
+fn effective_review_decision(
+    finding: &Finding,
+    review_decision: Option<&ReviewDecision>,
+) -> Option<ReviewDecision> {
+    review_decision.cloned().or_else(|| {
+        finding
+            .triage
+            .as_ref()
+            .map(|triage| ReviewDecision::from_triage(triage, finding.triaged_by))
+    })
+}
+
+fn lifecycle_status_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
+    filter.lifecycle_status.is_empty()
+        || filter
+            .lifecycle_status
+            .iter()
+            .any(|status| status.as_str() == finding_lifecycle_status(finding))
+}
+
+fn name_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
+    match &filter.name {
+        Some(name) => finding
+            .title
+            .to_ascii_lowercase()
+            .contains(&name.to_ascii_lowercase()),
+        None => true,
+    }
+}
+
+fn text_terms_match(filter: &FindingListFilter, finding: &Finding) -> bool {
+    filter
+        .text_terms
+        .iter()
+        .all(|term| finding_contains_text(finding, term))
+}
+
+fn source_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
+    if filter.vuln_source.is_empty() {
+        return true;
+    }
+    let observed = finding
+        .vuln_source
+        .unwrap_or_else(|| VulnSource::from_tool(&finding.tool));
+    filter.vuln_source.contains(&observed)
+}
+
+fn file_path_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
+    match &filter.file_path {
+        Some(file_path) => finding
+            .file_path
+            .to_ascii_lowercase()
+            .contains(&file_path.to_ascii_lowercase()),
+        None => true,
+    }
+}
+
+fn run_id_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
+    filter.run_id.is_empty()
+        || filter
+            .run_id
+            .iter()
+            .any(|run_id| run_matches(finding, run_id))
+}
+
+fn revision_sha_matches(filter: &FindingListFilter, sha: &str) -> bool {
+    filter.revision_sha.is_empty()
+        || filter
+            .revision_sha
+            .iter()
+            .any(|expected| sha.to_ascii_lowercase().starts_with(expected))
+}
+
+fn branch_matches(filter: &FindingListFilter, branch: Option<&str>) -> bool {
+    filter.branch.is_empty()
+        || branch.is_some_and(|branch| {
+            let branch = branch.to_ascii_lowercase();
+            filter
+                .branch
+                .iter()
+                .any(|expected| branch == *expected || branch.starts_with(expected))
+        })
+}
+
+fn dirty_matches(filter: &FindingListFilter, dirty: bool) -> bool {
+    filter.dirty.is_none_or(|expected| dirty == expected)
+}
+
+fn finding_contains_text(finding: &Finding, term: &str) -> bool {
+    let term = term.to_ascii_lowercase();
+    [
+        finding.title.as_str(),
+        finding.file_path.as_str(),
+        finding.rule_id.as_str(),
+        finding.message.as_str(),
+    ]
+    .into_iter()
+    .any(|value| value.to_ascii_lowercase().contains(&term))
+}
+
+fn run_matches(finding: &Finding, run_id: &str) -> bool {
+    finding
+        .scan_id
+        .as_deref()
+        .map(|scan_id| {
+            let scan_id = scan_id.to_ascii_lowercase();
+            scan_id == run_id || scan_id.starts_with(run_id)
+        })
+        .unwrap_or(false)
+}
+
+fn normalize_filter_key(key: &str) -> String {
+    key.trim()
+        .trim_start_matches('-')
+        .to_ascii_lowercase()
+        .replace(['_', '-'], "")
+}
+
+fn string_values_any(input: &Value, keys: &[&str]) -> Result<Vec<String>> {
+    let mut values = Vec::new();
+    for key in keys {
+        values.extend(string_values(input, key)?);
+    }
+    Ok(values)
+}
+
+fn file_path_input(input: &Value) -> Result<Option<String>> {
+    Ok(normalized_optional_string(input, "filePath")?
+        .or(normalized_optional_string(input, "file_path")?))
+}
+
+fn parsed_severities(values: Vec<String>) -> Result<Vec<Severity>> {
+    values
+        .into_iter()
+        .map(|value| Severity::try_from(value.as_str()))
+        .collect()
+}
+
+fn parsed_verdicts(values: Vec<String>) -> Result<Vec<FindingVerdictFilter>> {
+    values
+        .into_iter()
+        .map(|value| FindingVerdictFilter::from_input(&value))
+        .collect()
+}
+
+fn parsed_triage_states(values: Vec<String>) -> Result<Vec<FindingTriageStateFilter>> {
+    values
+        .into_iter()
+        .map(|value| FindingTriageStateFilter::from_input(&value))
+        .collect()
+}
+
+fn parsed_completeness_filters(
+    values: Vec<String>,
+) -> Result<Vec<FindingReviewCompletenessFilter>> {
+    values
+        .into_iter()
+        .map(|value| FindingReviewCompletenessFilter::from_input(&value))
+        .collect()
+}
+
+fn parsed_lifecycle_status_filters(
+    values: Vec<String>,
+) -> Result<Vec<FindingLifecycleStatusFilter>> {
+    values
+        .into_iter()
+        .map(|value| FindingLifecycleStatusFilter::from_input(&value))
+        .collect()
+}
+
+fn parsed_sources(values: Vec<String>) -> Result<Vec<VulnSource>> {
+    values
+        .into_iter()
+        .map(|value| {
+            VulnSource::parse(&value)
+                .ok_or_else(|| anyhow::anyhow!("unknown vuln source {value:?}"))
+        })
+        .collect()
+}
+
+enum FilterKey {
+    Rank,
+    Verdict,
+    State,
+    Completeness,
+    Status,
+    Source,
+    File,
+    Name,
+    Revision,
+    Branch,
+    Dirty,
+    Run,
+    Limit,
+}
+
+impl FilterKey {
+    fn parse(key: &str) -> Result<Self> {
+        match normalize_filter_key(key).as_str() {
+            "rank" | "severity" => Ok(Self::Rank),
+            "verdict" | "decision" | "conf" | "confirmation" => Ok(Self::Verdict),
+            "state" | "triage" => Ok(Self::State),
+            "completeness" | "review" | "reviewstate" => Ok(Self::Completeness),
+            "status" | "lifecycle" | "lifecyclestatus" => Ok(Self::Status),
+            "source" | "channel" => Ok(Self::Source),
+            "file" | "path" => Ok(Self::File),
+            "name" | "title" | "q" => Ok(Self::Name),
+            "rev" | "revision" | "sha" => Ok(Self::Revision),
+            "branch" => Ok(Self::Branch),
+            "dirty" => Ok(Self::Dirty),
+            "run" | "runid" | "scan" => Ok(Self::Run),
+            "limit" => Ok(Self::Limit),
+            "owner" | "changed" | "strategy" | "strat" | "scope" => unsupported_future_key(key),
+            other => anyhow::bail!("unknown findings:list filter key {other:?}"),
+        }
+    }
+}
+
+fn unsupported_future_key<T>(key: &str) -> Result<T> {
+    anyhow::bail!(
+        "findings:list filter key {key:?} is not supported until provenance indexing is available"
+    )
+}
+
+fn normalize_filter_value(value: String) -> String {
+    value.trim().to_ascii_lowercase()
+}
+
+fn normalized_filter_values(values: Vec<String>) -> Vec<String> {
+    values
+        .into_iter()
+        .map(normalize_filter_value)
+        .filter(|value| !value.is_empty())
+        .collect()
+}
+
+fn merge_dirty_filter(current: Option<bool>, values: Vec<String>) -> Result<Option<bool>> {
+    let Some(next) = parse_dirty_filter(values)? else {
+        return Ok(current);
+    };
+    match current {
+        Some(current) if current != next => {
+            anyhow::bail!("dirty filter cannot mix true and false values")
+        }
+        _ => Ok(Some(next)),
+    }
+}
+
+fn parse_dirty_filter(values: Vec<String>) -> Result<Option<bool>> {
+    let mut parsed = normalized_filter_values(values)
+        .into_iter()
+        .map(|value| match value.as_str() {
+            "1" | "true" | "yes" | "dirty" => Ok(true),
+            "0" | "false" | "no" | "clean" => Ok(false),
+            _ => anyhow::bail!("unknown dirty filter value {value:?}"),
+        })
+        .collect::<Result<Vec<_>>>()?;
+    parsed.sort();
+    parsed.dedup();
+    match parsed.as_slice() {
+        [] => Ok(None),
+        [value] => Ok(Some(*value)),
+        _ => anyhow::bail!("dirty filter cannot mix true and false values"),
+    }
+}
+
+fn merge_optional_contains(current: Option<String>, values: Vec<String>) -> Option<String> {
+    let next = values
+        .into_iter()
+        .map(normalize_filter_value)
+        .filter(|value| !value.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    match (current, next.is_empty()) {
+        (Some(current), false) => Some(format!("{current} {next}")),
+        (Some(current), true) => Some(current),
+        (None, false) => Some(next),
+        (None, true) => None,
+    }
+}
+
+fn merge_optional_field(current: Option<String>, next: Option<String>) -> Option<String> {
+    match (current, next) {
+        (Some(current), Some(next)) => Some(format!("{current} {next}")),
+        (Some(current), None) => Some(current),
+        (None, Some(next)) => Some(next),
+        (None, None) => None,
+    }
+}
+
+fn parse_limit_token(values: Vec<String>) -> Result<usize> {
+    if values.len() != 1 {
+        anyhow::bail!("findings:list filter limit expects one value");
+    }
+    values[0]
+        .parse::<usize>()
+        .with_context(|| "findings:list filter limit must be a non-negative integer")
+        .map(|value| value.min(FindingListFilter::MAX_LIMIT))
 }
 
 fn parsed_limit(value: Option<&Value>, current: usize) -> Result<usize> {

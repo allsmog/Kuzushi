@@ -348,13 +348,12 @@ fn run_identifier_injection_detector_for_plan(
     // Match the discovery sweep's file budget so a 100k-file repo
     // doesn't double its disk-read cost just for the detector.
     let max_files = plan.caps.max_files_per_query.saturating_mul(8).max(2_000);
-    let max_bytes = 256 * 1024;
     let files =
-        match collect_taint_iris_next_source_files(&plan.scan_root, Some(max_files), max_bytes) {
+        match collect_taint_iris_next_source_paths(&plan.scan_root, Some(max_files)) {
             Ok(files) => files,
             Err(_) => return Vec::new(),
         };
-    let matches = detect_identifier_injection_in_target(&plan.scan_root, &files);
+    let matches = detect_identifier_injection_in_paths(&files);
     candidates_from_identifier_injection_matches(&matches, &plan.cwe_focus)
 }
 
@@ -469,86 +468,6 @@ fn entry_point_candidate_cwes(
         return discovered_signal_cwe_allowed(signal, allow).then(|| vec![signal.cwe.clone()]);
     }
     Some(focused_cwes.to_vec())
-}
-
-/// Relevance score for an entry-point name when no operator-supplied
-/// scoring exists. Higher = more interesting. Tokens are
-/// framework-agnostic: privesc/file/process/admin verbs that appear
-/// across PG (`pg_read_*`, `pg_signal_backend`), Express
-/// (`/admin/exec`), Flask (`upload_file`), Java (`AdminService.exec`),
-/// etc. Reading by token, not full name, lets `pg_read_binary_file`
-/// score for both `read` and `file`.
-fn entry_point_relevance_score(name: &str) -> i32 {
-    let lower = name.to_ascii_lowercase();
-    let mut score: i32 = 0;
-    for token in [
-        "exec",
-        "system",
-        "shell",
-        "command",
-        "run_program",
-        "popen",
-        "spawn",
-        "load_library",
-        "load_file",
-        "load_external",
-        "load_module",
-        "dlopen",
-        "dlsym",
-        "import",
-        "read_file",
-        "read_binary",
-        "read_server",
-        "read_text",
-        "write_file",
-        "stat_file",
-        "ls_dir",
-        "ls_log",
-        "ls_wal",
-        "signal_backend",
-        "signal_proc",
-        "kill_backend",
-        "reload_conf",
-        "reload_config",
-        "alter_system",
-        "promote",
-        "terminate",
-        "cancel_backend",
-        "set_user",
-        "setuid",
-        "admin",
-        "super",
-        "sudo",
-        "privesc",
-        "set_session",
-        "switch_user",
-        "become",
-        "upload",
-        "download",
-        "evaluate",
-        "eval",
-        "compile",
-        "parse_script",
-        "lo_import",
-        "lo_export",
-    ] {
-        if lower.contains(token) {
-            score = score.saturating_add(20);
-        }
-    }
-    // Negative bias against names that are clearly internal-only
-    // (selectivity estimators, joinsel/restrictsel, _cmp, _hash) so
-    // a postgres tree doesn't bury its real entry points behind
-    // `_int_contained_joinsel`.
-    for negative in [
-        "_joinsel", "_sel", "_cmp", "_hash", "_in", "_out", "_recv", "_send", "_eq", "_lt", "_gt",
-        "_le", "_ge", "_ne",
-    ] {
-        if lower.ends_with(negative) {
-            score = score.saturating_sub(10);
-        }
-    }
-    score
 }
 
 fn make_discovery_candidate(

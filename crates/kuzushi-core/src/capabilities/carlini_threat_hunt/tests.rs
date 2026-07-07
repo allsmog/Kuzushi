@@ -236,6 +236,41 @@ mod tests {
     }
 
     #[test]
+    fn actor_prompt_places_repository_inventory_before_actor_specific_context() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: None,
+            trace: None,
+        };
+        let options = CarliniInput::from_tool_input(&json!({}), &ctx, workspace.root()).unwrap();
+        let prompt = build_actor_prompt(
+            workspace.root(),
+            &ActorHunt {
+                actor: DfdNode {
+                    id: "actor-user".to_string(),
+                    node_type: "external-entity".to_string(),
+                    name: "Authenticated User".to_string(),
+                    description: "Logged-in user".to_string(),
+                    trust_zone: "external".to_string(),
+                },
+                threats: Vec::new(),
+                flows: Vec::new(),
+            },
+            &options,
+            &[("src/auth.rs".to_string(), "fn login() {}".to_string())],
+            "carlini-threat-hunt:Authenticated_User:0",
+        );
+
+        let inventory = prompt.find("Repository inventory and snippets").unwrap();
+        let actor = prompt.find("Actor activity fingerprint").unwrap();
+        assert!(inventory < actor);
+    }
+
+    #[test]
     fn actor_prompt_attachments_use_shared_workspace_attachment_store() {
         let temp = tempfile::tempdir().unwrap();
         fs::write(temp.path().join("operator-note.md"), "review reset flow\n").unwrap();

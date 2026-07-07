@@ -73,7 +73,7 @@ fn prereq_prompt_actions_line(prompt: &PrereqPromptModel) -> Line<'static> {
         Span::raw(" reuse cached   "),
         Span::styled("g", theme::warn()),
         Span::raw(" regenerate   "),
-        Span::styled("c", theme::danger()),
+        Span::styled("n", theme::danger()),
         Span::raw(" cancel"),
     ])
 }

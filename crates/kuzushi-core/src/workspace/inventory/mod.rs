@@ -28,7 +28,6 @@ mod target_kind;
 mod tests;
 
 pub use build_repository_inventory::build_repository_inventory;
-pub use target_kind::{classify_target_kind, TargetKind};
 pub use repository_inventory::InventoryEntrypoint;
 pub use repository_inventory::InventoryFile;
 pub use repository_inventory::InventoryFramework;
@@ -37,3 +36,4 @@ pub use repository_inventory::InventoryPathClassification;
 pub use repository_inventory::InventoryRouteController;
 pub use repository_inventory::InventorySourceFile;
 pub use repository_inventory::RepositoryInventory;
+pub use target_kind::{classify_target_kind, TargetKind};

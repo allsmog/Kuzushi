@@ -8,7 +8,7 @@ impl ArtifactKnowledgeStore {
         }
         let conn = Connection::open(&findings_path)
             .with_context(|| format!("Could not open {}", findings_path.display()))?;
-        if !sqlite_table_exists(&conn, "findings")? {
+        if !sqlite_table_exists(&conn, "finding_observations")? {
             return Ok(0);
         }
 
@@ -35,20 +35,22 @@ struct FindingIndexRow {
     created_at: String,
 }
 
-impl FindingIndexRow {
-    fn from_sql_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Self> {
+impl TryFrom<crate::Finding> for FindingIndexRow {
+    type Error = anyhow::Error;
+
+    fn try_from(finding: crate::Finding) -> Result<Self> {
         Ok(Self {
-            scan_id: row.get(0)?,
-            fingerprint: row.get(1)?,
-            rule_id: row.get(2)?,
-            title: row.get(3)?,
-            severity: row.get(4)?,
-            file_path: row.get(5)?,
-            start_line: row.get(6)?,
-            end_line: row.get(7)?,
-            message: row.get(8)?,
-            tool: row.get(9)?,
-            created_at: row.get(10)?,
+            scan_id: finding.scan_id.unwrap_or_default(),
+            fingerprint: finding.fingerprint,
+            rule_id: finding.rule_id,
+            title: finding.title,
+            severity: finding.severity.as_str().to_string(),
+            file_path: finding.file_path,
+            start_line: i64::from(finding.start_line),
+            end_line: finding.end_line.map(i64::from),
+            message: finding.message,
+            tool: finding.tool,
+            created_at: finding.created_at,
         })
     }
 }
@@ -56,17 +58,23 @@ impl FindingIndexRow {
 fn finding_index_rows(conn: &Connection) -> Result<Vec<FindingIndexRow>> {
     let mut stmt = conn.prepare(
         r#"
-            select scan_id, fingerprint, rule_id, title, severity, file_path,
-                   start_line, end_line, message, tool, created_at
-            from findings
-            order by scan_id, id
+            select finding_json
+            from finding_observations
+            where finding_json is not null
+            order by run_id, created_seq
             "#,
     )?;
     let rows = stmt
-        .query_map([], FindingIndexRow::from_sql_row)?
+        .query_map([], |row| row.get::<_, String>(0))?
         .collect::<rusqlite::Result<Vec<_>>>()
         .context("Could not read persisted finding for artifact KB")?;
-    Ok(rows)
+    rows.into_iter()
+        .map(|raw| {
+            serde_json::from_str::<crate::Finding>(&raw)
+                .context("Could not parse v3 finding for artifact KB")?
+                .try_into()
+        })
+        .collect()
 }
 
 fn finding_record(row: &FindingIndexRow) -> ArtifactKnowledgeRecord {

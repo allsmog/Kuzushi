@@ -21,11 +21,12 @@ pub struct OnboardingInputs<'a> {
     pub model: Option<&'a str>,
     pub provider_auth_ready: bool,
     pub provider_has_multiple_auth_methods: bool,
-    /// Whether the shell was launched against a real workspace target. The
-    /// phase walker opens at 組 KUMI-KATA · map whenever there is a target to
-    /// act on — it offers reuse-or-rebuild for any cached artifacts rather than
-    /// only appearing when something is missing.
+    /// Whether the shell was launched against a real workspace target.
     pub has_target: bool,
+    /// Whether this target has no persisted findings and no known map
+    /// artifacts. Only fresh targets auto-open the phase walker; returning
+    /// workspaces land on the Workbench and invoke the walker with `next`.
+    pub workspace_is_fresh: bool,
     pub skip_onboarding_env: bool,
 }
 
@@ -42,7 +43,7 @@ pub fn initial_onboarding_phase(inputs: &OnboardingInputs<'_>) -> InitialOnboard
     if let Some(phase) = auth_phase(inputs) {
         return phase;
     }
-    if inputs.has_target {
+    if inputs.has_target && inputs.workspace_is_fresh {
         InitialOnboardingPhase::PlanningPicker
     } else {
         InitialOnboardingPhase::Catalog
@@ -81,12 +82,14 @@ pub fn initial_onboarding_phase_for(
     target: Option<&Path>,
     auth_ready: bool,
     has_multiple_auth_methods: bool,
+    workspace_is_fresh: bool,
 ) -> InitialOnboardingPhase {
     let inputs = OnboardingInputs {
         model: config.model.as_deref(),
         provider_auth_ready: auth_ready,
         provider_has_multiple_auth_methods: has_multiple_auth_methods,
         has_target: target.is_some(),
+        workspace_is_fresh,
         skip_onboarding_env: skip_onboarding_env(),
     };
     initial_onboarding_phase(&inputs)
@@ -116,6 +119,7 @@ mod tests {
             provider_auth_ready: false,
             provider_has_multiple_auth_methods: false,
             has_target: false,
+            workspace_is_fresh: false,
             skip_onboarding_env: false,
         }
     }
@@ -167,14 +171,28 @@ mod tests {
     }
 
     #[test]
-    fn auth_ready_with_a_target_opens_the_phase_walker() {
+    fn auth_ready_with_a_fresh_target_opens_the_phase_walker() {
         let mut i = inputs();
         i.model = Some("anthropic:claude-sonnet-4-6");
         i.provider_auth_ready = true;
         i.has_target = true;
+        i.workspace_is_fresh = true;
         assert_eq!(
             initial_onboarding_phase(&i),
             InitialOnboardingPhase::PlanningPicker
+        );
+    }
+
+    #[test]
+    fn auth_ready_with_returning_target_lands_on_catalog_for_workbench_start() {
+        let mut i = inputs();
+        i.model = Some("anthropic:claude-sonnet-4-6");
+        i.provider_auth_ready = true;
+        i.has_target = true;
+        i.workspace_is_fresh = false;
+        assert_eq!(
+            initial_onboarding_phase(&i),
+            InitialOnboardingPhase::Catalog
         );
     }
 

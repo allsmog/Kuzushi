@@ -90,7 +90,7 @@ const REQUIRED_POLICY_COVERAGE = [
   {
     label: "exploit-chain tool boundary uses shared no-silent-fallback policy",
     file: "crates/kuzushi-core/src/modules/native_scanners/register_modules.rs",
-    required: ["require_exploit_chain_model", 'require_configured_model("exploit-chain:scan"'],
+    required: ["require_exploit_chain_model", 'resolve_tool_model("exploit-chain:scan"'],
   },
   {
     label: "shared runtime requirement policy covers mode parity",
@@ -130,6 +130,20 @@ const REQUIRED_POLICY_COVERAGE = [
       "governance_normalizes_explicit_model_whitespace",
       " openai : gpt-5.5 ",
       "anthropic:claude-sonnet-4-6",
+    ],
+  },
+  {
+    label: "Anthropic OAuth tier labels do not rewrite configured models",
+    file: "crates/kuzushi-openai/src/anthropic_oauth/response.rs",
+    required: ["anthropic_model_for_tier", "configured.to_string()"],
+  },
+  {
+    label: "Anthropic OAuth tests cover no tier remapping",
+    file: "crates/kuzushi-openai/src/anthropic_oauth/tests.rs",
+    required: [
+      "model_for_tier_preserves_sonnet_when_cheap_requested",
+      "model_for_tier_preserves_haiku_when_deep_requested",
+      "anthropic:claude-opus-4-7",
     ],
   },
 ];

@@ -16,6 +16,14 @@ impl<'a> TracedRuntime<'a> {
         Self { inner, trace }
     }
 
+    fn record_model_call_start(&self, verb: &str, label: String, model: &str, prompt_hash: &str) {
+        let _ = self
+            .trace
+            .step("tool-progress", verb, label)
+            .with_model_metadata(model, model_provider(model), prompt_hash)
+            .emit();
+    }
+
     fn record_query(
         &self,
         verb: &str,
@@ -66,8 +74,9 @@ impl<'a> TracedRuntime<'a> {
     ) {
         let provider = model_provider(model);
         match result {
-            Ok(AgentLoopStep::ToolCall { call }) => self.record_tool_call_step(
+            Ok(AgentLoopStep::ToolCall { call, cost_usd }) => self.record_tool_call_step(
                 call,
+                *cost_usd,
                 elapsed_ms,
                 history_len,
                 model,
@@ -92,18 +101,26 @@ impl<'a> TracedRuntime<'a> {
     fn record_tool_call_step(
         &self,
         call: &ToolCall,
+        cost_usd: Option<f64>,
         elapsed_ms: u64,
         history_len: usize,
         model: &str,
         provider: &str,
         prompt_hash: &str,
     ) {
-        let _ = self
+        let mut step = self
             .trace
-            .step("tool-progress", "next-step", tool_call_label(call, history_len))
+            .step(
+                "tool-progress",
+                "next-step",
+                tool_call_label(call, history_len),
+            )
             .with_latency_ms(elapsed_ms)
-            .with_model_metadata(model, provider, prompt_hash)
-            .emit();
+            .with_model_metadata(model, provider, prompt_hash);
+        if let Some(cost) = cost_usd.filter(|cost| *cost > 0.0) {
+            step = step.with_cost_usd(cost);
+        }
+        let _ = step.emit();
     }
 
     fn record_final_step(
@@ -152,6 +169,12 @@ impl AgentRuntime for TracedRuntime<'_> {
         let prompt_len = request.prompt.len();
         let model = request.model.clone();
         let prompt_hash = prompt_pair_hash(&request.system_prompt, &request.prompt);
+        self.record_model_call_start(
+            "query",
+            format!("query · sending {prompt_len} chars"),
+            &model,
+            &prompt_hash,
+        );
         let result = self.inner.query_blocking(request);
         self.record_query(
             "query",
@@ -169,6 +192,12 @@ impl AgentRuntime for TracedRuntime<'_> {
         let model = request.model.clone();
         let prompt_hash = triage_prompt_hash(&request);
         let title = request.finding.title.clone();
+        self.record_model_call_start(
+            "triage",
+            format!("triage · checking {}", preview_str(&title)),
+            &model,
+            &prompt_hash,
+        );
         let result = self.inner.triage_finding_blocking(request);
         let elapsed_ms = start.elapsed().as_millis() as u64;
         let provider = model_provider(&model);
@@ -210,6 +239,12 @@ impl AgentRuntime for TracedRuntime<'_> {
         let start = Instant::now();
         let model = request.model.clone();
         let prompt_hash = prompt_pair_hash(&request.system_prompt, &request.prompt);
+        self.record_model_call_start(
+            "next-step",
+            format!("next-step · waiting on model (turn {})", history.len() + 1),
+            &model,
+            &prompt_hash,
+        );
         let result = self.inner.next_step_blocking(request, history);
         self.record_step(
             &result,
@@ -267,8 +302,14 @@ impl AgentRuntime for TracedRuntime<'_> {
         let prompt_len = request.prompt.len();
         let model = request.model.clone();
         let prompt_hash = prompt_pair_hash(&request.system_prompt, &request.prompt);
-        let result = self.inner.spawn_subagent_blocking(role, request);
         let verb = subagent_trace_verb(role);
+        self.record_model_call_start(
+            verb,
+            format!("{verb} · sending {prompt_len} chars"),
+            &model,
+            &prompt_hash,
+        );
+        let result = self.inner.spawn_subagent_blocking(role, request);
         self.record_query(
             verb,
             prompt_len,

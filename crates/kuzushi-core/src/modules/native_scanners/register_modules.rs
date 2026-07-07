@@ -1,14 +1,17 @@
 use super::*;
 
-pub(in crate::modules) fn register_modules(registry: &mut ModuleRegistry) {
-    registry.register(semgrep_module());
-    registry.register(codeql_module());
-    registry.register(iac_scan_module());
-    registry.register(cargo_audit_module());
-    registry.register(license_scan_module());
-    registry.register(sbom_scan_module());
-    registry.register(exploit_chain_module());
-    registry.register(android_apk_module());
+use crate::modules::registry::ToolExecutor;
+
+pub(in crate::modules) fn register_modules(registry: &mut ModuleRegistry, executor: ToolExecutor) {
+    registry.register(semgrep_module().with_executor(executor));
+    registry.register(codeql_module().with_executor(executor));
+    registry.register(iac_scan_module().with_executor(executor));
+    registry.register(cargo_audit_module().with_executor(executor));
+    registry.register(govulncheck_module().with_executor(executor));
+    registry.register(license_scan_module().with_executor(executor));
+    registry.register(sbom_scan_module().with_executor(executor));
+    registry.register(exploit_chain_module().with_executor(executor).deferred());
+    registry.register(android_apk_module().with_executor(executor));
 }
 
 pub(in crate::modules) fn execute_tool(
@@ -22,6 +25,7 @@ pub(in crate::modules) fn execute_tool(
         "codeql:scan" => run_codeql_scan(input, ctx),
         "iac-scan:scan" => run_iac_scan(input, ctx),
         "cargo-audit:scan" => run_cargo_audit_scan(input, ctx),
+        "govulncheck:scan" => run_govulncheck_scan(input, ctx),
         "license-scan:scan" => run_license_scan(input, ctx),
         "sbom-scan:scan" => run_sbom_scan(input, ctx),
         "exploit-chain:scan" => run_exploit_chain_scan(input, ctx, runtime),
@@ -44,15 +48,20 @@ pub(in crate::modules) fn run_semgrep_scan(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
-    emit_scan_start(ctx, "semgrep", &target);
     let scanner = SemgrepScanner::from_tool_input(&input)?;
+    if let Err(error) = scanner.preflight() {
+        return Ok(failed_tool_output("semgrep:scan", &target, error));
+    }
+    emit_scan_start(ctx, "semgrep", &target);
     let mut findings = match scanner.scan_with_cancel(&target, &ScanCancellation::default()) {
         Ok(findings) => findings,
         Err(error) => return Ok(failed_tool_output("semgrep:scan", &target, error)),
     };
     let index_static_evidence = whitebox_static_profile_requested(&input)?;
     if index_static_evidence {
-        mark_whitebox_static_findings(&mut findings, StaticProofState::SignalOnly)?;
+        let static_proof_state =
+            whitebox_static_proof_state_from_input(&input)?.unwrap_or(StaticProofState::SignalOnly);
+        mark_whitebox_static_findings(&mut findings, static_proof_state)?;
     }
     let persisted = persist_semgrep_findings(&target, &findings, ctx, index_static_evidence)?;
     emit_scan_done(ctx, "semgrep", findings.len());
@@ -64,21 +73,31 @@ pub(in crate::modules) fn run_codeql_scan(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
-    emit_scan_start(ctx, "codeql", &target);
     let scanner = CodeqlScanner::from_tool_input(&input)?;
+    if let Err(error) = scanner.preflight() {
+        return Ok(failed_tool_output("codeql:scan", &target, error));
+    }
+    emit_scan_start(ctx, "codeql", &target);
     let mut output = match scanner.scan_with_artifacts(&target, &ScanCancellation::default()) {
         Ok(output) => output,
         Err(error) => return Ok(failed_tool_output("codeql:scan", &target, error)),
     };
     let index_static_evidence = whitebox_static_profile_requested(&input)?;
     if index_static_evidence {
-        mark_whitebox_static_findings(&mut output.findings, StaticProofState::SignalOnly)?;
+        let static_proof_state =
+            whitebox_static_proof_state_from_input(&input)?.unwrap_or(StaticProofState::SignalOnly);
+        mark_whitebox_static_findings(&mut output.findings, static_proof_state)?;
     }
     let finding_count = output.findings.len();
     let findings = output.findings;
     let sarif_documents = output.codeql_sarif_documents;
-    let persisted =
-        persist_codeql_findings(&target, &findings, ctx, &sarif_documents, index_static_evidence)?;
+    let persisted = persist_codeql_findings(
+        &target,
+        &findings,
+        ctx,
+        &sarif_documents,
+        index_static_evidence,
+    )?;
     emit_scan_done(ctx, "codeql", finding_count);
     Ok(
         CodeqlScanReport::new(target.display().to_string(), findings, persisted)
@@ -151,6 +170,46 @@ pub(in crate::modules) fn run_cargo_audit_scan(
     let persisted = persist_iac_findings(&target, &findings, ctx)?;
     emit_scan_done(ctx, "cargo-audit", findings.len());
     Ok(cargo_audit_output(&target, findings, persisted))
+}
+
+pub(in crate::modules) fn run_govulncheck_scan(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    let target = resolve_tool_target(&input, ctx)?;
+    let scanner = GovulncheckScanner;
+    if let Err(error) = scanner.preflight() {
+        return Ok(failed_tool_output("govulncheck:scan", &target, error));
+    }
+    emit_scan_start(ctx, "govulncheck", &target);
+    let findings = match scanner.scan(&target, &ScanCancellation::default()) {
+        Ok(findings) => findings,
+        Err(error) => return Ok(failed_tool_output("govulncheck:scan", &target, error)),
+    };
+    let persisted = persist_iac_findings(&target, &findings, ctx)?;
+    emit_scan_done(ctx, "govulncheck", findings.len());
+    Ok(govulncheck_output(&target, findings, persisted))
+}
+
+fn govulncheck_output(target: &Path, findings: Vec<Finding>, persisted: Option<Value>) -> Value {
+    crate::scan::completed_scan_tool_json(
+        govulncheck_summary(target, findings.len()),
+        json!({
+            "target": target.display().to_string(),
+            "count": findings.len(),
+            "coreFindings": findings,
+            "findings": findings,
+            "persisted": persisted,
+        }),
+    )
+}
+
+fn govulncheck_summary(target: &Path, count: usize) -> String {
+    format!(
+        "govulncheck: {count} reachable vulnerability finding{} under {}",
+        if count == 1 { "" } else { "s" },
+        target.display()
+    )
 }
 
 fn cargo_audit_output(target: &Path, findings: Vec<Finding>, persisted: Option<Value>) -> Value {
@@ -249,7 +308,7 @@ pub(in crate::modules) fn run_exploit_chain_scan(
     emit_scan_start(ctx, "exploit-chain", &target);
     let scanner = ExploitChainScanner::from_tool_input(&input)?;
     let runtime = require_exploit_chain_runtime(runtime)?;
-    let model = require_exploit_chain_model(ctx)?;
+    let model = require_exploit_chain_model(&input, ctx)?;
     let report: ExploitChainReport = scan_exploit_chains_with_runtime(
         &target,
         &ScanCancellation::default(),
@@ -262,9 +321,7 @@ pub(in crate::modules) fn run_exploit_chain_scan(
     Ok(exploit_chain_output(report, &target, persisted))
 }
 
-fn require_exploit_chain_runtime(
-    runtime: Option<&dyn AgentRuntime>,
-) -> Result<&dyn AgentRuntime> {
+fn require_exploit_chain_runtime(runtime: Option<&dyn AgentRuntime>) -> Result<&dyn AgentRuntime> {
     runtime.ok_or_else(|| {
         anyhow::anyhow!(
             "exploit-chain:scan requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or install the bundled Node bridge dependencies."
@@ -272,8 +329,8 @@ fn require_exploit_chain_runtime(
     })
 }
 
-fn require_exploit_chain_model(ctx: &ToolExecutionContext<'_>) -> Result<String> {
-    crate::runtime::require_configured_model("exploit-chain:scan", ctx.config.model.as_deref())
+fn require_exploit_chain_model(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<String> {
+    resolve_tool_model("exploit-chain:scan", input, ctx)
 }
 
 fn persist_exploit_chain_findings(
@@ -310,7 +367,10 @@ mod tests {
         let output = cargo_audit_output(Path::new("/repo"), vec![finding], None);
 
         assert_eq!(output["status"], json!("completed"));
-        assert_eq!(output["data"]["coreFindings"][0]["tool"], json!("cargo-audit"));
+        assert_eq!(
+            output["data"]["coreFindings"][0]["tool"],
+            json!("cargo-audit")
+        );
         assert_eq!(
             output["data"]["coreFindings"][0]["staticProofState"],
             json!("signal_only")
@@ -320,5 +380,4 @@ mod tests {
             json!("signal_only")
         );
     }
-
 }

@@ -94,7 +94,9 @@ fn read_decompiler_choice(input: &Value) -> Result<Decompiler> {
         "jadx" => Ok(Decompiler::Jadx),
         "apktool" => Ok(Decompiler::Apktool),
         "both" => Ok(Decompiler::Both),
-        other => anyhow::bail!("android-apk:prepare: unknown decompiler {other:?} (expected jadx, apktool, or both)"),
+        other => anyhow::bail!(
+            "android-apk:prepare: unknown decompiler {other:?} (expected jadx, apktool, or both)"
+        ),
     }
 }
 
@@ -153,7 +155,10 @@ impl AndroidApkWorkspace {
             .status()
             .map_err(|error| missing_tool_error("unzip", &tools.unzip, error))?;
         if !status.success() {
-            anyhow::bail!("unzip exited with status {status} when extracting {}", apk.display());
+            anyhow::bail!(
+                "unzip exited with status {status} when extracting {}",
+                apk.display()
+            );
         }
         Ok(())
     }
@@ -169,7 +174,10 @@ impl AndroidApkWorkspace {
             .status()
             .map_err(|error| missing_tool_error("jadx", &tools.jadx, error))?;
         if !status.success() {
-            anyhow::bail!("jadx exited with status {status} when decompiling {}", apk.display());
+            anyhow::bail!(
+                "jadx exited with status {status} when decompiling {}",
+                apk.display()
+            );
         }
         Ok(())
     }
@@ -185,7 +193,10 @@ impl AndroidApkWorkspace {
             .status()
             .map_err(|error| missing_tool_error("apktool", &tools.apktool, error))?;
         if !status.success() {
-            anyhow::bail!("apktool exited with status {status} when decoding {}", apk.display());
+            anyhow::bail!(
+                "apktool exited with status {status} when decoding {}",
+                apk.display()
+            );
         }
         Ok(())
     }
@@ -301,12 +312,16 @@ mod tests {
 
     #[test]
     fn read_decompiler_choice_defaults_to_both() {
-        assert_eq!(read_decompiler_choice(&json!({})).unwrap(), Decompiler::Both);
+        assert_eq!(
+            read_decompiler_choice(&json!({})).unwrap(),
+            Decompiler::Both
+        );
     }
 
     #[test]
     fn read_decompiler_choice_rejects_unknown() {
-        let error = read_decompiler_choice(&json!({"decompiler": "ghidra"})).expect_err("unknown rejected");
+        let error =
+            read_decompiler_choice(&json!({"decompiler": "ghidra"})).expect_err("unknown rejected");
         assert!(error.to_string().contains("unknown decompiler"));
     }
 
@@ -315,6 +330,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let workspace = AndroidApkWorkspace::create(dir.path()).expect("workspace created");
         assert!(workspace.decompiled_root.is_dir());
-        assert_eq!(workspace.decompiled_root, dir.path().join("android-decompiled"));
+        assert_eq!(
+            workspace.decompiled_root,
+            dir.path().join("android-decompiled")
+        );
     }
 }

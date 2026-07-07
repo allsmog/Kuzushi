@@ -1,7 +1,5 @@
 use super::activity_dag_rows::{activity_dag_pane_rows, ActivityDagPaneRow, ActivityDagRowTone};
-use super::activity_feed_rows::{
-    activity_feed_pane_rows, ActivityFeedPaneRow, ActivityFeedRowTone,
-};
+use super::activity_feed_rows::{ActivityFeedPaneRow, ActivityFeedRowTone};
 use crate::ActivitySession;
 use std::time::Instant;
 
@@ -29,18 +27,16 @@ pub(crate) fn activity_plain_pane_rows(
     dag_width: usize,
     feed_width: usize,
     now: Instant,
-    extra_feed_rows: &[ActivityFeedPaneRow],
+    output_rows: &[ActivityFeedPaneRow],
     running_tool: Option<&str>,
 ) -> Vec<ActivityPlainPaneRow> {
-    let dag_rows = activity_dag_pane_rows(session, dag_width, now);
-    let mut feed_rows = activity_feed_pane_rows(session, feed_width, running_tool);
-    feed_rows.extend(extra_feed_rows.iter().cloned());
-    let row_count = dag_rows.len().max(feed_rows.len());
+    let dag_rows = activity_dag_pane_rows(session, dag_width, now, running_tool);
+    let row_count = dag_rows.len().max(output_rows.len());
     (0..row_count)
         .map(|index| ActivityPlainPaneRow {
             dag: dag_cell(dag_rows.get(index), dag_width),
             separator: " │ ",
-            feed: feed_cell(feed_rows.get(index), feed_width),
+            feed: feed_cell(output_rows.get(index), feed_width),
         })
         .collect()
 }
@@ -102,17 +98,19 @@ mod tests {
                 .with_started_at_ms(43_000),
         );
 
-        let rows = activity_plain_pane_rows(&session, 12, 20, Instant::now(), &[], None);
+        let rows = activity_plain_pane_rows(&session, 80, 20, Instant::now(), &[], None);
 
-        assert_eq!(rows.len(), 2);
+        assert!(rows.len() >= 3);
         assert_eq!(rows[0].separator, " │ ");
-        assert_eq!(rows[0].dag.text.chars().count(), 12);
-        assert_eq!(rows[0].dag.tone, Some(ActivityDagRowTone::Done));
+        assert_eq!(rows[0].dag.text.chars().count(), 80);
         assert_eq!(rows[0].feed.text.chars().count(), 20);
-        assert_eq!(rows[0].feed.tone, Some(ActivityFeedRowTone::Muted));
-        assert_eq!(rows[1].dag.text, " ".repeat(12));
-        assert_eq!(rows[1].dag.tone, None);
-        assert_eq!(rows[1].feed.tone, Some(ActivityFeedRowTone::Success));
+        assert_eq!(rows[0].feed.tone, None);
+        assert!(rows.iter().any(|row| row.dag.text.contains("ACTIONS")));
+        assert!(rows.iter().any(|row| row.dag.text.contains("[triage:run]")));
+        assert!(rows
+            .iter()
+            .any(|row| row.dag.text.contains("[verify:finding]")));
+        assert!(rows.iter().all(|row| row.feed.tone.is_none()));
     }
 
     #[test]

@@ -1,7 +1,9 @@
 use super::*;
 use crate::scene3d::VizPage;
 
-/// `/scene` (`/viz`, `/diagram`) opens the security-viz gallery, keeping
+const AUTO_OPEN_INTERACTION_GRACE: std::time::Duration = std::time::Duration::from_secs(4);
+
+/// `/scene` (`/viz`) opens the security-viz gallery, keeping
 /// whatever page was last shown. Pages are fed real Kuzushi data and show an
 /// empty-state hint until the backing artifact (findings, threat model, exploit
 /// chains, taint flow) has been generated.
@@ -24,7 +26,6 @@ pub(crate) fn viz_page_for_tool(tool_name: &str) -> Option<VizPage> {
     match tool_name {
         "taint-iris:hunt" => Some(VizPage::AttackPath),
         "exploit-chain:scan" => Some(VizPage::ExploitChain),
-        "threat-model:build" => Some(VizPage::Dfd),
         _ => None,
     }
 }
@@ -37,24 +38,114 @@ impl ShellApp {
 
     /// Open the gallery focused on a specific page (manual nav and auto-open).
     pub fn open_scene_to_page(&mut self, page: VizPage) {
+        if !matches!(self.shell_view, ShellView::Scene(_)) {
+            self.push_nav_history(self.shell_view.clone());
+        }
         self.scene_page = page;
         self.shell_view = ShellView::Scene(page);
         self.log(
             "scene",
             format!(
-                "security-viz — {} · Tab cycles pages · esc back",
+                "security-viz — {} · Tab cycles pages · Esc/q returns",
                 page.label()
             ),
         );
     }
 
     /// Auto-switch to a gallery page when its artifact lands, unless the
-    /// operator opted out via `KUZUSHI_AUTO_OPEN_VIZ=false`. Mirrors
+    /// operator opted out via `setg ui.auto_open_viz false`. Mirrors
     /// `auto_open_activity`.
     pub(crate) fn auto_open_viz_page(&mut self, page: VizPage) {
-        if self.auto_open_viz {
-            self.open_scene_to_page(page);
+        if !self.auto_open_viz {
+            return;
         }
+        if self.activity_deck_is_pinned() {
+            self.log_scene_ready(page, "output page unchanged");
+            return;
+        }
+        self.sync_activity_deck_to_scene_page(page);
+        self.open_or_log_scene_ready(page);
+    }
+
+    pub(crate) fn auto_open_workbench_dfd(&mut self) {
+        if !self.auto_open_viz {
+            return;
+        }
+        if crate::ui_view_models::dfd_model(self).empty_hint.is_some() {
+            return;
+        }
+        if self.can_auto_open_viz_now() {
+            self.open_workbench(crate::app::WorkbenchPane::Center);
+            self.log(
+                "workbench",
+                "data-flow model ready — showing Workbench DFD center pane",
+            );
+        } else {
+            self.log_workbench_ready("use `workbench` to view");
+        }
+    }
+
+    fn activity_deck_is_pinned(&self) -> bool {
+        self.activity
+            .as_ref()
+            .is_some_and(|session| !session.can_auto_switch_deck())
+    }
+
+    fn sync_activity_deck_to_scene_page(&mut self, page: VizPage) {
+        if let Some(session) = self.activity.as_mut() {
+            session.set_deck_scene_page(page);
+        }
+    }
+
+    fn open_or_log_scene_ready(&mut self, page: VizPage) {
+        if self.can_auto_open_viz_now() {
+            self.open_scene_to_page(page);
+        } else {
+            self.log_scene_ready(page, "use `scene` to view");
+        }
+    }
+
+    fn log_scene_ready(&mut self, page: VizPage, message: &str) {
+        self.log(
+            "scene",
+            format!(
+                "{} ready — {message}; setg ui.auto_open_viz false disables auto-open",
+                page.label()
+            ),
+        );
+    }
+
+    fn log_workbench_ready(&mut self, message: &str) {
+        self.log(
+            "workbench",
+            format!(
+                "data-flow model ready — {message}; setg ui.auto_open_viz false disables auto-open"
+            ),
+        );
+    }
+
+    fn can_auto_open_viz_now(&self) -> bool {
+        if self
+            .last_char_at
+            .is_some_and(|at| at.elapsed() <= AUTO_OPEN_INTERACTION_GRACE)
+        {
+            return false;
+        }
+        !matches!(
+            self.shell_view,
+            ShellView::Workbench
+                | ShellView::TargetPicker
+                | ShellView::PlanningPicker
+                | ShellView::ModelPicker
+                | ShellView::AuthMethodPicker(_)
+                | ShellView::PromptsEditor
+                | ShellView::ThreatEditor
+                | ShellView::AgentChat
+                | ShellView::Story
+                | ShellView::FailureHandoff
+                | ShellView::Trace(_)
+                | ShellView::Replay(_)
+        )
     }
 
     /// Whether `page` has a backing artifact worth showing. Guards auto-open so

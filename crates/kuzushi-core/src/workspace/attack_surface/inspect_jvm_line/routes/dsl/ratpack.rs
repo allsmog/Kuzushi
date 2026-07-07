@@ -12,7 +12,15 @@ pub(super) fn inspect_ratpack_route_line(
 ) {
     remember_ratpack_scope(lower, state);
     remember_ratpack_prefix(detail, lower, state);
-    emit_ratpack_route(source_file, framework, line_number, detail, lower, state, builder);
+    emit_ratpack_route(
+        source_file,
+        framework,
+        line_number,
+        detail,
+        lower,
+        state,
+        builder,
+    );
 }
 
 fn remember_ratpack_scope(lower: &str, state: &mut RouteScanState) {

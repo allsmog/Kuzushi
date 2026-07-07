@@ -10,7 +10,8 @@ mod run_scan;
 mod session;
 
 pub use command_payloads::{
-    ContextCommand, PwnCommand, SastTaskCommand, SastTaskModeCommand, WorkspaceCommand,
+    ContextCommand, PatchCommand, PwnCommand, ReviewDecisionCommand, SastTaskCommand,
+    SastTaskModeCommand, StrategyCommand, StrategyCorrectionCommandScope, WorkspaceCommand,
 };
 
 pub(crate) const SHELL_COMMAND_SPEC_GROUPS: &[&[ShellCommandSpec]] = &[
@@ -24,7 +25,8 @@ pub(crate) const SHELL_COMMAND_SPEC_GROUPS: &[&[ShellCommandSpec]] = &[
 ];
 
 pub(crate) const FEATURED_HELP_EXAMPLES: &[&str] = &[
-    "scan .",
+    "demo",
+    "next",
     "use semgrep",
     "run .",
     "findings",
@@ -42,7 +44,10 @@ pub fn shell_help_examples() -> Vec<&'static str> {
     FEATURED_HELP_EXAMPLES
         .iter()
         .copied()
-        .filter(|example| shell_command_specs().any(|spec| spec.aliases.contains(example)))
+        .filter(|example| {
+            shell_command_specs()
+                .any(|spec| spec.command == *example || spec.aliases.contains(example))
+        })
         .collect()
 }
 
@@ -57,7 +62,7 @@ fn parse_prompt_command(trimmed: &str) -> Option<ShellCommand> {
     }
     let question = trimmed.strip_prefix('?')?.trim();
     Some(if question.is_empty() {
-        ShellCommand::Help
+        ShellCommand::Help(None)
     } else {
         ShellCommand::Ask(question.to_string())
     })
@@ -69,11 +74,22 @@ fn parse_routed_command(trimmed: &str) -> ShellCommand {
     let verb = tokens.first().copied().unwrap_or_default();
     let args = tokens.get(1..).unwrap_or_default();
 
-    parse_static_command(verb)
+    parse_help_command(verb, args)
+        .or_else(|| parse_static_command(verb))
         .or_else(|| parse_single_arg_command(verb, args, trimmed))
         .or_else(|| parse_joined_arg_command(verb, args, trimmed))
         .or_else(|| parse_nested_shell_command(verb, args, trimmed))
         .unwrap_or_else(|| ShellCommand::Unknown(trimmed.to_string()))
+}
+
+fn parse_help_command(verb: &str, args: &[&str]) -> Option<ShellCommand> {
+    matches!(verb, "help" | "h" | "?").then(|| {
+        let query = args
+            .iter()
+            .any(|arg| !arg.trim().is_empty())
+            .then(|| args.join(" "));
+        ShellCommand::Help(query)
+    })
 }
 
 pub(crate) fn parse_static_command(verb: &str) -> Option<ShellCommand> {
@@ -86,9 +102,10 @@ pub(crate) fn parse_static_command(verb: &str) -> Option<ShellCommand> {
 fn parse_navigation_command(verb: &str) -> Option<ShellCommand> {
     match verb {
         "" | "home" => Some(ShellCommand::Home),
-        "help" | "h" | "?" => Some(ShellCommand::Help),
+        "demo" => Some(ShellCommand::Demo),
+        "help" | "h" | "?" => Some(ShellCommand::Help(None)),
         "back" | "b" => Some(ShellCommand::Back),
-        "quit" | "exit" | "q" | "exitj" => Some(ShellCommand::Quit),
+        "quit" | "exit" | "q" => Some(ShellCommand::Quit),
         _ => None,
     }
 }
@@ -97,30 +114,32 @@ fn parse_catalog_command(verb: &str) -> Option<ShellCommand> {
     match verb {
         "modules" | "m" => Some(ShellCommand::Modules),
         "recommend" | "rec" => Some(ShellCommand::Recommend),
-        "tools" => Some(ShellCommand::Tools),
         "tune" | "t" => Some(ShellCommand::Tune),
         "prompts" => Some(ShellCommand::Prompts),
         "tasks" => Some(ShellCommand::Tasks),
+        "project" | "project-model" => Some(ShellCommand::ProjectModel),
         _ => None,
     }
 }
 
 fn parse_session_command(verb: &str) -> Option<ShellCommand> {
     match verb {
+        "workbench" => Some(ShellCommand::Workbench(WorkbenchPane::Findings)),
+        "doctor" | "health" => Some(ShellCommand::Health),
         "cost" => Some(ShellCommand::Cost),
         "config" => Some(ShellCommand::Config),
         "permissions" => Some(ShellCommand::Permissions),
-        "runs" => Some(ShellCommand::ShowRuns),
         "history" => Some(ShellCommand::History),
         "clear" => Some(ShellCommand::Clear),
         "pause" => Some(ShellCommand::Pause),
+        "cancel" | "c" | "stop" => Some(ShellCommand::Cancel),
         "story" => Some(ShellCommand::Story),
         "quickstart" => Some(ShellCommand::Quickstart),
-        "onboarding" | "setup" | "plan-stage" | "planning" => Some(ShellCommand::Onboarding),
+        "onboarding" | "planning" => Some(ShellCommand::Onboarding),
         "next" | "continue" => Some(ShellCommand::Next),
         "logs" | "log" | "transcript" => Some(ShellCommand::Logs),
         "activity" | "progress" | "a" => Some(ShellCommand::Activity),
-        "scene" | "viz" | "3d" | "diagram" => Some(ShellCommand::Scene),
+        "scene" | "viz" => Some(ShellCommand::Scene),
         "handoff" | "failure" | "failures" => Some(ShellCommand::FailureHandoff),
         _ => None,
     }

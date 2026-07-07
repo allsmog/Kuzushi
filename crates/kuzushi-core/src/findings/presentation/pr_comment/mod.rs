@@ -13,4 +13,6 @@ mod severity_badge;
 mod tests;
 
 pub use build_pr_comment::build_pr_comment;
-pub use build_pr_comment::{PrCommentChain, PrCommentChainStep, PrCommentInput, PrCommentPhaseCost};
+pub use build_pr_comment::{
+    PrCommentChain, PrCommentChainStep, PrCommentInput, PrCommentPhaseCost,
+};

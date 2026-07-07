@@ -2,6 +2,11 @@ use super::*;
 
 pub trait ScanEngine: Send + Sync {
     fn id(&self) -> &'static str;
+
+    fn preflight(&self) -> Result<()> {
+        Ok(())
+    }
+
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>>;
 
     fn scan_artifacts(
@@ -43,4 +48,16 @@ impl Default for SemgrepScanner {
             config: vec!["auto".to_string()],
         }
     }
+}
+
+pub(crate) fn scanner_binary_available(binary: &str) -> bool {
+    let trimmed = binary.trim();
+    if trimmed.is_empty() {
+        return false;
+    }
+    let path = Path::new(trimmed);
+    if path.components().count() > 1 {
+        return path.is_file();
+    }
+    crate::process_lookup::executable_on_path(trimmed).is_some()
 }

@@ -2,17 +2,18 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 137
 ---
- KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › tasks · mode:shell · target:none · ctx:not built · model:unconfigured
 
  -- SAST TASKS ---------------------------------------------------------------------------------------------------------
 mode: auto + denylist
-selected: 5/12 enabled, 0 blocked
+selected: 5/13 enabled, 0 blocked
 
 state  id                        cost    scan                notes
 [x]    semgrep                   low     semgrep             pattern scanner
 [A]    codeql                    high    codeql              semantic query scanner
 [x]    dep-hygiene               low     dep-hygiene         dependency manifest hygiene
 [x]    cargo-audit               medium  cargo-audit         Rust advisory scanner
+[A]    govulncheck               medium  govulncheck         Go reachable vulnerability scanner
 [x]    secret-scan               low     secret-scan         local secret patterns
 [x]    iac-scan                  low     iac-scan            IaC misconfiguration scanner
 [A]    license-scan              low     license-scan        package license risk scanner

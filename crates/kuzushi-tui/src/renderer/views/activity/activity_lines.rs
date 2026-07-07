@@ -2,29 +2,49 @@ use super::dag_pane::dag_row_style;
 use super::feed_pane::feed_row_style;
 use super::*;
 use crate::ui_view_models::{
-    activity_view_model, ActivityPlainDagCell, ActivityPlainFeedCell, ActivityPlainPaneHeaderCell,
-    ActivityPlainPaneRow, ActivityViewModel,
+    activity_view_model, ActiveActivityViewModel, ActivityEmptyStateModel, ActivityPlainDagCell,
+    ActivityPlainFeedCell, ActivityPlainPaneHeaderCell, ActivityPlainPaneRow, ActivityViewModel,
 };
 use std::time::Instant;
 
 /// Build the line list for the Activity view. Renders a split-pane layout:
 ///   left ~46% — DAG status rows (one row per visible task + subsystems aggregate)
-///   right ~54% — chronological reasoning feed `[module:verb] label`
+///   right ~54% — OUTPUT deck (findings and generated artifacts)
 ///   footer    — single-line focus pane summary
 pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     let mut lines = context_strip(app, area);
     lines.push(blank());
 
-    let activity = match activity_view_model(app) {
-        ActivityViewModel::Active(activity) => activity,
-        ActivityViewModel::Inactive(empty) => {
-            push_inactive_activity_lines(&mut lines, area.width, empty.title, empty.body);
-            return lines;
-        }
-    };
+    match activity_view_model(app) {
+        ActivityViewModel::Active(activity) => active_activity_lines(lines, area, activity),
+        ActivityViewModel::Inactive(empty) => inactive_activity_lines(lines, area.width, empty),
+    }
+}
 
+fn inactive_activity_lines(
+    mut lines: Vec<Line<'static>>,
+    width: u16,
+    empty: ActivityEmptyStateModel,
+) -> Vec<Line<'static>> {
+    lines.push(divider(empty.title, width));
+    lines.extend(empty_state_panel(
+        empty.glyph_label,
+        empty.explanations,
+        empty.ctas,
+    ));
+    lines
+}
+
+fn active_activity_lines(
+    mut lines: Vec<Line<'static>>,
+    area: Rect,
+    activity: ActiveActivityViewModel<'_>,
+) -> Vec<Line<'static>> {
     let header = activity.header();
     lines.push(divider(&header.summary_title, area.width));
+    if let Some(banner) = activity.abort_banner() {
+        lines.push(Line::from(vec![Span::styled(banner, theme::warn())]));
+    }
 
     let widths = activity.plain_pane_widths(area.width);
     let pane_header = activity.plain_pane_header(widths);
@@ -46,18 +66,14 @@ pub(crate) fn activity_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         footer.body_line,
         theme::label(),
     )]));
-    lines.push(keybind_hint_line(&footer.plain_hints));
+    lines.extend(footer.hint_rows.iter().map(|row| {
+        let pairs = row
+            .iter()
+            .map(|hint| (hint.plain_key_text, hint.plain_hint_text))
+            .collect::<Vec<_>>();
+        keybind_hint_line(&pairs)
+    }));
     lines
-}
-
-fn push_inactive_activity_lines(
-    lines: &mut Vec<Line<'static>>,
-    width: u16,
-    title: &'static str,
-    body: &'static str,
-) {
-    lines.push(divider(title, width));
-    lines.push(muted(body));
 }
 
 fn activity_pane_line(row: ActivityPlainPaneRow) -> Line<'static> {
@@ -72,7 +88,7 @@ fn pane_title_style(cell: &ActivityPlainPaneHeaderCell) -> ratatui::style::Style
     if cell.focused {
         return theme::accent();
     }
-    theme::label()
+    theme::muted()
 }
 
 fn pane_header_cell_span(cell: &ActivityPlainPaneHeaderCell) -> Span<'static> {

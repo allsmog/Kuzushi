@@ -1,14 +1,16 @@
 use super::*;
-use crate::ui_view_models::{uses_activity_frame, uses_scene_frame};
+use crate::ui_view_models::{uses_activity_frame, uses_scene_frame, uses_workbench_frame};
 
 /// How the primary body region is painted this frame. Most views are
-/// line-based; Activity and the 3D attack-surface page each own the whole
-/// region with a frame-level layout (split panes / half-block framebuffer).
+/// line-based; Activity, the Workbench command center, and the 3D
+/// attack-surface page each own the whole region with a frame-level layout
+/// (split panes / half-block framebuffer).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum PrimaryRenderMode {
     Lines,
     Activity,
     Scene,
+    Workbench,
 }
 
 fn primary_render_mode(app: &ShellApp) -> PrimaryRenderMode {
@@ -16,6 +18,8 @@ fn primary_render_mode(app: &ShellApp) -> PrimaryRenderMode {
         PrimaryRenderMode::Scene
     } else if uses_activity_frame(app) {
         PrimaryRenderMode::Activity
+    } else if uses_workbench_frame(app) {
+        PrimaryRenderMode::Workbench
     } else {
         PrimaryRenderMode::Lines
     }
@@ -67,8 +71,15 @@ fn main_view_layout(
     }
 
     let view_lines = shell_view_lines(app, view_area);
-    let view_height = (view_lines.len() as u16).clamp(1, max_view_height);
+    let view_height = line_view_height(app, view_lines.len(), max_view_height);
     (view_height, view_lines)
+}
+
+fn line_view_height(app: &ShellApp, line_count: usize, max_view_height: u16) -> u16 {
+    if matches!(app.shell_view, crate::ShellView::PlanningPicker) {
+        return max_view_height;
+    }
+    (line_count as u16).clamp(1, max_view_height)
 }
 
 fn render_primary_view(
@@ -81,8 +92,39 @@ fn render_primary_view(
     match mode {
         PrimaryRenderMode::Scene => render_scene_view(frame, area, app),
         PrimaryRenderMode::Activity => render_activity_view(frame, area, app),
-        PrimaryRenderMode::Lines => render_lines(frame, area, view_lines),
+        PrimaryRenderMode::Workbench => render_workbench_view(frame, area, app),
+        PrimaryRenderMode::Lines => render_line_view(frame, area, app, view_lines),
     }
+}
+
+fn render_line_view(
+    frame: &mut Frame<'_>,
+    area: Rect,
+    app: &ShellApp,
+    view_lines: Vec<Line<'static>>,
+) {
+    if matches!(app.shell_view, crate::ShellView::PlanningPicker) {
+        render_centered_lines(frame, area, view_lines);
+    } else {
+        render_lines(frame, area, view_lines);
+    }
+}
+
+fn render_centered_lines(frame: &mut Frame<'_>, area: Rect, lines: Vec<Line<'static>>) {
+    if area.height == 0 || lines.is_empty() {
+        return;
+    }
+    let content_height = (lines.len() as u16).min(area.height);
+    let top_padding = area.height.saturating_sub(content_height) / 2;
+    render_lines(
+        frame,
+        Rect {
+            y: area.y.saturating_add(top_padding),
+            height: content_height,
+            ..area
+        },
+        lines,
+    );
 }
 
 pub(crate) const PROMPT_HEIGHT: u16 = 1;
@@ -138,11 +180,11 @@ const RENDER_SECTION_HANDLERS: &[RenderSectionHandler] = &[
 
 pub(crate) fn render_sections(app: &ShellApp, area: Rect) -> Vec<RenderSectionSlot> {
     [
+        section_slot(RenderSection::Budget, cost_cap_halt_height(app, area)),
         section_slot(RenderSection::Notice, notice_banner_height(app, area)),
         section_slot(RenderSection::Throttle, throttle_banner_height(app, area)),
         section_slot(RenderSection::Status, status_footer_height(app, area)),
         section_slot(RenderSection::Keybind, keybind_footer_height(app, area)),
-        section_slot(RenderSection::Budget, cost_cap_halt_height(app, area)),
         section_slot(RenderSection::Plan, plan_card_height(app, area)),
         section_slot(
             RenderSection::ThreatPatch,

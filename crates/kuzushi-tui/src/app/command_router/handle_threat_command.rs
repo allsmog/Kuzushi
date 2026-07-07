@@ -1,4 +1,6 @@
 use super::*;
+use kuzushi_core::workspace::findings_since_filter_expression;
+use std::path::Path;
 
 pub(crate) fn handle_threat_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
     let ShellCommand::Threat(view) = command else {
@@ -29,7 +31,8 @@ pub(crate) fn handle_threat_apply_command(app: &mut ShellApp, command: &ShellCom
     let ShellCommand::ThreatApply = command else {
         return false;
     };
-    app.apply_pending_threat_patch();
+    let effects = app.reduce_threat_apply();
+    app.execute_effects(effects);
     true
 }
 
@@ -86,6 +89,19 @@ pub(crate) fn handle_show_runs_command(app: &mut ShellApp, command: &ShellComman
     true
 }
 
+pub(crate) fn handle_run_diff_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::RunDiff { left, right } = command else {
+        return false;
+    };
+    app.shell_view = ShellView::RunDiff {
+        left: left.clone(),
+        right: right.clone(),
+    };
+    app.scroll_offset = 0;
+    app.log("runs", format!("comparing {left} -> {right}"));
+    true
+}
+
 pub(crate) fn handle_show_aliases_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
     let ShellCommand::ShowAliases(prefix) = command else {
         return false;
@@ -98,8 +114,19 @@ pub(crate) fn handle_since_command(app: &mut ShellApp, command: &ShellCommand) -
     let ShellCommand::Since(reference) = command else {
         return false;
     };
-    app.shell_view = ShellView::Findings;
-    app.log("since", reference);
+    let expression = match findings_since_filter_expression(app.target.as_deref(), reference) {
+        Ok(expression) => expression,
+        Err(error) => {
+            app.log(
+                "error",
+                with_next_step(error.to_string(), "target <path> then since <ref>"),
+            );
+            return true;
+        }
+    };
+    app.shell_view = ShellView::Workbench;
+    app.workbench_focus = crate::app::WorkbenchPane::Findings;
+    app.refresh_findings_filtered(&expression);
     true
 }
 
@@ -107,7 +134,49 @@ pub(crate) fn handle_replay_command(app: &mut ShellApp, command: &ShellCommand) 
     let ShellCommand::Replay(run_id) = command else {
         return false;
     };
-    app.shell_view = ShellView::Replay(run_id.clone());
-    app.log("replay", run_id);
+    let Some(resolved) = resolve_run_selector(app, run_id, "replay") else {
+        return true;
+    };
+    app.shell_view = ShellView::Replay(resolved.clone());
+    app.log("replay", resolved);
     true
+}
+
+fn resolve_run_selector(app: &mut ShellApp, selector: &str, verb: &str) -> Option<String> {
+    if selector != "latest" {
+        return Some(selector.to_string());
+    }
+    let Some(target) = app.target.as_deref() else {
+        app.log(
+            "error",
+            format!("{verb} latest needs a target. Next: target <path> or show runs"),
+        );
+        return None;
+    };
+    let latest_path = crate::ui_view_models::ui_latest_run_path(Some(target));
+    let text = match std::fs::read_to_string(&latest_path) {
+        Ok(text) => text,
+        Err(error) => {
+            app.log(
+                "error",
+                format!(
+                    "could not read latest run pointer {}: {error}. Next: show runs",
+                    latest_path.display()
+                ),
+            );
+            return None;
+        }
+    };
+    let run_id = text.trim();
+    if run_id.is_empty() {
+        app.log(
+            "error",
+            format!(
+                "latest run pointer {} is empty. Next: show runs",
+                latest_path.display()
+            ),
+        );
+        return None;
+    }
+    Some(run_id.to_string())
 }

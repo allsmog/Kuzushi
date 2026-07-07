@@ -32,6 +32,35 @@ Roadmap surfaces such as binary exploitation, broad pentest automation,
 governance packs, and defensive operations should reinforce that evidence
 workflow before they become primary product surfaces.
 
+## Current Snapshot Highlights
+
+This snapshot tightens the path from scanner output to human review:
+
+- Findings have durable identities, source signatures, corroborating source
+  rows, static proof state, latest runtime verification, run provenance, and
+  safe HTTP capture markers through list/detail/export surfaces.
+- Scanner-owned triage and human review decisions are intentionally separate.
+  `decision` appends a human verdict and rationale that carries forward by
+  durable identity; it does not rewrite detector output or claim that a scanner
+  result was confirmed by the machine.
+- Workspace persistence is v3-first: append-only event log segments under
+  `.kuzushi/v3/log/`, the projection DB at `.kuzushi/v3/index.sqlite3`, and
+  replayable run artifacts under `.kuzushi/v3/runs/<runId>/`.
+- The Rust workbench is the primary shell landing surface. It presents attack
+  surface, findings, details, activity, and generated artifact context without
+  replacing domain terms such as severity, confidence, status, decision, proof,
+  and verification with generic UX labels.
+- Run comparison, export preview/write, review queues, failure handoff, and
+  Activity summaries all read from persisted run/projection state rather than
+  transient shell-only state.
+- Model and runtime policy remains explicit. Missing credentials, incompatible
+  provider/model pairs, absent plugin roots, and unknown tool options fail with
+  actionable errors instead of silently choosing another provider, model, or
+  behavior path.
+- Legacy `taint-iris:hunt` compatibility routes through the current Taint IRIS
+  Next path, while public discovery and report labels keep defensive scanner
+  terminology precise.
+
 ## Privacy & Data Flow
 
 Kuzushi is local-first and ships **no telemetry**. Findings, evidence, run
@@ -89,12 +118,20 @@ kuzushi findings --target . --limit 10
 # Inspect one finding's evidence, proof state, verification, and next action.
 kuzushi finding F-0001 --target .
 
+# Record a human review decision without mutating scanner triage output.
+kuzushi decision F-0001 --target . \
+  --verdict confirmed \
+  --reason "reviewed source-linked evidence and accepted the finding"
+
 # Render a markdown PR/security review summary from persisted findings.
 kuzushi pr-comment --target . > kuzushi-report.md
+
+# Or export the canonical persisted projection.
+kuzushi export --target . --format json --completeness complete --out findings.json
 ```
 
-Fresh native state is stored under `.kuzushi/v2/`; scan, shell, and headless
-run summaries remain under `.kuzushi/runs/<runId>/`.
+Fresh native state is stored under `.kuzushi/v3/`; scan, shell, and headless
+run summaries remain under `.kuzushi/v3/runs/<runId>/`.
 `kuzushi doctor --target .` runs a Rust preflight over config, writable state,
 findings DB openability, optional scanner binaries, and the LangGraph
 bridge without printing credential values.
@@ -130,10 +167,12 @@ inside the TUI and your terminal still gives you a selection modifier.
 | --- | --- |
 | `kuzushi shell [--target <repo>]` | Start the Ratatui shell. |
 | `kuzushi demo` | Scan a vendored vulnerable fixture offline — no API key, no model, no external scanners. The fastest way to see a real finding with evidence. |
-| `kuzushi scan <repo> [--mode standard\|whitebox-static] [--tasks a,b] [--triage] [--json] [--ci] [--fail-on low\|medium\|high\|critical] [--sarif out.sarif]` | Run the Rust SAST umbrella executor and persist findings. `--fail-on` exits 3 when findings at/above the severity exist (CI gating); `--sarif` writes a SARIF 2.1.0 export for Code Scanning upload. |
+| `kuzushi scan <repo> [--mode standard\|whitebox-static] [--tasks a,b] [--triage] [--json] [--ci] [--fail-on low\|medium\|high\|critical] [--sarif out.sarif]` | Run the Rust SAST umbrella executor and persist findings. `--fail-on` exits 3 when findings at/above the severity exist (CI gating); `--sarif` writes a SARIF 2.1.0 export for Code Scanning upload. Descriptor-backed inputs also support `verifyWhen`, `verifyMax`, and `verifyVotes` for post-triage verification selection. |
 | `kuzushi findings --target <repo> [--severity high,critical] [--verdict true_positive] [--name text] [--file-path path] [--limit 50] [--json]` | List persisted findings. |
 | `kuzushi finding <F-0001\|fingerprint-prefix> --target <repo> [--json]` | Inspect one finding's evidence, proof state, verification summary, patch result, and next action. |
-| `kuzushi runs list [--status completed,failed]\|show <runId>\|trace <runId>\|diff <a> <b>\|prune --target <repo>` | Inspect, compare, or prune replayable summaries, result artifacts, and trace JSONL under `.kuzushi/runs/<runId>/`. |
+| `kuzushi decision <F-0001\|fingerprint-prefix> --target <repo> --verdict confirmed\|rejected_false_positive\|suppressed\|deferred\|accepted_risk\|needs_review --reason <text> [--json]` | Append a human review decision for a persisted finding. This carries forward by durable identity and does not mutate scanner triage. |
+| `kuzushi runs list [--status completed,failed]\|show <runId>\|trace <runId>\|diff <a> <b>\|prune --target <repo>` | Inspect, compare, or prune replayable summaries, result artifacts, and trace JSONL under `.kuzushi/v3/runs/<runId>/`. |
+| `kuzushi export --target <repo> --out <path> [--format json\|jsonl\|sarif\|csv\|markdown-bundle] [--completeness all\|open\|complete] [--preview] [--allow-empty]` | Export or preview the canonical persisted findings projection with review state and provenance. |
 | `kuzushi suppress <F-0001> --target <repo> --reason <text> [--days 90]` | Record an expiring, evidence-backed suppression; findings remain visible in audit/report output. |
 | `kuzushi suppressions --target <repo>` | List suppression memory and the audit store path. |
 | `kuzushi permissions [--target <repo>]` | Show the current model fallback, approval, headless-run, and sandbox policy summary. |
@@ -142,8 +181,8 @@ inside the TUI and your terminal still gives you a selection modifier.
 | `kuzushi tools [--json]` | List visible executable tool descriptors. |
 | `kuzushi doctor [--target <repo>] [--json]` | Check config, local state, findings DB openability, scanner binaries, bridge readiness, and model/auth setup. |
 | `kuzushi run <module:tool> --input '<json>' [--option key=value]` | Execute one explicit tool through the Rust registry. Use global `--target` for workspace-backed tools; `run .` is shell-only focused-module shorthand. |
-| `kuzushi mcp <server>` | Run a local MCP server over stdio. |
-| `kuzushi auth` | Print auth diagnostics; interactive provider login is handled inside `kuzushi shell`. |
+| `kuzushi mcp serve <gtags\|clang\|joern\|tree-sitter\|codeql>` | Run a local MCP server over stdio. Use `kuzushi mcp health <backend>` for a JSON readiness check. |
+| `kuzushi auth ping [anthropic\|openai] [--model provider:model]` | Round-trip auth diagnostics; interactive provider login is handled inside `kuzushi shell`. |
 | `kuzushi config show` | Print effective config. |
 | `kuzushi config init [--force]` | Write the default global config. |
 | `kuzushi config path` | Print the global config path. |
@@ -156,10 +195,14 @@ kuzushi scan . --mode standard --tasks semgrep,secret-scan --json
 kuzushi scan . --tasks agentic-sast --triage --json
 kuzushi findings --target . --severity high,critical --limit 10
 kuzushi finding F-0001 --target .
+kuzushi decision F-0001 --target . --verdict confirmed --reason "reviewed source-linked evidence"
 kuzushi runs list --target .
 kuzushi runs list --target . --status failed,partial
 kuzushi runs diff run-a run-b --target . --json
 kuzushi runs prune --target . --older-than-days 30 --keep-last 20 --dry-run
+kuzushi export --target . --out findings.json --format json --completeness all
+kuzushi export --target . --out complete.sarif --format sarif --completeness complete
+kuzushi export --target . --out preview.json --format json --preview --allow-empty
 kuzushi permissions --target .
 kuzushi pr-comment --target . --repo allsmog/Kuzushi > kuzushi-report.md
 kuzushi --target . run context:build --input '{}'
@@ -196,14 +239,36 @@ the same canonical key.
 | --- | --- |
 | `show options [tool]` | Inspect accepted option names, aliases, types, defaults, and current values. |
 | `set <key> <value>` | Set a shell-session option for the focused tool. |
-| `setg <key> <value>` | Persist a global option in `~/.kuzushi/v2/options.json`. |
+| `setg <key> <value>` | Persist a global option in `~/.kuzushi/v3/options.json`. |
 | `kuzushi run <tool> --option key=value` | Apply a one-shot session option before `--input` is merged. |
 | `kuzushi scan ...` | Compile scan flags into canonical `sast:scan` input. |
 
-Persistent state lives in `~/.kuzushi/v2/options.json` and
-`<target>/.kuzushi/v2/options.json`. Config remains separate for model,
-runtime, bridge, budget, and approval policy. See
+Persistent state lives in `~/.kuzushi/v3/options.json` and
+`<target>/.kuzushi/v3/options.json`. Config remains separate for model,
+runtime, bridge, budget, and approval policy. Project configs may set guided
+phase fields, but model/runtime/operator policy is operator-owned and must live
+in home config/models files, env bootstrap, or explicit tool input. See
 [docs/operator-control-surfaces.md](docs/operator-control-surfaces.md).
+
+## Review And Data Semantics
+
+Kuzushi keeps scanner facts, model judgments, and human decisions distinct:
+
+- **Scanner output** is the detector or tool result: rule id, severity,
+  confidence, evidence, source location, raw result hash, and provenance.
+- **Static proof state** is what the deterministic or static pipeline can
+  support from artifacts such as SARIF, Semgrep, CodeQL, snapshots, and stored
+  evidence.
+- **Runtime verification** is an explicit verification result with its own
+  proof level, verdict, cost, and run context.
+- **Human review decision** is an append-only operator decision recorded by
+  `kuzushi decision` or suppression flows. It has a human author and rationale,
+  carries forward through run diffs by durable identity when safe, and is
+  exported alongside scanner data without overwriting scanner triage.
+
+Reports, exports, Workbench rows, and run diffs must preserve those meanings.
+Avoid replacing them with generic labels such as "fixed", "done", or "AI
+confirmed" unless the underlying state explicitly proves that claim.
 
 ## Rust Shell
 
@@ -224,15 +289,15 @@ Piped shell output automatically uses the same strict plain renderer as
 | `/set <key> <value>`, `setg <key> <value>`, `/unset <key>`, `unsetg <key>` | Set or clear session/global option values for subsequent runs and scans. |
 | `/tasks`, `/task block <id>`, `/task allow <id>`, `/task toggle [id]`, `/task mode auto\|manual\|toggle`, `/task reset` | Configure SAST task selection for `sast:scan` and shell scans. |
 | `/context`, `/context build`, `/context status`, `/context regen <slice>` | View or rebuild the local context snapshot. |
-| `/kb [module]`, `attachments`, `attach <path-or-url>`, `detach <id>`, `reparse <id>` | Manage local `.kuzushi/v2/` KB attachments; URL attachments are metadata-only. |
-| `/workspace`, `workspace export findings <path>`, `findings export <path>` | Show workspace state and export findings as JSON or JSONL. |
+| `/kb [module]`, `attachments`, `attach <path-or-url>`, `detach <id>`, `reparse <id>` | Manage local `.kuzushi/v3/` KB attachments; URL attachments are metadata-only. |
+| `/workspace`, `workspace export findings <path> [format] [--allow-empty]`, `findings export <path>` | Show workspace state and export findings as JSON, JSONL, SARIF, CSV, or markdown bundle. |
 | `/findings`, `/open <alias-or-fingerprint>`, `/show aliases [prefix]` | Load findings and open deterministic aliases such as `F-0001`. |
 | `/show runs`, `/replay <runId>`, `/trace <runId>`, `/since <git-ref>` | Inspect replayable run artifacts and diff-scoped findings. |
-| `/threats [dfd\|stride\|stories\|scope\|summary\|1..5]`, `/threats regen`, `/threats ask <question>` | Switch threat-model views or request a reviewable threat-model patch. |
+| `/threats [dfd\|stride\|stories\|scope\|summary\|1..4]`, `/threats edit`, `/threats regen`, `/threats apply`, `/threats reject`, `/threats ask <question>` | Switch threat-model views or request and review a threat-model patch. |
 | `/auth`, `/auth login <provider>`, `/provider`, `/backend`, `/model [choice]`, `/cost`, `/config`, `/permissions` | Show credential status without secrets, select explicit models, and report known cost/config/approval state. |
 | `/history`, `/clear`, `/load <specifier>`, `/pause`, `/resume [runId]`, `/story` | Session utilities and precise replacement messages for unsupported legacy live-control paths. |
 | `/prompts`, `/prompt <verb>`, `/tune`, `/actor <n>`, `/plan <english>` | Prompt, tuning, transcript, and planner surfaces. |
-| `/quit`, `exit`, `/exit`, `/exitj` | Exit. |
+| `/quit`, `exit`, `/exit` | Exit. |
 
 ## Phase-Driven Workflow (組 → 崩 → 作 → 掛)
 
@@ -265,7 +330,8 @@ dependency-correct task set:
 
 `cpg:build` accepts a `heapMb` option (defaulting to ~75% of physical RAM) and
 classifies heap-exhaustion failures with an actionable message instead of an
-opaque crash. The Activity view's OUTPUT pane renders the threat model's
+opaque crash. The Activity view's OUTPUT pane starts on findings and switches
+directly between generated security artifacts, including the threat model's
 data-flow diagram (boxes, trust zones, flows) once a threat model exists.
 
 ## Built-In Modules
@@ -280,16 +346,19 @@ current built-ins are:
 | `sast` | `sast:scan` |
 | `semgrep` | `semgrep:scan` |
 | `codeql` | `codeql:scan` |
+| `cargo-audit` | `cargo-audit:scan` |
+| `govulncheck` | `govulncheck:scan` |
 | `agentic-sast` | `agentic-sast:scan` |
 | `offense-review` | `offense-review:threat-hunt` |
-| `taint-iris` | `taint-iris:hunt` |
 | `taint-iris-next` | `taint-iris-next:dataflow-plan`, `taint-iris-next:source-sink-trace`, `taint-iris-next:finding-review` |
 | `triage` | `triage:run` |
 | `verify` | `verify:finding` |
 | `patch` | `patch:finding` |
 | `findings` | `findings:list` |
+| `report` | `report:build` |
 | `threat-model` | `threat-model:build`, `threat-model:read`, `threat-model:methodologies` |
-| `randori` | `randori:pasta`, `randori:threat-model` |
+| `threat-intel` | `threat-intel:discover`, `threat-intel:list`, `threat-intel:apply`, `threat-intel:harvest` |
+| `randori` | `randori:pasta` |
 | `x-ray` | `x-ray:run`, `x-ray:read` |
 | `dep-hygiene` | `dep-hygiene:check` |
 | `secret-scan` | `secret-scan:scan` |
@@ -298,6 +367,12 @@ current built-ins are:
 | `variant` | `variant:lift-pattern`, `variant:hunt` |
 | `ndiff` | `ndiff:fetch-cve`, `ndiff:extract-fix-pattern`, `ndiff:hunt-variants` |
 | `iac-scan` | `iac-scan:scan` |
+| `android-apk` | `android-apk:scan` |
+| `entry-points` | `entry-points:extract` |
+| `cpg` | `cpg:build` |
+| `codeql-db` | `codeql:create-db` |
+| `bounty` | `bounty:import-har`, `bounty:import-burp` |
+| `router` | `router:show` |
 | `catalog` | `catalog:modules`, `catalog:tools` |
 | `config` | `config:show` |
 | `workspace` | `workspace:status`, `workspace:export-findings` |
@@ -305,10 +380,20 @@ current built-ins are:
 Internal DAG modules such as `context-lite`, `pipeline`, and `systems-hunt`
 stay hidden from `kuzushi modules`; `systems-hunt:*` entries are internal DAG
 nodes selected through `sast:scan`, not public catalog tools. Deferred
-compatibility modules are also hidden from the public catalog and shell
-completions, but remain executable by exact tool name for operators who opt
-into them: `carlini-threat-hunt`, `chrome-rce`, `prompt-armor`, `pwn`,
-`recon`, `shinsa`, `tob`, `uaf-hunt`, `vendor-assessment`, and `vuln-scout`.
+compatibility and product-quarantine modules are also hidden from the public
+catalog and shell completions, but remain executable by exact tool name for
+operators who opt into them: `carlini-threat-hunt`, `classifier-gate`,
+`chrome-rce`, `deep-audit`, `exploit-chain`, `full-mode`, `pwn`,
+`threat-leads`, `uaf-hunt`, and `vendor-assessment`. Legacy folded tools such
+as `taint-iris:hunt`, `taint-iris-next:hunt`, `randori:threat-model`,
+`verify:exploit`, and the granular `android-apk:*` sub-scans are exact-name
+compatibility entries; prefer the visible umbrella tools and descriptor options
+shown above.
+
+Optional plugin-backed adapters (`prompt-armor`, `shinsa`, `tob`, and
+`vuln-scout`) self-hide when their plugin package is absent. When installed,
+their canonical descriptor rows surface; legacy quick/deep aliases remain
+exact-name compatibility entries where applicable.
 
 Per-module operator guides live under `docs/`: [`docs/x-ray.md`](./docs/x-ray.md)
 for repository analysis reports and [`docs/pwn.md`](./docs/pwn.md) for the
@@ -318,7 +403,7 @@ binary-exploitation workflow.
 
 Native deterministic tools run without an LLM: `module-recommender`,
 `context`, `findings`, `dep-hygiene`, `secret-scan`, `license-scan`, `sbom-scan`,
-`iac-scan`, and local artifact readers.
+`iac-scan`, `govulncheck`, and local artifact readers.
 
 `license-scan` checks package manifest license declarations, top-level
 repository `LICENSE`/`COPYING` consistency, and SPDX source headers that
@@ -335,8 +420,9 @@ Subprocess-backed tools require the operator to install or configure binaries:
 | --- | --- |
 | `semgrep:scan` | `semgrep`, or pass `{"binary":"/path/to/semgrep"}`. |
 | `codeql:scan` | CodeQL CLI, or pass `{"binary":"/path/to/codeql"}`. |
-| Deferred `recon:nmap` | `nmap`, or pass a binary override. |
-| Deferred `recon:subdomain`, deferred `recon:http-fingerprint`, online `ndiff:fetch-cve` | `curl`, unless using offline/local input. |
+| `govulncheck:scan` | `govulncheck`, installed through the Go toolchain. |
+| `recon:nmap` | `nmap`, or pass a binary override. |
+| `recon:subdomain`, `recon:http-fingerprint`, online `ndiff:fetch-cve` | `curl`, unless using offline/local input. |
 
 LangGraph-backed tools require Node, `@langchain/langgraph`,
 `@langchain/openai` or `@langchain/anthropic`, a configured model, and provider
@@ -361,34 +447,38 @@ not silently succeed and they do not substitute a different model.
 
 | Path | Produced by |
 | --- | --- |
-| `~/.kuzushi/v2/config.toml` | `kuzushi config init` |
-| `.kuzushi/v2/config.toml` | Optional project override |
-| `~/.kuzushi/v2/options.json` | persisted global tool options from shell `setg` |
-| `.kuzushi/v2/options.json` | optional project/workspace tool option overrides |
-| `.kuzushi/v2/findings.sqlite3` | scan, shell, and run-mode tool persistence |
-| `.kuzushi/v2/attachments.json` | Rust shell KB attachments |
-| `.kuzushi/v2/artifact-kb.sqlite3` | Local artifact knowledge search index |
+| `~/.kuzushi/v3/config.toml` | `kuzushi config init` |
+| `.kuzushi/v3/config.toml` | Optional project override |
+| `~/.kuzushi/v3/options.json` | persisted global tool options from shell `setg` |
+| `.kuzushi/v3/options.json` | optional project/workspace tool option overrides |
+| `.kuzushi/v3/index.sqlite3` | scan, shell, and run-mode tool persistence |
+| `.kuzushi/v3/log/events-*.jsonl` | append-only event log for v3 projection, review decisions, run lifecycle, verification, patch attempts, and audit events |
+| `.kuzushi/v3/scene-taint-flow.json` | persisted attack-path snapshot for `/scene`, Activity, and workbench views |
+| `.kuzushi/v3/scene-exploit-chains.json` | persisted exploit-chain snapshot for `/scene`, Activity, and workbench views |
+| `.kuzushi/v3/strategy-queue.jsonl` | persisted strategy proposals, status, outcome, cost, and correction history |
+| `.kuzushi/v3/attachments.json` | Rust shell KB attachments |
+| `.kuzushi/v3/artifact-kb.sqlite3` | Local artifact knowledge search index |
 | `.kuzushi/context-snapshot.json` | `context:build` |
 | `.kuzushi/threat-model.json` | `threat-model:*`, `randori:*`, and threat-model readers |
-| `.kuzushi/latest` | latest completed, partial, failed, skipped, or running run id |
-| `.kuzushi/runs/<runId>/run.json` | canonical run metadata, status, cost, LLM audit, and artifact list |
-| `.kuzushi/runs/<runId>/events.jsonl` | tool lifecycle events |
-| `.kuzushi/runs/<runId>/trace.jsonl` | ordered trace steps for replay and activity views |
-| `.kuzushi/runs/<runId>/context.json` | run-scoped context snapshot or explicit skipped marker |
-| `.kuzushi/runs/<runId>/attack-surface.json` | run-scoped attack-surface snapshot or explicit skipped marker |
-| `.kuzushi/runs/<runId>/threat-model.json` | run-scoped threat-model snapshot or explicit skipped marker |
-| `.kuzushi/runs/<runId>/recommendations.json` | run-scoped recommendation snapshot or explicit skipped marker |
-| `.kuzushi/runs/<runId>/findings.json` | normalized finding snapshot or explicit skipped marker |
-| `.kuzushi/runs/<runId>/proof.json` | proof-state snapshot or explicit skipped marker |
-| `.kuzushi/runs/<runId>/failures.json` | bounded failure handoff context, empty when no failure is recorded |
-| `.kuzushi/runs/<runId>/report.md` | generated or placeholder Markdown report; promoted from `reportMarkdown`/`report_markdown` and `data.reportMarkdown`/`data.report_markdown` output aliases |
-| `.kuzushi/runs/<runId>/artifacts.json` | canonical artifact manifest for the run |
-| `.kuzushi/runs/<runId>/input.json` | prepared tool input for direct tool runs |
-| `.kuzushi/runs/<runId>/result.json` | tool result envelope for direct tool runs |
-| `.kuzushi/runs/<runId>/report.sarif` | optional SARIF report promoted from `reportSarif`/`report_sarif` and `data.reportSarif`/`data.report_sarif` output aliases |
-| `.kuzushi/runs/<runId>/summary.json` | legacy compatibility mirror of `run.json` |
-| `.kuzushi/runs/<runId>/triage.jsonl` | `sast:scan --triage` and post-scan triage |
-| `.kuzushi/runs/<runId>/verify.jsonl` | `sast:scan` with verify/auto-patch inputs |
+| `.kuzushi/v3/latest` | latest completed, partial, failed, skipped, or running run id |
+| `.kuzushi/v3/runs/<runId>/run.json` | canonical run metadata, status, cost, LLM audit, and artifact list |
+| `.kuzushi/v3/runs/<runId>/events.jsonl` | tool lifecycle events |
+| `.kuzushi/v3/runs/<runId>/trace.jsonl` | ordered trace steps for replay and activity views |
+| `.kuzushi/v3/runs/<runId>/context.json` | run-scoped context snapshot or explicit skipped marker |
+| `.kuzushi/v3/runs/<runId>/attack-surface.json` | run-scoped attack-surface snapshot or explicit skipped marker |
+| `.kuzushi/v3/runs/<runId>/threat-model.json` | run-scoped threat-model snapshot or explicit skipped marker |
+| `.kuzushi/v3/runs/<runId>/recommendations.json` | run-scoped recommendation snapshot or explicit skipped marker |
+| `.kuzushi/v3/runs/<runId>/strategy.json` | run-scoped strategy proposal snapshot or explicit skipped marker |
+| `.kuzushi/v3/runs/<runId>/findings.json` | normalized finding snapshot or explicit skipped marker |
+| `.kuzushi/v3/runs/<runId>/proof.json` | proof-state snapshot or explicit skipped marker |
+| `.kuzushi/v3/runs/<runId>/failures.json` | bounded failure handoff context, empty when no failure is recorded |
+| `.kuzushi/v3/runs/<runId>/report.md` | generated or placeholder Markdown report; promoted from `reportMarkdown`/`report_markdown` and `data.reportMarkdown`/`data.report_markdown` output aliases |
+| `.kuzushi/v3/runs/<runId>/artifacts.json` | canonical artifact manifest for the run |
+| `.kuzushi/v3/runs/<runId>/input.json` | prepared tool input for direct tool runs |
+| `.kuzushi/v3/runs/<runId>/result.json` | tool result envelope for direct tool runs |
+| `.kuzushi/v3/runs/<runId>/report.sarif` | optional SARIF report promoted from `reportSarif`/`report_sarif` and `data.reportSarif`/`data.report_sarif` output aliases |
+| `.kuzushi/v3/runs/<runId>/triage.jsonl` | `sast:scan --triage` and post-scan triage |
+| `.kuzushi/v3/runs/<runId>/verify.jsonl` | `sast:scan` with verify/auto-patch inputs |
 | `x-ray/` | `x-ray:run` |
 | `.kuzushi/vendor-assessment/` | vendor assessment tools |
 | `.prompt-armor/` | PromptArmor deterministic config/report tools |
@@ -428,6 +518,21 @@ Useful package scripts:
 | `pnpm doctor` | Run source-checkout development diagnostics; use `kuzushi doctor` for Rust CLI preflight. |
 | `pnpm check:docs` | Guard port-contract docs, public docs/workflows, stale Rust CLI command examples, and retired TS runtime imports. |
 | `pnpm export:source [path]` | Create a clean source tarball from tracked files with local state excluded. |
+
+Design and audit documents for the current UX/data redesign live at the repo
+root:
+
+- [`ACCEPTED_FABLE_RECOMMENDATIONS.md`](./ACCEPTED_FABLE_RECOMMENDATIONS.md)
+  maps generic UX recommendations back to real scanner semantics.
+- [`REAL_IMPLEMENTATION_SPEC.md`](./REAL_IMPLEMENTATION_SPEC.md) is the
+  implementation-ready spec for UX, TUI, CLI, data, state, persistence,
+  reporting, migration, and tests.
+- [`DOMAIN_RISK_REVIEW.md`](./DOMAIN_RISK_REVIEW.md) records wording,
+  confidence/status, report, data-loss, and review-workflow risks.
+- [`GPT_IMPLEMENTATION_BRIEF.md`](./GPT_IMPLEMENTATION_BRIEF.md) captures the
+  implementation priorities, constraints, files to inspect, and required tests.
+- [`REDESIGN_COMPLETION_AUDIT.md`](./REDESIGN_COMPLETION_AUDIT.md) records the
+  commands and evidence used to verify this branch.
 
 ## TypeScript Retention
 

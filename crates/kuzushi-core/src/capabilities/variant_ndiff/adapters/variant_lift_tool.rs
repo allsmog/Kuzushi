@@ -49,7 +49,7 @@ fn variant_lift_subject<'a>(
     fingerprint: &str,
 ) -> Result<VariantLiftSubject<'a>> {
     let workspace = ctx.workspace.context(
-        "variant:lift-pattern needs an active workspace. Pass --target <repo> or start the shell with --target.",
+        crate::workspace::active_workspace_required_message("variant:lift-pattern"),
     )?;
     let store = ctx
         .findings_store

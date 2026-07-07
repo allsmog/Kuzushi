@@ -124,7 +124,10 @@ pub fn finding_evidence_preview(finding: &Finding) -> String {
 }
 
 pub fn finding_remediation_hint(finding: &Finding) -> Option<String> {
-    if let Some(remediation) = finding.remediation.as_ref().filter(|value| !value.trim().is_empty())
+    if let Some(remediation) = finding
+        .remediation
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
     {
         return Some(remediation.trim().to_string());
     }

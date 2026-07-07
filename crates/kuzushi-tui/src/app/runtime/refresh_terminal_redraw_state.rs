@@ -43,21 +43,6 @@ pub(crate) fn draw_terminal_if_needed(
     Ok(false)
 }
 
-pub(crate) fn poll_terminal_event(app: &mut ShellApp) -> Result<bool> {
-    if !terminal_event_ready(app)? {
-        return Ok(false);
-    }
-    read_and_apply_terminal_event(app)
-}
-
-pub(crate) fn terminal_event_ready(app: &ShellApp) -> Result<bool> {
-    Ok(event::poll(terminal_event_timeout(app))?)
-}
-
-pub(crate) fn read_and_apply_terminal_event(app: &mut ShellApp) -> Result<bool> {
-    Ok(apply_terminal_event(app, event::read()?))
-}
-
 pub(crate) fn terminal_event_timeout(app: &ShellApp) -> Duration {
     if app.scene_animating() {
         SCENE_FRAME

@@ -8,7 +8,6 @@ pub(crate) struct ThreatNavItem {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ThreatPanel {
-    Dfd,
     Stride,
     Stories,
     Scope,
@@ -17,7 +16,6 @@ pub(crate) enum ThreatPanel {
 
 pub(crate) fn threat_panel_model(view: ThreatView) -> ThreatPanel {
     match view {
-        ThreatView::Dfd => ThreatPanel::Dfd,
         ThreatView::Stride => ThreatPanel::Stride,
         ThreatView::Stories => ThreatPanel::Stories,
         ThreatView::Scope => ThreatPanel::Scope,
@@ -25,13 +23,14 @@ pub(crate) fn threat_panel_model(view: ThreatView) -> ThreatPanel {
     }
 }
 
-pub(crate) fn threat_nav_model(active: ThreatView) -> [ThreatNavItem; 5] {
+// The DFD tab moved into the Workbench command center's center pane; the
+// remaining STRIDE / STORIES / SCOPE / SUMMARY tabs renumber from 1.
+pub(crate) fn threat_nav_model(active: ThreatView) -> [ThreatNavItem; 4] {
     [
-        nav_item(active, ThreatView::Dfd, "1 DFD"),
-        nav_item(active, ThreatView::Stride, "2 STRIDE"),
-        nav_item(active, ThreatView::Stories, "3 STORIES"),
-        nav_item(active, ThreatView::Scope, "4 SCOPE"),
-        nav_item(active, ThreatView::Summary, "5 SUMMARY"),
+        nav_item(active, ThreatView::Stride, "1 STRIDE"),
+        nav_item(active, ThreatView::Stories, "2 STORIES"),
+        nav_item(active, ThreatView::Scope, "3 SCOPE"),
+        nav_item(active, ThreatView::Summary, "4 SUMMARY"),
     ]
 }
 
@@ -50,15 +49,15 @@ mod tests {
     fn threat_nav_model_marks_active_tab() {
         let items = threat_nav_model(ThreatView::Scope);
 
-        assert_eq!(items.len(), 5);
-        assert_eq!(items[3].label, "4 SCOPE");
-        assert!(items[3].active);
+        assert_eq!(items.len(), 4);
+        assert_eq!(items[2].label, "3 SCOPE");
+        assert!(items[2].active);
         assert!(!items[0].active);
     }
 
     #[test]
     fn threat_panel_model_maps_shell_view_to_renderer_panel() {
-        assert_eq!(threat_panel_model(ThreatView::Dfd), ThreatPanel::Dfd);
+        assert_eq!(threat_panel_model(ThreatView::Stride), ThreatPanel::Stride);
         assert_eq!(
             threat_panel_model(ThreatView::Summary),
             ThreatPanel::Summary

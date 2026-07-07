@@ -49,7 +49,7 @@ fn plain_sast_task_row(row: &PlainSastTaskRow, widths: &[usize]) -> String {
 
 pub(crate) fn plain_help_lines(app: &ShellApp, width: usize) -> Vec<String> {
     let mut lines = plain_context_strip(app, width);
-    let model = plain_help_model();
+    let model = plain_help_model(app.help_route.filter());
     push_plain_help_summary(&mut lines, &model, width);
     for category in &model.categories {
         append_plain_help_category(&mut lines, category);
@@ -61,6 +61,10 @@ fn push_plain_help_summary(lines: &mut Vec<String>, model: &PlainHelpModel, widt
     lines.push(String::new());
     lines.push(plain_section_divider(model.title, width));
     lines.push(model.intro.to_string());
+    lines.push(model.glossary.to_string());
+    if let Some(note) = &model.filter_note {
+        lines.push(note.clone());
+    }
     if let Some(examples) = &model.examples_line {
         lines.push(examples.clone());
     }

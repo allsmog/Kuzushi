@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Debug, Clone, Serialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaintCweSelection {
     pub(crate) id: String,
@@ -8,7 +8,7 @@ pub(crate) struct TaintCweSelection {
     pub(crate) reason: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaintIrisReport {
     pub(crate) target: String,
@@ -25,7 +25,7 @@ pub(crate) struct TaintIrisReport {
 }
 
 /// One taint flow: the CWE/severity plus its ordered source→sink stages.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaintFlow {
     pub(crate) cwe: String,
@@ -33,7 +33,7 @@ pub(crate) struct TaintFlow {
     pub(crate) stages: Vec<TaintFlowStage>,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaintFlowStage {
     pub(crate) message: String,
@@ -42,7 +42,7 @@ pub(crate) struct TaintFlowStage {
     pub(crate) snippet: String,
 }
 
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct TaintIrisPersistedRun {
     pub(crate) run_id: String,

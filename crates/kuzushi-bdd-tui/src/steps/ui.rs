@@ -12,6 +12,15 @@ async fn press_key(world: &mut OnboardingWorld, key: String) {
     std::thread::sleep(Duration::from_millis(250));
 }
 
+#[when(regex = r#"^I type command "([^"]+)"$"#)]
+async fn type_command(world: &mut OnboardingWorld, command: String) {
+    let session = world.require_session();
+    session
+        .send_keys(&[&command, "Enter"])
+        .expect("tmux send-keys command failed");
+    std::thread::sleep(Duration::from_millis(250));
+}
+
 #[when(regex = r#"^I move the cursor to "([^"]+)"$"#)]
 async fn move_cursor_to(world: &mut OnboardingWorld, label: String) {
     let session = world.require_session();
@@ -63,9 +72,10 @@ async fn log_contains(world: &mut OnboardingWorld, needle: String) {
 async fn row_checked(world: &mut OnboardingWorld, label: String) {
     let session = world.require_session();
     let snapshot = session.snapshot().expect("snapshot failed");
-    let matched = snapshot
-        .lines()
-        .any(|line| line.contains("[x]") && line.contains(&label));
+    let matched = snapshot.lines().any(|line| {
+        line.contains(&label)
+            && (line.contains("[x]") || line.contains(" RUN ") || line.contains(" REUSE "))
+    });
     assert!(
         matched,
         "expected `{label}` row to be checked; pane was:\n{snapshot}"
@@ -78,7 +88,7 @@ async fn row_unchecked(world: &mut OnboardingWorld, label: String) {
     let snapshot = session.snapshot().expect("snapshot failed");
     let matched = snapshot
         .lines()
-        .any(|line| line.contains("[ ]") && line.contains(&label));
+        .any(|line| line.contains(&label) && (line.contains("[ ]") || line.contains(" SKIP ")));
     assert!(
         matched,
         "expected `{label}` row to be unchecked; pane was:\n{snapshot}"

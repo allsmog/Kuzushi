@@ -3,38 +3,662 @@ mod tests {
     use crate::adapters::auth_bridge::{
         bridge_ping_error, bridge_ping_summary, parse_bridge_stdout, run_auth_ping_bridge,
     };
-    use crate::adapters::auth_oauth::{anthropic_oauth_readiness_message, auth_ping_model};
+    use crate::adapters::auth_oauth::{
+        anthropic_missing_credential_message, anthropic_oauth_readiness_message, auth_ping_model,
+        openai_missing_credential_message,
+    };
     use crate::adapters::auth_ping::{auth_ping_provider_kind, AuthPingLog};
     use crate::application::config::{config_command, ensure_config_init_allowed};
+    use crate::application::review_decisions::decision_command;
     use crate::application::run_tool::{
         apply_option_override, output_with_cli_run_artifacts, parse_option_override,
-        start_cli_tool_run_with_loaded_modules,
+        run_tool_command, start_cli_tool_run_with_loaded_modules,
     };
     use crate::application::runs::{filter_runs_by_status, run_trace_path};
-    use crate::application::runs_diff::runs_diff;
+    use crate::application::runs_diff::{runs_diff, runs_diff_output};
     use crate::application::runs_prune::runs_prune_plan;
     use crate::application::scan::{scan_scope_body, scan_tool_input, scan_worktree_suffix};
-    use crate::application::suppressions::{suppressions_command_output, suppressions_plain_lines};
-    use crate::command::{ConfigCommand, McpBackend, ScanModeArg};
-    use crate::doctor::{check_model_config, deterministic_capability_checks, DoctorStatus};
+    use crate::application::suppressions::{
+        suppress_command, suppressions_command, suppressions_command_output,
+        suppressions_plain_lines,
+    };
+    use crate::command::{Command, ConfigCommand, McpBackend, ScanModeArg};
+    use crate::doctor::{
+        check_auth_env, check_model_config, deterministic_capability_checks, DoctorStatus,
+    };
     use crate::mcp::{mcp_health_spawn_error, mcp_spawn_error};
     use crate::presentation::{
-        ci_line, format_duration, plain_output_requested, scan_json_output, scan_started_body,
-        shell_startup_progress_messages, should_emit_shell_startup_progress,
+        ci_line, format_duration, plain_output_requested, scan_json_output,
+        scan_plain_artifact_footer, scan_started_body, shell_startup_progress_messages,
+        should_emit_shell_startup_progress,
     };
     use crate::presentation::{
         parse_trace_json_lines, run_summary_plain, runs_list_output, runs_show_output,
         runs_trace_output,
     };
     use crate::tool_requirements::{
-        tool_defaults_to_workspace, tool_needs_finding_store, tool_needs_runtime,
+        run_tool_workspace, run_tool_workspace_for_input, tool_defaults_to_workspace,
+        tool_needs_finding_store, tool_needs_runtime,
     };
     use crate::tool_run_artifacts::{fail_cli_tool_run, finish_cli_tool_run};
+    use clap::{CommandFactory, Parser};
+    use kuzushi_core::findings::{
+        Finding, FindingStore, ReviewDecisionVerdict, Severity, TriageAuthor, TriageOutcome,
+        TriageVerdict,
+    };
     use kuzushi_core::{
         latest_run_path, load_run_summary, run_dir, write_run_summary, RunSummary, ToolOptionStore,
         WorkspaceTarget,
     };
     use std::path::{Path, PathBuf};
+
+    struct EnvVarGuard {
+        key: &'static str,
+        prior: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn unset(key: &'static str) -> Self {
+            let prior = std::env::var_os(key);
+            unsafe {
+                std::env::remove_var(key);
+            }
+            Self { key, prior }
+        }
+
+        fn set(key: &'static str, value: &str) -> Self {
+            let prior = std::env::var_os(key);
+            unsafe {
+                std::env::set_var(key, value);
+            }
+            Self { key, prior }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prior {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn cli_public_args_have_help_text() {
+        assert_args_have_help(&crate::cli::Cli::command(), "kuzushi");
+    }
+
+    #[test]
+    fn cli_target_args_share_help_text() {
+        assert_target_args_share_help(&crate::cli::Cli::command(), "kuzushi");
+    }
+
+    #[test]
+    fn findings_cli_accepts_decision_and_completeness_filters() {
+        let cli = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "findings",
+            "--decision",
+            "confirmed",
+            "--completeness",
+            "open",
+            "--status",
+            "seen",
+        ])
+        .unwrap();
+
+        let Some(Command::Findings {
+            decision,
+            completeness,
+            status,
+            verdict,
+            ..
+        }) = cli.command
+        else {
+            panic!("expected findings command");
+        };
+
+        assert_eq!(decision, vec!["confirmed"]);
+        assert_eq!(completeness, vec!["open"]);
+        assert_eq!(status, vec!["seen"]);
+        assert!(verdict.is_empty());
+    }
+
+    #[test]
+    fn decision_cli_accepts_review_decision_input() {
+        let cli = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "decision",
+            "F-0001",
+            "--verdict",
+            "suppressed",
+            "--reason",
+            "reviewed under approved policy",
+            "--json",
+        ])
+        .unwrap();
+
+        let Some(Command::Decision {
+            reference,
+            verdict,
+            reason,
+            json,
+        }) = cli.command
+        else {
+            panic!("expected decision command");
+        };
+
+        assert_eq!(reference, "F-0001");
+        assert_eq!(verdict, "suppressed");
+        assert_eq!(reason, "reviewed under approved policy");
+        assert!(json);
+    }
+
+    #[test]
+    fn export_cli_accepts_completeness_filter() {
+        let cli = crate::cli::Cli::try_parse_from([
+            "kuzushi",
+            "export",
+            "--out",
+            "findings.json",
+            "--format",
+            "json",
+            "--completeness",
+            "open",
+            "--preview",
+            "--allow-empty",
+        ])
+        .unwrap();
+
+        let Some(Command::Export {
+            format,
+            completeness,
+            preview,
+            allow_empty,
+            output,
+        }) = cli.command
+        else {
+            panic!("expected export command");
+        };
+
+        assert_eq!(format.as_deref(), Some("json"));
+        assert_eq!(completeness, "open");
+        assert!(preview);
+        assert!(allow_empty);
+        assert_eq!(output, PathBuf::from("findings.json"));
+    }
+
+    #[test]
+    fn export_preview_command_does_not_write_output_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("run-1", workspace.root(), "completed")
+            .unwrap();
+        store
+            .insert_finding(
+                "run-1",
+                &Finding::new_tool(
+                    "fixture",
+                    "fixture/sql",
+                    "src/app.ts",
+                    10,
+                    None,
+                    Severity::High,
+                    "request data reaches SQL",
+                ),
+            )
+            .unwrap();
+
+        crate::application::export::export_command(
+            workspace.root().to_path_buf(),
+            PathBuf::from("preview.json"),
+            Some("json".to_string()),
+            "all".to_string(),
+            true,
+            false,
+        )
+        .unwrap();
+
+        assert!(!workspace.root().join("preview.json").exists());
+    }
+
+    #[test]
+    fn export_command_requires_allow_empty_for_empty_write() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        FindingStore::open(workspace.findings_db_path()).unwrap();
+
+        let output = PathBuf::from("empty.json");
+        let error = crate::application::export::export_command(
+            workspace.root().to_path_buf(),
+            output.clone(),
+            Some("json".to_string()),
+            "all".to_string(),
+            false,
+            false,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("selected 0 findings"));
+        assert!(!workspace.root().join(&output).exists());
+        crate::application::export::export_command(
+            workspace.root().to_path_buf(),
+            output.clone(),
+            Some("json".to_string()),
+            "all".to_string(),
+            false,
+            true,
+        )
+        .unwrap();
+        assert!(workspace.root().join(output).exists());
+    }
+
+    #[test]
+    fn export_preview_requires_allow_empty_for_empty_selection() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        FindingStore::open(workspace.findings_db_path()).unwrap();
+        let output = PathBuf::from("empty-preview.json");
+
+        let error = crate::application::export::export_command(
+            workspace.root().to_path_buf(),
+            output.clone(),
+            Some("json".to_string()),
+            "all".to_string(),
+            true,
+            false,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("selected 0 findings"));
+        assert!(!workspace.root().join(&output).exists());
+        crate::application::export::export_command(
+            workspace.root().to_path_buf(),
+            output.clone(),
+            Some("json".to_string()),
+            "all".to_string(),
+            true,
+            true,
+        )
+        .unwrap();
+        assert!(!workspace.root().join(output).exists());
+    }
+
+    #[test]
+    fn run_review_export_preserves_scanner_output_and_user_review_state() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let run_id = "scan-review-export";
+        write_run_summary(
+            workspace.root(),
+            &RunSummary::running(
+                run_id,
+                "scan",
+                Some("sast:scan".to_string()),
+                workspace.root().display().to_string(),
+            )
+            .complete()
+            .with_findings(Some(1)),
+        )
+        .unwrap();
+        store
+            .record_run_started(run_id, workspace.root(), "completed")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "semgrep",
+            "javascript.express.xss",
+            "src/server.js",
+            2,
+            Some(2),
+            Severity::High,
+            "source-linked reflected XSS evidence reaches a response",
+        );
+        store.insert_finding(run_id, &finding).unwrap();
+        drop(store);
+
+        decision_command(
+            Some(workspace.root().to_path_buf()),
+            finding.fingerprint.clone(),
+            "confirmed".to_string(),
+            "operator confirmed source-linked evidence".to_string(),
+            true,
+        )
+        .unwrap();
+
+        let complete_output = PathBuf::from("review-export.json");
+        crate::application::export::export_command(
+            workspace.root().to_path_buf(),
+            complete_output.clone(),
+            Some("json".to_string()),
+            "complete".to_string(),
+            false,
+            false,
+        )
+        .unwrap();
+
+        let exported: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(workspace.root().join(complete_output)).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(exported["completeness"], "complete");
+        assert_eq!(exported["count"], 1);
+        assert_eq!(exported["includedCount"], 1);
+        assert_eq!(exported["totalCount"], 1);
+        let exported_finding = &exported["findings"][0];
+        assert_eq!(exported_finding["reviewDecision"], "confirmed");
+        assert_eq!(
+            exported_finding["reviewDecisionReason"],
+            "operator confirmed source-linked evidence"
+        );
+        assert_eq!(exported_finding["reviewDecisionAuthor"], "human");
+        assert_eq!(exported_finding["triageVerdict"], "true_positive");
+        assert_eq!(exported_finding["provenance"]["runId"], run_id);
+        assert_eq!(exported_finding["provenance"]["runStatus"], "completed");
+        assert!(exported_finding["identityId"].as_str().is_some());
+
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        assert_eq!(
+            store.list_findings(10).unwrap()[0].triage,
+            None,
+            "user review state must not mutate scanner triage output"
+        );
+
+        let open_error = crate::application::export::export_command(
+            workspace.root().to_path_buf(),
+            PathBuf::from("open-review-export.json"),
+            Some("json".to_string()),
+            "open".to_string(),
+            false,
+            false,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(open_error.contains("selected 0 findings"));
+    }
+
+    #[test]
+    fn run_review_export_uses_real_secret_scan_detector() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        write_secret_scan_fixture(&workspace);
+        let _run_id = run_secret_scan_cli(&workspace);
+        let finding = persisted_secret_scan_finding(&workspace);
+
+        record_confirmed_secret_scan_decision(&workspace, &finding);
+        let exported = export_complete_json(&workspace, "secret-review-export.json");
+
+        assert_secret_scan_export(&exported, &finding);
+        assert_persisted_scanner_triage_is_unmodified(&workspace);
+    }
+
+    #[test]
+    fn run_compare_review_uses_real_secret_scan_detector() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        write_secret_scan_fixture(&workspace);
+        let base_run_id = run_secret_scan_cli(&workspace);
+        write_unrelated_compare_change(&workspace);
+        let compare_run_id = run_secret_scan_cli(&workspace);
+        let compare_scan_id = persisted_scan_id_for_cli_run(&workspace, &compare_run_id);
+        let compare_finding = persisted_secret_scan_finding_for_scan(&workspace, &compare_scan_id);
+        let artifact_identity = assert_secret_scan_artifact_identity(&workspace, &compare_run_id);
+
+        let before_review = runs_diff(workspace.root(), &base_run_id, &compare_run_id).unwrap();
+        assert_real_secret_scan_diff_before_review(&before_review, &artifact_identity);
+
+        record_confirmed_secret_scan_decision(&workspace, &compare_finding);
+
+        let after_review = runs_diff(workspace.root(), &base_run_id, &compare_run_id).unwrap();
+        assert_real_secret_scan_diff_after_review(&after_review);
+        assert_latest_secret_scan_review(&workspace, &artifact_identity);
+        assert_persisted_scanner_triage_is_unmodified_for_scan(&workspace, &compare_scan_id);
+    }
+
+    fn write_secret_scan_fixture(workspace: &WorkspaceTarget) {
+        std::fs::write(
+            workspace.root().join("config.env"),
+            [
+                "OPENAI_API_KEY=",
+                "sk",
+                "-proj-",
+                "abcdefghijklmnopqrstuvwxyzABCDEFGH",
+            ]
+            .concat(),
+        )
+        .unwrap();
+    }
+
+    fn write_unrelated_compare_change(workspace: &WorkspaceTarget) {
+        std::fs::write(
+            workspace.root().join("README.md"),
+            "unrelated compare change\n",
+        )
+        .unwrap();
+    }
+
+    fn run_secret_scan_cli(workspace: &WorkspaceTarget) -> String {
+        run_tool_command(
+            "secret-scan:scan".to_string(),
+            "{}".to_string(),
+            Vec::new(),
+            Some(workspace.root().to_path_buf()),
+            Vec::new(),
+        )
+        .unwrap();
+        latest_cli_run_id(workspace)
+    }
+
+    fn latest_cli_run_id(workspace: &WorkspaceTarget) -> String {
+        std::fs::read_to_string(latest_run_path(workspace.root()))
+            .unwrap()
+            .trim()
+            .to_string()
+    }
+
+    fn persisted_secret_scan_finding(workspace: &WorkspaceTarget) -> Finding {
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let findings = store.list_findings(10).unwrap();
+        assert_eq!(findings.len(), 1);
+        let finding = findings[0].clone();
+        assert_eq!(finding.tool, "secret-scan");
+        assert_eq!(finding.rule_id, "secret-scan/openai-api-key");
+        assert!(
+            finding.scan_id.as_deref().is_some(),
+            "real scanner run should persist scan provenance"
+        );
+        assert_eq!(finding.triage, None);
+        finding
+    }
+
+    fn persisted_secret_scan_finding_for_scan(
+        workspace: &WorkspaceTarget,
+        scan_id: &str,
+    ) -> Finding {
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let findings = store.list_findings_for_scan_id(scan_id).unwrap();
+        assert_eq!(findings.len(), 1);
+        let finding = findings[0].clone();
+        assert_eq!(finding.tool, "secret-scan");
+        assert_eq!(finding.rule_id, "secret-scan/openai-api-key");
+        assert_eq!(finding.scan_id.as_deref(), Some(scan_id));
+        assert!(finding
+            .identity_id
+            .as_deref()
+            .is_some_and(|id| id.starts_with("fi_")));
+        assert_eq!(finding.triage, None);
+        finding
+    }
+
+    fn record_confirmed_secret_scan_decision(workspace: &WorkspaceTarget, finding: &Finding) {
+        decision_command(
+            Some(workspace.root().to_path_buf()),
+            finding.fingerprint.clone(),
+            "confirmed".to_string(),
+            "operator confirmed deterministic secret-scan signal".to_string(),
+            true,
+        )
+        .unwrap();
+    }
+
+    fn persisted_scan_id_for_cli_run(workspace: &WorkspaceTarget, run_id: &str) -> String {
+        let result_path = run_dir(workspace.root(), run_id).join("result.json");
+        let result: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(result_path).unwrap()).unwrap();
+        result
+            .pointer("/data/persisted/runId")
+            .and_then(serde_json::Value::as_str)
+            .expect("persisted scanner run id")
+            .to_string()
+    }
+
+    fn assert_secret_scan_artifact_identity(workspace: &WorkspaceTarget, run_id: &str) -> String {
+        let findings_path = run_dir(workspace.root(), run_id).join("findings.json");
+        let findings: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(findings_path).unwrap()).unwrap();
+        let identity = findings[0]["identityId"]
+            .as_str()
+            .expect("run artifact finding identity")
+            .to_string();
+        assert!(identity.starts_with("fi_"));
+        assert_eq!(findings[0]["tool"], "secret-scan");
+        assert_eq!(findings[0]["rule_id"], "secret-scan/openai-api-key");
+        identity
+    }
+
+    fn assert_real_secret_scan_diff_before_review(
+        diff: &crate::application::runs_diff::RunsDiff,
+        artifact_identity: &str,
+    ) {
+        assert_eq!(diff.base_status, "completed");
+        assert_eq!(diff.compare_status, "completed");
+        assert!(diff.warnings.is_empty(), "{:?}", diff.warnings);
+        assert_eq!(diff.stable, 1);
+        assert!(diff.new.is_empty());
+        assert!(diff.not_seen.is_empty());
+        assert!(diff.changed.is_empty());
+        assert!(diff.uncertain_matches.is_empty());
+        let summary = diff.decision_summary.as_ref().expect("decision summary");
+        assert_eq!(summary.identities, 1);
+        assert_eq!(summary.with_stored_decision, 0);
+        assert!(artifact_identity.starts_with("fi_"));
+    }
+
+    fn assert_real_secret_scan_diff_after_review(diff: &crate::application::runs_diff::RunsDiff) {
+        let summary = diff.decision_summary.as_ref().expect("decision summary");
+        assert_eq!(summary.identities, 1);
+        assert_eq!(summary.with_stored_decision, 1);
+        assert_eq!(summary.carry_forward, 1);
+        assert_eq!(summary.conflicts, 0);
+        let plain = runs_diff_output(diff, false).unwrap();
+        assert!(plain.contains("decisions: identities=1 stored=1 carry_forward=1 conflicts=0"));
+    }
+
+    fn assert_latest_secret_scan_review(workspace: &WorkspaceTarget, identity: &str) {
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let review = store
+            .latest_review_decision_for_identity(identity)
+            .unwrap()
+            .expect("latest review decision");
+        assert_eq!(review.decision.verdict, ReviewDecisionVerdict::Confirmed);
+        assert_eq!(
+            review.decision.rationale,
+            "operator confirmed deterministic secret-scan signal"
+        );
+    }
+
+    fn export_complete_json(workspace: &WorkspaceTarget, file_name: &str) -> serde_json::Value {
+        crate::application::export::export_command(
+            workspace.root().to_path_buf(),
+            PathBuf::from(file_name),
+            Some("json".to_string()),
+            "complete".to_string(),
+            false,
+            false,
+        )
+        .unwrap();
+
+        serde_json::from_str(&std::fs::read_to_string(workspace.root().join(file_name)).unwrap())
+            .unwrap()
+    }
+
+    fn assert_secret_scan_export(exported: &serde_json::Value, finding: &Finding) {
+        assert_eq!(exported["completeness"], "complete");
+        assert_eq!(exported["count"], 1);
+        let exported_finding = &exported["findings"][0];
+        assert_eq!(exported_finding["tool"], "secret-scan");
+        assert_eq!(exported_finding["ruleId"], "secret-scan/openai-api-key");
+        assert_eq!(exported_finding["reviewDecision"], "confirmed");
+        assert_eq!(
+            exported_finding["reviewDecisionReason"],
+            "operator confirmed deterministic secret-scan signal"
+        );
+        assert_eq!(exported_finding["reviewDecisionAuthor"], "human");
+        let scan_id = finding.scan_id.as_deref().expect("persisted scan id");
+        assert_eq!(
+            exported_finding["provenance"]["runId"].as_str(),
+            Some(scan_id)
+        );
+    }
+
+    fn assert_persisted_scanner_triage_is_unmodified(workspace: &WorkspaceTarget) {
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        assert_eq!(
+            store.list_findings(10).unwrap()[0].triage,
+            None,
+            "user review state must not mutate real scanner triage output"
+        );
+    }
+
+    fn assert_persisted_scanner_triage_is_unmodified_for_scan(
+        workspace: &WorkspaceTarget,
+        scan_id: &str,
+    ) {
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        assert_eq!(
+            store.list_findings_for_scan_id(scan_id).unwrap()[0].triage,
+            None,
+            "user review state must not mutate compare-run scanner triage output"
+        );
+    }
+
+    fn assert_args_have_help(command: &clap::Command, path: &str) {
+        for arg in command.get_arguments() {
+            let has_help = arg.get_help().is_some() || arg.get_long_help().is_some();
+            assert!(
+                has_help,
+                "{path} argument {:?} has no help text",
+                arg.get_id()
+            );
+        }
+        for subcommand in command.get_subcommands() {
+            let child_path = format!("{path} {}", subcommand.get_name());
+            assert_args_have_help(subcommand, &child_path);
+        }
+    }
+
+    fn assert_target_args_share_help(command: &clap::Command, path: &str) {
+        for arg in command.get_arguments() {
+            if arg.get_id().as_str() == "target" {
+                assert_eq!(
+                    arg.get_help().map(|help| help.to_string()),
+                    Some(crate::support::TARGET_HELP.to_string()),
+                    "{path} target help changed"
+                );
+            }
+        }
+        for subcommand in command.get_subcommands() {
+            let child_path = format!("{path} {}", subcommand.get_name());
+            assert_target_args_share_help(subcommand, &child_path);
+        }
+    }
 
     #[test]
     fn ci_line_uses_relative_timestamp_and_prefix() {
@@ -99,15 +723,15 @@ mod tests {
 
     #[test]
     fn run_summary_plain_includes_optional_fields_and_artifacts() {
-        let summary_path = run_dir(Path::new("/repo"), "run-123").join("summary.json");
+        let artifact_path = run_dir(Path::new("/repo"), "run-123").join("analysis.json");
         let summary =
             RunSummary::running("run-123", "scan", Some("sast:scan".to_string()), "/repo")
                 .failed("boom")
                 .with_findings(Some(2))
                 .with_cost(Some(0.125))
                 .with_artifact(kuzushi_core::RunArtifact {
-                    label: "summary".to_string(),
-                    path: summary_path.display().to_string(),
+                    label: "analysis".to_string(),
+                    path: artifact_path.display().to_string(),
                     kind: "json".to_string(),
                 });
         let mut summary = summary;
@@ -123,7 +747,7 @@ mod tests {
         assert!(rendered.contains("Findings: 2"));
         assert!(rendered.contains("Cost USD: 0.1250"));
         assert!(rendered.contains("Error: boom"));
-        assert!(rendered.contains(&format!("summary: {}", summary_path.display())));
+        assert!(rendered.contains(&format!("analysis: {}", artifact_path.display())));
         assert!(rendered.ends_with("Next: kuzushi runs trace run-123\n"));
     }
 
@@ -416,7 +1040,7 @@ mod tests {
         write_run_summary(temp.path(), &summary_started_at("run-new", 1_000_000)).unwrap();
 
         crate::application::runs_prune::runs_prune_command(
-            Some(temp.path().to_path_buf()),
+            temp.path().to_path_buf(),
             None,
             Some(1),
             false,
@@ -433,7 +1057,7 @@ mod tests {
     }
 
     #[test]
-    fn runs_diff_classifies_new_fixed_drifted_and_stable_findings() {
+    fn runs_diff_classifies_new_not_seen_changed_and_stable_findings() {
         let temp = tempfile::tempdir().unwrap();
         write_run_summary(temp.path(), &summary_started_at("run-a", 1_000_000)).unwrap();
         write_run_summary(temp.path(), &summary_started_at("run-b", 1_000_100)).unwrap();
@@ -441,9 +1065,9 @@ mod tests {
             temp.path(),
             "run-a",
             serde_json::json!([
-                {"fingerprint": "fixed", "severity": "high", "confidence": "high"},
-                {"fingerprint": "drift", "severity": "medium", "confidence": "low", "triage": {"verdict": "needs_more_info"}},
-                {"fingerprint": "stable", "severity": "low", "confidence": 0.5}
+                {"fingerprint": "absent", "severity": "high", "confidence": "high"},
+                {"identityId": "fi_drift", "fingerprint": "drift-old", "severity": "medium", "confidence": "low", "triage": {"verdict": "needs_more_info"}},
+                {"identityId": "fi_stable", "fingerprint": "stable-old", "severity": "low", "confidence": 0.5}
             ]),
         );
         write_findings_snapshot(
@@ -451,23 +1075,568 @@ mod tests {
             "run-b",
             serde_json::json!([
                 {"fingerprint": "new", "severity": "critical", "confidence": "high"},
-                {"fingerprint": "drift", "severity": "high", "confidence": "medium", "triage": {"verdict": "true_positive"}},
-                {"fingerprint": "stable", "severity": "low", "confidence": 0.5}
+                {"identityId": "fi_drift", "fingerprint": "drift-new", "severity": "high", "confidence": "medium", "triage": {"verdict": "true_positive"}},
+                {"identityId": "fi_stable", "fingerprint": "stable-new", "severity": "low", "confidence": 0.5}
             ]),
         );
 
         let diff = runs_diff(temp.path(), "run-a", "run-b").unwrap();
 
+        assert_eq!(diff.base_status, "completed");
+        assert_eq!(diff.compare_status, "completed");
+        assert!(diff.warnings.is_empty());
         assert_eq!(diff.new, vec!["new"]);
-        assert_eq!(diff.fixed, vec!["fixed"]);
+        assert_eq!(diff.not_seen, vec!["absent"]);
         assert_eq!(diff.stable, 1);
-        assert_eq!(diff.drifted.len(), 1);
-        assert_eq!(diff.drifted[0].fingerprint, "drift");
-        assert_eq!(diff.drifted[0].before.severity.as_deref(), Some("medium"));
-        assert_eq!(diff.drifted[0].after.severity.as_deref(), Some("high"));
+        assert_eq!(diff.changed.len(), 1);
+        assert_eq!(diff.changed[0].finding_key, "fi_drift");
+        assert_eq!(diff.changed[0].before.severity.as_deref(), Some("medium"));
+        assert_eq!(diff.changed[0].after.severity.as_deref(), Some("high"));
         assert_eq!(
-            diff.drifted[0].after.verdict.as_deref(),
+            diff.changed[0].after.verdict.as_deref(),
             Some("true_positive")
+        );
+    }
+
+    #[test]
+    fn runs_diff_preserves_completed_status() {
+        let temp = tempfile::tempdir().unwrap();
+        write_run_summary(
+            temp.path(),
+            &summary_started_at_with_status("run-a", 1_000_000, "completed"),
+        )
+        .unwrap();
+        write_run_summary(
+            temp.path(),
+            &summary_started_at_with_status("run-b", 1_000_100, "completed"),
+        )
+        .unwrap();
+        write_findings_snapshot(temp.path(), "run-a", serde_json::json!([]));
+        write_findings_snapshot(temp.path(), "run-b", serde_json::json!([]));
+
+        let diff = runs_diff(temp.path(), "run-a", "run-b").unwrap();
+
+        assert_eq!(diff.base_status, "completed");
+        assert_eq!(diff.compare_status, "completed");
+        assert!(diff.warnings.is_empty(), "{:?}", diff.warnings);
+    }
+
+    #[test]
+    fn runs_diff_exposes_unique_uncertain_identity_matches() {
+        let temp = tempfile::tempdir().unwrap();
+        write_run_summary(temp.path(), &summary_started_at("run-a", 1_000_000)).unwrap();
+        write_run_summary(temp.path(), &summary_started_at("run-b", 1_000_100)).unwrap();
+        write_findings_snapshot(
+            temp.path(),
+            "run-a",
+            serde_json::json!([
+                {
+                    "fingerprint": "line-old",
+                    "ruleId": "demo.sql",
+                    "title": "line shifted item",
+                    "severity": "medium",
+                    "confidence": "low",
+                    "filePath": "src/db.rs",
+                    "startLine": 20,
+                    "tool": "semgrep"
+                }
+            ]),
+        );
+        write_findings_snapshot(
+            temp.path(),
+            "run-b",
+            serde_json::json!([
+                {
+                    "fingerprint": "line-new",
+                    "ruleId": "demo.sql",
+                    "title": "line shifted item",
+                    "severity": "high",
+                    "confidence": "medium",
+                    "filePath": "src/db.rs",
+                    "startLine": 24,
+                    "tool": "semgrep"
+                }
+            ]),
+        );
+
+        let diff = runs_diff(temp.path(), "run-a", "run-b").unwrap();
+
+        assert!(diff.new.is_empty());
+        assert!(diff.not_seen.is_empty());
+        assert_eq!(diff.uncertain_matches.len(), 1);
+        let uncertain = &diff.uncertain_matches[0];
+        assert_eq!(uncertain.base_finding_key, "line-old");
+        assert_eq!(uncertain.compare_finding_key, "line-new");
+        assert_eq!(uncertain.before.severity.as_deref(), Some("medium"));
+        assert_eq!(uncertain.after.severity.as_deref(), Some("high"));
+        assert!(uncertain
+            .reason
+            .contains("review before carrying decisions"));
+
+        let plain = runs_diff_output(&diff, false).unwrap();
+        assert!(plain.contains("uncertain=1"), "{plain}");
+        assert!(plain.contains("Uncertain matches:"), "{plain}");
+        assert!(plain.contains("line-old -> line-new"), "{plain}");
+        assert!(!plain.contains("Fixed"), "{plain}");
+
+        let json: serde_json::Value =
+            serde_json::from_str(&runs_diff_output(&diff, true).unwrap()).unwrap();
+        assert_eq!(json["counts"]["uncertainMatches"], serde_json::json!(1));
+        assert_eq!(
+            json["uncertainMatches"][0]["baseFindingKey"],
+            serde_json::json!("line-old")
+        );
+    }
+
+    #[test]
+    fn runs_diff_does_not_carry_decisions_to_uncertain_matches() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("stored-decisions", workspace.root(), "completed")
+            .unwrap();
+        let reviewed_identity = stored_identity_with_review(
+            &store,
+            "stored-decisions",
+            "demo.sql",
+            TriageVerdict::TruePositive,
+        );
+        write_run_summary(temp.path(), &summary_started_at("run-a", 1_000_000)).unwrap();
+        write_run_summary(temp.path(), &summary_started_at("run-b", 1_000_100)).unwrap();
+        write_findings_snapshot(
+            temp.path(),
+            "run-a",
+            serde_json::json!([
+                {
+                    "identityId": reviewed_identity,
+                    "fingerprint": "line-old",
+                    "ruleId": "demo.sql",
+                    "title": "line shifted item",
+                    "severity": "medium",
+                    "filePath": "src/db.rs",
+                    "startLine": 20,
+                    "tool": "semgrep"
+                }
+            ]),
+        );
+        write_findings_snapshot(
+            temp.path(),
+            "run-b",
+            serde_json::json!([
+                {
+                    "fingerprint": "line-new",
+                    "ruleId": "demo.sql",
+                    "title": "line shifted item",
+                    "severity": "high",
+                    "filePath": "src/db.rs",
+                    "startLine": 24,
+                    "tool": "semgrep"
+                }
+            ]),
+        );
+
+        let diff = runs_diff(temp.path(), "run-a", "run-b").unwrap();
+
+        assert_eq!(diff.uncertain_matches.len(), 1);
+        let summary = diff.decision_summary.as_ref().expect("decision summary");
+        assert_eq!(summary.identities, 0);
+        assert_eq!(summary.with_stored_decision, 0);
+        assert_eq!(summary.carry_forward, 0);
+        assert_eq!(summary.conflicts, 0);
+    }
+
+    #[test]
+    fn runs_diff_includes_identity_decision_summary_when_store_exists() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        store
+            .record_run_started("stored-decisions", workspace.root(), "completed")
+            .unwrap();
+        let carried = stored_identity_with_review(
+            &store,
+            "stored-decisions",
+            "demo.carried",
+            TriageVerdict::TruePositive,
+        );
+        let conflict = stored_identity_with_review(
+            &store,
+            "stored-decisions",
+            "demo.conflict",
+            TriageVerdict::TruePositive,
+        );
+        write_run_summary(temp.path(), &summary_started_at("run-a", 1_000_000)).unwrap();
+        write_run_summary(temp.path(), &summary_started_at("run-b", 1_000_100)).unwrap();
+        write_findings_snapshot(temp.path(), "run-a", serde_json::json!([]));
+        write_findings_snapshot(
+            temp.path(),
+            "run-b",
+            serde_json::json!([
+                {"identityId": carried, "fingerprint": "carried", "severity": "high"},
+                {"identityId": conflict, "fingerprint": "conflict", "severity": "high", "triage": {"verdict": "false_positive"}}
+            ]),
+        );
+
+        let diff = runs_diff(temp.path(), "run-a", "run-b").unwrap();
+        let summary = diff.decision_summary.as_ref().expect("decision summary");
+
+        assert_eq!(summary.identities, 2);
+        assert_eq!(summary.with_stored_decision, 2);
+        assert_eq!(summary.carry_forward, 1);
+        assert_eq!(summary.conflicts, 1);
+        let plain = runs_diff_output(&diff, false).unwrap();
+        assert!(plain.contains("decisions: identities=2 stored=2 carry_forward=1 conflicts=1"));
+    }
+
+    #[test]
+    fn run_compare_review_records_human_decision_after_diff() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        write_run_summary(temp.path(), &summary_started_at("run-a", 1_000_000)).unwrap();
+        write_run_summary(temp.path(), &summary_started_at("run-b", 1_000_100)).unwrap();
+        store
+            .record_run_started("run-a", workspace.root(), "completed")
+            .unwrap();
+        store
+            .record_run_started("run-b", workspace.root(), "completed")
+            .unwrap();
+        let base = Finding::new_tool(
+            "semgrep",
+            "javascript.express.xss",
+            "src/server.js",
+            20,
+            Some(20),
+            Severity::Medium,
+            "source-linked finding reaches response",
+        );
+        let compare = Finding::new_tool(
+            "semgrep",
+            "javascript.express.xss",
+            "src/server.js",
+            24,
+            Some(24),
+            Severity::High,
+            "source-linked finding reaches response",
+        );
+        store.insert_finding("run-a", &base).unwrap();
+        store.insert_finding("run-b", &compare).unwrap();
+        let base_row = store
+            .list_findings_for_scan_id("run-a")
+            .unwrap()
+            .pop()
+            .expect("base finding");
+        let compare_row = store
+            .list_findings_for_scan_id("run-b")
+            .unwrap()
+            .pop()
+            .expect("compare finding");
+        let identity = compare_row.identity_id.clone().expect("compare identity");
+        assert_eq!(base_row.identity_id.as_deref(), Some(identity.as_str()));
+        let compare_reference = compare_row.fingerprint.clone();
+        drop(store);
+        write_findings_snapshot(
+            temp.path(),
+            "run-a",
+            serde_json::json!([{
+                "identityId": identity.clone(),
+                "fingerprint": base.fingerprint,
+                "ruleId": base.rule_id,
+                "title": base.title,
+                "severity": "medium",
+                "filePath": base.file_path,
+                "startLine": base.start_line,
+                "tool": base.tool
+            }]),
+        );
+        write_findings_snapshot(
+            temp.path(),
+            "run-b",
+            serde_json::json!([{
+                "identityId": identity.clone(),
+                "fingerprint": compare.fingerprint,
+                "ruleId": compare.rule_id,
+                "title": compare.title,
+                "severity": "high",
+                "filePath": compare.file_path,
+                "startLine": compare.start_line,
+                "tool": compare.tool
+            }]),
+        );
+
+        let before_review = runs_diff(temp.path(), "run-a", "run-b").unwrap();
+
+        assert_eq!(before_review.changed.len(), 1);
+        assert_eq!(before_review.changed[0].finding_key, identity);
+        let before_summary = before_review
+            .decision_summary
+            .as_ref()
+            .expect("decision summary");
+        assert_eq!(before_summary.identities, 1);
+        assert_eq!(before_summary.with_stored_decision, 0);
+
+        decision_command(
+            Some(temp.path().to_path_buf()),
+            compare_reference,
+            "confirmed".to_string(),
+            "operator confirmed compare-run evidence".to_string(),
+            true,
+        )
+        .unwrap();
+
+        let after_review = runs_diff(temp.path(), "run-a", "run-b").unwrap();
+
+        let after_summary = after_review
+            .decision_summary
+            .as_ref()
+            .expect("decision summary");
+        assert_eq!(after_summary.identities, 1);
+        assert_eq!(after_summary.with_stored_decision, 1);
+        assert_eq!(after_summary.carry_forward, 1);
+        assert_eq!(after_summary.conflicts, 0);
+        let plain = runs_diff_output(&after_review, false).unwrap();
+        assert!(plain.contains("decisions: identities=1 stored=1 carry_forward=1 conflicts=0"));
+
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let compare_row = store
+            .list_findings_for_scan_id("run-b")
+            .unwrap()
+            .pop()
+            .expect("compare finding");
+        assert_eq!(
+            compare_row.triage, None,
+            "run compare review must not mutate scanner triage"
+        );
+    }
+
+    fn stored_identity_with_review(
+        store: &FindingStore,
+        run_id: &str,
+        rule_id: &str,
+        verdict: TriageVerdict,
+    ) -> String {
+        let finding = Finding::new_semgrep(
+            rule_id,
+            "src/app.ts",
+            12,
+            Some(12),
+            Severity::High,
+            "reviewed finding",
+        );
+        let finding_id = store.insert_finding(run_id, &finding).unwrap();
+        store
+            .save_triage_with_author(
+                finding_id,
+                &TriageOutcome {
+                    verdict,
+                    confidence: 0.95,
+                    rationale: "operator reviewed durable identity".to_string(),
+                    ..Default::default()
+                },
+                TriageAuthor::Human,
+            )
+            .unwrap();
+        store
+            .list_findings_for_scan_id(run_id)
+            .unwrap()
+            .into_iter()
+            .find(|finding| finding.rule_id == rule_id)
+            .and_then(|finding| finding.identity_id)
+            .expect("stored identity")
+    }
+
+    #[test]
+    fn runs_diff_warns_that_not_seen_is_uncertain_for_partial_or_failed_runs() {
+        let temp = tempfile::tempdir().unwrap();
+        write_run_summary(
+            temp.path(),
+            &summary_started_at_with_status("run-partial", 1_000_000, "partial"),
+        )
+        .unwrap();
+        write_run_summary(
+            temp.path(),
+            &summary_started_at_with_status("run-failed", 1_000_100, "failed"),
+        )
+        .unwrap();
+        write_findings_snapshot(
+            temp.path(),
+            "run-partial",
+            serde_json::json!([{"fingerprint": "left-only", "severity": "high"}]),
+        );
+        write_findings_snapshot(temp.path(), "run-failed", serde_json::json!([]));
+
+        let diff = runs_diff(temp.path(), "run-partial", "run-failed").unwrap();
+
+        assert_eq!(diff.base_status, "partial");
+        assert_eq!(diff.compare_status, "failed");
+        assert_eq!(diff.not_seen, vec!["left-only"]);
+        assert_eq!(diff.warnings.len(), 2);
+        assert!(
+            diff.warnings[0].contains("run-partial: run status partial")
+                && diff.warnings[0].contains("incomplete coverage")
+        );
+        assert!(
+            diff.warnings[1].contains("run-failed: run status failed")
+                && diff.warnings[1].contains("incomplete coverage")
+        );
+
+        let plain = runs_diff_output(&diff, false).unwrap();
+        assert!(plain.contains("status: partial -> failed"), "{plain}");
+        assert!(plain.contains("warning: run-partial"), "{plain}");
+        assert!(!plain.contains("Fixed"), "{plain}");
+    }
+
+    #[test]
+    fn suppression_commands_require_explicit_target() {
+        let suppress_error = suppress_command(
+            None,
+            "F-0001".to_string(),
+            "accepted risk".to_string(),
+            "tester".to_string(),
+            7,
+            false,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(suppress_error.contains("suppress needs a target"));
+
+        let list_error = suppressions_command(None, false).unwrap_err().to_string();
+        assert!(list_error.contains("suppressions needs a target"));
+    }
+
+    #[test]
+    fn decision_command_requires_explicit_target() {
+        let error = decision_command(
+            None,
+            "F-0001".to_string(),
+            "suppressed".to_string(),
+            "accepted risk".to_string(),
+            false,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("decision needs a target"));
+    }
+
+    #[test]
+    fn decision_command_rejects_empty_reason() {
+        let tmp = tempfile::tempdir().unwrap();
+        let error = decision_command(
+            Some(tmp.path().to_path_buf()),
+            "F-0001".to_string(),
+            "suppressed".to_string(),
+            "   ".to_string(),
+            false,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("review decision reason cannot be empty"));
+    }
+
+    #[test]
+    fn decision_command_appends_user_review_decision() {
+        let tmp = tempfile::tempdir().unwrap();
+        let store = FindingStore::open(tmp.path().join(".kuzushi/v3/index.sqlite3")).unwrap();
+        store
+            .record_run_started("scan-decision", tmp.path(), "completed")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "semgrep",
+            "javascript.express.xss",
+            "src/server.js",
+            2,
+            Some(2),
+            Severity::High,
+            "CWE-79 reflected XSS reaches response",
+        );
+        let finding_id = store.insert_finding("scan-decision", &finding).unwrap();
+        drop(store);
+
+        decision_command(
+            Some(tmp.path().to_path_buf()),
+            finding.fingerprint.clone(),
+            "rejected-false-positive".to_string(),
+            "source-linked evidence reviewed".to_string(),
+            true,
+        )
+        .unwrap();
+
+        let store = FindingStore::open(tmp.path().join(".kuzushi/v3/index.sqlite3")).unwrap();
+        let decision = store
+            .latest_review_decision(finding_id)
+            .unwrap()
+            .expect("review decision");
+        assert_eq!(
+            decision.decision.verdict,
+            ReviewDecisionVerdict::RejectedFalsePositive
+        );
+        assert_eq!(decision.decision.author, TriageAuthor::Human);
+        assert_eq!(
+            decision.decision.rationale,
+            "source-linked evidence reviewed"
+        );
+        assert_eq!(decision.triage_verdict, Some(TriageVerdict::FalsePositive));
+        assert_eq!(
+            store.list_findings(10).unwrap()[0].triage,
+            None,
+            "user decision must not mutate scanner triage"
+        );
+    }
+
+    #[test]
+    fn suppress_command_appends_user_review_decision() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(
+            tmp.path().join("src/server.js"),
+            "const express = require('express');\nres.send(req.query.name);\n",
+        )
+        .unwrap();
+        let store = FindingStore::open(tmp.path().join(".kuzushi/v3/index.sqlite3")).unwrap();
+        store
+            .record_run_started("scan-suppress", tmp.path(), "completed")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "semgrep",
+            "javascript.express.xss",
+            "src/server.js",
+            2,
+            Some(2),
+            Severity::High,
+            "CWE-79 reflected XSS reaches response",
+        );
+        let finding_id = store.insert_finding("scan-suppress", &finding).unwrap();
+        drop(store);
+
+        suppress_command(
+            Some(tmp.path().to_path_buf()),
+            finding.fingerprint.clone(),
+            "operator confirmed escaping upstream".to_string(),
+            "security@example.test".to_string(),
+            7,
+            true,
+        )
+        .unwrap();
+
+        let store = FindingStore::open(tmp.path().join(".kuzushi/v3/index.sqlite3")).unwrap();
+        let decision = store
+            .latest_review_decision(finding_id)
+            .unwrap()
+            .expect("suppression review decision");
+        assert_eq!(decision.decision.verdict, ReviewDecisionVerdict::Suppressed);
+        assert_eq!(decision.decision.author, TriageAuthor::Human);
+        assert_eq!(
+            decision.decision.rationale,
+            "operator confirmed escaping upstream"
+        );
+        assert_eq!(decision.triage_verdict, None);
+        assert_eq!(
+            store.list_findings(10).unwrap()[0].triage,
+            None,
+            "suppression must not mutate scanner triage"
         );
     }
 
@@ -567,6 +1736,12 @@ mod tests {
     }
 
     #[test]
+    fn auth_ping_missing_credential_messages_name_export_commands() {
+        assert!(anthropic_missing_credential_message().contains("export ANTHROPIC_API_KEY="));
+        assert!(openai_missing_credential_message().contains("export OPENAI_API_KEY="));
+    }
+
+    #[test]
     fn doctor_model_check_uses_shared_model_policy() {
         let mut config = kuzushi_core::V2Config::default();
         config.model = None;
@@ -588,6 +1763,72 @@ mod tests {
 
         assert_eq!(check.status, DoctorStatus::Fail);
         assert!(check.detail.contains("provider:model"));
+
+        config.model = Some("anthropic:claude-sonnet-4-6".to_string());
+        let check = check_model_config(&config);
+
+        assert_eq!(check.status, DoctorStatus::Fail);
+        assert!(check.detail.contains("requires ANTHROPIC_API_KEY"));
+
+        config.runtime.api_key_env = "ANTHROPIC_API_KEY".to_string();
+        let check = check_model_config(&config);
+
+        assert_eq!(check.status, DoctorStatus::Ok);
+        assert!(check.detail.contains("provider anthropic"));
+
+        config.model = Some("openai:gpt-5.5".to_string());
+        let check = check_model_config(&config);
+
+        assert_eq!(check.status, DoctorStatus::Fail);
+        assert!(check.detail.contains("requires OPENAI_API_KEY"));
+    }
+
+    #[test]
+    fn doctor_auth_check_matches_configured_model_provider() {
+        let _openai = EnvVarGuard::unset("OPENAI_API_KEY");
+        let _anthropic = EnvVarGuard::set("ANTHROPIC_API_KEY", "hidden");
+        let mut config = kuzushi_core::V2Config::default();
+        config.model = Some("openai:gpt-5.5".to_string());
+
+        let check = check_auth_env(&config);
+
+        assert_eq!(check.status, DoctorStatus::Warn);
+        assert!(check.detail.contains("OPENAI_API_KEY"));
+        assert!(!check.detail.contains("ANTHROPIC_API_KEY"));
+    }
+
+    #[test]
+    fn doctor_auth_check_reads_openai_oauth_for_codex_models() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("HOME", tmp.path().to_str().unwrap());
+        let mut config = kuzushi_core::V2Config::default();
+        config.model = Some("openai-codex:gpt-5.4".to_string());
+
+        let missing = check_auth_env(&config);
+        assert_eq!(missing.status, DoctorStatus::Warn);
+        assert!(missing
+            .detail
+            .contains("OpenAI OAuth credentials not found"));
+
+        let credentials_path = kuzushi_core::config::default_oauth_credentials_path(tmp.path());
+        std::fs::create_dir_all(credentials_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &credentials_path,
+            serde_json::json!({
+                "openai-codex": {
+                    "access": "hidden-access",
+                    "refresh": "hidden-refresh",
+                    "expires": u64::MAX
+                }
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        let ready = check_auth_env(&config);
+        assert_eq!(ready.status, DoctorStatus::Ok);
+        assert!(ready.detail.contains("OpenAI OAuth credentials are stored"));
+        assert!(!ready.detail.contains("hidden-access"));
     }
 
     #[test]
@@ -697,6 +1938,8 @@ mod tests {
         assert!(!tool_defaults_to_workspace("clang.health"));
 
         assert!(tool_needs_finding_store("variant:hunt"));
+        assert!(tool_needs_finding_store("variant:lift-pattern"));
+        assert!(tool_needs_finding_store("offense:chain"));
         assert!(tool_needs_finding_store("offense-review:threat-hunt"));
         assert!(tool_needs_finding_store("taint-iris-next:finding-review"));
         assert!(!tool_needs_finding_store("taint-iris-next:dataflow-plan"));
@@ -705,6 +1948,10 @@ mod tests {
         ));
         assert!(tool_needs_finding_store("module-recommender:recommend"));
         assert!(tool_needs_finding_store("prompt-armor:scan"));
+        assert!(tool_needs_finding_store("cargo-audit:scan"));
+        assert!(tool_needs_finding_store("sbom-scan:scan"));
+        assert!(tool_needs_finding_store("secret-scan:scan"));
+        assert!(tool_needs_finding_store("android-apk:scan"));
         assert!(!tool_needs_finding_store("context-lite:index"));
 
         assert!(tool_needs_runtime("deep-audit:run", &serde_json::json!({})));
@@ -716,6 +1963,21 @@ mod tests {
             "sast:scan",
             &serde_json::json!({"whiteboxStatic": true})
         ));
+    }
+
+    #[test]
+    fn run_tool_workspace_requires_explicit_target_for_workspace_tools() {
+        let error = run_tool_workspace("sast:scan", None)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("--target <path>"), "{error}");
+        assert!(
+            run_tool_workspace_for_input("iac-scan:scan", None, r#"{"target":"missing"}"#)
+                .unwrap()
+                .is_none()
+        );
+        assert!(run_tool_workspace("clang.health", None).unwrap().is_none());
     }
 
     #[test]
@@ -761,6 +2023,11 @@ mod tests {
         let summary = scan_json_output(&workspace, &data);
         assert_eq!(summary["findingsCount"], serde_json::json!(2));
         assert!(summary["db"].as_str().unwrap().contains(".kuzushi"));
+
+        let footer = scan_plain_artifact_footer(&workspace, &data);
+        assert!(footer.contains(".kuzushi/v3/runs/run-1"));
+        assert!(footer.contains(".kuzushi/v3/index.sqlite3"));
+        assert!(footer.contains("kuzushi runs show run-1"));
     }
 
     #[test]
@@ -797,6 +2064,16 @@ mod tests {
         let mut summary = RunSummary::running(run_id, "tool", None, "target").complete();
         summary.started_at_unix = started_at_unix;
         summary.completed_at_unix = Some(started_at_unix + 1);
+        summary
+    }
+
+    fn summary_started_at_with_status(
+        run_id: &str,
+        started_at_unix: u64,
+        status: &str,
+    ) -> RunSummary {
+        let mut summary = summary_started_at(run_id, started_at_unix);
+        summary.status = status.to_string();
         summary
     }
 

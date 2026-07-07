@@ -126,30 +126,21 @@ export function checkFailureFollowUpInventory(root) {
   const sourcePath = path.join(root, file);
   if (!existsSync(sourcePath)) return [`failure follow-up inventory: missing ${file}`];
   const source = readFileSync(sourcePath, "utf8");
-  const legacy = rustStringArrayConstant(source, "LEGACY_FOLLOW_UP_RUN_FILES") ?? [];
   return [
-    ...failureFollowUpOrderFailures(legacy),
+    ...failureFollowUpOrderFailures(),
     ...failureFollowUpSourceFailures(source),
     ...failureArtifactPathHelperFailures(source, root),
-    ...missingEntries(
-      legacy,
-      allowedLegacyFailureFollowUpArtifacts(),
-      "failure follow-up has uncontracted artifact",
-    ),
   ].filter(Boolean);
 }
 
-function failureFollowUpOrderFailures(legacy) {
+function failureFollowUpOrderFailures() {
   return [
     ...arrayOrderMismatch(
-      failureFollowUpRequiredOrder(legacy),
+      failureFollowUpRequiredOrder(),
       expectedFailureFollowUpRequiredOrder(),
       "failure follow-up required order drift",
     ),
-    ...duplicateEntries(legacy).map(
-      (artifact) => `failure follow-up duplicates configured artifact ${artifact}`,
-    ),
-    ...duplicateEntries(failureFollowUpRequiredOrder(legacy)).map(
+    ...duplicateEntries(failureFollowUpRequiredOrder()).map(
       (artifact) => `failure follow-up duplicates required artifact ${artifact}`,
     ),
   ];
@@ -200,14 +191,13 @@ function failureArtifactPathHelperFailures(source, root) {
   ].filter(Boolean);
 }
 
-function failureFollowUpRequiredOrder(legacy) {
+function failureFollowUpRequiredOrder() {
   return [
     "failures.json",
     ...toolResultArtifacts,
     ...toolInputArtifacts,
     "artifacts.json",
     "run.json",
-    ...legacy,
   ];
 }
 
@@ -233,12 +223,7 @@ function expectedFailureFollowUpRequiredOrder() {
     ...toolInputArtifacts,
     "artifacts.json",
     "run.json",
-    "summary.json",
   ];
-}
-
-function allowedLegacyFailureFollowUpArtifacts() {
-  return ["summary.json"];
 }
 
 export function checkFailureMissingArtifactInventory(root) {
@@ -320,20 +305,13 @@ export function checkRunMetadataWriterInventory(root) {
   const sourcePath = path.join(root, file);
   if (!existsSync(sourcePath)) return [`run metadata writer inventory: missing ${file}`];
   const source = readFileSync(sourcePath, "utf8");
-  const constants = rustStringConstants(source, ["LEGACY_SUMMARY_FILE"]);
   return [
-    constants.LEGACY_SUMMARY_FILE === "summary.json"
-      ? null
-      : "legacy summary writer must keep summary.json",
     source.includes('canonical_run_artifact_spec("run.json")')
       ? null
       : "run metadata writer must use shared run metadata spec",
     source.includes("write_run_summary_file(&dir.join(run_metadata_artifact_spec().leaf)")
       ? null
       : "run metadata writer must write run_metadata_artifact_spec().leaf",
-    source.includes("write_run_summary_file(&dir.join(LEGACY_SUMMARY_FILE)")
-      ? null
-      : "run metadata writer must write LEGACY_SUMMARY_FILE",
   ].filter(Boolean);
 }
 
@@ -374,18 +352,18 @@ function workspaceStatePathConstantFailures(constants) {
     constants.KUZUSHI_STATE_DIR === ".kuzushi"
       ? null
       : "workspace state helper must name KUZUSHI_STATE_DIR as .kuzushi",
-    constants.WORKSPACE_STATE_VERSION_DIR === "v2"
+    constants.WORKSPACE_STATE_VERSION_DIR === "v3"
       ? null
-      : "workspace state helper must name WORKSPACE_STATE_VERSION_DIR as v2",
+      : "workspace state helper must name WORKSPACE_STATE_VERSION_DIR as v3",
     constants.WORKSPACE_CONFIG_FILE === "config.toml"
       ? null
       : "workspace state helper must name WORKSPACE_CONFIG_FILE as config.toml",
     constants.WORKSPACE_OPTIONS_FILE === "options.json"
       ? null
       : "workspace state helper must name WORKSPACE_OPTIONS_FILE as options.json",
-    constants.WORKSPACE_FINDINGS_DB_FILE === "findings.sqlite3"
+    constants.WORKSPACE_FINDINGS_DB_FILE === "index.sqlite3"
       ? null
-      : "workspace state helper must name WORKSPACE_FINDINGS_DB_FILE as findings.sqlite3",
+      : "workspace state helper must name WORKSPACE_FINDINGS_DB_FILE as index.sqlite3",
     constants.WORKSPACE_STATIC_EVIDENCE_DB_FILE === "static-evidence.sqlite3"
       ? null
       : "workspace state helper must name WORKSPACE_STATIC_EVIDENCE_DB_FILE as static-evidence.sqlite3",
@@ -609,17 +587,17 @@ function workspaceStatePathConsumerHardcodesPath(source) {
   return [
     'join(".kuzushi").join("v2").join("config.toml")',
     'join(".kuzushi").join("v2").join("options.json")',
-    'join(".kuzushi/v2/config.toml")',
-    'join(".kuzushi/v2/options.json")',
+    'join(".kuzushi/v3/config.toml")',
+    'join(".kuzushi/v3/options.json")',
     'join(".kuzushi").join("models.toml")',
     'join(".kuzushi").join("codeql-db")',
     'join(".kuzushi/codeql-db")',
     'join(".kuzushi").join("bin")',
     'join(".kuzushi/bin")',
     'join(".kuzushi").join("v2").join("static-evidence.sqlite3")',
-    'join(".kuzushi/v2").join("static-evidence.sqlite3")',
+    'join(".kuzushi/v3").join("static-evidence.sqlite3")',
     'join(".kuzushi").join("v2").join("artifact-kb.sqlite3")',
-    'join(".kuzushi/v2").join("artifact-kb.sqlite3")',
+    'join(".kuzushi/v3").join("artifact-kb.sqlite3")',
     'join(".codeql").join("db")',
     'join(".codeql/db")',
   ].some((needle) => source.includes(needle));
@@ -643,8 +621,8 @@ function tuiWorkspaceStateLabelFailures(root) {
     source.includes(".to_string()")
       ? null
       : "TUI workspace state label must derive from workspace_state_dir",
-    productionSource.includes(".kuzushi/v2")
-      ? "TUI workspace state label must not hardcode .kuzushi/v2"
+    productionSource.includes(".kuzushi/v3")
+      ? "TUI workspace state label must not hardcode .kuzushi/v3"
       : null,
     source.includes("view.state_dir.as_deref()") &&
     source.includes("workspace_state_relative_path()")
@@ -655,8 +633,7 @@ function tuiWorkspaceStateLabelFailures(root) {
 
 function tuiFindingsDbLabelFailures(root) {
   const workspaceFile = "crates/kuzushi-tui/src/ui_view_models/workspace.rs";
-  const emptyStateFile =
-    "crates/kuzushi-tui/src/renderer/views/findings/findings_lines/empty_state.rs";
+  const emptyStateFile = "crates/kuzushi-tui/src/ui_view_models/findings.rs";
   const workspacePath = path.join(root, workspaceFile);
   const emptyStatePath = path.join(root, emptyStateFile);
   if (!existsSync(workspacePath))
@@ -686,9 +663,9 @@ function workspaceFindingsDbLabelChecks(workspaceSource) {
     workspaceSource.includes(".to_string()")
       ? null
       : "TUI workspace findings DB label must derive from workspace_findings_db_path",
-    countOccurrences(workspaceProductionSource, ".kuzushi/v2/findings.sqlite3") === 0
+    countOccurrences(workspaceProductionSource, ".kuzushi/v3/index.sqlite3") === 0
       ? null
-      : "TUI workspace findings DB label must not hardcode .kuzushi/v2/findings.sqlite3",
+      : "TUI workspace findings DB label must not hardcode .kuzushi/v3/index.sqlite3",
     workspaceSource.includes("compact_path_or(") &&
     workspaceSource.includes("view.findings_db.as_deref()") &&
     workspaceSource.includes("findings_db_relative_path()")
@@ -703,8 +680,8 @@ function emptyStateFindingsDbLabelChecks(emptyStateSource) {
     emptyStateSource.includes("findings_db_relative_path()")
       ? null
       : "TUI findings empty state must use findings_db_relative_path",
-    emptyStateProductionSource.includes(".kuzushi/v2/findings.sqlite3")
-      ? "TUI findings empty state must not hardcode .kuzushi/v2/findings.sqlite3"
+    emptyStateProductionSource.includes(".kuzushi/v3/index.sqlite3")
+      ? "TUI findings empty state must not hardcode .kuzushi/v3/index.sqlite3"
       : null,
   ];
 }
@@ -719,8 +696,8 @@ function modulePlaybookFindingsDbLabelFailures(root) {
     source.includes("findings_db_relative_path")
       ? null
       : "TUI module playbook findings DB label must use findings_db_relative_path",
-    productionSource.includes(".kuzushi/v2/findings.sqlite3")
-      ? "TUI module playbook findings DB label must not hardcode .kuzushi/v2/findings.sqlite3"
+    productionSource.includes(".kuzushi/v3/index.sqlite3")
+      ? "TUI module playbook findings DB label must not hardcode .kuzushi/v3/index.sqlite3"
       : null,
   ].filter(Boolean);
 }
@@ -743,8 +720,8 @@ function tuiKnowledgeBaseAttachmentStorePathFailures(root) {
     source.includes("attachments_store_relative_path().to_string()")
       ? null
       : "TUI KB attachment store fallback must use attachments_store_relative_path",
-    productionSource.includes(".kuzushi/v2/attachments.json")
-      ? "TUI KB attachment store label must not hardcode .kuzushi/v2/attachments.json"
+    productionSource.includes(".kuzushi/v3/attachments.json")
+      ? "TUI KB attachment store label must not hardcode .kuzushi/v3/attachments.json"
       : null,
   ].filter(Boolean);
 }
@@ -970,7 +947,7 @@ function attachmentKnownArtifactPathFailures(root) {
       : "attachment known artifacts must use workspace_findings_db_path",
     productionSource.includes('".kuzushi/context-snapshot.json"') ||
     productionSource.includes('".kuzushi/threat-model.json"') ||
-    productionSource.includes('".kuzushi/v2/findings.sqlite3"')
+    productionSource.includes('".kuzushi/v3/index.sqlite3"')
       ? "attachment known artifacts must not hardcode persistent artifact paths"
       : null,
   ].filter(Boolean);
@@ -1429,8 +1406,8 @@ function tuiFailureHandoffSourceFailures(source) {
     source.includes("ui_run_artifact_relative_path(run_id, failures_artifact_leaf())")
       ? null
       : "TUI failure handoff next path must use shared run artifact helper",
-    source.includes('format!(".kuzushi/runs/{run_id}/{failures_artifact_leaf()}")')
-      ? "TUI failure handoff next path must not hardcode .kuzushi/runs"
+    source.includes('format!(".kuzushi/v3/runs/{run_id}/{failures_artifact_leaf()}")')
+      ? "TUI failure handoff next path must not hardcode .kuzushi/v3/runs"
       : null,
     source.includes("failures_artifact_leaf().to_string()")
       ? null
@@ -1578,7 +1555,7 @@ function tuiModulePlaybookPathFailures(root) {
       ? null
       : "TUI module playbook path helpers must import view-model artifact labels",
     countOccurrences(productionSource, ".kuzushi/context-snapshot.json") === 0 &&
-    countOccurrences(productionSource, ".kuzushi/v2/findings.sqlite3") === 0 &&
+    countOccurrences(productionSource, ".kuzushi/v3/index.sqlite3") === 0 &&
     countOccurrences(productionSource, ".kuzushi/threat-model.json") === 0
       ? null
       : "TUI module playbook production source must keep persistent artifact labels centralized",
@@ -1590,7 +1567,6 @@ export function checkTuiRunTimelineArtifactLeaves(root) {
   const sourcePath = path.join(root, file);
   if (!existsSync(sourcePath)) return [`TUI run timeline artifact leaves: missing ${file}`];
   const source = readFileSync(sourcePath, "utf8");
-  const constants = rustStringConstants(source, ["LEGACY_RUN_SUMMARY_FILE"]);
   return [
     source.includes('canonical_run_artifact_spec("run.json")')
       ? null
@@ -1598,27 +1574,15 @@ export function checkTuiRunTimelineArtifactLeaves(root) {
     source.includes("fn run_metadata_artifact_leaf() -> &'static str")
       ? null
       : "TUI run timeline must centralize metadata artifact leaf",
-    constants.LEGACY_RUN_SUMMARY_FILE === "summary.json"
-      ? null
-      : "TUI run timeline must name LEGACY_RUN_SUMMARY_FILE as summary.json",
     source.includes(".join(metadata_leaf)") && source.includes("run_metadata_artifact_leaf()")
       ? null
       : "TUI run timeline canonical metadata path must use shared metadata artifact leaf",
-    source.includes(".join(LEGACY_RUN_SUMMARY_FILE)")
-      ? null
-      : "TUI run timeline legacy summary path must use LEGACY_RUN_SUMMARY_FILE",
     source.includes("malformed_past_run_metadata(metadata_leaf)")
       ? null
       : "TUI run timeline canonical malformed label must use shared metadata artifact leaf",
     source.includes("non_file_past_run_metadata(metadata_leaf)")
       ? null
       : "TUI run timeline canonical non-file label must use shared metadata artifact leaf",
-    source.includes("malformed_past_run_metadata(LEGACY_RUN_SUMMARY_FILE)")
-      ? null
-      : "TUI run timeline legacy malformed label must use LEGACY_RUN_SUMMARY_FILE",
-    source.includes("non_file_past_run_metadata(LEGACY_RUN_SUMMARY_FILE)")
-      ? null
-      : "TUI run timeline legacy non-file label must use LEGACY_RUN_SUMMARY_FILE",
   ].filter(Boolean);
 }
 
@@ -1634,9 +1598,9 @@ export function checkTuiRunsRootHelper(root) {
     helper.includes("pub(crate) fn ui_runs_root_relative_path() -> &'static str")
       ? null
       : "TUI runs-root helper must expose ui_runs_root_relative_path",
-    helper.includes('".kuzushi/runs"')
+    helper.includes('".kuzushi/v3/runs"')
       ? null
-      : "TUI runs-root relative label must name .kuzushi/runs",
+      : "TUI runs-root relative label must name .kuzushi/v3/runs",
     helper.includes("pub(crate) fn ui_run_dir(target: Option<&Path>, run_id: &str) -> PathBuf")
       ? null
       : "TUI run-dir helper must expose ui_run_dir",
@@ -1646,9 +1610,9 @@ export function checkTuiRunsRootHelper(root) {
     helper.includes("pub(crate) fn ui_latest_run_relative_path() -> &'static str")
       ? null
       : "TUI latest-run helper must expose ui_latest_run_relative_path",
-    helper.includes('".kuzushi/latest"')
+    helper.includes('".kuzushi/v3/latest"')
       ? null
-      : "TUI latest-run relative label must name .kuzushi/latest",
+      : "TUI latest-run relative label must name .kuzushi/v3/latest",
     helper.includes("kuzushi_core::runs_root")
       ? null
       : "TUI runs-root helper must delegate to kuzushi_core::runs_root",
@@ -1683,8 +1647,8 @@ export function checkRunArtifactPathHelpers(root) {
       ? null
       : "run artifact path helper must derive latest_run_path from kuzushi_root",
     productionSource.includes('join(".kuzushi")') ||
-    productionSource.includes('join(".kuzushi/runs")') ||
-    productionSource.includes('join(".kuzushi/latest")')
+    productionSource.includes('join(".kuzushi/v3/runs")') ||
+    productionSource.includes('join(".kuzushi/v3/latest")')
       ? "run artifact path helper must not hardcode .kuzushi paths"
       : null,
   ].filter(Boolean);
@@ -1761,10 +1725,10 @@ const cliRunsPathRequirementsByFile = {
 
 function cliRunsPathHardcodes(source) {
   return [
-    '".kuzushi/latest"',
-    'join(".kuzushi/runs")',
+    '".kuzushi/v3/latest"',
+    'join(".kuzushi/v3/runs")',
     'join(".kuzushi").join("runs")',
-    'join(".kuzushi/latest")',
+    'join(".kuzushi/v3/latest")',
     'join(".kuzushi").join("latest")',
   ].some((needle) => source.includes(needle));
 }
@@ -1802,8 +1766,8 @@ function workspaceArtifactKbDiscoveryPathFailures(root) {
     productionSource.includes('".kuzushi/threat-model.json"')
       ? "artifact KB discovery must not hardcode persistent workspace artifact paths"
       : null,
-    productionSource.includes('".kuzushi/runs/"')
-      ? "artifact KB discovery must not hardcode .kuzushi/runs source prefix"
+    productionSource.includes('".kuzushi/v3/runs/"')
+      ? "artifact KB discovery must not hardcode .kuzushi/v3/runs source prefix"
       : null,
     ...workspaceArtifactKbFindingsIndexPathFailures(root),
   ].filter(Boolean);
@@ -1825,7 +1789,7 @@ function workspaceArtifactKbFindingsIndexPathFailures(root) {
     source.includes('"{}#finding/{}"')
       ? null
       : "artifact KB findings index must append finding fragment to shared DB path",
-    productionSource.includes('".kuzushi/v2/findings.sqlite3')
+    productionSource.includes('".kuzushi/v3/index.sqlite3')
       ? "artifact KB findings index must not hardcode findings DB path"
       : null,
   ].filter(Boolean);
@@ -1938,8 +1902,8 @@ function tuiLatestRunConsumerFailure(root, file) {
       ? null
       : `TUI latest-run consumer must use ui_latest_run_path: ${file}`,
     source.includes("ui_run_dir(") ? null : `TUI latest-run consumer must use ui_run_dir: ${file}`,
-    productionSource.includes('".kuzushi/latest"')
-      ? `TUI latest-run consumer must not hardcode .kuzushi/latest: ${file}`
+    productionSource.includes('".kuzushi/v3/latest"')
+      ? `TUI latest-run consumer must not hardcode .kuzushi/v3/latest: ${file}`
       : null,
   ].filter(Boolean);
 }
@@ -1954,8 +1918,8 @@ function tuiRunsRootConsumerFailure(root, file) {
     source.includes("kuzushi_core::runs_root(");
   return [
     usesSharedRoot ? null : `TUI runs-root consumer must use shared helper: ${file}`,
-    source.includes(".kuzushi/runs")
-      ? `TUI runs-root consumer must not hardcode .kuzushi/runs: ${file}`
+    source.includes(".kuzushi/v3/runs")
+      ? `TUI runs-root consumer must not hardcode .kuzushi/v3/runs: ${file}`
       : null,
   ].filter(Boolean);
 }
@@ -2137,8 +2101,8 @@ function threatModelDefaultOutputDirChecks(toolContract, buildInput, determinist
     deterministicInput.includes("flavor.default_output_dir(&target, &run_id)")
       ? null
       : "threat-model deterministic input must use default_output_dir",
-    productionSources.includes(".kuzushi/runs/{run_id}")
-      ? "threat-model default output dir must not hardcode .kuzushi/runs"
+    productionSources.includes(".kuzushi/v3/runs/{run_id}")
+      ? "threat-model default output dir must not hardcode .kuzushi/v3/runs"
       : null,
   ].filter(Boolean);
 }

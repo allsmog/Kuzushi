@@ -70,7 +70,7 @@ Historical migrations preserved for fresh-DB-vs-pre-reset detection
 in `src/migrations/100_schema_reset.ts`.
 
 ### G. `src/agents/tasks/taint-analysis/label.ts` — legacy checkpoint format
-On-disk format compat for `.kuzushi/runs/*` checkpoints. Removing
+On-disk format compat for `.kuzushi/v3/runs/*` checkpoints. Removing
 invalidates any persisted operator state.
 
 ### H. `src/scanners/run-agentic.ts` — `parseAgenticOutput` / `selectAgenticFindings` /

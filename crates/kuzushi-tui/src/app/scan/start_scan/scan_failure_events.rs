@@ -26,6 +26,7 @@ impl ShellApp {
         scan.running = false;
         scan.abort_requested = false;
         scan.error = Some(error.to_string());
+        self.active_model_override = None;
         run_id
     }
 

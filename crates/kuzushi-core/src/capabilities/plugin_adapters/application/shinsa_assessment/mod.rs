@@ -86,7 +86,7 @@ fn resolve_shinsa_execution<'runtime>(
         plugin_root,
         runtime,
         model,
-        mode: mode::shinsa_mode(tool_name),
+        mode: mode::shinsa_mode(tool_name, input),
         output_dir: shinsa_output_dir(input),
     })
 }

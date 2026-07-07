@@ -1,4 +1,5 @@
 use super::*;
+use crate::scan::domain::scanner_binary_available;
 
 pub(crate) fn parse_semgrep_config_input(input: &Value) -> Result<Option<Vec<String>>> {
     let Some(raw) = input.get("config").or_else(|| input.get("configFlag")) else {
@@ -47,6 +48,16 @@ fn non_empty_semgrep_configs(configs: Vec<String>) -> Vec<String> {
 impl ScanEngine for SemgrepScanner {
     fn id(&self) -> &'static str {
         "semgrep"
+    }
+
+    fn preflight(&self) -> Result<()> {
+        if scanner_binary_available(&self.binary) {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "semgrep: could not find scanner binary {:?}. Install Semgrep (for example `pipx install semgrep` or `brew install semgrep`) or pass {{\"binary\":\"/path/to/semgrep\"}}. Next: run semgrep:scan {{\"binary\":\"/path/to/semgrep\"}} or task block semgrep.",
+            self.binary
+        )
     }
 
     fn scan(&self, target: &Path, cancellation: &ScanCancellation) -> Result<Vec<Finding>> {

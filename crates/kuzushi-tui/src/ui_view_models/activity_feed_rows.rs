@@ -1,11 +1,14 @@
 use super::activity_feed_pause::activity_feed_pause_model;
 use super::activity_feed_placeholder::activity_feed_placeholder_model;
-use crate::{ActivitySession, RecordedTraceEvent};
-use std::time::{SystemTime, UNIX_EPOCH};
+use crate::{ActivitySession, DagTaskState, RecordedTraceEvent};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+const STALLED_TRACE_AFTER_SECS: u64 = 30;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ActivityFeedRowTone {
     Primary,
+    Label,
     Success,
     Muted,
     Danger,
@@ -23,10 +26,16 @@ pub(crate) fn activity_feed_pane_rows(
     session: &ActivitySession,
     width: usize,
     running_tool: Option<&str>,
+    now: Instant,
 ) -> Vec<ActivityFeedPaneRow> {
+    let visible_events = session
+        .paused_event_count
+        .map(|count| count.min(session.events.len()))
+        .unwrap_or(session.events.len());
     let mut rows = session
         .events
         .iter()
+        .take(visible_events)
         .flat_map(|event| feed_event_rows(event, session.verbose_subsystems, width))
         .collect::<Vec<_>>();
     if let Some(model) = activity_feed_pause_model(session) {
@@ -47,7 +56,61 @@ pub(crate) fn activity_feed_pane_rows(
             tone: ActivityFeedRowTone::Muted,
         });
     }
+    if let Some(row) = stalled_trace_row(session, width, running_tool, now) {
+        rows.push(row);
+    }
     rows
+}
+
+fn stalled_trace_row(
+    session: &ActivitySession,
+    width: usize,
+    running_tool: Option<&str>,
+    now: Instant,
+) -> Option<ActivityFeedPaneRow> {
+    if session.paused || !activity_is_live(session, running_tool) {
+        return None;
+    }
+    let (elapsed, source) = trace_silence_elapsed(session, now)?;
+    (elapsed.as_secs() >= STALLED_TRACE_AFTER_SECS).then(|| ActivityFeedPaneRow {
+        text: fit(
+            &format!(
+                " ⚠ no trace output for {} since {source}",
+                silence_duration_label(elapsed)
+            ),
+            width,
+        ),
+        tone: ActivityFeedRowTone::Warn,
+    })
+}
+
+fn activity_is_live(session: &ActivitySession, running_tool: Option<&str>) -> bool {
+    running_tool.is_some()
+        || session
+            .tasks
+            .values()
+            .any(|row| row.state == DagTaskState::Active)
+}
+
+fn trace_silence_elapsed(
+    session: &ActivitySession,
+    now: Instant,
+) -> Option<(Duration, &'static str)> {
+    if let Some(event) = session.events.back() {
+        return now
+            .checked_duration_since(event.observed_at)
+            .map(|elapsed| (elapsed, "last trace event"));
+    }
+    now.checked_duration_since(session.started_at)
+        .map(|elapsed| (elapsed, "run start"))
+}
+
+fn silence_duration_label(elapsed: Duration) -> String {
+    let seconds = elapsed.as_secs();
+    if seconds < 60 {
+        return format!("{seconds}s");
+    }
+    format!("{}m{:02}s", seconds / 60, seconds % 60)
 }
 
 /// One event, one or more pane rows. Error rows (danger severity, refusals)
@@ -130,7 +193,7 @@ fn feed_event_glyph(event: &RecordedTraceEvent) -> &'static str {
             "done" | "tool-complete" => "✓",
             "refused" => "✗",
             "reasoning" | "tool-progress" => "…",
-            "finding" | "find" => "▸",
+            "finding" | "find" => "◇",
             _ => "·",
         },
     }
@@ -201,13 +264,13 @@ mod tests {
                 .with_started_at_ms(3_661_000),
         );
 
-        let rows = activity_feed_pane_rows(&session, 80, None);
+        let rows = activity_feed_pane_rows(&session, 80, None, Instant::now());
         assert_eq!(rows.len(), 1);
         assert!(rows[0].text.contains("hidden subsystem event"));
         assert_eq!(rows[0].tone, ActivityFeedRowTone::Muted);
 
         session.verbose_subsystems = true;
-        let rows = activity_feed_pane_rows(&session, 80, None);
+        let rows = activity_feed_pane_rows(&session, 80, None, Instant::now());
         assert_eq!(rows.len(), 1);
         assert!(rows[0].text.contains("[pipeline]"));
         assert_eq!(rows[0].tone, ActivityFeedRowTone::Muted);
@@ -224,11 +287,65 @@ mod tests {
                 .with_started_at_ms(42_000),
         );
 
-        let rows = activity_feed_pane_rows(&session, 80, None);
+        let rows = activity_feed_pane_rows(&session, 80, None, Instant::now());
 
         assert_eq!(rows[0].tone, ActivityFeedRowTone::Warn);
         assert!(rows[0].text.contains("paused"));
         assert_eq!(rows[1].tone, ActivityFeedRowTone::Success);
         assert!(rows[1].text.contains("[semgrep:scan]"));
+    }
+
+    #[test]
+    fn activity_feed_pane_rows_warns_when_live_trace_output_stalls() {
+        let now = Instant::now();
+        let mut session = ActivitySession::new("r-1");
+        session.started_at = now - Duration::from_secs(60);
+        session.events.push_back(RecordedTraceEvent {
+            step: RunTraceStep::new(1, "reasoning", "started").with_module_id("triage"),
+            observed_at: now - Duration::from_secs(45),
+        });
+
+        let rows = activity_feed_pane_rows(&session, 80, Some("triage:run"), now);
+
+        let stalled = rows
+            .iter()
+            .find(|row| row.text.contains("no trace output"))
+            .expect("stalled trace row");
+        assert_eq!(stalled.tone, ActivityFeedRowTone::Warn);
+        assert!(stalled.text.contains("45s since last trace event"));
+    }
+
+    #[test]
+    fn activity_feed_pane_rows_warns_when_live_run_never_emits_trace() {
+        let now = Instant::now();
+        let mut session = ActivitySession::new("r-1");
+        session.started_at = now - Duration::from_secs(31);
+
+        let rows = activity_feed_pane_rows(&session, 80, Some("threat-model:build"), now);
+
+        assert!(rows
+            .iter()
+            .any(|row| row.text.contains("waiting for its first trace event")));
+        assert!(rows
+            .iter()
+            .any(|row| row.text.contains("31s since run start")));
+    }
+
+    #[test]
+    fn activity_feed_pane_rows_does_not_warn_for_idle_or_paused_sessions() {
+        let now = Instant::now();
+        let mut session = ActivitySession::new("r-1");
+        session.started_at = now - Duration::from_secs(90);
+
+        let idle_rows = activity_feed_pane_rows(&session, 80, None, now);
+        assert!(!idle_rows
+            .iter()
+            .any(|row| row.text.contains("no trace output")));
+
+        session.paused = true;
+        let paused_rows = activity_feed_pane_rows(&session, 80, Some("sast:scan"), now);
+        assert!(!paused_rows
+            .iter()
+            .any(|row| row.text.contains("no trace output")));
     }
 }

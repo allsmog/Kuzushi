@@ -1,6 +1,6 @@
 use super::{
-    journey_footer_segment, routing_mode_segment, scan_status, status_footer_findings_summary,
-    view_status_segment, ShellApp,
+    active_project_scope_label, journey_footer_segment, routing_mode_segment, scan_status,
+    status_footer_findings_summary, view_status_segment, ShellApp,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -27,11 +27,16 @@ fn status_footer_left_segments(app: &ShellApp) -> Vec<String> {
 }
 
 fn active_status_footer_segments(app: &ShellApp, activity: FooterActivity) -> Vec<String> {
-    vec![
-        routing_mode_segment(app),
+    let mut segments = vec![routing_mode_segment(app)];
+    if let Some(chip) = journey_footer_segment(app) {
+        segments.push(chip);
+    }
+    segments.extend([
+        view_status_segment(app),
         model_footer_segment(app),
         activity.label,
-    ]
+    ]);
+    segments
 }
 
 /// Idle bottom bar: routing + current view (live orientation). Target, ctx,
@@ -43,13 +48,16 @@ fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
     // chip (M2 §2.1) is kept here — it's live gating state, not a session
     // fact, so it belongs with routing/view rather than the cockpit strip.
     let mut segments = vec![routing_mode_segment(app)];
-    // Engagement orientation (M-journey): `phase:hunt 2/4` keeps "where am
-    // I in the map→hunt→confirm→fix journey" visible on every view, not
-    // just inside the launch walker.
+    // Engagement orientation (M-journey): the same `組 map 1/4` phase chip used
+    // by the Workbench keeps the current journey step visible on every view,
+    // not just inside the launch walker.
     if let Some(chip) = journey_footer_segment(app) {
         segments.push(chip);
     }
     if let Some(chip) = scope_footer_segment(app) {
+        segments.push(chip);
+    }
+    if let Some(chip) = project_scope_footer_segment(app) {
         segments.push(chip);
     }
     segments.push(view_status_segment(app));
@@ -62,6 +70,10 @@ fn scope_footer_segment(app: &ShellApp) -> Option<String> {
         return None;
     }
     Some("scope: on".to_string())
+}
+
+fn project_scope_footer_segment(app: &ShellApp) -> Option<String> {
+    active_project_scope_label(app).map(|scope| format!("project-scope:{scope}"))
 }
 
 fn status_footer_right_segments(app: &ShellApp, warning: bool) -> Vec<String> {
@@ -141,6 +153,9 @@ fn active_or_abort_label(name: &str, abort_requested: bool) -> String {
 }
 
 fn model_footer_segment(app: &ShellApp) -> String {
+    if let Some(model) = app.active_model_override.as_deref() {
+        return format!("{model} (tool)");
+    }
     app.config
         .model
         .clone()

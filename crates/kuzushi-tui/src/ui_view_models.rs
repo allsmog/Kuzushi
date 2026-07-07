@@ -26,6 +26,7 @@ mod attack_surface;
 mod auth;
 mod catalog;
 mod chrome_layout;
+mod code_context;
 mod config;
 mod confirm_card;
 mod context_snapshot;
@@ -36,6 +37,7 @@ mod failure_handoff;
 mod finding_summary;
 mod findings;
 mod generated_views_feed;
+mod health;
 mod help;
 mod home_cockpit;
 mod journey;
@@ -48,22 +50,32 @@ mod module_run;
 mod options;
 mod patch_review;
 mod plan_card;
+mod planning_overview;
 mod prereq_prompt;
+mod project_model;
 mod prompt;
 mod prompt_tuning;
 mod pwn;
 mod recent_module_activity;
 mod recommendation;
+mod report_preview;
 mod retry_card;
+mod review_conflicts;
+mod review_queue;
+mod review_state;
 mod routing;
+mod run_diff;
 mod run_paths;
 mod run_status;
 mod run_timeline;
 mod run_trace;
 mod sast_tasks;
+mod screen_context;
 mod session_story;
 mod severity_tone;
+mod source_tree;
 mod status_footer;
+mod strategy_queue;
 mod threat_dfd_diagram;
 mod threat_impact;
 mod threat_model;
@@ -76,11 +88,15 @@ mod tools;
 mod transcript;
 mod view_status;
 mod viz_data;
+mod workbench;
+mod workbench_depth;
 mod workspace;
 pub(crate) use active_stage::active_stage_label;
 pub(crate) use activity_dag_rows::ActivityDagRowTone;
+pub(crate) use activity_empty_state::ActivityEmptyStateModel;
 pub(crate) use activity_feed_rows::ActivityFeedRowTone;
 pub(crate) use activity_footer::ActivityFooterHint;
+pub(crate) use activity_layout::{activity_frame_layout, ActivityFrameLayout};
 pub(crate) use activity_pane_chrome::{ActivityPaneTitle, ActivityPlainPaneHeaderCell};
 pub(crate) use activity_plain_rows::{
     ActivityPlainDagCell, ActivityPlainFeedCell, ActivityPlainPaneRow,
@@ -104,6 +120,7 @@ pub(crate) use catalog::{
 pub(crate) use chrome_layout::{
     keybind_footer_chrome_height, status_footer_chrome_height, transcript_chrome_height,
 };
+pub(crate) use code_context::{selected_finding_code_model, CodePaneModel, CodePaneRow};
 pub(crate) use config::{
     config_model, plain_config_model, ConfigModel, ConfigModelRow, ConfigModelTable,
     ConfigSummaryRow, PlainConfigModel, PlainConfigModelRow,
@@ -115,24 +132,33 @@ pub(crate) use context_snapshot::{
 };
 pub(crate) use context_strip::{context_strip_model, ContextStripModel, ContextStripSegment};
 pub(crate) use cost::{cost_model, CostBudgetRow, CostBudgetStatus, CostModel, CostTone};
-pub(crate) use display_text::{compact_target_path, format_session_cost};
+pub(crate) use display_text::{
+    active_project_scope_label, compact_target_path, format_session_cost, scoped_target_path_label,
+};
 pub(crate) use failure_handoff::{failure_handoff_model, FailureHandoffModel};
 pub(crate) use finding_summary::{
     ci_result_findings_summary, findings_count_summary, status_footer_findings_summary,
     SeverityCounts,
 };
 pub(crate) use findings::{
-    findings_model, selected_finding_detail_model, FindingDetailModel, FindingEvidenceRow,
-    FindingListRow, FindingsModel, TriageSummaryModel,
+    current_finding_for_detail, findings_model, selected_finding_detail_model,
+    visible_finding_at_cursor, visible_finding_at_index, visible_finding_position_for,
+    visible_findings_len, visible_sorted_finding_alias_indices, CleanScanEmptyState,
+    FilteredFindingsEmptyState, FindingDetailModel, FindingEvidenceRow, FindingListRow,
+    FindingsEmptyState, FindingsModel, ProofTier, TriageSummaryModel,
 };
+pub(crate) use health::{health_model, HealthModel, HealthRow, HealthTone};
 pub(crate) use help::{
     help_model, plain_help_model, quickstart_model, HelpCommandRow, PlainHelpCategoryModel,
     PlainHelpModel,
 };
-pub(crate) use home_cockpit::{home_cockpit_model, HomeArtifactRow, HomeCockpitModel};
+pub(crate) use home_cockpit::{
+    home_cockpit_model, HomeArtifactRow, HomeCockpitModel, HomeFindingsCard, HomeNextCard,
+    HomeRunArtifactChip, HomeRunCard, HomeTopRiskRow,
+};
 pub(crate) use journey::{
-    journey_footer_segment, journey_model, JourneyModel, JourneyPhaseState, JourneyPhaseStatus,
-    JourneyPhaseTone,
+    journey_footer_segment, journey_model, journey_phase_segment, JourneyModel, JourneyPhaseState,
+    JourneyPhaseStatus, JourneyPhaseTone,
 };
 pub(crate) use keybindings::footer_keybindings;
 pub(crate) use knowledge_base::{
@@ -159,13 +185,19 @@ pub(crate) use options::{
 };
 pub(crate) use patch_review::{patch_review_model, PatchReviewModel, PatchReviewTestRow};
 pub(crate) use plan_card::{plan_card_model, PlanCardModel, PlanChangeRow};
+pub(crate) use planning_overview::{
+    enter_plan, format_relative_age, latest_cached_modified, row_outcome, workspace_history,
+    EnterPlan, PriorState, RowOutcome, WorkspaceHistory,
+};
 pub(crate) use prereq_prompt::{
     plain_prereq_plan_model, prereq_prompt_model, PlainPrereqPlanModel, PrereqPromptModel,
     PrereqPromptStepModel,
 };
+pub(crate) use project_model::{project_model, ProjectModel, ProjectModelOrigin, ProjectModelRow};
 pub(crate) use prompt::{prompt_model, prompt_text};
 pub(crate) use prompt_tuning::{
-    prompts_model, tune_model, PromptRow, TuneActionRow, TuneHouseRules, TuneModel,
+    prompts_model, tune_model, PromptRow, PromptStackLayer, PromptStackModel, TuneActionRow,
+    TuneHouseRules, TuneModel,
 };
 pub(crate) use pwn::{
     pwn_dashboard_model, PwnDashboardModel, PwnPrimitiveRow, PwnReverseObservationRow, PwnRoundRow,
@@ -174,12 +206,25 @@ pub(crate) use recent_module_activity::{
     recent_module_activity_model, ModuleActivityKind, ModuleActivityModel, ModuleActivityRow,
     ModuleActivityTone,
 };
-pub(crate) use recommendation::{recommendation_model, RecommendationModel, RecommendationRow};
+pub(crate) use recommendation::{
+    recommendation_artifact_needs_refresh, recommendation_components, recommendation_model,
+    ComponentRecommendationRow, RecommendationModel, RecommendationRow,
+};
+pub(crate) use report_preview::{
+    report_preview_model, ReportPreviewCounts, ReportPreviewModel, ReportPreviewRow,
+};
 pub(crate) use retry_card::{retry_card_model, RetryCardModel, RetryCardRow};
+pub(crate) use review_queue::{
+    review_queue_model, ReviewQueueMode, ReviewQueueModel, ReviewQueueRow,
+};
 pub(crate) use routing::{
-    plain_render_mode, routing_mode, routing_mode_segment, shell_view_line_route,
-    uses_activity_frame, uses_scene_frame, PlainRenderMode, PrimaryViewRoute, RoutingMode,
-    ShellViewLineRoute, SystemViewRoute, ThreatAndRunViewRoute, WorkspaceSessionViewRoute,
+    has_run_activity, plain_render_mode, routing_mode, routing_mode_segment, uses_activity_frame,
+    uses_scene_frame, uses_workbench_frame, PlainInteractiveOnlyModel, PlainRenderMode,
+    RoutingMode,
+};
+pub(crate) use run_diff::{
+    run_diff_model, RunDiffChangedRow, RunDiffDecisionSummary, RunDiffFindingRow,
+    RunDiffFindingState, RunDiffModel, RunDiffUncertainMatchRow,
 };
 pub(crate) use run_paths::{
     ui_latest_run_path, ui_latest_run_relative_path, ui_run_artifact_relative_path, ui_run_dir,
@@ -194,13 +239,21 @@ pub(crate) use run_trace::{
 pub(crate) use sast_tasks::{
     plain_sast_tasks_model, sast_tasks_model, PlainSastTaskRow, PlainSastTasksModel, SastTasksModel,
 };
+pub(crate) use screen_context::{screen_context_model, ScreenContext};
 pub(crate) use session_story::{
     session_history_model, session_story_model, CommandHistoryModel, SessionStoryModel,
 };
 pub(crate) use severity_tone::SeverityTone;
+pub(crate) use source_tree::{
+    source_tree_model, SourceTreeComponentTier, SourceTreeModel, SourceTreeRow,
+};
 pub(crate) use status_footer::status_footer_model;
+pub(crate) use strategy_queue::{
+    strategy_queue_model, StrategyQueueDetailRow, StrategyQueueEmptyState, StrategyQueueModel,
+    StrategyQueueRow,
+};
 pub(crate) use threat_dfd_diagram::{
-    threat_dfd_diagram_feed_rows, threat_dfd_diagram_lines, threat_dfd_view, DfdLineKind,
+    threat_dfd_diagram_lines, threat_dfd_view, DfdDiagramLine, DfdLineKind,
 };
 pub(crate) use threat_model::{
     threat_model_doc, threat_model_relative_path, threat_summary_review, ThreatSummaryReview,
@@ -216,16 +269,28 @@ pub(crate) use threat_stories::{threat_story_model, ThreatStoryTone};
 #[cfg(test)]
 pub(crate) use threat_stride::threat_stride_rollup_from_doc;
 pub(crate) use threat_stride::{threat_stride_rollup, ThreatStrideRow, ThreatStrideTone};
-pub(crate) use tools::{tools_model, ToolRow};
+pub(crate) use tools::{tools_model, ToolGroup, ToolRow};
 pub(crate) use transcript::{
     plain_command_result_model, transcript_model, transcript_model_from_log_index,
     PlainCommandResultModel,
 };
 pub(crate) use view_status::view_status_segment;
 pub(crate) use viz_data::{
-    attack_tree, dfd_model, findings_heatmap, risk_by_module, taint_flow_path, AttackChain,
-    AttackTree, DfdFlowModel, DfdKind, DfdModel, DfdNodeModel, FindingsHeatmap, ModuleRisk,
-    RiskByModule, TaintFlowPath, TaintStageModel,
+    attack_tree, cached_findings_heatmap, cached_findings_heatmap_with_selection,
+    cached_risk_by_module, dfd_model, findings_heatmap, findings_heatmap_with_selection,
+    risk_by_module, selected_taint_flow_path, taint_flow_path, AttackChain, AttackTree,
+    DfdFlowModel, DfdKind, DfdModel, DfdNodeModel, FindingsHeatmap, ModuleRisk, RiskByModule,
+    TaintFlowPath, TaintStageModel,
+};
+pub(crate) use workbench::{
+    active_review_queue_mode, active_workbench_page, workbench_export_command,
+    workbench_report_command, workbench_view_model, WorkbenchCenter, WorkbenchCenterBody,
+    WorkbenchCenterTab, WorkbenchHint, WorkbenchState, WorkbenchTopBar, WorkbenchViewModel,
+    WORKBENCH_REPORT_COMMAND,
+};
+pub(crate) use workbench_depth::{
+    workbench_depth_bounds, workbench_depth_model, DrawerContent, FindingRow, LegKind, Stanza,
+    TraceLeg, Waypoint, WorkbenchModel,
 };
 pub(crate) use workspace::{
     findings_db_relative_path, plain_workspace_model, workspace_model, PlainWorkspaceModel,

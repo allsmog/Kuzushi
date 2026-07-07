@@ -5,8 +5,8 @@ mod report;
 mod types;
 
 pub(crate) use checks::{
-    check_auth_env, check_container_runtime, check_findings_db, check_model_config,
-    check_offense_sandbox, check_revng_image, check_scanner_binary,
+    check_auth_env, check_container_runtime, check_findings_db, check_joern_binary,
+    check_model_config, check_offense_sandbox, check_revng_image, check_scanner_binary,
     deterministic_capability_checks,
 };
 pub(crate) use output::{print_doctor_json, print_doctor_plain};

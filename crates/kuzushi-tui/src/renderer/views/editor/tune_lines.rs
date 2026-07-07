@@ -1,6 +1,7 @@
 use super::*;
 use crate::ui_view_models::{
-    prompts_model, tune_model, PromptRow, TuneActionRow, TuneHouseRules, TuneModel,
+    prompts_model, tune_model, PromptRow, PromptStackLayer, PromptStackModel, TuneActionRow,
+    TuneHouseRules, TuneModel,
 };
 
 pub(crate) fn tune_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
@@ -84,6 +85,7 @@ pub(crate) fn prompts_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     lines.push(blank());
     append_prompts_header(&mut lines, &model.module, area.width);
     append_prompt_rows(&mut lines, &model.rows, area);
+    append_prompt_stack(&mut lines, &model.stack, area);
     lines.push(blank());
     lines.push(keybind_hint_line(&[
         ("↑/↓/j/k", "row"),
@@ -92,6 +94,7 @@ pub(crate) fn prompts_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
         ("d", "diff"),
         ("r", "reset"),
         ("S", "set"),
+        ("cmd", "mutate/approve/reject"),
         ("Enter", "show"),
         ("back", "home"),
     ]));
@@ -129,7 +132,7 @@ fn prompt_row_line(row: &PromptRow, area: Rect) -> Line<'static> {
             &format!(
                 "{marker} {}",
                 table_text(
-                    &[row.verb, row.source, &row.path],
+                    &[row.verb, &row.source, &row.path],
                     &[12, 10, value_width(area, 28)],
                 )
             ),
@@ -137,4 +140,46 @@ fn prompt_row_line(row: &PromptRow, area: Rect) -> Line<'static> {
         ),
         style,
     )
+}
+
+fn append_prompt_stack(lines: &mut Vec<Line<'static>>, stack: &PromptStackModel, area: Rect) {
+    lines.push(blank());
+    lines.push(divider(
+        &format!("PROMPT STACK · {}", stack.verb),
+        area.width,
+    ));
+    lines.push(Line::from(vec![
+        Span::raw("  "),
+        Span::styled(
+            table_text(
+                &["layer", "state", "hash", "path"],
+                &prompt_stack_widths(area),
+            ),
+            theme::subtle(),
+        ),
+    ]));
+    for layer in &stack.layers {
+        lines.push(prompt_stack_layer_line(layer, area));
+    }
+}
+
+fn prompt_stack_layer_line(layer: &PromptStackLayer, area: Rect) -> Line<'static> {
+    Line::styled(
+        fit(
+            &format!(
+                "  {}",
+                table_text(
+                    &[layer.layer, &layer.state, &layer.hash, &layer.path],
+                    &prompt_stack_widths(area),
+                )
+            ),
+            area.width as usize,
+        ),
+        theme::primary(),
+    )
+}
+
+fn prompt_stack_widths(area: Rect) -> Vec<usize> {
+    let path_width = value_width(area, 62).max(16);
+    vec![18, 16, 22, path_width]
 }

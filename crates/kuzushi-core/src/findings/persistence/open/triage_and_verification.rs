@@ -1,28 +1,102 @@
 use super::*;
+use crate::storage_v3::writer_actor::{
+    DecisionCommand, StorageWriterActor, VerificationWrite, WriterCommand,
+};
+use std::collections::BTreeMap;
 
 impl FindingStore {
     pub fn save_triage(&self, finding_id: i64, triage: &TriageOutcome) -> Result<()> {
+        self.save_triage_with_author(finding_id, triage, TriageAuthor::Auto)
+    }
+
+    pub fn save_triage_with_author(
+        &self,
+        finding_id: i64,
+        triage: &TriageOutcome,
+        author: TriageAuthor,
+    ) -> Result<()> {
+        self.upsert_triage_for_finding_ids([finding_id], triage, author)
+    }
+
+    pub fn save_triage_for_fingerprint(
+        &self,
+        fingerprint: &str,
+        triage: &TriageOutcome,
+    ) -> Result<usize> {
+        let ids = self.finding_ids_for_fingerprint(fingerprint)?;
+        let count = ids.len();
+        self.upsert_triage_for_finding_ids(ids, triage, TriageAuthor::Auto)?;
+        Ok(count)
+    }
+
+    fn finding_ids_for_fingerprint(&self, fingerprint: &str) -> Result<Vec<i64>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                r#"
+                select distinct cast(json_extract(finding_json, '$.id') as integer) as finding_id
+                  from finding_observations
+                 where finding_json is not null
+                   and json_extract(finding_json, '$.fingerprint') = ?1
+                 order by finding_id asc
+                "#,
+            )?;
+        let rows = stmt.query_map(params![fingerprint], |row| row.get(0))?;
+        rows.collect::<rusqlite::Result<Vec<_>>>()
+            .context("Could not list sibling findings for triage fingerprint")
+    }
+
+    fn upsert_triage_for_finding_ids(
+        &self,
+        finding_ids: impl IntoIterator<Item = i64>,
+        triage: &TriageOutcome,
+        author: TriageAuthor,
+    ) -> Result<()> {
+        let created_at = now_isoish();
+        for finding_id in finding_ids {
+            self.upsert_triage_for_finding_id(finding_id, triage, author, &created_at)?;
+        }
+        Ok(())
+    }
+
+    fn upsert_triage_for_finding_id(
+        &self,
+        finding_id: i64,
+        triage: &TriageOutcome,
+        author: TriageAuthor,
+        created_at: &str,
+    ) -> Result<()> {
+        if self.apply_triage_to_v3_projection(finding_id, triage, author)? {
+            self.append_review_decision_from_triage(finding_id, triage, author, created_at)?;
+        }
+        Ok(())
+    }
+
+    fn apply_triage_to_v3_projection(
+        &self,
+        finding_id: i64,
+        triage: &TriageOutcome,
+        author: TriageAuthor,
+    ) -> Result<bool> {
+        let Some(mut finding) = self.v3_finding_by_projected_id(finding_id)? else {
+            anyhow::bail!("finding constraint violation: missing projected finding id {finding_id}");
+        };
+        if finding.triaged_by == Some(TriageAuthor::Human) && author != TriageAuthor::Human {
+            return Ok(false);
+        }
+        finding.triage = Some(triage.clone());
+        finding.triaged_by = Some(author);
+        let finding_json = serde_json::to_string(&finding)
+            .context("Could not serialize v3 triage projection")?;
         self.conn.execute(
             r#"
-            insert into triage(finding_id, verdict, confidence, rationale, created_at, cost_usd)
-            values (?1, ?2, ?3, ?4, ?5, ?6)
-            on conflict(finding_id) do update set
-              verdict = excluded.verdict,
-              confidence = excluded.confidence,
-              rationale = excluded.rationale,
-              created_at = excluded.created_at,
-              cost_usd = excluded.cost_usd
+            update finding_observations
+               set finding_json = ?1
+             where json_extract(finding_json, '$.id') = ?2
             "#,
-            params![
-                finding_id,
-                triage.verdict.as_str(),
-                triage.confidence,
-                triage.rationale,
-                now_isoish(),
-                triage.cost_usd,
-            ],
+            params![finding_json, finding_id],
         )?;
-        Ok(())
+        Ok(true)
     }
 
     /// Persist an empirical verification outcome alongside its finding.
@@ -34,32 +108,7 @@ impl FindingStore {
         finding_id: i64,
         record: &PersistedVerification,
     ) -> Result<i64> {
-        let notes_json = serde_json::to_string(&record.notes)
-            .context("Could not serialize verification notes")?;
-        self.conn.execute(
-            r#"
-            insert into verifications(
-              finding_id, proof_level, proof_verdict, backend, language,
-              harness_path, crash_evidence, duration_ms, cost_usd,
-              notes_json, created_at
-            )
-            values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-            "#,
-            params![
-                finding_id,
-                record.proof_level as i64,
-                record.proof_verdict.as_str(),
-                record.backend.as_str(),
-                record.language.as_deref(),
-                record.harness_path.as_deref(),
-                record.crash_evidence.as_deref(),
-                record.duration_ms as i64,
-                record.cost_usd,
-                notes_json,
-                now_isoish(),
-            ],
-        )?;
-        Ok(self.conn.last_insert_rowid())
+        self.record_v3_verification(finding_id, record)
     }
 
     /// Fetch the most recent verification record for a finding, if any.
@@ -67,14 +116,20 @@ impl FindingStore {
         &self,
         finding_id: i64,
     ) -> Result<Option<PersistedVerification>> {
-        let mut stmt = self.conn.prepare(
+        let Some(db_path) = &self.db_path else {
+            return Ok(None);
+        };
+        crate::storage_v3::ProjectionDb::open(db_path)?;
+        let conn = rusqlite::Connection::open(db_path)
+            .with_context(|| format!("Could not open {}", db_path.display()))?;
+        let mut stmt = conn.prepare(
             r#"
             select proof_level, proof_verdict, backend, language,
                    harness_path, crash_evidence, duration_ms, cost_usd,
                    notes_json, created_at
-            from verifications
+            from verification_events
             where finding_id = ?1
-            order by created_at desc, id desc
+            order by seq desc
             limit 1
             "#,
         )?;
@@ -84,25 +139,101 @@ impl FindingStore {
         }
         Ok(None)
     }
+
+    pub(crate) fn attach_latest_verifications_to_findings(
+        &self,
+        findings: &mut [Finding],
+    ) -> Result<()> {
+        let verification_by_id = self.latest_verifications_by_finding_id(finding_ids(findings))?;
+        for finding in findings {
+            if let Some(id) = finding.id {
+                finding.verification = verification_by_id.get(&id).cloned();
+            }
+        }
+        Ok(())
+    }
+
+    fn latest_verifications_by_finding_id(
+        &self,
+        finding_ids: Vec<i64>,
+    ) -> Result<BTreeMap<i64, PersistedVerification>> {
+        let mut by_id = BTreeMap::new();
+        for finding_id in finding_ids {
+            if let Some(verification) = self.get_latest_verification(finding_id)? {
+                by_id.insert(finding_id, verification);
+            }
+        }
+        Ok(by_id)
+    }
+}
+
+impl FindingStore {
+    fn record_v3_verification(
+        &self,
+        finding_id: i64,
+        record: &PersistedVerification,
+    ) -> Result<i64> {
+        let target = self
+            .v3_target_for_finding(finding_id, "verification")?
+            .context("verification records require a file-backed v3 finding store")?;
+        let receipt = StorageWriterActor::commit_blocking(
+            target.event_log_dir,
+            target.db_path,
+            WriterCommand::Decision(DecisionCommand::RecordVerification(VerificationWrite {
+                stable_fp: target.stable_fp,
+                finding_id: Some(finding_id),
+                identity_id: target.identity_id,
+                proof_level: record.proof_level,
+                proof_verdict: record.proof_verdict.as_str().to_string(),
+                backend: record.backend.as_str().to_string(),
+                language: record.language.clone(),
+                harness_path: record.harness_path.clone(),
+                crash_evidence: record.crash_evidence.clone(),
+                duration_ms: record.duration_ms,
+                cost_usd_micros: cost_usd_to_micros(record.cost_usd),
+                notes: record.notes.clone(),
+                actor: "verification".to_string(),
+            })),
+        )?;
+        Ok(receipt.committed_seq as i64)
+    }
 }
 
 fn latest_verification_from_row(row: &rusqlite::Row<'_>) -> Result<PersistedVerification> {
-    let notes_json: String = row.get(8)?;
+    latest_verification_from_row_at(row, 0)
+}
+
+fn latest_verification_from_row_at(
+    row: &rusqlite::Row<'_>,
+    offset: usize,
+) -> Result<PersistedVerification> {
+    let notes_json: String = row.get(offset + 8)?;
     let notes: Vec<String> = serde_json::from_str(&notes_json).unwrap_or_default();
-    let proof_verdict_str: String = row.get(1)?;
-    let backend_str: String = row.get(2)?;
+    let proof_verdict_str: String = row.get(offset + 1)?;
+    let backend_str: String = row.get(offset + 2)?;
     Ok(PersistedVerification {
-        proof_level: row.get::<_, i64>(0)? as u8,
-        proof_verdict: PersistedProofVerdict::from_str(&proof_verdict_str)
-            .unwrap_or(PersistedProofVerdict::NotReproduced),
+        proof_level: row.get::<_, i64>(offset)? as u8,
+        proof_verdict: PersistedProofVerdict::from_str(&proof_verdict_str).ok_or_else(|| {
+            anyhow::anyhow!("unknown persisted proof verdict {proof_verdict_str:?}")
+        })?,
         backend: PersistedSandboxBackend::from_str(&backend_str)
-            .unwrap_or(PersistedSandboxBackend::Plain),
-        language: row.get::<_, Option<String>>(3)?,
-        harness_path: row.get::<_, Option<String>>(4)?,
-        crash_evidence: row.get::<_, Option<String>>(5)?,
-        duration_ms: row.get::<_, i64>(6)? as u64,
-        cost_usd: row.get(7)?,
+            .ok_or_else(|| anyhow::anyhow!("unknown persisted sandbox backend {backend_str:?}"))?,
+        language: row.get::<_, Option<String>>(offset + 3)?,
+        harness_path: row.get::<_, Option<String>>(offset + 4)?,
+        crash_evidence: row.get::<_, Option<String>>(offset + 5)?,
+        duration_ms: row.get::<_, i64>(offset + 6)? as u64,
+        cost_usd: row.get(offset + 7)?,
         notes,
-        created_at: row.get(9)?,
+        created_at: row.get(offset + 9)?,
     })
+}
+
+fn finding_ids(findings: &[Finding]) -> Vec<i64> {
+    let mut ids = findings
+        .iter()
+        .filter_map(|finding| finding.id)
+        .collect::<Vec<_>>();
+    ids.sort_unstable();
+    ids.dedup();
+    ids
 }

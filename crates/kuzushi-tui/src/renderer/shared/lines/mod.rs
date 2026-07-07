@@ -1,7 +1,7 @@
 pub(in crate::renderer) use super::*;
 
 /// Catalog category divider that embeds the section blurb on the rule line:
-///   `── OFFENSE find vulnerabilities by … ──────────`
+///   `── HUNT scan code and dependencies … ──────────`
 /// Mirrors `catHead` in `design/mockups/catalog.jsx`.
 
 /// Inline keybind hint matching `keybindings_line` shape:
@@ -18,7 +18,7 @@ pub(in crate::renderer) use super::*;
 ///
 /// ```text
 ///        ∅  no findings yet
-///           kuzushi keeps the ledger in .kuzushi/v2/findings.sqlite3.
+///           kuzushi keeps the ledger in .kuzushi/v3/index.sqlite3.
 ///           nothing has been promoted on this workspace.
 ///
 ///        ▸ scan          umbrella SAST · semgrep + secrets + agentic

@@ -4,6 +4,7 @@ mod tests {
     use std::path::Path;
     use std::process::Command;
 
+    use serde_json::{json, Value};
     use tempfile::tempdir;
 
     use super::super::*;
@@ -13,7 +14,7 @@ mod tests {
     fn diff_status_helpers_cover_all_stable_labels() {
         assert_eq!(DiffFindingStatus::New.as_str(), "new");
         assert_eq!(DiffFindingStatus::Existing.as_str(), "existing");
-        assert_eq!(DiffFindingStatus::Fixed.as_str(), "fixed");
+        assert_eq!(DiffFindingStatus::NotSeen.as_str(), "not-seen");
         assert_eq!(
             DiffFindingStatus::ChangedContext.as_str(),
             "changed-context"
@@ -26,6 +27,40 @@ mod tests {
         assert_eq!(status_from_name_status("C075"), DiffFileStatus::Copied);
         assert_eq!(status_from_name_status("T"), DiffFileStatus::TypeChanged);
         assert_eq!(status_from_name_status("?"), DiffFileStatus::Unknown);
+    }
+
+    #[test]
+    fn diff_scope_serializes_not_seen_and_reads_legacy_fixed() {
+        let status = serde_json::from_value::<DiffFindingStatus>(json!("fixed")).unwrap();
+        assert_eq!(status, DiffFindingStatus::NotSeen);
+        assert_eq!(
+            serde_json::to_value(DiffFindingStatus::NotSeen).unwrap(),
+            json!("not-seen")
+        );
+
+        let summary = DiffScopeSummary {
+            not_seen_findings: 2,
+            ..DiffScopeSummary::default()
+        };
+        let serialized = serde_json::to_value(summary).unwrap();
+        assert_eq!(
+            serialized.get("notSeenFindings").and_then(Value::as_u64),
+            Some(2)
+        );
+        assert!(serialized.get("fixedFindings").is_none());
+
+        let legacy_summary = serde_json::from_value::<DiffScopeSummary>(json!({
+            "changedFiles": 0,
+            "changedRanges": 0,
+            "deletedRanges": 0,
+            "contextItems": 0,
+            "newFindings": 0,
+            "existingFindings": 0,
+            "fixedFindings": 3,
+            "changedContextFindings": 0
+        }))
+        .unwrap();
+        assert_eq!(legacy_summary.not_seen_findings, 3);
     }
 
     #[cfg(unix)]
@@ -172,7 +207,7 @@ mod tests {
             Severity::Low,
             "Header setup needs review",
         );
-        let old_fixed = Finding::new_tool(
+        let old_not_seen = Finding::new_tool(
             "semgrep",
             "js/missing-query",
             "src/app.js",
@@ -186,7 +221,7 @@ mod tests {
             temp.path(),
             "HEAD~1",
             &[new_finding.clone(), context_finding.clone()],
-            &[old_fixed],
+            &[old_not_seen],
         )
         .unwrap();
 
@@ -223,8 +258,26 @@ mod tests {
                 .map(|tag| tag.status),
             Some(DiffFindingStatus::ChangedContext)
         );
-        assert_eq!(report.fixed_findings.len(), 1);
-        assert_eq!(report.fixed_findings[0].status, DiffFindingStatus::Fixed);
+        assert_eq!(report.not_seen_findings.len(), 1);
+        assert_eq!(
+            report.not_seen_findings[0].status,
+            DiffFindingStatus::NotSeen
+        );
+        let report_json = serde_json::to_value(&report).unwrap();
+        assert!(report_json.get("notSeenFindings").is_some());
+        assert!(report_json.get("fixedFindings").is_none());
+        assert_eq!(
+            report_json
+                .pointer("/summary/notSeenFindings")
+                .and_then(Value::as_u64),
+            Some(1)
+        );
+        assert_eq!(
+            report_json
+                .pointer("/notSeenFindings/0/status")
+                .and_then(Value::as_str),
+            Some("not-seen")
+        );
     }
 }
 

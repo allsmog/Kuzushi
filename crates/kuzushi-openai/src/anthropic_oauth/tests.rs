@@ -160,7 +160,7 @@ mod tests {
     }
 
     #[test]
-    fn triage_outcome_from_response_prefers_structured_then_json_text_then_fallbacks() {
+    fn triage_outcome_from_response_prefers_structured_then_json_text() {
         let structured = triage_outcome_from_response(AgentQueryResponse {
             structured: Some(json!({
                 "verdict": "true_positive",
@@ -169,7 +169,8 @@ mod tests {
             })),
             cost_usd: 0.12,
             ..Default::default()
-        });
+        })
+        .unwrap();
         assert_eq!(structured.verdict, TriageVerdict::TruePositive);
         assert_eq!(structured.confidence, 1.0);
         assert_eq!(structured.cost_usd, 0.12);
@@ -178,26 +179,46 @@ mod tests {
             text: r#"{"verdict":"false_positive","confidence":0.8,"rationale":"json"}"#.to_string(),
             cost_usd: 0.03,
             ..Default::default()
-        });
+        })
+        .unwrap();
         assert_eq!(from_text.verdict, TriageVerdict::FalsePositive);
         assert_eq!(from_text.cost_usd, 0.03);
+    }
 
+    #[test]
+    fn triage_outcome_from_response_errors_on_plain_or_empty_content() {
         let plain = triage_outcome_from_response(AgentQueryResponse {
             text: "plain rationale".to_string(),
             cost_usd: 0.04,
             ..Default::default()
-        });
-        assert_eq!(plain.verdict, TriageVerdict::NeedsReview);
-        assert_eq!(plain.confidence, 0.25);
-        assert_eq!(plain.rationale, "plain rationale");
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(plain.contains("not valid triage JSON"));
 
         let empty = triage_outcome_from_response(AgentQueryResponse {
             cost_usd: 0.05,
             ..Default::default()
-        });
-        assert_eq!(empty.verdict, TriageVerdict::NeedsReview);
-        assert_eq!(empty.confidence, 0.0);
-        assert!(empty.rationale.contains("no triage content"));
+        })
+        .unwrap_err()
+        .to_string();
+        assert!(empty.contains("no triage content"));
+    }
+
+    #[test]
+    fn triage_outcome_from_response_errors_on_schema_violations() {
+        let err = triage_outcome_from_response(AgentQueryResponse {
+            structured: Some(json!({
+                "verdict": "true_positive",
+                "confidence": "high",
+                "rationale": "reachable"
+            })),
+            ..Default::default()
+        })
+        .unwrap_err()
+        .to_string();
+
+        assert!(err.contains("violated schema"));
     }
 
     // ----- cost estimation -----------------------------------------
@@ -236,16 +257,16 @@ mod tests {
     // ----- model_for_tier ------------------------------------------
 
     #[test]
-    fn model_for_tier_promotes_haiku_when_cheap_requested_with_sonnet() {
+    fn model_for_tier_preserves_sonnet_when_cheap_requested() {
         let resolved = anthropic_model_for_tier(ModelTier::Cheap, "anthropic:claude-sonnet-4-6");
-        assert_eq!(resolved, "anthropic:claude-haiku-4-5-20251001");
+        assert_eq!(resolved, "anthropic:claude-sonnet-4-6");
     }
 
     #[test]
-    fn model_for_tier_promotes_opus_when_deep_requested_with_haiku() {
+    fn model_for_tier_preserves_haiku_when_deep_requested() {
         let resolved =
             anthropic_model_for_tier(ModelTier::Deep, "anthropic:claude-haiku-4-5-20251001");
-        assert_eq!(resolved, "anthropic:claude-opus-4-7");
+        assert_eq!(resolved, "anthropic:claude-haiku-4-5-20251001");
     }
 
     #[test]
@@ -261,8 +282,7 @@ mod tests {
             "sk-ant-oat01-XYZ",
         ))
         .unwrap();
-        // Ask for Cheap on an Opus-configured model — should down-shift.
         let model = runtime.model_for_tier(ModelTier::Cheap, "anthropic:claude-opus-4-7");
-        assert_eq!(model, "anthropic:claude-haiku-4-5-20251001");
+        assert_eq!(model, "anthropic:claude-opus-4-7");
     }
 }

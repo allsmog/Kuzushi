@@ -1,4 +1,5 @@
 use super::*;
+use crate::modules::registry::ToolExecutor;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ModuleMetadata {
@@ -25,7 +26,7 @@ pub enum ModuleKind {
     Workspace,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDescriptor {
     pub name: String,
     pub description: String,
@@ -36,6 +37,19 @@ pub struct ToolDescriptor {
     pub runtime_requirement: RuntimeRequirement,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<OptionSpec>,
+    #[serde(skip)]
+    pub(in crate::modules) executor: Option<ToolExecutor>,
+}
+
+impl PartialEq for ToolDescriptor {
+    fn eq(&self, other: &Self) -> bool {
+        self.name == other.name
+            && self.description == other.description
+            && self.headless == other.headless
+            && self.hidden == other.hidden
+            && self.runtime_requirement == other.runtime_requirement
+            && self.options == other.options
+    }
 }
 
 fn is_false(value: &bool) -> bool {
@@ -154,9 +168,21 @@ impl OptionSpec {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DagNodeDescriptor {
     pub id: String,
     pub output_kind: String,
     pub depends_on: Vec<String>,
+    #[serde(skip)]
+    pub(in crate::modules) executor: Option<ToolExecutor>,
 }
+
+impl PartialEq for DagNodeDescriptor {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id
+            && self.output_kind == other.output_kind
+            && self.depends_on == other.depends_on
+    }
+}
+
+impl Eq for DagNodeDescriptor {}

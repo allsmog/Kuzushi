@@ -16,7 +16,7 @@ Accepted scope from the 5 Phase A assessments + user review. Sibling docs:
 1. New `src/migrations/100_schema_reset.ts` replaces migrations 001–025 on fresh DBs.
 2. `src/store.ts initDb()` gets:
    - `PRAGMA foreign_keys = ON` before `runMigrations`
-   - Reset branch: inspect schema state; if `legacy-pre-v100`, close + rename `findings.sqlite3` → `findings.sqlite3.bak-v<N>-<UTC-ts>` with collision suffix + advisory lock, re-open fresh, run v100
+   - Reset branch: inspect schema state; if `legacy-pre-v100`, close + rename `index.sqlite3` → `index.sqlite3.bak-v<N>-<UTC-ts>` with collision suffix + advisory lock, re-open fresh, run v100
    - Onto `SchemaStateError` on corrupt or `>v100`
 3. `src/migrations/index.ts` registers v100 only.
 4. `detectAndMarkLegacyDatabase` in `runner.ts` deleted (dead after reset branch).

@@ -59,4 +59,10 @@ pub(crate) const AUTH_CONFIG_MODEL_COMMANDS: &[ShellCommandSpec] = &[
         category: ShellCommandCategory::AuthConfigModel,
         description: "switch scan target without restart",
     },
+    ShellCommandSpec {
+        command: "target rev <ref>",
+        aliases: &["/target rev <sha>", "target revision <ref>"],
+        category: ShellCommandCategory::AuthConfigModel,
+        description: "switch target git revision when worktree is clean",
+    },
 ];

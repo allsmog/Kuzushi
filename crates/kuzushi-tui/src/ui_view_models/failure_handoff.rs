@@ -298,7 +298,9 @@ fn failures_artifact_leaf() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kuzushi_core::run_artifacts::RunArtifact;
+    use kuzushi_core::run_artifacts::{
+        record_tool_run_failed, record_tool_run_started, RunArtifact, ToolRunRecord,
+    };
     use kuzushi_core::V2Config;
 
     fn test_run_dir(root: &Path, run_id: &str) -> PathBuf {
@@ -363,6 +365,31 @@ mod tests {
         assert!(!missing.contains("missing-12"));
         assert!(recovery.contains("+3 more"));
         assert!(!forbidden.contains("claim-12"));
+    }
+
+    #[test]
+    fn failure_handoff_model_reads_failed_tool_run_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        let run_id = "run-failed-tool-handoff";
+        let record = ToolRunRecord::new(temp.path(), run_id, "tool", "agentic-sast:scan");
+        record_tool_run_started(record, &serde_json::json!({"target": "."}));
+        record_tool_run_failed(record, "bridge failed");
+
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.target = Some(temp.path().to_path_buf());
+
+        let model = failure_handoff_model(&app).unwrap();
+
+        assert_eq!(row_value(&model, "stage"), "agentic-sast:scan");
+        assert_eq!(row_value(&model, "cause"), "bridge failed");
+        assert!(row_value(&model, "proof").contains("artifact-review-only"));
+        assert_eq!(row_value(&model, "available"), "1 artifact");
+        assert_eq!(row_value(&model, "missing"), "none");
+        assert!(row_value(&model, "next").contains("failures.json"));
+        assert!(row_value(&model, "recovery").contains("Rerun agentic-sast:scan"));
+        assert!(row_value(&model, "forbidden").contains("verified claim"));
+        assert!(row_value(&model, "prompt")
+            .contains("Continue the failed Kuzushi run for agentic-sast:scan"));
     }
 
     #[test]

@@ -9,9 +9,10 @@ pub(crate) fn run_background_tool(
     run_id: &str,
     thinking_level: Option<String>,
     trace_handle: Option<TraceHandle>,
+    cancel: ScanCancellation,
 ) -> Result<serde_json::Value> {
     let store = background_findings_store(tool_name, workspace)?;
-    let runtime = background_agent_runtime(&config, tool_name, &input, thinking_level)?;
+    let runtime = background_agent_runtime(&config, tool_name, &input, thinking_level, cancel)?;
     let trace = trace_handle
         .unwrap_or_else(|| TraceHandle::jsonl(workspace.root(), run_id))
         .for_tool(tool_name)
@@ -23,7 +24,7 @@ pub(crate) fn run_background_tool(
         findings_store: store.as_ref(),
         trace: Some(&trace),
     };
-    registry.execute_tool_with_runtime(tool_name, input, &ctx, runtime_ref)
+    registry.dispatch_prepared_tool_with_runtime(tool_name, input, &ctx, runtime_ref)
 }
 
 fn background_findings_store(
@@ -41,25 +42,16 @@ fn background_agent_runtime(
     tool_name: &str,
     input: &serde_json::Value,
     thinking_level: Option<String>,
+    cancel: ScanCancellation,
 ) -> Result<Option<LangGraphRuntime>> {
-    if !wants_background_runtime(config, tool_name, input) {
+    if !tool_wants_runtime(tool_name, input, config) {
         return Ok(None);
     }
     Ok(Some(
         LangGraphRuntime::from_config(config, background_current_dir())?
-            .with_thinking_level(thinking_level),
+            .with_thinking_level(thinking_level)
+            .with_cancellation(cancel),
     ))
-}
-
-/// Whether to construct a runtime for a background tool. Required tools always
-/// get one; the recommender opts in *only* when a model is configured, so it
-/// can rank with the session model yet still run deterministically (no runtime)
-/// when no model is set.
-fn wants_background_runtime(config: &V2Config, tool_name: &str, input: &serde_json::Value) -> bool {
-    if tool_needs_runtime(tool_name, input) {
-        return true;
-    }
-    tool_name == "module-recommender:recommend" && config.model.is_some()
 }
 
 fn background_current_dir() -> PathBuf {
@@ -67,42 +59,7 @@ fn background_current_dir() -> PathBuf {
 }
 
 pub(crate) fn tool_requires_findings_store(tool_name: &str) -> bool {
-    tool_name.starts_with("findings:")
-        || tool_name.starts_with("module-recommender:")
-        || tool_name.starts_with("systems-hunt:")
-        || tool_name.starts_with("chrome-rce:")
-        || tool_name.starts_with("uaf-hunt:")
-        || matches!(
-            tool_name,
-            "triage:run"
-                | "verify:finding"
-                | "verify:exploit"
-                | "patch:finding"
-                | "agentic-sast:scan"
-                | "carlini-threat-hunt:run"
-                | "offense-review:threat-hunt"
-                | "vuln-scout:audit"
-                | "tob:audit"
-                | "shinsa:scan"
-                | "shinsa:quick-check"
-                | "shinsa:nist-scan"
-                | "shinsa:nist-quick-check"
-                | "prompt-armor:scan"
-                | "prompt-armor:analyze"
-                | "prompt-armor:attack"
-                | "variant:lift-pattern"
-                | "variant:hunt"
-                | "ndiff:hunt-variants"
-                | "taint-iris:hunt"
-                | "taint-iris-next:finding-review"
-                | "taint-iris-next:hunt"
-                | "sast:scan"
-                | "semgrep:scan"
-                | "codeql:scan"
-                | "iac-scan:scan"
-                | "license-scan:scan"
-                | "cargo-audit:scan"
-        )
+    tool_needs_finding_store(tool_name)
 }
 
 #[cfg(test)]
@@ -156,6 +113,19 @@ mod tests {
     }
 
     #[test]
+    fn recommender_can_force_deterministic_ranking_without_runtime() {
+        let mut config = kuzushi_core::V2Config::default();
+        config.model = Some("openai:gpt-5.4".to_string());
+        let input = serde_json::json!({ "useModelRanking": false });
+
+        assert!(!kuzushi_core::tool_wants_runtime(
+            "module-recommender:recommend",
+            &input,
+            &config,
+        ));
+    }
+
+    #[test]
     fn recommender_has_finding_store_access() {
         assert!(super::tool_requires_findings_store(
             "module-recommender:recommend"
@@ -166,7 +136,14 @@ mod tests {
         assert!(super::tool_requires_findings_store(
             "offense-review:threat-hunt"
         ));
+        assert!(super::tool_requires_findings_store("offense:chain"));
+        assert!(super::tool_requires_findings_store(
+            "variant:any-future-tool"
+        ));
         assert!(super::tool_requires_findings_store("cargo-audit:scan"));
+        assert!(super::tool_requires_findings_store("sbom-scan:scan"));
+        assert!(super::tool_requires_findings_store("secret-scan:scan"));
+        assert!(super::tool_requires_findings_store("android-apk:scan"));
         assert!(!super::tool_requires_findings_store(
             "taint-iris-next:dataflow-plan"
         ));

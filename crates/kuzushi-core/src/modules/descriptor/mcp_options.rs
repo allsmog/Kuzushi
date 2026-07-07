@@ -4,7 +4,7 @@ pub(in crate::modules) fn mcps_option() -> OptionSpec {
     opt(
         "mcps",
         OptionType::Bool,
-        "Attach the kuzushi MCP servers (tree-sitter, joern, codeql) as agent tools during the hunt.",
+        "Attach conditional kuzushi MCP oracle servers as agent tools when their target artifacts exist.",
     )
     .default(json!(true))
     .advanced()

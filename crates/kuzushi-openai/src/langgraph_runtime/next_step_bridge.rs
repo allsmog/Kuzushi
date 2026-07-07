@@ -1,7 +1,9 @@
 use anyhow::{Context, Result};
 use kuzushi_core::{AgentLoopStep, AgentToolLoopRequest, LoopHistoryEntry, ToolCall};
 
-use super::bridge_payloads::{BridgeTool, NextStepBridgeRequest, NextStepBridgeResponse};
+use super::bridge_payloads::{
+    BridgeTool, NextStepBridgeRequest, NextStepBridgeResponse, LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
+};
 use super::bridge_process::{
     public_bridge_error, run_next_step_bridge, run_next_step_preflight_bridge,
 };
@@ -13,6 +15,7 @@ pub(crate) fn next_step_blocking(
     request: &AgentToolLoopRequest,
     history: &[LoopHistoryEntry],
 ) -> Result<AgentLoopStep> {
+    validate_runtime_model(runtime, &request.model)?;
     let bridge_request = next_step_bridge_request(runtime, request, history);
     // Same transient-retry policy as query_blocking: without it, one 429 or
     // dropped socket kills an entire multi-step agent loop mid-flight. A
@@ -20,8 +23,13 @@ pub(crate) fn next_step_blocking(
     const ATTEMPTS: usize = 3;
     let mut last_error: Option<anyhow::Error> = None;
     for attempt in 1..=ATTEMPTS {
-        match run_next_step_bridge(&runtime.command, &bridge_request)
-            .and_then(ensure_next_step_response_ok)
+        ensure_not_cancelled(runtime)?;
+        match run_next_step_bridge(
+            &runtime.command,
+            &bridge_request,
+            runtime.cancellation.as_ref(),
+        )
+        .and_then(ensure_next_step_response_ok)
         {
             Ok(step) => return Ok(step),
             Err(error) => {
@@ -33,6 +41,7 @@ pub(crate) fn next_step_blocking(
                 last_error = Some(error);
             }
         }
+        ensure_not_cancelled(runtime)?;
         std::thread::sleep(std::time::Duration::from_millis(
             super::runtime_impl::retry_delay_ms(attempt),
         ));
@@ -44,10 +53,30 @@ pub(crate) fn preflight_tool_loop_blocking(
     runtime: &LangGraphRuntime,
     request: &AgentToolLoopRequest,
 ) -> Result<()> {
+    validate_runtime_model(runtime, &request.model)?;
     let mut bridge_request = next_step_bridge_request(runtime, request, &[]);
     bridge_request.envelope_type = "next-step-preflight";
-    let response = run_next_step_preflight_bridge(&runtime.command, &bridge_request)?;
+    let response = run_next_step_preflight_bridge(
+        &runtime.command,
+        &bridge_request,
+        runtime.cancellation.as_ref(),
+    )?;
     ensure_next_step_preflight_ok(response)
+}
+
+fn validate_runtime_model(runtime: &LangGraphRuntime, model: &str) -> Result<()> {
+    runtime.credential_for_model(model).map(|_| ())
+}
+
+fn ensure_not_cancelled(runtime: &LangGraphRuntime) -> Result<()> {
+    if runtime
+        .cancellation
+        .as_ref()
+        .is_some_and(kuzushi_core::ScanCancellation::is_cancelled)
+    {
+        anyhow::bail!("LangGraph next-step bridge cancelled");
+    }
+    Ok(())
 }
 
 fn next_step_bridge_request(
@@ -55,7 +84,11 @@ fn next_step_bridge_request(
     request: &AgentToolLoopRequest,
     history: &[LoopHistoryEntry],
 ) -> NextStepBridgeRequest {
+    let credential = runtime
+        .credential_for_model(&request.model)
+        .expect("model credential was validated before building bridge request");
     NextStepBridgeRequest {
+        protocol_version: LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
         envelope_type: "next-step",
         model: request.model.clone(),
         cwd: request.cwd.display().to_string(),
@@ -71,8 +104,8 @@ fn next_step_bridge_request(
             })
             .collect(),
         max_tokens: 4096,
-        api_key_env: runtime.api_key_env.clone(),
-        api_key: runtime.api_key.clone(),
+        api_key_env: credential.env,
+        api_key: credential.value,
         base_url: runtime.base_url.clone(),
         runtime_options: request.runtime_options.clone(),
         temperature: request.temperature,
@@ -121,6 +154,7 @@ fn step_from_bridge_response(response: NextStepBridgeResponse) -> Result<AgentLo
 }
 
 fn tool_call_step(response: NextStepBridgeResponse) -> Result<AgentLoopStep> {
+    let cost_usd = response.cost_usd;
     let call = response
         .call
         .context("next-step: tool_call missing call body")?;
@@ -130,5 +164,8 @@ fn tool_call_step(response: NextStepBridgeResponse) -> Result<AgentLoopStep> {
             input: call.input,
             call_id: call.call_id,
         },
+        // The bridge reports per-round cost on tool-call turns too; forward it
+        // so the driver settles spend incrementally instead of only at Final.
+        cost_usd,
     })
 }

@@ -1,5 +1,6 @@
 use super::task_id::PlanningTaskId;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 /// Per-row state shown in the planning picker. Built once at picker open
 /// and refreshed when artifacts change.
@@ -10,9 +11,14 @@ pub struct PlanningTaskRow {
     pub tool_name: &'static str,
     pub artifact_path: PathBuf,
     pub artifact_state: ArtifactState,
+    /// When the cached artifact was last written, so the picker can tell a
+    /// returning operator when prior work happened. `None` for missing/action
+    /// rows (nothing on disk to date).
+    pub artifact_modified: Option<SystemTime>,
     pub model_backed: bool,
     pub required_cli: Option<&'static str>,
     pub cli_available: bool,
+    pub blocker: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -39,16 +45,20 @@ impl ArtifactState {
 impl PlanningTaskRow {
     pub fn for_task(task: PlanningTaskId, target: &Path) -> Self {
         let required_cli = task.required_cli();
-        let cli_available = required_cli.map(cli_is_on_path).unwrap_or(true);
-        let (artifact_path, artifact_state) = match task.artifact_relative_path() {
+        let cli_blocked = required_cli.is_some_and(|cli| !cli_is_on_path(cli));
+        let blocker = task_workspace_blocker(task, target);
+        let cli_available = !cli_blocked && blocker.is_none();
+        let (artifact_path, artifact_state, artifact_modified) = match task.artifact_relative_path()
+        {
             Some(rel) => {
                 let path = target.join(rel);
                 let state = artifact_state(&path);
-                (path, state)
+                let modified = artifact_modified(&path);
+                (path, state, modified)
             }
             // Action tasks have no cached artifact; the path is a harmless
             // placeholder under the workspace state dir.
-            None => (target.join(".kuzushi"), ArtifactState::Action),
+            None => (target.join(".kuzushi"), ArtifactState::Action, None),
         };
         Self {
             id: task,
@@ -56,9 +66,11 @@ impl PlanningTaskRow {
             tool_name: task.tool_name(),
             artifact_path,
             artifact_state,
+            artifact_modified,
             model_backed: task.is_model_backed(),
             required_cli,
             cli_available,
+            blocker,
         }
     }
 
@@ -80,11 +92,17 @@ impl PlanningTaskRow {
     /// hint — prefixing it with cost info only pushed the actionable part past
     /// the column budget where it got truncated.
     pub fn cost_hint(&self) -> String {
+        if self.id.is_inline_action() {
+            return "local UI action".to_string();
+        }
         let base = if self.model_backed {
             "model-backed"
         } else {
             "no model cost"
         };
+        if let Some(blocker) = &self.blocker {
+            return blocker.clone();
+        }
         match self.required_cli {
             Some(cli) if !self.cli_available => format!("requires {cli} — not on PATH"),
             Some(cli) => format!("{base} (requires {cli})"),
@@ -98,6 +116,23 @@ impl PlanningTaskRow {
 /// default.
 fn forced_off_by_default(task: PlanningTaskId) -> bool {
     matches!(task, PlanningTaskId::BuildPastaThreatModel)
+}
+
+fn task_workspace_blocker(task: PlanningTaskId, target: &Path) -> Option<String> {
+    if task == PlanningTaskId::HuntUseAfterFree
+        && !super::recommend::has_compile_commands_json(target)
+    {
+        return Some(
+            "requires compile_commands.json under target or build/ for clangd".to_string(),
+        );
+    }
+    None
+}
+
+/// Last-modified time of an artifact, when it exists on disk. Used only for
+/// the "prior work found ~N ago" orientation line — absence is not an error.
+pub fn artifact_modified(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
 }
 
 pub fn artifact_state(path: &Path) -> ArtifactState {
@@ -218,5 +253,13 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let row = PlanningTaskRow::for_task(PlanningTaskId::BuildPastaThreatModel, tmp.path());
         assert!(!row.pre_checked());
+    }
+
+    #[test]
+    fn uaf_hunt_row_blocks_without_compile_commands_json() {
+        let tmp = tempfile::tempdir().unwrap();
+        let row = PlanningTaskRow::for_task(PlanningTaskId::HuntUseAfterFree, tmp.path());
+        assert!(!row.cli_available);
+        assert!(row.cost_hint().contains("requires compile_commands.json"));
     }
 }

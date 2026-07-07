@@ -14,16 +14,58 @@ pub(crate) use tree::TreeDiagram;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Color, Style};
-use ratatui::widgets::{Block, BorderType, Borders, Widget};
+use ratatui::widgets::{Block, BorderType, Borders, Paragraph, Widget};
 
 /// Set one cell's glyph + colour, clipped to `area` (coords are area-relative).
 pub(super) fn put(buf: &mut Buffer, area: Rect, x: u16, y: u16, ch: &str, color: Color) {
     let (ax, ay) = (area.x + x, area.y + y);
     if ax < area.right() && ay < area.bottom() {
         if let Some(cell) = buf.cell_mut((ax, ay)) {
-            cell.set_symbol(ch).set_fg(color);
+            cell.set_symbol(ch);
+            if !crate::theme::active_theme().no_color {
+                cell.set_fg(color);
+            }
         }
     }
+}
+
+pub(super) fn diagram_primary() -> Color {
+    if crate::theme::active_theme().high_contrast {
+        crate::theme::T_HEADING
+    } else {
+        crate::theme::T_PRIMARY
+    }
+}
+
+pub(super) fn diagram_muted() -> Color {
+    if crate::theme::active_theme().high_contrast {
+        crate::theme::T_PRIMARY
+    } else {
+        crate::theme::T_MUTED
+    }
+}
+
+pub(super) fn diagram_subtle() -> Color {
+    if crate::theme::active_theme().high_contrast {
+        crate::theme::T_MUTED
+    } else {
+        crate::theme::T_SUBTLE
+    }
+}
+
+pub(super) fn render_empty_state_panel(
+    buf: &mut Buffer,
+    area: Rect,
+    glyph_label: &str,
+    hint: &str,
+    ctas: &[(&str, &str)],
+) {
+    Paragraph::new(crate::renderer::empty_state_panel(
+        glyph_label,
+        &[hint],
+        ctas,
+    ))
+    .render(area, buf);
 }
 
 /// Write a label, truncated to fit within `area`.
@@ -34,7 +76,7 @@ pub(super) fn text(buf: &mut Buffer, area: Rect, x: u16, y: u16, s: &str, color:
     }
     let max = (area.right() - ax) as usize;
     let clipped: String = s.chars().take(max).collect();
-    buf.set_string(ax, ay, clipped, Style::default().fg(color));
+    buf.set_string(ax, ay, clipped, diagram_style(color));
 }
 
 /// A rounded node box with a left-aligned label on its middle row.
@@ -59,7 +101,7 @@ pub(super) fn boxed(
     Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Rounded)
-        .border_style(Style::default().fg(border))
+        .border_style(diagram_style(border))
         .render(rect, buf);
     // Truncate to the box interior so long real labels don't spill past the border.
     let inner = (w.saturating_sub(3)) as usize;
@@ -88,12 +130,20 @@ pub(super) fn panel(
     Block::default()
         .borders(Borders::ALL)
         .border_type(BorderType::Plain)
-        .border_style(Style::default().fg(color))
+        .border_style(diagram_style(color))
         .title(ratatui::text::Span::styled(
             format!(" {title} "),
-            Style::default().fg(color),
+            diagram_style(color),
         ))
         .render(rect, buf);
+}
+
+fn diagram_style(color: Color) -> Style {
+    if crate::theme::active_theme().no_color {
+        Style::default()
+    } else {
+        Style::default().fg(color)
+    }
 }
 
 /// Draw a horizontal glyph run on row `y` over `x0..x1`.
@@ -257,14 +307,23 @@ mod tests {
                 AttackChain {
                     title: "SQLi /orders".into(),
                     severity: ChainSeverity::Critical,
+                    narrative: None,
+                    impact_description: None,
+                    preconditions: Vec::new(),
                     steps: vec!["unsanitised id".into(), "raw db.exec()".into()],
+                    hidden_step_count: 0,
                 },
                 AttackChain {
                     title: "IDOR /account".into(),
                     severity: ChainSeverity::High,
+                    narrative: None,
+                    impact_description: None,
+                    preconditions: Vec::new(),
                     steps: vec!["missing owner check".into()],
+                    hidden_step_count: 0,
                 },
             ],
+            hidden_chain_count: 0,
             empty_hint: None,
         }
     }

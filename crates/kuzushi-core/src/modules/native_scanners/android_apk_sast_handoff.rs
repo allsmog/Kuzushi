@@ -10,7 +10,13 @@ pub(in crate::modules) fn run_sast_handoff(
     emit_step(ctx, "tool", "handoff", "android-apk:sast-handoff start");
     let layout = match resolve_handoff_layout(&target) {
         Ok(layout) => layout,
-        Err(error) => return Ok(failed_tool_output("android-apk:sast-handoff", &target, error)),
+        Err(error) => {
+            return Ok(failed_tool_output(
+                "android-apk:sast-handoff",
+                &target,
+                error,
+            ));
+        }
     };
     emit_step(ctx, "done", "handoff", "android-apk:sast-handoff complete");
     Ok(handoff_output(&layout))
@@ -93,15 +99,33 @@ fn handoff_output(layout: &HandoffLayout) -> Value {
 fn build_next_steps(layout: &HandoffLayout, scan_target: &Path) -> Vec<String> {
     let mut steps = Vec::new();
     if layout.jadx_sources.is_some() {
-        steps.push(format!("kuzushi run semgrep:scan --input '{{\"target\":\"{}\"}}'", scan_target.display()));
-        steps.push(format!("kuzushi run codeql:scan --input '{{\"target\":\"{}\",\"language\":\"java\"}}'", scan_target.display()));
-        steps.push(format!("kuzushi run exploit-chain:scan --input '{{\"target\":\"{}\"}}'", scan_target.display()));
-        steps.push(format!("kuzushi run agentic-sast:scan --input '{{\"target\":\"{}\"}}'", scan_target.display()));
-        steps.push(format!("kuzushi run taint-iris-next:hunt --input '{{\"target\":\"{}\"}}'", scan_target.display()));
+        steps.push(format!(
+            "kuzushi run semgrep:scan --input '{{\"target\":\"{}\"}}'",
+            scan_target.display()
+        ));
+        steps.push(format!(
+            "kuzushi run codeql:scan --input '{{\"target\":\"{}\",\"language\":\"java\"}}'",
+            scan_target.display()
+        ));
+        steps.push(format!(
+            "kuzushi run exploit-chain:scan --input '{{\"target\":\"{}\"}}'",
+            scan_target.display()
+        ));
+        steps.push(format!(
+            "kuzushi run agentic-sast:scan --input '{{\"target\":\"{}\"}}'",
+            scan_target.display()
+        ));
+        steps.push(format!(
+            "kuzushi run taint-iris-next:hunt --input '{{\"target\":\"{}\"}}'",
+            scan_target.display()
+        ));
         steps.push("kuzushi run android-apk:code-scan --input '{}'".to_string());
     }
     if let Some(raw) = layout.raw_root.as_ref() {
-        steps.push(format!("kuzushi run secret-scan:scan --input '{{\"target\":\"{}\"}}'", raw.display()));
+        steps.push(format!(
+            "kuzushi run secret-scan:scan --input '{{\"target\":\"{}\"}}'",
+            raw.display()
+        ));
     }
     steps.push("kuzushi findings --severity high,critical".to_string());
     steps

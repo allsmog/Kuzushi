@@ -1,0 +1,9 @@
+{
+  "pkg": "@kuzushi/tui-kit",
+  "globalName": "KuzushiTui",
+  "projectId": "b3691e4f-ec2f-467a-9b02-f21a78733e94",
+  "shape": "package",
+  "buildCmd": "npm --prefix packages/kuzushi-tui-kit run build",
+  "cssEntry": "dist/styles.css",
+  "readmeHeader": ".design-sync/conventions.md"
+}

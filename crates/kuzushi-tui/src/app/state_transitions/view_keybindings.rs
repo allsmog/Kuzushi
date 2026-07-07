@@ -1,6 +1,6 @@
 use super::view_keybinding_groups::{
-    activity_keybindings, actor_detail_keybindings, findings_keybindings,
-    prompts_editor_keybindings, threat_keybindings, tune_keybindings,
+    activity_keybindings, actor_detail_keybindings, home_keybindings, prompts_editor_keybindings,
+    recommend_keybindings, threat_keybindings, tune_keybindings, workbench_keybindings,
 };
 use super::view_keybinding_helpers::{
     back_keybinding, bind, pause_scan_keybindings, resume_scan_keybindings, scroll_keybindings,
@@ -25,36 +25,49 @@ impl ShellApp {
 
     fn view_specific_keybindings(&self) -> Vec<ViewKeybinding> {
         match self.shell_view {
-            ShellView::Findings => findings_keybindings(),
+            ShellView::Home => home_keybindings(),
+            ShellView::Workbench => workbench_keybindings(),
+            ShellView::Recommend => recommend_keybindings(),
             ShellView::Threat(_) => threat_keybindings(),
             ShellView::ModuleRun => self.module_run_keybindings(),
             ShellView::ActorDetail(_) => actor_detail_keybindings(),
             ShellView::PromptsEditor => prompts_editor_keybindings(),
             ShellView::Tune => tune_keybindings(),
-            ShellView::Activity => activity_keybindings(),
+            ShellView::Activity => self.activity_view_keybindings(),
             _ => Vec::new(),
         }
     }
 
-    /// Generic `j/k/g/G` scrolling applies to scrollable views except those
-    /// that drive a bespoke row cursor (Catalog, Findings own their keys).
-    fn view_uses_scroll_base(&self) -> bool {
-        self.is_scrollable_view()
-            && !matches!(self.shell_view, ShellView::Catalog | ShellView::Findings)
+    fn activity_view_keybindings(&self) -> Vec<ViewKeybinding> {
+        let mut bindings = activity_keybindings();
+        if self.can_pause_scan_hotkey() {
+            bindings.extend(pause_scan_keybindings());
+        }
+        if self.can_resume_scan_hotkey() {
+            bindings.extend(resume_scan_keybindings());
+        }
+        bindings
     }
 
-    /// Esc goes back everywhere except views that already own Esc (Activity
-    /// cancels a run; pickers/modals intercept Esc earlier) and while a
-    /// cleared draft is stashed (Esc restores it — see `esc_clear_or_restore`).
+    /// Generic `j/k/g/G` scrolling applies to scrollable views except those
+    /// that drive a bespoke cursor (Catalog and the Workbench's pane-aware
+    /// focus own their keys).
+    fn view_uses_scroll_base(&self) -> bool {
+        self.is_scrollable_view()
+            && !matches!(self.shell_view, ShellView::Catalog | ShellView::Workbench)
+    }
+
+    /// Esc goes back everywhere except views that already own Esc
+    /// (pickers/modals intercept Esc earlier). Cleared prompt drafts are
+    /// restored explicitly with Ctrl+_ / Ctrl+/ so Esc stays navigation.
     fn view_offers_back(&self) -> bool {
-        self.last_cleared_input.is_none() && !self.view_owns_esc()
+        !self.view_owns_esc()
     }
 
     fn view_owns_esc(&self) -> bool {
         matches!(
             self.shell_view,
-            ShellView::Activity
-                | ShellView::CommandPalette
+            ShellView::CommandPalette
                 | ShellView::ModelPicker
                 | ShellView::AuthMethodPicker(_)
                 | ShellView::PlanningPicker

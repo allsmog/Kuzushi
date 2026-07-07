@@ -1,3 +1,4 @@
+use crate::app::JsonFileState;
 use crate::{ShellApp, ThreatPatch};
 use std::path::PathBuf;
 
@@ -132,22 +133,13 @@ fn threat_model_root(app: &ShellApp) -> PathBuf {
 
 fn read_threat_model_artifact(app: &ShellApp) -> ThreatModelArtifact {
     let path = threat_model_artifact_path(&threat_model_root(app));
-    match std::fs::metadata(&path) {
-        Ok(metadata) if metadata.is_file() => {}
-        Ok(_) => return ThreatModelArtifact::NonFile,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return ThreatModelArtifact::Missing;
+    match app.workbench_cache.borrow_mut().json_file(&path) {
+        JsonFileState::Present(value) if value.is_object() => ThreatModelArtifact::Present(value),
+        JsonFileState::Present(_) | JsonFileState::Malformed | JsonFileState::Unreadable => {
+            ThreatModelArtifact::Malformed
         }
-        Err(_) => return ThreatModelArtifact::Malformed,
-    };
-    let raw = match std::fs::read_to_string(path) {
-        Ok(raw) => raw,
-        Err(_) => return ThreatModelArtifact::Malformed,
-    };
-    match serde_json::from_str::<serde_json::Value>(&raw) {
-        Ok(value) if value.is_object() => ThreatModelArtifact::Present(value),
-        Ok(_) => ThreatModelArtifact::Malformed,
-        Err(_) => ThreatModelArtifact::Malformed,
+        JsonFileState::NonFile => ThreatModelArtifact::NonFile,
+        JsonFileState::Missing => ThreatModelArtifact::Missing,
     }
 }
 

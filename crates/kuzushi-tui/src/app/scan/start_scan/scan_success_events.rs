@@ -1,13 +1,29 @@
 use super::*;
 
 impl ShellApp {
+    #[cfg(test)]
     pub(crate) fn apply_scan_finished(&mut self, run_id: String, findings_count: usize) {
+        self.apply_scan_finished_with_cost(run_id, findings_count, None);
+    }
+
+    pub(crate) fn apply_scan_finished_with_cost(
+        &mut self,
+        run_id: String,
+        findings_count: usize,
+        cost_usd: Option<f64>,
+    ) {
+        if let Some(cost_usd) = cost_usd {
+            self.record_cost(cost_usd);
+        }
         self.mark_scan_panel_completed(&run_id, findings_count);
         self.mark_scan_activity_run_id(&run_id);
-        self.mark_active_scan_tasks_done();
+        self.mark_scan_tasks_terminal();
         let target_label = self.scan_target_label();
         self.record_scan_completion_artifacts(&run_id, findings_count, &target_label);
         self.refresh_findings(false);
+        let target_root = self.target.clone();
+        self.hydrate_persisted_scene_snapshots(target_root.as_deref());
+        self.update_workflow_phase_after_scan(findings_count);
         self.log_scan_alias_hint();
         self.log_scan_completion(&run_id, findings_count);
         self.log_scan_result(
@@ -20,12 +36,44 @@ impl ShellApp {
         );
         self.record_scan_task_durations();
         self.notify_scan_completion(findings_count);
-        // Findings are refreshed above, so the heatmap has real per-module risk
-        // to draw the moment the scan lands (gated on `auto_open_viz`). Skip a
-        // clean scan — an empty heatmap reading "run scan" right after scanning
-        // is misleading; a 0-finding scan is a pass, not a thing to visualize.
+        self.maybe_open_scan_findings_output(findings_count);
+    }
+
+    fn update_workflow_phase_after_scan(&mut self, findings_count: usize) {
         if findings_count > 0 {
+            self.engagement.clear_phase();
+            return;
+        }
+        if self
+            .engagement
+            .current_phase()
+            .is_none_or(|phase| phase <= crate::app::WorkflowPhase::Hunt)
+        {
+            self.engagement.set_phase(crate::app::WorkflowPhase::Hunt);
+        }
+    }
+
+    fn maybe_open_scan_findings_output(&mut self, findings_count: usize) {
+        // Findings are refreshed above. If the operator allows viz auto-open,
+        // the Activity output can switch to the review list when it has not
+        // been manually pinned; otherwise leave their page alone.
+        if findings_count == 0 {
+            return;
+        }
+        self.maybe_switch_activity_deck_to_findings();
+        if !matches!(self.shell_view, ShellView::Activity) {
             self.auto_open_viz_page(crate::scene3d::VizPage::Heatmap);
+        }
+    }
+
+    fn maybe_switch_activity_deck_to_findings(&mut self) {
+        if !self.auto_open_viz {
+            return;
+        }
+        if let Some(session) = self.activity.as_mut() {
+            if session.can_auto_switch_deck() {
+                session.set_deck_page(crate::ActivityDeckPage::Findings);
+            }
         }
     }
 
@@ -39,6 +87,7 @@ impl ShellApp {
         scan.running = false;
         scan.abort_requested = false;
         scan.error = None;
+        self.active_model_override = None;
     }
 
     fn mark_scan_activity_run_id(&mut self, run_id: &str) {
@@ -48,13 +97,13 @@ impl ShellApp {
         session.run_id = run_id.to_string();
     }
 
-    fn mark_active_scan_tasks_done(&mut self) {
+    fn mark_scan_tasks_terminal(&mut self) {
         let Some(session) = self.activity.as_mut() else {
             return;
         };
         let now = std::time::Instant::now();
         for row in session.tasks.values_mut() {
-            mark_active_scan_task_done(row, now);
+            mark_scan_task_terminal(row, now);
         }
     }
 
@@ -80,8 +129,9 @@ impl ShellApp {
         self.set_success_notice(
             "scan",
             format!(
-                "✓ scan finished — {findings_count} {} · `findings` to review",
-                scan_finding_label(findings_count)
+                "✓ scan finished — {findings_count} {} · {}",
+                scan_finding_label(findings_count),
+                scan_completion_next_step(findings_count)
             ),
         );
     }
@@ -127,10 +177,11 @@ impl ShellApp {
         self.log(
             "scan",
             format!(
-                "completed {} with {} {}",
+                "completed {} with {} {} · {}",
                 short_fingerprint(run_id),
                 findings_count,
                 scan_finding_label(findings_count),
+                scan_completion_next_step(findings_count)
             ),
         );
     }
@@ -160,10 +211,18 @@ fn completed_task_durations(session: &crate::app::ActivitySession) -> Vec<(Strin
         .collect()
 }
 
-fn mark_active_scan_task_done(row: &mut crate::app::DagTaskRow, now: std::time::Instant) {
-    if matches!(row.state, crate::app::DagTaskState::Active) {
-        row.state = crate::app::DagTaskState::Done;
-        row.completed_at = Some(now);
+fn mark_scan_task_terminal(row: &mut crate::app::DagTaskRow, now: std::time::Instant) {
+    match row.state {
+        crate::app::DagTaskState::Active => {
+            row.state = crate::app::DagTaskState::Done;
+            row.completed_at = Some(now);
+        }
+        crate::app::DagTaskState::Queued => {
+            row.state = crate::app::DagTaskState::Skipped;
+            row.completed_at = Some(now);
+            row.last_label = "not run in this scan".to_string();
+        }
+        _ => {}
     }
 }
 
@@ -172,5 +231,13 @@ fn scan_finding_label(count: usize) -> &'static str {
         "finding"
     } else {
         "findings"
+    }
+}
+
+fn scan_completion_next_step(findings_count: usize) -> &'static str {
+    if findings_count == 0 {
+        "崩 hunt remains active · `options sast:scan` to tune or `scan` to rerun"
+    } else {
+        "next: 作 confirm · `findings` to browse or `next` to triage/verify"
     }
 }

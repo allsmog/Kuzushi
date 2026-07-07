@@ -36,6 +36,18 @@ pub(crate) fn failed_output_result(
     })
 }
 
+pub fn failed_tool_output(tool: &str, error: impl Into<String>, artifacts: Value) -> Value {
+    let error = error.into();
+    json!({
+        "ok": false,
+        "status": "failed",
+        "summary": format!("{tool} failed"),
+        "artifacts": array_or_empty(artifacts),
+        "warnings": [],
+        "errors": [error],
+    })
+}
+
 pub(crate) fn skipped_output_result(
     summary: impl Into<String>,
     output: impl Into<String>,
@@ -73,6 +85,13 @@ fn status_output_result(
     })
 }
 
+fn array_or_empty(value: Value) -> Value {
+    if value.is_array() {
+        return value;
+    }
+    json!([])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -99,6 +118,21 @@ mod tests {
         assert_eq!(result["status"], "failed");
         assert_eq!(result["summary"], "missing tool");
         assert_eq!(result["errors"], json!(["scanner missing"]));
+    }
+
+    #[test]
+    fn failed_tool_output_preserves_artifact_array() {
+        let result = failed_tool_output(
+            "secret-scan:scan",
+            "scanner missing",
+            json!([{"path": "analysis.json"}]),
+        );
+
+        assert_eq!(result["ok"], false);
+        assert_eq!(result["status"], "failed");
+        assert_eq!(result["summary"], "secret-scan:scan failed");
+        assert_eq!(result["errors"], json!(["scanner missing"]));
+        assert_eq!(result["artifacts"], json!([{"path": "analysis.json"}]));
     }
 
     #[test]

@@ -169,8 +169,8 @@ Timestamp is UTC, `toISOString()` with `:` and `-` and `.xxxZ` stripped, ending 
 
 Examples:
 
-- `findings.sqlite3` + oldVersion 25 + `2026-04-16T14:23:07.123Z` → `findings.sqlite3.bak-v25-20260416T142307`
-- oldVersion 0 (legacy DB with `findings` table but empty `schema_version`) → `findings.sqlite3.bak-v0-20260416T142307`
+- `index.sqlite3` + oldVersion 25 + `2026-04-16T14:23:07.123Z` → `index.sqlite3.bak-v25-20260416T142307`
+- oldVersion 0 (legacy DB with `findings` table but empty `schema_version`) → `index.sqlite3.bak-v0-20260416T142307`
 
 ### 2.5 Concurrency: two `kuzushi` processes hitting the same DB
 
@@ -233,7 +233,7 @@ Never use `console.log` directly from `store.ts`. The reset logger accepts an in
 
 ### 2.8 Hook point for `kuzushi db migrate-from-bak` (future CLI, not implemented)
 
-The backup filename encodes the old schema version: `findings.sqlite3.bak-v25-20260416T142307`. A future `kuzushi db migrate-from-bak <path>` subcommand parses the `v<N>-` segment, opens the backup read-only, reads rows out of old tables, and upserts them into the new DB through the normal store API (which applies the new CHECK constraints and normalisation). The hook is purely a filename contract — no new code is required in `store.ts` today.
+The backup filename encodes the old schema version: `index.sqlite3.bak-v25-20260416T142307`. A future `kuzushi db migrate-from-bak <path>` subcommand parses the `v<N>-` segment, opens the backup read-only, reads rows out of old tables, and upserts them into the new DB through the normal store API (which applies the new CHECK constraints and normalisation). The hook is purely a filename contract — no new code is required in `store.ts` today.
 
 Design note so a future implementer doesn't have to rediscover: the backup file must be treated as **read-only** — never run migrations against it (it's a snapshot of the pre-v100 world). The CLI should open it with `new Database(path, { readonly: true })`.
 
@@ -336,7 +336,7 @@ import type { Migration } from "./types.js";
  *
  * Consolidated replacement for migrations 001–025. This migration runs against
  * a *fresh* database only — the reset branch in `initDb()` ensures any legacy
- * DB has been renamed to `findings.sqlite3.bak-v<old>-<ts>` before we get here.
+ * DB has been renamed to `index.sqlite3.bak-v<old>-<ts>` before we get here.
  *
  * Composition:
  *   - [A1] Column names / types at the DB↔TS boundary
@@ -518,14 +518,14 @@ describe("v100 schema reset", () => {
 
   it("renames a legacy v25 DB and applies v100 to a fresh file", () => {
     const tmp = mktempDir();
-    const dbPath = path.join(tmp, "findings.sqlite3");
+    const dbPath = path.join(tmp, "index.sqlite3");
     seedLegacyV25Db(dbPath);  // run migrations 1..25 against a fresh DB via legacy runner
 
     const resets: unknown[] = [];
     const db = initDb(dbPath, { now: () => new Date("2026-04-16T14:23:07Z"), onReset: (i) => resets.push(i) });
 
     // Backup exists next to the DB
-    const backup = path.join(tmp, "findings.sqlite3.bak-v25-20260416T142307");
+    const backup = path.join(tmp, "index.sqlite3.bak-v25-20260416T142307");
     expect(fs.existsSync(backup)).toBe(true);
 
     // New DB has only v100

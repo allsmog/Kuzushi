@@ -9,6 +9,7 @@ use super::phase::WorkflowPhase;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PlanningTaskId {
     // 組 KUMI-KATA · map — context & analysis artifacts.
+    AttachFiles,
     GatherRepoContext,
     MapEntryPoints,
     BuildXRay,
@@ -37,6 +38,7 @@ pub enum PlanningTaskId {
 
 impl PlanningTaskId {
     pub const ALL: &'static [PlanningTaskId] = &[
+        PlanningTaskId::AttachFiles,
         PlanningTaskId::GatherRepoContext,
         PlanningTaskId::MapEntryPoints,
         PlanningTaskId::BuildXRay,
@@ -72,7 +74,8 @@ impl PlanningTaskId {
     pub fn phase(self) -> WorkflowPhase {
         use PlanningTaskId::*;
         match self {
-            GatherRepoContext
+            AttachFiles
+            | GatherRepoContext
             | MapEntryPoints
             | BuildXRay
             | BuildStrideThreatModel
@@ -91,6 +94,7 @@ impl PlanningTaskId {
     pub fn label(self) -> &'static str {
         use PlanningTaskId::*;
         match self {
+            AttachFiles => "Attach reference files",
             GatherRepoContext => "Gather repo context",
             MapEntryPoints => "Map entry points",
             BuildXRay => "Build X-ray",
@@ -109,7 +113,7 @@ impl PlanningTaskId {
             HuntSystems => "Systems-level semantic hunt",
             HuntUseAfterFree => "Use-after-free hunt (C/C++)",
             TriageFindings => "Triage findings",
-            VerifyFindings => "Verify exploitability",
+            VerifyFindings => "Verify findings",
             PatchFindings => "Patch findings",
             BuildReport => "Build report",
         }
@@ -120,6 +124,7 @@ impl PlanningTaskId {
     pub fn tool_name(self) -> &'static str {
         use PlanningTaskId::*;
         match self {
+            AttachFiles => "attach",
             GatherRepoContext => "context:build",
             MapEntryPoints => "entry-points:extract",
             BuildXRay => "x-ray:run",
@@ -161,6 +166,14 @@ impl PlanningTaskId {
                 | VerifyFindings
                 | PatchFindings
         )
+    }
+
+    pub fn is_inline_action(self) -> bool {
+        matches!(self, PlanningTaskId::AttachFiles)
+    }
+
+    pub fn dispatches_tool(self) -> bool {
+        !self.is_inline_action()
     }
 
     /// Relative artifact path under the workspace root used to determine

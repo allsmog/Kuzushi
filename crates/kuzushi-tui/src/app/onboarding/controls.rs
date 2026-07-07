@@ -27,6 +27,11 @@ pub enum ToggleOutcome {
         task: PlanningTaskId,
         cli: &'static str,
     },
+    /// Tried to toggle a row whose workspace prerequisite is absent.
+    MissingPrereq {
+        task: PlanningTaskId,
+        reason: String,
+    },
 }
 
 pub fn toggle_planning_row(
@@ -38,7 +43,13 @@ pub fn toggle_planning_row(
         Some(row) => row,
         None => return ToggleOutcome::Off { task },
     };
-    if !row.cli_available {
+    if !row.cli_available && !is_cached(row) {
+        if let Some(reason) = &row.blocker {
+            return ToggleOutcome::MissingPrereq {
+                task,
+                reason: reason.clone(),
+            };
+        }
         return ToggleOutcome::MissingCli {
             task,
             cli: row.required_cli.unwrap_or("required binary"),
@@ -93,31 +104,36 @@ pub enum RowDisposition {
     Unavailable,
 }
 
-impl RowDisposition {
-    pub fn checkbox(self) -> &'static str {
-        match self {
-            RowDisposition::WillRun => "[x]",
-            RowDisposition::Reused => "[~]",
-            RowDisposition::Off | RowDisposition::Unavailable => "[ ]",
-        }
-    }
-}
-
 pub fn row_disposition(
     row: &PlanningTaskRow,
     selected: &BTreeSet<PlanningTaskId>,
     rebuild: &BTreeSet<PlanningTaskId>,
 ) -> RowDisposition {
+    if let Some(disposition) = cached_row_disposition(row, selected, rebuild) {
+        return disposition;
+    }
     if !row.cli_available {
         return RowDisposition::Unavailable;
     }
     if !selected.contains(&row.id) {
         return RowDisposition::Off;
     }
-    if is_cached(row) && !rebuild.contains(&row.id) {
-        return RowDisposition::Reused;
-    }
     RowDisposition::WillRun
+}
+
+fn cached_row_disposition(
+    row: &PlanningTaskRow,
+    selected: &BTreeSet<PlanningTaskId>,
+    rebuild: &BTreeSet<PlanningTaskId>,
+) -> Option<RowDisposition> {
+    if !is_cached(row) || rebuild.contains(&row.id) {
+        return None;
+    }
+    Some(if selected.contains(&row.id) {
+        RowDisposition::Reused
+    } else {
+        RowDisposition::Off
+    })
 }
 
 /// Build the ordered execution plan from the currently-selected rows. Cached
@@ -131,6 +147,7 @@ pub fn build_execution_plan(
     let runnable: BTreeSet<PlanningTaskId> = selected
         .iter()
         .copied()
+        .filter(|task| !task.is_inline_action())
         .filter(|task| {
             rows.iter()
                 .find(|row| row.id == *task)
@@ -159,9 +176,11 @@ mod tests {
             tool_name: id.tool_name(),
             artifact_path: PathBuf::from("/dev/null"),
             artifact_state: state,
+            artifact_modified: None,
             model_backed: id.is_model_backed(),
             required_cli: id.required_cli(),
             cli_available: id.required_cli().is_none(),
+            blocker: None,
         }
     }
 
@@ -253,9 +272,9 @@ mod tests {
 
     #[test]
     fn disposition_separates_will_run_from_reused() {
-        // The seed disconnect: a checked cached row used to render the same
-        // `[x]` as a row that will actually run. The disposition keeps the
-        // two states (and their glyphs) distinct.
+        // The seed disconnect: a checked cached row used to look identical to a
+        // row that will actually run. The disposition keeps the two states
+        // distinct so the picker can label one RUN and the other REUSE.
         let cached = row(GatherRepoContext, ArtifactState::Cached);
         let missing = row(BuildXRay, ArtifactState::Missing);
         let selected: BTreeSet<PlanningTaskId> =
@@ -268,10 +287,6 @@ mod tests {
         assert_eq!(
             row_disposition(&missing, &selected, &rebuild),
             RowDisposition::WillRun
-        );
-        assert_ne!(
-            RowDisposition::Reused.checkbox(),
-            RowDisposition::WillRun.checkbox()
         );
     }
 
@@ -301,7 +316,6 @@ mod tests {
             row_disposition(&no_cli, &selected, &rebuild),
             RowDisposition::Unavailable
         );
-        assert_eq!(RowDisposition::Off.checkbox(), "[ ]");
     }
 
     #[test]
@@ -313,9 +327,11 @@ mod tests {
             tool_name: BuildCodePropertyGraph.tool_name(),
             artifact_path: PathBuf::from("/dev/null"),
             artifact_state: ArtifactState::Missing,
+            artifact_modified: None,
             model_backed: false,
             required_cli: Some("joern-parse"),
             cli_available: false,
+            blocker: None,
         }];
         let mut selected = BTreeSet::new();
         let outcome = toggle_planning_row(BuildCodePropertyGraph, &rows, &mut selected);

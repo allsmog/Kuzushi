@@ -33,7 +33,11 @@ mod tests;
 
 pub use config_model::AnthropicOauthConfig;
 pub use config_model::ConfigPaths;
+pub use config_model::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS;
+pub use config_model::GuidedPhase;
+pub use config_model::GuidedPhaseConfig;
 pub use config_model::OAUTH_CREDENTIALS_FILE;
+pub use config_model::PhaseTemplateConfig;
 pub use config_model::RuntimeConfig;
 pub use config_model::RuntimeKind;
 pub use config_model::V2Config;
@@ -42,4 +46,5 @@ pub use config_hash::config_hash;
 pub use load_config_for_target::load_anthropic_oauth_config;
 pub use load_config_for_target::load_config;
 pub use load_config_for_target::load_config_for_target;
+pub use load_config_for_target::persist_global_model_selection;
 pub use load_config_for_target::write_default_config;

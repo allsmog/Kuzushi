@@ -21,9 +21,7 @@ pub(crate) fn inspect_go_line(
 
 fn is_go_import_line(line: &str) -> bool {
     let trimmed = line.trim_start();
-    trimmed.starts_with("package ")
-        || trimmed.starts_with("import ")
-        || trimmed.starts_with('"')
+    trimmed.starts_with("package ") || trimmed.starts_with("import ") || trimmed.starts_with('"')
 }
 
 struct GoLineDetector {

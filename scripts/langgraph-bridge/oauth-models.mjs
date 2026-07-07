@@ -1,5 +1,5 @@
 import { AIMessage } from "@langchain/core/messages";
-import { appendStructuredOutputContract, messageText } from "./model.mjs";
+import { appendStructuredOutputContract, cacheableTextBlock, messageText } from "./model.mjs";
 
 const CLAUDE_CODE_IDENTITY_LINE = "You are Claude Code, Anthropic's official CLI for Claude.";
 
@@ -261,7 +261,7 @@ function numericTemperature(request) {
 
 function claudeCodeIdentitySystemBlocks(system) {
   const blocks = [{ type: "text", text: CLAUDE_CODE_IDENTITY_LINE }];
-  if (system.trim()) blocks.push({ type: "text", text: stripIdentity(system) });
+  if (system.trim()) blocks.push(cacheableTextBlock(stripIdentity(system)));
   return blocks;
 }
 

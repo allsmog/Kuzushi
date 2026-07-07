@@ -107,7 +107,7 @@ mod tests {
     #[test]
     fn quantile_state_persists_across_reload() {
         let tmp = tempfile::tempdir().unwrap();
-        let db = tmp.path().join("findings.sqlite3");
+        let db = tmp.path().join("index.sqlite3");
         // First gate observes 60 samples at increasing scores.
         {
             let runtime = routed(0.5, true);

@@ -26,30 +26,41 @@ pub(in crate::modules) fn codeql_db_module() -> BuiltinModule {
             "codeql:create-db",
             "Create a CodeQL database for the active target. Skips silently when the codeql CLI \
              is missing; otherwise writes .kuzushi/codeql-db/.",
-            vec![
-                target_option(),
-                opt(
-                    "language",
-                    OptionType::String,
-                    "CodeQL language pack (e.g. javascript, python, cpp, java, rust). Defaults to auto-detection.",
-                ),
-                opt(
-                    "outputPath",
-                    OptionType::Path,
-                    "Destination DB directory. Defaults to <target>/.kuzushi/codeql-db.",
-                )
-                .advanced(),
-                opt(
-                    "buildMode",
-                    OptionType::String,
-                    "CodeQL build mode override (none, autobuild). When omitted, compiled languages try autobuild, then fall back to none where supported.",
-                )
-                .advanced()
-                .aliases(&["build_mode"]),
-            ],
+            codeql_create_db_options(),
         )],
         vec![dag("codeql:create-db", "codeql-db", &["context:build"])],
     )
+}
+
+fn codeql_create_db_options() -> Vec<OptionSpec> {
+    vec![
+        target_option(),
+        opt(
+            "language",
+            OptionType::String,
+            "CodeQL language pack (e.g. javascript, python, cpp, java, rust). Defaults to auto-detection.",
+        ),
+        opt(
+            "outputPath",
+            OptionType::Path,
+            "Destination DB directory. Defaults to <target>/.kuzushi/codeql-db.",
+        )
+        .advanced(),
+        opt(
+            "codeqlBin",
+            OptionType::Path,
+            "Explicit CodeQL CLI binary path. When omitted, Kuzushi searches PATH.",
+        )
+        .aliases(&["codeql_bin"])
+        .advanced(),
+        opt(
+            "buildMode",
+            OptionType::String,
+            "CodeQL build mode override (none, autobuild). When omitted, compiled languages try autobuild, then fall back to none where supported.",
+        )
+        .advanced()
+        .aliases(&["build_mode"]),
+    ]
 }
 
 pub(in crate::modules) fn run_codeql_create_db(
@@ -57,7 +68,7 @@ pub(in crate::modules) fn run_codeql_create_db(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(input, ctx)?;
-    let bin = match locate_codeql_bin()? {
+    let bin = match locate_codeql_bin(input)? {
         Some(path) => path,
         None => return Ok(skipped_response(&target)),
     };
@@ -118,14 +129,14 @@ fn emit_done_step(ctx: &ToolExecutionContext<'_>, output_path: &Path, elapsed_ms
     emit_step(ctx, "done", "create-db", done_label);
 }
 
-fn locate_codeql_bin() -> Result<Option<PathBuf>> {
-    if let Some(value) = std::env::var_os("KUZUSHI_CODEQL_BIN") {
+fn locate_codeql_bin(input: &Value) -> Result<Option<PathBuf>> {
+    if let Some(value) = optional_string_input(input, &["codeqlBin", "codeql_bin"])? {
         let path = PathBuf::from(value);
         if path.is_file() {
             return Ok(Some(path));
         }
         anyhow::bail!(
-            "KUZUSHI_CODEQL_BIN points to a missing CodeQL binary: {}",
+            "codeqlBin points to a missing CodeQL binary: {}",
             path.display()
         );
     }
@@ -303,8 +314,8 @@ fn codeql_failure_summary(output: &std::process::Output) -> String {
 }
 
 fn skipped_response(target: &Path) -> Value {
-    let output = "codeql:create-db skipped — the `codeql` CLI is not installed (KUZUSHI_CODEQL_BIN \
-                  unset, not on PATH). Install CodeQL or set KUZUSHI_CODEQL_BIN to enable database creation."
+    let output = "codeql:create-db skipped — the `codeql` CLI is not installed and no `codeqlBin` \
+                  option was provided. Install CodeQL on PATH or pass codeqlBin to enable database creation."
         .to_string();
     crate::module_result::completed_output_result(
         output.clone(),
@@ -405,18 +416,12 @@ mod tests {
     }
 
     #[test]
-    fn invalid_codeql_bin_env_is_not_silent_fallback() {
-        let _guard = crate::test_env::codeql_bin_env_lock();
+    fn invalid_codeql_bin_option_is_not_silent_fallback() {
         let temp = tempdir().unwrap();
-        let previous = std::env::var_os("KUZUSHI_CODEQL_BIN");
-        std::env::set_var("KUZUSHI_CODEQL_BIN", temp.path().join("missing-codeql"));
+        let input = json!({"codeqlBin": temp.path().join("missing-codeql")});
 
-        let error = locate_codeql_bin().unwrap_err().to_string();
+        let error = locate_codeql_bin(&input).unwrap_err().to_string();
 
-        match previous {
-            Some(value) => std::env::set_var("KUZUSHI_CODEQL_BIN", value),
-            None => std::env::remove_var("KUZUSHI_CODEQL_BIN"),
-        }
-        assert!(error.contains("KUZUSHI_CODEQL_BIN points to a missing CodeQL binary"));
+        assert!(error.contains("codeqlBin points to a missing CodeQL binary"));
     }
 }

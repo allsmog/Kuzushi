@@ -168,13 +168,13 @@ export interface WorkspaceHandle {
 }
 
 // ---------------------------------------------------------------------------
-// RunArtifactStore — typed writer for `.kuzushi/runs/<runId>/<moduleId>/...`
+// RunArtifactStore — typed writer for `.kuzushi/v3/runs/<runId>/<moduleId>/...`
 // ---------------------------------------------------------------------------
 
 /**
  * Sandboxed per-(runId, moduleId) artifact writer. Modules use this to drop
  * version-controllable artefacts into the run dir without hardcoding the
- * `.kuzushi/runs/<runId>/...` path layout (which is a host concern that may
+ * `.kuzushi/v3/runs/<runId>/...` path layout (which is a host concern that may
  * evolve). The host materialises the directory lazily on first write.
  *
  * Available on `ExecutionContext.runArtifacts` only when both a DAG

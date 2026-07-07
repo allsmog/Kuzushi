@@ -42,7 +42,7 @@ pub(in crate::workspace::diff_scope) fn tag_current_finding(
     )
 }
 
-pub(in crate::workspace::diff_scope) fn tag_fixed_findings(
+pub(in crate::workspace::diff_scope) fn tag_not_seen_findings(
     previous_findings: &[Finding],
     current_findings: &[Finding],
     changed_files: &[ChangedFile],
@@ -51,7 +51,7 @@ pub(in crate::workspace::diff_scope) fn tag_fixed_findings(
         .iter()
         .map(|finding| finding.fingerprint.as_str())
         .collect::<BTreeSet<_>>();
-    let mut fixed = Vec::new();
+    let mut not_seen = Vec::new();
     let mut seen = BTreeSet::new();
     for finding in previous_findings {
         if current.contains(finding.fingerprint.as_str()) || !seen.insert(&finding.fingerprint) {
@@ -67,14 +67,14 @@ pub(in crate::workspace::diff_scope) fn tag_fixed_findings(
         if file.status == DiffFileStatus::Deleted
             || ranges_overlap(finding.start_line, end_line, &file.deleted_ranges)
         {
-            fixed.push(diff_finding_tag(
+            not_seen.push(diff_finding_tag(
                 finding,
-                DiffFindingStatus::Fixed,
+                DiffFindingStatus::NotSeen,
                 "previous finding no longer appears and its old source span was changed or deleted",
             ));
         }
     }
-    fixed
+    not_seen
 }
 
 pub(in crate::workspace::diff_scope) fn diff_finding_tag(

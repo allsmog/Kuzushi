@@ -1,6 +1,13 @@
 use anyhow::{Context, Result};
 use std::{fs, path::Path};
 
+pub fn prompt_content_sha256(value: &str) -> String {
+    format!(
+        "sha256:{}",
+        kuzushi_mcp_common::cache::sha256_hex_bytes(value.as_bytes())
+    )
+}
+
 pub(crate) fn resolve_prompt_override_for_key(
     value: &str,
     cwd: &Path,

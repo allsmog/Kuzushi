@@ -4,7 +4,7 @@
 //!
 //! 1. Creates a synthetic mini-slice whose layout mirrors the oracle's
 //!    file references (so path matching is exercised, not stubbed).
-//! 2. Pre-populates `<slice>/.kuzushi/v2/findings.sqlite3` with a
+//! 2. Pre-populates `<slice>/.kuzushi/v3/index.sqlite3` with a
 //!    finding that the scorer should classify as a hit.
 //! 3. Pipes `kuzushi findings --json` into the `kuzushi-eval` scorer.
 //! 4. Asserts at least one match at the user-chosen primary tolerance
@@ -114,7 +114,7 @@ fn seed_finding_matching_oracle(slice: &Path, oracle: &Value) {
     let workspace = WorkspaceTarget::new(slice).unwrap();
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     store
-        .insert_scan_run("run-recall", workspace.root(), "running")
+        .record_run_started("run-recall", workspace.root(), "running")
         .unwrap();
 
     let entry = &oracle["ground_truth"][0];
@@ -158,7 +158,7 @@ fn seed_finding_matching_oracle(slice: &Path, oracle: &Value) {
     );
     store.insert_finding("run-recall", &finding).unwrap();
     store
-        .complete_scan_run("run-recall", "completed", 1)
+        .record_run_finished("run-recall", "completed", 1)
         .unwrap();
 }
 

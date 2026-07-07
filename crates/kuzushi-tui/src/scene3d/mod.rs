@@ -16,7 +16,9 @@ mod scenes;
 pub use math::{dot, normalize, project, view_space, Camera, Projected, Vec3};
 pub use model::{EdgeKind, Scene, SceneColor, SceneEdge, SceneLabel, Splat, VizPage};
 pub use raster::Framebuffer;
-pub use render::{brighten, default_palette, render_to_framebuffer, Projector, BACKGROUND};
+pub use render::{
+    active_palette, brighten, default_palette, render_to_framebuffer, Projector, BACKGROUND,
+};
 pub(crate) use scenes::attack_surface_scene;
 
 #[cfg(test)]

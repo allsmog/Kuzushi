@@ -92,6 +92,44 @@ mod tests {
     }
 
     #[test]
+    fn prompt_mutate_records_pending_mutation_and_approval() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(temp.path()).unwrap();
+        let mut app = prompt_test_app(temp.path());
+
+        app.handle_prompt_verb("mutate triage \"focus on authz paths\"");
+
+        let mutations = kuzushi_core::load_prompt_mutations(&workspace).unwrap();
+        assert_eq!(mutations.len(), 1);
+        assert_eq!(mutations[0].module_id, "sast");
+        assert_eq!(mutations[0].verb, "triage");
+        assert_eq!(mutations[0].text, "focus on authz paths");
+        assert_eq!(
+            mutations[0].status,
+            kuzushi_core::PromptMutationStatus::Pending
+        );
+        assert!(app
+            .log
+            .iter()
+            .any(|line| line.body.contains("pending for sast:triage")));
+
+        app.handle_prompt_verb(&format!("approve {} reviewed stack", mutations[0].id));
+
+        let approved = kuzushi_core::latest_prompt_mutation(&workspace, "sast", "triage")
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            approved.status,
+            kuzushi_core::PromptMutationStatus::Approved
+        );
+        assert_eq!(approved.reason.as_deref(), Some("reviewed stack"));
+        assert_eq!(
+            std::fs::read_to_string(prompt_override_path(temp.path())).unwrap(),
+            "focus on authz paths"
+        );
+    }
+
+    #[test]
     fn prompt_list_reports_sorted_prompt_overrides_and_missing_state() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());

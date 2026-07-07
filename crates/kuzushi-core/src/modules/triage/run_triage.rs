@@ -60,7 +60,7 @@ fn resolve_triage_execution<'a>(
     run: &PreparedTriageRun<'_>,
 ) -> Result<TriageExecution<'a>> {
     let runtime = require_triage_runtime(runtime)?;
-    let stage2_model = resolve_triage_model(ctx, runtime, run.input.stage2_tier)?;
+    let stage2_model = resolve_triage_model(ctx, runtime, &run.input)?;
     Ok(TriageExecution {
         runtime,
         config: TriageExecutionConfig::new(run.workspace.root().to_path_buf(), stage2_model),
@@ -78,9 +78,9 @@ fn classify_triage_findings(
     execution: &TriageExecution<'_>,
 ) -> Result<CompletedTriageRun> {
     let findings = std::mem::take(&mut run.findings);
-    let mut stage1 = prefilter_triage_findings(findings, run.input.prefilter_threshold);
+    let stage1 = prefilter_triage_findings(findings, run.input.prefilter_threshold);
     let evidence_phase = emit_triage_evidence_phase(ctx, &run.input, &stage1);
-    let kept = std::mem::take(&mut stage1.kept);
+    let kept = stage1.kept.clone();
     let stats = run_triage_stage2_with_scope(ctx, evidence_phase, run, execution, kept)?;
     Ok(CompletedTriageRun { stage1, stats })
 }
@@ -110,7 +110,7 @@ fn emit_triage_start(ctx: &ToolExecutionContext<'_>, input: &TriageRunInput) {
             .step(
                 "tool",
                 "run",
-                format!("triage start (batch={})", input.batch_size),
+                format!("triage start (concurrency={})", input.concurrency),
             )
             .emit();
     }
@@ -187,9 +187,10 @@ fn emit_triage_done(ctx: &ToolExecutionContext<'_>, stats: &TriageRunStats) {
 pub(in crate::modules) fn require_triage_workspace<'a>(
     ctx: &'a ToolExecutionContext<'_>,
 ) -> Result<&'a WorkspaceTarget> {
-    ctx.workspace.context(
-        "triage:run needs an active workspace. Pass --target <repo> or start the shell with --target.",
-    )
+    ctx.workspace
+        .context(crate::workspace::active_workspace_required_message(
+            "triage:run",
+        ))
 }
 
 pub(in crate::modules) fn require_triage_store<'a>(
@@ -200,25 +201,23 @@ pub(in crate::modules) fn require_triage_store<'a>(
 }
 
 pub(in crate::modules) fn empty_triage_response(
-    input: &TriageRunInput,
+    _input: &TriageRunInput,
     missing_fingerprints: Vec<String>,
 ) -> Value {
     let summary = "No findings matched triage input.";
-    let output =
-        "[-] No findings match. Run a scanner first (`kuzushi scan <repo>`) or pass explicit fingerprints.";
+    let output = "[-] No findings match. Run a scanner first (`kuzushi scan <repo>`) or pass explicit fingerprints.";
     let data = json!({
-            "summary": "No findings matched triage input.",
-            "triaged": 0,
-            "total": 0,
-            "tp": 0,
-            "fp": 0,
-            "needsReview": 0,
-            "byDesign": 0,
-            "costUsd": 0.0,
-            "missingFingerprints": missing_fingerprints,
-            "batchSize": input.batch_size,
-            "findings": [],
-        });
+        "summary": "No findings matched triage input.",
+        "triaged": 0,
+        "total": 0,
+        "tp": 0,
+        "fp": 0,
+        "needsReview": 0,
+        "byDesign": 0,
+        "costUsd": 0.0,
+        "missingFingerprints": missing_fingerprints,
+        "findings": [],
+    });
     let mut result = crate::module_result::skipped_output_result(
         summary,
         output,
@@ -240,11 +239,14 @@ pub(in crate::modules) fn require_triage_runtime(
 pub(in crate::modules) fn resolve_triage_model(
     ctx: &ToolExecutionContext<'_>,
     runtime: &dyn AgentRuntime,
-    tier: ModelTier,
+    input: &TriageRunInput,
 ) -> Result<String> {
-    let model_configured =
-        crate::runtime::require_configured_model("triage:run", ctx.config.model.as_deref())?;
-    let model = runtime.model_for_tier(tier, &model_configured);
+    let configured = crate::runtime::resolve_explicit_model(
+        "triage:run",
+        input.model.clone(),
+        ctx.config.model.as_deref(),
+    )?;
+    let model = runtime.model_for_tier(input.stage2_tier, &configured);
     crate::runtime::validate_model_spec(&model)
         .with_context(|| "triage:run resolved an invalid stage2 model")?;
     Ok(model)

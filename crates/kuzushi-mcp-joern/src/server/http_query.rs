@@ -22,14 +22,6 @@ async fn send_query_with_ready_client(
     send_joern_query(client, &url, scala).await
 }
 
-/// Default URL the auto-spawn module pins JOERN_SERVER_URL to. Kept
-/// here (rather than dropped) so doctor/tests can probe a sensible
-/// default when no server is running.
-#[allow(dead_code)]
-pub(crate) fn joern_server_url() -> String {
-    std::env::var("JOERN_SERVER_URL").unwrap_or_else(|_| "http://127.0.0.1:8080".to_string())
-}
-
 pub(crate) fn joern_http_client() -> Result<reqwest::Client> {
     reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(120))

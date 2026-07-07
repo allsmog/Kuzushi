@@ -7,10 +7,7 @@ pub(super) fn inspect(inspection: &NodeLineInspection<'_>, builder: &mut AttackS
     inspect_tenant_isolation(inspection, builder);
 }
 
-fn inspect_auth_boundary(
-    inspection: &NodeLineInspection<'_>,
-    builder: &mut AttackSurfaceBuilder,
-) {
+fn inspect_auth_boundary(inspection: &NodeLineInspection<'_>, builder: &mut AttackSurfaceBuilder) {
     if is_route_line(&inspection.lower) && line_has_auth_guard(&inspection.lower) {
         let route = inspection.route();
         inspection.add_surface(

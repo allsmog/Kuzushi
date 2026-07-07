@@ -59,16 +59,34 @@ impl ShellApp {
         self.config.model = Some(model.clone());
         self.session_thinking_level = thinking_level.clone();
         self.sync_selected_model_index();
+        self.persist_global_model_choice(&model, thinking_level.as_deref());
         self.log(
             "model",
             format!(
-                "{model}{} via LangGraph (session only; no fallback model will be selected)",
+                "{model}{} via LangGraph (no fallback model will be selected)",
                 thinking_level
                     .as_deref()
                     .map(|level| format!(" / {level}"))
                     .unwrap_or_default()
             ),
         );
+    }
+
+    pub(crate) fn persist_global_model_choice(
+        &mut self,
+        model: &str,
+        thinking_level: Option<&str>,
+    ) {
+        if !model_persistence_enabled_for_build() {
+            return;
+        }
+        match kuzushi_core::config::persist_global_model_selection(model, thinking_level) {
+            Ok(path) => self.log("model", format!("saved global model to {}", path.display())),
+            Err(error) => self.log(
+                "warn",
+                format!("model active for this session, but could not save config: {error}"),
+            ),
+        }
     }
 }
 
@@ -78,4 +96,14 @@ fn model_command_default_scopes_to_module(
     has_global_model: bool,
 ) -> bool {
     (!force_global) & has_focused_module & has_global_model
+}
+
+#[cfg(not(test))]
+fn model_persistence_enabled_for_build() -> bool {
+    true
+}
+
+#[cfg(test)]
+fn model_persistence_enabled_for_build() -> bool {
+    std::env::var_os("KUZUSHI_TUI_TEST_PERSIST_MODEL").is_some()
 }

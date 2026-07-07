@@ -7,22 +7,99 @@ mod tests {
     fn parses_kept_commands() {
         assert_eq!(parse_command("/"), ShellCommand::Home);
         assert_eq!(parse_command("home"), ShellCommand::Home);
-        assert_eq!(parse_command("/help"), ShellCommand::Help);
-        assert_eq!(parse_command("/h"), ShellCommand::Help);
-        assert_eq!(parse_command("?"), ShellCommand::Help);
+        assert_eq!(parse_command("/help"), ShellCommand::Help(None));
+        assert_eq!(parse_command("/h"), ShellCommand::Help(None));
+        assert_eq!(parse_command("?"), ShellCommand::Help(None));
         assert_eq!(parse_command("/modules"), ShellCommand::Modules);
         assert_eq!(parse_command("/show modules"), ShellCommand::Modules);
         assert_eq!(parse_command("/recommend"), ShellCommand::Recommend);
         assert_eq!(parse_command("rec"), ShellCommand::Recommend);
-        assert_eq!(parse_command("/tools"), ShellCommand::Tools);
-        assert_eq!(parse_command("/show tools"), ShellCommand::Tools);
+        assert_eq!(parse_command("aim"), ShellCommand::Aim(None));
+        assert_eq!(
+            parse_command("aim sql injection"),
+            ShellCommand::Aim(Some("sql injection".to_string()))
+        );
+        assert_eq!(parse_command("doctor"), ShellCommand::Health);
+        assert_eq!(parse_command("/health"), ShellCommand::Health);
+        assert_eq!(parse_command("/tools"), ShellCommand::Tools(None));
+        assert_eq!(parse_command("/show tools"), ShellCommand::Tools(None));
+        assert_eq!(
+            parse_command("tools semgrep scan"),
+            ShellCommand::Tools(Some("semgrep scan".to_string()))
+        );
+        assert_eq!(
+            parse_command("show tools codeql"),
+            ShellCommand::Tools(Some("codeql".to_string()))
+        );
         assert_eq!(parse_command("/findings"), ShellCommand::Findings);
         assert_eq!(parse_command("/f"), ShellCommand::Findings);
         assert_eq!(
+            parse_command("findings filter state:new rank:high run:scan-1"),
+            ShellCommand::FindingsFilter("state:new rank:high run:scan-1".to_string())
+        );
+        assert_eq!(
+            parse_command("decision suppressed reviewed under policy"),
+            ShellCommand::ReviewDecision(ReviewDecisionCommand::Record {
+                verdict: "suppressed".to_string(),
+                reason: "reviewed under policy".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_command("review confirmed source-linked evidence reviewed"),
+            ShellCommand::ReviewDecision(ReviewDecisionCommand::Record {
+                verdict: "confirmed".to_string(),
+                reason: "source-linked evidence reviewed".to_string(),
+            })
+        );
+        assert_eq!(
+            parse_command("decision suppressed"),
+            ShellCommand::ReviewDecision(ReviewDecisionCommand::Unsupported(
+                "decision suppressed".to_string(),
+            ))
+        );
+        assert_eq!(
             parse_command("findings export /tmp/findings.json"),
             ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
-                output: PathBuf::from("/tmp/findings.json")
+                output: PathBuf::from("/tmp/findings.json"),
+                format: None,
+                completeness: None,
+                allow_empty: false,
             })
+        );
+        assert_eq!(
+            parse_command("findings export /tmp/findings-bundle format=markdown-bundle"),
+            ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+                output: PathBuf::from("/tmp/findings-bundle"),
+                format: Some("markdown-bundle".to_string()),
+                completeness: None,
+                allow_empty: false,
+            })
+        );
+        assert_eq!(
+            parse_command("findings export /tmp/empty.json --allow-empty"),
+            ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+                output: PathBuf::from("/tmp/empty.json"),
+                format: None,
+                completeness: None,
+                allow_empty: true,
+            })
+        );
+        assert_eq!(
+            parse_command("findings export /tmp/open.json --completeness open"),
+            ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+                output: PathBuf::from("/tmp/open.json"),
+                format: None,
+                completeness: Some("open".to_string()),
+                allow_empty: false,
+            })
+        );
+        assert_eq!(parse_command("runs"), ShellCommand::ShowRuns);
+        assert_eq!(
+            parse_command("runs diff run-left run-right"),
+            ShellCommand::RunDiff {
+                left: "run-left".to_string(),
+                right: "run-right".to_string()
+            }
         );
         assert_eq!(parse_command("/back"), ShellCommand::Back);
         assert_eq!(
@@ -30,7 +107,7 @@ mod tests {
             ShellCommand::Threat(ThreatView::Stride)
         );
         assert_eq!(
-            parse_command("/threats 5"),
+            parse_command("/threats 4"),
             ShellCommand::Threat(ThreatView::Summary)
         );
         assert_eq!(parse_command("/threats regen"), ShellCommand::ThreatRegen);
@@ -46,12 +123,21 @@ mod tests {
             ShellCommand::Prompt("show run".to_string())
         );
         assert_eq!(
+            parse_command("/prompt mutate triage \"focus authz\""),
+            ShellCommand::Prompt("mutate triage \"focus authz\"".to_string())
+        );
+        assert_eq!(
             parse_command("/open abc123"),
             ShellCommand::Open("abc123".to_string())
         );
         assert_eq!(
             parse_command("/scan ./repo"),
             ShellCommand::Scan(Some(PathBuf::from("./repo")))
+        );
+        assert_eq!(parse_command("/demo"), ShellCommand::Demo);
+        assert_eq!(
+            parse_command("/target rev abcdef1"),
+            ShellCommand::TargetRevision("abcdef1".to_string())
         );
         assert_eq!(parse_command("/pwn"), ShellCommand::Pwn(PwnCommand::Show));
         assert_eq!(
@@ -207,6 +293,16 @@ mod tests {
             parse_command("attach docs/design.md"),
             ShellCommand::Attach("docs/design.md".to_string())
         );
+        assert_eq!(parse_command("attach"), ShellCommand::FilePicker);
+        assert_eq!(parse_command("files"), ShellCommand::FilePicker);
+        assert_eq!(
+            parse_command("component web/app"),
+            ShellCommand::Component(Some("web/app".to_string()))
+        );
+        assert_eq!(
+            parse_command("component all"),
+            ShellCommand::Component(Some("all".to_string()))
+        );
         assert_eq!(
             parse_command("detach A-123"),
             ShellCommand::Detach("A-123".to_string())
@@ -223,6 +319,10 @@ mod tests {
         );
         assert_eq!(parse_command("/load"), ShellCommand::Load(None));
         assert_eq!(parse_command("/pause"), ShellCommand::Pause);
+        assert_eq!(parse_command("/cancel"), ShellCommand::Cancel);
+        assert_eq!(parse_command("c"), ShellCommand::Cancel);
+        assert_eq!(parse_command("/c"), ShellCommand::Cancel);
+        assert_eq!(parse_command("stop"), ShellCommand::Cancel);
         assert_eq!(parse_command("/resume"), ShellCommand::Resume(None));
         assert_eq!(
             parse_command("/resume run-123"),
@@ -277,6 +377,74 @@ mod tests {
             parse_command("/context regen repo"),
             ShellCommand::Context(ContextCommand::Regen("repo".to_string()))
         );
+        assert_eq!(parse_command("project model"), ShellCommand::ProjectModel);
+        assert_eq!(
+            parse_command("strategy"),
+            ShellCommand::Strategy(StrategyCommand::Show)
+        );
+        assert_eq!(
+            parse_command("strategies"),
+            ShellCommand::Strategy(StrategyCommand::Show)
+        );
+        assert_eq!(
+            parse_command("strategy queue"),
+            ShellCommand::Strategy(StrategyCommand::Show)
+        );
+        assert_eq!(
+            parse_command("strategy approve review-codeql-scan"),
+            ShellCommand::Strategy(StrategyCommand::Approve("review-codeql-scan".to_string()))
+        );
+        assert_eq!(
+            parse_command("strategy keep review-codeql-scan"),
+            ShellCommand::Strategy(StrategyCommand::Approve("review-codeql-scan".to_string()))
+        );
+        assert_eq!(
+            parse_command("strategy reject review-codeql-scan"),
+            ShellCommand::Strategy(StrategyCommand::Reject("review-codeql-scan".to_string()))
+        );
+        assert_eq!(
+            parse_command("strategy skip review-codeql-scan"),
+            ShellCommand::Strategy(StrategyCommand::Reject("review-codeql-scan".to_string()))
+        );
+        assert_eq!(
+            parse_command("strategy fire"),
+            ShellCommand::Strategy(StrategyCommand::Fire)
+        );
+        assert_eq!(
+            parse_command(
+                "strategy correct review-codeql-scan run codeql:scan with authz focus --workspace --reason tighten authz paths"
+            ),
+            ShellCommand::Strategy(StrategyCommand::Correct {
+                id: "review-codeql-scan".to_string(),
+                to_strategy: "run codeql:scan with authz focus".to_string(),
+                reason: Some("tighten authz paths".to_string()),
+                scope: StrategyCorrectionCommandScope::Workspace,
+            })
+        );
+        assert_eq!(
+            parse_command("patch apply"),
+            ShellCommand::Patch(PatchCommand::Apply)
+        );
+        assert_eq!(
+            parse_command("/patch reject"),
+            ShellCommand::Patch(PatchCommand::Reject)
+        );
+        assert_eq!(
+            parse_command("patch discard"),
+            ShellCommand::Patch(PatchCommand::Reject)
+        );
+        assert_eq!(
+            parse_command("patch regen --style defensive"),
+            ShellCommand::Patch(PatchCommand::Regen {
+                style: Some("defensive".to_string())
+            })
+        );
+        assert_eq!(
+            parse_command("patch regenerate --style=minimal"),
+            ShellCommand::Patch(PatchCommand::Regen {
+                style: Some("minimal".to_string())
+            })
+        );
         assert_eq!(
             parse_command("/workspace"),
             ShellCommand::Workspace(WorkspaceCommand::Status)
@@ -288,8 +456,33 @@ mod tests {
         assert_eq!(
             parse_command("workspace export findings out.json"),
             ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
-                output: PathBuf::from("out.json")
+                output: PathBuf::from("out.json"),
+                format: None,
+                completeness: None,
+                allow_empty: false,
             })
+        );
+        assert_eq!(
+            parse_command("workspace export findings markdown-bundle bundle-dir"),
+            ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+                output: PathBuf::from("bundle-dir"),
+                format: Some("markdown-bundle".to_string()),
+                completeness: None,
+                allow_empty: false,
+            })
+        );
+        assert_eq!(
+            parse_command("workspace export findings out.csv scope=complete"),
+            ShellCommand::Workspace(WorkspaceCommand::ExportFindings {
+                output: PathBuf::from("out.csv"),
+                format: None,
+                completeness: Some("complete".to_string()),
+                allow_empty: false,
+            })
+        );
+        assert_eq!(
+            parse_command("workspace scope init"),
+            ShellCommand::Workspace(WorkspaceCommand::ScopeInit)
         );
         assert_eq!(
             parse_command("workspace import burp report.xml"),
@@ -331,7 +524,19 @@ mod tests {
             parse_command("?what changed?"),
             ShellCommand::Ask("what changed?".to_string())
         );
-        assert_eq!(parse_command("?"), ShellCommand::Help);
+        assert_eq!(parse_command("?"), ShellCommand::Help(None));
+        assert_eq!(
+            parse_command("phase confirm"),
+            ShellCommand::Phase(WorkflowPhase::Confirm)
+        );
+        assert_eq!(
+            parse_command("/phase fix"),
+            ShellCommand::Phase(WorkflowPhase::Fix)
+        );
+        assert_eq!(
+            parse_command("help scan"),
+            ShellCommand::Help(Some("scan".to_string()))
+        );
         assert_eq!(
             parse_command("/run dep-hygiene:check {\"target\":\".\"}"),
             ShellCommand::RunTool {
@@ -359,10 +564,10 @@ mod tests {
 
     #[test]
     fn accepts_commands_without_slash_for_log_prompt() {
-        assert_eq!(parse_command("help"), ShellCommand::Help);
+        assert_eq!(parse_command("help"), ShellCommand::Help(None));
         assert_eq!(parse_command("modules"), ShellCommand::Modules);
         assert_eq!(parse_command("m"), ShellCommand::Modules);
-        assert_eq!(parse_command("tools"), ShellCommand::Tools);
+        assert_eq!(parse_command("tools"), ShellCommand::Tools(None));
         assert_eq!(parse_command("findings"), ShellCommand::Findings);
         assert_eq!(parse_command("back"), ShellCommand::Back);
         assert_eq!(parse_command("b"), ShellCommand::Back);
@@ -376,8 +581,14 @@ mod tests {
             ShellCommand::Scan(Some(PathBuf::from("./repo")))
         );
         assert_eq!(parse_command("q"), ShellCommand::Quit);
-        assert_eq!(parse_command("exitj"), ShellCommand::Quit);
-        assert_eq!(parse_command("/exitj"), ShellCommand::Quit);
+        assert_eq!(
+            parse_command("exitj"),
+            ShellCommand::Unknown("exitj".into())
+        );
+        assert_eq!(
+            parse_command("/exitj"),
+            ShellCommand::Unknown("/exitj".into())
+        );
     }
 
     #[test]
@@ -394,6 +605,24 @@ mod tests {
             parse_command("/ask"),
             ShellCommand::Unknown("/ask".to_string())
         );
+    }
+
+    #[test]
+    fn retired_navigation_aliases_do_not_route() {
+        for input in [
+            "studio",
+            "cc",
+            "setup",
+            "plan-stage",
+            "diagram",
+            "3d",
+            "threats dfd",
+        ] {
+            assert!(
+                matches!(parse_command(input), ShellCommand::Unknown(_)),
+                "retired alias {input:?} still routes"
+            );
+        }
     }
 
     #[test]
@@ -426,19 +655,26 @@ mod tests {
         let expected = std::collections::BTreeSet::from([
             "activity",
             "actor",
+            "aim",
             "attach",
             "ask",
             "auth",
             "auth-login",
             "back",
             "backend",
+            "cancel",
             "clear",
+            "component",
             "config",
             "context",
             "cost",
+            "demo",
             "detach",
             "failure-handoff",
+            "file-picker",
             "findings",
+            "findings-filter",
+            "health",
             "help",
             "home",
             "history",
@@ -452,19 +688,25 @@ mod tests {
             "open",
             "options",
             "pause",
+            "patch",
             "permissions",
+            "phase",
             "plan",
             "plan-apply",
             "plan-discard",
             "prompts",
             "prompt",
             "provider",
+            "project-model",
+            "pwn",
             "quickstart",
             "recommend",
             "quit",
             "reparse",
             "replay",
             "resume",
+            "review-decision",
+            "run-diff",
             "run-tool",
             "scan",
             "scene",
@@ -473,7 +715,9 @@ mod tests {
             "show-runs",
             "since",
             "story",
+            "strategy",
             "target",
+            "target-revision",
             "task",
             "tasks",
             "threat",
@@ -487,6 +731,7 @@ mod tests {
             "tune",
             "unset-option",
             "use",
+            "workbench",
             "workspace",
         ]);
 
@@ -499,7 +744,8 @@ mod tests {
         assert_eq!(
             examples,
             vec![
-                "scan .",
+                "demo",
+                "next",
                 "use semgrep",
                 "run .",
                 "findings",
@@ -522,15 +768,20 @@ mod tests {
 
     fn route_kind(command: &ShellCommand) -> &'static str {
         match command {
-            ShellCommand::Help => "help",
+            ShellCommand::Help(_) => "help",
             ShellCommand::Home => "home",
             ShellCommand::Back => "back",
             ShellCommand::Modules => "modules",
             ShellCommand::Recommend => "recommend",
-            ShellCommand::Tools => "tools",
+            ShellCommand::Tools(_) => "tools",
+            ShellCommand::Workbench(_) => "workbench",
+            ShellCommand::Aim(_) => "aim",
             ShellCommand::Findings => "findings",
+            ShellCommand::FindingsFilter(_) => "findings-filter",
+            ShellCommand::Component(_) => "component",
             ShellCommand::Open(_) => "open",
             ShellCommand::Scan(_) => "scan",
+            ShellCommand::Demo => "demo",
             ShellCommand::Model(_) => "model",
             ShellCommand::Auth => "auth",
             ShellCommand::AuthLogin(_) => "auth-login",
@@ -538,7 +789,9 @@ mod tests {
             ShellCommand::Backend(_) => "backend",
             ShellCommand::Cost => "cost",
             ShellCommand::Config => "config",
+            ShellCommand::Health => "health",
             ShellCommand::Permissions => "permissions",
+            ShellCommand::ProjectModel => "project-model",
             ShellCommand::Use(_) => "use",
             ShellCommand::Tune => "tune",
             ShellCommand::Threat(_) => "threat",
@@ -551,6 +804,7 @@ mod tests {
             ShellCommand::Prompt(_) => "prompt",
             ShellCommand::Actor(_) => "actor",
             ShellCommand::ShowRuns => "show-runs",
+            ShellCommand::RunDiff { .. } => "run-diff",
             ShellCommand::ShowAliases(_) => "show-aliases",
             ShellCommand::Since(_) => "since",
             ShellCommand::Replay(_) => "replay",
@@ -563,8 +817,10 @@ mod tests {
             ShellCommand::Quickstart => "quickstart",
             ShellCommand::Onboarding => "onboarding",
             ShellCommand::Next => "next",
+            ShellCommand::Phase(_) => "phase",
             ShellCommand::Logs => "logs",
             ShellCommand::Target(_) => "target",
+            ShellCommand::TargetRevision(_) => "target-revision",
             ShellCommand::Ask(_) => "ask",
             ShellCommand::Options { .. } => "options",
             ShellCommand::SetOption { .. } => "set-option",
@@ -573,8 +829,12 @@ mod tests {
             ShellCommand::Task(_) => "task",
             ShellCommand::Context(_) => "context",
             ShellCommand::Workspace(_) => "workspace",
+            ShellCommand::Strategy(_) => "strategy",
+            ShellCommand::ReviewDecision(_) => "review-decision",
+            ShellCommand::Patch(_) => "patch",
             ShellCommand::Pwn(_) => "pwn",
             ShellCommand::KnowledgeBase(_) => "kb",
+            ShellCommand::FilePicker => "file-picker",
             ShellCommand::Attach(_) => "attach",
             ShellCommand::Detach(_) => "detach",
             ShellCommand::Reparse(_) => "reparse",
@@ -583,6 +843,7 @@ mod tests {
             ShellCommand::Load(_) => "load",
             ShellCommand::Resume(_) => "resume",
             ShellCommand::Pause => "pause",
+            ShellCommand::Cancel => "cancel",
             ShellCommand::Story => "story",
             ShellCommand::Scene => "scene",
             ShellCommand::RunTool { .. } => "run-tool",
@@ -606,20 +867,25 @@ mod tests {
                 "<run>" | "<runId>" => "run-123".to_string(),
                 "<ref>" => "main".to_string(),
                 "<provider>" => "openai".to_string(),
+                "<map|hunt|confirm|fix>" => "confirm".to_string(),
                 "<choice>" => "1".to_string(),
                 "<question>" => "what now".to_string(),
                 "<specifier>" => "builtin:sast".to_string(),
                 "<verb>" => "show run".to_string(),
                 "<n>" => "1".to_string(),
                 "[json]" => String::new(),
+                "[format]" => String::new(),
                 "[tool]" => "sast:scan".to_string(),
                 "[target]" => "./repo".to_string(),
                 "[module]" => "context".to_string(),
                 "[prefix]" => "F-00".to_string(),
                 "[id]" => "semgrep".to_string(),
-                "[1-5]" => "5".to_string(),
+                "[1-4]" => "4".to_string(),
                 "[choice]" => "1".to_string(),
                 "[runId]" => "run-123".to_string(),
+                "[--completeness" => "--completeness".to_string(),
+                "open|complete]" => "open".to_string(),
+                "[--allow-empty]" => "--allow-empty".to_string(),
                 "auto|manual|toggle" => "auto".to_string(),
                 other => other.to_string(),
             })

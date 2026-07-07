@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 mod adapters;
 mod application;
+mod component_classify;
 mod domain;
 mod model_ranking;
 mod rule_catalog;

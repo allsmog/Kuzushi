@@ -179,7 +179,7 @@ keyed by the `ShellView` variant — design output is one mockup per view:
     transcript. Goal: chronological log with timestamp gutter, fold/unfold
     affordances for long results.
 
-15. **`Runs`** — past pipeline runs (`.kuzushi/runs/<runId>/`). Today: list.
+15. **`Runs`** — past pipeline runs (`.kuzushi/v3/runs/<runId>/`). Today: list.
     Goal: timeline-style view, status pill per run, total cost column.
 
 16. **`Replay(runId)` / `Trace(runId)`** — read-only views over past run

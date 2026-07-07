@@ -12,26 +12,32 @@ pub(crate) use subcommands::{
 pub(crate) enum Command {
     /// Start the interactive shell.
     Shell {
-        #[arg(long)]
+        #[arg(long, help = crate::support::TARGET_HELP)]
         target: Option<PathBuf>,
     },
     /// Run configured scanners and persist findings.
     Scan {
-        target: PathBuf,
+        #[arg(help = crate::support::TARGET_HELP)]
+        target: Option<PathBuf>,
+        /// Scan mode: `standard` or `whitebox-static`.
         #[arg(long, value_enum)]
         mode: Option<ScanModeArg>,
+        /// Restrict the scan to these DAG tasks (comma- or repeat-separated).
         #[arg(long, value_delimiter = ',')]
         tasks: Vec<String>,
+        /// Run model-backed triage on recorded findings after the scan.
         #[arg(long, action = clap::ArgAction::SetTrue)]
         triage: Option<bool>,
+        /// Emit the scan result as a single machine-readable JSON object.
         #[arg(long)]
         json: bool,
         /// Emit one line per pipeline event in a deterministic, grep-friendly format.
         #[arg(long, conflicts_with = "json")]
         ci: bool,
         /// Per-operation USD budget caps, e.g. `triage=50,deep-audit=200,full-mode-multi=300`.
-        /// Caps are persisted to the spend ledger and enforced before each LLM call
-        /// once the runtime is wired through (Phase 4+). Set without value to clear all caps.
+        /// Caps are persisted to the spend ledger and enforced by spend-aware
+        /// model-backed operations before they reserve estimated LLM spend.
+        /// Scanner-only work and tools that do not report spend are unaffected.
         #[arg(long)]
         budget: Option<String>,
         /// Diff-scope the scan to files changed since `<ref>`. Engines that
@@ -54,63 +60,109 @@ pub(crate) enum Command {
     },
     /// List persisted findings.
     Findings {
-        #[arg(long)]
-        target: Option<PathBuf>,
+        /// Maximum number of findings to list.
         #[arg(long, default_value_t = 50)]
         limit: usize,
+        /// Filter by severity (critical, high, medium, low, info). Comma- or repeat-separated.
         #[arg(long, value_delimiter = ',')]
         severity: Vec<String>,
+        /// Filter by triage verdict (e.g. confirmed, rejected, untriaged). Comma- or repeat-separated.
         #[arg(long, value_delimiter = ',')]
         verdict: Vec<String>,
+        /// Alias for --verdict using current review-decision terminology.
+        #[arg(long, value_delimiter = ',')]
+        decision: Vec<String>,
+        /// Filter by terminal review decision completeness: open or complete.
+        #[arg(long, value_delimiter = ',')]
+        completeness: Vec<String>,
+        /// Filter by lifecycle status, e.g. candidate, seen, runtime_verified, verified_static.
+        #[arg(long, value_delimiter = ',')]
+        status: Vec<String>,
+        /// Filter by finding alias or rule name.
         #[arg(long)]
         name: Option<String>,
+        /// Filter by source file path substring.
         #[arg(long = "file-path")]
         file_path: Option<String>,
-        /// Filter by discovery channel: sarif, ainalysis, ainalysis-multi,
+        /// Filter by discovery channel: sarif, analysis, analysis-multi,
         /// diff-analyzer, infer, fuzzing. Comma- or repeat-separated.
         #[arg(long = "vuln-source", value_delimiter = ',')]
         vuln_source: Vec<String>,
+        /// Emit the findings list as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// Inspect one persisted finding by alias, fingerprint, or fingerprint prefix.
     Finding {
+        /// Finding alias (F-0001), full fingerprint, or fingerprint prefix.
         reference: String,
-        #[arg(long)]
-        target: Option<PathBuf>,
+        /// Emit the finding as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
-    /// Inspect replayable run artifacts under `.kuzushi/runs`.
+    /// Record an append-only human review decision for a persisted finding.
+    Decision {
+        /// Finding alias (F-0001), full fingerprint, or fingerprint prefix.
+        reference: String,
+        /// Review decision: confirmed, rejected_false_positive, suppressed, deferred, accepted_risk, or needs_review.
+        #[arg(long)]
+        verdict: String,
+        /// Human rationale recorded with the decision.
+        #[arg(long)]
+        reason: String,
+        /// Emit the result as machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect replayable run artifacts under `.kuzushi/v3/runs`.
     Runs {
         #[command(subcommand)]
         command: RunsCommand,
     },
+    /// Export persisted workspace findings.
+    Export {
+        /// Export format: json, jsonl, sarif, csv, or markdown-bundle.
+        #[arg(long)]
+        format: Option<String>,
+        /// Export findings by review-decision completeness: all, open, or complete.
+        #[arg(long, default_value = "all")]
+        completeness: String,
+        /// Render the selected export to stdout without writing the output path.
+        #[arg(long)]
+        preview: bool,
+        /// Permit writing a valid export when the selected completeness mode contains no findings.
+        #[arg(long)]
+        allow_empty: bool,
+        /// Output file or bundle directory. Relative paths resolve under the target root.
+        #[arg(long = "out")]
+        output: PathBuf,
+    },
     /// Add an expiring, evidence-backed suppression for a finding.
     Suppress {
+        /// Finding alias, fingerprint, or fingerprint prefix to suppress.
         reference: String,
-        #[arg(long)]
-        target: Option<PathBuf>,
+        /// Why this finding is being suppressed (recorded in the audit store).
         #[arg(long)]
         reason: String,
+        /// Operator recorded as the author of the suppression.
         #[arg(long, default_value = "operator")]
         author: String,
+        /// Days until the suppression expires and the finding resurfaces.
         #[arg(long, default_value_t = 90)]
         days: u64,
+        /// Emit the result as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// List whitebox/static suppressions and their audit store.
     Suppressions {
-        #[arg(long)]
-        target: Option<PathBuf>,
+        /// Emit the suppressions list as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// Show the current CLI/shell permission and sandbox policy summary.
     Permissions {
-        #[arg(long)]
-        target: Option<PathBuf>,
+        /// Emit the policy summary as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
@@ -128,31 +180,35 @@ pub(crate) enum Command {
     },
     /// List native modules.
     Modules {
+        /// Emit the module list as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// List native tools.
     Tools {
+        /// Emit the tool list as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// Run Rust CLI preflight diagnostics.
     Doctor {
-        #[arg(long)]
-        target: Option<PathBuf>,
+        /// Emit the diagnostics report as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// Scan a vendored vulnerable fixture offline — no API key, no model,
     /// no external scanners. A real finding with evidence in seconds.
     Demo {
+        /// Emit the demo result as machine-readable JSON.
         #[arg(long)]
         json: bool,
     },
     /// Execute a native tool descriptor-backed command. Use an explicit
     /// `module:tool`; shell-only `run .` needs focused module state.
     Run {
+        /// Tool to execute, as `module:tool` (e.g. `context:build`).
         tool: String,
+        /// Tool input as JSON. Use `@path` to read a file or `-` to read stdin.
         #[arg(long, default_value = "{}")]
         input: String,
         /// Override a canonical tool option. Repeat as `--option key=value`.

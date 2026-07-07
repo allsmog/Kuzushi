@@ -70,6 +70,9 @@ pub struct ExploitChainDetail {
     pub id: String,
     pub title: String,
     pub severity: ChainSeverity,
+    pub narrative: Option<String>,
+    pub impact_description: Option<String>,
+    pub preconditions: Vec<String>,
     pub steps: Vec<ExploitChainStep>,
 }
 
@@ -95,6 +98,7 @@ pub struct TaintStage {
     pub message: String,
     pub file: String,
     pub line: u32,
+    pub snippet: Option<String>,
 }
 
 impl ChainSeverity {

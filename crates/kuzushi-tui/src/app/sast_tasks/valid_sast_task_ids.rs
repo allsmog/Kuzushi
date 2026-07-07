@@ -44,6 +44,14 @@ pub(crate) const SAST_TASK_CAPABILITIES: &[SastTaskCapability] = &[
         toggleable: true,
     },
     SastTaskCapability {
+        id: "govulncheck",
+        scan_task: "govulncheck",
+        cost: "medium",
+        notes: "Go reachable vulnerability scanner",
+        default_enabled: false,
+        toggleable: true,
+    },
+    SastTaskCapability {
         id: "secret-scan",
         scan_task: "secret-scan",
         cost: "low",

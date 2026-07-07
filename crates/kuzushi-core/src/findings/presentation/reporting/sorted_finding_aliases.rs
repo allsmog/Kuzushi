@@ -1,35 +1,41 @@
 use super::*;
 
 pub fn sorted_finding_aliases(findings: &[Finding]) -> Vec<(String, Finding)> {
-    let mut indexed: Vec<&Finding> = findings.iter().collect();
+    sorted_finding_alias_indices(findings)
+        .into_iter()
+        .map(|(alias, index)| (alias, findings[index].clone()))
+        .collect()
+}
+
+pub fn sorted_finding_alias_indices(findings: &[Finding]) -> Vec<(String, usize)> {
+    let mut indexed: Vec<(usize, &Finding)> = findings.iter().enumerate().collect();
     indexed.sort_by(|a, b| {
-        let by_severity = severity_rank(a.severity).cmp(&severity_rank(b.severity));
-        if by_severity == std::cmp::Ordering::Equal {
-            a.fingerprint.cmp(&b.fingerprint)
-        } else {
-            by_severity
+        let by_severity = severity_rank(a.1.severity).cmp(&severity_rank(b.1.severity));
+        if by_severity != std::cmp::Ordering::Equal {
+            return by_severity;
         }
+        a.1.fingerprint.cmp(&b.1.fingerprint)
     });
     indexed
         .into_iter()
         .enumerate()
-        .map(|(index, finding)| (format_finding_alias(index), finding.clone()))
+        .map(|(alias_index, (finding_index, _))| (format_finding_alias(alias_index), finding_index))
         .collect()
 }
 
 pub fn stable_finding_alias(findings: &[Finding], fingerprint: &str) -> Option<String> {
-    sorted_finding_aliases(findings)
+    sorted_finding_alias_indices(findings)
         .into_iter()
-        .find(|(_, finding)| finding.fingerprint == fingerprint)
+        .find(|(_, index)| findings[*index].fingerprint == fingerprint)
         .map(|(alias, _)| alias)
 }
 
 pub fn resolve_finding_alias(findings: &[Finding], reference: &str) -> Option<Finding> {
     let index = parse_finding_alias(reference)?;
-    sorted_finding_aliases(findings)
+    sorted_finding_alias_indices(findings)
         .into_iter()
         .nth(index)
-        .map(|(_, finding)| finding)
+        .and_then(|(_, finding_index)| findings.get(finding_index).cloned())
 }
 
 pub(in crate::findings) fn string_values(input: &Value, key: &str) -> Result<Vec<String>> {

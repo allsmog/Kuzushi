@@ -4,7 +4,15 @@ pub(crate) fn handle_scan_command(app: &mut ShellApp, command: &ShellCommand) ->
     let ShellCommand::Scan(target) = command else {
         return false;
     };
-    app.start_scan(target.clone());
+    app.open_guided_scan(target.clone());
+    true
+}
+
+pub(crate) fn handle_demo_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Demo = command else {
+        return false;
+    };
+    app.start_offline_demo_fixture_scan();
     true
 }
 

@@ -379,7 +379,8 @@ mod tests {
 
     #[test]
     fn completed_chain_persists_a_finding_and_reports_its_id() {
-        let store = FindingStore::open_in_memory().unwrap();
+        let temp = tempfile::tempdir().unwrap();
+        let store = FindingStore::open(temp.path().join(".kuzushi/v3/index.sqlite3")).unwrap();
         let transport = StubTransport {
             status: 200,
             body: "root shell".to_string(),

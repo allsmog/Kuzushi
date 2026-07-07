@@ -36,7 +36,7 @@ fn append_post_success_next(
             .to_string()
     } else if let Some(top) = findings.rows.first() {
         format!(
-            "▸ NEXT `open {}` (highest severity) · `findings` · `workspace export findings <path>.json`",
+            "▸ NEXT `open {}` (highest severity) · `findings` · `workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]`",
             top.alias
         )
     } else {

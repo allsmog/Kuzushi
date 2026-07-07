@@ -6,7 +6,9 @@
 use std::sync::mpsc;
 use std::sync::Arc;
 
-use kuzushi_core::{BroadcastSink, JsonlSink, RunTraceStep, TraceHandle, TraceSink, V2Config};
+use kuzushi_core::{
+    BroadcastSink, Finding, JsonlSink, RunTraceStep, Severity, TraceHandle, TraceSink, V2Config,
+};
 use kuzushi_tui::{render_plain_app, ShellApp, ShellCommand, ShellView};
 
 #[test]
@@ -44,7 +46,9 @@ fn fake_scan_dag_renders_with_module_tags_and_subsystems_collapse() {
         .emit();
 
     let triage = handle.for_module("triage");
-    let triage_start = triage.step("tool", "run", "triage start (batch=10)").emit();
+    let triage_start = triage
+        .step("tool", "run", "triage start (concurrency=10)")
+        .emit();
     let _ = triage
         .child(triage_start)
         .step("reasoning", "run", "evidence-collect · stage1 kept 14/14")
@@ -180,6 +184,7 @@ fn auto_open_disabled_does_not_open_activity() {
 fn pane_focus_routes_jk_to_focused_scroll_offset() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.handle_command(ShellCommand::Activity);
+    app.findings = sample_findings(10);
     {
         let session = app.activity.as_mut().unwrap();
         // Seed enough events that scrolling makes sense.
@@ -202,11 +207,15 @@ fn pane_focus_routes_jk_to_focused_scroll_offset() {
     app.activity.as_mut().unwrap().toggle_pane_focus();
     app.scroll_down(7);
     let session = app.activity.as_ref().unwrap();
-    assert_eq!(session.feed_scroll, 7);
+    assert_eq!(session.deck_cursor, 7);
+    assert_eq!(
+        session.feed_scroll, 0,
+        "feed rows now live in TASKS/ACTIONS"
+    );
     assert_eq!(session.task_scroll, 3, "DAG must not move");
     assert!(
         !session.feed_auto_tail,
-        "manually scrolling the feed unpins live auto-tail"
+        "manually scrolling OUTPUT unpins live auto-tail"
     );
     assert!(
         !session.paused,
@@ -215,10 +224,11 @@ fn pane_focus_routes_jk_to_focused_scroll_offset() {
 }
 
 #[test]
-fn pause_toggle_preserves_pinned_feed_scroll() {
+fn pause_toggle_preserves_pinned_output_cursor() {
     use kuzushi_tui::ActivitySession;
     let mut app = ShellApp::new(V2Config::default(), None);
     app.handle_command(ShellCommand::Activity);
+    app.findings = sample_findings(10);
     let session: &mut ActivitySession = app.activity.as_mut().unwrap();
     for i in 0..40 {
         session.apply_step(
@@ -230,31 +240,38 @@ fn pause_toggle_preserves_pinned_feed_scroll() {
     session.pane_focus = kuzushi_tui::PaneFocus::Right;
     let _ = session;
 
-    // Operator scrolls up by 5 — pins position, unpins auto-tail.
+    // Operator scrolls OUTPUT by 5 — moves the artifact cursor and unpins
+    // auto-tail. The live event feed itself now lives under TASKS/ACTIONS.
     app.scroll_down(5);
     let session = app.activity.as_ref().unwrap();
-    assert_eq!(session.feed_scroll, 5);
+    assert_eq!(session.deck_cursor, 5);
+    assert_eq!(session.feed_scroll, 0);
     assert!(!session.feed_auto_tail);
 
-    // Toggle pause on, then off — feed_scroll and feed_auto_tail must be
+    // Toggle pause on, then off — output cursor and feed_auto_tail must be
     // preserved (R4.D contract).
     let session = app.activity.as_mut().unwrap();
     session.toggle_paused();
     session.toggle_paused();
     assert_eq!(
-        session.feed_scroll, 5,
-        "pause toggle must not reset pinned position"
+        session.deck_cursor, 5,
+        "pause toggle must not reset output cursor position"
     );
     assert!(
         !session.feed_auto_tail,
         "pause toggle must not re-engage auto-tail"
     );
 
-    // G (scroll-to-bottom) restores auto-tail.
+    // G on OUTPUT jumps to the bottom of the output view; it does not re-arm
+    // feed auto-tail because the feed is no longer the focused right pane.
     let _ = session;
     app.scroll_to_bottom();
     let session = app.activity.as_ref().unwrap();
-    assert!(session.feed_auto_tail, "G should reset live auto-tail");
+    assert_eq!(session.deck_cursor, 9);
+    assert!(
+        !session.feed_auto_tail,
+        "OUTPUT bottom should not reset live auto-tail"
+    );
 }
 
 #[test]
@@ -302,28 +319,52 @@ fn cancel_hotkey_in_activity_emits_visible_signal() {
     });
     assert!(matches!(app.shell_view, ShellView::Activity));
 
-    // Press 'c' on the Activity view.
+    // Ctrl+C requests abort without leaving the Activity view; a second
+    // Ctrl+C is the explicit exit chord.
     app.handle_key(crossterm::event::KeyEvent::new(
         crossterm::event::KeyCode::Char('c'),
-        crossterm::event::KeyModifiers::empty(),
+        crossterm::event::KeyModifiers::CONTROL,
     ));
 
     // The hotkey is wired iff one of the cancel paths logs:
-    //   - tool path: "abort requested" (request_tool_abort)
+    //   - tool path: "cancel requested" / "abort requested"
     //   - scan path: "abort requested" (request_scan_abort)
     //   - no-op fallback: "no running tool or scan to cancel"
     let log_has_signal = app.log.iter().any(|line| {
-        line.body.contains("abort requested") || line.body.contains("no running tool or scan")
+        line.body.contains("cancel requested")
+            || line.body.contains("abort requested")
+            || line.body.contains("no running tool or scan")
     });
     assert!(
         log_has_signal,
-        "c hotkey should produce a visible signal in the transcript; \
+        "Ctrl+C should produce a visible signal in the transcript; \
          got log: {:?}",
         app.log
             .iter()
             .map(|l| format!("{}: {}", l.prefix, l.body))
             .collect::<Vec<_>>()
     );
+    assert!(matches!(app.shell_view, ShellView::Activity));
+    assert!(!app.should_quit);
+}
+
+fn sample_findings(count: usize) -> Vec<Finding> {
+    (0..count)
+        .map(|index| Finding {
+            id: None,
+            scan_id: None,
+            fingerprint: format!("fp-{index}"),
+            rule_id: "test/rule".to_string(),
+            title: format!("finding {index}"),
+            severity: Severity::High,
+            file_path: "src/x.rs".to_string(),
+            start_line: (index + 1) as u32,
+            end_line: None,
+            message: String::new(),
+            tool: "test".to_string(),
+            ..Finding::default()
+        })
+        .collect()
 }
 
 #[test]
@@ -354,9 +395,9 @@ fn verbose_subsystems_toggle_reveals_hidden_module_events() {
         session.toggle_verbose_subsystems();
     }
 
-    let output = render_plain_app(&app, 120);
+    let output = render_plain_app(&app, 180);
     assert!(
-        output.contains("[pipeline:approval-before-verification]"),
+        output.contains("[pipeline:approval-before-"),
         "verbose toggle should expose hidden module events: {output}"
     );
 }

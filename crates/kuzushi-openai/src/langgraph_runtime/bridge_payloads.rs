@@ -2,9 +2,12 @@ use kuzushi_core::{AgentRuntimeOptions, AgentStructuredOutput, AgentToolPolicy};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub(crate) const LANGGRAPH_BRIDGE_PROTOCOL_VERSION: u32 = 1;
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NextStepBridgeRequest {
+    pub(crate) protocol_version: u32,
     #[serde(rename = "type")]
     pub(crate) envelope_type: &'static str,
     pub(crate) model: String,
@@ -63,6 +66,7 @@ pub(crate) struct NextStepBridgeCall {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct BridgeRequest {
+    pub(crate) protocol_version: u32,
     pub(crate) model: String,
     pub(crate) cwd: String,
     pub(crate) system_prompt: String,

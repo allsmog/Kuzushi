@@ -2,55 +2,52 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 33
 ---
- KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › modules · mode:shell · target:none · ctx:not built · model:unconfigured
 
-MODULES · 41 modules
+MODULES · 38 modules
 
-▸ NEXT Run sast — Full SAST pipeline: context, scanners, AI triage, verification, patch, and report
+> NEXT Run sast — Full SAST pipeline: context, scanners, AI triage, verification, patch, and report
 
--- OFFENSE find vulnerabilities by scanning code, dependencies, and runtime surface ------------------------------------
-▌ agentic-sast            LLM-driven detectors that reason about data flow and intent rather than pattern-match.
+-- HUNT scan code, dependencies, and runtime surface for candidates ----------------------------------------------------
+# agentic-sast            LLM-driven detectors that reason about data flow and intent rather than pattern-match.
   cargo-audit             Run cargo-audit against Rust lockfiles and persist advisory findings.
   codeql                  GitHub's taint-query semantic analyzer: deeper than pattern scanners but slower.
   dep-hygiene             Check dependency manifests for stale, vulnerable, or policy-risky packages.
-  full-mode               Whole-codebase chunked LLM pass — token-greedy file clustering, per-chunk model query.
+  govulncheck             Run govulncheck against Go packages and persist reachable vulnerability findings.
   iac-scan                Scan IaC manifests for security misconfigurations.
   license-scan            Scan package manifests for missing or copyleft license declarations.
   offense-review          Model-backed offensive review tools over existing threat-model artifacts.
   sast                    Full SAST pipeline: context, scanners, AI triage, verification, patch, and report.
   secret-scan             Fast deterministic secret scanner over source files.
   semgrep                 Native SAST path using semgrep JSON output.
-  taint-iris              LLM-driven taint analysis selecting relevant CWEs then tracing source to sink.
   taint-iris-next         Bounded IRIS-style taint analysis with deterministic evidence extraction and agent review.
   variant                 Lift exploit patterns from confirmed findings and hunt sibling variants.
+  wasm-plugin             Run a capability-scoped Wasm analyzer against the indexed source snapshot.
 
--- INTEL build context, recon, and threat model the operator reads first -----------------------------------------------
+-- MAP build context, recon, inventory, and threat model first ---------------------------------------------------------
   bounty                  Bug-bounty intake: import Burp Suite XML and HAR captures into the findings ledger as...
   codeql-db               Create a CodeQL database (.kuzushi/codeql-db/) for downstream taint and security queries.
   context                 Build and persist repository context snapshots for scanner and shell use.
   cpg                     Build a Joern Code Property Graph (.kuzushi/cpg.bin) for downstream taint analyses.
+  engagement              Seed target-scoped engagement planning artifacts.
   entry-points            Deterministic extractor that normalizes attack-surface routes from the context snapshot...
   ndiff                   Fetch CVE fix context, extract fix patterns, and hunt n-day variants.
-  randori                 PASTA and randori threat-model generation.
+  randori                 Threat-model generation using PASTA stage framing and adversarial scenario review.
+  recon                   Network and web reconnaissance tools.
   threat-intel            Per-target detector catalog seeded from a project's CVE history.
-  threat-leads            Build threat-to-code lead cards from threat-model, X-Ray, and bounded source evidence.
   threat-model            Build and read threat-model artifacts and methodology overlays.
   workspace               Report target and state paths.
-  x-ray                   Pashov X-Ray repository analysis and report artifacts.
+  x-ray                   Repository architecture review that maps entry points, invariants, attack surface, and risk...
 
--- GOVERNANCE configuration, allowlists, and audit trails --------------------------------------------------------------
+-- OPERATE configure providers, catalogs, policy, and audit trails -----------------------------------------------------
   catalog                 List native modules and tools.
   config                  Inspect effective configuration.
   module-recommender      Recommend next Kuzushi module tools from local repository, attack-surface, threat-model...
   router                  Per-role model routing. Set MODEL_<ROLE> via `setg` to override models.toml.
   sbom-scan               Extract a deterministic dependency inventory from package manifests.
-  smoke                   Diagnostic flows that exercise the bridge end-to-end without paying for a real scan.
 
--- DEFENSE triage, verify, and patch emitted findings ------------------------------------------------------------------
+-- CONFIRM/FIX triage, verify, patch, and report findings --------------------------------------------------------------
   android-apk             Unpack, decompile, and analyze Android APKs so Kuzushi's existing Java/Kotlin SAST engines...
-  classifier-gate         Cheap LLM classifier with adaptive p80 quantile gate. Score one finding to decide whether...
-  deep-audit              Tool-augmented LLM auditor — uses code-nav primitives to verify a finding's triggerability.
-  exploit-chain           LLM-driven analyzer that connects vulnerability primitives into likely exploit paths and...
   findings                Persist and inspect findings in SQLite.
   patch                   Generate and validate a patch for a finding.
   report                  Build artifact-backed Kuzushi run reports without executing scanners or runtimes.

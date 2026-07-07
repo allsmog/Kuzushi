@@ -3,7 +3,7 @@ import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "n
 import { homedir } from "node:os";
 import path from "node:path";
 import { ChatAnthropic } from "@langchain/anthropic";
-import { AIMessage, ToolMessage } from "@langchain/core/messages";
+import { AIMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
 import { ChatOpenAI } from "@langchain/openai";
 import { oauthModelForRequest } from "./oauth-models.mjs";
 
@@ -185,6 +185,29 @@ export function appendStructuredOutputContract(systemPrompt, structuredOutput) {
   const schema = JSON.stringify(contract.schema ?? {}, null, 2);
   const strict = contract.strict ? "strict " : "";
   return `${systemPrompt ?? ""}\n\nStructured output contract:\nReturn only ${strict}JSON for \`${name}\`. Do not include markdown fences, prose, or trailing commentary.\nRequired JSON schema:\n${schema}`;
+}
+
+export function systemMessageForRequest(request, systemPrompt) {
+  if (providerForRequest(request) !== "anthropic") return new SystemMessage(systemPrompt ?? "");
+  const text = String(systemPrompt ?? "");
+  if (!text.trim()) return new SystemMessage("");
+  return new SystemMessage({ content: [cacheableTextBlock(text)] });
+}
+
+export function cacheableTextBlock(text) {
+  return {
+    type: "text",
+    text,
+    cache_control: { type: "ephemeral" },
+  };
+}
+
+function providerForRequest(request) {
+  try {
+    return parseModelSpec(request.model)[0];
+  } catch {
+    return "";
+  }
 }
 
 export function maybeParseJson(text) {

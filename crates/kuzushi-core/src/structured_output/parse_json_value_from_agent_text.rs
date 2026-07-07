@@ -1,42 +1,132 @@
 use super::*;
 
 pub(crate) fn parse_json_value_from_agent_text(text: &str) -> Result<Value> {
+    Ok(parse_json_value_from_agent_text_with_strategy(text)?.value)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JsonExtractionStrategy {
+    Direct,
+    LastFencedBlock,
+    BalancedObject,
+    BalancedArray,
+}
+
+impl JsonExtractionStrategy {
+    #[cfg(test)]
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Direct => "direct",
+            Self::LastFencedBlock => "last_fenced_block",
+            Self::BalancedObject => "balanced_object",
+            Self::BalancedArray => "balanced_array",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct ParsedAgentJson {
+    pub(crate) value: Value,
+    pub(crate) strategy: JsonExtractionStrategy,
+}
+
+pub(crate) fn parse_json_value_from_agent_text_with_strategy(
+    text: &str,
+) -> Result<ParsedAgentJson> {
+    let trimmed = non_empty_agent_text(text)?;
+    let candidate = strip_markdown_fence(trimmed);
+    parse_direct_agent_json(candidate)
+        .or_else(|| parse_last_fenced_agent_json(text))
+        .map(Ok)
+        .unwrap_or_else(|| parse_balanced_agent_json(candidate))
+}
+
+fn non_empty_agent_text(text: &str) -> Result<&str> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         anyhow::bail!("model response was empty");
     }
-    let candidate = strip_markdown_fence(trimmed);
-    if let Ok(value) = serde_json::from_str::<Value>(candidate) {
-        return Ok(value);
-    }
+    Ok(trimmed)
+}
 
-    // Models often emit a paragraph of analysis followed by a fenced
-    // ```json … ``` block at the end. The leading-fence-strip above
-    // catches the case where the WHOLE response is fenced; this catches
-    // the case where the verdict is embedded in prose. Try the LAST
-    // fenced block first because that's where the verdict tends to live.
-    if let Some(value) = parse_last_fenced_json(text) {
-        return Ok(value);
-    }
+fn parse_direct_agent_json(candidate: &str) -> Option<ParsedAgentJson> {
+    Some(ParsedAgentJson {
+        value: serde_json::from_str::<Value>(candidate).ok()?,
+        strategy: JsonExtractionStrategy::Direct,
+    })
+}
 
-    // Balanced-brace fallback, walked from the LAST `{` backward — the
-    // verdict tends to be at the end, and the FIRST `{` is often inside
-    // a C code snippet quoted earlier in the analysis.
+fn parse_last_fenced_agent_json(text: &str) -> Option<ParsedAgentJson> {
+    Some(ParsedAgentJson {
+        value: parse_last_fenced_json(text)?,
+        strategy: JsonExtractionStrategy::LastFencedBlock,
+    })
+}
+
+fn parse_balanced_agent_json(candidate: &str) -> Result<ParsedAgentJson> {
     let mut saw_json_like_text = false;
-    let mut slices_obj = balanced_json_slices(candidate, '{', '}');
-    slices_obj.reverse();
-    let mut slices_arr = balanced_json_slices(candidate, '[', ']');
-    slices_arr.reverse();
-    for slice in slices_obj.into_iter().chain(slices_arr) {
+    for candidate in balanced_json_candidates(candidate) {
         saw_json_like_text = true;
-        if let Ok(value) = serde_json::from_str::<Value>(slice) {
-            return Ok(value);
+        if let Ok(value) = serde_json::from_str::<Value>(candidate.slice) {
+            return Ok(ParsedAgentJson {
+                value,
+                strategy: candidate.strategy,
+            });
         }
     }
+    Err(balanced_json_parse_error(saw_json_like_text))
+}
+
+struct BalancedJsonCandidate<'a> {
+    strategy: JsonExtractionStrategy,
+    slice: &'a str,
+}
+
+fn balanced_json_candidates(text: &str) -> Vec<BalancedJsonCandidate<'_>> {
+    let mut candidates = Vec::new();
+    append_reversed_balanced_candidates(
+        &mut candidates,
+        text,
+        '{',
+        '}',
+        JsonExtractionStrategy::BalancedObject,
+    );
+    append_reversed_balanced_candidates(
+        &mut candidates,
+        text,
+        '[',
+        ']',
+        JsonExtractionStrategy::BalancedArray,
+    );
+    candidates
+}
+
+fn append_reversed_balanced_candidates<'a>(
+    candidates: &mut Vec<BalancedJsonCandidate<'a>>,
+    text: &'a str,
+    open: char,
+    close: char,
+    strategy: JsonExtractionStrategy,
+) {
+    let mut slices = balanced_json_slices(text, open, close);
+    slices.reverse();
+    candidates.extend(
+        slices
+            .into_iter()
+            .map(|slice| BalancedJsonCandidate { strategy, slice }),
+    );
+}
+
+fn balanced_json_parse_error(saw_json_like_text: bool) -> anyhow::Error {
     if saw_json_like_text {
-        anyhow::bail!("model response contained JSON-looking text, but it was invalid");
+        anyhow::anyhow!(
+            "model response contained JSON-looking text, but it was invalid; strategies attempted: direct,last_fenced_block,balanced_object,balanced_array"
+        )
+    } else {
+        anyhow::anyhow!(
+            "model response did not contain a JSON object or array; strategies attempted: direct,last_fenced_block,balanced_object,balanced_array"
+        )
     }
-    anyhow::bail!("model response did not contain a JSON object or array")
 }
 
 /// Locate every ```json … ``` (or bare ``` … ```) block in `text`, parse

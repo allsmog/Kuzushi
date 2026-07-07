@@ -1,6 +1,6 @@
 //! Geometry for the 3D attack-surface terrain — the gallery's only 3D page.
-//! Pure dummy data; terminal drawing lives in `scene3d::render`. (The other
-//! gallery pages are 2D box-drawing diagrams rendered as styled lines, not 3D.)
+//! Terminal drawing lives in `scene3d::render`. The other gallery pages are 2D
+//! box-drawing diagrams rendered as styled lines, not 3D.
 
 mod terrain;
 

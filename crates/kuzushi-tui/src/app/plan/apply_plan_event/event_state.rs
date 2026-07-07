@@ -32,9 +32,7 @@ impl ShellApp {
                         plan.changes.len()
                     ),
                 );
-                self.plan_cursor = 0;
-                self.plan_skipped.clear();
-                self.pending_plan = Some(plan);
+                self.engagement.set_pending_plan(plan);
                 self.set_completed_activity("plan", "proposal ready for review");
             }
             PlanEvent::Failed { error } => {
@@ -46,8 +44,6 @@ impl ShellApp {
 
     pub fn set_pending_plan(&mut self, plan: PlanProposal) {
         self.planner_running = false;
-        self.plan_cursor = 0;
-        self.plan_skipped.clear();
-        self.pending_plan = Some(plan);
+        self.engagement.set_pending_plan(plan);
     }
 }

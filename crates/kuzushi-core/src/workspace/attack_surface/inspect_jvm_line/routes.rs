@@ -19,7 +19,14 @@ pub(crate) fn inspect_jvm_routes(
     };
     for (index, line) in text.lines().enumerate() {
         let line_number = u32::try_from(index + 1).unwrap_or(u32::MAX);
-        inspect_jvm_route_line(source_file, framework, line_number, line, &mut state, builder);
+        inspect_jvm_route_line(
+            source_file,
+            framework,
+            line_number,
+            line,
+            &mut state,
+            builder,
+        );
     }
 }
 
@@ -36,7 +43,15 @@ fn inspect_jvm_route_line(
         return;
     }
     let lower = detail.to_ascii_lowercase();
-    dsl::inspect_dsl_route_line(source_file, framework, line_number, &detail, &lower, state, builder);
+    dsl::inspect_dsl_route_line(
+        source_file,
+        framework,
+        line_number,
+        &detail,
+        &lower,
+        state,
+        builder,
+    );
     annotation::inspect_annotation_route_line(
         source_file,
         framework,

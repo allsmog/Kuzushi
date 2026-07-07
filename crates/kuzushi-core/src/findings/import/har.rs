@@ -29,19 +29,24 @@ pub fn import_har(workspace: &WorkspaceTarget, path: &Path) -> Result<HarImportS
     let entries = document
         .pointer("/log/entries")
         .and_then(Value::as_array)
-        .ok_or_else(|| {
-            anyhow::anyhow!("HAR file {} missing log.entries array", path.display())
-        })?;
+        .ok_or_else(|| anyhow::anyhow!("HAR file {} missing log.entries array", path.display()))?;
 
     let scope = load_program_scope(workspace).context("Could not load scope.toml")?;
     let store = FindingStore::open(workspace.findings_db_path())?;
     let run_id = format!("har-{}", Uuid::new_v4());
-    store.insert_scan_run(&run_id, workspace.root(), "completed")?;
+    store.record_run_started(&run_id, workspace.root(), "completed")?;
 
     let mut imported = 0usize;
     let mut skipped = 0usize;
     for entry in entries {
-        persist_har_entry(&store, &run_id, scope.as_ref(), entry, &mut imported, &mut skipped)?;
+        persist_har_entry(
+            &store,
+            &run_id,
+            scope.as_ref(),
+            entry,
+            &mut imported,
+            &mut skipped,
+        )?;
     }
 
     Ok(HarImportSummary {

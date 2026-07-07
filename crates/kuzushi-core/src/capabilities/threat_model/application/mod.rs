@@ -12,6 +12,7 @@ pub(crate) use read_manifest_summary::*;
 pub(crate) use read_methodology::*;
 pub(crate) use read_randori_artifacts::*;
 pub(crate) use read_threat_model::*;
+pub(crate) use source_bundle::*;
 
 mod build_threat_model;
 mod build_summary;
@@ -29,3 +30,4 @@ mod read_manifest_summary;
 mod read_methodology;
 mod read_randori_artifacts;
 mod read_threat_model;
+mod source_bundle;

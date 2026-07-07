@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import process from "node:process";
-import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from "@langchain/core/messages";
+import { AIMessage, HumanMessage, ToolMessage } from "@langchain/core/messages";
 import { END, MessagesAnnotation, START, StateGraph } from "@langchain/langgraph";
 import { mcpToolsForRequest } from "./langgraph-bridge/mcp.mjs";
 import {
@@ -10,11 +10,12 @@ import {
   messageText,
   modelForRequest,
   parseModelSpec,
+  systemMessageForRequest,
   toolMessageForOutput,
   usageFromMessage,
 } from "./langgraph-bridge/model.mjs";
 import { parseOauthLoginArgs, runOauthLogin } from "./langgraph-bridge/oauth-login.mjs";
-import { bridgeToolsForNextStep } from "./langgraph-bridge/schema.mjs";
+import { bridgeToolsForNextStep, validateBridgeRequest } from "./langgraph-bridge/schema.mjs";
 
 async function readStdin() {
   let data = "";
@@ -44,7 +45,7 @@ function queryGraphForRequest(request, tools) {
   );
   const boundModel = tools.length ? model.bindTools(tools) : model;
   return new StateGraph(MessagesAnnotation)
-    .addNode("model", callModelNode(boundModel, system))
+    .addNode("model", callModelNode(boundModel, request, system))
     .addNode("tools", runToolsNode(tools))
     .addEdge(START, "model")
     .addConditionalEdges("model", shouldContinue)
@@ -52,9 +53,9 @@ function queryGraphForRequest(request, tools) {
     .compile();
 }
 
-function callModelNode(model, system) {
+function callModelNode(model, request, system) {
   return async (state) => ({
-    messages: [await model.invoke([new SystemMessage(system), ...state.messages])],
+    messages: [await model.invoke([systemMessageForRequest(request, system), ...state.messages])],
   });
 }
 
@@ -122,7 +123,10 @@ async function handleNextStep(request) {
   const baseModel = modelForRequest(request);
   const model = tools.length ? baseModel.bindTools(tools) : baseModel;
   const system = request.systemPrompt ?? request.system_prompt ?? "";
-  const response = await model.invoke([new SystemMessage(system), ...messagesForNextStep(request)]);
+  const response = await model.invoke([
+    systemMessageForRequest(request, system),
+    ...messagesForNextStep(request),
+  ]);
   return nextStepResultFromResponse(response);
 }
 
@@ -151,7 +155,7 @@ async function handlePing(request) {
   const start = Date.now();
   const model = modelForRequest(request);
   const response = await model.invoke([
-    new SystemMessage("You are an auth ping probe. Reply with ok."),
+    systemMessageForRequest(request, "You are an auth ping probe. Reply with ok."),
     new HumanMessage("ok"),
   ]);
   const usage = usageFromMessage(response);
@@ -184,7 +188,7 @@ async function main() {
     process.exitCode = await runOauthLogin(oauthArgs);
     return;
   }
-  const request = JSON.parse(await readStdin());
+  const request = validateBridgeRequest(JSON.parse(await readStdin()));
   process.stdout.write(JSON.stringify(await dispatch(request)));
 }
 

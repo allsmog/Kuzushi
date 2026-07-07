@@ -45,6 +45,7 @@ fn collect_structural_candidates_inproc(
 /// gets a few representative candidates and the budget spreads
 /// across the codebase.
 const STRUCTURAL_MAX_CANDIDATES_PER_FILE_PER_CWE: usize = 6;
+const STRUCTURAL_SNIPPET_CHAR_LIMIT: usize = 120;
 
 #[derive(Default)]
 pub(super) struct CandidateCollectionState {
@@ -161,12 +162,25 @@ fn build_candidate(
         pattern: query.pattern.clone(),
         file_path: source_file.relative_path.clone(),
         line: line_number,
-        snippet: line.trim().to_string(),
+        snippet: structural_snippet(line),
         language: source_file.language.clone(),
         confidence: candidate_confidence(query),
         catalog_signal: format!("{}: {}", query.role, query.pattern),
         source: "structural".to_string(),
     }
+}
+
+fn structural_snippet(line: &str) -> String {
+    let trimmed = line.trim();
+    if trimmed.chars().count() <= STRUCTURAL_SNIPPET_CHAR_LIMIT {
+        return trimmed.to_string();
+    }
+    let mut snippet = trimmed
+        .chars()
+        .take(STRUCTURAL_SNIPPET_CHAR_LIMIT)
+        .collect::<String>();
+    snippet.push_str("...");
+    snippet
 }
 
 fn candidate_track(query: &TaintIrisNextStructuralQuery) -> String {
@@ -263,5 +277,15 @@ mod tests {
     fn unknown_file_language_is_blocked_for_scoped_queries() {
         let scoped = query_with_languages(&["c", "rust"]);
         assert!(!query_applies_to_language(&scoped, "unknown"));
+    }
+
+    #[test]
+    fn structural_snippet_caps_long_minified_lines() {
+        let line = format!("  eval({})", "a".repeat(500));
+        let snippet = structural_snippet(&line);
+
+        assert!(snippet.len() < line.len());
+        assert!(snippet.ends_with("..."));
+        assert!(snippet.starts_with("eval("));
     }
 }

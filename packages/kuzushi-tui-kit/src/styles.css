@@ -1,0 +1,167 @@
+/*
+ * Kuzushi TUI Kit — design tokens + terminal-grid styling.
+ *
+ * This is the single styling source for the kit. The 8-role color theme,
+ * severity palette, and JetBrains Mono grid mirror the live Rust Ratatui
+ * shell (crates/kuzushi-tui/src/theme/mod.rs) one-to-one, so a design built
+ * with these components reads exactly like the real terminal.
+ *
+ * Class vocabulary (all namespaced `kz-`):
+ *   .kz-frame / .kz-chrome / .kz-term   — terminal window + body
+ *   .kz-row                             — one monospace grid line
+ *   .kz-tone-<role>                     — semantic text color (see :root)
+ *   .kz-badge                           — severity / status chip text
+ */
+
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+:root {
+  /* Surfaces */
+  --kz-term-bg:        #0b0d10;
+  --kz-term-bg-elev:   #0f1115;
+  --kz-chrome-bg:      #15181d;
+
+  /* 8-role text theme */
+  --kz-primary:        #cfd6e0;
+  --kz-muted:          #7d8794;
+  --kz-subtle:         #3d4654;
+  --kz-accent:         #7fb8ff;
+  --kz-label:          #a6cdff;
+  --kz-heading:        #ffffff;
+  --kz-success:        #57c479;
+  --kz-warn:           #e2c14a;
+  --kz-danger:         #e25c5c;
+
+  /* Selection (the j/k cursor highlight) */
+  --kz-sel-fg:         #0b0d10;
+  --kz-sel-bg:         #7fb8ff;
+
+  /* Severity scale */
+  --kz-sev-critical:   #e25c5c;
+  --kz-sev-high:       #ff8b8b;
+  --kz-sev-medium:     #e2c14a;
+  --kz-sev-low:        #8aa6c4;
+  --kz-sev-info:       #8aa6c4;
+  --kz-sev-unknown:    #7d8794;
+
+  /* Grid metrics */
+  --kz-font: 'JetBrains Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  --kz-font-size: 12.5px;
+  --kz-line-height: 1.28;
+}
+
+[data-kz-theme="high-contrast"],
+.kz-theme--high-contrast {
+  --kz-primary:        #ffffff;
+  --kz-muted:          #cfd6e0;
+  --kz-subtle:         #7d8794;
+  --kz-accent:         #ffffff;
+  --kz-label:          #ffffff;
+  --kz-heading:        #ffffff;
+  --kz-sev-critical:   #e25c5c;
+  --kz-sev-high:       #e25c5c;
+  --kz-sev-medium:     #e2c14a;
+  --kz-sev-low:        #ffffff;
+  --kz-sev-info:       #ffffff;
+  --kz-sev-unknown:    #cfd6e0;
+}
+
+/* ── Terminal window ─────────────────────────────────────────────── */
+
+.kz-frame {
+  display: inline-flex;
+  flex-direction: column;
+  background: var(--kz-term-bg);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 18px 60px rgba(0, 0, 0, 0.18),
+    0 0 0 1px rgba(0, 0, 0, 0.5);
+  max-width: 100%;
+}
+
+.kz-frame--fluid { display: flex; width: 100%; }
+
+.kz-chrome {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  background: var(--kz-chrome-bg);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  font-family: var(--kz-font);
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.5);
+  flex: 0 0 auto;
+}
+
+.kz-dot { width: 11px; height: 11px; border-radius: 50%; }
+.kz-dot--r { background: #ff5f57; }
+.kz-dot--y { background: #febc2e; }
+.kz-dot--g { background: #28c840; }
+
+.kz-chrome__title { margin-left: auto; margin-right: auto; transform: translateX(-22px); }
+
+.kz-term {
+  font-family: var(--kz-font);
+  font-feature-settings: "calt" 0, "liga" 0;
+  font-variant-ligatures: none;
+  background: var(--kz-term-bg);
+  color: var(--kz-primary);
+  padding: 12px 14px;
+  line-height: var(--kz-line-height);
+  white-space: pre;
+  overflow: hidden;
+  font-size: var(--kz-font-size);
+  box-sizing: border-box;
+  position: relative;
+}
+
+/* ── Grid line ───────────────────────────────────────────────────── */
+
+.kz-row { display: block; }
+.kz-row--selected {
+  color: var(--kz-sel-fg);
+  background: var(--kz-sel-bg);
+  font-weight: 700;
+}
+
+/* ── Semantic text tones ─────────────────────────────────────────── */
+
+.kz-tone-primary   { color: var(--kz-primary); }
+.kz-tone-muted     { color: var(--kz-muted); }
+.kz-tone-subtle    { color: var(--kz-subtle); }
+.kz-tone-accent    { color: var(--kz-accent); }
+.kz-tone-label     { color: var(--kz-label);   font-weight: 700; }
+.kz-tone-heading   { color: var(--kz-heading); font-weight: 700; }
+.kz-tone-success   { color: var(--kz-success); }
+.kz-tone-warn      { color: var(--kz-warn); }
+.kz-tone-danger    { color: var(--kz-danger); }
+.kz-tone-selection { color: var(--kz-sel-fg); background: var(--kz-sel-bg); font-weight: 700; }
+
+.kz-tone-critical { color: var(--kz-sev-critical); font-weight: 700; }
+.kz-tone-high     { color: var(--kz-sev-high); }
+.kz-tone-medium   { color: var(--kz-sev-medium); }
+.kz-tone-low      { color: var(--kz-sev-low); }
+.kz-tone-info     { color: var(--kz-sev-info); }
+.kz-tone-unknown  { color: var(--kz-sev-unknown); }
+
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-primary,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-accent,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-label,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-heading,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-success,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-warn,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-danger,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-critical,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-high,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-medium,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-low,
+:is([data-kz-theme="high-contrast"], .kz-theme--high-contrast) .kz-tone-info {
+  font-weight: 700;
+}
+
+/* ── Severity / status chip ──────────────────────────────────────── */
+
+.kz-badge { font-weight: 700; }

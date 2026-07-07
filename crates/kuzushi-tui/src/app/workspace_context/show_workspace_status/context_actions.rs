@@ -22,15 +22,7 @@ impl ShellApp {
         };
         self.target = Some(workspace.root().to_path_buf());
 
-        let mut input = serde_json::Map::new();
-        if let Some(scope) = scope {
-            input.insert("scope".to_string(), serde_json::json!(scope));
-        }
-        let input = match self.registry.prepare_tool_input(
-            "context:build",
-            serde_json::Value::Object(input),
-            Some(&self.option_store),
-        ) {
+        let input = match self.prepared_context_build_input(scope, &workspace) {
             Ok(input) => input,
             Err(error) => {
                 self.log("error", error.to_string());
@@ -46,6 +38,25 @@ impl ShellApp {
             "indexing repository context",
             None,
         );
+    }
+
+    fn prepared_context_build_input(
+        &self,
+        scope: Option<&str>,
+        workspace: &WorkspaceTarget,
+    ) -> Result<serde_json::Value> {
+        let ctx = ToolExecutionContext {
+            config: &self.config,
+            workspace: Some(workspace),
+            findings_store: None,
+            trace: None,
+        };
+        self.registry.prepare_tool_input_for_dispatch(
+            "context:build",
+            context_build_input(scope),
+            &ctx,
+            Some(&self.option_store),
+        )
     }
 
     pub(crate) fn regen_context_slice(&mut self, slice: &str) {
@@ -70,4 +81,12 @@ impl ShellApp {
         self.context_view = load_context_snapshot_view(snapshot_path)?;
         Ok(())
     }
+}
+
+fn context_build_input(scope: Option<&str>) -> serde_json::Value {
+    let mut input = serde_json::Map::new();
+    if let Some(scope) = scope {
+        input.insert("scope".to_string(), serde_json::json!(scope));
+    }
+    serde_json::Value::Object(input)
 }

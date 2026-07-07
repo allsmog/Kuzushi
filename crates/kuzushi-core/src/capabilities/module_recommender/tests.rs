@@ -20,6 +20,7 @@ fn missing_scanner_binary_demotes_the_recommendation_and_names_the_blocker() {
         tools_missing_binaries,
         available_tools: tool_set(&["secret-scan:scan", "semgrep:scan"]),
         signals: rich_signals(),
+        components: Vec::new(),
     };
 
     let report = build_recommendation_report(request);
@@ -68,6 +69,7 @@ fn recommends_installed_tools_from_combined_signals() {
             "verify:finding",
         ]),
         signals: rich_signals(),
+        components: Vec::new(),
     };
 
     let report = build_recommendation_report(request);
@@ -123,6 +125,7 @@ fn omits_deferred_ai_tools_from_default_recommendations() {
             "threat-model:build",
         ]),
         signals,
+        components: Vec::new(),
     };
 
     let report = build_recommendation_report(request);
@@ -148,6 +151,7 @@ fn omits_recommendations_for_missing_capabilities() {
         tools_missing_binaries: BTreeSet::new(),
         available_tools: tool_set(&["context:build", "semgrep:scan"]),
         signals: rich_signals(),
+        components: Vec::new(),
     };
 
     let report = build_recommendation_report(request);
@@ -178,6 +182,7 @@ fn codeql_recommendation_mentions_threat_model_related_cwes() {
         tools_missing_binaries: BTreeSet::new(),
         available_tools: tool_set(&["codeql:scan"]),
         signals,
+        components: Vec::new(),
     };
 
     let report = build_recommendation_report(request);
@@ -203,6 +208,7 @@ fn recommends_cargo_audit_for_rust_dependency_signals() {
         tools_missing_binaries: BTreeSet::new(),
         available_tools: tool_set(&["cargo-audit:scan"]),
         signals,
+        components: Vec::new(),
     };
 
     let report = build_recommendation_report(request);
@@ -275,11 +281,12 @@ fn executor_reads_workspace_inventory_and_visible_capabilities() {
     .unwrap();
 
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let trace = crate::run_artifacts::TraceHandle::jsonl(workspace.root(), "run-recommend");
     let ctx = ToolExecutionContext {
         config: &V2Config::default(),
         workspace: Some(&workspace),
         findings_store: None,
-        trace: None,
+        trace: Some(&trace),
     };
 
     let output = execute_module_recommender_tool(
@@ -308,6 +315,26 @@ fn executor_reads_workspace_inventory_and_visible_capabilities() {
     assert!(tools.contains(&"secret-scan:scan".to_string()));
     assert!(tools.contains(&"dep-hygiene:check".to_string()));
     assert!(tools.contains(&"iac-scan:scan".to_string()));
+    let queue = crate::strategy::load_strategy_queue(&workspace).unwrap();
+    assert!(queue.iter().any(|proposal| {
+        proposal.id == "review-secret-scan-scan"
+            && proposal.status == crate::strategy::StrategyProposalStatus::Proposed
+            && proposal.phase == crate::strategy::StrategyPhase::Review
+            && proposal.tool.as_deref() == Some("secret-scan:scan")
+    }));
+    let strategy_doc: Value = serde_json::from_str(
+        &fs::read_to_string(crate::run_artifacts::run_artifact_path(
+            workspace.root(),
+            "run-recommend",
+            "strategy.json",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        strategy_doc["strategyProposals"][0]["phase"],
+        json!("review")
+    );
     assert_eq!(report["signals"]["routes"], json!(1));
     assert_eq!(report["signals"]["frameworks"], json!(["Express"]));
     assert_eq!(report["signals"]["attackSurfaceMaxRiskScore"], json!(65));
@@ -324,6 +351,89 @@ fn executor_reads_workspace_inventory_and_visible_capabilities() {
         json!("deterministic-workspace-analysis")
     );
     assert_eq!(report["signals"]["findingsSource"], json!("unavailable"));
+}
+
+#[test]
+fn executor_applies_workspace_strategy_corrections_to_rerun_proposals() {
+    let temp = tempdir().unwrap();
+    let src = temp.path().join("src");
+    fs::create_dir_all(&src).unwrap();
+    fs::write(
+        temp.path().join("package.json"),
+        r#"{"dependencies":{"express":"latest"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        src.join("app.ts"),
+        "import express from 'express';\nconst app = express();\napp.get('/users', (_req, res) => res.send('ok'));\n",
+    )
+    .unwrap();
+
+    let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+    let correction = crate::strategy::StrategyCorrection::new(
+        crate::strategy::StrategyPhase::Review,
+        Some("review-secret-scan-scan".to_string()),
+        "run secret-scan:scan",
+        "run secret-scan:scan with authz focus",
+        crate::strategy::StrategyCorrectionScope::Workspace,
+        None,
+        "tighten authz paths",
+        "operator",
+    );
+    crate::strategy::append_strategy_correction(&workspace, &correction).unwrap();
+    let trace = crate::run_artifacts::TraceHandle::jsonl(workspace.root(), "run-corrected");
+    let ctx = ToolExecutionContext {
+        config: &V2Config::default(),
+        workspace: Some(&workspace),
+        findings_store: None,
+        trace: Some(&trace),
+    };
+
+    execute_module_recommender_tool(
+        json!({ "maxRecommendations": 10 }),
+        &ctx,
+        None,
+        vec!["secret-scan:scan".to_string()],
+    )
+    .unwrap();
+
+    let queue = crate::strategy::load_strategy_queue(&workspace).unwrap();
+    let proposal = queue
+        .iter()
+        .find(|proposal| proposal.id == "review-secret-scan-scan")
+        .unwrap();
+    assert_eq!(
+        proposal.corrected_strategy.as_deref(),
+        Some("run secret-scan:scan with authz focus")
+    );
+    assert_eq!(
+        proposal.applied_corrections[0].reason,
+        "tighten authz paths"
+    );
+
+    let strategy_doc: Value = serde_json::from_str(
+        &fs::read_to_string(crate::run_artifacts::run_artifact_path(
+            workspace.root(),
+            "run-corrected",
+            "strategy.json",
+        ))
+        .unwrap(),
+    )
+    .unwrap();
+    let artifact_proposal = strategy_doc["strategyProposals"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|proposal| proposal["id"] == json!("review-secret-scan-scan"))
+        .unwrap();
+    assert_eq!(
+        artifact_proposal["correctedStrategy"],
+        json!("run secret-scan:scan with authz focus")
+    );
+    assert_eq!(
+        artifact_proposal["appliedCorrections"][0]["reason"],
+        json!("tighten authz paths")
+    );
 }
 
 #[test]
@@ -600,6 +710,8 @@ fn rich_signals() -> RepositorySignals {
         source_files: 12,
         languages: vec!["TypeScript".to_string()],
         frameworks: vec!["Express".to_string()],
+        product_boundaries: 2,
+        product_boundary_labels: vec!["api".to_string(), "web".to_string()],
         codeql_languages: vec!["typescript".to_string()],
         dependency_manifests: 2,
         config_files: 1,

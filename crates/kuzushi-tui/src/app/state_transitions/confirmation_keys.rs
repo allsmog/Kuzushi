@@ -7,6 +7,12 @@ pub(super) struct ConfirmKeyAction {
 }
 
 pub(super) fn confirm_key_action(code: KeyCode) -> Option<ConfirmKeyAction> {
+    if code == KeyCode::Esc {
+        return Some(ConfirmKeyAction {
+            outcome: false,
+            remember: false,
+        });
+    }
     let KeyCode::Char(ch) = code else {
         return None;
     };
@@ -45,3 +51,7 @@ const CONFIRM_KEY_ACTIONS: &[(char, ConfirmKeyAction)] = &[
         },
     ),
 ];
+
+pub(super) fn confirm_key_is_consumed_without_action(code: KeyCode) -> bool {
+    code == KeyCode::Enter
+}

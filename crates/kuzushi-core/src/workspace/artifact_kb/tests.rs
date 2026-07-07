@@ -24,14 +24,14 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            crate::run_artifacts::run_dir(tmp.path(), "run-1").join("summary.json"),
+            crate::run_artifacts::run_dir(tmp.path(), "run-1").join("run.json"),
             r#"{"ok":true,"data":{"carliniThreatHunt":{"count":1}}}"#,
         )
         .unwrap();
         let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
         let findings = FindingStore::open(workspace.findings_db_path()).unwrap();
         findings
-            .insert_scan_run("scan-1", workspace.root(), "completed")
+            .record_run_started("scan-1", workspace.root(), "completed")
             .unwrap();
         findings
             .insert_finding(
@@ -48,7 +48,7 @@ mod tests {
             )
             .unwrap();
         findings
-            .complete_scan_run("scan-1", "completed", 1)
+            .record_run_finished("scan-1", "completed", 1)
             .unwrap();
 
         let report = index_workspace_artifacts(&workspace).unwrap();
@@ -67,7 +67,7 @@ mod tests {
                 && result
                     .record
                     .source_path
-                    .contains("findings.sqlite3#finding")
+                    .contains("index.sqlite3#finding")
                 && result.record.refs == ["src/app.ts:42"]
         }));
         assert!(search
@@ -90,9 +90,7 @@ mod tests {
 
         let store = ArtifactKnowledgeStore::open(&workspace).unwrap();
         let source_path = relative_workspace_path(workspace.root(), &source);
-        let records = store
-            .records_for_source(&source_path)
-            .unwrap();
+        let records = store.records_for_source(&source_path).unwrap();
         assert_eq!(records.len(), 1);
         assert!(records[0].body.contains("beta service"));
         assert_eq!(store.search("alpha", 10).unwrap().len(), 0);

@@ -6,7 +6,8 @@ use kuzushi_core::run_artifacts::{
     record_tool_run_failed, record_tool_run_started_with_reproducibility, ToolRunRecord,
 };
 use kuzushi_core::{
-    config_hash, load_config_for_target, new_run_id, FindingStore, ModuleRegistry, WorkspaceTarget,
+    config_hash, load_config_for_target, new_run_id, FindingStore, ModuleRegistry,
+    ToolExecutionContext, WorkspaceTarget,
 };
 use kuzushi_openai::LangGraphRuntime;
 use std::path::{Path, PathBuf};
@@ -47,12 +48,35 @@ pub(crate) fn prepare_scan_command(
     ci: bool,
 ) -> Result<PreparedScanCommand> {
     let bootstrap = ScanCommandBootstrap::new(target, mode, tasks, triage)?;
+    prepare_scan_command_from_bootstrap(bootstrap, budget, since, include_worktree, json, ci, true)
+}
+
+pub(crate) fn prepare_scan_command_with_requested_input(
+    target: &PathBuf,
+    requested_input: serde_json::Value,
+    json: bool,
+    ci: bool,
+) -> Result<PreparedScanCommand> {
+    let bootstrap = ScanCommandBootstrap::from_input(target, requested_input)?;
+    prepare_scan_command_from_bootstrap(bootstrap, None, None, false, json, ci, false)
+}
+
+fn prepare_scan_command_from_bootstrap(
+    bootstrap: ScanCommandBootstrap,
+    budget: Option<&str>,
+    since: Option<&str>,
+    include_worktree: bool,
+    json: bool,
+    ci: bool,
+    use_stored_options: bool,
+) -> Result<PreparedScanCommand> {
     let config = bootstrap.load_config_or_record_failure()?;
     let setup = bootstrap.with_config(config);
     let store = setup.finding_store()?;
+    setup.index_workspace_snapshot()?;
     setup.apply_since_scope(since, include_worktree, json, ci)?;
     setup.apply_budget_caps(budget, json, ci)?;
-    let input = setup.prepared_input()?;
+    let input = setup.prepared_input(use_stored_options, &store)?;
     let runtime = setup.runtime(&input)?;
     Ok(setup.into_prepared(store, input, runtime))
 }
@@ -64,9 +88,12 @@ impl ScanCommandBootstrap {
         tasks: &[String],
         triage: Option<bool>,
     ) -> Result<Self> {
+        Self::from_input(target, scan_tool_input(mode, tasks, triage))
+    }
+
+    fn from_input(target: &PathBuf, requested_input: serde_json::Value) -> Result<Self> {
         let registry = ModuleRegistry::with_v2_builtins();
         let run_id = new_run_id("scan");
-        let requested_input = scan_tool_input(mode, tasks, triage);
         let workspace = match WorkspaceTarget::new(target) {
             Ok(workspace) => workspace,
             Err(error) => {
@@ -122,6 +149,12 @@ impl ScanCommandSetup {
             .inspect_err(|error| self.record_failure(&self.bootstrap.requested_input, error))
     }
 
+    fn index_workspace_snapshot(&self) -> Result<()> {
+        kuzushi_core::incremental_index::index_workspace_snapshot(&self.bootstrap.workspace)
+            .map(|_| ())
+            .inspect_err(|error| self.record_failure(&self.bootstrap.requested_input, error))
+    }
+
     fn apply_since_scope(
         &self,
         since: Option<&str>,
@@ -144,16 +177,35 @@ impl ScanCommandSetup {
         .inspect_err(|error| self.record_failure(&self.bootstrap.requested_input, error))
     }
 
-    fn prepared_input(&self) -> Result<serde_json::Value> {
-        let option_store = scan_option_store(&self.bootstrap.workspace)
-            .inspect_err(|error| self.record_failure(&self.bootstrap.requested_input, error))?;
+    fn prepared_input(
+        &self,
+        use_stored_options: bool,
+        store: &FindingStore,
+    ) -> Result<serde_json::Value> {
+        let option_store = if use_stored_options {
+            Some(
+                scan_option_store(&self.bootstrap.workspace).inspect_err(|error| {
+                    self.record_failure(&self.bootstrap.requested_input, error)
+                })?,
+            )
+        } else {
+            None
+        };
+        let ctx = ToolExecutionContext {
+            config: &self.config,
+            workspace: Some(&self.bootstrap.workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
         self.bootstrap
             .registry
-            .prepare_tool_input(
+            .prepare_tool_input_for_dispatch(
                 SCAN_TOOL,
                 self.bootstrap.requested_input.clone(),
-                Some(&option_store),
+                &ctx,
+                option_store.as_ref(),
             )
+            .map(|input| scan_input_with_run_id(input, &self.bootstrap.run_id))
             .inspect_err(|error| self.record_failure(&self.bootstrap.requested_input, error))
     }
 
@@ -181,6 +233,13 @@ impl ScanCommandSetup {
             run_id: self.bootstrap.run_id,
         }
     }
+}
+
+fn scan_input_with_run_id(mut input: serde_json::Value, run_id: &str) -> serde_json::Value {
+    if let serde_json::Value::Object(object) = &mut input {
+        object.insert("runId".to_string(), serde_json::json!(run_id));
+    }
+    input
 }
 
 fn record_scan_prepare_failure(
@@ -230,4 +289,46 @@ fn record_scan_prepare_failure_at_target(
         registry.loaded_module_specifiers(),
     );
     record_tool_run_failed(record, &error.to_string());
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scan_input_with_run_id_adds_internal_artifact_identity() {
+        let input = scan_input_with_run_id(serde_json::json!({"triage": true}), "scan-123");
+
+        assert_eq!(input["runId"], serde_json::json!("scan-123"));
+        assert_eq!(input["triage"], serde_json::json!(true));
+    }
+
+    #[test]
+    fn scan_prepare_commits_workspace_snapshot_before_dispatch() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(tmp.path().join("src")).unwrap();
+        std::fs::write(tmp.path().join("src/app.rs"), "fn main() {}\n").unwrap();
+
+        let prepared = prepare_scan_command_with_requested_input(
+            &tmp.path().to_path_buf(),
+            serde_json::json!({"triage": false}),
+            true,
+            true,
+        )
+        .unwrap();
+        drop(prepared);
+
+        let log =
+            kuzushi_core::event_log::EventLog::open(tmp.path().join(".kuzushi/v3/log")).unwrap();
+        let events = log.read_all().unwrap();
+        assert_eq!(events.len(), 2);
+        assert_eq!(
+            events[0].event_kind,
+            kuzushi_core::event_log::EventKind::SnapshotIndexed
+        );
+        assert_eq!(
+            events[1].event_kind,
+            kuzushi_core::event_log::EventKind::FileIndexed
+        );
+    }
 }

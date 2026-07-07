@@ -1,6 +1,7 @@
 use super::*;
 
-pub(in crate::modules) fn run_sast_scan(
+pub(in crate::modules) fn run_sast_scan_with_registry(
+    registry: &ModuleRegistry,
     input: Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
@@ -10,10 +11,13 @@ pub(in crate::modules) fn run_sast_scan(
     let store = sast_store(ctx)?;
     let requests = SastScanRequests::from_input(&input)?;
     let options = sast_scan_options(&input, whitebox_static.is_some())?;
+    let option_store = sast_subtool_options(ctx, workspace)?;
     let executed = execute_sast_scan(SastScanExecutionInput {
+        registry,
         input: &input,
         ctx,
         runtime,
+        option_store: &option_store,
         workspace,
         store,
         requests: &requests,
@@ -35,9 +39,11 @@ pub(in crate::modules) fn run_sast_scan(
 }
 
 struct SastScanExecutionInput<'a> {
+    registry: &'a ModuleRegistry,
     input: &'a Value,
     ctx: &'a ToolExecutionContext<'a>,
     runtime: Option<&'a dyn AgentRuntime>,
+    option_store: &'a crate::options::ToolOptionStore,
     workspace: &'a crate::workspace::WorkspaceTarget,
     store: &'a crate::findings::FindingStore,
     requests: &'a SastScanRequests,
@@ -48,9 +54,11 @@ struct SastScanExecutionInput<'a> {
 impl SastScanExecutionInput<'_> {
     fn reports(&self) -> Result<SastPipelineReports> {
         run_sast_pipeline_reports(
+            self.registry,
             self.input,
             self.ctx,
             self.runtime,
+            self.option_store,
             self.workspace,
             self.store,
             self.options,
@@ -78,10 +86,12 @@ impl SastScanExecutionInput<'_> {
         artifacts: &SastRunArtifacts,
     ) -> Result<SastPostProcessing> {
         run_sast_post_processing(
+            self.registry,
             self.requests,
             self.input,
             self.ctx,
             self.runtime,
+            self.option_store,
             self.store,
             run_ids,
             artifacts,
@@ -188,16 +198,23 @@ impl ExecutedSastScan {
 fn sast_workspace<'a>(
     ctx: &'a ToolExecutionContext<'_>,
 ) -> Result<&'a crate::workspace::WorkspaceTarget> {
-    ctx.workspace.context(
-        "sast:scan requires a workspace target; pass --target <repo> or start the shell with --target <repo>",
-    )
+    ctx.workspace
+        .context(crate::workspace::active_workspace_required_message(
+            "sast:scan",
+        ))
 }
 
-fn sast_store<'a>(
-    ctx: &'a ToolExecutionContext<'_>,
-) -> Result<&'a crate::findings::FindingStore> {
+fn sast_store<'a>(ctx: &'a ToolExecutionContext<'_>) -> Result<&'a crate::findings::FindingStore> {
     ctx.findings_store
         .context("sast:scan requires a findings store")
+}
+
+fn sast_subtool_options(
+    ctx: &ToolExecutionContext<'_>,
+    workspace: &crate::workspace::WorkspaceTarget,
+) -> Result<crate::options::ToolOptionStore> {
+    let paths = tool_context_config_paths(ctx, Some(workspace.root()))?;
+    persistent_tool_options_for_paths(&paths)
 }
 
 fn write_sast_whitebox_artifacts(
@@ -244,6 +261,7 @@ fn sast_scan_data(parts: SastScanResultParts<'_>) -> Value {
         "mode": whitebox_mode_label(parts.whitebox_static),
         "whiteboxStatic": parts.whitebox_static.map(|policy| policy.to_json()),
         "findingsCount": parts.findings_count,
+        "costUsd": sast_cost_usd(parts.reports, parts.post_processing),
         "coreFindings": parts.core_findings,
         "db": parts.workspace.findings_db_path().display().to_string(),
         "engines": parts.reports.engine_ids.clone(),
@@ -263,6 +281,51 @@ fn sast_scan_data(parts: SastScanResultParts<'_>) -> Value {
         "patch": patch_json(parts.post_processing),
         "artifacts": sast_artifacts_json(parts.artifacts, paths),
     })
+}
+
+fn sast_cost_usd(reports: &SastPipelineReports, post_processing: &SastPostProcessing) -> f64 {
+    reports
+        .agentic
+        .as_ref()
+        .map(|report| report.cost_usd)
+        .unwrap_or(0.0)
+        + reports
+            .carlini
+            .as_ref()
+            .map(|report| report.cost_usd)
+            .unwrap_or(0.0)
+        + reports
+            .taint_iris
+            .as_ref()
+            .map(|report| report.cost_usd)
+            .unwrap_or(0.0)
+        + reports
+            .taint_iris_next
+            .as_ref()
+            .map(|report| report.cost_usd)
+            .unwrap_or(0.0)
+        + reports
+            .systems_hunt
+            .as_ref()
+            .map(|report| report.cost_usd)
+            .unwrap_or(0.0)
+        + tool_output_cost_usd(post_processing.triage.as_ref())
+        + post_processing
+            .verification_results
+            .iter()
+            .map(|result| tool_output_cost_usd(Some(result)))
+            .sum::<f64>()
+        + post_processing
+            .patch_results
+            .iter()
+            .map(|result| tool_output_cost_usd(Some(result)))
+            .sum::<f64>()
+}
+
+fn tool_output_cost_usd(output: Option<&Value>) -> f64 {
+    output
+        .and_then(crate::run_artifacts::tool_run_output_cost_usd)
+        .unwrap_or(0.0)
 }
 
 fn sast_run_ids_json(run_ids: SastRunIds) -> Value {

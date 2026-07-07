@@ -2,8 +2,15 @@ use super::*;
 
 impl ShellApp {
     pub fn handle_command(&mut self, command: ShellCommand) {
+        let previous_view = self.shell_view.clone();
+        if let Some(effects) = self.reduce_command_effects(&command) {
+            self.execute_effects(effects);
+            self.discard_stashed_input_after_view_change(&previous_view);
+            return;
+        }
         for handler in COMMAND_HANDLERS {
             if handler(self, &command) {
+                self.discard_stashed_input_after_view_change(&previous_view);
                 return;
             }
         }
@@ -17,8 +24,10 @@ impl ShellApp {
         if trimmed.is_empty() {
             return;
         }
+        self.last_cleared_input = None;
         self.log(">", raw.to_string());
-        self.remember_command(trimmed);
+        let history_effects = self.reduce_remember_command(trimmed);
+        self.execute_effects(history_effects);
         if self.handle_subverb_query(trimmed) {
             return;
         }
@@ -44,13 +53,17 @@ impl ShellApp {
         true
     }
 
-    fn remember_command(&mut self, trimmed: &str) {
+    pub(crate) fn reduce_remember_command(&mut self, trimmed: &str) -> Vec<ShellEffect> {
         self.command_history.push(trimmed.to_string());
         if self.command_history.len() > COMMAND_HISTORY_CAP {
             let overflow = self.command_history.len() - COMMAND_HISTORY_CAP;
             self.command_history.drain(0..overflow);
         }
-        self.persist_command_history();
+        if self.history_file_path().is_some() {
+            vec![ShellEffect::PersistCommandHistory]
+        } else {
+            Vec::new()
+        }
     }
 
     fn handle_editor_local_command(&mut self, trimmed: &str) -> bool {
@@ -91,6 +104,12 @@ impl ShellApp {
         let head = raw.split_whitespace().next().unwrap_or("");
         matches!(head, "show" | "set" | "reset")
     }
+
+    fn discard_stashed_input_after_view_change(&mut self, previous_view: &ShellView) {
+        if &self.shell_view != previous_view {
+            self.last_cleared_input = None;
+        }
+    }
 }
 
 pub(crate) fn handle_home_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
@@ -98,20 +117,26 @@ pub(crate) fn handle_home_command(app: &mut ShellApp, command: &ShellCommand) ->
         return false;
     };
     app.focused_module = None;
-    app.catalog_expanded = false;
+    app.catalog_route.collapse();
     app.shell_view = ShellView::Home;
     app.log("home", "showing Kuzushi cockpit");
     true
 }
 
 pub(crate) fn handle_help_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
-    let ShellCommand::Help = command else {
+    let ShellCommand::Help(query) = command else {
         return false;
     };
     app.shell_view = ShellView::Help;
-    app.help_scroll = 0;
-    app.log("help", compact_help_summary());
+    app.help_route.open(query.clone());
+    app.log("help", help_log_summary(query.as_deref()));
     true
+}
+
+fn help_log_summary(query: Option<&str>) -> String {
+    query.map_or_else(compact_help_summary, |query| {
+        format!("filtered command reference for `{query}`")
+    })
 }
 
 pub(crate) fn handle_back_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
@@ -122,13 +147,23 @@ pub(crate) fn handle_back_command(app: &mut ShellApp, command: &ShellCommand) ->
     true
 }
 
+pub(crate) fn handle_cancel_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Cancel = command else {
+        return false;
+    };
+    if !app.request_active_abort() {
+        app.log("cancel", "no active scan/tool/agent to cancel");
+    }
+    true
+}
+
 pub(crate) fn handle_modules_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
     let ShellCommand::Modules = command else {
         return false;
     };
     app.shell_view = ShellView::Catalog;
-    app.catalog_expanded = true;
-    app.modules_scroll = 0;
+    app.catalog_route.expand();
+    app.modules_route.open();
     let count = app.registry.modules().count();
     app.log(
         "module",
@@ -144,33 +179,88 @@ pub(crate) fn handle_recommend_command(app: &mut ShellApp, command: &ShellComman
     let ShellCommand::Recommend = command else {
         return false;
     };
-    app.shell_view = ShellView::Recommend;
-    app.log("recommend", "latest module recommendations");
+    let effects = app.reduce_recommend();
+    app.execute_effects(effects);
     true
 }
 
 pub(crate) fn handle_tools_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
-    let ShellCommand::Tools = command else {
+    let ShellCommand::Tools(filter) = command else {
         return false;
     };
     app.shell_view = ShellView::Tools;
-    app.tools_scroll = 0;
-    let count = app.registry.tools().count();
+    app.tools_route.open(filter.clone());
+    let model = crate::ui_view_models::tools_model(app);
+    let suffix = filter
+        .as_ref()
+        .map(|query| format!(" matching {query:?}"))
+        .unwrap_or_default();
     app.log(
         "tool",
         format!(
-            "showing {count} {}",
-            if count == 1 { "tool" } else { "tools" }
+            "showing {} of {} {}{}",
+            model.visible_count,
+            model.total_count,
+            if model.total_count == 1 {
+                "tool"
+            } else {
+                "tools"
+            },
+            suffix
         ),
     );
     true
 }
 
-pub(crate) fn handle_findings_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
-    let ShellCommand::Findings = command else {
+pub(crate) fn handle_health_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Health = command else {
         return false;
     };
-    app.show_findings();
+    app.shell_view = ShellView::Health;
+    app.scroll_offset = 0;
+    let model = crate::ui_view_models::health_model(app);
+    app.log("health", model.summary);
+    true
+}
+
+pub(crate) fn handle_workbench_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Workbench(pane) = command else {
+        return false;
+    };
+    app.open_workbench(*pane);
+    true
+}
+
+pub(crate) fn handle_aim_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Aim(focus) = command else {
+        return false;
+    };
+    let effects = app.reduce_aim(focus);
+    app.execute_effects(effects);
+    true
+}
+
+pub(crate) fn handle_findings_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    match command {
+        ShellCommand::Findings => {
+            app.show_findings();
+            true
+        }
+        ShellCommand::FindingsFilter(expression) => {
+            app.shell_view = ShellView::Workbench;
+            app.workbench_focus = crate::app::WorkbenchPane::Findings;
+            app.refresh_findings_filtered(expression);
+            true
+        }
+        _ => false,
+    }
+}
+
+pub(crate) fn handle_component_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Component(selection) = command else {
+        return false;
+    };
+    app.apply_component_selection(selection.as_deref());
     true
 }
 
@@ -179,6 +269,25 @@ pub(crate) fn handle_pwn_command(app: &mut ShellApp, command: &ShellCommand) -> 
         return false;
     };
     app.handle_pwn_command(command);
+    true
+}
+
+pub(crate) fn handle_project_model_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::ProjectModel = command else {
+        return false;
+    };
+    app.shell_view = ShellView::ProjectModel;
+    app.scroll_offset = 0;
+    app.log("project", "showing project model aggregate");
+    true
+}
+
+pub(crate) fn handle_strategy_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::Strategy(command) = command else {
+        return false;
+    };
+    app.open_strategy_queue();
+    app.apply_strategy_command(command);
     true
 }
 

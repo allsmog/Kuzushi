@@ -19,7 +19,9 @@ so new callers should use the canonical names:
 - `findings:list`
 - `context:build`
 - `offense-review:threat-hunt`
-- `taint-iris:hunt`
+- `taint-iris-next:dataflow-plan`
+- `taint-iris-next:source-sink-trace`
+- `taint-iris-next:finding-review`
 
 Legacy `sast:<action>` aliases remain registered for backward compatibility,
 but they are compatibility redirects rather than the preferred API surface.
@@ -29,6 +31,30 @@ test is explicitly covering alias behavior.
 `carlini-threat-hunt:run` remains registered as a compatibility alias for the
 same threat-model-scoped offensive review executor. New product-facing scripts
 and docs should use `offense-review:threat-hunt`.
+
+The 2026 surface cut keeps exact-name compatibility while reducing discovery
+noise:
+
+- `taint-iris:hunt` dispatches to the `taint-iris-next:hunt` executor shape.
+  New workflows should use the visible `taint-iris-next:*` evidence helpers or
+  the SAST/journey path that invokes the hunt stage.
+- `full-mode:hunt` is exact-only; use
+  `agentic-sast:scan {"strategy":"chunked"}` for the same chunked whole-repo
+  strategy.
+- `deep-audit:run` is exact-only; use
+  `triage:run {"strategy":"deep"}`. The cheap classifier gate is exposed as
+  `triage:run {"strategy":"gate-deep"}`.
+- `verify:exploit` is exact-only; use
+  `verify:finding {"mode":"empirical"}`.
+- `shinsa:quick-check` and `shinsa:nist-quick-check` are exact-only; use
+  `shinsa:scan {"depth":"quick"}` or
+  `shinsa:nist-scan {"depth":"quick"}` when the plugin is installed.
+- `randori:threat-model` is exact-only; prefer `threat-model:build` and
+  `threat-model:read` for PASTA artifacts.
+- `android-apk:scan` is the catalog-visible APK entry point. Granular
+  `android-apk:*` phase tools remain exact-only for debugging and scripted
+  recovery.
+- `smoke:next-step` was a hidden runtime smoke-test helper and is removed.
 
 ## Streaming SSE routes
 

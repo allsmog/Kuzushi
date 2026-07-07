@@ -2,14 +2,15 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 253
 ---
- KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › workspace · mode:shell · target:none · ctx:not built · model:unconfigured
 
  -- WORKSPACE ----------------------------------------------------------------------------------------------------------
 status: no active workspace. Next: scan <target> or start shell with --target .
 target: none
-state: .kuzushi/v2
-findings db: .kuzushi/v2/findings.sqlite3
+state: .kuzushi/v3
+findings db: .kuzushi/v3/index.sqlite3
 findings: none yet (run scan first)
 last export: none
 
-Next: workspace status, workspace export findings <path>.json, kuzushi pr-comment
+Next: workspace status, workspace scope init, workspace export findings <path> [format] [--completeness open|complete]
+[--allow-empty]

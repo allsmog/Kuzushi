@@ -21,6 +21,7 @@ impl ShellApp {
                 agent.error = None;
             }
         }
+        self.record_agent_cost(audit.cost_usd);
         if state.abort_requested {
             self.log(
                 "agent",
@@ -46,6 +47,7 @@ impl ShellApp {
             agent.answer = None;
             agent.error = Some(agent_failure_message(&error, state.abort_requested));
         }
+        self.record_agent_cost(audit.cost_usd);
         if state.abort_requested {
             self.log(
                 "agent",
@@ -57,6 +59,12 @@ impl ShellApp {
         self.set_error_notice("ask", error.clone());
         self.set_refused_activity("agent", "model request failed");
         self.write_agent_trace_failure(&error, &audit, &state);
+    }
+
+    fn record_agent_cost(&mut self, cost_usd: Option<f64>) {
+        if let Some(cost_usd) = cost_usd {
+            self.record_cost(cost_usd);
+        }
     }
 
     fn write_agent_trace_success(

@@ -45,12 +45,18 @@ impl Widget for DfdDiagram {
                 1,
                 0,
                 "widen terminal (≥24 cols) for the diagram",
-                theme::T_MUTED,
+                diagram_muted(),
             );
             return;
         }
         if let Some(hint) = &self.model.empty_hint {
-            text(buf, area, 2, 1, hint, theme::T_MUTED);
+            render_empty_state_panel(
+                buf,
+                area,
+                "no data-flow diagram",
+                hint,
+                &[("threat-model:build", "map trust zones and flows")],
+            );
             return;
         }
         let zone_count = self.model.zones.len().max(1) as u16;
@@ -58,7 +64,7 @@ impl Widget for DfdDiagram {
         // Reserve 4 rows below the panels (1 gap + 2 legend lines + 1 so the
         // last legend row stays inside the area); otherwise the second legend
         // line is silently clipped at the common pane heights (≤ 24 rows).
-        let zone_h = area.height.saturating_sub(4).clamp(9, 21);
+        let zone_h = area.height.saturating_sub(4).max(9);
         let zx = |i: u16| i * (zone_w + GAP);
 
         self.draw_zone_panels(buf, area, zone_w, zone_h, &zx);
@@ -88,7 +94,7 @@ impl DfdDiagram {
                 zone_w,
                 zone_h,
                 &zone.to_uppercase(),
-                theme::T_SUBTLE,
+                diagram_subtle(),
             );
         }
     }
@@ -115,7 +121,7 @@ impl DfdDiagram {
                 self.model.nodes.len(),
                 self.model.flows.len()
             ),
-            theme::T_PRIMARY,
+            diagram_primary(),
         );
         text(
             buf,
@@ -123,7 +129,7 @@ impl DfdDiagram {
             2,
             legend_y + 1,
             "amber ▶ = trust-boundary crossing · grey = in-zone",
-            theme::T_MUTED,
+            diagram_muted(),
         );
     }
 
@@ -160,19 +166,30 @@ impl DfdDiagram {
         anchors: &mut HashMap<String, Anchor>,
     ) {
         let left = cx.saturating_sub(nbw / 2);
-        let nodes: Vec<&DfdNodeModel> = self
-            .model
-            .nodes
+        let zone_nodes: Vec<&DfdNodeModel> =
+            self.model.nodes.iter().filter(|n| n.zone == zone).collect();
+        let hidden = zone_nodes.len().saturating_sub(MAX_NODES_PER_ZONE);
+        let nodes = zone_nodes
             .iter()
-            .filter(|n| n.zone == zone)
             .take(MAX_NODES_PER_ZONE)
-            .collect();
+            .copied()
+            .collect::<Vec<_>>();
         let span = nodes.len() as u16 * (NODE_H + NODE_VGAP);
         let mut y = 2 + zone_h.saturating_sub(2).saturating_sub(span) / 2;
         for node in nodes {
             let anchor = place_node_box(buf, area, node, zi, cx, left, y, nbw);
             anchors.insert(node.name.clone(), anchor);
             y += NODE_H + NODE_VGAP;
+        }
+        if hidden > 0 {
+            text(
+                buf,
+                area,
+                left.saturating_add(1),
+                y,
+                &format!("+{hidden} more"),
+                diagram_muted(),
+            );
         }
     }
 }
@@ -228,13 +245,19 @@ fn draw_flow(buf: &mut Buffer, area: Rect, a: &Anchor, b: &Anchor, color: Color)
 fn node_label(node: &DfdNodeModel) -> String {
     let glyph = match node.kind {
         DfdKind::Entity => "◆",
-        DfdKind::Process => "▸",
+        DfdKind::Process => "◇",
         DfdKind::Store => "▣",
     };
     format!("{glyph} {}", node.name)
 }
 
 fn node_color(kind: DfdKind) -> Color {
+    if theme::active_theme().high_contrast {
+        return match kind {
+            DfdKind::Entity | DfdKind::Process => theme::T_HEADING,
+            DfdKind::Store => theme::SEV_HIGH,
+        };
+    }
     match kind {
         DfdKind::Entity => theme::T_LABEL,
         DfdKind::Process => theme::T_ACCENT,
@@ -245,6 +268,8 @@ fn node_color(kind: DfdKind) -> Color {
 fn flow_color(crosses: bool) -> Color {
     if crosses {
         theme::SEV_HIGH
+    } else if theme::active_theme().high_contrast {
+        theme::T_PRIMARY
     } else {
         theme::T_MUTED
     }

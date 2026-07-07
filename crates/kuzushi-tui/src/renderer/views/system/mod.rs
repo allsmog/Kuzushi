@@ -7,7 +7,7 @@ pub(in crate::renderer) use super::*;
 
 /// `/patch <alias>` view — RATIONALE / DIFF / TESTS / GUARDRAIL
 /// matching `design/mockups/patch.jsx`.  Pulls from
-/// `app.pending_patch` when the alias matches; otherwise renders an
+/// engagement pending patch state when the alias matches; otherwise renders an
 /// empty state advising how to stage a patch.
 
 /// Render a single 30-cell budget bar matching
@@ -18,12 +18,14 @@ pub(in crate::renderer) use auth_provider_rows::*;
 pub(in crate::renderer) use command_palette_lines::*;
 pub(in crate::renderer) use config_lines::*;
 pub(in crate::renderer) use cost_lines::*;
+pub(in crate::renderer) use health_lines::*;
 pub(in crate::renderer) use tools_lines::*;
 mod auth_lines;
 mod auth_provider_rows;
 mod command_palette_lines;
 mod config_lines;
 mod cost_lines;
+mod health_lines;
 mod tools_lines;
 pub(crate) use auth_lines::auth_lines;
 pub(crate) use auth_provider_rows::{auth_provider_line, auth_provider_lines};
@@ -31,4 +33,5 @@ pub(crate) use command_palette_lines::command_palette_lines;
 pub(crate) use config_lines::config_lines;
 pub(crate) use cost_lines::cost_budget_bar;
 pub(crate) use cost_lines::cost_lines;
+pub(crate) use health_lines::health_lines;
 pub(crate) use tools_lines::tools_lines;

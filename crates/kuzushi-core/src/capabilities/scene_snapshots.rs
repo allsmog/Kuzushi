@@ -7,7 +7,7 @@
 //! workspace findings store, and the threat model (the DFD page) persists via
 //! [`crate::capabilities::persistent_threat_model_path`]. These two were the
 //! only generated visualizations that vanished on restart; saving them under the
-//! same `.kuzushi/v2` state root keeps every page available for a repo across
+//! same `.kuzushi/v3` state root keeps every page available for a repo across
 //! sessions. The payload is the raw structured JSON the tools emit, reloaded by
 //! the same parsers that handle the live tool result, so there is no second
 //! schema to keep in sync.
@@ -21,12 +21,12 @@ use std::path::{Path, PathBuf};
 const TAINT_FLOW_FILE: &str = "scene-taint-flow.json";
 const EXPLOIT_CHAINS_FILE: &str = "scene-exploit-chains.json";
 
-/// `<root>/.kuzushi/v2/scene-taint-flow.json` — the persisted `{ "flows": [...] }`.
+/// `<root>/.kuzushi/v3/scene-taint-flow.json` — the persisted `{ "flows": [...] }`.
 pub fn persistent_taint_flow_path(root: &Path) -> PathBuf {
     workspace_state_root(root).join(TAINT_FLOW_FILE)
 }
 
-/// `<root>/.kuzushi/v2/scene-exploit-chains.json` — the persisted `{ "chains": [...] }`.
+/// `<root>/.kuzushi/v3/scene-exploit-chains.json` — the persisted `{ "chains": [...] }`.
 pub fn persistent_exploit_chains_path(root: &Path) -> PathBuf {
     workspace_state_root(root).join(EXPLOIT_CHAINS_FILE)
 }

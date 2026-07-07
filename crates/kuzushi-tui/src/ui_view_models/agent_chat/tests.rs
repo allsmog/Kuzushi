@@ -34,6 +34,7 @@ fn agent_chat_model_copies_active_turn_and_history() {
         }],
         run_id: None,
         started_secs: 0,
+        screen_context_scope: Some("scope: F-0001 · 作 confirm · abc1234-dirty".to_string()),
         failure_context: None,
         pending_failure_context: None,
     });
@@ -44,6 +45,10 @@ fn agent_chat_model_copies_active_turn_and_history() {
     assert_eq!(session.status, "answered");
     assert_eq!(session.question, "what now?");
     assert_eq!(session.answer, Some("run context".to_string()));
+    assert_eq!(
+        session.screen_context_scope.as_deref(),
+        Some("scope: F-0001 · 作 confirm · abc1234-dirty")
+    );
     assert_eq!(
         session.history,
         vec![AgentChatTurn {
@@ -66,6 +71,7 @@ fn agent_chat_model_prefers_abort_status() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        screen_context_scope: None,
         failure_context: None,
         pending_failure_context: None,
     });

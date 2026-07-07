@@ -6,11 +6,12 @@ mod tests {
         Finding, FindingListFilter, PatchStatus, Severity, StaticProofState, TriageOutcome,
         TriageVerdict,
     };
+    use crate::options::{OptionScope, OptionTarget, ToolOptionStore};
+    use crate::run_artifacts::{run_dir, write_run_summary, RunSummary};
     use crate::runtime::{
         AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentToolLoopRequest,
         LoopHistoryEntry, TriageRequest,
     };
-    use crate::run_artifacts::{run_dir, write_run_summary, RunSummary};
     use crate::workspace::WorkspaceTarget;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -43,6 +44,13 @@ mod tests {
     impl AgentRuntime for MockRuntime {
         fn query_blocking(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
             self.queries.lock().unwrap().push(request);
+            if let Some(structured) = self.exploit_chain_response() {
+                return Ok(AgentQueryResponse {
+                    text: String::new(),
+                    structured: Some(structured),
+                    ..Default::default()
+                });
+            }
             let is_patch_request = self
                 .queries
                 .lock()
@@ -397,6 +405,47 @@ mod tests {
         }
     }
 
+    impl MockRuntime {
+        fn exploit_chain_response(&self) -> Option<Value> {
+            let queries = self.queries();
+            let query = queries.last()?;
+            if query.system_prompt.contains("exploit-chain code navigator") {
+                return Some(json!({
+                    "selections": [{
+                        "filePath": "src/app.js",
+                        "startLine": 1,
+                        "endLine": 3,
+                        "rationale": "request body reaches template rendering"
+                    }]
+                }));
+            }
+            query
+                .system_prompt
+                .contains("exploit-chain analyzer")
+                .then(|| {
+                    json!({
+                        "evidence": [{
+                            "kind": "template-rendering",
+                            "filePath": "src/app.js",
+                            "line": 2,
+                            "snippet": "res.send(ejs.render(req.body.template));",
+                            "rationale": "request body controls rendered template",
+                            "confidence": 9
+                        }],
+                        "findings": [{
+                            "ruleId": "exploit-chain/template-render",
+                            "title": "Template render chain",
+                            "severity": "high",
+                            "filePath": "src/app.js",
+                            "startLine": 2,
+                            "message": "Request body controls template rendering.",
+                            "evidenceIndexes": [0]
+                        }]
+                    })
+                })
+        }
+    }
+
     #[cfg(unix)]
     fn fake_semgrep_binary(dir: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
@@ -428,6 +477,24 @@ JSON
         permissions.set_mode(0o755);
         fs::set_permissions(&binary, permissions).unwrap();
         binary
+    }
+
+    fn javascript_fixture_with_line_9_sink() -> String {
+        [
+            "const q = req.query.q;",
+            "function handler(req, res, db) {",
+            "  const prefix = 'select ';",
+            "  const table = 'users';",
+            "  const where = ' where name = ';",
+            "  const sql = prefix + '* from ' + table + where;",
+            "  const suffix = q;",
+            "  const built = sql + suffix;",
+            "  return db.query(built);",
+            "}",
+            "res.send(req.query.name);",
+        ]
+        .join("\n")
+            + "\n"
     }
 
     #[cfg(unix)]
@@ -1041,10 +1108,7 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(false));
-        assert_eq!(
-            result.get("status").and_then(Value::as_str),
-            Some("failed")
-        );
+        assert_eq!(result.get("status").and_then(Value::as_str), Some("failed"));
         assert!(result
             .get("errors")
             .and_then(Value::as_array)
@@ -1119,7 +1183,9 @@ OUT
             .unwrap();
         assert!(Path::new(report_path).exists());
         assert_eq!(
-            report_result.pointer("/artifacts/0/path").and_then(Value::as_str),
+            report_result
+                .pointer("/artifacts/0/path")
+                .and_then(Value::as_str),
             Some(report_path)
         );
         assert!(report_result
@@ -1622,7 +1688,7 @@ OUT
         use crate::findings::FindingStore;
         let store = FindingStore::open_in_memory().unwrap();
         store
-            .insert_scan_run("run-cost-test", std::path::Path::new("/repo"), "running")
+            .record_run_started("run-cost-test", std::path::Path::new("/repo"), "running")
             .unwrap();
         let finding = Finding::new_tool("test", "rule", "src/x.c", 1, None, Severity::High, "msg");
         let finding_id = store.insert_finding("run-cost-test", &finding).unwrap();
@@ -1715,6 +1781,10 @@ OUT
             .pointer("/data/coreFindings/0/fingerprint")
             .and_then(Value::as_str)
             .is_some());
+        assert!(result
+            .pointer("/data/coreFindings/0/identityId")
+            .and_then(Value::as_str)
+            .is_some_and(|identity| identity.starts_with("fi_")));
         assert_eq!(store.list_findings(10).unwrap().len(), 1);
     }
 
@@ -1846,6 +1916,10 @@ OUT
             .pointer("/data/coreFindings/0/fingerprint")
             .and_then(Value::as_str)
             .is_some());
+        assert!(result
+            .pointer("/data/coreFindings/0/identityId")
+            .and_then(Value::as_str)
+            .is_some_and(|identity| identity.starts_with("fi_")));
         assert_eq!(store.list_findings(10).unwrap().len(), 1);
     }
 
@@ -2031,12 +2105,16 @@ OUT
             trace: None,
         };
 
-        let result = registry.execute_tool("sbom-scan:scan", json!({}), &ctx).unwrap();
+        let result = registry
+            .execute_tool("sbom-scan:scan", json!({}), &ctx)
+            .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
         assert_completed_result_envelope(&result, "sbom-scan:");
         assert_eq!(
-            result.pointer("/data/componentCount").and_then(Value::as_u64),
+            result
+                .pointer("/data/componentCount")
+                .and_then(Value::as_u64),
             Some(1)
         );
         assert_eq!(
@@ -2170,7 +2248,10 @@ OUT
             )
             .unwrap();
 
-        assert_eq!(result.get("status").and_then(Value::as_str), Some("completed"));
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
         assert!(result
             .get("summary")
             .and_then(Value::as_str)
@@ -2223,7 +2304,10 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
-        assert_eq!(result.get("status").and_then(Value::as_str), Some("completed"));
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
         assert!(result
             .get("summary")
             .and_then(Value::as_str)
@@ -2232,7 +2316,12 @@ OUT
             .get("errors")
             .and_then(Value::as_array)
             .is_some_and(Vec::is_empty));
-        assert_eq!(result.pointer("/data/findingsCount").and_then(Value::as_u64), Some(0));
+        assert_eq!(
+            result
+                .pointer("/data/findingsCount")
+                .and_then(Value::as_u64),
+            Some(0)
+        );
         assert!(result
             .pointer("/data/coreFindings")
             .and_then(Value::as_array)
@@ -2245,6 +2334,48 @@ OUT
     }
 
     #[test]
+    fn exploit_chain_scan_honors_input_model_override() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("src")).unwrap();
+        fs::write(
+            temp.path().join("src/app.js"),
+            "res.send(ejs.render(req.body.template));\n",
+        )
+        .unwrap();
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config {
+            model: Some("openai:gpt-config".to_string()),
+            ..V2Config::default()
+        };
+        let runtime = MockRuntime::new();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool_with_runtime(
+                "exploit-chain:scan",
+                json!({"model": "openai:gpt-input", "maxEvidence": 8}),
+                &ctx,
+                Some(&runtime),
+            )
+            .unwrap();
+
+        assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
+        let queries = runtime.queries();
+        assert_eq!(queries.len(), 2);
+        assert!(queries
+            .iter()
+            .all(|query| query.model == "openai:gpt-input"));
+    }
+
+    #[test]
     fn sast_scan_can_continue_into_langgraph_runtime_triage() {
         let temp = tempdir().unwrap();
         fs::write(
@@ -2254,6 +2385,12 @@ OUT
         .unwrap();
 
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        save_workspace_tool_option(
+            &workspace,
+            "triage:run",
+            "TRIAGE_PROMPT",
+            "Persistent triage guidance.",
+        );
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
         let mut config = V2Config::default();
@@ -2292,6 +2429,10 @@ OUT
             Some(TriageVerdict::TruePositive)
         );
         assert_eq!(runtime.requests().len(), 1);
+        assert_eq!(
+            runtime.requests()[0].prompt_template.as_deref(),
+            Some("Persistent triage guidance.")
+        );
     }
 
     #[test]
@@ -2380,7 +2521,11 @@ OUT
             result.pointer("/data/mode").and_then(Value::as_str),
             Some("whitebox-static")
         );
-        let query = runtime.queries().pop().unwrap();
+        let queries = runtime.queries();
+        let query = queries
+            .iter()
+            .find(|query| query.tool_policy.profile == "whitebox-static")
+            .expect("expected a whitebox-static agent query");
         assert_eq!(query.tool_policy.profile, "whitebox-static");
         assert_eq!(
             query.tool_policy.tools,
@@ -2435,7 +2580,11 @@ OUT
             )
             .unwrap();
 
-        let query = runtime.queries().pop().unwrap();
+        let queries = runtime.queries();
+        let query = queries
+            .iter()
+            .find(|query| query.tool_policy.profile == "whitebox-static")
+            .expect("expected a whitebox-static agent query");
         assert!(query.system_prompt.contains("whitebox-static mode"));
         for field in [
             "\"verdict\"",
@@ -2479,10 +2628,13 @@ OUT
     #[test]
     fn agentic_sast_scan_requires_runtime_and_explicit_model() {
         let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/db.ts"), "db.query(req.query.q)\n").unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
-        let config = V2Config::default();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
@@ -2494,8 +2646,15 @@ OUT
             .execute_tool("agentic-sast:scan", json!({}), &ctx)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("requires the LangGraph runtime"));
+        assert!(err.contains("requires") && err.contains("runtime"), "{err}");
 
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
         let runtime = MockRuntime::new();
         let err = registry
             .execute_tool_with_runtime("agentic-sast:scan", json!({}), &ctx, Some(&runtime))
@@ -2528,6 +2687,7 @@ OUT
                 "taint-iris:hunt",
                 json!({
                     "maxFindings": 5,
+                    "mcps": false,
                     "TAINT_IRIS_PROMPT": "Focus on SQL sinks only."
                 }),
                 &ctx,
@@ -2536,20 +2696,24 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
-        assert_completed_result_envelope(&result, "taint-iris:");
+        assert_completed_result_envelope(&result, "taint-iris-next:");
         assert_eq!(
-            result.pointer("/data/count").and_then(Value::as_u64),
+            result
+                .pointer("/data/stats/totalFindings")
+                .and_then(Value::as_u64),
             Some(1)
         );
         assert_eq!(
-            result.pointer("/data/cwes/0/id").and_then(Value::as_str),
+            result
+                .pointer("/data/selectedCwes/0/cwe")
+                .and_then(Value::as_str),
             Some("CWE-89")
         );
         assert_eq!(
             result
                 .pointer("/data/findings/0/rule_id")
                 .and_then(Value::as_str),
-            Some("taint-iris/cwe-89")
+            Some("taint-iris-next/cwe-89")
         );
         assert!(result
             .pointer("/data/persisted/runId")
@@ -2557,26 +2721,25 @@ OUT
             .is_some());
         let stored = store.list_findings(10).unwrap();
         assert_eq!(stored.len(), 1);
-        assert_eq!(stored[0].tool, "taint-iris");
-        assert!(stored[0].message.contains("req.query.q -> db.query"));
+        assert_eq!(stored[0].tool, "taint-iris-next");
+        assert!(stored[0].message.contains("request-controlled data"));
 
         let queries = runtime.queries();
-        assert_eq!(queries.len(), 2);
-        assert!(queries[0].system_prompt.contains("Taint CWE selector"));
-        assert!(queries[1]
-            .system_prompt
-            .contains("IRIS-style taint analysis"));
-        assert!(queries[1].prompt.contains("Focus on SQL sinks only."));
-        assert!(queries[1].prompt.contains("CWE-89"));
+        assert_eq!(queries.len(), 1);
+        assert!(queries[0].system_prompt.contains("Taint IRIS Next agent"));
+        assert!(queries[0].prompt.contains("CWE-89"));
     }
 
     #[test]
     fn taint_iris_hunt_requires_runtime_and_explicit_model() {
         let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/db.ts"), "db.query(req.query.q)\n").unwrap();
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
-        let config = V2Config::default();
+        let mut config = V2Config::default();
+        config.model = Some("openai:gpt-4.1".to_string());
         let ctx = ToolExecutionContext {
             config: &config,
             workspace: Some(&workspace),
@@ -2585,14 +2748,26 @@ OUT
         };
 
         let err = registry
-            .execute_tool("taint-iris:hunt", json!({}), &ctx)
+            .execute_tool("taint-iris:hunt", json!({ "mcps": false }), &ctx)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("requires the LangGraph runtime"));
+        assert!(err.contains("requires") && err.contains("runtime"), "{err}");
 
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
         let runtime = MockRuntime::new();
         let err = registry
-            .execute_tool_with_runtime("taint-iris:hunt", json!({}), &ctx, Some(&runtime))
+            .execute_tool_with_runtime(
+                "taint-iris:hunt",
+                json!({ "mcps": false }),
+                &ctx,
+                Some(&runtime),
+            )
             .unwrap_err()
             .to_string();
         assert!(err.contains("requires an explicit model"));
@@ -2607,7 +2782,10 @@ OUT
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let registry = ModuleRegistry::with_v2_builtins();
-        assert!(registry.resolve_tool("pipeline:taint-cwe-select").is_none());
+        assert!(registry.resolve_tool("pipeline:taint-cwe-select").is_some());
+        assert!(!registry
+            .tools()
+            .any(|tool| tool.name == "pipeline:taint-cwe-select"));
 
         let mut config = V2Config::default();
         config.model = Some("openai:gpt-4.1".to_string());
@@ -2901,6 +3079,7 @@ OUT
                 json!({
                     "taskMode": "manual",
                     "tasks": ["taint-iris"],
+                    "mcps": false,
                     "maxFindings": 5
                 }),
                 &ctx,
@@ -2917,13 +3096,13 @@ OUT
         );
         assert_eq!(
             result.pointer("/data/engines/0").and_then(Value::as_str),
-            Some("taint-iris")
+            Some("taint-iris-next")
         );
         assert!(result
-            .pointer("/data/taintIris/count")
+            .pointer("/data/taintIrisNext/count")
             .and_then(Value::as_u64)
             .is_some());
-        assert_eq!(store.list_findings(10).unwrap()[0].tool, "taint-iris");
+        assert_eq!(store.list_findings(10).unwrap()[0].tool, "taint-iris-next");
     }
 
     #[test]
@@ -3065,7 +3244,7 @@ OUT
             .execute_tool("systems-hunt:systems-hunt", json!({"maxFindings": 5}), &ctx)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("requires the LangGraph runtime"));
+        assert!(err.contains("requires an agent runtime"));
 
         let runtime = MockRuntime::new();
         let err = registry
@@ -3211,22 +3390,21 @@ OUT
         assert!(fs::read_to_string(summary)
             .unwrap()
             .contains("\"verification\""));
-        let run_id = result.pointer("/data/runId").and_then(Value::as_str).unwrap();
+        let run_id = result
+            .pointer("/data/runId")
+            .and_then(Value::as_str)
+            .unwrap();
         let run_summary = crate::run_artifacts::load_run_summary(temp.path(), run_id).unwrap();
         assert_eq!(run_summary.status, "completed");
         assert_eq!(run_summary.tool.as_deref(), Some("sast:scan"));
         assert_eq!(run_summary.findings, Some(1));
-        assert!(run_summary.artifacts.iter().any(|artifact| {
-            artifact.label == "sast summary" && artifact.path == summary
-        }));
-        let canonical_summary = temp
-            .path()
-            .join(".kuzushi")
-            .join("runs")
-            .join(run_id)
-            .join("summary.json");
+        assert!(run_summary
+            .artifacts
+            .iter()
+            .any(|artifact| { artifact.label == "sast summary" && artifact.path == summary }));
+        let canonical_summary =
+            crate::run_artifacts::run_artifact_path(temp.path(), run_id, "run.json");
         assert!(canonical_summary.exists());
-        assert!(canonical_summary.with_file_name("run.json").exists());
         assert!(!fs::read_to_string(canonical_summary)
             .unwrap()
             .contains("\"verification\""));
@@ -3457,12 +3635,19 @@ OUT
             .and_then(Value::as_str)
             .unwrap()
             .contains("Diff scope: 1 changed file"));
+        assert!(result
+            .get("output")
+            .and_then(Value::as_str)
+            .unwrap()
+            .contains("not-seen"));
         let artifact = result
             .pointer("/data/artifacts/whiteboxDiff")
             .and_then(Value::as_str)
             .unwrap();
         let artifact_body = fs::read_to_string(artifact).unwrap();
         assert!(artifact_body.contains("\"changedFiles\""));
+        assert!(artifact_body.contains("\"notSeenFindings\""));
+        assert!(!artifact_body.contains("\"fixedFindings\""));
         assert!(artifact_body.contains("\"noRemoteProviderRequired\": true"));
     }
 
@@ -3584,6 +3769,53 @@ OUT
                     .and_then(Value::as_bool)
                     == Some(false)
         }));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn semgrep_static_evidence_direct_tool_honors_static_proof_state_option() {
+        let temp = tempdir().unwrap();
+        fs::write(
+            temp.path().join("server.js"),
+            javascript_fixture_with_line_9_sink(),
+        )
+        .unwrap();
+        let binary = fake_semgrep_binary(temp.path());
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool(
+                "semgrep:scan",
+                json!({
+                    "binary": binary.display().to_string(),
+                    "mode": "whitebox-static",
+                    "staticProofState": "needs_runtime_evidence"
+                }),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(
+            result
+                .pointer("/data/findings/0/staticProofState")
+                .and_then(Value::as_str),
+            Some("needs_runtime_evidence")
+        );
+        let finding = store.list_findings(10).unwrap().pop().unwrap();
+        assert_eq!(
+            finding.static_proof_state,
+            Some(StaticProofState::NeedsRuntimeEvidence)
+        );
     }
 
     #[test]
@@ -3745,6 +3977,55 @@ OUT
             .any(|node| node.kind == crate::static_evidence::StaticEvidenceNodeKind::DataflowStep));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn codeql_static_evidence_direct_tool_honors_static_proof_state_option() {
+        let temp = tempdir().unwrap();
+        fs::write(temp.path().join("package.json"), "{}\n").unwrap();
+        fs::write(
+            temp.path().join("server.js"),
+            javascript_fixture_with_line_9_sink(),
+        )
+        .unwrap();
+        let binary = fake_codeql_binary(temp.path());
+
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let registry = ModuleRegistry::with_v2_builtins();
+        let config = V2Config::default();
+        let ctx = ToolExecutionContext {
+            config: &config,
+            workspace: Some(&workspace),
+            findings_store: Some(&store),
+            trace: None,
+        };
+
+        let result = registry
+            .execute_tool(
+                "codeql:scan",
+                json!({
+                    "binary": binary.display().to_string(),
+                    "language": "javascript",
+                    "mode": "whitebox-static",
+                    "staticProofState": "needs_runtime_evidence"
+                }),
+                &ctx,
+            )
+            .unwrap();
+
+        assert_eq!(
+            result
+                .pointer("/data/findings/0/staticProofState")
+                .and_then(Value::as_str),
+            Some("needs_runtime_evidence")
+        );
+        let finding = store.list_findings(10).unwrap().pop().unwrap();
+        assert_eq!(
+            finding.static_proof_state,
+            Some(StaticProofState::NeedsRuntimeEvidence)
+        );
+    }
+
     #[test]
     fn codeql_missing_binary_failure_is_actionable() {
         let temp = tempdir().unwrap();
@@ -3784,7 +4065,7 @@ OUT
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         store
-            .insert_scan_run("run-1", workspace.root(), "completed")
+            .record_run_started("run-1", workspace.root(), "completed")
             .unwrap();
         let confirmed = Finding::new_semgrep(
             "demo.sql",
@@ -3900,10 +4181,7 @@ OUT
         let expected_report_path = run_dir(workspace.root(), "run-report-source").join("report.md");
         assert_eq!(Path::new(report_path), expected_report_path.as_path());
         assert!(Path::new(report_path).exists());
-        assert!(result
-            .get("warnings")
-            .and_then(Value::as_array)
-            .is_some());
+        assert!(result.get("warnings").and_then(Value::as_array).is_some());
         assert!(result
             .get("errors")
             .and_then(Value::as_array)
@@ -3916,7 +4194,7 @@ OUT
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         store
-            .insert_scan_run("run-1", workspace.root(), "completed")
+            .record_run_started("run-1", workspace.root(), "completed")
             .unwrap();
         let confirmed = Finding::new_semgrep(
             "demo.sql",
@@ -3953,6 +4231,7 @@ OUT
                 "triage:run",
                 json!({
                     "fingerprint": confirmed.fingerprint.clone(),
+                    "model": "openai:gpt-override",
                     "TRIAGE_PROMPT": "Use repository evidence only."
                 }),
                 &ctx,
@@ -3982,7 +4261,7 @@ OUT
         );
         let requests = runtime.requests();
         assert_eq!(requests.len(), 1);
-        assert_eq!(requests[0].model, "openai:gpt-4.1");
+        assert_eq!(requests[0].model, "openai:gpt-override");
         assert_eq!(
             requests[0].prompt_template.as_deref(),
             Some("Use repository evidence only.")
@@ -3995,7 +4274,7 @@ OUT
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         store
-            .insert_scan_run("run-1", workspace.root(), "completed")
+            .record_run_started("run-1", workspace.root(), "completed")
             .unwrap();
         let finding = Finding::new_semgrep(
             "demo.sql",
@@ -4020,7 +4299,7 @@ OUT
             .execute_tool("triage:run", json!({}), &ctx)
             .unwrap_err()
             .to_string();
-        assert!(err.contains("requires the LangGraph runtime"));
+        assert!(err.contains("requires an agent runtime"));
 
         let runtime = MockRuntime::new();
         let err = registry
@@ -4057,7 +4336,10 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
-        assert_eq!(result.get("status").and_then(Value::as_str), Some("skipped"));
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("skipped")
+        );
         assert_eq!(
             result.pointer("/data/triaged").and_then(Value::as_u64),
             Some(0)
@@ -4077,7 +4359,7 @@ OUT
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         store
-            .insert_scan_run("run-1", workspace.root(), "completed")
+            .record_run_started("run-1", workspace.root(), "completed")
             .unwrap();
         let finding = Finding::new_semgrep(
             "demo.sql",
@@ -4142,7 +4424,7 @@ OUT
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         store
-            .insert_scan_run("run-1", workspace.root(), "completed")
+            .record_run_started("run-1", workspace.root(), "completed")
             .unwrap();
         let finding = Finding::new_semgrep(
             "demo.sql",
@@ -4233,7 +4515,10 @@ OUT
             .unwrap();
 
         assert_eq!(result.get("ok").and_then(Value::as_bool), Some(true));
-        assert_eq!(result.pointer("/status").and_then(Value::as_str), Some("completed"));
+        assert_eq!(
+            result.pointer("/status").and_then(Value::as_str),
+            Some("completed")
+        );
         assert_eq!(
             result.pointer("/summary").and_then(Value::as_str),
             Some("full-mode:hunt planned 1 chunk over 1 file")
@@ -4256,7 +4541,7 @@ OUT
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         store
-            .insert_scan_run("run-1", workspace.root(), "completed")
+            .record_run_started("run-1", workspace.root(), "completed")
             .unwrap();
         let finding = Finding::new_semgrep(
             "demo.sql",
@@ -4295,6 +4580,7 @@ OUT
                 "verify:finding",
                 json!({
                     "fingerprint": finding.fingerprint.clone(),
+                    "model": "openai:gpt-verify",
                     "VERIFY_PROMPT": "Prove exploitability with concrete runtime evidence."
                 }),
                 &ctx,
@@ -4327,7 +4613,7 @@ OUT
 
         let queries = runtime.queries();
         assert_eq!(queries.len(), 1);
-        assert_eq!(queries[0].model, "openai:gpt-4.1");
+        assert_eq!(queries[0].model, "openai:gpt-verify");
         assert!(queries[0]
             .prompt
             .contains("Prove exploitability with concrete runtime evidence."));
@@ -4340,7 +4626,7 @@ OUT
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         store
-            .insert_scan_run("run-1", workspace.root(), "completed")
+            .record_run_started("run-1", workspace.root(), "completed")
             .unwrap();
         let finding = Finding::new_semgrep(
             "demo.sql",
@@ -4424,7 +4710,7 @@ OUT
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         store
-            .insert_scan_run("run-1", workspace.root(), "completed")
+            .record_run_started("run-1", workspace.root(), "completed")
             .unwrap();
         let finding = Finding::new_semgrep(
             "demo.sql",
@@ -4463,6 +4749,7 @@ OUT
                 "patch:finding",
                 json!({
                     "fingerprint": finding.fingerprint.clone(),
+                    "model": "openai:gpt-patch",
                     "maxIterations": 1,
                     "buildCmd": "true",
                     "testCmd": "true"
@@ -4497,7 +4784,7 @@ OUT
 
         let queries = runtime.queries();
         assert_eq!(queries.len(), 1);
-        assert_eq!(queries[0].model, "openai:gpt-4.1");
+        assert_eq!(queries[0].model, "openai:gpt-patch");
         assert!(queries[0].prompt.contains(&finding.fingerprint));
         assert!(queries[0].prompt.contains("const query = req.query.q"));
     }
@@ -4508,7 +4795,7 @@ OUT
         let workspace = WorkspaceTarget::new(temp.path()).unwrap();
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         store
-            .insert_scan_run("run-1", workspace.root(), "completed")
+            .record_run_started("run-1", workspace.root(), "completed")
             .unwrap();
         let finding = Finding::new_semgrep(
             "demo.sql",
@@ -4630,7 +4917,10 @@ OUT
     }
 
     fn assert_completed_result_envelope(result: &Value, summary_prefix: &str) {
-        assert_eq!(result.get("status").and_then(Value::as_str), Some("completed"));
+        assert_eq!(
+            result.get("status").and_then(Value::as_str),
+            Some("completed")
+        );
         assert!(result
             .get("summary")
             .and_then(Value::as_str)
@@ -4649,9 +4939,29 @@ OUT
             .is_some_and(Vec::is_empty));
     }
 
+    fn save_workspace_tool_option(
+        workspace: &WorkspaceTarget,
+        tool: &str,
+        name: &str,
+        value: &str,
+    ) {
+        let mut store = ToolOptionStore::new();
+        store.set_value(
+            OptionScope::Workspace,
+            OptionTarget::Tool(tool.to_string()),
+            name,
+            json!(value),
+        );
+        store
+            .save_to_path(&crate::workspace::workspace_options_path(workspace.root()))
+            .unwrap();
+    }
+
     fn assert_route_path(routes: &[Value], expected: &str) {
         assert!(
-            routes.iter().any(|route| route_path(route) == Some(expected)),
+            routes
+                .iter()
+                .any(|route| route_path(route) == Some(expected)),
             "missing route {expected}: {routes:#?}"
         );
     }

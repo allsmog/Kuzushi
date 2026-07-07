@@ -22,12 +22,5 @@ pub async fn run() -> Result<()> {
     let command = cli
         .command
         .unwrap_or(command::Command::Shell { target: None });
-    dispatch::dispatch_command(
-        command,
-        cli.target,
-        plain,
-        cli.load,
-        cli.allow_untrusted_module,
-    )
-    .await
+    dispatch::dispatch_command(command, cli.target, plain, cli.load).await
 }

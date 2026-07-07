@@ -63,7 +63,9 @@ fn resolve_model_command_choice(selector: &str) -> Result<(String, Option<&'stat
         return Ok((choice.id.to_string(), Some(choice.thinking_level)));
     }
     if selector.contains(':') {
-        return Ok((selector.to_string(), None));
+        return kuzushi_core::runtime::canonical_model_spec(selector)
+            .map(|model| (model, None))
+            .map_err(|error| format!("{error}. Next: model, or model openai:gpt-5.5"));
     }
     Err(format!(
         "unknown model choice {selector:?}. Next: model, or model provider:model-id"

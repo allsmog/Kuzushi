@@ -111,13 +111,7 @@ pub(crate) fn format_inventory(inventory: &[(String, String)]) -> String {
 }
 
 pub(crate) fn parse_severity(value: String) -> Severity {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "critical" => Severity::Critical,
-        "error" | "high" => Severity::High,
-        "warning" | "medium" => Severity::Medium,
-        "info" | "low" => Severity::Low,
-        _ => Severity::Medium,
-    }
+    Severity::from_label(&value)
 }
 
 pub(crate) fn string_field(value: Option<&Value>) -> String {

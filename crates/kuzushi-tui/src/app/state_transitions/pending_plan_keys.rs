@@ -3,7 +3,7 @@ use super::*;
 impl ShellApp {
     pub(super) fn handle_pending_plan_key(&mut self, key: KeyEvent) -> bool {
         pending_plan_key_handler_for(
-            self.pending_plan.is_some(),
+            self.engagement.has_pending_plan(),
             self.input.is_empty(),
             key.modifiers.is_empty(),
             key.code,
@@ -23,14 +23,11 @@ impl ShellApp {
     }
 
     fn move_plan_cursor_to_start(&mut self) {
-        self.plan_cursor = 0;
+        self.engagement.move_plan_cursor_to_start();
     }
 
     pub(super) fn move_plan_cursor_to_end(&mut self) {
-        let total = self.plan_change_count();
-        if total > 0 {
-            self.plan_cursor = total - 1;
-        }
+        self.engagement.move_plan_cursor_to_end();
     }
 }
 
@@ -53,6 +50,7 @@ fn pending_plan_key_handler_for(
 }
 
 const PENDING_PLAN_KEY_ACTIONS: &[(KeyCode, fn(&mut ShellApp))] = &[
+    (KeyCode::Enter, ShellApp::apply_pending_plan),
     (KeyCode::Char('y'), ShellApp::apply_pending_plan),
     (KeyCode::Char('Y'), ShellApp::apply_pending_plan),
     (KeyCode::Char('n'), ShellApp::discard_pending_plan),

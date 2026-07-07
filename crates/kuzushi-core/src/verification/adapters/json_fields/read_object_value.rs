@@ -29,18 +29,12 @@ pub(in crate::verification::adapters) fn read_object_nullable_string(
     })
 }
 
+#[cfg(test)]
 pub(in crate::verification::adapters) fn read_object_bool(
     object: &Map<String, Value>,
     keys: &[&str],
 ) -> Option<bool> {
     read_object_value(object, keys).and_then(Value::as_bool)
-}
-
-pub(in crate::verification::adapters) fn read_object_f64(
-    object: &Map<String, Value>,
-    keys: &[&str],
-) -> Option<f64> {
-    read_object_value(object, keys).and_then(Value::as_f64)
 }
 
 pub(in crate::verification::adapters) fn read_object_u64(

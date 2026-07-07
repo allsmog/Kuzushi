@@ -15,12 +15,9 @@ harness = false
 
 [dependencies]
 anyhow = { workspace = true }
-async-trait = { workspace = true }
 cucumber = "0.21"
 futures = "0.3"
-serde_json = { workspace = true }
 tempfile = { workspace = true }
-tokio = { workspace = true }
 uuid = { workspace = true }
 
 [lints]
