@@ -2783,7 +2783,8 @@ fn report_rejects_failure_handoff_missing_stage_and_cause() {
     let error = build_run_report(temp.path(), Some("run-failed-missing-context-fields")).unwrap_err();
     let message = error.to_string();
 
-    assert!(message.contains("failed to parse"));
+    assert!(message.contains("Run failures artifact is not canonical"));
+    assert!(message.contains("missing field `failedStage`"));
     assert!(message.contains("failures.json"));
 }
 

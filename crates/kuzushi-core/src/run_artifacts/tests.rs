@@ -2000,25 +2000,31 @@ mod tests {
     }
 
     #[test]
-    fn load_run_failures_rejects_obsolete_failure_aliases() {
+    fn load_run_failures_rejects_unknown_failure_fields() {
         let tmp = tempfile::tempdir().unwrap();
-        let run_id = "run-failure-obsolete-aliases";
+        let run_id = "run-failure-unknown-field";
         write_run_summary(
             tmp.path(),
             &RunSummary::running(run_id, "tool", Some("triage:run".to_string()), "target")
                 .failed("runtime unavailable"),
         )
         .unwrap();
+        let mut failures = serde_json::to_value(representative_run_failures()).unwrap();
+        failures["failures"][0]["agentThreadContext"]
+            .as_object_mut()
+            .unwrap()
+            .insert("failed_stage".to_string(), serde_json::json!("triage:run"));
         fs::write(
             run_artifact_path(tmp.path(), run_id, "failures.json"),
-            serde_json::to_string_pretty(&representative_snake_case_run_failures()).unwrap(),
+            serde_json::to_string_pretty(&failures).unwrap(),
         )
         .unwrap();
 
         let error = load_run_failures(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("failed to parse"));
+        assert!(message.contains("Run failures artifact is not canonical"));
+        assert!(message.contains("unknown field `failed_stage`"));
         assert!(message.contains("failures.json"));
     }
 
@@ -3796,34 +3802,6 @@ mod tests {
                 },
             }],
         }
-    }
-
-    fn representative_snake_case_run_failures() -> serde_json::Value {
-        serde_json::json!({
-            "run_id": "run-failed",
-            "status": "failed",
-            "failures": [{
-                "tool": "triage:run",
-                "status": "failed",
-                "error": "runtime unavailable",
-                "agent_thread_context": {
-                    "failed_stage": "triage:run",
-                    "cause": "runtime unavailable",
-                    "what_failed": "triage:run did not complete successfully",
-                    "artifacts_available": [{
-                        "label": "run metadata",
-                        "path": representative_run_artifact_path("run-failed", "run.json"),
-                        "kind": "json"
-                    }],
-                    "missing_artifacts": ["proof.json"],
-                    "allowed_proof_level": "artifact-review-only",
-                    "next_files_or_artifacts_to_inspect": ["failures.json"],
-                    "recovery_options": ["rerun triage"],
-                    "fallback_prompt": "continue failed run",
-                    "claims_forbidden": ["verified claim"]
-                }
-            }]
-        })
     }
 
     fn representative_run_event() -> RunEvent {

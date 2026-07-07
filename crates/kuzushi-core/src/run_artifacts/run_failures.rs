@@ -5,7 +5,7 @@ use crate::artifact_contract::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunFailures {
     pub run_id: String,
     pub status: String,
@@ -13,7 +13,7 @@ pub struct RunFailures {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct RunFailure {
     pub tool: String,
     pub status: String,
@@ -22,7 +22,7 @@ pub struct RunFailure {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct FailureToLlmContext {
     pub failed_stage: String,
     pub cause: String,
@@ -91,7 +91,12 @@ pub fn load_run_failures(target: impl AsRef<Path>, run_id: &str) -> Result<RunFa
             path.display()
         );
     }
-    serde_json::from_value(value).with_context(|| format!("failed to parse {}", path.display()))
+    serde_json::from_value(value).map_err(|error| {
+        anyhow::anyhow!(
+            "Run failures artifact is not canonical: {error}: {}",
+            path.display()
+        )
+    })
 }
 
 pub(crate) fn run_failure_artifact_path(target: &Path, run_id: &str) -> PathBuf {
