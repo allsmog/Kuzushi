@@ -454,6 +454,12 @@ fn home_view_renders_latest_run_artifact_rail() {
     )
     .unwrap();
     std::fs::write(run_dir.join("threat-model.json"), r#"{"status":"failed"}"#).unwrap();
+    std::fs::write(
+        run_dir.join("artifacts.json"),
+        r#"{"runId":"run-1","artifacts":[]}"#,
+    )
+    .unwrap();
+    std::fs::write(run_dir.join("failures.json"), r#"{"status":"failed"}"#).unwrap();
 
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -471,14 +477,13 @@ fn home_view_renders_latest_run_artifact_rail() {
     assert!(rendered.contains("2 high/critical"));
     assert!(rendered.contains("critical=1"));
     assert!(rendered.contains("frameworks Next.js=1, Rails=1, Spring=1"));
-    assert!(rendered.contains("ctx"));
     assert!(rendered.contains("✓"));
     assert!(rendered.contains("recorded"));
-    assert!(rendered.contains("findings"));
-    assert!(rendered.contains("○"));
+    assert!(rendered.contains("failures"));
+    assert!(rendered.contains("report"));
+    assert!(rendered.contains("manifest"));
     assert!(rendered.contains("⚠"));
     assert!(rendered.contains("■"));
-    assert!(rendered.contains("◆"));
 }
 
 #[test]

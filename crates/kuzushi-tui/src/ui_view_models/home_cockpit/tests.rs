@@ -176,7 +176,7 @@ fn home_cockpit_model_shapes_static_chrome_and_cards() {
     assert!(!model.next_card.mechanics.contains("scan ."));
     assert_eq!(model.findings_card.total, 0);
     assert_eq!(model.run_card.recorded, 0);
-    assert_eq!(model.run_card.total, 10);
+    assert_eq!(model.run_card.total, 3);
     assert!(model.top_risks.is_empty());
     assert!(model.workspace_line.contains("target none"));
 }
@@ -299,9 +299,11 @@ fn placeholder_attack_surface_does_not_render_zero_risk() {
 
     assert!(model.attack_surface.is_none());
     assert_eq!(model.findings_card.counts.high, 1);
-    assert!(model.run_card.artifacts.iter().any(|artifact| {
-        artifact.label == "surface" && artifact.state == "placeholder" && artifact.glyph == "○"
-    }));
+    assert!(!model
+        .run_card
+        .artifacts
+        .iter()
+        .any(|artifact| artifact.label == "surface"));
 }
 
 #[test]

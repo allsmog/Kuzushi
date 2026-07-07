@@ -101,7 +101,7 @@ pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
     let module_count = app.registry().modules().count();
     HomeCockpitModel {
         title: "HOME",
-        attack_surface: home_attack_surface_model(&run.run_dir, &artifacts),
+        attack_surface: attack_surface_risk_model(&run.run_dir),
         next_card: home_next_card(journey.as_ref()),
         findings_card: home_findings_card(app),
         top_risks: home_top_risks(app),
@@ -254,18 +254,6 @@ fn home_path_label(path: &Path) -> String {
     } else {
         format!("~/{}", rest.display())
     }
-}
-
-fn home_attack_surface_model(
-    run_dir: &Path,
-    artifacts: &[HomeArtifactRow],
-) -> Option<AttackSurfaceRiskModel> {
-    let surface = artifacts
-        .iter()
-        .find(|artifact| artifact.cells[1] == "surface")?;
-    matches!(surface.cells[2].as_str(), "recorded" | "partial")
-        .then(|| attack_surface_risk_model(run_dir))
-        .flatten()
 }
 
 fn home_artifact_rows(run_dir: &Path) -> Vec<HomeArtifactRow> {
