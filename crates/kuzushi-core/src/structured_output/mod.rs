@@ -8,6 +8,7 @@ mod structured_json_contract;
 mod tests;
 
 pub(crate) use finding_output::FindingsOutput;
+#[cfg(test)]
 pub(crate) use parse_json_value_from_agent_text::parse_json_value_from_agent_text;
 pub(crate) use parse_json_value_from_agent_text::{
     balanced_json_slices, parse_json_value_from_agent_text_with_strategy,
