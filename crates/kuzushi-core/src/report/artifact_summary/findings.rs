@@ -15,10 +15,8 @@ fn finding_items(value: &Value) -> Option<&[Value]> {
     value
         .as_array()
         .or_else(|| value.get("coreFindings").and_then(Value::as_array))
-        .or_else(|| value.get("core_findings").and_then(Value::as_array))
         .or_else(|| value.get("findings").and_then(Value::as_array))
         .or_else(|| value.pointer("/data/coreFindings").and_then(Value::as_array))
-        .or_else(|| value.pointer("/data/core_findings").and_then(Value::as_array))
         .or_else(|| value.pointer("/data/findings").and_then(Value::as_array))
         .map(Vec::as_slice)
 }
@@ -36,15 +34,9 @@ fn finding_segments(findings: &[Value]) -> Vec<String> {
     parts.extend(named_segment("confidence", confidence_summary(findings)));
     parts.extend(named_segment("CWEs", cwe_summary(findings)));
     parts.extend(named_segment("root causes", root_cause_summary(findings)));
-    parts.extend(named_segment("tools", finding_unique_summary(findings, &["tool"])));
-    parts.extend(named_segment(
-        "rules",
-        finding_unique_summary(findings, &["ruleId", "rule_id"]),
-    ));
-    parts.extend(named_segment(
-        "files",
-        finding_unique_summary(findings, &["filePath", "file_path"]),
-    ));
+    parts.extend(named_segment("tools", finding_unique_summary(findings, "tool")));
+    parts.extend(named_segment("rules", finding_unique_summary(findings, "ruleId")));
+    parts.extend(named_segment("files", finding_unique_summary(findings, "filePath")));
     parts.extend(named_count("suppressed", findings, suppressed_count));
     parts.extend(named_count("snoozed", findings, snoozed_count));
     parts.extend(named_count("remediation", findings, remediation_count));
@@ -91,30 +83,7 @@ fn canonical_static_proof_state(value: &str) -> String {
 }
 
 fn finding_string_field<'a>(finding: &'a Value, key: &str) -> Option<&'a str> {
-    finding
-        .get(key)
-        .or_else(|| static_proof_state_alias(finding, key))
-        .and_then(string_value)
-}
-
-fn static_proof_state_alias<'a>(finding: &'a Value, key: &str) -> Option<&'a Value> {
-    if key != "staticProofState" {
-        return None;
-    }
-    finding
-        .get("static_proof_state")
-        .or_else(|| finding.get("proofState"))
-        .or_else(|| finding.get("proof_state"))
-        .or_else(|| nested_static_proof_state_alias(finding))
-}
-
-fn nested_static_proof_state_alias(finding: &Value) -> Option<&Value> {
-    let properties = finding.get("properties")?;
-    properties
-        .get("staticProofState")
-        .or_else(|| properties.get("static_proof_state"))
-        .or_else(|| properties.get("proofState"))
-        .or_else(|| properties.get("proof_state"))
+    finding.get(key).and_then(string_value)
 }
 
 fn string_value(value: &Value) -> Option<&str> {
@@ -157,7 +126,7 @@ fn root_cause_summary(findings: &[Value]) -> Option<String> {
 /// cause (a per-index sentinel) rather than collapsing with other fileless
 /// findings on an empty key.
 fn finding_root_cause_key(finding: &Value, index: usize) -> String {
-    match string_alias(finding, &["filePath", "file_path"]) {
+    match finding_string_field(finding, "filePath") {
         Some(file) => {
             crate::findings::compute_root_cause_key(file, finding_cwes(finding).into_iter().next())
         }
@@ -173,9 +142,9 @@ fn cwe_summary(findings: &[Value]) -> Option<String> {
     count_segments(&counts, alphabetical_order)
 }
 
-fn finding_unique_summary(findings: &[Value], keys: &[&str]) -> Option<String> {
+fn finding_unique_summary(findings: &[Value], key: &str) -> Option<String> {
     let mut counts = BTreeMap::new();
-    for value in findings.iter().filter_map(|finding| string_alias(finding, keys)) {
+    for value in findings.iter().filter_map(|finding| finding_string_field(finding, key)) {
         *counts.entry(value.to_string()).or_insert(0) += 1;
     }
     count_segments(&counts, alphabetical_order)
@@ -201,11 +170,11 @@ fn suppressed_count(finding: &Value) -> usize {
 }
 
 fn snoozed_count(finding: &Value) -> usize {
-    string_alias(finding, &["snoozedUntil", "snoozed_until"]).is_some() as usize
+    finding_string_field(finding, "snoozedUntil").is_some() as usize
 }
 
 fn remediation_count(finding: &Value) -> usize {
-    string_alias(finding, &["remediation"]).is_some() as usize
+    finding_string_field(finding, "remediation").is_some() as usize
 }
 
 fn reference_count(finding: &Value) -> usize {
@@ -214,12 +183,6 @@ fn reference_count(finding: &Value) -> usize {
         .and_then(Value::as_array)
         .map(Vec::len)
         .unwrap_or(0)
-}
-
-fn string_alias<'a>(finding: &'a Value, keys: &[&str]) -> Option<&'a str> {
-    keys.iter()
-        .filter_map(|key| finding.get(*key))
-        .find_map(string_value)
 }
 
 fn canonical_confidence(value: &str) -> String {

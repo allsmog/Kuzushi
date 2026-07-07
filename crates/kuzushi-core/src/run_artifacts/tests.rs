@@ -3208,7 +3208,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_run_complete_promotes_proof_state_aliases() {
+    fn tool_run_complete_ignores_obsolete_proof_state_aliases() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-proof-state-alias";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "sast:scan");
@@ -3233,13 +3233,10 @@ mod tests {
         let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
 
         assert_eq!(
-            proof["countsByState"]["execution_confirmed"],
-            serde_json::json!(1)
+            proof["summary"],
+            serde_json::json!("No proof snapshot was recorded for this run.")
         );
-        assert_eq!(proof["countsByState"]["code_cited"], serde_json::json!(2));
-        assert!(proof["countsByState"].get("code-cited").is_none());
-        assert_eq!(proof["runtimeVerification"], serde_json::json!(true));
-        assert_eq!(proof["proofLevel"], serde_json::json!("runtime-and-static"));
+        assert!(proof.get("countsByState").is_none());
     }
 
     #[test]
@@ -3255,9 +3252,9 @@ mod tests {
                 "ok": true,
                 "data": {
                     "coreFindings": [
-                        {"fingerprint": "reviewed", "tool": "verify", "proof_state": "runtime_reviewed"},
-                        {"fingerprint": "attempted", "tool": "verify", "proof_state": "execution_attempted"},
-                        {"fingerprint": "rejected", "tool": "verify", "proof_state": "execution_rejected"}
+                        {"fingerprint": "reviewed", "tool": "verify", "staticProofState": "runtime_reviewed"},
+                        {"fingerprint": "attempted", "tool": "verify", "staticProofState": "execution_attempted"},
+                        {"fingerprint": "rejected", "tool": "verify", "staticProofState": "execution_rejected"}
                     ]
                 }
             }),
@@ -3281,7 +3278,7 @@ mod tests {
     }
 
     #[test]
-    fn tool_run_complete_promotes_nested_properties_proof_state() {
+    fn tool_run_complete_ignores_nested_properties_proof_state() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "tool-proof-state-properties";
         let record = ToolRunRecord::new(tmp.path(), run_id, "tool", "codeql:scan");
@@ -3298,7 +3295,7 @@ mod tests {
                             "tool": "codeql",
                             "ruleId": "js/sql-injection",
                             "filePath": "src/app.ts",
-                            "properties": {"staticProofState": "source-sink-linked"}
+                            "staticProofState": "source-sink-linked"
                         },
                         {
                             "fingerprint": "codeql-b",
@@ -3322,9 +3319,9 @@ mod tests {
         );
         assert_eq!(
             proof["countsByState"]["runtime_confirmed"],
-            serde_json::json!(1)
+            serde_json::Value::Null
         );
-        assert_eq!(proof["runtimeVerification"], serde_json::json!(true));
+        assert_eq!(proof["runtimeVerification"], serde_json::json!(false));
         assert_eq!(
             proof["findings"][0]["staticProofState"],
             serde_json::json!("source_sink_linked")
@@ -4328,7 +4325,7 @@ mod tests {
             "startLine": 7,
             "endLine": 9,
             "staticProofState": "source_sink_linked",
-            "properties": {"proofState": "source_sink_linked"},
+            "properties": {"scanner": "semgrep"},
             "cwe": ["CWE-89"],
             "evidence": "source to sink",
             "suppressed": false,

@@ -113,7 +113,7 @@ const requiredAliasGroupsBySchema = {
 
 const snapshotEnvelopeFieldsBySchema = {
   "schemas/run.context.schema.json": ["context", "contextSnapshot"],
-  "schemas/run.findings.schema.json": ["coreFindings", "core_findings", "findings"],
+  "schemas/run.findings.schema.json": ["coreFindings", "findings"],
   "schemas/run.proof.schema.json": ["proof"],
   "schemas/run.recommendations.schema.json": [
     "data",
@@ -140,13 +140,6 @@ const proofStateEnumBySchema = {
 const proofStateRefBySchema = {
   "schemas/run.findings.schema.json": [
     ["definitions", "finding", "properties", "staticProofState"],
-    ["definitions", "finding", "properties", "static_proof_state"],
-    ["definitions", "finding", "properties", "proofState"],
-    ["definitions", "finding", "properties", "proof_state"],
-    ["definitions", "findingProperties", "properties", "staticProofState"],
-    ["definitions", "findingProperties", "properties", "static_proof_state"],
-    ["definitions", "findingProperties", "properties", "proofState"],
-    ["definitions", "findingProperties", "properties", "proof_state"],
   ],
   "schemas/run.proof.schema.json": [
     ["definitions", "proofFinding", "properties", "staticProofState"],

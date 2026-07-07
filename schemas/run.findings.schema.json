@@ -24,10 +24,6 @@
       "type": "array",
       "items": { "$ref": "#/definitions/finding" }
     },
-    "core_findings": {
-      "type": "array",
-      "items": { "$ref": "#/definitions/finding" }
-    },
     "findings": {
       "type": "array",
       "items": { "$ref": "#/definitions/finding" }
@@ -46,39 +42,24 @@
         "fingerprint": { "type": "string" },
         "tool": { "type": "string" },
         "ruleId": { "type": "string" },
-        "rule_id": { "type": "string" },
         "title": { "type": "string" },
         "message": { "type": "string" },
         "severity": { "$ref": "#/definitions/severity" },
         "confidence": { "$ref": "#/definitions/confidence" },
         "filePath": { "type": "string" },
-        "file_path": { "type": "string" },
         "startLine": { "type": "integer", "minimum": 1 },
-        "start_line": { "type": "integer", "minimum": 1 },
         "endLine": { "type": "integer", "minimum": 1 },
-        "end_line": { "type": "integer", "minimum": 1 },
         "staticProofState": { "$ref": "#/definitions/proofState" },
-        "static_proof_state": { "$ref": "#/definitions/proofState" },
-        "proofState": { "$ref": "#/definitions/proofState" },
-        "proof_state": { "$ref": "#/definitions/proofState" },
-        "properties": { "$ref": "#/definitions/findingProperties" },
+        "properties": {
+          "type": "object",
+          "additionalProperties": true
+        },
         "cwe": { "type": ["string", "array"] },
         "evidence": { "type": ["string", "array", "object"] },
         "suppressed": { "type": "boolean" },
         "snoozedUntil": { "type": "string" },
-        "snoozed_until": { "type": "string" },
         "remediation": { "type": "string" },
         "references": { "type": "array" }
-      }
-    },
-    "findingProperties": {
-      "type": "object",
-      "additionalProperties": true,
-      "properties": {
-        "staticProofState": { "$ref": "#/definitions/proofState" },
-        "static_proof_state": { "$ref": "#/definitions/proofState" },
-        "proofState": { "$ref": "#/definitions/proofState" },
-        "proof_state": { "$ref": "#/definitions/proofState" }
       }
     },
     "severity": {

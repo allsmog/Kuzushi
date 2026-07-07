@@ -28,32 +28,16 @@ fn finding_values(output: &Value) -> Option<&Vec<Value>> {
 
 fn static_proof_entry(finding: &Value) -> Option<Value> {
     let object = finding.as_object()?;
-    let state = canonical_proof_state(finding_proof_state(object)?);
+    let state = canonical_proof_state(string_field(object, "staticProofState")?);
     Some(json!({
-        "fingerprint": string_field(object, &["fingerprint"]),
-        "tool": string_field(object, &["tool"]),
-        "ruleId": string_field(object, &["ruleId", "rule_id"]),
-        "filePath": string_field(object, &["filePath", "file_path"]),
-        "startLine": object.get("startLine").or_else(|| object.get("start_line")).cloned(),
+        "fingerprint": string_field(object, "fingerprint"),
+        "tool": string_field(object, "tool"),
+        "ruleId": string_field(object, "ruleId"),
+        "filePath": string_field(object, "filePath"),
+        "startLine": object.get("startLine").cloned(),
         "staticProofState": state,
     }))
 }
-
-fn finding_proof_state<'a>(object: &'a Map<String, Value>) -> Option<&'a str> {
-    string_field(object, PROOF_STATE_KEYS).or_else(|| {
-        object
-            .get("properties")
-            .and_then(Value::as_object)
-            .and_then(|properties| string_field(properties, PROOF_STATE_KEYS))
-    })
-}
-
-const PROOF_STATE_KEYS: &[&str] = &[
-    "staticProofState",
-    "static_proof_state",
-    "proofState",
-    "proof_state",
-];
 
 fn canonical_proof_state(raw: &str) -> String {
     StaticProofState::try_from(raw)
@@ -100,10 +84,8 @@ fn counts_by_state(entries: &[Value]) -> BTreeMap<String, usize> {
     counts
 }
 
-fn string_field<'a>(object: &'a Map<String, Value>, keys: &[&str]) -> Option<&'a str> {
-    keys.iter()
-        .filter_map(|key| object.get(*key))
-        .find_map(Value::as_str)
+fn string_field<'a>(object: &'a Map<String, Value>, key: &str) -> Option<&'a str> {
+    object.get(key).and_then(Value::as_str)
 }
 
 fn value_at<'a>(output: &'a Value, pointers: &[&str]) -> Option<&'a Value> {

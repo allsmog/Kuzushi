@@ -1928,14 +1928,14 @@ fn report_summarizes_canonical_findings_distribution() {
             {
                 "id": "F-2",
                 "severity": "high",
-                "static_proof_state": "code_cited",
+                "staticProofState": "code_cited",
                 "tool": "semgrep:scan",
-                "rule_id": "sqli",
-                "file_path": "app/db.ts"
+                "ruleId": "sqli",
+                "filePath": "app/db.ts"
             },
-            {"id": "F-3", "severity": "high", "proofState": "execution_confirmed", "tool": "codeql:scan", "ruleId": "xss", "filePath": "app/routes.ts"},
-            {"id": "F-4", "severity": "medium", "proof_state": "runtime_reviewed"},
-            {"id": "F-5", "severity": "medium", "proof_state": "code-cited"},
+            {"id": "F-3", "severity": "high", "staticProofState": "execution_confirmed", "tool": "codeql:scan", "ruleId": "xss", "filePath": "app/routes.ts"},
+            {"id": "F-4", "severity": "medium", "staticProofState": "runtime_reviewed"},
+            {"id": "F-5", "severity": "medium", "staticProofState": "code-cited"},
         ]),
     )
     .unwrap();
@@ -2060,7 +2060,7 @@ fn report_summarizes_findings_confidence_distribution() {
                 "severity": "medium",
                 "confidence": 0.72,
                 "cwe": ["CWE-79", "CWE-89"],
-                "snoozed_until": "2027-01-01"
+                "snoozedUntil": "2027-01-01"
             },
             {
                 "id": "F-3",
@@ -2081,7 +2081,7 @@ fn report_summarizes_findings_confidence_distribution() {
 }
 
 #[test]
-fn report_summarizes_nested_properties_proof_state() {
+fn report_ignores_nested_properties_proof_state() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-findings-properties", "codeql:scan");
     write_run_summary(temp.path(), &source).unwrap();
@@ -2108,8 +2108,10 @@ fn report_summarizes_nested_properties_proof_state() {
     let report = build_run_report(temp.path(), Some("run-findings-properties")).unwrap();
 
     assert!(report.report_markdown.contains(
-        "findings.json: present - 2 finding(s), severity high=1, medium=1, proof runtime_confirmed=1, source_sink_linked=1"
+        "findings.json: present - 2 finding(s), severity high=1, medium=1"
     ));
+    assert!(!report.report_markdown.contains("proof runtime_confirmed"));
+    assert!(!report.report_markdown.contains("proof source_sink_linked"));
 }
 
 #[test]
@@ -2125,9 +2127,9 @@ fn report_summarizes_enveloped_findings_snapshot() {
         &json!({
             "status": "completed",
             "data": {
-                "core_findings": [
+                "coreFindings": [
                     {"id": "F-1", "severity": "HIGH", "confidence": 0.9},
-                    {"id": "F-2", "severity": "warning", "proof_state": "source-sink-linked"}
+                    {"id": "F-2", "severity": "warning", "staticProofState": "source-sink-linked"}
                 ]
             }
         }),
