@@ -58,6 +58,14 @@ impl FindingStore {
         Some((self.event_log_dir.clone()?, self.db_path.clone()?))
     }
 
+    pub(in crate::findings::persistence::open) fn required_v3_storage_paths(
+        &self,
+        context: &str,
+    ) -> Result<(PathBuf, PathBuf)> {
+        self.v3_storage_paths()
+            .with_context(|| format!("v3 storage paths are required to {context}"))
+    }
+
     pub(in crate::findings::persistence::open) fn finding_identity_for_id(
         &self,
         finding_id: i64,

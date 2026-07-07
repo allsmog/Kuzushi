@@ -453,8 +453,8 @@ mod tests {
             "systems-hunt",
             "systems/cwe-78",
             "src/foo.c",
-            42,
-            Some(42),
+            43,
+            Some(43),
             Severity::High,
             "exec reaches shell with attacker input, CWE-78",
         );
@@ -737,8 +737,14 @@ mod tests {
             .read_all()
             .unwrap();
         assert_eq!(events.len(), 3);
-        assert_eq!(events[2].event_kind, crate::event_log::EventKind::TriageDecided);
-        assert_eq!(events[2].payload["updatesFindingTriage"].as_bool(), Some(true));
+        assert_eq!(
+            events[2].event_kind,
+            crate::event_log::EventKind::TriageDecided
+        );
+        assert_eq!(
+            events[2].payload["updatesFindingTriage"].as_bool(),
+            Some(true)
+        );
     }
 
     #[test]
@@ -983,12 +989,13 @@ mod tests {
             "systems-hunt",
             "systems/cwe-78",
             "src/foo.c",
-            43,
-            Some(43),
+            42,
+            Some(42),
             Severity::High,
             "exec reaches shell with attacker input, CWE-78",
         );
         assert_eq!(semgrep.dedup_key, systems.dedup_key);
+        assert_eq!(semgrep.source_signature, systems.source_signature);
         assert_ne!(semgrep.fingerprint, systems.fingerprint);
 
         store.insert_finding(run, &systems).unwrap();
