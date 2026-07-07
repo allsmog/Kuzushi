@@ -40,6 +40,18 @@ impl BuiltinModule {
         }
         self
     }
+
+    /// Stamp each tool with its canonical journey phase from the single core
+    /// mapping table. Applied once at registration so the descriptor carries
+    /// the phase truth instead of a side table.
+    pub(in crate::modules) fn with_stamped_phases(mut self) -> Self {
+        let id = self.metadata.id.clone();
+        let kind = self.metadata.kind;
+        for tool in &mut self.tools {
+            tool.phase = canonical_tool_phase(&id, kind, &tool.name);
+        }
+        self
+    }
 }
 
 pub(in crate::modules) fn module(
@@ -101,6 +113,7 @@ pub(in crate::modules) fn tool_with_options(
         headless: true,
         hidden: false,
         runtime_requirement: RuntimeRequirement::Never,
+        phase: ToolPhase::default(),
         options,
         executor: None,
     }

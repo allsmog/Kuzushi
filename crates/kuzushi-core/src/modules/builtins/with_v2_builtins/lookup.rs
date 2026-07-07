@@ -24,6 +24,23 @@ impl ModuleRegistry {
             .filter(|tool| self.is_tool_visible(tool))
     }
 
+    /// Iterate visible `(module, tool)` pairs for catalog grouping and querying.
+    /// Skips hidden tools and tools whose owning module is hidden.
+    pub fn tools_with_modules(
+        &self,
+    ) -> impl Iterator<Item = (&ModuleMetadata, &ToolDescriptor)> {
+        self.modules
+            .values()
+            .filter(|module| !module.is_hidden())
+            .flat_map(|module| {
+                module
+                    .tools()
+                    .iter()
+                    .filter(|tool| !tool.hidden)
+                    .map(move |tool| (module.metadata(), tool))
+            })
+    }
+
     pub fn resolve_tool(&self, name: &str) -> Option<&ToolDescriptor> {
         self.tools.get(name)
     }

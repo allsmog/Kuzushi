@@ -35,6 +35,11 @@ pub struct ToolDescriptor {
     pub hidden: bool,
     #[serde(default, skip_serializing_if = "RuntimeRequirement::is_never")]
     pub runtime_requirement: RuntimeRequirement,
+    /// Canonical journey phase for grouping. Always serialized so `tools --json`
+    /// is explicit; `#[serde(default)]` keeps old manifests/dynamic modules
+    /// (which land in OPERATE) deserializable.
+    #[serde(default)]
+    pub phase: ToolPhase,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub options: Vec<OptionSpec>,
     #[serde(skip)]
@@ -48,6 +53,7 @@ impl PartialEq for ToolDescriptor {
             && self.headless == other.headless
             && self.hidden == other.hidden
             && self.runtime_requirement == other.runtime_requirement
+            && self.phase == other.phase
             && self.options == other.options
     }
 }

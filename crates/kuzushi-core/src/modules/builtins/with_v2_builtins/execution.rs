@@ -87,7 +87,24 @@ impl ModuleRegistry {
             format!("registered tool or DAG node {name:?} has no Rust executor mapping")
         })?;
         let result = executor(self, name, &input, ctx, runtime);
+        self.record_recent_tool_use(name, ctx);
         return result.map(|output| normalize_tool_output_contract(name, output));
+    }
+
+    /// Record a recents entry at the shared dispatch boundary so scan, shell,
+    /// and run all agree. Only visible (non-hidden) registered tools with a
+    /// workspace are recorded; a shelf-write failure never fails the tool run.
+    fn record_recent_tool_use(&self, name: &str, ctx: &ToolExecutionContext<'_>) {
+        let Some(workspace) = ctx.workspace else {
+            return;
+        };
+        let is_visible_tool = self.resolve_tool(name).is_some_and(|tool| !tool.hidden);
+        if !is_visible_tool {
+            return;
+        }
+        let at = dispatch_timestamp();
+        // Convenience state — a write failure must never fail the tool run.
+        let _ = crate::workspace::record_tool_use(workspace, name, &at);
     }
 
     fn enforce_runtime_requirement(
@@ -106,6 +123,15 @@ impl ModuleRegistry {
             "{name} requires an agent runtime; configure a model/runtime before running it"
         )
     }
+}
+
+/// Unix-seconds timestamp for a recents entry, as an opaque string. Read at the
+/// dispatch edge (not in domain code), so the shelf domain stays clockless.
+fn dispatch_timestamp() -> String {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs().to_string())
+        .unwrap_or_default()
 }
 
 fn runtime_requirement_is_deferred_to_executor(name: &str) -> bool {

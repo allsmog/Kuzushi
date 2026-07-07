@@ -63,6 +63,9 @@ impl FindingVerdictFilter {
 pub enum FindingTriageStateFilter {
     Untriaged,
     Triaged,
+    /// Still being worked: no verdict yet, or a verdict of "needs review".
+    /// Distinct from review-completeness `open` (`completeness:open`).
+    Open,
 }
 
 impl FindingTriageStateFilter {
@@ -70,6 +73,7 @@ impl FindingTriageStateFilter {
         match value.trim() {
             "new" | "pending" | "untriaged" => Ok(Self::Untriaged),
             "triaged" | "classified" => Ok(Self::Triaged),
+            "open" | "working" => Ok(Self::Open),
             other => anyhow::bail!("unknown findings:list state filter {other:?}"),
         }
     }
@@ -164,6 +168,9 @@ pub struct FindingListFilter {
     pub triage_state: Vec<FindingTriageStateFilter>,
     pub completeness: Vec<FindingReviewCompletenessFilter>,
     pub lifecycle_status: Vec<FindingLifecycleStatusFilter>,
+    /// Filter by triage confidence band. Empty = no filter. Untriaged findings
+    /// never match a confidence band (honest — no fabricated confidence).
+    pub confidence: Vec<ConfidenceBand>,
     pub name: Option<String>,
     pub text_terms: Vec<String>,
     pub file_path: Option<String>,
@@ -184,6 +191,7 @@ impl Default for FindingListFilter {
             triage_state: Vec::new(),
             completeness: Vec::new(),
             lifecycle_status: Vec::new(),
+            confidence: Vec::new(),
             name: None,
             text_terms: Vec::new(),
             file_path: None,
