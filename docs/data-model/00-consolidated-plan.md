@@ -46,7 +46,7 @@ Accepted scope from the 5 Phase A assessments + user review. Sibling docs:
 
 17. Add `'aborted'` to `PipelineRunStatus` at `src/store.ts:32–39` (A4 §3 "pipeline_runs.status").
 18. Delete zombie `FindingRow` type in `src/types.ts:857` + its Zod schema at `src/schemas.ts:805` (A1 identified as uninstantiated).
-19. Update `StoredFindingRecord`, `upsertFindingParams`, and `UPSERT_FINDING_SQL` to drop the 4 removed finding columns (calibrated_confidence, evidence_chain_json, composite_confidence, confidence_signals_json).
+19. Update the stored finding record and upsert path to drop the 4 removed finding columns (calibrated_confidence, evidence_chain_json, composite_confidence, confidence_signals_json).
 20. Delete dead functions: `_updateFindingCompositeConfidence`, `_updateRunAssertions`, `_updatePromptHash`, `_getRunAssertions`, `updateFindingCalibration`.
 21. Tests updated: delete DB-level subtests for H2/H3 in `tests/confidence-calibration.test.ts`; delete e2e phase-1E composite_confidence checks in `tests/e2e/run-e2e.sh`.
 

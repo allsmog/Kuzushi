@@ -104,14 +104,10 @@ impl FindingStore {
         }
 
         let identity = self.identity_assignment_for_finding(tx, scan_id, finding)?;
-        self.upsert_finding(tx, scan_id, finding, &identity)?;
-        let id: i64 = tx.query_row(
-            "select id from finding_projection_rows where run_id = ?1 and fingerprint = ?2",
-            params![scan_id, finding.fingerprint],
-            |row| row.get(0),
-        )?;
-        let evidence = self.verified_finding_evidence(tx, scan_id, &finding.evidence)?;
+        let id = self.upsert_current_finding_seed(tx, scan_id, finding, &identity)?;
         let projected = projected_seed(scan_id, id, finding, &identity);
+        self.update_current_finding(tx, id, &projected)?;
+        let evidence = self.verified_finding_evidence(tx, scan_id, &finding.evidence)?;
         Ok(FindingInsertOutcome {
             id,
             projected,
@@ -119,42 +115,68 @@ impl FindingStore {
         })
     }
 
-    fn upsert_finding(
+    fn upsert_current_finding_seed(
         &self,
         tx: &Connection,
         scan_id: &str,
         finding: &Finding,
         identity: &FindingIdentityAssignment,
-    ) -> Result<()> {
-        let references_json = references_json(&finding.references)?;
+    ) -> Result<i64> {
+        let seed = current_finding_seed(scan_id, finding, identity);
+        let finding_json = current_finding_json(&seed)?;
         tx.execute(
-            UPSERT_FINDING_SQL,
+            UPSERT_CURRENT_FINDING_SQL,
             params![
                 scan_id,
                 finding.fingerprint,
-                finding.rule_id,
-                finding.title,
-                finding.severity.as_str(),
-                finding.file_path,
-                finding.start_line,
-                finding.end_line,
-                finding.message,
-                finding.tool,
-                finding.actor_fingerprint,
-                finding.static_proof_state.map(StaticProofState::as_str),
-                finding.created_at,
-                finding.vuln_source.map(|s| s.as_str()),
-                finding.dedup_key,
-                finding.source_signature,
-                finding.corroboration_count.max(1),
-                finding.suppressed,
-                finding.snoozed_until,
-                finding.remediation,
-                references_json,
                 identity.identity_id,
                 identity.match_tier.as_str(),
+                finding.created_at,
+                finding.dedup_key,
+                finding.source_signature,
+                finding_json,
             ],
         )?;
+        self.current_finding_id(tx, scan_id, &finding.fingerprint)
+    }
+
+    fn current_finding_id(&self, tx: &Connection, scan_id: &str, fingerprint: &str) -> Result<i64> {
+        tx.query_row(
+            "select id from finding_current where run_id = ?1 and fingerprint = ?2",
+            params![scan_id, fingerprint],
+            |row| row.get(0),
+        )
+        .context("Could not load current finding id")
+    }
+
+    fn update_current_finding(
+        &self,
+        tx: &Connection,
+        finding_id: i64,
+        finding: &Finding,
+    ) -> Result<()> {
+        tx.execute(
+            r#"
+            update finding_current
+               set identity_id = ?1,
+                   identity_match_tier = ?2,
+                   updated_at = ?3,
+                   dedup_key = ?4,
+                   source_signature = ?5,
+                   finding_json = ?6
+             where id = ?7
+            "#,
+            params![
+                required_identity_id(finding)?,
+                required_identity_match_tier(finding)?,
+                finding.created_at,
+                finding.dedup_key,
+                finding.source_signature,
+                current_finding_json(finding)?,
+                finding_id,
+            ],
+        )
+        .context("Could not update current v3 finding")?;
         Ok(())
     }
 
@@ -168,19 +190,7 @@ impl FindingStore {
         let merge_id = existing.id.expect("existing finding always has id");
         let merged_tool = merge_tool_list(&existing.tool, &finding.tool);
         let merged_source = merge_vuln_source(existing.vuln_source, finding.vuln_source);
-        let evidence = if finding.severity > existing.severity {
-            self.replace_collision_headline(tx, merge_id, finding, &merged_tool, merged_source)?;
-            ProjectionEvidence::Replace(self.verified_finding_evidence(
-                tx,
-                scan_id,
-                &finding.evidence,
-            )?)
-        } else if existing.tool != merged_tool {
-            self.update_collision_tool(tx, merge_id, &merged_tool, merged_source)?;
-            ProjectionEvidence::KeepExisting
-        } else {
-            ProjectionEvidence::KeepExisting
-        };
+        let evidence = self.collision_projection_evidence(tx, scan_id, &existing, finding)?;
         self.record_collision_identity(tx, &existing, finding)?;
         let identity = match collision_identity_assignment(&existing) {
             Some(identity) => identity,
@@ -195,6 +205,7 @@ impl FindingStore {
             &merged_tool,
             merged_source,
         );
+        self.update_current_finding(tx, merge_id, &projected)?;
         Ok(FindingInsertOutcome {
             id: merge_id,
             projected,
@@ -202,49 +213,21 @@ impl FindingStore {
         })
     }
 
-    fn replace_collision_headline(
+    fn collision_projection_evidence(
         &self,
         tx: &Connection,
-        id: i64,
-        finding: &Finding,
-        merged_tool: &str,
-        merged_source: Option<VulnSource>,
-    ) -> Result<()> {
-        tx.execute(
-            r#"update finding_projection_rows set
-                 severity = ?, rule_id = ?, title = ?, message = ?,
-                 tool = ?, vuln_source = ?, suppressed = ?,
-                 snoozed_until = ?, remediation = ?, references_json = ?
-               where id = ?"#,
-            params![
-                finding.severity.as_str(),
-                finding.rule_id,
-                finding.title,
-                finding.message,
-                merged_tool,
-                merged_source.map(|s| s.as_str()),
-                finding.suppressed,
-                finding.snoozed_until,
-                finding.remediation,
-                references_json(&finding.references)?,
-                id,
-            ],
-        )?;
-        Ok(())
-    }
-
-    fn update_collision_tool(
-        &self,
-        tx: &Connection,
-        id: i64,
-        merged_tool: &str,
-        merged_source: Option<VulnSource>,
-    ) -> Result<()> {
-        tx.execute(
-            "update finding_projection_rows set tool = ?, vuln_source = ? where id = ?",
-            params![merged_tool, merged_source.map(|s| s.as_str()), id],
-        )?;
-        Ok(())
+        scan_id: &str,
+        existing: &Finding,
+        incoming: &Finding,
+    ) -> Result<ProjectionEvidence> {
+        if incoming.severity <= existing.severity {
+            return Ok(ProjectionEvidence::KeepExisting);
+        }
+        Ok(ProjectionEvidence::Replace(self.verified_finding_evidence(
+            tx,
+            scan_id,
+            &incoming.evidence,
+        )?))
     }
 
     /// Look up an existing finding in this scan run that shares the dedup_key.
@@ -259,10 +242,8 @@ impl FindingStore {
         new_fingerprint: &str,
     ) -> Result<Option<Finding>> {
         let mut stmt = tx.prepare(
-            "select id, run_id, fingerprint, rule_id, title, severity, file_path,
-                    start_line, end_line, message, tool, vuln_source, source_signature,
-                    corroboration_count, identity_id, identity_match_tier
-               from finding_projection_rows
+            "select finding_json
+               from finding_current
               where run_id = ?1
                 and dedup_key = ?2
                 and not (run_id = ?1 and fingerprint = ?3)
@@ -270,9 +251,9 @@ impl FindingStore {
               limit 1",
         )?;
         let row = stmt
-            .query_row(params![scan_id, dedup_key, new_fingerprint], collision_row)
+            .query_row(params![scan_id, dedup_key, new_fingerprint], row_to_current_finding)
             .optional()?;
-        Ok(row.map(|row| row.into_finding(dedup_key)))
+        Ok(row)
     }
 
     fn record_v3_observation(
@@ -561,6 +542,18 @@ fn merged_projection_seed(
     projected
 }
 
+fn current_finding_seed(
+    scan_id: &str,
+    finding: &Finding,
+    identity: &FindingIdentityAssignment,
+) -> Finding {
+    let mut projected = finding.clone();
+    projected.scan_id = Some(scan_id.to_string());
+    projected.identity_id = Some(identity.identity_id.clone());
+    projected.identity_match_tier = Some(identity.match_tier.as_str().to_string());
+    projected
+}
+
 fn apply_projection_identity(
     projected: &mut Finding,
     scan_id: &str,
@@ -571,6 +564,29 @@ fn apply_projection_identity(
     projected.scan_id = Some(scan_id.to_string());
     projected.identity_id = Some(identity.identity_id.clone());
     projected.identity_match_tier = Some(identity.match_tier.as_str().to_string());
+}
+
+fn current_finding_json(finding: &Finding) -> Result<String> {
+    serde_json::to_string(finding).context("Could not serialize current v3 finding")
+}
+
+fn row_to_current_finding(row: &rusqlite::Row<'_>) -> rusqlite::Result<Finding> {
+    let raw: String = row.get(0)?;
+    serde_json::from_str(&raw).map_err(|error| to_sql_error(anyhow::Error::new(error)))
+}
+
+fn required_identity_id(finding: &Finding) -> Result<&str> {
+    finding
+        .identity_id
+        .as_deref()
+        .context("current v3 finding requires identity_id")
+}
+
+fn required_identity_match_tier(finding: &Finding) -> Result<&str> {
+    finding
+        .identity_match_tier
+        .as_deref()
+        .context("current v3 finding requires identity_match_tier")
 }
 
 fn read_optional_file(path: &Path) -> Result<Option<Vec<u8>>> {
@@ -725,71 +741,6 @@ fn line_end(bytes: &[u8], target_line: u32) -> Option<usize> {
     Some(start + relative_end)
 }
 
-struct CollisionRow {
-    id: i64,
-    scan_id: String,
-    fingerprint: String,
-    rule_id: String,
-    title: String,
-    severity: String,
-    file_path: String,
-    start_line: i64,
-    end_line: Option<i64>,
-    message: String,
-    tool: String,
-    vuln_source: Option<String>,
-    source_signature: Option<String>,
-    corroboration_count: i64,
-    identity_id: Option<String>,
-    identity_match_tier: Option<String>,
-}
-
-impl CollisionRow {
-    fn into_finding(self, dedup_key: &str) -> Finding {
-        Finding {
-            id: Some(self.id),
-            scan_id: Some(self.scan_id),
-            fingerprint: self.fingerprint,
-            rule_id: self.rule_id,
-            title: self.title,
-            severity: Severity::try_from(self.severity.as_str()).unwrap_or(Severity::Unknown),
-            file_path: self.file_path,
-            start_line: self.start_line.max(1) as u32,
-            end_line: self.end_line.map(|line| line.max(1) as u32),
-            message: self.message,
-            tool: self.tool,
-            vuln_source: self.vuln_source.as_deref().and_then(VulnSource::parse),
-            dedup_key: Some(dedup_key.to_string()),
-            source_signature: self.source_signature,
-            corroboration_count: self.corroboration_count.max(0) as u32,
-            identity_id: self.identity_id,
-            identity_match_tier: self.identity_match_tier,
-            ..Finding::default()
-        }
-    }
-}
-
-fn collision_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<CollisionRow> {
-    Ok(CollisionRow {
-        id: row.get(0)?,
-        scan_id: row.get(1)?,
-        fingerprint: row.get(2)?,
-        rule_id: row.get(3)?,
-        title: row.get(4)?,
-        severity: row.get(5)?,
-        file_path: row.get(6)?,
-        start_line: row.get(7)?,
-        end_line: row.get(8)?,
-        message: row.get(9)?,
-        tool: row.get(10)?,
-        vuln_source: row.get(11)?,
-        source_signature: row.get(12)?,
-        corroboration_count: row.get(13)?,
-        identity_id: row.get(14)?,
-        identity_match_tier: row.get(15)?,
-    })
-}
-
 fn collision_identity_assignment(finding: &Finding) -> Option<FindingIdentityAssignment> {
     Some(FindingIdentityAssignment {
         identity_id: finding.identity_id.clone()?,
@@ -822,37 +773,17 @@ fn normalized_collision_text(value: &str) -> String {
     crate::identity::finding_identity::normalize_finding_text(value)
 }
 
-fn references_json(references: &[String]) -> Result<Option<String>> {
-    if references.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(serde_json::to_string(references)?))
-}
-
-const UPSERT_FINDING_SQL: &str = r#"
-insert into finding_projection_rows(
-  run_id, fingerprint, rule_id, title, severity, file_path,
-  start_line, end_line, message, tool, actor_fingerprint,
-  static_proof_state, created_at, vuln_source, dedup_key,
-  source_signature, corroboration_count, suppressed, snoozed_until,
-  remediation, references_json, identity_id, identity_match_tier
+const UPSERT_CURRENT_FINDING_SQL: &str = r#"
+insert into finding_current(
+  run_id, fingerprint, identity_id, identity_match_tier, created_at,
+  updated_at, dedup_key, source_signature, finding_json
 )
-values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15,
-        ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
+values (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7, ?8)
 on conflict(run_id, fingerprint) do update set
-  title = excluded.title,
-  severity = excluded.severity,
-  message = excluded.message,
-  actor_fingerprint = excluded.actor_fingerprint,
-  static_proof_state = coalesce(excluded.static_proof_state, finding_projection_rows.static_proof_state),
-  vuln_source = coalesce(excluded.vuln_source, finding_projection_rows.vuln_source),
-  dedup_key = coalesce(excluded.dedup_key, finding_projection_rows.dedup_key),
-  source_signature = coalesce(excluded.source_signature, finding_projection_rows.source_signature),
-  corroboration_count = max(finding_projection_rows.corroboration_count, excluded.corroboration_count),
-  suppressed = excluded.suppressed,
-  snoozed_until = excluded.snoozed_until,
-  remediation = excluded.remediation,
-  references_json = excluded.references_json,
-  identity_id = coalesce(excluded.identity_id, finding_projection_rows.identity_id),
-  identity_match_tier = coalesce(excluded.identity_match_tier, finding_projection_rows.identity_match_tier)
+  identity_id = excluded.identity_id,
+  identity_match_tier = excluded.identity_match_tier,
+  updated_at = excluded.updated_at,
+  dedup_key = coalesce(excluded.dedup_key, finding_current.dedup_key),
+  source_signature = coalesce(excluded.source_signature, finding_current.source_signature),
+  finding_json = excluded.finding_json
 "#;
