@@ -39,7 +39,7 @@ pub(crate) fn render_prompt(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
 }
 
 fn inactive_prompt_line(app: &ShellApp) -> Option<Line<'static>> {
-    if matches!(app.shell_view, crate::ShellView::FilePicker) {
+    if matches!(app.shell_view(), crate::ShellView::FilePicker) {
         return Some(disabled_prompt_line(
             "file picker active — type to filter · Enter attach · Esc close",
         ));

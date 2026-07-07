@@ -16,7 +16,7 @@ fn unmapped_leaf_views_advertise_the_exit_path() {
         ShellView::FailureHandoff,
     ] {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.shell_view = view.clone();
+        app.set_shell_view(view.clone());
         let bindings = footer_keybindings(&app);
         assert!(
             bindings.contains(&bind("Esc", "back")),
@@ -28,7 +28,7 @@ fn unmapped_leaf_views_advertise_the_exit_path() {
 #[test]
 fn workbench_footer_advertises_esc_back_and_run_path() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     let bindings = footer_keybindings(&app);
     assert!(bindings.contains(&bind("Esc", "back")));
     assert!(!bindings.contains(&bind("cc", "workbench")));
@@ -42,7 +42,7 @@ fn workbench_footer_advertises_esc_back_and_run_path() {
 #[test]
 fn workbench_footer_advertises_export_when_findings_exist() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     *app.findings_mut() = vec![kuzushi_core::Finding::new_semgrep(
         "demo.rule",
         "src/app.rs",
@@ -60,7 +60,7 @@ fn workbench_footer_advertises_export_when_findings_exist() {
 #[test]
 fn footer_keybindings_include_shell_completion_prefix() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Home;
+    app.set_shell_view(ShellView::Home);
 
     let bindings = footer_keybindings(&app);
 
@@ -97,7 +97,7 @@ fn footer_keybindings_show_wait_cleanup_after_abort_request() {
 #[test]
 fn footer_keybindings_deduplicate_view_bindings() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     *app.findings_mut() = vec![kuzushi_core::Finding::new_semgrep(
         "demo.rule",
         "src/app.rs",
@@ -117,7 +117,7 @@ fn footer_keybindings_deduplicate_view_bindings() {
 #[test]
 fn planning_picker_footer_separates_phase_navigation_skip_and_close() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::PlanningPicker;
+    app.set_shell_view(ShellView::PlanningPicker);
 
     let bindings = footer_keybindings(&app);
 
@@ -148,7 +148,7 @@ fn planning_picker_footer_separates_phase_navigation_skip_and_close() {
 #[test]
 fn file_picker_footer_names_filter_and_attach_controls() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::FilePicker;
+    app.set_shell_view(ShellView::FilePicker);
 
     let bindings = footer_keybindings(&app);
 
@@ -170,7 +170,7 @@ fn previously_empty_views_now_show_scroll_and_back_in_footer() {
         ShellView::PromptsEditor,
     ] {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.shell_view = view.clone();
+        app.set_shell_view(view.clone());
         let bindings = footer_keybindings(&app);
         assert!(
             bindings.contains(&bind("j/k/g/G", "scroll")),
@@ -197,7 +197,7 @@ fn footers_do_not_relabel_back_as_home() {
         ShellView::AgentChat,
     ] {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.shell_view = view.clone();
+        app.set_shell_view(view.clone());
         let bindings = footer_keybindings(&app);
         assert!(
             !bindings.contains(&bind("Esc", "home")),
@@ -210,7 +210,7 @@ fn footers_do_not_relabel_back_as_home() {
 fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.scene_mut().set_page(VizPage::Dfd);
-    app.shell_view = ShellView::Scene;
+    app.set_shell_view(ShellView::Scene);
 
     let dfd_bindings = footer_keybindings(&app);
     assert!(dfd_bindings.contains(&bind("j/k/g/G", "scroll")));
@@ -222,7 +222,7 @@ fn scene_footer_advertises_3d_controls_only_on_3d_page() {
     assert!(!dfd_bindings.contains(&bind("r", "reset")));
 
     app.router.scene_mut().set_page(VizPage::AttackSurface);
-    app.shell_view = ShellView::Scene;
+    app.set_shell_view(ShellView::Scene);
     let terrain_bindings = footer_keybindings(&app);
     assert!(!terrain_bindings.contains(&bind("j/k/g/G", "scroll")));
     assert!(terrain_bindings.contains(&bind("h/l/j/k", "orbit 3D")));

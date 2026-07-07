@@ -446,7 +446,7 @@ fn background_tool_waits_for_pending_prompt_mutation_decision() {
     );
 
     assert_eq!(app.running_tool_name(), None);
-    assert_eq!(app.shell_view, ShellView::PromptsEditor);
+    assert_eq!(app.shell_view(), ShellView::PromptsEditor);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "prompt" && line.body.contains("blocked by pending prompt mutation")
     }));
@@ -474,7 +474,7 @@ fn threat_dependent_run_waits_for_pending_threat_review_decision() {
 
     assert_eq!(app.running_tool_name(), None);
     assert!(!app.engagement.has_pending_chain());
-    assert_eq!(app.shell_view, ShellView::Threat);
+    assert_eq!(app.shell_view(), ShellView::Threat);
     assert_eq!(app.router.threat().view(), ThreatView::Summary);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "threats" && line.body.contains("apply or reject the pending threat")
@@ -506,7 +506,7 @@ fn offense_review_threat_hunt_waits_for_pending_threat_review_decision() {
 
     assert_eq!(app.running_tool_name(), None);
     assert!(!app.engagement.has_pending_chain());
-    assert_eq!(app.shell_view, ShellView::Threat);
+    assert_eq!(app.shell_view(), ShellView::Threat);
     assert_eq!(app.router.threat().view(), ThreatView::Summary);
 }
 
@@ -1119,16 +1119,16 @@ fn logs_command_routes_to_full_screen_transcript() {
     // the entire 500-line buffer instead of seeing only the embedded strip.
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, parse_command("logs"));
-    assert!(matches!(app.shell_view, ShellView::Logs));
+    assert!(matches!(app.shell_view(), ShellView::Logs));
 
     // Aliases (log, transcript) reach the same view.
-    app.shell_view = ShellView::Home;
+    app.set_shell_view(ShellView::Home);
     run_command(&mut app, parse_command("log"));
-    assert!(matches!(app.shell_view, ShellView::Logs));
+    assert!(matches!(app.shell_view(), ShellView::Logs));
 
-    app.shell_view = ShellView::Home;
+    app.set_shell_view(ShellView::Home);
     run_command(&mut app, parse_command("transcript"));
-    assert!(matches!(app.shell_view, ShellView::Logs));
+    assert!(matches!(app.shell_view(), ShellView::Logs));
 }
 
 #[test]
@@ -1138,7 +1138,7 @@ fn logs_view_routes_j_k_and_page_keys_to_logs_scroll() {
     // — otherwise the transcript would visually stay pinned while the
     // generic offset advances.
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Logs;
+    app.set_shell_view(ShellView::Logs);
     app.router.default_scroll_mut().reset();
     app.router.logs_mut().open();
 
@@ -1189,7 +1189,7 @@ fn help_command_routes_to_rust_shell_help_without_removed_cli_paths() {
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, parse_command("/help"));
 
-    assert_eq!(app.shell_view, ShellView::Help);
+    assert_eq!(app.shell_view(), ShellView::Help);
     let help_log = app
         .log_lines()
         .iter()
@@ -1388,7 +1388,7 @@ fn scan_command_reducer_defers_guided_scan_open_to_effect_runtime() {
         [ShellEffect::OpenGuidedScan(GuidedScanOpen { .. })]
     ));
     assert!(app.target().is_none());
-    assert_ne!(app.shell_view, ShellView::PlanningPicker);
+    assert_ne!(app.shell_view(), ShellView::PlanningPicker);
 
     EffectRuntime::execute(&mut app, effects);
 
@@ -1396,7 +1396,7 @@ fn scan_command_reducer_defers_guided_scan_open_to_effect_runtime() {
         app.target().and_then(|path| path.canonicalize().ok()),
         temp.path().canonicalize().ok()
     );
-    assert_eq!(app.shell_view, ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
     assert!(!app.jobs().is_running(JobKind::Run));
 }
 
@@ -2111,7 +2111,7 @@ fn findings_command_returns_refresh_then_finalize_effects_without_inline_reload(
         app.findings().is_empty(),
         "reload is an effect runtime concern"
     );
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
     assert!(matches!(
         effects.as_slice(),
@@ -2266,7 +2266,7 @@ fn pwn_show_reducer_returns_refresh_effect_without_reading_disk() {
         .reduce_command_effects(&ShellCommand::Pwn(PwnCommand::Show))
         .expect("pwn command should be effect-routed");
 
-    assert_eq!(app.shell_view, ShellView::Pwn);
+    assert_eq!(app.shell_view(), ShellView::Pwn);
     assert!(app.pwn_view().state_snapshot.is_none());
     assert_eq!(effects.len(), 1);
     assert!(matches!(effects[0], ShellEffect::RefreshPwnState));
@@ -2287,7 +2287,7 @@ fn replay_latest_reducer_defers_latest_pointer_read_to_effect_runtime() {
         .reduce_command_effects(&ShellCommand::Replay("latest".to_string()))
         .expect("replay command should be effect-routed");
 
-    assert_ne!(app.shell_view, ShellView::Replay);
+    assert_ne!(app.shell_view(), ShellView::Replay);
     assert!(app.log_lines().iter().all(|line| line.prefix != "error"));
     let open = run_artifact_open(&effects).expect("open run artifact effect");
     assert_eq!(open.selector, "latest");
@@ -2296,7 +2296,7 @@ fn replay_latest_reducer_defers_latest_pointer_read_to_effect_runtime() {
 
     EffectRuntime::execute(&mut app, effects);
 
-    assert_ne!(app.shell_view, ShellView::Replay);
+    assert_ne!(app.shell_view(), ShellView::Replay);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "error" && line.body.contains("could not read latest run pointer")
     }));
@@ -2312,12 +2312,12 @@ fn activity_command_reducer_defers_session_creation_to_effect_runtime() {
 
     let open = activity_open_effect(&effects).expect("open activity effect");
     assert!(open.run_id.is_none());
-    assert!(!matches!(app.shell_view, ShellView::Activity));
+    assert!(!matches!(app.shell_view(), ShellView::Activity));
     assert!(app.activity().is_none());
 
     EffectRuntime::execute(&mut app, effects);
 
-    assert!(matches!(app.shell_view, ShellView::Activity));
+    assert!(matches!(app.shell_view(), ShellView::Activity));
     assert!(app.activity().is_some());
     assert!(app
         .log_lines()
@@ -2336,7 +2336,7 @@ fn load_command_reducer_defers_dynamic_registry_load_to_effect_runtime() {
 
     let load = dynamic_module_load_effect(&effects).expect("dynamic load effect");
     assert_eq!(load.specifier, specifier);
-    assert_eq!(app.shell_view, ShellView::Tools);
+    assert_eq!(app.shell_view(), ShellView::Tools);
     assert!(app.log_lines().iter().all(|line| line.prefix != "error"));
 
     EffectRuntime::execute(&mut app, effects);
@@ -2347,7 +2347,7 @@ fn load_command_reducer_defers_dynamic_registry_load_to_effect_runtime() {
 #[test]
 fn clear_command_reducer_defers_conversation_mutation_to_effect_runtime() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
     *app.selected_finding_mut() = Some(Finding::new_tool(
         "fixture",
         "clear/finding",
@@ -2364,7 +2364,7 @@ fn clear_command_reducer_defers_conversation_mutation_to_effect_runtime() {
         .expect("clear command should be effect-routed");
 
     assert!(has_clear_effect(&effects));
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app.selected_finding().is_some());
     assert!(app
         .log_lines()
@@ -2373,7 +2373,7 @@ fn clear_command_reducer_defers_conversation_mutation_to_effect_runtime() {
 
     EffectRuntime::execute(&mut app, effects);
 
-    assert_eq!(app.shell_view, ShellView::Catalog);
+    assert_eq!(app.shell_view(), ShellView::Catalog);
     assert!(app.selected_finding().is_none());
     assert!(!app
         .log_lines()
@@ -2388,7 +2388,7 @@ fn clear_command_reducer_defers_conversation_mutation_to_effect_runtime() {
 #[test]
 fn workspace_status_reducer_defers_projection_to_effect_runtime() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
     let initial_log_len = app.log_len();
 
     let effects = app
@@ -2396,12 +2396,12 @@ fn workspace_status_reducer_defers_projection_to_effect_runtime() {
         .expect("workspace status command should be effect-routed");
 
     assert!(has_workspace_status_effect(&effects));
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert_eq!(app.log_len(), initial_log_len);
 
     EffectRuntime::execute(&mut app, effects);
 
-    assert_eq!(app.shell_view, ShellView::Workspace);
+    assert_eq!(app.shell_view(), ShellView::Workspace);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "workspace" && line.body.contains("start shell with --target")
     }));
@@ -2421,7 +2421,7 @@ fn context_build_reducer_returns_build_effect_without_resolving_workspace() {
 
     assert_eq!(build.target.as_deref(), Some(missing_target.as_path()));
     assert_eq!(build.scope, None);
-    assert_ne!(app.shell_view, ShellView::Context);
+    assert_ne!(app.shell_view(), ShellView::Context);
     assert_ne!(app.focused_module(), Some("context"));
     assert!(!app.tool_is_running());
     assert!(!app.has_running_work());
@@ -2486,7 +2486,7 @@ fn terminal_edge_commands_enter_the_command_reducer() {
         .reduce_command_effects(&ShellCommand::Scene)
         .expect("scene command should be reducer-routed");
     assert!(scene.is_empty());
-    assert_eq!(app.shell_view, ShellView::Scene);
+    assert_eq!(app.shell_view(), ShellView::Scene);
 
     let unknown = app
         .reduce_command_effects(&ShellCommand::Unknown("wat".to_string()))
@@ -2503,7 +2503,7 @@ fn terminal_edge_commands_enter_the_command_reducer() {
         )))
         .expect("unsupported workspace command should be reducer-routed");
     assert!(unsupported.is_empty());
-    assert_eq!(app.shell_view, ShellView::Workspace);
+    assert_eq!(app.shell_view(), ShellView::Workspace);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "error" && line.body.contains("workspace sync is not supported")
     }));
@@ -2593,7 +2593,7 @@ fn command_effect_reducer_routes_tool_launcher_commands_without_spawning() {
         run_tool_prepare_input(aim_prepare)["focus"],
         serde_json::json!("auth")
     );
-    assert_eq!(aim_app.shell_view, ShellView::Workbench);
+    assert_eq!(aim_app.shell_view(), ShellView::Workbench);
     assert!(!aim_app.tool_is_running());
     assert!(!aim_app.jobs().is_running(JobKind::Run));
 
@@ -2604,7 +2604,7 @@ fn command_effect_reducer_routes_tool_launcher_commands_without_spawning() {
     let recommend_prepare =
         run_tool_prepare(&recommend_effects).expect("recommend should prepare a tool");
     assert_eq!(recommend_prepare.tool_name, "module-recommender:recommend");
-    assert_eq!(recommend_app.shell_view, ShellView::Recommend);
+    assert_eq!(recommend_app.shell_view(), ShellView::Recommend);
     assert!(!recommend_app.tool_is_running());
     assert!(!recommend_app.jobs().is_running(JobKind::Run));
 
@@ -2686,7 +2686,7 @@ fn patch_reject_reducer_discards_pending_patch_without_effects() {
 
     assert!(effects.is_empty());
     assert!(app.engagement.pending_patch().is_none());
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Ship));
 }
 
@@ -2722,7 +2722,7 @@ fn patch_apply_effect_applies_reviewed_diff_and_updates_view_state() {
         "after\n"
     );
     assert!(app.engagement.pending_patch().is_none());
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Ship));
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
     assert!(app
@@ -3496,7 +3496,7 @@ fn tools_command_applies_filter() {
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, ShellCommand::Tools(Some("semgrep".to_string())));
 
-    assert_eq!(app.shell_view, ShellView::Tools);
+    assert_eq!(app.shell_view(), ShellView::Tools);
     assert_eq!(app.router.tools().filter(), Some("semgrep"));
     assert_eq!(app.router.tools().scroll(), 0);
     assert!(app
@@ -3528,7 +3528,7 @@ fn findings_command_loads_store_rows() {
 
     assert_eq!(app.findings().len(), 1);
     // `findings` now lands on the Workbench command center (FINDINGS pane).
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
 }
 
@@ -3554,7 +3554,7 @@ fn open_command_accepts_deterministic_finding_alias() {
     run_command(&mut app, ShellCommand::Open("F-0001".to_string()));
 
     // A selected finding now reads in the Workbench DETAILS pane.
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
     assert_eq!(
         app.selected_finding()
@@ -3581,7 +3581,7 @@ fn open_command_resolves_alias_from_stable_sorted_mapping() {
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     run_command(&mut app, ShellCommand::Open("F-0001".to_string()));
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(
         app.selected_finding()
             .as_ref()
@@ -3671,7 +3671,7 @@ fn run_command_dispatches_focused_module_tool_through_registry() {
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app.log_lines().iter().any(
         |line| line.prefix == "result" && line.body.contains("dep-hygiene: 1 risky specifier")
     ));
@@ -3698,7 +3698,7 @@ fn run_command_dispatches_context_build_and_writes_snapshot() {
         },
     );
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app.has_running_work());
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "tool" && line.body.contains("running context:build in background")
@@ -3726,7 +3726,7 @@ fn run_dot_dispatches_focused_default_tool() {
     run_command(&mut app, parse_command("use context"));
     run_command(&mut app, parse_command(r#"run . {"sampleLimit":10}"#));
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app.has_running_work());
     drain_tool(&mut app);
     assert!(app.domain().context_view().exists);
@@ -3753,7 +3753,7 @@ fn context_build_command_dispatches_context_build_and_writes_snapshot() {
     // Auto-open lifts the user into the Activity view so the live trace
     // feed is visible while context:build runs. The original test
     // contract (shell_view == Context after dispatch) is now superseded.
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert_eq!(app.focused_module(), Some("context"));
     assert!(app.has_running_work());
     drain_tool(&mut app);
@@ -3775,7 +3775,7 @@ fn context_status_displays_existing_snapshot_or_missing_state() {
 
     run_command(&mut app, ShellCommand::Context(ContextCommand::Status));
 
-    assert_eq!(app.shell_view, ShellView::Context);
+    assert_eq!(app.shell_view(), ShellView::Context);
     assert!(!app.domain().context_view().exists);
     assert!(app.domain().context_view().status.contains("missing"));
 
@@ -3825,7 +3825,7 @@ fn workspace_status_reports_no_active_workspace() {
 
     run_command(&mut app, ShellCommand::Workspace(WorkspaceCommand::Status));
 
-    assert_eq!(app.shell_view, ShellView::Workspace);
+    assert_eq!(app.shell_view(), ShellView::Workspace);
     assert_eq!(app.domain().workspace_view().root, None);
     assert!(app
         .domain()
@@ -3856,7 +3856,7 @@ fn strategy_approve_command_updates_persisted_queue() {
         parse_command("strategy approve review-codeql-scan"),
     );
 
-    assert_eq!(app.shell_view, ShellView::StrategyQueue);
+    assert_eq!(app.shell_view(), ShellView::StrategyQueue);
     let queue = kuzushi_core::load_strategy_queue(&workspace).unwrap();
     assert_eq!(
         queue[0].status,
@@ -3886,7 +3886,7 @@ fn strategy_approve_reducer_returns_effect_without_persisting_queue() {
     let effects =
         app.reduce_strategy_command(&StrategyCommand::Approve("review-codeql-scan".to_string()));
 
-    assert_eq!(app.shell_view, ShellView::StrategyQueue);
+    assert_eq!(app.shell_view(), ShellView::StrategyQueue);
     let [ShellEffect::UpdateStrategyProposalStatus(update)] = effects.as_slice() else {
         panic!("strategy approve should return a status update effect");
     };
@@ -3941,7 +3941,7 @@ fn strategy_fire_runs_next_approved_runnable_proposal() {
         kuzushi_core::StrategyProposalStatus::Running
     );
     assert_eq!(app.running_tool_name(), Some("workspace:status"));
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app.log_lines().iter().any(|line| line.prefix == "strategy"
         && line
             .body
@@ -4005,7 +4005,7 @@ fn strategy_correct_command_records_lineage_and_updates_queue() {
         "strategy correct review-codeql-scan run codeql:scan with authz focus --workspace --reason tighten authz paths",
     ));
 
-    assert_eq!(app.shell_view, ShellView::StrategyQueue);
+    assert_eq!(app.shell_view(), ShellView::StrategyQueue);
     let corrections = kuzushi_core::load_strategy_corrections(&workspace).unwrap();
     assert_eq!(corrections.len(), 1);
     assert_eq!(
@@ -4113,7 +4113,7 @@ fn workspace_export_findings_to_temp_path() {
         }),
     );
 
-    assert_eq!(app.shell_view, ShellView::Workspace);
+    assert_eq!(app.shell_view(), ShellView::Workspace);
     assert_eq!(app.domain().workspace_view().findings_count, Some(1));
     assert_eq!(
         app.domain().workspace_view().last_export.as_deref(),
@@ -4820,7 +4820,7 @@ fn task_commands_update_sast_scan_selection_options() {
     let mut app = ShellApp::new(V2Config::default(), None);
 
     run_command(&mut app, ShellCommand::Tasks);
-    assert_eq!(app.shell_view, ShellView::SastTasks);
+    assert_eq!(app.shell_view(), ShellView::SastTasks);
     assert_eq!(app.focused_module(), Some("sast"));
 
     run_command(
@@ -5028,7 +5028,7 @@ fn kb_attach_detach_and_reparse_store_under_v2() {
 
     run_command(&mut app, ShellCommand::Attach("notes.md".to_string()));
 
-    assert_eq!(app.shell_view, ShellView::KnowledgeBase);
+    assert_eq!(app.shell_view(), ShellView::KnowledgeBase);
     assert_eq!(app.domain().kb_view().module_id, "threat-model");
     assert!(workspace
         .root()
@@ -5310,7 +5310,7 @@ fn auth_status_reducer_returns_show_effect_without_reading_env() {
     let result = update(&mut app, Msg::Cmd(ShellCommand::Auth));
 
     assert!(result.changed);
-    assert_eq!(app.shell_view, ShellView::Auth);
+    assert_eq!(app.shell_view(), ShellView::Auth);
     let show = auth_status_show_effect(&result.effects).expect("auth status effect");
     assert_eq!(show.api_key_env, "KUZUSHI_BG011_TEST_SECRET");
     assert!(
@@ -5329,7 +5329,7 @@ fn auth_login_reducer_returns_login_effect_without_spawning_process() {
     );
 
     assert!(result.changed);
-    assert_eq!(app.shell_view, ShellView::Auth);
+    assert_eq!(app.shell_view(), ShellView::Auth);
     let login = app.router.auth().login().expect("auth login view");
     assert_eq!(login.provider, "openai");
     assert_eq!(login.method, "headless");
@@ -5349,7 +5349,7 @@ fn auth_picker_oauth_returns_login_effect_with_continuation() {
     let _key = EnvVarGuard::unset("OPENAI_API_KEY");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.auth_picker_mut().open("openai".to_string());
-    app.shell_view = ShellView::AuthMethodPicker;
+    app.set_shell_view(ShellView::AuthMethodPicker);
     app.router.auth_picker_mut().set_cursor(1);
 
     let result = update(
@@ -5395,7 +5395,7 @@ fn auth_provider_backend_model_and_cost_commands_are_explicit_and_secret_safe() 
         &mut app,
         ShellCommand::AuthLogin(Some("not-a-provider".to_string())),
     );
-    assert_eq!(app.shell_view, ShellView::Auth);
+    assert_eq!(app.shell_view(), ShellView::Auth);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "error" && line.body.contains("unsupported auth login provider")
     }));
@@ -5519,7 +5519,7 @@ fn doctor_verb_opens_shell_health_not_agent_chat() {
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, ShellCommand::Health);
 
-    assert_eq!(app.shell_view, ShellView::Health);
+    assert_eq!(app.shell_view(), ShellView::Health);
     assert!(app.log_lines().iter().any(|line| line.prefix == "health"));
 
     let message = unknown_command_message("pr-comment");
@@ -5870,7 +5870,7 @@ fn model_choice_with_focused_module_and_no_global_sets_global_first() {
 #[test]
 fn config_view_onboards_with_keyboard_model_selection() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Config;
+    app.set_shell_view(ShellView::Config);
     // The Config view hides the non-primary OpenAI row (which varies with auth
     // state), so navigation steps the *visible* set — derive expectations from
     // it rather than hardcoding an index, and assert the Enter target is exactly
@@ -5915,7 +5915,7 @@ fn auth_picker_navigation_keys_work_with_text_in_prompt() {
     // modal it now captures navigation regardless of prompt contents.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.auth_picker_mut().open("openai".to_string());
-    app.shell_view = ShellView::AuthMethodPicker;
+    app.set_shell_view(ShellView::AuthMethodPicker);
     app.set_input("leftover");
 
     press_key(
@@ -5940,7 +5940,7 @@ fn auth_picker_swallows_typed_characters() {
     // never leak into the prompt or command history.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.auth_picker_mut().open("anthropic".to_string());
-    app.shell_view = ShellView::AuthMethodPicker;
+    app.set_shell_view(ShellView::AuthMethodPicker);
     app.clear_input();
 
     press_key(
@@ -5960,7 +5960,7 @@ fn auth_picker_swallows_shifted_typed_characters() {
     // still plain picker input, not shell chords.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.auth_picker_mut().open("openai".to_string());
-    app.shell_view = ShellView::AuthMethodPicker;
+    app.set_shell_view(ShellView::AuthMethodPicker);
 
     press_key(
         &mut app,
@@ -5979,7 +5979,7 @@ fn auth_picker_accepts_pasted_api_key_without_relaunch_or_logging_secret() {
     let _guard = EnvVarGuard::unset("OPENAI_API_KEY");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.auth_picker_mut().open("openai".to_string());
-    app.shell_view = ShellView::AuthMethodPicker;
+    app.set_shell_view(ShellView::AuthMethodPicker);
 
     paste_text(&mut app, "sk-test-secret");
     assert_eq!(app.router.auth_picker().key_draft(), "sk-test-secret");
@@ -6020,7 +6020,7 @@ fn auth_picker_enter_returns_session_env_effect_without_setting_secret() {
     let _guard = EnvVarGuard::unset("OPENAI_API_KEY");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.auth_picker_mut().open("openai".to_string());
-    app.shell_view = ShellView::AuthMethodPicker;
+    app.set_shell_view(ShellView::AuthMethodPicker);
 
     paste_text(&mut app, "sk-test-secret");
     let result = update(
@@ -6076,7 +6076,7 @@ fn picker_footer_omits_tab_complete_hint() {
     // completes — that contradicted the picker's own hint row.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.auth_picker_mut().open("openai".to_string());
-    app.shell_view = ShellView::AuthMethodPicker;
+    app.set_shell_view(ShellView::AuthMethodPicker);
     let bindings = crate::ui_view_models::footer_keybindings(&app);
     assert!(
         !bindings.iter().any(|binding| binding.key == "Tab"),
@@ -6093,7 +6093,7 @@ fn picker_footer_omits_tab_complete_hint() {
 #[test]
 fn picker_colon_focuses_prompt_and_esc_returns_to_picker() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::PlanningPicker;
+    app.set_shell_view(ShellView::PlanningPicker);
     app.engagement.set_phase(WorkflowPhase::Map);
 
     press_key(
@@ -6122,7 +6122,7 @@ fn picker_colon_focuses_prompt_and_esc_returns_to_picker() {
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
     assert_eq!(app.engagement.planning_picker().focus(), PickerFocus::List);
-    assert_eq!(app.shell_view, ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
     assert!(
         app.input().is_empty(),
@@ -6133,7 +6133,7 @@ fn picker_colon_focuses_prompt_and_esc_returns_to_picker() {
 #[test]
 fn picker_prompt_focus_restores_tab_completion_hint() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::PlanningPicker;
+    app.set_shell_view(ShellView::PlanningPicker);
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char(':'), KeyModifiers::empty()),
@@ -6154,11 +6154,11 @@ fn picker_prompt_focus_restores_tab_completion_hint() {
 #[test]
 fn ask_requires_explicit_model_and_unknown_prose_stays_deterministic() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Home;
+    app.set_shell_view(ShellView::Home);
 
     run_command(&mut app, parse_command("summarize this repo"));
 
-    assert_eq!(app.shell_view, ShellView::Home);
+    assert_eq!(app.shell_view(), ShellView::Home);
     assert!(app.agent_chat().is_none());
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "error" && line.body.contains("Free-form chat is explicit only")
@@ -6166,7 +6166,7 @@ fn ask_requires_explicit_model_and_unknown_prose_stays_deterministic() {
 
     run_command(&mut app, parse_command("/ask What should I run first?"));
 
-    assert_eq!(app.shell_view, ShellView::AgentChat);
+    assert_eq!(app.shell_view(), ShellView::AgentChat);
     let agent = app.agent_chat().unwrap();
     assert_eq!(agent.question, "What should I run first?");
     assert!(!agent.running);
@@ -6195,7 +6195,7 @@ fn exit_and_unknown_command_feedback_is_actionable() {
     }
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Home;
+    app.set_shell_view(ShellView::Home);
     submit_shell_line(&mut app, "/exitj");
 
     assert!(!app.should_quit());
@@ -6204,7 +6204,7 @@ fn exit_and_unknown_command_feedback_is_actionable() {
     }));
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Home;
+    app.set_shell_view(ShellView::Home);
     submit_shell_line(&mut app, "/definitely-not-real");
     let slash_error = app
         .log_lines()
@@ -6227,13 +6227,13 @@ fn exit_and_unknown_command_feedback_is_actionable() {
         .unwrap_or_default();
     assert!(missing_ask_error.contains("Next: /ask <question>"));
     assert!(app.agent_chat().is_none());
-    assert_eq!(app.shell_view, ShellView::Home);
+    assert_eq!(app.shell_view(), ShellView::Home);
 }
 
 #[test]
 fn plain_scripted_unknown_command_prints_command_and_new_error_log() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Home;
+    app.set_shell_view(ShellView::Home);
 
     let output = render_plain_scripted_session(&mut app, &["/nope"], 80);
 
@@ -6241,7 +6241,7 @@ fn plain_scripted_unknown_command_prints_command_and_new_error_log() {
     assert!(output.contains("command: /nope"));
     assert!(output.contains("> /nope"));
     assert!(output.contains("error: unknown command \"/nope\". Next: /help"));
-    assert_eq!(app.shell_view, ShellView::Home);
+    assert_eq!(app.shell_view(), ShellView::Home);
     assert_plain_output_strict_80(&output);
 }
 
@@ -6276,12 +6276,12 @@ fn plain_scripted_help_then_quit_prints_one_result_block_per_command() {
 #[test]
 fn plain_scripted_unchanged_view_command_still_prints_result_block() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
-    let before = app.shell_view.clone();
+    app.set_shell_view(ShellView::Workbench);
+    let before = app.shell_view().clone();
 
     let output = render_plain_scripted_session(&mut app, &["/workbench"], 80);
 
-    assert_eq!(app.shell_view, before);
+    assert_eq!(app.shell_view(), before);
     assert!(output.contains("COMMAND RESULT"));
     assert!(output.contains("command: /workbench"));
     assert!(output.contains("> /workbench"));
@@ -6297,7 +6297,7 @@ fn session_history_clear_load_resume_pause_and_story_are_explicit() {
     submit_shell_line(&mut app, "modules");
     submit_shell_line(&mut app, "/history");
 
-    assert_eq!(app.shell_view, ShellView::History);
+    assert_eq!(app.shell_view(), ShellView::History);
     assert_eq!(
         app.command_history(),
         vec!["modules".to_string(), "/history".to_string()]
@@ -6338,7 +6338,7 @@ fn session_history_clear_load_resume_pause_and_story_are_explicit() {
     }));
 
     run_command(&mut app, parse_command("/resume run-123"));
-    assert_eq!(app.shell_view, ShellView::Replay);
+    assert_eq!(app.shell_view(), ShellView::Replay);
     assert_eq!(app.router.replay().run_id(), "run-123");
     assert!(app
         .log_lines()
@@ -6346,7 +6346,7 @@ fn session_history_clear_load_resume_pause_and_story_are_explicit() {
         .any(|line| { line.prefix == "resume" && line.body.contains("replay run-123") }));
 
     run_command(&mut app, parse_command("/story"));
-    assert_eq!(app.shell_view, ShellView::Story);
+    assert_eq!(app.shell_view(), ShellView::Story);
 }
 
 #[test]
@@ -6359,7 +6359,7 @@ fn replay_latest_resolves_latest_run_pointer() {
 
     run_command(&mut app, parse_command("replay latest"));
 
-    assert_eq!(app.shell_view, ShellView::Replay);
+    assert_eq!(app.shell_view(), ShellView::Replay);
     assert_eq!(app.router.replay().run_id(), "run-latest");
     assert!(app
         .log_lines()
@@ -6377,7 +6377,7 @@ fn trace_latest_resolves_latest_run_pointer() {
 
     run_command(&mut app, parse_command("trace latest"));
 
-    assert_eq!(app.shell_view, ShellView::Trace);
+    assert_eq!(app.shell_view(), ShellView::Trace);
     assert_eq!(app.router.trace().run_id(), "run-latest");
     assert!(app
         .log_lines()
@@ -6391,7 +6391,7 @@ fn replay_latest_without_target_is_actionable() {
 
     run_command(&mut app, parse_command("replay latest"));
 
-    assert_ne!(app.shell_view, ShellView::Replay);
+    assert_ne!(app.shell_view(), ShellView::Replay);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "error" && line.body.contains("replay latest needs a target")
     }));
@@ -6418,7 +6418,7 @@ fn ask_dispatches_agent_question_through_explicit_runtime() {
 
     run_command(&mut app, parse_command("?What should I run first?"));
 
-    assert_eq!(app.shell_view, ShellView::AgentChat);
+    assert_eq!(app.shell_view(), ShellView::AgentChat);
     let running_agent = app.agent_chat().unwrap();
     assert_eq!(running_agent.question, "What should I run first?");
     assert!(
@@ -6481,7 +6481,7 @@ fn run_command_dispatches_recon_nmap_through_registry() {
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "result"
             && line
@@ -6514,7 +6514,7 @@ fn run_command_dispatches_recon_http_fingerprint_through_registry() {
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "result"
             && line
@@ -6554,7 +6554,7 @@ fn run_command_dispatches_secret_scan_through_registry() {
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app
         .log_lines()
         .iter()
@@ -6582,7 +6582,7 @@ fn run_command_dispatches_semgrep_through_registry_and_persists() {
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app
         .log_lines()
         .iter()
@@ -6614,7 +6614,7 @@ fn run_command_dispatches_codeql_through_registry_and_persists() {
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app
         .log_lines()
         .iter()
@@ -6644,7 +6644,7 @@ fn run_command_dispatches_iac_scan_through_registry_and_persists() {
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app
         .log_lines()
         .iter()
@@ -6676,7 +6676,7 @@ fn run_command_dispatches_cargo_audit_through_registry() {
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "result" && line.body.contains("cargo-audit: 0 advisory findings")
     }));
@@ -6719,7 +6719,7 @@ fn run_command_dispatches_sast_scan_through_registry_and_persists() {
     );
     drain_chain_with_auto_reuse(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app
         .log_lines()
         .iter()
@@ -6757,7 +6757,7 @@ fn run_dot_from_catalog_dispatches_sast_scan() {
     );
     drain_chain_with_auto_reuse(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app.focused_module().is_none());
     assert!(app
         .log_lines()
@@ -6804,7 +6804,7 @@ fn run_command_dispatches_agentic_sast_through_langgraph_runtime_bridge_and_pers
     );
     drain_chain_with_auto_reuse(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app
         .log_lines()
         .iter()
@@ -6851,7 +6851,7 @@ fn run_command_dispatches_variant_hunt_through_langgraph_runtime_bridge_and_pers
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app
         .log_lines()
         .iter()
@@ -6895,7 +6895,7 @@ fn run_command_dispatches_ndiff_hunt_through_langgraph_runtime_bridge_and_persis
         });
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "result" && line.body.contains("ndiff:hunt-variants complete")
     }));
@@ -6941,7 +6941,7 @@ fn run_command_dispatches_taint_iris_through_langgraph_runtime_bridge_and_persis
     // The compatibility path now runs the taint-iris-next report shape. It
     // persists findings, but emits no structured `data.flows[]`; the AttackPath
     // page correctly stays closed rather than showing an empty visualization.
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app.domain().taint_flow().is_none());
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "result"
@@ -7009,7 +7009,7 @@ fn run_command_dispatches_legacy_taint_iris_next_hunt_through_langgraph_runtime_
     // taint-iris-next flattens its taint path into finding text and emits no
     // structured `data.flows[]`, so there's nothing for the attack-path page to
     // draw — auto-open correctly leaves the view on Activity.
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(
         app.log_lines().iter().any(|line| {
             line.prefix == "result"
@@ -7060,7 +7060,7 @@ fn run_command_dispatches_carlini_threat_hunt_through_langgraph_runtime_bridge_a
     );
     drain_chain_with_auto_reuse(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "result" && line.body.contains("carlini-threat-hunt: 1 finding")
     }));
@@ -7104,7 +7104,7 @@ fn run_command_dispatches_systems_hunt_through_langgraph_runtime_bridge_and_pers
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app
         .log_lines()
         .iter()
@@ -7155,7 +7155,7 @@ fn run_command_dispatches_findings_filters_through_registry() {
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "result"
             && line.body.contains("SQL injection in search")
@@ -7210,7 +7210,7 @@ fn findings_filter_command_loads_filtered_rows_into_workbench() {
     );
 
     assert!(result.changed);
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
     assert_eq!(
         app.findings().len(),
@@ -7242,7 +7242,7 @@ fn findings_filter_command_matches_run_revision_metadata() {
         ShellCommand::FindingsFilter("sha:abcdef1 branch:main dirty:true".to_string()),
     );
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
     assert_eq!(app.findings().len(), 1);
     assert_eq!(app.findings()[0].rule_id, "demo.sql");
@@ -7259,7 +7259,7 @@ fn since_ref_scopes_findings_list() {
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     run_command(&mut app, ShellCommand::Since("main".to_string()));
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
     assert_eq!(app.findings().len(), 1);
     assert_eq!(app.findings()[0].rule_id, "demo.sql");
@@ -7276,7 +7276,7 @@ fn since_ref_requires_target_before_filtering_findings() {
 
     run_command(&mut app, ShellCommand::Since("main".to_string()));
 
-    assert_ne!(app.shell_view, ShellView::Workbench);
+    assert_ne!(app.shell_view(), ShellView::Workbench);
     assert!(app.findings().is_empty());
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "error" && line.body.contains("since requires an active target")
@@ -7394,7 +7394,7 @@ fn run_command_dispatches_triage_through_langgraph_runtime_bridge_and_persists()
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app
         .log_lines()
         .iter()
@@ -7464,7 +7464,7 @@ fn run_command_dispatches_verify_through_langgraph_runtime_bridge() {
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app
         .log_lines()
         .iter()
@@ -7535,7 +7535,7 @@ fn run_command_dispatches_patch_through_langgraph_runtime_bridge_and_persists() 
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app
         .log_lines()
         .iter()
@@ -7584,7 +7584,7 @@ fn run_command_dispatches_threat_model_build_through_langgraph_runtime_bridge() 
     drain_chain_with_auto_reuse(&mut app);
 
     // Auto-open lands on the Workbench DFD center once the threat model is built.
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Center);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "result" && line.body.contains("threat-model:build complete")
@@ -7626,7 +7626,7 @@ fn run_command_dispatches_x_ray_run_through_langgraph_runtime_bridge() {
     );
     drain_tool(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app
         .log_lines()
         .iter()
@@ -7702,7 +7702,7 @@ fn ctrl_c_requests_active_scan_abort_before_exit() {
 fn threat_digit_hotkeys_switch_views_without_entering_input() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.threat_mut().open(ThreatView::Summary);
-    app.shell_view = ShellView::Threat;
+    app.set_shell_view(ShellView::Threat);
 
     // DFD moved to the Workbench; the remaining tabs renumber from 1, so
     // `1` is now STRIDE.
@@ -7711,7 +7711,7 @@ fn threat_digit_hotkeys_switch_views_without_entering_input() {
         KeyEvent::new(KeyCode::Char('1'), KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view, ShellView::Threat);
+    assert_eq!(app.shell_view(), ShellView::Threat);
     assert_eq!(app.router.threat().view(), ThreatView::Stride);
     assert!(app.input().is_empty());
 }
@@ -7895,7 +7895,7 @@ fn scan_failure_sets_error_notice_and_keeps_log() {
 #[test]
 fn esc_dismisses_notice_before_going_back() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Tools;
+    app.set_shell_view(ShellView::Tools);
     app.push_nav_history(ShellView::Catalog);
     app.set_error_notice("tool", "boom");
 
@@ -7903,7 +7903,7 @@ fn esc_dismisses_notice_before_going_back() {
 
     assert!(app.advisory().notice.is_none(), "notice dismissed");
     assert_eq!(
-        app.shell_view,
+        app.shell_view(),
         ShellView::Tools,
         "back deferred to next Esc"
     );
@@ -7912,11 +7912,11 @@ fn esc_dismisses_notice_before_going_back() {
 #[test]
 fn empty_back_stack_returns_to_workbench() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Tools;
+    app.set_shell_view(ShellView::Tools);
 
     app.go_back();
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
 }
 
@@ -7957,7 +7957,7 @@ fn paste_of_workspace_file_attaches_instead_of_filling_prompt() {
     paste_text(&mut app, &path.display().to_string());
 
     assert!(app.input().is_empty());
-    assert_eq!(app.shell_view, ShellView::KnowledgeBase);
+    assert_eq!(app.shell_view(), ShellView::KnowledgeBase);
     assert_eq!(app.domain().kb_view().attachments.len(), 1);
     assert_eq!(
         app.domain().kb_view().attachments[0].source,
@@ -8009,7 +8009,7 @@ fn file_picker_filters_and_attaches_selected_workspace_file() {
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view, ShellView::KnowledgeBase);
+    assert_eq!(app.shell_view(), ShellView::KnowledgeBase);
     assert_eq!(app.domain().kb_view().attachments.len(), 1);
     assert_eq!(
         app.domain().kb_view().attachments[0].source,
@@ -8045,7 +8045,7 @@ fn file_picker_enter_returns_attach_effect_without_attaching_inline() {
     );
 
     assert!(result.changed);
-    assert_eq!(app.shell_view, ShellView::FilePicker);
+    assert_eq!(app.shell_view(), ShellView::FilePicker);
     assert!(app.domain().kb_view().attachments.is_empty());
     assert_eq!(
         kb_attach_effect(&result.effects).map(|effect| effect.source.as_str()),
@@ -8059,10 +8059,10 @@ fn file_picker_close_returns_to_origin_without_readding_picker_history() {
     std::fs::write(temp.path().join("README.md"), "readme").unwrap();
     let workspace = kuzushi_core::WorkspaceTarget::new(temp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
 
     app.open_file_picker();
-    assert_eq!(app.shell_view, ShellView::FilePicker);
+    assert_eq!(app.shell_view(), ShellView::FilePicker);
     assert!(app
         .router
         .navigation()
@@ -8070,7 +8070,7 @@ fn file_picker_close_returns_to_origin_without_readding_picker_history() {
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     app.sync_view_change();
     assert!(!app
         .router
@@ -8090,12 +8090,12 @@ fn file_picker_command_reducer_defers_workspace_walk_to_effect_runtime() {
         .expect("file picker command should be effect-routed");
 
     assert!(matches!(effects.as_slice(), [ShellEffect::OpenFilePicker]));
-    assert_ne!(app.shell_view, ShellView::FilePicker);
+    assert_ne!(app.shell_view(), ShellView::FilePicker);
     assert!(app.router.file_picker().files().is_empty());
 
     EffectRuntime::execute(&mut app, effects);
 
-    assert_eq!(app.shell_view, ShellView::FilePicker);
+    assert_eq!(app.shell_view(), ShellView::FilePicker);
     assert!(app
         .router
         .file_picker()
@@ -8128,7 +8128,7 @@ fn map_phase_attach_row_opens_file_picker() {
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view, ShellView::FilePicker);
+    assert_eq!(app.shell_view(), ShellView::FilePicker);
     assert!(app
         .router
         .file_picker()
@@ -8166,7 +8166,7 @@ fn skipped_map_phase_attach_row_does_not_intercept_enter() {
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert_eq!(app.engagement.running_tool(), Some("context:build"));
     drain_tool(&mut app);
 }
@@ -8174,7 +8174,7 @@ fn skipped_map_phase_attach_row_does_not_intercept_enter() {
 #[test]
 fn enter_on_empty_findings_logs_guidance() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.router
         .workbench_mut()
         .set_focus(WorkbenchPane::Findings);
@@ -8191,15 +8191,15 @@ fn enter_on_empty_findings_logs_guidance() {
             .any(|line| line.prefix == "findings" && line.body.contains("run `scan`")),
         "empty-findings Enter should guide the operator"
     );
-    assert_eq!(app.shell_view, ShellView::Workbench, "stay on the view");
+    assert_eq!(app.shell_view(), ShellView::Workbench, "stay on the view");
 }
 
 #[test]
 fn open_start_view_lands_on_the_workbench_by_default() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
     open_start_view(&mut app);
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
 }
 
@@ -8212,9 +8212,9 @@ fn open_start_view_preserves_an_active_onboarding_picker() {
         ShellView::PlanningPicker,
     ] {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.shell_view = picker.clone();
+        app.set_shell_view(picker.clone());
         open_start_view(&mut app);
-        assert_eq!(app.shell_view, picker, "picker was clobbered");
+        assert_eq!(app.shell_view(), picker, "picker was clobbered");
     }
 }
 
@@ -8226,7 +8226,7 @@ fn fresh_target_can_auto_open_the_phase_picker() {
 
     app.open_fresh_planner_or_workbench();
 
-    assert_eq!(app.shell_view, ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
 }
 
@@ -8250,7 +8250,7 @@ fn returning_target_lands_on_workbench_instead_of_phase_picker() {
 
     app.open_fresh_planner_or_workbench();
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
 }
 
@@ -8264,7 +8264,7 @@ fn target_with_persisted_findings_lands_on_workbench_instead_of_phase_picker() {
 
     app.open_fresh_planner_or_workbench();
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
 }
 
@@ -8278,11 +8278,11 @@ fn shell_start_with_persisted_findings_lands_on_workbench() {
     let mut app = ShellApp::new(config, Some(&workspace));
 
     assert!(!app.findings().is_empty());
-    assert_ne!(app.shell_view, ShellView::PlanningPicker);
+    assert_ne!(app.shell_view(), ShellView::PlanningPicker);
 
     open_start_view(&mut app);
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
 }
 
@@ -8348,14 +8348,14 @@ fn ctrl_c_in_reverse_search_still_cancels_running_tool() {
 #[test]
 fn command_palette_opens_filters_and_loads_without_executing() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
 
     // Ctrl+G opens the palette.
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL),
     );
-    assert_eq!(app.shell_view, ShellView::CommandPalette);
+    assert_eq!(app.shell_view(), ShellView::CommandPalette);
 
     // Typing filters the specs.
     for ch in "scan".chars() {
@@ -8376,7 +8376,11 @@ fn command_palette_opens_filters_and_loads_without_executing() {
         &mut app,
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
     );
-    assert_ne!(app.shell_view, ShellView::CommandPalette, "palette closed");
+    assert_ne!(
+        app.shell_view(),
+        ShellView::CommandPalette,
+        "palette closed"
+    );
     assert!(
         !app.input().is_empty(),
         "selected command loaded into prompt"
@@ -8393,13 +8397,13 @@ fn command_palette_opens_filters_and_loads_without_executing() {
 #[test]
 fn command_palette_esc_closes_without_loading() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
     app.open_command_palette();
-    assert_eq!(app.shell_view, ShellView::CommandPalette);
+    assert_eq!(app.shell_view(), ShellView::CommandPalette);
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
-    assert_ne!(app.shell_view, ShellView::CommandPalette);
+    assert_ne!(app.shell_view(), ShellView::CommandPalette);
     assert!(
         app.input().is_empty(),
         "Esc cancels without loading a command"
@@ -8488,7 +8492,7 @@ fn spinner_resets_when_work_completes() {
 fn running_work_shows_strip_spinner_off_activity_view() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_running_tool_for_test("semgrep:scan");
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
 
     let model = crate::ui_view_models::context_strip_model(&app);
     let run = model.run.expect("a run segment with a spinner");
@@ -8529,7 +8533,7 @@ fn next_command_opens_phase_picker_at_derived_phase() {
     app.set_target(Some(dir.path().to_path_buf()));
 
     run_command(&mut app, ShellCommand::Next);
-    assert_eq!(app.shell_view, ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
 
     std::fs::create_dir_all(dir.path().join(".kuzushi")).expect("kuzushi dir");
@@ -8563,7 +8567,7 @@ fn phase_command_opens_requested_phase_picker() {
 
     run_command(&mut app, ShellCommand::Phase(WorkflowPhase::Confirm));
 
-    assert_eq!(app.shell_view, ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Confirm));
     assert!(app
         .engagement
@@ -8580,12 +8584,12 @@ fn phase_stop_after_config_blocks_later_phase_picker() {
     let mut config = V2Config::default();
     config.phases.stop_after = Some(kuzushi_core::GuidedPhase::Map);
     let mut app = ShellApp::new(config, Some(&workspace));
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
     app.engagement.clear_phase();
 
     app.open_phase_picker(WorkflowPhase::Hunt);
 
-    assert_ne!(app.shell_view, ShellView::PlanningPicker);
+    assert_ne!(app.shell_view(), ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "phase"
@@ -8635,7 +8639,7 @@ fn planning_phase_navigation_moves_horizontally_without_running() {
         &mut app,
         KeyEvent::new(KeyCode::Char('h'), KeyModifiers::empty()),
     );
-    assert_eq!(app.shell_view, ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Hunt));
     assert!(app.engagement.planning_queues_empty());
 
@@ -8661,7 +8665,7 @@ fn planning_phase_navigation_logs_config_block_instead_of_silent_noop() {
         KeyEvent::new(KeyCode::Char('l'), KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view, ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
     assert!(app
         .log_lines()
@@ -8759,7 +8763,7 @@ fn target_picker_enter_applies_candidate_and_leaves_the_picker() {
             }),
         }]);
     app.router.target_picker_mut().set_cursor(0);
-    app.shell_view = ShellView::TargetPicker;
+    app.set_shell_view(ShellView::TargetPicker);
 
     press_key(
         &mut app,
@@ -8773,13 +8777,13 @@ fn target_picker_enter_applies_candidate_and_leaves_the_picker() {
         app.active_scope().map(|scope| scope.id.as_str()),
         Some("submodule-libs-parser")
     );
-    assert_ne!(app.shell_view, ShellView::TargetPicker);
+    assert_ne!(app.shell_view(), ShellView::TargetPicker);
 }
 
 #[test]
 fn target_picker_d_starts_the_offline_fixture() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::TargetPicker;
+    app.set_shell_view(ShellView::TargetPicker);
 
     press_key(
         &mut app,
@@ -8790,7 +8794,7 @@ fn target_picker_d_starts_the_offline_fixture() {
         app.target().is_some(),
         "demo fixture target should be active"
     );
-    assert_ne!(app.shell_view, ShellView::TargetPicker);
+    assert_ne!(app.shell_view(), ShellView::TargetPicker);
     assert!(app
         .log_lines()
         .iter()
@@ -8811,18 +8815,18 @@ fn target_activation_applies_ready_default_model_before_onboarding_continues() {
     );
 
     assert!(app.config().model.is_some());
-    assert_ne!(app.shell_view, ShellView::ModelPicker);
+    assert_ne!(app.shell_view(), ShellView::ModelPicker);
 }
 
 #[test]
 fn target_picker_esc_defers_to_workbench_without_a_target() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.target_picker_mut().open(Vec::new());
-    app.shell_view = ShellView::TargetPicker;
+    app.set_shell_view(ShellView::TargetPicker);
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
     assert!(app.target().is_none());
     assert!(app
@@ -8838,7 +8842,7 @@ fn scan_completion_raises_success_banner_when_operator_is_elsewhere() {
     // they're already watching the Activity feed.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_activity(Some(ActivitySession::new("r-scan")));
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     let effects = app.apply_scan_finished("r-scan".to_string(), 3);
     EffectRuntime::execute(&mut app, effects);
     let notice = app.advisory().notice.clone().expect("completion banner");
@@ -8848,7 +8852,7 @@ fn scan_completion_raises_success_banner_when_operator_is_elsewhere() {
 
     app.advisory_mut().notice = None;
     app.set_activity(Some(ActivitySession::new("r-scan2")));
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
     let effects = app.apply_scan_finished("r-scan2".to_string(), 1);
     EffectRuntime::execute(&mut app, effects);
     assert!(
@@ -8903,19 +8907,19 @@ fn scene_view_is_never_a_trap() {
     // always be exitable: Esc and q leave directly, and typing yields the
     // hotkeys to the prompt.
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     run_command(&mut app, ShellCommand::Scene);
     app.sync_view_change();
-    assert!(matches!(app.shell_view, ShellView::Scene));
+    assert!(matches!(app.shell_view(), ShellView::Scene));
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
-    assert!(!matches!(app.shell_view, ShellView::Scene), "Esc exits");
+    assert!(!matches!(app.shell_view(), ShellView::Scene), "Esc exits");
 
     run_command(&mut app, ShellCommand::Scene);
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()),
     );
-    assert!(!matches!(app.shell_view, ShellView::Scene), "q exits");
+    assert!(!matches!(app.shell_view(), ShellView::Scene), "q exits");
 
     run_command(&mut app, ShellCommand::Scene);
     press_key(
@@ -8923,7 +8927,7 @@ fn scene_view_is_never_a_trap() {
         KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()),
     );
     assert!(
-        matches!(app.shell_view, ShellView::Scene),
+        matches!(app.shell_view(), ShellView::Scene),
         "o is not a scene exit alias"
     );
     press_key(
@@ -8931,7 +8935,7 @@ fn scene_view_is_never_a_trap() {
         KeyEvent::new(KeyCode::Char('n'), KeyModifiers::empty()),
     );
     assert!(
-        matches!(app.shell_view, ShellView::Scene),
+        matches!(app.shell_view(), ShellView::Scene),
         "n is not a scene paging alias"
     );
     assert_eq!(app.input(), "on");
@@ -8960,7 +8964,7 @@ fn scene_view_is_never_a_trap() {
         &mut app,
         KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()),
     );
-    assert!(matches!(app.shell_view, ShellView::Scene));
+    assert!(matches!(app.shell_view(), ShellView::Scene));
     assert_eq!(app.input(), "/o", "o yields to a non-empty prompt");
 }
 
@@ -8970,7 +8974,7 @@ fn static_scene_pages_do_not_consume_3d_only_controls() {
     app.router
         .scene_mut()
         .set_page(crate::scene3d::VizPage::Dfd);
-    app.shell_view = ShellView::Scene;
+    app.set_shell_view(ShellView::Scene);
 
     press_key(
         &mut app,
@@ -8988,9 +8992,9 @@ fn static_scene_pages_do_not_consume_3d_only_controls() {
 #[test]
 fn next_command_without_target_logs_guidance() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    let view_before = app.shell_view.clone();
+    let view_before = app.shell_view().clone();
     run_command(&mut app, ShellCommand::Next);
-    assert_eq!(app.shell_view, view_before);
+    assert_eq!(app.shell_view(), view_before);
     assert!(app
         .log_lines()
         .iter()
@@ -9053,7 +9057,7 @@ fn non_char_hotkey_code(trigger: HotkeyTrigger) -> KeyCode {
 
 fn app_with_findings(count: usize) -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.router
         .workbench_mut()
         .set_focus(WorkbenchPane::Findings);
@@ -9079,7 +9083,7 @@ fn app_with_module_run_scan(paused: bool) -> (ShellApp, ScanCancellation) {
         abort_requested: false,
         error: None,
     }));
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
     (app, cancel)
 }
 
@@ -9172,7 +9176,7 @@ fn tune_show_local_reducer_returns_show_effect_without_reading_disk() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::Tune;
+    app.set_shell_view(ShellView::Tune);
     let path = temp.path().join(".kuzushi/house-rules/sast.md");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, "focus on auth bypass").unwrap();
@@ -9204,7 +9208,7 @@ fn tune_set_local_reducer_returns_write_effect_without_touching_disk() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::Tune;
+    app.set_shell_view(ShellView::Tune);
 
     let update = app.reduce_submitted_line("set \"focus on auth bypass\"");
     let path = temp.path().join(".kuzushi/house-rules/sast.md");
@@ -9228,7 +9232,7 @@ fn tune_reset_local_reducer_returns_reset_effect_without_touching_disk() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::Tune;
+    app.set_shell_view(ShellView::Tune);
     let path = temp.path().join(".kuzushi/house-rules/sast.md");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, "focus on auth bypass").unwrap();
@@ -9250,7 +9254,7 @@ fn tune_set_writes_house_rules_and_reset_removes_them() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::Tune;
+    app.set_shell_view(ShellView::Tune);
     submit_shell_line(&mut app, "set \"focus on auth bypass\"");
     let path = temp.path().join(".kuzushi/house-rules/sast.md");
     assert!(path.exists());
@@ -9279,7 +9283,7 @@ fn quickstart_opens_dedicated_view_with_concise_log() {
         .filter(|line| line.prefix == "quickstart")
         .count();
     run_command(&mut app, ShellCommand::Quickstart);
-    assert_eq!(app.shell_view, ShellView::Quickstart);
+    assert_eq!(app.shell_view(), ShellView::Quickstart);
     let new_lines: Vec<_> = app
         .log_lines()
         .iter()
@@ -9418,7 +9422,7 @@ fn component_command_reducer_returns_selection_effect_without_reading_scope_tree
     assert_eq!(selection.target.as_deref(), Some(workspace.root()));
     assert_eq!(selection.raw.as_deref(), Some("packages/api"));
     assert_eq!(app.active_scope(), None);
-    assert_ne!(app.shell_view, ShellView::Workbench);
+    assert_ne!(app.shell_view(), ShellView::Workbench);
 
     EffectRuntime::execute(&mut app, result.effects);
 
@@ -9426,7 +9430,7 @@ fn component_command_reducer_returns_selection_effect_without_reading_scope_tree
         app.active_scope().map(|scope| scope.rel_path.as_str()),
         Some("packages/api")
     );
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
 }
 
 #[test]
@@ -9473,7 +9477,7 @@ fn target_command_resumes_onboarding_after_deferred_picker() {
     let _anthropic_key = EnvVarGuard::unset("ANTHROPIC_API_KEY");
     let temp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
 
     run_command(
         &mut app,
@@ -9483,7 +9487,7 @@ fn target_command_resumes_onboarding_after_deferred_picker() {
     let canonical = std::fs::canonicalize(temp.path()).unwrap();
     assert_eq!(app.target(), Some(canonical.as_path()));
     assert!(app.config().model.is_some());
-    assert_eq!(app.shell_view, ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
 }
 
 #[test]
@@ -9498,7 +9502,7 @@ fn run_diff_command_opens_revision_comparison_view() {
         },
     );
 
-    assert_eq!(app.shell_view, ShellView::RunDiff);
+    assert_eq!(app.shell_view(), ShellView::RunDiff);
     assert_eq!(app.router.run_diff().left(), "run-left");
     assert_eq!(app.router.run_diff().right(), "run-right");
     assert!(app
@@ -9656,7 +9660,7 @@ fn multi_line_paste_keeps_first_line_and_warns() {
 #[test]
 fn vi_cursor_navigates_findings_list() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.router
         .workbench_mut()
         .set_focus(WorkbenchPane::Findings);
@@ -9794,7 +9798,7 @@ fn mouse_wheel_scrolls_focused_workbench_pane_by_one_line() {
 #[test]
 fn mouse_click_focuses_activity_panes() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
     let mut session = ActivitySession::new("run-live");
     session.tasks.insert(
         "triage:run".to_string(),
@@ -9947,7 +9951,7 @@ fn page_keys_scroll_view_offset() {
     // same way; views without dedicated fields fall back to the router-owned
     // default scroll state.
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Help;
+    app.set_shell_view(ShellView::Help);
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::PageDown, KeyModifiers::empty()),
@@ -9965,7 +9969,7 @@ fn page_keys_scroll_view_offset() {
     assert_eq!(app.router.help().scroll(), 10);
 
     // Views without a dedicated scroll field still use the default scroll route.
-    app.shell_view = ShellView::Tune;
+    app.set_shell_view(ShellView::Tune);
     app.router.default_scroll_mut().reset();
     press_key(
         &mut app,
@@ -9977,14 +9981,14 @@ fn page_keys_scroll_view_offset() {
 #[test]
 fn changing_view_resets_default_scroll() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Help;
+    app.set_shell_view(ShellView::Help);
     app.router.default_scroll_mut().set(25);
     app.sync_view_change();
     // First sync after construction: no synced router view exists, so scroll resets.
     assert_eq!(app.router.default_scroll().offset(), 0);
     // Move scroll, switch view, sync again — scroll resets again.
     app.router.default_scroll_mut().set(12);
-    app.shell_view = ShellView::Tools;
+    app.set_shell_view(ShellView::Tools);
     app.sync_view_change();
     assert_eq!(app.router.default_scroll().offset(), 0);
 }
@@ -10013,7 +10017,7 @@ fn completion_preview_shows_only_when_cursor_at_end() {
 #[test]
 fn vi_keys_scroll_help_view() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Help;
+    app.set_shell_view(ShellView::Help);
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
@@ -10069,7 +10073,7 @@ fn tick_advances_spinner_only_when_running() {
 #[test]
 fn pgdown_pgup_paginate_findings_cursor() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.router
         .workbench_mut()
         .set_focus(WorkbenchPane::Findings);
@@ -10101,7 +10105,7 @@ fn pgdown_pgup_paginate_findings_cursor() {
 #[test]
 fn viewport_enter_opens_cursor_finding_from_visible_list() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.router
         .workbench_mut()
         .set_focus(WorkbenchPane::Findings);
@@ -10117,7 +10121,7 @@ fn viewport_enter_opens_cursor_finding_from_visible_list() {
     );
 
     // Enter selects the cursored finding; the Workbench DETAILS pane shows it.
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
     assert_eq!(
         app.selected_finding()
@@ -10130,7 +10134,7 @@ fn viewport_enter_opens_cursor_finding_from_visible_list() {
 #[test]
 fn viewport_enter_opens_projected_cursor_finding_after_duplicate_group() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.router
         .workbench_mut()
         .set_focus(WorkbenchPane::Findings);
@@ -10146,7 +10150,7 @@ fn viewport_enter_opens_projected_cursor_finding_after_duplicate_group() {
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
     assert_eq!(
         app.selected_finding()
@@ -10164,12 +10168,12 @@ fn workbench_esc_returns_focus_to_findings_before_leaving() {
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
-    assert_eq!(app.shell_view, ShellView::Catalog);
+    assert_eq!(app.shell_view(), ShellView::Catalog);
 }
 
 #[test]
@@ -10300,7 +10304,7 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                     .workbench_mut()
                     .set_center_mode(WorkbenchCenterMode::Dfd);
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
-                assert_eq!(app.shell_view, ShellView::Scene);
+                assert_eq!(app.shell_view(), ShellView::Scene);
                 assert_eq!(app.router.scene().page(), VizPage::Dfd);
             }
             ViewHotkeyAction::WorkbenchOpen => {
@@ -10310,7 +10314,7 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                     .set_center_mode(WorkbenchCenterMode::Dfd);
                 let expected = app.findings()[2].fingerprint.clone();
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
-                assert_eq!(app.shell_view, ShellView::Workbench);
+                assert_eq!(app.shell_view(), ShellView::Workbench);
                 assert_eq!(app.router.workbench().focus(), WorkbenchPane::Details);
                 assert_eq!(
                     app.router.workbench().center_mode(),
@@ -10368,13 +10372,13 @@ fn keybind_advertised_workbench_hotkeys_drive_state_transitions() {
                 let target = tempfile::tempdir().unwrap();
                 app.set_target(Some(target.path().to_path_buf()));
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
-                assert!(matches!(app.shell_view, ShellView::PlanningPicker));
+                assert!(matches!(app.shell_view(), ShellView::PlanningPicker));
             }
             ViewHotkeyAction::Back => {
                 let mut app = app_with_findings(25);
                 app.push_nav_history(ShellView::Catalog);
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
-                assert_eq!(app.shell_view, ShellView::Catalog);
+                assert_eq!(app.shell_view(), ShellView::Catalog);
             }
             other => panic!("unexpected workbench hotkey action: {other:?}"),
         }
@@ -10406,7 +10410,7 @@ fn prompt_show_local_reducer_returns_show_effect_without_reading_disk() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::PromptsEditor;
+    app.set_shell_view(ShellView::PromptsEditor);
     let path = temp.path().join(".kuzushi/prompts/sast/triage.md");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, "focus on auth bypass").unwrap();
@@ -10434,7 +10438,7 @@ fn prompt_diff_local_reducer_returns_diff_effect_without_metadata_lookup() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::PromptsEditor;
+    app.set_shell_view(ShellView::PromptsEditor);
     let path = temp.path().join(".kuzushi/prompts/sast/triage.md");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, "focus on auth bypass").unwrap();
@@ -10462,7 +10466,7 @@ fn prompt_list_local_reducer_returns_list_effect_without_reading_dir() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::PromptsEditor;
+    app.set_shell_view(ShellView::PromptsEditor);
     let dir = temp.path().join(".kuzushi/prompts/sast");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(dir.join("triage.md"), "focus on auth bypass").unwrap();
@@ -10490,7 +10494,7 @@ fn prompt_edit_local_reducer_returns_edit_effect_without_touching_disk() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::PromptsEditor;
+    app.set_shell_view(ShellView::PromptsEditor);
 
     let update = app.reduce_submitted_line("edit triage");
     let path = temp.path().join(".kuzushi/prompts/sast/triage.md");
@@ -10514,7 +10518,7 @@ fn prompt_set_local_reducer_returns_write_effect_without_touching_disk() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::PromptsEditor;
+    app.set_shell_view(ShellView::PromptsEditor);
 
     let update = app.reduce_submitted_line("set triage \"focus on auth bypass\"");
     let path = temp.path().join(".kuzushi/prompts/sast/triage.md");
@@ -10538,7 +10542,7 @@ fn prompt_reset_local_reducer_returns_reset_effect_without_touching_disk() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::PromptsEditor;
+    app.set_shell_view(ShellView::PromptsEditor);
     let path = temp.path().join(".kuzushi/prompts/sast/triage.md");
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     std::fs::write(&path, "focus on auth bypass").unwrap();
@@ -10560,7 +10564,7 @@ fn prompt_set_writes_override_file_and_reset_removes_it() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::PromptsEditor;
+    app.set_shell_view(ShellView::PromptsEditor);
 
     submit_shell_line(&mut app, "set triage \"focus on auth bypass\"");
     let path = temp.path().join(".kuzushi/prompts/sast/triage.md");
@@ -10582,7 +10586,7 @@ fn bare_verbs_only_intercepted_in_prompts_editor_view() {
     app.set_focused_module(Some("sast".to_string()));
     // NOT in prompts editor — should fall through to normal parser, which treats
     // unknown bare verbs as Unknown (not a prompt write).
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
     submit_shell_line(&mut app, "set triage \"abc\"");
     let path = temp.path().join(".kuzushi/prompts/sast/triage.md");
     assert!(!path.exists());
@@ -10591,12 +10595,12 @@ fn bare_verbs_only_intercepted_in_prompts_editor_view() {
 #[test]
 fn ctrl_o_toggles_story_overlay_back_to_origin() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL),
     );
-    assert_eq!(app.shell_view, ShellView::Story);
+    assert_eq!(app.shell_view(), ShellView::Story);
     assert!(app
         .router
         .navigation()
@@ -10605,7 +10609,7 @@ fn ctrl_o_toggles_story_overlay_back_to_origin() {
         &mut app,
         KeyEvent::new(KeyCode::Char('o'), KeyModifiers::CONTROL),
     );
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert!(!app
         .router
         .navigation()
@@ -10687,7 +10691,7 @@ fn module_run_p_and_r_keys_pause_resume() {
         abort_requested: false,
         error: None,
     }));
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('p'), KeyModifiers::empty()),
@@ -10713,7 +10717,7 @@ fn keybind_advertised_module_run_hotkeys_drive_state_transitions() {
             ViewHotkeyAction::ActorDetail(index) => {
                 let (mut app, _) = app_with_module_run_scan(false);
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
-                assert_eq!(app.shell_view, ShellView::ActorDetail);
+                assert_eq!(app.shell_view(), ShellView::ActorDetail);
                 assert_eq!(app.router.actor_detail().index(), index);
             }
             ViewHotkeyAction::PauseScan => {
@@ -10737,7 +10741,7 @@ fn keybind_advertised_module_run_hotkeys_drive_state_transitions() {
                 let (mut app, _) = app_with_module_run_scan(false);
                 app.push_nav_history(ShellView::Catalog);
                 press_key(&mut app, key_event_for_trigger(binding.trigger));
-                assert_eq!(app.shell_view, ShellView::Catalog);
+                assert_eq!(app.shell_view(), ShellView::Catalog);
             }
             other => panic!("unexpected active module-run hotkey action: {other:?}"),
         }
@@ -10775,7 +10779,7 @@ fn scrollable_views_advertise_scroll_and_back_hints() {
     ];
     for view in scrollable {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.shell_view = view.clone();
+        app.set_shell_view(view.clone());
         let advertised = app.view_keybindings();
         assert!(
             advertised.iter().any(|binding| binding.hint == "j/k/g/G"),
@@ -10793,25 +10797,25 @@ fn scrollable_views_advertise_scroll_and_back_hints() {
 #[test]
 fn esc_goes_back_to_previous_view_when_input_empty() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Tools;
+    app.set_shell_view(ShellView::Tools);
     app.push_nav_history(ShellView::Catalog);
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
-    assert_eq!(app.shell_view, ShellView::Catalog);
+    assert_eq!(app.shell_view(), ShellView::Catalog);
 }
 
 #[test]
 fn esc_clears_draft_instead_of_going_back_when_typing() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Tools;
+    app.set_shell_view(ShellView::Tools);
     app.push_nav_history(ShellView::Catalog);
     app.set_input("scan");
     app.set_cursor(app.input().chars().count());
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
-    assert_eq!(app.shell_view, ShellView::Tools, "view must not change");
+    assert_eq!(app.shell_view(), ShellView::Tools, "view must not change");
     assert!(app.input().is_empty(), "draft should be cleared");
     assert_eq!(app.last_cleared_input(), Some("scan"));
 }
@@ -10819,13 +10823,13 @@ fn esc_clears_draft_instead_of_going_back_when_typing() {
 #[test]
 fn esc_goes_back_with_stashed_draft() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Tools;
+    app.set_shell_view(ShellView::Tools);
     app.push_nav_history(ShellView::Catalog);
     app.set_last_cleared_input(Some("scan".to_string()));
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
-    assert_eq!(app.shell_view, ShellView::Catalog);
+    assert_eq!(app.shell_view(), ShellView::Catalog);
     assert!(app.input().is_empty(), "stashed draft should stay explicit");
     assert_eq!(app.last_cleared_input(), Some("scan"));
 }
@@ -10833,7 +10837,7 @@ fn esc_goes_back_with_stashed_draft() {
 #[test]
 fn ctrl_underscore_restores_stashed_draft() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Tools;
+    app.set_shell_view(ShellView::Tools);
     app.push_nav_history(ShellView::Catalog);
     app.set_last_cleared_input(Some("scan".to_string()));
 
@@ -10842,7 +10846,7 @@ fn ctrl_underscore_restores_stashed_draft() {
         KeyEvent::new(KeyCode::Char('_'), KeyModifiers::CONTROL),
     );
 
-    assert_eq!(app.shell_view, ShellView::Tools, "view must not change");
+    assert_eq!(app.shell_view(), ShellView::Tools, "view must not change");
     assert_eq!(app.input(), "scan", "stashed draft should be restored");
     assert!(app.last_cleared_input().is_none());
 }
@@ -10850,7 +10854,7 @@ fn ctrl_underscore_restores_stashed_draft() {
 #[test]
 fn esc_back_stays_advertised_after_a_draft_clear_and_view_change() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Tools;
+    app.set_shell_view(ShellView::Tools);
     app.push_nav_history(ShellView::Catalog);
     app.set_input("scan");
 
@@ -10871,14 +10875,14 @@ fn esc_back_stays_advertised_after_a_draft_clear_and_view_change() {
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
-    assert_eq!(app.shell_view, ShellView::Catalog);
+    assert_eq!(app.shell_view(), ShellView::Catalog);
     assert!(app.input().is_empty(), "stale draft must not be restored");
 }
 
 #[test]
 fn submitting_a_command_clears_stashed_draft() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Tools;
+    app.set_shell_view(ShellView::Tools);
     app.push_nav_history(ShellView::Catalog);
     app.set_last_cleared_input(Some("scan".to_string()));
     app.set_input("help");
@@ -10888,7 +10892,7 @@ fn submitting_a_command_clears_stashed_draft() {
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view, ShellView::Help);
+    assert_eq!(app.shell_view(), ShellView::Help);
     assert!(app.last_cleared_input().is_none());
     assert!(app.input().is_empty());
 }
@@ -10896,7 +10900,7 @@ fn submitting_a_command_clears_stashed_draft() {
 #[test]
 fn activity_view_offers_back_binding() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
     assert!(
         app.view_keybindings()
             .iter()
@@ -10908,7 +10912,7 @@ fn activity_view_offers_back_binding() {
 #[test]
 fn taskless_activity_task_keys_log_why_they_do_not_focus() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
     app.set_activity(Some(ActivitySession::new("run-1")));
     app.set_input_mode(crate::InputMode::Navigate);
 
@@ -10938,9 +10942,9 @@ fn taskless_activity_task_keys_log_why_they_do_not_focus() {
 #[test]
 fn picker_views_are_not_recorded_in_nav_history() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::ModelPicker;
+    app.set_shell_view(ShellView::ModelPicker);
     app.sync_view_change();
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
     app.sync_view_change();
 
     assert!(
@@ -11314,7 +11318,7 @@ fn ctrl_c_during_agent_chat_requests_abort_without_claiming_kill() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let ticket = app.jobs_mut().start(JobKind::Agent, "agent");
     let cancel = ticket.cancel.clone();
-    app.shell_view = ShellView::AgentChat;
+    app.set_shell_view(ShellView::AgentChat);
     app.set_agent_cancel(Some(cancel.clone()));
     app.set_agent_chat(Some(AgentChatView {
         question: "what changed?".to_string(),
@@ -11682,7 +11686,7 @@ fn activity_ctrl_c_cancels_scan_and_background_tool_without_leaving_tui() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let scan_cancel = ScanCancellation::default();
     let tool_cancel = ScanCancellation::default();
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
     app.set_activity(Some(ActivitySession::new("tool-x")));
     app.set_scan_panel(Some(ScanPanelState {
         run_id: Some("scan-run".to_string()),
@@ -11711,7 +11715,7 @@ fn activity_ctrl_c_cancels_scan_and_background_tool_without_leaving_tui() {
     assert!(scan_cancel.is_cancelled());
     assert!(app.tool_abort_requested());
     assert!(tool_cancel.is_cancelled());
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(!app.should_quit());
     assert!(!app.ctrl_c_armed());
 }
@@ -11888,7 +11892,7 @@ fn failure_handoff_command_opens_dedicated_view() {
 
     run_command(&mut app, ShellCommand::FailureHandoff);
 
-    assert_eq!(app.shell_view, ShellView::FailureHandoff);
+    assert_eq!(app.shell_view(), ShellView::FailureHandoff);
     assert!(app
         .log_lines()
         .iter()
@@ -11901,7 +11905,7 @@ fn recommend_command_opens_artifact_backed_view() {
 
     run_command(&mut app, ShellCommand::Recommend);
 
-    assert_eq!(app.shell_view, ShellView::Recommend);
+    assert_eq!(app.shell_view(), ShellView::Recommend);
     assert!(app
         .log_lines()
         .iter()
@@ -11944,7 +11948,7 @@ fn recommend_enter_runs_selected_component_scoped_scan() {
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.session_mut().set_trusted_workflow_auto_accept(true);
-    app.shell_view = ShellView::Recommend;
+    app.set_shell_view(ShellView::Recommend);
 
     press_key(
         &mut app,
@@ -11952,7 +11956,7 @@ fn recommend_enter_runs_selected_component_scoped_scan() {
     );
 
     drain_chain_with_auto_reuse(&mut app);
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert!(app
         .log_lines()
         .iter()
@@ -11987,7 +11991,7 @@ fn recommend_promote_returns_activation_effect_before_switching_target() {
     );
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
-    app.shell_view = ShellView::Recommend;
+    app.set_shell_view(ShellView::Recommend);
 
     let result = update(
         &mut app,
@@ -12031,7 +12035,7 @@ fn recommend_promote_rejects_paths_outside_active_target() {
     );
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
-    app.shell_view = ShellView::Recommend;
+    app.set_shell_view(ShellView::Recommend);
 
     press_key(
         &mut app,
@@ -12070,7 +12074,7 @@ fn write_component_recommendation_artifact(root: &std::path::Path, component: se
 fn actor_detail_filter_cycle_and_reset() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.actor_detail_mut().open(1);
-    app.shell_view = ShellView::ActorDetail;
+    app.set_shell_view(ShellView::ActorDetail);
 
     assert_eq!(app.router.actor_detail().filter(), ActorDetailFilter::All);
     press_key(
@@ -12104,7 +12108,7 @@ fn actor_detail_filter_cycle_and_reset() {
 #[test]
 fn prompts_editor_cursor_and_action_shortcuts() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::PromptsEditor;
+    app.set_shell_view(ShellView::PromptsEditor);
 
     assert_eq!(app.current_prompt_verb_name(), Some("scan"));
     press_key(
@@ -12128,7 +12132,7 @@ fn prompts_editor_cursor_and_action_shortcuts() {
 #[test]
 fn tune_view_cursor_and_activate() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Tune;
+    app.set_shell_view(ShellView::Tune);
 
     assert_eq!(app.router.tune().cursor(), 0);
     press_key(
@@ -12337,7 +12341,7 @@ fn pending_confirm_y_dispatches_deferred_run_once() {
 #[test]
 fn pending_confirm_esc_denies_once_without_navigation() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Tools;
+    app.set_shell_view(ShellView::Tools);
     app.push_nav_history(ShellView::Catalog);
     app.advisory_mut().pending_confirm = Some(PendingConfirm {
         kind: ConfirmKind::NetworkEgress,
@@ -12357,7 +12361,7 @@ fn pending_confirm_esc_denies_once_without_navigation() {
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
-    assert_eq!(app.shell_view, ShellView::Tools);
+    assert_eq!(app.shell_view(), ShellView::Tools);
     assert!(app.advisory().pending_confirm.is_none());
     assert!(app.advisory().pending_confirm_launch.is_none());
     assert!(app.engagement.confirm_denylist().is_empty());
@@ -12501,7 +12505,7 @@ fn cache_tool_snapshot_populates_pending_patch_for_patch_run() {
         patch.guardrail.as_deref(),
         Some("approval.patches = human-required")
     );
-    assert_eq!(app.shell_view, ShellView::Patch);
+    assert_eq!(app.shell_view(), ShellView::Patch);
     assert_eq!(app.router.patch().alias(), "F-0001");
 }
 
@@ -12521,7 +12525,7 @@ fn patch_reject_command_discards_pending_patch() {
     run_command(&mut app, ShellCommand::Patch(PatchCommand::Reject));
 
     assert!(app.engagement.pending_patch().is_none());
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().page(), Some(WorkbenchPage::Ship));
 }
 
@@ -12724,13 +12728,13 @@ fn plan_cursor_navigation_and_skip_toggle() {
 #[test]
 fn activity_command_opens_view_and_creates_session() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Home;
-    assert!(matches!(app.shell_view, ShellView::Home));
+    app.set_shell_view(ShellView::Home);
+    assert!(matches!(app.shell_view(), ShellView::Home));
     assert!(app.activity().is_none());
 
     run_command(&mut app, ShellCommand::Activity);
 
-    assert!(matches!(app.shell_view, ShellView::Activity));
+    assert!(matches!(app.shell_view(), ShellView::Activity));
     assert!(
         app.activity().is_some(),
         "/activity should mint a session if none exists"
@@ -12789,7 +12793,7 @@ fn activity_view_pause_verbose_reset_keys() {
 fn activity_p_key_pauses_real_scan_work_not_the_feed() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let cancel = ScanCancellation::default();
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
     app.set_activity(Some(ActivitySession::new("run-live")));
     app.set_input_mode(crate::InputMode::Navigate);
     app.set_scan_cancel_for_test(cancel.clone());
@@ -12816,7 +12820,7 @@ fn activity_p_key_pauses_real_scan_work_not_the_feed() {
 #[test]
 fn reset_during_run_job_preserves_run_identity() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
     app.set_running_tool_for_test("triage:run");
     app.set_activity(Some(ActivitySession::new("run-live")));
     app.set_input_mode(crate::InputMode::Navigate);
@@ -12848,7 +12852,7 @@ fn reset_finished_activity_preserves_completed_run() {
     use kuzushi_core::RunTraceStep;
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
     let mut session = ActivitySession::new("run-finished");
     session.apply_step(
         RunTraceStep::new(1, "tool", "triage start")
@@ -12973,7 +12977,7 @@ fn activity_findings_key_opens_workbench_review() {
         KeyEvent::new(KeyCode::Char('f'), KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
     assert!(app
         .log_lines()
@@ -12997,7 +13001,7 @@ fn activity_open_key_on_findings_opens_workbench_review() {
         KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
 }
 
@@ -13024,7 +13028,7 @@ fn activity_open_carries_deck_selection_into_workbench() {
         KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
     assert_eq!(app.router.findings().cursor(), 1);
     assert_eq!(
@@ -13054,7 +13058,7 @@ fn activity_open_uses_projected_findings_deck_index() {
         KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
     assert_eq!(app.router.findings().cursor(), 1);
     assert_eq!(
@@ -13080,14 +13084,14 @@ fn activity_open_key_on_visualization_returns_to_activity_with_q() {
         &mut app,
         KeyEvent::new(KeyCode::Char('o'), KeyModifiers::empty()),
     );
-    assert_eq!(app.shell_view, ShellView::Scene);
+    assert_eq!(app.shell_view(), ShellView::Scene);
     assert_eq!(app.router.scene().page(), VizPage::Dfd);
 
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()),
     );
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
 }
 
 #[test]
@@ -13247,7 +13251,7 @@ fn assert_plain_output_strict_80(output: &str) {
 fn scene_command_opens_gallery_without_a_flag() {
     let mut app = ShellApp::new(V2Config::default(), None);
     run_command(&mut app, ShellCommand::Scene);
-    assert_eq!(app.shell_view, ShellView::Scene);
+    assert_eq!(app.shell_view(), ShellView::Scene);
 }
 
 #[test]
@@ -13303,7 +13307,7 @@ fn auto_open_viz_page_switches_view_when_enabled() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.ui_mut().set_auto_open_viz(true);
     app.auto_open_viz_page(VizPage::Dfd);
-    assert_eq!(app.shell_view, ShellView::Scene);
+    assert_eq!(app.shell_view(), ShellView::Scene);
     assert_eq!(app.router.scene().page(), VizPage::Dfd);
 }
 
@@ -13312,9 +13316,9 @@ fn auto_open_viz_page_is_inert_when_disabled() {
     use crate::scene3d::VizPage;
     let mut app = ShellApp::new(V2Config::default(), None);
     app.ui_mut().set_auto_open_viz(false);
-    let before = app.shell_view.clone();
+    let before = app.shell_view().clone();
     app.auto_open_viz_page(VizPage::Dfd);
-    assert_eq!(app.shell_view, before);
+    assert_eq!(app.shell_view(), before);
 }
 
 #[test]
@@ -13322,7 +13326,7 @@ fn auto_open_viz_page_respects_manually_pinned_activity_output() {
     use crate::scene3d::VizPage;
     let mut app = ShellApp::new(V2Config::default(), None);
     app.ui_mut().set_auto_open_viz(true);
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
     app.set_activity(Some(ActivitySession::new("run-viz")));
     app.router
         .activity_mut()
@@ -13330,7 +13334,7 @@ fn auto_open_viz_page_respects_manually_pinned_activity_output() {
 
     app.auto_open_viz_page(VizPage::Dfd);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert_eq!(
         app.router.activity().deck_page,
         super::view_state::ActivityDeckPage::Findings
@@ -13342,18 +13346,18 @@ fn auto_open_viz_page_respects_recent_manual_navigation() {
     use crate::scene3d::VizPage;
     let mut app = ShellApp::new(V2Config::default(), None);
     app.ui_mut().set_auto_open_viz(true);
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
     app.set_input("help");
 
     press_key(
         &mut app,
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
     );
-    assert_eq!(app.shell_view, ShellView::Help);
+    assert_eq!(app.shell_view(), ShellView::Help);
 
     app.auto_open_viz_page(VizPage::Dfd);
 
-    assert_eq!(app.shell_view, ShellView::Help);
+    assert_eq!(app.shell_view(), ShellView::Help);
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "scene"
             && line.body.contains("use `scene` to view")
@@ -13368,7 +13372,7 @@ fn scan_completion_auto_opens_the_findings_heatmap() {
     app.ui_mut().set_auto_open_viz(true);
     let effects = app.apply_scan_finished("run-viz".to_string(), 2);
     EffectRuntime::execute(&mut app, effects);
-    assert_eq!(app.shell_view, ShellView::Scene);
+    assert_eq!(app.shell_view(), ShellView::Scene);
     assert_eq!(app.router.scene().page(), VizPage::Heatmap);
 }
 
@@ -13377,12 +13381,12 @@ fn scan_completion_focuses_activity_findings_when_watching_activity() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.ui_mut().set_auto_open_viz(true);
     app.set_activity(Some(ActivitySession::new("run-viz")));
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
 
     let effects = app.apply_scan_finished("run-viz".to_string(), 2);
     EffectRuntime::execute(&mut app, effects);
 
-    assert_eq!(app.shell_view, ShellView::Activity);
+    assert_eq!(app.shell_view(), ShellView::Activity);
     assert_eq!(
         app.router.activity().deck_page,
         super::view_state::ActivityDeckPage::Findings
@@ -13438,21 +13442,22 @@ fn scan_finished_event_records_aggregate_cost() {
 fn scan_completion_respects_viz_opt_out() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.ui_mut().set_auto_open_viz(false);
-    let before = app.shell_view.clone();
+    let before = app.shell_view().clone();
     let effects = app.apply_scan_finished("run-viz".to_string(), 2);
     EffectRuntime::execute(&mut app, effects);
-    assert_eq!(app.shell_view, before);
+    assert_eq!(app.shell_view(), before);
 }
 
 #[test]
 fn clean_scan_does_not_auto_open_an_empty_heatmap() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.ui_mut().set_auto_open_viz(true);
-    let before = app.shell_view.clone();
+    let before = app.shell_view().clone();
     let effects = app.apply_scan_finished("run-clean".to_string(), 0);
     EffectRuntime::execute(&mut app, effects);
     assert_eq!(
-        app.shell_view, before,
+        app.shell_view(),
+        before,
         "a 0-finding scan is a pass, not a heatmap to yank to"
     );
 }
@@ -13478,7 +13483,7 @@ fn open_test_planning_picker(app: &mut ShellApp, rows: Vec<PlanningTaskRow>) {
     let selected = rows.iter().map(|row| row.id).collect();
     app.engagement.planning_picker_mut().open(rows, selected);
     app.engagement.set_phase(WorkflowPhase::Map);
-    app.shell_view = ShellView::PlanningPicker;
+    app.set_shell_view(ShellView::PlanningPicker);
 }
 
 #[test]
@@ -13502,7 +13507,7 @@ fn confirming_an_all_cached_selection_explains_instead_of_silently_advancing() {
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view, ShellView::PlanningPicker, "stays put");
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker, "stays put");
     assert_eq!(
         app.engagement.current_phase(),
         Some(WorkflowPhase::Map),
@@ -13563,7 +13568,7 @@ fn planning_picker_esc_closes_without_recording_skip_or_advancing() {
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
     assert!(!app
         .engagement
@@ -13622,7 +13627,7 @@ fn planning_picker_number_keys_jump_directly_to_phases_without_running() {
         KeyEvent::new(KeyCode::Char('3'), KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view, ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Confirm));
     assert!(app.engagement.planning_queues_empty());
     assert_eq!(app.engagement.planning_picker().focus(), PickerFocus::List);
@@ -13635,7 +13640,7 @@ fn planning_picker_number_keys_jump_directly_to_phases_without_running() {
         KeyEvent::new(KeyCode::Char('1'), KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view, ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
     assert!(app.engagement.planning_queues_empty());
     assert_eq!(app.engagement.planning_picker().focus(), PickerFocus::List);
@@ -13801,7 +13806,7 @@ fn planning_picker_accept_returns_dispatch_effect_without_resolving_workspace() 
 
     assert!(result.changed);
     assert_eq!(app.engagement.queued_task_count(), 1);
-    assert_eq!(app.shell_view, ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
     let [ShellEffect::DispatchNextPlanningTask(dispatch)] = result.effects.as_slice() else {
         panic!("expected one planning dispatch effect");
     };
@@ -14120,12 +14125,12 @@ fn planning_completion_returns_to_workbench_without_auto_recommender() {
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(dir.path().to_path_buf()));
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
     app.engagement.clear_phase();
 
     let effects = app.advance_to_next_phase();
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert!(effects.is_empty());
     assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
     assert_eq!(app.running_tool_name(), None);
@@ -14147,7 +14152,7 @@ fn map_phase_advance_returns_recommendation_refresh_effect_without_inline_launch
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(dir.path().to_path_buf()));
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.engagement.set_phase(WorkflowPhase::Map);
 
     let effects = app.advance_to_next_phase();
@@ -14179,12 +14184,12 @@ fn phase_advance_does_not_steal_view_when_operator_navigated_away() {
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(dir.path().to_path_buf()));
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.engagement.set_phase(WorkflowPhase::Map);
 
     app.advance_to_next_phase();
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Hunt));
     let notice = app.advisory().notice.as_ref().expect("phase ready notice");
     assert_eq!(notice.severity, NoticeSeverity::Success);
@@ -14197,12 +14202,12 @@ fn phase_advance_opens_next_picker_while_operator_watches_activity() {
     let dir = tempfile::tempdir().expect("temp target");
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(dir.path().to_path_buf()));
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
     app.engagement.set_phase(WorkflowPhase::Map);
 
     app.advance_to_next_phase();
 
-    assert_eq!(app.shell_view, ShellView::PlanningPicker);
+    assert_eq!(app.shell_view(), ShellView::PlanningPicker);
     assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Hunt));
 }
 
@@ -14286,7 +14291,7 @@ fn planning_picker_uppercase_aliases_match_their_advertised_lowercase_keys() {
         &mut app,
         KeyEvent::new(KeyCode::Char('q'), KeyModifiers::empty()),
     );
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert!(
         !app.engagement
             .skipped_phases()
@@ -14298,7 +14303,7 @@ fn planning_picker_uppercase_aliases_match_their_advertised_lowercase_keys() {
 #[test]
 fn empty_prompt_characters_trigger_view_hotkeys_before_text_entry() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     *app.findings_mut() = sample_two_findings();
 
     press_key(
@@ -14316,7 +14321,7 @@ fn non_empty_prompt_characters_type_instead_of_triggering_view_hotkeys() {
     let temp = tempfile::tempdir().expect("temp target");
     let workspace = WorkspaceTarget::new(temp.path()).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     *app.findings_mut() = sample_two_findings();
     app.set_input("confi");
     app.set_cursor(app.input().len());
@@ -14330,14 +14335,14 @@ fn non_empty_prompt_characters_type_instead_of_triggering_view_hotkeys() {
         KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
     );
 
-    assert_eq!(app.shell_view, ShellView::Config);
+    assert_eq!(app.shell_view(), ShellView::Config);
     assert_ne!(app.running_tool_name(), Some("exploit-chain:scan"));
 }
 
 #[test]
 fn navigate_mode_enables_view_hotkeys_and_esc_returns_to_prompt() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     *app.findings_mut() = sample_two_findings();
 
     press_key(
@@ -14355,7 +14360,7 @@ fn navigate_mode_enables_view_hotkeys_and_esc_returns_to_prompt() {
 
     press_key(&mut app, KeyEvent::new(KeyCode::Esc, KeyModifiers::empty()));
 
-    assert_eq!(app.shell_view, ShellView::Workbench);
+    assert_eq!(app.shell_view(), ShellView::Workbench);
     assert_eq!(app.input_mode(), crate::InputMode::Prompt);
 }
 

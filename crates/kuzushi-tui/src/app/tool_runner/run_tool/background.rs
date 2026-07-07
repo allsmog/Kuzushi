@@ -122,7 +122,7 @@ impl ShellApp {
                 if mutation.status == kuzushi_core::PromptMutationStatus::Pending =>
             {
                 self.set_focused_module(Some(module_id.to_string()));
-                self.shell_view = ShellView::PromptsEditor;
+                self.set_shell_view(ShellView::PromptsEditor);
                 self.log(
                     "prompt",
                     format!(
@@ -134,7 +134,7 @@ impl ShellApp {
             }
             Ok(_) => false,
             Err(error) => {
-                self.shell_view = ShellView::PromptsEditor;
+                self.set_shell_view(ShellView::PromptsEditor);
                 self.log(
                     "error",
                     format!("could not read prompt mutations before {tool_name}: {error}"),
@@ -161,7 +161,7 @@ impl ShellApp {
         // operator on an empty Activity view. Flipping after thread::spawn
         // guarantees the run is in flight before the view becomes visible.
         if self.ui().auto_open_activity() {
-            self.shell_view = ShellView::Activity;
+            self.set_shell_view(ShellView::Activity);
             self.log(
                 "view",
                 "opened activity — Ctrl+C requests abort; type `back` to leave (disable: setg ui.auto_open_activity false)",

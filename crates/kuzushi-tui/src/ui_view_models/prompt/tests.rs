@@ -63,7 +63,7 @@ fn prompt_brand_defaults_to_kuzushi() {
 fn prompt_model_projects_prompt_and_editor_state() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
     app.set_running_tool_for_test("sast:scan");
     app.set_input("scan ./demo");
     app.set_cursor(4);

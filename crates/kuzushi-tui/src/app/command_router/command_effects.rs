@@ -82,23 +82,23 @@ impl ShellApp {
     ) -> Option<Vec<ShellEffect>> {
         match command {
             ShellCommand::BootSplash => {
-                self.shell_view = ShellView::BootSplash;
+                self.set_shell_view(ShellView::BootSplash);
                 Some(Vec::new())
             }
             ShellCommand::Keymap => {
-                self.shell_view = ShellView::Keymap;
+                self.set_shell_view(ShellView::Keymap);
                 Some(Vec::new())
             }
             ShellCommand::QuitConfirm => {
-                self.shell_view = ShellView::QuitConfirm;
+                self.set_shell_view(ShellView::QuitConfirm);
                 Some(Vec::new())
             }
             ShellCommand::ThemePicker => {
-                self.shell_view = ShellView::ThemePicker;
+                self.set_shell_view(ShellView::ThemePicker);
                 Some(Vec::new())
             }
             ShellCommand::UpdateAvailable => {
-                self.shell_view = ShellView::UpdateAvailable;
+                self.set_shell_view(ShellView::UpdateAvailable);
                 Some(Vec::new())
             }
             _ => None,
@@ -230,7 +230,7 @@ impl ShellApp {
                 Some(Vec::new())
             }
             ShellCommand::Prompt(raw) => {
-                self.shell_view = ShellView::PromptsEditor;
+                self.set_shell_view(ShellView::PromptsEditor);
                 Some(self.reduce_prompt_verb(raw))
             }
             ShellCommand::Prompts => {
@@ -500,18 +500,18 @@ impl ShellApp {
     fn open_home_view(&mut self) {
         self.clear_focused_module();
         self.router.catalog_mut().collapse();
-        self.shell_view = ShellView::Home;
+        self.set_shell_view(ShellView::Home);
         self.log("home", "showing Kuzushi cockpit");
     }
 
     fn open_help_view(&mut self, query: Option<String>) {
-        self.shell_view = ShellView::Help;
+        self.set_shell_view(ShellView::Help);
         self.router.help_mut().open(query.clone());
         self.log("help", Self::help_summary(query.as_deref()));
     }
 
     fn open_modules_view(&mut self) {
-        self.shell_view = ShellView::Catalog;
+        self.set_shell_view(ShellView::Catalog);
         self.router.catalog_mut().expand();
         self.router.modules_mut().open();
         let count = self.registry().modules().count();
@@ -525,7 +525,7 @@ impl ShellApp {
     }
 
     fn open_tools_view(&mut self, filter: Option<String>) {
-        self.shell_view = ShellView::Tools;
+        self.set_shell_view(ShellView::Tools);
         self.router.tools_mut().open(filter.clone());
         let model = crate::ui_view_models::tools_model(self);
         let suffix = filter
@@ -549,7 +549,7 @@ impl ShellApp {
     }
 
     fn open_health_view(&mut self) {
-        self.shell_view = ShellView::Health;
+        self.set_shell_view(ShellView::Health);
         self.router.default_scroll_mut().reset();
         let model = crate::ui_view_models::health_model(self);
         self.log("health", model.summary);
@@ -595,7 +595,7 @@ impl ShellApp {
     }
 
     fn open_project_model_view(&mut self) {
-        self.shell_view = ShellView::ProjectModel;
+        self.set_shell_view(ShellView::ProjectModel);
         self.router.default_scroll_mut().reset();
         self.log("project", "showing project model aggregate");
     }
@@ -609,7 +609,7 @@ impl ShellApp {
     }
 
     fn open_filtered_findings_view(&mut self) {
-        self.shell_view = ShellView::Workbench;
+        self.set_shell_view(ShellView::Workbench);
         self.router
             .workbench_mut()
             .set_focus(crate::app::WorkbenchPane::Findings);
@@ -630,7 +630,7 @@ impl ShellApp {
     }
 
     fn show_config_status(&mut self) {
-        self.shell_view = ShellView::Config;
+        self.set_shell_view(ShellView::Config);
         self.sync_selected_model_index();
         self.log(
             "config",
@@ -648,7 +648,7 @@ impl ShellApp {
     }
 
     fn show_permissions_status(&mut self) {
-        self.shell_view = ShellView::Config;
+        self.set_shell_view(ShellView::Config);
         self.log(
             "permissions",
             "model fallback forbidden without explicit consent; headless run requires explicit tool names",
@@ -660,7 +660,7 @@ impl ShellApp {
     }
 
     fn open_tune_view(&mut self) {
-        self.shell_view = ShellView::Tune;
+        self.set_shell_view(ShellView::Tune);
         self.log("view", "tune");
     }
 
@@ -671,7 +671,7 @@ impl ShellApp {
             .any(|entry| entry.metadata().id == module)
         {
             self.set_focused_module(Some(module.to_string()));
-            self.shell_view = ShellView::Module;
+            self.set_shell_view(ShellView::Module);
             self.log("use", module);
         } else {
             self.log("error", self.unknown_module_message(module));
@@ -680,12 +680,12 @@ impl ShellApp {
 
     fn open_actor_detail(&mut self, index: usize) {
         self.router.actor_detail_mut().open(index);
-        self.shell_view = ShellView::ActorDetail;
+        self.set_shell_view(ShellView::ActorDetail);
         self.log("actor", index.to_string());
     }
 
     fn open_failure_handoff(&mut self) {
-        self.shell_view = ShellView::FailureHandoff;
+        self.set_shell_view(ShellView::FailureHandoff);
         if self
             .agent_chat()
             .and_then(|agent| agent.failure_context.as_ref())
@@ -698,30 +698,30 @@ impl ShellApp {
     }
 
     fn open_prompts_view(&mut self) {
-        self.shell_view = ShellView::PromptsEditor;
+        self.set_shell_view(ShellView::PromptsEditor);
         self.log("view", "prompts");
     }
 
     fn open_runs_view(&mut self) {
-        self.shell_view = ShellView::Runs;
+        self.set_shell_view(ShellView::Runs);
         self.log("runs", "recent runs");
     }
 
     fn open_run_diff_view(&mut self, left: String, right: String) {
         self.router.run_diff_mut().open(left.clone(), right.clone());
-        self.shell_view = ShellView::RunDiff;
+        self.set_shell_view(ShellView::RunDiff);
         self.router.default_scroll_mut().reset();
         self.log("runs", format!("comparing {left} -> {right}"));
     }
 
     fn open_threat_view(&mut self, view: crate::app::ThreatView) {
         self.router.threat_mut().open(view);
-        self.shell_view = ShellView::Threat;
+        self.set_shell_view(ShellView::Threat);
         self.log("view", format!("threats {}", threat_view_label(view)));
     }
 
     fn open_threat_editor(&mut self) {
-        self.shell_view = ShellView::ThreatEditor;
+        self.set_shell_view(ShellView::ThreatEditor);
         self.log("view", "threats edit");
     }
 
@@ -732,7 +732,7 @@ impl ShellApp {
     }
 
     pub(crate) fn reduce_recommend(&mut self) -> Vec<ShellEffect> {
-        self.shell_view = ShellView::Recommend;
+        self.set_shell_view(ShellView::Recommend);
         self.router.catalog_mut().reset_recommend_cursor();
         if self.target().is_none() {
             self.log(
@@ -753,7 +753,7 @@ impl ShellApp {
     }
 
     pub(crate) fn reduce_aim(&mut self, focus: &Option<String>) -> Vec<ShellEffect> {
-        self.shell_view = ShellView::Workbench;
+        self.set_shell_view(ShellView::Workbench);
         self.router
             .workbench_mut()
             .set_page(Some(crate::app::WorkbenchPage::Terrain));
@@ -821,7 +821,7 @@ impl ShellApp {
             self.log("patch", "no pending patch to reject");
             return Vec::new();
         };
-        self.shell_view = ShellView::Workbench;
+        self.set_shell_view(ShellView::Workbench);
         self.router
             .workbench_mut()
             .set_page(Some(crate::app::WorkbenchPage::Ship));

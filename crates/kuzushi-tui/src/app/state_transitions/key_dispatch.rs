@@ -103,7 +103,7 @@ impl ShellApp {
     /// Command palette and Ctrl+R reverse search both fully capture input while
     /// active. Checked before the normal key chain; Ctrl+C still falls through.
     fn handle_overlay_key(&mut self, key: KeyEvent) -> bool {
-        if matches!(self.shell_view, ShellView::CommandPalette) {
+        if matches!(self.shell_view(), ShellView::CommandPalette) {
             return self.handle_command_palette_key(key);
         }
         if self.history_search().is_some() {
@@ -211,7 +211,7 @@ impl ShellApp {
     }
 
     fn handle_system_overlay_modal_key(&mut self, key: KeyEvent) -> InputUpdate {
-        match self.shell_view {
+        match self.shell_view() {
             ShellView::QuitConfirm => self.handle_quit_confirm_key(key),
             _ => InputUpdate::ignored(),
         }
@@ -439,7 +439,7 @@ mod tests {
     #[test]
     fn quit_confirm_y_is_consumed_as_quit_effect_not_text_input() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.shell_view = ShellView::QuitConfirm;
+        app.set_shell_view(ShellView::QuitConfirm);
 
         let update = app.reduce_key(plain_key(KeyCode::Char('y')));
 
@@ -451,7 +451,7 @@ mod tests {
     #[test]
     fn quit_confirm_n_is_consumed_as_close_not_text_input() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.shell_view = ShellView::QuitConfirm;
+        app.set_shell_view(ShellView::QuitConfirm);
 
         let update = app.reduce_key(plain_key(KeyCode::Char('n')));
 

@@ -87,7 +87,7 @@ fn status_footer_right_segments(app: &ShellApp, warning: bool) -> Vec<String> {
 }
 
 fn status_footer_findings_segment(app: &ShellApp) -> String {
-    if matches!(app.shell_view, ShellView::Workbench) {
+    if matches!(app.shell_view(), ShellView::Workbench) {
         let findings = findings_model(app);
         return status_footer_findings_summary_from_counts(findings.total, findings.counts);
     }

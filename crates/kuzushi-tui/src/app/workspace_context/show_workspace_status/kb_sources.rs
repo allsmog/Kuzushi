@@ -14,7 +14,7 @@ impl ShellApp {
                 let module_id = record.module_id.clone();
                 let _ = self.refresh_kb_view(&module_id);
                 self.set_focused_module(Some(module_id));
-                self.shell_view = ShellView::KnowledgeBase;
+                self.set_shell_view(ShellView::KnowledgeBase);
                 self.log("detach", format!("removed {} {}", record.id, record.source));
             }
             Err(error) => self.log("error", error.to_string()),
@@ -34,7 +34,7 @@ impl ShellApp {
                 let module_id = record.module_id.clone();
                 let _ = self.refresh_kb_view(&module_id);
                 self.set_focused_module(Some(module_id));
-                self.shell_view = ShellView::KnowledgeBase;
+                self.set_shell_view(ShellView::KnowledgeBase);
                 self.log("reparse", format!("{} {}", record.id, record.status));
             }
             Err(error) => self.log("error", error.to_string()),

@@ -5,7 +5,7 @@ use crate::ui_view_models::WORKBENCH_REPORT_COMMAND;
 use crate::{ShellApp, ShellView};
 
 pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
-    matches!(app.shell_view, ShellView::Workbench).then(|| workbench_keybindings(app))
+    matches!(app.shell_view(), ShellView::Workbench).then(|| workbench_keybindings(app))
 }
 
 fn workbench_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {

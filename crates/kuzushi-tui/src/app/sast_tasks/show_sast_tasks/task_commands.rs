@@ -7,7 +7,7 @@ impl ShellApp {
             return;
         }
         self.set_focused_module(Some("sast".to_string()));
-        self.shell_view = ShellView::SastTasks;
+        self.set_shell_view(ShellView::SastTasks);
         self.log("tasks", self.sast_task_summary_line());
     }
 
@@ -61,7 +61,7 @@ impl ShellApp {
     }
 
     pub(crate) fn finalize_sast_task_command_effect(&mut self, finalize: SastTaskCommandFinalize) {
-        self.shell_view = ShellView::SastTasks;
+        self.set_shell_view(ShellView::SastTasks);
         self.set_focused_module(Some("sast".to_string()));
         match finalize.outcome {
             SastTaskCommandOutcome::Applied(message) => self.log("tasks", message),

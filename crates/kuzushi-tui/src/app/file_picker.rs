@@ -16,11 +16,10 @@ impl ShellApp {
             }
         };
         let (files, truncated) = workspace_file_candidates(workspace.root(), FILE_PICKER_MAX_FILES);
-        self.router
-            .navigation_mut()
-            .push_overlay_origin(self.shell_view.clone());
+        let origin = self.shell_view();
+        self.router.navigation_mut().push_overlay_origin(origin);
         self.router.file_picker_mut().open(files, truncated);
-        self.shell_view = ShellView::FilePicker;
+        self.set_shell_view(ShellView::FilePicker);
         self.log_file_picker_open(workspace.root());
     }
 

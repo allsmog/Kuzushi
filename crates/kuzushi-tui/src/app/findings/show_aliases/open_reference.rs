@@ -91,7 +91,7 @@ impl ShellApp {
     fn apply_found_finding(&mut self, finding: Finding) {
         *self.selected_finding_mut() = Some(finding.clone());
         self.sync_findings_cursor_to_selected();
-        self.shell_view = ShellView::Workbench;
+        self.set_shell_view(ShellView::Workbench);
         self.router
             .workbench_mut()
             .set_focus(crate::app::WorkbenchPane::Details);

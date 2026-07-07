@@ -81,7 +81,7 @@ fn fake_scan_dag_renders_with_module_tags_and_subsystems_collapse() {
         }
     }
 
-    assert!(matches!(app.shell_view, ShellView::Activity));
+    assert!(matches!(app.shell_view(), ShellView::Activity));
 
     let output = render_plain_app(&app, 120);
     assert!(
@@ -141,8 +141,8 @@ fn auto_open_flips_view_on_tool_start() {
     // M1 §1.3: target must be set explicitly — dispatch no longer falls back
     // to cwd silently. Use a tempdir so the workspace resolves cleanly.
     app.set_target(Some(tmp.path().to_path_buf()));
-    app.shell_view = ShellView::Home;
-    assert!(matches!(app.shell_view, ShellView::Home));
+    app.set_shell_view(ShellView::Home);
+    assert!(matches!(app.shell_view(), ShellView::Home));
 
     // Issue a /run command for a tool whose dispatcher we know — the
     // background_tool_worker will fail without a real workspace, but we only
@@ -154,7 +154,7 @@ fn auto_open_flips_view_on_tool_start() {
     });
 
     assert!(
-        matches!(app.shell_view, ShellView::Activity),
+        matches!(app.shell_view(), ShellView::Activity),
         "shell_view should auto-flip to Activity on tool start"
     );
 }
@@ -177,9 +177,9 @@ fn auto_open_disabled_does_not_open_activity() {
     });
 
     assert!(
-        !matches!(app.shell_view, ShellView::Activity),
+        !matches!(app.shell_view(), ShellView::Activity),
         "Activity should not auto-open when the toggle is off; got {:?}",
-        app.shell_view
+        app.shell_view()
     );
 }
 
@@ -317,7 +317,7 @@ fn cancel_command_in_activity_emits_visible_signal() {
         tool: Some("findings:list".to_string()),
         input: None,
     });
-    assert!(matches!(app.shell_view, ShellView::Activity));
+    assert!(matches!(app.shell_view(), ShellView::Activity));
 
     app.handle_command(ShellCommand::Cancel);
 
@@ -339,7 +339,7 @@ fn cancel_command_in_activity_emits_visible_signal() {
             .map(|l| format!("{}: {}", l.prefix, l.body))
             .collect::<Vec<_>>()
     );
-    assert!(matches!(app.shell_view, ShellView::Activity));
+    assert!(matches!(app.shell_view(), ShellView::Activity));
     assert!(!app.should_quit());
 }
 

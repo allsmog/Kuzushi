@@ -12,7 +12,7 @@ impl ShellApp {
         match self.refresh_kb_view(&module_id) {
             Ok(()) => {
                 self.set_focused_module(Some(module_id.clone()));
-                self.shell_view = ShellView::KnowledgeBase;
+                self.set_shell_view(ShellView::KnowledgeBase);
                 self.router.kb_mut().open();
                 self.log(
                     "kb",
@@ -50,7 +50,7 @@ impl ShellApp {
             Ok(record) => {
                 let _ = self.refresh_kb_view(&module_id);
                 self.set_focused_module(Some(module_id));
-                self.shell_view = ShellView::KnowledgeBase;
+                self.set_shell_view(ShellView::KnowledgeBase);
                 self.log(
                     "attach",
                     format!(

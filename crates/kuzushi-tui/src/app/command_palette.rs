@@ -6,7 +6,7 @@ impl ShellApp {
     /// Open the fuzzy command palette, resetting its query and cursor.
     pub(crate) fn open_command_palette(&mut self) {
         self.router.command_palette_mut().reset();
-        self.shell_view = ShellView::CommandPalette;
+        self.set_shell_view(ShellView::CommandPalette);
     }
 
     pub(crate) fn palette_input(&mut self, ch: char) {

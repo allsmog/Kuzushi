@@ -102,7 +102,7 @@ impl ShellApp {
 
     fn workbench_depth_stack_active(&self) -> bool {
         self.router.workbench().depth_stack()
-            && self.shell_view == ShellView::Workbench
+            && self.shell_view() == ShellView::Workbench
             && self.workbench_is_review_page()
     }
 
@@ -120,7 +120,7 @@ impl ShellApp {
         } else {
             workbench.set_focus(WorkbenchPane::Center);
         }
-        self.shell_view = ShellView::Workbench;
+        self.set_shell_view(ShellView::Workbench);
         self.log(
             "workbench",
             format!(
@@ -165,7 +165,7 @@ impl ShellApp {
     }
 
     fn focus_workbench_findings_before_back(&mut self) -> bool {
-        if self.shell_view != ShellView::Workbench
+        if self.shell_view() != ShellView::Workbench
             || self.router.workbench().focus() != WorkbenchPane::Details
         {
             return false;
@@ -471,7 +471,7 @@ impl ShellApp {
         match action {
             ViewHotkeyAction::ActorDetail(index) => {
                 self.router.actor_detail_mut().open(index);
-                self.shell_view = ShellView::ActorDetail;
+                self.set_shell_view(ShellView::ActorDetail);
             }
             ViewHotkeyAction::ActorDetailFilterCycle => {
                 self.router.actor_detail_mut().cycle_filter();
@@ -499,7 +499,7 @@ impl ShellApp {
         match action {
             ViewHotkeyAction::ThreatView(view) => {
                 self.router.threat_mut().open(view);
-                self.shell_view = ShellView::Threat;
+                self.set_shell_view(ShellView::Threat);
                 InputUpdate::handled()
             }
             ViewHotkeyAction::PauseScan => self.reduce_hotkey_command(ShellCommand::Pause),

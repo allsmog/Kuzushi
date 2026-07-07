@@ -469,7 +469,7 @@ impl ShellApp {
             Ok(report) => {
                 let workspace_view = self.build_workspace_view(Some(report.output_path.clone()));
                 self.domain_mut().set_workspace_view(workspace_view);
-                self.shell_view = ShellView::Workspace;
+                self.set_shell_view(ShellView::Workspace);
                 self.set_focused_module(Some("workspace".to_string()));
                 self.log(
                     "export",
@@ -479,7 +479,7 @@ impl ShellApp {
             Err(error) => {
                 let workspace_view = self.build_workspace_view(None);
                 self.domain_mut().set_workspace_view(workspace_view);
-                self.shell_view = ShellView::Workspace;
+                self.set_shell_view(ShellView::Workspace);
                 self.log(
                     "error",
                     format!(
@@ -498,7 +498,7 @@ impl ShellApp {
             Ok(path) => {
                 let workspace_view = self.build_workspace_view(None);
                 self.domain_mut().set_workspace_view(workspace_view);
-                self.shell_view = ShellView::Workspace;
+                self.set_shell_view(ShellView::Workspace);
                 self.set_focused_module(Some("workspace".to_string()));
                 self.log(
                     "scope",
@@ -512,7 +512,7 @@ impl ShellApp {
             Err(error) => {
                 let workspace_view = self.build_workspace_view(None);
                 self.domain_mut().set_workspace_view(workspace_view);
-                self.shell_view = ShellView::Workspace;
+                self.set_shell_view(ShellView::Workspace);
                 self.log(
                     "error",
                     format!("{error}. Next: target <path>, then workspace scope init"),
@@ -591,7 +591,7 @@ impl ShellApp {
         {
             Ok(report) => {
                 self.engagement.clear_pending_patch();
-                self.shell_view = ShellView::Workbench;
+                self.set_shell_view(ShellView::Workbench);
                 self.router
                     .workbench_mut()
                     .set_page(Some(crate::app::WorkbenchPage::Ship));
@@ -654,12 +654,12 @@ impl ShellApp {
         match open.view {
             RunArtifactView::Replay => {
                 self.router.replay_mut().open(run_id.clone());
-                self.shell_view = ShellView::Replay;
+                self.set_shell_view(ShellView::Replay);
                 self.log("replay", run_id);
             }
             RunArtifactView::Trace => {
                 self.router.trace_mut().open(run_id.clone());
-                self.shell_view = ShellView::Trace;
+                self.set_shell_view(ShellView::Trace);
                 self.log("trace", run_id);
             }
         }
@@ -672,7 +672,7 @@ impl ShellApp {
             session.seed_from_registry(self.registry());
             self.set_activity(Some(session));
         }
-        self.shell_view = ShellView::Activity;
+        self.set_shell_view(ShellView::Activity);
         self.log("activity", "live module-progress dashboard");
     }
 

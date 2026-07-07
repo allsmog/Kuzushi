@@ -63,7 +63,7 @@ fn renders_ink_style_shell_without_box_dashboard() {
     let backend = TestBackend::new(96, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Home;
+    app.set_shell_view(ShellView::Home);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -154,7 +154,7 @@ fn planning_picker_announces_prior_state_and_plain_language_outcomes() {
             .into_iter()
             .collect(),
     );
-    app.shell_view = ShellView::PlanningPicker;
+    app.set_shell_view(ShellView::PlanningPicker);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -226,7 +226,7 @@ fn planning_picker_options_focus_marks_the_options_pane() {
     app.engagement
         .planning_picker_mut()
         .set_focus(PickerFocus::OptionsPane);
-    app.shell_view = ShellView::PlanningPicker;
+    app.set_shell_view(ShellView::PlanningPicker);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -259,7 +259,7 @@ fn planning_picker_is_vertically_centered_on_tall_terminals() {
         rows,
         [PlanningTaskId::GatherRepoContext].into_iter().collect(),
     );
-    app.shell_view = ShellView::PlanningPicker;
+    app.set_shell_view(ShellView::PlanningPicker);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let buffer = terminal.backend().buffer();
@@ -294,7 +294,7 @@ fn planning_picker_revisit_banner_names_cached_artifact_behavior() {
         rows,
         [PlanningTaskId::GatherRepoContext].into_iter().collect(),
     );
-    app.shell_view = ShellView::PlanningPicker;
+    app.set_shell_view(ShellView::PlanningPicker);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -316,7 +316,7 @@ fn planning_picker_prompt_focus_renders_live_prompt() {
     app.engagement
         .planning_picker_mut()
         .open(rows, Default::default());
-    app.shell_view = ShellView::PlanningPicker;
+    app.set_shell_view(ShellView::PlanningPicker);
     app.engagement
         .planning_picker_mut()
         .set_focus(PickerFocus::Prompt);
@@ -350,7 +350,7 @@ fn planning_picker_reuses_cached_artifact_when_rebuild_cli_is_missing() {
         vec![row],
         [PlanningTaskId::BuildCodeQlDatabase].into_iter().collect(),
     );
-    app.shell_view = ShellView::PlanningPicker;
+    app.set_shell_view(ShellView::PlanningPicker);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -400,7 +400,7 @@ fn home_first_run_state_names_real_artifact_commands() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Home;
+    app.set_shell_view(ShellView::Home);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -459,7 +459,7 @@ fn home_view_renders_latest_run_artifact_rail() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(tmp.path().to_path_buf()));
-    app.shell_view = ShellView::Home;
+    app.set_shell_view(ShellView::Home);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -486,7 +486,7 @@ fn catalog_default_is_grouped_at_normal_width() {
     let backend = TestBackend::new(120, 60);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -507,7 +507,7 @@ fn catalog_default_keeps_quickstart_fallback_on_tight_width() {
     let backend = TestBackend::new(80, 16);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -527,7 +527,7 @@ fn quickstart_follows_doctor_context_scan_findings_report_path() {
     let backend = TestBackend::new(80, 22);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Quickstart;
+    app.set_shell_view(ShellView::Quickstart);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let buffer = terminal.backend().buffer();
@@ -581,7 +581,7 @@ fn renders_actionable_empty_states_at_80_columns() {
         let mut app = ShellApp::new(V2Config::default(), None);
         let runs_target = tempfile::tempdir().unwrap();
         let is_runs = matches!(view, ShellView::Runs);
-        app.shell_view = view;
+        app.set_shell_view(view);
         if is_runs {
             app.set_target(Some(runs_target.path().to_path_buf()));
         }
@@ -721,7 +721,7 @@ fn replay_and_trace_surfaces_reuse_current_finding_aliases() {
             Finding::new_semgrep("demo.rule", "src/app.ts", 8, None, Severity::High, "sink");
         finding.fingerprint = "aaaa1111".to_string();
         *app.findings_mut() = vec![finding];
-        app.shell_view = view;
+        app.set_shell_view(view);
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
@@ -738,7 +738,7 @@ fn renders_threat_view_navigation() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.threat_mut().open(ThreatView::Stride);
-    app.shell_view = ShellView::Threat;
+    app.set_shell_view(ShellView::Threat);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -991,7 +991,7 @@ fn module_run_body_ends_with_streaming_cursor_when_scan_active() {
         abort_requested: false,
         error: None,
     }));
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
     let area = Rect::new(0, 0, 120, 30);
     let lines = module_run_lines(&app, area);
     let last = lines.last().expect("expected non-empty body");
@@ -1015,7 +1015,7 @@ fn module_run_body_ends_with_streaming_cursor_when_scan_active() {
 #[test]
 fn module_run_body_omits_streaming_cursor_when_idle() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
     let area = Rect::new(0, 0, 120, 30);
     let lines = module_run_lines(&app, area);
     // No scan → no streaming cursor expected.
@@ -1035,7 +1035,7 @@ fn module_run_body_omits_streaming_cursor_when_idle() {
 #[test]
 fn module_run_findings_preview_uses_projected_finding_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
     let mut triaged = Finding::new_semgrep(
         "demo.sql",
         "src/search.ts",
@@ -1155,7 +1155,7 @@ fn sast_progress_bars_use_scan_progress_per_task_when_present() {
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
     app.set_scan_panel(Some(crate::app::ScanPanelState {
         run_id: Some("run-real-progress".to_string()),
         target: std::path::PathBuf::from("./demo"),
@@ -1278,7 +1278,7 @@ fn threats_stories_view_renders_attacker_story_cards() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.threat_mut().open(ThreatView::Stories);
-    app.shell_view = ShellView::Threat;
+    app.set_shell_view(ShellView::Threat);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1298,7 +1298,7 @@ fn threats_scope_view_renders_criticality_buckets() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.threat_mut().open(ThreatView::Scope);
-    app.shell_view = ShellView::Threat;
+    app.set_shell_view(ShellView::Threat);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1409,7 +1409,7 @@ fn threats_summary_view_is_review_first_without_fake_observations() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     app.router.threat_mut().open(ThreatView::Summary);
-    app.shell_view = ShellView::Threat;
+    app.set_shell_view(ShellView::Threat);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1434,7 +1434,7 @@ fn threats_editor_names_persistent_artifact_path() {
     let backend = TestBackend::new(120, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::ThreatEditor;
+    app.set_shell_view(ShellView::ThreatEditor);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1449,7 +1449,7 @@ fn threats_summary_unknown_state_does_not_invent_data() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.threat_mut().open(ThreatView::Summary);
-    app.shell_view = ShellView::Threat;
+    app.set_shell_view(ShellView::Threat);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1467,7 +1467,7 @@ fn threats_stride_view_renders_design_rollup() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.threat_mut().open(ThreatView::Stride);
-    app.shell_view = ShellView::Threat;
+    app.set_shell_view(ShellView::Threat);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1492,7 +1492,7 @@ fn recon_module_is_focusable_from_catalog() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
 
@@ -1545,7 +1545,7 @@ fn module_run_transcript_uses_growing_console_glyphs() {
         abort_requested: false,
         error: None,
     }));
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1568,7 +1568,7 @@ fn direct_tool_run_header_does_not_show_pending_scan_run() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_focused_module(Some("context".to_string()));
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1587,7 +1587,7 @@ fn active_tool_run_uses_live_tool_chrome_not_scan_chrome() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_focused_module(Some("recon".to_string()));
     app.set_running_tool_for_test("recon:nmap");
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1617,7 +1617,7 @@ fn renders_options_table_readably_at_80_columns() {
         tool_name: "sast:scan".to_string(),
         filter: crate::app::OptionsFilter::Standard,
     });
-    app.shell_view = ShellView::Options;
+    app.set_shell_view(ShellView::Options);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1638,7 +1638,7 @@ fn renders_sast_task_picker_readably_at_80_columns() {
     let backend = TestBackend::new(80, 22);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::SastTasks;
+    app.set_shell_view(ShellView::SastTasks);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1674,7 +1674,7 @@ fn renders_kb_attachments_readably_at_80_columns() {
         status: "metadata-only; URL was not fetched".to_string(),
         updated_at_unix: 1,
     }];
-    app.shell_view = ShellView::KnowledgeBase;
+    app.set_shell_view(ShellView::KnowledgeBase);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1705,7 +1705,7 @@ fn renders_context_status_readably_at_80_columns() {
             generated_slices: vec!["repo".to_string(), "app-model".to_string()],
             stale_slices: Vec::new(),
         });
-    app.shell_view = ShellView::Context;
+    app.set_shell_view(ShellView::Context);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1723,7 +1723,7 @@ fn active_context_build_view_shows_live_feedback() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_focused_module(Some("context".to_string()));
-    app.shell_view = ShellView::Context;
+    app.set_shell_view(ShellView::Context);
     app.set_running_tool_for_test("context:build");
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -1743,7 +1743,7 @@ fn context_build_view_surfaces_malformed_snapshot() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_focused_module(Some("context".to_string()));
-    app.shell_view = ShellView::Context;
+    app.set_shell_view(ShellView::Context);
     app.domain_mut().context_view_mut().snapshot_path = Some(context_snapshot_fixture_path());
     app.domain_mut().context_view_mut().status =
         "malformed context snapshot. Next: context build".to_string();
@@ -1772,7 +1772,7 @@ fn renders_workspace_status_readably_at_80_columns() {
         status: "workspace ready; 2 finding(s). Next: workspace scope init or workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]"
             .to_string(),
     });
-    app.shell_view = ShellView::Workspace;
+    app.set_shell_view(ShellView::Workspace);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1820,7 +1820,7 @@ fn workspace_view_renders_findings_rollup_bar_when_findings_exist() {
             )
         })
         .collect();
-    app.shell_view = ShellView::Workspace;
+    app.set_shell_view(ShellView::Workspace);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1843,7 +1843,7 @@ fn workspace_view_skips_rollup_when_no_findings() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workspace;
+    app.set_shell_view(ShellView::Workspace);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1865,7 +1865,7 @@ fn plain_options_table_has_no_ansi_or_box_drawing() {
         tool_name: "sast:scan".to_string(),
         filter: crate::app::OptionsFilter::Standard,
     });
-    app.shell_view = ShellView::Options;
+    app.set_shell_view(ShellView::Options);
 
     let rendered = render_plain_app(&app, 80);
 
@@ -1900,7 +1900,7 @@ fn plain_kb_list_has_no_ansi_or_box_drawing() {
         status: "metadata-only; URL was not fetched".to_string(),
         updated_at_unix: 1,
     }];
-    app.shell_view = ShellView::KnowledgeBase;
+    app.set_shell_view(ShellView::KnowledgeBase);
 
     let rendered = render_plain_app(&app, 80);
 
@@ -1929,7 +1929,7 @@ fn plain_context_status_has_no_ansi_or_box_drawing() {
             generated_slices: vec!["repo".to_string(), "app-model".to_string()],
             stale_slices: Vec::new(),
         });
-    app.shell_view = ShellView::Context;
+    app.set_shell_view(ShellView::Context);
 
     let rendered = render_plain_app(&app, 80);
 
@@ -1943,7 +1943,7 @@ fn plain_context_status_has_no_ansi_or_box_drawing() {
 #[test]
 fn plain_context_guidance_wraps_without_truncating_next_steps() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Context;
+    app.set_shell_view(ShellView::Context);
 
     let rendered = render_plain_app(&app, 56);
 
@@ -1969,7 +1969,7 @@ fn plain_workspace_guidance_wraps_without_truncating_export_command() {
         status: "workspace ready; 2 finding(s). Next: workspace scope init or workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]"
             .to_string(),
     });
-    app.shell_view = ShellView::Workspace;
+    app.set_shell_view(ShellView::Workspace);
 
     let rendered = render_plain_app(&app, 52);
 
@@ -1984,7 +1984,7 @@ fn plain_workspace_guidance_wraps_without_truncating_export_command() {
 #[test]
 fn plain_help_guidance_wraps_without_truncating_command_shapes() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Help;
+    app.set_shell_view(ShellView::Help);
 
     let rendered = render_plain_app(&app, 64);
 
@@ -2005,7 +2005,7 @@ fn renders_config_onboarding_without_silent_model_selection() {
     app.config_mut().model = None;
     app.set_session_thinking_level(None);
     app.router.model_catalog_mut().set_selected_index(2);
-    app.shell_view = ShellView::Config;
+    app.set_shell_view(ShellView::Config);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -2029,7 +2029,7 @@ fn plain_config_onboarding_uses_explicit_model_selection() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.config_mut().model = None;
     app.set_session_thinking_level(None);
-    app.shell_view = ShellView::Config;
+    app.set_shell_view(ShellView::Config);
 
     let rendered = render_plain_app(&app, 80);
 
@@ -2047,7 +2047,7 @@ fn renders_help_grouped_by_operator_workflow() {
     let backend = TestBackend::new(110, 130);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Help;
+    app.set_shell_view(ShellView::Help);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -2079,7 +2079,7 @@ fn renders_help_aliases_and_examples_from_command_specs() {
     let backend = TestBackend::new(120, 130);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Help;
+    app.set_shell_view(ShellView::Help);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -2123,7 +2123,7 @@ fn renders_help_aliases_and_examples_from_command_specs() {
 #[test]
 fn plain_help_aliases_and_examples_are_width_safe() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Help;
+    app.set_shell_view(ShellView::Help);
 
     let rendered = render_plain_app(&app, 80);
 
@@ -2156,7 +2156,7 @@ fn viewport_help_remains_navigable_at_24_rows() {
     let backend = TestBackend::new(110, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Help;
+    app.set_shell_view(ShellView::Help);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let first_page = format!("{:?}", terminal.backend().buffer());
@@ -2182,7 +2182,7 @@ fn viewport_tools_remain_navigable_at_24_rows() {
         .unwrap()
         .cells[0]
         .clone();
-    app.shell_view = ShellView::Tools;
+    app.set_shell_view(ShellView::Tools);
     *app.router.tools_mut().scroll_mut() = usize::MAX;
 
     let backend = TestBackend::new(110, 24);
@@ -2211,7 +2211,7 @@ fn viewport_expanded_modules_remain_navigable_at_24_rows() {
         .unwrap()
         .id
         .clone();
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
     app.router.catalog_mut().expand();
     *app.router.modules_mut().scroll_mut() = usize::MAX;
 
@@ -2233,7 +2233,7 @@ fn workbench_findings_pane_windows_cursor_into_view() {
     let backend = TestBackend::new(100, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.router
         .workbench_mut()
         .set_focus(WorkbenchPane::Findings);
@@ -2267,7 +2267,7 @@ fn keybind_footer_advertises_workbench_navigation_keys_at_80_columns() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     *app.findings_mut() = vec![Finding::new_semgrep(
         "demo.rule",
         "src/app.rs",
@@ -2301,7 +2301,7 @@ fn keybind_footer_advertises_module_run_actor_and_pause_resume_keys() {
         abort_requested: false,
         error: None,
     }));
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let running = format!("{:?}", terminal.backend().buffer());
@@ -2346,7 +2346,7 @@ fn renders_agent_chat_mode_while_question_is_active() {
         failure_context: None,
         pending_failure_context: None,
     }));
-    app.shell_view = ShellView::AgentChat;
+    app.set_shell_view(ShellView::AgentChat);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -2371,7 +2371,7 @@ fn renders_honest_abort_requested_states() {
         },
         None,
     );
-    app.shell_view = ShellView::AgentChat;
+    app.set_shell_view(ShellView::AgentChat);
     app.set_agent_chat(Some(crate::app::AgentChatView {
         question: "What changed?".to_string(),
         answer: None,
@@ -2394,7 +2394,7 @@ fn renders_honest_abort_requested_states() {
 
     let backend = TestBackend::new(96, 22);
     let mut terminal = Terminal::new(backend).unwrap();
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
     app.clear_agent_chat();
     app.set_scan_panel(Some(crate::app::ScanPanelState {
         run_id: Some("run-1".to_string()),
@@ -2449,7 +2449,7 @@ fn agent_chat_renders_failure_handoff_panel() {
         }),
         pending_failure_context: None,
     }));
-    app.shell_view = ShellView::AgentChat;
+    app.set_shell_view(ShellView::AgentChat);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -2491,7 +2491,7 @@ fn failure_handoff_view_renders_current_context() {
         }),
         pending_failure_context: None,
     }));
-    app.shell_view = ShellView::FailureHandoff;
+    app.set_shell_view(ShellView::FailureHandoff);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -2539,7 +2539,7 @@ fn failure_handoff_view_reads_latest_failures_artifact() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(tmp.path().to_path_buf()));
-    app.shell_view = ShellView::FailureHandoff;
+    app.set_shell_view(ShellView::FailureHandoff);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -2596,7 +2596,7 @@ fn recommend_view_renders_latest_recommendations_artifact() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(tmp.path().to_path_buf()));
-    app.shell_view = ShellView::Recommend;
+    app.set_shell_view(ShellView::Recommend);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -2622,7 +2622,7 @@ fn renders_shell_module_plan_and_run_routing_modes() {
         {
             let mut app = ShellApp::new(V2Config::default(), None);
             app.set_focused_module(Some("sast".to_string()));
-            app.shell_view = ShellView::Module;
+            app.set_shell_view(ShellView::Module);
             (app, "mode:module", "kuzushi/sast>")
         },
         {
@@ -2646,20 +2646,20 @@ fn renders_shell_module_plan_and_run_routing_modes() {
                 abort_requested: false,
                 error: None,
             }));
-            app.shell_view = ShellView::ModuleRun;
+            app.set_shell_view(ShellView::ModuleRun);
             (app, "mode:run", "kuzushi/run>")
         },
         {
             let mut app = ShellApp::new(V2Config::default(), None);
             app.set_focused_module(Some("context".to_string()));
-            app.shell_view = ShellView::ModuleRun;
+            app.set_shell_view(ShellView::ModuleRun);
             (app, "mode:module", "kuzushi/context>")
         },
         {
             let mut app = ShellApp::new(V2Config::default(), None);
             app.set_focused_module(Some("context".to_string()));
             app.set_running_tool_for_test("context:build");
-            app.shell_view = ShellView::ModuleRun;
+            app.set_shell_view(ShellView::ModuleRun);
             (app, "mode:run", "kuzushi/context/run>")
         },
     ];
@@ -2756,7 +2756,7 @@ fn renders_all_ink_parity_shell_surfaces() {
         // The Workbench command center is the one box-drawing primary surface
         // (bordered panes); every other view stays line-based.
         let is_workbench = matches!(view, ShellView::Workbench);
-        app.shell_view = view;
+        app.set_shell_view(view);
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
@@ -2776,7 +2776,7 @@ fn renders_pwn_dashboard_with_state_and_rounds() {
     let backend = TestBackend::new(110, 28);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Pwn;
+    app.set_shell_view(ShellView::Pwn);
     let pwn = app.pwn_view_mut();
     pwn.target = Some(std::path::PathBuf::from("./chal"));
     pwn.profile_snapshot = Some(serde_json::json!({
@@ -2885,7 +2885,7 @@ fn module_run_error_wraps_on_word_boundaries() {
     let backend = TestBackend::new(72, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
     app.set_scan_panel(Some(ScanPanelState {
         run_id: Some("abc1234".to_string()),
         target: PathBuf::from("./repo"),
@@ -2940,32 +2940,32 @@ fn view_status_segment_reflects_actual_view_not_focused_module() {
     // returns the real view label so the status reflects what the user
     // actually sees.
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Help;
+    app.set_shell_view(ShellView::Help);
     assert_eq!(view_status_segment(&app), "help");
 
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
     assert_eq!(view_status_segment(&app), "modules");
 
-    app.shell_view = ShellView::Tools;
+    app.set_shell_view(ShellView::Tools);
     assert_eq!(view_status_segment(&app), "tools");
 
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     assert_eq!(view_status_segment(&app), "workbench");
 
     app.router.threat_mut().open(ThreatView::Stride);
-    app.shell_view = ShellView::Threat;
+    app.set_shell_view(ShellView::Threat);
     assert_eq!(view_status_segment(&app), "threats:stride");
 
-    app.shell_view = ShellView::Runs;
+    app.set_shell_view(ShellView::Runs);
     assert_eq!(view_status_segment(&app), "run-timeline");
 
-    app.shell_view = ShellView::FailureHandoff;
+    app.set_shell_view(ShellView::FailureHandoff);
     assert_eq!(view_status_segment(&app), "failure-handoff");
 
     // Module view still surfaces the focused module so operators can
     // see which module they're driving.
     app.set_focused_module(Some("semgrep".to_string()));
-    app.shell_view = ShellView::Module;
+    app.set_shell_view(ShellView::Module);
     assert_eq!(view_status_segment(&app), "semgrep");
 }
 
@@ -3122,7 +3122,7 @@ fn prereq_plan_card_shows_cached_missing_writes_risk_cost_and_actions() {
         None,
     );
     app.engagement.set_pending_prereq_prompt(chain.plan());
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3157,7 +3157,7 @@ fn prereq_plan_card_explains_invalid_artifacts_before_reuse() {
         None,
     );
     app.engagement.set_pending_prereq_prompt(chain.plan());
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3198,7 +3198,7 @@ fn module_run_renders_live_activity_in_body_and_status_strip() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::ModuleRun;
+    app.set_shell_view(ShellView::ModuleRun);
     app.set_live_activity_state(Some(LiveActivity::new(
         LiveActivityPhase::Thinking,
         "triage:run",
@@ -3283,7 +3283,7 @@ fn runs_view_tints_status_column_per_mockup() {
         abort_requested: false,
         error: None,
     }));
-    app.shell_view = ShellView::Runs;
+    app.set_shell_view(ShellView::Runs);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3381,7 +3381,7 @@ fn runs_view_lists_past_runs_from_run_json() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(tmp.path().to_path_buf()));
-    app.shell_view = ShellView::Runs;
+    app.set_shell_view(ShellView::Runs);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3432,7 +3432,7 @@ fn run_diff_view_renders_new_and_not_seen_findings_and_revisions() {
         run_diff_reviewed_finding("fi_changed", TriageVerdict::FalsePositive),
     ];
     app.router.run_diff_mut().open("run-left", "run-right");
-    app.shell_view = ShellView::RunDiff;
+    app.set_shell_view(ShellView::RunDiff);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3627,7 +3627,7 @@ fn cost_view_renders_budget_bar_and_session_spend() {
     app.session_mut().set_session_budget_usd(Some(5.0));
     app.session_mut()
         .set_last_tool_cost_usd_for_test(Some(0.18));
-    app.shell_view = ShellView::Cost;
+    app.set_shell_view(ShellView::Cost);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3657,7 +3657,7 @@ fn auth_view_renders_providers_model_and_spend_sections() {
         None,
     );
     app.session_mut().set_session_cost_usd_for_test(0.42);
-    app.shell_view = ShellView::Auth;
+    app.set_shell_view(ShellView::Auth);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3676,7 +3676,7 @@ fn auth_view_renders_latest_oauth_flow_state() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Auth;
+    app.set_shell_view(ShellView::Auth);
     app.router.auth_mut().set_login(AuthLoginView {
         provider: "openai".to_string(),
         method: "headless".to_string(),
@@ -3704,7 +3704,7 @@ fn auth_view_stacks_and_wraps_on_narrow_terminals() {
     // hints wrap, the store path keeps its tail, and every recovery
     // command survives.
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Auth;
+    app.set_shell_view(ShellView::Auth);
     app.router.auth_mut().set_login(AuthLoginView {
         provider: "openai".to_string(),
         method: "browser".to_string(),
@@ -3756,7 +3756,7 @@ fn home_view_shows_journey_rail_and_phase_chip_with_target() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(dir.path().to_path_buf()));
-    app.shell_view = ShellView::Home;
+    app.set_shell_view(ShellView::Home);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3784,7 +3784,7 @@ fn activity_view_collapses_tasks_pane_for_taskless_runs() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_activity(Some(ActivitySession::new("tool-1")));
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3807,7 +3807,7 @@ fn activity_view_names_the_running_tool_everywhere_it_matters() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_running_tool_for_test("threat-model:build");
     app.set_activity(Some(ActivitySession::new("tool-7b7fa744")));
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3839,7 +3839,7 @@ fn activity_view_renders_partial_terminal_outcome_from_run_summary() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(temp.path().to_path_buf()));
     app.set_activity(Some(ActivitySession::new("run-partial-render")));
-    app.shell_view = ShellView::Activity;
+    app.set_shell_view(ShellView::Activity);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3879,7 +3879,7 @@ fn target_picker_renders_candidates_with_cursor_and_hints() {
         },
     ]);
     app.router.target_picker_mut().set_cursor(1);
-    app.shell_view = ShellView::TargetPicker;
+    app.set_shell_view(ShellView::TargetPicker);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3904,7 +3904,7 @@ fn model_picker_renders_offline_demo_escape_hatch() {
     let backend = TestBackend::new(110, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::ModelPicker;
+    app.set_shell_view(ShellView::ModelPicker);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3921,7 +3921,7 @@ fn auth_picker_renders_selectable_offline_demo_row() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.auth_picker_mut().open("openai".to_string());
-    app.shell_view = ShellView::AuthMethodPicker;
+    app.set_shell_view(ShellView::AuthMethodPicker);
     app.router.auth_picker_mut().set_cursor(2);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -3937,7 +3937,7 @@ fn file_picker_renders_filter_count_and_selected_file() {
     let backend = TestBackend::new(100, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::FilePicker;
+    app.set_shell_view(ShellView::FilePicker);
     app.router.file_picker_mut().open(
         vec![
             "README.md".to_string(),
@@ -3966,7 +3966,7 @@ fn home_view_without_target_has_no_journey_rail() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Home;
+    app.set_shell_view(ShellView::Home);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3982,7 +3982,7 @@ fn auth_provider_rows_drop_detail_to_second_line_when_narrow() {
     // would overflow, the detail drops to an indented second line
     // instead of vanishing off the right edge.
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Auth;
+    app.set_shell_view(ShellView::Auth);
 
     let area = ratatui::layout::Rect::new(0, 0, 36, 50);
     let rendered = auth_lines(&app, area)
@@ -4130,7 +4130,7 @@ fn module_detail_renders_options_when_stored_values_exist() {
         serde_json::json!(true),
     );
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::Module;
+    app.set_shell_view(ShellView::Module);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -4156,7 +4156,7 @@ fn module_detail_lists_prompt_overrides_from_disk() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(tmp.path().to_path_buf()));
     app.set_focused_module(Some("sast".to_string()));
-    app.shell_view = ShellView::Module;
+    app.set_shell_view(ShellView::Module);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -4179,7 +4179,7 @@ fn prompts_editor_renders_selected_prompt_stack() {
     app.set_target(Some(tmp.path().to_path_buf()));
     app.set_focused_module(Some("sast".to_string()));
     app.router.prompts_mut().set_cursor(1);
-    app.shell_view = ShellView::PromptsEditor;
+    app.set_shell_view(ShellView::PromptsEditor);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -4215,7 +4215,7 @@ fn trace_view_renders_steps_from_trace_jsonl() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(tmp.path().to_path_buf()));
     app.router.trace_mut().open("r-1");
-    app.shell_view = ShellView::Trace;
+    app.set_shell_view(ShellView::Trace);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -4242,7 +4242,7 @@ fn trace_view_empty_when_no_trace_jsonl_on_disk() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(tmp.path().to_path_buf()));
     app.router.trace_mut().open("r-missing");
-    app.shell_view = ShellView::Trace;
+    app.set_shell_view(ShellView::Trace);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -4285,7 +4285,7 @@ fn render_replay_for_target(target: &std::path::Path, run_id: &str) -> String {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_target(Some(target.to_path_buf()));
     app.router.replay_mut().open(run_id);
-    app.shell_view = ShellView::Replay;
+    app.set_shell_view(ShellView::Replay);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     format!("{:?}", terminal.backend().buffer())
@@ -4312,7 +4312,7 @@ fn patch_view_renders_rationale_diff_tests_and_guardrail_sections() {
             staged_at: Some(ui_run_artifact_relative_path("r-2113", "patch.diff")),
         });
     app.router.patch_mut().open("F-0001");
-    app.shell_view = ShellView::Patch;
+    app.set_shell_view(ShellView::Patch);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -4345,7 +4345,7 @@ fn patch_view_empty_state_when_no_patch_pending() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.router.patch_mut().open("F-0042");
-    app.shell_view = ShellView::Patch;
+    app.set_shell_view(ShellView::Patch);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -4495,7 +4495,7 @@ fn agent_chat_renders_multi_turn_history_with_bubble_per_turn() {
         failure_context: None,
         pending_failure_context: None,
     }));
-    app.shell_view = ShellView::AgentChat;
+    app.set_shell_view(ShellView::AgentChat);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -4573,7 +4573,7 @@ fn agent_chat_renders_role_tagged_bubbles() {
         failure_context: None,
         pending_failure_context: None,
     }));
-    app.shell_view = ShellView::AgentChat;
+    app.set_shell_view(ShellView::AgentChat);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -4621,7 +4621,7 @@ fn compact_finding_row_renders_alias_severity_and_location() {
 #[test]
 fn error_notice_banner_renders_above_throttle() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
     app.set_error_notice("tool", "semgrep:scan failed");
     app.set_throttle("anthropic", "429 retry-after 14s");
 
@@ -4638,7 +4638,7 @@ fn error_notice_banner_renders_above_throttle() {
 #[test]
 fn notice_banner_hidden_on_short_terminal() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Catalog;
+    app.set_shell_view(ShellView::Catalog);
     app.set_error_notice("tool", "boom");
 
     let backend = TestBackend::new(80, 4);
@@ -4669,7 +4669,7 @@ fn banner_row(buffer: &Buffer, needle: &str) -> Option<u16> {
 
 fn workbench_app_with_findings() -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     *app.findings_mut() = vec![Finding::new_semgrep(
         "demo.sqli",
         "apps/api/orders.rs",
@@ -4683,7 +4683,7 @@ fn workbench_app_with_findings() -> ShellApp {
 
 fn workbench_app_with_long_source_rows() -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.findings_mut().extend(repeat_finding(
         "demo.workflow",
         ".github/workflows/benchmark-regression.yml",
@@ -4793,7 +4793,7 @@ fn workbench_top_bar_renders_compact_journey_phase_with_target() {
     let backend = TestBackend::new(140, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.set_target(Some(target.path().to_path_buf()));
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -4957,7 +4957,7 @@ fn workbench_selected_finding_gets_readable_details_pane() {
         response_blob: None,
     }];
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.router.workbench_mut().set_focus(WorkbenchPane::Details);
     app.set_target(Some(temp.path().to_path_buf()));
     *app.findings_mut() = vec![finding.clone()];
@@ -5022,7 +5022,7 @@ fn workbench_center_renders_dfd_title_when_artifact_present() {
     std::fs::write(&path, serde_json::to_string(&doc).unwrap()).unwrap();
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.set_target(Some(temp.path().to_path_buf()));
     app.router
         .workbench_mut()
@@ -5074,7 +5074,7 @@ fn workbench_frame_uses_scene_dfd_widget_when_artifact_present() {
     let backend = TestBackend::new(150, 34);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
     app.set_target(Some(temp.path().to_path_buf()));
     app.router
         .workbench_mut()
@@ -5105,7 +5105,7 @@ fn phase_three_overlay_views_render_plain_surfaces() {
 
     for (view, marker) in cases {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.shell_view = view;
+        app.set_shell_view(view);
         let rendered = render_plain_app(&app, 120);
         assert!(
             rendered.contains(marker),
@@ -5133,7 +5133,7 @@ fn phase_four_interruption_views_render_plain_surfaces() {
     for (view, marker) in cases {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.router.interruption_mut().open(view);
-        app.shell_view = ShellView::Interruption;
+        app.set_shell_view(ShellView::Interruption);
         app.advisory_mut().budget_halt = Some(crate::app::BudgetHalt {
             limit_usd: 2.50,
             spent_usd: 2.75,
@@ -5182,7 +5182,7 @@ fn phase_five_committed_module_views_render_descriptor_details() {
             .unwrap_or_else(|| panic!("{module_id} should be registered"))
             .is_hidden();
         app.set_focused_module(Some(module_id.to_string()));
-        app.shell_view = ShellView::Module;
+        app.set_shell_view(ShellView::Module);
 
         let rendered = render_plain_app(&app, 120);
 

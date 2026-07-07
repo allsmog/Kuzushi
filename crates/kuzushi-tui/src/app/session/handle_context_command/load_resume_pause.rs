@@ -4,7 +4,7 @@ use kuzushi_core::ScanCancellation;
 
 impl ShellApp {
     pub(crate) fn reduce_load_command(&mut self, specifier: Option<String>) -> Vec<ShellEffect> {
-        self.shell_view = ShellView::Tools;
+        self.set_shell_view(ShellView::Tools);
         let Some(specifier) = normalized_load_specifier(specifier) else {
             self.log(
                 "error",
@@ -55,7 +55,7 @@ impl ShellApp {
 
     fn open_resume_replay(&mut self, run_id: String) {
         self.router.replay_mut().open(run_id.clone());
-        self.shell_view = ShellView::Replay;
+        self.set_shell_view(ShellView::Replay);
         self.log(
             "resume",
             format!(
@@ -77,7 +77,7 @@ impl ShellApp {
     }
 
     fn show_resume_guidance(&mut self) {
-        self.shell_view = ShellView::Runs;
+        self.set_shell_view(ShellView::Runs);
         self.log(
             "resume",
             "no paused scan to resume. Next: show runs, replay <runId>, or scan <target>",

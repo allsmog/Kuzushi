@@ -50,7 +50,7 @@ fn logs_view_scroll_keys_clamp_safely_under_load() {
     for index in 0..LARGE_LOG_LINES {
         app.log("scan", format!("entry {index}"));
     }
-    app.shell_view = ShellView::Logs;
+    app.set_shell_view(ShellView::Logs);
     for _ in 0..50 {
         app.scroll_down(1);
     }
@@ -111,7 +111,7 @@ fn one_thousand_findings_render_findings_view_without_panic() {
     );
     let mut app = ShellApp::new(V2Config::default(), None);
     app.set_findings(findings);
-    app.shell_view = ShellView::Workbench;
+    app.set_shell_view(ShellView::Workbench);
 
     let rendered = render_plain_app(&app, RENDER_WIDTH);
     let elapsed_ms = start.elapsed().as_millis();

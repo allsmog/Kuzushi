@@ -4,7 +4,7 @@ use crate::{ShellApp, ShellView};
 /// header, in-pane keybind hints, and live feed, so the generic transcript,
 /// keybind footer, and status strip would only duplicate it — suppress them.
 fn activity_supplies_own_chrome(app: &ShellApp) -> bool {
-    matches!(app.shell_view, ShellView::Activity)
+    matches!(app.shell_view(), ShellView::Activity)
 }
 
 pub(crate) fn transcript_chrome_height(app: &ShellApp, terminal_height: u16) -> u16 {
@@ -14,7 +14,7 @@ pub(crate) fn transcript_chrome_height(app: &ShellApp, terminal_height: u16) -> 
     // transcript so a strip would be redundant. Activity hides all generic
     // chrome via `activity_supplies_own_chrome`.
     if activity_supplies_own_chrome(app)
-        || hides_transcript_chrome(&app.shell_view)
+        || hides_transcript_chrome(&app.shell_view())
         || terminal_height < 12
     {
         return 0;
@@ -57,7 +57,7 @@ mod tests {
 
     fn app_in_view(view: ShellView) -> ShellApp {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.shell_view = view;
+        app.set_shell_view(view);
         app
     }
 
@@ -73,10 +73,10 @@ mod tests {
     fn transcript_chrome_height_hides_for_quickstart_and_logs() {
         // M1 §1.1 / §1.2: full-screen views suppress the embedded transcript.
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.shell_view = ShellView::Quickstart;
+        app.set_shell_view(ShellView::Quickstart);
         assert_eq!(transcript_chrome_height(&app, 24), 0);
 
-        app.shell_view = ShellView::Logs;
+        app.set_shell_view(ShellView::Logs);
         assert_eq!(transcript_chrome_height(&app, 24), 0);
     }
 
