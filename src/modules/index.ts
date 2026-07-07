@@ -32,6 +32,18 @@ export type {
   WorkspaceServiceStore,
   WorkspaceVulnStore,
 } from "./host-handles.js";
+// KWP MCP composition types — modules use these when refining ExecutionContext
+// for host-mounted MCP aliases such as `symcc`.
+export type {
+  KwpMcpExecutionContext,
+  McpArtifactRef,
+  McpCallLimits,
+  McpCallOptions,
+  McpCallResult,
+  McpContentBlock,
+  McpHandle,
+} from "./kwp-mcp.js";
+export { McpNotGrantedError, requireMcp } from "./kwp-mcp.js";
 // Registry + specifier parsing — re-export so third parties can do static
 // analysis of their own module specifiers without importing deep paths.
 export { ModuleRegistry, parseModuleSpecifier } from "./registry.js";
