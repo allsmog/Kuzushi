@@ -156,6 +156,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - run: cargo clean -p kuzushi-tui
       - run: rm -f target/debug/deps/snapshots-*
+      - run: |
+          rm -f target/debug/deps/*kuzushi_core* target/debug/deps/*kuzushi_tui*
+          rm -rf target/debug/.fingerprint/kuzushi-core-* target/debug/.fingerprint/kuzushi-tui-*
+          rm -rf target/debug/incremental/kuzushi_core-* target/debug/incremental/kuzushi_tui-* target/debug/incremental/snapshots-*
       - run: 'grep -R "ready: 42 modules, 67 tools" crates/kuzushi-tui/tests/snapshots'
       - run: cargo test --workspace
       - run: cargo build --workspace
