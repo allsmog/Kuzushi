@@ -124,7 +124,11 @@ impl FindingStore {
         let statuses = self.current_statuses_for(&stable_fps)?;
         for finding in findings {
             let stable_fp = finding_stable_fp(finding);
-            finding.suppressed = statuses.get(&stable_fp).map(String::as_str) == Some("suppressed");
+            let projected_suppressed =
+                statuses.get(&stable_fp).map(String::as_str) == Some("suppressed");
+            // Additive: the projection can mark a finding suppressed, but must
+            // not clear a value already carried in the stored finding JSON.
+            finding.suppressed = finding.suppressed || projected_suppressed;
         }
         Ok(())
     }
