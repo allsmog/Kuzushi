@@ -159,7 +159,7 @@ const expectedPackageDependencies = {
   "@langchain/openai": "^1.0.0",
   "better-sqlite3": "^12.8.0",
   chalk: "^5.4.1",
-  commander: "^13.1.0",
+  commander: "^15.0.0",
   langchain: "^1.0.0",
   tinyglobby: "^0.2.15",
   typescript: "^5.7.3",
@@ -182,7 +182,7 @@ const expectedPnpmLockfileRootDependencyVersions = {
       "1.4.7(@langchain/core@1.1.48(openai@6.39.0(ws@8.20.1)(zod@4.3.6))(ws@8.20.1))(ws@8.20.1)",
     "better-sqlite3": "12.8.0",
     chalk: "5.6.2",
-    commander: "13.1.0",
+    commander: "15.0.0",
     langchain:
       "1.4.2(@langchain/core@1.1.48(openai@6.39.0(ws@8.20.1)(zod@4.3.6))(ws@8.20.1))(openai@6.39.0(ws@8.20.1)(zod@4.3.6))(ws@8.20.1)(zod-to-json-schema@3.25.1(zod@4.3.6))",
     tinyglobby: "0.2.15",
