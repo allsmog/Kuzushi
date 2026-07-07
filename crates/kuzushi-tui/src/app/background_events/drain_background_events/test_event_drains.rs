@@ -25,7 +25,7 @@ impl ShellApp {
         }
         Err(format!(
             "timed out after {timeout:?} waiting for job agent worker; job_running={}; drains={drain_count}; changed_drains={changed_count}; {}",
-            self.jobs.is_running(JobKind::Agent),
+            self.jobs().is_running(JobKind::Agent),
             self.agent_chat_diagnostics_for_test(),
         ))
     }
@@ -53,7 +53,7 @@ impl ShellApp {
         Err(format!(
             "timed out after {timeout:?} waiting for job tool worker; running={:?}; job_running={}; activity_events={}; drains={drain_count}; changed_drains={changed_count}",
             self.running_tool_name(),
-            self.jobs.is_running(JobKind::Run),
+            self.jobs().is_running(JobKind::Run),
             self.activity().map(|activity| activity.events.len()).unwrap_or(0),
         ))
     }

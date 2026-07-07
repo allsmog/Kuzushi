@@ -47,7 +47,7 @@ impl ShellApp {
             return;
         }
 
-        let ticket = self.jobs.start(JobKind::Run, tool_name.clone());
+        let ticket = self.jobs_mut().start(JobKind::Run, tool_name.clone());
         let dispatch = self.background_tool_dispatch(&workspace, &tool_name, &input, ticket);
         self.launch_prepared_background_tool(
             dispatch,
@@ -75,7 +75,7 @@ impl ShellApp {
             tool_name,
             input,
             ticket,
-            self.jobs.trace_budget(),
+            self.jobs().trace_budget(),
         )
     }
 

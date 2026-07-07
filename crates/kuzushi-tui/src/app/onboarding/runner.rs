@@ -300,7 +300,7 @@ impl ShellApp {
     /// Whether `name` is the shell-initiated background tool (vs an
     /// operator-triggered run).
     pub(crate) fn tool_is_ambient(&self, name: &str) -> bool {
-        self.tool_run.is_ambient(name)
+        self.runtime_state.tool_run().is_ambient(name)
     }
 
     /// Completion hook for the recommender: map its tool picks to planning

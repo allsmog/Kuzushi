@@ -8,7 +8,7 @@ impl ShellApp {
     }
 
     pub(crate) fn dispatch_planner(&mut self, start: PlannerStart) {
-        let ticket = self.jobs.start(JobKind::Plan, "planner");
+        let ticket = self.jobs_mut().start(JobKind::Plan, "planner");
         let generation = ticket.generation();
         let cancel = ticket.cancel.clone();
         self.set_plan_cancel(Some(cancel.clone()));

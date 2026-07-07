@@ -57,8 +57,8 @@ impl ShellApp {
     }
 
     pub(crate) fn clear_conversation(&mut self) {
-        self.jobs.cancel(JobKind::Agent);
-        self.jobs.finish(JobKind::Agent);
+        self.jobs_mut().cancel(JobKind::Agent);
+        self.jobs_mut().finish(JobKind::Agent);
         self.clear_log();
         *self.selected_finding_mut() = None;
         self.clear_agent_chat();

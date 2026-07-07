@@ -79,7 +79,7 @@ fn app_drain_marks_timed_out_tool_abort_requested() {
     let mut config = V2Config::default();
     config.runtime.worker_watchdog_timeout_ms = Some(5);
     let mut app = ShellApp::new(config, None);
-    let ticket = app.jobs.start(JobKind::Run, "semgrep:scan");
+    let ticket = app.jobs_mut().start(JobKind::Run, "semgrep:scan");
     let generation = ticket.generation();
     let cancel = ticket.cancel.clone();
     app.set_running_tool_for_test("semgrep:scan");

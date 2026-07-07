@@ -13,9 +13,7 @@ pub struct ShellApp {
     /// Route-local scroll/filter state for simple stacked shell surfaces.
     pub router: RouterState,
     pub(crate) ui: UiPrefs,
-    pub(crate) jobs: JobHub,
     pub(crate) runtime_state: RuntimeState,
-    pub(crate) tool_run: ToolRunState,
     #[cfg(test)]
     pub(crate) option_persistence_enabled_for_test: bool,
 }
@@ -416,32 +414,42 @@ impl ShellApp {
         self.runtime_state.worker_handles().active_count()
     }
 
+    pub(crate) fn jobs(&self) -> &JobHub {
+        self.runtime_state.jobs()
+    }
+
+    pub(crate) fn jobs_mut(&mut self) -> &mut JobHub {
+        self.runtime_state.jobs_mut()
+    }
+
     pub(crate) fn tool_is_running(&self) -> bool {
-        self.tool_run.is_running()
+        self.runtime_state.tool_run().is_running()
     }
 
     pub(crate) fn running_tool_name_owned(&self) -> Option<String> {
-        self.tool_run.active_name_owned()
+        self.runtime_state.tool_run().active_name_owned()
     }
 
     pub(crate) fn tool_cancel_token(&self) -> Option<&ScanCancellation> {
-        self.tool_run.cancel()
+        self.runtime_state.tool_run().cancel()
     }
 
     pub(crate) fn active_tool_run_id(&self) -> Option<&str> {
-        self.tool_run.run_id()
+        self.runtime_state.tool_run().run_id()
     }
 
     pub(crate) fn take_active_tool_run_id(&mut self) -> Option<String> {
-        self.tool_run.take_run_id()
+        self.runtime_state.tool_run_mut().take_run_id()
     }
 
     pub(crate) fn active_model_override(&self) -> Option<&str> {
-        self.tool_run.active_model_override()
+        self.runtime_state.tool_run().active_model_override()
     }
 
     pub(crate) fn set_active_model_override(&mut self, model: Option<String>) {
-        self.tool_run.set_active_model_override(model);
+        self.runtime_state
+            .tool_run_mut()
+            .set_active_model_override(model);
     }
 
     pub(crate) fn start_tool_run(
@@ -451,20 +459,21 @@ impl ShellApp {
         run_id: String,
         model_override: Option<String>,
     ) {
-        self.tool_run
+        self.runtime_state
+            .tool_run_mut()
             .start(tool_name, cancel, run_id, model_override);
     }
 
     pub(crate) fn finish_tool_run(&mut self) {
-        self.tool_run.finish();
+        self.runtime_state.tool_run_mut().finish();
     }
 
     pub(crate) fn clear_finished_tool_run_slot(&mut self) {
-        self.tool_run.clear_finished_run_slot();
+        self.runtime_state.tool_run_mut().clear_finished_run_slot();
     }
 
     pub(crate) fn request_tool_abort_flag(&mut self) {
-        self.tool_run.request_abort();
+        self.runtime_state.tool_run_mut().request_abort();
     }
 
     pub(crate) fn input(&self) -> &str {

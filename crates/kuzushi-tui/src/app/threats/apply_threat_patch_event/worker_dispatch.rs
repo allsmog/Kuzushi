@@ -8,7 +8,7 @@ impl ShellApp {
     }
 
     pub(crate) fn dispatch_threat_worker(&mut self, start: ThreatWorkerStart) {
-        let ticket = self.jobs.start(JobKind::Threat, "threat model");
+        let ticket = self.jobs_mut().start(JobKind::Threat, "threat model");
         let generation = ticket.generation();
         let watchdog_cancel = ticket.cancel.clone();
         let runtime = self.start_threat_worker_runtime(&start, watchdog_cancel.clone());

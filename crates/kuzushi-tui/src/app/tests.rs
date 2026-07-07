@@ -1350,7 +1350,7 @@ fn run_tool_reducer_returns_prepare_effect_without_preparing_launch() {
     assert_eq!(prepare.input, None);
     assert!(prepare.target.as_ref().is_some_and(|path| path.exists()));
     assert!(!app.tool_is_running());
-    assert!(!app.jobs.is_running(JobKind::Run));
+    assert!(!app.jobs().is_running(JobKind::Run));
 }
 
 #[test]
@@ -1371,7 +1371,7 @@ fn run_tool_prepare_effect_returns_prepared_launch_without_spawning_worker() {
     assert_eq!(launch.workspace.root(), workspace.root());
     assert!(launch.input.is_object());
     assert!(!app.tool_is_running());
-    assert!(!app.jobs.is_running(JobKind::Run));
+    assert!(!app.jobs().is_running(JobKind::Run));
 }
 
 #[test]
@@ -1397,7 +1397,7 @@ fn scan_command_reducer_defers_guided_scan_open_to_effect_runtime() {
         temp.path().canonicalize().ok()
     );
     assert_eq!(app.shell_view, ShellView::PlanningPicker);
-    assert!(!app.jobs.is_running(JobKind::Run));
+    assert!(!app.jobs().is_running(JobKind::Run));
 }
 
 #[test]
@@ -1413,7 +1413,7 @@ fn scan_reducer_returns_prepare_effect_without_preparing_launch() {
     assert!(prepare.target.as_ref().is_some_and(|path| path.exists()));
     assert!(prepare.explicit_input.is_none());
     assert!(app.scan_is_none());
-    assert!(!app.jobs.is_running(JobKind::Run));
+    assert!(!app.jobs().is_running(JobKind::Run));
 }
 
 #[test]
@@ -1431,7 +1431,7 @@ fn scan_prepare_effect_returns_start_effect_without_spawning_worker() {
     assert_eq!(effects.len(), 1);
     assert!(matches!(effects[0], ShellEffect::StartScan(_)));
     assert!(app.scan_is_none());
-    assert!(!app.jobs.is_running(JobKind::Run));
+    assert!(!app.jobs().is_running(JobKind::Run));
 }
 
 #[test]
@@ -1529,7 +1529,7 @@ fn ask_reducer_returns_dispatch_effect_without_spawning_worker() {
         }
     }
     assert!(app.agent_chat().is_none());
-    assert!(!app.jobs.is_running(JobKind::Agent));
+    assert!(!app.jobs().is_running(JobKind::Agent));
     assert!(app.live_activity().is_none());
     assert!(!app.log_lines().iter().any(|line| line.prefix == "agent"));
 }
@@ -2595,7 +2595,7 @@ fn command_effect_reducer_routes_tool_launcher_commands_without_spawning() {
     );
     assert_eq!(aim_app.shell_view, ShellView::Workbench);
     assert!(!aim_app.tool_is_running());
-    assert!(!aim_app.jobs.is_running(JobKind::Run));
+    assert!(!aim_app.jobs().is_running(JobKind::Run));
 
     let mut recommend_app = ShellApp::new(V2Config::default(), Some(&workspace));
     let recommend_effects = recommend_app
@@ -2606,7 +2606,7 @@ fn command_effect_reducer_routes_tool_launcher_commands_without_spawning() {
     assert_eq!(recommend_prepare.tool_name, "module-recommender:recommend");
     assert_eq!(recommend_app.shell_view, ShellView::Recommend);
     assert!(!recommend_app.tool_is_running());
-    assert!(!recommend_app.jobs.is_running(JobKind::Run));
+    assert!(!recommend_app.jobs().is_running(JobKind::Run));
 
     let mut patch_app = ShellApp::new(V2Config::default(), Some(&workspace));
     patch_app.engagement.set_pending_patch(PendingPatch {
@@ -2630,7 +2630,7 @@ fn command_effect_reducer_routes_tool_launcher_commands_without_spawning() {
     assert_eq!(patch_input["fingerprint"], serde_json::json!("F-0001"));
     assert_eq!(patch_input["style"], serde_json::json!("minimal"));
     assert!(!patch_app.tool_is_running());
-    assert!(!patch_app.jobs.is_running(JobKind::Run));
+    assert!(!patch_app.jobs().is_running(JobKind::Run));
 }
 
 #[test]
@@ -11255,7 +11255,7 @@ fn ctrl_c_during_active_scan_requests_abort_without_arming_exit() {
 #[test]
 fn ctrl_c_during_active_scan_marks_run_job_cancel_requested() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    let ticket = app.jobs.start(JobKind::Run, "scan");
+    let ticket = app.jobs_mut().start(JobKind::Run, "scan");
     let cancel = ticket.cancel.clone();
     app.set_scan_cancel_for_test(cancel.clone());
     app.set_scan_panel(Some(ScanPanelState {
@@ -11274,7 +11274,7 @@ fn ctrl_c_during_active_scan_marks_run_job_cancel_requested() {
     );
 
     assert!(cancel.is_cancelled());
-    assert!(app.jobs.cancel_requested(JobKind::Run));
+    assert!(app.jobs().cancel_requested(JobKind::Run));
     assert!(app.scan().is_some_and(|scan| scan.abort_requested));
 }
 
@@ -11312,7 +11312,7 @@ fn second_ctrl_c_after_scan_abort_request_keeps_waiting() {
 #[test]
 fn ctrl_c_during_agent_chat_requests_abort_without_claiming_kill() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    let ticket = app.jobs.start(JobKind::Agent, "agent");
+    let ticket = app.jobs_mut().start(JobKind::Agent, "agent");
     let cancel = ticket.cancel.clone();
     app.shell_view = ShellView::AgentChat;
     app.set_agent_cancel(Some(cancel.clone()));
@@ -11339,7 +11339,7 @@ fn ctrl_c_during_agent_chat_requests_abort_without_claiming_kill() {
     assert!(!app.ctrl_c_armed());
     assert!(app.agent_chat().is_some_and(|agent| agent.abort_requested));
     assert!(cancel.is_cancelled());
-    assert!(app.jobs.cancel_requested(JobKind::Agent));
+    assert!(app.jobs().cancel_requested(JobKind::Agent));
     assert!(app.log_lines().iter().any(|line| {
         line.prefix == "agent"
             && line.body.contains("abort requested")
@@ -11525,9 +11525,9 @@ fn scan_failure_event_records_bounded_failure_handoff() {
 #[test]
 fn ctrl_c_during_plan_and_threat_workers_requests_honest_abort() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    let plan_ticket = app.jobs.start(JobKind::Plan, "planner");
+    let plan_ticket = app.jobs_mut().start(JobKind::Plan, "planner");
     let plan_cancel = plan_ticket.cancel.clone();
-    let threat_ticket = app.jobs.start(JobKind::Threat, "threat model");
+    let threat_ticket = app.jobs_mut().start(JobKind::Threat, "threat model");
     let threat_cancel = threat_ticket.cancel.clone();
     app.set_planner_running(true);
     app.set_plan_cancel(Some(plan_cancel.clone()));
@@ -11542,9 +11542,9 @@ fn ctrl_c_during_plan_and_threat_workers_requests_honest_abort() {
     assert!(app.plan_abort_requested());
     assert!(app.threat_abort_requested());
     assert!(plan_cancel.is_cancelled());
-    assert!(app.jobs.cancel_requested(JobKind::Plan));
+    assert!(app.jobs().cancel_requested(JobKind::Plan));
     assert!(threat_cancel.is_cancelled());
-    assert!(app.jobs.cancel_requested(JobKind::Threat));
+    assert!(app.jobs().cancel_requested(JobKind::Threat));
     assert!(!app.should_quit());
     assert!(!app.ctrl_c_armed());
     assert!(app.log_lines().iter().any(|line| {
@@ -11585,7 +11585,7 @@ fn ctrl_c_during_background_tool_requests_honest_abort_without_exiting() {
 #[test]
 fn ctrl_c_during_background_tool_marks_run_job_cancel_requested() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    let ticket = app.jobs.start(JobKind::Run, "context:build");
+    let ticket = app.jobs_mut().start(JobKind::Run, "context:build");
     let cancel = ticket.cancel.clone();
     app.set_running_tool_for_test("context:build");
     app.set_tool_cancel_for_test(cancel.clone());
@@ -11596,18 +11596,22 @@ fn ctrl_c_during_background_tool_marks_run_job_cancel_requested() {
     );
 
     assert!(cancel.is_cancelled());
-    assert!(app.jobs.cancel_requested(JobKind::Run));
+    assert!(app.jobs().cancel_requested(JobKind::Run));
     assert!(app.tool_abort_requested());
 }
 
 #[test]
 fn exit_abort_effect_cancels_all_running_job_slots() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    let run = app.jobs.start(JobKind::Run, "scan").cancel.clone();
-    let agent = app.jobs.start(JobKind::Agent, "agent").cancel.clone();
-    let plan = app.jobs.start(JobKind::Plan, "planner").cancel.clone();
+    let run = app.jobs_mut().start(JobKind::Run, "scan").cancel.clone();
+    let agent = app.jobs_mut().start(JobKind::Agent, "agent").cancel.clone();
+    let plan = app
+        .jobs_mut()
+        .start(JobKind::Plan, "planner")
+        .cancel
+        .clone();
     let threat = app
-        .jobs
+        .jobs_mut()
         .start(JobKind::Threat, "threat model")
         .cancel
         .clone();
@@ -11618,10 +11622,10 @@ fn exit_abort_effect_cancels_all_running_job_slots() {
     assert!(agent.is_cancelled());
     assert!(plan.is_cancelled());
     assert!(threat.is_cancelled());
-    assert!(app.jobs.cancel_requested(JobKind::Run));
-    assert!(app.jobs.cancel_requested(JobKind::Agent));
-    assert!(app.jobs.cancel_requested(JobKind::Plan));
-    assert!(app.jobs.cancel_requested(JobKind::Threat));
+    assert!(app.jobs().cancel_requested(JobKind::Run));
+    assert!(app.jobs().cancel_requested(JobKind::Agent));
+    assert!(app.jobs().cancel_requested(JobKind::Plan));
+    assert!(app.jobs().cancel_requested(JobKind::Threat));
 }
 
 #[test]

@@ -32,9 +32,7 @@ macro_rules! shell_app_initial_state {
                 read_auto_open_activity_pref(&$option_store),
                 read_auto_open_viz_pref(&$option_store),
             ),
-            jobs: JobHub::default(),
             runtime_state: RuntimeState::default(),
-            tool_run: ToolRunState::default(),
             #[cfg(test)]
             option_persistence_enabled_for_test: true,
         }

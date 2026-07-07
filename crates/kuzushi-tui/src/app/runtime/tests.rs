@@ -90,7 +90,7 @@ mod tests {
     #[test]
     fn pending_background_events_are_applied_through_runtime_helper() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        let ticket = app.jobs.start(JobKind::Run, "scan");
+        let ticket = app.jobs_mut().start(JobKind::Run, "scan");
         app.set_scan_panel(Some(ScanPanelState {
             run_id: None,
             target: std::path::PathBuf::from("."),
@@ -109,14 +109,14 @@ mod tests {
         assert!(apply_pending_background_events(&mut app));
 
         assert!(!app.scan().unwrap().running);
-        assert!(!app.jobs.is_running(JobKind::Run));
+        assert!(!app.jobs().is_running(JobKind::Run));
     }
 
     #[test]
     fn runtime_messages_apply_tick_and_job_updates_together() {
         let now = std::time::Instant::now();
         let mut app = ShellApp::new(V2Config::default(), None);
-        let ticket = app.jobs.start(JobKind::Run, "scan");
+        let ticket = app.jobs_mut().start(JobKind::Run, "scan");
         app.set_ctrl_c_armed_at(Some(
             now - CTRL_C_ARM_WINDOW - std::time::Duration::from_millis(1),
         ));
