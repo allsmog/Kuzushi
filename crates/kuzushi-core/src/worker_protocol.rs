@@ -391,6 +391,15 @@ impl InvocationAuthority {
         }
     }
 
+    /// Rejects a brokered request whose `invocationId` does not match this authority.
+    pub fn ensure_invocation_id(&self, id: &InvocationId) -> Result<(), KwpError> {
+        if *id == self.invocation_id {
+            Ok(())
+        } else {
+            Err(KwpError::NoActiveInvocation)
+        }
+    }
+
     pub async fn computed_cost_usd(&self) -> f64 {
         self.meter.lock().await.runtime_cost_usd
     }
@@ -964,9 +973,7 @@ impl CapabilityBroker {
     pub async fn mcp_call(&self, inv: &InvocationAuthority, request: McpCallRequest) -> Result<McpCallResult, KwpError> {
         inv.ensure_active()?;
         inv.ensure_epoch_current()?;
-        if request.invocation_id != *inv.invocation_id() {
-            return Err(KwpError::NoActiveInvocation);
-        }
+        inv.ensure_invocation_id(&request.invocation_id)?;
         let grant = inv.grant().mcp_grant(&request.alias).ok_or_else(|| KwpError::denied("mcp"))?;
         if !grant.allows_tool(&request.tool) {
             return Err(KwpError::denied("mcp.tool"));
@@ -987,9 +994,7 @@ impl CapabilityBroker {
     pub async fn fuzz_run(&self, inv: &InvocationAuthority, request: FuzzRunRequest) -> Result<FuzzRunResult, KwpError> {
         inv.ensure_active()?;
         inv.ensure_epoch_current()?;
-        if request.invocation_id != *inv.invocation_id() {
-            return Err(KwpError::NoActiveInvocation);
-        }
+        inv.ensure_invocation_id(&request.invocation_id)?;
         let grant = inv.grant().fuzz.as_ref().ok_or_else(|| KwpError::denied("fuzz"))?;
         if !grant.allows_engine(request.engine) {
             return Err(KwpError::denied("fuzz.engine"));
