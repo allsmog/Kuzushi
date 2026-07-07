@@ -9,9 +9,6 @@ pub struct ShellApp {
     pub(crate) domain: DomainCache,
     pub(crate) workbench_cache: std::cell::RefCell<WorkbenchCache>,
     pub advisory: AdvisoryState,
-    /// Per-task duration history for ETA forecasting in the ambient
-    /// progress chip. Loaded from `<target>/.kuzushi/task-durations.json`.
-    pub(crate) task_durations: crate::app::TaskDurationStore,
     /// Engagement-scoped planning runtime state: current phase, queued steps,
     /// failures/retries, target classification, planning picker route state,
     /// and per-run option overlays.
@@ -379,6 +376,14 @@ impl ShellApp {
     #[cfg(test)]
     pub(crate) fn scan_is_none(&self) -> bool {
         self.domain.scan().is_none()
+    }
+
+    pub(crate) fn estimate_task_duration_secs(&self, task_id: &str) -> Option<u64> {
+        self.domain.estimate_task_duration_secs(task_id)
+    }
+
+    pub(crate) fn record_task_duration_secs(&mut self, task_id: &str, secs: u64) {
+        self.domain.record_task_duration_secs(task_id, secs);
     }
 
     pub(crate) fn agent_cancel_token(&self) -> Option<&ScanCancellation> {

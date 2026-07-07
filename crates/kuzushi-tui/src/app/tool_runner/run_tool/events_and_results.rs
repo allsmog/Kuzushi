@@ -98,7 +98,7 @@ impl ShellApp {
         let Some(secs) = self.completed_tool_secs(tool_name) else {
             return;
         };
-        self.task_durations.record_secs(tool_name, secs);
+        self.record_task_duration_secs(tool_name, secs);
         if matches!(self.shell_view, ShellView::Activity) {
             return;
         }

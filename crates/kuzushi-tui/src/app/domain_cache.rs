@@ -1,7 +1,7 @@
 use super::{
     ActivitySession, AgentChatState, AgentChatView, ContextSnapshotView, ExploitChain,
     ExploitChainDetail, KnowledgeBaseView, LiveActivity, PwnView, ReconSnapshot, ScanPanelState,
-    ScanState, TaintFlowSnapshot, WorkspaceView,
+    ScanState, TaintFlowSnapshot, TaskDurationStore, WorkspaceView,
 };
 use kuzushi_core::{
     findings::ReviewDecisionRecord, AgenticSastReport, CarliniThreatHuntReport, Finding,
@@ -16,6 +16,7 @@ pub struct DomainCache {
     pwn_view: PwnView,
     agent_chat: AgentChatState,
     scan: ScanState,
+    task_durations: TaskDurationStore,
     activity: Option<ActivitySession>,
     live_activity: Option<LiveActivity>,
     recon_snapshot: Option<ReconSnapshot>,
@@ -36,6 +37,7 @@ impl DomainCache {
         context_view: ContextSnapshotView,
         workspace_view: WorkspaceView,
         kb_view: KnowledgeBaseView,
+        task_durations: TaskDurationStore,
     ) -> Self {
         Self {
             context_view,
@@ -44,6 +46,7 @@ impl DomainCache {
             pwn_view: PwnView::default(),
             agent_chat: AgentChatState::default(),
             scan: ScanState::default(),
+            task_durations,
             activity: None,
             live_activity: None,
             recon_snapshot: None,
@@ -132,6 +135,14 @@ impl DomainCache {
 
     pub(crate) fn set_scan(&mut self, scan: Option<ScanPanelState>) {
         self.scan.set(scan);
+    }
+
+    pub(crate) fn estimate_task_duration_secs(&self, task_id: &str) -> Option<u64> {
+        self.task_durations.estimate_secs(task_id)
+    }
+
+    pub(crate) fn record_task_duration_secs(&mut self, task_id: &str, secs: u64) {
+        self.task_durations.record_secs(task_id, secs);
     }
 
     pub(crate) fn activity(&self) -> Option<&ActivitySession> {

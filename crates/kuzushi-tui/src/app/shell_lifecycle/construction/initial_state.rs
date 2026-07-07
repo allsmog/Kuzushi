@@ -7,9 +7,6 @@ macro_rules! shell_app_initial_state {
         Self {
             editor: EditorState::default(),
             log: LogState::default(),
-            task_durations: crate::app::TaskDurationStore::load(
-                ($target).map(|target| target.root()),
-            ),
             shell_view: ShellView::Catalog,
             session: SessionState::new(
                 $config,
@@ -28,6 +25,7 @@ macro_rules! shell_app_initial_state {
                     attachments: Vec::new(),
                     artifacts: Vec::new(),
                 },
+                crate::app::TaskDurationStore::load(($target).map(|target| target.root())),
             ),
             workbench_cache: std::cell::RefCell::new(WorkbenchCache::default()),
             advisory: AdvisoryState::default(),
