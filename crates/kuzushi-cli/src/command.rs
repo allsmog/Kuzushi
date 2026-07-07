@@ -197,7 +197,8 @@ pub(crate) enum Command {
         json: bool,
     },
     /// Scan a vendored vulnerable fixture offline — no API key, no model,
-    /// no external scanners. A real finding with evidence in seconds.
+    /// no external scanners. A real finding with evidence in seconds. The
+    /// fixture is self-contained, so `--target` is ignored here.
     Demo {
         /// Emit the demo result as machine-readable JSON.
         #[arg(long)]
