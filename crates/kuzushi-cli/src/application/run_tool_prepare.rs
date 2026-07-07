@@ -7,7 +7,7 @@ use crate::tool_run_artifacts::fail_cli_tool_run;
 use anyhow::Result;
 use kuzushi_core::run_artifacts::{record_tool_run_started_with_reproducibility, ToolRunRecord};
 use kuzushi_core::{
-    config_hash, load_config_for_target, new_run_id, FindingStore, ModuleRegistry,
+    config_hash, load_config_for_target, new_run_id, AutonomyPosture, FindingStore, ModuleRegistry,
     ToolExecutionContext, ToolOptionStore, WorkspaceTarget,
 };
 use std::path::{Path, PathBuf};
@@ -44,11 +44,13 @@ pub(crate) fn prepare_cli_tool_run(
     tool: String,
     input: String,
     options: Vec<String>,
+    autonomy: Option<String>,
     target: Option<PathBuf>,
     load: Vec<String>,
 ) -> Result<PreparedCliToolRun> {
     let bootstrap = CliToolRunBootstrap::new(tool, target, &input)?;
-    let config = bootstrap.load_config_or_record_failure(&input)?;
+    let mut config = bootstrap.load_config_or_record_failure(&input)?;
+    config.autonomy = resolve_cli_autonomy(&config, autonomy)?;
     let setup = bootstrap.with_config(config, load, &input)?;
     let input = setup.parse_input(&input)?;
     let option_store = setup.option_store(&input, &options)?;
@@ -56,6 +58,28 @@ pub(crate) fn prepare_cli_tool_run(
     let store = setup.finding_store(&input)?;
     setup.start(&input);
     Ok(setup.into_prepared(input, store))
+}
+
+/// Resolve the `--autonomy` flag into the run's posture. Absent = the config
+/// default (`Fix`, unconstrained). An explicit rung is clamped by the
+/// project-declared `phases.stop_after` cap, and an unrecognized rung is a hard
+/// error — never a silent fallback to a different rung.
+fn resolve_cli_autonomy(
+    config: &kuzushi_core::V2Config,
+    autonomy: Option<String>,
+) -> Result<AutonomyPosture> {
+    let Some(raw) = autonomy else {
+        return Ok(config.autonomy);
+    };
+    let posture = AutonomyPosture::parse(&raw).ok_or_else(|| {
+        anyhow::anyhow!("--autonomy must be one of recon|hunt|confirm|fix, got {raw:?}")
+    })?;
+    let cap = config
+        .phases
+        .stop_after
+        .map(AutonomyPosture::from_guided_phase)
+        .unwrap_or(AutonomyPosture::Fix);
+    Ok(posture.capped_by(cap))
 }
 
 #[cfg(test)]
