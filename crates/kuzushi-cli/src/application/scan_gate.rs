@@ -62,6 +62,7 @@ pub(crate) fn count_blocking_findings(
     Ok(store
         .list_findings_for_scan_id(scan_id)?
         .iter()
+        .filter(|finding| !finding.suppressed)
         .filter(|finding| {
             severity_gate_rank(finding.severity).is_some_and(|rank| rank >= threshold_rank)
         })
@@ -138,6 +139,29 @@ mod tests {
     #[test]
     fn unknown_severity_never_trips_the_gate() {
         let store = store_with(&[Severity::Unknown, Severity::Unknown]);
+        assert_eq!(
+            count_blocking_findings(&store, "scan-1", Severity::Low).unwrap(),
+            0
+        );
+    }
+
+    #[test]
+    fn suppressed_findings_do_not_trip_the_gate() {
+        let store = FindingStore::open_in_memory().unwrap();
+        store
+            .record_run_started("scan-1", std::path::Path::new("/tmp"), "running")
+            .unwrap();
+        let mut finding = Finding::new_tool(
+            "semgrep",
+            "rule-suppressed",
+            "src/app.rs",
+            10,
+            None,
+            Severity::Critical,
+            "suppressed critical",
+        );
+        finding.suppressed = true;
+        store.insert_finding("scan-1", &finding).unwrap();
         assert_eq!(
             count_blocking_findings(&store, "scan-1", Severity::Low).unwrap(),
             0

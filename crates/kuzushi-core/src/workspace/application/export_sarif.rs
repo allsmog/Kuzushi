@@ -98,7 +98,7 @@ fn sarif_rules(records: &[&WorkspaceFindingExportRecord]) -> Vec<serde_json::Val
 }
 
 fn sarif_result(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
-    json!({
+    let mut result = json!({
         "ruleId": record.rule_id,
         "level": sarif_level(&record.severity),
         "message": { "text": record.message },
@@ -113,7 +113,22 @@ fn sarif_result(record: &WorkspaceFindingExportRecord) -> serde_json::Value {
             }
         }],
         "properties": sarif_properties(record),
-    })
+    });
+    if let Some(suppressions) = sarif_suppressions(record) {
+        result["suppressions"] = suppressions;
+    }
+    result
+}
+
+/// Standard SARIF `result.suppressions[]`. A suppressed finding is emitted
+/// (never dropped) and marked with a `kind: "external"` suppression so
+/// SARIF consumers can honor it. `None` leaves the array absent for
+/// non-suppressed findings (SARIF treats absent as unsuppressed).
+fn sarif_suppressions(record: &WorkspaceFindingExportRecord) -> Option<serde_json::Value> {
+    if !record.suppressed {
+        return None;
+    }
+    Some(json!([{ "kind": "external", "status": "accepted" }]))
 }
 
 fn sarif_region(record: &WorkspaceFindingExportRecord) -> serde_json::Value {

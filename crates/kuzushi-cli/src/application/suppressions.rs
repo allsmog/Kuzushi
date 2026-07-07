@@ -28,10 +28,11 @@ pub(crate) fn suppress_command(
         workspace.root(),
         &finding,
         reason.clone(),
-        author,
+        author.clone(),
         expires_at_unix,
     )?;
     let record = upsert_whitebox_suppression(&workspace, record)?;
+    store_unified_suppression_rule(&workspace, &finding, &reason, &author, expires_at_unix)?;
     let decision_id = append_suppressed_review_decision(&workspace, &finding, &reason)?;
     print_suppress_command_result(&workspace, &record, decision_id, json)
 }
@@ -139,6 +140,39 @@ pub(crate) fn suppression_row(record: &WhiteboxSuppressionRecord) -> String {
         record.expires_at_unix,
         record.reason
     )
+}
+
+/// Persist a unified `SuppressionRule` alongside the whitebox record so the
+/// new `suppressions.toml` store is the source of truth going forward. The
+/// finding-fingerprint predicate converges on the same `SuppressionAdded`
+/// projection as the review decision, so the reconcile sweep stays a no-op.
+fn store_unified_suppression_rule(
+    workspace: &WorkspaceTarget,
+    finding: &Finding,
+    reason: &str,
+    author: &str,
+    expires_at_unix: u64,
+) -> Result<()> {
+    use kuzushi_core::suppressions::{
+        derive_rule_id, upsert_suppression_rule, FindingRef, SuppressionOrigin,
+        SuppressionPredicate, SuppressionReason, SuppressionRule,
+    };
+    let predicate = SuppressionPredicate {
+        finding_id: Some(FindingRef(finding.fingerprint.clone())),
+        ..SuppressionPredicate::empty()
+    };
+    let parsed_reason = SuppressionReason::parse(reason).unwrap_or(SuppressionReason::AcceptableRisk);
+    let rule = SuppressionRule {
+        id: derive_rule_id(&predicate, parsed_reason),
+        predicate,
+        reason: parsed_reason,
+        statement: reason.to_string(),
+        actor: author.to_string(),
+        created_at_unix: now_unix(),
+        expires_at_unix: Some(expires_at_unix),
+        origin: SuppressionOrigin::File,
+    };
+    upsert_suppression_rule(workspace, rule)
 }
 
 pub(crate) fn now_unix() -> u64 {

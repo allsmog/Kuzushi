@@ -96,6 +96,7 @@ fn execute_prepared_scan(
 
     let started = std::time::Instant::now();
     emit_scan_ci_start(ci, started, &target, &config, &tasks);
+    reconcile_suppressions_before_scan(&store, &workspace);
 
     let result = execute_scan_tool(ScanToolExecution {
         registry: &registry,
@@ -114,6 +115,20 @@ fn execute_prepared_scan(
 
 fn scan_trace(workspace: &WorkspaceTarget, run_id: &str) -> TraceHandle {
     TraceHandle::jsonl(workspace.root(), run_id)
+}
+
+/// Reconcile suppression rules against the current clock before the scan so a
+/// workspace with lapsed suppressions begins by reopening them. A failure here
+/// is logged explicitly and never aborts the scan.
+fn reconcile_suppressions_before_scan(store: &FindingStore, workspace: &WorkspaceTarget) {
+    match kuzushi_core::suppressions::run_suppression_sweep(store, workspace, "system:scan-start") {
+        Ok(sweep) if !sweep.summary.is_noop() => eprintln!(
+            "suppressions: {} added, {} reopened by expiry",
+            sweep.summary.added, sweep.summary.expired
+        ),
+        Ok(_) => {}
+        Err(error) => eprintln!("suppressions: sweep failed at scan start: {error:#}"),
+    }
 }
 
 /// Findings persist under the scan tool's own run id (`data.runId`), which can
