@@ -91,7 +91,11 @@ fn scan_for_kind_evidence(target: &Path) -> KindEvidence {
     evidence
 }
 
-fn absorb_entry(entry: &std::fs::DirEntry, evidence: &mut KindEvidence, stack: &mut Vec<std::path::PathBuf>) {
+fn absorb_entry(
+    entry: &std::fs::DirEntry,
+    evidence: &mut KindEvidence,
+    stack: &mut Vec<std::path::PathBuf>,
+) {
     let path = entry.path();
     if path.is_dir() {
         if !is_skippable_dir(&path) {

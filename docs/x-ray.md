@@ -13,8 +13,8 @@ and `scan` when you want findings.
 
 | Tool | What it does | Model? |
 | --- | --- | --- |
-| `x-ray:run` | Run repository X-Ray analysis and persist the report artifact. | yes |
-| `x-ray:read` | Read the latest X-Ray analysis report. | no |
+| `x-ray:run` | Analyze repository structure, entry points, invariants, and attack surface; persist the report artifact. | yes |
+| `x-ray:read` | Read the latest repository architecture and attack-surface report. | no |
 
 In scan mode the hidden `x-ray:x-ray` DAG task contributes the same report
 after `context:build` completes.
@@ -44,10 +44,12 @@ Options on `x-ray:run`:
 ## Output
 
 The report lands under the run's artifact directory
-(`.kuzushi/runs/<runId>/`) and is summarized in the tool result envelope.
+(`.kuzushi/v3/runs/<runId>/`) and is summarized in the tool result envelope.
 `x-ray:read` always returns the latest persisted report, so other modules
-(for example `threat-leads:build`) and operators can consume it without
-re-spending model budget.
+and operators can consume it without re-spending model budget. Legacy
+`threat-leads:*` tooling remains exact-only; new flows should prefer
+`x-ray:run`/`x-ray:read` plus `threat-model:build` when they need repository
+orientation and threat-model context.
 
 ## Notes
 

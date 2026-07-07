@@ -1,18 +1,82 @@
 use super::*;
 
-/// Operator preference for the Activity view's auto-open behaviour at
-/// scan/tool start. Default ON. Override via the env var
-/// `KUZUSHI_AUTO_OPEN_ACTIVITY=false` (the option-store-backed `setg`
-/// path runs after `ShellApp::new`, so a startup-time env knob is the
-/// simplest way to disable it before the first tool launches).
-fn read_auto_open_activity_pref() -> bool {
-    read_bool_env("KUZUSHI_AUTO_OPEN_ACTIVITY")
+#[macro_use]
+mod initial_state;
+
+pub(crate) const UI_AUTO_OPEN_ACTIVITY_OPTION: &str = "ui.auto_open_activity";
+pub(crate) const UI_AUTO_OPEN_VIZ_OPTION: &str = "ui.auto_open_viz";
+pub(crate) const UI_WORKBENCH_DEPTH_STACK_OPTION: &str = "ui.workbench_depth_stack";
+
+/// Opt-in depth-stack Workbench review surface. Default OFF — the four-pane
+/// ring stays the default. `setg ui.workbench_depth_stack true` enables it.
+fn read_workbench_depth_stack_pref(option_store: &ToolOptionStore) -> bool {
+    stored_bool_pref(option_store, UI_WORKBENCH_DEPTH_STACK_OPTION).unwrap_or(false)
 }
 
-/// Operator preference for auto-opening the relevant security-viz page when its
-/// artifact is generated. Default ON; disable with `KUZUSHI_AUTO_OPEN_VIZ=false`.
-fn read_auto_open_viz_pref() -> bool {
-    read_bool_env("KUZUSHI_AUTO_OPEN_VIZ")
+/// Operator preference for the Activity view's auto-open behaviour at
+/// scan/tool start. Default ON. `setg ui.auto_open_activity false` wins over
+/// the compatibility env var `KUZUSHI_AUTO_OPEN_ACTIVITY=false`.
+fn read_auto_open_activity_pref(option_store: &ToolOptionStore) -> bool {
+    read_bool_pref(
+        option_store,
+        UI_AUTO_OPEN_ACTIVITY_OPTION,
+        "KUZUSHI_AUTO_OPEN_ACTIVITY",
+    )
+}
+
+/// Operator preference for auto-opening the relevant security-viz page when
+/// its artifact is generated. Default ON. `setg ui.auto_open_viz false` wins
+/// over the compatibility env var `KUZUSHI_AUTO_OPEN_VIZ=false`.
+fn read_auto_open_viz_pref(option_store: &ToolOptionStore) -> bool {
+    read_bool_pref(
+        option_store,
+        UI_AUTO_OPEN_VIZ_OPTION,
+        "KUZUSHI_AUTO_OPEN_VIZ",
+    )
+}
+
+pub(crate) fn refresh_auto_open_prefs_from_store(app: &mut ShellApp) {
+    app.auto_open_activity = read_auto_open_activity_pref(&app.option_store);
+    app.auto_open_viz = read_auto_open_viz_pref(&app.option_store);
+    app.workbench_depth_stack = read_workbench_depth_stack_pref(&app.option_store);
+}
+
+fn read_bool_pref(option_store: &ToolOptionStore, option_name: &str, env_key: &str) -> bool {
+    stored_bool_pref(option_store, option_name).unwrap_or_else(|| read_bool_env(env_key))
+}
+
+fn stored_bool_pref(option_store: &ToolOptionStore, option_name: &str) -> Option<bool> {
+    option_store
+        .effective_stored_values("kuzushi:ui")
+        .get(option_name)
+        .and_then(json_bool)
+}
+
+pub(crate) fn json_bool(value: &serde_json::Value) -> Option<bool> {
+    match value {
+        serde_json::Value::Bool(value) => Some(*value),
+        serde_json::Value::String(value) => parse_bool_pref(value),
+        _ => None,
+    }
+}
+
+pub(crate) fn parse_bool_pref(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Some(true),
+        "0" | "false" | "no" | "off" => Some(false),
+        _ => None,
+    }
+}
+
+pub(crate) fn active_model_override_from_input(
+    input: &serde_json::Value,
+    config: &V2Config,
+) -> Option<String> {
+    let model = input.get("model")?.as_str()?.trim();
+    if model.is_empty() || Some(model) == config.model.as_deref() {
+        return None;
+    }
+    Some(model.to_string())
 }
 
 /// A default-true boolean env knob (`0|false|no|off` → false; unset → true).
@@ -26,133 +90,8 @@ fn read_bool_env(key: &str) -> bool {
     }
 }
 
-macro_rules! shell_app_initial_state {
-    ($config:expr, $target:expr, $option_store:expr, $registry:expr, $selected_model_index:expr, $session_budget_usd:expr, $trusted_workflow_auto_accept:expr) => {{
-        Self {
-            input: String::new(),
-            cursor: 0,
-            history_index: None,
-            history_draft: String::new(),
-            last_cleared_input: None,
-            completion_cycle: None,
-            log: Vec::new(),
-            target: ($target).map(|target| target.root().to_path_buf()),
-            task_durations: crate::app::TaskDurationStore::load(
-                ($target).map(|target| target.root()),
-            ),
-            focused_module: None,
-            shell_view: ShellView::Catalog,
-            prev_shell_view: None,
-            nav_history: Vec::new(),
-            catalog_expanded: false,
-            catalog_cursor: 0,
-            pending_patch: None,
-            confirm_allowlist: std::collections::BTreeSet::new(),
-            confirm_denylist: std::collections::BTreeSet::new(),
-            config: $config,
-            registry: $registry,
-            option_store: $option_store,
-            command_history: Vec::new(),
-            history_search: None,
-            session_cost_usd: 0.0,
-            last_tool_cost_usd: None,
-            selected_model_index: $selected_model_index,
-            context_view: default_context_snapshot_view(
-                ($target).map(|target| kuzushi_core::context_snapshot_path(target.root())),
-            ),
-            workspace_view: default_workspace_view($target),
-            kb_view: KnowledgeBaseView {
-                module_id: "context".to_string(),
-                store_path: None,
-                attachments: Vec::new(),
-                artifacts: Vec::new(),
-            },
-            pwn_view: PwnView::default(),
-            auth_login: None,
-            agent_chat: None,
-            session_thinking_level: None,
-            findings: Vec::new(),
-            selected_finding: None,
-            scan: None,
-            should_quit: false,
-            ctrl_c_armed_at: None,
-            session_budget_usd: $session_budget_usd,
-            advisory: AdvisoryState::default(),
-            live_activity: None,
-            trusted_workflow_auto_accept: $trusted_workflow_auto_accept,
-            pending_chain: None,
-            pending_prereq_prompt: None,
-            pending_plan: None,
-            plan_cursor: 0,
-            plan_skipped: BTreeSet::new(),
-            palette_query: String::new(),
-            palette_cursor: 0,
-            model_picker_cursor: 0,
-            auth_picker_cursor: 0,
-            target_picker_cursor: 0,
-            target_candidates: Vec::new(),
-            planning_cursor: 0,
-            planning_selected: BTreeSet::new(),
-            planning_tasks: Vec::new(),
-            planning_run_queue: std::collections::VecDeque::new(),
-            planning_running_tool: None,
-            workflow_phase: None,
-            target_kind: None,
-            planning_rebuild: BTreeSet::new(),
-            planning_failed: Vec::new(),
-            planning_adjustments: std::collections::BTreeMap::new(),
-            model_recommended_tasks: None,
-            recommendation_requested: false,
-            tune_cursor: 0,
-            prompts_cursor: 0,
-            actor_detail_filter: ActorDetailFilter::All,
-            planner_running: false,
-            plan_abort_requested: false,
-            pending_threat_patch: None,
-            threat_worker_running: false,
-            threat_abort_requested: false,
-            chains: Vec::new(),
-            story_return_view: None,
-            findings_cursor: 0,
-            help_scroll: 0,
-            tools_scroll: 0,
-            modules_scroll: 0,
-            history_scroll: 0,
-            kb_scroll: 0,
-            logs_scroll: 0,
-            program_scope: None,
-            last_char_at: None,
-            scroll_offset: 0,
-            spinner_phase: 0,
-            last_spinner_advance: None,
-            force_full_redraw: false,
-            recon_snapshot: None,
-            carlini_snapshot: None,
-            agentic_sast_snapshot: None,
-            scan_progress: None,
-            scan_rx: None,
-            scan_cancel: None,
-            tool_rx: None,
-            tool_running: None,
-            ambient_tool: None,
-            tool_run_id: None,
-            tool_abort_requested: false,
-            agent_rx: None,
-            plan_rx: None,
-            threat_rx: None,
-            trace_rx: None,
-            activity: None,
-            auto_open_activity: read_auto_open_activity_pref(),
-            scene_page: crate::scene3d::VizPage::default(),
-            scene_spin: 0.6,
-            scene_pitch: 0.45,
-            scene_paused: false,
-            last_scene_advance: None,
-            auto_open_viz: read_auto_open_viz_pref(),
-            exploit_chains: Vec::new(),
-            taint_flow: None,
-        }
-    }};
+fn context_snapshot_target_path(target: Option<&WorkspaceTarget>) -> Option<PathBuf> {
+    target.map(|target| kuzushi_core::context_snapshot_path(target.root()))
 }
 
 impl ShellApp {
@@ -216,7 +155,7 @@ impl ShellApp {
         // copy in the transcript wasted one of only two visible log rows.
         self.log(
             "help",
-            "type `scan` to begin · `help` for commands · `?<text>` to ask the agent",
+            "type `next` to continue the guided workflow · `help` for commands · `?<text>` to ask the agent",
         );
         if has_target {
             self.refresh_findings(false);

@@ -42,6 +42,7 @@ pub use engines::codeql::{
 pub use engines::exploit_chain::{
     scan_exploit_chains, scan_exploit_chains_with_runtime, ExploitChainReport, ExploitChainScanner,
 };
+pub use engines::govulncheck::{parse_govulncheck_json, GovulncheckScanner};
 pub use engines::license_scan::{
     scan_licenses, scan_licenses_with_options, LicenseScanFinding, LicenseScanOptions,
     LicenseScanReport, LicenseScanScanner,

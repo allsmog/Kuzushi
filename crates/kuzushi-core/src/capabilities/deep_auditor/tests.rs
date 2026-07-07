@@ -215,6 +215,7 @@ mod tests {
                     input: serde_json::json!({ "file": "foo.c" }),
                     call_id: "c1".to_string(),
                 },
+                cost_usd: None,
             },
             AgentLoopStep::Final {
                 text: String::new(),
@@ -260,6 +261,7 @@ mod tests {
                     input: serde_json::json!({ "file": "a.c", "start_line": 1, "end_line": 3 }),
                     call_id: "c1".to_string(),
                 },
+                cost_usd: None,
             },
             AgentLoopStep::Final {
                 text: "I cannot determine triggerability".to_string(),
@@ -339,7 +341,7 @@ mod tests {
     #[test]
     fn save_evidence_persists_rows_in_findings_evidence_table() {
         let tmp = tempfile::tempdir().unwrap();
-        let db = tmp.path().join("findings.sqlite3");
+        let db = tmp.path().join("index.sqlite3");
         let evidence = vec![EvidenceCitation {
             file: "src/foo.c".to_string(),
             start_line: 10,

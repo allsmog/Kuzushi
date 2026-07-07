@@ -74,11 +74,7 @@ impl ShellApp {
             return;
         }
         let key = confirm_allowlist_key(&request.tool, &request.target);
-        if outcome {
-            self.confirm_allowlist.insert(key);
-        } else {
-            self.confirm_denylist.insert(key);
-        }
+        self.engagement.remember_confirm_decision(key, outcome);
     }
 
     fn log_confirm_resolution(&mut self, request: &PendingConfirm, outcome: bool, remember: bool) {

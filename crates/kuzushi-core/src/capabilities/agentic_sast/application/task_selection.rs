@@ -56,23 +56,35 @@ const fn task_flags(
 const AGENTIC_TASK_ALIASES: &[(&str, AgenticTaskFlags)] = &[
     ("agentic", task_flags(true, false, false, false, false)),
     ("agentic-sast", task_flags(true, false, false, false, false)),
-    ("agentic-sast:scan", task_flags(true, false, false, false, false)),
+    (
+        "agentic-sast:scan",
+        task_flags(true, false, false, false, false),
+    ),
     ("carlini", task_flags(false, true, false, false, false)),
     ("threat-hunt", task_flags(false, true, false, false, false)),
-    ("carlini-threat-hunt", task_flags(false, true, false, false, false)),
+    (
+        "carlini-threat-hunt",
+        task_flags(false, true, false, false, false),
+    ),
     (
         "carlini-threat-hunt:run",
         task_flags(false, true, false, false, false),
     ),
-    ("offense-review", task_flags(false, true, false, false, false)),
+    (
+        "offense-review",
+        task_flags(false, true, false, false, false),
+    ),
     (
         "offense-review:threat-hunt",
         task_flags(false, true, false, false, false),
     ),
-    ("taint", task_flags(false, false, true, false, false)),
-    ("iris", task_flags(false, false, true, false, false)),
-    ("taint-iris", task_flags(false, false, true, false, false)),
-    ("taint-iris:hunt", task_flags(false, false, true, false, false)),
+    ("taint", task_flags(false, false, false, true, false)),
+    ("iris", task_flags(false, false, false, true, false)),
+    ("taint-iris", task_flags(false, false, false, true, false)),
+    (
+        "taint-iris:hunt",
+        task_flags(false, false, false, true, false),
+    ),
     (
         "taint-iris-next",
         task_flags(false, false, false, true, false),
@@ -84,10 +96,7 @@ const AGENTIC_TASK_ALIASES: &[(&str, AgenticTaskFlags)] = &[
         task_flags(false, false, false, true, false),
     ),
     ("systems", task_flags(false, false, false, false, true)),
-    (
-        "systems-hunt",
-        task_flags(false, false, false, false, true),
-    ),
+    ("systems-hunt", task_flags(false, false, false, false, true)),
     (
         "systems-hunt:systems-hunt",
         task_flags(false, false, false, false, true),

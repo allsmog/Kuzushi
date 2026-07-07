@@ -3,8 +3,8 @@ use super::auth_bridge::{
     run_auth_ping_bridge,
 };
 use super::auth_oauth::{
-    auth_ping_model, record_anthropic_env_presence, record_anthropic_oauth_readiness,
-    record_openai_runtime_auth_presence,
+    anthropic_missing_credential_message, auth_ping_model, record_anthropic_env_presence,
+    record_anthropic_oauth_readiness, record_openai_runtime_auth_presence,
 };
 use crate::command::AuthCommand;
 use anyhow::Result;
@@ -155,12 +155,16 @@ pub(crate) fn probe_anthropic_credentials(
     config: &kuzushi_core::V2Config,
     log: &mut AuthPingLog,
 ) -> Result<()> {
-    if let Some(oauth_cfg) = &config.runtime.anthropic_oauth {
+    let oauth_ready = if let Some(oauth_cfg) = &config.runtime.anthropic_oauth {
         let readiness = kuzushi_openai::probe_anthropic_oauth(oauth_cfg)?;
-        record_anthropic_oauth_readiness(readiness, log);
+        record_anthropic_oauth_readiness(readiness, log)
     } else {
         log.record(true, "oauth not configured; will check env / api key");
+        false
+    };
+    let env_ready = record_anthropic_env_presence(log);
+    if !oauth_ready && !env_ready {
+        log.record(false, anthropic_missing_credential_message());
     }
-    record_anthropic_env_presence(log);
     Ok(())
 }

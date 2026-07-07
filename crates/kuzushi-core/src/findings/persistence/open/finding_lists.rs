@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeMap;
 
 impl FindingStore {
     pub fn list_findings(&self, limit: usize) -> Result<Vec<Finding>> {
@@ -8,84 +9,83 @@ impl FindingStore {
     }
 
     pub fn list_findings_for_scan_id(&self, scan_id: &str) -> Result<Vec<Finding>> {
-        let mut stmt = self.conn.prepare(
-            r#"
-            select
-              f.id, f.scan_id, f.fingerprint, f.rule_id, f.title, f.severity,
-              f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
-              f.static_proof_state, f.created_at,
-              t.verdict, t.confidence, t.rationale, t.cost_usd,
-              f.vuln_source, f.dedup_key, f.suppressed, f.snoozed_until,
-              f.remediation, f.references_json
-            from findings f
-            left join triage t on t.finding_id = f.id
-            where f.scan_id = ?1
-            order by f.id asc
-            "#,
-        )?;
-        let rows = stmt.query_map(params![scan_id], row_to_finding)?;
-        let mut findings = rows
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .context("Could not list findings for scan run")?;
-        self.attach_evidence_to_findings(&mut findings)?;
-        Ok(findings)
+        self.v3_findings_for_scan_id(scan_id)
     }
 
     pub fn list_findings_filtered(&self, filter: &FindingListFilter) -> Result<FindingListReport> {
-        let mut stmt = self.conn.prepare(
-            r#"
-            select
-              f.id, f.scan_id, f.fingerprint, f.rule_id, f.title, f.severity,
-              f.file_path, f.start_line, f.end_line, f.message, f.tool, f.actor_fingerprint,
-              f.static_proof_state, f.created_at,
-              t.verdict, t.confidence, t.rationale, t.cost_usd,
-              f.vuln_source, f.dedup_key, f.suppressed, f.snoozed_until,
-              f.remediation, f.references_json
-            from findings f
-            left join triage t on t.finding_id = f.id
-            order by
-              case f.severity
-                when 'critical' then 0
-                when 'high' then 1
-                when 'medium' then 2
-                when 'low' then 3
-                when 'info' then 4
-                else 5
-              end,
-              f.id desc
-            "#,
-        )?;
-
-        let rows = stmt.query_map([], row_to_finding)?;
-        let (count, mut findings) = collect_filtered_findings(rows, filter)?;
-        self.attach_evidence_to_findings(&mut findings)?;
+        let all_findings = self.v3_all_findings()?;
+        let (count, mut findings) = collect_filtered_findings(self, all_findings, filter)?;
+        self.attach_latest_verifications_to_findings(&mut findings)?;
         Ok(FindingListReport { count, findings })
     }
 }
 
 fn collect_filtered_findings(
-    rows: impl Iterator<Item = rusqlite::Result<Finding>>,
+    store: &FindingStore,
+    rows: Vec<Finding>,
     filter: &FindingListFilter,
 ) -> Result<(usize, Vec<Finding>)> {
     let mut count = 0;
     let mut findings = Vec::new();
+    let mut review_cache = BTreeMap::new();
     for row in rows {
-        let finding = row.context("Could not list findings")?;
-        count += push_matching_finding(&mut findings, finding, filter) as usize;
+        count += push_matching_finding(store, &mut review_cache, &mut findings, row, filter)?
+            as usize;
     }
     Ok((count, findings))
 }
 
 fn push_matching_finding(
+    store: &FindingStore,
+    review_cache: &mut BTreeMap<String, Option<ReviewDecision>>,
     findings: &mut Vec<Finding>,
     finding: Finding,
     filter: &FindingListFilter,
-) -> bool {
-    if !filter.matches(&finding) {
-        return false;
+) -> Result<bool> {
+    let review_decision = latest_review_decision_for_filter(store, review_cache, &finding)?;
+    if !filter.matches_with_review_decision(&finding, review_decision.as_ref()) {
+        return Ok(false);
     }
     if findings.len() < filter.limit {
         findings.push(finding);
     }
-    true
+    Ok(true)
+}
+
+fn latest_review_decision_for_filter(
+    store: &FindingStore,
+    review_cache: &mut BTreeMap<String, Option<ReviewDecision>>,
+    finding: &Finding,
+) -> Result<Option<ReviewDecision>> {
+    let Some(cache_key) = review_cache_key(finding) else {
+        return Ok(None);
+    };
+    if let Some(decision) = review_cache.get(&cache_key) {
+        return Ok(decision.clone());
+    }
+    let decision = load_latest_review_decision_for_filter(store, finding)?
+        .map(|record| record.decision);
+    review_cache.insert(cache_key, decision.clone());
+    Ok(decision)
+}
+
+fn load_latest_review_decision_for_filter(
+    store: &FindingStore,
+    finding: &Finding,
+) -> Result<Option<ReviewDecisionRecord>> {
+    if let Some(identity_id) = finding.identity_id.as_deref() {
+        return store.latest_review_decision_for_identity(identity_id);
+    }
+    match finding.id {
+        Some(finding_id) => store.latest_review_decision(finding_id),
+        None => Ok(None),
+    }
+}
+
+fn review_cache_key(finding: &Finding) -> Option<String> {
+    finding
+        .identity_id
+        .as_ref()
+        .map(|identity_id| format!("identity:{identity_id}"))
+        .or_else(|| finding.id.map(|finding_id| format!("finding:{finding_id}")))
 }

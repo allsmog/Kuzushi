@@ -32,6 +32,8 @@ export type {
   WorkspaceServiceStore,
   WorkspaceVulnStore,
 } from "./host-handles.js";
+export type { PrintLevel, PrintOptions, PrintSink } from "./print.js";
+export { createArraySink, createPrintSink, stripAnsi } from "./print.js";
 // Registry + specifier parsing — re-export so third parties can do static
 // analysis of their own module specifiers without importing deep paths.
 export { ModuleRegistry, parseModuleSpecifier } from "./registry.js";

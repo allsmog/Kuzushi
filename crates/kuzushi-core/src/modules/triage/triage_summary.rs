@@ -61,37 +61,86 @@ pub(in crate::modules) fn select_triage_findings(
     input: &TriageRunInput,
 ) -> Result<(Vec<Finding>, Vec<String>)> {
     let mut findings = Vec::new();
-    let mut missing = Vec::new();
     let mut seen = BTreeSet::new();
+    let scan_id = effective_triage_scan_id(store, input)?;
 
-    if let Some(fingerprints) = &input.fingerprints {
-        for reference in fingerprints {
-            match store.get_finding_by_reference(reference)? {
-                Some(finding)
-                    if input
-                        .scan_id
-                        .as_ref()
-                        .is_none_or(|scan_id| finding.scan_id.as_deref() == Some(scan_id)) =>
-                {
-                    if seen.insert(finding.fingerprint.clone()) {
-                        findings.push(finding);
-                    }
-                }
-                _ => missing.push(reference.clone()),
-            }
+    let missing = match &input.fingerprints {
+        Some(references) => select_referenced_triage_findings(
+            store,
+            input,
+            scan_id.as_deref(),
+            references,
+            &mut findings,
+            &mut seen,
+        )?,
+        None => {
+            select_all_triage_findings(store, input, scan_id.as_deref(), &mut findings, &mut seen)?;
+            Vec::new()
         }
-    } else {
-        for finding in store.list_findings(FindingListFilter::MAX_LIMIT)? {
-            if input
-                .scan_id
-                .as_ref()
-                .is_some_and(|scan_id| finding.scan_id.as_deref() != Some(scan_id))
-            {
-                continue;
-            }
-            findings.push(finding);
-        }
-    }
+    };
 
     Ok((findings, missing))
+}
+
+fn select_referenced_triage_findings(
+    store: &FindingStore,
+    input: &TriageRunInput,
+    scan_id: Option<&str>,
+    references: &[String],
+    findings: &mut Vec<Finding>,
+    seen: &mut BTreeSet<String>,
+) -> Result<Vec<String>> {
+    let mut missing = Vec::new();
+    for reference in references {
+        match store.get_finding_by_reference(reference)? {
+            Some(finding) if finding_matches_triage_scope(&finding, scan_id) => {
+                push_triage_candidate(findings, seen, finding, input.retriage);
+            }
+            _ => missing.push(reference.clone()),
+        }
+    }
+    Ok(missing)
+}
+
+fn select_all_triage_findings(
+    store: &FindingStore,
+    input: &TriageRunInput,
+    scan_id: Option<&str>,
+    findings: &mut Vec<Finding>,
+    seen: &mut BTreeSet<String>,
+) -> Result<()> {
+    for finding in store.list_findings(FindingListFilter::MAX_LIMIT)? {
+        if finding_matches_triage_scope(&finding, scan_id) {
+            push_triage_candidate(findings, seen, finding, input.retriage);
+        }
+    }
+    Ok(())
+}
+
+fn effective_triage_scan_id(
+    store: &FindingStore,
+    input: &TriageRunInput,
+) -> Result<Option<String>> {
+    match &input.scan_id {
+        Some(scan_id) => Ok(Some(scan_id.clone())),
+        None => store.latest_run_id(),
+    }
+}
+
+fn finding_matches_triage_scope(finding: &Finding, scan_id: Option<&str>) -> bool {
+    scan_id.is_none_or(|scan_id| finding.scan_id.as_deref() == Some(scan_id))
+}
+
+fn push_triage_candidate(
+    findings: &mut Vec<Finding>,
+    seen: &mut BTreeSet<String>,
+    finding: Finding,
+    retriage: bool,
+) {
+    if finding.triage.is_some() && !retriage {
+        return;
+    }
+    if seen.insert(finding.fingerprint.clone()) {
+        findings.push(finding);
+    }
 }

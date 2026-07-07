@@ -9,11 +9,12 @@ pub(crate) fn target_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stati
         "Kuzushi anchors scans, findings, and artifacts to a target directory.",
     ));
     lines.push(muted(
-        "Nothing defaults to cwd silently — pick it (or any repo below) explicitly.",
+        "Nothing defaults to cwd silently — pick it, a repo, or a submodule explicitly.",
     ));
     lines.push(blank());
-    let label_width = candidate_label_width(&app.target_candidates);
-    for (idx, candidate) in app.target_candidates.iter().enumerate() {
+    let candidates = app.target_picker_route.candidates();
+    let label_width = candidate_label_width(candidates);
+    for (idx, candidate) in candidates.iter().enumerate() {
         lines.push(target_picker_row(
             app,
             idx,
@@ -24,9 +25,14 @@ pub(crate) fn target_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stati
     }
     lines.push(blank());
     lines.push(muted("any other directory: Esc, then `target <path>`"));
+    lines.push(muted(
+        "no repo or no key yet: press `d` for the offline fixture",
+    ));
     lines.push(blank());
     lines.push(keybind_hint_line(&[
         ("↑/↓/j/k", "move"),
+        (":", "type a command"),
+        ("d", "offline fixture"),
         ("Enter", "select"),
         ("Esc/q", "browse without a target"),
     ]));
@@ -48,7 +54,7 @@ fn target_picker_row(
     label_width: usize,
     width: u16,
 ) -> Line<'static> {
-    let marker = if idx == app.target_picker_cursor {
+    let marker = if idx == app.target_picker_route.cursor() {
         ">"
     } else {
         " "
@@ -56,12 +62,20 @@ fn target_picker_row(
     let body = format!(
         "  {marker} {label:<label_width$}   {hint}",
         label = candidate.label,
-        hint = candidate.hint,
+        hint = candidate_hint(candidate),
     );
-    let style = if idx == app.target_picker_cursor {
+    let style = if idx == app.target_picker_route.cursor() {
         theme::success().add_modifier(Modifier::BOLD)
     } else {
         theme::primary()
     };
     Line::styled(fit(&body, width as usize), style)
+}
+
+fn candidate_hint(candidate: &TargetCandidate) -> String {
+    candidate
+        .scope
+        .as_ref()
+        .map(|scope| format!("{} · scope:{}", candidate.hint, scope.id))
+        .unwrap_or_else(|| candidate.hint.to_string())
 }

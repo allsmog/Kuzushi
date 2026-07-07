@@ -49,12 +49,12 @@ fn semgrep_summary_line(report: &SemgrepScanReport) -> String {
     )
 }
 
-fn append_semgrep_persisted_run(
-    lines: &mut Vec<String>,
-    persisted: Option<&SemgrepPersistedRun>,
-) {
+fn append_semgrep_persisted_run(lines: &mut Vec<String>, persisted: Option<&SemgrepPersistedRun>) {
     if let Some(persisted) = persisted {
-        lines.push(persisted_run_line(&persisted.run_id, &persisted.findings_db));
+        lines.push(persisted_run_line(
+            &persisted.run_id,
+            &persisted.findings_db,
+        ));
     }
 }
 
@@ -174,7 +174,10 @@ fn plural_suffix(count: usize) -> &'static str {
 
 fn append_codeql_persisted_run(lines: &mut Vec<String>, persisted: Option<&CodeqlPersistedRun>) {
     if let Some(persisted) = persisted {
-        lines.push(persisted_run_line(&persisted.run_id, &persisted.findings_db));
+        lines.push(persisted_run_line(
+            &persisted.run_id,
+            &persisted.findings_db,
+        ));
     }
 }
 

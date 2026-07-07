@@ -12,9 +12,9 @@ pub(crate) fn run_recon_import_nmap_xml(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<ReconReport> {
-    let workspace = ctx.workspace.context(
-        "recon:import needs an active workspace. Pass --target <repo> or start the shell with --target.",
-    )?;
+    let workspace = ctx
+        .workspace
+        .context(crate::workspace::active_workspace_required_message("recon:import"))?;
     let path = required_path(input, "path", "recon:import nmap-xml needs a `path` field")?;
     let xml = std::fs::read_to_string(&path)
         .with_context(|| format!("Could not read {}", path.display()))?;

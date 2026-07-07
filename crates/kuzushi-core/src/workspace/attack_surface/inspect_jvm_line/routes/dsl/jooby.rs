@@ -12,11 +12,22 @@ pub(super) fn inspect_jooby_route_line(
 ) {
     remember_jooby_scope(lower, state);
     remember_jooby_prefix(detail, lower, state);
-    emit_jooby_route(source_file, framework, line_number, detail, lower, state, builder);
+    emit_jooby_route(
+        source_file,
+        framework,
+        line_number,
+        detail,
+        lower,
+        state,
+        builder,
+    );
 }
 
 fn remember_jooby_scope(lower: &str, state: &mut RouteScanState) {
-    if lower.contains("extends jooby") || lower.contains("jooby.create") || lower.contains("new jooby") {
+    if lower.contains("extends jooby")
+        || lower.contains("jooby.create")
+        || lower.contains("new jooby")
+    {
         state.jooby_seen = true;
     }
 }
@@ -59,9 +70,5 @@ fn emit_jooby_route(
 }
 
 fn jooby_route_method(line: &str) -> Option<&'static str> {
-    route_method_call(line).or_else(|| {
-        line.trim_start()
-            .starts_with("all(")
-            .then_some("ANY")
-    })
+    route_method_call(line).or_else(|| line.trim_start().starts_with("all(").then_some("ANY"))
 }

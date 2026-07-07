@@ -20,7 +20,6 @@
 //! for rg / joern / codeql candidates.
 
 use super::*;
-use std::path::Path;
 use tree_sitter::{Node, Parser};
 
 /// One identifier-injection match. Mirrors the fields of
@@ -122,14 +121,10 @@ fn is_safe_wrapper(name: &str) -> bool {
         || lower.starts_with("sanitize_identifier")
 }
 
-/// Scan the given source-file slice. Each file must be the actual
-/// on-disk contents (the detector reparses with tree-sitter rather
-/// than the line-split shape `TaintIrisNextSourceFile` carries).
-/// Returns one match per `%s` slot that lands at an identifier
-/// position without a safe wrapper.
-pub(crate) fn detect_identifier_injection_in_target(
-    scan_root: &Path,
-    files: &[TaintIrisNextSourceFile],
+/// Scan the given C/C++ source-file paths. Returns one match per `%s` slot that
+/// lands at an identifier position without a safe wrapper.
+pub(crate) fn detect_identifier_injection_in_paths(
+    files: &[TaintIrisNextSourcePath],
 ) -> Vec<IdentifierInjectionMatch> {
     let mut out: Vec<IdentifierInjectionMatch> = Vec::new();
     let mut parser = Parser::new();
@@ -140,22 +135,35 @@ pub(crate) fn detect_identifier_injection_in_target(
         return out;
     }
     for file in files {
-        if file.language != "c" && file.language != "cpp" {
-            continue;
-        }
-        let abs = scan_root.join(&file.relative_path);
-        let Ok(bytes) = std::fs::read(&abs) else {
-            continue;
-        };
-        if bytes.is_empty() {
-            continue;
-        }
-        let Some(tree) = parser.parse(&bytes, None) else {
-            continue;
-        };
-        walk_node(tree.root_node(), &bytes, &file.relative_path, &mut out);
+        collect_identifier_injection_file_matches(file, &mut parser, &mut out);
     }
     out
+}
+
+fn collect_identifier_injection_file_matches(
+    file: &TaintIrisNextSourcePath,
+    parser: &mut Parser,
+    out: &mut Vec<IdentifierInjectionMatch>,
+) {
+    if !is_c_family_source(file) {
+        return;
+    }
+    let Some(bytes) = parseable_source_bytes(file) else {
+        return;
+    };
+    let Some(tree) = parser.parse(&bytes, None) else {
+        return;
+    };
+    walk_node(tree.root_node(), &bytes, &file.relative_path, out);
+}
+
+fn is_c_family_source(file: &TaintIrisNextSourcePath) -> bool {
+    file.language == "c" || file.language == "cpp"
+}
+
+fn parseable_source_bytes(file: &TaintIrisNextSourcePath) -> Option<Vec<u8>> {
+    let bytes = std::fs::read(&file.absolute_path).ok()?;
+    (!bytes.is_empty() && !bytes.iter().take(4096).any(|byte| *byte == 0)).then_some(bytes)
 }
 
 fn walk_node(node: Node<'_>, src: &[u8], rel_path: &str, out: &mut Vec<IdentifierInjectionMatch>) {
@@ -206,19 +214,7 @@ fn identifier_printf_call<'tree, 'src>(
         return None;
     }
 
-    // Locate the format-string argument. Heuristic: first
-    // `string_literal` in the argument list. This handles
-    // appendStringInfo(buf, "fmt", ...) (fmt at index 1) AND
-    // sprintf(buf, "fmt", ...) (fmt at index 1) AND
-    // printf("fmt", ...) (fmt at index 0). For snprintf(buf, size,
-    // "fmt", ...) the literal is at index 2 — same heuristic.
-    let Some((fmt_arg_idx, fmt_node)) = arg_nodes
-        .iter()
-        .enumerate()
-        .find_map(|(idx, node)| (node.kind() == "string_literal").then_some((idx, *node)))
-    else {
-        return None;
-    };
+    let (fmt_arg_idx, fmt_node) = locate_format_string_arg(&arg_nodes)?;
     let fmt_inner = string_literal_inner_text(fmt_node, src);
     if fmt_inner.is_empty() {
         return None;
@@ -232,6 +228,16 @@ fn identifier_printf_call<'tree, 'src>(
         fmt_inner_upper: fmt_inner.to_ascii_uppercase(),
         fmt_inner,
     })
+}
+
+/// Heuristic: first `string_literal` in the argument list. This handles
+/// appendStringInfo(buf, "fmt", ...), sprintf(buf, "fmt", ...),
+/// printf("fmt", ...), and snprintf(buf, size, "fmt", ...).
+fn locate_format_string_arg<'tree>(arg_nodes: &[Node<'tree>]) -> Option<(usize, Node<'tree>)> {
+    arg_nodes
+        .iter()
+        .enumerate()
+        .find_map(|(idx, node)| (node.kind() == "string_literal").then_some((idx, *node)))
 }
 
 fn collect_identifier_injection_specs(
@@ -637,7 +643,8 @@ fn truncate(s: &str, n: usize) -> String {
     if s.len() <= n {
         s.to_string()
     } else {
-        format!("{}…", &s[..n])
+        let end = clamp_to_char_boundary_left(s.as_bytes(), n.min(s.len()));
+        format!("{}…", &s[..end])
     }
 }
 
@@ -650,24 +657,24 @@ mod tests {
     fn fixture_file(
         path: &str,
         contents: &str,
-    ) -> (tempfile::TempDir, Vec<TaintIrisNextSourceFile>) {
+    ) -> (tempfile::TempDir, Vec<TaintIrisNextSourcePath>) {
         let temp = tempdir().unwrap();
         let target = temp.path().join(path);
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).unwrap();
         }
         fs::write(&target, contents).unwrap();
-        let files = vec![TaintIrisNextSourceFile {
+        let files = vec![TaintIrisNextSourcePath {
+            absolute_path: target,
             relative_path: path.to_string(),
             language: "c".to_string(),
-            lines: contents.lines().map(|l| l.to_string()).collect(),
         }];
         (temp, files)
     }
 
     #[test]
     fn detects_dblink_close_cursor_name_injection() {
-        let (temp, files) = fixture_file(
+        let (_temp, files) = fixture_file(
             "contrib/dblink/dblink.c",
             r#"
 static void
@@ -680,7 +687,7 @@ dblink_close(PG_FUNCTION_ARGS)
 }
 "#,
         );
-        let matches = detect_identifier_injection_in_target(temp.path(), &files);
+        let matches = detect_identifier_injection_in_paths(&files);
         assert_eq!(matches.len(), 1, "got {matches:?}");
         let m = &matches[0];
         assert_eq!(m.printf_callee, "appendStringInfo");
@@ -690,7 +697,7 @@ dblink_close(PG_FUNCTION_ARGS)
 
     #[test]
     fn detects_dblink_open_declare_cursor() {
-        let (temp, files) = fixture_file(
+        let (_temp, files) = fixture_file(
             "contrib/dblink/dblink.c",
             r#"
 static void
@@ -703,7 +710,7 @@ dblink_open(PG_FUNCTION_ARGS)
 }
 "#,
         );
-        let matches = detect_identifier_injection_in_target(temp.path(), &files);
+        let matches = detect_identifier_injection_in_paths(&files);
         // Both %s slots fire because: %s after DECLARE (identifier),
         // %s after CURSOR FOR (also identifier-position per our list).
         // The CURSOR FOR slot's argument is `sql` — also unwrapped —
@@ -719,7 +726,7 @@ dblink_open(PG_FUNCTION_ARGS)
 
     #[test]
     fn detects_dblink_fetch_from_cursor() {
-        let (temp, files) = fixture_file(
+        let (_temp, files) = fixture_file(
             "contrib/dblink/dblink.c",
             r#"
 static void
@@ -732,7 +739,7 @@ dblink_fetch(PG_FUNCTION_ARGS)
 }
 "#,
         );
-        let matches = detect_identifier_injection_in_target(temp.path(), &files);
+        let matches = detect_identifier_injection_in_paths(&files);
         assert_eq!(matches.len(), 1, "got {matches:?}");
         let m = &matches[0];
         assert!(
@@ -743,7 +750,7 @@ dblink_fetch(PG_FUNCTION_ARGS)
 
     #[test]
     fn skips_safe_wrapped_argument() {
-        let (temp, files) = fixture_file(
+        let (_temp, files) = fixture_file(
             "ok.c",
             r#"
 void f(void)
@@ -754,7 +761,7 @@ void f(void)
 }
 "#,
         );
-        let matches = detect_identifier_injection_in_target(temp.path(), &files);
+        let matches = detect_identifier_injection_in_paths(&files);
         assert!(
             matches.is_empty(),
             "quote_identifier-wrapped %s should not flag: {matches:?}",
@@ -763,7 +770,7 @@ void f(void)
 
     #[test]
     fn skips_quote_ident_cstr_wrapped() {
-        let (temp, files) = fixture_file(
+        let (_temp, files) = fixture_file(
             "ok2.c",
             r#"
 void f(void)
@@ -773,7 +780,7 @@ void f(void)
 }
 "#,
         );
-        let matches = detect_identifier_injection_in_target(temp.path(), &files);
+        let matches = detect_identifier_injection_in_paths(&files);
         assert!(
             matches.is_empty(),
             "quote_ident_cstr-wrapped should not flag: {matches:?}",
@@ -782,7 +789,7 @@ void f(void)
 
     #[test]
     fn skips_literal_substitution() {
-        let (temp, files) = fixture_file(
+        let (_temp, files) = fixture_file(
             "ok3.c",
             r#"
 void f(void)
@@ -792,7 +799,7 @@ void f(void)
 }
 "#,
         );
-        let matches = detect_identifier_injection_in_target(temp.path(), &files);
+        let matches = detect_identifier_injection_in_paths(&files);
         assert!(
             matches.is_empty(),
             "string-literal substitution should not flag: {matches:?}",
@@ -803,7 +810,7 @@ void f(void)
     fn skips_non_identifier_position_percent_s() {
         // %s appears but NOT after a SQL identifier keyword — should
         // not flag. Example: error-message formatting.
-        let (temp, files) = fixture_file(
+        let (_temp, files) = fixture_file(
             "ok4.c",
             r#"
 void f(void)
@@ -813,7 +820,7 @@ void f(void)
 }
 "#,
         );
-        let matches = detect_identifier_injection_in_target(temp.path(), &files);
+        let matches = detect_identifier_injection_in_paths(&files);
         assert!(
             matches.is_empty(),
             "%s in non-identifier position should not flag: {matches:?}",
@@ -824,7 +831,7 @@ void f(void)
     fn handles_width_and_length_modifiers() {
         // %lus, %-20s, %.10s all consume one argument; their
         // argument-index tracking must stay correct.
-        let (temp, files) = fixture_file(
+        let (_temp, files) = fixture_file(
             "modifiers.c",
             r#"
 void f(void)
@@ -835,7 +842,7 @@ void f(void)
 }
 "#,
         );
-        let matches = detect_identifier_injection_in_target(temp.path(), &files);
+        let matches = detect_identifier_injection_in_paths(&files);
         // The DECLARE position fires on `name` (variadic_position=2,
         // after `fixed` and `0UL`).
         assert_eq!(matches.len(), 1, "got {matches:?}");
@@ -844,13 +851,13 @@ void f(void)
 
     #[test]
     fn maps_to_taint_iris_next_candidate_with_cwe_89() {
-        let (temp, files) = fixture_file(
+        let (_temp, files) = fixture_file(
             "x.c",
             r#"
 void f(void) { appendStringInfo(&buf, "CLOSE %s", curname); }
 "#,
         );
-        let matches = detect_identifier_injection_in_target(temp.path(), &files);
+        let matches = detect_identifier_injection_in_paths(&files);
         assert_eq!(matches.len(), 1);
         let candidates = candidates_from_identifier_injection_matches(&matches, &[]);
         assert_eq!(candidates.len(), 1);
@@ -888,7 +895,7 @@ void f(void) { appendStringInfo(&buf, "CLOSE %s", curname); }
         // contain multi-byte UTF-8 (emoji, accented chars in
         // error messages). The detector must not panic on these
         // when slicing the 32-byte preceding window.
-        let (temp, files) = fixture_file(
+        let (_temp, files) = fixture_file(
             "emoji.c",
             r#"
 void f(void) {
@@ -898,7 +905,14 @@ void f(void) {
 "#,
         );
         // Must not panic. May or may not flag — both are fine.
-        let _ = detect_identifier_injection_in_target(temp.path(), &files);
+        let _ = detect_identifier_injection_in_paths(&files);
+    }
+
+    #[test]
+    fn truncate_preserves_utf8_boundaries() {
+        let text = format!("{}🚀z", "a".repeat(120));
+        let truncated = truncate(&text, 121);
+        assert_eq!(truncated, format!("{}…", "a".repeat(120)));
     }
 
     #[test]

@@ -36,7 +36,7 @@ const MODULE_PLAYBOOKS: &[(&str, ModulePlaybook)] = &[
     (
         "sast",
         ModulePlaybook {
-            run: PlaybookText::Static("scan runs configured scanners; run . dispatches sast:scan"),
+            run: PlaybookText::Static("next opens guided hunt; run . dispatches sast:scan"),
             needs: "target, scanner/task config",
             output: PlaybookText::FindingsDbPath,
             inspect: "tasks · findings · use triage",
@@ -74,6 +74,17 @@ const MODULE_PLAYBOOKS: &[(&str, ModulePlaybook)] = &[
         ModulePlaybook {
             run: PlaybookText::Static("run . dispatches cargo-audit:scan for RustSec advisories"),
             needs: "target with Cargo.lock and cargo-audit installed",
+            output: PlaybookText::FindingsDbPath,
+            inspect: "findings · use triage · use report",
+        },
+    ),
+    (
+        "govulncheck",
+        ModulePlaybook {
+            run: PlaybookText::Static(
+                "run . dispatches govulncheck:scan for Go reachable vulnerabilities",
+            ),
+            needs: "target with Go packages and govulncheck installed",
             output: PlaybookText::FindingsDbPath,
             inspect: "findings · use triage · use report",
         },
@@ -216,6 +227,10 @@ fn append_run_rows(
     lines.push(playbook_row("run .", &fit(&resolution, width as usize)));
     lines.push(playbook_row("tool", &fit(&run, width as usize)));
     lines.push(playbook_row("needs", &fit(playbook.needs, width as usize)));
+    lines.push(playbook_row(
+        "options",
+        &fit(&options_row_text(primary_tool), width as usize),
+    ));
     lines.push(playbook_row("output", &fit(&output, width as usize)));
 }
 
@@ -234,6 +249,17 @@ fn run_resolution(primary_tool: &str) -> String {
     format!(
         "dispatches {primary_tool} (shell); terminal: kuzushi --target . run {primary_tool} --input '{{}}'"
     )
+}
+
+fn options_row_text(primary_tool: &str) -> String {
+    if primary_tool == "sast:scan" {
+        return "options sast:scan before scan; show advanced sast:scan for budgets/model"
+            .to_string();
+    }
+    if primary_tool == "no-tool" {
+        return "options . when this module exposes tunable tool knobs".to_string();
+    }
+    "options . before run; show advanced . for hidden knobs".to_string()
 }
 
 fn append_help_row(lines: &mut Vec<Line<'static>>, inspect: &str) {

@@ -85,6 +85,10 @@ pub(crate) const PRIMARY_COMPLETION_PROVIDERS: &[PrimaryCompletionProvider] = &[
         values: attachment_module_completion_values,
     },
     PrimaryCompletionProvider {
+        commands: &["attach"],
+        values: file_completion_values_for,
+    },
+    PrimaryCompletionProvider {
         commands: &["detach", "reparse"],
         values: attachment_id_completion_values_for,
     },

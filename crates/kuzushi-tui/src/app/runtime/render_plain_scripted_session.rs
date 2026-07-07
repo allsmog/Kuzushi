@@ -11,7 +11,7 @@ pub(crate) fn render_plain_scripted_session(
             output.push('\n');
         }
         let log_start = app.log.len();
-        app.submit_line(command);
+        submit_plain_scripted_command(app, command);
         app.drain_background_events();
         output.push_str(&render_plain_command_result(app, width, command, log_start));
         if app.should_quit {
@@ -19,6 +19,30 @@ pub(crate) fn render_plain_scripted_session(
         }
     }
     output
+}
+
+fn submit_plain_scripted_command(app: &mut ShellApp, command: &str) {
+    match crate::commands::parse_command(command) {
+        ShellCommand::Scan(target) => app.start_umbrella_sast_scan(target),
+        _ => app.submit_line(command),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scripted_scan_starts_worker_instead_of_opening_picker() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        submit_plain_scripted_command(&mut app, &format!("scan {}", temp.path().display()));
+
+        assert!(app.scan.as_ref().is_some_and(|scan| scan.running));
+        assert_eq!(app.shell_view, ShellView::Activity);
+        assert_ne!(app.shell_view, ShellView::PlanningPicker);
+    }
 }
 
 pub(crate) fn setup_terminal() -> Result<Terminal<CrosstermBackend<Stdout>>> {

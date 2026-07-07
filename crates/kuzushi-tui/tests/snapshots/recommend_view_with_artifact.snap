@@ -2,10 +2,10 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 0
 ---
- KUZUSHI mode:shell · target:./recommend · ctx:not built · model:unconfigured
+ KUZUSHI › recommend · mode:shell · target:./recommend · phase:組 map 1/4 · ctx:not built · model:unconfigured
 
  -- RECOMMEND ----------------------------------------------------------------------------------------------------------
-recommendations    target/kuzushi-tui-snapshots/recommend/.kuzushi/runs/run-rec/recommendations.json
+recommendations    target/kuzushi-tui-snapshots/recommend/.kuzushi/v3/runs/run-rec/recommendations.json
 run                run-rec
 surface risk       1 high/critical, max 90, tiers critical=1, frameworks Next.js=1, Spring=1, top critical POST /admin
 
@@ -15,4 +15,4 @@ priority  tool                        runtime   signal                          
 ⚠ high    semgrep:scan                no        frameworks: Falcon, Litestar...     Source files match the fast native
                                                                                     SAST path.
 
-▸ try: run <tool> [json] · trace <run> · runs · back
+> try: run <tool> [json] · trace <run> · runs · back

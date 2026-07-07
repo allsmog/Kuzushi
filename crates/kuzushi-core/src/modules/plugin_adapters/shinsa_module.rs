@@ -12,7 +12,7 @@ pub(in crate::modules) fn shinsa_module() -> BuiltinModule {
                 "Run a full ISO 27001 Annex A compliance assessment.",
                 shinsa_tool_options(),
             ),
-            tool_with_options(
+            hidden_tool_with_options(
                 "shinsa:quick-check",
                 "Run a fast ISO 27001 Annex A check.",
                 shinsa_tool_options(),
@@ -22,7 +22,7 @@ pub(in crate::modules) fn shinsa_module() -> BuiltinModule {
                 "Run a full NIST SP 800-53 Rev 5 compliance assessment.",
                 shinsa_tool_options(),
             ),
-            tool_with_options(
+            hidden_tool_with_options(
                 "shinsa:nist-quick-check",
                 "Run a fast NIST SP 800-53 Rev 5 check.",
                 shinsa_tool_options(),
@@ -54,6 +54,9 @@ fn shinsa_tool_options() -> Vec<OptionSpec> {
         )
         .advanced(),
         opt("family", OptionType::String, "Control family filter.").advanced(),
+        opt("depth", OptionType::Enum, "Assessment depth.")
+            .choices(&["full", "quick"])
+            .default(json!("full")),
         opt(
             "severity",
             OptionType::StringList,

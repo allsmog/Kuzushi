@@ -8,10 +8,40 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "open persisted findings",
     },
     ShellCommandSpec {
+        command: "findings filter <expr>",
+        aliases: &[
+            "findings filter state:new rank:high",
+            "findings filter decision:confirmed completeness:open",
+            "/findings filter <expr>",
+        ],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "open filtered findings by severity, review decision, or completeness",
+    },
+    ShellCommandSpec {
+        command: "component <scope|path|all>",
+        aliases: &[
+            "component web/app",
+            "component entrypoint-cmd-proxy",
+            "component all",
+        ],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "focus Workbench findings on a detected component",
+    },
+    ShellCommandSpec {
         command: "open <id>",
         aliases: &["open F-0001", "/open <id>"],
         category: ShellCommandCategory::FindingsEvidence,
         description: "open a finding alias or fingerprint",
+    },
+    ShellCommandSpec {
+        command: "decision <verdict> <reason>",
+        aliases: &[
+            "decision confirmed reviewed source-linked evidence",
+            "decision suppressed accepted by policy owner",
+            "review rejected_false_positive reviewed data flow",
+        ],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "record a human review decision for the selected finding",
     },
     ShellCommandSpec {
         command: "show aliases [prefix]",
@@ -26,8 +56,14 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "recent run artifacts",
     },
     ShellCommandSpec {
-        command: "replay <run>",
-        aliases: &["/replay <run>"],
+        command: "runs diff <left> <right>",
+        aliases: &["runs diff <runA> <runB>", "runs compare <runA> <runB>"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "compare findings snapshots from two runs",
+    },
+    ShellCommandSpec {
+        command: "replay <run|latest>",
+        aliases: &["/replay <run|latest>", "replay latest"],
         category: ShellCommandCategory::FindingsEvidence,
         description: "render a run summary",
     },
@@ -50,17 +86,34 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "latest bounded failure handoff",
     },
     ShellCommandSpec {
+        command: "patch apply",
+        aliases: &["/patch apply", "patch apply"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "apply the pending reviewed patch to the active target",
+    },
+    ShellCommandSpec {
+        command: "patch reject",
+        aliases: &["/patch reject", "patch discard"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "discard the pending reviewed patch",
+    },
+    ShellCommandSpec {
+        command: "patch regen [--style minimal|defensive]",
+        aliases: &["/patch regen", "patch regen --style defensive"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "regenerate the pending patch for the same finding",
+    },
+    ShellCommandSpec {
         command: "since <ref>",
         aliases: &["/since <ref>"],
         category: ShellCommandCategory::FindingsEvidence,
         description: "scope findings to a git ref",
     },
     ShellCommandSpec {
-        command: "threats [1-5]",
+        command: "threats [1-4]",
         aliases: &[
-            "/threats [1-5]",
+            "/threats [1-4]",
             "threats summary",
-            "threats dfd",
             "threats stride",
             "threats stories",
             "threats scope",

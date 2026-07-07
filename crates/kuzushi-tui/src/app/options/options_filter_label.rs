@@ -16,50 +16,15 @@ pub(crate) fn find_option_spec<'a>(tool: &'a ToolDescriptor, name: &str) -> Opti
 
 pub(crate) fn coerce_raw_option_value(spec: &OptionSpec, raw: &str) -> Result<serde_json::Value> {
     let raw = raw.trim();
-    match spec.option_type {
-        OptionType::String | OptionType::Path | OptionType::StringList => {
-            Ok(raw_string_option_value(raw))
-        }
-        OptionType::Bool => Ok(serde_json::Value::Bool(parse_bool_option(raw)?)),
-        OptionType::Int => coerce_raw_int_option(raw),
-        OptionType::Float => coerce_raw_float_option(raw),
-        OptionType::Enum => coerce_raw_enum_option(spec, raw),
-        OptionType::Json => serde_json::from_str(raw).with_context(|| "must be valid JSON"),
+    let value = raw_value_for_core_coercion(spec, raw)?;
+    kuzushi_core::modules::coerce_option_value(spec, value)
+}
+
+fn raw_value_for_core_coercion(spec: &OptionSpec, raw: &str) -> Result<serde_json::Value> {
+    if spec.option_type == OptionType::Json {
+        return serde_json::from_str(raw).with_context(|| "must be valid JSON");
     }
-}
-
-pub(crate) fn raw_string_option_value(raw: &str) -> serde_json::Value {
-    serde_json::Value::String(raw.to_string())
-}
-
-pub(crate) fn coerce_raw_int_option(raw: &str) -> Result<serde_json::Value> {
-    let parsed = raw
-        .parse::<i64>()
-        .with_context(|| format!("must be an integer, got {raw:?}"))?;
-    Ok(serde_json::Value::Number(parsed.into()))
-}
-
-pub(crate) fn coerce_raw_float_option(raw: &str) -> Result<serde_json::Value> {
-    let parsed = raw
-        .parse::<f64>()
-        .with_context(|| format!("must be a number, got {raw:?}"))?;
-    let number = serde_json::Number::from_f64(parsed).context("must be a finite JSON number")?;
-    Ok(serde_json::Value::Number(number))
-}
-
-pub(crate) fn coerce_raw_enum_option(spec: &OptionSpec, raw: &str) -> Result<serde_json::Value> {
-    if !spec.choices.iter().any(|choice| choice == raw) {
-        anyhow::bail!("must be one of {}, got {raw:?}", spec.choices.join("|"));
-    }
-    Ok(raw_string_option_value(raw))
-}
-
-pub(crate) fn parse_bool_option(value: &str) -> Result<bool> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "true" | "t" | "yes" | "y" | "1" | "on" => Ok(true),
-        "false" | "f" | "no" | "n" | "0" | "off" => Ok(false),
-        _ => anyhow::bail!("must be true or false, got {value:?}"),
-    }
+    Ok(serde_json::Value::String(raw.to_string()))
 }
 
 pub(crate) fn format_option_value(value: &serde_json::Value) -> String {

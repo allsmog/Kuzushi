@@ -48,15 +48,15 @@ fn failed_status_overrides_stale_ok_true() {
 }
 
 #[test]
-fn canonicalizes_top_level_status_aliases() {
-    let output = normalize_output_value(json!({"status": "success"}));
+fn preserves_top_level_completed_status() {
+    let output = normalize_output_value(json!({"status": "completed"}));
 
     assert_eq!(output["status"], "completed");
 }
 
 #[test]
-fn canonicalizes_mixed_case_status_aliases() {
-    let output = normalize_output_value(json!({"status": " ERROR "}));
+fn preserves_top_level_failed_status() {
+    let output = normalize_output_value(json!({"status": "failed"}));
 
     assert_eq!(output["ok"], false);
     assert_eq!(output["status"], "failed");

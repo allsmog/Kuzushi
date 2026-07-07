@@ -1,5 +1,27 @@
 use super::*;
 
+/// Run a synchronous bridge call from an async context without stalling the
+/// worker thread. The default async trait methods below only have a blocking
+/// implementation to forward to; calling it directly from `async fn` would pin
+/// an executor thread for the whole model round-trip and distort scheduling
+/// fairness. On a multi-thread Tokio runtime `block_in_place` moves the other
+/// tasks off this worker for the duration; on a current-thread runtime (or
+/// outside any runtime) there is nothing to yield to, so we invoke inline.
+///
+/// This keeps blocking work explicit instead of hidden behind an async
+/// signature — a runtime that can do genuinely non-blocking dispatch should
+/// override the async method rather than rely on this shim.
+pub(crate) fn isolate_blocking<F, R>(f: F) -> R
+where
+    F: FnOnce() -> R,
+{
+    use tokio::runtime::{Handle, RuntimeFlavor};
+    match Handle::try_current().map(|handle| handle.runtime_flavor()) {
+        Ok(RuntimeFlavor::MultiThread) => tokio::task::block_in_place(f),
+        _ => f(),
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LoopHistoryEntry {
@@ -28,13 +50,13 @@ pub trait AgentRuntime: Send + Sync {
     }
 
     async fn query(&self, request: AgentQueryRequest) -> Result<AgentQueryResponse> {
-        self.query_blocking(request)
+        isolate_blocking(move || self.query_blocking(request))
     }
 
     fn triage_finding_blocking(&self, request: TriageRequest) -> Result<TriageOutcome>;
 
     async fn triage_finding(&self, request: TriageRequest) -> Result<TriageOutcome> {
-        self.triage_finding_blocking(request)
+        isolate_blocking(move || self.triage_finding_blocking(request))
     }
 
     /// Whether this runtime supports tool-augmented loops.
@@ -64,10 +86,9 @@ pub trait AgentRuntime: Send + Sync {
         Ok(())
     }
 
-    /// Resolve a tier handle (`Cheap`/`Mid`/`Deep`) to a concrete model
-    /// name. Default: pass-through to whatever the operator
-    /// configured. Providers that can route across model classes
-    /// override this so multi-stage triage can ask for a cheap pass.
+    /// Resolve a tier label (`Cheap`/`Mid`/`Deep`) to the concrete model.
+    /// This must preserve the operator-configured model unless an explicit
+    /// operator-controlled route chooses a different model before the call.
     fn model_for_tier(&self, _tier: ModelTier, configured: &str) -> String {
         configured.to_string()
     }
@@ -101,6 +122,6 @@ pub trait AgentRuntime: Send + Sync {
         role: SubagentRole,
         request: AgentQueryRequest,
     ) -> Result<AgentQueryResponse> {
-        self.spawn_subagent_blocking(role, request)
+        isolate_blocking(move || self.spawn_subagent_blocking(role, request))
     }
 }

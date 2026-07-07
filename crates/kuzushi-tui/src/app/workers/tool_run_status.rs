@@ -4,7 +4,7 @@ pub(crate) fn tool_run_status(tool_name: &str) -> &'static str {
     match tool_name {
         "context:build" | "context-lite:index" => "indexing repository context",
         "semgrep:scan" | "codeql:scan" | "iac-scan:scan" | "license-scan:scan"
-        | "cargo-audit:scan" | "secret-scan:scan" => "searching with scanner",
+        | "cargo-audit:scan" | "govulncheck:scan" | "secret-scan:scan" => "searching with scanner",
         "sast:scan" => "searching SAST pipeline",
         "findings:list" => "reading persisted findings",
         "recon:http-fingerprint" | "recon:nmap" => "collecting recon evidence",
@@ -22,10 +22,13 @@ pub(crate) fn agent_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     question: String,
-    tx: Sender<AgentEvent>,
+    tx: Sender<StampedEvent<AgentEvent>>,
+    generation: WorkerGeneration,
+    cancel: ScanCancellation,
+    wake: Option<TerminalLoopWake>,
 ) {
     let audit = AgentCallAudit::for_prompt(&model, ASK_SYSTEM_PROMPT, &question);
-    let result = run_agent_worker(config, model, thinking_level, cwd, question);
+    let result = run_agent_worker(config, model, thinking_level, cwd, question, cancel);
     let event = match result {
         Ok(answer) => AgentEvent::Answered {
             text: answer.text,
@@ -36,7 +39,8 @@ pub(crate) fn agent_worker(
             audit,
         },
     };
-    let _ = tx.send(event);
+    let _ = tx.send(StampedEvent::new(generation, event));
+    notify_terminal_loop(&wake);
 }
 
 pub(crate) struct AgentWorkerAnswer {
@@ -50,8 +54,11 @@ pub(crate) fn run_agent_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     question: String,
+    cancel: ScanCancellation,
 ) -> Result<AgentWorkerAnswer> {
-    let runtime = LangGraphRuntime::from_config(&config, &cwd)?.with_thinking_level(thinking_level);
+    let runtime = LangGraphRuntime::from_config(&config, &cwd)?
+        .with_thinking_level(thinking_level)
+        .with_cancellation(cancel);
     let response = runtime.query_blocking(AgentQueryRequest::new(
         model,
         cwd,
@@ -96,15 +103,19 @@ pub(crate) fn planner_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     goal: String,
-    tx: Sender<PlanEvent>,
+    tx: Sender<StampedEvent<PlanEvent>>,
+    generation: WorkerGeneration,
+    cancel: ScanCancellation,
+    wake: Option<TerminalLoopWake>,
 ) {
-    let event = match run_planner_worker(config, model, thinking_level, cwd, &goal) {
+    let event = match run_planner_worker(config, model, thinking_level, cwd, &goal, cancel) {
         Ok(plan) => PlanEvent::Proposed(plan),
         Err(error) => PlanEvent::Failed {
             error: error.to_string(),
         },
     };
-    let _ = tx.send(event);
+    let _ = tx.send(StampedEvent::new(generation, event));
+    notify_terminal_loop(&wake);
 }
 
 pub(crate) fn run_planner_worker(
@@ -113,8 +124,9 @@ pub(crate) fn run_planner_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     goal: &str,
+    cancel: ScanCancellation,
 ) -> Result<PlanProposal> {
-    let runtime = planner_runtime(&config, &cwd, thinking_level)?;
+    let runtime = planner_runtime(&config, &cwd, thinking_level, cancel)?;
     let body = planner_response_text(runtime, model, cwd, goal)?;
     parse_plan_json(goal, &body)
 }
@@ -123,8 +135,11 @@ fn planner_runtime(
     config: &V2Config,
     cwd: &PathBuf,
     thinking_level: Option<String>,
+    cancel: ScanCancellation,
 ) -> Result<LangGraphRuntime> {
-    Ok(LangGraphRuntime::from_config(config, cwd)?.with_thinking_level(thinking_level))
+    Ok(LangGraphRuntime::from_config(config, cwd)?
+        .with_thinking_level(thinking_level)
+        .with_cancellation(cancel))
 }
 
 fn planner_response_text(

@@ -160,14 +160,7 @@ pub(crate) fn model_to_finding(m: ModelFinding) -> Option<Finding> {
 }
 
 pub(crate) fn parse_severity(s: &str) -> Severity {
-    match s.to_ascii_lowercase().as_str() {
-        "critical" => Severity::Critical,
-        "high" => Severity::High,
-        "medium" | "med" => Severity::Medium,
-        "low" => Severity::Low,
-        "info" => Severity::Info,
-        _ => Severity::Unknown,
-    }
+    Severity::from_label(s)
 }
 
 pub fn cost_summary(plan: &FullModePlan, model_hint: Option<&str>) -> CostSummary {

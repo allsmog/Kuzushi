@@ -16,7 +16,11 @@ pub(in crate::modules) fn entry_points_module() -> BuiltinModule {
              context snapshot. Writes .kuzushi/entry-points.json. Deterministic; no model cost.",
             vec![target_option()],
         )],
-        vec![dag("entry-points:extract", "entry-points", &["context:build"])],
+        vec![dag(
+            "entry-points:extract",
+            "entry-points",
+            &["context:build"],
+        )],
     )
 }
 
@@ -52,9 +56,7 @@ fn load_context_snapshot(target: &Path) -> Result<Value> {
 }
 
 fn collect_entry_points(snapshot: &Value) -> Vec<Value> {
-    let attack_surface = snapshot
-        .get("attackSurfaceMap")
-        .and_then(Value::as_object);
+    let attack_surface = snapshot.get("attackSurfaceMap").and_then(Value::as_object);
     let Some(surface) = attack_surface else {
         return Vec::new();
     };
@@ -115,8 +117,11 @@ fn write_entry_points_json(
         "total": entry_points.len(),
         "entryPoints": entry_points,
     });
-    fs::write(&path, serde_json::to_string_pretty(&body).unwrap_or_default())
-        .with_context(|| format!("writing entry-points artifact at {}", path.display()))?;
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&body).unwrap_or_default(),
+    )
+    .with_context(|| format!("writing entry-points artifact at {}", path.display()))?;
     Ok(path)
 }
 

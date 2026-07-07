@@ -31,8 +31,7 @@ pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> 
     }
 
     let runtime = require_verify_finding_runtime(request.runtime)?;
-    let model =
-        crate::runtime::require_configured_model("verify:finding", request.configured_model)?;
+    let model = verify_finding_model(&request.input, request.configured_model)?;
     let prompt = build_verify_prompt(&finding, input.prompt_template.as_deref())?;
 
     // Each pass is an independent adversarial verifier with no shared
@@ -47,11 +46,23 @@ pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> 
             request.workspace_root,
             &prompt,
             &finding.fingerprint,
+            &input,
         )?);
     }
     let result = super::verify_consensus::combine_verify_passes(passes);
 
     Ok(verify_finding_response(result))
+}
+
+fn verify_finding_model(input: &Value, configured_model: Option<&str>) -> Result<String> {
+    crate::runtime::resolve_explicit_model(
+        "verify:finding",
+        input
+            .get("model")
+            .and_then(Value::as_str)
+            .map(str::to_string),
+        configured_model,
+    )
 }
 
 fn run_one_verify_pass(
@@ -60,15 +71,11 @@ fn run_one_verify_pass(
     workspace_root: &Path,
     prompt: &str,
     fingerprint: &str,
+    input: &VerifyFindingInput,
 ) -> Result<Value> {
     query_required_structured_json(
         runtime,
-        AgentQueryRequest::new(
-            model,
-            workspace_root.to_path_buf(),
-            VERIFY_SYSTEM_PROMPT.to_string(),
-            prompt.to_string(),
-        ),
+        verify_agent_query_request(model, workspace_root, prompt, input),
         StructuredJsonContract::new(
             "verify:finding",
             "VerificationResult",
@@ -76,6 +83,33 @@ fn run_one_verify_pass(
         ),
         |raw| normalize_verification_result(raw, fingerprint),
     )
+}
+
+fn verify_agent_query_request(
+    model: &str,
+    workspace_root: &Path,
+    prompt: &str,
+    input: &VerifyFindingInput,
+) -> AgentQueryRequest {
+    let mut request = AgentQueryRequest::new(
+        model,
+        workspace_root.to_path_buf(),
+        VERIFY_SYSTEM_PROMPT.to_string(),
+        prompt.to_string(),
+    );
+    if input.mcps {
+        request = request.with_tool_policy(crate::proof::whitebox_policy::whitebox_static_policy_for_target(
+            workspace_root,
+        ));
+    }
+    if let Some(timeout_ms) = input.mcp_tool_timeout_ms {
+        let runtime_options = crate::runtime::AgentRuntimeOptions {
+            mcp_tool_timeout_ms: Some(timeout_ms),
+            ..Default::default()
+        };
+        request = request.with_runtime_options(runtime_options);
+    }
+    request
 }
 
 fn missing_finding_response(fingerprint: &str) -> Value {
@@ -91,7 +125,8 @@ fn missing_finding_response(fingerprint: &str) -> Value {
 }
 
 fn untriaged_finding_response(fingerprint: &str) -> Value {
-    let output = format!("[-] Finding '{fingerprint}' has no triage verdict. Run triage:run first.");
+    let output =
+        format!("[-] Finding '{fingerprint}' has no triage verdict. Run triage:run first.");
     crate::module_result::failed_output_result(
         "verify:finding failed",
         output,
@@ -199,5 +234,49 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("No finding with fingerprint 'missing'"));
+    }
+
+    #[test]
+    fn verify_request_attaches_conditional_mcp_policy_and_timeout() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(temp.path().join(".kuzushi")).unwrap();
+        std::fs::write(temp.path().join(".kuzushi/context-snapshot.json"), "{}").unwrap();
+        let input = VerifyFindingInput {
+            fingerprint: "F-1".to_string(),
+            prompt_template: None,
+            passes: 1,
+            mcps: true,
+            mcp_tool_timeout_ms: Some(12_345),
+        };
+
+        let request = verify_agent_query_request("model", temp.path(), "prompt", &input);
+
+        assert_eq!(request.tool_policy.profile, "whitebox-static");
+        assert!(request.tool_policy.mcps);
+        assert!(request
+            .tool_policy
+            .mcps_attached
+            .iter()
+            .any(|attachment| attachment.name == "treesitter"));
+        assert_eq!(
+            request.runtime_options.unwrap().mcp_tool_timeout_ms,
+            Some(12_345)
+        );
+    }
+
+    #[test]
+    fn verify_request_can_disable_mcp_policy() {
+        let input = VerifyFindingInput {
+            fingerprint: "F-1".to_string(),
+            prompt_template: None,
+            passes: 1,
+            mcps: false,
+            mcp_tool_timeout_ms: None,
+        };
+
+        let request = verify_agent_query_request("model", Path::new("."), "prompt", &input);
+
+        assert!(request.tool_policy.is_default());
+        assert!(request.runtime_options.is_none());
     }
 }

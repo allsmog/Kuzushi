@@ -1,20 +1,39 @@
+use super::agent_dispatch_model::{
+    agent_cwd, agent_target_label, next_agent_run_id, spawn_agent_dispatch, thinking_level_suffix,
+    AgentDispatchParts, AgentDispatchStart, AgentDispatchState,
+};
+use super::agent_prompt::agent_question_with_context;
 use super::*;
+use crate::ui_view_models::screen_context_model;
 use kuzushi_core::run_artifacts::FailureToLlmContext;
 
 impl ShellApp {
     pub(crate) fn ask_agent(&mut self, question: &str) {
+        let effects = self.reduce_ask_agent(question);
+        self.execute_effects(effects);
+    }
+
+    pub(crate) fn reduce_ask_agent(&mut self, question: &str) -> Vec<ShellEffect> {
         let Some(operator_question) = self.accept_agent_question(question) else {
-            return;
+            return Vec::new();
         };
         let prior = self.agent_chat.as_ref().cloned().unwrap_or_default();
         let Some(model) = self.agent_model_for_question(&prior, &operator_question) else {
-            return;
+            return Vec::new();
         };
         let dispatch = self.start_agent_dispatch(prior, operator_question, model);
+        vec![ShellEffect::DispatchAgent(dispatch)]
+    }
+
+    pub(crate) fn dispatch_agent(&mut self, dispatch: AgentDispatch) {
         self.log_agent_dispatch(&dispatch);
         self.write_agent_dispatch_artifacts(&dispatch);
         self.log_agent_failure_context_attachment(dispatch.attached_failure_context);
-        spawn_agent_dispatch(dispatch);
+        self.log_agent_screen_context_attachment(dispatch.attached_screen_context);
+        let generation = dispatch.generation;
+        let watchdog_cancel = dispatch.cancel.clone();
+        let handle = spawn_agent_dispatch(dispatch, self.loop_wake.clone());
+        self.register_worker_handle_with_watchdog("agent", generation, handle, watchdog_cancel);
     }
 
     fn accept_agent_question(&mut self, question: &str) -> Option<String> {
@@ -74,30 +93,73 @@ impl ShellApp {
         operator_question: String,
         model: String,
     ) -> AgentDispatch {
+        let start = self.prepare_agent_dispatch_start(prior, operator_question, model);
+        self.install_agent_dispatch_state(start.state);
+        self.agent_dispatch_from_parts(start.parts)
+    }
+
+    fn prepare_agent_dispatch_start(
+        &mut self,
+        prior: AgentChatView,
+        operator_question: String,
+        model: String,
+    ) -> AgentDispatchStart {
+        let screen_context = screen_context_model(self);
         let failure_context = self.take_pending_failure_context();
         let (tx, rx) = mpsc::channel();
+        let cancel = ScanCancellation::default();
+        let generation = self.next_worker_generation();
         let (run_id, started_secs) = next_agent_run_id();
-        let agent_prompt =
-            agent_question_with_failure_context(&operator_question, failure_context.as_ref());
-        let mut next = prior.fold_for_next_turn(operator_question.clone());
-        next.running = true;
-        next.run_id = Some(run_id.clone());
-        next.started_secs = started_secs;
-        next.failure_context = failure_context.clone();
-        self.agent_chat = Some(next);
-        self.agent_rx = Some(rx);
-        self.shell_view = ShellView::AgentChat;
-        AgentDispatch {
-            config: self.config.clone(),
-            model,
-            thinking_level: self.session_thinking_level.clone(),
-            cwd: agent_cwd(self.target.as_ref()),
+        let agent_prompt = agent_question_with_context(
+            &operator_question,
+            failure_context.as_ref(),
+            Some(&screen_context),
+        );
+        AgentDispatchStart::new(
+            prior,
             operator_question,
+            model,
             agent_prompt,
             run_id,
-            attached_failure_context: failure_context.is_some(),
+            started_secs,
+            screen_context.scope_chip(),
+            failure_context,
             tx,
+            rx,
+            generation,
+            cancel,
+        )
+    }
+
+    fn agent_dispatch_from_parts(&self, parts: AgentDispatchParts) -> AgentDispatch {
+        AgentDispatch {
+            config: self.config.clone(),
+            model: parts.model,
+            thinking_level: self.session_thinking_level.clone(),
+            cwd: agent_cwd(self.target.as_ref()),
+            operator_question: parts.operator_question,
+            agent_prompt: parts.agent_prompt,
+            run_id: parts.run_id,
+            attached_failure_context: parts.attached_failure_context,
+            attached_screen_context: true,
+            tx: parts.tx,
+            generation: parts.generation,
+            cancel: parts.cancel,
         }
+    }
+
+    fn install_agent_dispatch_state(&mut self, state: AgentDispatchState) {
+        let mut next = state.prior.fold_for_next_turn(state.operator_question);
+        next.running = true;
+        next.run_id = Some(state.run_id);
+        next.started_secs = state.started_secs;
+        next.screen_context_scope = state.screen_context_scope;
+        next.failure_context = state.failure_context;
+        self.agent_chat = Some(next);
+        self.agent_generation = Some(state.generation);
+        self.agent_rx = Some(state.rx);
+        self.agent_cancel = Some(state.cancel);
+        self.shell_view = ShellView::AgentChat;
     }
 
     pub(crate) fn set_pending_failure_context(&mut self, context: FailureToLlmContext) {
@@ -160,130 +222,13 @@ impl ShellApp {
             );
         }
     }
-}
 
-struct AgentDispatch {
-    config: V2Config,
-    model: String,
-    thinking_level: Option<String>,
-    cwd: PathBuf,
-    operator_question: String,
-    agent_prompt: String,
-    run_id: String,
-    attached_failure_context: bool,
-    tx: mpsc::Sender<AgentEvent>,
-}
-
-fn spawn_agent_dispatch(dispatch: AgentDispatch) {
-    thread::spawn(move || {
-        agent_worker(
-            dispatch.config,
-            dispatch.model,
-            dispatch.thinking_level,
-            dispatch.cwd,
-            dispatch.agent_prompt,
-            dispatch.tx,
-        )
-    });
-}
-
-fn next_agent_run_id() -> (String, u64) {
-    let started_secs = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|d| d.as_secs())
-        .unwrap_or_default();
-    (format!("agent-{started_secs}"), started_secs)
-}
-
-fn agent_cwd(target: Option<&PathBuf>) -> PathBuf {
-    target
-        .cloned()
-        .or_else(|| std::env::current_dir().ok())
-        .unwrap_or_else(|| PathBuf::from("."))
-}
-
-fn agent_target_label(target: Option<&PathBuf>) -> String {
-    target
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| ".".to_string())
-}
-
-fn thinking_level_suffix(thinking_level: Option<&str>) -> String {
-    thinking_level
-        .map(|level| format!(" / {level}"))
-        .unwrap_or_default()
-}
-
-pub(super) fn agent_question_with_failure_context(
-    question: &str,
-    context: Option<&FailureToLlmContext>,
-) -> String {
-    let Some(context) = context else {
-        return question.to_string();
-    };
-    format!(
-        "{}\n\nFailure handoff context:\n{}\n\nOperator question:\n{}",
-        bounded_prompt_text(&context.fallback_prompt),
-        failure_context_prompt_block(context),
-        question
-    )
-}
-
-const FAILURE_PROMPT_LIST_LIMIT: usize = 12;
-const FAILURE_PROMPT_TEXT_LIMIT: usize = 4000;
-
-fn failure_context_prompt_block(context: &FailureToLlmContext) -> String {
-    [
-        format!("failed_stage: {}", context.failed_stage),
-        format!("cause: {}", bounded_prompt_text(&context.cause)),
-        format!("allowed_proof_level: {}", context.allowed_proof_level),
-        format!("available_artifacts: {}", context.artifacts_available.len()),
-        format!(
-            "missing_artifacts: {}",
-            compact_prompt_list(&context.missing_artifacts)
-        ),
-        format!(
-            "next_files_or_artifacts: {}",
-            compact_prompt_list(&context.next_files_or_artifacts_to_inspect)
-        ),
-        format!(
-            "recovery_options: {}",
-            compact_prompt_list(&context.recovery_options)
-        ),
-        format!(
-            "forbidden_claims: {}",
-            compact_prompt_list(&context.claims_forbidden)
-        ),
-    ]
-    .join("\n")
-}
-
-fn compact_prompt_list(values: &[String]) -> String {
-    if values.is_empty() {
-        return "none".to_string();
+    fn log_agent_screen_context_attachment(&mut self, attached: bool) {
+        if attached {
+            self.log(
+                "agent",
+                "attached bounded untrusted screen context to agent prompt",
+            );
+        }
     }
-    let mut rendered = values
-        .iter()
-        .take(FAILURE_PROMPT_LIST_LIMIT)
-        .cloned()
-        .collect::<Vec<_>>();
-    if values.len() > FAILURE_PROMPT_LIST_LIMIT {
-        rendered.push(format!(
-            "+{} more",
-            values.len() - FAILURE_PROMPT_LIST_LIMIT
-        ));
-    }
-    rendered.join(", ")
-}
-
-fn bounded_prompt_text(text: &str) -> String {
-    if text.chars().count() <= FAILURE_PROMPT_TEXT_LIMIT {
-        return text.to_string();
-    }
-    format!(
-        "{}...",
-        text.chars()
-            .take(FAILURE_PROMPT_TEXT_LIMIT)
-            .collect::<String>()
-    )
 }

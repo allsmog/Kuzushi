@@ -82,7 +82,7 @@ fn plan_change_line(change: &PlanChangeRow, width: usize) -> Line<'static> {
 
 fn plan_change_style(change: &PlanChangeRow) -> Style {
     if change.skipped {
-        return theme::muted().add_modifier(Modifier::DIM);
+        return theme::disabled();
     }
     if change.selected {
         return theme::success().add_modifier(Modifier::BOLD);
@@ -97,6 +97,17 @@ pub(crate) fn render_cost_cap_halt(frame: &mut Frame<'_>, area: Rect, app: &Shel
     let Some(halt) = cost_cap_halt_model(app) else {
         return;
     };
+    if area.height == 1 {
+        render_lines(
+            frame,
+            area,
+            vec![Line::styled(
+                fit(halt.compact, area.width as usize),
+                theme::danger(),
+            )],
+        );
+        return;
+    }
     let mut lines = vec![cost_cap_halt_header_line(&halt, area.width as usize)];
     if area.height > 1 {
         // Mirror the unbracketed key style from `keybindings_line` /

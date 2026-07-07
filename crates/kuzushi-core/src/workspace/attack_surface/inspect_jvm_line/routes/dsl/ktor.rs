@@ -12,7 +12,15 @@ pub(super) fn inspect_ktor_route_line(
 ) {
     remember_ktor_scope(lower, state);
     remember_ktor_prefix(detail, lower, state);
-    emit_ktor_route(source_file, framework, line_number, detail, lower, state, builder);
+    emit_ktor_route(
+        source_file,
+        framework,
+        line_number,
+        detail,
+        lower,
+        state,
+        builder,
+    );
 }
 
 fn remember_ktor_scope(lower: &str, state: &mut RouteScanState) {

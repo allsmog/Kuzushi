@@ -1,5 +1,6 @@
 pub(in crate::renderer) use super::*;
 pub(crate) use crate::ui_view_models::format_session_cost;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub(crate) fn join_segments(values: &[String]) -> String {
     values
@@ -19,11 +20,11 @@ pub(crate) fn fit(value: &str, max_chars: usize) -> String {
     if max_chars == 0 {
         return String::new();
     }
-    if value.chars().count() <= max_chars {
+    if display_width(value) <= max_chars {
         return value.to_string();
     }
     if max_chars <= 3 {
-        return value.chars().take(max_chars).collect();
+        return take_columns(value, max_chars);
     }
     fit_with_ellipsis(value, max_chars)
 }
@@ -31,20 +32,19 @@ pub(crate) fn fit(value: &str, max_chars: usize) -> String {
 /// Fit a path-like string by truncating from the LEFT, so the most useful tail
 /// (`…/dir/file.rs:42`) stays visible instead of the repo-root prefix.
 pub(crate) fn fit_path(value: &str, max_chars: usize) -> String {
-    let len = value.chars().count();
-    if max_chars == 0 || len <= max_chars {
+    if max_chars == 0 || display_width(value) <= max_chars {
         return value.to_string();
     }
     if max_chars <= 3 {
-        return value.chars().skip(len - max_chars).collect();
+        return take_tail_columns(value, max_chars);
     }
-    let tail: String = value.chars().skip(len - (max_chars - 1)).collect();
+    let tail = take_tail_columns(value, max_chars - 1);
     format!("…{tail}")
 }
 
 fn fit_with_ellipsis(value: &str, max_chars: usize) -> String {
     let budget = max_chars.saturating_sub(3);
-    let head: String = value.chars().take(budget).collect();
+    let head = take_columns(value, budget);
     if let Some(clean) = clean_sentence_break(&head, budget) {
         return clean;
     }
@@ -166,11 +166,11 @@ impl WrapLineState {
     }
 
     fn start_or_split(&mut self, pending: String) -> String {
-        if pending.chars().count() <= self.width {
+        if display_width(&pending) <= self.width {
             self.current = pending;
             return String::new();
         }
-        let (head, tail) = split_at_char_count(&pending, self.width);
+        let (head, tail) = split_at_width(&pending, self.width);
         self.lines.push(head);
         tail
     }
@@ -188,27 +188,12 @@ impl WrapLineState {
 }
 
 fn fits_with_space(current: &str, pending: &str, width: usize) -> bool {
-    current.chars().count() + 1 + pending.chars().count() <= width
-}
-
-pub(crate) fn split_at_char_count(value: &str, count: usize) -> (String, String) {
-    if count == 0 {
-        return (String::new(), value.to_string());
-    }
-    let split_index = value
-        .char_indices()
-        .nth(count)
-        .map(|(index, _)| index)
-        .unwrap_or(value.len());
-    (
-        value[..split_index].to_string(),
-        value[split_index..].to_string(),
-    )
+    display_width(current) + 1 + display_width(pending) <= width
 }
 
 pub(crate) fn pad(value: &str, width: usize) -> String {
     let value = fit(value, width);
-    let padding = width.saturating_sub(value.chars().count());
+    let padding = width.saturating_sub(display_width(&value));
     format!("{value}{}", " ".repeat(padding))
 }
 
@@ -216,9 +201,60 @@ pub(crate) fn value_width(area: Rect, used: usize) -> usize {
     (area.width as usize).saturating_sub(used).max(12)
 }
 
+pub(crate) fn display_width(value: &str) -> usize {
+    UnicodeWidthStr::width(value)
+}
+
+fn char_display_width(ch: char) -> usize {
+    UnicodeWidthChar::width(ch).unwrap_or(0)
+}
+
+fn take_columns(value: &str, max_columns: usize) -> String {
+    let mut width = 0usize;
+    let mut out = String::new();
+    for ch in value.chars() {
+        let next = width + char_display_width(ch);
+        if next > max_columns {
+            break;
+        }
+        out.push(ch);
+        width = next;
+    }
+    out
+}
+
+fn take_tail_columns(value: &str, max_columns: usize) -> String {
+    let mut width = 0usize;
+    let mut chars = Vec::new();
+    for ch in value.chars().rev() {
+        let next = width + char_display_width(ch);
+        if next > max_columns {
+            break;
+        }
+        chars.push(ch);
+        width = next;
+    }
+    chars.into_iter().rev().collect()
+}
+
+fn split_at_width(value: &str, width: usize) -> (String, String) {
+    if width == 0 {
+        return (String::new(), value.to_string());
+    }
+    let mut used = 0usize;
+    for (index, ch) in value.char_indices() {
+        let next = used + char_display_width(ch);
+        if next > width {
+            return (value[..index].to_string(), value[index..].to_string());
+        }
+        used = next;
+    }
+    (value.to_string(), String::new())
+}
+
 #[cfg(test)]
 mod fit_path_tests {
-    use super::fit_path;
+    use super::{display_width, fit, fit_path, pad, wrap_text};
 
     #[test]
     fn keeps_full_path_when_it_fits() {
@@ -228,8 +264,25 @@ mod fit_path_tests {
     #[test]
     fn truncates_from_the_left_keeping_the_tail() {
         let got = fit_path("crates/core/src/scan/engines/secret_scan/file.rs:13", 24);
-        assert_eq!(got.chars().count(), 24);
+        assert_eq!(display_width(&got), 24);
         assert!(got.starts_with('…'));
         assert!(got.ends_with("file.rs:13"), "kept the useful tail: {got}");
+    }
+
+    #[test]
+    fn fit_and_pad_count_display_columns() {
+        let got = fit("ab日本cd", 6);
+        assert_eq!(display_width(&got), 5);
+        assert_eq!(got, "ab...");
+
+        let padded = pad("界", 4);
+        assert_eq!(display_width(&padded), 4);
+    }
+
+    #[test]
+    fn wrap_text_splits_wide_words_on_columns() {
+        let lines = wrap_text("ab日本cd", 4);
+        assert!(lines.iter().all(|line| display_width(line) <= 4));
+        assert_eq!(lines, vec!["ab日", "本cd"]);
     }
 }

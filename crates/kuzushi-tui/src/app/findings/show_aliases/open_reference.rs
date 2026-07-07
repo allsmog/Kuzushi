@@ -83,7 +83,12 @@ impl ShellApp {
             return;
         };
         self.selected_finding = Some(finding.clone());
-        self.shell_view = ShellView::Finding;
+        self.sync_findings_cursor_to_selected();
+        self.shell_view = ShellView::Workbench;
+        self.workbench_focus = crate::app::WorkbenchPane::Details;
+        self.workbench_center_mode = crate::app::WorkbenchCenterMode::Code;
+        self.workbench_scroll
+            .set(crate::app::WorkbenchPane::Details, 0);
         self.log_opened_finding(&finding);
     }
 

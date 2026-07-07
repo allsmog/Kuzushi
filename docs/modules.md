@@ -31,16 +31,18 @@ productized today.
   `kuzushi modules`, `kuzushi tools`, shell `/use`, scan tasks, and
   `kuzushi run <module:tool>`.
 - **Retained TypeScript SDK modules are an authoring and compatibility
-  surface.** The SDK remains useful for tests, package shape, MCP bridging,
-  and migration references.
-- **Dynamic `file://` and `package:` module loading is not a supported Rust
-  CLI/TUI operator workflow yet.** Do not promise operators that arbitrary
-  third-party modules can be loaded into the native shell until that loader is
-  wired and tested in Rust.
+  surface.** The SDK remains useful for tests, package shape, dynamic-module
+  descriptors, and migration references.
+- **Dynamic `file://`, local path, and `package:` module loading is supported
+  through the native CLI's global `--load` flag for shell and headless `run`.**
+  The Node bridge is trusted-only: each specifier must be listed in
+  `operator.trusted_modules`. Untrusted analyzers must use the v3 sandbox
+  plugin path instead of the dynamic Node bridge.
 - **MCP servers and deferred plugin adapters are exact, explicit integrations.**
-  They should declare required binaries, plugin roots, bridge commands, and
-  model policy through options/config rather than implying generic extension
-  loading.
+  Rust MCP servers are exposed through `kuzushi mcp serve <backend>` and the
+  agent bridge. The legacy `mcp:` module specifier remains a parsed
+  compatibility form in the TypeScript SDK; it is not the native dynamic-loader
+  path.
 
 This guide documents the contract and the SDK shape. Shipping behavior should
 be checked against `kuzushi modules`, `kuzushi tools`, and the Rust registry
@@ -80,11 +82,11 @@ added.
 | `id` | `string` | yes | `[a-z][a-z0-9-]*`. Must equal the exported module's `id`. |
 | `displayName` | `string` | yes | Shown in `/modules` and catalog. |
 | `version` | `string` | yes | Module's own semver. |
-| `description` | `string` | yes | One-line summary. |
+| `description` | `string` | no | One-line summary. `defineModule()` enforces one sentence and <=140 chars when present. |
 | `category` | `"offense" \| "defense" \| "governance" \| "intel"` | yes | Grouping in the catalog. |
 | `entry` | `string` | yes | Relative path to the compiled entry (e.g. `./dist/index.js`). |
 | `kuzushiSdkVersion` | `string` | no (warn if missing) | Host SDK the module was authored against. Drift produces a warn. |
-| `requires` | `{ env?: string[]; bins?: string[]; nodeVersion?: string }` | no | Checked before `init()`. |
+| `requires` | `{ env?: string[]; bins?: string[]; nodeVersion?: string }` | no | Exposed through SDK helper checks; native Rust built-ins should use descriptor options/config instead. |
 | `configSchema` | `JSONSchema` | no | Validated against operator-supplied `moduleConfig` before `init()`. |
 | `author` / `license` | `string` | no | npm-style metadata. |
 
@@ -144,15 +146,20 @@ export default defineModule({
 
 Optional fields: `rank` (`"manual" | "low" | "normal" | "good" | "great" | "excellent"`),
 `authors`, `references` (CVEs, ATT&CK techniques), `disclosureDate`, `notes`
-(stability / reliability / side-effects), `examples` (shell snippets shown by
-`examples <id>`), `requires`, `knowledge`, `events`, `hidden`,
+(stability / reliability / side-effects), `examples` (metadata for docs/tests),
+`requires`, `knowledge`, `events`, `hidden`,
 `init(config, ctx)`, `dispose()`.
 
 > **DAG participation.** DAG nodes are `DagTool`s declared inside `tools`.
 > Use `defineDagTool<"<id>">({...})`; hidden infrastructure nodes use the
 > same `DagTool` contract with `hidden: true`.
 
-See `src/modules/core-sast.ts` for the canonical reference.
+For live Rust built-in behavior, use the Rust descriptor/executor path as the
+reference: `crates/kuzushi-core/src/modules/workspace_module.rs` for
+descriptors and `crates/kuzushi-core/src/modules/application/sast_scan/` for
+umbrella orchestration. The retained TypeScript files under `src/modules` are
+SDK compatibility surfaces, not the runtime for built-in scan/shell/run
+behavior.
 
 ## 7. Writing a tool
 
@@ -216,11 +223,11 @@ const hunt = defineDagTool<"my-scanner", ScanOpts, Finding[]>({
 });
 ```
 
-Authors don't implement `execute` themselves — the module registry installs
-one automatically. It re-enters the scan pipeline filtered
-to this one task, so shell dispatch (`/use my-scanner; run`) and headless
-`kuzushi run my-scanner:hunt --target ./repo` both share the exact code path
-scan mode uses.
+Authors don't implement `execute` themselves — the retained TypeScript module
+registry installs one automatically for SDK compatibility. Live Rust scan
+behavior should be implemented through Rust descriptors/executors and the
+shared registry boundary rather than by adding new TypeScript scan runtime
+paths.
 
 **Hidden DAG tools.** Internal helpers that shouldn't appear in `/use`
 overviews or LLM tool lists should still be authored with `defineDagTool`;
@@ -260,18 +267,20 @@ Modules **must not** hardcode model strings as fallbacks. The runtime
 boundary (`crates/kuzushi-core/src/runtime/policy/no_silent_fallback.rs`
 plus the Rust agent router) rejects empty / incompatible models and fallback
 chains before any LLM call. `scripts/check-model-safety.mjs` keeps that
-boundary wired into CI. The right resolution chain is:
+boundary wired into CI. For retained TypeScript SDK modules, the expected
+resolution chain is:
 
 ```ts
 const model =
-  ctx.toolModel /* setg <MODULE>_MODEL=… or /set model … */ ??
   (input?.model as string | undefined) /* inline tool arg */ ??
+  ctx.toolModel /* setg <MODULE>_MODEL=… or /set model … */ ??
   ctx.config.model /* operator-configured global */;
 ```
 
-For DAG tasks use `resolveTaskModel(context, "<task-id>")` from
-`src/agents/tasks/runtime-overrides.ts`, which already follows this
-precedence and falls back to `context.config.model`.
+For Rust built-ins, use `resolve_tool_model(tool_name, input, ctx)` or
+`resolve_explicit_model(tool_name, parsed_input_model, ctx.config.model.as_deref())`.
+Do not reintroduce deleted TypeScript task-runtime helpers as a new source of
+model policy.
 
 Anything that looks like `model = X ?? "anthropic:claude-..."` is the
 silent-fallback pattern the audit removed and must not return.
@@ -292,7 +301,7 @@ pub struct ToolExecutionContext<'a> {
 
 When the shell starts a tool or scan it constructs a `TraceHandle` that
 wraps a `BroadcastSink` (file + mpsc channel). The dispatch wrapper in
-`src/modules/registry/with_v2_builtins/execution.rs` auto-stamps the
+`crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution.rs` auto-stamps the
 handle with the calling tool's `module_id` derived from the qualified tool
 name (`semgrep:scan` → `semgrep`), so producer code only needs:
 
@@ -339,9 +348,9 @@ so cross-module categorization stays consistent):
 
 Beyond the explicit `ctx.trace.step(...)` boundaries above, **every LLM
 call is auto-traced**. The dispatch wrapper at
-`src/modules/registry/with_v2_builtins/execution.rs` wraps the incoming
+`crates/kuzushi-core/src/modules/builtins/with_v2_builtins/execution.rs` wraps the incoming
 `AgentRuntime` in a `TracedRuntime` (defined in
-`src/runtime/traced_runtime.rs`) whenever `ctx.trace.is_some()`. Each
+`crates/kuzushi-core/src/runtime/traced_runtime.rs`) whenever `ctx.trace.is_some()`. Each
 call to `runtime.query_blocking`, `runtime.next_step_blocking`,
 `runtime.triage_finding_blocking`, or `runtime.spawn_subagent_blocking`
 emits a `kind="reasoning"` (or `tool-progress` / `done` for loop
@@ -370,20 +379,25 @@ indents the row under the phase header in the right pane. The scope is
 per-thread; nested scopes form a stack and pop in LIFO order on drop.
 
 Producers that already follow this pattern as canonical references:
-`triage:run`, `verify:finding`, `agentic-sast:scan`, `taint-iris:hunt`,
-`taint-iris-next:hunt`, `carlini-threat-hunt:run`, `patch:finding`,
+`triage:run`, `verify:finding`, `agentic-sast:scan`, `taint-iris-next:hunt`,
+`taint-iris-next:finding-review`, `carlini-threat-hunt:run`, `patch:finding`,
 `threat-model:build`, `x-ray:run`, `run_plugin_finding_adapter` (used
 by `vuln-scout:audit` / `tob:audit`), `shinsa:scan`, `prompt-armor:*`.
 
-**Hidden modules** (`pipeline:*`, `systems-hunt:*`, `context-lite:index`)
-collapse into one aggregated `subsystems` row in the Activity view. Their
-events also still flow through but are filtered out of the right-pane
-feed unless the operator presses `V` (verbose).
+**Hidden modules** (`pipeline:*`, `systems-hunt:*`, `context-lite:index`,
+compatibility aliases, and quarantined exact-only surfaces such as
+`full-mode:*`, `deep-audit:*`, `exploit-chain:*`, `pwn:*`, `threat-leads:*`,
+`chrome-rce:*`, and `vendor-assessment:*`) collapse into one aggregated
+`subsystems` row in the Activity view. Their events also still flow through
+but are filtered out of the right-pane feed unless the operator presses `V`
+(verbose).
 
-`ctx.trace` is `None` for `kuzushi run` and evals — the `if let Some(...)`
-guard short-circuits cleanly.
+Headless `kuzushi run` creates a JSONL trace handle for run artifacts. Some
+test/eval or compatibility contexts may still leave `ctx.trace` as `None`; the
+`if let Some(...)` guard should always short-circuit cleanly.
 
-See `src/run_artifacts/trace_handle.rs` for the implementation and
+See `crates/kuzushi-core/src/run_artifacts/trace_handle.rs` for the
+implementation and
 `crates/kuzushi-tui/tests/activity_dag_fixture.rs` for end-to-end
 integration tests showing how to drive the view from a fake DAG.
 
@@ -425,9 +439,9 @@ return {
 
 ## 11. Capability probe — `ctx.host.capabilities`
 
-`ctx.host` is populated by `CopilotCore.executeTool`. Feature-probe before
-depending on an optional capability so your tool survives both shell-mode
-and headless `run`:
+`ctx.host` is populated when compatibility TypeScript modules are executed
+through the module host. Feature-probe before depending on an optional
+capability so your tool survives both shell-mode and headless `run`:
 
 ```ts
 if (ctx.host?.capabilities.has("workspace")) {
@@ -444,7 +458,15 @@ without a kuzushi release.
 
 ## 12. Load specifiers
 
-The TypeScript loader and compatibility layer understand four specifier
+The native Rust CLI accepts dynamic module specifiers via the global
+`--load <specifier>` flag for `kuzushi shell` and `kuzushi run`. The loader
+delegates to `scripts/kuzushi-dynamic-module-host.mjs`, imports the module
+entry, and consumes the descriptor JSON returned by that host. Each specifier
+must be listed under `[operator].trusted_modules` in the global config.
+Untrusted third-party analyzers must be packaged for the v3 sandbox plugin
+runtime, where capabilities are explicit and ambient process access is denied.
+
+The retained TypeScript SDK parser also understands four compatibility
 prefixes:
 
 | Prefix | Example | Source |
@@ -452,14 +474,9 @@ prefixes:
 | `builtin:` | `builtin:sast` | Shipped inside the kuzushi package. |
 | `file://` | `file:///abs/path/to/my-module` | Local directory with `module.manifest.json`. |
 | `package:` | `package:@kuzushi/blackbox` | Installed npm package (manifest optional). |
-| `mcp:` | `mcp:http://localhost:3000` | MCP server — see §15. |
+| `mcp:` | `mcp:http://localhost:3000` | Parsed compatibility form only; native MCP is served through `kuzushi mcp serve <backend>`. |
 
 A bare string (`"foo"`) defaults to `{ type: "builtin", id: "foo" }`.
-
-The native Rust CLI/TUI does not currently expose `--load file://...` or
-`--load package:...` as a supported operator path. Use the table above to
-author compatible modules and tests, but only document dynamic loading in
-operator-facing material after the Rust loader is wired end to end.
 
 ## 13. Load errors — `ModuleLoadError`
 
@@ -470,11 +487,11 @@ The loader throws `ModuleLoadError` instead of plain `Error`. Branch on
 |------|-------|-----|
 | `MANIFEST_MISSING` | No `module.manifest.json` in the target directory. | Create the manifest at the module root. |
 | `MANIFEST_INVALID` | Zod-parse failure (missing field, bad semver, bad category). | `err.details.issues` lists every problem. |
-| `REQUIREMENTS_UNMET` | Env var missing, Node too old, etc. | Set the env/upgrade Node per `manifest.requires`. |
+| `REQUIREMENTS_UNMET` | Reserved compatibility code; current SDK exposes requirement checks through `checkRequirements(...)` helper results instead of rejecting in the loader. | Check helper output before loading if your host wants hard enforcement. |
 | `ENTRY_NOT_FOUND` | `entry` path doesn't exist. | Run your build; check `entry` is relative to the manifest. |
 | `SHAPE_INVALID` | Exported module failed `validateModuleExport`. Includes tool-name-prefix and duplicate-name violations. | Error message lists the violating tool index. |
-| `ID_MISMATCH` | Manifest `id` ≠ exported module's `id`. | Align them. |
-| `SDK_INCOMPATIBLE` | `kuzushiSdkVersion` major mismatch with host. | Update the manifest or the host. Currently warns; will reject in a future release. |
+| `ID_MISMATCH` | Registry id conflict or lookup of an unknown module id. | Use a unique module id and verify the id is registered before resolving it. |
+| `SDK_INCOMPATIBLE` | Reserved compatibility code; current SDK version checks warn through `checkSdkCompatibility(...)` rather than rejecting. | Update the manifest or host when warnings appear. |
 | `CONFIG_INVALID` | `moduleConfig` fails the manifest's `configSchema`. | Check `err.details` for schema path + message. |
 
 `ModuleLoadError extends Error`, so legacy `catch (err) { err.message }`
@@ -527,21 +544,22 @@ manually:
 - `src/index.test.ts` using `createMockToolContext` + `expectModuleShape`.
 - `README.md` with load and run examples.
 
-## 16. MCP modules
+## 16. MCP servers
 
-Kuzushi can bridge any MCP-compatible server into a `CopilotModule` via
-`--load mcp:<spec>`. Each MCP tool becomes a `ModuleTool`; the bridge
-preserves the full `inputSchema` (required, additionalProperties, nested
-shapes) and applies configurable timeouts (default 60s).
+Native MCP integration is explicit rather than a generic `--load mcp:<spec>`
+module bridge. Kuzushi ships Rust MCP servers for analysis backends such as
+tree-sitter, Joern, Clang, CodeQL, and gtags. Operators can run them over
+stdio with:
 
-MCP-bridged tools default to `headless: false` unless the server advertises
-`annotations.readOnlyHint: true && !destructiveHint`. Pass `trustHeadless:
-true` via `createMcpModule` options to trust server-declared hints wholesale.
-Auth tokens flow via `CreateMcpModuleOptions.authToken` or the
-`KUZUSHI_MCP_TOKEN` env var (sent as `Authorization: Bearer <token>`).
+```bash
+kuzushi mcp serve <backend>
+kuzushi mcp health <backend>
+```
 
-The minimum an MCP server must implement to be Kuzushi-compatible is
-documented in [`mcp-server-requirements.md`](./mcp-server-requirements.md).
+Agent-backed tools opt into these servers through the Rust agent bridge and
+tool policy. The legacy `mcp:` module specifier remains a parsed compatibility
+form in the TypeScript SDK, but the native CLI does not convert arbitrary MCP
+servers into module tools.
 
 ## 17. Troubleshooting
 
@@ -549,12 +567,12 @@ documented in [`mcp-server-requirements.md`](./mcp-server-requirements.md).
 |---------|--------------|-----|
 | `Unknown tool: module:action` | Module not registered, wrong id, unsupported dynamic loading path, or tool prefix mismatch. | Check `kuzushi modules` / `kuzushi tools`; for Rust CLI usage, use a built-in or explicitly wired integration. |
 | `ModuleLoadError: MANIFEST_MISSING` | No `module.manifest.json` at the path. | Add manifest at module root. |
-| `ModuleLoadError: REQUIREMENTS_UNMET` | Missing env var or Node version. | Set env; upgrade Node per manifest. |
-| `ModuleLoadError: ID_MISMATCH` | Manifest `id` ≠ exported module's `id`. | Align them. |
+| `ModuleLoadError: REQUIREMENTS_UNMET` | Reserved compatibility code; current SDK helper reports unmet requirements without throwing. | Check `checkRequirements(...)` output if you need hard enforcement. |
+| `ModuleLoadError: ID_MISMATCH` | Duplicate module id during registration, or lookup of an unknown module id. | Use a unique id and verify the module is registered. |
 | `ModuleLoadError: SHAPE_INVALID` with "does not start with" | Tool name prefix violates module id. | Rename tool to `<id>:<action>` or use `defineTool<"id">`. |
 | `ModuleLoadError: SHAPE_INVALID` with "duplicate" | Two tools share a name. | Rename the duplicate. |
-| `ModuleLoadError: SDK_INCOMPATIBLE` | Manifest `kuzushiSdkVersion` major differs from host. | Bump manifest or pin host. |
-| MCP tool stuck for 60s | Server timeout. | Raise `timeoutMs` or investigate server. |
+| `ModuleLoadError: SDK_INCOMPATIBLE` | Reserved compatibility code; current SDK version checks warn rather than throw. | Bump manifest or pin host when warnings appear. |
+| MCP backend unavailable | Native MCP backend binary or runtime is missing. | Run `kuzushi mcp health <backend>` and install/configure the backend it reports. |
 
 ## 18. Minimal starter
 
@@ -595,6 +613,6 @@ export default defineModule({
 ```
 
 Ship it with a `module.manifest.json` as shown in §5 and build to
-`./dist/index.js`. Today, use this starter for SDK tests and compatibility
-work; native Rust CLI/TUI dynamic loading should wait for the supported loader
-path described in §2 and §12.
+`./dist/index.js`. Load it in the native shell or headless run path with
+`--load <specifier>` after adding the exact specifier to
+`operator.trusted_modules`.

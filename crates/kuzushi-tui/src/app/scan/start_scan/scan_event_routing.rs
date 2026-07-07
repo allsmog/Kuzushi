@@ -8,7 +8,8 @@ impl ShellApp {
             ScanEvent::Finished {
                 run_id,
                 findings_count,
-            } => self.apply_scan_finished(run_id, findings_count),
+                cost_usd,
+            } => self.apply_scan_finished_with_cost(run_id, findings_count, cost_usd),
             ScanEvent::Failed { error } => self.apply_scan_failed(error),
         }
     }

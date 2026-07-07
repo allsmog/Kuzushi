@@ -11,6 +11,8 @@ pub(in crate::verification::adapters) struct VerifyFindingInput {
     /// spend for precision: a finding is only confirmed exploitable when
     /// a strict majority of independent adversarial verifiers agree.
     pub(in crate::verification::adapters) passes: u32,
+    pub(in crate::verification::adapters) mcps: bool,
+    pub(in crate::verification::adapters) mcp_tool_timeout_ms: Option<u64>,
 }
 
 /// Upper bound on independent verifier passes. Beyond this the marginal
@@ -39,11 +41,15 @@ impl VerifyFindingInput {
             Some(_) => anyhow::bail!("verify:finding VERIFY_PROMPT must be a string"),
         };
         let passes = parse_verify_passes(input)?;
+        let mcps = parse_verify_mcps(input)?;
+        let mcp_tool_timeout_ms = parse_mcp_tool_timeout_ms(input)?;
 
         Ok(Self {
             fingerprint,
             prompt_template,
             passes,
+            mcps,
+            mcp_tool_timeout_ms,
         })
     }
 }
@@ -62,6 +68,32 @@ fn parse_verify_passes(input: &Value) -> Result<u32> {
         anyhow::bail!("verify:finding VERIFY_PASSES must be at least 1");
     }
     Ok(passes.min(MAX_VERIFY_PASSES) as u32)
+}
+
+fn parse_verify_mcps(input: &Value) -> Result<bool> {
+    match input.get("mcps") {
+        None | Some(Value::Null) => Ok(true),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(_) => anyhow::bail!("verify:finding mcps must be a boolean"),
+    }
+}
+
+fn parse_mcp_tool_timeout_ms(input: &Value) -> Result<Option<u64>> {
+    let raw = input
+        .get("mcpToolTimeoutMs")
+        .or_else(|| input.get("mcp_tool_timeout_ms"));
+    match raw {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => {
+            let timeout = value
+                .as_u64()
+                .context("verify:finding mcpToolTimeoutMs must be a positive integer")?;
+            if timeout == 0 {
+                anyhow::bail!("verify:finding mcpToolTimeoutMs must be at least 1");
+            }
+            Ok(Some(timeout))
+        }
+    }
 }
 
 pub(in crate::verification::adapters) const VERIFY_SYSTEM_PROMPT: &str = r#"You are Kuzushi's independent exploitability verifier. You did not discover this finding and must not assume it is real. Your job is to disprove it: assume it is a false positive and find the mitigation that makes it unexploitable. Inspect the actual code rather than trusting the claim. Set exploitable=true only when you have traced attacker-controlled input to the sink with no blocking control (validation, sanitization, auth gate, type constraint, unreachable path) in between; otherwise set exploitable=false. Be conservative — incomplete runtime evidence means exploitable=false.

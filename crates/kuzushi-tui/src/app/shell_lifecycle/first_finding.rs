@@ -3,9 +3,9 @@ use super::*;
 impl ShellApp {
     pub fn first_finding_scan_command(&self) -> &'static str {
         if self.target.is_some() {
-            "scan"
+            "next"
         } else {
-            "scan ."
+            "target .; next"
         }
     }
 

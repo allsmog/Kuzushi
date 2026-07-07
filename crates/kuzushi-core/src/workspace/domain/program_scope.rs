@@ -9,8 +9,9 @@ use std::str::FromStr;
 /// `<workspace>/.kuzushi/scope.toml`. Contains an in-scope allow list
 /// and an out-of-scope deny list. Recon, Burp/HAR import, and any tool
 /// that takes a host or URL argument runs every target through
-/// [`ProgramScope::verdict`] before dispatch so out-of-scope assets are
-/// refused with an actionable message.
+/// [`ProgramScope::verdict`] before dispatch. Out-of-scope assets are
+/// refused with an actionable message; when an in-scope allow list is present,
+/// unmatched assets are also refused.
 ///
 /// File schema:
 /// ```toml
@@ -44,7 +45,7 @@ pub enum ScopeVerdict {
     InScope,
     /// Target matches an out-of-scope pattern — dispatch must refuse.
     OutOfScope,
-    /// Target matches neither list. Callers warn but do not refuse.
+    /// Target matches neither list and there is no allow list. Callers may warn.
     Unknown,
 }
 
@@ -82,8 +83,8 @@ impl ProgramScope {
         self.in_scope.is_empty() && self.out_of_scope.is_empty()
     }
 
-    /// `false` when the host is explicitly out-of-scope. InScope and
-    /// Unknown both return `true`. Used by per-entry import gates
+    /// `false` when the host is explicitly out-of-scope, or when an allow list
+    /// exists and the host does not match it. Used by per-entry import gates
     /// (M2 §2.2 / §2.3) so each amass/httpx/nuclei/nmap-xml/HAR/Burp
     /// entry is checked individually — `recon:import` does not carry
     /// a top-level target field, so the dispatch-level scope guard is
@@ -92,21 +93,26 @@ impl ProgramScope {
         self.verdict(target) != ScopeVerdict::OutOfScope
     }
 
-    /// Validate a candidate target — host, IP, or URL — against the
-    /// active scope. Out-of-scope wins over in-scope so deny rules
-    /// dominate. Returns [`ScopeVerdict::Unknown`] when the scope is
-    /// empty or the target matches nothing.
+    /// Validate a candidate target — host, IP, or URL — against the active
+    /// scope. Out-of-scope wins over in-scope so deny rules dominate. Returns
+    /// [`ScopeVerdict::Unknown`] only when no allow list exists and the target
+    /// matches nothing.
     pub fn verdict(&self, target: &str) -> ScopeVerdict {
         let host = extract_host(target);
-        if self.is_empty() {
-            return ScopeVerdict::Unknown;
-        }
         if matches_any(&self.out_of_scope, &host) {
             return ScopeVerdict::OutOfScope;
         }
         if matches_any(&self.in_scope, &host) {
             return ScopeVerdict::InScope;
         }
+        unmatched_scope_verdict(!self.in_scope.is_empty())
+    }
+}
+
+fn unmatched_scope_verdict(has_allow_list: bool) -> ScopeVerdict {
+    if has_allow_list {
+        ScopeVerdict::OutOfScope
+    } else {
         ScopeVerdict::Unknown
     }
 }
@@ -114,20 +120,22 @@ impl ProgramScope {
 fn compile_patterns(list: &ProgramScopeList) -> Result<Vec<HostPattern>> {
     let mut compiled = Vec::with_capacity(list.hosts.len() + list.cidrs.len());
     for raw in &list.hosts {
-        let glob = Glob::new(raw)
-            .with_context(|| format!("invalid host glob in scope.toml: {raw}"))?;
+        let glob =
+            Glob::new(raw).with_context(|| format!("invalid host glob in scope.toml: {raw}"))?;
         compiled.push(HostPattern::HostGlob(glob));
     }
     for raw in &list.cidrs {
-        let cidr = IpNet::from_str(raw)
-            .with_context(|| format!("invalid cidr in scope.toml: {raw}"))?;
+        let cidr =
+            IpNet::from_str(raw).with_context(|| format!("invalid cidr in scope.toml: {raw}"))?;
         compiled.push(HostPattern::Cidr(cidr));
     }
     Ok(compiled)
 }
 
 fn matches_any(patterns: &[HostPattern], host: &str) -> bool {
-    patterns.iter().any(|pattern| matches_pattern(pattern, host))
+    patterns
+        .iter()
+        .any(|pattern| matches_pattern(pattern, host))
 }
 
 fn matches_pattern(pattern: &HostPattern, host: &str) -> bool {
@@ -146,7 +154,10 @@ fn matches_pattern(pattern: &HostPattern, host: &str) -> bool {
 /// match host globs.
 fn extract_host(target: &str) -> String {
     let trimmed = target.trim();
-    let after_scheme = trimmed.split_once("://").map(|(_, rest)| rest).unwrap_or(trimmed);
+    let after_scheme = trimmed
+        .split_once("://")
+        .map(|(_, rest)| rest)
+        .unwrap_or(trimmed);
     let after_userinfo = after_scheme
         .rsplit_once('@')
         .map(|(_, rest)| rest)
@@ -163,9 +174,7 @@ fn strip_port(host: &str) -> &str {
     if let Some(bracket_end) = host.strip_prefix('[').and_then(|rest| rest.find(']')) {
         return &host[1..1 + bracket_end];
     }
-    host.rsplit_once(':')
-        .map(|(host, _)| host)
-        .unwrap_or(host)
+    host.rsplit_once(':').map(|(host, _)| host).unwrap_or(host)
 }
 
 #[cfg(test)]
@@ -193,7 +202,19 @@ mod tests {
             "#,
         );
         assert_eq!(scope.verdict("api.example.com"), ScopeVerdict::InScope);
-        assert_eq!(scope.verdict("evil.com"), ScopeVerdict::Unknown);
+        assert_eq!(scope.verdict("evil.com"), ScopeVerdict::OutOfScope);
+    }
+
+    #[test]
+    fn deny_list_only_scope_allows_unknown_hosts() {
+        let scope = scope(
+            r#"
+            [out_of_scope]
+            hosts = ["admin.example.com"]
+            "#,
+        );
+        assert_eq!(scope.verdict("admin.example.com"), ScopeVerdict::OutOfScope);
+        assert_eq!(scope.verdict("api.example.com"), ScopeVerdict::Unknown);
     }
 
     #[test]
@@ -219,7 +240,7 @@ mod tests {
             "#,
         );
         assert_eq!(scope.verdict("10.42.7.1"), ScopeVerdict::InScope);
-        assert_eq!(scope.verdict("11.0.0.1"), ScopeVerdict::Unknown);
+        assert_eq!(scope.verdict("11.0.0.1"), ScopeVerdict::OutOfScope);
     }
 
     #[test]

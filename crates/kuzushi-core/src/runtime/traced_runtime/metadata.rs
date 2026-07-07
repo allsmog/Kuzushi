@@ -14,17 +14,8 @@ pub(super) fn subagent_trace_verb(role: SubagentRole) -> &'static str {
 }
 
 pub(super) fn tool_call_label(call: &ToolCall, history_len: usize) -> String {
-    let args_summary = preview_value(&call.input);
-    if args_summary.is_empty() {
-        format!("tool-call · {} (turn {})", call.name, history_len + 1)
-    } else {
-        format!(
-            "tool-call · {}({}) (turn {})",
-            call.name,
-            args_summary,
-            history_len + 1
-        )
-    }
+    let action = tool_action_summary(call);
+    format!("agent-action: {action} · turn {}", history_len + 1)
 }
 
 pub(super) fn final_label(text: &str, history_len: usize) -> String {
@@ -37,7 +28,10 @@ pub(super) fn final_label(text: &str, history_len: usize) -> String {
 }
 
 pub fn model_provider(model: &str) -> &str {
-    model.split_once(':').map(|(provider, _)| provider).unwrap_or("")
+    model
+        .split_once(':')
+        .map(|(provider, _)| provider)
+        .unwrap_or("")
 }
 
 pub fn prompt_pair_hash(system_prompt: &str, prompt: &str) -> String {
@@ -111,16 +105,62 @@ pub(super) fn preview_str(value: &str) -> String {
     }
 }
 
-fn preview_value(value: &Value) -> String {
-    if value.is_null() {
-        return String::new();
+fn tool_action_summary(call: &ToolCall) -> String {
+    match tool_input_summary(&call.input) {
+        Some(input) if !input.is_empty() => preview_str(&format!("{} {input}", call.name)),
+        _ => call.name.clone(),
     }
-    let value = value.to_string();
-    if value.chars().count() <= 60 {
-        value
-    } else {
-        let mut out = value.chars().take(57).collect::<String>();
-        out.push_str("...");
-        out
+}
+
+fn tool_input_summary(input: &Value) -> Option<String> {
+    match input {
+        Value::Object(object) => object_tool_input_summary(object),
+        Value::String(value) => Some(preview_str(value)),
+        Value::Array(items) => Some(format!("{} item(s)", items.len())),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Null => None,
+    }
+}
+
+fn object_tool_input_summary(object: &serde_json::Map<String, Value>) -> Option<String> {
+    preferred_tool_input_summary(object).or_else(|| fallback_tool_input_summary(object))
+}
+
+fn preferred_tool_input_summary(object: &serde_json::Map<String, Value>) -> Option<String> {
+    const KEYS: &[&str] = &[
+        "path",
+        "file",
+        "filePath",
+        "file_path",
+        "target",
+        "query",
+        "pattern",
+        "symbol",
+        "name",
+        "command",
+        "cmd",
+    ];
+    KEYS.iter()
+        .find_map(|key| object.get(*key).and_then(compact_json_scalar))
+}
+
+fn fallback_tool_input_summary(object: &serde_json::Map<String, Value>) -> Option<String> {
+    let parts = object
+        .iter()
+        .filter_map(|(key, value)| compact_json_scalar(value).map(|value| format!("{key}={value}")))
+        .take(2)
+        .collect::<Vec<_>>();
+    (!parts.is_empty()).then(|| preview_str(&parts.join(" ")))
+}
+
+fn compact_json_scalar(value: &Value) -> Option<String> {
+    match value {
+        Value::String(value) => Some(preview_str(value)),
+        Value::Number(value) => Some(value.to_string()),
+        Value::Bool(value) => Some(value.to_string()),
+        Value::Array(items) => Some(format!("{} item(s)", items.len())),
+        Value::Object(object) => Some(format!("{} field(s)", object.len())),
+        Value::Null => None,
     }
 }

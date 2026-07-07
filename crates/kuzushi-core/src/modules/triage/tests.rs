@@ -49,7 +49,7 @@ mod tests {
     }
 
     #[test]
-    fn triage_run_input_parses_aliases_limits_and_prompt_files() {
+    fn triage_run_input_parses_aliases_controls_and_prompt_files() {
         let temp = tempfile::tempdir().unwrap();
         let prompt = temp.path().join("triage.md");
         std::fs::write(&prompt, "custom triage prompt").unwrap();
@@ -58,13 +58,14 @@ mod tests {
             &json!({
                 "fingerprint": " fp-1 ",
                 "fingerprints": ["fp-2"],
-                "batch_size": "999",
                 "TRIAGE_PROMPT": "./triage.md",
                 "scan_id": "scan-1",
                 "concurrency": 128,
                 "cost_cap_usd": 1.25,
                 "prefilter_threshold": 7,
-                "stage2_tier": "deep"
+                "stage2_tier": "deep",
+                "model": "openai:gpt-override",
+                "retriage": true
             }),
             temp.path(),
         )
@@ -74,7 +75,6 @@ mod tests {
             parsed.fingerprints,
             Some(vec!["fp-1".to_string(), "fp-2".to_string()])
         );
-        assert_eq!(parsed.batch_size, 500);
         assert_eq!(
             parsed.prompt_template,
             Some("custom triage prompt".to_string())
@@ -84,6 +84,8 @@ mod tests {
         assert_eq!(parsed.cost_cap_usd, Some(1.25));
         assert_eq!(parsed.prefilter_threshold, 7);
         assert_eq!(parsed.stage2_tier, ModelTier::Deep);
+        assert_eq!(parsed.model.as_deref(), Some("openai:gpt-override"));
+        assert!(parsed.retriage);
     }
 
     #[test]
@@ -100,12 +102,6 @@ mod tests {
                 .unwrap_err()
                 .to_string()
                 .contains("non-empty strings")
-        );
-        assert!(
-            TriageRunInput::from_tool_input(&json!({"batchSize": 0}), cwd)
-                .unwrap_err()
-                .to_string()
-                .contains("batchSize")
         );
         assert!(
             TriageRunInput::from_tool_input(&json!({"concurrency": "many"}), cwd)
@@ -152,10 +148,108 @@ mod tests {
             trace: None,
         };
 
-        let err = resolve_triage_model(&ctx, &BareTierRuntime, ModelTier::Cheap).unwrap_err();
+        let input = TriageRunInput::from_tool_input(
+            &json!({"stage2Tier": "cheap"}),
+            std::path::Path::new("."),
+        )
+        .unwrap();
+        let err = resolve_triage_model(&ctx, &BareTierRuntime, &input).unwrap_err();
         let message = format!("{err:#}");
         assert!(message.contains("triage:run resolved an invalid stage2 model"));
         assert!(message.contains("provider:model"));
+    }
+
+    struct CancelledRuntime {
+        calls: std::sync::Mutex<usize>,
+    }
+
+    impl AgentRuntime for CancelledRuntime {
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            *self.calls.lock().unwrap() += 1;
+            anyhow::bail!("LangGraph bridge cancelled and was killed");
+        }
+    }
+
+    #[test]
+    fn triage_stage2_stops_on_runtime_cancellation() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let runtime = CancelledRuntime {
+            calls: std::sync::Mutex::new(0),
+        };
+        let input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+        let config =
+            TriageExecutionConfig::new(PathBuf::from("/repo"), "openai-codex:gpt-5.4".to_string());
+        let findings = vec![
+            finding_with(Severity::High, "semgrep", "sql injection"),
+            finding_with(Severity::High, "semgrep", "xss"),
+        ];
+
+        let err = match run_triage_stage2(&store, &runtime, &input, &config, findings) {
+            Ok(_) => panic!("cancelled triage should fail the run"),
+            Err(error) => error,
+        };
+
+        assert!(format!("{err:#}").contains("triage:run cancelled"));
+        assert_eq!(*runtime.calls.lock().unwrap(), 1);
+    }
+
+    #[test]
+    fn select_triage_findings_defaults_to_latest_scan() {
+        let store = store_with_scan_findings(&[
+            ("scan-a", finding_with(Severity::High, "semgrep", "old sql")),
+            (
+                "scan-z",
+                finding_with(Severity::High, "semgrep", "latest xss"),
+            ),
+        ]);
+        let input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+
+        let (findings, missing) = select_triage_findings(&store, &input).unwrap();
+
+        assert!(missing.is_empty());
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].scan_id.as_deref(), Some("scan-z"));
+        assert_eq!(findings[0].message, "latest xss");
+    }
+
+    #[test]
+    fn select_triage_findings_skips_existing_verdicts_unless_retriage() {
+        let store = store_with_scan_findings(&[(
+            "scan-z",
+            finding_with(Severity::High, "semgrep", "already paid"),
+        )]);
+        let stored = store.list_findings_for_scan_id("scan-z").unwrap();
+        store
+            .save_triage(stored[0].id.unwrap(), &true_positive_outcome())
+            .unwrap();
+
+        let input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+        assert!(select_triage_findings(&store, &input).unwrap().0.is_empty());
+
+        let retriage =
+            TriageRunInput::from_tool_input(&json!({"retriage": true}), Path::new(".")).unwrap();
+        assert_eq!(
+            select_triage_findings(&store, &retriage).unwrap().0.len(),
+            1
+        );
+    }
+
+    #[test]
+    fn persist_triage_outcome_propagates_to_same_fingerprint_siblings() {
+        let finding = finding_with(Severity::High, "semgrep", "same fp");
+        let store = store_with_scan_findings(&[("scan-a", finding.clone()), ("scan-z", finding)]);
+        let latest = store.list_findings_for_scan_id("scan-z").unwrap().remove(0);
+        let mut stats = TriageRunStats::default();
+
+        persist_triage_outcome(&store, &mut stats, latest, true_positive_outcome());
+
+        for scan_id in ["scan-a", "scan-z"] {
+            let stored = store.list_findings_for_scan_id(scan_id).unwrap();
+            assert_eq!(
+                stored[0].triage.as_ref().map(|triage| triage.verdict),
+                Some(TriageVerdict::TruePositive)
+            );
+        }
     }
 
     #[test]
@@ -185,7 +279,10 @@ mod tests {
         let response = triage_response(&input, &config, &stage1, &stats, Vec::new());
 
         assert_eq!(response["status"], json!("completed"));
-        assert_eq!(response["data"]["findings"][0]["verdict"], json!("true_positive"));
+        assert_eq!(
+            response["data"]["findings"][0]["verdict"],
+            json!("true_positive")
+        );
         assert!(response["warnings"].as_array().unwrap().is_empty());
     }
 
@@ -197,8 +294,32 @@ mod tests {
         assert_eq!(response["ok"], json!(true));
         assert_eq!(response["status"], json!("skipped"));
         assert_eq!(response["errors"], json!([]));
-        assert_eq!(response["warnings"][0], json!("No findings matched triage input."));
+        assert_eq!(
+            response["warnings"][0],
+            json!("No findings matched triage input.")
+        );
         assert_eq!(response["data"]["findings"], json!([]));
         assert_eq!(response["costUsd"], json!(0.0));
+    }
+
+    fn store_with_scan_findings(scan_findings: &[(&str, Finding)]) -> FindingStore {
+        let store = FindingStore::open_in_memory().unwrap();
+        for (scan_id, finding) in scan_findings {
+            store
+                .record_run_started(scan_id, Path::new("/tmp/repo"), "completed")
+                .unwrap();
+            store.insert_finding(scan_id, finding).unwrap();
+            store.record_run_finished(scan_id, "completed", 1).unwrap();
+        }
+        store
+    }
+
+    fn true_positive_outcome() -> TriageOutcome {
+        TriageOutcome {
+            verdict: TriageVerdict::TruePositive,
+            confidence: 0.9,
+            rationale: "confirmed once".to_string(),
+            cost_usd: 0.01,
+        }
     }
 }

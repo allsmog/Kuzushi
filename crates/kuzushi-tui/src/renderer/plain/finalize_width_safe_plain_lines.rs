@@ -52,6 +52,15 @@ fn box_drawing_to_ascii(ch: char) -> char {
         | '\u{254e}' | '\u{254f}' | '\u{2551}' => '|',
         // Anything else in the box-drawing block: corners, joins, arrows. Use `+`.
         '\u{2500}'..='\u{257f}' => '+',
+        // Terminal UI signifiers used by the TTY renderer. Plain/screen-reader
+        // output should preserve meaning without relying on glyph support.
+        '█' | '▌' | '▐' | '▀' | '▄' | '▁'..='▇' => '#',
+        '▶' | '▸' | '➜' | '→' | '⇒' => '>',
+        '◀' | '◂' | '←' | '⇐' => '<',
+        '●' | '•' | '⠋'..='⣿' => '*',
+        '○' | '◦' => 'o',
+        '✓' | '✔' => '+',
+        '✗' | '✘' | '×' => 'x',
         _ => ch,
     }
 }
@@ -64,4 +73,17 @@ pub(crate) fn trim_plain_lines(mut lines: Vec<String>) -> Vec<String> {
         lines.pop();
     }
     lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_for_plain_output_folds_terminal_glyphs() {
+        assert_eq!(
+            sanitize_for_plain_output("█ ▌ ▶ ● ○ ⠿ ✓ ✗"),
+            "# # > * o * + x"
+        );
+    }
 }

@@ -9,8 +9,12 @@ mod output;
 mod sorted_finding_aliases;
 mod with_limit;
 
-pub use from_input::{FindingListFilter, FindingVerdictFilter};
+pub use from_input::{
+    FindingLifecycleStatusFilter, FindingListFilter, FindingReviewCompletenessFilter,
+    FindingTriageStateFilter, FindingVerdictFilter,
+};
 pub use output::{format_finding_alias, parse_finding_alias, FindingListReport};
 pub use sorted_finding_aliases::{
-    resolve_finding_alias, sorted_finding_aliases, stable_finding_alias,
+    resolve_finding_alias, sorted_finding_alias_indices, sorted_finding_aliases,
+    stable_finding_alias,
 };

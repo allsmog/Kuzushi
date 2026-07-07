@@ -15,7 +15,7 @@ kuzushi-core = { path = "../kuzushi-core" }
 kuzushi-openai = { path = "../kuzushi-openai" }
 ratatui.workspace = true
 serde_json.workspace = true
-uuid.workspace = true
+unicode-width.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

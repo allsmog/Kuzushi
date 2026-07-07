@@ -2,13 +2,13 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 277
 ---
- KUZUSHI mode:agent · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › agent · mode:agent · target:none · ctx:not built · model:unconfigured
 
  -- AGENT · empty ------------------------------------------------------------------------------------------------------
        ∅  no question yet
        agent chat dispatches a single question through LangGraph.
        tools and findings are read-only; the chat doesn't write to disk.
 
-       ▸ ask <question>        explicit agent route
-       ▸ ?<text>               always-on agent route from any view
-       ▸ model <provider:id>   pick the model the agent will use
+       > ask <question>        explicit agent route
+       > ?<text>               always-on agent route from any view
+       > model <provider:id>   pick the model the agent will use

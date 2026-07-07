@@ -159,6 +159,81 @@
             "anyOf": [
               {
                 "required": ["path"],
+                "properties": { "path": { "pattern": "(^|/)strategy\\.json$" } }
+              },
+              {
+                "required": ["file"],
+                "properties": { "file": { "pattern": "(^|/)strategy\\.json$" } }
+              },
+              {
+                "required": ["filePath"],
+                "properties": { "filePath": { "pattern": "(^|/)strategy\\.json$" } }
+              },
+              {
+                "required": ["file_path"],
+                "properties": { "file_path": { "pattern": "(^|/)strategy\\.json$" } }
+              },
+              {
+                "required": ["reportPath"],
+                "properties": { "reportPath": { "pattern": "(^|/)strategy\\.json$" } }
+              },
+              {
+                "required": ["report_path"],
+                "properties": { "report_path": { "pattern": "(^|/)strategy\\.json$" } }
+              },
+              {
+                "required": ["reportJsonPath"],
+                "properties": { "reportJsonPath": { "pattern": "(^|/)strategy\\.json$" } }
+              },
+              {
+                "required": ["report_json_path"],
+                "properties": { "report_json_path": { "pattern": "(^|/)strategy\\.json$" } }
+              },
+              {
+                "required": ["scopePath"],
+                "properties": { "scopePath": { "pattern": "(^|/)strategy\\.json$" } }
+              },
+              {
+                "required": ["scope_path"],
+                "properties": { "scope_path": { "pattern": "(^|/)strategy\\.json$" } }
+              },
+              {
+                "required": ["dir"],
+                "properties": { "dir": { "pattern": "(^|/)strategy\\.json$" } }
+              },
+              {
+                "required": ["outputDir"],
+                "properties": { "outputDir": { "pattern": "(^|/)strategy\\.json$" } }
+              },
+              {
+                "required": ["output_dir"],
+                "properties": { "output_dir": { "pattern": "(^|/)strategy\\.json$" } }
+              },
+              {
+                "required": ["promptsDir"],
+                "properties": { "promptsDir": { "pattern": "(^|/)strategy\\.json$" } }
+              },
+              {
+                "required": ["prompts_dir"],
+                "properties": { "prompts_dir": { "pattern": "(^|/)strategy\\.json$" } }
+              }
+            ]
+          },
+          "then": {
+            "properties": {
+              "label": { "const": "strategy proposals" },
+              "name": { "const": "strategy proposals" },
+              "title": { "const": "strategy proposals" },
+              "kind": { "const": "json" },
+              "type": { "const": "json" }
+            }
+          }
+        },
+        {
+          "if": {
+            "anyOf": [
+              {
+                "required": ["path"],
                 "properties": { "path": { "pattern": "(^|/)events\\.jsonl$" } }
               },
               {

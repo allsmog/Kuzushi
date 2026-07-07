@@ -92,7 +92,7 @@ task, scan mode, and run artifact.
 
 Invariants:
 scan/shell/run converge on the same tool dispatch path; scan artifacts under
-`.kuzushi/runs/<runId>/` remain readable; `--ci` output is deterministic and
+`.kuzushi/v3/runs/<runId>/` remain readable; `--ci` output is deterministic and
 line-oriented.
 
 Allowed dependencies:
@@ -152,7 +152,7 @@ finding severity ranking, TUI command parsing, scanner JSON parsing.
 
 Owner files:
 `crates/kuzushi-tui/src/app/`,
-`crates/kuzushi-tui/src/commands.rs`,
+`crates/kuzushi-tui/src/commands/`,
 `crates/kuzushi-tui/src/renderer/`,
 `crates/kuzushi-tui/src/renderer/plain/`, and
 `crates/kuzushi-tui/src/theme/mod.rs`.

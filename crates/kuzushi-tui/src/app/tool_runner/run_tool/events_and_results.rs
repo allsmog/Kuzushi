@@ -30,7 +30,9 @@ impl ShellApp {
             target: self.target.clone(),
         };
         self.tool_running = None;
+        self.tool_cancel = None;
         self.ambient_tool = None;
+        self.active_model_override = None;
         self.tool_abort_requested = false;
         state
     }
@@ -72,6 +74,10 @@ impl ShellApp {
     /// whether it actually produced data — a zero-flow hunt or empty chain run
     /// shouldn't yank the operator to a "run the tool" empty page.
     fn auto_open_viz_for_tool(&mut self, tool_name: &str) {
+        if tool_name == "threat-model:build" {
+            self.auto_open_workbench_dfd();
+            return;
+        }
         if let Some(page) = viz_page_for_tool(tool_name) {
             if self.viz_page_has_content(page) {
                 self.auto_open_viz_page(page);
@@ -147,7 +153,7 @@ impl ShellApp {
         );
         self.log_failure_context(failure_context);
         self.abort_pending_chain(&tool_name);
-        if self.planning_running_tool.as_deref() == Some(&tool_name) {
+        if self.engagement.running_tool_is(&tool_name) {
             // Dependency-aware fall-through: skip only the tasks that depended
             // on this one; keep running the independent rest of the queue.
             self.fail_planning_task(&tool_name, &error);
@@ -205,25 +211,44 @@ impl ShellApp {
     }
 
     pub(crate) fn apply_tool_result(&mut self, tool_name: &str, result: serde_json::Value) {
-        if let Some(cost_usd) = extract_cost_usd(&result) {
-            self.record_cost(cost_usd);
-        }
-        if matches!(tool_name, "context:build" | "context-lite:index") {
-            let _ = self.refresh_context_view();
-        }
+        self.apply_tool_result_side_effects(tool_name, &result);
         self.cache_tool_snapshot(tool_name, &result);
         if tool_name == "module-recommender:recommend" {
             self.apply_model_recommendations(&result);
         }
-        let rendered = result
-            .get("output")
-            .and_then(serde_json::Value::as_str)
-            .map(ToString::to_string)
-            .unwrap_or_else(|| {
-                serde_json::to_string_pretty(&result).unwrap_or_else(|_| result.to_string())
-            });
+        let rendered = rendered_tool_result(&result);
         self.log("result", rendered);
     }
+
+    fn apply_tool_result_side_effects(&mut self, tool_name: &str, result: &serde_json::Value) {
+        self.record_tool_result_cost(result);
+        if matches!(tool_name, "context:build" | "context-lite:index") {
+            let _ = self.refresh_context_view();
+        }
+        if finding_state_tool(tool_name) {
+            self.refresh_findings(false);
+        }
+    }
+
+    fn record_tool_result_cost(&mut self, result: &serde_json::Value) {
+        if let Some(cost_usd) = extract_cost_usd(result) {
+            self.record_cost(cost_usd);
+        }
+    }
+}
+
+fn finding_state_tool(tool_name: &str) -> bool {
+    matches!(tool_name, "triage:run" | "verify:finding" | "patch:finding")
+}
+
+fn rendered_tool_result(result: &serde_json::Value) -> String {
+    result
+        .get("output")
+        .and_then(serde_json::Value::as_str)
+        .map(ToString::to_string)
+        .unwrap_or_else(|| {
+            serde_json::to_string_pretty(result).unwrap_or_else(|_| result.to_string())
+        })
 }
 
 fn result_with_fallback_context(
@@ -243,14 +268,7 @@ fn failed_tool_result(
     tool_name: &str,
     error: &str,
 ) -> serde_json::Value {
-    let result = serde_json::json!({
-        "ok": false,
-        "status": "failed",
-        "summary": format!("{tool_name} failed"),
-        "artifacts": failed_tool_artifacts(target, run_id),
-        "warnings": [],
-        "errors": [error],
-    });
+    let result = failed_tool_output(tool_name, error, failed_tool_artifacts(target, run_id));
     result_with_fallback_context(target, run_id, result)
 }
 

@@ -1,14 +1,16 @@
-//! The gallery's 2D diagrams — pure presentation that turns dummy security data
+//! The gallery's 2D diagrams — pure presentation that turns Kuzushi view models
 //! into styled box-drawing `Line`s. Each module owns one diagram; this file
 //! holds the small shared vocabulary (severity tones, span/line helpers).
 
 mod attack_path;
 mod heatmap;
 
-pub(super) use attack_path::attack_path_lines;
-pub(super) use heatmap::heatmap_lines;
+pub(in crate::renderer::views) use attack_path::attack_path_lines;
+pub(in crate::renderer::views) use heatmap::heatmap_lines;
 
+use crate::renderer::empty_state_panel;
 use crate::theme;
+use crate::ui_view_models::SeverityTone;
 use ratatui::prelude::{Line, Span};
 use ratatui::style::Style;
 
@@ -24,14 +26,16 @@ pub(super) enum Sev {
 
 impl Sev {
     pub(super) fn style(self) -> Style {
+        theme::severity_tone(self.tone())
+    }
+
+    fn tone(self) -> SeverityTone {
         match self {
-            Sev::Critical => Style::default()
-                .fg(theme::SEV_CRITICAL)
-                .add_modifier(ratatui::style::Modifier::BOLD),
-            Sev::High => Style::default().fg(theme::SEV_HIGH),
-            Sev::Medium => Style::default().fg(theme::SEV_MEDIUM),
-            Sev::Low => Style::default().fg(theme::SEV_LOW),
-            Sev::Info => Style::default().fg(theme::T_LABEL),
+            Sev::Critical => SeverityTone::Critical,
+            Sev::High => SeverityTone::High,
+            Sev::Medium => SeverityTone::Medium,
+            Sev::Low => SeverityTone::Low,
+            Sev::Info => SeverityTone::Info,
         }
     }
 
@@ -57,6 +61,14 @@ pub(super) fn line(spans: Vec<Span<'static>>) -> Line<'static> {
 
 pub(super) fn blank() -> Line<'static> {
     Line::from(String::new())
+}
+
+pub(super) fn scene_empty_state_lines(
+    glyph_label: &str,
+    hint: &str,
+    ctas: &[(&str, &str)],
+) -> Vec<Line<'static>> {
+    empty_state_panel(glyph_label, &[hint], ctas)
 }
 
 /// Centre `text` within `width` columns (truncating if it's too long).
@@ -106,14 +118,17 @@ mod tests {
                 TaintStageModel {
                     title: "req.body.id".into(),
                     location: "order.ts:12".into(),
+                    snippet: None,
                 },
                 TaintStageModel {
                     title: "buildQuery".into(),
                     location: "order.ts:42".into(),
+                    snippet: None,
                 },
                 TaintStageModel {
                     title: "db.exec()".into(),
                     location: "db.ts:7".into(),
+                    snippet: None,
                 },
             ],
             empty_hint: None,
@@ -136,6 +151,7 @@ mod tests {
                 },
             ],
             empty_hint: None,
+            selected_module: None,
         }
     }
 
@@ -165,6 +181,7 @@ mod tests {
                 score: 0.0,
             }],
             empty_hint: None,
+            selected_module: Some("auth".into()),
         };
         let text = as_text(&heatmap_lines(72, &model));
         let widest = text.lines().map(|l| l.chars().count()).max().unwrap_or(0);
@@ -182,6 +199,7 @@ mod tests {
         let heatmap = FindingsHeatmap {
             rows: Vec::new(),
             empty_hint: Some("no findings".into()),
+            selected_module: None,
         };
         assert!(!attack_path_lines(72, &taint).is_empty());
         assert!(!heatmap_lines(72, &heatmap).is_empty());

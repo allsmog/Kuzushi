@@ -59,6 +59,7 @@ impl AgentRuntime for FakeRuntime {
                 input: serde_json::json!({"path": "src/lib.rs"}),
                 call_id: format!("call-{}", history.len()),
             },
+            cost_usd: None,
         })
     }
 }
@@ -96,12 +97,15 @@ fn traced_query_emits_reasoning_step_with_cost_and_latency() {
         .unwrap();
 
     let steps = sink.steps.lock().unwrap();
-    assert_eq!(steps.len(), 1);
-    assert_eq!(steps[0].kind, "reasoning");
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0].kind, "tool-progress");
     assert_eq!(steps[0].verb.as_deref(), Some("query"));
-    assert!(steps[0].label.contains("verdict=likely-tp"));
-    assert!(steps[0].latency_ms.is_some());
-    assert_eq!(steps[0].cost_usd, Some(0.0023));
+    assert!(steps[0].label.contains("sending"));
+    assert_eq!(steps[1].kind, "reasoning");
+    assert_eq!(steps[1].verb.as_deref(), Some("query"));
+    assert!(steps[1].label.contains("verdict=likely-tp"));
+    assert!(steps[1].latency_ms.is_some());
+    assert_eq!(steps[1].cost_usd, Some(0.0023));
     assert_eq!(steps[0].model.as_deref(), Some("openai:gpt-test"));
     assert_eq!(steps[0].provider.as_deref(), Some("openai"));
     assert!(steps[0]
@@ -123,8 +127,8 @@ fn traced_query_strips_markdown_fence_in_preview() {
         .unwrap();
 
     let steps = sink.steps.lock().unwrap();
-    assert!(steps[0].label.contains("{\"verdict\":\"tp\"}"));
-    assert!(!steps[0].label.contains("```"));
+    assert!(steps[1].label.contains("{\"verdict\":\"tp\"}"));
+    assert!(!steps[1].label.contains("```"));
 }
 
 #[test]
@@ -135,9 +139,10 @@ fn traced_query_failure_emits_refused_with_danger_severity() {
     let _ = traced.query_blocking(AgentQueryRequest::new("m", ".", "s", "p"));
 
     let steps = sink.steps.lock().unwrap();
-    assert_eq!(steps.len(), 1);
-    assert_eq!(steps[0].kind, "refused");
-    assert_eq!(steps[0].severity.as_deref(), Some("danger"));
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0].kind, "tool-progress");
+    assert_eq!(steps[1].kind, "refused");
+    assert_eq!(steps[1].severity.as_deref(), Some("danger"));
     assert_eq!(steps[0].model.as_deref(), Some("m"));
     assert_eq!(steps[0].provider.as_deref(), Some(""));
 }
@@ -160,7 +165,7 @@ fn traced_next_step_emits_tool_progress_then_done() {
 
     for _ in 0..3 {
         match traced.next_step_blocking(&request, &history).unwrap() {
-            AgentLoopStep::ToolCall { call } => {
+            AgentLoopStep::ToolCall { call, .. } => {
                 history.push(LoopHistoryEntry::AssistantToolCall(call.clone()));
                 history.push(LoopHistoryEntry::ToolResult(ToolResult {
                     call_id: call.call_id,
@@ -173,13 +178,18 @@ fn traced_next_step_emits_tool_progress_then_done() {
     }
 
     let steps = sink.steps.lock().unwrap();
-    assert_eq!(steps.len(), 3);
+    assert_eq!(steps.len(), 6);
     assert_eq!(steps[0].kind, "tool-progress");
-    assert!(steps[0].label.contains("read_source"));
+    assert!(steps[0].label.contains("waiting on model"));
+    assert_eq!(steps[1].kind, "tool-progress");
+    assert!(steps[1].label.starts_with("agent-action:"));
+    assert!(steps[1].label.contains("read_source"));
+    assert!(steps[1].label.contains("src/lib.rs"));
+    assert!(!steps[1].label.contains("{\"path\""));
     assert_eq!(steps[0].model.as_deref(), Some("openai:gpt-test"));
     assert!(steps[0].prompt_hash.is_some());
-    assert_eq!(steps[2].kind, "done");
-    assert_eq!(steps[2].cost_usd, Some(0.01));
+    assert_eq!(steps[5].kind, "done");
+    assert_eq!(steps[5].cost_usd, Some(0.01));
 }
 
 #[test]
@@ -222,6 +232,8 @@ fn traced_triage_emits_reasoning_step() {
             finding: Finding {
                 id: None,
                 scan_id: None,
+                identity_id: None,
+                identity_match_tier: None,
                 fingerprint: "fp".to_string(),
                 rule_id: "test".to_string(),
                 title: "SQL injection".to_string(),
@@ -234,22 +246,29 @@ fn traced_triage_emits_reasoning_step() {
                 actor_fingerprint: None,
                 static_proof_state: None,
                 triage: None,
+                triaged_by: None,
                 verification: None,
                 created_at: String::new(),
                 vuln_source: None,
                 dedup_key: None,
+                source_signature: None,
+                corroboration_count: 0,
                 suppressed: false,
                 snoozed_until: None,
                 remediation: None,
                 references: Vec::new(),
                 evidence: Vec::new(),
+                sources: Vec::new(),
             },
             prompt_template: None,
         })
         .unwrap();
 
     let steps = sink.steps.lock().unwrap();
-    assert_eq!(steps[0].kind, "reasoning");
+    assert_eq!(steps.len(), 2);
+    assert_eq!(steps[0].kind, "tool-progress");
+    assert!(steps[0].label.contains("checking SQL injection"));
+    assert_eq!(steps[1].kind, "reasoning");
     assert!(steps[0].label.contains("SQL injection"));
     assert_eq!(steps[0].model.as_deref(), Some("openai:gpt-test"));
     assert_eq!(steps[0].provider.as_deref(), Some("openai"));

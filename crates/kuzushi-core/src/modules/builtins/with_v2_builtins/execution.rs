@@ -29,9 +29,19 @@ impl ModuleRegistry {
         runtime: Option<&dyn AgentRuntime>,
         option_store: Option<&ToolOptionStore>,
     ) -> Result<Value> {
-        let input = self.prepare_tool_input(name, input, option_store)?;
-
+        let input = self.prepare_tool_input_for_dispatch(name, input, ctx, option_store)?;
         self.dispatch_prepared_tool_with_runtime(name, input, ctx, runtime)
+    }
+
+    pub fn prepare_tool_input_for_dispatch(
+        &self,
+        name: &str,
+        input: Value,
+        ctx: &ToolExecutionContext<'_>,
+        option_store: Option<&ToolOptionStore>,
+    ) -> Result<Value> {
+        let input = self.prepare_tool_input(name, input, option_store)?;
+        input_with_prompt_file_default(name, input, ctx)
     }
 
     pub fn prepare_tool_input(
@@ -42,7 +52,9 @@ impl ModuleRegistry {
     ) -> Result<Value> {
         let tool = self.resolve_tool(name);
         if tool.is_none() && !self.is_registered_dag_node(name) {
-            anyhow::bail!("unknown tool {name:?}. Next: run catalog:tools or use the Rust shell `tools` command");
+            anyhow::bail!(
+                "unknown tool {name:?}. Next: run catalog:tools or use the Rust shell `tools` command"
+            );
         }
         let input = prepare_input_with_stored_options(name, input, option_store, tool)?;
         Ok(if let Some(tool) = tool {
@@ -52,13 +64,14 @@ impl ModuleRegistry {
         })
     }
 
-    pub(in crate::modules) fn dispatch_prepared_tool_with_runtime(
+    pub fn dispatch_prepared_tool_with_runtime(
         &self,
         name: &str,
         input: Value,
         ctx: &ToolExecutionContext<'_>,
         runtime: Option<&dyn AgentRuntime>,
     ) -> Result<Value> {
+        self.enforce_runtime_requirement(name, &input, runtime)?;
         let scoped_trace = scoped_tool_trace(ctx, name);
         let scoped_ctx;
         let ctx: &ToolExecutionContext<'_> = if let Some(handle) = scoped_trace.as_ref() {
@@ -70,13 +83,42 @@ impl ModuleRegistry {
         let traced_runtime = traced_tool_runtime(runtime, scoped_trace.as_ref());
         let runtime = active_tool_runtime(runtime, traced_runtime.as_ref());
 
-        let executor = self
-            .executors
-            .get(name)
-            .with_context(|| format!("registered tool or DAG node {name:?} has no Rust executor mapping"))?;
+        let executor = self.executors.get(name).with_context(|| {
+            format!("registered tool or DAG node {name:?} has no Rust executor mapping")
+        })?;
         let result = executor(self, name, &input, ctx, runtime);
         return result.map(|output| normalize_tool_output_contract(name, output));
     }
+
+    fn enforce_runtime_requirement(
+        &self,
+        name: &str,
+        input: &Value,
+        runtime: Option<&dyn AgentRuntime>,
+    ) -> Result<()> {
+        if runtime.is_some() || !self.tool_needs_runtime(name, input) {
+            return Ok(());
+        }
+        if runtime_requirement_is_deferred_to_executor(name) {
+            return Ok(());
+        }
+        anyhow::bail!(
+            "{name} requires an agent runtime; configure a model/runtime before running it"
+        )
+    }
+}
+
+fn runtime_requirement_is_deferred_to_executor(name: &str) -> bool {
+    matches!(
+        name,
+        "carlini-threat-hunt:run"
+            | "offense-review:threat-hunt"
+            | "patch:finding"
+            | "prompt-armor:analyze"
+            | "prompt-armor:attack"
+            | "prompt-armor:scan"
+            | "verify:finding"
+    )
 }
 
 fn prepare_input_with_stored_options(
@@ -86,13 +128,108 @@ fn prepare_input_with_stored_options(
     tool: Option<&ToolDescriptor>,
 ) -> Result<Value> {
     match (option_store, tool) {
-        (Some(store), Some(tool)) => store.effective_tool_input_with_stored_filter(
-            name,
-            input,
-            |option_name| tool.options.iter().any(|spec| spec.matches_name_or_alias(option_name)),
-        ),
+        (Some(store), Some(tool)) => {
+            store.effective_tool_input_with_stored_filter(name, input, |option_name| {
+                tool.options
+                    .iter()
+                    .any(|spec| spec.matches_name_or_alias(option_name))
+            })
+        }
         (Some(store), None) => store.effective_tool_input(name, input),
         (None, _) => Ok(input),
+    }
+}
+
+fn input_with_prompt_file_default(
+    name: &str,
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<Value> {
+    let Some(default) = prompt_file_default_for_tool(name) else {
+        return Ok(input);
+    };
+    apply_prompt_file_default(input, ctx, default)
+}
+
+#[derive(Clone, Copy)]
+struct PromptFileDefault {
+    module_id: &'static str,
+    verb: &'static str,
+    option_key: &'static str,
+}
+
+fn prompt_file_default_for_tool(name: &str) -> Option<PromptFileDefault> {
+    match name {
+        "triage:run" => Some(prompt_file_default("triage", "run", "TRIAGE_PROMPT")),
+        "verify:finding" => Some(prompt_file_default("verify", "finding", "VERIFY_PROMPT")),
+        "threat-model:build" => Some(prompt_file_default(
+            "threat-model",
+            "build",
+            "THREAT_MODEL_PROMPT",
+        )),
+        "taint-iris:hunt" => Some(prompt_file_default(
+            "taint-iris",
+            "hunt",
+            "TAINT_IRIS_PROMPT",
+        )),
+        "carlini-threat-hunt:run" => Some(prompt_file_default(
+            "carlini-threat-hunt",
+            "run",
+            "CARLINI_THREAT_HUNT_PROMPT",
+        )),
+        _ => None,
+    }
+}
+
+fn prompt_file_default(
+    module_id: &'static str,
+    verb: &'static str,
+    option_key: &'static str,
+) -> PromptFileDefault {
+    PromptFileDefault {
+        module_id,
+        verb,
+        option_key,
+    }
+}
+
+fn apply_prompt_file_default(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    default: PromptFileDefault,
+) -> Result<Value> {
+    let Value::Object(mut object) = input else {
+        return Ok(input);
+    };
+    if object.contains_key(default.option_key) {
+        return Ok(Value::Object(object));
+    }
+    if let Some(text) = read_prompt_file_default(ctx, default)? {
+        object.insert(default.option_key.to_string(), Value::String(text));
+    }
+    Ok(Value::Object(object))
+}
+
+fn read_prompt_file_default(
+    ctx: &ToolExecutionContext<'_>,
+    default: PromptFileDefault,
+) -> Result<Option<String>> {
+    let Some(workspace) = ctx.workspace else {
+        return Ok(None);
+    };
+    let path =
+        crate::options::prompt_override_path(workspace.root(), default.module_id, default.verb);
+    match std::fs::read_to_string(&path) {
+        Ok(text) if !text.trim().is_empty() => Ok(Some(text)),
+        Ok(_) => Ok(None),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(error) => Err(error).with_context(|| {
+            format!(
+                "Could not read {} from {}",
+                default.option_key,
+                path.display()
+            )
+        }),
     }
 }
 
@@ -135,6 +272,77 @@ fn active_tool_runtime<'scope>(
     traced_runtime
         .map(|runtime| runtime as &dyn AgentRuntime)
         .or(runtime)
+}
+
+#[cfg(test)]
+mod prompt_file_default_tests {
+    use super::*;
+    use crate::{V2Config, WorkspaceTarget};
+
+    fn context<'a>(
+        config: &'a V2Config,
+        workspace: &'a WorkspaceTarget,
+    ) -> ToolExecutionContext<'a> {
+        ToolExecutionContext {
+            config,
+            workspace: Some(workspace),
+            findings_store: None,
+            trace: None,
+        }
+    }
+
+    #[test]
+    fn direct_tool_prompt_file_default_is_injected() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let path = crate::options::prompt_override_path(temp.path(), "triage", "run");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "prioritize exploitability\n").unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+
+        let input = input_with_prompt_file_default("triage:run", json!({}), &ctx).unwrap();
+
+        assert_eq!(input["TRIAGE_PROMPT"], json!("prioritize exploitability\n"));
+    }
+
+    #[test]
+    fn direct_tool_prompt_file_default_keeps_explicit_input() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let path = crate::options::prompt_override_path(temp.path(), "triage", "run");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "file prompt\n").unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+
+        let input = input_with_prompt_file_default(
+            "triage:run",
+            json!({"TRIAGE_PROMPT": "explicit prompt"}),
+            &ctx,
+        )
+        .unwrap();
+
+        assert_eq!(input["TRIAGE_PROMPT"], json!("explicit prompt"));
+    }
+
+    #[test]
+    fn threat_model_prompt_file_default_is_injected() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let path = crate::options::prompt_override_path(temp.path(), "threat-model", "build");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, "focus callback replay threats\n").unwrap();
+        let config = V2Config::default();
+        let ctx = context(&config, &workspace);
+
+        let input = input_with_prompt_file_default("threat-model:build", json!({}), &ctx).unwrap();
+
+        assert_eq!(
+            input["THREAT_MODEL_PROMPT"],
+            json!("focus callback replay threats\n")
+        );
+    }
 }
 
 /// Derive a module id from a qualified tool name (`semgrep:scan` -> `semgrep`).

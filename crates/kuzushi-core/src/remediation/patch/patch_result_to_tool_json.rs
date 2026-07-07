@@ -35,7 +35,11 @@ fn patch_header_lines(fingerprint: &str, result: &PatchResult) -> Vec<String> {
     vec![
         format!(
             "[{}] patch:finding {}",
-            if patch_is_sound(result.status) { "+" } else { "!" },
+            if patch_is_sound(result.status) {
+                "+"
+            } else {
+                "!"
+            },
             result.status.as_str()
         ),
         format!("      fingerprint:   {fingerprint}"),
@@ -55,7 +59,11 @@ fn append_patch_details(lines: &mut Vec<String>, result: &PatchResult, validator
 }
 
 fn append_patch_diff(lines: &mut Vec<String>, result: &PatchResult) {
-    if let Some(diff) = result.diff.as_ref().filter(|value| !value.trim().is_empty()) {
+    if let Some(diff) = result
+        .diff
+        .as_ref()
+        .filter(|value| !value.trim().is_empty())
+    {
         lines.push(String::new());
         lines.push("Diff:".to_string());
         lines.push(diff.to_string());
@@ -123,7 +131,10 @@ fn patch_validator_message(status: PatchStatus, validator_log: &str) -> String {
     if validator_log.trim().is_empty() {
         return format!("Patch finished with status {}.", status.as_str());
     }
-    format!("Patch finished with status {}. See validator log.", status.as_str())
+    format!(
+        "Patch finished with status {}. See validator log.",
+        status.as_str()
+    )
 }
 
 fn patch_report_markdown(
@@ -184,7 +195,10 @@ mod tests {
 
         assert_eq!(output["status"], json!("completed"));
         assert_eq!(output["proof"]["patchStatus"], json!("SOUND"));
-        assert!(output["reportMarkdown"].as_str().unwrap().contains("Patch Report"));
+        assert!(output["reportMarkdown"]
+            .as_str()
+            .unwrap()
+            .contains("Patch Report"));
     }
 }
 
@@ -196,8 +210,9 @@ pub(crate) fn synthesize_patch(
     finding: &Finding,
     triage: &TriageOutcome,
     history: &[PatchAttempt],
+    style: PatchStyle,
 ) -> Result<PatchSynthesis> {
-    let prompt = build_patch_prompt(repo_root, repo_name, finding, triage, history)?;
+    let prompt = build_patch_prompt(repo_root, repo_name, finding, triage, history, style)?;
     query_required_structured_json(
         runtime,
         AgentQueryRequest::new(

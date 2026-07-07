@@ -148,21 +148,16 @@ pub(crate) fn full_mode_dry_run_response(
 pub(crate) fn required_full_mode_runtime(
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<&dyn AgentRuntime> {
-    runtime
-        .ok_or_else(|| anyhow::anyhow!("full-mode:hunt requires an agent runtime; none configured"))
+    runtime.ok_or_else(|| {
+        anyhow::anyhow!(crate::runtime::missing_agent_runtime_message(
+            "full-mode:hunt"
+        ))
+    })
 }
 
 pub(crate) fn full_mode_routed_runtime<'a>(
     runtime: &'a dyn AgentRuntime,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<crate::agent_router::RoutedRuntime<'a>> {
-    use crate::agent_router::{AgentRouter, RoutedRuntime};
-    use std::sync::Arc;
-
-    let router = Arc::new(AgentRouter::load(&full_mode_config_paths(ctx))?);
-    Ok(RoutedRuntime::borrowed(
-        runtime,
-        router,
-        ctx.config.model.clone(),
-    ))
+    routed_runtime_for_tool_context(runtime, ctx, None)
 }

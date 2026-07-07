@@ -34,6 +34,26 @@ impl WorkflowPhase {
         }
     }
 
+    /// The previous phase in the engagement, or `None` before 組 KUMI-KATA.
+    pub fn previous(self) -> Option<WorkflowPhase> {
+        match self {
+            WorkflowPhase::Map => None,
+            WorkflowPhase::Hunt => Some(WorkflowPhase::Map),
+            WorkflowPhase::Confirm => Some(WorkflowPhase::Hunt),
+            WorkflowPhase::Fix => Some(WorkflowPhase::Confirm),
+        }
+    }
+
+    pub fn parse(raw: &str) -> Option<WorkflowPhase> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "map" | "1" | "kumi" | "kumi-kata" | "組" => Some(WorkflowPhase::Map),
+            "hunt" | "2" | "kuzushi" | "崩" => Some(WorkflowPhase::Hunt),
+            "confirm" | "3" | "tsukuri" | "作" => Some(WorkflowPhase::Confirm),
+            "fix" | "4" | "kake" | "掛" => Some(WorkflowPhase::Fix),
+            _ => None,
+        }
+    }
+
     /// Judo-primary header label (glyph · romaji · plain word).
     pub fn label(self) -> &'static str {
         match self {
@@ -111,9 +131,28 @@ mod tests {
     }
 
     #[test]
+    fn previous_walks_to_start() {
+        assert_eq!(WorkflowPhase::Map.previous(), None);
+        assert_eq!(WorkflowPhase::Hunt.previous(), Some(WorkflowPhase::Map));
+        assert_eq!(WorkflowPhase::Fix.previous(), Some(WorkflowPhase::Confirm));
+    }
+
+    #[test]
     fn labels_lead_with_judo_term() {
         assert!(WorkflowPhase::Hunt.label().contains("KUZUSHI"));
         assert_eq!(WorkflowPhase::Map.position(), 1);
         assert_eq!(WorkflowPhase::Fix.position(), 4);
+    }
+
+    #[test]
+    fn parse_accepts_named_and_numbered_phases() {
+        assert_eq!(WorkflowPhase::parse("map"), Some(WorkflowPhase::Map));
+        assert_eq!(WorkflowPhase::parse("2"), Some(WorkflowPhase::Hunt));
+        assert_eq!(
+            WorkflowPhase::parse("confirm"),
+            Some(WorkflowPhase::Confirm)
+        );
+        assert_eq!(WorkflowPhase::parse("掛"), Some(WorkflowPhase::Fix));
+        assert_eq!(WorkflowPhase::parse("later"), None);
     }
 }

@@ -1,29 +1,40 @@
-use super::confirmation_keys::{confirm_key_action, ConfirmKeyAction};
+use super::confirmation_keys::{
+    confirm_key_action, confirm_key_is_consumed_without_action, ConfirmKeyAction,
+};
 use super::control_keys::control_key_handler;
 use super::*;
 
 impl ShellApp {
     pub fn handle_key(&mut self, key: KeyEvent) {
         if self.handle_modal_key(key) {
+            self.record_operator_interaction();
             return;
         }
 
         self.update_quit_chord_arm(key);
         if self.handle_story_toggle_key(key) {
+            self.record_operator_interaction();
             return;
         }
 
         let modifiers = KeyModifierState::new(key);
         self.reset_completion_cycle_for_key(key);
 
-        if self.handle_control_key(key, modifiers)
-            || self.handle_cursor_key(key, modifiers)
+        if self.handle_input_mode_key(key, modifiers)
+            || self.handle_control_key(key, modifiers)
             || self.handle_empty_input_view_key(key, modifiers)
+            || self.handle_unhandled_navigation_key(key, modifiers)
+            || self.handle_cursor_key(key, modifiers)
             || self.handle_history_key(key, modifiers)
             || self.handle_text_key(key)
         {
+            self.record_operator_interaction();
             return;
         }
+    }
+
+    fn record_operator_interaction(&mut self) {
+        self.last_char_at = Some(Instant::now());
     }
 
     pub(super) fn handle_modal_key(&mut self, key: KeyEvent) -> bool {
@@ -51,7 +62,13 @@ impl ShellApp {
         let alt = key.modifiers.contains(KeyModifiers::ALT);
         match key.code {
             KeyCode::Esc => self.cancel_history_search(),
-            KeyCode::Char('c') if ctrl => self.cancel_history_search(),
+            KeyCode::Char('c') if ctrl => {
+                let work_running = self.has_running_work();
+                self.cancel_history_search();
+                if work_running {
+                    return false;
+                }
+            }
             KeyCode::Char('r') if ctrl => self.history_search_next(),
             KeyCode::Enter => self.accept_history_search(),
             KeyCode::Backspace => self.history_search_backspace(),
@@ -131,7 +148,7 @@ impl ShellApp {
             return false;
         }
         let Some(action) = confirm_key_action(key.code) else {
-            return false;
+            return confirm_key_is_consumed_without_action(key.code);
         };
         self.apply_confirm_key_action(action);
         true
@@ -178,7 +195,7 @@ impl ShellApp {
 
     pub(super) fn reset_completion_cycle_for_key(&mut self, key: KeyEvent) {
         // Tab keeps the cycle alive (it's the cycle's input). Esc owns
-        // the cycle teardown via `esc_clear_or_restore` (M3 §3.3) so the
+        // the cycle teardown via `esc_clear_input_or_completion` (M3 §3.3) so the
         // popup can restore the operator's original prefix instead of
         // losing it to a blanket reset.
         if matches!(key.code, KeyCode::Tab | KeyCode::Esc) {
@@ -199,6 +216,63 @@ impl ShellApp {
             return false;
         };
         handler(self);
+        true
+    }
+
+    fn handle_input_mode_key(&mut self, key: KeyEvent, modifiers: KeyModifierState) -> bool {
+        if !modifiers.no_modifiers {
+            return false;
+        }
+        match key.code {
+            KeyCode::F(2) => self.toggle_input_mode(),
+            KeyCode::Esc if self.input_mode == InputMode::Navigate => self.enter_prompt_mode(),
+            _ => return false,
+        }
+        true
+    }
+
+    fn toggle_input_mode(&mut self) {
+        match self.input_mode {
+            InputMode::Prompt => self.enter_navigate_mode(),
+            InputMode::Navigate => self.enter_prompt_mode(),
+        }
+    }
+
+    fn enter_navigate_mode(&mut self) {
+        if !self.input.is_empty() {
+            self.log(
+                "input",
+                "finish or clear the prompt before entering navigation mode",
+            );
+            return;
+        }
+        self.input_mode = InputMode::Navigate;
+        self.log("input", "navigation mode — Esc returns to prompt");
+    }
+
+    fn enter_prompt_mode(&mut self) {
+        self.input_mode = InputMode::Prompt;
+        self.log("input", "prompt mode — F2 returns to navigation");
+    }
+
+    fn handle_unhandled_navigation_key(
+        &mut self,
+        key: KeyEvent,
+        modifiers: KeyModifierState,
+    ) -> bool {
+        if self.input_mode != InputMode::Navigate || !self.input.is_empty() || !modifiers.plain {
+            return false;
+        }
+        match key.code {
+            KeyCode::Char(ch) => self.log(
+                "input",
+                format!("no navigation action for `{ch}` here — Esc returns to prompt"),
+            ),
+            KeyCode::Enter | KeyCode::Tab | KeyCode::BackTab => {
+                self.log("input", "no navigation action here — Esc returns to prompt")
+            }
+            _ => return false,
+        }
         true
     }
 }

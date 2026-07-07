@@ -1,4 +1,5 @@
 use super::*;
+use crate::modules::registry::ToolExecutor;
 
 #[derive(Debug, Clone)]
 pub struct BuiltinModule {
@@ -27,7 +28,16 @@ impl BuiltinModule {
 
     pub(in crate::modules) fn deferred(mut self) -> Self {
         self.hidden = true;
-        self.dag_nodes.clear();
+        self
+    }
+
+    pub(in crate::modules) fn with_executor(mut self, executor: ToolExecutor) -> Self {
+        for tool in &mut self.tools {
+            tool.executor = Some(executor);
+        }
+        for node in &mut self.dag_nodes {
+            node.executor = Some(executor);
+        }
         self
     }
 }
@@ -92,6 +102,7 @@ pub(in crate::modules) fn tool_with_options(
         hidden: false,
         runtime_requirement: RuntimeRequirement::Never,
         options,
+        executor: None,
     }
 }
 

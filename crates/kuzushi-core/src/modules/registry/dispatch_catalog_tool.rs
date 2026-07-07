@@ -50,6 +50,7 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "router:show" => Some(router_show_tool(input.clone(), ctx)),
         "workspace:status" => Some(Ok(workspace_status_json(ctx))),
         "workspace:export-findings" => Some(export_workspace_findings_tool(input.clone(), ctx)),
+        "engagement:aim" => Some(engagement_aim_tool(input, ctx)),
         "bounty:import-har" => Some(bounty_import_har_tool(input, ctx)),
         "bounty:import-burp" => Some(bounty_import_burp_tool(input, ctx)),
         "findings:list" => Some(list_findings_tool(input, ctx)),
@@ -57,6 +58,47 @@ pub(in crate::modules) fn dispatch_context_workspace_tool(
         "entry-points:extract" => Some(run_entry_points_extract(input, ctx)),
         _ => None,
     }
+}
+
+fn engagement_aim_tool(input: &Value, ctx: &ToolExecutionContext<'_>) -> Result<Value> {
+    let workspace = ctx
+        .workspace
+        .context("engagement:aim requires an active workspace target")?;
+    let request = crate::engagement::EngagementHarnessRequest {
+        focus: string_input_any(input, &["focus"]),
+        engines: string_array_or_csv_input(input, &["engines"]).unwrap_or_default(),
+        budget_usd: optional_f64_input(input, &["budget", "budgetUsd", "budget_usd"])?,
+    };
+    let report = crate::engagement::write_engagement_harness(workspace, request)?;
+    let output = format!("engagement:aim wrote {}", report.path.display());
+    Ok(crate::module_result::completed_output_result(
+        output.clone(),
+        output,
+        json!({
+            "path": report.path.display().to_string(),
+            "harness": report.harness,
+        }),
+    ))
+}
+
+fn optional_f64_input(input: &Value, keys: &[&str]) -> Result<Option<f64>> {
+    for key in keys {
+        let Some(value) = input.get(*key) else {
+            continue;
+        };
+        if let Some(number) = value.as_f64() {
+            return Ok(Some(number));
+        }
+        if let Some(raw) = value.as_str() {
+            return raw
+                .trim()
+                .parse::<f64>()
+                .map(Some)
+                .with_context(|| format!("{key} must be a number"));
+        }
+        anyhow::bail!("{key} must be a number");
+    }
+    Ok(None)
 }
 
 pub(in crate::modules) fn config_show_json(ctx: &ToolExecutionContext<'_>) -> Value {
@@ -140,11 +182,57 @@ pub(in crate::modules) fn list_findings_tool(
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
-    let filter = FindingListFilter::from_tool_input(input)?;
+    let mut filter = FindingListFilter::from_tool_input(input)?;
+    let requested_limit = filter.limit;
+    if filter.has_provenance_filter() {
+        filter.limit = FindingListFilter::MAX_LIMIT;
+    }
     let store = ctx
         .findings_store
         .context("findings:list requires a findings store")?;
-    Ok(store.list_findings_filtered(&filter)?.to_tool_json())
+    let report = store.list_findings_filtered(&filter)?;
+    if !filter.has_provenance_filter() {
+        return Ok(report.to_tool_json());
+    }
+    let target = findings_provenance_target(input, ctx)?;
+    let runs = crate::list_run_summaries(&target)?
+        .into_iter()
+        .map(|summary| (summary.run_id.clone(), summary))
+        .collect::<BTreeMap<_, _>>();
+    let findings = report
+        .findings
+        .into_iter()
+        .filter(|finding| filter.matches_run_provenance(finding, &runs))
+        .collect::<Vec<_>>();
+    let count = findings.len();
+    Ok(crate::findings::FindingListReport {
+        count,
+        findings: findings.into_iter().take(requested_limit).collect(),
+    }
+    .to_tool_json())
+}
+
+fn findings_provenance_target(
+    input: &Value,
+    ctx: &ToolExecutionContext<'_>,
+) -> Result<std::path::PathBuf> {
+    if let Some(target) = input.get("target").and_then(Value::as_str) {
+        let trimmed = target.trim();
+        if trimmed.is_empty() {
+            anyhow::bail!("findings:list provenance filters require a non-empty target");
+        }
+        let candidate = std::path::PathBuf::from(trimmed);
+        return Ok(if candidate.is_absolute() {
+            candidate
+        } else {
+            std::env::current_dir()
+                .context("Could not resolve current directory")?
+                .join(candidate)
+        });
+    }
+    ctx.workspace
+        .map(|workspace| workspace.root().to_path_buf())
+        .context("findings:list provenance filters require an active workspace or target")
 }
 
 pub(in crate::modules) fn build_report_tool(
@@ -157,41 +245,56 @@ pub(in crate::modules) fn build_report_tool(
 }
 
 pub(in crate::modules) fn dispatch_native_security_tool(
+    registry: &ModuleRegistry,
     name: &str,
     input: &Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> ToolDispatchResult {
-    match name {
-        "dep-hygiene:check" => Some(run_dep_hygiene_tool(input, ctx)),
-        "secret-scan:scan" => Some(run_secret_scan_tool(input, ctx)),
-        "semgrep:scan"
-        | "codeql:scan"
-        | "iac-scan:scan"
-        | "cargo-audit:scan"
-        | "license-scan:scan"
-        | "sbom-scan:scan"
-        | "exploit-chain:scan"
-        | "android-apk:check-env"
-        | "android-apk:prepare"
-        | "android-apk:manifest-scan"
-        | "android-apk:network-security-config"
-        | "android-apk:fileprovider-scan"
-        | "android-apk:code-scan"
-        | "android-apk:sast-handoff"
-        | "android-apk:native-libs"
-        | "android-apk:hybrid-detect"
-        | "android-apk:scan" => Some(native_scanners::execute_tool(
+    if native_scanner_tool(name) {
+        return Some(native_scanners::execute_tool(
             name,
             input.clone(),
             ctx,
             runtime,
+        ));
+    }
+    match name {
+        "dep-hygiene:check" => Some(run_dep_hygiene_tool(input, ctx)),
+        "secret-scan:scan" => Some(run_secret_scan_tool(input, ctx)),
+        "sast:scan" => Some(run_sast_scan_with_registry(
+            registry,
+            input.clone(),
+            ctx,
+            runtime,
         )),
-        "sast:scan" => Some(run_sast_scan(input.clone(), ctx, runtime)),
         "cpg:build" => Some(run_cpg_build(input, ctx)),
         "codeql:create-db" => Some(run_codeql_create_db(input, ctx)),
         _ => None,
     }
+}
+
+fn native_scanner_tool(name: &str) -> bool {
+    matches!(
+        name,
+        "semgrep:scan"
+            | "codeql:scan"
+            | "iac-scan:scan"
+            | "cargo-audit:scan"
+            | "license-scan:scan"
+            | "sbom-scan:scan"
+            | "exploit-chain:scan"
+            | "android-apk:check-env"
+            | "android-apk:prepare"
+            | "android-apk:manifest-scan"
+            | "android-apk:network-security-config"
+            | "android-apk:fileprovider-scan"
+            | "android-apk:code-scan"
+            | "android-apk:sast-handoff"
+            | "android-apk:native-libs"
+            | "android-apk:hybrid-detect"
+            | "android-apk:scan"
+    )
 }
 
 pub(in crate::modules) fn run_dep_hygiene_tool(
@@ -216,7 +319,10 @@ pub(in crate::modules) fn run_dep_hygiene_tool(
     if let Some(trace) = ctx.trace {
         let _ = trace.step("done", "check", "dep-hygiene complete").emit();
     }
-    Ok(output_with_core_findings(report.to_tool_json(), store_result))
+    Ok(output_with_core_findings(
+        report.to_tool_json(),
+        store_result,
+    ))
 }
 
 pub(in crate::modules) fn run_secret_scan_tool(
@@ -242,7 +348,10 @@ pub(in crate::modules) fn run_secret_scan_tool(
     if let Some(trace) = ctx.trace {
         let _ = trace.step("done", "scan", "secret-scan complete").emit();
     }
-    Ok(output_with_core_findings(report.to_tool_json(), store_result))
+    Ok(output_with_core_findings(
+        report.to_tool_json(),
+        store_result,
+    ))
 }
 
 struct StoredCoreFindings {
@@ -267,8 +376,9 @@ fn store_dep_hygiene_findings(
         ctx.workspace,
         ctx.findings_store,
     )?;
+    let core_findings = output_core_findings(findings, &persisted, ctx.findings_store)?;
     Ok(StoredCoreFindings {
-        core_findings: findings,
+        core_findings,
         persisted,
     })
 }
@@ -290,10 +400,26 @@ fn store_secret_scan_findings(
         ctx.workspace,
         ctx.findings_store,
     )?;
+    let core_findings = output_core_findings(findings, &persisted, ctx.findings_store)?;
     Ok(StoredCoreFindings {
-        core_findings: findings,
+        core_findings,
         persisted,
     })
+}
+
+fn output_core_findings(
+    findings: Vec<crate::findings::Finding>,
+    persisted: &Option<crate::findings::GenericPersistedRun>,
+    store: Option<&crate::findings::FindingStore>,
+) -> Result<Vec<crate::findings::Finding>> {
+    let Some(persisted) = persisted else {
+        return Ok(findings);
+    };
+    let Some(store) = store else {
+        return Ok(findings);
+    };
+    let stored = store.list_findings_for_scan_id(&persisted.run_id)?;
+    Ok(if stored.is_empty() { findings } else { stored })
 }
 
 fn output_with_core_findings(mut output: Value, store_result: StoredCoreFindings) -> Value {
@@ -311,6 +437,9 @@ pub(in crate::modules) fn dispatch_agentic_security_tool(
     runtime: Option<&dyn AgentRuntime>,
 ) -> ToolDispatchResult {
     match name {
+        "agentic-sast:scan" if agentic_sast_chunked_strategy(input) => {
+            Some(run_full_mode_hunt_tool(input.clone(), ctx, runtime))
+        }
         "agentic-sast:scan" => Some(run_agentic_sast_tool(input, ctx, runtime)),
         "variant:lift-pattern" => Some(run_variant_lift_pattern(input.clone(), ctx, runtime)),
         "variant:hunt" => Some(run_variant_hunt(input.clone(), ctx, runtime)),
@@ -336,6 +465,13 @@ pub(in crate::modules) fn dispatch_agentic_security_tool(
         }
         _ => None,
     }
+}
+
+fn agentic_sast_chunked_strategy(input: &Value) -> bool {
+    input
+        .get("strategy")
+        .and_then(Value::as_str)
+        .is_some_and(|strategy| strategy.trim().eq_ignore_ascii_case("chunked"))
 }
 
 pub(in crate::modules) fn run_agentic_sast_tool(

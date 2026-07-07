@@ -6,7 +6,9 @@ pub(in crate::modules) fn build_context_snapshot(
 ) -> Result<Value> {
     let workspace = ctx
         .workspace
-        .context("context:build requires a workspace target")?;
+        .context(crate::workspace::active_workspace_required_message(
+            "context:build",
+        ))?;
     let options = context_build_options(&input)?;
 
     emit_context_build_start(ctx, workspace.root());
@@ -14,7 +16,10 @@ pub(in crate::modules) fn build_context_snapshot(
     let file_sample = collect_context_file_sample(workspace.root(), options.sample_limit)?;
     emit_context_build_step(
         ctx,
-        format!("indexed {} files · building snapshot", file_sample.files_indexed),
+        format!(
+            "indexed {} files · building snapshot",
+            file_sample.files_indexed
+        ),
     );
     let snapshot = context_snapshot_value(workspace.root(), &options, &file_sample)?;
     emit_context_build_step(ctx, "writing snapshot".to_string());
@@ -29,6 +34,33 @@ pub(in crate::modules) fn build_context_snapshot(
         snapshot,
         file_sample.files_indexed,
     ))
+}
+
+pub(crate) struct ContextSnapshotBuild {
+    pub(crate) snapshot: Value,
+}
+
+pub(crate) fn build_context_snapshot_for_root(
+    root: &Path,
+    sample_limit: usize,
+) -> Result<ContextSnapshotBuild> {
+    let options = ContextBuildOptions {
+        sample_limit: sample_limit.min(2_000),
+        discovery: "auto".to_string(),
+        enrichment: false,
+        scope: "all".to_string(),
+    };
+    build_context_snapshot_for_root_with_options(root, &options)
+}
+
+fn build_context_snapshot_for_root_with_options(
+    root: &Path,
+    options: &ContextBuildOptions,
+) -> Result<ContextSnapshotBuild> {
+    let file_sample = collect_context_file_sample(root, options.sample_limit)?;
+    let snapshot = context_snapshot_value(root, options, &file_sample)?;
+    save_context_snapshot(root, &snapshot)?;
+    Ok(ContextSnapshotBuild { snapshot })
 }
 
 struct ContextBuildOptions {

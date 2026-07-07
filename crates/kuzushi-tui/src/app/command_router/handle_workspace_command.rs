@@ -16,6 +16,14 @@ pub(crate) fn handle_knowledge_base_command(app: &mut ShellApp, command: &ShellC
     true
 }
 
+pub(crate) fn handle_file_picker_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
+    let ShellCommand::FilePicker = command else {
+        return false;
+    };
+    app.open_file_picker();
+    true
+}
+
 pub(crate) fn handle_attach_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
     let ShellCommand::Attach(source) = command else {
         return false;

@@ -6,6 +6,7 @@ pub(crate) struct PromptModel {
     pub(crate) prefix: String,
     pub(crate) input: String,
     pub(crate) cursor: usize,
+    pub(crate) placeholder: Option<String>,
 }
 
 pub(crate) fn prompt_model(app: &ShellApp) -> PromptModel {
@@ -20,6 +21,7 @@ pub(crate) fn prompt_model(app: &ShellApp) -> PromptModel {
         ),
         input: app.input.clone(),
         cursor: app.cursor,
+        placeholder: prompt_placeholder(app),
     }
 }
 
@@ -31,7 +33,14 @@ fn reverse_search_prompt(app: &ShellApp, query: &str) -> PromptModel {
         prefix,
         input,
         cursor,
+        placeholder: None,
     }
+}
+
+fn prompt_placeholder(app: &ShellApp) -> Option<String> {
+    app.input
+        .is_empty()
+        .then(|| "type help or press Tab".to_string())
 }
 
 pub(crate) fn prompt_brand() -> &'static str {

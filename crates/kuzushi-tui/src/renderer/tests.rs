@@ -1,5 +1,5 @@
 use kuzushi_core::{
-    Finding, FindingEvidence, OptionScope, OptionTarget, ScanCancellation, Severity,
+    Finding, FindingEvidence, OptionScope, OptionTarget, RunSummary, ScanCancellation, Severity,
     StaticProofState, TriageOutcome, TriageVerdict, V2Config,
 };
 use ratatui::backend::TestBackend;
@@ -47,12 +47,12 @@ fn renders_ink_style_shell_without_box_dashboard() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("HOME"));
-    assert!(rendered.contains("run artifacts"));
+    assert!(rendered.contains("RUN"));
+    assert!(rendered.contains("artifacts"));
     assert!(rendered.contains("modules"));
-    assert!(rendered.contains("recommend"));
     assert!(rendered.contains("kuzushi>"));
     assert!(rendered.contains("Tab complete"));
-    assert!(rendered.contains("modules browse"));
+    assert!(rendered.contains("next"));
     assert!(!rendered.contains("command log"));
     assert!(!rendered.contains("┌"));
     assert!(!rendered.contains("v2"));
@@ -82,6 +82,279 @@ fn retry_gate_card_renders_failed_tasks_and_fix() {
     assert!(rendered.contains("retry"));
 }
 
+fn planning_row_fixture(
+    id: crate::app::PlanningTaskId,
+    state: crate::app::PlanningArtifactState,
+) -> crate::app::PlanningTaskRow {
+    crate::app::PlanningTaskRow {
+        id,
+        label: id.label(),
+        tool_name: id.tool_name(),
+        artifact_path: std::path::PathBuf::from("/dev/null"),
+        artifact_state: state,
+        artifact_modified: None,
+        model_backed: id.is_model_backed(),
+        required_cli: None,
+        cli_available: true,
+        blocker: None,
+    }
+}
+
+#[test]
+fn planning_picker_announces_prior_state_and_plain_language_outcomes() {
+    use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
+
+    let backend = TestBackend::new(110, 44);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let dir = tempfile::tempdir().unwrap();
+    app.target = Some(dir.path().to_path_buf());
+    app.engagement.set_phase(WorkflowPhase::Map);
+    app.findings.push(Finding::new_tool(
+        "demo",
+        "demo.rule",
+        "src/lib.rs",
+        7,
+        None,
+        Severity::Medium,
+        "prior finding",
+    ));
+    let rows = vec![
+        planning_row_fixture(
+            PlanningTaskId::GatherRepoContext,
+            PlanningArtifactState::Cached,
+        ),
+        planning_row_fixture(PlanningTaskId::BuildXRay, PlanningArtifactState::Missing),
+    ];
+    app.planning_picker_route.open(
+        rows,
+        [PlanningTaskId::GatherRepoContext, PlanningTaskId::BuildXRay]
+            .into_iter()
+            .collect(),
+    );
+    app.shell_view = ShellView::PlanningPicker;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    // Prior state is announced up front, with counts the operator can verify.
+    assert!(
+        rendered.contains("Resuming"),
+        "prior-state banner: {rendered}"
+    );
+    assert!(
+        rendered.contains("組 map"),
+        "phase rail shows map: {rendered}"
+    );
+    assert!(
+        rendered.contains("崩 hunt"),
+        "phase rail shows hunt: {rendered}"
+    );
+    assert!(rendered.contains("‹h"), "rail advertises h: {rendered}");
+    assert!(
+        rendered.contains("1 組 map"),
+        "rail numbers phases: {rendered}"
+    );
+    assert!(rendered.contains("l›"), "rail advertises l: {rendered}");
+    assert!(
+        rendered.contains("TASKS FOCUS"),
+        "focused task pane is explicit: {rendered}"
+    );
+    assert!(rendered.contains("cached artifact"));
+    assert!(rendered.contains("1 finding"));
+    // Ambiguous [x]/[~]/[ ] glyphs are gone; outcomes read as words + a legend.
+    assert!(rendered.contains("OUTCOME"));
+    assert!(rendered.contains("RUN"));
+    assert!(rendered.contains("REUSE"));
+    assert!(!rendered.contains("[~]"));
+    // Enter is spelled out, not left to guesswork.
+    assert!(
+        rendered.contains("Enter: run 1 new step"),
+        "enter summary: {rendered}"
+    );
+    assert!(
+        !rendered.contains("↑/↓/j/k"),
+        "planner body should not duplicate footer keybinds: {rendered}"
+    );
+    assert!(rendered.contains("command prompt paused"), "{rendered}");
+    assert!(rendered.contains(": to type a command"), "{rendered}");
+    assert!(!rendered.contains("kuzushi>"), "{rendered}");
+}
+
+#[test]
+fn planning_picker_options_focus_marks_the_options_pane() {
+    use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
+
+    let backend = TestBackend::new(132, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let dir = tempfile::tempdir().unwrap();
+    app.target = Some(dir.path().to_path_buf());
+    app.engagement.set_phase(WorkflowPhase::Map);
+    let rows = vec![planning_row_fixture(
+        PlanningTaskId::BuildStrideThreatModel,
+        PlanningArtifactState::Missing,
+    )];
+    app.planning_picker_route.open(
+        rows,
+        [PlanningTaskId::BuildStrideThreatModel]
+            .into_iter()
+            .collect(),
+    );
+    app.planning_picker_route
+        .set_focus(PickerFocus::OptionsPane);
+    app.shell_view = ShellView::PlanningPicker;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(
+        rendered.contains("threat-model:build FOCUS"),
+        "focused options pane is explicit: {rendered}"
+    );
+    assert!(
+        !rendered.contains("TASKS FOCUS"),
+        "inactive task pane should not claim focus: {rendered}"
+    );
+}
+
+#[test]
+fn planning_picker_is_vertically_centered_on_tall_terminals() {
+    use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
+
+    let backend = TestBackend::new(120, 60);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let dir = tempfile::tempdir().unwrap();
+    app.target = Some(dir.path().to_path_buf());
+    app.engagement.set_phase(WorkflowPhase::Map);
+    let rows = vec![planning_row_fixture(
+        PlanningTaskId::GatherRepoContext,
+        PlanningArtifactState::Missing,
+    )];
+    app.planning_picker_route.open(
+        rows,
+        [PlanningTaskId::GatherRepoContext].into_iter().collect(),
+    );
+    app.shell_view = ShellView::PlanningPicker;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let header_row = banner_row(buffer, "KUMI-KATA").expect("phase header row");
+    let prompt_row = banner_row(buffer, "command prompt paused").expect("prompt row");
+
+    assert!(
+        header_row >= 8,
+        "planner should not pin to the top on tall terminals; header row was {header_row}"
+    );
+    assert!(
+        prompt_row > header_row,
+        "prompt/footer should stay below centered planner content"
+    );
+}
+
+#[test]
+fn planning_picker_revisit_banner_names_cached_artifact_behavior() {
+    use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
+
+    let backend = TestBackend::new(120, 28);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let dir = tempfile::tempdir().unwrap();
+    app.target = Some(dir.path().to_path_buf());
+    app.engagement.set_phase(WorkflowPhase::Map);
+    let rows = vec![planning_row_fixture(
+        PlanningTaskId::GatherRepoContext,
+        PlanningArtifactState::Cached,
+    )];
+    app.planning_picker_route.open(
+        rows,
+        [PlanningTaskId::GatherRepoContext].into_iter().collect(),
+    );
+    app.shell_view = ShellView::PlanningPicker;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("Revisiting"), "{rendered}");
+    assert!(rendered.contains("press g to rebuild"), "{rendered}");
+    assert!(!rendered.contains("Resuming"), "{rendered}");
+}
+
+#[test]
+fn planning_picker_prompt_focus_renders_live_prompt() {
+    let backend = TestBackend::new(120, 28);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let rows = vec![planning_row_fixture(
+        PlanningTaskId::GatherRepoContext,
+        PlanningArtifactState::Missing,
+    )];
+    app.planning_picker_route.open(rows, Default::default());
+    app.shell_view = ShellView::PlanningPicker;
+    app.planning_picker_route.set_focus(PickerFocus::Prompt);
+    app.set_input("help");
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("kuzushi>"), "{rendered}");
+    assert!(rendered.contains("help"), "{rendered}");
+    assert!(!rendered.contains("command prompt paused"), "{rendered}");
+}
+
+#[test]
+fn planning_picker_reuses_cached_artifact_when_rebuild_cli_is_missing() {
+    use crate::app::{PlanningArtifactState, PlanningTaskId, WorkflowPhase};
+
+    let backend = TestBackend::new(120, 28);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    let dir = tempfile::tempdir().unwrap();
+    app.target = Some(dir.path().to_path_buf());
+    app.engagement.set_phase(WorkflowPhase::Map);
+    let mut row = planning_row_fixture(
+        PlanningTaskId::BuildCodeQlDatabase,
+        PlanningArtifactState::Cached,
+    );
+    row.required_cli = Some("codeql");
+    row.cli_available = false;
+    app.planning_picker_route.open(
+        vec![row],
+        [PlanningTaskId::BuildCodeQlDatabase].into_iter().collect(),
+    );
+    app.shell_view = ShellView::PlanningPicker;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("REUSE"), "{rendered}");
+    assert!(rendered.contains("cached"), "{rendered}");
+    assert!(rendered.contains("rebuild needs codeql"), "{rendered}");
+    assert!(!rendered.contains("blocked — install codeql"), "{rendered}");
+}
+
+#[test]
+fn plain_retry_gate_explains_y_n_intercept() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.advisory.pending_retry = Some(crate::app::PendingRetry {
+        tasks: vec![crate::app::FailedPlanningTask {
+            task: crate::app::PlanningTaskId::BuildCodePropertyGraph,
+            error: "java heap OOM".to_string(),
+            adjustment: Some(crate::app::RetryAdjustment::RaiseHeap { heap_mb: 12288 }),
+            blocked: vec![crate::app::PlanningTaskId::HuntTaint],
+        }],
+    });
+
+    let rendered = render_plain_app(&app, 100);
+
+    assert!(rendered.contains("RETRY"));
+    assert!(rendered.contains("y/Enter retry"));
+    assert!(rendered.contains("n/Esc skip"));
+    assert!(rendered.contains("cpg:build"));
+    assert!(rendered.contains("12288"));
+}
+
 #[test]
 fn compact_alias_uses_kz_prompt_brand() {
     assert_eq!(prompt_text("kz", RoutingMode::Shell, None), "kz> ");
@@ -97,7 +370,7 @@ fn compact_alias_uses_kz_prompt_brand() {
 
 #[test]
 fn home_first_run_state_names_real_artifact_commands() {
-    let backend = TestBackend::new(80, 30);
+    let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Home;
@@ -106,12 +379,14 @@ fn home_first_run_state_names_real_artifact_commands() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("HOME"));
-    assert!(rendered.contains("run artifacts"));
-    assert!(rendered.contains("scan ."));
+    assert!(rendered.contains("RUN"));
+    assert!(rendered.contains("artifacts"));
+    assert!(rendered.contains("target ."));
+    assert!(rendered.contains("next"));
     assert!(rendered.contains("findings"));
     assert!(rendered.contains("modules"));
-    assert!(rendered.contains("recommend"));
     assert!(rendered.contains("quickstart"));
+    assert!(rendered.find("target .").unwrap() < rendered.find("next").unwrap());
     assert!(!rendered.contains("./repo"));
     assert!(!rendered.contains("┌"));
 }
@@ -165,7 +440,7 @@ fn home_view_renders_latest_run_artifact_rail() {
     assert!(rendered.contains("HOME"));
     assert!(rendered.contains("run-1"));
     assert!(rendered.contains("completed"));
-    assert!(rendered.contains("surface risk"));
+    assert!(rendered.contains("SURFACE"));
     assert!(rendered.contains("2 high/critical"));
     assert!(rendered.contains("critical=1"));
     assert!(rendered.contains("frameworks Next.js=1, Rails=1, Spring=1"));
@@ -174,13 +449,9 @@ fn home_view_renders_latest_run_artifact_rail() {
     assert!(rendered.contains("recorded"));
     assert!(rendered.contains("findings"));
     assert!(rendered.contains("○"));
-    assert!(rendered.contains("placeholder"));
     assert!(rendered.contains("⚠"));
-    assert!(rendered.contains("failed"));
     assert!(rendered.contains("■"));
-    assert!(rendered.contains("missing"));
     assert!(rendered.contains("◆"));
-    assert!(rendered.contains("partial"));
 }
 
 #[test]
@@ -195,10 +466,10 @@ fn catalog_default_is_grouped_at_normal_width() {
 
     assert!(rendered.contains("MODULES"));
     assert!(rendered.contains("▸ NEXT"));
-    assert!(rendered.contains("OFFENSE"));
-    assert!(rendered.contains("INTEL"));
-    assert!(rendered.contains("GOVERNANCE"));
-    assert!(rendered.contains("DEFENSE"));
+    assert!(rendered.contains("HUNT"));
+    assert!(rendered.contains("MAP"));
+    assert!(rendered.contains("OPERATE"));
+    assert!(rendered.contains("CONFIRM/FIX"));
     assert!(rendered.contains("sast"));
     assert!(!rendered.contains("Start here"));
     assert!(!rendered.contains("[!] no target selected"));
@@ -217,9 +488,10 @@ fn catalog_default_keeps_quickstart_fallback_on_tight_width() {
     assert!(rendered.contains("MODULES"));
     assert!(rendered.contains("Start here"));
     assert!(rendered.contains("context build"));
-    assert!(rendered.contains("scan ."));
+    assert!(rendered.contains("target ."));
+    assert!(rendered.contains("next"));
     assert!(rendered.contains("findings"));
-    assert!(!rendered.contains("OFFENSE"));
+    assert!(!rendered.contains("HUNT"));
     assert!(!rendered.contains("agentic-sast"));
 }
 
@@ -239,7 +511,10 @@ fn quickstart_follows_doctor_context_scan_findings_report_path() {
         "kuzushi doctor",
         "context build",
         ".kuzushi/context-snapshot.json",
-        "scan .",
+        "target .",
+        "options sast:scan",
+        "next",
+        "run sast:scan",
         "findings",
         "proof state",
         "workspace export",
@@ -251,7 +526,10 @@ fn quickstart_follows_doctor_context_scan_findings_report_path() {
         );
     }
     assert!(rendered.find("kuzushi doctor").unwrap() < rendered.find("context build").unwrap());
-    assert!(rendered.find("context build").unwrap() < rendered.find("scan .").unwrap());
+    assert!(rendered.find("context build").unwrap() < rendered.find("target .").unwrap());
+    assert!(rendered.find("target .").unwrap() < rendered.find("options sast:scan").unwrap());
+    assert!(rendered.find("options sast:scan").unwrap() < rendered.find("next").unwrap());
+    assert!(rendered.find("next").unwrap() < rendered.find("run sast:scan").unwrap());
     for y in 0..22 {
         let row = buffer_row_text(buffer, 80, y);
         assert!(
@@ -263,193 +541,11 @@ fn quickstart_follows_doctor_context_scan_findings_report_path() {
 }
 
 #[test]
-fn renders_selected_finding_detail() {
-    let backend = TestBackend::new(100, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
-    let finding = Finding::new_semgrep(
-        "demo.rule",
-        "src/app.ts",
-        8,
-        Some(8),
-        Severity::High,
-        "dangerous sink",
-    )
-    .with_evidence(vec![FindingEvidence {
-        kind: "filesystem_sink".to_string(),
-        file_path: "src/app.ts".to_string(),
-        line: 8,
-        snippet: "file.save(filepath)".to_string(),
-        rationale: "Raw upload path reaches a filesystem write".to_string(),
-        confidence: 92,
-        ..Default::default()
-    }]);
-    app.findings = vec![finding.clone()];
-    app.selected_finding = Some(finding);
-    app.shell_view = ShellView::Finding;
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
-
-    assert!(rendered.contains("dangerous sink"));
-    assert!(rendered.contains("alias"));
-    assert!(rendered.contains("F-0001"));
-    assert!(rendered.contains("fingerprint"));
-    assert!(rendered.contains("STRUCTURED EVIDENCE"));
-    assert!(rendered.contains("filesystem_sink"));
-    assert!(rendered.contains("src/app.ts:8"));
-    assert!(rendered.contains("file.save(filepath)"));
-}
-
-#[test]
-fn finding_detail_surfaces_proof_state_and_report_commands_at_80_columns() {
-    let backend = TestBackend::new(80, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
-    let finding = Finding::new_semgrep(
-        "demo.rule",
-        "src/app.ts",
-        8,
-        Some(8),
-        Severity::High,
-        "dangerous sink\nEvidence: request parameter reaches query builder",
-    )
-    .with_static_proof_state(StaticProofState::SourceSinkLinked);
-    app.findings = vec![finding.clone()];
-    app.selected_finding = Some(finding);
-    app.shell_view = ShellView::Finding;
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
-
-    assert!(rendered.contains("proof state"), "{rendered}");
-    assert!(rendered.contains("source_sink_linked"), "{rendered}");
-    assert!(rendered.contains("runtime verification"), "{rendered}");
-    assert!(rendered.contains("Evidence: request parameter reaches query builder"));
-    assert!(rendered.contains("workspace export findings"));
-    assert!(rendered.contains("kuzushi pr-comment"));
-    assert!(!rendered.contains("┌"));
-}
-
-#[test]
-fn renders_dense_findings_rows_at_80_columns() {
-    let backend = TestBackend::new(80, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
-    let mut confirmed = Finding::new_semgrep(
-            "typescript.express.sql-injection",
-            "src/controllers/admin_search.ts",
-            117,
-            Some(119),
-            Severity::High,
-            "SQL injection in admin search\nEvidence: req.query.q flows into db.query without a guard\nCWE: CWE-89",
-        );
-    confirmed.triage = Some(TriageOutcome {
-        verdict: TriageVerdict::TruePositive,
-        confidence: 0.91,
-        rationale: "source and sink are linked in the same handler".to_string(),
-        cost_usd: 0.0,
-    });
-    let untriaged = Finding::new_tool(
-        "codeql",
-        "js/path-injection",
-        "src/files.ts",
-        22,
-        None,
-        Severity::Medium,
-        "Path traversal candidate\nEvidence: filename reaches fs.readFile",
-    );
-    app.findings = vec![confirmed, untriaged];
-    app.shell_view = ShellView::Findings;
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let buffer = terminal.backend().buffer();
-    let rendered = format!("{:?}", buffer);
-
-    for expected in [
-        // Section header replaces the old column-name row.
-        "FINDINGS",
-        "1 TRIAGED",
-        "1 PENDING",
-        // Severity chips uppercase per design.
-        "F-0001",
-        "HIGH",
-        "F-0002",
-        "MEDIUM",
-        // Compact row 1 carries title + location.
-        "SQL injection in admin search",
-        "src/controllers/admin_search.ts:117-119",
-        // Compact row 2 detail line.
-        "tp",
-        "91%",
-        "CWE-89",
-        "semgrep",
-        "untriaged",
-        "codeql",
-    ] {
-        assert!(rendered.contains(expected), "missing {expected}");
-    }
-    for y in 0..24 {
-        let row = buffer_row_text(buffer, 80, y);
-        assert!(
-            row.chars().count() <= 80,
-            "row exceeded 80 columns: {row:?}"
-        );
-    }
-    assert!(!rendered.contains("┌"));
-}
-
-#[test]
-fn findings_rows_preview_structured_evidence_at_wide_width() {
-    let backend = TestBackend::new(120, 18);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
-    let finding = Finding::new_tool(
-        "exploit-chain",
-        "exploit-chain/path-traversal-to-parser-abuse",
-        "app.py",
-        62,
-        None,
-        Severity::Critical,
-        "Path traversal reaches a parser import boundary",
-    )
-    .with_evidence(vec![
-        FindingEvidence {
-            kind: "attacker_input".to_string(),
-            file_path: "app.py".to_string(),
-            line: 48,
-            snippet: "filename = file.filename".to_string(),
-            rationale: "The upload filename is attacker-controlled".to_string(),
-            confidence: 90,
-            ..Default::default()
-        },
-        FindingEvidence {
-            kind: "filesystem_sink".to_string(),
-            file_path: "app.py".to_string(),
-            line: 63,
-            snippet: "file.save(filepath)".to_string(),
-            rationale: "The raw filename controls the write target".to_string(),
-            confidence: 94,
-            ..Default::default()
-        },
-    ]);
-    app.findings = vec![finding];
-    app.shell_view = ShellView::Findings;
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
-
-    assert!(rendered.contains("evidence 2 anchors"), "{rendered}");
-    assert!(rendered.contains("attacker_input app.py:48"), "{rendered}");
-}
-
-#[test]
 fn renders_actionable_empty_states_at_80_columns() {
     // Each empty-state surface advertises a concrete next step,
     // matching `design/mockups/empty-states.jsx::panel` (`∅` glyph
     // + label + indented muted explanation + `▸` CTA rows).
     for (view, expected) in [
-        (ShellView::Findings, "no findings yet"),
         (ShellView::Runs, "no run timeline entries"),
         (ShellView::Workspace, "no workspace selected"),
     ] {
@@ -457,7 +553,6 @@ fn renders_actionable_empty_states_at_80_columns() {
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
         let runs_target = tempfile::tempdir().unwrap();
-        let is_dfd = matches!(view, ShellView::Threat(ThreatView::Dfd));
         let is_runs = matches!(view, ShellView::Runs);
         app.shell_view = view;
         if is_runs {
@@ -469,13 +564,11 @@ fn renders_actionable_empty_states_at_80_columns() {
 
         assert!(rendered.contains(expected), "missing {expected}");
         if is_runs {
-            assert!(rendered.contains(".kuzushi/runs/<id>"), "{rendered}");
+            assert!(rendered.contains(".kuzushi/v3/runs/<id>"), "{rendered}");
         }
-        // Box-drawing is reserved for the DFD diagram; every other view
-        // must remain free of nested boxes (no Ink-style boxed dashboard).
-        if !is_dfd {
-            assert!(!rendered.contains("┌"), "{expected} drew a box");
-        }
+        // These line-based empty states must stay free of nested boxes (the
+        // bordered command center is the only box-drawing primary surface).
+        assert!(!rendered.contains("┌"), "{expected} drew a box");
     }
 }
 
@@ -491,6 +584,46 @@ fn renders_long_prompt_on_single_row() {
 
     assert!(rendered.contains("kuzushi>"));
     assert!(!rendered.contains("prompt"));
+}
+
+#[test]
+fn prompt_renders_completion_preview_suffix() {
+    let backend = TestBackend::new(80, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_input("/he");
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let row = buffer_row_text(terminal.backend().buffer(), 80, 11);
+
+    assert!(row.contains("/he"), "{row}");
+    assert!(row.contains("lp"), "{row}");
+}
+
+#[test]
+fn prompt_renders_empty_placeholder() {
+    let backend = TestBackend::new(80, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let app = ShellApp::new(V2Config::default(), None);
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let row = buffer_row_text(terminal.backend().buffer(), 80, 11);
+
+    assert!(row.contains("type help or press Tab"), "{row}");
+}
+
+#[test]
+fn prompt_renders_fuzzy_completion_candidate() {
+    let backend = TestBackend::new(80, 12);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.set_input("fnd");
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let row = buffer_row_text(terminal.backend().buffer(), 80, 11);
+
+    assert!(row.contains("fnd"), "{row}");
+    assert!(row.contains("findings"), "{row}");
 }
 
 #[test]
@@ -523,7 +656,7 @@ fn keeps_command_log_directly_above_bottom_prompt_at_80_columns() {
 
 #[test]
 fn renders_exit_commands_before_closing() {
-    for command in ["/exit", "exit", "/exitj"] {
+    for command in ["/exit", "exit"] {
         let backend = TestBackend::new(80, 12);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
@@ -634,8 +767,8 @@ fn renders_expanded_catalog_readably_on_narrow_terminal() {
     // Category divider embeds the section blurb on the rule line — see
     // `category_divider` and `design/mockups/catalog.jsx::catHead`. Narrow
     // terminals truncate, so assert on the shortest blurb word that
-    // survives an 58-col render: "OFFENSE" itself.
-    assert!(rendered.contains("OFFENSE"));
+    // survives a 58-col render: the workflow label itself.
+    assert!(rendered.contains("HUNT"));
     assert!(!rendered.contains("module context-lite"));
     assert!(!rendered.contains("command log"));
 }
@@ -652,7 +785,7 @@ fn expanded_catalog_uses_design_sections_without_dag_column() {
 
     assert!(rendered.contains("MODULES"));
     assert!(rendered.contains("▸ NEXT"));
-    assert!(rendered.contains("OFFENSE"));
+    assert!(rendered.contains("HUNT"));
     assert!(rendered.contains("sast"));
     assert!(!rendered.contains("dag"));
     assert!(!rendered.contains("DAG"));
@@ -700,8 +833,17 @@ fn module_playbooks_name_supported_run_and_scan_commands() {
     let cases = [
         ("context", "context build", "run build"),
         ("threat-model", "threats regen", "threats build"),
-        ("sast", "scan runs configured scanners", "run . or scan"),
+        (
+            "sast",
+            "next opens guided hunt",
+            "scan runs configured scanners",
+        ),
         ("cargo-audit", "RustSec advisories", "tool-specific options"),
+        (
+            "govulncheck",
+            "Go reachable vulnerabilities",
+            "tool-specific options",
+        ),
         ("agentic-sast", "run agentic-sast:scan", "run scan"),
     ];
     for (module, required, stale) in cases {
@@ -710,6 +852,7 @@ fn module_playbooks_name_supported_run_and_scan_commands() {
             "threat-model" => "threat-model:build",
             "sast" => "sast:scan",
             "cargo-audit" => "cargo-audit:scan",
+            "govulncheck" => "govulncheck:scan",
             "agentic-sast" => "agentic-sast:scan",
             _ => "demo:tool",
         };
@@ -734,9 +877,17 @@ fn module_playbooks_name_supported_run_and_scan_commands() {
             text.contains("terminal: kuzushi --target . run"),
             "{module} does not distinguish terminal run syntax: {text}"
         );
+        assert!(
+            text.contains("options .") || text.contains("options sast:scan"),
+            "{module} does not point at the options view: {text}"
+        );
         if module == "sast" {
             assert!(
-                text.contains(".kuzushi/v2/findings.sqlite3"),
+                text.contains("options sast:scan"),
+                "{module} does not name scan tuning command: {text}"
+            );
+            assert!(
+                text.contains(".kuzushi/v3/index.sqlite3"),
                 "{module} does not name the findings DB artifact: {text}"
             );
         }
@@ -760,7 +911,7 @@ fn module_playbooks_name_supported_run_and_scan_commands() {
         .collect::<Vec<_>>()
         .join("\n");
     assert!(
-        codeql_text.contains(".kuzushi/v2/findings.sqlite3 and optional SARIF"),
+        codeql_text.contains(".kuzushi/v3/index.sqlite3 and optional SARIF"),
         "codeql does not name findings DB plus optional SARIF: {codeql_text}"
     );
 }
@@ -1132,47 +1283,6 @@ fn threats_scope_view_renders_criticality_buckets() {
 }
 
 #[test]
-fn dfd_canonical_lines_render_design_diagram() {
-    let lines = dfd_canonical_lines();
-    assert_eq!(lines.len(), 10, "expected 10 rows in canonical DFD");
-    let texts: Vec<String> = lines
-        .iter()
-        .map(|line| line.spans.iter().map(|s| s.content.as_ref()).collect())
-        .collect();
-    assert!(texts[1].contains("user"));
-    assert!(texts[1].contains("api edge"));
-    assert!(texts[1].contains("postgres"));
-    assert!(texts[4].contains("plaintext PII"));
-    assert!(texts[7].contains("worker"));
-    // top + bottom borders are pure box-drawing
-    assert!(texts[0].contains("┌────"));
-    assert!(texts[3].contains("└────"));
-}
-
-#[test]
-fn threats_dfd_view_renders_canonical_diagram_header() {
-    let backend = TestBackend::new(120, 28);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Threat(ThreatView::Dfd);
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
-
-    assert!(
-        rendered.contains("DFD NOTATION") && rendered.contains("ILLUSTRATIVE EXAMPLE"),
-        "expected the diagram labelled as an illustrative example in: {rendered}"
-    );
-    assert!(rendered.contains("user"));
-    assert!(rendered.contains("api edge"));
-    assert!(rendered.contains("postgres"));
-    assert!(rendered.contains("worker"));
-    // Old placeholder content must be gone.
-    assert!(!rendered.contains("browser, API clients, package registries"));
-    assert!(!rendered.contains("source tree, handlers, jobs, CLIs"));
-}
-
-#[test]
 fn threat_stride_rollup_from_doc_parses_real_threats() {
     let doc = serde_json::json!({
         "threats": [
@@ -1343,7 +1453,7 @@ fn threats_stride_view_renders_design_rollup() {
 }
 
 #[test]
-fn deferred_recon_module_is_not_focusable_from_catalog() {
+fn recon_module_is_focusable_from_catalog() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
@@ -1351,7 +1461,7 @@ fn deferred_recon_module_is_not_focusable_from_catalog() {
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
 
-    assert!(!app
+    assert!(app
         .registry
         .modules()
         .any(|module| module.metadata().id == "recon"));
@@ -1482,6 +1592,7 @@ fn renders_options_table_readably_at_80_columns() {
     assert!(rendered.contains("triage"));
     assert!(rendered.contains("true"));
     assert!(rendered.contains("set <key> <value>"));
+    assert!(rendered.contains("lost on exit"));
     assert!(!rendered.contains("┌"));
 }
 
@@ -1613,13 +1724,13 @@ fn renders_workspace_status_readably_at_80_columns() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.workspace_view = crate::app::WorkspaceView {
         root: Some(std::path::PathBuf::from("/tmp/kuzushi-demo")),
-        state_dir: Some(std::path::PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v2")),
+        state_dir: Some(std::path::PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v3")),
         findings_db: Some(std::path::PathBuf::from(
-            "/tmp/kuzushi-demo/.kuzushi/v2/findings.sqlite3",
+            "/tmp/kuzushi-demo/.kuzushi/v3/index.sqlite3",
         )),
         findings_count: Some(2),
         last_export: Some(std::path::PathBuf::from("/tmp/findings.json")),
-        status: "workspace ready; 2 finding(s). Next: workspace export findings <path>.json"
+        status: "workspace ready; 2 finding(s). Next: workspace scope init or workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]"
             .to_string(),
     };
     app.shell_view = ShellView::Workspace;
@@ -1628,7 +1739,7 @@ fn renders_workspace_status_readably_at_80_columns() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("WORKSPACE"));
-    assert!(rendered.contains("findings.sqlite3"));
+    assert!(rendered.contains("index.sqlite3"));
     assert!(rendered.contains("findings.json"));
     assert!(rendered.contains("workspace export"));
     assert!(!rendered.contains("┌"));
@@ -1721,6 +1832,7 @@ fn plain_options_table_has_no_ansi_or_box_drawing() {
     assert!(rendered.contains("sast:scan"));
     assert!(rendered.contains("triage"));
     assert!(rendered.contains("true"));
+    assert!(rendered.contains("lost on exit"));
     assert!(rendered.contains("Next: set <key> <value>"));
     assert_strict_plain_80(&rendered);
 }
@@ -1806,13 +1918,13 @@ fn plain_workspace_guidance_wraps_without_truncating_export_command() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.workspace_view = crate::app::WorkspaceView {
         root: Some(std::path::PathBuf::from("/tmp/kuzushi-demo")),
-        state_dir: Some(std::path::PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v2")),
+        state_dir: Some(std::path::PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v3")),
         findings_db: Some(std::path::PathBuf::from(
-            "/tmp/kuzushi-demo/.kuzushi/v2/findings.sqlite3",
+            "/tmp/kuzushi-demo/.kuzushi/v3/index.sqlite3",
         )),
         findings_count: Some(2),
         last_export: None,
-        status: "workspace ready; 2 finding(s). Next: workspace export findings <path>.json"
+        status: "workspace ready; 2 finding(s). Next: workspace scope init or workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]"
             .to_string(),
     };
     app.shell_view = ShellView::Workspace;
@@ -1820,7 +1932,9 @@ fn plain_workspace_guidance_wraps_without_truncating_export_command() {
     let rendered = render_plain_app(&app, 52);
 
     assert!(rendered.contains("workspace ready; 2 finding(s)."));
-    assert!(rendered.contains("workspace export findings <path>.json"));
+    assert!(rendered.contains("workspace scope init"));
+    assert!(rendered.contains("workspace export findings <path>"));
+    assert!(rendered.contains("[--allow-empty]"));
     assert!(!rendered.contains("workspace export findings..."));
     assert_strict_plain_width(&rendered, 52);
 }
@@ -2007,10 +2121,10 @@ fn viewport_help_remains_navigable_at_24_rows() {
     assert!(first_page.contains("HELP"));
     assert!(first_page.contains("NAVIGATION"));
 
-    app.help_scroll = usize::MAX;
+    *app.help_route.scroll_mut() = usize::MAX;
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let last_page = format!("{:?}", terminal.backend().buffer());
-    assert!(last_page.contains("SESSION"));
+    assert!(last_page.contains("quit"), "{last_page}");
     assert!(last_page.contains("PgUp/PgDn scroll"), "{last_page}");
     assert!(!last_page.contains("┌"));
 }
@@ -2018,9 +2132,16 @@ fn viewport_help_remains_navigable_at_24_rows() {
 #[test]
 fn viewport_tools_remain_navigable_at_24_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    let last_tool = app.registry.tools().last().unwrap().name.clone();
+    let last_tool = crate::ui_view_models::tools_model(&app)
+        .groups
+        .iter()
+        .rev()
+        .find_map(|group| group.rows.last())
+        .unwrap()
+        .cells[0]
+        .clone();
     app.shell_view = ShellView::Tools;
-    app.tools_scroll = usize::MAX;
+    *app.tools_route.scroll_mut() = usize::MAX;
 
     let backend = TestBackend::new(110, 24);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -2049,8 +2170,8 @@ fn viewport_expanded_modules_remain_navigable_at_24_rows() {
         .id
         .clone();
     app.shell_view = ShellView::Catalog;
-    app.catalog_expanded = true;
-    app.modules_scroll = usize::MAX;
+    app.catalog_route.expand();
+    *app.modules_route.scroll_mut() = usize::MAX;
 
     let backend = TestBackend::new(110, 24);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -2066,12 +2187,13 @@ fn viewport_expanded_modules_remain_navigable_at_24_rows() {
 }
 
 #[test]
-fn viewport_findings_keeps_cursor_visible_at_24_rows() {
+fn workbench_findings_pane_windows_cursor_into_view() {
     let backend = TestBackend::new(100, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Findings;
-    app.findings_cursor = 29;
+    app.shell_view = ShellView::Workbench;
+    app.workbench_focus = WorkbenchPane::Findings;
+    app.findings_route.set_cursor(29);
     app.findings = (0..30)
         .map(|index| {
             let mut finding = Finding::new_semgrep(
@@ -2090,21 +2212,18 @@ fn viewport_findings_keeps_cursor_visible_at_24_rows() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
+    // The review queue windows around the cursor: the last alias is visible,
+    // the first has scrolled off.
     assert!(rendered.contains("F-0030"));
-    assert!(rendered.contains("title-29"));
     assert!(!rendered.contains("F-0001"));
-    assert!(rendered.contains("j/k/g/G move"));
-    assert!(rendered.contains("PgUp/PgDn page"));
-    assert!(rendered.contains("Enter open"));
-    assert!(!rendered.contains("┌"));
 }
 
 #[test]
-fn keybind_footer_advertises_findings_navigation_keys_at_80_columns() {
+fn keybind_footer_advertises_workbench_navigation_keys_at_80_columns() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Findings;
+    app.shell_view = ShellView::Workbench;
     app.findings = vec![Finding::new_semgrep(
         "demo.rule",
         "src/app.rs",
@@ -2117,10 +2236,9 @@ fn keybind_footer_advertises_findings_navigation_keys_at_80_columns() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
-    assert!(rendered.contains("j/k/g/G move"));
-    assert!(rendered.contains("PgUp/PgDn page"));
-    assert!(rendered.contains("Enter open"));
-    assert!(!rendered.contains("[open <id>]"));
+    assert!(rendered.contains("Tab"), "{rendered}");
+    assert!(rendered.contains("j/k"), "{rendered}");
+    assert!(rendered.contains("Enter"), "{rendered}");
 }
 
 #[test]
@@ -2180,6 +2298,7 @@ fn renders_agent_chat_mode_while_question_is_active() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        screen_context_scope: Some("scope: F-0001 · 作 confirm · abc1234-dirty".to_string()),
         failure_context: None,
         pending_failure_context: None,
     });
@@ -2192,6 +2311,7 @@ fn renders_agent_chat_mode_while_question_is_active() {
     assert!(rendered.contains("running"));
     assert!(rendered.contains("mode:agent"));
     assert!(rendered.contains("agent: active"));
+    assert!(rendered.contains("scope: F-0001"));
     assert!(rendered.contains("kuzushi/agent>"));
     assert!(!rendered.contains("┌"));
 }
@@ -2217,6 +2337,7 @@ fn renders_honest_abort_requested_states() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        screen_context_scope: None,
         failure_context: None,
         pending_failure_context: None,
     });
@@ -2262,6 +2383,7 @@ fn agent_chat_renders_failure_handoff_panel() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        screen_context_scope: None,
         failure_context: Some(kuzushi_core::run_artifacts::FailureToLlmContext {
             failed_stage: "semgrep:scan".to_string(),
             cause: "semgrep binary missing".to_string(),
@@ -2309,6 +2431,7 @@ fn failure_handoff_view_renders_current_context() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        screen_context_scope: None,
         failure_context: Some(kuzushi_core::run_artifacts::FailureToLlmContext {
             failed_stage: "semgrep:scan".to_string(),
             cause: "semgrep binary missing".to_string(),
@@ -2486,6 +2609,13 @@ fn renders_shell_module_plan_and_run_routing_modes() {
             let mut app = ShellApp::new(V2Config::default(), None);
             app.focused_module = Some("context".to_string());
             app.shell_view = ShellView::ModuleRun;
+            (app, "mode:module", "kuzushi/context>")
+        },
+        {
+            let mut app = ShellApp::new(V2Config::default(), None);
+            app.focused_module = Some("context".to_string());
+            app.set_running_tool_for_test("context:build");
+            app.shell_view = ShellView::ModuleRun;
             (app, "mode:run", "kuzushi/context/run>")
         },
     ];
@@ -2497,21 +2627,19 @@ fn renders_shell_module_plan_and_run_routing_modes() {
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains(mode), "missing {mode} in {rendered}");
+        assert!(rendered.contains("KUZUSHI"), "missing brand in {rendered}");
         assert!(
-            rendered.contains("KUZUSHI mode:"),
-            "missing cockpit strip in {rendered}"
+            rendered.contains("mode:"),
+            "missing mode chip in {rendered}"
         );
         assert!(
-            rendered.contains(" · target:"),
-            "missing target separator in {rendered}"
+            rendered.contains("target:"),
+            "missing target chip in {rendered}"
         );
+        assert!(rendered.contains("ctx:"), "missing ctx chip in {rendered}");
         assert!(
-            rendered.contains(" · ctx:"),
-            "missing ctx separator in {rendered}"
-        );
-        assert!(
-            rendered.contains(" · model:"),
-            "missing model separator in {rendered}"
+            rendered.contains("model:"),
+            "missing model chip in {rendered}"
         );
         assert!(
             !rendered.contains("KUZUSHI  mode "),
@@ -2530,18 +2658,25 @@ fn renders_all_ink_parity_shell_surfaces() {
         (ShellView::Recommend, "RECOMMEND"),
         (ShellView::Module, "MODULE DETAIL"),
         (ShellView::ModuleRun, "TRANSCRIPT"),
-        (ShellView::Findings, "filters"),
+        (ShellView::Workbench, "FINDINGS"),
         (ShellView::Tune, "TUNE"),
-        (ShellView::Threat(ThreatView::Dfd), "DFD"),
         (ShellView::Threat(ThreatView::Stories), "STORIES"),
         (ShellView::ThreatEditor, "THREAT MODEL EDIT"),
         (ShellView::PromptsEditor, "PROMPTS"),
         (ShellView::ActorDetail(1), "ACTOR 1"),
         (ShellView::Runs, "RUN TIMELINE"),
+        (
+            ShellView::RunDiff {
+                left: "run-left".to_string(),
+                right: "run-right".to_string(),
+            },
+            "RUN DIFF",
+        ),
         (ShellView::Replay("run-1".to_string()), "REPLAY"),
         (ShellView::Trace("run-1".to_string()), "TRACE"),
         (ShellView::Help, "HELP"),
         (ShellView::Config, "CONFIG"),
+        (ShellView::Health, "HEALTH"),
         (ShellView::Tools, "TOOLS"),
         (
             ShellView::Options(crate::app::OptionsView {
@@ -2552,8 +2687,11 @@ fn renders_all_ink_parity_shell_surfaces() {
         ),
         (ShellView::SastTasks, "SAST TASKS"),
         (ShellView::Context, "CONTEXT"),
+        (ShellView::ProjectModel, "PROJECT MODEL"),
+        (ShellView::StrategyQueue, "STRATEGY QUEUE"),
         (ShellView::Workspace, "WORKSPACE"),
         (ShellView::KnowledgeBase, "KB ATTACHMENTS"),
+        (ShellView::FilePicker, "ATTACH A FILE"),
         (ShellView::FailureHandoff, "FAILURE HANDOFF"),
         (ShellView::AgentChat, "AGENT"),
         (ShellView::History, "COMMAND HISTORY"),
@@ -2569,16 +2707,16 @@ fn renders_all_ink_parity_shell_surfaces() {
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
         app.focused_module = Some("semgrep".to_string());
-        let is_dfd = matches!(view, ShellView::Threat(ThreatView::Dfd));
+        // The Workbench command center is the one box-drawing primary surface
+        // (bordered panes); every other view stays line-based.
+        let is_workbench = matches!(view, ShellView::Workbench);
         app.shell_view = view;
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
 
         assert!(rendered.contains(expected), "missing {expected}");
-        // DFD diagram intentionally uses box-drawing; suppress the
-        // no-Ink-dashboard guard for that one view.
-        if !is_dfd {
+        if !is_workbench {
             assert!(!rendered.contains("┌"), "{expected} drew a box");
         }
     }
@@ -2761,8 +2899,8 @@ fn view_status_segment_reflects_actual_view_not_focused_module() {
     app.shell_view = ShellView::Tools;
     assert_eq!(view_status_segment(&app), "tools");
 
-    app.shell_view = ShellView::Findings;
-    assert_eq!(view_status_segment(&app), "findings");
+    app.shell_view = ShellView::Workbench;
+    assert_eq!(view_status_segment(&app), "workbench");
 
     app.shell_view = ShellView::Threat(ThreatView::Stride);
     assert_eq!(view_status_segment(&app), "threats:stride");
@@ -2894,7 +3032,7 @@ fn plan_card_keybind_row_drops_bracket_chrome() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.pending_plan = Some(PlanProposal {
+    app.set_pending_plan(PlanProposal {
         goal: "demo".to_string(),
         summary: "demo summary".to_string(),
         changes: vec![PlanChange::Note {
@@ -2951,7 +3089,7 @@ fn prereq_plan_card_shows_cached_missing_writes_risk_cost_and_actions() {
     assert!(rendered.contains("a approve"));
     assert!(rendered.contains("r reuse cached"));
     assert!(rendered.contains("g regenerate"));
-    assert!(rendered.contains("c cancel"));
+    assert!(rendered.contains("n cancel"));
 }
 
 #[test]
@@ -3168,23 +3306,22 @@ fn transcript_finding_line_tints_severity_per_mockup() {
 }
 
 #[test]
-fn runs_view_lists_past_runs_from_run_json_with_summary_fallback() {
+fn runs_view_lists_past_runs_from_run_json() {
     // Mockup parity: `design/mockups/runs.jsx` shows past runs as a
-    // table with status tinting.  Verify the run view model prefers
-    // canonical `run.json`, keeps `summary.json` fallback, and renders
-    // one styled row per past run.
+    // table with status tinting. Verify the run view model renders one
+    // styled row per canonical run metadata file.
     let tmp = tempfile::tempdir().unwrap();
-    let canonical_run_dir = ui_run_dir(Some(tmp.path()), "r-2026-05-06T14-31");
-    let legacy_run_dir = ui_run_dir(Some(tmp.path()), "r-2026-05-06T15-18");
-    std::fs::create_dir_all(&canonical_run_dir).unwrap();
-    std::fs::create_dir_all(&legacy_run_dir).unwrap();
+    let first_run_dir = ui_run_dir(Some(tmp.path()), "r-2026-05-06T14-31");
+    let second_run_dir = ui_run_dir(Some(tmp.path()), "r-2026-05-06T15-18");
+    std::fs::create_dir_all(&first_run_dir).unwrap();
+    std::fs::create_dir_all(&second_run_dir).unwrap();
     std::fs::write(
-        canonical_run_dir.join("run.json"),
+        first_run_dir.join("run.json"),
         r#"{"status":"completed","findings":18,"target":"~/work/acme-checkout"}"#,
     )
     .unwrap();
     std::fs::write(
-        legacy_run_dir.join("summary.json"),
+        second_run_dir.join("run.json"),
         r#"{"status":"failed","findings":0,"target":"~/work/acme-checkout"}"#,
     )
     .unwrap();
@@ -3211,6 +3348,103 @@ fn runs_view_lists_past_runs_from_run_json_with_summary_fallback() {
 }
 
 #[test]
+fn run_diff_view_renders_new_and_not_seen_findings_and_revisions() {
+    let tmp = tempfile::tempdir().unwrap();
+    write_run_diff_fixture(
+        tmp.path(),
+        "run-left",
+        "abcdef123456",
+        serde_json::json!([
+            {"identityId":"fi_shared","fingerprint":"same","title":"shared","severity":"high","filePath":"src/lib.rs","startLine":10,"tool":"semgrep"},
+            {"identityId":"fi_changed","fingerprint":"changed","title":"changed item","severity":"medium","filePath":"src/change.rs","startLine":15,"tool":"semgrep","triage":{"confidence":"0.41","verdict":"needs_review"}},
+            {"fingerprint":"line-old","ruleId":"demo.sql","title":"line shifted item","severity":"medium","filePath":"src/db.rs","startLine":20,"tool":"semgrep"},
+            {"fingerprint":"not-seen","title":"not seen item","severity":"medium","filePath":"src/old.rs","startLine":20,"tool":"codeql"}
+        ]),
+    );
+    write_run_diff_fixture(
+        tmp.path(),
+        "run-right",
+        "123456789abc",
+        serde_json::json!([
+            {"identityId":"fi_shared","fingerprint":"same","title":"shared","severity":"high","filePath":"src/lib.rs","startLine":10,"tool":"semgrep"},
+            {"identityId":"fi_changed","fingerprint":"changed","title":"changed item","severity":"high","filePath":"src/change.rs","startLine":15,"tool":"semgrep","triage":{"confidence":"0.91","verdict":"confirmed"}},
+            {"fingerprint":"line-new","ruleId":"demo.sql","title":"line shifted item","severity":"high","filePath":"src/db.rs","startLine":24,"tool":"semgrep"},
+            {"fingerprint":"new","title":"new item","severity":"critical","filePath":"src/new.rs","startLine":30,"tool":"joern"}
+        ]),
+    );
+    let backend = TestBackend::new(120, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
+    app.findings = vec![
+        run_diff_reviewed_finding("fi_shared", TriageVerdict::TruePositive),
+        run_diff_reviewed_finding("fi_changed", TriageVerdict::FalsePositive),
+    ];
+    app.shell_view = ShellView::RunDiff {
+        left: "run-left".to_string(),
+        right: "run-right".to_string(),
+    };
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("RUN DIFF"));
+    assert!(rendered.contains("rev:abcdef1"));
+    assert!(rendered.contains("rev:1234567"));
+    assert!(rendered.contains("NEW IN RIGHT"));
+    assert!(rendered.contains("new item"));
+    assert!(rendered.contains("decisions: identities=2"));
+    assert!(rendered.contains("conflicts=1"));
+    assert!(rendered.contains("CHANGED IN RIGHT"));
+    assert!(rendered.contains("changed item"));
+    assert!(rendered.contains("UNCERTAIN MATCHES"));
+    assert!(rendered.contains("line shifted item"));
+    assert!(rendered.contains("review before carrying decisions"));
+    assert!(rendered.contains("NOT SEEN IN RIGHT"));
+    assert!(rendered.contains("not seen item"));
+}
+
+fn run_diff_reviewed_finding(identity_id: &str, verdict: TriageVerdict) -> Finding {
+    let mut finding = Finding::new_semgrep(
+        "demo.review",
+        "src/app.ts",
+        12,
+        Some(12),
+        Severity::High,
+        "reviewed finding",
+    );
+    finding.identity_id = Some(identity_id.to_string());
+    finding.triage = Some(TriageOutcome {
+        verdict,
+        confidence: 0.95,
+        rationale: "loaded workspace review".to_string(),
+        ..Default::default()
+    });
+    finding
+}
+
+fn write_run_diff_fixture(
+    root: &std::path::Path,
+    run_id: &str,
+    sha: &str,
+    findings: serde_json::Value,
+) {
+    let run_dir = ui_run_dir(Some(root), run_id);
+    std::fs::create_dir_all(&run_dir).unwrap();
+    std::fs::write(
+        run_dir.join("run.json"),
+        serde_json::json!({
+            "status": "completed",
+            "targetGit": {"sha": sha, "branch": "main", "dirty": false},
+            "target": root.display().to_string()
+        })
+        .to_string(),
+    )
+    .unwrap();
+    std::fs::write(run_dir.join("findings.json"), findings.to_string()).unwrap();
+}
+
+#[test]
 fn catalog_j_k_moves_row_cursor_and_highlights_row() {
     // `design/mockups/catalog.jsx` advertises `j/k row` and shows the
     // focused row with `▌` accent + c-sel background.  Verify that
@@ -3225,13 +3459,13 @@ fn catalog_j_k_moves_row_cursor_and_highlights_row() {
     app.handle_command(crate::commands::ShellCommand::Modules);
 
     // Cursor starts at 0; `j` advances it.
-    let before = app.catalog_cursor;
+    let before = app.catalog_route.cursor();
     app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
-    assert_eq!(app.catalog_cursor, before + 1);
+    assert_eq!(app.catalog_route.cursor(), before + 1);
 
     // `k` reverses; from row 1 back to 0.
     app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()));
-    assert_eq!(app.catalog_cursor, before);
+    assert_eq!(app.catalog_route.cursor(), before);
 
     // Render after a `j` press; the catalog body should contain the
     // cursor `▌` glyph at least once.
@@ -3239,28 +3473,6 @@ fn catalog_j_k_moves_row_cursor_and_highlights_row() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
     assert!(rendered.contains("▌"), "cursor glyph missing: {rendered}");
-}
-
-#[test]
-fn findings_empty_state_uses_panel_pattern_per_mockup() {
-    // `design/mockups/empty-states.jsx::panel` paints empty-state
-    // panels with: `· empty` divider, `∅` glyph + label, muted
-    // explanations, and `▸` CTA rows with accent commands.
-    let backend = TestBackend::new(120, 24);
-    let mut terminal = Terminal::new(backend).unwrap();
-    let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Findings;
-
-    terminal.draw(|frame| render_app(frame, &app)).unwrap();
-    let rendered = format!("{:?}", terminal.backend().buffer());
-
-    assert!(rendered.contains("FINDINGS · empty"));
-    assert!(rendered.contains("∅"));
-    assert!(rendered.contains("no findings yet"));
-    assert!(rendered.contains(".kuzushi/v2/findings.sqlite3"));
-    assert!(rendered.contains("▸"));
-    assert!(rendered.contains("scan"));
-    assert!(!rendered.contains("load gh"));
 }
 
 #[test]
@@ -3290,11 +3502,11 @@ fn catalog_g_and_uppercase_g_jump_cursor_to_bounds() {
 
     // G jumps to last row.
     app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
-    assert_eq!(app.catalog_cursor, total - 1);
+    assert_eq!(app.catalog_route.cursor(), total - 1);
 
     // g jumps to first.
     app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
-    assert_eq!(app.catalog_cursor, 0);
+    assert_eq!(app.catalog_route.cursor(), 0);
 }
 
 #[test]
@@ -3467,7 +3679,7 @@ fn auth_view_stacks_and_wraps_on_narrow_terminals() {
 fn home_view_shows_journey_rail_and_phase_chip_with_target() {
     // The engagement spine must be ambient: the home view carries the
     // 組 map → 崩 hunt → 作 confirm → 掛 fix rail and the idle footer a
-    // compact `phase:<word> n/4` chip whenever a target is active.
+    // compact journey chip whenever a target is active.
     let dir = tempfile::tempdir().expect("temp target");
     let backend = TestBackend::new(120, 34);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -3481,10 +3693,14 @@ fn home_view_shows_journey_rail_and_phase_chip_with_target() {
     assert!(rendered.contains("組 map"), "rail shows map phase");
     assert!(rendered.contains("崩 hunt"), "rail shows hunt phase");
     assert!(rendered.contains("掛 fix"), "rail shows fix phase");
-    assert!(rendered.contains("phase:map 1/4"), "footer phase chip");
+    assert!(rendered.contains("組 map 1/4"), "footer phase chip");
     assert!(
-        rendered.contains("Run next"),
-        "NEXT action speaks the journey verb"
+        rendered.contains("type `next`"),
+        "NEXT mechanics name the typed command"
+    );
+    assert!(
+        rendered.contains("next · findings · options sast:scan"),
+        "journey Home command list should expose next, findings, and tuning"
     );
 }
 
@@ -3505,8 +3721,7 @@ fn activity_view_collapses_tasks_pane_for_taskless_runs() {
     assert!(!rendered.contains("no DAG tasks yet"));
     assert!(!rendered.contains("TASKS"));
     assert!(rendered.contains("OUTPUT"));
-    assert!(rendered.contains("no DAG tasks — streaming tool output"));
-    assert!(rendered.contains("[output focused]"));
+    assert!(rendered.contains("no task rows — streaming tool output"));
 }
 
 #[test]
@@ -3527,10 +3742,44 @@ fn activity_view_names_the_running_tool_everywhere_it_matters() {
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("threat-model:build · running"));
-    assert!(rendered.contains("threat-model:build is working — waiting for its first trace"));
-    assert!(rendered.contains("▸ RUNNING  threat-model:build"));
+    assert!(rendered.contains("TASKS"));
+    assert!(rendered.contains("single tool: threat-model:build"));
+    assert!(rendered.contains("● RUNNING  threat-model:build"));
     assert!(!rendered.contains("waiting for trace events"));
     assert!(!rendered.contains("hover [j/k] to inspect a task"));
+}
+
+#[test]
+fn activity_view_renders_partial_terminal_outcome_from_run_summary() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut summary = RunSummary::running(
+        "run-partial-render",
+        "scan",
+        Some("sast:scan".to_string()),
+        temp.path().display().to_string(),
+    )
+    .with_findings(Some(1));
+    summary.status = "partial".to_string();
+    summary.error = Some("triage stage did not complete".to_string());
+    kuzushi_core::write_run_summary(temp.path(), &summary).unwrap();
+
+    let backend = TestBackend::new(140, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(temp.path().to_path_buf());
+    app.activity = Some(ActivitySession::new("run-partial-render"));
+    app.shell_view = ShellView::Activity;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("⚠ run partial"), "{rendered}");
+    assert!(rendered.contains("1 finding"), "{rendered}");
+    assert!(
+        rendered.contains("reason: triage stage did not complete"),
+        "{rendered}"
+    );
+    assert!(!rendered.contains("clean"), "{rendered}");
 }
 
 #[test]
@@ -3538,19 +3787,27 @@ fn target_picker_renders_candidates_with_cursor_and_hints() {
     let backend = TestBackend::new(120, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target_candidates = vec![
+    app.target_picker_route.open(vec![
         crate::app::TargetCandidate {
             path: std::path::PathBuf::from("/work/acme"),
             label: ".".to_string(),
             hint: "git repo",
+            scope: None,
         },
         crate::app::TargetCandidate {
             path: std::path::PathBuf::from("/work/acme/api"),
             label: "api".to_string(),
             hint: "previous kuzushi target",
+            scope: None,
         },
-    ];
-    app.target_picker_cursor = 1;
+        crate::app::TargetCandidate {
+            path: std::path::PathBuf::from("/work/acme/libs/parser"),
+            label: "libs/parser".to_string(),
+            hint: "git submodule",
+            scope: None,
+        },
+    ]);
+    app.target_picker_route.set_cursor(1);
     app.shell_view = ShellView::TargetPicker;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -3560,10 +3817,75 @@ fn target_picker_renders_candidates_with_cursor_and_hints() {
     assert!(rendered.contains("git repo"));
     assert!(rendered.contains("> api"), "cursor marks the selected row");
     assert!(rendered.contains("previous kuzushi target"));
+    assert!(rendered.contains("git submodule"));
     assert!(
         rendered.contains("target <path>"),
         "manual-path escape hatch"
     );
+    assert!(
+        rendered.contains("press `d`"),
+        "targetless/no-key escape hatch"
+    );
+}
+
+#[test]
+fn model_picker_renders_offline_demo_escape_hatch() {
+    let backend = TestBackend::new(110, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::ModelPicker;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("CHOOSE A MODEL"));
+    assert!(rendered.contains("Try offline fixture"));
+    assert!(rendered.contains("local/no auth"));
+    assert!(rendered.contains("d/demo"));
+}
+
+#[test]
+fn auth_picker_renders_selectable_offline_demo_row() {
+    let backend = TestBackend::new(110, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::AuthMethodPicker("openai".to_string());
+    app.auth_picker_route.set_cursor(2);
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("CHOOSE AUTH METHOD"));
+    assert!(rendered.contains("> Offline demo"));
+    assert!(rendered.contains("no key, model, or scanner binary"));
+}
+
+#[test]
+fn file_picker_renders_filter_count_and_selected_file() {
+    let backend = TestBackend::new(100, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::FilePicker;
+    app.file_picker_route.open(
+        vec![
+            "README.md".to_string(),
+            "docs/design.md".to_string(),
+            "src/main.rs".to_string(),
+        ],
+        false,
+        &ShellView::KnowledgeBase,
+    );
+    for ch in "des".chars() {
+        app.file_picker_route.push_query(ch);
+    }
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("ATTACH A FILE"));
+    assert!(rendered.contains("filter: des"));
+    assert!(rendered.contains("1 shown"));
+    assert!(rendered.contains("> docs/design.md"));
 }
 
 #[test]
@@ -3706,6 +4028,23 @@ fn cost_cap_halt_row_drops_bracket_chrome() {
 }
 
 #[test]
+fn cost_cap_halt_renders_compact_fallback_on_short_terminals() {
+    let backend = TestBackend::new(80, 4);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.advisory.budget_halt = Some(crate::app::BudgetHalt {
+        limit_usd: 1.0,
+        spent_usd: 1.5,
+    });
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("COST CAP: c=continue"));
+    assert!(rendered.contains("a=abort"));
+}
+
+#[test]
 fn module_detail_renders_options_when_stored_values_exist() {
     // `design/mockups/modules-detail.jsx::s2` shows OPTIONS · N as
     // a section.  Verify storing a value through `option_store`
@@ -3754,6 +4093,31 @@ fn module_detail_lists_prompt_overrides_from_disk() {
     assert!(rendered.contains("PROMPTS"));
     assert!(rendered.contains("system"));
     assert!(rendered.contains("triage"));
+}
+
+#[test]
+fn prompts_editor_renders_selected_prompt_stack() {
+    let tmp = tempfile::tempdir().unwrap();
+    let override_path = kuzushi_core::prompt_override_path(tmp.path(), "sast", "triage");
+    std::fs::create_dir_all(override_path.parent().unwrap()).unwrap();
+    std::fs::write(&override_path, "triage prompt body").unwrap();
+
+    let backend = TestBackend::new(120, 32);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.target = Some(tmp.path().to_path_buf());
+    app.focused_module = Some("sast".to_string());
+    app.prompts_cursor = 1;
+    app.shell_view = ShellView::PromptsEditor;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("PROMPT STACK"));
+    assert!(rendered.contains("triage"));
+    assert!(rendered.contains("project override"));
+    assert!(rendered.contains("override active"));
+    assert!(rendered.contains("sha256:"));
 }
 
 #[test]
@@ -3815,22 +4179,19 @@ fn trace_view_empty_when_no_trace_jsonl_on_disk() {
 }
 
 #[test]
-fn replay_view_prefers_run_json_and_keeps_summary_fallback() {
+fn replay_view_requires_run_json_metadata() {
     let tmp = tempfile::tempdir().unwrap();
     let canonical = ui_run_dir(Some(tmp.path()), "r-canonical");
-    let legacy = ui_run_dir(Some(tmp.path()), "r-legacy");
+    let missing = ui_run_dir(Some(tmp.path()), "r-missing");
     std::fs::create_dir_all(&canonical).unwrap();
-    std::fs::create_dir_all(&legacy).unwrap();
+    std::fs::create_dir_all(&missing).unwrap();
     std::fs::write(canonical.join("run.json"), r#"{"status":"completed"}"#).unwrap();
-    std::fs::write(legacy.join("summary.json"), r#"{"status":"complete"}"#).unwrap();
 
     let canonical_rendered = render_replay_for_target(tmp.path(), "r-canonical");
     assert!(canonical_rendered.contains("run.json"));
-    assert!(!canonical_rendered.contains("summary.json (missing)"));
 
-    let legacy_rendered = render_replay_for_target(tmp.path(), "r-legacy");
-    assert!(legacy_rendered.contains("summary.json"));
-    assert!(!legacy_rendered.contains("run artefacts not on disk"));
+    let missing_rendered = render_replay_for_target(tmp.path(), "r-missing");
+    assert!(missing_rendered.contains("run.json (missing)"));
 }
 
 #[test]
@@ -3864,7 +4225,7 @@ fn patch_view_renders_rationale_diff_tests_and_guardrail_sections() {
     let backend = TestBackend::new(120, 48);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.pending_patch = Some(crate::app::PendingPatch {
+    app.engagement.set_pending_patch(crate::app::PendingPatch {
             alias: "F-0001".to_string(),
             rationale: "replace format!() concatenation with sqlx::query!() macro".to_string(),
             side_effect: Some("closes F-0001 (sqli)".to_string()),
@@ -3916,8 +4277,8 @@ fn patch_view_empty_state_when_no_patch_pending() {
     assert!(rendered.contains("PATCH · F-0042 · empty"));
     assert!(rendered.contains("∅"));
     assert!(rendered.contains("no patch staged"));
-    assert!(rendered.contains("patch:run"));
-    assert!(rendered.contains(".kuzushi/runs/"));
+    assert!(rendered.contains("patch:finding"));
+    assert!(rendered.contains(".kuzushi/v3/runs/"));
 }
 
 #[test]
@@ -3933,7 +4294,7 @@ fn patch_diff_summary_counts_files_adds_and_dels() {
 #[test]
 fn confirm_card_renders_tool_target_and_y_n_action_row() {
     // `design/mockups/confirm-dialog.jsx` paints CONFIRM gates with
-    // a warn header, tool/target/rationale rows, and a y/Y/n/N action
+    // a warn header, tool/target/rationale rows, and a y/Y/n/Esc/N action
     // row.  Verify each lands in the buffer when the gate is pending.
     let backend = TestBackend::new(120, 24);
     let mut terminal = Terminal::new(backend).unwrap();
@@ -3958,6 +4319,8 @@ fn confirm_card_renders_tool_target_and_y_n_action_row() {
     assert!(rendered.contains("verify F-0012"));
     assert!(rendered.contains("refund.acme on project allowlist"));
     assert!(rendered.contains("allow once"));
+    assert!(rendered.contains("n/Esc"));
+    assert!(rendered.contains("deny once"));
     assert!(rendered.contains("deny + add to denylist"));
 }
 
@@ -4049,6 +4412,7 @@ fn agent_chat_renders_multi_turn_history_with_bubble_per_turn() {
         ],
         run_id: None,
         started_secs: 0,
+        screen_context_scope: None,
         failure_context: None,
         pending_failure_context: None,
     });
@@ -4092,6 +4456,7 @@ fn agent_chat_fold_for_next_turn_pushes_completed_turn_into_history() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        screen_context_scope: None,
         failure_context: None,
         pending_failure_context: None,
     };
@@ -4125,6 +4490,7 @@ fn agent_chat_renders_role_tagged_bubbles() {
         history: Vec::new(),
         run_id: None,
         started_secs: 0,
+        screen_context_scope: None,
         failure_context: None,
         pending_failure_context: None,
     });
@@ -4218,4 +4584,422 @@ fn banner_row(buffer: &Buffer, needle: &str) -> Option<u16> {
         }
     }
     None
+}
+
+// ── Workbench command center ─────────────────────────────────────────────────
+
+fn workbench_app_with_findings() -> ShellApp {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.findings = vec![Finding::new_semgrep(
+        "demo.sqli",
+        "apps/api/orders.rs",
+        12,
+        Some(14),
+        Severity::High,
+        "sql injection via order_id",
+    )];
+    app
+}
+
+fn workbench_app_with_long_source_rows() -> ShellApp {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.findings.extend(repeat_finding(
+        "demo.workflow",
+        ".github/workflows/benchmark-regression.yml",
+        Severity::High,
+        1,
+    ));
+    app.findings.extend(repeat_finding(
+        "demo.reference",
+        ".github/workflows/kuzushi-reference.yml",
+        Severity::High,
+        4,
+    ));
+    app.findings.extend(repeat_finding(
+        "demo.secret",
+        "crates/kuzushi-core/src/scan/engines/secret_scan/applies_size_binary_and_severity_filters.rs",
+        Severity::High,
+        18,
+    ));
+    app.findings.extend(repeat_finding(
+        "demo.medium",
+        "src/review/moderate-risk-finding.rs",
+        Severity::Medium,
+        1,
+    ));
+    app
+}
+
+fn repeat_finding<'a>(
+    rule: &'a str,
+    path: &'a str,
+    severity: Severity,
+    count: usize,
+) -> impl Iterator<Item = Finding> + 'a {
+    (0..count).map(move |index| {
+        Finding::new_semgrep(
+            format!("{rule}.{index}"),
+            path,
+            12,
+            Some(14),
+            severity.clone(),
+            "long source row render regression",
+        )
+    })
+}
+
+#[test]
+fn workbench_renders_pane_borders_at_wide_and_narrow_widths() {
+    let wide = render_workbench_for_test(120, 24);
+    assert!(wide.contains("┌"), "{wide}");
+    assert!(wide.contains("SOURCE"), "{wide}");
+    assert!(wide.contains("CODE"), "{wide}");
+    assert!(wide.contains("REVIEW QUEUE"), "{wide}");
+    assert!(wide.contains("CLAIM"), "{wide}");
+    assert!(!wide.contains("2/4 shown"), "{wide}");
+
+    let narrow = render_workbench_for_test(80, 16);
+    assert!(narrow.contains("┌"), "{narrow}");
+    assert!(narrow.contains("REVIEW QUEUE"), "{narrow}");
+    assert!(narrow.contains("F-0001"), "{narrow}");
+    assert!(narrow.contains("2/4 panes"), "{narrow}");
+}
+
+fn render_workbench_for_test(width: u16, height: u16) -> String {
+    let backend = TestBackend::new(width, height);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let app = workbench_app_with_findings();
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    format!("{:?}", terminal.backend().buffer())
+}
+
+#[test]
+fn workbench_renders_review_grid_at_common_terminal_widths() {
+    let backend = TestBackend::new(110, 24);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let app = workbench_app_with_findings();
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("CODE"), "{rendered}");
+    assert!(rendered.contains("REVIEW QUEUE"), "{rendered}");
+    assert!(rendered.contains("CLAIM"), "{rendered}");
+    assert!(rendered.contains("SOURCE"), "{rendered}");
+    assert!(!rendered.contains("2/4 shown"), "{rendered}");
+}
+
+#[test]
+fn workbench_short_review_hint_names_real_constraints() {
+    let backend = TestBackend::new(80, 16);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let app = workbench_app_with_findings();
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(!rendered.contains("SOURCE+CENTER hidden"), "{rendered}");
+    assert!(!rendered.contains(">=100 cols"), "{rendered}");
+    assert!(rendered.contains("2/4 panes"), "{rendered}");
+    assert!(!rendered.contains("? unconfirmed"), "{rendered}");
+    assert!(rendered.contains("REVIEW QUEUE"), "{rendered}");
+    assert!(rendered.contains("F-0001"), "{rendered}");
+}
+
+#[test]
+fn workbench_top_bar_renders_compact_journey_phase_with_target() {
+    let target = tempfile::tempdir().expect("temp target");
+    let backend = TestBackend::new(140, 30);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.target = Some(target.path().to_path_buf());
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("› workbench"), "{rendered}");
+    assert!(rendered.contains("target:"), "{rendered}");
+    assert!(!rendered.contains("phase:"), "{rendered}");
+    assert!(rendered.contains("組 map"), "{rendered}");
+    assert!(rendered.contains("▸ NEXT"), "{rendered}");
+    assert!(rendered.contains("page:aim"), "{rendered}");
+    assert!(rendered.contains("build context"), "{rendered}");
+}
+
+#[test]
+fn workbench_wide_frame_keeps_source_counts_and_footer_summary_on_one_row() {
+    let width = 220;
+    let backend = TestBackend::new(width, 42);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let app = workbench_app_with_long_source_rows();
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let buffer = terminal.backend().buffer();
+    let rows = rendered_buffer_rows(buffer);
+    let rendered = rows.join("\n");
+
+    assert!(rendered.contains("type scan run scan"), "{rendered}");
+    assert!(rendered.contains(" / 1 med"), "{rendered}");
+    assert!(!rendered.contains("medium"), "{rendered}");
+    assert!(!rendered.contains("mediu"), "{rendered}");
+
+    let source_width = ((width * 14) / 100).clamp(18, 32) as usize;
+    for row in rows {
+        let Some(source_text) = source_inner_text(&row, source_width) else {
+            continue;
+        };
+        assert!(
+            !is_orphan_source_count(&source_text),
+            "source row count wrapped onto its own line: {source_text:?}\n{rendered}"
+        );
+    }
+}
+
+fn rendered_buffer_rows(buffer: &Buffer) -> Vec<String> {
+    (0..buffer.area.height)
+        .map(|y| buffer_row_text(buffer, buffer.area.width, y))
+        .collect()
+}
+
+fn source_inner_text(row: &str, source_width: usize) -> Option<String> {
+    let pane = row.chars().take(source_width).collect::<String>();
+    if !pane.starts_with('│') || !pane.ends_with('│') {
+        return None;
+    }
+    Some(
+        pane.chars()
+            .skip(1)
+            .take(source_width.saturating_sub(2))
+            .collect::<String>()
+            .trim()
+            .to_string(),
+    )
+}
+
+fn is_orphan_source_count(source_text: &str) -> bool {
+    let Some(stripped) = source_text.strip_prefix("· ") else {
+        return source_text.parse::<usize>().is_ok();
+    };
+    stripped.parse::<usize>().is_ok()
+}
+
+#[test]
+fn workbench_lines_plain_shows_top_bar_findings_and_dfd_empty_hint() {
+    let app = workbench_app_with_findings();
+    let rendered = render_plain_app(&app, 110);
+
+    // Top bar identity, a findings row, and the cursor-following code/detail
+    // preview. DFD is still available by focusing the center pane explicitly.
+    assert!(rendered.contains("Kuzushi"), "{rendered}");
+    assert!(
+        rendered.contains("workspace export findings report.sarif"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("F-0001"), "{rendered}");
+    assert!(
+        rendered.contains("sql injection via order_id"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("CODE"), "{rendered}");
+    assert!(rendered.contains("F-0001"), "{rendered}");
+    assert!(rendered.contains("source unavailable"), "{rendered}");
+}
+
+#[test]
+fn workbench_ship_plain_shows_report_preview_counts() {
+    let mut app = workbench_app_with_findings();
+    app.workbench_page = Some(WorkbenchPage::Ship);
+
+    let rendered = render_plain_app(&app, 110);
+
+    assert!(rendered.contains("EXPORT"), "{rendered}");
+    assert!(
+        rendered.contains("1 of 1 findings in preview"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("decisions: 0 terminal / 1 open"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("format:sarif completeness:all"),
+        "{rendered}"
+    );
+    assert!(
+        rendered.contains("preview-only; export projection; writes no review state"),
+        "{rendered}"
+    );
+    assert!(rendered.contains("format omits: references"), "{rendered}");
+    assert!(rendered.contains("preview rows"), "{rendered}");
+    assert!(rendered.contains("decision:needs_review"), "{rendered}");
+}
+
+#[test]
+fn workbench_selected_finding_gets_readable_details_pane() {
+    let backend = TestBackend::new(180, 42);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let temp = tempfile::tempdir().unwrap();
+    let source_path = temp.path().join("src/main/java/Demo.java");
+    std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+    let source = (1..=50)
+        .map(|line| {
+            if line == 42 {
+                "String sql = \"SELECT * FROM accounts WHERE id=\" + request.getParameter(\"id\");"
+                    .to_string()
+            } else {
+                format!("// filler line {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    std::fs::write(&source_path, source).unwrap();
+    let mut finding = Finding::new_semgrep(
+        "demo.sqli",
+        "src/main/java/Demo.java",
+        42,
+        Some(42),
+        Severity::High,
+        "Request parameter is concatenated into an SQL query string before prepareStatement(), so the prepared statement does not prevent SQL injection.",
+    );
+    finding.message = "The request parameter is attacker-controlled and is concatenated into the SQL text before prepareStatement is called.".to_string();
+    finding.evidence = vec![FindingEvidence {
+        kind: "source-sink".to_string(),
+        file_path: finding.file_path.clone(),
+        line: 42,
+        snippet: "String sql = \"SELECT * FROM accounts WHERE id=\" + request.getParameter(\"id\");".to_string(),
+        rationale: "Attacker-controlled source reaches SQL construction before the prepared statement boundary.".to_string(),
+        confidence: 95,
+        request_blob: None,
+        response_blob: None,
+    }];
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.workbench_focus = WorkbenchPane::Details;
+    app.target = Some(temp.path().to_path_buf());
+    app.findings = vec![finding.clone()];
+    app.selected_finding = Some(finding);
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("CODE"), "{rendered}");
+    assert!(rendered.contains("Demo.java:42"), "{rendered}");
+    assert!(rendered.contains("▶"), "{rendered}");
+    assert!(rendered.contains("SELECT * FROM accounts"), "{rendered}");
+    assert!(!rendered.contains("┌DFD"), "{rendered}");
+    assert!(rendered.contains("F-0001 · HIGH"), "{rendered}");
+    assert!(rendered.contains("workspace export findings"), "{rendered}");
+    let claim_pos = rendered.find("CLAIM").expect("claim section");
+    let signals_pos = rendered[claim_pos..]
+        .find("SIGNALS")
+        .map(|offset| claim_pos + offset)
+        .expect("signals section");
+    let evidence_pos = rendered[signals_pos..]
+        .find("source-sink")
+        .map(|offset| signals_pos + offset)
+        .expect("evidence section");
+    let analysis_pos = rendered[evidence_pos..]
+        .find("ANALYSIS")
+        .map(|offset| evidence_pos + offset)
+        .expect("analysis section");
+    let verification_pos = rendered[analysis_pos..]
+        .find("VERIFICATION")
+        .map(|offset| analysis_pos + offset)
+        .expect("verification section");
+    assert!(claim_pos < signals_pos, "{rendered}");
+    assert!(signals_pos < evidence_pos, "{rendered}");
+    assert!(evidence_pos < analysis_pos, "{rendered}");
+    assert!(analysis_pos < verification_pos, "{rendered}");
+    assert!(!rendered.contains("proof state:"), "{rendered}");
+    assert!(rendered.contains("prepareStatement"), "{rendered}");
+    assert!(rendered.contains("source-sink"), "{rendered}");
+    assert!(
+        rendered.contains("Attacker-controlled source"),
+        "{rendered}"
+    );
+}
+
+#[test]
+fn workbench_center_renders_dfd_title_when_artifact_present() {
+    let temp = tempfile::tempdir().unwrap();
+    let doc = serde_json::json!({
+        "dfd": {
+            "nodes": [
+                {"id": "user", "name": "Browser", "trustZone": "internet"},
+                {"id": "api", "name": "API server", "trustZone": "app-tier"}
+            ],
+            "flows": [
+                {"id": "f1", "sourceId": "user", "targetId": "api", "description": "https"}
+            ]
+        }
+    });
+    let path = kuzushi_core::capabilities::persistent_threat_model_path(temp.path());
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, serde_json::to_string(&doc).unwrap()).unwrap();
+
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.target = Some(temp.path().to_path_buf());
+    app.workbench_page = Some(WorkbenchPage::Review);
+    app.workbench_center_mode = WorkbenchCenterMode::Dfd;
+
+    let rendered = render_plain_app(&app, 120);
+
+    // The real data-flow diagram replaces the empty hint.
+    assert!(rendered.contains("DATA-FLOW DIAGRAM"), "{rendered}");
+    assert!(!rendered.contains("no threat model yet"), "{rendered}");
+}
+
+#[test]
+fn workbench_frame_uses_scene_dfd_widget_when_artifact_present() {
+    let temp = tempfile::tempdir().unwrap();
+    let doc = serde_json::json!({
+        "dfd": {
+            "nodes": [
+                {
+                    "id": "user",
+                    "type": "external-entity",
+                    "name": "Browser",
+                    "trustZone": "internet"
+                },
+                {
+                    "id": "api",
+                    "type": "process",
+                    "name": "API server",
+                    "trustZone": "app-tier"
+                }
+            ],
+            "flows": [
+                {
+                    "id": "f1",
+                    "sourceId": "user",
+                    "targetId": "api",
+                    "description": "https"
+                }
+            ]
+        }
+    });
+    let path = kuzushi_core::capabilities::persistent_threat_model_path(temp.path());
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    std::fs::write(&path, serde_json::to_string(&doc).unwrap()).unwrap();
+
+    let backend = TestBackend::new(150, 34);
+    let mut terminal = Terminal::new(backend).unwrap();
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.target = Some(temp.path().to_path_buf());
+    app.workbench_page = Some(WorkbenchPage::Review);
+    app.workbench_center_mode = WorkbenchCenterMode::Dfd;
+
+    terminal.draw(|frame| render_app(frame, &app)).unwrap();
+    let rendered = format!("{:?}", terminal.backend().buffer());
+
+    assert!(rendered.contains("INTERNET"), "{rendered}");
+    assert!(rendered.contains("APP-TIER"), "{rendered}");
+    assert!(rendered.contains("◆ Browser"), "{rendered}");
+    assert!(rendered.contains("◇ API server"), "{rendered}");
+    assert!(!rendered.contains("DATA-FLOW DIAGRAM"), "{rendered}");
 }

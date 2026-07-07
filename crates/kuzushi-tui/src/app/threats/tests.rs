@@ -5,7 +5,6 @@ mod tests {
 
     #[test]
     fn threat_view_labels_match_command_suffixes() {
-        assert_eq!(threat_view_label(ThreatView::Dfd), "dfd");
         assert_eq!(threat_view_label(ThreatView::Stride), "stride");
         assert_eq!(threat_view_label(ThreatView::Stories), "stories");
         assert_eq!(threat_view_label(ThreatView::Scope), "scope");

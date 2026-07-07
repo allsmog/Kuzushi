@@ -101,7 +101,7 @@ pub(in crate::modules) fn run_triage_stage2(
 ) -> Result<TriageRunStats> {
     let mut stats = TriageRunStats::with_capacity(findings.len());
     for finding in findings {
-        triage_one_finding(store, runtime, input, config, &mut stats, finding);
+        triage_one_finding(store, runtime, input, config, &mut stats, finding)?;
     }
     Ok(stats)
 }
@@ -113,18 +113,27 @@ pub(in crate::modules) fn triage_one_finding(
     config: &TriageExecutionConfig,
     stats: &mut TriageRunStats,
     finding: Finding,
-) {
+) -> Result<()> {
     if triage_cost_cap_reached(input.cost_cap_usd, stats.total_cost) {
         stats.record_cost_cap_pending();
-        return;
+        return Ok(());
     }
 
     let outcome = match call_triage_runtime(runtime, config, input, &finding) {
         Ok(outcome) => outcome,
+        Err(error) if is_cancelled_runtime_error(&error) => {
+            return Err(error).context("triage:run cancelled");
+        }
         Err(error) => {
             stats.record_runtime_error(finding, error);
-            return;
+            return Ok(());
         }
     };
     persist_triage_outcome(store, stats, finding, outcome);
+    Ok(())
+}
+
+fn is_cancelled_runtime_error(error: &anyhow::Error) -> bool {
+    let message = format!("{error:#}").to_ascii_lowercase();
+    message.contains("cancelled") || message.contains("canceled")
 }

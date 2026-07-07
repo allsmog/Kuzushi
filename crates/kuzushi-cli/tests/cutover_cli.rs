@@ -3,6 +3,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
+use kuzushi_core::findings::ReviewDecisionVerdict;
 use kuzushi_core::{
     Finding, FindingStore, PatchResult, PatchStatus, PersistedProofVerdict,
     PersistedSandboxBackend, PersistedVerification, Severity, StaticProofState, TriageOutcome,
@@ -12,10 +13,6 @@ use serde_json::Value;
 
 fn kuzushi() -> Command {
     Command::new(env!("CARGO_BIN_EXE_kuzushi"))
-}
-
-fn kz() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_kz"))
 }
 
 fn repo_root() -> &'static Path {
@@ -33,6 +30,17 @@ fn stdout(output: std::process::Output) -> String {
         String::from_utf8_lossy(&output.stderr)
     );
     String::from_utf8(output.stdout).expect("stdout should be UTF-8")
+}
+
+fn native_alias(name: &str) -> (tempfile::TempDir, PathBuf) {
+    let temp = tempfile::tempdir().unwrap();
+    let alias_path = temp.path().join(name);
+    fs::copy(env!("CARGO_BIN_EXE_kuzushi"), &alias_path).unwrap();
+    let permissions = fs::metadata(env!("CARGO_BIN_EXE_kuzushi"))
+        .unwrap()
+        .permissions();
+    fs::set_permissions(&alias_path, permissions).unwrap();
+    (temp, alias_path)
 }
 
 fn latest_run_dir(root: &Path) -> PathBuf {
@@ -137,6 +145,7 @@ fn rust_cli_help_is_the_documented_primary_surface() {
         "findings",
         "finding",
         "runs",
+        "export",
         "suppress",
         "suppressions",
         "permissions",
@@ -159,7 +168,8 @@ fn rust_cli_help_is_the_documented_primary_surface() {
 
 #[test]
 fn rust_cli_compact_alias_is_a_native_binary() {
-    let out = stdout(kz().arg("--help").output().unwrap());
+    let (_temp, alias_path) = native_alias("kz");
+    let out = stdout(Command::new(alias_path).arg("--help").output().unwrap());
 
     assert!(out.contains("Kuzushi security-native code agent"));
     assert!(out.contains("Usage: kz"));
@@ -264,7 +274,7 @@ fn cli_run_workspace_status_reports_recorded_artifacts() {
             .as_str()
             .is_some_and(|path| path.ends_with("result.json"))
     }));
-    assert!(tmp.path().join(".kuzushi/latest").exists());
+    assert!(tmp.path().join(".kuzushi/v3/latest").exists());
     assert_canonical_run_files(&latest_run_dir(tmp.path()));
 }
 
@@ -309,9 +319,9 @@ fn suppress_command_records_expiring_evidence_backed_suppression() {
         "const express = require('express');\nres.send(req.query.name);\n",
     )
     .unwrap();
-    let store = FindingStore::open(tmp.path().join(".kuzushi/v2/findings.sqlite3")).unwrap();
+    let store = FindingStore::open(tmp.path().join(".kuzushi/v3/index.sqlite3")).unwrap();
     store
-        .insert_scan_run("scan-test", tmp.path(), "complete")
+        .record_run_started("scan-test", tmp.path(), "complete")
         .unwrap();
     let finding = Finding::new_tool(
         "semgrep",
@@ -324,6 +334,7 @@ fn suppress_command_records_expiring_evidence_backed_suppression() {
     )
     .with_static_proof_state(StaticProofState::StaticallyRejected);
     store.insert_finding("scan-test", &finding).unwrap();
+    drop(store);
 
     let out = stdout(
         kuzushi()
@@ -349,8 +360,21 @@ fn suppress_command_records_expiring_evidence_backed_suppression() {
     assert_eq!(parsed["scope"]["filePath"], "src/server.js");
     assert!(tmp
         .path()
-        .join(".kuzushi/v2/whitebox-suppressions.json")
+        .join(".kuzushi/v3/whitebox-suppressions.json")
         .exists());
+    let store = FindingStore::open(tmp.path().join(".kuzushi/v3/index.sqlite3")).unwrap();
+    let finding_id = store
+        .get_finding_by_fingerprint(&finding.fingerprint)
+        .unwrap()
+        .expect("finding after suppress")
+        .id
+        .expect("persisted finding id");
+    let decision = store
+        .latest_review_decision_for_finding_identity(finding_id)
+        .unwrap()
+        .expect("suppressed review decision");
+    assert_eq!(decision.decision.verdict, ReviewDecisionVerdict::Suppressed);
+    assert_eq!(decision.triage_verdict, None);
 }
 
 #[test]
@@ -358,7 +382,7 @@ fn plain_flag_forces_line_oriented_shell_output() {
     let tmp = tempfile::tempdir().unwrap();
     let out = stdout(
         kuzushi()
-            // Skip first-run onboarding so the shell lands on the home view
+            // Skip first-run onboarding so the shell lands on the workbench
             // this test exercises, not the no-model-configured model picker.
             .env("KUZUSHI_SKIP_ONBOARDING", "1")
             .args(["--plain", "shell", "--target"])
@@ -369,9 +393,9 @@ fn plain_flag_forces_line_oriented_shell_output() {
 
     assert!(out.contains("KUZUSHI"));
     assert!(out.contains("mode:shell"));
-    assert!(out.contains("HOME"));
-    // Fresh workspace collapses the per-artifact rail into a one-line summary.
-    assert!(out.contains("run artifacts"));
+    assert!(out.contains("ATTACK SURFACE"));
+    assert!(out.contains("DFD / AIM"));
+    assert!(out.contains("no findings yet"));
     assert_strict_plain("--plain shell", &out);
 }
 
@@ -381,7 +405,7 @@ fn plain_env_aliases_are_line_oriented_for_screen_reader_mode() {
     let out = stdout(
         kuzushi()
             .env("KUZUSHI_SCREEN_READER", "1")
-            // Skip first-run onboarding so the shell lands on the home view
+            // Skip first-run onboarding so the shell lands on the workbench
             // this test exercises, not the no-model-configured model picker.
             .env("KUZUSHI_SKIP_ONBOARDING", "1")
             .args(["shell", "--target"])
@@ -392,6 +416,7 @@ fn plain_env_aliases_are_line_oriented_for_screen_reader_mode() {
 
     assert!(out.contains("KUZUSHI"));
     assert!(out.contains("mode:shell"));
+    assert!(out.contains("ATTACK SURFACE"));
     assert_strict_plain("KUZUSHI_SCREEN_READER shell", &out);
 }
 
@@ -458,7 +483,6 @@ fn modules_and_tools_list_visible_executable_rust_surfaces() {
         "agentic-sast",
         "findings",
         "secret-scan",
-        "exploit-chain",
         "dep-hygiene",
         "iac-scan",
         "module-recommender",
@@ -468,7 +492,7 @@ fn modules_and_tools_list_visible_executable_rust_surfaces() {
             "missing visible module {expected}; modules={module_ids:?}"
         );
     }
-    for hidden in ["context-lite", "pipeline", "systems-hunt"] {
+    for hidden in ["context-lite", "exploit-chain", "pipeline", "systems-hunt"] {
         assert!(
             !module_ids.contains(&hidden),
             "hidden module {hidden} must not be listed"
@@ -487,7 +511,6 @@ fn modules_and_tools_list_visible_executable_rust_surfaces() {
         "agentic-sast:scan",
         "findings:list",
         "secret-scan:scan",
-        "exploit-chain:scan",
         "dep-hygiene:check",
         "iac-scan:scan",
         "module-recommender:recommend",
@@ -521,10 +544,10 @@ fn findings_empty_state_names_next_scan_command() {
 #[test]
 fn finding_detail_resolves_alias_and_outputs_json_report() {
     let tmp = tempfile::tempdir().unwrap();
-    let db_path = tmp.path().join(".kuzushi/v2/findings.sqlite3");
+    let db_path = tmp.path().join(".kuzushi/v3/index.sqlite3");
     let store = FindingStore::open(&db_path).unwrap();
     store
-        .insert_scan_run("run-detail", tmp.path(), "completed")
+        .record_run_started("run-detail", tmp.path(), "completed")
         .unwrap();
     let finding = Finding::new_semgrep(
         "demo.detail",
@@ -593,7 +616,7 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
     );
     assert!(plain.contains("Finding F-0001"));
     assert!(plain.contains("Proof state: source_sink_linked"));
-    assert!(plain.contains("Runtime validation: execution_confirmed"));
+    assert!(plain.contains("Runtime validation: runtime_verified"));
     assert!(plain.contains("Patch result:"));
     assert!(plain.contains("Next action: patch"));
 
@@ -616,7 +639,7 @@ fn finding_detail_resolves_alias_and_outputs_json_report() {
     assert!(report["runtimeValidation"]
         .as_str()
         .unwrap()
-        .starts_with("execution_confirmed"));
+        .starts_with("runtime_verified"));
     assert_eq!(report["nextAction"], "patch");
     assert_eq!(report["patchResults"].as_array().unwrap().len(), 1);
 }
@@ -679,7 +702,7 @@ fn npm_wrapper_kz_alias_reaches_the_compact_rust_binary() {
     fs::copy(repo_root().join("bin/kuzushi-rs.mjs"), &alias_path).unwrap();
 
     let output = Command::new("node")
-        .env("KUZUSHI_NATIVE_BIN", env!("CARGO_BIN_EXE_kz"))
+        .env("KUZUSHI_NATIVE_BIN", env!("CARGO_BIN_EXE_kuzushi"))
         .arg(alias_path)
         .arg("--help")
         .output()
@@ -709,7 +732,7 @@ fn demo_scans_offline_fixture_and_persists_findings() {
     let combined = format!("{stdout}{stderr}");
     assert!(combined.contains("finding(s)"), "{combined}");
     assert!(
-        !combined.contains("0 finding(s)"),
+        !combined.contains("completed: 0 finding(s)"),
         "demo fixture must fire findings: {combined}"
     );
 }
@@ -952,6 +975,8 @@ fn doctor_checks_rust_preflight_without_printing_secrets() {
         "findings-db",
         "semgrep",
         "codeql",
+        "joern",
+        "nmap",
         "model",
         "auth-env",
         "LangGraph bridge",
@@ -966,7 +991,7 @@ fn doctor_checks_rust_preflight_without_printing_secrets() {
     );
     assert!(
         !tmp.path()
-            .join(".kuzushi/v2")
+            .join(".kuzushi/v3")
             .join(format!(".doctor-write-test-{}", std::process::id()))
             .exists(),
         "doctor write probe should be removed"
@@ -1001,6 +1026,8 @@ fn doctor_json_reports_named_preflight_checks() {
         "findings-db",
         "semgrep",
         "codeql",
+        "joern",
+        "nmap",
         "model",
         "auth-env",
         "LangGraph bridge",
@@ -1036,7 +1063,7 @@ fn failed_run_writes_failure_handoff_context() {
         .is_some_and(|prompt| prompt.contains("context:build")));
     assert!(!String::from_utf8_lossy(&output.stdout).contains("validated"));
 
-    let runs_root = tmp.path().join(".kuzushi/runs");
+    let runs_root = tmp.path().join(".kuzushi/v3/runs");
     let run_dir = fs::read_dir(&runs_root)
         .unwrap()
         .next()
@@ -1186,8 +1213,8 @@ fn runtime_backed_run_missing_model_writes_failed_artifact_bundle() {
 }
 
 fn seed_untriaged_finding(repo: &Path) {
-    let store = FindingStore::open(repo.join(".kuzushi/v2/findings.sqlite3")).unwrap();
-    store.insert_scan_run("run-1", repo, "completed").unwrap();
+    let store = FindingStore::open(repo.join(".kuzushi/v3/index.sqlite3")).unwrap();
+    store.record_run_started("run-1", repo, "completed").unwrap();
     let finding = Finding::new_semgrep(
         "demo.sql",
         "src/db.ts",
@@ -1203,8 +1230,8 @@ fn seed_untriaged_finding(repo: &Path) {
 fn invalid_config_writes_failed_run_artifact_bundle() {
     let tmp = tempfile::tempdir().unwrap();
     let home = tmp.path().join("home");
-    fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
-    fs::write(home.join(".kuzushi/v2/config.toml"), r#"model = "gpt-5.5""#).unwrap();
+    fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+    fs::write(home.join(".kuzushi/v3/config.toml"), r#"model = "gpt-5.5""#).unwrap();
 
     let output = kuzushi()
         .current_dir(tmp.path())
@@ -1227,8 +1254,8 @@ fn scan_invalid_config_writes_failed_run_artifact_bundle() {
     let repo = tmp.path().join("repo");
     let home = tmp.path().join("home");
     fs::create_dir_all(&repo).unwrap();
-    fs::create_dir_all(home.join(".kuzushi/v2")).unwrap();
-    fs::write(home.join(".kuzushi/v2/config.toml"), r#"model = "gpt-5.5""#).unwrap();
+    fs::create_dir_all(home.join(".kuzushi/v3")).unwrap();
+    fs::write(home.join(".kuzushi/v3/config.toml"), r#"model = "gpt-5.5""#).unwrap();
 
     let output = kuzushi()
         .env("HOME", &home)
@@ -1381,7 +1408,7 @@ fn sast_scan_missing_cargo_audit_writes_failure_handoff_context() {
         stderr.contains("cargo-audit: `cargo audit` was not found"),
         "stderr: {stderr}"
     );
-    let run_dir = fs::read_dir(repo.join(".kuzushi/runs"))
+    let run_dir = fs::read_dir(repo.join(".kuzushi/v3/runs"))
         .unwrap()
         .next()
         .unwrap()

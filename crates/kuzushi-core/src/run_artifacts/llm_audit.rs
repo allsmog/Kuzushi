@@ -87,6 +87,9 @@ fn trace_step_from_line(line: &str) -> Result<RunTraceStep, serde_json::Error> {
 }
 
 fn audit_call_from_trace_step(step: RunTraceStep) -> Option<RunLlmCallAudit> {
+    if !is_llm_audit_step(&step) {
+        return None;
+    }
     Some(RunLlmCallAudit {
         n: step.n,
         kind: step.kind,
@@ -97,4 +100,8 @@ fn audit_call_from_trace_step(step: RunTraceStep) -> Option<RunLlmCallAudit> {
         latency_ms: step.latency_ms,
         cost_usd: step.cost_usd,
     })
+}
+
+fn is_llm_audit_step(step: &RunTraceStep) -> bool {
+    step.kind == "reasoning" || step.latency_ms.is_some() || step.cost_usd.is_some()
 }

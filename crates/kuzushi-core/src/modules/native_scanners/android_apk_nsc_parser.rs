@@ -55,7 +55,9 @@ pub(in crate::modules) fn parse_network_security_bytes(
 
 fn end_local_name(element: &quick_xml::events::BytesEnd<'_>) -> String {
     let name = String::from_utf8_lossy(element.name().as_ref()).to_string();
-    name.rsplit_once(':').map(|(_, l)| l.to_string()).unwrap_or(name)
+    name.rsplit_once(':')
+        .map(|(_, l)| l.to_string())
+        .unwrap_or(name)
 }
 
 #[derive(Default)]
@@ -145,7 +147,9 @@ impl NscParserState {
     }
 
     fn flush_domain_text(&mut self) {
-        let value = std::mem::take(&mut self.last_domain_text).trim().to_string();
+        let value = std::mem::take(&mut self.last_domain_text)
+            .trim()
+            .to_string();
         self.in_domain_element = false;
         if value.is_empty() {
             return;
@@ -179,7 +183,9 @@ fn attr_value(element: &BytesStart<'_>, qualified: &str) -> Result<Option<String
         let attr = attr?;
         let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
         if key == qualified || strip_ns(&key) == strip_ns(qualified) {
-            return Ok(Some(String::from_utf8_lossy(attr.value.as_ref()).to_string()));
+            return Ok(Some(
+                String::from_utf8_lossy(attr.value.as_ref()).to_string(),
+            ));
         }
     }
     Ok(None)
@@ -190,11 +196,13 @@ fn strip_ns(name: &str) -> &str {
 }
 
 fn attr_bool(element: &BytesStart<'_>, qualified: &str) -> Result<Option<bool>> {
-    Ok(attr_value(element, qualified)?.and_then(|value| match value.as_str() {
-        "true" | "True" | "TRUE" | "1" => Some(true),
-        "false" | "False" | "FALSE" | "0" => Some(false),
-        _ => None,
-    }))
+    Ok(
+        attr_value(element, qualified)?.and_then(|value| match value.as_str() {
+            "true" | "True" | "TRUE" | "1" => Some(true),
+            "false" | "False" | "FALSE" | "0" => Some(false),
+            _ => None,
+        }),
+    )
 }
 
 #[cfg(test)]
@@ -226,7 +234,10 @@ mod tests {
     fn parses_domain_config_with_text_content() {
         let summary = parse_network_security_bytes(SAMPLE.as_bytes()).unwrap();
         assert_eq!(summary.domain_configs.len(), 1);
-        assert_eq!(summary.domain_configs[0].domains, vec!["internal.lyft.test"]);
+        assert_eq!(
+            summary.domain_configs[0].domains,
+            vec!["internal.lyft.test"]
+        );
     }
 
     #[test]

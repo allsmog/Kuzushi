@@ -2,12 +2,12 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 289
 ---
- KUZUSHI mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › story · mode:shell · target:none · ctx:not built · model:unconfigured
 
  -- SESSION STORY · event log (refresh with /story) --------------------------------------------------------------------
 
 system      kuzushi shell
-startup     ready: 41 modules, 67 tools, target none
-help        type `scan` to begin · `help` for commands · `?<text>` to ask the agent
+startup     ready: 38 modules, 55 tools, target none
+help        type `next` to continue the guided workflow · `help` for commands · `?<text>` to ask the agent
 
-▸ try: Ctrl+O toggle · /history commands · /show runs · /replay <runId> · /trace <runId>
+> try: Ctrl+O toggle · /history commands · /show runs · /replay <runId> · /trace <runId>

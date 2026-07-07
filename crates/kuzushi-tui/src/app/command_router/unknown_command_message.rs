@@ -1,4 +1,6 @@
 use super::*;
+use crate::app::line_editor::rank_fuzzy;
+use crate::commands::shell_command_specs;
 
 pub(crate) fn unknown_command_message(raw: &str) -> String {
     let trimmed = raw.trim();
@@ -6,6 +8,7 @@ pub(crate) fn unknown_command_message(raw: &str) -> String {
     let verb = normalized.split_whitespace().next().unwrap_or_default();
 
     known_unknown_command_message(normalized, verb)
+        .or_else(|| did_you_mean_command_message(trimmed, verb))
         .unwrap_or_else(|| fallback_unknown_command_message(trimmed))
 }
 
@@ -126,6 +129,40 @@ fn missing_attachment_option_message(verb: &str) -> Option<String> {
             "{verb} needs an arg. Next: `kb` to see attachments and supported modules, then `{verb} <path-or-id>`"
         )
     })
+}
+
+fn did_you_mean_command_message(trimmed: &str, verb: &str) -> Option<String> {
+    if verb.is_empty() {
+        return None;
+    }
+    let heads = command_heads();
+    if heads.iter().any(|head| head == verb) {
+        return None;
+    }
+    let matches = rank_fuzzy(heads, verb);
+    let suggestion = matches.first()?;
+    Some(format!(
+        "unknown command {trimmed:?}. Did you mean `{suggestion}`? Next: `{suggestion}` or /help"
+    ))
+}
+
+fn command_heads() -> Vec<String> {
+    let mut heads = shell_command_specs()
+        .flat_map(|spec| std::iter::once(spec.command).chain(spec.aliases.iter().copied()))
+        .filter_map(command_head)
+        .collect::<Vec<_>>();
+    heads.sort();
+    heads.dedup();
+    heads
+}
+
+fn command_head(value: &str) -> Option<String> {
+    let head = value
+        .trim()
+        .trim_start_matches('/')
+        .split_whitespace()
+        .next()?;
+    (!head.is_empty() && !head.starts_with('<')).then(|| head.to_string())
 }
 
 fn fallback_unknown_command_message(trimmed: &str) -> String {

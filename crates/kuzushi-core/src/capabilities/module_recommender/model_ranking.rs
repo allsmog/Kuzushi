@@ -29,6 +29,13 @@ impl<'a> ModelRanking<'a> {
         input: &Value,
         root: &Path,
     ) -> Self {
+        if !model_ranking_enabled(input) {
+            return Self {
+                runtime: None,
+                model: None,
+                cwd: root.to_path_buf(),
+            };
+        }
         let input_model = input
             .get("model")
             .and_then(Value::as_str)
@@ -68,18 +75,27 @@ impl<'a> ModelRanking<'a> {
     }
 }
 
+pub(crate) fn model_ranking_enabled(input: &Value) -> bool {
+    input
+        .get("useModelRanking")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+}
+
 fn render_recommender_prompt(request: &RecommenderRequest) -> String {
     let signals = &request.signals;
     let mut available: Vec<&str> = request.available_tools.iter().map(String::as_str).collect();
     available.sort_unstable();
     format!(
         "TARGET: {target}\nSIGNALS:\n  source files: {files}\n  languages: {langs}\n  frameworks: {fw}\n  \
+product boundaries: {boundaries}\n  \
 attack-surface entries: {surface} ({high} high-risk)\n  threat model present: {tm}\n  findings: {findings}\n\n\
 AVAILABLE tools ({count}):\n{tools}\n\nPick up to {max} tools to run next, highest-value first.",
         target = request.target,
         files = signals.source_files,
         langs = join_or_none(&signals.languages),
         fw = join_or_none(&signals.frameworks),
+        boundaries = join_or_none(&signals.product_boundary_labels),
         surface = signals.attack_surface_total,
         high = signals.attack_surface_high_risk,
         tm = signals.threat_model_present,
@@ -173,6 +189,7 @@ mod tests {
             tools_missing_binaries: Default::default(),
             available_tools: tools.iter().map(|t| t.to_string()).collect(),
             signals: signals_stub(),
+            components: Vec::new(),
         }
     }
 
@@ -185,6 +202,8 @@ mod tests {
             source_files: 0,
             languages: Vec::new(),
             frameworks: Vec::new(),
+            product_boundaries: 0,
+            product_boundary_labels: Vec::new(),
             codeql_languages: Vec::new(),
             dependency_manifests: 0,
             config_files: 0,
@@ -249,5 +268,11 @@ mod tests {
         assert_eq!(priority_from_str("HIGH"), RecommendationPriority::High);
         assert_eq!(priority_from_str("low"), RecommendationPriority::Low);
         assert_eq!(priority_from_str("weird"), RecommendationPriority::Medium);
+    }
+
+    #[test]
+    fn use_model_ranking_flag_can_disable_model_path() {
+        assert!(model_ranking_enabled(&json!({})));
+        assert!(!model_ranking_enabled(&json!({ "useModelRanking": false })));
     }
 }

@@ -149,7 +149,7 @@ produce a single finding. Repros included:
 
 - **`tee` in the pipeline → SIGPIPE → orphaned semgrep**, see #13
 - **Two concurrent `kuzushi scan` runs against the same DB** racing
-  on `findings.sqlite3`. No mutex, no warning.
+  on `index.sqlite3`. No mutex, no warning.
 - **SIGTERM not propagated**: when the parent node died, `pysemgrep`
   and `semgrep-core` kept running unattached, holding CPU and writing
   partial state into `/tmp`.
@@ -312,7 +312,7 @@ but blocks the Read/Write paths randori uses for its artifacts:
 [threat-model-randori] Phase 1 Write failed (1/3):
   Tool "Write" file_path "/root/.claude/plans/deep-riding-willow.md" escapes the Read sandbox
 [threat-model-randori] Phase 2 (S4) Read failed (1/3):
-  Tool "Read" file_path "/root/.kuzushi/runs/<runId>/..." [restricted]
+  Tool "Read" file_path "/root/.kuzushi/v3/runs/<runId>/..." [restricted]
 ```
 
 Randori retries 3x then moves on — degrades gracefully but produces a

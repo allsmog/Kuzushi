@@ -12,16 +12,17 @@ pub fn run_semgrep_scan(
     store: &FindingStore,
     scanner: &SemgrepScanner,
 ) -> Result<ScanRun> {
+    scanner.preflight()?;
     workspace.ensure_state_dir()?;
 
     let run_id = Uuid::new_v4().to_string();
-    store.insert_scan_run(&run_id, workspace.root(), "running")?;
+    store.record_run_started(&run_id, workspace.root(), "running")?;
 
     let findings = scanner.scan(workspace.root())?;
     for finding in &findings {
         store.insert_finding(&run_id, finding)?;
     }
-    store.complete_scan_run(&run_id, "completed", findings.len())?;
+    store.record_run_finished(&run_id, "completed", findings.len())?;
 
     Ok(ScanRun {
         id: run_id,
@@ -51,6 +52,7 @@ pub fn scan_engines_for_tasks(tasks: &[String]) -> Result<Vec<Box<dyn ScanEngine
             "semgrep" | "semgrep:scan" => scanners.push(Box::new(SemgrepScanner::default())),
             "codeql" | "codeql:scan" => scanners.push(Box::new(CodeqlScanner::default())),
             "dep-hygiene" | "dep-hygiene:check" => scanners.push(Box::new(DepHygieneScanner)),
+            "govulncheck" | "govulncheck:scan" => scanners.push(Box::new(GovulncheckScanner)),
             "cargo-audit" | "cargo-audit:scan" => scanners.push(Box::new(CargoAuditScanner)),
             "secret-scan" | "secret-scan:scan" => scanners.push(Box::new(SecretScanScanner)),
             "license-scan" | "license-scan:scan" => scanners.push(Box::new(LicenseScanScanner)),
@@ -60,7 +62,7 @@ pub fn scan_engines_for_tasks(tasks: &[String]) -> Result<Vec<Box<dyn ScanEngine
             "iac-scan" | "iac-scan:scan" => scanners.push(Box::new(IacScanScanner::default())),
             "" => {}
             other => anyhow::bail!(
-                "unknown scan task {other:?}; supported tasks: semgrep, codeql, dep-hygiene, cargo-audit, secret-scan, license-scan, iac-scan, agentic, offense-review, taint-iris, taint-iris-next, systems-hunt"
+                "unknown scan task {other:?}; supported tasks: semgrep, codeql, dep-hygiene, govulncheck, cargo-audit, secret-scan, license-scan, iac-scan, agentic, offense-review, taint-iris, taint-iris-next, systems-hunt"
             ),
         }
     }
@@ -78,7 +80,9 @@ pub fn run_scan_engines(
 
 #[derive(Debug, Default, Clone)]
 pub struct ScanRunOptions {
+    pub run_id: Option<String>,
     pub severity: Option<Vec<Severity>>,
+    pub paths: Vec<String>,
     pub tasks: Option<Vec<String>>,
     pub static_proof_state: Option<StaticProofState>,
     pub index_static_evidence: bool,

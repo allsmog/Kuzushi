@@ -25,11 +25,11 @@ pub(in crate::modules) fn persist_semgrep_findings(
     };
 
     let run_id = Uuid::new_v4().to_string();
-    store.insert_scan_run(&run_id, target, "running")?;
+    store.record_run_started(&run_id, target, "running")?;
     for finding in findings {
         store.insert_finding(&run_id, finding)?;
     }
-    store.complete_scan_run(&run_id, "completed", findings.len())?;
+    store.record_run_finished(&run_id, "completed", findings.len())?;
 
     Ok(Some(SemgrepPersistedRun {
         run_id,
@@ -51,41 +51,49 @@ pub(in crate::modules) fn persist_codeql_findings(
 
     workspace.ensure_state_dir()?;
     let static_evidence = if index_static_evidence {
-        let evidence_store = crate::static_evidence::StaticEvidenceStore::open(workspace)?;
-        let mut combined = crate::static_evidence::StaticEvidenceIndexReport {
-            db_path: evidence_store.db_path().to_string(),
-            findings_indexed: 0,
-            nodes_indexed: 0,
-            edges_indexed: 0,
-            node_ids: Vec::new(),
-            edge_ids: Vec::new(),
-        };
-        for sarif in sarif_documents {
-            let report =
-                index_codeql_sarif_as_static_evidence(&evidence_store, workspace.root(), sarif)?;
-            combined.findings_indexed += report.findings_indexed;
-            combined.nodes_indexed += report.nodes_indexed;
-            combined.edges_indexed += report.edges_indexed;
-            combined.node_ids.extend(report.node_ids);
-            combined.edge_ids.extend(report.edge_ids);
-        }
-        Some(combined)
+        Some(index_codeql_static_evidence(workspace, sarif_documents)?)
     } else {
         None
     };
 
     let run_id = Uuid::new_v4().to_string();
-    store.insert_scan_run(&run_id, target, "running")?;
+    store.record_run_started(&run_id, target, "running")?;
     for finding in findings {
         store.insert_finding(&run_id, finding)?;
     }
-    store.complete_scan_run(&run_id, "completed", findings.len())?;
+    store.record_run_finished(&run_id, "completed", findings.len())?;
 
     Ok(Some(CodeqlPersistedRun {
         run_id,
         findings_db: workspace.findings_db_path().display().to_string(),
         static_evidence,
     }))
+}
+
+fn index_codeql_static_evidence(
+    workspace: &crate::workspace::WorkspaceTarget,
+    sarif_documents: &[String],
+) -> Result<crate::static_evidence::StaticEvidenceIndexReport> {
+    let evidence_store = crate::static_evidence::StaticEvidenceStore::open(workspace)?;
+    let mut combined =
+        crate::static_evidence::StaticEvidenceIndexReport::new(evidence_store.db_path());
+    for sarif in sarif_documents {
+        let report =
+            index_codeql_sarif_as_static_evidence(&evidence_store, workspace.root(), sarif)?;
+        append_static_evidence_report(&mut combined, report);
+    }
+    Ok(combined)
+}
+
+fn append_static_evidence_report(
+    combined: &mut crate::static_evidence::StaticEvidenceIndexReport,
+    report: crate::static_evidence::StaticEvidenceIndexReport,
+) {
+    combined.findings_indexed += report.findings_indexed;
+    combined.nodes_indexed += report.nodes_indexed;
+    combined.edges_indexed += report.edges_indexed;
+    combined.node_ids.extend(report.node_ids);
+    combined.edge_ids.extend(report.edge_ids);
 }
 
 pub(in crate::modules) fn persist_iac_findings(
@@ -99,11 +107,11 @@ pub(in crate::modules) fn persist_iac_findings(
 
     workspace.ensure_state_dir()?;
     let run_id = Uuid::new_v4().to_string();
-    store.insert_scan_run(&run_id, target, "running")?;
+    store.record_run_started(&run_id, target, "running")?;
     for finding in findings {
         store.insert_finding(&run_id, finding)?;
     }
-    store.complete_scan_run(&run_id, "completed", findings.len())?;
+    store.record_run_finished(&run_id, "completed", findings.len())?;
 
     Ok(Some(json!({
         "runId": run_id,

@@ -14,6 +14,7 @@ permissions:
   contents: read
 
 env:
+  RUST_VERSION: "1.88.0"
   # Run JS-based actions on Node 24 ahead of the June 2026 default flip
   # (Node 20 action runtimes are deprecated on GitHub-hosted runners).
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
@@ -123,6 +124,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
       - uses: Swatinem/rust-cache@v2
       - run: cargo build -p kuzushi-cli --release
       - name: Package binaries

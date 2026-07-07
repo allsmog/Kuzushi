@@ -2,9 +2,9 @@ use regex::Regex;
 use std::path::Path;
 
 use crate::{
-    best_matches_by_oracle, precision_for_hits, primary_hit_breakdowns, recall_by_tolerance,
-    summarize_oracle_matches, Cli, FindingRow, FindingsDump, MatchReport, Oracle, OracleEntry,
-    Tolerance,
+    best_matches_by_oracle, label_accuracy, precision_for_hits, primary_hit_breakdowns,
+    recall_by_tolerance, summarize_oracle_matches, Cli, FindingRow, FindingsDump, MatchReport,
+    Oracle, OracleEntry, Tolerance,
 };
 
 pub(crate) fn score(
@@ -25,6 +25,7 @@ pub(crate) fn score(
     let precision = precision_for_hits(hits, findings.findings.len());
     let (proof_state_breakdown, vuln_source_breakdown) =
         primary_hit_breakdowns(&scored.matches_out);
+    let label_accuracy = label_accuracy(&scored.matches_out);
 
     MatchReport {
         slice: cli.slice.clone(),
@@ -39,6 +40,7 @@ pub(crate) fn score(
         recall,
         proof_state_breakdown,
         vuln_source_breakdown,
+        label_accuracy,
         matches: scored.matches_out,
         missed_oracle: scored.missed,
         expected_min_recall: oracle.expected_min_recall.unwrap_or(0.0),

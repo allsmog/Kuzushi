@@ -1,6 +1,6 @@
 use super::activity_dag_rows::{activity_dag_pane_rows, ActivityDagPaneRow};
 use super::activity_empty_state::{activity_empty_state_model, ActivityEmptyStateModel};
-use super::activity_feed_rows::{activity_feed_pane_rows, ActivityFeedPaneRow};
+use super::activity_feed_rows::ActivityFeedPaneRow;
 use super::activity_footer::{activity_footer_model, ActivityFooterModel};
 use super::activity_header::{
     activity_header_model, ActivityHeaderModel, ActivityLiveTool, ActivityRunOutcome,
@@ -14,8 +14,9 @@ use super::activity_pane_chrome::{
 };
 use super::activity_plain_rows::{activity_plain_pane_rows, ActivityPlainPaneRow};
 use super::activity_scroll::{activity_feed_scroll_offset, activity_task_scroll_offset};
-use super::generated_views_feed::generated_views_feed_rows;
-use crate::{ActivitySession, ShellApp};
+use super::generated_views_feed::{activity_deck_plain_extra_rows, activity_deck_rows};
+use crate::{ActivitySession, DagTaskState, ShellApp};
+use kuzushi_core::RunSummary;
 use std::time::Instant;
 
 pub(crate) enum ActivityViewModel<'a> {
@@ -31,6 +32,9 @@ pub(crate) struct ActiveActivityViewModel<'a> {
 
 pub(crate) fn activity_view_model(app: &ShellApp) -> ActivityViewModel<'_> {
     match app.activity.as_ref() {
+        Some(session) if manual_activity_session_is_idle(app, session) => {
+            ActivityViewModel::Inactive(activity_empty_state_model())
+        }
         Some(session) => ActivityViewModel::Active(ActiveActivityViewModel {
             app,
             session,
@@ -40,21 +44,64 @@ pub(crate) fn activity_view_model(app: &ShellApp) -> ActivityViewModel<'_> {
     }
 }
 
+fn manual_activity_session_is_idle(app: &ShellApp, session: &ActivitySession) -> bool {
+    session.run_id.starts_with("manual-")
+        && app.running_tool_name().is_none()
+        && !app.scan.as_ref().is_some_and(|scan| scan.running)
+        && session.events.is_empty()
+        && session
+            .tasks
+            .values()
+            .all(|row| row.state == DagTaskState::Queued)
+        && session.subsystem_aggregate.hidden_task_states.is_empty()
+}
+
 /// The Activity run's terminal failure, if any. Sourced from the live
 /// activity card (set by both scan refusals and tool failures) and only once
 /// nothing is still running, so an in-flight session never reads as failed.
 fn activity_run_outcome(app: &ShellApp, session: &ActivitySession) -> Option<ActivityRunOutcome> {
-    use crate::app::{DagTaskState, LiveActivityPhase};
-    let still_running = session
-        .tasks
-        .values()
-        .any(|row| row.state == DagTaskState::Active);
-    if still_running {
+    use crate::app::LiveActivityPhase;
+    if activity_session_still_running(app, session) {
         return None;
+    }
+    if let Some(summary) = activity_run_summary(app, session) {
+        if let Some(outcome) = activity_run_summary_outcome(summary) {
+            return Some(outcome);
+        }
     }
     let activity = app.live_activity.as_ref()?;
     matches!(activity.phase, LiveActivityPhase::Refused).then(|| ActivityRunOutcome::Failed {
         subject: activity.subject.clone(),
+    })
+}
+
+fn activity_session_still_running(app: &ShellApp, session: &ActivitySession) -> bool {
+    session
+        .tasks
+        .values()
+        .any(|row| row.state == DagTaskState::Active)
+        || app.running_tool_name().is_some()
+        || app.scan.as_ref().is_some_and(|scan| scan.running)
+}
+
+fn activity_run_summary(app: &ShellApp, session: &ActivitySession) -> Option<RunSummary> {
+    let target = app.target.as_deref()?;
+    app.workbench_cache
+        .borrow_mut()
+        .run_summary_index(Some(target), vec![session.run_id.clone()])
+        .get(&session.run_id)
+        .cloned()
+}
+
+fn activity_run_summary_outcome(summary: RunSummary) -> Option<ActivityRunOutcome> {
+    let status = summary.status.trim().to_ascii_lowercase();
+    if matches!(status.as_str(), "running" | "queued" | "started") || status.is_empty() {
+        return None;
+    }
+    Some(ActivityRunOutcome::Terminal {
+        status,
+        findings: summary.findings,
+        reason: summary.error,
     })
 }
 
@@ -99,15 +146,21 @@ impl<'a> ActiveActivityViewModel<'a> {
         &self.context_line
     }
 
+    pub(crate) fn abort_banner(&self) -> Option<String> {
+        activity_abort_banner(self.app)
+    }
+
     pub(crate) fn frame_layout(&self) -> ActivityFrameLayout {
         activity_frame_layout()
     }
 
-    /// Single-tool runs register no DAG tasks (scans pre-seed theirs from
-    /// the registry), so an empty task map means the TASKS pane would only
-    /// ever say "(no DAG tasks yet)" — give its 40% to the OUTPUT pane.
+    /// Single-tool runs can still have live trace events. Keep TASKS visible
+    /// whenever there is activity to show; collapse only for a fully empty
+    /// session so OUTPUT can own the frame.
     pub(crate) fn collapse_dag_pane(&self) -> bool {
         self.session.tasks.is_empty()
+            && self.session.events.is_empty()
+            && self.app.running_tool_name().is_none()
     }
 
     pub(crate) fn pane_chrome(&self) -> ActivityPaneChromeModel {
@@ -130,13 +183,13 @@ impl<'a> ActiveActivityViewModel<'a> {
         widths: ActivityPaneWidths,
         now: Instant,
     ) -> Vec<ActivityPlainPaneRow> {
-        let generated = generated_views_feed_rows(self.app, widths.feed);
+        let output_rows = activity_deck_plain_extra_rows(self.app, self.session, widths.feed);
         activity_plain_pane_rows(
             self.session,
             widths.dag,
             widths.feed,
             now,
-            &generated,
+            &output_rows,
             self.app.running_tool_name(),
         )
     }
@@ -146,17 +199,20 @@ impl<'a> ActiveActivityViewModel<'a> {
         inner_width: usize,
         now: Instant,
     ) -> Vec<ActivityDagPaneRow> {
-        activity_dag_pane_rows(self.session, inner_width, now)
+        activity_dag_pane_rows(self.session, inner_width, now, self.app.running_tool_name())
     }
 
-    /// The live event feed, followed by every generated visualization that has
-    /// data (pulled from persistent `ShellApp` state, so the views persist across
-    /// later phases and — via the on-disk snapshots — across sessions).
+    /// The right pane is an output strip: one selected artifact/review page at
+    /// a time. Live trace rows are integrated into the TASKS pane. Pages are pulled
+    /// from persistent `ShellApp` state, so they persist across later phases and
+    /// — via the on-disk snapshots — across sessions.
     pub(crate) fn feed_pane_rows(&self, inner_width: usize) -> Vec<ActivityFeedPaneRow> {
-        let mut rows =
-            activity_feed_pane_rows(self.session, inner_width, self.app.running_tool_name());
-        rows.extend(generated_views_feed_rows(self.app, inner_width));
-        rows
+        activity_deck_rows(
+            self.app,
+            self.session,
+            inner_width,
+            self.app.running_tool_name(),
+        )
     }
 
     pub(crate) fn task_scroll_offset(&self, rows: usize, viewport_rows: usize) -> usize {
@@ -168,15 +224,55 @@ impl<'a> ActiveActivityViewModel<'a> {
     }
 
     pub(crate) fn footer(&self, width: u16) -> ActivityFooterModel {
-        activity_footer_model(self.session, width, self.app.running_tool_name())
+        activity_footer_model(
+            self.session,
+            width,
+            self.app.running_tool_name(),
+            activity_abort_pending(self.app),
+        )
     }
+}
+
+fn activity_abort_banner(app: &ShellApp) -> Option<String> {
+    let subjects = activity_abort_subjects(app);
+    (!subjects.is_empty()).then(|| {
+        format!(
+            "⚠ abort requested for {} — waiting for cleanup; Ctrl+C will not exit while work is live",
+            subjects.join(", ")
+        )
+    })
+}
+
+fn activity_abort_pending(app: &ShellApp) -> bool {
+    !activity_abort_subjects(app).is_empty()
+}
+
+fn activity_abort_subjects(app: &ShellApp) -> Vec<&'static str> {
+    [
+        (
+            app.scan.as_ref().is_some_and(|scan| scan.abort_requested),
+            "scan",
+        ),
+        (app.tool_abort_requested(), "tool"),
+        (
+            app.agent_chat
+                .as_ref()
+                .is_some_and(|agent| agent.abort_requested),
+            "agent",
+        ),
+        (app.plan_abort_requested, "plan"),
+        (app.threat_abort_requested, "threat model"),
+    ]
+    .into_iter()
+    .filter_map(|(active, subject)| active.then_some(subject))
+    .collect()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::DagTaskRow;
-    use kuzushi_core::V2Config;
+    use kuzushi_core::{RunSummary, V2Config, WorkspaceTarget};
 
     #[test]
     fn activity_view_model_projects_inactive_state() {
@@ -186,8 +282,10 @@ mod tests {
             panic!("expected inactive activity model");
         };
 
-        assert_eq!(empty.title, "ACTIVITY");
-        assert!(empty.body.contains("no run active"));
+        assert_eq!(empty.title, "ACTIVITY · idle");
+        assert_eq!(empty.glyph_label, "no active run");
+        assert!(empty.explanations.iter().any(|line| line.contains("logs")));
+        assert!(empty.ctas.iter().any(|(command, _)| *command == "scan"));
     }
 
     #[test]
@@ -215,7 +313,69 @@ mod tests {
     }
 
     #[test]
-    fn generated_views_pin_to_feed_regardless_of_session_tasks() {
+    fn activity_header_uses_terminal_run_summary_status_and_findings() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        kuzushi_core::write_run_summary(
+            workspace.root(),
+            &RunSummary::running(
+                "run-finished",
+                "scan",
+                None,
+                workspace.root().display().to_string(),
+            )
+            .complete()
+            .with_findings(Some(2)),
+        )
+        .unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.activity = Some(ActivitySession::new("run-finished"));
+
+        let ActivityViewModel::Active(model) = activity_view_model(&app) else {
+            panic!("expected active activity model");
+        };
+
+        assert!(
+            model
+                .header()
+                .summary_title
+                .contains("✓ run completed · 2 findings"),
+            "{}",
+            model.header().summary_title
+        );
+    }
+
+    #[test]
+    fn activity_header_uses_partial_run_reason_from_summary() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(temp.path()).unwrap();
+        let mut summary = RunSummary::running(
+            "run-partial",
+            "tool",
+            Some("sast:scan".to_string()),
+            workspace.root().display().to_string(),
+        )
+        .with_findings(Some(1));
+        summary.status = "partial".to_string();
+        summary.error = Some("triage stage did not complete".to_string());
+        kuzushi_core::write_run_summary(workspace.root(), &summary).unwrap();
+        let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
+        app.activity = Some(ActivitySession::new("run-partial"));
+
+        let ActivityViewModel::Active(model) = activity_view_model(&app) else {
+            panic!("expected active activity model");
+        };
+
+        let title = model.header().summary_title;
+        assert!(title.contains("⚠ run partial · 1 finding"), "{title}");
+        assert!(
+            title.contains("reason: triage stage did not complete"),
+            "{title}"
+        );
+    }
+
+    #[test]
+    fn activity_deck_shows_selected_artifact_regardless_of_session_tasks() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.taint_flow = Some(crate::TaintFlowSnapshot {
             cwe: "CWE-89".to_string(),
@@ -224,6 +384,7 @@ mod tests {
                 message: "order_id".to_string(),
                 file: "orders.rs".to_string(),
                 line: 1,
+                snippet: None,
             }],
         });
         // The active session ran only an unrelated task — no taint-iris and no
@@ -235,6 +396,10 @@ mod tests {
             DagTaskRow::queued("context:build".into(), "context".into(), Vec::new()),
         );
         app.activity = Some(session);
+        app.activity
+            .as_mut()
+            .unwrap()
+            .set_deck_page(crate::ActivityDeckPage::AttackPath);
 
         let ActivityViewModel::Active(model) = activity_view_model(&app) else {
             panic!("expected active activity model");

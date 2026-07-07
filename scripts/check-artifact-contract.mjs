@@ -92,27 +92,24 @@ const reportSubstrateAliasFields = [
 const schemaArchitectureDocChecks = requiredArtifactSchemaReferences().map((reference) => ({
   label: `run schema architecture doc ${reference.artifactPath}`,
   file: "docs/architecture/kuzushi-artifacts.md",
-  artifacts:
-    reference.artifactPath === "run.json"
-      ? [reference.schemaFile, reference.artifactPath, "summary.json"]
-      : [reference.schemaFile, reference.artifactPath],
+  artifacts: [reference.schemaFile, reference.artifactPath],
 }));
 
 const manifestContractGuardrailLabels = [
   "TUI workspace state label must expose workspace_state_relative_path",
   "TUI workspace state label must cache its derived relative path label",
   "TUI workspace state label must derive from workspace_state_dir",
-  "TUI workspace state label must not hardcode .kuzushi/v2",
+  "TUI workspace state label must not hardcode .kuzushi/v3",
   "TUI workspace state fallback must use workspace_state_relative_path",
   "TUI workspace findings DB label must expose findings_db_relative_path",
   "TUI workspace findings DB label must cache its derived relative path label",
   "TUI workspace findings DB label must derive from workspace_findings_db_path",
-  "TUI workspace findings DB label must not hardcode .kuzushi/v2/findings.sqlite3",
+  "TUI workspace findings DB label must not hardcode .kuzushi/v3/index.sqlite3",
   "TUI workspace findings DB fallback must use findings_db_relative_path",
   "TUI findings empty state must use findings_db_relative_path",
-  "TUI findings empty state must not hardcode .kuzushi/v2/findings.sqlite3",
+  "TUI findings empty state must not hardcode .kuzushi/v3/index.sqlite3",
   "TUI module playbook findings DB label must use findings_db_relative_path",
-  "TUI module playbook findings DB label must not hardcode .kuzushi/v2/findings.sqlite3",
+  "TUI module playbook findings DB label must not hardcode .kuzushi/v3/index.sqlite3",
   "Carlini attachment renderer must read the shared attachment store",
   "Carlini attachment renderer must accept product and compatibility attachment modules",
   "Carlini attachment renderer must resolve attachments through WorkspaceTarget",
@@ -217,7 +214,7 @@ const checks = [
   {
     label: "run summary schema",
     file: "schemas/run.summary.schema.json",
-    artifacts: ["run.json", "summary.json", ...runSummarySchemaFields],
+    artifacts: ["run.json", ...runSummarySchemaFields],
   },
   {
     label: "run artifact manifest schema",

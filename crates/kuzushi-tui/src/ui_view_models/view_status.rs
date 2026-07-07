@@ -14,8 +14,7 @@ fn primary_view_status(app: &ShellApp) -> Option<String> {
         ShellView::Recommend => Some("recommend".to_string()),
         ShellView::Module => Some(focused_or_default(app, "module")),
         ShellView::ModuleRun => Some(module_run_status(app)),
-        ShellView::Findings => Some("findings".to_string()),
-        ShellView::Finding => Some("finding".to_string()),
+        ShellView::Workbench => Some("workbench".to_string()),
         ShellView::ModelPicker => Some("model-picker".to_string()),
         ShellView::TargetPicker => Some("target-picker".to_string()),
         ShellView::AuthMethodPicker(provider) => Some(format!("auth-picker:{provider}")),
@@ -32,6 +31,7 @@ fn threat_view_status(app: &ShellApp) -> Option<String> {
         ShellView::PromptsEditor => Some("prompts".to_string()),
         ShellView::ActorDetail(index) => Some(format!("actor:{}", index + 1)),
         ShellView::Runs => Some("run-timeline".to_string()),
+        ShellView::RunDiff { .. } => Some("run-diff".to_string()),
         ShellView::Replay(_) => Some("replay".to_string()),
         ShellView::Trace(_) => Some("trace".to_string()),
         ShellView::Activity => Some("activity".to_string()),
@@ -45,6 +45,7 @@ fn system_view_status(app: &ShellApp) -> Option<String> {
         ShellView::Quickstart => Some("quickstart".to_string()),
         ShellView::Logs => Some("logs".to_string()),
         ShellView::Config => Some("config".to_string()),
+        ShellView::Health => Some("health".to_string()),
         ShellView::Tools => Some("tools".to_string()),
         ShellView::Options(view) => Some(format!("options[{}]", view.tool_name)),
         ShellView::SastTasks => Some("tasks".to_string()),
@@ -55,6 +56,8 @@ fn system_view_status(app: &ShellApp) -> Option<String> {
 fn workspace_view_status(app: &ShellApp) -> String {
     match &app.shell_view {
         ShellView::Context => "context".to_string(),
+        ShellView::ProjectModel => "project-model".to_string(),
+        ShellView::StrategyQueue => "strategy-queue".to_string(),
         ShellView::Workspace => "workspace".to_string(),
         ShellView::KnowledgeBase => "kb".to_string(),
         ShellView::FailureHandoff => "failure-handoff".to_string(),
@@ -84,7 +87,6 @@ fn module_run_status(app: &ShellApp) -> String {
 
 fn threat_view_slug(view: ThreatView) -> &'static str {
     match view {
-        ThreatView::Dfd => "dfd",
         ThreatView::Stride => "stride",
         ThreatView::Stories => "stories",
         ThreatView::Scope => "scope",

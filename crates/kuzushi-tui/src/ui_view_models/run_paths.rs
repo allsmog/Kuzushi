@@ -1,11 +1,11 @@
 use std::path::{Path, PathBuf};
 
 pub(crate) fn ui_runs_root_relative_path() -> &'static str {
-    ".kuzushi/runs"
+    ".kuzushi/v3/runs"
 }
 
 pub(crate) fn ui_latest_run_relative_path() -> &'static str {
-    ".kuzushi/latest"
+    ".kuzushi/v3/latest"
 }
 
 pub(crate) fn ui_run_artifact_relative_path(run_id: &str, leaf: &str) -> String {
@@ -42,7 +42,7 @@ mod tests {
     fn ui_run_artifact_relative_path_uses_shared_runs_root_label() {
         assert_eq!(
             ui_run_artifact_relative_path("run-1", "failures.json"),
-            ".kuzushi/runs/run-1/failures.json"
+            ".kuzushi/v3/runs/run-1/failures.json"
         );
     }
 

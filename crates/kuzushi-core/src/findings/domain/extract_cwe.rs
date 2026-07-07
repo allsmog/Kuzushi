@@ -39,13 +39,16 @@ impl Finding {
         let rule_id = rule_id.into();
         let file_path = file_path.into();
         let message = message.into();
-        let fingerprint = fingerprint_parts(&rule_id, &file_path, start_line);
         let title = finding_title(&message, &rule_id);
+        let fingerprint = crate::identity::stable_fingerprint_for_tool(
+            &tool, &rule_id, &file_path, &title, &message,
+        );
         let cwe = extract_cwe(&rule_id, &title, &message);
-        let dedup_key = finding_dedup_key(&file_path, start_line, cwe.as_deref());
+        let (dedup_key, source_signature) =
+            finding_identity(&file_path, start_line, cwe.as_deref(), &title);
         let vuln_source = Some(VulnSource::from_tool(&tool));
 
-        Self {
+        finding_record(FindingRecordInput {
             fingerprint,
             rule_id,
             title,
@@ -55,13 +58,10 @@ impl Finding {
             end_line,
             message,
             tool,
-            actor_fingerprint: None,
-            static_proof_state: None,
-            created_at: now_isoish(),
             vuln_source,
             dedup_key,
-            ..Self::default()
-        }
+            source_signature,
+        })
     }
 
     /// Override the auto-detected vuln source (e.g. when reusing
@@ -75,6 +75,11 @@ impl Finding {
     /// Override the auto-computed dedup key.
     pub fn with_dedup_key(mut self, key: impl Into<String>) -> Self {
         self.dedup_key = Some(key.into());
+        self
+    }
+
+    pub fn with_source_signature(mut self, signature: impl Into<String>) -> Self {
+        self.source_signature = Some(signature.into());
         self
     }
 
@@ -117,15 +122,58 @@ impl Finding {
     }
 }
 
+struct FindingRecordInput {
+    fingerprint: String,
+    rule_id: String,
+    title: String,
+    severity: Severity,
+    file_path: String,
+    start_line: u32,
+    end_line: Option<u32>,
+    message: String,
+    tool: String,
+    vuln_source: Option<VulnSource>,
+    dedup_key: Option<String>,
+    source_signature: Option<String>,
+}
+
+fn finding_record(input: FindingRecordInput) -> Finding {
+    Finding {
+        fingerprint: input.fingerprint,
+        rule_id: input.rule_id,
+        title: input.title,
+        severity: input.severity,
+        file_path: input.file_path,
+        start_line: input.start_line,
+        end_line: input.end_line,
+        message: input.message,
+        tool: input.tool,
+        actor_fingerprint: None,
+        static_proof_state: None,
+        created_at: now_isoish(),
+        vuln_source: input.vuln_source,
+        dedup_key: input.dedup_key,
+        source_signature: input.source_signature,
+        corroboration_count: 1,
+        ..Finding::default()
+    }
+}
+
 fn finding_title(message: &str, rule_id: &str) -> String {
-    message
-        .lines()
-        .next()
-        .unwrap_or(rule_id)
-        .trim()
-        .to_string()
+    message.lines().next().unwrap_or(rule_id).trim().to_string()
 }
 
 fn finding_dedup_key(file_path: &str, start_line: u32, cwe: Option<&str>) -> Option<String> {
     cwe.map(|cwe| compute_dedup_key(file_path, start_line, Some(cwe)))
+}
+
+fn finding_identity(
+    file_path: &str,
+    start_line: u32,
+    cwe: Option<&str>,
+    title: &str,
+) -> (Option<String>, Option<String>) {
+    let dedup_key = finding_dedup_key(file_path, start_line, cwe);
+    let source_signature = compute_source_signature(file_path, start_line, cwe.or(Some(title)));
+    (dedup_key, Some(source_signature))
 }

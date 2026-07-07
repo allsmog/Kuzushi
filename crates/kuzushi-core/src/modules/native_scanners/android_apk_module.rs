@@ -23,7 +23,7 @@ pub(in crate::modules) fn android_apk_module() -> BuiltinModule {
 }
 
 fn native_libs_tool() -> ToolDescriptor {
-    tool_with_options(
+    hidden_tool_with_options(
         "android-apk:native-libs",
         "Enumerate `.so` files under <workspace>/android-decompiled/raw/lib/<abi>/, parse their ELF dynsyms with goblin, and emit findings for dangerous imports (system/execve/dlopen/strcpy) and JNI export attack surface.",
         vec![
@@ -71,7 +71,7 @@ fn scan_tool() -> ToolDescriptor {
 }
 
 fn hybrid_detect_tool() -> ToolDescriptor {
-    tool_with_options(
+    hidden_tool_with_options(
         "android-apk:hybrid-detect",
         "Detect hybrid app frameworks (Cordova, React Native, Capacitor, Flutter, Ionic) by their on-disk fingerprints in the unzipped APK so you know which JavaScript / Dart bundles deserve a follow-up review.",
         vec![
@@ -88,7 +88,7 @@ fn hybrid_detect_tool() -> ToolDescriptor {
 }
 
 fn code_scan_tool() -> ToolDescriptor {
-    tool_with_options(
+    hidden_tool_with_options(
         "android-apk:code-scan",
         "Run the bundled Android Semgrep rule pack against the decompiled jadx source tree. Covers WebView/JS-bridge misuse, intent redirection, mutable PendingIntent, ECB/MD5/SHA-1/static-IV crypto misuse, PII logging, clipboard credential exposure, MODE_WORLD_* file modes, plaintext SharedPreferences, HostnameVerifier/X509TrustManager all-accept patterns, SQL injection via rawQuery/execSQL string concat, deeplink URI loaded into WebView, reflection on Intent extras, intent redirection through extras, and Keystore-misuse patterns (RSA PKCS1, no user auth, hardcoded SecretKeySpec). Writes a .semgrepignore in the scan root that filters out gms / androidx / kotlin / okhttp / retrofit / react-native / dagger noise; pass includeLibraries=true to disable.",
         vec![
@@ -112,7 +112,7 @@ fn code_scan_tool() -> ToolDescriptor {
 }
 
 fn sast_handoff_tool() -> ToolDescriptor {
-    tool_with_options(
+    hidden_tool_with_options(
         "android-apk:sast-handoff",
         "Bridge node that returns the decompiled tree layout (jadx/apktool/raw paths, taint-sources.json) so downstream Java SAST engines can be invoked against the right roots. Emits next-step commands; warns when prepare/manifest-scan haven't run yet.",
         vec![target_option()],
@@ -120,7 +120,7 @@ fn sast_handoff_tool() -> ToolDescriptor {
 }
 
 fn manifest_scan_tool() -> ToolDescriptor {
-    tool_with_options(
+    hidden_tool_with_options(
         "android-apk:manifest-scan",
         "Parse AndroidManifest.xml emitted by apktool and emit findings for debuggable, allowBackup, cleartext, exported components without permission, deep links, and provider exposure. Writes taint-sources.json next to the manifest for downstream consumption.",
         vec![target_option(), decompiled_root_option()],
@@ -128,7 +128,7 @@ fn manifest_scan_tool() -> ToolDescriptor {
 }
 
 fn network_security_config_tool() -> ToolDescriptor {
-    tool_with_options(
+    hidden_tool_with_options(
         "android-apk:network-security-config",
         "Parse res/xml/network_security_config.xml and emit findings for cleartext-permitted base/domain configs and user-CA trust anchors.",
         vec![target_option(), nsc_path_option()],
@@ -136,7 +136,7 @@ fn network_security_config_tool() -> ToolDescriptor {
 }
 
 fn fileprovider_scan_tool() -> ToolDescriptor {
-    tool_with_options(
+    hidden_tool_with_options(
         "android-apk:fileprovider-scan",
         "Parse res/xml/file_paths.xml and flag overly broad FileProvider path descriptors (root-path, broad external-path) that expose sensitive files via shared URIs.",
         vec![target_option(), file_paths_option()],
@@ -174,19 +174,15 @@ fn file_paths_option() -> OptionSpec {
 }
 
 fn check_env_tool() -> ToolDescriptor {
-    tool_with_options(
+    hidden_tool_with_options(
         "android-apk:check-env",
         "Verify that jadx, apktool, and unzip are available on PATH.",
-        vec![
-            jadx_bin_option(),
-            apktool_bin_option(),
-            unzip_bin_option(),
-        ],
+        vec![jadx_bin_option(), apktool_bin_option(), unzip_bin_option()],
     )
 }
 
 fn prepare_tool() -> ToolDescriptor {
-    tool_with_options(
+    hidden_tool_with_options(
         "android-apk:prepare",
         "Validate an APK file, unzip resources, and decompile to Java source under <workspace>/android-decompiled/.",
         vec![
@@ -227,9 +223,13 @@ fn jadx_bin_option() -> OptionSpec {
 }
 
 fn apktool_bin_option() -> OptionSpec {
-    opt("apktoolBin", OptionType::Path, "Path to the apktool binary.")
-        .aliases(&["apktool_bin", "apktool"])
-        .advanced()
+    opt(
+        "apktoolBin",
+        OptionType::Path,
+        "Path to the apktool binary.",
+    )
+    .aliases(&["apktool_bin", "apktool"])
+    .advanced()
 }
 
 fn unzip_bin_option() -> OptionSpec {

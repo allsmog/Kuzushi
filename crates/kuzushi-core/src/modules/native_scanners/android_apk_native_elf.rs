@@ -6,9 +6,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 const DANGEROUS_IMPORTS: &[&str] = &[
-    "system", "popen", "execve", "execvp", "execv", "execle", "execl", "execlp",
-    "dlopen", "dlsym", "mmap", "mprotect", "ptrace", "fork", "syscall",
-    "strcpy", "strcat", "sprintf", "gets",
+    "system", "popen", "execve", "execvp", "execv", "execle", "execl", "execlp", "dlopen", "dlsym",
+    "mmap", "mprotect", "ptrace", "fork", "syscall", "strcpy", "strcat", "sprintf", "gets",
 ];
 
 #[derive(Debug)]

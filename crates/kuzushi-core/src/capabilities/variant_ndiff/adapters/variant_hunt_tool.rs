@@ -142,9 +142,8 @@ fn missing_variant_hunt_finding_response(
 fn require_variant_hunt_workspace<'a>(
     ctx: &'a ToolExecutionContext<'_>,
 ) -> Result<&'a crate::workspace::WorkspaceTarget> {
-    ctx.workspace.context(
-        "variant:hunt needs an active workspace. Pass --target <repo> or start the shell with --target.",
-    )
+    ctx.workspace
+        .context(crate::workspace::active_workspace_required_message("variant:hunt"))
 }
 
 struct VariantHuntExecution<'a> {

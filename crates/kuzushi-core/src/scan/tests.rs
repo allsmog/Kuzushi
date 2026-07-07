@@ -110,6 +110,163 @@ mod tests {
     }
 
     #[test]
+    fn scan_runner_uses_supplied_run_id_for_native_findings() {
+        struct StaticScanner;
+
+        impl ScanEngine for StaticScanner {
+            fn id(&self) -> &'static str {
+                "static"
+            }
+
+            fn scan(
+                &self,
+                _target: &Path,
+                _cancellation: &ScanCancellation,
+            ) -> Result<Vec<Finding>> {
+                Ok(vec![Finding::new_tool(
+                    "static",
+                    "static/demo",
+                    "src/app.rs",
+                    12,
+                    None,
+                    Severity::Low,
+                    "static scanner finding",
+                )])
+            }
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(StaticScanner)];
+        let options = ScanRunOptions {
+            run_id: Some("scan-fixed".to_string()),
+            severity: None,
+            paths: Vec::new(),
+            tasks: None,
+            static_proof_state: None,
+            index_static_evidence: false,
+        };
+
+        let run = run_scan_engines_with_options(&workspace, &store, &scanners, &options).unwrap();
+        let findings = store.list_findings_for_scan_id("scan-fixed").unwrap();
+
+        assert_eq!(run.id, "scan-fixed");
+        assert_eq!(findings.len(), 1);
+        assert!(store.list_findings_for_scan_id(&run.id).unwrap().len() == 1);
+    }
+
+    #[test]
+    fn scan_runner_preflights_before_creating_scan_run() {
+        struct MissingBinaryScanner;
+
+        impl ScanEngine for MissingBinaryScanner {
+            fn id(&self) -> &'static str {
+                "missing"
+            }
+
+            fn preflight(&self) -> Result<()> {
+                anyhow::bail!("missing scanner binary")
+            }
+
+            fn scan(
+                &self,
+                _target: &Path,
+                _cancellation: &ScanCancellation,
+            ) -> Result<Vec<Finding>> {
+                panic!("scan should not run after failed preflight")
+            }
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(MissingBinaryScanner)];
+
+        let error = run_scan_engines(&workspace, &store, &scanners)
+            .unwrap_err()
+            .to_string();
+
+        assert!(error.contains("missing preflight failed"));
+        assert!(error.contains("missing scanner binary"));
+        assert_eq!(store.latest_run_id().unwrap(), None);
+    }
+
+    #[test]
+    fn subprocess_scanners_report_missing_configured_binary_in_preflight() {
+        let tmp = tempfile::tempdir().unwrap();
+        let missing_semgrep = tmp.path().join("missing-semgrep");
+        let semgrep = SemgrepScanner {
+            binary: missing_semgrep.display().to_string(),
+            config: vec!["auto".to_string()],
+        };
+
+        let error = semgrep.preflight().unwrap_err().to_string();
+
+        assert!(error.contains("semgrep"));
+        assert!(error.contains("could not find scanner binary"));
+
+        let missing_codeql = tmp.path().join("missing-codeql");
+        let codeql = CodeqlScanner {
+            binary: Some(missing_codeql.display().to_string()),
+            ..CodeqlScanner::default()
+        };
+
+        let error = codeql.preflight().unwrap_err().to_string();
+
+        assert!(error.contains("codeql"));
+        assert!(error.contains("could not find CodeQL CLI"));
+    }
+
+    #[test]
+    fn scan_runner_scopes_paths_and_reprefixes_findings() {
+        struct ScopedScanner;
+
+        impl ScanEngine for ScopedScanner {
+            fn id(&self) -> &'static str {
+                "scoped"
+            }
+
+            fn scan(
+                &self,
+                target: &Path,
+                _cancellation: &ScanCancellation,
+            ) -> Result<Vec<Finding>> {
+                assert!(target.ends_with("web"));
+                Ok(vec![Finding::new_tool(
+                    "static",
+                    "static/demo",
+                    "src/app.ts",
+                    7,
+                    None,
+                    Severity::Medium,
+                    "scoped scanner finding",
+                )])
+            }
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        fs::create_dir_all(tmp.path().join("web/src")).unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(ScopedScanner)];
+        let options = ScanRunOptions {
+            run_id: Some("scan-scoped".to_string()),
+            severity: None,
+            paths: vec!["web".to_string()],
+            tasks: None,
+            static_proof_state: None,
+            index_static_evidence: false,
+        };
+
+        run_scan_engines_with_options(&workspace, &store, &scanners, &options).unwrap();
+        let findings = store.list_findings_for_scan_id("scan-scoped").unwrap();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].file_path, "web/src/app.ts");
+    }
+
+    #[test]
     fn semgrep_static_evidence_scan_runner_indexes_whitebox_signals() {
         struct StaticSemgrepScanner;
 
@@ -145,7 +302,9 @@ mod tests {
         let store = FindingStore::open(workspace.findings_db_path()).unwrap();
         let scanners: Vec<Box<dyn ScanEngine>> = vec![Box::new(StaticSemgrepScanner)];
         let options = ScanRunOptions {
+            run_id: None,
             severity: None,
+            paths: Vec::new(),
             tasks: None,
             static_proof_state: Some(StaticProofState::SignalOnly),
             index_static_evidence: true,
@@ -938,7 +1097,9 @@ exit 2
             findings,
         })];
         let options = ScanRunOptions {
+            run_id: None,
             severity: None,
+            paths: Vec::new(),
             tasks: None,
             static_proof_state: Some(StaticProofState::SignalOnly),
             index_static_evidence: true,
@@ -1044,6 +1205,14 @@ exit 2
         let ids = engines.iter().map(|engine| engine.id()).collect::<Vec<_>>();
 
         assert_eq!(ids, vec!["cargo-audit"]);
+    }
+
+    #[test]
+    fn scan_engines_for_tasks_resolves_govulncheck_task() {
+        let engines = scan_engines_for_tasks(&["govulncheck".to_string()]).unwrap();
+        let ids = engines.iter().map(|engine| engine.id()).collect::<Vec<_>>();
+
+        assert_eq!(ids, vec!["govulncheck"]);
     }
 
     #[test]

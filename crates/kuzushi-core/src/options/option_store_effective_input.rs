@@ -41,6 +41,52 @@ impl ToolOptionStore {
         merged.into_iter().collect()
     }
 
+    pub fn effective_stored_value_scope(
+        &self,
+        tool_name: &str,
+        option_name: &str,
+    ) -> Option<OptionScope> {
+        let module_id = tool_name.split_once(':').map(|(module, _)| module);
+        let mut source = None;
+        for scope in [
+            OptionScope::Global,
+            OptionScope::Workspace,
+            OptionScope::Session,
+        ] {
+            source = self
+                .target_value_scope(scope, &OptionTarget::All, option_name)
+                .or(source);
+            if let Some(module_id) = module_id {
+                source = self
+                    .target_value_scope(
+                        scope,
+                        &OptionTarget::Module(module_id.to_string()),
+                        option_name,
+                    )
+                    .or(source);
+            }
+            source = self
+                .target_value_scope(
+                    scope,
+                    &OptionTarget::Tool(tool_name.to_string()),
+                    option_name,
+                )
+                .or(source);
+        }
+        source
+    }
+
+    fn target_value_scope(
+        &self,
+        scope: OptionScope,
+        target: &OptionTarget,
+        option_name: &str,
+    ) -> Option<OptionScope> {
+        self.values_for(scope, target)
+            .is_some_and(|values| values.contains_key(option_name))
+            .then_some(scope)
+    }
+
     pub(crate) fn merge_effective_stored_values(
         &self,
         tool_name: &str,

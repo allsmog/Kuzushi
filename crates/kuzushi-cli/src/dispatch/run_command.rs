@@ -7,21 +7,13 @@ pub(super) fn dispatch_run_command(
     command: Command,
     default_target: Option<PathBuf>,
     load: Vec<String>,
-    allow_untrusted_module: bool,
 ) -> Result<()> {
     match command {
         Command::Run {
             tool,
             input,
             options,
-        } => run_tool_command(
-            tool,
-            input,
-            options,
-            default_target,
-            load,
-            allow_untrusted_module,
-        ),
+        } => run_tool_command(tool, input, options, default_target, load),
         _ => unreachable!("non-run command routed to run dispatcher"),
     }
 }

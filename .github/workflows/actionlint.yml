@@ -28,7 +28,7 @@ jobs:
         id: install
         run: |
           set -euo pipefail
-          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash)
+          bash <(curl -sSfL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash)
           echo "bin=$PWD/actionlint" >> "${GITHUB_OUTPUT}"
       - name: Lint workflows
         run: ${{ steps.install.outputs.bin }} -color

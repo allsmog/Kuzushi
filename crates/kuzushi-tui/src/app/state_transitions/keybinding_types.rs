@@ -5,11 +5,14 @@ pub(crate) enum HotkeyTrigger {
     Char(char),
     Enter,
     Tab,
+    BackTab,
     Esc,
     PageUp,
     PageDown,
     Up,
     Down,
+    Left,
+    Right,
 }
 
 impl HotkeyTrigger {
@@ -31,11 +34,14 @@ impl HotkeyTrigger {
             (Self::Char(expected), KeyCode::Char(actual)) => expected == actual,
             (Self::Enter, KeyCode::Enter) => true,
             (Self::Tab, KeyCode::Tab) => true,
+            (Self::BackTab, KeyCode::BackTab) => true,
             (Self::Esc, KeyCode::Esc) => true,
             (Self::PageUp, KeyCode::PageUp) => true,
             (Self::PageDown, KeyCode::PageDown) => true,
             (Self::Up, KeyCode::Up) => true,
             (Self::Down, KeyCode::Down) => true,
+            (Self::Left, KeyCode::Left) => true,
+            (Self::Right, KeyCode::Right) => true,
             _ => false,
         }
     }
@@ -47,13 +53,27 @@ impl HotkeyTrigger {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ViewHotkeyAction {
-    FindingsNext,
-    FindingsPrevious,
-    FindingsFirst,
-    FindingsLast,
-    FindingsPageDown,
-    FindingsPageUp,
-    FindingsOpen,
+    WorkbenchCyclePane,
+    WorkbenchCyclePanePrev,
+    WorkbenchScrollNext,
+    WorkbenchScrollPrev,
+    WorkbenchScrollFirst,
+    WorkbenchScrollLast,
+    WorkbenchToggleCenter,
+    WorkbenchCenterNext,
+    WorkbenchCenterPrev,
+    WorkbenchZoomCenter,
+    WorkbenchOpen,
+    WorkbenchPageNext,
+    WorkbenchPagePrev,
+    WorkbenchPage(WorkbenchPage),
+    WorkbenchValidate,
+    WorkbenchOrderChain,
+    WorkbenchCluster,
+    RecommendCursorPrevious,
+    RecommendCursorNext,
+    RecommendScanComponent,
+    RecommendPromoteComponent,
     ThreatView(ThreatView),
     ActorDetail(usize),
     PauseScan,
@@ -78,7 +98,11 @@ pub(crate) enum ViewHotkeyAction {
     ActivityTogglePause,
     ActivityReset,
     ActivityFocusSelected,
-    ActivityCancelRunning,
+    ActivityDeckNext,
+    ActivityDeckPrev,
+    ActivityOpenDeckArtifact,
+    ActivityOpenFindings,
+    OpenNextPhase,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

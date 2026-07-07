@@ -274,8 +274,11 @@ fn write_candidates_json(
         "note": "Offline candidate set. Populate `cves` from OSV / NVD / vendor advisories \
                  and feed into `threat-intel:harvest`.",
     });
-    fs::write(&path, serde_json::to_string_pretty(&body).unwrap_or_default())
-        .with_context(|| format!("writing threat-intel candidates at {}", path.display()))?;
+    fs::write(
+        &path,
+        serde_json::to_string_pretty(&body).unwrap_or_default(),
+    )
+    .with_context(|| format!("writing threat-intel candidates at {}", path.display()))?;
     Ok(path)
 }
 
@@ -317,11 +320,7 @@ fn emit_discover_start(ctx: &ToolExecutionContext<'_>, target: &Path) {
     }
 }
 
-fn emit_discover_done(
-    ctx: &ToolExecutionContext<'_>,
-    tech_count: usize,
-    package_count: usize,
-) {
+fn emit_discover_done(ctx: &ToolExecutionContext<'_>, tech_count: usize, package_count: usize) {
     if let Some(trace) = ctx.trace {
         let _ = trace
             .step(

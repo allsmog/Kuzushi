@@ -8,19 +8,21 @@ Feature: Auth-method picker
     When I launch the shell
     And I press "Down"
     And I press "Down"
+    And I press "Down"
     And I press "Enter"
     Then I see "CHOOSE AUTH METHOD"
     And I see "API key (ANTHROPIC_API_KEY)"
     And I see "Claude.ai OAuth login"
     And the status segment shows "auth-picker:anthropic"
 
-  Scenario: Esc on the auth picker defers and goes to Catalog
+  Scenario: Esc on the auth picker defers and goes to Workbench
     Given a fresh kuzushi workspace
     And no model is configured
     When I launch the shell
     And I press "Down"
     And I press "Down"
+    And I press "Down"
     And I press "Enter"
     And I press "Esc"
-    Then the log contains "auth deferred"
-    And the status segment shows "modules"
+    Then I see "AIM - ATTACK SURFACE"
+    And the status segment shows "workbench"

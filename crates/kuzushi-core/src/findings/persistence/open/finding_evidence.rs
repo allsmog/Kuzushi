@@ -1,83 +1,123 @@
 use super::*;
+use std::path::{Component, Path, PathBuf};
 
 impl FindingStore {
-    pub(crate) fn replace_finding_evidence(
+    pub(crate) fn verified_finding_evidence(
         &self,
-        finding_id: i64,
+        tx: &Connection,
+        scan_id: &str,
         evidence: &[FindingEvidence],
-    ) -> Result<()> {
-        self.conn.execute(
-            "delete from finding_evidence where finding_id = ?1",
-            params![finding_id],
-        )?;
-        for (ordinal, item) in evidence.iter().enumerate() {
-            self.conn.execute(
-                r#"
-                insert into finding_evidence(
-                  finding_id, ordinal, kind, file_path, line, snippet, rationale, confidence,
-                  request_blob, response_blob
-                )
-                values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-                "#,
-                params![
-                    finding_id,
-                    ordinal as i64,
-                    &item.kind,
-                    &item.file_path,
-                    item.line,
-                    &item.snippet,
-                    &item.rationale,
-                    item.confidence,
-                    &item.request_blob,
-                    &item.response_blob,
-                ],
-            )?;
-        }
-        Ok(())
+    ) -> Result<Vec<FindingEvidence>> {
+        let target_root = scan_target_root(tx, scan_id)?;
+        Ok(verify_finding_evidence_for_insert(
+            target_root.as_deref(),
+            evidence,
+        ))
+    }
+}
+
+fn scan_target_root(tx: &Connection, scan_id: &str) -> Result<Option<PathBuf>> {
+    let target: String = tx
+        .query_row(
+            "select target from run_states where run_id = ?1",
+            params![scan_id],
+            |row| row.get(0),
+        )
+        .with_context(|| format!("scan run {scan_id:?} is required before finding evidence insert"))?;
+    let root = PathBuf::from(target);
+    Ok(root.is_dir().then_some(root))
+}
+
+fn verify_finding_evidence_for_insert(
+    target_root: Option<&Path>,
+    evidence: &[FindingEvidence],
+) -> Vec<FindingEvidence> {
+    let Some(target_root) = target_root else {
+        return evidence.to_vec();
+    };
+    evidence
+        .iter()
+        .map(|item| verify_evidence_item(target_root, item))
+        .collect()
+}
+
+fn verify_evidence_item(target_root: &Path, evidence: &FindingEvidence) -> FindingEvidence {
+    if should_skip_disk_verification(evidence) || citation_matches_disk(target_root, evidence) {
+        return evidence.clone();
     }
 
-    pub(crate) fn attach_evidence_to_findings(&self, findings: &mut [Finding]) -> Result<()> {
-        for finding in findings {
-            if let Some(id) = finding.id {
-                finding.evidence = self.finding_evidence(id)?;
-            }
-        }
-        Ok(())
-    }
+    let mut downgraded = evidence.clone();
+    downgraded.kind = "reasoning".to_string();
+    downgraded.confidence = downgraded.confidence.min(25);
+    downgraded.rationale = append_unverified_citation_note(&downgraded.rationale);
+    downgraded
+}
 
-    pub(crate) fn attach_evidence_to_finding(&self, finding: Option<&mut Finding>) -> Result<()> {
-        if let Some(finding) = finding {
-            if let Some(id) = finding.id {
-                finding.evidence = self.finding_evidence(id)?;
-            }
-        }
-        Ok(())
-    }
+fn should_skip_disk_verification(evidence: &FindingEvidence) -> bool {
+    evidence.kind.trim().eq_ignore_ascii_case("reasoning")
+        || evidence.request_blob.is_some()
+        || evidence.response_blob.is_some()
+        || evidence.file_path.trim().is_empty()
+        || evidence.snippet.trim().is_empty()
+}
 
-    fn finding_evidence(&self, finding_id: i64) -> Result<Vec<FindingEvidence>> {
-        let mut stmt = self.conn.prepare(
-            r#"
-            select kind, file_path, line, snippet, rationale, confidence,
-                   request_blob, response_blob
-              from finding_evidence
-             where finding_id = ?1
-             order by ordinal asc
-            "#,
-        )?;
-        let rows = stmt.query_map(params![finding_id], |row| {
-            let confidence: i64 = row.get(5)?;
-            Ok(FindingEvidence {
-                kind: row.get(0)?,
-                file_path: row.get(1)?,
-                line: row.get(2)?,
-                snippet: row.get(3)?,
-                rationale: row.get(4)?,
-                confidence: confidence.clamp(0, u8::MAX as i64) as u8,
-                request_blob: row.get(6)?,
-                response_blob: row.get(7)?,
-            })
-        })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .context("Could not load finding evidence")
+fn citation_matches_disk(target_root: &Path, evidence: &FindingEvidence) -> bool {
+    let Some(path) = safe_target_path(target_root, &evidence.file_path) else {
+        return false;
+    };
+    let Ok(source) = std::fs::read_to_string(path) else {
+        return false;
+    };
+    let snippet = normalize_evidence_text(&evidence.snippet);
+    if snippet.is_empty() {
+        return true;
+    }
+    let haystack = line_window_for_evidence(&source, evidence.line)
+        .map(|window| normalize_evidence_text(&window))
+        .unwrap_or_else(|| normalize_evidence_text(&source));
+    haystack.contains(&snippet)
+}
+
+fn safe_target_path(target_root: &Path, raw_path: &str) -> Option<PathBuf> {
+    let mut relative = PathBuf::new();
+    for component in Path::new(raw_path.trim()).components() {
+        match component {
+            Component::Normal(part) => relative.push(part),
+            Component::CurDir => {}
+            Component::RootDir | Component::Prefix(_) | Component::ParentDir => return None,
+        }
+    }
+    Some(target_root.join(relative))
+}
+
+fn line_window_for_evidence(source: &str, line: u32) -> Option<String> {
+    if line == 0 {
+        return None;
+    }
+    let lines = source.lines().collect::<Vec<_>>();
+    if lines.is_empty() {
+        return Some(String::new());
+    }
+    let index = line.saturating_sub(1) as usize;
+    if index >= lines.len() {
+        return Some(String::new());
+    }
+    let start = index.saturating_sub(4);
+    let end = (index + 5).min(lines.len());
+    Some(lines[start..end].join("\n"))
+}
+
+fn normalize_evidence_text(value: &str) -> String {
+    value.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+fn append_unverified_citation_note(rationale: &str) -> String {
+    const NOTE: &str = "citation-unverified: snippet was not found on disk at insertion time";
+    if rationale.trim().is_empty() {
+        NOTE.to_string()
+    } else if rationale.contains(NOTE) {
+        rationale.to_string()
+    } else {
+        format!("{}\n{NOTE}", rationale.trim())
     }
 }

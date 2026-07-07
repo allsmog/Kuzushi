@@ -17,6 +17,9 @@ fn candidate_for_prefix(form: &str, prefix: &str, slash: bool) -> Option<String>
     if slash && head.starts_with('?') {
         return None;
     }
+    if slash && head.contains(' ') {
+        return None;
+    }
     let candidate = if slash && !head.starts_with('/') {
         format!("/{head}")
     } else {

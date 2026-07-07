@@ -11,7 +11,7 @@ use crate::whitebox_static::{
 };
 use crate::workspace::WorkspaceTarget;
 use anyhow::{Context, Result};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;

@@ -1,49 +1,92 @@
+use super::findings::{cached_sorted_finding_alias_indices, relativize_location, target_base};
+use super::review_state::{indexed_review_decision_complete, EffectiveReviewStateIndex};
 use super::{
-    attack_surface_risk_model, journey_model, ui_latest_run_path, ui_run_dir,
-    AttackSurfaceRiskModel, JourneyModel,
+    attack_surface_risk_model, context_snapshot_state, journey_model, ui_latest_run_path,
+    ui_run_dir, AttackSurfaceRiskModel, JourneyModel, SeverityCounts, SeverityTone,
 };
 use crate::ShellApp;
 use kuzushi_core::run_artifacts::{
     canonical_run_artifact_spec, canonical_run_artifact_specs, RunArtifactSpec,
 };
+use kuzushi_core::{project_finding, Finding};
 use std::path::{Path, PathBuf};
 
 const HOME_TIMELINE_ARTIFACTS: [&str; 3] = ["run.json", "events.jsonl", "trace.jsonl"];
 const HOME_ARTIFACT_COLUMN_COUNT: usize = 4;
+const HOME_TOP_RISK_LIMIT: usize = 3;
 const HOME_COMMANDS: [&str; 6] = [
-    "modules",
-    "recommend",
+    "target .",
+    "options sast:scan",
+    "tasks",
+    "next",
     "quickstart",
-    "scan .",
-    "findings",
-    "runs",
+    "Ctrl+G",
 ];
 /// With an active engagement, `next` (continue the journey) replaces the
 /// first-run `quickstart` slot.
-const HOME_JOURNEY_COMMANDS: [&str; 6] =
-    ["next", "scan .", "findings", "modules", "recommend", "runs"];
+const HOME_JOURNEY_COMMANDS: [&str; 6] = [
+    "next",
+    "findings",
+    "options sast:scan",
+    "tasks",
+    "modules",
+    "Ctrl+G",
+];
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct HomeCockpitModel {
     pub title: &'static str,
-    pub summary_rows: Vec<HomeSummaryRow>,
     pub attack_surface: Option<AttackSurfaceRiskModel>,
-    pub next_action: String,
-    pub rail_legend: &'static str,
-    /// One-line replacement for the per-artifact rail on a fresh workspace
-    /// (every artifact still missing). `Some` collapses the nine-row wall into
-    /// a calm summary; `None` renders the full legend + rows.
-    pub rail_summary: Option<String>,
+    pub next_card: HomeNextCard,
+    pub findings_card: HomeFindingsCard,
+    pub top_risks: Vec<HomeTopRiskRow>,
+    pub run_card: HomeRunCard,
+    pub workspace_line: String,
     pub command_labels: [&'static str; 6],
-    pub artifacts: Vec<HomeArtifactRow>,
     /// The engagement spine (組 map → 崩 hunt → 作 confirm → 掛 fix), derived
     /// from workspace state. `None` without a target.
     pub journey: Option<JourneyModel>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct HomeSummaryRow {
-    pub cells: [String; 2],
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HomeNextCard {
+    pub action: String,
+    pub mechanics: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HomeFindingsCard {
+    pub total: usize,
+    pub reviewed: usize,
+    pub unreviewed: usize,
+    pub counts: SeverityCounts,
+    pub reviewed_counts: SeverityCounts,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HomeTopRiskRow {
+    pub severity_tone: SeverityTone,
+    pub severity_label: String,
+    pub alias: String,
+    pub rule: String,
+    pub location: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HomeRunCard {
+    pub run_id: String,
+    pub status: String,
+    pub recorded: usize,
+    pub total: usize,
+    pub artifacts: Vec<HomeRunArtifactChip>,
+    pub run_dir: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HomeRunArtifactChip {
+    pub glyph: String,
+    pub label: String,
+    pub state: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -53,29 +96,18 @@ pub struct HomeArtifactRow {
 
 pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
     let run = HomeRunModel::from_app(app);
-    let target = target_label(app);
-    let latest_run = run.latest_run_label();
-    let run_status = run_status_label(&run.run_dir);
-    let module_count = app.registry.modules().count();
-    let finding_count = app.findings.len();
     let artifacts = home_artifact_rows(&run.run_dir);
     let journey = journey_model(app);
+    let module_count = app.registry.modules().count();
     HomeCockpitModel {
         title: "HOME",
-        summary_rows: home_summary_rows(
-            target,
-            latest_run,
-            run_status,
-            module_count,
-            finding_count,
-        ),
-        attack_surface: attack_surface_risk_model(&run.run_dir),
-        next_action: home_next_action(journey.as_ref()),
-        rail_legend:
-            "rails: ✓ recorded · ○ placeholder · ◆ partial · ⚠ failed/malformed · ■ missing",
-        rail_summary: home_rail_summary(&artifacts),
+        attack_surface: home_attack_surface_model(&run.run_dir, &artifacts),
+        next_card: home_next_card(journey.as_ref()),
+        findings_card: home_findings_card(app),
+        top_risks: home_top_risks(app),
+        run_card: home_run_card(&run, &artifacts),
+        workspace_line: home_workspace_line(app, module_count),
         command_labels: home_command_labels(journey.as_ref()),
-        artifacts,
         journey,
     }
 }
@@ -88,54 +120,153 @@ fn home_command_labels(journey: Option<&JourneyModel>) -> [&'static str; 6] {
     }
 }
 
-/// On a fresh workspace every artifact is "missing" — the expected initial
-/// state, not a failure. Collapse the per-artifact rail into one calm summary
-/// line; once any artifact is produced, the full rail returns.
-fn home_rail_summary(artifacts: &[HomeArtifactRow]) -> Option<String> {
-    let total = artifacts.len();
-    let produced = artifacts
+fn home_next_card(journey: Option<&JourneyModel>) -> HomeNextCard {
+    journey.map_or_else(first_run_next_card, journey_next_card)
+}
+
+fn first_run_next_card() -> HomeNextCard {
+    HomeNextCard {
+        action: "set a target and start the guided workflow".to_string(),
+        mechanics: "type `target .` or `target <path>` · then `next`".to_string(),
+    }
+}
+
+fn journey_next_card(journey: &JourneyModel) -> HomeNextCard {
+    HomeNextCard {
+        action: journey.next_action.clone(),
+        mechanics: format!("type `next` · tools: {}", journey.next_tools),
+    }
+}
+
+fn home_findings_card(app: &ShellApp) -> HomeFindingsCard {
+    let findings = &app.findings;
+    let review_index =
+        EffectiveReviewStateIndex::from_findings_and_decisions(findings, &app.review_decisions);
+    let reviewed = findings
         .iter()
-        .filter(|artifact| artifact.cells[2] != "missing")
+        .filter(|finding| indexed_review_decision_complete(&review_index, finding))
         .count();
-    (produced == 0 && total > 0).then(|| {
-        format!("run artifacts   0/{total} produced — run `scan .` to populate the proof rails")
-    })
+    HomeFindingsCard {
+        total: findings.len(),
+        reviewed,
+        unreviewed: findings.len().saturating_sub(reviewed),
+        counts: SeverityCounts::from_findings(findings),
+        reviewed_counts: reviewed_severity_counts(findings, &review_index),
+    }
 }
 
-fn home_summary_rows(
-    target: String,
-    latest_run: String,
-    run_status: String,
-    module_count: usize,
-    finding_count: usize,
-) -> Vec<HomeSummaryRow> {
-    vec![
-        home_summary_row("target", target),
-        home_summary_row("latest run", latest_run),
-        home_summary_row("run status", run_status),
-        home_summary_row("modules", module_count.to_string()),
-        home_summary_row("findings", finding_count.to_string()),
-    ]
+fn reviewed_severity_counts(
+    findings: &[Finding],
+    review_index: &EffectiveReviewStateIndex,
+) -> SeverityCounts {
+    let mut counts = SeverityCounts::default();
+    for finding in findings
+        .iter()
+        .filter(|finding| indexed_review_decision_complete(review_index, finding))
+    {
+        counts.add(finding.severity);
+    }
+    counts
 }
 
-fn home_summary_row(label: &str, value: String) -> HomeSummaryRow {
-    HomeSummaryRow {
-        cells: [label.to_string(), value],
+fn home_top_risks(app: &ShellApp) -> Vec<HomeTopRiskRow> {
+    let base = target_base(app);
+    cached_sorted_finding_alias_indices(app)
+        .into_iter()
+        .take(HOME_TOP_RISK_LIMIT)
+        .filter_map(|(alias, finding_index)| {
+            let finding = app.findings.get(finding_index)?;
+            Some(home_top_risk_row(alias, finding, base.as_deref()))
+        })
+        .collect()
+}
+
+fn home_top_risk_row(alias: String, finding: &Finding, base: Option<&str>) -> HomeTopRiskRow {
+    let projection = project_finding(finding, Some(alias.clone()));
+    HomeTopRiskRow {
+        severity_tone: SeverityTone::from_severity(projection.severity),
+        severity_label: projection.severity_label,
+        alias,
+        rule: finding.rule_id.clone(),
+        location: relativize_location(projection.location, base),
+    }
+}
+
+fn home_run_card(run: &HomeRunModel, artifacts: &[HomeArtifactRow]) -> HomeRunCard {
+    HomeRunCard {
+        run_id: run.latest_run_label(),
+        status: run_status_label(&run.run_dir),
+        recorded: recorded_artifact_count(artifacts),
+        total: artifacts.len(),
+        artifacts: artifacts.iter().map(home_run_artifact_chip).collect(),
+        run_dir: home_path_label(&run.run_dir),
+    }
+}
+
+fn recorded_artifact_count(artifacts: &[HomeArtifactRow]) -> usize {
+    artifacts
+        .iter()
+        .filter(|artifact| artifact.cells[2] == "recorded")
+        .count()
+}
+
+fn home_run_artifact_chip(artifact: &HomeArtifactRow) -> HomeRunArtifactChip {
+    let [glyph, label, state, _path] = &artifact.cells;
+    HomeRunArtifactChip {
+        glyph: glyph.clone(),
+        label: label.clone(),
+        state: state.clone(),
+    }
+}
+
+fn home_workspace_line(app: &ShellApp, module_count: usize) -> String {
+    format!(
+        "target {} · modules {} · context {}",
+        target_label(app),
+        module_count,
+        home_context_label(context_snapshot_state(app))
+    )
+}
+
+fn home_context_label(state: &str) -> &'static str {
+    match state {
+        "present" => "built",
+        "malformed" => "malformed",
+        _ => "not built",
     }
 }
 
 fn target_label(app: &ShellApp) -> String {
     app.target
         .as_ref()
-        .map(|path| path.display().to_string())
+        .map(|path| home_path_label(path))
         .unwrap_or_else(|| "none".to_string())
 }
 
-fn home_next_action(journey: Option<&JourneyModel>) -> String {
-    if let Some(journey) = journey {
-        return journey.next_action.clone();
+fn home_path_label(path: &Path) -> String {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return path.display().to_string();
+    };
+    let Ok(rest) = path.strip_prefix(home) else {
+        return path.display().to_string();
+    };
+    if rest.as_os_str().is_empty() {
+        "~".to_string()
+    } else {
+        format!("~/{}", rest.display())
     }
-    "Run `scan .` to scan the current directory and create the first run artifacts.".to_string()
+}
+
+fn home_attack_surface_model(
+    run_dir: &Path,
+    artifacts: &[HomeArtifactRow],
+) -> Option<AttackSurfaceRiskModel> {
+    let surface = artifacts
+        .iter()
+        .find(|artifact| artifact.cells[1] == "surface")?;
+    matches!(surface.cells[2].as_str(), "recorded" | "partial")
+        .then(|| attack_surface_risk_model(run_dir))
+        .flatten()
 }
 
 fn home_artifact_rows(run_dir: &Path) -> Vec<HomeArtifactRow> {
@@ -211,9 +342,9 @@ fn artifact_status_from_value(value: &serde_json::Value) -> Option<String> {
 
 fn state_for_status(status: &str) -> Option<HomeArtifactState> {
     match status {
-        "completed" | "complete" | "ok" => Some(HomeArtifactState::recorded()),
+        "completed" => Some(HomeArtifactState::recorded()),
         "partial" => Some(HomeArtifactState::partial()),
-        "failed" | "error" => Some(HomeArtifactState::failed()),
+        "failed" => Some(HomeArtifactState::failed()),
         "skipped" => Some(HomeArtifactState::placeholder()),
         _ => None,
     }
@@ -268,6 +399,7 @@ fn home_artifact_label(label: &str) -> &str {
         "attack surface" => "surface",
         "threat model" => "threat",
         "recommendations" => "recommend",
+        "strategy proposals" => "strategy",
         "failure handoff" => "failures",
         "artifact manifest" => "manifest",
         _ => label,

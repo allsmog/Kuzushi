@@ -17,9 +17,13 @@ pub(crate) fn offense_module() -> BuiltinModule {
 
 fn offense_chain_tool() -> ToolDescriptor {
     let mut options = vec![
-        opt("target", OptionType::String, "Target host (IP or hostname) to operate against.")
-            .aliases(&["targetHost", "target_host"])
-            .required(),
+        opt(
+            "target",
+            OptionType::String,
+            "Target host (IP or hostname) to operate against.",
+        )
+        .aliases(&["targetHost", "target_host"])
+        .required(),
         opt(
             "chain",
             OptionType::Json,
@@ -47,23 +51,35 @@ fn offense_chain_tool() -> ToolDescriptor {
 
 fn offense_chain_advanced_options() -> Vec<OptionSpec> {
     vec![
-        opt("maxSteps", OptionType::Int, "Autonomous mode: max planned steps (1-24).")
-            .aliases(&["max_steps"])
-            .default(json!(8))
-            .advanced(),
+        opt(
+            "maxSteps",
+            OptionType::Int,
+            "Autonomous mode: max planned steps (1-24).",
+        )
+        .aliases(&["max_steps"])
+        .default(json!(8))
+        .advanced(),
         opt(
             "scope",
             OptionType::Json,
             "Inline engagement scope; overrides .kuzushi/engagement-scope.json.",
         )
         .advanced(),
-        opt("timeoutMs", OptionType::Int, "Per-play network timeout in milliseconds.")
-            .aliases(&["timeout_ms"])
-            .default(json!(15000))
-            .advanced(),
-        opt("runId", OptionType::String, "Run id to record chain evidence under.")
-            .aliases(&["run_id"])
-            .advanced(),
+        opt(
+            "timeoutMs",
+            OptionType::Int,
+            "Per-play network timeout in milliseconds.",
+        )
+        .aliases(&["timeout_ms"])
+        .default(json!(15000))
+        .advanced(),
+        opt(
+            "runId",
+            OptionType::String,
+            "Run id to record chain evidence under.",
+        )
+        .aliases(&["run_id"])
+        .advanced(),
     ]
 }
 
@@ -86,9 +102,11 @@ fn run_offense_chain(
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    let workspace = ctx.workspace.context(
-        "offense:chain needs an active workspace for the engagement scope. Pass --target <dir> or start the shell with --target.",
-    )?;
+    let workspace = ctx
+        .workspace
+        .context(crate::workspace::active_workspace_required_message(
+            "offense:chain",
+        ))?;
     let observer = TraceHopObserver { trace: ctx.trace };
     let goal = input
         .get("goal")
@@ -108,7 +126,8 @@ fn run_offense_chain(
     let runtime = runtime.context(
         "offense:chain autonomous mode (goal) requires the LangGraph runtime. Configure runtime.langgraph_bridge_command or run a declarative chain instead.",
     )?;
-    let model = crate::runtime::require_configured_model("offense:chain", ctx.config.model.as_deref())?;
+    let model =
+        crate::runtime::require_configured_model("offense:chain", ctx.config.model.as_deref())?;
     Ok(crate::offense::execute_offense_planned(
         input,
         workspace.root(),
@@ -131,7 +150,11 @@ impl crate::offense::HopObserver for TraceHopObserver<'_> {
     fn on_chain_start(&self, chain: &str, target: &str) {
         if let Some(trace) = self.trace {
             let _ = trace
-                .step("tool", "chain", format!("offense:chain start · {chain} → {target}"))
+                .step(
+                    "tool",
+                    "chain",
+                    format!("offense:chain start · {chain} → {target}"),
+                )
                 .emit();
         }
     }
@@ -139,7 +162,11 @@ impl crate::offense::HopObserver for TraceHopObserver<'_> {
     fn on_planning(&self, step_index: usize) {
         if let Some(trace) = self.trace {
             let _ = trace
-                .step("reasoning", "chain", format!("planning hop {}", step_index + 1))
+                .step(
+                    "reasoning",
+                    "chain",
+                    format!("planning hop {}", step_index + 1),
+                )
                 .emit();
         }
     }

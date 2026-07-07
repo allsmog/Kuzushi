@@ -54,7 +54,13 @@ fn prepare_carlini_threat_hunt_run<'a>(
     let scope = prepare_carlini_threat_hunt_scope(input, ctx)?;
     let execution = prepare_carlini_execution_inputs(input, ctx, runtime, &scope.target)?;
     let capped = capped_actor_hunts(scope.actors, execution.options.max_actors);
+    emit_carlini_progress(ctx, scope.parent_step, "inventory · collect actor-focused snippets");
     let inventory = collect_carlini_inventory(&scope.target, &capped)?;
+    emit_carlini_progress(
+        ctx,
+        scope.parent_step,
+        format!("inventory · {} snippets loaded", inventory.len()),
+    );
     emit_carlini_actor_spawn(
         ctx,
         scope.parent_step,
@@ -84,7 +90,17 @@ fn prepare_carlini_threat_hunt_scope(
 ) -> Result<CarliniThreatHuntScope> {
     let target = resolve_carlini_target(input, ctx)?;
     let parent_step = emit_carlini_start_step(ctx, &target);
+    emit_carlini_progress(ctx, parent_step, "threat-model · load actors and threats");
     let actors = resolve_carlini_actor_hunts(input, ctx, &target)?;
+    emit_carlini_progress(
+        ctx,
+        parent_step,
+        format!(
+            "threat-model · {} actors · {} prioritized",
+            actors.all_actors.len(),
+            actors.prioritized.len()
+        ),
+    );
 
     Ok(CarliniThreatHuntScope {
         target,
@@ -377,6 +393,21 @@ fn emit_carlini_refusal(ctx: &ToolExecutionContext<'_>, label: &str) {
     if let Some(trace) = ctx.trace {
         let _ = trace.step("refused", "run", label).emit();
     }
+}
+
+fn emit_carlini_progress(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    label: impl Into<String>,
+) {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return;
+    };
+
+    let _ = trace
+        .child(parent)
+        .step("tool-progress", "run", label.into())
+        .emit();
 }
 
 fn emit_carlini_actor_spawn(

@@ -717,11 +717,18 @@ fn dotnet_route_for_line(line: &str, text: &str, line_number: u32) -> Option<Str
     }
     let context = dotnet_route_context(text, line, line_number);
     if line.to_ascii_lowercase().contains("mapidentityapi") {
-        return Some(context.group_route.unwrap_or_else(|| "/identity".to_string()));
+        return Some(
+            context
+                .group_route
+                .unwrap_or_else(|| "/identity".to_string()),
+        );
     }
     let route = dotnet_route_path_for_line(line);
     let action_route = route.as_deref().or(context.action_route.as_deref());
-    let prefix = context.group_route.as_deref().or(context.class_route.as_deref());
+    let prefix = context
+        .group_route
+        .as_deref()
+        .or(context.class_route.as_deref());
     combine_dotnet_routes(prefix, action_route)
 }
 
@@ -803,7 +810,8 @@ fn dotnet_controller_route(line: &str, lower: &str) -> Option<String> {
         return Some("/{controller}/{action}".to_string());
     }
     if lower.contains("mapcontrollerroute(") || lower.contains("mapareacontrollerroute(") {
-        return dotnet_named_argument_route(line, "pattern").or_else(|| dotnet_last_quoted_route(line));
+        return dotnet_named_argument_route(line, "pattern")
+            .or_else(|| dotnet_last_quoted_route(line));
     }
     None
 }
@@ -812,7 +820,9 @@ fn dotnet_dynamic_route(line: &str, lower: &str) -> Option<String> {
     if !lower.contains("mapdynamiccontrollerroute") && !lower.contains("mapdynamicpageroute") {
         return None;
     }
-    dotnet_quoted_values(line).into_iter().find_map(dotnet_route_path)
+    dotnet_quoted_values(line)
+        .into_iter()
+        .find_map(dotnet_route_path)
 }
 
 fn dotnet_last_quoted_route(line: &str) -> Option<String> {
@@ -898,9 +908,9 @@ fn dotnet_asset_or_metrics_route(line: &str, lower: &str) -> Option<String> {
 }
 
 fn dotnet_openapi_route(line: &str, lower: &str) -> Option<String> {
-    lower.contains("mapopenapi(").then(|| {
-        dotnet_defaultable_route(line, "/openapi/{documentName}.json")
-    })
+    lower
+        .contains("mapopenapi(")
+        .then(|| dotnet_defaultable_route(line, "/openapi/{documentName}.json"))
 }
 
 fn dotnet_swagger_or_graphql_route(line: &str, lower: &str) -> Option<String> {
@@ -1047,7 +1057,9 @@ fn dotnet_parent_route_group(line: &str, route_groups: &[(String, String)]) -> O
 
 fn dotnet_assignment_name(line: &str) -> Option<String> {
     let left = line.split('=').next()?.trim();
-    left.split_whitespace().last().map(|name| name.to_ascii_lowercase())
+    left.split_whitespace()
+        .last()
+        .map(|name| name.to_ascii_lowercase())
 }
 
 fn dotnet_route_group_for_line(line: &str, route_groups: &[(String, String)]) -> Option<String> {
@@ -1091,7 +1103,8 @@ fn dotnet_route_attribute(line: &str) -> Option<String> {
     if !line.to_ascii_lowercase().contains("[route(") {
         return None;
     }
-    dotnet_named_argument_route(line, "template").or_else(|| dotnet_positional_attribute_route(line))
+    dotnet_named_argument_route(line, "template")
+        .or_else(|| dotnet_positional_attribute_route(line))
 }
 
 fn combine_dotnet_routes(prefix: Option<&str>, route: Option<&str>) -> Option<String> {
@@ -1367,8 +1380,8 @@ pub(crate) fn inspect_php_route_line(
     let Some((method, marker)) = php_route_method(&lower) else {
         return;
     };
-    let Some(route) =
-        extract_quoted_after_marker_case_insensitive(line, marker).filter(|route| backend_route_path(route))
+    let Some(route) = extract_quoted_after_marker_case_insensitive(line, marker)
+        .filter(|route| backend_route_path(route))
     else {
         return;
     };
@@ -1388,7 +1401,8 @@ fn laravel_match_route(line: &str, lower: &str) -> Option<(&'static str, String)
     let arguments = &line[start..];
     let method = laravel_match_method(&arguments.to_ascii_lowercase())?;
     let route_start = arguments.find(']')? + 1;
-    let route = extract_first_quoted(&arguments[route_start..]).filter(|route| backend_route_path(route))?;
+    let route = extract_first_quoted(&arguments[route_start..])
+        .filter(|route| backend_route_path(route))?;
     Some((method, route))
 }
 

@@ -1,3 +1,4 @@
+use crate::app::PromptMutationsState;
 use crate::{HouseRulesRead, ShellApp, TuneAction};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -29,14 +30,29 @@ pub(crate) enum TuneHouseRules {
 pub(crate) struct PromptsModel {
     pub(crate) module: String,
     pub(crate) rows: Vec<PromptRow>,
+    pub(crate) stack: PromptStackModel,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PromptRow {
     pub(crate) verb: &'static str,
-    pub(crate) source: &'static str,
+    pub(crate) source: String,
     pub(crate) path: String,
     pub(crate) selected: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PromptStackModel {
+    pub(crate) verb: &'static str,
+    pub(crate) layers: Vec<PromptStackLayer>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct PromptStackLayer {
+    pub(crate) layer: &'static str,
+    pub(crate) state: String,
+    pub(crate) path: String,
+    pub(crate) hash: String,
 }
 
 pub(crate) fn tune_model(app: &ShellApp, house_rule_limit: usize) -> TuneModel {
@@ -57,19 +73,36 @@ pub(crate) fn tune_model(app: &ShellApp, house_rule_limit: usize) -> TuneModel {
 pub(crate) fn prompts_model(app: &ShellApp) -> PromptsModel {
     let module = focused_module(app);
     let cursor = app.prompts_cursor_clamped();
+    let override_states: Vec<_> = ShellApp::PROMPT_VERB_NAMES
+        .iter()
+        .map(|verb| prompt_override_layer_state(app, &module, verb))
+        .collect();
     let rows = ShellApp::PROMPT_VERB_NAMES
         .iter()
         .enumerate()
         .map(|(index, verb)| PromptRow {
             verb,
-            source: "none",
+            source: override_states[index].source_label().to_string(),
             path: kuzushi_core::relative_prompt_override_path(&module, verb)
                 .display()
                 .to_string(),
             selected: index == cursor,
         })
         .collect();
-    PromptsModel { module, rows }
+    let verb = ShellApp::PROMPT_VERB_NAMES
+        .get(cursor)
+        .copied()
+        .unwrap_or("scan");
+    let override_state = override_states
+        .get(cursor)
+        .cloned()
+        .unwrap_or_else(|| prompt_override_layer_state(app, &module, verb));
+    let stack = prompt_stack_model(app, &module, verb, override_state);
+    PromptsModel {
+        module,
+        rows,
+        stack,
+    }
 }
 
 fn focused_module(app: &ShellApp) -> String {
@@ -99,6 +132,231 @@ fn house_rules(app: &ShellApp, limit: usize) -> TuneHouseRules {
         }
         HouseRulesRead::Unreadable(path) => TuneHouseRules::Unreadable(path.display().to_string()),
         _ => TuneHouseRules::Empty,
+    }
+}
+
+fn prompt_stack_model(
+    app: &ShellApp,
+    module: &str,
+    verb: &'static str,
+    override_state: PromptOverrideLayerState,
+) -> PromptStackModel {
+    let mutation_state = prompt_mutation_layer_state(app, module, verb);
+    let final_layer = prompt_final_layer(&override_state, &mutation_state);
+    PromptStackModel {
+        verb,
+        layers: vec![
+            prompt_stack_layer("base", "module default", "built-in", "runtime"),
+            override_state.layer(),
+            prompt_stack_layer("variant", "inactive", "not configured", "-"),
+            mutation_state.layer(),
+            prompt_stack_layer("correction", "inactive", "not configured", "-"),
+            final_layer,
+        ],
+    }
+}
+
+fn prompt_stack_layer(
+    layer: &'static str,
+    state: impl Into<String>,
+    path: impl Into<String>,
+    hash: impl Into<String>,
+) -> PromptStackLayer {
+    PromptStackLayer {
+        layer,
+        state: state.into(),
+        path: path.into(),
+        hash: hash.into(),
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PromptOverrideLayerState {
+    Present { path: String, hash: String },
+    Missing { path: String },
+    NoTarget { path: String },
+    Unreadable { path: String },
+}
+
+impl PromptOverrideLayerState {
+    fn layer(&self) -> PromptStackLayer {
+        match self {
+            Self::Present { path, hash } => {
+                prompt_stack_layer("project override", "present", path, hash)
+            }
+            Self::Missing { path } => prompt_stack_layer("project override", "missing", path, "-"),
+            Self::NoTarget { path } => {
+                prompt_stack_layer("project override", "no target", path, "-")
+            }
+            Self::Unreadable { path } => {
+                prompt_stack_layer("project override", "unreadable", path, "invalid")
+            }
+        }
+    }
+
+    fn final_layer(&self) -> PromptStackLayer {
+        match self {
+            Self::Present { path, hash } => {
+                prompt_stack_layer("final", "override active", path, hash)
+            }
+            _ => prompt_stack_layer("final", "base active", "built-in", "runtime"),
+        }
+    }
+
+    fn source_label(&self) -> &'static str {
+        match self {
+            Self::Present { .. } => "file",
+            Self::Missing { .. } => "none",
+            Self::NoTarget { .. } => "no target",
+            Self::Unreadable { .. } => "invalid",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PromptMutationLayerState {
+    Present {
+        id: String,
+        status: kuzushi_core::PromptMutationStatus,
+        hash: String,
+    },
+    Missing,
+    NoTarget,
+    Unreadable,
+}
+
+impl PromptMutationLayerState {
+    fn layer(&self) -> PromptStackLayer {
+        match self {
+            Self::Present { id, status, hash } => prompt_stack_layer(
+                "mutation",
+                mutation_status_label(*status),
+                prompt_mutation_layer_path(id),
+                hash,
+            ),
+            Self::Missing => prompt_stack_layer("mutation", "inactive", "not configured", "-"),
+            Self::NoTarget => prompt_stack_layer(
+                "mutation",
+                "no target",
+                prompt_mutations_relative_path(),
+                "-",
+            ),
+            Self::Unreadable => prompt_stack_layer(
+                "mutation",
+                "unreadable",
+                prompt_mutations_relative_path(),
+                "invalid",
+            ),
+        }
+    }
+}
+
+fn prompt_final_layer(
+    override_state: &PromptOverrideLayerState,
+    mutation_state: &PromptMutationLayerState,
+) -> PromptStackLayer {
+    match mutation_state {
+        PromptMutationLayerState::Present {
+            id,
+            status: kuzushi_core::PromptMutationStatus::Pending,
+            ..
+        } => prompt_stack_layer(
+            "final",
+            "blocked: mutation pending approval",
+            prompt_mutation_layer_path(id),
+            "-",
+        ),
+        PromptMutationLayerState::Present {
+            id,
+            status: kuzushi_core::PromptMutationStatus::Approved,
+            hash,
+        } => prompt_stack_layer(
+            "final",
+            "approved mutation active",
+            prompt_mutation_layer_path(id),
+            hash,
+        ),
+        _ => override_state.final_layer(),
+    }
+}
+
+fn mutation_status_label(status: kuzushi_core::PromptMutationStatus) -> &'static str {
+    match status {
+        kuzushi_core::PromptMutationStatus::Pending => "pending approval",
+        kuzushi_core::PromptMutationStatus::Approved => "approved",
+        kuzushi_core::PromptMutationStatus::Rejected => "rejected",
+    }
+}
+
+fn prompt_mutation_layer_state(
+    app: &ShellApp,
+    module: &str,
+    verb: &str,
+) -> PromptMutationLayerState {
+    let Some(target) = app.target.as_ref() else {
+        return PromptMutationLayerState::NoTarget;
+    };
+    let workspace = match kuzushi_core::WorkspaceTarget::new(target) {
+        Ok(workspace) => workspace,
+        Err(_) => return PromptMutationLayerState::Unreadable,
+    };
+    match app
+        .workbench_cache
+        .borrow_mut()
+        .prompt_mutations(Some(&workspace))
+    {
+        Some(PromptMutationsState::Ready(mutations)) => {
+            let Some(mutation) = mutations
+                .into_iter()
+                .rev()
+                .find(|mutation| mutation.module_id == module && mutation.verb == verb)
+            else {
+                return PromptMutationLayerState::Missing;
+            };
+            let hash = mutation.content_hash();
+            PromptMutationLayerState::Present {
+                id: mutation.id,
+                status: mutation.status,
+                hash,
+            }
+        }
+        Some(PromptMutationsState::Unreadable) => PromptMutationLayerState::Unreadable,
+        None => PromptMutationLayerState::Missing,
+    }
+}
+
+fn prompt_mutation_layer_path(id: &str) -> String {
+    format!("{}:{id}", prompt_mutations_relative_path())
+}
+
+fn prompt_mutations_relative_path() -> String {
+    format!(
+        "{}/{}/{}",
+        kuzushi_core::KUZUSHI_STATE_DIR,
+        kuzushi_core::WORKSPACE_STATE_VERSION_DIR,
+        kuzushi_core::PROMPT_MUTATIONS_FILE
+    )
+}
+
+fn prompt_override_layer_state(
+    app: &ShellApp,
+    module: &str,
+    verb: &str,
+) -> PromptOverrideLayerState {
+    let relative = kuzushi_core::relative_prompt_override_path(module, verb)
+        .display()
+        .to_string();
+    let Some(target) = app.target.as_ref() else {
+        return PromptOverrideLayerState::NoTarget { path: relative };
+    };
+    let path = kuzushi_core::prompt_override_path(target, module, verb);
+    match app.workbench_cache.borrow_mut().prompt_override_hash(&path) {
+        Ok(Some(hash)) => PromptOverrideLayerState::Present {
+            path: relative,
+            hash,
+        },
+        Ok(None) => PromptOverrideLayerState::Missing { path: relative },
+        Err(_) => PromptOverrideLayerState::Unreadable { path: relative },
     }
 }
 

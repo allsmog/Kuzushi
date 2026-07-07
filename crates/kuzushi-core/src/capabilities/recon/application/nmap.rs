@@ -30,9 +30,8 @@ fn prepare_recon_nmap<'a>(
 fn require_recon_nmap_workspace<'a>(
     ctx: &'a ToolExecutionContext<'_>,
 ) -> Result<&'a crate::workspace::WorkspaceTarget> {
-    ctx.workspace.context(
-        "recon:nmap needs an active workspace. Pass --target <repo> or start the shell with --target.",
-    )
+    ctx.workspace
+        .context(crate::workspace::active_workspace_required_message("recon:nmap"))
 }
 
 fn scan_recon_nmap(options: &NmapInput, cancel: &ScanCancellation) -> Result<NmapParseResult> {

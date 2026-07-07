@@ -1,15 +1,32 @@
 use super::*;
 pub(crate) use super::*;
+use unicode_width::{UnicodeWidthChar, UnicodeWidthStr};
 
 pub(super) fn short_label(text: &str, max: usize) -> String {
     let cleaned = text.replace('\n', " ");
-    if cleaned.chars().count() <= max {
+    if UnicodeWidthStr::width(cleaned.as_str()) <= max {
         cleaned
+    } else if max == 0 {
+        String::new()
     } else {
-        let mut out: String = cleaned.chars().take(max - 1).collect();
+        let mut out = take_display_columns(&cleaned, max.saturating_sub(1));
         out.push('…');
         out
     }
+}
+
+fn take_display_columns(value: &str, max: usize) -> String {
+    let mut width = 0usize;
+    let mut out = String::new();
+    for ch in value.chars() {
+        let next = width + UnicodeWidthChar::width(ch).unwrap_or(0);
+        if next > max {
+            break;
+        }
+        out.push(ch);
+        width = next;
+    }
+    out
 }
 
 /// Write minimal run metadata so the runs ledger can list synthetic
@@ -23,7 +40,7 @@ pub fn write_run_summary(
     target_label: &str,
 ) {
     // Only write when an explicit workspace target is set — otherwise
-    // synthetic agent runs would land in the cwd's .kuzushi/runs and
+    // synthetic agent runs would land in the cwd's .kuzushi/v3/runs and
     // pollute test workspaces (cwd is `crates/<name>` during cargo test).
     let Some(target) = target else { return };
     let mut summary = kuzushi_core::RunSummary::running(
@@ -78,18 +95,18 @@ pub fn append_run_status_event(
 
 fn canonical_run_status(status: &str) -> &'static str {
     match status.to_ascii_lowercase().as_str() {
-        "complete" | "completed" | "ok" | "success" => "completed",
-        "failed" | "error" => "failed",
+        "complete" | "completed" => "completed",
+        "failed" => "failed",
         "partial" => "partial",
-        "skipped" | "skip" => "skipped",
-        "paused" | "cancelled" | "canceled" => "paused",
-        "running" | "started" => "running",
+        "skipped" => "skipped",
+        "paused" => "paused",
+        "running" => "running",
         _ => "running",
     }
 }
 
 /// Append a single `TraceStep`-shaped JSON object to the trace.jsonl
-/// for the given `run_id` under `<target>/.kuzushi/runs/<run_id>/`.
+/// for the given `run_id` under `<target>/.kuzushi/v3/runs/<run_id>/`.
 /// No-ops on any I/O error so a missing target dir or read-only mount
 /// doesn't crash a worker — trace writes are observability, not a
 /// correctness contract.  `kind` is the renderer's tint key:

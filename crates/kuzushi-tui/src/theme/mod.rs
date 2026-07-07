@@ -3,7 +3,7 @@ use crate::ui_view_models::SeverityTone;
 use ratatui::prelude::{Color, Modifier, Style};
 
 mod config;
-pub use config::{active_theme, ThemeConfig};
+pub use config::{active_theme, ColorDepth, ThemeConfig};
 
 pub const STATUS_SEPARATOR: &str = " · ";
 pub const RULE_CHAR: &str = "─";
@@ -28,79 +28,132 @@ pub const SEV_MEDIUM: Color = T_WARN;
 pub const SEV_LOW: Color = Color::Rgb(0x8a, 0xa6, 0xc4);
 
 pub fn primary() -> Style {
-    if active_theme().high_contrast {
-        return Style::default().fg(T_HEADING).add_modifier(Modifier::BOLD);
+    let config = active_theme();
+    if config.no_color {
+        return Style::default();
     }
-    Style::default().fg(T_PRIMARY)
+    if config.high_contrast {
+        return fg(Style::default(), T_HEADING, config).add_modifier(Modifier::BOLD);
+    }
+    fg(Style::default(), T_PRIMARY, config)
 }
 
 pub fn muted() -> Style {
-    if active_theme().high_contrast {
-        return Style::default().fg(T_PRIMARY);
+    let config = active_theme();
+    if config.no_color {
+        return Style::default();
     }
-    Style::default().fg(T_MUTED)
+    if config.high_contrast {
+        return fg(Style::default(), T_PRIMARY, config);
+    }
+    fg(Style::default(), T_MUTED, config)
+}
+
+pub fn disabled() -> Style {
+    disabled_for_config(active_theme())
+}
+
+fn disabled_for_config(config: ThemeConfig) -> Style {
+    if config.no_color {
+        return Style::default().add_modifier(Modifier::DIM);
+    }
+    if config.high_contrast {
+        return fg(Style::default(), T_PRIMARY, config);
+    }
+    fg(Style::default(), T_MUTED, config).add_modifier(Modifier::DIM)
 }
 
 pub fn subtle() -> Style {
-    if active_theme().high_contrast {
-        return Style::default().fg(T_MUTED);
+    subtle_for_config(active_theme())
+}
+
+fn subtle_for_config(config: ThemeConfig) -> Style {
+    if config.no_color {
+        return Style::default().add_modifier(Modifier::DIM);
     }
-    Style::default().fg(T_SUBTLE)
+    if config.high_contrast {
+        return fg(Style::default(), T_MUTED, config);
+    }
+    let style = fg(Style::default(), T_SUBTLE, config);
+    if config.color_depth == ColorDepth::Ansi16 {
+        style.add_modifier(Modifier::DIM)
+    } else {
+        style
+    }
 }
 
 pub fn label() -> Style {
-    if active_theme().high_contrast {
-        return Style::default().fg(T_HEADING).add_modifier(Modifier::BOLD);
+    let config = active_theme();
+    if config.no_color {
+        return Style::default().add_modifier(Modifier::BOLD);
     }
-    Style::default().fg(T_LABEL).add_modifier(Modifier::BOLD)
+    if config.high_contrast {
+        return fg(Style::default(), T_HEADING, config).add_modifier(Modifier::BOLD);
+    }
+    fg(Style::default(), T_LABEL, config).add_modifier(Modifier::BOLD)
 }
 
 pub fn heading() -> Style {
-    Style::default().fg(T_HEADING).add_modifier(Modifier::BOLD)
+    let config = active_theme();
+    if config.no_color {
+        return Style::default().add_modifier(Modifier::BOLD);
+    }
+    fg(Style::default(), T_HEADING, config).add_modifier(Modifier::BOLD)
 }
 
 pub fn accent() -> Style {
-    if active_theme().high_contrast {
-        return Style::default().fg(T_HEADING).add_modifier(Modifier::BOLD);
+    let config = active_theme();
+    if config.no_color {
+        return Style::default().add_modifier(Modifier::BOLD);
     }
-    Style::default().fg(T_ACCENT)
+    if config.high_contrast {
+        return fg(Style::default(), T_HEADING, config).add_modifier(Modifier::BOLD);
+    }
+    fg(Style::default(), T_ACCENT, config).add_modifier(Modifier::BOLD)
 }
 
 pub fn success() -> Style {
-    Style::default()
-        .fg(T_SUCCESS)
-        .add_modifier(if active_theme().high_contrast {
-            Modifier::BOLD
-        } else {
-            Modifier::empty()
-        })
+    let config = active_theme();
+    if config.no_color {
+        return Style::default().add_modifier(Modifier::BOLD);
+    }
+    fg(Style::default(), T_SUCCESS, config).add_modifier(if config.high_contrast {
+        Modifier::BOLD
+    } else {
+        Modifier::empty()
+    })
 }
 
 pub fn warn() -> Style {
-    Style::default()
-        .fg(T_WARN)
-        .add_modifier(if active_theme().high_contrast {
-            Modifier::BOLD
-        } else {
-            Modifier::empty()
-        })
+    let config = active_theme();
+    if config.no_color {
+        return Style::default().add_modifier(Modifier::BOLD);
+    }
+    fg(Style::default(), T_WARN, config).add_modifier(if config.high_contrast {
+        Modifier::BOLD
+    } else {
+        Modifier::empty()
+    })
 }
 
 pub fn danger() -> Style {
-    Style::default()
-        .fg(T_DANGER)
-        .add_modifier(if active_theme().high_contrast {
-            Modifier::BOLD
-        } else {
-            Modifier::empty()
-        })
+    let config = active_theme();
+    if config.no_color {
+        return Style::default().add_modifier(Modifier::BOLD);
+    }
+    fg(Style::default(), T_DANGER, config).add_modifier(if config.high_contrast {
+        Modifier::BOLD
+    } else {
+        Modifier::empty()
+    })
 }
 
 pub fn selection() -> Style {
-    Style::default()
-        .fg(TERM_BG)
-        .bg(T_ACCENT)
-        .add_modifier(Modifier::BOLD)
+    let config = active_theme();
+    if config.no_color {
+        return Style::default().add_modifier(Modifier::REVERSED);
+    }
+    bg(fg(Style::default(), TERM_BG, config), T_ACCENT, config).add_modifier(Modifier::BOLD)
 }
 
 /// Inverse cursor block for the input prompt. Matches the mockup's
@@ -108,17 +161,259 @@ pub fn selection() -> Style {
 /// cursor cell — softer than `selection()` since the prompt is always
 /// visible and shouldn't pulse the same way a row selection does.
 pub fn cursor_block() -> Style {
-    Style::default().fg(TERM_BG).bg(T_PRIMARY)
+    let config = active_theme();
+    if config.no_color {
+        return Style::default().add_modifier(Modifier::REVERSED);
+    }
+    bg(fg(Style::default(), TERM_BG, config), T_PRIMARY, config)
 }
 
 pub(crate) fn severity_tone(tone: SeverityTone) -> Style {
+    severity_tone_for_config(tone, active_theme())
+}
+
+fn severity_tone_for_config(tone: SeverityTone, config: ThemeConfig) -> Style {
+    match severity_palette(config) {
+        SeverityPalette::NoColor => no_color_severity_tone(tone),
+        SeverityPalette::HighContrast => high_contrast_severity_tone(tone, config),
+        SeverityPalette::Ansi16 => ansi16_severity_tone(tone),
+        SeverityPalette::Standard => standard_severity_tone(tone, config),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SeverityPalette {
+    NoColor,
+    HighContrast,
+    Ansi16,
+    Standard,
+}
+
+fn severity_palette(config: ThemeConfig) -> SeverityPalette {
+    if config.no_color {
+        return SeverityPalette::NoColor;
+    }
+    if config.high_contrast {
+        return SeverityPalette::HighContrast;
+    }
+    if config.color_depth == ColorDepth::Ansi16 {
+        return SeverityPalette::Ansi16;
+    }
+    SeverityPalette::Standard
+}
+
+fn standard_severity_tone(tone: SeverityTone, config: ThemeConfig) -> Style {
     match tone {
         SeverityTone::Critical => Style::default()
-            .fg(SEV_CRITICAL)
+            .fg(adapt_color(SEV_CRITICAL, config))
             .add_modifier(Modifier::BOLD),
-        SeverityTone::High => Style::default().fg(SEV_HIGH),
-        SeverityTone::Medium => Style::default().fg(SEV_MEDIUM),
-        SeverityTone::Low | SeverityTone::Info => Style::default().fg(SEV_LOW),
-        SeverityTone::Unknown => muted(),
+        SeverityTone::High => fg(Style::default(), SEV_HIGH, config),
+        SeverityTone::Medium => fg(Style::default(), SEV_MEDIUM, config),
+        SeverityTone::Low | SeverityTone::Info => fg(Style::default(), SEV_LOW, config),
+        SeverityTone::Unknown => fg(Style::default(), T_MUTED, config),
+    }
+}
+
+fn ansi16_severity_tone(tone: SeverityTone) -> Style {
+    match tone {
+        SeverityTone::Critical => Style::default().fg(Color::Red).add_modifier(Modifier::BOLD),
+        SeverityTone::High => Style::default().fg(Color::Red),
+        SeverityTone::Medium => Style::default().fg(Color::Yellow),
+        SeverityTone::Low => Style::default().fg(Color::Blue),
+        SeverityTone::Info => Style::default().fg(Color::Cyan),
+        SeverityTone::Unknown => Style::default().fg(Color::DarkGray),
+    }
+}
+
+fn no_color_severity_tone(tone: SeverityTone) -> Style {
+    match tone {
+        SeverityTone::Critical | SeverityTone::High | SeverityTone::Medium => {
+            Style::default().add_modifier(Modifier::BOLD)
+        }
+        SeverityTone::Low | SeverityTone::Info | SeverityTone::Unknown => Style::default(),
+    }
+}
+
+fn high_contrast_severity_tone(tone: SeverityTone, config: ThemeConfig) -> Style {
+    match tone {
+        SeverityTone::Critical | SeverityTone::High => {
+            fg(Style::default(), T_DANGER, config).add_modifier(Modifier::BOLD)
+        }
+        SeverityTone::Medium => fg(Style::default(), T_WARN, config).add_modifier(Modifier::BOLD),
+        SeverityTone::Low | SeverityTone::Info => {
+            fg(Style::default(), T_HEADING, config).add_modifier(Modifier::BOLD)
+        }
+        SeverityTone::Unknown => fg(Style::default(), T_PRIMARY, config),
+    }
+}
+
+fn fg(style: Style, color: Color, config: ThemeConfig) -> Style {
+    style.fg(adapt_color(color, config))
+}
+
+fn bg(style: Style, color: Color, config: ThemeConfig) -> Style {
+    style.bg(adapt_color(color, config))
+}
+
+fn adapt_color(color: Color, config: ThemeConfig) -> Color {
+    match config.color_depth {
+        ColorDepth::TrueColor => color,
+        ColorDepth::Ansi256 => ansi256_color(color),
+        ColorDepth::Ansi16 | ColorDepth::None => ansi16_color(color),
+    }
+}
+
+fn ansi256_color(color: Color) -> Color {
+    match color {
+        T_PRIMARY => Color::Indexed(188),
+        T_MUTED => Color::Indexed(102),
+        T_SUBTLE => Color::Indexed(60),
+        T_ACCENT => Color::Indexed(111),
+        T_LABEL => Color::Indexed(153),
+        T_HEADING => Color::Indexed(15),
+        T_SUCCESS => Color::Indexed(71),
+        T_WARN => Color::Indexed(179),
+        T_DANGER => Color::Indexed(167),
+        TERM_BG => Color::Indexed(232),
+        SEV_HIGH => Color::Indexed(210),
+        SEV_LOW => Color::Indexed(109),
+        _ => color,
+    }
+}
+
+fn ansi16_color(color: Color) -> Color {
+    match color {
+        T_PRIMARY | T_HEADING => Color::White,
+        T_MUTED | T_SUBTLE => Color::DarkGray,
+        T_ACCENT | SEV_LOW => Color::Blue,
+        T_LABEL => Color::Cyan,
+        T_SUCCESS => Color::Green,
+        T_WARN => Color::Yellow,
+        T_DANGER | SEV_HIGH => Color::Red,
+        TERM_BG => Color::Black,
+        _ => color,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn high_contrast_severity_tones_do_not_use_dim_default_palette() {
+        let config = ThemeConfig {
+            high_contrast: true,
+            no_color: false,
+            reduced_motion: false,
+            color_depth: ColorDepth::TrueColor,
+        };
+
+        assert_eq!(
+            severity_tone_for_config(SeverityTone::Low, config),
+            Style::default().fg(T_HEADING).add_modifier(Modifier::BOLD)
+        );
+        assert_eq!(
+            severity_tone_for_config(SeverityTone::Info, config),
+            Style::default().fg(T_HEADING).add_modifier(Modifier::BOLD)
+        );
+        assert_eq!(
+            severity_tone_for_config(SeverityTone::High, config),
+            Style::default().fg(T_DANGER).add_modifier(Modifier::BOLD)
+        );
+    }
+
+    #[test]
+    fn disabled_style_does_not_dim_high_contrast_text() {
+        let style = disabled_for_config(ThemeConfig {
+            high_contrast: true,
+            no_color: false,
+            reduced_motion: false,
+            color_depth: ColorDepth::TrueColor,
+        });
+
+        assert!(!style.add_modifier.contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn no_color_theme_uses_modifiers_not_foreground_colours() {
+        let config = ThemeConfig {
+            high_contrast: false,
+            no_color: true,
+            reduced_motion: false,
+            color_depth: ColorDepth::None,
+        };
+
+        assert_eq!(
+            severity_tone_for_config(SeverityTone::High, config),
+            Style::default().add_modifier(Modifier::BOLD)
+        );
+        assert_eq!(
+            severity_tone_for_config(SeverityTone::Low, config),
+            Style::default()
+        );
+        assert_eq!(
+            disabled_for_config(config),
+            Style::default().add_modifier(Modifier::DIM)
+        );
+    }
+
+    #[test]
+    fn theme_colours_downsample_for_limited_terminals() {
+        let config = ThemeConfig {
+            high_contrast: false,
+            no_color: false,
+            reduced_motion: false,
+            color_depth: ColorDepth::Ansi16,
+        };
+
+        assert_eq!(
+            severity_tone_for_config(SeverityTone::High, config).fg,
+            Some(Color::Red)
+        );
+        assert!(!severity_tone_for_config(SeverityTone::High, config)
+            .add_modifier
+            .contains(Modifier::BOLD));
+        assert_eq!(
+            severity_tone_for_config(SeverityTone::Critical, config).fg,
+            Some(Color::Red)
+        );
+        assert!(severity_tone_for_config(SeverityTone::Critical, config)
+            .add_modifier
+            .contains(Modifier::BOLD));
+        assert_eq!(fg(Style::default(), T_ACCENT, config).fg, Some(Color::Blue));
+        assert!(subtle_for_config(config)
+            .add_modifier
+            .contains(Modifier::DIM));
+    }
+
+    #[test]
+    fn ansi16_severity_tones_do_not_collapse() {
+        let config = ThemeConfig {
+            high_contrast: false,
+            no_color: false,
+            reduced_motion: false,
+            color_depth: ColorDepth::Ansi16,
+        };
+        let tones = [
+            SeverityTone::Critical,
+            SeverityTone::High,
+            SeverityTone::Medium,
+            SeverityTone::Low,
+            SeverityTone::Info,
+            SeverityTone::Unknown,
+        ];
+        let styles = tones
+            .into_iter()
+            .map(|tone| (tone, severity_tone_for_config(tone, config)))
+            .collect::<Vec<_>>();
+
+        for (left_index, (left_tone, left_style)) in styles.iter().enumerate() {
+            for (right_tone, right_style) in styles.iter().skip(left_index + 1) {
+                assert_ne!(
+                    left_style, right_style,
+                    "{left_tone:?} collapsed into {right_tone:?}"
+                );
+            }
+        }
     }
 }

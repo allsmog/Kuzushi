@@ -1,5 +1,7 @@
-use super::artifact_manifest::record_run_artifact;
+use super::artifact_manifest::{record_run_artifact, record_run_artifact_object};
 use super::*;
+use crate::content_store::{ContentStore, ObjectKind};
+use crate::workspace::workspace_objects_dir;
 
 pub(crate) fn write_run_artifact_text(
     target: impl AsRef<Path>,
@@ -9,10 +11,12 @@ pub(crate) fn write_run_artifact_text(
     kind: impl Into<String>,
     body: &str,
 ) -> Result<RunArtifact> {
-    let dir = run_dir(&target, run_id);
+    let target = target.as_ref();
+    let dir = run_dir(target, run_id);
     fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
     let path = dir.join(leaf);
-    fs::write(&path, body_with_trailing_newline(body))
+    let body = body_with_trailing_newline(body);
+    fs::write(&path, &body)
         .with_context(|| format!("Could not write {}", path.display()))?;
     let label = label.into();
     let kind = kind.into();
@@ -20,6 +24,9 @@ pub(crate) fn write_run_artifact_text(
     let artifact = RunArtifact::from_declared(&label, &path, Some(&kind))
         .context("run artifact path must not be empty")?;
     record_run_artifact(target, run_id, &artifact)?;
+    let object_ref =
+        ContentStore::open(workspace_objects_dir(target))?.put_bytes(ObjectKind::Blob, body.as_bytes())?;
+    record_run_artifact_object(target, run_id, &artifact, object_ref)?;
     Ok(artifact)
 }
 

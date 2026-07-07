@@ -78,7 +78,11 @@ mod tests {
     #[test]
     fn repository_inventory_detects_python_frameworks_and_routes() {
         let temp = tempfile::tempdir().unwrap();
-        fs::write(temp.path().join("requirements.txt"), "django\nfastapi\nflask\n").unwrap();
+        fs::write(
+            temp.path().join("requirements.txt"),
+            "django\nfastapi\nflask\n",
+        )
+        .unwrap();
         fs::write(
             temp.path().join("app.py"),
             "from fastapi import FastAPI\napp = FastAPI()\n@app.post('/items')\ndef create_item(): pass\nif __name__ == '__main__':\n    pass\n",
@@ -149,7 +153,11 @@ mod tests {
     #[test]
     fn repository_inventory_detects_django_as_view_methods() {
         let temp = tempfile::tempdir().unwrap();
-        fs::write(temp.path().join("requirements.txt"), "django\ndjangorestframework\n").unwrap();
+        fs::write(
+            temp.path().join("requirements.txt"),
+            "django\ndjangorestframework\n",
+        )
+        .unwrap();
         fs::write(
             temp.path().join("urls.py"),
             "from django.urls import path\nurlpatterns = [path('imports/file/', ImportView.as_view({'post': 'create'}))]\n",
@@ -648,7 +656,11 @@ mod tests {
     fn repository_inventory_detects_kotlin_spring_request_mapping_methods() {
         let temp = tempfile::tempdir().unwrap();
         fs::create_dir_all(temp.path().join("src/main/kotlin/app")).unwrap();
-        fs::write(temp.path().join("build.gradle.kts"), "plugins { kotlin(\"jvm\") }\n").unwrap();
+        fs::write(
+            temp.path().join("build.gradle.kts"),
+            "plugins { kotlin(\"jvm\") }\n",
+        )
+        .unwrap();
         fs::write(
             temp.path().join("src/main/kotlin/app/ImportController.kt"),
             "import org.springframework.web.bind.annotation.RequestMapping\nclass ImportController {\n@RequestMapping(value = [\"/imports/file\"], method = [RequestMethod.POST])\nfun importFile() {}\n}\n",
@@ -809,12 +821,7 @@ mod tests {
         let inventory = build_repository_inventory(temp.path()).unwrap();
 
         assert_route(&inventory, "GET", "/api/admin/settings", "ASP.NET Core");
-        assert_route(
-            &inventory,
-            "POST",
-            "/tenant/admin/users",
-            "ASP.NET Core",
-        );
+        assert_route(&inventory, "POST", "/tenant/admin/users", "ASP.NET Core");
         assert_no_route(&inventory, "/admin/settings");
         assert_no_route(&inventory, "/tenant/users");
     }
@@ -1068,8 +1075,18 @@ mod tests {
 
         let inventory = build_repository_inventory(temp.path()).unwrap();
 
-        assert_route(&inventory, "PUT,PATCH", "/imports/constants", "ASP.NET Core");
-        assert_route(&inventory, "TRACE,CONNECT", "/imports/tunnel", "ASP.NET Core");
+        assert_route(
+            &inventory,
+            "PUT,PATCH",
+            "/imports/constants",
+            "ASP.NET Core",
+        );
+        assert_route(
+            &inventory,
+            "TRACE,CONNECT",
+            "/imports/tunnel",
+            "ASP.NET Core",
+        );
         assert_route(&inventory, "POST,TRACE", "/api/tunnel", "ASP.NET Core");
     }
 

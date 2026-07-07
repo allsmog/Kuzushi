@@ -14,22 +14,12 @@ pub(crate) fn bounty_module() -> BuiltinModule {
             tool_with_options(
                 "bounty:import-har",
                 "Import a HAR capture (Burp/Chrome DevTools/Charles) as Finding evidence.",
-                vec![opt(
-                    "path",
-                    OptionType::Path,
-                    "Path to the .har file.",
-                )
-                .required()],
+                vec![opt("path", OptionType::Path, "Path to the .har file.").required()],
             ),
             tool_with_options(
                 "bounty:import-burp",
                 "Import a Burp Suite proxy/sitemap XML export as Finding evidence.",
-                vec![opt(
-                    "path",
-                    OptionType::Path,
-                    "Path to the Burp XML file.",
-                )
-                .required()],
+                vec![opt("path", OptionType::Path, "Path to the Burp XML file.").required()],
             ),
         ],
         vec![],

@@ -14,18 +14,18 @@ use self::{
     classifier_gate_module, config_module, context, deep_audit_module, dep_hygiene_module,
     findings_module, full_mode_module, native_scanners, ndiff_module, offense_review_module,
     patch_module, pipeline_module, plugin_adapters, prompt_armor, randori_module, recon_module,
-    resolve_tool_target, router_module, router_show_tool, run_classifier_score_tool,
-    run_deep_audit_tool, run_full_mode_hunt_tool, run_smoke_next_step_tool, sast_module,
-    secret_scan_module, smoke_module, systems_hunt_module, taint_iris_module,
-    report_module, taint_iris_next_module, threat_leads_module, threat_model_module,
-    triage_module, variant_module, vendor_assessment, verify_module, workspace_module,
-    x_ray_module,
+    report_module, resolve_tool_target, router_module, router_show_tool, run_classifier_score_tool,
+    run_deep_audit_tool, run_full_mode_hunt_tool, sast_module, secret_scan_module,
+    systems_hunt_module, taint_iris_module, taint_iris_next_module, threat_leads_module,
+    threat_model_module, triage_module, variant_module, vendor_assessment, verify_module,
+    workspace_module, x_ray_module,
 };
 use crate::capabilities::systems_hunt::execute_systems_hunt_tool;
 use crate::capabilities::uaf_hunt::execute_uaf_hunt_tool;
 use crate::carlini_threat_hunt::run_carlini_threat_hunt;
 use crate::dep_hygiene::check_dependency_hygiene;
 use crate::findings::FindingListFilter;
+use crate::modules::application::sast_scan::run_sast_scan_with_registry;
 #[allow(unused_imports)]
 use crate::options::ToolOptionStore;
 use crate::recon::execute_recon_tool;

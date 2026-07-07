@@ -1,19 +1,23 @@
 ---
 view: home_narrow
 ---
-KUZUSHI mode:shell · model:unconfigured · target:none ·...
+KUZUSHI mode:shell · view:home · target:none ·...
 
  -- HOME ---------------------------------------------------
-target             none
-latest run         none
-run status         no runs yet
-modules            41
-findings           0
 
-▸ NEXT Run `scan .` to scan the current directory and...
+  > NEXT   set a target and start the guided workflow
+           type `target .` or `target <path>` · then `next`
 
-run artifacts 0/9 produced — run `scan .` to populate the
-proof rails
+  FINDINGS   0
+  no findings loaded
+  0 findings
 
-▸ try: modules · recommend · quickstart · scan . · findings
-· …
+  RUN   none · no runs yet · artifacts 0/10 recorded
+        ctx ■  surface ■  threat ■  recommend ■  strategy ■
+        findings ■  proof ■  failures ■  report ■
+        manifest ■
+        .kuzushi/v3/runs/latest · `show runs` for detail
+
+  WORKSPACE   target none · modules 38 · context not built
+
+> try: target . · options sast:scan · tasks · next · …

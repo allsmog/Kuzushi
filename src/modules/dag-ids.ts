@@ -34,7 +34,7 @@ const CANONICAL_DAG_IDS: Record<string, string> = {
   "agentic-sast": "agentic-sast:scan",
   "carlini-threat-hunt": "carlini-threat-hunt:run",
   "taint-cwe-select": "pipeline:taint-cwe-select",
-  "taint-iris": "taint-iris:hunt",
+  "taint-iris": "taint-iris-next:hunt",
   "task-selector": "pipeline:task-selector",
   "approval-gate": "pipeline:approval-gate",
   "context-gatherer": "context:context-gatherer",

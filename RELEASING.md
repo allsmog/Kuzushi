@@ -12,21 +12,30 @@ part of every release commit.
 ## Manual Release (from your machine)
 
 ```sh
-# 1. Make sure tests pass and build is clean
-pnpm test && pnpm build
+# 1. Make sure release gates pass locally
+pnpm check:docs
+pnpm quality:architecture
+pnpm quality:model-safety
+pnpm quality:crap-risk
+pnpm test
+pnpm check:types
+cargo check --workspace
+cargo test --workspace
+pnpm build:clean
+pnpm build:native
+pnpm verify:pack
 
 # 2. Bump version (pick one)
 npm version patch --no-git-tag-version   # 0.2.0 -> 0.2.1
 npm version minor --no-git-tag-version   # 0.2.0 -> 0.3.0
 npm version major --no-git-tag-version   # 0.2.0 -> 1.0.0
 
-# 3. Commit, tag, publish
-git add package.json
+# 3. Commit and tag
+git add package.json CHANGELOG.md
 git commit -m "chore: bump version to $(node -p 'require("./package.json").version')"
 git tag "v$(node -p 'require("./package.json").version')"
-npm publish --access public
 
-# 4. Push commit + tag (triggers GitHub Release workflow)
+# 4. Push commit + tag (triggers GitHub Release workflow and npm publish)
 git push origin main --tags
 ```
 
@@ -34,9 +43,15 @@ git push origin main --tags
 
 Pushing a `v*` tag triggers `.github/workflows/release.yml` which:
 
-1. Runs the full CI suite (types, tests, coverage, e2e)
-2. Publishes to npm (requires `NPM_TOKEN` secret)
-3. Creates a GitHub Release with changelog and `.tgz` tarball
+1. Runs the full reusable CI suite, including the hard-blocking e2e npm-wrapper smoke.
+2. Builds native binaries for linux-x64, linux-arm64, darwin-x64,
+   darwin-arm64, and win32-x64. Required legs block the release; best-effort
+   legs are staged when they build.
+3. Stages all green native binaries into `native/<platform>-<arch>/`.
+4. Runs `pnpm verify:pack` against the staged package.
+5. Publishes to npm with the multi-platform native payload (requires
+   `NPM_TOKEN` secret).
+6. Creates a GitHub Release with changelog, npm tarball, and native archives.
 
 ```sh
 # If you've already published manually, just push the tag:
@@ -55,6 +70,24 @@ git push origin main --tags
 npm view kuzushi version          # check published version
 npm install -g kuzushi && kuzushi --version   # install and verify
 ```
+
+## Surface Compatibility Migrations
+
+Before publishing a release that changes the registry surface, check
+`docs/api-compatibility.md` and the deferred-surface contract. Current
+compatibility folds intentionally keep old exact tool names runnable while
+removing them from catalog/recommender discovery:
+
+- `taint-iris:hunt` -> `taint-iris-next:hunt`
+- `full-mode:hunt` -> `agentic-sast:scan {"strategy":"chunked"}`
+- `deep-audit:run` -> `triage:run {"strategy":"deep"}`
+- `classifier-gate:score` -> `triage:run {"strategy":"gate-deep"}`
+- `verify:exploit` -> `verify:finding {"mode":"empirical"}`
+- `shinsa:*quick-check` -> `shinsa:*scan {"depth":"quick"}`
+- granular `android-apk:*` phase tools -> `android-apk:scan`
+
+`smoke:next-step` was a hidden runtime smoke-test helper and has no migration
+path.
 
 ## If a version is already published
 

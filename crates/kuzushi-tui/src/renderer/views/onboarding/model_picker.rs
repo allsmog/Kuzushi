@@ -14,9 +14,12 @@ pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static
     for (idx, choice) in choices.iter().enumerate() {
         lines.push(model_picker_row(app, idx, choice, widths, area.width));
     }
+    lines.push(offline_demo_action_line(area.width));
     lines.push(blank());
     lines.push(keybind_hint_line(&[
         ("↑/↓/j/k", "move"),
+        ("d/demo", "offline fixture"),
+        (":", "type a command"),
         ("Enter", "confirm"),
         ("Esc/q", "defer (you'll need to /model later)"),
     ]));
@@ -28,12 +31,12 @@ pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static
 fn picker_column_widths(choices: &[&ModelChoice]) -> (usize, usize) {
     let label = choices
         .iter()
-        .map(|choice| choice.label.chars().count())
+        .map(|choice| display_width(choice.label))
         .max()
         .unwrap_or(0);
     let provider = choices
         .iter()
-        .map(|choice| provider_effort_cell(choice).chars().count())
+        .map(|choice| display_width(&provider_effort_cell(choice)))
         .max()
         .unwrap_or(0);
     (label, provider)
@@ -54,7 +57,7 @@ fn model_picker_row(
     (label_width, provider_width): (usize, usize),
     width: u16,
 ) -> Line<'static> {
-    let marker = if idx == app.model_picker_cursor {
+    let marker = if idx == app.model_picker_route.cursor() {
         ">"
     } else {
         " "
@@ -65,12 +68,22 @@ fn model_picker_row(
         "  {marker} {label:<label_width$}   {provider_effort:<provider_width$}   {auth_hint}",
         label = choice.label,
     );
-    let style = if idx == app.model_picker_cursor {
+    let style = if idx == app.model_picker_route.cursor() {
         theme::success().add_modifier(Modifier::BOLD)
     } else {
         theme::primary()
     };
     Line::styled(fit(&body, width as usize), style)
+}
+
+fn offline_demo_action_line(width: u16) -> Line<'static> {
+    Line::styled(
+        fit(
+            "  demo  Try offline fixture   local/no auth   deterministic scan",
+            width as usize,
+        ),
+        theme::muted(),
+    )
 }
 
 fn auth_hint_for(choice: &ModelChoice) -> String {

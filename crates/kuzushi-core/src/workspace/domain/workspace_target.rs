@@ -1,11 +1,13 @@
 use super::*;
 
 pub const KUZUSHI_STATE_DIR: &str = ".kuzushi";
-pub const WORKSPACE_STATE_VERSION_DIR: &str = "v2";
+pub const WORKSPACE_STATE_VERSION_DIR: &str = "v3";
 pub const WORKSPACE_CONFIG_FILE: &str = "config.toml";
 pub const WORKSPACE_OPTIONS_FILE: &str = "options.json";
 pub const WORKSPACE_HISTORY_FILE: &str = "shell-history.txt";
-pub const WORKSPACE_FINDINGS_DB_FILE: &str = "findings.sqlite3";
+pub const WORKSPACE_FINDINGS_DB_FILE: &str = "index.sqlite3";
+pub const WORKSPACE_EVENT_LOG_DIR: &str = "log";
+pub const WORKSPACE_OBJECTS_DIR: &str = "objects";
 pub const WORKSPACE_STATIC_EVIDENCE_DB_FILE: &str = "static-evidence.sqlite3";
 pub const WORKSPACE_ARTIFACT_KB_DB_FILE: &str = "artifact-kb.sqlite3";
 pub const WORKSPACE_ATTACHMENTS_FILE: &str = "attachments.json";
@@ -36,6 +38,14 @@ pub fn workspace_history_path(root: impl AsRef<Path>) -> PathBuf {
 
 pub fn workspace_findings_db_path(root: impl AsRef<Path>) -> PathBuf {
     workspace_state_dir(root).join(WORKSPACE_FINDINGS_DB_FILE)
+}
+
+pub fn workspace_event_log_dir(root: impl AsRef<Path>) -> PathBuf {
+    workspace_state_dir(root).join(WORKSPACE_EVENT_LOG_DIR)
+}
+
+pub fn workspace_objects_dir(root: impl AsRef<Path>) -> PathBuf {
+    workspace_state_dir(root).join(WORKSPACE_OBJECTS_DIR)
 }
 
 pub fn workspace_static_evidence_db_path(root: impl AsRef<Path>) -> PathBuf {
@@ -76,7 +86,10 @@ impl WorkspaceTarget {
             fs::canonicalize(path)
                 .with_context(|| format!("Could not resolve {}", path.display()))?
         } else {
-            anyhow::bail!("Target path does not exist: {}", path.display());
+            anyhow::bail!(
+                "Target path does not exist: {}. Next: pass an existing directory with --target <path> (or --target . for the current directory).",
+                path.display()
+            );
         };
 
         if !root.is_dir() {
@@ -96,6 +109,14 @@ impl WorkspaceTarget {
 
     pub fn findings_db_path(&self) -> PathBuf {
         workspace_findings_db_path(&self.root)
+    }
+
+    pub fn event_log_dir(&self) -> PathBuf {
+        workspace_event_log_dir(&self.root)
+    }
+
+    pub fn objects_dir(&self) -> PathBuf {
+        workspace_objects_dir(&self.root)
     }
 
     pub fn ensure_state_dir(&self) -> Result<PathBuf> {
@@ -136,14 +157,15 @@ impl WorkspaceExportFormat {
             return Ok(Self::Sarif);
         }
         match path.extension().and_then(|extension| extension.to_str()) {
-            Some("json") | None => Ok(Self::Json),
+            None => Ok(Self::MarkdownBundle),
+            Some("json") => Ok(Self::Json),
             Some("jsonl") | Some("ndjson") => Ok(Self::Jsonl),
             Some("sarif") => Ok(Self::Sarif),
             Some("csv") => Ok(Self::Csv),
             Some(other) => anyhow::bail!(
                 "unsupported workspace findings export extension .{other}. \
                  Supported extensions: .json, .jsonl, .sarif, .sarif.json, .csv. \
-                 Pass format=markdown-bundle explicitly for directory output."
+                 Use an extensionless directory or format=markdown-bundle for a report bundle."
             ),
         }
     }
@@ -157,6 +179,79 @@ impl WorkspaceExportFormat {
             Self::MarkdownBundle => "markdown-bundle",
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum WorkspaceExportCompleteness {
+    #[default]
+    All,
+    Open,
+    Complete,
+}
+
+impl WorkspaceExportCompleteness {
+    pub fn from_input(value: &str) -> Result<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "" | "all" => Ok(Self::All),
+            "open" | "pending" => Ok(Self::Open),
+            "complete" | "completed" | "closed" => Ok(Self::Complete),
+            other => anyhow::bail!(
+                "unsupported workspace findings export completeness {other:?}. \
+                 Supported values: all, open, complete"
+            ),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Open => "open",
+            Self::Complete => "complete",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceExportOptions {
+    pub format: Option<WorkspaceExportFormat>,
+    pub completeness: WorkspaceExportCompleteness,
+    #[serde(default = "default_allow_empty_export")]
+    pub allow_empty: bool,
+}
+
+impl Default for WorkspaceExportOptions {
+    fn default() -> Self {
+        Self {
+            format: None,
+            completeness: WorkspaceExportCompleteness::All,
+            allow_empty: default_allow_empty_export(),
+        }
+    }
+}
+
+impl WorkspaceExportOptions {
+    pub fn new(format: Option<WorkspaceExportFormat>) -> Self {
+        Self {
+            format,
+            ..Self::default()
+        }
+    }
+
+    pub fn with_completeness(mut self, completeness: WorkspaceExportCompleteness) -> Self {
+        self.completeness = completeness;
+        self
+    }
+
+    pub fn with_allow_empty(mut self, allow_empty: bool) -> Self {
+        self.allow_empty = allow_empty;
+        self
+    }
+}
+
+fn default_allow_empty_export() -> bool {
+    true
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

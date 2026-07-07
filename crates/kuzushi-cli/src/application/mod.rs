@@ -3,11 +3,13 @@ pub(crate) mod catalog;
 pub(crate) mod config;
 pub(crate) mod demo;
 pub(crate) mod doctor;
+pub(crate) mod export;
 pub(crate) mod findings;
 pub(crate) mod permissions;
 pub(crate) mod pr_comment;
 #[cfg(test)]
 mod pr_comment_tests;
+pub(crate) mod review_decisions;
 pub(crate) mod run_tool;
 pub(crate) mod run_tool_prepare;
 pub(crate) mod runs;

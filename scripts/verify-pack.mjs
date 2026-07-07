@@ -50,6 +50,7 @@ const allowedPackageEntries = [
   "native",
   "scripts/langgraph-bridge.mjs",
   "scripts/langgraph-bridge",
+  "scripts/kuzushi-dynamic-module-host.mjs",
   "scripts/check-native-bindings.mjs",
   "schemas",
   "assets/ascii",
@@ -106,7 +107,7 @@ const expectedPackageScripts = {
   "quality:crap-risk": "node scripts/crap-risk-gate.mjs",
   "quality:identity": "node scripts/check-public-identity.mjs",
   "quality:architecture":
-    "node scripts/check-ddd-boundaries.mjs && node scripts/check-ddd-context-docs.mjs && node scripts/check-artifact-contract.mjs && node scripts/check-result-envelope-contract.mjs && node scripts/check-retired-ts-runtime.mjs && node scripts/check-deferred-surface-contract.mjs && node scripts/check-validated-wording.mjs",
+    "node scripts/check-ddd-boundaries.mjs && node scripts/check-ddd-context-docs.mjs && node scripts/check-artifact-contract.mjs && node scripts/check-result-envelope-contract.mjs && node scripts/check-retired-ts-runtime.mjs && node scripts/check-deferred-surface-contract.mjs && node scripts/check-env-discipline.mjs && node scripts/check-dispatch-boundary-contract.mjs && node scripts/check-validated-wording.mjs",
   "quality:model-safety": "node scripts/check-model-safety.mjs",
   "verify:pack": "node scripts/verify-pack.mjs",
   "publish:npm": "bash scripts/publish-npm.sh",
@@ -308,7 +309,7 @@ const denied = [
   /^(?:.*\/)?(?:codex|kuzushi-ts)(?:\.exe)?$/,
 ];
 const deniedPathFixtures = [
-  "assets/.kuzushi/runs/example/run.json",
+  "assets/.kuzushi/v3/runs/example/run.json",
   "assets/.codex/session.json",
   "assets/node_modules/example/package.json",
   "assets/.git/config",

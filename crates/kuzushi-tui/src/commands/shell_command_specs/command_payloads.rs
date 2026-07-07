@@ -20,8 +20,49 @@ pub enum ContextCommand {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorkspaceCommand {
     Status,
-    ExportFindings { output: PathBuf },
+    ScopeInit,
+    ExportFindings {
+        output: PathBuf,
+        format: Option<String>,
+        completeness: Option<String>,
+        allow_empty: bool,
+    },
     Unsupported(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StrategyCommand {
+    Show,
+    Approve(String),
+    Reject(String),
+    Fire,
+    Correct {
+        id: String,
+        to_strategy: String,
+        reason: Option<String>,
+        scope: StrategyCorrectionCommandScope,
+    },
+    Unsupported(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PatchCommand {
+    Apply,
+    Reject,
+    Regen { style: Option<String> },
+    Unsupported(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReviewDecisionCommand {
+    Record { verdict: String, reason: String },
+    Unsupported(String),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StrategyCorrectionCommandScope {
+    Run,
+    Workspace,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

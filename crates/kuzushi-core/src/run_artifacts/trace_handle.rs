@@ -1,16 +1,28 @@
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::marker::PhantomData;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use super::{append_run_trace_step, next_run_trace_step_number, RunTraceStep};
+use super::{RunTraceStep, append_run_trace_step, next_run_trace_step_number, run_artifact_path};
 
 thread_local! {
     static PARENT_STACK: RefCell<Vec<usize>> = const { RefCell::new(Vec::new()) };
+}
+
+tokio::task_local! {
+    /// Innermost trace parent for the *current async task*. Unlike the
+    /// thread-local `PARENT_STACK`, a task-local follows the task across
+    /// `.await` points and worker-thread hops, so parent→child linkage
+    /// survives async execution instead of being lost the moment the executor
+    /// resumes the task on a different thread. Nesting works by shadowing:
+    /// each `with_parent_step` scope overrides the outer value, and
+    /// `try_with` returns the innermost.
+    static TASK_PARENT_STEP: usize;
 }
 
 pub struct ParentScope {
@@ -26,7 +38,31 @@ impl Drop for ParentScope {
     }
 }
 
+/// Run `fut` with `parent` established as the ambient trace parent for every
+/// trace step emitted inside it — including across `.await` boundaries and
+/// after the task migrates between runtime worker threads. This is the
+/// async-safe counterpart to [`TraceHandle::parent_scope`], which only holds
+/// for strictly synchronous same-thread nesting.
+///
+/// Spawned tasks (`tokio::spawn`) do NOT inherit the caller's task-locals; to
+/// carry a parent into a detached task, either wrap that task's body in its
+/// own `with_parent_step`, or hand it an explicit `TraceHandle::child(parent)`,
+/// whose parent linkage is stored on the handle and is fully `Send`.
+pub async fn with_parent_step<F, T>(parent: usize, fut: F) -> T
+where
+    F: std::future::Future<Output = T>,
+{
+    TASK_PARENT_STEP.scope(parent, fut).await
+}
+
 pub fn current_parent_step() -> Option<usize> {
+    // The task-local scope wins: it is correct under async execution. Fall back
+    // to the thread-local stack for synchronous same-thread nesting. `try_with`
+    // returns `Err` (never panics) when neither is set — e.g. a sync producer
+    // running outside any Tokio task — so this stays safe off-runtime.
+    if let Ok(parent) = TASK_PARENT_STEP.try_with(|parent| *parent) {
+        return Some(parent);
+    }
     PARENT_STACK.with(|stack| stack.borrow().last().copied())
 }
 
@@ -47,7 +83,8 @@ pub struct TraceHandle {
 
 struct TraceHandleInner {
     sink: Arc<dyn TraceSink>,
-    counter: AtomicUsize,
+    counter: Arc<AtomicUsize>,
+    emit_lock: Arc<Mutex<()>>,
 }
 
 impl TraceHandle {
@@ -60,10 +97,23 @@ impl TraceHandle {
     }
 
     fn with_counter(sink: Arc<dyn TraceSink>, initial_step_number: usize) -> Self {
+        Self::with_shared_state(
+            sink,
+            Arc::new(AtomicUsize::new(initial_step_number)),
+            Arc::new(Mutex::new(())),
+        )
+    }
+
+    fn with_shared_state(
+        sink: Arc<dyn TraceSink>,
+        counter: Arc<AtomicUsize>,
+        emit_lock: Arc<Mutex<()>>,
+    ) -> Self {
         Self {
             inner: Arc::new(TraceHandleInner {
                 sink,
-                counter: AtomicUsize::new(initial_step_number),
+                counter,
+                emit_lock,
             }),
             module_id: None,
             parent_step: None,
@@ -73,11 +123,16 @@ impl TraceHandle {
     pub fn jsonl(target: impl Into<PathBuf>, run_id: impl Into<String>) -> Self {
         let target = target.into();
         let run_id = run_id.into();
-        let initial_step_number = next_run_trace_step_number(&target, &run_id).saturating_sub(1);
-        Self::with_counter(
-            Arc::new(JsonlSink::new(target, run_id)),
-            initial_step_number,
-        )
+        // Independent JSONL handles pointed at the same run must share one step
+        // counter, otherwise two roots would both seed from the file and mint
+        // colliding step numbers. Key a process-global counter by the resolved
+        // trace path; the first handle seeds it from disk, later handles reuse
+        // the in-memory value (which already reflects steps emitted this run).
+        let trace_path = run_artifact_path(&target, &run_id, "trace.jsonl");
+        let (counter, emit_lock) = shared_trace_state(&trace_path, || {
+            next_run_trace_step_number(&target, &run_id).saturating_sub(1)
+        });
+        Self::with_shared_state(Arc::new(JsonlSink::new(target, run_id)), counter, emit_lock)
     }
 
     pub fn for_module(&self, module_id: impl Into<String>) -> Self {
@@ -106,8 +161,7 @@ impl TraceHandle {
         verb: impl Into<String>,
         label: impl Into<String>,
     ) -> TraceStepBuilder<'a> {
-        let n = self.inner.counter.fetch_add(1, Ordering::Relaxed) + 1;
-        let mut step = RunTraceStep::new(n, kind, label)
+        let mut step = RunTraceStep::new(0, kind, label)
             .with_verb(verb)
             .with_started_at_ms(now_unix_ms());
         if let Some(module_id) = &self.module_id {
@@ -132,8 +186,31 @@ impl TraceHandle {
         }
     }
 
+    /// Async-safe parent scoping. Prefer this over [`Self::parent_scope`] when
+    /// the wrapped work contains `.await` points or may fan out across worker
+    /// threads — the parent linkage is carried on a task-local and survives
+    /// both. See [`with_parent_step`].
+    pub async fn with_parent_scope<F, T>(&self, parent: usize, fut: F) -> T
+    where
+        F: std::future::Future<Output = T>,
+    {
+        with_parent_step(parent, fut).await
+    }
+
     pub fn run_artifact_location(&self) -> Option<(PathBuf, String)> {
         self.inner.sink.run_artifact_location()
+    }
+
+    fn record_step(&self, mut step: RunTraceStep) -> usize {
+        let _guard = self
+            .inner
+            .emit_lock
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let n = self.inner.counter.fetch_add(1, Ordering::Relaxed) + 1;
+        step.n = n;
+        self.inner.sink.record(&step);
+        n
     }
 }
 
@@ -190,23 +267,48 @@ impl TraceStepBuilder<'_> {
             .step
             .take()
             .expect("trace step should still be pending");
-        let n = step.n;
-        self.handle.inner.sink.record(&step);
-        n
+        self.handle.record_step(step)
     }
 }
 
 impl Drop for TraceStepBuilder<'_> {
     fn drop(&mut self) {
         if let Some(step) = self.step.take() {
-            self.handle.inner.sink.record(&step);
+            self.handle.record_step(step);
         }
     }
+}
+
+struct SharedTraceState {
+    counter: Arc<AtomicUsize>,
+    emit_lock: Arc<Mutex<()>>,
+}
+
+/// Process-global trace emission state, keyed by resolved trace-file path, so
+/// all `TraceHandle::jsonl` roots targeting one run share numbering and serialize
+/// the number+record critical section.
+fn shared_trace_state(
+    trace_path: &Path,
+    seed: impl FnOnce() -> usize,
+) -> (Arc<AtomicUsize>, Arc<Mutex<()>>) {
+    static STATES: OnceLock<Mutex<HashMap<PathBuf, SharedTraceState>>> = OnceLock::new();
+    let states = STATES.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut map = states
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let state = map
+        .entry(trace_path.to_path_buf())
+        .or_insert_with(|| SharedTraceState {
+            counter: Arc::new(AtomicUsize::new(seed())),
+            emit_lock: Arc::new(Mutex::new(())),
+        });
+    (Arc::clone(&state.counter), Arc::clone(&state.emit_lock))
 }
 
 pub struct JsonlSink {
     target: PathBuf,
     run_id: String,
+    append_failures: AtomicU64,
 }
 
 impl JsonlSink {
@@ -214,13 +316,30 @@ impl JsonlSink {
         Self {
             target: target.into(),
             run_id: run_id.into(),
+            append_failures: AtomicU64::new(0),
         }
+    }
+
+    /// Number of trace-append failures observed by this sink. Surfaced instead
+    /// of swallowed so a broken ledger is detectable in tests and operations.
+    pub fn append_failures(&self) -> u64 {
+        self.append_failures.load(Ordering::Relaxed)
     }
 }
 
 impl TraceSink for JsonlSink {
     fn record(&self, step: &RunTraceStep) {
-        let _ = append_run_trace_step(&self.target, &self.run_id, step);
+        if let Err(error) = append_run_trace_step(&self.target, &self.run_id, step) {
+            // Do not silently discard a failed ledger write: count it and warn
+            // on stderr. The trace is diagnostic, so we don't unwind the caller,
+            // but the failure must be observable rather than invisible.
+            self.append_failures.fetch_add(1, Ordering::Relaxed);
+            eprintln!(
+                "kuzushi: failed to append run trace step to {} (run {}): {error:#}",
+                self.target.display(),
+                self.run_id
+            );
+        }
     }
 
     fn run_artifact_location(&self) -> Option<(PathBuf, String)> {

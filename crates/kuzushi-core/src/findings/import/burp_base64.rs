@@ -10,7 +10,8 @@ use anyhow::Result;
 
 pub(super) fn decode_base64_string(input: &str) -> Result<String> {
     let bytes = decode_base64_bytes(input.as_bytes())?;
-    String::from_utf8(bytes).map_err(|err| anyhow::anyhow!("Burp XML body decoded to non-UTF-8: {err}"))
+    String::from_utf8(bytes)
+        .map_err(|err| anyhow::anyhow!("Burp XML body decoded to non-UTF-8: {err}"))
 }
 
 pub(super) fn decode_base64_bytes(input: &[u8]) -> Result<Vec<u8>> {

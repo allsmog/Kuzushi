@@ -29,9 +29,9 @@ fn severity_count_part(findings: &[Finding], severity: Severity) -> Option<Strin
     let count = findings.iter().filter(|f| f.severity == severity).count();
     (count > 0).then(|| {
         format!(
-                "{} **{count} {}**",
-                severity_icon(severity),
-                severity.as_str()
+            "{} **{count} {}**",
+            severity_icon(severity),
+            severity.as_str()
         )
     })
 }
@@ -152,7 +152,10 @@ fn append_findings_truncation(
 }
 
 pub(crate) fn render_chains_block(chains: &[PrCommentChain]) -> String {
-    let mut out = vec![format!("#### Exploit chains ({})", chains.len()), String::new()];
+    let mut out = vec![
+        format!("#### Exploit chains ({})", chains.len()),
+        String::new(),
+    ];
     for chain in chains.iter().take(3) {
         out.push(format!(
             "- **{} · {} · {} {}** - {}",
@@ -222,7 +225,10 @@ fn optional_footer_stamps(input: &PrCommentInput) -> Vec<String> {
             .run_id
             .as_deref()
             .map(|run_id| format!("run `{}`", short(run_id, 8))),
-        input.model.as_deref().map(|model| format!("model `{model}`")),
+        input
+            .model
+            .as_deref()
+            .map(|model| format!("model `{model}`")),
         input
             .git_sha
             .as_deref()

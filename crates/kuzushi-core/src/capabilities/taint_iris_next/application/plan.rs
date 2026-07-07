@@ -10,7 +10,7 @@ pub(crate) fn build_taint_iris_next_plan(
     let catalog = catalog_selection.catalog;
     let structural_queries = build_taint_iris_next_structural_queries(&catalog);
     let prompt_catalog = render_taint_iris_next_catalog(&catalog);
-    let backend = configure_taint_iris_next_backend(&roots.repo_root, &options);
+    let backend = configure_taint_iris_next_backend(&roots.repo_root, &options)?;
 
     Ok(TaintIrisNextPlan {
         target: target.to_path_buf(),
@@ -248,8 +248,9 @@ fn finalize_taint_iris_next_catalog(
 fn configure_taint_iris_next_backend(
     repo_root: &Path,
     options: &TaintIrisNextInput,
-) -> TaintIrisNextBackendChoice {
+) -> Result<TaintIrisNextBackendChoice> {
     let mut backend = choose_taint_iris_next_backend(&options.backend, repo_root);
+    validate_explicit_taint_iris_next_backend(&backend)?;
     if options.target_subdir.is_none() {
         let c_file_count = count_c_files_under(repo_root);
         if should_recommend_partitioning(repo_root, c_file_count) {
@@ -267,7 +268,27 @@ fn configure_taint_iris_next_backend(
             ));
         }
     }
-    backend
+    Ok(backend)
+}
+
+fn validate_explicit_taint_iris_next_backend(backend: &TaintIrisNextBackendChoice) -> Result<()> {
+    if !matches!(backend.requested.as_str(), "codeql" | "joern") {
+        return Ok(());
+    }
+    if backend.selected == backend.requested {
+        return Ok(());
+    }
+    let reason = backend
+        .warnings
+        .first()
+        .map(|warning| warning.replace(" Using structural evidence.", ""))
+        .unwrap_or_else(|| {
+            format!(
+                "backend={} requested, but the backend is not available",
+                backend.requested
+            )
+        });
+    anyhow::bail!("{reason}")
 }
 
 /// Cheap .c-file count under a directory. Stops walking after
@@ -387,12 +408,8 @@ pub(crate) fn catalog_regex_markers_for_discovery(
             if out.len() >= CATALOG_MARKER_CAP {
                 return out;
             }
-            // Default languages: when the marker doesn't specify them,
-            // inherit the entry's languages. Empty fall-back is "any C"
-            // — discovery's per-marker language filter is permissive
-            // when the marker list is empty? No — it requires a match.
-            // Inherit the entry's full language list as the default
-            // (empty-language markers would otherwise never fire).
+            // Empty-language markers never fire, so inherit the entry's
+            // language list when a marker does not declare its own.
             let languages = if marker.languages.is_empty() {
                 entry.languages.clone()
             } else {
@@ -656,192 +673,153 @@ fn supplement_catalog_with_phantom_focus_entries(
     if cwe_focus.is_empty() {
         return catalog;
     }
-    let represented: std::collections::BTreeSet<String> = catalog
-        .iter()
-        .map(|entry| entry.cwe.to_ascii_uppercase())
-        .collect();
-
-    let threat_model_source_signals: Vec<String> = {
-        let mut out = hints.entry_points.clone();
-        out.sort();
-        out.dedup();
-        out
-    };
-    let threat_model_sink_signals: Vec<String> = {
-        let mut out: Vec<String> = hints
-            .external_sinks
-            .iter()
-            .chain(hints.role_gates.iter())
-            .cloned()
-            .collect();
-        out.sort();
-        out.dedup();
-        out
-    };
-    // Pre-compute the discovery's entry-point names (universal sources
-    // for any focus CWE — see Thread A's projection rationale) and a
-    // per-CWE sink-name index from the discovery output.
-    //
-    // Cap the entry-point list before it lands in the phantom catalog:
-    // a postgres tree exposes ~5000 PG_FUNCTION_ARGS-style entry
-    // points, and shipping all of them as `source_signals` would push
-    // the structural query seed count from ~200 to ~4000 and turn the
-    // rg pass into a many-minute walk. The first 50 alphabetically is
-    // good enough — the agent prompt lists the full set separately
-    // under "## Discovered Signals" so high-relevance names aren't
-    // lost from the model's view, only from the rg seed pass.
-    const PHANTOM_DISCOVERY_SOURCE_CAP: usize = 50;
-    let discovery_entry_points: Vec<String> = {
-        let mut deduped: std::collections::BTreeSet<String> = discovered
-            .entry_points
-            .iter()
-            .map(|signal| signal.name.clone())
-            .collect();
-        let mut ranked: Vec<(String, i32)> = deduped
-            .iter()
-            .map(|name| (name.clone(), phantom_entry_point_relevance(name)))
-            .collect();
-        deduped.clear();
-        ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
-        ranked.truncate(PHANTOM_DISCOVERY_SOURCE_CAP);
-        ranked.into_iter().map(|(name, _)| name).collect()
-    };
-    let mut discovery_sinks_by_cwe: std::collections::BTreeMap<String, Vec<String>> =
-        std::collections::BTreeMap::new();
-    for signal in &discovered.sinks {
-        let entry = discovery_sinks_by_cwe
-            .entry(signal.cwe.to_ascii_uppercase())
-            .or_default();
-        entry.push(signal.name.clone());
-    }
-    for entry in discovery_sinks_by_cwe.values_mut() {
-        entry.sort();
-        entry.dedup();
-    }
-
+    let represented = represented_catalog_cwes(&catalog);
+    let signals = phantom_focus_signal_sources(hints, discovered);
     for cwe in cwe_focus {
-        let normalised = cwe.to_ascii_uppercase();
-        if represented.contains(&normalised) {
-            continue;
+        if let Some(entry) = phantom_focus_entry(cwe, &represented, &signals) {
+            catalog.push(entry);
         }
-        // Prefer threat-model when populated; fall back to discovery.
-        let (source_signals, sink_signals, provenance) = if !hints.is_empty()
-            && (!threat_model_source_signals.is_empty() || !threat_model_sink_signals.is_empty())
-        {
-            (
-                threat_model_source_signals.clone(),
-                threat_model_sink_signals.clone(),
-                "Threat-Model Attack Surface",
-            )
-        } else {
-            let discovery_sinks = discovery_sinks_by_cwe
-                .get(&normalised)
-                .cloned()
-                .unwrap_or_default();
-            (
-                discovery_entry_points.clone(),
-                discovery_sinks,
-                "Discovery Sweep",
-            )
-        };
-        if source_signals.is_empty() && sink_signals.is_empty() {
-            continue;
-        }
-        catalog.push(TaintIrisNextRankedCatalogEntry {
-            cwe: normalised.clone(),
-            name: format!("{provenance} ({normalised})"),
-            taint_class: phantom_taint_class_for_cwe(&normalised).to_string(),
-            languages: Vec::new(),
-            source_signals,
-            sink_signals,
-            sanitizer_signals: Vec::new(),
-            structural_queries: Vec::new(),
-            regex_markers: Vec::new(),
-            score: 50,
-            reasons: vec![format!(
-                "Synthesised from {provenance}; no static catalog entry covered this focus CWE.",
-            )],
-        });
     }
     catalog.sort_by_key(|entry| std::cmp::Reverse(entry.score));
     catalog
 }
 
-/// Local copy of the entry-point relevance heuristic that
-/// `extract_taint_iris_next_evidence::entry_point_relevance_score`
-/// uses for candidate sampling. Duplicated here (rather than promoted
-/// to a shared module) because both paths call it independently and
-/// the table is small enough that a single shared definition isn't
-/// load-bearing. Keep them aligned: privesc / file / process / admin
-/// tokens score positively; selectivity-estimator suffixes score
-/// negatively.
-fn phantom_entry_point_relevance(name: &str) -> i32 {
-    let lower = name.to_ascii_lowercase();
-    let mut score: i32 = 0;
-    for token in [
-        "exec",
-        "system",
-        "shell",
-        "command",
-        "run_program",
-        "popen",
-        "spawn",
-        "load_library",
-        "load_file",
-        "load_external",
-        "load_module",
-        "dlopen",
-        "dlsym",
-        "import",
-        "read_file",
-        "read_binary",
-        "read_server",
-        "read_text",
-        "write_file",
-        "stat_file",
-        "ls_dir",
-        "ls_log",
-        "ls_wal",
-        "signal_backend",
-        "signal_proc",
-        "kill_backend",
-        "reload_conf",
-        "reload_config",
-        "alter_system",
-        "promote",
-        "terminate",
-        "cancel_backend",
-        "set_user",
-        "setuid",
-        "admin",
-        "super",
-        "sudo",
-        "privesc",
-        "set_session",
-        "switch_user",
-        "become",
-        "upload",
-        "download",
-        "evaluate",
-        "eval",
-        "compile",
-        "parse_script",
-        "lo_import",
-        "lo_export",
-    ] {
-        if lower.contains(token) {
-            score = score.saturating_add(20);
-        }
+struct PhantomFocusSignalSources {
+    threat_sources: Vec<String>,
+    threat_sinks: Vec<String>,
+    discovery_sources: Vec<String>,
+    discovery_sinks_by_cwe: BTreeMap<String, Vec<String>>,
+}
+
+fn represented_catalog_cwes(
+    catalog: &[TaintIrisNextRankedCatalogEntry],
+) -> BTreeSet<String> {
+    catalog
+        .iter()
+        .map(|entry| entry.cwe.to_ascii_uppercase())
+        .collect()
+}
+
+fn phantom_focus_signal_sources(
+    hints: &TaintIrisNextAttackSurfaceHints,
+    discovered: &DiscoveredSignals,
+) -> PhantomFocusSignalSources {
+    PhantomFocusSignalSources {
+        threat_sources: sorted_unique(hints.entry_points.clone()),
+        threat_sinks: sorted_unique(threat_sink_signals(hints)),
+        discovery_sources: ranked_discovery_entry_points(discovered),
+        discovery_sinks_by_cwe: discovery_sinks_by_cwe(discovered),
     }
-    for negative in [
-        "_joinsel", "_sel", "_cmp", "_hash", "_in", "_out", "_recv", "_send", "_eq", "_lt", "_gt",
-        "_le", "_ge", "_ne",
-    ] {
-        if lower.ends_with(negative) {
-            score = score.saturating_sub(10);
-        }
+}
+
+fn threat_sink_signals(hints: &TaintIrisNextAttackSurfaceHints) -> Vec<String> {
+    hints
+        .external_sinks
+        .iter()
+        .chain(hints.role_gates.iter())
+        .cloned()
+        .collect()
+}
+
+fn sorted_unique(mut values: Vec<String>) -> Vec<String> {
+    values.sort();
+    values.dedup();
+    values
+}
+
+fn ranked_discovery_entry_points(discovered: &DiscoveredSignals) -> Vec<String> {
+    const PHANTOM_DISCOVERY_SOURCE_CAP: usize = 50;
+    let mut ranked = discovered
+        .entry_points
+        .iter()
+        .map(|signal| {
+            (
+                signal.name.clone(),
+                entry_point_relevance_score(&signal.name),
+            )
+        })
+        .collect::<Vec<_>>();
+    ranked.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+    ranked.dedup_by(|a, b| a.0 == b.0);
+    ranked.truncate(PHANTOM_DISCOVERY_SOURCE_CAP);
+    ranked.into_iter().map(|(name, _)| name).collect()
+}
+
+fn discovery_sinks_by_cwe(discovered: &DiscoveredSignals) -> BTreeMap<String, Vec<String>> {
+    let mut by_cwe = BTreeMap::new();
+    for signal in &discovered.sinks {
+        by_cwe
+            .entry(signal.cwe.to_ascii_uppercase())
+            .or_insert_with(Vec::new)
+            .push(signal.name.clone());
     }
-    score
+    by_cwe.values_mut().for_each(|signals| *signals = sorted_unique(std::mem::take(signals)));
+    by_cwe
+}
+
+fn phantom_focus_entry(
+    cwe: &str,
+    represented: &BTreeSet<String>,
+    signals: &PhantomFocusSignalSources,
+) -> Option<TaintIrisNextRankedCatalogEntry> {
+    let normalised = cwe.to_ascii_uppercase();
+    if represented.contains(&normalised) {
+        return None;
+    }
+    let scoped = phantom_signals_for_cwe(&normalised, signals);
+    (!scoped.source_signals.is_empty() || !scoped.sink_signals.is_empty()).then(|| {
+        phantom_catalog_entry(normalised, scoped)
+    })
+}
+
+struct ScopedPhantomSignals {
+    source_signals: Vec<String>,
+    sink_signals: Vec<String>,
+    provenance: &'static str,
+}
+
+fn phantom_signals_for_cwe(
+    cwe: &str,
+    signals: &PhantomFocusSignalSources,
+) -> ScopedPhantomSignals {
+    if has_threat_model_signals(signals) {
+        return ScopedPhantomSignals {
+            source_signals: signals.threat_sources.clone(),
+            sink_signals: signals.threat_sinks.clone(),
+            provenance: "Threat-Model Attack Surface",
+        };
+    }
+    ScopedPhantomSignals {
+        source_signals: signals.discovery_sources.clone(),
+        sink_signals: signals.discovery_sinks_by_cwe.get(cwe).cloned().unwrap_or_default(),
+        provenance: "Discovery Sweep",
+    }
+}
+
+fn has_threat_model_signals(signals: &PhantomFocusSignalSources) -> bool {
+    !signals.threat_sources.is_empty() || !signals.threat_sinks.is_empty()
+}
+
+fn phantom_catalog_entry(
+    cwe: String,
+    signals: ScopedPhantomSignals,
+) -> TaintIrisNextRankedCatalogEntry {
+    TaintIrisNextRankedCatalogEntry {
+        cwe: cwe.clone(),
+        name: format!("{} ({cwe})", signals.provenance),
+        taint_class: phantom_taint_class_for_cwe(&cwe).to_string(),
+        languages: Vec::new(),
+        source_signals: signals.source_signals,
+        sink_signals: signals.sink_signals,
+        sanitizer_signals: Vec::new(),
+        structural_queries: Vec::new(),
+        regex_markers: Vec::new(),
+        score: 50,
+        reasons: vec![format!(
+            "Synthesised from {}; no static catalog entry covered this focus CWE.",
+            signals.provenance
+        )],
+    }
 }
 
 /// Map CWE → catalog-aligned `taintClass` for the phantom-entry path.
@@ -1102,7 +1080,10 @@ pub(crate) struct TaintIrisNextArtifactLoad {
 }
 
 pub(crate) fn load_taint_iris_next_context(repo_root: &Path) -> TaintIrisNextArtifactLoad {
-    let path = crate::context::context_snapshot_path(repo_root);
+    load_taint_iris_next_json_artifact(crate::context::context_snapshot_path(repo_root))
+}
+
+fn load_taint_iris_next_json_artifact(path: PathBuf) -> TaintIrisNextArtifactLoad {
     match fs::read_to_string(&path) {
         Ok(raw) => match serde_json::from_str::<Value>(&raw) {
             Ok(value) => TaintIrisNextArtifactLoad {
@@ -1424,33 +1405,7 @@ mod catalog_regex_markers_for_discovery_tests {
 }
 
 pub(crate) fn load_taint_iris_next_threat_model(repo_root: &Path) -> TaintIrisNextArtifactLoad {
-    let path = crate::capabilities::threat_model::persistent_threat_model_path(repo_root);
-    match fs::read_to_string(&path) {
-        Ok(raw) => match serde_json::from_str::<Value>(&raw) {
-            Ok(value) => TaintIrisNextArtifactLoad {
-                status: TaintIrisNextArtifactStatus {
-                    ok: true,
-                    path: Some(path.display().to_string()),
-                    reason: "loaded".to_string(),
-                },
-                value: Some(value),
-            },
-            Err(error) => TaintIrisNextArtifactLoad {
-                status: TaintIrisNextArtifactStatus {
-                    ok: false,
-                    path: Some(path.display().to_string()),
-                    reason: format!("invalid JSON: {error}"),
-                },
-                value: None,
-            },
-        },
-        Err(_) => TaintIrisNextArtifactLoad {
-            status: TaintIrisNextArtifactStatus {
-                ok: false,
-                path: Some(path.display().to_string()),
-                reason: "not found".to_string(),
-            },
-            value: None,
-        },
-    }
+    load_taint_iris_next_json_artifact(
+        crate::capabilities::threat_model::persistent_threat_model_path(repo_root),
+    )
 }

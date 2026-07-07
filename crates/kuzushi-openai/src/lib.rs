@@ -10,6 +10,7 @@ pub mod runtime;
 mod messages;
 #[cfg(test)]
 mod tests;
+mod triage_prompt;
 
 pub use anthropic_oauth::{AnthropicOAuthRuntime, AnthropicOAuthRuntimeOptions};
 pub use langgraph_runtime::{default_langgraph_bridge_command, LangGraphRuntime};

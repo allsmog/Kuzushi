@@ -73,7 +73,7 @@ compatible. The shipped patch in this PR adds it.
 
 ### 2.2. Per-run artifact persistence handle — HIGH CONFIDENCE
 
-**Gap.** Operators can version-control `.kuzushi/runs/<runId>/...` (CLAUDE.md
+**Gap.** Operators can version-control `.kuzushi/v3/runs/<runId>/...` (CLAUDE.md
 documents this), and several built-ins (audit-worker, scan-worker,
 context-persist) write to that tree. There is no typed handle that gives a
 third-party module a sandboxed writer for `<runId>/<moduleId>/...`. The
@@ -83,7 +83,7 @@ or skip persistence entirely.
 
 **Blocking module.** `@thirdparty/sbom-export` — a DAG tool that emits a
 `CycloneDX` SBOM per scan. It wants to drop `sbom.json` into the run dir so
-the operator can `git commit .kuzushi/runs/<runId>/sbom-export/sbom.json`
+the operator can `git commit .kuzushi/v3/runs/<runId>/sbom-export/sbom.json`
 alongside `summary.json`. Without a handle it cannot guarantee the path
 matches the host's convention.
 

@@ -84,14 +84,24 @@ pub enum ShellView {
     Recommend,
     Module,
     ModuleRun,
-    Findings,
-    Finding,
+    /// Split-pane command center and the shell's default landing surface
+    /// (Claude Design layout 1a). A multi-pane body —
+    /// `[SOURCE tree | CENTER context | FINDINGS + DETAILS]` — under a
+    /// `Kuzushi · Project · Target · LIVE · phase` top bar, with the shared
+    /// prompt/keybind footer acting as its command bar. Folds the old standalone
+    /// findings, finding-detail, and threat-DFD surfaces into one frame view.
+    /// Pane focus lives on `app.workbench_focus`.
+    Workbench,
     Tune,
     Threat(ThreatView),
     ThreatEditor,
     PromptsEditor,
     ActorDetail(usize),
     Runs,
+    RunDiff {
+        left: String,
+        right: String,
+    },
     Replay(String),
     Trace(String),
     Help,
@@ -103,10 +113,13 @@ pub enum ShellView {
     /// and `j`/`k`/`g`/`G`/`PgUp`/`PgDn` page through the buffer.
     Logs,
     Config,
+    Health,
     Tools,
     Options(OptionsView),
     SastTasks,
     Context,
+    ProjectModel,
+    StrategyQueue,
     Workspace,
     KnowledgeBase,
     FailureHandoff,
@@ -118,9 +131,8 @@ pub enum ShellView {
     Auth,
     /// `/cost` budget bars + by-tool spend.  See `design/mockups/cost.jsx`.
     Cost,
-    /// `/patch <alias>` view — RATIONALE / DIFF / TESTS / GUARDRAIL
-    /// per `design/mockups/patch.jsx`.  String is the finding alias
-    /// the patch addresses.
+    /// Patch review view — RATIONALE / DIFF / TESTS / GUARDRAIL.
+    /// String is the finding alias the patch addresses.
     Patch(String),
     /// Dedicated pwn workflow dashboard backed by pwn:* tool results and
     /// `.kuzushi/pwn/<hash>/state.json`.
@@ -136,8 +148,7 @@ pub enum ShellView {
     CommandPalette,
     /// First-run model picker. Lists the entries in `MODEL_CHOICES` and
     /// lets the operator pick one with ↑/↓/Enter. Esc falls through to
-    /// `Catalog`. Opened only when `config.model.is_none()` at shell
-    /// startup, or on demand via `/model-picker`.
+    /// `Catalog`. Opened when `config.model.is_none()` at shell startup.
     ModelPicker,
     /// Secondary picker shown after `ModelPicker` when the chosen
     /// provider supports both an API-key and an OAuth login path
@@ -154,6 +165,11 @@ pub enum ShellView {
     /// tasks (context build, x-ray, threat-model variants, CPG, CodeQL
     /// DB, threat intel). State lives on `app.planning_*` fields.
     PlanningPicker,
+    /// Target-rooted fuzzy file picker for `attach <path>`. It reuses the
+    /// shell's line-rendered picker pattern: app-owned query/cursor state,
+    /// no external event loop, and Enter dispatches through the existing
+    /// attachment store.
+    FilePicker,
     /// Security-visualization gallery, fed real Kuzushi data. One page is a 3D
     /// attack-surface terrain (half-block framebuffer); the rest are 2D diagrams
     /// (attack path, DFD, findings heatmap, exploit chain). Auto-opens to the
@@ -165,11 +181,218 @@ pub enum ShellView {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreatView {
-    Dfd,
     Stride,
     Stories,
     Scope,
     Summary,
+}
+
+/// Which pane the operator's keyboard focus is on inside the Workbench command
+/// center. `Tab` cycles `Source → Center → Findings → Details → Source`; `j`/`k`
+/// move within the focused pane; `Enter` opens the cursored finding when
+/// `Findings` is focused. Defaults to `Findings` — the list is the primary
+/// interaction, and opening a finding moves focus to `Details` for reading.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkbenchPane {
+    Source,
+    Center,
+    Findings,
+    Details,
+}
+
+impl WorkbenchPane {
+    /// Advance focus to the next pane in `Source → Center → Findings → Details` order.
+    pub fn next(self) -> Self {
+        match self {
+            WorkbenchPane::Source => WorkbenchPane::Center,
+            WorkbenchPane::Center => WorkbenchPane::Findings,
+            WorkbenchPane::Findings => WorkbenchPane::Details,
+            WorkbenchPane::Details => WorkbenchPane::Source,
+        }
+    }
+
+    /// Move focus to the previous pane in `Source ← Center ← Findings ← Details` order.
+    pub fn prev(self) -> Self {
+        match self {
+            WorkbenchPane::Source => WorkbenchPane::Details,
+            WorkbenchPane::Center => WorkbenchPane::Source,
+            WorkbenchPane::Findings => WorkbenchPane::Center,
+            WorkbenchPane::Details => WorkbenchPane::Findings,
+        }
+    }
+}
+
+/// Explicit content mode for the Workbench center pane. Focus decides which
+/// pane receives keyboard input; this decides which page the center deck shows.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum WorkbenchCenterMode {
+    #[default]
+    Code,
+    Dfd,
+    Chain,
+    Flow,
+    Risk,
+}
+
+impl WorkbenchCenterMode {
+    pub const ALL: [Self; 5] = [
+        WorkbenchCenterMode::Code,
+        WorkbenchCenterMode::Dfd,
+        WorkbenchCenterMode::Chain,
+        WorkbenchCenterMode::Flow,
+        WorkbenchCenterMode::Risk,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            WorkbenchCenterMode::Code => "CODE",
+            WorkbenchCenterMode::Dfd => "DFD",
+            WorkbenchCenterMode::Chain => "CHAIN",
+            WorkbenchCenterMode::Flow => "FLOW",
+            WorkbenchCenterMode::Risk => "RISK",
+        }
+    }
+
+    pub fn toggled(self) -> Self {
+        match self {
+            WorkbenchCenterMode::Code => WorkbenchCenterMode::Dfd,
+            WorkbenchCenterMode::Dfd
+            | WorkbenchCenterMode::Chain
+            | WorkbenchCenterMode::Flow
+            | WorkbenchCenterMode::Risk => WorkbenchCenterMode::Code,
+        }
+    }
+
+    pub fn next(self) -> Self {
+        let index = self.index();
+        Self::ALL[(index + 1) % Self::ALL.len()]
+    }
+
+    pub fn prev(self) -> Self {
+        let index = self.index();
+        Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+
+    pub fn scene_page(self) -> Option<crate::scene3d::VizPage> {
+        match self {
+            WorkbenchCenterMode::Code => None,
+            WorkbenchCenterMode::Dfd => Some(crate::scene3d::VizPage::Dfd),
+            WorkbenchCenterMode::Chain => Some(crate::scene3d::VizPage::ExploitChain),
+            WorkbenchCenterMode::Flow => Some(crate::scene3d::VizPage::AttackPath),
+            WorkbenchCenterMode::Risk => Some(crate::scene3d::VizPage::Heatmap),
+        }
+    }
+
+    fn index(self) -> usize {
+        Self::ALL.iter().position(|mode| *mode == self).unwrap_or(0)
+    }
+}
+
+/// Full-page cockpit deck. The enum names are historical, but each page maps
+/// one-to-one to the control-room engagement phases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkbenchPage {
+    Terrain,
+    Coverage,
+    Review,
+    Ship,
+}
+
+impl WorkbenchPage {
+    pub const ALL: [Self; 4] = [Self::Terrain, Self::Coverage, Self::Review, Self::Ship];
+
+    pub fn from_phase(phase: WorkflowPhase) -> Self {
+        match phase {
+            WorkflowPhase::Map => Self::Terrain,
+            WorkflowPhase::Hunt => Self::Coverage,
+            WorkflowPhase::Confirm => Self::Review,
+            WorkflowPhase::Fix => Self::Ship,
+        }
+    }
+
+    pub fn phase(self) -> WorkflowPhase {
+        match self {
+            Self::Terrain => WorkflowPhase::Map,
+            Self::Coverage => WorkflowPhase::Hunt,
+            Self::Review => WorkflowPhase::Confirm,
+            Self::Ship => WorkflowPhase::Fix,
+        }
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Terrain => "AIM",
+            Self::Coverage => "HUNT",
+            Self::Review => "CONFIRM",
+            Self::Ship => "FIX/REPORT",
+        }
+    }
+
+    pub fn next(self) -> Self {
+        let index = self.index();
+        Self::ALL[(index + 1) % Self::ALL.len()]
+    }
+
+    pub fn prev(self) -> Self {
+        let index = self.index();
+        Self::ALL[(index + Self::ALL.len() - 1) % Self::ALL.len()]
+    }
+
+    pub fn from_digit(index: usize) -> Option<Self> {
+        Self::ALL.get(index.checked_sub(1)?).copied()
+    }
+
+    pub fn position(self) -> usize {
+        self.index() + 1
+    }
+
+    fn index(self) -> usize {
+        Self::ALL.iter().position(|page| *page == self).unwrap_or(0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WorkbenchPaneScroll {
+    pub source: u16,
+    pub center: u16,
+    pub details: u16,
+}
+
+impl WorkbenchPaneScroll {
+    pub fn get(self, pane: WorkbenchPane) -> u16 {
+        match pane {
+            WorkbenchPane::Source => self.source,
+            WorkbenchPane::Center => self.center,
+            WorkbenchPane::Findings => 0,
+            WorkbenchPane::Details => self.details,
+        }
+    }
+
+    pub fn shift(&mut self, pane: WorkbenchPane, amount: i32) {
+        let Some(scroll) = self.scroll_mut(pane) else {
+            return;
+        };
+        *scroll = if amount.is_negative() {
+            scroll.saturating_sub(amount.unsigned_abs().min(u16::MAX as u32) as u16)
+        } else {
+            scroll.saturating_add(amount.min(u16::MAX as i32) as u16)
+        };
+    }
+
+    pub fn set(&mut self, pane: WorkbenchPane, value: u16) {
+        if let Some(scroll) = self.scroll_mut(pane) {
+            *scroll = value;
+        }
+    }
+
+    fn scroll_mut(&mut self, pane: WorkbenchPane) -> Option<&mut u16> {
+        match pane {
+            WorkbenchPane::Source => Some(&mut self.source),
+            WorkbenchPane::Center => Some(&mut self.center),
+            WorkbenchPane::Findings => None,
+            WorkbenchPane::Details => Some(&mut self.details),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

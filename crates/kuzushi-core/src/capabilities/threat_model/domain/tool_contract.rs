@@ -4,6 +4,16 @@ pub(crate) const VALID_STAGES: &[&str] = &["s1", "s2", "s3", "s4"];
 
 pub(crate) const VALID_METHODOLOGIES: &[&str] = &["pasta", "stride", "dread"];
 
+pub(crate) const VALID_SOURCE_ARTIFACTS: &[&str] = &[
+    "context",
+    "threat-model",
+    "x-ray",
+    "entry-points",
+    "none",
+];
+
+pub(crate) const VALID_CONTEXT_MODES: &[&str] = &["auto", "refresh", "require", "off"];
+
 pub(crate) const STRIDE_CATEGORIES: &[&str] = &[
     "spoofing",
     "tampering",
@@ -78,13 +88,20 @@ pub(crate) struct BuildInput {
     pub(crate) target: PathBuf,
     pub(crate) repo_name: String,
     pub(crate) methodology: String,
+    pub(crate) sources: Vec<String>,
+    pub(crate) seeds: Vec<String>,
+    pub(crate) design_doc: Option<String>,
     pub(crate) slice: String,
     pub(crate) stages: Vec<String>,
     pub(crate) output_dir: String,
+    pub(crate) context_mode: String,
+    pub(crate) context_limit: usize,
+    pub(crate) max_source_bytes: usize,
     pub(crate) max_elements: usize,
     pub(crate) max_threats: usize,
     pub(crate) emit_findings: bool,
     pub(crate) preserve_user_edits: bool,
+    pub(crate) prompt_override: Option<String>,
     pub(crate) model: String,
 }
 

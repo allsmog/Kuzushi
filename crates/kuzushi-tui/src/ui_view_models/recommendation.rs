@@ -7,8 +7,10 @@ const RECOMMENDATION_REPORT_HEADERS: [&str; 5] =
     ["priority", "tool", "runtime", "signal", "reason"];
 const RECOMMENDATION_REPORT_COMMANDS: [&str; 4] =
     ["run <tool> [json]", "trace <run>", "runs", "back"];
-const RECOMMENDATION_EMPTY_COMMANDS: [&str; 3] =
-    ["run module-recommender:recommend", "runs", "back"];
+const RECOMMENDATION_COMPONENT_COMMANDS: [&str; 4] =
+    ["Enter component", "p promote", "run <tool>", "back"];
+const RECOMMENDATION_EMPTY_COMMANDS: [&str; 3] = ["recommend", "runs", "back"];
+const RECOMMENDATION_TARGETLESS_COMMANDS: [&str; 3] = ["target <path>", "demo", "back"];
 const RECOMMENDATION_RUNNING_COMMANDS: [&str; 3] = ["activity", "runs", "back"];
 
 #[derive(Debug, Clone, PartialEq)]
@@ -20,6 +22,7 @@ pub(crate) struct RecommendationModel {
     pub(crate) report_headers: [&'static str; 5],
     pub(crate) report_commands: [&'static str; 4],
     pub(crate) empty_state: RecommendationEmptyState,
+    pub(crate) components: Vec<ComponentRecommendationRow>,
     pub(crate) rows: Vec<RecommendationRow>,
 }
 
@@ -41,10 +44,32 @@ pub(crate) struct RecommendationRow {
     pub(crate) cells: [String; RECOMMENDATION_COLUMN_COUNT],
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ComponentRecommendationRow {
+    pub(crate) scope_id: String,
+    pub(crate) rel_path: String,
+    pub(crate) class_label: String,
+    pub(crate) tier_label: String,
+    pub(crate) risk_score: u16,
+    pub(crate) reason: String,
+    pub(crate) scan_input: Option<String>,
+    pub(crate) scan_command: String,
+    pub(crate) promote_command: Option<String>,
+}
+
 pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
     let source = RecommendationSource::from_app(app);
     let report = read_recommendations(&source.path);
     let source_detail = artifact_detail_label(&source.path);
+    let components = report
+        .as_ref()
+        .map(|view| view.components.clone())
+        .unwrap_or_default();
+    let report_commands = if components.is_empty() {
+        RECOMMENDATION_REPORT_COMMANDS
+    } else {
+        RECOMMENDATION_COMPONENT_COMMANDS
+    };
     RecommendationModel {
         title: "RECOMMEND",
         detail_rows: recommendation_detail_rows(
@@ -55,9 +80,28 @@ pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
         attack_surface: source.path.parent().and_then(attack_surface_risk_model),
         summary: report.as_ref().and_then(|view| view.summary.clone()),
         report_headers: RECOMMENDATION_REPORT_HEADERS,
-        report_commands: RECOMMENDATION_REPORT_COMMANDS,
-        empty_state: recommendation_empty_state(recommender_running(app)),
+        report_commands,
+        empty_state: recommendation_empty_state(recommender_running(app), app.target.is_some()),
+        components,
         rows: report.map(|view| view.rows).unwrap_or_default(),
+    }
+}
+
+pub(crate) fn recommendation_components(app: &ShellApp) -> Vec<ComponentRecommendationRow> {
+    let source = RecommendationSource::from_app(app);
+    read_recommendations(&source.path)
+        .map(|view| view.components)
+        .unwrap_or_default()
+}
+
+pub(crate) fn recommendation_artifact_needs_refresh(app: &ShellApp) -> bool {
+    if app.target.is_none() || recommender_running(app) {
+        return false;
+    }
+    let source = RecommendationSource::from_app(app);
+    match std::fs::metadata(&source.path) {
+        Ok(metadata) => !metadata.is_file(),
+        Err(_) => true,
     }
 }
 
@@ -90,31 +134,63 @@ fn recommendation_detail_row(label: &str, value: String) -> RecommendationDetail
     }
 }
 
-fn recommendation_empty_state(running: bool) -> RecommendationEmptyState {
+fn recommendation_empty_state(running: bool, has_target: bool) -> RecommendationEmptyState {
     if running {
-        return RecommendationEmptyState {
-            title: "ranking modules…",
-            explanations: [
-                "module-recommender:recommend is running for this workspace.",
-                "results will appear here automatically when it finishes.",
-            ],
-            actions: [
-                ("(running)", "no action needed — sit tight"),
-                ("runs", "inspect persisted runs"),
-            ],
-            commands: RECOMMENDATION_RUNNING_COMMANDS,
-        };
+        return running_recommendation_empty_state();
     }
+    if !has_target {
+        return targetless_recommendation_empty_state();
+    }
+    missing_recommendation_empty_state()
+}
+
+fn running_recommendation_empty_state() -> RecommendationEmptyState {
+    RecommendationEmptyState {
+        title: "ranking modules…",
+        explanations: [
+            "module-recommender:recommend is running for this workspace.",
+            "results will appear here automatically when it finishes.",
+        ],
+        actions: [
+            ("(running)", "no action needed — sit tight"),
+            ("runs", "inspect persisted runs"),
+        ],
+        commands: RECOMMENDATION_RUNNING_COMMANDS,
+    }
+}
+
+fn targetless_recommendation_empty_state() -> RecommendationEmptyState {
+    RecommendationEmptyState {
+        title: "choose a target first",
+        explanations: [
+            "recommend ranks modules from the active workspace.",
+            "set a repository target or run the offline demo to see a complete flow.",
+        ],
+        actions: [
+            (
+                "target <path>",
+                "use an existing repository or app directory",
+            ),
+            (
+                "demo",
+                "run the bundled offline fixture without credentials",
+            ),
+        ],
+        commands: RECOMMENDATION_TARGETLESS_COMMANDS,
+    }
+}
+
+fn missing_recommendation_empty_state() -> RecommendationEmptyState {
     RecommendationEmptyState {
         title: "no recommendations artifact",
         explanations: [
-            "recommend reads the latest recommendations.json artifact.",
-            "generate it through normal tool dispatch when planning is needed.",
+            "recommend will run module-recommender:recommend for this workspace.",
+            "results appear here after the background run finishes.",
         ],
         actions: [
             (
                 "recommend",
-                "ranks modules for the active workspace and writes recommendations.json",
+                "rank modules for the active workspace and write recommendations.json",
             ),
             ("runs", "inspect persisted runs"),
         ],
@@ -152,6 +228,10 @@ fn read_recommendations(path: &Path) -> Option<RecommendationView> {
     let report = recommendation_report_value(&value);
     Some(RecommendationView {
         summary: string_field(report, "summary"),
+        components: component_values(report)
+            .into_iter()
+            .filter_map(component_from_value)
+            .collect(),
         rows: recommendation_values(report)
             .into_iter()
             .filter_map(recommendation_from_value)
@@ -162,6 +242,7 @@ fn read_recommendations(path: &Path) -> Option<RecommendationView> {
 fn non_file_recommendations_view() -> RecommendationView {
     RecommendationView {
         summary: Some(format!("{} is not a file", recommendations_artifact_leaf())),
+        components: Vec::new(),
         rows: vec![RecommendationRow {
             cells: [
                 "⚠ high".to_string(),
@@ -178,6 +259,7 @@ fn non_file_recommendations_view() -> RecommendationView {
 fn malformed_recommendations_view() -> RecommendationView {
     RecommendationView {
         summary: Some(format!("malformed {}", recommendations_artifact_leaf())),
+        components: Vec::new(),
         rows: vec![RecommendationRow {
             cells: [
                 "⚠ high".to_string(),
@@ -211,6 +293,10 @@ fn has_recommendation_items(value: &serde_json::Value) -> bool {
         .get("recommendations")
         .and_then(serde_json::Value::as_array)
         .is_some()
+        || value
+            .get("components")
+            .and_then(serde_json::Value::as_array)
+            .is_some()
 }
 
 fn recommendation_values(value: &serde_json::Value) -> Vec<serde_json::Value> {
@@ -223,6 +309,77 @@ fn recommendation_values(value: &serde_json::Value) -> Vec<serde_json::Value> {
         .and_then(serde_json::Value::as_array)
         .cloned()
         .unwrap_or_default()
+}
+
+fn component_values(value: &serde_json::Value) -> Vec<serde_json::Value> {
+    value
+        .get("components")
+        .or_else(|| value.pointer("/data/components"))
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+fn component_from_value(value: serde_json::Value) -> Option<ComponentRecommendationRow> {
+    let next_input = value.get("nextInput").or_else(|| value.get("next_input"));
+    let rel_path = string_field(&value, "relPath").or_else(|| string_field(&value, "rel_path"))?;
+    let tier_label = string_field(&value, "tier").unwrap_or_else(|| "low".to_string());
+    let class_label = string_field(&value, "class").unwrap_or_else(|| "component".to_string());
+    Some(ComponentRecommendationRow {
+        scope_id: string_field(&value, "scopeId")
+            .or_else(|| string_field(&value, "scope_id"))
+            .unwrap_or_else(|| rel_path.clone()),
+        rel_path: rel_path.clone(),
+        class_label,
+        risk_score: value
+            .get("riskScore")
+            .or_else(|| value.get("risk_score"))
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or_default() as u16,
+        reason: primary_reason(&value).unwrap_or_else(|| "scoped scan candidate".to_string()),
+        scan_input: scoped_scan_input(next_input),
+        scan_command: scoped_scan_command(next_input),
+        promote_command: promote_command(&rel_path, independent_component(&value)),
+        tier_label,
+    })
+}
+
+fn primary_reason(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("reasons")
+        .and_then(serde_json::Value::as_array)?
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .find(|reason| !reason.trim().is_empty())
+        .map(str::to_string)
+}
+
+fn scoped_scan_command(next_input: Option<&serde_json::Value>) -> String {
+    scoped_scan_input(next_input)
+        .map(|input| format!("run sast:scan {input}"))
+        .unwrap_or_else(|| "run sast:scan".to_string())
+}
+
+fn scoped_scan_input(next_input: Option<&serde_json::Value>) -> Option<String> {
+    next_input.and_then(|input| {
+        let mut input = input.clone();
+        if let serde_json::Value::Object(object) = &mut input {
+            object.remove("target");
+            object.remove("component");
+        }
+        serde_json::to_string(&input).ok()
+    })
+}
+
+fn independent_component(value: &serde_json::Value) -> bool {
+    matches!(
+        string_field(value, "class").as_deref(),
+        Some("web-app" | "service-api")
+    )
+}
+
+fn promote_command(rel_path: &str, independent: bool) -> Option<String> {
+    independent.then(|| format!("target {rel_path}"))
 }
 
 fn recommendation_from_value(value: serde_json::Value) -> Option<RecommendationRow> {
@@ -356,6 +513,7 @@ fn recommendation_latest_run_file(path: &Path) -> RecommendationLatestRunId {
 
 struct RecommendationView {
     summary: Option<String>,
+    components: Vec<ComponentRecommendationRow>,
     rows: Vec<RecommendationRow>,
 }
 
@@ -385,7 +543,7 @@ mod tests {
 
     #[test]
     fn empty_state_shows_ranking_while_recommender_runs() {
-        let running = recommendation_empty_state(true);
+        let running = recommendation_empty_state(true, true);
         assert_eq!(running.title, "ranking modules…");
         // Must NOT invite a re-run while it's already in flight.
         assert!(!running
@@ -393,12 +551,13 @@ mod tests {
             .iter()
             .any(|c| c.contains("module-recommender")));
 
-        let idle = recommendation_empty_state(false);
+        let idle = recommendation_empty_state(false, true);
         assert_eq!(idle.title, "no recommendations artifact");
-        assert!(idle
-            .commands
-            .iter()
-            .any(|c| c.contains("module-recommender")));
+        assert!(idle.commands.iter().any(|c| *c == "recommend"));
+
+        let targetless = recommendation_empty_state(false, false);
+        assert_eq!(targetless.title, "choose a target first");
+        assert_eq!(targetless.commands, ["target <path>", "demo", "back"]);
     }
 
     #[test]
@@ -643,10 +802,100 @@ mod tests {
             model.report_commands,
             ["run <tool> [json]", "trace <run>", "runs", "back"]
         );
-        assert_eq!(model.empty_state.title, "no recommendations artifact");
+        assert_eq!(model.empty_state.title, "choose a target first");
         assert_eq!(
             model.empty_state.commands,
-            ["run module-recommender:recommend", "runs", "back"]
+            ["target <path>", "demo", "back"]
         );
+    }
+
+    #[test]
+    fn recommendation_artifact_needs_refresh_only_with_target_and_missing_artifact() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        assert!(!recommendation_artifact_needs_refresh(&app));
+
+        app.target = Some(temp.path().to_path_buf());
+        assert!(recommendation_artifact_needs_refresh(&app));
+
+        let run_dir = test_run_dir(temp.path(), "run-rec");
+        fs::create_dir_all(&run_dir).unwrap();
+        write_latest_run(temp.path(), "run-rec");
+        fs::write(
+            run_dir.join(recommendations_artifact_leaf()),
+            serde_json::json!({"recommendations": []}).to_string(),
+        )
+        .unwrap();
+
+        assert!(!recommendation_artifact_needs_refresh(&app));
+    }
+
+    #[test]
+    fn recommendation_model_reads_component_recommendations() {
+        let temp = tempfile::tempdir().unwrap();
+        write_component_recommendation_artifact(temp.path());
+        let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
+        app.target = Some(temp.path().to_path_buf());
+
+        let model = recommendation_model(&app);
+
+        assert_component_recommendation_model(&model);
+    }
+
+    fn write_component_recommendation_artifact(target: &Path) {
+        let run_dir = test_run_dir(target, "run-components");
+        fs::create_dir_all(&run_dir).unwrap();
+        write_latest_run(target, "run-components");
+        fs::write(
+            run_dir.join(recommendations_artifact_leaf()),
+            component_recommendation_payload(target).to_string(),
+        )
+        .unwrap();
+    }
+
+    fn component_recommendation_payload(target: &Path) -> serde_json::Value {
+        json!({
+            "data": {
+                "components": [{
+                    "scopeId": "package-web",
+                    "relPath": "web/app",
+                    "class": "web-app",
+                    "tier": "high",
+                    "riskScore": 91,
+                    "reasons": ["web-app component at web/app"],
+                    "nextInput": {
+                        "target": target.display().to_string(),
+                        "paths": ["web/app"],
+                        "taskMode": "manual",
+                        "tasks": ["semgrep", "dep-hygiene", "secret-scan"]
+                    }
+                }],
+                "recommendations": []
+            }
+        })
+    }
+
+    fn assert_component_recommendation_model(model: &RecommendationModel) {
+        assert_eq!(model.components.len(), 1);
+        assert_component_recommendation_row(&model.components[0]);
+        assert_eq!(
+            model.report_commands,
+            ["Enter component", "p promote", "run <tool>", "back"]
+        );
+    }
+
+    fn assert_component_recommendation_row(row: &ComponentRecommendationRow) {
+        assert_eq!(row.scope_id, "package-web");
+        assert_eq!(row.rel_path, "web/app");
+        assert_eq!(row.class_label, "web-app");
+        assert!(row
+            .scan_input
+            .as_deref()
+            .is_some_and(|input| input.contains("\"paths\":[\"web/app\"]")));
+        assert!(row
+            .scan_input
+            .as_deref()
+            .is_some_and(|input| !input.contains("\"target\"")));
+        assert_eq!(row.promote_command.as_deref(), Some("target web/app"));
     }
 }

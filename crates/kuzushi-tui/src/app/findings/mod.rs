@@ -8,7 +8,7 @@ use self::{with_next_step, ExploitChain, ShellApp, ShellView};
 use anyhow::Result;
 use kuzushi_core::{
     format_finding_alias, parse_finding_alias, resolve_finding_alias, sorted_finding_aliases,
-    Finding, FindingStore, WorkspaceTarget,
+    Finding, FindingListFilter, FindingStore, WorkspaceTarget,
 };
 mod show_aliases;
 pub use format_chain_alias::format_alias_table;

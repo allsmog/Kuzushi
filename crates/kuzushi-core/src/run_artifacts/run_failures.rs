@@ -48,8 +48,6 @@ pub struct FailureToLlmContext {
     pub claims_forbidden: Vec<String>,
 }
 
-const LEGACY_FOLLOW_UP_RUN_FILES: &[&str] = &["summary.json"];
-
 const MAX_AVAILABLE_FAILURE_ARTIFACTS: usize = 12;
 const MAX_NEXT_FAILURE_PATHS: usize = 12;
 
@@ -226,12 +224,6 @@ fn append_follow_up_run_files(paths: &mut Vec<String>, target: &Path, run_id: &s
             .display()
             .to_string(),
     );
-    for leaf in LEGACY_FOLLOW_UP_RUN_FILES {
-        push_next_failure_path(
-            paths,
-            run_artifact_path(target, run_id, leaf).display().to_string(),
-        );
-    }
     push_existing_follow_up_path(paths, target, run_id, report_artifact_spec().leaf);
     for spec in OPTIONAL_RUN_ARTIFACTS {
         push_existing_follow_up_path(paths, target, run_id, spec.leaf);

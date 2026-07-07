@@ -8,7 +8,7 @@ pub(in crate::modules) fn run_network_security_config_scan(
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
     let target = resolve_tool_target(&input, ctx)?;
-    emit_step(ctx, "tool", "scan", &format!("network-security-config start · target={}", target.display()));
+    emit_network_security_start(ctx, &target);
     let outcome = match scan_network_security(&input, &target) {
         Ok(outcome) => outcome,
         Err(error) => {
@@ -16,7 +16,7 @@ pub(in crate::modules) fn run_network_security_config_scan(
                 "android-apk:network-security-config",
                 &target,
                 error,
-            ))
+            ));
         }
     };
     let persisted = persist_tool_findings(
@@ -26,7 +26,7 @@ pub(in crate::modules) fn run_network_security_config_scan(
         ctx.workspace,
         ctx.findings_store,
     )?;
-    emit_step(ctx, "done", "scan", &format!("network-security-config complete · {} findings", outcome.findings.len()));
+    emit_network_security_done(ctx, outcome.findings.len());
     Ok(network_security_output(&outcome, persisted))
 }
 
@@ -51,6 +51,27 @@ fn emit_step(ctx: &ToolExecutionContext<'_>, kind: &str, verb: &str, message: &s
     if let Some(trace) = ctx.trace {
         let _ = trace.step(kind, verb, message.to_string()).emit();
     }
+}
+
+fn emit_network_security_start(ctx: &ToolExecutionContext<'_>, target: &Path) {
+    emit_step(
+        ctx,
+        "tool",
+        "scan",
+        &format!(
+            "network-security-config start · target={}",
+            target.display()
+        ),
+    );
+}
+
+fn emit_network_security_done(ctx: &ToolExecutionContext<'_>, findings_count: usize) {
+    emit_step(
+        ctx,
+        "done",
+        "scan",
+        &format!("network-security-config complete · {findings_count} findings"),
+    );
 }
 
 fn resolve_config_path(input: &Value, workspace_root: &Path) -> Result<PathBuf> {
@@ -139,7 +160,10 @@ fn nsc_finding(rule_id: &str, file_path: &str, severity: Severity, message: &str
     )
 }
 
-fn network_security_output(outcome: &NscScanOutcome, persisted: Option<GenericPersistedRun>) -> Value {
+fn network_security_output(
+    outcome: &NscScanOutcome,
+    persisted: Option<GenericPersistedRun>,
+) -> Value {
     let summary_text = format!(
         "android-apk:network-security-config: {} findings (domains={}, user-CA={})",
         outcome.findings.len(),

@@ -4,7 +4,9 @@ use crate::{ShellApp, ShellView};
 pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
     match app.shell_view {
         ShellView::Home => Some(home_keybindings()),
-        ShellView::Catalog if !app.catalog_expanded => Some(collapsed_catalog_keybindings()),
+        ShellView::Catalog if !app.catalog_route.is_expanded() => {
+            Some(collapsed_catalog_keybindings())
+        }
         ShellView::Catalog => Some(expanded_catalog_keybindings()),
         ShellView::Recommend => Some(recommend_keybindings()),
         _ => None,
@@ -13,8 +15,10 @@ pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
 
 fn home_keybindings() -> Vec<FooterKeybinding> {
     vec![
+        bind("Ctrl+G", "palette"),
+        bind("n", "next phase"),
         bind("modules", "browse"),
-        bind("recommend", "plan"),
+        bind("options sast:scan", "tune scan"),
         bind("scan", "run scanners"),
         bind("Ctrl+C", "exit"),
     ]
@@ -22,6 +26,7 @@ fn home_keybindings() -> Vec<FooterKeybinding> {
 
 fn collapsed_catalog_keybindings() -> Vec<FooterKeybinding> {
     vec![
+        bind("Ctrl+G", "palette"),
         bind("modules", "browse"),
         bind("use <id>", "focus module"),
         bind("scan", "run scanners"),
@@ -31,6 +36,7 @@ fn collapsed_catalog_keybindings() -> Vec<FooterKeybinding> {
 
 fn expanded_catalog_keybindings() -> Vec<FooterKeybinding> {
     vec![
+        bind("Ctrl+G", "palette"),
         bind("j/k", "row"),
         bind("PgUp/PgDn", "scroll"),
         bind("Enter", "use selected row"),
@@ -42,9 +48,12 @@ fn expanded_catalog_keybindings() -> Vec<FooterKeybinding> {
 
 fn recommend_keybindings() -> Vec<FooterKeybinding> {
     vec![
-        bind("run <tool>", "dispatch"),
+        bind("Ctrl+G", "palette"),
+        bind("j/k", "component"),
+        bind("Enter", "scan focused"),
+        bind("p", "promote target"),
         bind("runs", "ledger"),
-        bind("Esc", "home"),
+        bind("Esc", "back"),
         bind("?", "help"),
     ]
 }

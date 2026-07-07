@@ -11,12 +11,21 @@ pub(super) fn inspect_micronaut_route_line(
     builder: &mut AttackSurfaceBuilder,
 ) {
     remember_micronaut_prefix(detail, lower, state);
-    emit_micronaut_route(source_file, framework, line_number, detail, lower, state, builder);
+    emit_micronaut_route(
+        source_file,
+        framework,
+        line_number,
+        detail,
+        lower,
+        state,
+        builder,
+    );
 }
 
 fn remember_micronaut_prefix(detail: &str, lower: &str, state: &mut RouteScanState) {
     if lower.contains("@controller(") {
-        state.micronaut_prefix = first_quoted(detail).and_then(|route| normalize_route_path(&route));
+        state.micronaut_prefix =
+            first_quoted(detail).and_then(|route| normalize_route_path(&route));
     }
 }
 

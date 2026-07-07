@@ -1,13 +1,17 @@
 use super::*;
+use crate::findings::FindingStore;
+use std::path::Path;
 
 pub(in crate::modules) fn run_verify_finding(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
     runtime: Option<&dyn AgentRuntime>,
 ) -> Result<Value> {
-    let workspace = ctx.workspace.context(
-        "verify:finding needs an active workspace. Pass --target <repo> or start the shell with --target.",
-    )?;
+    let workspace = ctx
+        .workspace
+        .context(crate::workspace::active_workspace_required_message(
+            "verify:finding",
+        ))?;
     let store = ctx
         .findings_store
         .context("verify:finding requires a findings store for the active workspace")?;
@@ -17,47 +21,99 @@ pub(in crate::modules) fn run_verify_finding(
         .or_else(|| input.get("id"))
         .and_then(Value::as_str)
         .unwrap_or("unknown");
-    if let Some(trace) = ctx.trace {
-        let _ = trace
-            .step(
-                "tool",
-                "finding",
-                format!("verify start · fp={fingerprint}"),
-            )
-            .emit();
-    }
+    let parent_step = emit_verify_start(ctx, fingerprint);
+    emit_verify_progress(ctx, parent_step, "finding · load evidence and context");
 
+    let result =
+        run_scoped_verify_finding(input, ctx, runtime, workspace.root(), store, parent_step);
+    emit_verify_done(ctx, &result);
+    result
+}
+
+fn run_scoped_verify_finding(
+    input: Value,
+    ctx: &ToolExecutionContext<'_>,
+    runtime: Option<&dyn AgentRuntime>,
+    workspace_root: &Path,
+    store: &FindingStore,
+    parent_step: Option<usize>,
+) -> Result<Value> {
+    let _verify_scope = begin_verify_scope(ctx, parent_step);
     let result = crate::verification::adapters::run_verify_finding_tool(
         crate::verification::adapters::VerifyFindingToolRequest {
             input,
-            workspace_root: workspace.root(),
+            workspace_root,
             store,
             runtime,
             configured_model: ctx.config.model.as_deref(),
         },
     );
-    if let Some(trace) = ctx.trace {
-        if let Ok(output) = &result {
-            let status = output
-                .get("data")
-                .and_then(|data| data.get("verdict").or_else(|| data.get("status")))
-                .and_then(Value::as_str)
-                .unwrap_or("complete");
-            let _ = trace
-                .step("done", "finding", format!("verify · {status}"))
-                .emit();
-        }
-    }
+    drop(_verify_scope);
     result
+}
+
+fn emit_verify_start(ctx: &ToolExecutionContext<'_>, fingerprint: &str) -> Option<usize> {
+    ctx.trace.map(|trace| {
+        trace
+            .step(
+                "tool",
+                "finding",
+                format!("verify start · fp={fingerprint}"),
+            )
+            .emit()
+    })
+}
+
+fn emit_verify_progress(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+    label: impl Into<String>,
+) {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return;
+    };
+    let _ = trace
+        .child(parent)
+        .step("tool-progress", "finding", label.into())
+        .emit();
+}
+
+fn begin_verify_scope(
+    ctx: &ToolExecutionContext<'_>,
+    parent_step: Option<usize>,
+) -> Option<crate::run_artifacts::ParentScope> {
+    let (Some(trace), Some(parent)) = (ctx.trace, parent_step) else {
+        return None;
+    };
+    let phase = trace
+        .child(parent)
+        .step("reasoning", "finding", "exploitability check")
+        .emit();
+    Some(trace.parent_scope(phase))
+}
+
+fn emit_verify_done(ctx: &ToolExecutionContext<'_>, result: &Result<Value>) {
+    let (Some(trace), Ok(output)) = (ctx.trace, result) else {
+        return;
+    };
+    let status = output
+        .get("data")
+        .and_then(|data| data.get("verdict").or_else(|| data.get("status")))
+        .and_then(Value::as_str)
+        .unwrap_or("complete");
+    let _ = trace
+        .step("done", "finding", format!("verify · {status}"))
+        .emit();
 }
 
 pub(in crate::modules) fn run_verify_exploit(
     input: Value,
     ctx: &ToolExecutionContext<'_>,
 ) -> Result<Value> {
-    ctx.workspace.context(
-        "verify:exploit needs an active workspace. Pass --target <repo> or start the shell with --target.",
-    )?;
+    ctx.workspace
+        .context(crate::workspace::active_workspace_required_message(
+            "verify:exploit",
+        ))?;
     let store = ctx
         .findings_store
         .context("verify:exploit requires a findings store for the active workspace")?;

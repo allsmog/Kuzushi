@@ -12,7 +12,14 @@ pub(crate) fn inspect_php_line(
         return;
     }
     let lower = detail.to_ascii_lowercase();
-    add_laravel_route(source_file, framework, line_number, &detail, &lower, builder);
+    add_laravel_route(
+        source_file,
+        framework,
+        line_number,
+        &detail,
+        &lower,
+        builder,
+    );
     for detector in PHP_LINE_DETECTORS {
         if detector.matches(&lower) {
             builder.add(detector.surface(source_file, framework, line_number, &detail));
@@ -22,7 +29,9 @@ pub(crate) fn inspect_php_line(
 
 fn is_php_import_line(line: &str) -> bool {
     let trimmed = line.trim_start().trim_start_matches("<?php").trim_start();
-    trimmed.starts_with("use ") || trimmed.starts_with("require ") || trimmed.starts_with("include ")
+    trimmed.starts_with("use ")
+        || trimmed.starts_with("require ")
+        || trimmed.starts_with("include ")
 }
 
 fn add_laravel_route(
@@ -34,18 +43,34 @@ fn add_laravel_route(
     builder: &mut AttackSurfaceBuilder,
 ) {
     if let Some((method, route)) = laravel_match_route(detail, lower) {
-        add_laravel_route_surface(source_file, framework, line_number, detail, method, &route, builder);
+        add_laravel_route_surface(
+            source_file,
+            framework,
+            line_number,
+            detail,
+            method,
+            &route,
+            builder,
+        );
         return;
     }
     let Some((method, marker)) = laravel_route_method(lower) else {
         return;
     };
-    let Some(route) =
-        extract_quoted_after_marker_case_insensitive(detail, marker).filter(|route| backend_route_path(route))
+    let Some(route) = extract_quoted_after_marker_case_insensitive(detail, marker)
+        .filter(|route| backend_route_path(route))
     else {
         return;
     };
-    add_laravel_route_surface(source_file, framework, line_number, detail, method, &route, builder);
+    add_laravel_route_surface(
+        source_file,
+        framework,
+        line_number,
+        detail,
+        method,
+        &route,
+        builder,
+    );
 }
 
 fn add_laravel_route_surface(
@@ -77,7 +102,8 @@ fn laravel_match_route(line: &str, lower: &str) -> Option<(&'static str, String)
     let arguments = &line[start..];
     let method = laravel_match_method(&arguments.to_ascii_lowercase())?;
     let route_start = arguments.find(']')? + 1;
-    let route = extract_first_quoted(&arguments[route_start..]).filter(|route| backend_route_path(route))?;
+    let route = extract_first_quoted(&arguments[route_start..])
+        .filter(|route| backend_route_path(route))?;
     Some((method, route))
 }
 
@@ -162,14 +188,26 @@ const PHP_LINE_DETECTORS: &[PhpLineDetector] = &[
         title: "Authentication or authorization guard",
         boundary: "auth_guard",
         detector: "php.auth-guard",
-        needles: &["auth::", "auth()->", "$this->authorize", "gate::authorize", "middleware('auth"],
+        needles: &[
+            "auth::",
+            "auth()->",
+            "$this->authorize",
+            "gate::authorize",
+            "middleware('auth",
+        ],
     },
     PhpLineDetector {
         kind: AttackSurfaceKind::SessionStateBoundary,
         title: "Session state boundary",
         boundary: "session_state",
         detector: "php.session-state",
-        needles: &["session([", "session()->", "$_session", "cookie(", "jwtauth::"],
+        needles: &[
+            "session([",
+            "session()->",
+            "$_session",
+            "cookie(",
+            "jwtauth::",
+        ],
     },
     PhpLineDetector {
         kind: AttackSurfaceKind::RequestTrustBoundary,

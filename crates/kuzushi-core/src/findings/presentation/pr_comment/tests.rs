@@ -7,6 +7,8 @@ mod tests {
         Finding {
             id: None,
             scan_id: None,
+            identity_id: None,
+            identity_match_tier: None,
             fingerprint: fp.to_string(),
             rule_id: "test/rule".to_string(),
             title: title.to_string(),
@@ -19,15 +21,19 @@ mod tests {
             actor_fingerprint: None,
             static_proof_state: None,
             triage: None,
+            triaged_by: None,
             verification: None,
             created_at: String::new(),
             vuln_source: None,
             dedup_key: None,
+            source_signature: None,
+            corroboration_count: 0,
             suppressed: false,
             snoozed_until: None,
             remediation: None,
             references: Vec::new(),
             evidence: Vec::new(),
+            sources: Vec::new(),
         }
     }
 

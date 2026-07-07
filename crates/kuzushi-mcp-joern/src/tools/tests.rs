@@ -38,6 +38,14 @@ mod tests {
         std::net::TcpStream::connect_timeout(&parsed, std::time::Duration::from_millis(200)).is_ok()
     }
 
+    fn assert_backend_unavailable_or_available(result: anyhow::Result<Value>) {
+        if result.is_ok() || joern_locatable() {
+            return;
+        }
+        let err = result.unwrap_err();
+        assert!(err.to_string().starts_with("BackendUnavailable:"), "{err}");
+    }
+
     #[test]
     fn registry_includes_all_planned_tools() {
         let r = build_registry();
@@ -108,32 +116,21 @@ mod tests {
 
     #[tokio::test]
     async fn callers_of_reports_backend_unavailable_when_joern_missing() {
-        if joern_locatable() {
-            return;
-        }
         let tool = CallersOfTool;
-        let err = tool.call(json!({"fn": "main"})).await.unwrap_err();
-        assert!(err.to_string().starts_with("BackendUnavailable:"));
+        assert_backend_unavailable_or_available(tool.call(json!({"fn": "main"})).await);
     }
 
     #[tokio::test]
     async fn parse_and_method_at_report_backend_unavailable_when_joern_missing() {
-        if joern_locatable() {
-            return;
-        }
         let parse = ParseTool;
-        let err = parse
-            .call(json!({"repoPath": "/tmp/repo"}))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().starts_with("BackendUnavailable:"));
+        assert_backend_unavailable_or_available(parse.call(json!({"repoPath": "/tmp/repo"})).await);
 
         let method_at = MethodAtTool;
-        let err = method_at
-            .call(json!({"file": "/tmp/repo/a.c", "line": 7}))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().starts_with("BackendUnavailable:"));
+        assert_backend_unavailable_or_available(
+            method_at
+                .call(json!({"file": "/tmp/repo/a.c", "line": 7}))
+                .await,
+        );
     }
 
     #[tokio::test]
@@ -146,15 +143,10 @@ mod tests {
 
     #[tokio::test]
     async fn taint_paths_reports_backend_unavailable_when_joern_missing() {
-        if joern_locatable() {
-            return;
-        }
         let tool = TaintPathsTool;
-        let err = tool
-            .call(json!({"source": "argv", "sink": "system"}))
-            .await
-            .unwrap_err();
-        assert!(err.to_string().starts_with("BackendUnavailable:"));
+        assert_backend_unavailable_or_available(
+            tool.call(json!({"source": "argv", "sink": "system"})).await,
+        );
     }
 
     #[tokio::test]

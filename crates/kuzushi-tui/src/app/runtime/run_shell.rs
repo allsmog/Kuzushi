@@ -64,10 +64,6 @@ pub(crate) fn run_terminal_shell(
     if app.target.is_none() && !crate::app::skip_onboarding_env() {
         app.open_target_picker();
     }
-    // Interactive launches kick off the one-shot session-model ranking that
-    // refines the walker's preselection. Done here (not in construction) so
-    // headless/test apps never spawn a background tool.
-    app.request_model_recommendations();
     let result = terminal_shell_loop(&mut terminal, &mut app);
     let _ = restore_terminal(&mut terminal);
     result
@@ -86,7 +82,13 @@ pub(crate) fn open_start_view(app: &mut ShellApp) {
     ) {
         return;
     }
-    app.shell_view = ShellView::Home;
+    // The Workbench command center is the default landing surface (both the
+    // interactive shell and the plain front door route through here). The
+    // onboarding/target/model pickers above still take precedence — nothing
+    // here clobbers a first-run gate.
+    app.shell_view = ShellView::Workbench;
+    app.workbench_focus = WorkbenchPane::Findings;
+    app.workbench_center_mode = app.default_workbench_center_mode(WorkbenchPane::Findings);
 }
 
 pub(crate) fn terminal_shell_loop(
@@ -94,9 +96,14 @@ pub(crate) fn terminal_shell_loop(
     app: &mut ShellApp,
 ) -> Result<()> {
     let mut state = TerminalLoopState::default();
+    let (input, wake) = TerminalLoopInbox::spawn_crossterm_reader();
+    app.loop_wake = Some(wake.clone());
+    app.jobs.set_wake(Some(wake));
     while !app.should_quit {
-        terminal_shell_step(terminal, app, &mut state)?;
+        terminal_shell_step(terminal, app, &mut state, &input)?;
     }
+    app.jobs.set_wake(None);
+    app.loop_wake = None;
     Ok(())
 }
 
@@ -115,8 +122,9 @@ pub(crate) fn terminal_shell_step(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     app: &mut ShellApp,
     state: &mut TerminalLoopState,
+    input: &TerminalLoopInbox,
 ) -> Result<()> {
     refresh_terminal_redraw_state(terminal, app, state)?;
-    state.needs_redraw |= poll_terminal_event(app)?;
+    state.needs_redraw |= wait_for_terminal_loop_event(app, input)?;
     Ok(())
 }

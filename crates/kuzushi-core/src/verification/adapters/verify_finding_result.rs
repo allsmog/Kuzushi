@@ -1,7 +1,7 @@
 use super::json_fields::{
     normalize_attack_path, normalize_code_citations, normalize_controls, normalize_object_array,
-    read_object_bool, read_object_f64, read_object_nullable_string, read_object_string,
-    read_object_string_array, read_object_u64, string_or_null,
+    read_object_nullable_string, read_object_string, read_object_string_array, read_object_u64,
+    read_object_value, string_or_null,
 };
 use crate::findings::Finding;
 use anyhow::{Context, Result};
@@ -42,7 +42,6 @@ fn independent_finding_claim(finding: &Finding) -> Result<Value> {
     Ok(value)
 }
 
-
 pub(in crate::verification::adapters) fn normalize_verification_result(
     raw: Value,
     fallback_fingerprint: &str,
@@ -50,56 +49,141 @@ pub(in crate::verification::adapters) fn normalize_verification_result(
     let Value::Object(object) = raw else {
         anyhow::bail!("verification output parse failed: expected a JSON object");
     };
-
-    let fingerprint = read_object_string(&object, &["fingerprint"])
-        .unwrap_or_else(|| fallback_fingerprint.to_string());
-    let exploitable = read_object_bool(&object, &["exploitable"]).unwrap_or(false);
-    let poc_payload = read_object_nullable_string(&object, &["pocPayload", "poc_payload"]);
-    let poc_description =
-        read_object_string(&object, &["pocDescription", "poc_description"]).unwrap_or_default();
-    let attack_vector = read_object_nullable_string(&object, &["attackVector", "attack_vector"]);
-    let preconditions = read_object_string_array(&object, &["preconditions"]);
-    let confidence = read_object_f64(&object, &["confidence"])
-        .unwrap_or(0.0)
-        .clamp(0.0, 1.0);
-
+    let required = required_verification_fields(&object, fallback_fingerprint)?;
     let mut result = Map::new();
-    result.insert("fingerprint".to_string(), json!(fingerprint));
-    result.insert("exploitable".to_string(), json!(exploitable));
-    result.insert("pocPayload".to_string(), string_or_null(poc_payload));
-    result.insert("pocDescription".to_string(), json!(poc_description));
-    result.insert("attackVector".to_string(), string_or_null(attack_vector));
-    result.insert("preconditions".to_string(), json!(preconditions));
-    result.insert("confidence".to_string(), json!(confidence));
+    insert_required_verification_fields(&mut result, required);
+    insert_optional_verification_fields(&mut result, &object);
+    Ok(Value::Object(result))
+}
 
-    if let Some(level) = read_object_u64(&object, &["proofLevel", "proof_level"])
+struct RequiredVerificationFields {
+    fingerprint: String,
+    exploitable: bool,
+    poc_payload: Option<String>,
+    poc_description: String,
+    attack_vector: Option<String>,
+    preconditions: Vec<String>,
+    confidence: f64,
+}
+
+fn required_verification_fields(
+    object: &Map<String, Value>,
+    fallback_fingerprint: &str,
+) -> Result<RequiredVerificationFields> {
+    let fingerprint = read_object_string(object, &["fingerprint"])
+        .unwrap_or_else(|| fallback_fingerprint.to_string());
+    let exploitable = required_object_bool(object, &["exploitable"])?;
+    let poc_payload = read_object_nullable_string(object, &["pocPayload", "poc_payload"]);
+    let poc_description =
+        read_object_string(object, &["pocDescription", "poc_description"]).unwrap_or_default();
+    let attack_vector = read_object_nullable_string(object, &["attackVector", "attack_vector"]);
+    let preconditions = read_object_string_array(object, &["preconditions"]);
+    let confidence = required_object_f64(object, &["confidence"])?.clamp(0.0, 1.0);
+
+    Ok(RequiredVerificationFields {
+        fingerprint,
+        exploitable,
+        poc_payload,
+        poc_description,
+        attack_vector,
+        preconditions,
+        confidence,
+    })
+}
+
+fn insert_required_verification_fields(
+    result: &mut Map<String, Value>,
+    fields: RequiredVerificationFields,
+) {
+    result.insert("fingerprint".to_string(), json!(fields.fingerprint));
+    result.insert("exploitable".to_string(), json!(fields.exploitable));
+    result.insert("pocPayload".to_string(), string_or_null(fields.poc_payload));
+    result.insert("pocDescription".to_string(), json!(fields.poc_description));
+    result.insert(
+        "attackVector".to_string(),
+        string_or_null(fields.attack_vector),
+    );
+    result.insert("preconditions".to_string(), json!(fields.preconditions));
+    result.insert("confidence".to_string(), json!(fields.confidence));
+}
+
+fn insert_optional_verification_fields(
+    result: &mut Map<String, Value>,
+    object: &Map<String, Value>,
+) {
+    insert_optional_proof_fields(result, object);
+    insert_optional_evidence_fields(result, object);
+    insert_optional_context_fields(result, object);
+}
+
+fn insert_optional_proof_fields(result: &mut Map<String, Value>, object: &Map<String, Value>) {
+    if let Some(level) = read_object_u64(object, &["proofLevel", "proof_level"])
         .filter(|level| (1..=4).contains(level))
     {
         result.insert("proofLevel".to_string(), json!(level));
     }
-    if let Some(verdict) = read_object_string(&object, &["proofVerdict", "proof_verdict"]) {
+    if let Some(verdict) = read_object_string(object, &["proofVerdict", "proof_verdict"]) {
         result.insert("proofVerdict".to_string(), json!(verdict));
     }
-    if let Some(value) = normalize_object_array(&object, &["bypassAttempts", "bypass_attempts"]) {
+}
+
+fn insert_optional_evidence_fields(result: &mut Map<String, Value>, object: &Map<String, Value>) {
+    if let Some(value) = normalize_object_array(object, &["bypassAttempts", "bypass_attempts"]) {
         result.insert("bypassAttempts".to_string(), value);
     }
-    if let Some(value) = normalize_code_citations(&object) {
+    if let Some(value) = normalize_code_citations(object) {
         result.insert("codeCitations".to_string(), value);
     }
-    if let Some(value) = normalize_attack_path(&object) {
+    if let Some(value) = normalize_attack_path(object) {
         result.insert("attackPath".to_string(), value);
     }
-    if let Some(value) = normalize_object_array(&object, &["assumptions"]) {
+}
+
+fn insert_optional_context_fields(result: &mut Map<String, Value>, object: &Map<String, Value>) {
+    if let Some(value) = normalize_object_array(object, &["assumptions"]) {
         result.insert("assumptions".to_string(), value);
     }
-    if let Some(value) = normalize_controls(&object) {
+    if let Some(value) = normalize_controls(object) {
         result.insert("controls".to_string(), value);
     }
-    if let Some(value) = normalize_object_array(&object, &["blindspots"]) {
+    if let Some(value) = normalize_object_array(object, &["blindspots"]) {
         result.insert("blindspots".to_string(), value);
     }
+}
 
-    Ok(Value::Object(result))
+fn required_object_bool(object: &Map<String, Value>, keys: &[&str]) -> Result<bool> {
+    let value = read_object_value(object, keys).ok_or_else(|| {
+        anyhow::anyhow!("verification output missing required boolean `exploitable`")
+    })?;
+    value.as_bool().ok_or_else(|| {
+        anyhow::anyhow!(
+            "verification output field `exploitable` must be boolean, got {}",
+            value_type_name(value)
+        )
+    })
+}
+
+fn required_object_f64(object: &Map<String, Value>, keys: &[&str]) -> Result<f64> {
+    let value = read_object_value(object, keys).ok_or_else(|| {
+        anyhow::anyhow!("verification output missing required number `confidence`")
+    })?;
+    value.as_f64().ok_or_else(|| {
+        anyhow::anyhow!(
+            "verification output field `confidence` must be number, got {}",
+            value_type_name(value)
+        )
+    })
+}
+
+fn value_type_name(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
 }
 
 #[cfg(test)]
@@ -146,6 +230,36 @@ mod tests {
             .to_string();
 
         assert!(err.contains("expected a JSON object"));
+    }
+
+    #[test]
+    fn rejects_missing_or_mistyped_exploitable_field() {
+        let missing = normalize_verification_result(json!({"confidence": 0.4}), "fp")
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("missing required boolean"));
+
+        let string_value =
+            normalize_verification_result(json!({"exploitable": "yes", "confidence": 0.9}), "fp")
+                .unwrap_err()
+                .to_string();
+        assert!(string_value.contains("must be boolean"));
+        assert!(string_value.contains("string"));
+    }
+
+    #[test]
+    fn rejects_missing_or_mistyped_confidence_field() {
+        let missing = normalize_verification_result(json!({"exploitable": true}), "fp")
+            .unwrap_err()
+            .to_string();
+        assert!(missing.contains("missing required number"));
+
+        let string_value =
+            normalize_verification_result(json!({"exploitable": true, "confidence": "high"}), "fp")
+                .unwrap_err()
+                .to_string();
+        assert!(string_value.contains("must be number"));
+        assert!(string_value.contains("string"));
     }
 
     #[test]

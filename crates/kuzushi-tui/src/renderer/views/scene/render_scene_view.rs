@@ -8,10 +8,10 @@ use super::gallery::gallery_header_lines;
 use super::scene_color::to_color;
 use super::*;
 use crate::scene3d::{
-    attack_surface_scene, brighten, default_palette, render_to_framebuffer, Camera, Projector,
+    active_palette, attack_surface_scene, brighten, render_to_framebuffer, Camera, Projector,
     SceneLabel, VizPage, BACKGROUND,
 };
-use crate::ui_view_models::{attack_tree, dfd_model, risk_by_module};
+use crate::ui_view_models::{attack_tree, cached_risk_by_module, dfd_model};
 use ratatui::layout::{Constraint, Direction, Layout, Rect};
 use ratatui::prelude::{Frame, Line, Span};
 use ratatui::style::{Color, Style};
@@ -56,7 +56,17 @@ fn render_terrain_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if cols == 0 || rows == 0 {
         return;
     }
-    let scene = attack_surface_scene(&risk_by_module(&app.findings));
+    if app.findings.is_empty() {
+        frame.render_widget(
+            Paragraph::new(Line::from(vec![Span::styled(
+                "no risk surface yet — run `scan` to populate findings.",
+                crate::theme::muted(),
+            )])),
+            area,
+        );
+        return;
+    }
+    let scene = attack_surface_scene(&cached_risk_by_module(app));
     let cam = scene_camera(app);
     let fb = render_to_framebuffer(&scene, cam, cols, rows * 2);
     let proj = Projector::new(cam, cols, rows * 2);
@@ -104,7 +114,7 @@ fn stamp_labels(cells: &mut [Vec<Cell>], proj: &Projector, labels: &[SceneLabel]
         };
         let cy = (py * 0.5).round() as i32;
         let cx = px.round() as i32 + 1;
-        let fg = to_color(brighten(default_palette(lbl.color)));
+        let fg = to_color(brighten(active_palette(lbl.color)));
         stamp(cells, cx, cy, &lbl.text, fg, bg_color);
     }
 }
@@ -144,5 +154,8 @@ fn row_to_line(row: Vec<Cell>) -> Line<'static> {
 }
 
 fn styled(text: String, fg: Color, bg: Color) -> Span<'static> {
+    if crate::theme::active_theme().no_color {
+        return Span::styled(text, Style::default());
+    }
     Span::styled(text, Style::default().fg(fg).bg(bg))
 }

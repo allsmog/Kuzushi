@@ -242,7 +242,7 @@ the SAST tool dispatcher checks `ctx.executor`, and `semgrep:scan` /
 `codeql:scan` route through `scan_via_executor` instead of spawning
 local subprocesses.
 
-The findings come back via the normal `.kuzushi/v2/findings.sqlite3`
+The findings come back via the normal `.kuzushi/v3/index.sqlite3`
 write path. `kuzushi findings` and `kuzushi metrics` work without any
 backend awareness.
 

@@ -1,4 +1,6 @@
 use super::*;
+use crate::scene3d::VizPage;
+use crate::ui_view_models::WORKBENCH_REPORT_COMMAND;
 use crate::{ScanPanelState, ShellView};
 use kuzushi_core::V2Config;
 use std::path::PathBuf;
@@ -24,22 +26,49 @@ fn unmapped_leaf_views_advertise_the_exit_path() {
 }
 
 #[test]
-fn finding_detail_advertises_esc_not_a_typed_verb() {
+fn workbench_footer_advertises_esc_back_and_run_path() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Finding;
+    app.shell_view = ShellView::Workbench;
     let bindings = footer_keybindings(&app);
-    assert!(bindings.contains(&bind("Esc", "back to list")));
-    assert!(!bindings.contains(&bind("findings", "list")));
+    assert!(bindings.contains(&bind("Esc", "back")));
+    assert!(!bindings.contains(&bind("cc", "workbench")));
+    assert!(bindings.contains(&bind("n/N", "page")));
+    assert!(bindings.contains(&bind("1..4", "page")));
+    assert!(bindings.contains(&bind("scan", "run scan")));
+    assert!(bindings.contains(&bind("Ctrl+C", "exit")));
+    assert!(!bindings.contains(&bind(WORKBENCH_REPORT_COMMAND, "export report")));
+}
+
+#[test]
+fn workbench_footer_advertises_export_when_findings_exist() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Workbench;
+    app.findings = vec![kuzushi_core::Finding::new_semgrep(
+        "demo.rule",
+        "src/app.rs",
+        1,
+        Some(1),
+        kuzushi_core::Severity::High,
+        "demo",
+    )];
+
+    let bindings = footer_keybindings(&app);
+
+    assert!(bindings.contains(&bind(WORKBENCH_REPORT_COMMAND, "export report")));
 }
 
 #[test]
 fn footer_keybindings_include_shell_completion_prefix() {
-    let app = ShellApp::new(V2Config::default(), None);
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Home;
 
     let bindings = footer_keybindings(&app);
 
     assert_eq!(bindings[0], bind("Tab", "complete"));
     assert!(bindings.contains(&bind("modules", "browse")));
+    assert!(bindings.contains(&bind("workbench", "command center")));
+    assert!(bindings.contains(&bind("n", "next phase")));
+    assert!(bindings.contains(&bind("options sast:scan", "tune scan")));
     assert!(bindings.contains(&bind("Ctrl+C", "exit")));
 }
 
@@ -56,19 +85,19 @@ fn footer_keybindings_show_scan_abort_action_when_running() {
 }
 
 #[test]
-fn footer_keybindings_show_arm_exit_after_abort_request() {
+fn footer_keybindings_show_wait_cleanup_after_abort_request() {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.scan = Some(scan_state(true, true));
 
     let bindings = footer_keybindings(&app);
 
-    assert_eq!(bindings[0], bind("Ctrl+C", "arm exit"));
+    assert_eq!(bindings[0], bind("Ctrl+C", "wait cleanup"));
 }
 
 #[test]
 fn footer_keybindings_deduplicate_view_bindings() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Findings;
+    app.shell_view = ShellView::Workbench;
     app.findings = vec![kuzushi_core::Finding::new_semgrep(
         "demo.rule",
         "src/app.rs",
@@ -80,8 +109,52 @@ fn footer_keybindings_deduplicate_view_bindings() {
 
     let bindings = footer_keybindings(&app);
 
-    assert_eq!(count_binding(&bindings, "j/k/g/G", "move"), 1);
-    assert_eq!(count_binding(&bindings, "scan", "rescan"), 1);
+    assert_eq!(count_binding(&bindings, "j/k", "move"), 1);
+    assert_eq!(count_binding(&bindings, "scan", "run scan"), 1);
+    assert_eq!(count_binding(&bindings, "n/N", "page"), 1);
+}
+
+#[test]
+fn planning_picker_footer_separates_phase_navigation_skip_and_close() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::PlanningPicker;
+
+    let bindings = footer_keybindings(&app);
+
+    assert!(bindings.contains(&bind("KEYS", "j/k move")));
+    assert!(bindings.contains(&bind("h/l ←/→", "phase")));
+    assert!(bindings.contains(&bind("1-4", "jump phase")));
+    assert!(bindings.contains(&bind("Tab/Shift+Tab/o", "focus pane")));
+    assert!(bindings.contains(&bind("a/n", "all/none")));
+    assert!(bindings.contains(&bind("s", "skip phase")));
+    assert!(bindings.contains(&bind("Esc/q", "workbench")));
+    assert!(bindings.contains(&bind("COMMAND", ": type")));
+    assert!(!bindings.contains(&bind("Esc", "close")));
+    assert!(!bindings.contains(&bind("workbench", "command center")));
+
+    app.planning_picker_route
+        .set_focus(crate::app::PickerFocus::OptionsPane);
+    let bindings = footer_keybindings(&app);
+
+    assert!(bindings.contains(&bind("KEYS", "j/k option")));
+    assert!(bindings.contains(&bind("Tab/Shift+Tab/o", "steps")));
+    assert!(bindings.contains(&bind("1-4", "phase")));
+    assert!(bindings.contains(&bind("Esc/q", "steps")));
+    assert!(bindings.contains(&bind("COMMAND", ": type")));
+    assert!(!bindings.contains(&bind("workbench", "command center")));
+}
+
+#[test]
+fn file_picker_footer_names_filter_and_attach_controls() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::FilePicker;
+
+    let bindings = footer_keybindings(&app);
+
+    assert!(bindings.contains(&bind("type", "filter")));
+    assert!(bindings.contains(&bind("Enter", "attach")));
+    assert!(bindings.contains(&bind("Esc", "close")));
+    assert!(!bindings.contains(&bind(":", "type command")));
 }
 
 #[test]
@@ -90,7 +163,10 @@ fn previously_empty_views_now_show_scroll_and_back_in_footer() {
         ShellView::Tools,
         ShellView::History,
         ShellView::Context,
+        ShellView::StrategyQueue,
         ShellView::KnowledgeBase,
+        ShellView::AgentChat,
+        ShellView::PromptsEditor,
     ] {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.shell_view = view.clone();
@@ -109,6 +185,46 @@ fn previously_empty_views_now_show_scroll_and_back_in_footer() {
             "{view:?} should not duplicate the back hint"
         );
     }
+}
+
+#[test]
+fn footers_do_not_relabel_back_as_home() {
+    for view in [
+        ShellView::Recommend,
+        ShellView::Threat(crate::ThreatView::Summary),
+        ShellView::ModuleRun,
+        ShellView::AgentChat,
+    ] {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = view.clone();
+        let bindings = footer_keybindings(&app);
+        assert!(
+            !bindings.contains(&bind("Esc", "home")),
+            "{view:?} should not advertise Esc as home: {bindings:?}"
+        );
+    }
+}
+
+#[test]
+fn scene_footer_advertises_3d_controls_only_on_3d_page() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.shell_view = ShellView::Scene(VizPage::Dfd);
+
+    let dfd_bindings = footer_keybindings(&app);
+    assert!(dfd_bindings.contains(&bind("j/k/g/G", "scroll")));
+    assert!(dfd_bindings.contains(&bind("Tab", "next page")));
+    assert!(dfd_bindings.contains(&bind("Shift+Tab", "prev page")));
+    assert!(dfd_bindings.contains(&bind("Esc/q", "leave")));
+    assert!(!dfd_bindings.contains(&bind("h/l/j/k", "orbit 3D")));
+    assert!(!dfd_bindings.contains(&bind("space/p", "pause")));
+    assert!(!dfd_bindings.contains(&bind("r", "reset")));
+
+    app.shell_view = ShellView::Scene(VizPage::AttackSurface);
+    let terrain_bindings = footer_keybindings(&app);
+    assert!(!terrain_bindings.contains(&bind("j/k/g/G", "scroll")));
+    assert!(terrain_bindings.contains(&bind("h/l/j/k", "orbit 3D")));
+    assert!(terrain_bindings.contains(&bind("space/p", "pause")));
+    assert!(terrain_bindings.contains(&bind("r", "reset")));
 }
 
 fn scan_state(running: bool, abort_requested: bool) -> ScanPanelState {

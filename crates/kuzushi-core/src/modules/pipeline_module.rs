@@ -6,7 +6,7 @@ pub(crate) fn pipeline_module() -> BuiltinModule {
         "Pipeline",
         ModuleKind::Internal,
         "Internal orchestrator DAG nodes for task selection, approval gates, and taint sub-tasks.",
-        vec![],
+        pipeline_tools(),
         vec![
             dag(
                 "pipeline:task-selector",
@@ -25,6 +25,74 @@ pub(crate) fn pipeline_module() -> BuiltinModule {
             ),
         ],
     )
+}
+
+fn pipeline_tools() -> Vec<ToolDescriptor> {
+    vec![
+        pipeline_task_selector_tool(),
+        pipeline_approval_tool(),
+        pipeline_taint_cwe_select_tool(),
+    ]
+}
+
+fn pipeline_task_selector_tool() -> ToolDescriptor {
+    hidden_tool_with_options(
+        "pipeline:task-selector",
+        "Select enabled SAST tasks after applying disabled task filters.",
+        vec![
+            opt("tasks", OptionType::StringList, "Requested scan task ids.")
+                .aliases(&["taskIds", "task_ids"])
+                .advanced(),
+            opt(
+                "disabledTasks",
+                OptionType::StringList,
+                "Disabled scan task ids.",
+            )
+            .aliases(&["disabled_tasks"])
+            .advanced(),
+        ],
+    )
+}
+
+fn pipeline_approval_tool() -> ToolDescriptor {
+    hidden_tool_with_options(
+        "pipeline:approval-before-verification",
+        "Represent the verification approval gate decision.",
+        vec![opt(
+            "approved",
+            OptionType::Bool,
+            "Whether verification is approved.",
+        )
+        .aliases(&["approve"])
+        .default(json!(true))],
+    )
+}
+
+fn pipeline_taint_cwe_select_tool() -> ToolDescriptor {
+    hidden_tool_with_options(
+        "pipeline:taint-cwe-select",
+        "Select taint-analysis CWE classes for Taint IRIS.",
+        pipeline_taint_cwe_select_options(),
+    )
+}
+
+fn pipeline_taint_cwe_select_options() -> Vec<OptionSpec> {
+    vec![
+        target_option(),
+        opt("cwes", OptionType::Json, "Explicit CWE selection.")
+            .aliases(&["cwe"])
+            .advanced(),
+        opt(
+            "whiteboxStatic",
+            OptionType::Json,
+            "Whitebox static analysis policy.",
+        )
+        .aliases(&["whitebox_static"])
+        .advanced(),
+        opt("mode", OptionType::String, "Analysis mode.").advanced(),
+        opt("preset", OptionType::String, "Analysis preset.").advanced(),
+        model_option(),
+    ]
 }
 
 pub(crate) fn variant_module() -> BuiltinModule {
@@ -157,85 +225,111 @@ pub(crate) fn randori_module() -> BuiltinModule {
         "randori",
         "Randori",
         ModuleKind::Intel,
-        "PASTA and randori threat-model generation.",
-        vec![
-            tool_with_options(
-                "randori:pasta",
-                "Generate a PASTA threat model.",
-                vec![
-                    target_option(),
-                    opt(
-                        "outputDir",
-                        OptionType::Path,
-                        "Directory for randori PASTA artifacts.",
-                    )
-                    .aliases(&["output_dir"])
-                    .advanced(),
-                    opt("slice", OptionType::Enum, "Threat-model slice to generate.")
-                        .choices(&["all", "dfd", "stride", "stories", "scope", "scenarios"])
-                        .default(json!("all"))
-                        .advanced(),
-                    opt(
-                        "stages",
-                        OptionType::StringList,
-                        "PASTA stages to generate.",
-                    )
-                    .advanced(),
-                    opt("maxElements", OptionType::Int, "Maximum model elements.")
-                        .aliases(&["max_elements"])
-                        .default(json!(40))
-                        .advanced(),
-                    opt("maxThreats", OptionType::Int, "Maximum threats.")
-                        .aliases(&["max_threats"])
-                        .default(json!(30))
-                        .advanced(),
-                    opt(
-                        "emitFindings",
-                        OptionType::Bool,
-                        "Persist threats as findings.",
-                    )
-                    .aliases(&["emit_findings"])
-                    .default(json!(false))
-                    .advanced(),
-                    opt(
-                        "preserveUserEdits",
-                        OptionType::Bool,
-                        "Preserve existing user-edited threat model.",
-                    )
-                    .aliases(&["preserve_user_edits"])
-                    .default(json!(true))
-                    .advanced(),
-                    model_option(),
-                ],
-            ),
-            tool_with_options(
-                "randori:threat-model",
-                "Generate a randori threat model.",
-                vec![
-                    target_option(),
-                    opt(
-                        "outputDir",
-                        OptionType::Path,
-                        "Directory containing randori artifacts.",
-                    )
-                    .aliases(&["output_dir"])
-                    .required(),
-                    opt(
-                        "methodology",
-                        OptionType::Enum,
-                        "Threat-model methodology overlay.",
-                    )
-                    .aliases(&["type"])
-                    .choices(&["pasta", "stride", "dread"])
-                    .default(json!("pasta")),
-                    model_option(),
-                ],
-            ),
-        ],
+        "Threat-model generation using PASTA stage framing and adversarial scenario review.",
+        vec![randori_pasta_tool(), randori_threat_model_tool()],
         vec![dag(
             "randori:threat-model",
             "threat-model",
             &["context:build"],
         )],
     )
+}
+
+fn randori_pasta_tool() -> ToolDescriptor {
+    tool_with_options(
+        "randori:pasta",
+        "Generate a PASTA threat model.",
+        randori_pasta_options(),
+    )
+}
+
+fn randori_threat_model_tool() -> ToolDescriptor {
+    hidden_tool_with_options(
+        "randori:threat-model",
+        "Compatibility alias for threat-model PASTA artifacts.",
+        randori_threat_model_options(),
+    )
+}
+
+fn randori_pasta_options() -> Vec<OptionSpec> {
+    let mut options = vec![
+        target_option(),
+        randori_output_dir_option(false),
+        randori_slice_option(),
+        opt(
+            "stages",
+            OptionType::StringList,
+            "PASTA stages to generate.",
+        )
+        .advanced(),
+    ];
+    options.extend(randori_limit_options());
+    options.push(model_option());
+    options
+}
+
+fn randori_threat_model_options() -> Vec<OptionSpec> {
+    vec![
+        target_option(),
+        randori_output_dir_option(true),
+        opt(
+            "methodology",
+            OptionType::Enum,
+            "Threat-model methodology overlay.",
+        )
+        .aliases(&["type"])
+        .choices(&["pasta", "stride", "dread"])
+        .default(json!("pasta")),
+        model_option(),
+    ]
+}
+
+fn randori_output_dir_option(required: bool) -> OptionSpec {
+    let option = opt(
+        "outputDir",
+        OptionType::Path,
+        "Directory for randori artifacts.",
+    )
+    .aliases(&["output_dir"]);
+    if required {
+        option.required()
+    } else {
+        option.advanced()
+    }
+}
+
+fn randori_slice_option() -> OptionSpec {
+    opt("slice", OptionType::Enum, "Threat-model slice to generate.")
+        .choices(&["all", "dfd", "stride", "stories", "scope", "scenarios"])
+        .default(json!("all"))
+        .advanced()
+}
+
+fn randori_limit_options() -> Vec<OptionSpec> {
+    vec![
+        opt("maxElements", OptionType::Int, "Maximum model elements.")
+            .aliases(&["max_elements"])
+            .default(json!(40))
+            .advanced(),
+        opt("maxThreats", OptionType::Int, "Maximum threats.")
+            .aliases(&["max_threats"])
+            .default(json!(30))
+            .advanced(),
+        opt(
+            "emitFindings",
+            OptionType::Bool,
+            "Persist threats as findings.",
+        )
+        .aliases(&["emit_findings"])
+        .default(json!(false))
+        .advanced(),
+        opt(
+            "preserveUserEdits",
+            OptionType::Bool,
+            "Preserve existing user-edited threat model.",
+        )
+        .aliases(&["preserve_user_edits"])
+        .default(json!(true))
+        .advanced(),
+    ]
 }

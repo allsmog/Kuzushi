@@ -116,7 +116,7 @@ fn confirm_action_line(confirm: &ConfirmCardModel) -> Line<'static> {
             Span::raw(" "),
             Span::styled("allow + remember", theme::muted()),
             Span::raw("   "),
-            Span::styled("n", theme::danger()),
+            Span::styled("n/Esc", theme::danger()),
             Span::raw(" "),
             Span::styled("deny once", theme::muted()),
             Span::raw("   "),

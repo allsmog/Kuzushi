@@ -26,6 +26,12 @@ pub(crate) const CONTEXT_KB_COMMANDS: &[ShellCommandSpec] = &[
         description: "rebuild all, repo, or app-model",
     },
     ShellCommandSpec {
+        command: "project",
+        aliases: &["/project", "project model", "project-model"],
+        category: ShellCommandCategory::ContextKb,
+        description: "show the aggregated project model",
+    },
+    ShellCommandSpec {
         command: "kb [module]",
         aliases: &["attachments", "/kb [module]"],
         category: ShellCommandCategory::ContextKb,
@@ -33,9 +39,15 @@ pub(crate) const CONTEXT_KB_COMMANDS: &[ShellCommandSpec] = &[
     },
     ShellCommandSpec {
         command: "attach <path-or-url>",
-        aliases: &["/attach <path-or-url>"],
+        aliases: &["/attach <path-or-url>", "attach", "/attach"],
         category: ShellCommandCategory::ContextKb,
-        description: "record local file or URL metadata",
+        description: "record local file or URL metadata; omit the path to browse target files",
+    },
+    ShellCommandSpec {
+        command: "files",
+        aliases: &["/files", "file-picker", "/file-picker"],
+        category: ShellCommandCategory::ContextKb,
+        description: "open a fuzzy target-file picker for KB attachment",
     },
     ShellCommandSpec {
         command: "detach <id>",
@@ -56,12 +68,18 @@ pub(crate) const CONTEXT_KB_COMMANDS: &[ShellCommandSpec] = &[
         description: "show target and state status",
     },
     ShellCommandSpec {
-        command: "workspace export findings <path>",
+        command: "workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]",
         aliases: &[
-            "/workspace export findings <path>",
-            "findings export <path>",
+            "/workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]",
+            "findings export <path> [format] [--completeness open|complete] [--allow-empty]",
         ],
         category: ShellCommandCategory::ContextKb,
-        description: "export findings JSON or JSONL",
+        description: "export findings; choose all/open/complete and pass --allow-empty for metadata-only exports",
+    },
+    ShellCommandSpec {
+        command: "workspace scope init",
+        aliases: &["/workspace scope init", "workspace scope init"],
+        category: ShellCommandCategory::ContextKb,
+        description: "write an editable .kuzushi/scope.toml scaffold",
     },
 ];

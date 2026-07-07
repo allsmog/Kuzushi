@@ -1,7 +1,7 @@
 use super::context_snapshot_state;
 use crate::ShellApp;
 use kuzushi_core::modules::ModuleKind;
-use kuzushi_core::{sorted_finding_aliases, Severity};
+use kuzushi_core::Severity;
 use std::collections::BTreeMap;
 
 pub(crate) const CATALOG_CATEGORY_ORDER: &[&str] = &["OFFENSE", "INTEL", "GOVERNANCE", "DEFENSE"];
@@ -51,7 +51,7 @@ pub(crate) fn catalog_model(app: &ShellApp) -> CatalogModel {
     let focused_id = app.focused_module.as_deref();
     CatalogModel {
         module_count,
-        expanded: app.catalog_expanded,
+        expanded: app.catalog_route.is_expanded(),
         default_action,
         collapsed: collapsed_catalog_model(app),
         groups: catalog_groups(&modules, focused_id, cursor_id.as_deref()),
@@ -115,7 +115,7 @@ fn collapsed_catalog_model(app: &ShellApp) -> CatalogCollapsedModel {
 
 fn collapsed_target_warning(app: &ShellApp) -> Option<&'static str> {
     if app.target.is_none() {
-        return Some("[!] no target selected; `scan .` uses the current directory");
+        return Some("[!] no target selected; run `target .`, then `next`");
     }
     app.findings
         .is_empty()
@@ -141,7 +141,7 @@ fn catalog_next_hint(app: &ShellApp) -> String {
 
 fn critical_finding_hint(app: &ShellApp) -> Option<String> {
     has_critical_finding(app)
-        .then(|| sorted_finding_aliases(&app.findings).into_iter().next())
+        .then(|| super::findings::cached_sorted_finding_alias_indices(app).into_iter().next())
         .flatten()
         .map(|(alias, _)| {
             format!(
@@ -191,7 +191,11 @@ fn preferred_default_module(modules: &[CatalogActionModule]) -> Option<&CatalogA
 fn selected_cursor_id(app: &ShellApp, modules: &[CatalogActionModule]) -> Option<String> {
     let visible_ids = ordered_visible_module_ids(modules);
     visible_ids
-        .get(app.catalog_cursor.min(visible_ids.len().saturating_sub(1)))
+        .get(
+            app.catalog_route
+                .cursor()
+                .min(visible_ids.len().saturating_sub(1)),
+        )
         .cloned()
 }
 
@@ -250,6 +254,7 @@ fn catalog_category(id: &str, kind: ModuleKind) -> &'static str {
         | "iac-scan"
         | "license-scan"
         | "cargo-audit"
+        | "govulncheck"
         | "dep-hygiene"
         | "taint-iris"
         | "taint-iris-next"

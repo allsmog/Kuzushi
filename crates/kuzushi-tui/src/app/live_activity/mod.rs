@@ -197,6 +197,7 @@ fn searching_tool(tool_name: &str) -> bool {
             | "iac-scan:scan"
             | "license-scan:scan"
             | "cargo-audit:scan"
+            | "govulncheck:scan"
             | "secret-scan:scan"
             | "recon:http-fingerprint"
             | "recon:nmap"

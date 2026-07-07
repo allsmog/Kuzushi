@@ -59,6 +59,15 @@ mod tests {
     }
 
     #[test]
+    fn slash_command_completion_ignores_argument_aliases() {
+        let app = ShellApp::new(V2Config::default(), None);
+        let candidates = app.completion_candidates("/con");
+
+        assert_eq!(candidates.first().map(String::as_str), Some("/context"));
+        assert!(!candidates.contains(&"/phase confirm".to_string()));
+    }
+
+    #[test]
     fn threats_and_prompt_subverbs_complete() {
         let app = ShellApp::new(V2Config::default(), None);
 
@@ -79,6 +88,34 @@ mod tests {
             candidates.iter().any(|c| c.contains("semgrep")),
             "fuzzy matching should surface semgrep from `sgrep`: {candidates:?}"
         );
+    }
+
+    #[test]
+    fn completion_preview_names_fuzzy_candidate_when_suffix_is_not_enough() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_input("fnd");
+
+        let preview = app.completion_preview().expect("fuzzy preview");
+
+        assert!(preview.contains("findings"), "{preview}");
+    }
+
+    #[test]
+    fn attach_completion_lists_workspace_files() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(temp.path().join("docs")).unwrap();
+        std::fs::write(temp.path().join("docs").join("design.md"), "design").unwrap();
+        std::fs::create_dir(temp.path().join(".kuzushi")).unwrap();
+        std::fs::write(temp.path().join(".kuzushi").join("state.json"), "{}").unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(temp.path()).unwrap();
+        let app = ShellApp::new(V2Config::default(), Some(&workspace));
+
+        let candidates = app.completion_candidates("attach des");
+
+        assert!(candidates.contains(&"attach docs/design.md".to_string()));
+        assert!(!candidates
+            .iter()
+            .any(|candidate| candidate.contains(".kuzushi")));
     }
 
     #[test]

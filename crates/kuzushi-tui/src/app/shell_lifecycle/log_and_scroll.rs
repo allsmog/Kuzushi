@@ -1,60 +1,58 @@
 use super::*;
 
+pub(crate) const LOG_LINE_CAPACITY: usize = 500;
+
 impl ShellApp {
     pub fn log(&mut self, prefix: impl Into<String>, body: impl Into<String>) {
         self.log.push(LogLine::new(prefix, body));
-        if self.log.len() > 500 {
-            let overflow = self.log.len() - 500;
+        if self.log.len() > LOG_LINE_CAPACITY {
+            let overflow = self.log.len() - LOG_LINE_CAPACITY;
             self.log.drain(0..overflow);
         }
     }
 
     pub fn scroll_up(&mut self, amount: u16) {
-        if matches!(self.shell_view, ShellView::Activity) {
-            self.scroll_active_activity_pane(-(amount as isize));
-            return;
+        match self.scroll_target() {
+            ScrollTarget::Activity => self.scroll_active_activity_pane(-(amount as isize)),
+            ScrollTarget::WorkbenchPane => self
+                .workbench_scroll
+                .shift(self.workbench_focus, -(amount as i32)),
+            ScrollTarget::Logs => self.logs_route.scroll_up(amount as usize),
+            ScrollTarget::Default => self.scroll_offset = self.scroll_offset.saturating_sub(amount),
         }
-        if matches!(self.shell_view, ShellView::Logs) {
-            self.logs_scroll = self.logs_scroll.saturating_sub(amount as usize);
-            return;
-        }
-        self.scroll_offset = self.scroll_offset.saturating_sub(amount);
     }
 
     pub fn scroll_down(&mut self, amount: u16) {
-        if matches!(self.shell_view, ShellView::Activity) {
-            self.scroll_active_activity_pane(amount as isize);
-            return;
+        match self.scroll_target() {
+            ScrollTarget::Activity => self.scroll_active_activity_pane(amount as isize),
+            ScrollTarget::WorkbenchPane => self
+                .workbench_scroll
+                .shift(self.workbench_focus, amount as i32),
+            ScrollTarget::Logs => self.logs_route.scroll_down(amount as usize),
+            ScrollTarget::Default => self.scroll_offset = self.scroll_offset.saturating_add(amount),
         }
-        if matches!(self.shell_view, ShellView::Logs) {
-            self.logs_scroll = self.logs_scroll.saturating_add(amount as usize);
-            return;
-        }
-        self.scroll_offset = self.scroll_offset.saturating_add(amount);
     }
 
     pub fn scroll_to_top(&mut self) {
-        if matches!(self.shell_view, ShellView::Activity) {
-            self.activity.as_mut().map(focused_pane_to_top);
-            return;
+        match self.scroll_target() {
+            ScrollTarget::Activity => {
+                self.activity.as_mut().map(focused_pane_to_top);
+            }
+            ScrollTarget::WorkbenchPane => self.workbench_scroll.set(self.workbench_focus, 0),
+            ScrollTarget::Logs => self.logs_route.open(),
+            ScrollTarget::Default => self.scroll_offset = 0,
         }
-        if matches!(self.shell_view, ShellView::Logs) {
-            self.logs_scroll = 0;
-            return;
-        }
-        self.scroll_offset = 0;
     }
 
     pub fn scroll_to_bottom(&mut self) {
-        if matches!(self.shell_view, ShellView::Activity) {
-            self.activity.as_mut().map(focused_pane_to_bottom);
-            return;
+        match self.scroll_target() {
+            ScrollTarget::Activity => self.focused_activity_pane_to_bottom(),
+            ScrollTarget::WorkbenchPane => {
+                self.workbench_scroll.set(self.workbench_focus, u16::MAX)
+            }
+            ScrollTarget::Logs => self.logs_route.set_scroll(usize::MAX),
+            ScrollTarget::Default => self.scroll_offset = u16::MAX,
         }
-        if matches!(self.shell_view, ShellView::Logs) {
-            self.logs_scroll = usize::MAX;
-            return;
-        }
-        self.scroll_offset = u16::MAX;
     }
 
     /// j/k delta routed to whichever Activity-view pane currently has focus.
@@ -62,25 +60,67 @@ impl ShellApp {
     /// by manually scrolling the feed pane: once the operator scrolls up
     /// from the bottom, auto-tail is paused for that session.
     fn scroll_active_activity_pane(&mut self, amount: isize) {
+        let deck_cursor_max = self.activity_deck_cursor_max();
         let Some(session) = self.activity.as_mut() else {
             return;
         };
         match session.effective_pane_focus() {
-            PaneFocus::Left => {
-                // Clamp to the row count so a short DAG can't be scrolled into
-                // empty space — there's nothing to reveal past the last task.
-                let max = session.tasks.len().saturating_sub(1);
-                session.task_scroll = shift_clamped(session.task_scroll, amount, max);
-            }
+            PaneFocus::Left => session.shift_task_cursor(amount),
             PaneFocus::Right => {
-                // Manual feed scroll unpins live auto-tail so the operator
-                // stays at the position they navigated to. `feed_auto_tail`
-                // is reset by `G` (scroll-to-bottom). `paused` is decoupled
-                // — toggling pause does not unpin the position.
                 session.feed_auto_tail = false;
-                let max = session.events.len().saturating_sub(1);
-                session.feed_scroll = shift_clamped(session.feed_scroll, amount, max);
+                session.deck_cursor = shift_clamped(session.deck_cursor, amount, deck_cursor_max);
             }
+        }
+    }
+
+    fn focused_activity_pane_to_bottom(&mut self) {
+        let deck_cursor_max = self.activity_deck_cursor_max();
+        let Some(session) = self.activity.as_mut() else {
+            return;
+        };
+        match session.effective_pane_focus() {
+            PaneFocus::Left => session.move_task_cursor_to_bottom(),
+            PaneFocus::Right => {
+                session.deck_cursor = deck_cursor_max;
+                session.feed_auto_tail = false;
+            }
+        }
+    }
+
+    fn activity_deck_cursor_max(&self) -> usize {
+        let Some(session) = self.activity.as_ref() else {
+            return 0;
+        };
+        match session.deck_page {
+            ActivityDeckPage::Findings => self.findings.len().saturating_sub(1),
+            ActivityDeckPage::AttackSurface => crate::ui_view_models::cached_risk_by_module(self)
+                .modules
+                .len()
+                .saturating_sub(1),
+            ActivityDeckPage::Dfd => threat_dfd_selectable_count(self).saturating_sub(1),
+            ActivityDeckPage::Heatmap => crate::ui_view_models::cached_risk_by_module(self)
+                .modules
+                .len()
+                .min(10)
+                .saturating_sub(1),
+            ActivityDeckPage::AttackPath => self
+                .taint_flow
+                .as_ref()
+                .map(|flow| flow.stages.len().min(6))
+                .unwrap_or_default()
+                .saturating_sub(1),
+            ActivityDeckPage::ExploitChain => self.exploit_chains.len().min(3).saturating_sub(1),
+        }
+    }
+
+    fn scroll_target(&self) -> ScrollTarget {
+        match self.shell_view {
+            ShellView::Activity => ScrollTarget::Activity,
+            ShellView::Workbench if self.workbench_focus != WorkbenchPane::Findings => {
+                ScrollTarget::WorkbenchPane
+            }
+            ShellView::Logs => ScrollTarget::Logs,
+            _ => ScrollTarget::Default,
         }
     }
 
@@ -98,7 +138,7 @@ impl ShellApp {
         }
     }
 
-    fn push_nav_history(&mut self, view: ShellView) {
+    pub(crate) fn push_nav_history(&mut self, view: ShellView) {
         const NAV_HISTORY_DEPTH: usize = 16;
         // Onboarding pickers are transient — `back` should never drop the user
         // back into a model/auth/planning picker they already dismissed.
@@ -123,23 +163,37 @@ impl ShellApp {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ScrollTarget {
+    Activity,
+    WorkbenchPane,
+    Logs,
+    Default,
+}
+
 fn focused_pane_to_top(session: &mut ActivitySession) {
     match session.effective_pane_focus() {
-        PaneFocus::Left => session.task_scroll = 0,
-        PaneFocus::Right => session.feed_scroll = 0,
+        PaneFocus::Left => session.move_task_cursor_to_top(),
+        PaneFocus::Right => session.deck_cursor = 0,
     }
 }
 
-fn focused_pane_to_bottom(session: &mut ActivitySession) {
-    match session.effective_pane_focus() {
-        PaneFocus::Left => session.task_scroll = usize::MAX,
-        PaneFocus::Right => {
-            session.feed_scroll = usize::MAX;
-            // G on the feed pane unpins manual scroll so the operator
-            // returns to live auto-tail.
-            session.feed_auto_tail = true;
-        }
+fn threat_dfd_selectable_count(app: &ShellApp) -> usize {
+    let Some(doc) = crate::ui_view_models::threat_model_doc(app) else {
+        return 0;
+    };
+    let flows = json_array_len(doc.pointer("/dfd/flows"));
+    if flows > 0 {
+        return flows;
     }
+    json_array_len(doc.pointer("/dfd/nodes"))
+}
+
+fn json_array_len(value: Option<&serde_json::Value>) -> usize {
+    value
+        .and_then(serde_json::Value::as_array)
+        .map(Vec::len)
+        .unwrap_or_default()
 }
 
 /// Apply a signed scroll delta and clamp the result to `[0, max]`, so a pane
