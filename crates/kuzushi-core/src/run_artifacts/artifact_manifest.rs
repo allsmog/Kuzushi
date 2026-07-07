@@ -1,16 +1,14 @@
 use super::*;
 use crate::artifact_contract::{
     canonical_run_artifact_spec, optional_run_artifact_spec, tool_input_artifact_spec,
-    tool_result_artifact_spec, CanonicalRunArtifactSpec, ARTIFACT_KIND_KEYS, ARTIFACT_LABEL_KEYS,
-    ARTIFACT_PATH_KEYS, CANONICAL_RUN_ARTIFACTS,
+    tool_result_artifact_spec, CanonicalRunArtifactSpec, CANONICAL_RUN_ARTIFACTS,
 };
 use crate::content_store::ObjectRef;
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct RunArtifactManifest {
-    #[serde(alias = "run_id")]
     pub run_id: String,
     pub artifacts: Vec<RunArtifact>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -105,11 +103,11 @@ fn parse_manifest_body(text: &str, path: &Path) -> Result<RunArtifactManifest> {
     if !value.is_object() {
         anyhow::bail!("Artifact manifest is not a JSON object: {}", path.display());
     }
+    require_manifest_canonical_only(&value, path)?;
     require_manifest_run_id(&value, path)?;
-    normalize_manifest_run_id_alias(&mut value, path)?;
     require_manifest_artifacts_array(&value, path)?;
     require_manifest_artifact_objects(&value, path)?;
-    normalize_manifest_artifact_aliases(&mut value, path)?;
+    require_manifest_artifact_fields(&value, path)?;
     require_known_manifest_artifact_metadata(&value, path)?;
     serde_json::from_value(value).with_context(|| format!("Could not parse {}", path.display()))
 }
@@ -119,12 +117,10 @@ fn require_manifest_run_id(value: &Value, path: &Path) -> Result<()> {
         return Ok(());
     };
     let run_id = object.get("runId");
-    let snake_run_id = object.get("run_id");
-    if run_id.is_none() && snake_run_id.is_none() {
+    if run_id.is_none() {
         anyhow::bail!("Artifact manifest is missing runId: {}", path.display());
     }
-    require_manifest_run_id_value("runId", run_id, path)?;
-    require_manifest_run_id_value("run_id", snake_run_id, path)
+    require_manifest_run_id_value("runId", run_id, path)
 }
 
 fn require_manifest_run_id_value(field: &str, value: Option<&Value>, path: &Path) -> Result<()> {
@@ -138,26 +134,6 @@ fn require_manifest_run_id_value(field: &str, value: Option<&Value>, path: &Path
             path.display()
         ),
     }
-}
-
-fn normalize_manifest_run_id_alias(value: &mut Value, path: &Path) -> Result<()> {
-    let Some(object) = value.as_object_mut() else {
-        return Ok(());
-    };
-    let Some(run_id) = object.get("runId") else {
-        return Ok(());
-    };
-    let Some(snake_run_id) = object.get("run_id") else {
-        return Ok(());
-    };
-    if run_id != snake_run_id {
-        anyhow::bail!(
-            "Artifact manifest runId and run_id disagree: {}",
-            path.display()
-        );
-    }
-    object.remove("run_id");
-    Ok(())
 }
 
 fn require_manifest_artifacts_array(value: &Value, path: &Path) -> Result<()> {
@@ -184,172 +160,89 @@ fn require_manifest_artifact_objects(value: &Value, path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn normalize_manifest_artifact_aliases(value: &mut Value, path: &Path) -> Result<()> {
-    let Some(artifacts) = value.get_mut("artifacts").and_then(Value::as_array_mut) else {
+fn require_manifest_artifact_fields(value: &Value, path: &Path) -> Result<()> {
+    let Some(artifacts) = value.get("artifacts").and_then(Value::as_array) else {
         return Ok(());
     };
-    for (index, artifact) in artifacts.iter_mut().enumerate() {
-        let Some(object) = artifact.as_object_mut() else {
-            continue;
-        };
-        normalize_manifest_artifact_alias_set(
-            object,
-            index,
-            path,
-            &ARTIFACT_LABEL_KEYS,
-            "label",
-            true,
-            normalize_manifest_label_alias,
-        )?;
-        normalize_manifest_artifact_alias_set(
-            object,
-            index,
-            path,
-            &ARTIFACT_PATH_KEYS,
-            "path",
-            true,
-            normalize_manifest_path_alias,
-        )?;
-        normalize_manifest_artifact_alias_set(
-            object,
-            index,
-            path,
-            &ARTIFACT_KIND_KEYS,
-            "kind",
-            true,
-            normalize_manifest_kind_alias,
-        )?;
+    for (index, artifact) in artifacts.iter().enumerate() {
+        require_manifest_artifact_string(artifact, index, path, "label")?;
+        require_manifest_artifact_string(artifact, index, path, "path")?;
+        require_manifest_artifact_string(artifact, index, path, "kind")?;
     }
     Ok(())
 }
 
-fn normalize_manifest_artifact_alias_set(
-    object: &mut Map<String, Value>,
+fn require_manifest_artifact_string(
+    artifact: &Value,
     index: usize,
     path: &Path,
-    keys: &[&str],
     field: &str,
-    reject_empty: bool,
-    normalize: fn(&str) -> String,
 ) -> Result<()> {
-    let values = manifest_alias_values(object, index, path, keys, normalize)?;
-    ensure_manifest_alias_present(&values, index, path, field)?;
-    ensure_manifest_aliases_agree(&values, index, path, field)?;
-    ensure_manifest_alias_non_empty(&values, index, path, field, reject_empty)?;
-    insert_manifest_canonical_alias(object, keys[0], values.first());
-    remove_manifest_aliases(object, &keys[1..]);
-    Ok(())
-}
-
-struct ManifestAliasValue {
-    raw: String,
-    normalized: String,
-}
-
-fn manifest_alias_values(
-    object: &Map<String, Value>,
-    index: usize,
-    path: &Path,
-    keys: &[&str],
-    normalize: fn(&str) -> String,
-) -> Result<Vec<ManifestAliasValue>> {
-    keys.iter()
-        .filter_map(|key| {
-            object
-                .get(*key)
-                .map(|value| manifest_alias_value(index, path, key, value, normalize))
-        })
-        .collect()
-}
-
-fn manifest_alias_value(
-    index: usize,
-    path: &Path,
-    key: &str,
-    value: &Value,
-    normalize: fn(&str) -> String,
-) -> Result<ManifestAliasValue> {
-    let Some(raw) = value.as_str() else {
+    let Some(value) = artifact.get(field) else {
         anyhow::bail!(
-            "Artifact manifest artifact at index {index} {key} is not a string: {}",
+            "Artifact manifest artifact at index {index} is missing {field}: {}",
             path.display()
         );
     };
-    Ok(ManifestAliasValue {
-        raw: raw.to_string(),
-        normalized: normalize(raw),
-    })
-}
-
-fn ensure_manifest_alias_present(
-    values: &[ManifestAliasValue],
-    index: usize,
-    path: &Path,
-    field: &str,
-) -> Result<()> {
-    if values.is_empty() {
-        anyhow::bail!(
-            "Artifact manifest artifact at index {index} is missing {field} alias: {}",
+    match value.as_str() {
+        Some(text) if !text.trim().is_empty() => Ok(()),
+        _ => anyhow::bail!(
+            "Artifact manifest artifact at index {index} {field} is not a non-empty string: {}",
             path.display()
-        );
+        ),
     }
-    Ok(())
 }
 
-fn ensure_manifest_aliases_agree(
-    values: &[ManifestAliasValue],
-    index: usize,
-    path: &Path,
-    field: &str,
-) -> Result<()> {
-    let Some(first) = values.first() else {
+fn require_manifest_canonical_only(value: &Value, path: &Path) -> Result<()> {
+    let Some(object) = value.as_object() else {
         return Ok(());
     };
-    if values
-        .iter()
-        .any(|value| value.normalized != first.normalized)
-    {
+    if object.contains_key("run_id") {
         anyhow::bail!(
-            "Artifact manifest artifact at index {index} has conflicting {field} aliases: {}",
+            "Artifact manifest uses obsolete run_id alias; use runId: {}",
             path.display()
         );
+    }
+    let Some(artifacts) = object.get("artifacts").and_then(Value::as_array) else {
+        return Ok(());
+    };
+    for (index, artifact) in artifacts.iter().enumerate() {
+        reject_obsolete_artifact_fields(artifact, index, path)?;
     }
     Ok(())
 }
 
-fn ensure_manifest_alias_non_empty(
-    values: &[ManifestAliasValue],
-    index: usize,
-    path: &Path,
-    field: &str,
-    reject_empty: bool,
-) -> Result<()> {
-    if reject_empty && values.first().is_some_and(|value| value.normalized.is_empty()) {
-        anyhow::bail!(
-            "Artifact manifest artifact at index {index} {field} alias is empty: {}",
-            path.display()
-        );
+fn reject_obsolete_artifact_fields(artifact: &Value, index: usize, path: &Path) -> Result<()> {
+    let Some(object) = artifact.as_object() else {
+        return Ok(());
+    };
+    for field in [
+        "name",
+        "title",
+        "file",
+        "filePath",
+        "file_path",
+        "reportPath",
+        "report_path",
+        "reportJsonPath",
+        "report_json_path",
+        "scopePath",
+        "scope_path",
+        "dir",
+        "outputDir",
+        "output_dir",
+        "promptsDir",
+        "prompts_dir",
+        "type",
+    ] {
+        if object.contains_key(field) {
+            anyhow::bail!(
+                "Artifact manifest artifact at index {index} uses obsolete {field} alias: {}",
+                path.display()
+            );
+        }
     }
     Ok(())
-}
-
-fn insert_manifest_canonical_alias(
-    object: &mut Map<String, Value>,
-    canonical_key: &str,
-    value: Option<&ManifestAliasValue>,
-) {
-    if object.contains_key(canonical_key) {
-        return;
-    }
-    if let Some(value) = value {
-        object.insert(canonical_key.to_string(), Value::String(value.raw.clone()));
-    }
-}
-
-fn remove_manifest_aliases(object: &mut Map<String, Value>, aliases: &[&str]) {
-    for key in aliases {
-        object.remove(*key);
-    }
 }
 
 fn require_known_manifest_artifact_metadata(value: &Value, path: &Path) -> Result<()> {
@@ -395,18 +288,6 @@ fn require_manifest_artifact_spec_field(
         "Artifact manifest artifact at index {index} {field} does not match canonical artifact contract: {}",
         path.display()
     );
-}
-
-fn normalize_manifest_label_alias(value: &str) -> String {
-    value.trim().to_string()
-}
-
-fn normalize_manifest_path_alias(value: &str) -> String {
-    value.trim().to_string()
-}
-
-fn normalize_manifest_kind_alias(value: &str) -> String {
-    value.trim().to_ascii_lowercase()
 }
 
 fn empty_manifest(run_id: &str) -> RunArtifactManifest {

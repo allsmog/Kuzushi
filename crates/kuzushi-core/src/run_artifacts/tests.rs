@@ -1171,7 +1171,7 @@ mod tests {
     }
 
     #[test]
-    fn load_run_artifacts_accepts_snake_case_manifest_run_id() {
+    fn load_run_artifacts_accepts_canonical_manifest_run_id() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-snake-manifest";
         write_run_summary(
@@ -1183,7 +1183,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": "run metadata",
@@ -1204,7 +1204,7 @@ mod tests {
     }
 
     #[test]
-    fn load_run_artifacts_accepts_manifest_artifact_field_aliases() {
+    fn load_run_artifacts_rejects_obsolete_manifest_artifact_field_aliases() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-manifest-artifact-aliases";
         write_run_summary(
@@ -1216,7 +1216,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "name": " report json ",
@@ -1234,19 +1234,15 @@ mod tests {
         )
         .unwrap();
 
-        let artifacts = load_run_artifacts(tmp.path(), run_id).unwrap();
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
 
-        assert_eq!(artifacts.len(), 2);
-        assert_eq!(artifacts[0].label, "report json");
-        assert_eq!(artifacts[0].path, "reports/report.json");
-        assert_eq!(artifacts[0].kind, "json");
-        assert_eq!(artifacts[1].label, "prompts");
-        assert_eq!(artifacts[1].path, ".kuzushi/prompts");
-        assert_eq!(artifacts[1].kind, "directory");
+        assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete name alias"));
+        assert!(message.contains("artifacts.json"));
     }
 
     #[test]
-    fn load_run_artifacts_accepts_matching_manifest_artifact_aliases() {
+    fn load_run_artifacts_rejects_redundant_manifest_artifact_aliases() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-manifest-matching-artifact-aliases";
         write_run_summary(
@@ -1258,7 +1254,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": " run metadata ",
@@ -1274,12 +1270,11 @@ mod tests {
         )
         .unwrap();
 
-        let artifacts = load_run_artifacts(tmp.path(), run_id).unwrap();
+        let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
+        let message = error.to_string();
 
-        assert_eq!(artifacts.len(), 1);
-        assert_eq!(artifacts[0].label, "run metadata");
-        assert_eq!(artifacts[0].path, "run.json");
-        assert_eq!(artifacts[0].kind, "json");
+        assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete name alias"));
+        assert!(message.contains("artifacts.json"));
     }
 
     #[test]
@@ -1295,7 +1290,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": "run metadata",
@@ -1312,7 +1307,7 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest artifact at index 0 has conflicting label aliases"));
+        assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete name alias"));
         assert!(message.contains("artifacts.json"));
     }
 
@@ -1329,7 +1324,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": "run metadata",
@@ -1346,7 +1341,7 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest artifact at index 0 has conflicting path aliases"));
+        assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete filePath alias"));
         assert!(message.contains("artifacts.json"));
     }
 
@@ -1363,7 +1358,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": "run metadata",
@@ -1380,7 +1375,7 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest artifact at index 0 has conflicting kind aliases"));
+        assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete type alias"));
         assert!(message.contains("artifacts.json"));
     }
 
@@ -1397,7 +1392,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": ["run metadata"],
@@ -1413,7 +1408,7 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest artifact at index 0 label is not a string"));
+        assert!(message.contains("Artifact manifest artifact at index 0 label is not a non-empty string"));
         assert!(message.contains("artifacts.json"));
     }
 
@@ -1430,7 +1425,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": "run metadata",
@@ -1446,7 +1441,7 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest artifact at index 0 filePath is not a string"));
+        assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete filePath alias"));
         assert!(message.contains("artifacts.json"));
     }
 
@@ -1463,7 +1458,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": "run metadata",
@@ -1479,7 +1474,7 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest artifact at index 0 type is not a string"));
+        assert!(message.contains("Artifact manifest artifact at index 0 uses obsolete type alias"));
         assert!(message.contains("artifacts.json"));
     }
 
@@ -1496,7 +1491,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "path": "run.json",
@@ -1512,7 +1507,7 @@ mod tests {
         let message = error.to_string();
 
         assert!(
-            message.contains("Artifact manifest artifact at index 0 is missing label alias")
+            message.contains("Artifact manifest artifact at index 0 is missing label")
         );
         assert!(message.contains("artifacts.json"));
     }
@@ -1530,7 +1525,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": "run metadata",
@@ -1545,7 +1540,7 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest artifact at index 0 is missing path alias"));
+        assert!(message.contains("Artifact manifest artifact at index 0 is missing path"));
         assert!(message.contains("artifacts.json"));
     }
 
@@ -1562,7 +1557,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": "run metadata",
@@ -1577,7 +1572,7 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest artifact at index 0 is missing kind alias"));
+        assert!(message.contains("Artifact manifest artifact at index 0 is missing kind"));
         assert!(message.contains("artifacts.json"));
     }
 
@@ -1594,7 +1589,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": "run metadata",
@@ -1610,7 +1605,7 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest artifact at index 0 path alias is empty"));
+        assert!(message.contains("Artifact manifest artifact at index 0 path is not a non-empty string"));
         assert!(message.contains("artifacts.json"));
     }
 
@@ -1627,7 +1622,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": "   ",
@@ -1643,7 +1638,7 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest artifact at index 0 label alias is empty"));
+        assert!(message.contains("Artifact manifest artifact at index 0 label is not a non-empty string"));
         assert!(message.contains("artifacts.json"));
     }
 
@@ -1660,7 +1655,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": "run metadata",
@@ -1676,7 +1671,7 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest artifact at index 0 kind alias is empty"));
+        assert!(message.contains("Artifact manifest artifact at index 0 kind is not a non-empty string"));
         assert!(message.contains("artifacts.json"));
     }
 
@@ -1693,7 +1688,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": "runtime trace",
@@ -1728,7 +1723,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": "run metadata",
@@ -1763,7 +1758,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": "tool result",
@@ -1837,7 +1832,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": {}
             }))
             .unwrap(),
@@ -1864,7 +1859,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id
+                "runId": run_id
             }))
             .unwrap(),
         )
@@ -1953,7 +1948,7 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest run_id is not a non-empty string"));
+        assert!(message.contains("Artifact manifest uses obsolete run_id alias; use runId"));
         assert!(message.contains("artifacts.json"));
     }
 
@@ -1985,7 +1980,7 @@ mod tests {
     }
 
     #[test]
-    fn load_run_artifacts_accepts_matching_manifest_run_id_aliases() {
+    fn load_run_artifacts_accepts_single_canonical_manifest_run_id() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-manifest-matching-run-id-aliases";
         write_run_summary(
@@ -1998,7 +1993,6 @@ mod tests {
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
                 "runId": run_id,
-                "run_id": run_id,
                 "artifacts": [
                     {
                         "label": "run metadata",
@@ -2041,7 +2035,7 @@ mod tests {
         let error = load_run_artifacts(tmp.path(), run_id).unwrap_err();
         let message = error.to_string();
 
-        assert!(message.contains("Artifact manifest runId and run_id disagree"));
+        assert!(message.contains("Artifact manifest uses obsolete run_id alias; use runId"));
         assert!(message.contains("artifacts.json"));
     }
 
@@ -2058,7 +2052,7 @@ mod tests {
         fs::write(
             run_artifact_path(tmp.path(), run_id, "artifacts.json"),
             serde_json::to_string_pretty(&serde_json::json!({
-                "run_id": run_id,
+                "runId": run_id,
                 "artifacts": [
                     {
                         "label": "run metadata",
