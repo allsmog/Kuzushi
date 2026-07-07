@@ -1,16 +1,19 @@
 use super::*;
 pub(in crate::renderer) use super::*;
 
+pub(in crate::renderer) use jobs_lines::*;
 pub(in crate::renderer) use replay_lines::*;
 pub(in crate::renderer) use run_diff_lines::*;
 pub(in crate::renderer) use runs_lines::*;
 pub(in crate::renderer) use runs_row::*;
 pub(in crate::renderer) use trace_step_line::*;
+mod jobs_lines;
 mod replay_lines;
 mod run_diff_lines;
 mod runs_lines;
 mod runs_row;
 mod trace_step_line;
+pub(crate) use jobs_lines::jobs_lines;
 pub(crate) use replay_lines::replay_lines;
 pub(crate) use replay_lines::trace_lines;
 pub(crate) use run_diff_lines::run_diff_lines;

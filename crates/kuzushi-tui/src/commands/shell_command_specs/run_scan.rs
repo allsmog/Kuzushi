@@ -25,4 +25,10 @@ pub(crate) const RUN_SCAN_COMMANDS: &[ShellCommandSpec] = &[
         category: ShellCommandCategory::RunScan,
         description: "explicit agent question",
     },
+    ShellCommandSpec {
+        command: "queue <tool|verb>",
+        aliases: &["/queue <tool>", "queue run <tool>"],
+        category: ShellCommandCategory::RunScan,
+        description: "queue a command to run after the current one finishes",
+    },
 ];

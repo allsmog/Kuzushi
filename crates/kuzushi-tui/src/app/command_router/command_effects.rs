@@ -2,6 +2,17 @@ use super::*;
 use crate::commands::PatchCommand;
 use kuzushi_core::workspace::findings_since_filter_expression;
 
+/// Short registry/activity label for a queued command: the leading verb plus
+/// the tool/argument, dropping any trailing JSON payload.
+fn steer_command_summary(raw: &str) -> String {
+    let head: Vec<&str> = raw.split_whitespace().take(2).collect();
+    if head.is_empty() {
+        raw.trim().to_string()
+    } else {
+        head.join(" ")
+    }
+}
+
 impl ShellApp {
     pub(crate) fn reduce_command_effects(
         &mut self,
@@ -21,7 +32,24 @@ impl ShellApp {
             .or_else(|| self.reduce_view_command_effect(command))
             .or_else(|| self.reduce_engagement_command_effect(command))
             .or_else(|| self.reduce_findings_command_effect(command))
+            .or_else(|| self.reduce_jobs_command_effect(command))
             .or_else(|| self.reduce_terminal_command_effect(command))
+    }
+
+    fn reduce_jobs_command_effect(&mut self, command: &ShellCommand) -> Option<Vec<ShellEffect>> {
+        match command {
+            ShellCommand::ShowJobs => {
+                self.open_jobs_view();
+                Some(Vec::new())
+            }
+            ShellCommand::CancelJob(run_id) => Some(self.reduce_cancel_job(run_id)),
+            ShellCommand::QueueCommand(raw) => Some(self.reduce_queue_command(raw)),
+            ShellCommand::Background => {
+                self.background_handoff();
+                Some(Vec::new())
+            }
+            _ => None,
+        }
     }
 
     fn reduce_status_command_effect(&mut self, command: &ShellCommand) -> Option<Vec<ShellEffect>> {
@@ -705,6 +733,112 @@ impl ShellApp {
     fn open_runs_view(&mut self) {
         self.set_shell_view(ShellView::Runs);
         self.log("runs", "recent runs");
+    }
+
+    fn open_jobs_view(&mut self) {
+        self.set_shell_view(ShellView::Jobs);
+        self.router.default_scroll_mut().reset();
+        self.log("jobs", "live + recent run registry");
+    }
+
+    /// Cancel-by-id. A pending steer item cancels by dequeue (never fires a
+    /// token); a live job reuses the existing `CancelActiveJobs` path so the
+    /// cancellation policy is not duplicated. A completed/unknown id reports
+    /// honestly rather than pretending to act.
+    fn reduce_cancel_job(&mut self, run_id: &str) -> Vec<ShellEffect> {
+        if let Some(removed) = self.steer_queue_mut().remove_matching(run_id) {
+            self.log("jobs", format!("dropped pending {}", removed.summary));
+            return Vec::new();
+        }
+        if self.run_id_matches_live_job(run_id) {
+            return vec![ShellEffect::CancelActiveJobs];
+        }
+        self.log(
+            "jobs",
+            format!("{run_id} is not running; cancel only affects live jobs (see `jobs`)"),
+        );
+        Vec::new()
+    }
+
+    fn run_id_matches_live_job(&self, run_id: &str) -> bool {
+        let matches_run_slot = self.jobs().is_running(crate::app::JobKind::Run)
+            && self.live_run_id().is_some_and(|id| id == run_id);
+        matches_run_slot
+            || (run_id == "plan" && self.jobs().is_running(crate::app::JobKind::Plan))
+            || (run_id == "threat" && self.jobs().is_running(crate::app::JobKind::Threat))
+            || (run_id == "agent" && self.jobs().is_running(crate::app::JobKind::Agent))
+    }
+
+    fn live_run_id(&self) -> Option<String> {
+        self.activity()
+            .map(|session| session.run_id.clone())
+            .or_else(|| self.active_tool_run_id().map(str::to_string))
+            .or_else(|| self.scan().and_then(|scan| scan.run_id.clone()))
+    }
+
+    /// The explicit `queue <cmd>` verb. Dispatches immediately when nothing is
+    /// running (queuing behind nothing would only add a round-trip); otherwise
+    /// appends to the steer queue to drain after the live run finishes.
+    fn reduce_queue_command(&mut self, raw: &str) -> Vec<ShellEffect> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            self.log("queue", "nothing to queue. Next: queue run <tool>");
+            return Vec::new();
+        }
+        if !self.has_running_work() {
+            return self
+                .reduce_command_message(crate::commands::parse_command(trimmed))
+                .effects;
+        }
+        self.enqueue_steer_command(trimmed);
+        Vec::new()
+    }
+
+    /// Append an operator submission to the steer queue and log the depth. The
+    /// exact line is stored and re-parsed at drain time so it never captures a
+    /// stale option snapshot.
+    pub(crate) fn enqueue_steer_command(&mut self, raw: &str) {
+        let summary = steer_command_summary(raw);
+        self.steer_queue_mut().enqueue(crate::app::QueuedCommand {
+            raw: raw.to_string(),
+            summary: summary.clone(),
+        });
+        let depth = self.steer_queue().len();
+        self.log(
+            "queue",
+            format!("queued {summary} — runs after the current job ({depth} pending)"),
+        );
+    }
+
+    /// Drop back to the Workbench without touching cancel tokens so the live
+    /// run keeps going. The Workbench top-bar `● LIVE` chip stays lit because
+    /// it is gated on `has_running_work()`.
+    pub(crate) fn background_handoff(&mut self) {
+        self.set_shell_view(ShellView::Workbench);
+        if self.has_running_work() {
+            self.log(
+                "background",
+                "job still running in the background — Ctrl+C cancels, `jobs` to check",
+            );
+        } else {
+            self.log("background", "no live job; showing Workbench");
+        }
+    }
+
+    /// Drain the steer queue after a tool finishes. Lowest precedence of the
+    /// three "next tool" mechanisms: chain → plan → steer. If a prereq chain or
+    /// planning task already re-occupied the single Run slot, the steer item
+    /// stays queued and retries on the next completion.
+    pub(crate) fn advance_steer_queue(&mut self) -> Vec<ShellEffect> {
+        if self.has_running_work() || self.engagement.has_pending_chain() {
+            return Vec::new();
+        }
+        let Some(queued) = self.steer_queue_mut().pop_front() else {
+            return Vec::new();
+        };
+        self.log("queue", format!("dispatching queued {}", queued.summary));
+        self.reduce_command_message(crate::commands::parse_command(&queued.raw))
+            .effects
     }
 
     fn open_run_diff_view(&mut self, left: String, right: String) {

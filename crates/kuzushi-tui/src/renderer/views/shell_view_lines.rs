@@ -46,6 +46,11 @@ fn threat_run_shell_view_lines(app: &ShellApp, area: Rect) -> Option<Vec<Line<'s
         ShellView::PromptsEditor => prompts_lines(app, area),
         ShellView::ActorDetail => actor_detail_lines(app, area, app.router.actor_detail().index()),
         ShellView::Runs => runs_lines(app, area),
+        ShellView::Jobs => viewport_lines(
+            jobs_lines(app, area),
+            area.height,
+            default_scroll_offset(app),
+        ),
         ShellView::RunDiff => viewport_lines(
             run_diff_lines(
                 app,

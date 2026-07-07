@@ -24,6 +24,12 @@ pub(super) fn activity_keybindings() -> Vec<ViewKeybinding> {
             ViewHotkeyAction::ActivityTogglePause,
         ),
         bind_char('x', "x", "reset view", ViewHotkeyAction::ActivityReset),
+        bind_char(
+            'b',
+            "b",
+            "background",
+            ViewHotkeyAction::ActivityBackground,
+        ),
     ];
     bindings.extend(activity_deck_keybindings());
     bindings.extend([bind(

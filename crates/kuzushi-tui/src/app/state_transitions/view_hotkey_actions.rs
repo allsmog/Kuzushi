@@ -522,6 +522,7 @@ impl ShellApp {
             ViewHotkeyAction::ActivityFocusSelected => self.open_or_focus_activity_task(),
             ViewHotkeyAction::ActivityOpenDeckArtifact => self.open_activity_deck_artifact(),
             ViewHotkeyAction::ActivityOpenFindings => self.open_activity_findings_review(),
+            ViewHotkeyAction::ActivityBackground => self.background_handoff(),
             _ => return false,
         }
         true

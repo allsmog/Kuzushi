@@ -102,6 +102,7 @@ pub(crate) enum ViewHotkeyAction {
     ActivityDeckPrev,
     ActivityOpenDeckArtifact,
     ActivityOpenFindings,
+    ActivityBackground,
     OpenNextPhase,
 }
 

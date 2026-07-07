@@ -54,6 +54,17 @@ pub enum ShellCommand {
     Prompt(String),
     Actor(usize),
     ShowRuns,
+    /// Open the background jobs registry (live + recent runs, queued steer
+    /// items). `jobs`.
+    ShowJobs,
+    /// Cancel a running job (or dequeue a pending steer item) by run id.
+    /// `jobs -k <id>`.
+    CancelJob(String),
+    /// Queue a command to dispatch after the current run finishes. `queue
+    /// <tool|verb>`.
+    QueueCommand(String),
+    /// Drop back to the Workbench while live work keeps running. `background`.
+    Background,
     RunDiff {
         left: String,
         right: String,

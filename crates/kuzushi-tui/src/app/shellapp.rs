@@ -749,6 +749,14 @@ impl ShellApp {
         &mut self.session
     }
 
+    pub(crate) fn steer_queue(&self) -> &SteerQueue {
+        self.session.steer_queue()
+    }
+
+    pub(crate) fn steer_queue_mut(&mut self) -> &mut SteerQueue {
+        self.session.steer_queue_mut()
+    }
+
     pub(crate) fn session_thinking_level(&self) -> Option<&str> {
         self.session.thinking_level()
     }

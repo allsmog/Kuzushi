@@ -56,6 +56,18 @@ pub(crate) const FINDINGS_EVIDENCE_COMMANDS: &[ShellCommandSpec] = &[
         description: "recent run artifacts",
     },
     ShellCommandSpec {
+        command: "jobs",
+        aliases: &["/jobs", "jobs list"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "live + recent run registry",
+    },
+    ShellCommandSpec {
+        command: "jobs -k <runId>",
+        aliases: &["jobs kill <runId>", "jobs cancel <runId>"],
+        category: ShellCommandCategory::FindingsEvidence,
+        description: "cancel a running job or drop a pending one",
+    },
+    ShellCommandSpec {
         command: "runs diff <left> <right>",
         aliases: &["runs diff <runA> <runB>", "runs compare <runA> <runB>"],
         category: ShellCommandCategory::FindingsEvidence,
