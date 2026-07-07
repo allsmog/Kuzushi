@@ -118,6 +118,26 @@ create table if not exists finding_observations (
 create index if not exists idx_finding_observations_stable_fp
   on finding_observations(stable_fp, created_seq desc);
 
+create table if not exists finding_current (
+  id integer primary key,
+  run_id text not null,
+  identity_id text not null,
+  identity_match_tier text not null,
+  fingerprint text not null,
+  created_at text not null,
+  updated_at text not null,
+  dedup_key text,
+  source_signature text,
+  finding_json text not null,
+  unique(run_id, fingerprint)
+);
+create index if not exists idx_finding_current_dedup_key
+  on finding_current(dedup_key) where dedup_key is not null;
+create index if not exists idx_finding_current_run_dedup_key
+  on finding_current(run_id, dedup_key) where dedup_key is not null;
+create index if not exists idx_finding_current_identity_id
+  on finding_current(identity_id);
+
 create table if not exists stable_findings (
   stable_fp text primary key,
   current_status text not null,

@@ -10,6 +10,7 @@ use super::projection_proof::{project_patch_attempt_event, project_verification_
 use super::projection_review::project_review_decision;
 use super::projection_runs::project_run_lifecycle_event;
 use super::sql_seq;
+use super::ProjectionApplyReceipt;
 use crate::event_log::{EventEnvelope, EventKind};
 use anyhow::Result;
 use rusqlite::{params, Transaction};
@@ -19,19 +20,23 @@ mod inventory;
 pub(super) fn apply_projection_event(
     tx: &Transaction<'_>,
     event: &EventEnvelope,
-) -> Result<Option<i64>> {
+) -> Result<ProjectionApplyReceipt> {
     project_snapshot_indexed(tx, event)?;
     project_run_lifecycle_event(tx, event)?;
     project_file_indexed(tx, event)?;
     project_file_deleted(tx, event)?;
     project_attack_surface_indexed(tx, event)?;
-    project_finding_observation(tx, event)?;
+    let finding_id = project_finding_observation(tx, event)?;
     project_finding_rekeyed(tx, event)?;
     project_finding_lifecycle_status(tx, event)?;
     project_verification_event(tx, event)?;
     project_patch_attempt_event(tx, event)?;
     project_audit_event(tx, event)?;
-    project_review_decision(tx, event)
+    let review_decision_id = project_review_decision(tx, event)?;
+    Ok(ProjectionApplyReceipt {
+        review_decision_id,
+        finding_id,
+    })
 }
 
 fn project_finding_rekeyed(tx: &Transaction<'_>, event: &EventEnvelope) -> Result<()> {

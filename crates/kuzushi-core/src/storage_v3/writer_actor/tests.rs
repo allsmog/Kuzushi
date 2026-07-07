@@ -17,6 +17,7 @@ fn decision(stable_fp: &str, read_watermark: u64) -> DecisionWrite {
 
 fn observation(observation_hash: &str) -> ObservationWrite {
     ObservationWrite {
+        projected_finding_id: None,
         observation_hash: observation_hash.to_string(),
         stable_fp: "fp3_observed".to_string(),
         snapshot_hash: "snap3_test".to_string(),

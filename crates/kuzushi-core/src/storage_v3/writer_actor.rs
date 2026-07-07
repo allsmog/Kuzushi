@@ -30,6 +30,7 @@ pub struct WriteReceipt {
     pub committed_seq: u64,
     pub event_hash: String,
     pub projection_generation: u64,
+    pub projected_finding_id: Option<i64>,
     pub projected_review_decision_id: Option<i64>,
 }
 
@@ -148,6 +149,7 @@ impl StorageWriter {
             committed_seq: event.seq,
             event_hash: event.event_hash.as_str().to_string(),
             projection_generation: self.projection.meta()?.generation,
+            projected_finding_id: projection.finding_id,
             projected_review_decision_id: projection.review_decision_id,
         })
     }
@@ -236,6 +238,7 @@ impl StorageWriter {
             committed_seq: applied_seq,
             event_hash: "rebuild-projection".to_string(),
             projection_generation: self.projection.meta()?.generation,
+            projected_finding_id: None,
             projected_review_decision_id: None,
         })
     }
@@ -252,6 +255,7 @@ impl StorageWriter {
             committed_seq: self.projection.meta()?.applied_seq,
             event_hash: label.to_string(),
             projection_generation: self.projection.meta()?.generation,
+            projected_finding_id: None,
             projected_review_decision_id: None,
         })
     }
@@ -269,6 +273,7 @@ impl StorageWriter {
             committed_seq: event.seq,
             event_hash: event.event_hash.as_str().to_string(),
             projection_generation: self.projection.meta()?.generation,
+            projected_finding_id: projection.finding_id,
             projected_review_decision_id: projection.review_decision_id,
         })
     }
