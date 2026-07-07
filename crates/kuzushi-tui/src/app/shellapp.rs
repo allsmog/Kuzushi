@@ -1,4 +1,5 @@
 use super::*;
+use kuzushi_core::incremental_index::WorkspaceChange;
 
 #[derive(Debug)]
 pub struct ShellApp {
@@ -597,6 +598,18 @@ impl ShellApp {
 
     pub(crate) fn set_findings_read_watermark(&mut self, read_watermark: Option<u64>) {
         self.domain.set_findings_read_watermark(read_watermark);
+    }
+
+    pub(crate) fn workspace_stale(&self) -> Option<&WorkspaceStaleSummary> {
+        self.domain.workspace_stale()
+    }
+
+    pub(crate) fn apply_workspace_changes(&mut self, changes: &[WorkspaceChange]) {
+        self.domain.apply_workspace_changes(changes);
+    }
+
+    pub(crate) fn clear_workspace_stale(&mut self) {
+        self.domain.clear_workspace_stale();
     }
 
     pub(crate) fn review_decisions(&self) -> &[kuzushi_core::findings::ReviewDecisionRecord] {

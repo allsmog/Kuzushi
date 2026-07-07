@@ -1,6 +1,9 @@
 use super::*;
 use crate::ScanPanelState;
-use kuzushi_core::{Finding, Severity, V2Config};
+use kuzushi_core::{
+    incremental_index::{ReindexPlan, WorkspaceChange},
+    Finding, Severity, V2Config,
+};
 use std::path::PathBuf;
 use std::time::Instant;
 
@@ -123,6 +126,48 @@ fn status_footer_shows_active_project_scope_chip() {
         "expected active project scope chip, got {:?}",
         model.left_segments
     );
+}
+
+#[test]
+fn status_footer_shows_workspace_stale_chip_from_watcher_changes() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.apply_workspace_changes(&[WorkspaceChange::FileChanged(PathBuf::from(
+        "src/routes/users.rs",
+    ))]);
+
+    let model = status_footer_model(&app);
+
+    assert!(
+        model
+            .left_segments
+            .iter()
+            .any(|segment| segment == "workspace:stale routes"),
+        "expected stale route chip, got {:?}",
+        model.left_segments
+    );
+    let stale = app.workspace_stale().expect("stale summary");
+    assert_eq!(stale.change_count(), 1);
+    assert_eq!(
+        stale.strongest_plan(),
+        ReindexPlan::FileFactsAndLocalAttackSurface
+    );
+}
+
+#[test]
+fn workspace_stale_summary_keeps_strongest_plan_across_batches() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.apply_workspace_changes(&[WorkspaceChange::PromptOrHouseRuleChanged]);
+    app.apply_workspace_changes(&[WorkspaceChange::GitHeadChanged]);
+
+    let stale = app.workspace_stale().expect("stale summary");
+    assert_eq!(stale.change_count(), 2);
+    assert_eq!(stale.strongest_plan(), ReindexPlan::FullSnapshot);
+    assert!(status_footer_model(&app)
+        .left_segments
+        .contains(&"workspace:stale snapshot".to_string()));
+
+    app.clear_workspace_stale();
+    assert!(app.workspace_stale().is_none());
 }
 
 #[test]

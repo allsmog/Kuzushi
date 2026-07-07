@@ -4,9 +4,76 @@ use super::{
     ScanPanelState, ScanState, TaintFlowSnapshot, TaskDurationStore, WorkbenchCache, WorkspaceView,
 };
 use kuzushi_core::{
-    findings::ReviewDecisionRecord, AgenticSastReport, CarliniThreatHuntReport, Finding,
-    ProgramScope, ScanProgress,
+    findings::ReviewDecisionRecord,
+    incremental_index::{plan_for_change, ReindexPlan, WorkspaceChange},
+    AgenticSastReport, CarliniThreatHuntReport, Finding, ProgramScope, ScanProgress,
 };
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct WorkspaceStaleSummary {
+    change_count: usize,
+    strongest_plan: ReindexPlan,
+}
+
+impl WorkspaceStaleSummary {
+    pub(crate) fn from_changes(changes: &[WorkspaceChange]) -> Option<Self> {
+        let strongest_plan = changes
+            .iter()
+            .map(plan_for_change)
+            .max_by_key(|plan| reindex_plan_priority(*plan))?;
+        Some(Self {
+            change_count: changes.len(),
+            strongest_plan,
+        })
+    }
+
+    pub(crate) fn merge(&mut self, other: Self) {
+        self.change_count += other.change_count;
+        if reindex_plan_priority(other.strongest_plan) > reindex_plan_priority(self.strongest_plan)
+        {
+            self.strongest_plan = other.strongest_plan;
+        }
+    }
+
+    pub(crate) fn chip(&self) -> String {
+        format!(
+            "workspace:stale {}",
+            reindex_plan_label(self.strongest_plan)
+        )
+    }
+
+    pub(crate) fn change_count(&self) -> usize {
+        self.change_count
+    }
+
+    pub(crate) fn strongest_plan(&self) -> ReindexPlan {
+        self.strongest_plan
+    }
+}
+
+fn reindex_plan_priority(plan: ReindexPlan) -> u8 {
+    match plan {
+        ReindexPlan::MarkStaleOnly => 0,
+        ReindexPlan::FileFacts => 1,
+        ReindexPlan::FileFactsAndLocalAttackSurface => 2,
+        ReindexPlan::DependencyIndex => 3,
+        ReindexPlan::FullInventory => 4,
+        ReindexPlan::FullDeterministicScan => 5,
+        ReindexPlan::FullSnapshot => 6,
+    }
+}
+
+fn reindex_plan_label(plan: ReindexPlan) -> &'static str {
+    match plan {
+        ReindexPlan::MarkStaleOnly => "prompts",
+        ReindexPlan::FileFacts => "files",
+        ReindexPlan::FileFactsAndLocalAttackSurface => "routes",
+        ReindexPlan::DependencyIndex => "deps",
+        ReindexPlan::FullInventory => "inventory",
+        ReindexPlan::FullSnapshot => "snapshot",
+        ReindexPlan::FullDeterministicScan => "rules",
+    }
+}
 
 #[derive(Debug)]
 pub struct DomainCache {
@@ -33,6 +100,7 @@ pub struct DomainCache {
     findings_total: usize,
     findings_read_watermark: Option<u64>,
     review_decisions: Vec<ReviewDecisionRecord>,
+    workspace_stale: Option<WorkspaceStaleSummary>,
 }
 
 impl DomainCache {
@@ -66,6 +134,7 @@ impl DomainCache {
             findings_total: 0,
             findings_read_watermark: None,
             review_decisions: Vec::new(),
+            workspace_stale: None,
         }
     }
 
@@ -275,6 +344,24 @@ impl DomainCache {
 
     pub(crate) fn set_program_scope(&mut self, scope: Option<ProgramScope>) {
         self.program_scope = scope;
+    }
+
+    pub(crate) fn workspace_stale(&self) -> Option<&WorkspaceStaleSummary> {
+        self.workspace_stale.as_ref()
+    }
+
+    pub(crate) fn apply_workspace_changes(&mut self, changes: &[WorkspaceChange]) {
+        let Some(summary) = WorkspaceStaleSummary::from_changes(changes) else {
+            return;
+        };
+        match &mut self.workspace_stale {
+            Some(current) => current.merge(summary),
+            None => self.workspace_stale = Some(summary),
+        }
+    }
+
+    pub(crate) fn clear_workspace_stale(&mut self) {
+        self.workspace_stale = None;
     }
 
     pub(crate) fn findings(&self) -> &[Finding] {

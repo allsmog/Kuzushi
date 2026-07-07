@@ -30,9 +30,7 @@ fn status_footer_left_segments(app: &ShellApp) -> Vec<String> {
 
 fn active_status_footer_segments(app: &ShellApp, activity: FooterActivity) -> Vec<String> {
     let mut segments = vec![routing_mode_segment(app)];
-    if let Some(chip) = journey_footer_segment(app) {
-        segments.push(chip);
-    }
+    segments.extend(optional_active_chips(app));
     segments.extend([
         view_status_segment(app),
         model_footer_segment(app),
@@ -53,17 +51,29 @@ fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
     // Engagement orientation (M-journey): the same `組 map 1/4` phase chip used
     // by the Workbench keeps the current journey step visible on every view,
     // not just inside the launch walker.
-    if let Some(chip) = journey_footer_segment(app) {
-        segments.push(chip);
-    }
-    if let Some(chip) = scope_footer_segment(app) {
-        segments.push(chip);
-    }
-    if let Some(chip) = project_scope_footer_segment(app) {
-        segments.push(chip);
-    }
+    segments.extend(optional_idle_chips(app));
     segments.push(view_status_segment(app));
     segments
+}
+
+fn optional_active_chips(app: &ShellApp) -> impl Iterator<Item = String> {
+    [
+        journey_footer_segment(app),
+        workspace_stale_footer_segment(app),
+    ]
+    .into_iter()
+    .flatten()
+}
+
+fn optional_idle_chips(app: &ShellApp) -> impl Iterator<Item = String> {
+    [
+        journey_footer_segment(app),
+        scope_footer_segment(app),
+        project_scope_footer_segment(app),
+        workspace_stale_footer_segment(app),
+    ]
+    .into_iter()
+    .flatten()
 }
 
 fn scope_footer_segment(app: &ShellApp) -> Option<String> {
@@ -76,6 +86,10 @@ fn scope_footer_segment(app: &ShellApp) -> Option<String> {
 
 fn project_scope_footer_segment(app: &ShellApp) -> Option<String> {
     active_project_scope_label(app).map(|scope| format!("project-scope:{scope}"))
+}
+
+fn workspace_stale_footer_segment(app: &ShellApp) -> Option<String> {
+    app.workspace_stale().map(|stale| stale.chip())
 }
 
 fn status_footer_right_segments(app: &ShellApp, warning: bool) -> Vec<String> {
