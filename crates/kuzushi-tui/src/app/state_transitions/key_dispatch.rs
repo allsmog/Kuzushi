@@ -245,7 +245,7 @@ impl ShellApp {
     /// The end-of-engagement retry gate: `y`/Enter retries the failed tasks
     /// (with auto-adjustments), `n`/Esc skips them.
     fn handle_retry_key(&mut self, key: KeyEvent) -> InputUpdate {
-        if self.advisory.pending_retry.is_none() || !key.modifiers.is_empty() {
+        if self.advisory().pending_retry.is_none() || !key.modifiers.is_empty() {
             return InputUpdate::ignored();
         }
         match key.code {
@@ -263,7 +263,8 @@ impl ShellApp {
     /// Esc dismisses a visible notice banner. Returns false when no notice is
     /// present so Esc falls through to view-back / draft-restore as usual.
     fn handle_notice_dismiss_key(&mut self, key: KeyEvent) -> bool {
-        if self.advisory.notice.is_none() || key.code != KeyCode::Esc || !key.modifiers.is_empty() {
+        if self.advisory().notice.is_none() || key.code != KeyCode::Esc || !key.modifiers.is_empty()
+        {
             return false;
         }
         self.clear_notice();
@@ -281,13 +282,13 @@ impl ShellApp {
     }
 
     fn confirm_key_ready(&self, key: KeyEvent) -> bool {
-        self.advisory.pending_confirm.is_some() && key.modifiers.is_empty()
+        self.advisory().pending_confirm.is_some() && key.modifiers.is_empty()
     }
 
     fn apply_confirm_key_action(&mut self, action: ConfirmKeyAction) -> InputUpdate {
         let resolved = self.resolve_confirm(action.outcome, action.remember);
         let launch = self.confirmed_run_launch(action, resolved.as_ref());
-        self.advisory.pending_confirm_launch = None;
+        self.advisory_mut().pending_confirm_launch = None;
         match launch {
             Some(launch) => {
                 InputUpdate::handled_with_effects(vec![ShellEffect::DispatchRunTool(launch)])
@@ -308,7 +309,7 @@ impl ShellApp {
         if !request.kind.allows_yes() {
             return None;
         }
-        self.advisory.pending_confirm_launch.take()
+        self.advisory_mut().pending_confirm_launch.take()
     }
 
     pub(super) fn handle_budget_key(&mut self, key: KeyEvent) -> InputUpdate {

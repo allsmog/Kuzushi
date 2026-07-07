@@ -14,7 +14,7 @@ pub(crate) struct NoticeBannerModel {
 }
 
 pub(crate) fn notice_banner_model(app: &ShellApp) -> Option<NoticeBannerModel> {
-    app.advisory
+    app.advisory()
         .notice
         .as_ref()
         .map(NoticeBannerModel::from_notice)
@@ -37,14 +37,14 @@ pub(crate) struct CostCapHaltModel {
 }
 
 pub(crate) fn throttle_banner_model(app: &ShellApp) -> Option<ThrottleBannerModel> {
-    app.advisory
+    app.advisory()
         .throttle
         .as_ref()
         .map(ThrottleBannerModel::from_advisory)
 }
 
 pub(crate) fn cost_cap_halt_model(app: &ShellApp) -> Option<CostCapHaltModel> {
-    app.advisory
+    app.advisory()
         .budget_halt
         .as_ref()
         .map(CostCapHaltModel::from_halt)

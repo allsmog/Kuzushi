@@ -14,7 +14,7 @@ pub(crate) struct ConfirmCardModel {
 }
 
 pub(crate) fn confirm_card_model(app: &ShellApp) -> Option<ConfirmCardModel> {
-    app.advisory
+    app.advisory()
         .pending_confirm
         .as_ref()
         .map(ConfirmCardModel::from_confirm)

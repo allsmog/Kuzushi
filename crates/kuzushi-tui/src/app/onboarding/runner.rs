@@ -554,7 +554,7 @@ impl ShellApp {
     fn open_retry_gate(&mut self) {
         let tasks = self.engagement.failed_tasks_cloned();
         let count = tasks.len();
-        self.advisory.pending_retry = Some(PendingRetry { tasks });
+        self.advisory_mut().pending_retry = Some(PendingRetry { tasks });
         self.log(
             "phase",
             format!("{count} task(s) failed — retry? [y] retry · [n] skip"),
@@ -564,7 +564,7 @@ impl ShellApp {
     /// Operator accepted the retry gate: re-queue every failed task (with its
     /// auto-adjustment) plus the dependents that were skipped, then run them.
     pub(crate) fn retry_failed_tasks(&mut self) -> Vec<crate::app::ShellEffect> {
-        let Some(pending) = self.advisory.pending_retry.take() else {
+        let Some(pending) = self.advisory_mut().pending_retry.take() else {
             return Vec::new();
         };
         self.reset_retry_state();
@@ -651,7 +651,7 @@ impl ShellApp {
 
     /// Operator declined the retry gate: drop the failures and move on.
     pub(crate) fn decline_retry(&mut self) {
-        self.advisory.pending_retry = None;
+        self.advisory_mut().pending_retry = None;
         self.engagement.clear_failures_and_adjustments();
         self.engagement.clear_planning_queue();
         self.log("phase", "retry skipped");

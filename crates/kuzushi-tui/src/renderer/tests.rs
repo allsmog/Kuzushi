@@ -85,7 +85,7 @@ fn retry_gate_card_renders_failed_tasks_and_fix() {
     let backend = TestBackend::new(100, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.advisory.pending_retry = Some(crate::app::PendingRetry {
+    app.advisory_mut().pending_retry = Some(crate::app::PendingRetry {
         tasks: vec![crate::app::FailedPlanningTask {
             task: crate::app::PlanningTaskId::BuildCodePropertyGraph,
             error: "java heap OOM".to_string(),
@@ -364,7 +364,7 @@ fn planning_picker_reuses_cached_artifact_when_rebuild_cli_is_missing() {
 #[test]
 fn plain_retry_gate_explains_y_n_intercept() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.advisory.pending_retry = Some(crate::app::PendingRetry {
+    app.advisory_mut().pending_retry = Some(crate::app::PendingRetry {
         tasks: vec![crate::app::FailedPlanningTask {
             task: crate::app::PlanningTaskId::BuildCodePropertyGraph,
             error: "java heap OOM".to_string(),
@@ -4048,7 +4048,7 @@ fn throttle_banner_uses_chip_style_per_mockup() {
     let backend = TestBackend::new(120, 22);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.advisory.throttle = Some(crate::app::ThrottleAdvisory {
+    app.advisory_mut().throttle = Some(crate::app::ThrottleAdvisory {
         source: "anthropic".to_string(),
         message: "429 retry-after 14s".to_string(),
         since: std::time::Instant::now(),
@@ -4077,7 +4077,7 @@ fn cost_cap_halt_row_drops_bracket_chrome() {
     let backend = TestBackend::new(80, 22);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.advisory.budget_halt = Some(crate::app::BudgetHalt {
+    app.advisory_mut().budget_halt = Some(crate::app::BudgetHalt {
         limit_usd: 1.0,
         spent_usd: 1.5,
     });
@@ -4103,7 +4103,7 @@ fn cost_cap_halt_renders_compact_fallback_on_short_terminals() {
     let backend = TestBackend::new(80, 4);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.advisory.budget_halt = Some(crate::app::BudgetHalt {
+    app.advisory_mut().budget_halt = Some(crate::app::BudgetHalt {
         limit_usd: 1.0,
         spent_usd: 1.5,
     });
@@ -4375,7 +4375,7 @@ fn confirm_card_renders_tool_target_and_y_n_action_row() {
     let backend = TestBackend::new(120, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.advisory.pending_confirm = Some(crate::app::PendingConfirm {
+    app.advisory_mut().pending_confirm = Some(crate::app::PendingConfirm {
         kind: crate::app::ConfirmKind::NetworkEgress,
         tool: "sandbox:run".to_string(),
         target: "curl https://refund.acme/api/internal/balances".to_string(),
@@ -4408,7 +4408,7 @@ fn confirm_card_destructive_kind_renders_unconditional_refusal() {
     let backend = TestBackend::new(120, 22);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.advisory.pending_confirm = Some(crate::app::PendingConfirm {
+    app.advisory_mut().pending_confirm = Some(crate::app::PendingConfirm {
         kind: crate::app::ConfirmKind::DestructiveVerb,
         tool: "shell:run".to_string(),
         target: "rm -rf .git".to_string(),
@@ -4435,7 +4435,7 @@ fn confirm_keys_resolve_pending_confirm_with_remember_flag() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.advisory.pending_confirm = Some(crate::app::PendingConfirm {
+    app.advisory_mut().pending_confirm = Some(crate::app::PendingConfirm {
         kind: crate::app::ConfirmKind::NetworkEgress,
         tool: "sandbox:run".to_string(),
         target: "curl x".to_string(),
@@ -4448,7 +4448,7 @@ fn confirm_keys_resolve_pending_confirm_with_remember_flag() {
         &mut app,
         KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::empty()),
     );
-    assert!(app.advisory.pending_confirm.is_none());
+    assert!(app.advisory().pending_confirm.is_none());
     // The system log line records the outcome.
     assert!(app
         .log_lines()
@@ -5134,7 +5134,7 @@ fn phase_four_interruption_views_render_plain_surfaces() {
         let mut app = ShellApp::new(V2Config::default(), None);
         app.router.interruption_mut().open(view);
         app.shell_view = ShellView::Interruption;
-        app.advisory.budget_halt = Some(crate::app::BudgetHalt {
+        app.advisory_mut().budget_halt = Some(crate::app::BudgetHalt {
             limit_usd: 2.50,
             spent_usd: 2.75,
         });

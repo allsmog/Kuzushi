@@ -8,7 +8,6 @@ pub struct ShellApp {
     pub(crate) session: SessionState,
     pub(crate) domain: DomainCache,
     pub(crate) workbench_cache: std::cell::RefCell<WorkbenchCache>,
-    pub advisory: AdvisoryState,
     /// Engagement-scoped planning runtime state: current phase, queued steps,
     /// failures/retries, target classification, planning picker route state,
     /// and per-run option overlays.
@@ -712,6 +711,14 @@ impl ShellApp {
 
     pub(crate) fn ui_mut(&mut self) -> &mut UiPrefs {
         &mut self.ui
+    }
+
+    pub(crate) fn advisory(&self) -> &AdvisoryState {
+        self.ui.advisory()
+    }
+
+    pub(crate) fn advisory_mut(&mut self) -> &mut AdvisoryState {
+        self.ui.advisory_mut()
     }
 
     pub(crate) fn session(&self) -> &SessionState {

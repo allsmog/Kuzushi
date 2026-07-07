@@ -21,7 +21,7 @@ pub(crate) struct RetryCardRow {
 }
 
 pub(crate) fn retry_card_model(app: &ShellApp) -> Option<RetryCardModel> {
-    let pending = app.advisory.pending_retry.as_ref()?;
+    let pending = app.advisory().pending_retry.as_ref()?;
     let rows = pending
         .tasks
         .iter()
@@ -47,7 +47,7 @@ mod tests {
     #[test]
     fn retry_card_model_summarizes_failures_with_adjustments() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.advisory.pending_retry = Some(PendingRetry {
+        app.advisory_mut().pending_retry = Some(PendingRetry {
             tasks: vec![FailedPlanningTask {
                 task: PlanningTaskId::BuildCodePropertyGraph,
                 error: "java heap OOM".to_string(),

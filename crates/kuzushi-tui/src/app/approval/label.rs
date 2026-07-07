@@ -47,8 +47,9 @@ pub struct PendingConfirm {
 
 impl ShellApp {
     pub fn request_confirm(&mut self, request: PendingConfirm) {
-        self.advisory.pending_confirm = Some(request);
-        self.advisory.pending_confirm_launch = None;
+        let advisory = self.advisory_mut();
+        advisory.pending_confirm = Some(request);
+        advisory.pending_confirm_launch = None;
     }
 
     pub(crate) fn request_confirm_for_run(
@@ -57,11 +58,11 @@ impl ShellApp {
         launch: RunToolLaunch,
     ) {
         self.request_confirm(request);
-        self.advisory.pending_confirm_launch = Some(launch);
+        self.advisory_mut().pending_confirm_launch = Some(launch);
     }
 
     pub fn resolve_confirm(&mut self, outcome: bool, remember: bool) -> Option<PendingConfirm> {
-        let mut request = self.advisory.pending_confirm.take()?;
+        let mut request = self.advisory_mut().pending_confirm.take()?;
         if refuses_confirm_yes(&request, outcome) {
             return Some(PendingConfirm {
                 remembered: false,
