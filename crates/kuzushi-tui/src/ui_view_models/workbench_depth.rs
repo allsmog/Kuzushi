@@ -3,7 +3,7 @@
 //!
 //! Pure projection over the existing finding / detail / taint-flow view-models,
 //! so the depth-stack renderer never re-derives finding data and DETAILS/legs
-//! always reflect the authoritative `ShellApp::findings_route`.
+//! always reflect the authoritative findings route state.
 
 use super::{
     findings_model, selected_finding_detail_model, FindingDetailModel, FindingEvidenceRow,
@@ -100,8 +100,8 @@ impl DrawerContent {
 /// reducer only needs leg/drawer counts). Called once per keystroke.
 pub(crate) fn workbench_depth_bounds(app: &ShellApp, nav: &WorkbenchNav) -> NavBounds {
     let legs = app
-        .taint_flow
-        .as_ref()
+        .domain()
+        .taint_flow()
         .map(|flow| flow.stages.len().saturating_sub(1))
         .unwrap_or(0);
     NavBounds {
@@ -139,7 +139,7 @@ fn finding_row(row: &FindingListRow) -> FindingRow {
 }
 
 fn flow_legs(app: &ShellApp) -> (Option<String>, Vec<TraceLeg>) {
-    let Some(flow) = app.taint_flow.as_ref() else {
+    let Some(flow) = app.domain().taint_flow() else {
         return (None, Vec::new());
     };
     let stage_count = flow.stages.len();

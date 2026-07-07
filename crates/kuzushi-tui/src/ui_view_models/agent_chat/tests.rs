@@ -21,7 +21,7 @@ fn agent_chat_model_reports_empty_state_and_model_label() {
 #[test]
 fn agent_chat_model_copies_active_turn_and_history() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.agent_chat = Some(AgentChatView {
+    app.set_agent_chat(Some(AgentChatView {
         question: "what now?".to_string(),
         answer: Some("run context".to_string()),
         running: false,
@@ -37,7 +37,7 @@ fn agent_chat_model_copies_active_turn_and_history() {
         screen_context_scope: Some("scope: F-0001 · 作 confirm · abc1234-dirty".to_string()),
         failure_context: None,
         pending_failure_context: None,
-    });
+    }));
 
     let model = agent_chat_model(&app);
     let session = model.session.expect("agent session");
@@ -62,7 +62,7 @@ fn agent_chat_model_copies_active_turn_and_history() {
 #[test]
 fn agent_chat_model_prefers_abort_status() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.agent_chat = Some(AgentChatView {
+    app.set_agent_chat(Some(AgentChatView {
         question: "stop?".to_string(),
         answer: None,
         running: true,
@@ -74,7 +74,7 @@ fn agent_chat_model_prefers_abort_status() {
         screen_context_scope: None,
         failure_context: None,
         pending_failure_context: None,
-    });
+    }));
 
     let session = agent_chat_model(&app).session.expect("agent session");
 

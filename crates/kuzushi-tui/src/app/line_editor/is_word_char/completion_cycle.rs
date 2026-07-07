@@ -27,24 +27,21 @@ impl ShellApp {
         // list. Subsequent Tabs advance through the list without recomputing,
         // so cycling stays stable even after we've replaced `input` with a
         // longer candidate that would otherwise filter the candidates down.
-        let active_cycle = self.completion_cycle.take();
+        let active_cycle = self.editor_mut().take_completion_cycle();
         let cycle = match active_cycle {
             Some(cycle)
                 if !cycle.candidates.is_empty()
-                    && self
-                        .input
-                        .as_str()
-                        .eq(cycle.candidates[cycle.index].as_str()) =>
+                    && self.input().eq(cycle.candidates[cycle.index].as_str()) =>
             {
                 cycle
             }
             _ => {
-                let candidates = self.completion_candidates(&self.input);
+                let candidates = self.completion_candidates(self.input());
                 if candidates.is_empty() {
                     return;
                 }
                 CompletionCycle {
-                    prefix: self.input.clone(),
+                    prefix: self.input().to_string(),
                     candidates,
                     index: usize::MAX, // pre-increment in next step lands on 0
                 }
@@ -57,7 +54,7 @@ impl ShellApp {
         };
         let candidate = cycle.candidates[next_index].clone();
         self.set_input(candidate);
-        self.completion_cycle = Some(CompletionCycle {
+        self.editor_mut().set_completion_cycle(CompletionCycle {
             prefix: cycle.prefix,
             candidates: cycle.candidates,
             index: next_index,
@@ -65,7 +62,7 @@ impl ShellApp {
     }
 
     pub(crate) fn reset_completion_cycle(&mut self) {
-        self.completion_cycle = None;
+        self.editor_mut().reset_completion_cycle();
     }
 
     /// Inline ghost-text suggestion shown after the cursor when the cursor sits
@@ -75,14 +72,14 @@ impl ShellApp {
     /// noisy.
     pub fn completion_preview(&self) -> Option<String> {
         let candidate = self.completion_preview_candidate()?;
-        completion_preview_tail(&self.input, &candidate)
+        completion_preview_tail(self.input(), &candidate)
     }
 
     fn completion_preview_candidate(&self) -> Option<String> {
-        if self.input.is_empty() || self.cursor != self.input.chars().count() {
+        if self.input().is_empty() || self.cursor() != self.input().chars().count() {
             return None;
         }
-        self.completion_candidates(&self.input).into_iter().next()
+        self.completion_candidates(self.input()).into_iter().next()
     }
 }
 

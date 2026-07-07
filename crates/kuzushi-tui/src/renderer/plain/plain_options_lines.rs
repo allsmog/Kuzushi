@@ -8,11 +8,59 @@ pub(crate) fn plain_options_lines(
     width: usize,
     view: &crate::app::OptionsView,
 ) -> Vec<String> {
+    if let Some(snapshot) = app.options_screen_snapshot() {
+        return plain_options_snapshot_lines(snapshot.clone(), width);
+    }
+
     let model = plain_options_model(app, view);
     let mut lines = plain_context_strip(app, width);
     push_plain_options_summary(&mut lines, &model, width);
     push_plain_options_body(&mut lines, width, &model.body);
     lines
+}
+
+fn plain_options_snapshot_lines(snapshot: OptionsScreenSnapshot, width: usize) -> Vec<String> {
+    let mut lines = vec![
+        format!(
+            " KUZUSHI  target {}  ctx ✓ {}  model {}  module {}  cost {}",
+            snapshot.status.target,
+            snapshot.status.ctx,
+            snapshot.status.model,
+            snapshot.status.module,
+            snapshot.status.cost
+        ),
+        "─".repeat(width),
+        String::new(),
+    ];
+    lines.extend(snapshot.body_rows);
+    lines.push(String::new());
+    lines.push("─".repeat(width));
+    lines.push(options_footer_stage_line(width, &snapshot.footer));
+    lines.push(options_footer_keybind_line(&snapshot.footer));
+    lines.push(match snapshot.footer.prompt_module {
+        Some(module) => format!(" kuzushi ({module})>"),
+        None => " kuzushi>".to_string(),
+    });
+    lines
+}
+
+fn options_footer_stage_line(width: usize, footer: &OptionsScreenFooter) -> String {
+    let left = format!(" stage {} · routing direct", footer.stage);
+    let right = format!("Ctrl+C quit · findings {}", footer.findings);
+    let gap = width
+        .saturating_sub(left.chars().count() + right.chars().count())
+        .saturating_sub(1);
+    format!("{left}{}{right}", " ".repeat(gap))
+}
+
+fn options_footer_keybind_line(footer: &OptionsScreenFooter) -> String {
+    let body = footer
+        .keybinds
+        .iter()
+        .map(|(key, label)| format!("{key} {label}"))
+        .collect::<Vec<_>>()
+        .join("   ");
+    format!(" {body}")
 }
 
 fn push_plain_options_summary(lines: &mut Vec<String>, model: &PlainOptionsModel, width: usize) {

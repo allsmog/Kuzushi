@@ -2,14 +2,14 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn apply_threat_patch_event(&mut self, event: ThreatPatchEvent) {
-        self.threat_worker_running = false;
-        if self.threat_abort_requested {
-            self.threat_abort_requested = false;
+        self.set_threat_worker_running(false);
+        if self.threat_abort_requested() {
+            self.set_threat_abort_requested(false);
             self.log(
                 "threats",
                 "LangGraph response arrived after abort request; discarded",
             );
-            self.set_paused_activity("threat model", "response discarded after abort request");
+            self.set_refused_activity("threat model", "response discarded after abort request");
             return;
         }
         match event {

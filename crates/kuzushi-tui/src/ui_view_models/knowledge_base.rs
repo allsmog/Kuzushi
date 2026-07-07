@@ -68,7 +68,7 @@ pub(crate) struct PlainKnowledgeBaseAttachmentRow {
 }
 
 pub(crate) fn knowledge_base_model(app: &ShellApp) -> KnowledgeBaseModel {
-    let view = &app.kb_view;
+    let view = app.domain().kb_view();
     let module_id_label = view.module_id.clone();
     let store_label = store_label(view.store_path.as_ref());
     let supported_label = SUPPORTED_ATTACHMENT_MODULES.join(", ");

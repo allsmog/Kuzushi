@@ -2,14 +2,6 @@ use super::*;
 use crate::commands::ReviewDecisionCommand;
 use kuzushi_core::findings::{Finding, ReviewDecision, ReviewDecisionVerdict, TriageAuthor};
 
-pub(crate) fn handle_review_decision_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
-    let ShellCommand::ReviewDecision(command) = command else {
-        return false;
-    };
-    app.handle_review_decision_command(command);
-    true
-}
-
 impl ShellApp {
     pub(crate) fn reduce_review_decision_command(
         &mut self,
@@ -29,11 +21,6 @@ impl ShellApp {
                 Vec::new()
             }
         }
-    }
-
-    fn handle_review_decision_command(&mut self, command: &ReviewDecisionCommand) {
-        let effects = self.reduce_review_decision_command(command);
-        self.execute_effects(effects);
     }
 
     fn reduce_current_finding_review_decision(
@@ -57,14 +44,16 @@ impl ShellApp {
             rationale: reason,
         };
         let read_watermark = self
-            .workbench_review
+            .router
+            .workbench()
+            .review()
             .read_watermark_for(finding_stable_fp(&finding));
         vec![ShellEffect::RecordReviewDecision(ReviewDecisionApply {
             alias,
             decision,
             finding,
             read_watermark,
-            target: self.target.clone(),
+            target: self.target_owned(),
         })]
     }
 
@@ -129,7 +118,7 @@ impl ShellApp {
     ) {
         let message = error.to_string();
         if message.contains("changed after read watermark") {
-            self.workbench_review.mode = ReviewMode::Conflict {
+            self.router.workbench_mut().review_mut().mode = ReviewMode::Conflict {
                 message: message.clone(),
                 target_fp: finding_stable_fp(finding).to_string(),
             };
@@ -143,21 +132,39 @@ impl ShellApp {
         );
     }
 
-    pub(crate) fn refresh_findings_after_review_decision(&mut self, previous_finding: &Finding) {
+    pub(crate) fn review_decision_refresh_effects(
+        &mut self,
+        previous_finding: &Finding,
+    ) -> Vec<ShellEffect> {
         let fingerprint = previous_finding.fingerprint.clone();
-        let active_filter = self.active_findings_filter.clone();
+        let active_filter = self.active_findings_filter().clone();
         match active_filter {
-            Some(expression) => {
-                self.refresh_findings_filtered(&expression);
-                if !self
-                    .findings
-                    .iter()
-                    .any(|finding| finding.fingerprint == fingerprint)
-                {
-                    self.log("review", "row moved because the active filter excludes it");
-                }
-            }
-            None => self.refresh_findings(false),
+            Some(expression) => vec![
+                ShellEffect::RefreshFindings(FindingsRefresh {
+                    announce: true,
+                    filter: Some(expression),
+                }),
+                ShellEffect::ReportFilteredFindingMovement(FilteredFindingMovementNotice {
+                    fingerprint,
+                }),
+            ],
+            None => vec![ShellEffect::RefreshFindings(FindingsRefresh {
+                announce: false,
+                filter: None,
+            })],
+        }
+    }
+
+    pub(crate) fn report_filtered_finding_movement_effect(
+        &mut self,
+        notice: FilteredFindingMovementNotice,
+    ) {
+        if !self
+            .findings()
+            .iter()
+            .any(|finding| finding.fingerprint == notice.fingerprint)
+        {
+            self.log("review", "row moved because the active filter excludes it");
         }
     }
 }

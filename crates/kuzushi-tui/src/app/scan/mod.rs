@@ -6,7 +6,7 @@ use self::artifacts::{
     write_run_summary,
 };
 use self::findings::short_fingerprint;
-use self::workers::{scan_worker, spawn_panic_safe_worker, LiveTraceBudget};
+use self::workers::{scan_worker, LiveTraceBudget};
 use self::{with_next_step, ScanEvent, ScanPanelState, ShellApp, ShellView};
 use anyhow::Result;
 use kuzushi_core::modules::ToolExecutionContext;
@@ -16,7 +16,6 @@ use kuzushi_core::{
 };
 pub(crate) use start_scan::*;
 use std::path::PathBuf;
-use std::sync::mpsc;
 use std::sync::Arc;
 pub(crate) use truncate_ascii::*;
 mod start_scan;

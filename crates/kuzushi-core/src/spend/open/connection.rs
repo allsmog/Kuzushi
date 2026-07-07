@@ -10,11 +10,7 @@ impl SpendLimiter {
         hard_ceiling: Option<f64>,
     ) -> Result<Self> {
         let path = path.as_ref();
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .with_context(|| format!("could not create {}", parent.display()))?;
-        }
-        let conn = Connection::open(path)
+        let conn = crate::sqlite_connection::open_file(path)
             .with_context(|| format!("could not open spend ledger at {}", path.display()))?;
         Self::with_connection_and_hard_ceiling(conn, hard_ceiling)
     }

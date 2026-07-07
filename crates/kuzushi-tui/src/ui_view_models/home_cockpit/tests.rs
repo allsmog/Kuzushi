@@ -185,7 +185,7 @@ fn home_cockpit_model_shapes_static_chrome_and_cards() {
 fn active_home_commands_offer_one_guided_workflow_entrypoint() {
     let temp = tempfile::tempdir().unwrap();
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = home_cockpit_model(&app);
 
@@ -209,7 +209,7 @@ fn home_cockpit_model_surfaces_invalid_latest_pointer() {
     let temp = tempfile::tempdir().unwrap();
     create_invalid_latest_pointer(temp.path());
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = home_cockpit_model(&app);
 
@@ -222,7 +222,7 @@ fn home_cockpit_model_surfaces_blank_latest_pointer() {
     let temp = tempfile::tempdir().unwrap();
     write_blank_latest_pointer(temp.path());
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
+    app.set_target(Some(temp.path().to_path_buf()));
 
     let model = home_cockpit_model(&app);
 
@@ -292,8 +292,8 @@ fn placeholder_attack_surface_does_not_render_zero_risk() {
     )
     .unwrap();
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
-    app.findings = vec![finding("sql-injection", kuzushi_core::Severity::High, 88)];
+    app.set_target(Some(temp.path().to_path_buf()));
+    *app.findings_mut() = vec![finding("sql-injection", kuzushi_core::Severity::High, 88)];
 
     let model = home_cockpit_model(&app);
 
@@ -307,7 +307,7 @@ fn placeholder_attack_surface_does_not_render_zero_risk() {
 #[test]
 fn findings_card_counts_reviewed_queue_and_top_risks() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.findings = vec![
+    *app.findings_mut() = vec![
         reviewed(finding(
             "command-injection",
             kuzushi_core::Severity::High,
@@ -349,7 +349,7 @@ fn findings_card_counts_reviewed_by_durable_identity() {
     );
     assert!(rerun.triage.is_none());
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.findings = vec![reviewed_row, rerun];
+    *app.findings_mut() = vec![reviewed_row, rerun];
 
     let model = home_cockpit_model(&app);
 

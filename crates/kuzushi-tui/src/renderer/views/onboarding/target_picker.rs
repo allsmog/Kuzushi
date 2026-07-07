@@ -12,7 +12,7 @@ pub(crate) fn target_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'stati
         "Nothing defaults to cwd silently — pick it, a repo, or a submodule explicitly.",
     ));
     lines.push(blank());
-    let candidates = app.target_picker_route.candidates();
+    let candidates = app.router.target_picker().candidates();
     let label_width = candidate_label_width(candidates);
     for (idx, candidate) in candidates.iter().enumerate() {
         lines.push(target_picker_row(
@@ -54,7 +54,7 @@ fn target_picker_row(
     label_width: usize,
     width: u16,
 ) -> Line<'static> {
-    let marker = if idx == app.target_picker_route.cursor() {
+    let marker = if idx == app.router.target_picker().cursor() {
         ">"
     } else {
         " "
@@ -64,7 +64,7 @@ fn target_picker_row(
         label = candidate.label,
         hint = candidate_hint(candidate),
     );
-    let style = if idx == app.target_picker_route.cursor() {
+    let style = if idx == app.router.target_picker().cursor() {
         theme::success().add_modifier(Modifier::BOLD)
     } else {
         theme::primary()

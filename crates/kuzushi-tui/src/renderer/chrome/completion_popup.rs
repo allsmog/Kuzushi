@@ -14,7 +14,7 @@ pub(crate) fn render_completion_popup(frame: &mut Frame<'_>, area: Rect, app: &S
     if area.height == 0 {
         return;
     }
-    let Some(cycle) = app.completion_cycle.as_ref() else {
+    let Some(cycle) = app.completion_cycle() else {
         return;
     };
     if cycle.candidates.is_empty() {
@@ -36,7 +36,7 @@ pub(crate) fn render_completion_popup(frame: &mut Frame<'_>, area: Rect, app: &S
 }
 
 pub(crate) fn completion_popup_height(app: &ShellApp, area: Rect) -> u16 {
-    let Some(cycle) = app.completion_cycle.as_ref() else {
+    let Some(cycle) = app.completion_cycle() else {
         return 0;
     };
     if cycle.candidates.is_empty() || area.height < 6 {

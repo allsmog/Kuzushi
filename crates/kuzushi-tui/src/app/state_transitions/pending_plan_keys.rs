@@ -1,17 +1,26 @@
 use super::*;
 
 impl ShellApp {
-    pub(super) fn handle_pending_plan_key(&mut self, key: KeyEvent) -> bool {
-        pending_plan_key_handler_for(
+    pub(super) fn handle_pending_plan_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if !pending_plan_key_is_active(
             self.engagement.has_pending_plan(),
-            self.input.is_empty(),
+            self.input().is_empty(),
             key.modifiers.is_empty(),
-            key.code,
-        )
-        .is_some_and(|handler| {
-            handler(self);
-            true
-        })
+        ) {
+            return InputUpdate::ignored();
+        }
+        match key.code {
+            KeyCode::Enter | KeyCode::Char('y') | KeyCode::Char('Y') => {
+                InputUpdate::handled_with_effects(self.reduce_apply_pending_plan())
+            }
+            KeyCode::Char('n') | KeyCode::Char('N') | KeyCode::Esc => {
+                InputUpdate::handled_with_effects(self.reduce_discard_pending_plan())
+            }
+            _ => pending_plan_key_handler(key.code).map_or_else(InputUpdate::ignored, |handler| {
+                handler(self);
+                InputUpdate::handled()
+            }),
+        }
     }
 
     fn move_plan_cursor_down_key(&mut self) {
@@ -37,25 +46,15 @@ pub(super) fn pending_plan_key_handler(code: KeyCode) -> Option<fn(&mut ShellApp
         .find_map(|(candidate, handler)| (*candidate == code).then_some(*handler))
 }
 
-fn pending_plan_key_handler_for(
+fn pending_plan_key_is_active(
     has_pending_plan: bool,
     input_is_empty: bool,
     modifiers_are_empty: bool,
-    code: KeyCode,
-) -> Option<fn(&mut ShellApp)> {
-    match (has_pending_plan, input_is_empty, modifiers_are_empty) {
-        (true, true, true) => pending_plan_key_handler(code),
-        _ => None,
-    }
+) -> bool {
+    has_pending_plan && input_is_empty && modifiers_are_empty
 }
 
 const PENDING_PLAN_KEY_ACTIONS: &[(KeyCode, fn(&mut ShellApp))] = &[
-    (KeyCode::Enter, ShellApp::apply_pending_plan),
-    (KeyCode::Char('y'), ShellApp::apply_pending_plan),
-    (KeyCode::Char('Y'), ShellApp::apply_pending_plan),
-    (KeyCode::Char('n'), ShellApp::discard_pending_plan),
-    (KeyCode::Char('N'), ShellApp::discard_pending_plan),
-    (KeyCode::Esc, ShellApp::discard_pending_plan),
     (KeyCode::Char(' '), ShellApp::toggle_plan_change_skip),
     (KeyCode::Char('j'), ShellApp::move_plan_cursor_down_key),
     (KeyCode::Down, ShellApp::move_plan_cursor_down_key),

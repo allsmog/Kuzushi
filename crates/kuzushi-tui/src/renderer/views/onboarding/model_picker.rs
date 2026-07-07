@@ -9,7 +9,7 @@ pub(crate) fn model_picker_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static
         "Kuzushi does not silently pick a model for you. Select one to continue.",
     ));
     lines.push(blank());
-    let choices = visible_model_choices(app.config.model.as_deref());
+    let choices = visible_model_choices(app.config().model.as_deref());
     let widths = picker_column_widths(&choices);
     for (idx, choice) in choices.iter().enumerate() {
         lines.push(model_picker_row(app, idx, choice, widths, area.width));
@@ -57,7 +57,7 @@ fn model_picker_row(
     (label_width, provider_width): (usize, usize),
     width: u16,
 ) -> Line<'static> {
-    let marker = if idx == app.model_picker_route.cursor() {
+    let marker = if idx == app.router.model_picker().cursor() {
         ">"
     } else {
         " "
@@ -68,7 +68,7 @@ fn model_picker_row(
         "  {marker} {label:<label_width$}   {provider_effort:<provider_width$}   {auth_hint}",
         label = choice.label,
     );
-    let style = if idx == app.model_picker_route.cursor() {
+    let style = if idx == app.router.model_picker().cursor() {
         theme::success().add_modifier(Modifier::BOLD)
     } else {
         theme::primary()

@@ -19,8 +19,9 @@ impl ShellApp {
     /// page and not paused — drives both the faster redraw cadence and the
     /// per-tick camera advance.
     pub fn scene_animating(&self) -> bool {
-        matches!(self.shell_view, ShellView::Scene(page) if page.is_animated())
-            && !self.scene_paused
+        matches!(self.shell_view, ShellView::Scene)
+            && self.router.scene().page().is_animated()
+            && !self.router.scene().paused()
             && !crate::theme::active_theme().reduced_motion
     }
 
@@ -28,30 +29,31 @@ impl ShellApp {
     /// of the redraw rate. No-op (and clears the baseline) when not animating.
     fn advance_scene(&mut self, now: Instant) -> bool {
         if !self.scene_animating() {
-            self.last_scene_advance = None;
+            self.router.scene_mut().clear_advance_baseline();
             return false;
         }
-        let Some(prev) = self.last_scene_advance else {
-            self.last_scene_advance = Some(now);
+        let Some(prev) = self.router.scene().last_advance() else {
+            self.router.scene_mut().set_advance_baseline(now);
             return true;
         };
         let elapsed = now.duration_since(prev);
         if elapsed < SCENE_FRAME {
             return false;
         }
-        self.scene_spin = wrap_angle(self.scene_spin + elapsed.as_secs_f32() * SCENE_SPIN_RATE);
-        self.last_scene_advance = Some(now);
+        self.router
+            .scene_mut()
+            .advance_yaw(elapsed.as_secs_f32() * SCENE_SPIN_RATE, now);
         true
     }
 
     fn expire_ctrl_c_arm(&mut self, now: Instant) -> bool {
-        let Some(armed_at) = self.ctrl_c_armed_at else {
+        let Some(armed_at) = self.ctrl_c_armed_at() else {
             return false;
         };
         if now.duration_since(armed_at) <= CTRL_C_ARM_WINDOW {
             return false;
         }
-        self.ctrl_c_armed_at = None;
+        self.set_ctrl_c_armed_at(None);
         true
     }
 
@@ -73,46 +75,36 @@ impl ShellApp {
         if !self.has_running_work() {
             return self.reset_spinner();
         }
-        let due = self
-            .last_spinner_advance
-            .map(|prev| now.duration_since(prev) >= SPINNER_FRAME)
-            .unwrap_or(true);
-        if !due {
+        if !self.ui().spinner_due(now, SPINNER_FRAME) {
             return false;
         }
-        self.spinner_phase = self.spinner_phase.wrapping_add(1);
-        self.last_spinner_advance = Some(now);
+        self.ui_mut().advance_spinner(now);
         true
     }
 
     /// Clear the animation when work finishes so no frozen glyph lingers.
     fn reset_spinner(&mut self) -> bool {
-        self.last_spinner_advance = None;
-        if self.spinner_phase == 0 {
-            return false;
-        }
-        self.spinner_phase = 0;
-        true
+        self.ui_mut().reset_spinner()
     }
 
     pub fn has_running_work(&self) -> bool {
-        let scan_running = self.scan.as_ref().is_some_and(|scan| scan.running);
-        let tool_running = self.tool_running.is_some();
-        let agent_running = self.agent_chat.as_ref().is_some_and(|agent| agent.running);
+        let scan_running = self.scan().is_some_and(|scan| scan.running);
+        let tool_running = self.tool_is_running();
+        let agent_running = self.agent_chat().is_some_and(|agent| agent.running);
         scan_running
             || tool_running
             || agent_running
-            || self.planner_running
-            || self.threat_worker_running
+            || self.planner_running()
+            || self.threat_worker_running()
     }
 
     pub fn spinner_glyph(&self) -> &'static str {
         const FRAMES: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-        FRAMES[(self.spinner_phase as usize) % FRAMES.len()]
+        FRAMES[(self.ui().spinner_phase() as usize) % FRAMES.len()]
     }
 
     pub fn ctrl_c_armed(&self) -> bool {
-        self.ctrl_c_armed_at
+        self.ctrl_c_armed_at()
             .map(|armed_at| Instant::now().duration_since(armed_at) <= CTRL_C_ARM_WINDOW)
             .unwrap_or(false)
     }
@@ -179,16 +171,9 @@ impl ShellApp {
     }
 
     pub fn record_cost(&mut self, cost_usd: f64) {
-        self.last_tool_cost_usd = Some(cost_usd);
-        self.session_cost_usd += cost_usd;
+        self.session_mut().record_cost(cost_usd);
         self.maybe_trigger_budget_halt();
     }
-}
-
-/// Keep an angle within `[0, 2π)` so the camera spin never accumulates an
-/// ever-growing float. `rem_euclid` keeps negative nudges positive too.
-pub(super) fn wrap_angle(angle: f32) -> f32 {
-    angle.rem_euclid(std::f32::consts::TAU)
 }
 
 /// The two transient banners that auto-expire in `tick`. Lets one helper

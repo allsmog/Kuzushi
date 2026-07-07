@@ -10,18 +10,15 @@ impl ShellApp {
     pub fn catalog_cursor_module_id(&self) -> Option<String> {
         let model = catalog_model(self);
         let modules = catalog_module_ids(&model);
+        let cursor = self.router.catalog().cursor();
         modules
-            .get(
-                self.catalog_route
-                    .cursor()
-                    .min(modules.len().saturating_sub(1)),
-            )
+            .get(cursor.min(modules.len().saturating_sub(1)))
             .cloned()
     }
 
     pub fn move_catalog_cursor(&mut self, delta: i32) {
-        self.catalog_route
-            .move_cursor(delta, self.catalog_module_count());
+        let count = self.catalog_module_count();
+        self.router.catalog_mut().move_cursor(delta, count);
     }
 }
 

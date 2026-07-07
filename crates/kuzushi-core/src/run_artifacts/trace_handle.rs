@@ -350,18 +350,34 @@ impl TraceSink for JsonlSink {
 pub struct BroadcastSink {
     inner: Arc<dyn TraceSink>,
     tx: Sender<RunTraceStep>,
+    dropped_live_sends: AtomicU64,
 }
 
 impl BroadcastSink {
     pub fn new(inner: Arc<dyn TraceSink>, tx: Sender<RunTraceStep>) -> Self {
-        Self { inner, tx }
+        Self {
+            inner,
+            tx,
+            dropped_live_sends: AtomicU64::new(0),
+        }
+    }
+
+    pub fn dropped_live_sends(&self) -> u64 {
+        self.dropped_live_sends.load(Ordering::Relaxed)
     }
 }
 
 impl TraceSink for BroadcastSink {
     fn record(&self, step: &RunTraceStep) {
         self.inner.record(step);
-        let _ = self.tx.send(step.clone());
+        if self.tx.send(step.clone()).is_err() {
+            let dropped = self.dropped_live_sends.fetch_add(1, Ordering::Relaxed) + 1;
+            if dropped == 1 || dropped.is_power_of_two() {
+                eprintln!(
+                    "kuzushi: dropped {dropped} live trace broadcast(s); durable trace sink remains authoritative"
+                );
+            }
+        }
     }
 
     fn run_artifact_location(&self) -> Option<(PathBuf, String)> {

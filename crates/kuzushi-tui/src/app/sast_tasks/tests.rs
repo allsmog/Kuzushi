@@ -7,20 +7,42 @@ mod tests {
     fn toggle_sast_task_blocks_enabled_tasks_and_allows_disabled_tasks() {
         let mut app = ShellApp::new(V2Config::default(), None);
 
-        let blocked = app.toggle_sast_task("semgrep").unwrap();
-        assert!(blocked.contains("Blocked SAST task"));
+        let blocked =
+            app.reduce_sast_task_command(SastTaskCommand::Toggle(Some("semgrep".to_string())));
+        assert!(matches!(
+            blocked.first(),
+            Some(ShellEffect::ApplySastTaskOptions(_))
+        ));
+        assert!(!app.current_disabled_sast_tasks().contains("semgrep"));
+        EffectRuntime::execute(&mut app, blocked);
         assert!(app.current_disabled_sast_tasks().contains("semgrep"));
 
-        let allowed = app.toggle_sast_task("semgrep").unwrap();
-        assert!(allowed.contains("Allowed SAST task"));
+        let allowed =
+            app.reduce_sast_task_command(SastTaskCommand::Toggle(Some("semgrep".to_string())));
+        assert!(matches!(
+            allowed.first(),
+            Some(ShellEffect::ApplySastTaskOptions(_))
+        ));
+        EffectRuntime::execute(&mut app, allowed);
         assert!(!app.current_disabled_sast_tasks().contains("semgrep"));
     }
 
     #[test]
     fn toggle_sast_task_reports_unknown_ids_actionably() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        let error = app.toggle_sast_task("made-up").unwrap_err().to_string();
-        assert!(error.contains("unknown SAST task"));
+        let effects =
+            app.reduce_sast_task_command(SastTaskCommand::Toggle(Some("made-up".to_string())));
+        match effects.first() {
+            Some(ShellEffect::FinalizeSastTaskCommand(finalize)) => match &finalize.outcome {
+                SastTaskCommandOutcome::Error(error) => {
+                    assert!(error.contains("unknown SAST task"));
+                }
+                SastTaskCommandOutcome::Applied(message) => {
+                    panic!("expected error, got applied message {message}");
+                }
+            },
+            _ => panic!("expected finalize SAST task command effect"),
+        }
     }
 
     #[test]

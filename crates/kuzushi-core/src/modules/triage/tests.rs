@@ -170,6 +170,17 @@ mod tests {
         }
     }
 
+    struct CountingRuntime {
+        calls: std::sync::Mutex<usize>,
+    }
+
+    impl AgentRuntime for CountingRuntime {
+        fn triage_finding_blocking(&self, _request: TriageRequest) -> Result<TriageOutcome> {
+            *self.calls.lock().unwrap() += 1;
+            Ok(true_positive_outcome())
+        }
+    }
+
     #[test]
     fn triage_stage2_stops_on_runtime_cancellation() {
         let store = FindingStore::open_in_memory().unwrap();
@@ -235,13 +246,73 @@ mod tests {
     }
 
     #[test]
+    fn select_triage_findings_skips_later_run_with_reviewed_identity() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let finding = finding_with(Severity::High, "semgrep", "already paid across runs");
+        store
+            .record_run_started("scan-a", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+        let first_id = store.insert_finding("scan-a", &finding).unwrap();
+        store
+            .save_triage(first_id, &true_positive_outcome())
+            .unwrap();
+        store.record_run_finished("scan-a", "completed", 1).unwrap();
+        store
+            .record_run_started("scan-z", Path::new("/tmp/repo"), "completed")
+            .unwrap();
+        store.insert_finding("scan-z", &finding).unwrap();
+        store.record_run_finished("scan-z", "completed", 1).unwrap();
+
+        let latest = store.list_findings_for_scan_id("scan-z").unwrap();
+        assert!(latest[0].triage.is_none(), "new row has no copied verdict");
+
+        let input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+
+        assert!(select_triage_findings(&store, &input).unwrap().0.is_empty());
+    }
+
+    #[test]
+    fn triage_stage2_reuses_cached_outcome_without_extra_model_call_or_cost() {
+        let store = store_with_scan_findings(&[(
+            "scan-cache",
+            finding_with(Severity::High, "semgrep", "cache me once"),
+        )]);
+        let finding = store
+            .list_findings_for_scan_id("scan-cache")
+            .unwrap()
+            .remove(0);
+        let runtime = CountingRuntime {
+            calls: std::sync::Mutex::new(0),
+        };
+        let input = TriageRunInput::from_tool_input(&json!({}), Path::new(".")).unwrap();
+        let config = TriageExecutionConfig::new(
+            PathBuf::from("/repo-cache"),
+            "openai-codex:gpt-5.4".to_string(),
+        );
+
+        let first =
+            run_triage_stage2(&store, &runtime, &input, &config, vec![finding.clone()]).unwrap();
+        let second = run_triage_stage2(&store, &runtime, &input, &config, vec![finding]).unwrap();
+
+        assert_eq!(*runtime.calls.lock().unwrap(), 1);
+        assert_eq!(first.total_cost, 0.01);
+        assert_eq!(second.total_cost, 0.0);
+        assert_eq!(second.results[0]["cached"], json!(true));
+    }
+
+    #[test]
     fn persist_triage_outcome_propagates_to_same_fingerprint_siblings() {
         let finding = finding_with(Severity::High, "semgrep", "same fp");
         let store = store_with_scan_findings(&[("scan-a", finding.clone()), ("scan-z", finding)]);
         let latest = store.list_findings_for_scan_id("scan-z").unwrap().remove(0);
         let mut stats = TriageRunStats::default();
 
-        persist_triage_outcome(&store, &mut stats, latest, true_positive_outcome());
+        persist_triage_outcome(
+            &store,
+            &mut stats,
+            latest,
+            runtime_outcome(true_positive_outcome()),
+        );
 
         for scan_id in ["scan-a", "scan-z"] {
             let stored = store.list_findings_for_scan_id(scan_id).unwrap();
@@ -320,6 +391,13 @@ mod tests {
             confidence: 0.9,
             rationale: "confirmed once".to_string(),
             cost_usd: 0.01,
+        }
+    }
+
+    fn runtime_outcome(outcome: TriageOutcome) -> TriageRuntimeOutcome {
+        TriageRuntimeOutcome {
+            outcome,
+            cached: false,
         }
     }
 }

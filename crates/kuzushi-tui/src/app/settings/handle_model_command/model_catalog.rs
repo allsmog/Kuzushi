@@ -10,8 +10,8 @@ impl ShellApp {
     }
 
     fn log_model_catalog_status(&mut self) {
-        let active = active_model_label(&self.config);
-        let effort = self.session_thinking_level.as_deref().unwrap_or("default");
+        let active = active_model_label(self.config());
+        let effort = self.session_thinking_level().unwrap_or("default");
         self.log(
             "model",
             format!("active {active} / {effort}. Select with: model <n> [low|medium|high|xhigh]"),
@@ -19,19 +19,19 @@ impl ShellApp {
     }
 
     fn log_model_catalog_choices(&mut self) {
-        for choice in visible_model_choices(self.config.model.as_deref()) {
+        for choice in visible_model_choices(self.config().model.as_deref()) {
             self.log("model", model_catalog_choice_line(choice));
         }
     }
 
     fn log_model_catalog_scope_hint(&mut self) {
-        if let Some(hint) = model_catalog_scope_hint(&self.focused_module, &self.config) {
+        if let Some(hint) = model_catalog_scope_hint(self.focused_module(), self.config()) {
             self.log("model", hint);
         }
     }
 
     pub(crate) fn provider_label(&self) -> String {
-        self.config
+        self.config()
             .model
             .as_deref()
             .and_then(|model| model.split_once(':').map(|(provider, _)| provider))
@@ -42,36 +42,31 @@ impl ShellApp {
     }
 
     pub(crate) fn sync_selected_model_index(&mut self) {
-        self.selected_model_index = preferred_model_choice_index(&self.config);
+        let selected_index = preferred_model_choice_index(self.config());
+        self.router
+            .model_catalog_mut()
+            .set_selected_index(selected_index);
     }
 
     pub(crate) fn move_model_selection(&mut self, delta: isize) {
         // Step only through the rows the Config view actually shows. Cycling the
-        // full MODEL_CHOICES set could land `selected_model_index` on a hidden
+        // full MODEL_CHOICES set could land the route cursor on a hidden
         // row (the non-primary OpenAI entry), which the renderer collapses to the
         // first visible row — so the highlight and the Enter-selected model would
         // disagree. Navigating the visible set keeps them in lockstep.
-        let visible = visible_model_choice_indexes(self.config.model.as_deref());
-        if visible.is_empty() {
-            self.selected_model_index = 0;
-            return;
-        }
-        let current_pos = visible
-            .iter()
-            .position(|&index| index == self.selected_model_index)
-            .unwrap_or(0);
-        let next_pos = (current_pos as isize + delta).rem_euclid(visible.len() as isize) as usize;
-        self.selected_model_index = visible[next_pos];
+        let visible = visible_model_choice_indexes(self.config().model.as_deref());
+        self.router
+            .model_catalog_mut()
+            .move_selection(&visible, delta);
     }
 
-    pub(crate) fn select_current_model_choice(&mut self) {
-        let Some(choice) = MODEL_CHOICES.get(self.selected_model_index) else {
+    pub(crate) fn select_current_model_choice(&mut self) -> Vec<ShellEffect> {
+        let Some(choice) = MODEL_CHOICES.get(self.router.model_catalog().selected_index()) else {
             self.log("error", "no model choices are available");
-            return;
+            return Vec::new();
         };
-        self.config.model = Some(choice.id.to_string());
-        self.session_thinking_level = Some(choice.thinking_level.to_string());
-        self.persist_global_model_choice(choice.id, Some(choice.thinking_level));
+        self.config_mut().model = Some(choice.id.to_string());
+        self.set_session_thinking_level(Some(choice.thinking_level.to_string()));
         self.shell_view = ShellView::Config;
         self.log(
             "model",
@@ -81,6 +76,10 @@ impl ShellApp {
                 choice.thinking_level
             ),
         );
+        vec![crate::app::global_model_selection_persist_effect(
+            choice.id,
+            Some(choice.thinking_level),
+        )]
     }
 }
 
@@ -104,10 +103,10 @@ fn model_catalog_choice_line(choice: &ModelChoice) -> String {
 }
 
 fn model_catalog_scope_hint(
-    focused_module: &Option<String>,
+    focused_module: Option<&str>,
     config: &V2Config,
 ) -> Option<&'static str> {
-    focused_module.as_ref()?;
+    focused_module?;
     Some(if config.model.is_none() {
         "focused module detected, but no global model yet — model <n> sets the global model so `ask` works. Use `model module <n>` to scope per-module."
     } else {

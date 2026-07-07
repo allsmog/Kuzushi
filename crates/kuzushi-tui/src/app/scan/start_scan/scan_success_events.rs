@@ -2,8 +2,12 @@ use super::*;
 
 impl ShellApp {
     #[cfg(test)]
-    pub(crate) fn apply_scan_finished(&mut self, run_id: String, findings_count: usize) {
-        self.apply_scan_finished_with_cost(run_id, findings_count, None);
+    pub(crate) fn apply_scan_finished(
+        &mut self,
+        run_id: String,
+        findings_count: usize,
+    ) -> Vec<ShellEffect> {
+        self.apply_scan_finished_with_cost(run_id, findings_count, None)
     }
 
     pub(crate) fn apply_scan_finished_with_cost(
@@ -11,7 +15,7 @@ impl ShellApp {
         run_id: String,
         findings_count: usize,
         cost_usd: Option<f64>,
-    ) {
+    ) -> Vec<ShellEffect> {
         if let Some(cost_usd) = cost_usd {
             self.record_cost(cost_usd);
         }
@@ -19,16 +23,35 @@ impl ShellApp {
         self.mark_scan_activity_run_id(&run_id);
         self.mark_scan_tasks_terminal();
         let target_label = self.scan_target_label();
-        self.record_scan_completion_artifacts(&run_id, findings_count, &target_label);
-        self.refresh_findings(false);
-        let target_root = self.target.clone();
-        self.hydrate_persisted_scene_snapshots(target_root.as_deref());
+        let target = self.target_owned();
+        vec![
+            ShellEffect::RecordScanRun(ScanRunRecord {
+                target: target.clone(),
+                run_id: run_id.clone(),
+                target_label,
+                outcome: ScanRunOutcome::Complete { findings_count },
+            }),
+            ShellEffect::RefreshFindings(FindingsRefresh {
+                announce: false,
+                filter: None,
+            }),
+            ShellEffect::HydrateSceneSnapshots(SceneSnapshotsHydration { target }),
+            ShellEffect::FinalizeScanCompletion(ScanCompletionFinalize {
+                run_id,
+                findings_count,
+            }),
+        ]
+    }
+
+    pub(crate) fn finalize_scan_completion_effect(&mut self, finalize: ScanCompletionFinalize) {
+        let run_id = finalize.run_id;
+        let findings_count = finalize.findings_count;
         self.update_workflow_phase_after_scan(findings_count);
         self.log_scan_alias_hint();
         self.log_scan_completion(&run_id, findings_count);
         self.log_scan_result(
             findings_count,
-            &crate::ui_view_models::ci_result_findings_summary(&self.findings, findings_count),
+            &crate::ui_view_models::ci_result_findings_summary(self.findings(), findings_count),
         );
         self.set_completed_activity(
             "sast:scan",
@@ -67,18 +90,18 @@ impl ShellApp {
     }
 
     fn maybe_switch_activity_deck_to_findings(&mut self) {
-        if !self.auto_open_viz {
+        if !self.ui().auto_open_viz() {
             return;
         }
-        if let Some(session) = self.activity.as_mut() {
-            if session.can_auto_switch_deck() {
-                session.set_deck_page(crate::ActivityDeckPage::Findings);
-            }
+        if self.activity().is_some() && self.router.activity().can_auto_switch_deck() {
+            self.router
+                .activity_mut()
+                .set_deck_page(crate::ActivityDeckPage::Findings);
         }
     }
 
     fn mark_scan_panel_completed(&mut self, run_id: &str, findings_count: usize) {
-        let Some(scan) = &mut self.scan else {
+        let Some(scan) = self.scan_mut() else {
             return;
         };
         scan.run_id = Some(run_id.to_string());
@@ -87,32 +110,28 @@ impl ShellApp {
         scan.running = false;
         scan.abort_requested = false;
         scan.error = None;
-        self.active_model_override = None;
+        self.set_active_model_override(None);
     }
 
     fn mark_scan_activity_run_id(&mut self, run_id: &str) {
-        let Some(session) = self.activity.as_mut() else {
+        let Some(session) = self.activity_mut() else {
             return;
         };
         session.run_id = run_id.to_string();
     }
 
     fn mark_scan_tasks_terminal(&mut self) {
-        let Some(session) = self.activity.as_mut() else {
+        let Some(session) = self.activity_mut() else {
             return;
         };
-        let now = std::time::Instant::now();
-        for row in session.tasks.values_mut() {
-            mark_scan_task_terminal(row, now);
-        }
+        session.mark_incomplete_tasks_after_success(ActivityTerminalContext::Scan);
     }
 
     /// Feed the ETA history with every task this scan completed, so the
     /// ambient chip can forecast the next run.
     fn record_scan_task_durations(&mut self) {
         let durations: Vec<(String, u64)> = self
-            .activity
-            .as_ref()
+            .activity()
             .map(completed_task_durations)
             .unwrap_or_default();
         for (task_id, secs) in durations {
@@ -132,43 +151,6 @@ impl ShellApp {
                 "✓ scan finished — {findings_count} {} · {}",
                 scan_finding_label(findings_count),
                 scan_completion_next_step(findings_count)
-            ),
-        );
-    }
-
-    fn record_scan_completion_artifacts(
-        &self,
-        run_id: &str,
-        findings_count: usize,
-        target_label: &str,
-    ) {
-        append_trace_step(
-            self.target.as_deref(),
-            run_id,
-            1_000,
-            "tool",
-            &format!(
-                "completed · {findings_count} {}",
-                scan_finding_label(findings_count)
-            ),
-            None,
-            None,
-        );
-        write_run_summary(
-            self.target.as_deref(),
-            run_id,
-            "complete",
-            Some(findings_count as u64),
-            target_label,
-        );
-        append_run_status_event(
-            self.target.as_deref(),
-            run_id,
-            "sast:scan",
-            "completed",
-            format!(
-                "sast:scan completed with {findings_count} {}",
-                scan_finding_label(findings_count)
             ),
         );
     }
@@ -194,6 +176,78 @@ impl ShellApp {
             format!("{verdict} ({findings_summary}) exit_hint={exit_hint}"),
         );
     }
+
+    pub(crate) fn record_scan_run_effect(&self, record: ScanRunRecord) {
+        match record.outcome {
+            ScanRunOutcome::Complete { findings_count } => record_scan_completion_artifacts(
+                record.target.as_deref(),
+                &record.run_id,
+                findings_count,
+                &record.target_label,
+            ),
+            ScanRunOutcome::Failed { error } => record_scan_failure_artifacts(
+                record.target.as_deref(),
+                &record.run_id,
+                &record.target_label,
+                &error,
+            ),
+        }
+    }
+}
+
+fn record_scan_completion_artifacts(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    findings_count: usize,
+    target_label: &str,
+) {
+    append_trace_step(
+        target,
+        run_id,
+        "tool",
+        &format!(
+            "completed · {findings_count} {}",
+            scan_finding_label(findings_count)
+        ),
+        None,
+        None,
+    );
+    write_run_summary(
+        target,
+        run_id,
+        "complete",
+        Some(findings_count as u64),
+        target_label,
+    );
+    append_run_status_event(
+        target,
+        run_id,
+        "sast:scan",
+        "completed",
+        format!(
+            "sast:scan completed with {findings_count} {}",
+            scan_finding_label(findings_count)
+        ),
+    );
+}
+
+fn record_scan_failure_artifacts(
+    target: Option<&std::path::Path>,
+    run_id: &str,
+    target_label: &str,
+    error: &str,
+) {
+    append_trace_step(
+        target,
+        run_id,
+        "refused",
+        &short_label(error, 80),
+        None,
+        None,
+    );
+    write_run_summary(target, run_id, "failed", None, target_label);
+    append_run_status_event(target, run_id, "sast:scan", "failed", "sast:scan failed");
+    write_run_failure_handoff(target, run_id, "sast:scan", "failed", error);
 }
 
 fn completed_task_durations(session: &crate::app::ActivitySession) -> Vec<(String, u64)> {
@@ -209,21 +263,6 @@ fn completed_task_durations(session: &crate::app::ActivitySession) -> Vec<(Strin
             ))
         })
         .collect()
-}
-
-fn mark_scan_task_terminal(row: &mut crate::app::DagTaskRow, now: std::time::Instant) {
-    match row.state {
-        crate::app::DagTaskState::Active => {
-            row.state = crate::app::DagTaskState::Done;
-            row.completed_at = Some(now);
-        }
-        crate::app::DagTaskState::Queued => {
-            row.state = crate::app::DagTaskState::Skipped;
-            row.completed_at = Some(now);
-            row.last_label = "not run in this scan".to_string();
-        }
-        _ => {}
-    }
 }
 
 fn scan_finding_label(count: usize) -> &'static str {

@@ -122,8 +122,7 @@ impl ThreatSummaryReview {
 }
 
 fn threat_model_root(app: &ShellApp) -> PathBuf {
-    app.target
-        .clone()
+    app.target_owned()
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."))
 }
@@ -318,7 +317,7 @@ mod tests {
         std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
         std::fs::write(artifact_path, "{not-json").unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let review = threat_summary_review(&app);
 
@@ -344,7 +343,7 @@ mod tests {
         std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
         std::fs::write(artifact_path, "[]").unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let review = threat_summary_review(&app);
 
@@ -366,7 +365,7 @@ mod tests {
         std::fs::create_dir_all(artifact_path.parent().unwrap()).unwrap();
         std::fs::create_dir(artifact_path).unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let review = threat_summary_review(&app);
 

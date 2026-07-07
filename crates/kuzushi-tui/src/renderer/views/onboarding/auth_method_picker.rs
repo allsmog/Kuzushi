@@ -5,6 +5,10 @@ pub(crate) fn auth_method_picker_lines(
     area: Rect,
     provider: &str,
 ) -> Vec<Line<'static>> {
+    if let Some(snapshot) = app.auth_screen_snapshot() {
+        return auth_snapshot_lines(snapshot.clone(), area.width as usize);
+    }
+
     let rows = auth_method_rows(provider);
     let mut lines: Vec<Line<'static>> = Vec::new();
     lines.push(divider("CHOOSE AUTH METHOD", area.width));
@@ -16,7 +20,7 @@ pub(crate) fn auth_method_picker_lines(
     for (idx, row) in rows.iter().enumerate() {
         lines.push(auth_row_line(app, idx, row, area.width));
     }
-    if app.auth_picker_route.is_api_key_row() {
+    if app.router.auth_picker().is_api_key_row() {
         lines.extend(api_key_draft_lines(app, provider, area.width));
     }
     lines.push(blank());
@@ -74,7 +78,7 @@ fn api_key_draft_lines(app: &ShellApp, provider: &str, width: u16) -> Vec<Line<'
         "anthropic" => "ANTHROPIC_API_KEY",
         _ => "OPENAI_API_KEY",
     };
-    let draft_chars = app.auth_picker_route.key_draft().chars().count();
+    let draft_chars = app.router.auth_picker().key_draft().chars().count();
     let draft = if draft_chars == 0 {
         "no key pasted yet".to_string()
     } else {
@@ -94,7 +98,7 @@ fn api_key_draft_lines(app: &ShellApp, provider: &str, width: u16) -> Vec<Line<'
 }
 
 fn auth_row_line(app: &ShellApp, idx: usize, row: &AuthMethodRow, width: u16) -> Line<'static> {
-    let marker = if idx == app.auth_picker_route.cursor() {
+    let marker = if idx == app.router.auth_picker().cursor() {
         ">"
     } else {
         " "
@@ -104,7 +108,7 @@ fn auth_row_line(app: &ShellApp, idx: usize, row: &AuthMethodRow, width: u16) ->
         label = row.label,
         hint = row.hint
     );
-    let style = if idx == app.auth_picker_route.cursor() {
+    let style = if idx == app.router.auth_picker().cursor() {
         theme::success().add_modifier(Modifier::BOLD)
     } else {
         theme::primary()

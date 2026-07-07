@@ -162,6 +162,69 @@ while :; do :; done
         assert!(error.contains("cancelled"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn query_bridge_cancellation_kills_bridge_process_group() {
+        let tmp = tempfile::tempdir().unwrap();
+        let started = tmp.path().join("started");
+        let survived = tmp.path().join("survived");
+        let bridge = tmp.path().join("bridge.sh");
+        std::fs::write(
+            &bridge,
+            format!(
+                r#"#!/bin/sh
+(sleep 1; printf survived > {survived}) &
+printf started > {started}
+while :; do sleep 1; done
+"#,
+                started = started.display(),
+                survived = survived.display()
+            ),
+        )
+        .unwrap();
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&bridge, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let runtime = RuntimeConfig {
+            kind: RuntimeKind::LangGraph,
+            api_key_env: "OPENAI_API_KEY".to_string(),
+            base_url: None,
+            thinking_level: None,
+            langgraph_bridge_command: Some(vec![bridge.to_string_lossy().into_owned()]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
+            anthropic_oauth: None,
+        };
+        let cancel = ScanCancellation::default();
+        let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".")
+            .unwrap()
+            .with_cancellation(cancel.clone());
+        let handle = std::thread::spawn(move || {
+            bridge
+                .query_blocking(AgentQueryRequest::new(
+                    "openai:gpt-5.5",
+                    ".",
+                    "sys",
+                    "prompt",
+                ))
+                .unwrap_err()
+                .to_string()
+        });
+
+        wait_for_file(&started, Duration::from_secs(2));
+        cancel.cancel();
+        let error = handle.join().unwrap();
+        std::thread::sleep(Duration::from_millis(1500));
+
+        assert!(error.contains("cancelled"));
+        assert!(
+            !survived.exists(),
+            "bridge grandchild survived cancellation and wrote {}",
+            survived.display()
+        );
+    }
+
     fn wait_for_file(path: &std::path::Path, timeout: Duration) {
         let deadline = Instant::now() + timeout;
         while !path.exists() {
@@ -406,6 +469,48 @@ fi
             .to_string();
         assert!(err.contains("next-step"));
         assert!(err.contains("no Anthropic credentials"));
+    }
+
+    #[test]
+    fn next_step_bridge_rejects_final_step_without_text() {
+        use kuzushi_core::{AgentTool, AgentToolLoopRequest};
+        let runtime = RuntimeConfig {
+            kind: RuntimeKind::LangGraph,
+            api_key_env: "ANTHROPIC_API_KEY".to_string(),
+            base_url: None,
+            thinking_level: None,
+            langgraph_bridge_command: Some(vec![
+                "sh".to_string(),
+                "-c".to_string(),
+                "printf '%s' '{\"ok\":true,\"step\":\"final\"}'".to_string(),
+            ]),
+            worker_watchdog_timeout_ms: Some(
+                kuzushi_core::config::DEFAULT_WORKER_WATCHDOG_TIMEOUT_MS,
+            ),
+            anthropic_oauth: None,
+        };
+        let bridge = LangGraphRuntime::from_runtime_config(&runtime, ".").unwrap();
+        let req = AgentToolLoopRequest {
+            model: "anthropic:claude-sonnet-4-6".to_string(),
+            cwd: ".".into(),
+            system_prompt: "sys".to_string(),
+            prompt: "p".to_string(),
+            tools: vec![AgentTool {
+                name: "x".to_string(),
+                description: "".to_string(),
+                input_schema: serde_json::json!({"type":"object"}),
+            }],
+            max_steps: 1,
+            runtime_options: None,
+            temperature: None,
+        };
+
+        let err = bridge
+            .next_step_blocking(&req, &[])
+            .unwrap_err()
+            .to_string();
+
+        assert!(err.contains("final step missing text"));
     }
 
     #[test]

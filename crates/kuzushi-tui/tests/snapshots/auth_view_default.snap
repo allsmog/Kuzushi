@@ -1,7 +1,7 @@
 ---
 view: auth
 ---
- KUZUSHI › auth · mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › auth · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
  -- BACKEND ------------------------------------------------------------------------------------------------------------
   x  LangGraph       missing    OPENAI_API_KEY=missing
@@ -16,7 +16,7 @@ view: auth
  reasoning xhigh
 
  -- SPEND · this session -----------------------------------------------------------------------------------------------
- session   $0.0000 · last tool —
+ session   $0.00 · last tool —
 
  -- ROTATE · clear & re-auth -------------------------------------------------------------------------------------------
  * unset env: `unset ANTHROPIC_API_KEY` (host shell) then re-launch kuzushi

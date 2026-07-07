@@ -1,70 +1,6 @@
-use super::panic_safe::worker_panic_message;
 use super::*;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
-
-#[test]
-fn spawn_panic_safe_worker_emits_stamped_failure_event() {
-    let generation = WorkerGeneration::new(7);
-    let (tx, rx) = std::sync::mpsc::channel();
-
-    let handle = spawn_panic_safe_worker(
-        "tool",
-        tx,
-        generation,
-        None,
-        || std::panic::resume_unwind(Box::new("boom")),
-        |error| ToolEvent::Failed {
-            tool_name: "semgrep:scan".to_string(),
-            error,
-        },
-    );
-
-    assert!(handle.join().is_ok());
-    let event = rx.recv_timeout(Duration::from_secs(1)).unwrap();
-    assert_eq!(event.generation, generation);
-    match event.payload {
-        ToolEvent::Failed { tool_name, error } => {
-            assert_eq!(tool_name, "semgrep:scan");
-            assert_eq!(error, "tool worker panicked: boom");
-        }
-        ToolEvent::Finished { .. } => panic!("expected failure event"),
-    }
-}
-
-#[test]
-fn spawn_panic_safe_worker_notifies_terminal_loop_after_failure() {
-    let generation = WorkerGeneration::new(8);
-    let (tx, rx) = std::sync::mpsc::channel();
-    let (inbox, wake) = TerminalLoopInbox::channel_for_test();
-
-    let handle = spawn_panic_safe_worker(
-        "agent",
-        tx,
-        generation,
-        Some(wake),
-        || std::panic::resume_unwind(Box::new("boom")),
-        |error| AgentEvent::Failed {
-            error,
-            audit: AgentCallAudit::for_prompt("openai:gpt-test", ASK_SYSTEM_PROMPT, "wake"),
-        },
-    );
-
-    assert!(handle.join().is_ok());
-    let event = rx.recv_timeout(Duration::from_secs(1)).unwrap();
-    assert_eq!(event.generation, generation);
-    assert!(matches!(event.payload, AgentEvent::Failed { .. }));
-    assert!(matches!(
-        inbox.recv_timeout(Duration::from_secs(1)).unwrap(),
-        Some(TerminalLoopEvent::Wake)
-    ));
-}
-
-#[test]
-fn panic_message_handles_non_string_payloads() {
-    let message = worker_panic_message("scan", Box::new(42usize));
-    assert_eq!(message, "scan worker panicked: non-string panic payload");
-}
 
 #[test]
 fn worker_handle_registry_reaps_finished_handles() {
@@ -140,14 +76,14 @@ fn worker_handle_registry_cancels_timed_out_handles_once() {
 #[test]
 fn app_drain_marks_timed_out_tool_abort_requested() {
     let (tx, rx) = mpsc::channel::<()>();
-    let cancel = ScanCancellation::default();
-    let generation = WorkerGeneration::new(10);
     let mut config = V2Config::default();
     config.runtime.worker_watchdog_timeout_ms = Some(5);
     let mut app = ShellApp::new(config, None);
-    app.tool_running = Some("semgrep:scan".to_string());
-    app.tool_generation = Some(generation);
-    app.tool_cancel = Some(cancel.clone());
+    let ticket = app.jobs.start(JobKind::Run, "semgrep:scan");
+    let generation = ticket.generation();
+    let cancel = ticket.cancel.clone();
+    app.set_running_tool_for_test("semgrep:scan");
+    app.set_tool_cancel_for_test(cancel.clone());
     app.register_worker_handle_with_watchdog(
         "tool",
         generation,
@@ -161,8 +97,8 @@ fn app_drain_marks_timed_out_tool_abort_requested() {
 
     assert!(app.drain_background_events());
     assert!(cancel.is_cancelled());
-    assert!(app.tool_abort_requested);
-    assert_eq!(app.worker_handles.active_count(), 1);
+    assert!(app.tool_abort_requested());
+    assert_eq!(app.worker_handle_active_count_for_test(), 1);
     drop(tx);
     assert!(wait_for_app_handle_reap(&mut app));
 }
@@ -173,7 +109,7 @@ fn app_drain_reaps_finished_worker_handles() {
     app.register_worker_handle("test", WorkerGeneration::new(9), std::thread::spawn(|| {}));
 
     assert!(wait_for_app_handle_reap(&mut app));
-    assert_eq!(app.worker_handles.active_count(), 0);
+    assert_eq!(app.worker_handle_active_count_for_test(), 0);
 }
 
 fn wait_for_finished_handles(registry: &mut WorkerHandleRegistry) -> Vec<FinishedWorkerHandle> {

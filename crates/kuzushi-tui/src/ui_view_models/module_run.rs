@@ -6,6 +6,7 @@ pub(crate) struct ModuleRunSummary {
     pub(crate) target: String,
     pub(crate) stage: String,
     pub(crate) findings: usize,
+    pub(crate) findings_label: String,
     pub(crate) run: String,
     pub(crate) active_stage: String,
     pub(crate) status: ModuleRunStatusKind,
@@ -40,7 +41,7 @@ pub(crate) enum ModuleRunStatusKind {
 }
 
 pub(crate) fn module_run_summary(app: &ShellApp) -> ModuleRunSummary {
-    let scan = app.scan.as_ref();
+    let scan = app.scan();
     let running_tool = app.running_tool_name().map(str::to_string);
     let scan_running = scan.is_some_and(|scan| scan.running);
 
@@ -48,10 +49,11 @@ pub(crate) fn module_run_summary(app: &ShellApp) -> ModuleRunSummary {
         target: module_run_target(app, scan),
         stage: module_run_stage(app, scan, running_tool.as_ref()),
         findings: module_run_findings(app, scan),
+        findings_label: module_run_findings_label(app, scan, running_tool.as_ref()),
         run: module_run_label(scan, running_tool.as_deref()),
         active_stage: module_run_active_stage(scan),
         status: module_run_status(scan, running_tool.as_deref()),
-        spinner_phase: app.spinner_phase as usize,
+        spinner_phase: app.ui().spinner_phase() as usize,
         scan_running,
         scan_done: module_run_done(scan, scan_running),
         has_scan: scan.is_some(),
@@ -61,7 +63,10 @@ pub(crate) fn module_run_summary(app: &ShellApp) -> ModuleRunSummary {
 }
 
 pub(crate) fn module_run_live_activity(app: &ShellApp) -> Option<ModuleRunLiveActivity> {
-    let activity = app.live_activity.as_ref()?;
+    let activity = app.live_activity()?;
+    if !activity.phase.active() {
+        return None;
+    }
     Some(ModuleRunLiveActivity {
         phase_label: activity.phase.label(),
         subject: activity.subject.clone(),
@@ -72,8 +77,7 @@ pub(crate) fn module_run_live_activity(app: &ShellApp) -> Option<ModuleRunLiveAc
 fn module_run_target(app: &ShellApp, scan: Option<&ScanPanelState>) -> String {
     scan.map(|scan| compact_target_path(&scan.target.display().to_string()))
         .or_else(|| {
-            app.target
-                .as_ref()
+            app.target()
                 .map(|path| compact_target_path(&path.display().to_string()))
         })
         .unwrap_or_else(|| "target:none".to_string())
@@ -86,8 +90,7 @@ fn module_run_stage(
 ) -> String {
     scan.map(scan_status)
         .or_else(|| {
-            app.live_activity
-                .as_ref()
+            app.live_activity()
                 .map(|activity| activity.phase.label().to_string())
         })
         .or_else(|| running_tool.map(|_| "running tool".to_string()))
@@ -96,7 +99,33 @@ fn module_run_stage(
 
 fn module_run_findings(app: &ShellApp, scan: Option<&ScanPanelState>) -> usize {
     scan.map(|scan| scan.findings_count)
-        .unwrap_or(app.findings.len())
+        .unwrap_or(app.findings_total_count())
+}
+
+fn module_run_findings_label(
+    app: &ShellApp,
+    scan: Option<&ScanPanelState>,
+    running_tool: Option<&String>,
+) -> String {
+    if scan.is_some_and(|scan| scan.running) {
+        return "findings pending".to_string();
+    }
+    if running_tool.is_some() && scan.is_none() {
+        return "findings unknown".to_string();
+    }
+    let count = module_run_findings(app, scan);
+    if scan.is_none() && app.findings_are_partial() {
+        return format!("{} of {count} findings loaded", app.findings().len());
+    }
+    format!("{} {}", count, module_run_finding_noun(count))
+}
+
+fn module_run_finding_noun(count: usize) -> &'static str {
+    if count == 1 {
+        "finding"
+    } else {
+        "findings"
+    }
 }
 
 fn module_run_label(scan: Option<&ScanPanelState>, running_tool: Option<&str>) -> String {
@@ -158,6 +187,7 @@ mod tests {
         assert_eq!(summary.target, "target:none");
         assert_eq!(summary.stage, "idle");
         assert_eq!(summary.findings, 0);
+        assert_eq!(summary.findings_label, "0 findings");
         assert_eq!(summary.run, "tool run");
         assert_eq!(summary.status, ModuleRunStatusKind::Idle);
         assert!(!summary.has_scan);
@@ -167,7 +197,7 @@ mod tests {
     #[test]
     fn module_run_summary_prefers_scan_state() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.scan = Some(ScanPanelState {
+        app.set_scan_panel(Some(ScanPanelState {
             run_id: Some("run-abcdef123".to_string()),
             target: PathBuf::from("./demo"),
             stage: "scanning".to_string(),
@@ -175,8 +205,8 @@ mod tests {
             running: true,
             abort_requested: false,
             error: None,
-        });
-        app.findings = vec![Finding::new_semgrep(
+        }));
+        *app.findings_mut() = vec![Finding::new_semgrep(
             "demo.rule",
             "src/app.rs",
             1,
@@ -190,6 +220,7 @@ mod tests {
         assert_eq!(summary.target, "./demo");
         assert_eq!(summary.stage, "running: scanning");
         assert_eq!(summary.findings, 3);
+        assert_eq!(summary.findings_label, "findings pending");
         assert_eq!(summary.run, "run run-abcd");
         assert_eq!(summary.status, ModuleRunStatusKind::Running);
         assert!(summary.scan_running);
@@ -197,9 +228,29 @@ mod tests {
     }
 
     #[test]
+    fn module_run_summary_does_not_use_workspace_count_for_running_tool() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.set_running_tool_for_test("triage:run");
+        *app.findings_mut() = vec![Finding::new_semgrep(
+            "demo.rule",
+            "src/app.rs",
+            1,
+            None,
+            Severity::High,
+            "stored finding",
+        )];
+
+        let summary = module_run_summary(&app);
+
+        assert_eq!(summary.findings, 1);
+        assert_eq!(summary.findings_label, "findings unknown");
+        assert_eq!(summary.status, ModuleRunStatusKind::Running);
+    }
+
+    #[test]
     fn module_run_summary_reports_abort_and_failed_status() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.scan = Some(ScanPanelState {
+        app.set_scan_panel(Some(ScanPanelState {
             run_id: None,
             target: PathBuf::from("./demo"),
             stage: "scanning".to_string(),
@@ -207,14 +258,14 @@ mod tests {
             running: true,
             abort_requested: true,
             error: None,
-        });
+        }));
 
         assert_eq!(
             module_run_summary(&app).status,
             ModuleRunStatusKind::Aborting
         );
 
-        if let Some(scan) = &mut app.scan {
+        if let Some(scan) = app.scan_mut() {
             scan.running = false;
             scan.abort_requested = false;
             scan.error = Some("boom".to_string());
@@ -226,11 +277,11 @@ mod tests {
     #[test]
     fn module_run_live_activity_projects_display_row() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.live_activity = Some(LiveActivity::new(
+        app.set_live_activity_state(Some(LiveActivity::new(
             LiveActivityPhase::Thinking,
             "triage:run",
             "reviewing persisted findings",
-        ));
+        )));
 
         let model = module_run_live_activity(&app).expect("activity row");
 

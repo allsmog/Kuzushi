@@ -101,6 +101,15 @@ pub struct OptionsView {
     pub filter: OptionsFilter,
 }
 
+impl Default for OptionsView {
+    fn default() -> Self {
+        Self {
+            tool_name: String::new(),
+            filter: OptionsFilter::Standard,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OptionsFilter {
     Standard,

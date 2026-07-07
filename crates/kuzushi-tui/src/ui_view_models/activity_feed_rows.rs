@@ -1,6 +1,6 @@
 use super::activity_feed_pause::activity_feed_pause_model;
 use super::activity_feed_placeholder::activity_feed_placeholder_model;
-use crate::{ActivitySession, DagTaskState, RecordedTraceEvent};
+use crate::{ActivityRouteState, ActivitySession, DagTaskState, RecordedTraceEvent};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const STALLED_TRACE_AFTER_SECS: u64 = 30;
@@ -24,21 +24,39 @@ pub(crate) struct ActivityFeedPaneRow {
 
 pub(crate) fn activity_feed_pane_rows(
     session: &ActivitySession,
+    route: &ActivityRouteState,
     width: usize,
     running_tool: Option<&str>,
     now: Instant,
 ) -> Vec<ActivityFeedPaneRow> {
-    let visible_events = session
-        .paused_event_count
-        .map(|count| count.min(session.events.len()))
-        .unwrap_or(session.events.len());
     let mut rows = session
         .events
         .iter()
-        .take(visible_events)
-        .flat_map(|event| feed_event_rows(event, session.verbose_subsystems, width))
+        .take(visible_event_count(session, route))
+        .flat_map(|event| feed_event_rows(event, route.verbose_subsystems, width))
         .collect::<Vec<_>>();
-    if let Some(model) = activity_feed_pause_model(session) {
+    append_feed_status_rows(&mut rows, session, route, running_tool);
+    if let Some(row) = stalled_trace_row(session, route, width, running_tool, now) {
+        rows.push(row);
+    }
+    rows
+}
+
+fn visible_event_count(session: &ActivitySession, route: &ActivityRouteState) -> usize {
+    let visible_events = session.events.len();
+    route
+        .paused_event_count
+        .map(|count| count.min(visible_events))
+        .unwrap_or(visible_events)
+}
+
+fn append_feed_status_rows(
+    rows: &mut Vec<ActivityFeedPaneRow>,
+    session: &ActivitySession,
+    route: &ActivityRouteState,
+    running_tool: Option<&str>,
+) {
+    if let Some(model) = activity_feed_pause_model(route) {
         rows.insert(
             0,
             ActivityFeedPaneRow {
@@ -49,26 +67,23 @@ pub(crate) fn activity_feed_pane_rows(
     }
     if let (true, Some(model)) = (
         rows.is_empty(),
-        activity_feed_placeholder_model(session, running_tool),
+        activity_feed_placeholder_model(session, route, running_tool),
     ) {
         rows.push(ActivityFeedPaneRow {
             text: model.text,
             tone: ActivityFeedRowTone::Muted,
         });
     }
-    if let Some(row) = stalled_trace_row(session, width, running_tool, now) {
-        rows.push(row);
-    }
-    rows
 }
 
 fn stalled_trace_row(
     session: &ActivitySession,
+    route: &ActivityRouteState,
     width: usize,
     running_tool: Option<&str>,
     now: Instant,
 ) -> Option<ActivityFeedPaneRow> {
-    if session.paused || !activity_is_live(session, running_tool) {
+    if route.paused || !activity_is_live(session, running_tool) {
         return None;
     }
     let (elapsed, source) = trace_silence_elapsed(session, now)?;
@@ -258,19 +273,20 @@ mod tests {
     #[test]
     fn activity_feed_pane_rows_filters_hidden_events_until_verbose() {
         let mut session = ActivitySession::new("r-1");
+        let mut route = ActivityRouteState::default();
         session.apply_step(
             RunTraceStep::new(1, "reasoning", "index")
                 .with_module_id("pipeline")
                 .with_started_at_ms(3_661_000),
         );
 
-        let rows = activity_feed_pane_rows(&session, 80, None, Instant::now());
+        let rows = activity_feed_pane_rows(&session, &route, 80, None, Instant::now());
         assert_eq!(rows.len(), 1);
         assert!(rows[0].text.contains("hidden subsystem event"));
         assert_eq!(rows[0].tone, ActivityFeedRowTone::Muted);
 
-        session.verbose_subsystems = true;
-        let rows = activity_feed_pane_rows(&session, 80, None, Instant::now());
+        route.verbose_subsystems = true;
+        let rows = activity_feed_pane_rows(&session, &route, 80, None, Instant::now());
         assert_eq!(rows.len(), 1);
         assert!(rows[0].text.contains("[pipeline]"));
         assert_eq!(rows[0].tone, ActivityFeedRowTone::Muted);
@@ -279,7 +295,8 @@ mod tests {
     #[test]
     fn activity_feed_pane_rows_adds_pause_before_events() {
         let mut session = ActivitySession::new("r-1");
-        session.paused = true;
+        let mut route = ActivityRouteState::default();
+        route.paused = true;
         session.apply_step(
             RunTraceStep::new(1, "done", "complete")
                 .with_module_id("semgrep")
@@ -287,7 +304,7 @@ mod tests {
                 .with_started_at_ms(42_000),
         );
 
-        let rows = activity_feed_pane_rows(&session, 80, None, Instant::now());
+        let rows = activity_feed_pane_rows(&session, &route, 80, None, Instant::now());
 
         assert_eq!(rows[0].tone, ActivityFeedRowTone::Warn);
         assert!(rows[0].text.contains("paused"));
@@ -299,13 +316,14 @@ mod tests {
     fn activity_feed_pane_rows_warns_when_live_trace_output_stalls() {
         let now = Instant::now();
         let mut session = ActivitySession::new("r-1");
+        let route = ActivityRouteState::default();
         session.started_at = now - Duration::from_secs(60);
         session.events.push_back(RecordedTraceEvent {
             step: RunTraceStep::new(1, "reasoning", "started").with_module_id("triage"),
             observed_at: now - Duration::from_secs(45),
         });
 
-        let rows = activity_feed_pane_rows(&session, 80, Some("triage:run"), now);
+        let rows = activity_feed_pane_rows(&session, &route, 80, Some("triage:run"), now);
 
         let stalled = rows
             .iter()
@@ -319,9 +337,10 @@ mod tests {
     fn activity_feed_pane_rows_warns_when_live_run_never_emits_trace() {
         let now = Instant::now();
         let mut session = ActivitySession::new("r-1");
+        let route = ActivityRouteState::default();
         session.started_at = now - Duration::from_secs(31);
 
-        let rows = activity_feed_pane_rows(&session, 80, Some("threat-model:build"), now);
+        let rows = activity_feed_pane_rows(&session, &route, 80, Some("threat-model:build"), now);
 
         assert!(rows
             .iter()
@@ -335,15 +354,16 @@ mod tests {
     fn activity_feed_pane_rows_does_not_warn_for_idle_or_paused_sessions() {
         let now = Instant::now();
         let mut session = ActivitySession::new("r-1");
+        let mut route = ActivityRouteState::default();
         session.started_at = now - Duration::from_secs(90);
 
-        let idle_rows = activity_feed_pane_rows(&session, 80, None, now);
+        let idle_rows = activity_feed_pane_rows(&session, &route, 80, None, now);
         assert!(!idle_rows
             .iter()
             .any(|row| row.text.contains("no trace output")));
 
-        session.paused = true;
-        let paused_rows = activity_feed_pane_rows(&session, 80, Some("sast:scan"), now);
+        route.paused = true;
+        let paused_rows = activity_feed_pane_rows(&session, &route, 80, Some("sast:scan"), now);
         assert!(!paused_rows
             .iter()
             .any(|row| row.text.contains("no trace output")));

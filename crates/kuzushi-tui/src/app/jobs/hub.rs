@@ -1,6 +1,8 @@
 use super::*;
 use std::collections::BTreeMap;
-use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError};
+
+pub(super) const JOB_EVENT_CHANNEL_CAPACITY: usize = 4096;
 
 #[derive(Debug)]
 pub(super) struct StampedShellEvent {
@@ -10,9 +12,15 @@ pub(super) struct StampedShellEvent {
 }
 
 #[derive(Debug)]
+pub(crate) enum JobDrainResult {
+    Event(ShellEvent),
+    Stale,
+    Empty,
+}
+
+#[derive(Debug)]
 struct JobSlot {
     generation: WorkerGeneration,
-    #[cfg(test)]
     cancel: ScanCancellation,
     #[cfg(test)]
     label: String,
@@ -22,7 +30,7 @@ struct JobSlot {
 
 #[derive(Debug)]
 pub(crate) struct JobHub {
-    tx: Sender<StampedShellEvent>,
+    tx: SyncSender<StampedShellEvent>,
     rx: Receiver<StampedShellEvent>,
     next_generation: u64,
     slots: BTreeMap<JobKind, JobSlot>,
@@ -32,7 +40,7 @@ pub(crate) struct JobHub {
 
 impl Default for JobHub {
     fn default() -> Self {
-        let (tx, rx) = mpsc::channel();
+        let (tx, rx) = mpsc::sync_channel(JOB_EVENT_CHANNEL_CAPACITY);
         Self {
             tx,
             rx,
@@ -57,7 +65,6 @@ impl JobHub {
             kind,
             JobSlot {
                 generation,
-                #[cfg(test)]
                 cancel: cancel.clone(),
                 #[cfg(test)]
                 label: label.clone(),
@@ -91,12 +98,14 @@ impl JobHub {
             .is_some_and(|slot| slot.cancel_requested)
     }
 
-    #[cfg(test)]
     pub(crate) fn cancel(&mut self, kind: JobKind) -> bool {
         let Some(slot) = self.slots.get_mut(&kind) else {
             return false;
         };
-        slot.cancel_requested = true;
+        #[cfg(test)]
+        {
+            slot.cancel_requested = true;
+        }
         slot.cancel.cancel();
         true
     }
@@ -109,29 +118,37 @@ impl JobHub {
         self.trace_budget.clone()
     }
 
+    #[cfg(test)]
     pub(crate) fn drain(&mut self, limit: usize) -> Vec<ShellEvent> {
         let mut events = Vec::with_capacity(limit);
-        let mut received = 0;
-        while received < limit {
-            match self.rx.try_recv() {
-                Ok(stamped) => {
-                    received += 1;
-                    self.push_current_event(stamped, &mut events);
-                }
-                Err(TryRecvError::Empty | TryRecvError::Disconnected) => break,
+        for _ in 0..limit {
+            match self.drain_one() {
+                JobDrainResult::Event(event) => events.push(event),
+                JobDrainResult::Stale => {}
+                JobDrainResult::Empty => break,
             }
         }
         events
     }
 
-    fn push_current_event(&mut self, stamped: StampedShellEvent, events: &mut Vec<ShellEvent>) {
+    pub(crate) fn drain_one(&mut self) -> JobDrainResult {
+        let stamped = match self.rx.try_recv() {
+            Ok(stamped) => stamped,
+            Err(TryRecvError::Empty | TryRecvError::Disconnected) => return JobDrainResult::Empty,
+        };
         self.release_trace_slot(&stamped.event);
         if self.is_current_generation(stamped.kind, stamped.generation) {
-            events.push(stamped.event);
+            JobDrainResult::Event(stamped.event)
+        } else {
+            JobDrainResult::Stale
         }
     }
 
-    fn is_current_generation(&self, kind: JobKind, generation: WorkerGeneration) -> bool {
+    pub(crate) fn is_current_generation(
+        &self,
+        kind: JobKind,
+        generation: WorkerGeneration,
+    ) -> bool {
         self.slots
             .get(&kind)
             .is_some_and(|slot| slot.generation == generation)

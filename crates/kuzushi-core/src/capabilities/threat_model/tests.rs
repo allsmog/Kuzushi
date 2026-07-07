@@ -26,6 +26,30 @@ mod tests {
     }
 
     #[test]
+    fn parse_threats_marks_missing_risk_fields_unknown() {
+        let s4 = json!({
+            "threats": [{
+                "id": "T-001",
+                "title": "Missing risk fields",
+                "stride_category": "spoofing"
+            }]
+        });
+
+        let threats = parse_threats(s4.as_object().unwrap());
+
+        assert_eq!(threats[0]["impact"], json!("unknown"));
+        assert_eq!(threats[0]["likelihood"], json!("unknown"));
+        assert_eq!(threats[0]["probability"], Value::Null);
+        assert_eq!(
+            threats[0]["normalizationWarnings"],
+            json!([
+                "missing impact; using unknown",
+                "missing probability; using unknown likelihood"
+            ])
+        );
+    }
+
+    #[test]
     fn parse_narrative_normalizes_aliases_and_skips_empty_documents() {
         assert!(parse_narrative(&json!({})).is_none());
 

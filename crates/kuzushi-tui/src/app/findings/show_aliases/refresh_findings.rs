@@ -11,8 +11,11 @@ impl ShellApp {
             }
         };
 
-        match store.list_findings(200) {
-            Ok(findings) => self.replace_findings_from_store(&store, findings, announce),
+        let filter = FindingListFilter::with_limit(FindingListFilter::MAX_LIMIT);
+        match store.list_findings_filtered(&filter) {
+            Ok(report) => {
+                self.replace_findings_from_store(&store, report.findings, report.count, announce)
+            }
             Err(error) => self.log_refresh_findings_error(error.into(), announce),
         }
     }
@@ -59,7 +62,7 @@ impl ShellApp {
         if !filter.has_provenance_filter() {
             return Ok((findings, count));
         }
-        let Some(target) = self.target.as_ref() else {
+        let Some(target) = self.target_path_buf() else {
             anyhow::bail!("revision filters require an active target");
         };
         let runs = kuzushi_core::list_run_summaries(target)?
@@ -78,10 +81,11 @@ impl ShellApp {
         &mut self,
         store: &FindingStore,
         findings: Vec<Finding>,
+        total_count: usize,
         announce: bool,
     ) {
         let decisions = self.load_review_decisions_for_findings(store, &findings);
-        self.replace_findings(findings, decisions, announce);
+        self.replace_findings(findings, decisions, announce, total_count);
     }
 
     fn replace_findings(
@@ -89,22 +93,17 @@ impl ShellApp {
         findings: Vec<Finding>,
         review_decisions: Vec<kuzushi_core::findings::ReviewDecisionRecord>,
         announce: bool,
+        total_count: usize,
     ) {
-        self.findings = findings;
-        self.review_decisions = review_decisions;
-        self.active_findings_filter = None;
+        self.set_findings(findings);
+        self.set_findings_total_count(total_count);
+        self.set_review_decisions(review_decisions);
+        self.set_active_findings_filter(None);
         self.reselect_current_finding();
         self.sync_findings_cursor_to_selected();
         if announce {
-            let count = self.findings.len();
-            self.log(
-                "findings",
-                format!(
-                    "loaded {} {}",
-                    count,
-                    if count == 1 { "finding" } else { "findings" }
-                ),
-            );
+            let count = self.findings().len();
+            self.log("findings", findings_loaded_message(count, total_count));
         }
     }
 
@@ -116,13 +115,13 @@ impl ShellApp {
         count: usize,
     ) {
         let decisions = self.load_review_decisions_for_findings(store, &findings);
-        self.replace_findings(findings, decisions, false);
-        self.active_findings_filter = Some(expression.to_string());
+        self.replace_findings(findings, decisions, false, count);
+        self.set_active_findings_filter(Some(expression.to_string()));
         self.log(
             "findings",
             format!(
                 "filter {expression:?}: loaded {} of {count} matching",
-                self.findings.len()
+                self.findings().len()
             ),
         );
     }
@@ -148,14 +147,19 @@ impl ShellApp {
     }
 
     fn reselect_current_finding(&mut self) {
-        let Some(selected) = &self.selected_finding else {
+        let Some(selected_fingerprint) = self
+            .selected_finding()
+            .as_ref()
+            .map(|finding| finding.fingerprint.clone())
+        else {
             return;
         };
-        self.selected_finding = self
-            .findings
+        let selected = self
+            .findings()
             .iter()
-            .find(|finding| finding.fingerprint == selected.fingerprint)
+            .find(|finding| finding.fingerprint == selected_fingerprint)
             .cloned();
+        self.set_selected_finding(selected);
         self.sync_findings_cursor_to_selected();
     }
 
@@ -166,6 +170,15 @@ impl ShellApp {
                 with_next_step(error.to_string(), "scan <target> or workspace status"),
             );
         }
+    }
+}
+
+fn findings_loaded_message(loaded: usize, total: usize) -> String {
+    let noun = if total == 1 { "finding" } else { "findings" };
+    if loaded == total {
+        format!("loaded {total} {noun}")
+    } else {
+        format!("loaded {loaded} of {total} {noun}")
     }
 }
 

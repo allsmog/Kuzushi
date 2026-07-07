@@ -4,7 +4,7 @@ use kuzushi_core::{ReconHost, V2Config};
 #[test]
 fn recent_module_activity_model_prefers_recon_snapshot() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.recon_snapshot = Some(recon_snapshot());
+    app.domain_mut().set_recon_snapshot(recon_snapshot());
     app.log("result", "recon:nmap stale fallback line");
 
     let model = recent_module_activity_model(&app, "recon", 8);

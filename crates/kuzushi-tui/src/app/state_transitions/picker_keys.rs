@@ -11,35 +11,51 @@ impl ShellApp {
         matches!(
             self.shell_view,
             ShellView::ModelPicker
-                | ShellView::AuthMethodPicker(_)
+                | ShellView::AuthMethodPicker
                 | ShellView::PlanningPicker
                 | ShellView::TargetPicker
                 | ShellView::FilePicker
         )
     }
 
-    pub(super) fn handle_picker_key(&mut self, key: KeyEvent) -> bool {
+    pub(super) fn handle_picker_key(&mut self, key: KeyEvent) -> InputUpdate {
         if !self.picker_should_capture_key(key) {
-            return false;
+            return InputUpdate::ignored();
         }
         self.handle_captured_picker_key(key)
     }
 
-    fn handle_captured_picker_key(&mut self, key: KeyEvent) -> bool {
+    fn handle_captured_picker_key(&mut self, key: KeyEvent) -> InputUpdate {
+        if let Some(update) = self.handle_picker_capture_override(key) {
+            return update;
+        }
+        self.handle_picker_control_or_swallow(key)
+    }
+
+    fn handle_picker_capture_override(&mut self, key: KeyEvent) -> Option<InputUpdate> {
         if matches!(self.shell_view, ShellView::FilePicker) {
-            return self.handle_file_picker_key(key);
+            return Some(self.handle_file_picker_key(key));
         }
         if self.picker_prompt_focused() {
-            return self.handle_picker_prompt_focus_key(key);
+            return Some(InputUpdate::handled_if(
+                self.handle_picker_prompt_focus_key(key),
+            ));
         }
         if self.enter_picker_prompt_if_requested(key) {
-            return true;
+            return Some(InputUpdate::handled());
         }
-        self.dispatch_picker_control_key(key);
+        None
+    }
+
+    fn handle_picker_control_or_swallow(&mut self, key: KeyEvent) -> InputUpdate {
+        let update = self.dispatch_picker_control_key(key);
+        if update.handled {
+            return update;
+        }
         // Treat a picker as a true modal: swallow every other non-Ctrl/Alt
         // keystroke so stray input cannot divert later navigation into the
         // prompt and make the picker feel frozen.
-        true
+        InputUpdate::handled()
     }
 
     fn enter_picker_prompt_if_requested(&mut self, key: KeyEvent) -> bool {
@@ -54,25 +70,15 @@ impl ShellApp {
         self.is_picker_view() && !picker_shell_chord(key.modifiers)
     }
 
-    fn dispatch_picker_control_key(&mut self, key: KeyEvent) {
+    fn dispatch_picker_control_key(&mut self, key: KeyEvent) -> InputUpdate {
         match &self.shell_view {
-            ShellView::ModelPicker => {
-                self.handle_model_picker_key(key.code);
-            }
-            ShellView::AuthMethodPicker(_) => {
-                self.handle_auth_picker_key(key.code);
-            }
-            ShellView::PlanningPicker => {
-                self.handle_planning_picker_key(key);
-            }
-            ShellView::TargetPicker => {
-                self.handle_target_picker_key(key.code);
-            }
-            ShellView::FilePicker => {
-                self.handle_file_picker_key(key);
-            }
-            _ => {}
-        };
+            ShellView::ModelPicker => self.handle_model_picker_key(key.code),
+            ShellView::AuthMethodPicker => self.handle_auth_picker_key(key.code),
+            ShellView::PlanningPicker => self.handle_planning_picker_key(key),
+            ShellView::TargetPicker => self.handle_target_picker_key(key.code),
+            ShellView::FilePicker => self.handle_file_picker_key(key),
+            _ => InputUpdate::ignored(),
+        }
     }
 
     pub(crate) fn picker_prompt_focused(&self) -> bool {
@@ -101,19 +107,15 @@ impl ShellApp {
 
     fn leave_picker_prompt_focus(&mut self) {
         self.reset_completion_cycle();
-        if !self.input.is_empty() {
-            self.last_cleared_input = Some(std::mem::take(&mut self.input));
-            self.cursor = 0;
-            self.history_index = None;
-        }
+        self.editor_mut().stash_and_clear_input();
         self.set_current_picker_focus(PickerFocus::List);
     }
 
     fn current_picker_focus(&self) -> PickerFocus {
         match self.shell_view {
-            ShellView::ModelPicker => self.model_picker_route.focus(),
-            ShellView::AuthMethodPicker(_) => self.auth_picker_route.focus(),
-            ShellView::TargetPicker => self.target_picker_route.focus(),
+            ShellView::ModelPicker => self.router.model_picker().focus(),
+            ShellView::AuthMethodPicker => self.router.auth_picker().focus(),
+            ShellView::TargetPicker => self.router.target_picker().focus(),
             ShellView::PlanningPicker => self.engagement.planning_picker().focus(),
             _ => PickerFocus::List,
         }
@@ -121,54 +123,56 @@ impl ShellApp {
 
     fn set_current_picker_focus(&mut self, focus: PickerFocus) {
         match self.shell_view {
-            ShellView::ModelPicker => self.model_picker_route.set_focus(focus),
-            ShellView::AuthMethodPicker(_) => self.auth_picker_route.set_focus(focus),
-            ShellView::TargetPicker => self.target_picker_route.set_focus(focus),
+            ShellView::ModelPicker => self.router.model_picker_mut().set_focus(focus),
+            ShellView::AuthMethodPicker => self.router.auth_picker_mut().set_focus(focus),
+            ShellView::TargetPicker => self.router.target_picker_mut().set_focus(focus),
             ShellView::PlanningPicker => self.engagement.planning_picker_mut().set_focus(focus),
             _ => {}
         }
     }
 
-    fn handle_model_picker_key(&mut self, code: KeyCode) -> bool {
+    fn handle_model_picker_key(&mut self, code: KeyCode) -> InputUpdate {
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.move_model_picker_cursor(-1);
-                true
+                InputUpdate::handled()
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 self.move_model_picker_cursor(1);
-                true
+                InputUpdate::handled()
             }
-            KeyCode::Enter => {
-                self.accept_model_picker_choice();
-                true
-            }
-            KeyCode::Char('d') => {
-                self.start_offline_demo_fixture_scan();
-                true
-            }
+            KeyCode::Enter => InputUpdate::handled_with_effects(self.accept_model_picker_choice()),
+            KeyCode::Char('d') => self.reduce_picker_command(ShellCommand::Demo),
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.defer_model_picker();
-                true
+                InputUpdate::handled()
             }
-            _ => false,
+            _ => InputUpdate::ignored(),
+        }
+    }
+
+    fn reduce_picker_command(&mut self, command: ShellCommand) -> InputUpdate {
+        let update = self.reduce_command_message(command);
+        if update.handled {
+            InputUpdate::handled_with_effects(update.effects)
+        } else {
+            InputUpdate::ignored()
         }
     }
 
     fn move_model_picker_cursor(&mut self, delta: isize) {
-        let len = visible_model_choices(self.config.model.as_deref()).len();
-        self.model_picker_route.move_cursor(delta, len);
+        let len = visible_model_choices(self.config().model.as_deref()).len();
+        self.router.model_picker_mut().move_cursor(delta, len);
     }
 
-    fn accept_model_picker_choice(&mut self) {
-        let choices = visible_model_choices(self.config.model.as_deref());
-        let Some(choice) = choices.get(self.model_picker_route.cursor()).copied() else {
+    fn accept_model_picker_choice(&mut self) -> Vec<ShellEffect> {
+        let choices = visible_model_choices(self.config().model.as_deref());
+        let Some(choice) = choices.get(self.router.model_picker().cursor()).copied() else {
             self.log("error", "no model choices available");
-            return;
+            return Vec::new();
         };
-        self.config.model = Some(choice.id.to_string());
-        self.session_thinking_level = Some(choice.thinking_level.to_string());
-        self.persist_global_model_choice(choice.id, Some(choice.thinking_level));
+        self.config_mut().model = Some(choice.id.to_string());
+        self.set_session_thinking_level(Some(choice.thinking_level.to_string()));
         self.log(
             "model",
             format!(
@@ -177,6 +181,10 @@ impl ShellApp {
             ),
         );
         self.transition_after_model_choice(choice.provider);
+        vec![crate::app::global_model_selection_persist_effect(
+            choice.id,
+            Some(choice.thinking_level),
+        )]
     }
 
     fn transition_after_model_choice(&mut self, provider: &'static str) {
@@ -195,68 +203,40 @@ impl ShellApp {
         self.open_fresh_planner_or_workbench();
     }
 
-    fn handle_target_picker_key(&mut self, code: KeyCode) -> bool {
+    fn handle_target_picker_key(&mut self, code: KeyCode) -> InputUpdate {
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.move_target_picker_cursor(-1);
-                true
+                InputUpdate::handled()
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 self.move_target_picker_cursor(1);
-                true
+                InputUpdate::handled()
             }
-            KeyCode::Enter => {
-                self.accept_target_picker_choice();
-                true
-            }
-            KeyCode::Char('d') => {
-                self.start_offline_demo_fixture_scan();
-                true
-            }
+            KeyCode::Enter => InputUpdate::handled_with_effects(self.accept_target_picker_choice()),
+            KeyCode::Char('d') => self.reduce_picker_command(ShellCommand::Demo),
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.defer_target_picker();
-                true
+                InputUpdate::handled()
             }
-            _ => false,
+            _ => InputUpdate::ignored(),
         }
     }
 
     fn move_target_picker_cursor(&mut self, delta: isize) {
-        self.target_picker_route.move_cursor(delta);
+        self.router.target_picker_mut().move_cursor(delta);
     }
 
-    fn accept_target_picker_choice(&mut self) {
-        let Some(candidate) = self.target_picker_route.selected().cloned() else {
+    fn accept_target_picker_choice(&mut self) -> Vec<ShellEffect> {
+        let Some(candidate) = self.router.target_picker().selected().cloned() else {
             self.log("error", "no target candidates available");
-            return;
+            return Vec::new();
         };
-        let path = candidate.path.display().to_string();
-        let selected_scope = candidate.scope;
-        // Same wiring as the `target <path>` verb: workspace root, state
-        // dir, findings, and program scope all refresh together.
-        self.handle_target_command(Some(&path));
-        if self.target.is_none() {
-            // Invalid pick (already logged) — stay in the picker.
-            return;
-        }
-        if let Some(scope) = selected_scope {
-            self.active_scope = Some(scope.clone());
-            self.log(
-                "target",
-                format!(
-                    "entered {} scope {} ({})",
-                    scope.kind.label(),
-                    scope.rel_path,
-                    scope.id
-                ),
-            );
-        }
-        // `target <path>` already continues the first-run chain; the picker
-        // intentionally shares that route so typed and selected targets do
-        // not diverge.
-        if self.shell_view == ShellView::TargetPicker {
-            self.open_workbench(WorkbenchPane::Findings);
-        }
+        vec![ShellEffect::ActivateTarget(TargetActivation {
+            path: candidate.path,
+            selected_scope: candidate.scope,
+            source: TargetActivationSource::Picker,
+        })]
     }
 
     fn defer_target_picker(&mut self) {
@@ -275,52 +255,49 @@ impl ShellApp {
         self.open_workbench(WorkbenchPane::Findings);
     }
 
-    fn handle_auth_picker_key(&mut self, code: KeyCode) -> bool {
+    fn handle_auth_picker_key(&mut self, code: KeyCode) -> InputUpdate {
         if self.handle_auth_api_key_draft_key(code) {
-            return true;
+            return InputUpdate::handled();
         }
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.move_auth_picker_cursor(-1);
-                true
+                InputUpdate::handled()
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 self.move_auth_picker_cursor(1);
-                true
+                InputUpdate::handled()
             }
-            KeyCode::Enter => {
-                self.accept_auth_picker_choice();
-                true
-            }
+            KeyCode::Enter => self.accept_auth_picker_choice(),
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.defer_auth_picker();
-                true
+                InputUpdate::handled()
             }
-            _ => false,
+            _ => InputUpdate::ignored(),
         }
     }
 
     fn handle_auth_api_key_draft_key(&mut self, code: KeyCode) -> bool {
-        if !self.auth_picker_route.is_api_key_row() {
+        if !self.router.auth_picker().is_api_key_row() {
             return false;
         }
         match code {
             KeyCode::Char(ch)
-                if self.auth_picker_route.key_draft().is_empty()
+                if self.router.auth_picker().key_draft().is_empty()
                     && matches!(ch, 'j' | 'k' | 'q') =>
             {
                 false
             }
             KeyCode::Char(ch) if !ch.is_control() && !ch.is_whitespace() => {
-                self.auth_picker_route.push_key_char(ch);
+                self.router.auth_picker_mut().push_key_char(ch);
                 true
             }
             KeyCode::Backspace => {
-                self.auth_picker_route.pop_key_char();
+                self.router.auth_picker_mut().pop_key_char();
                 true
             }
             KeyCode::Delete => {
-                self.auth_picker_route.clear_key_draft();
+                self.router.auth_picker_mut().clear_key_draft();
                 true
             }
             _ => false,
@@ -328,74 +305,76 @@ impl ShellApp {
     }
 
     fn move_auth_picker_cursor(&mut self, delta: isize) {
-        self.auth_picker_route.move_cursor(delta);
+        self.router.auth_picker_mut().move_cursor(delta);
     }
 
-    fn accept_auth_picker_choice(&mut self) {
-        let provider = match &self.shell_view {
-            ShellView::AuthMethodPicker(provider) => provider.clone(),
-            _ => return,
+    fn accept_auth_picker_choice(&mut self) -> InputUpdate {
+        let provider = match self.shell_view {
+            ShellView::AuthMethodPicker => self.router.auth_picker().provider().to_string(),
+            _ => return InputUpdate::ignored(),
         };
-        if self.auth_picker_route.is_offline_demo_row() {
-            self.auth_picker_route.clear_key_draft();
-            self.start_offline_demo_fixture_scan();
-            return;
+        if self.router.auth_picker().is_offline_demo_row() {
+            self.router.auth_picker_mut().clear_key_draft();
+            return self.reduce_picker_command(ShellCommand::Demo);
         }
-        if self.auth_picker_route.is_api_key_row() {
-            self.accept_auth_api_key_choice(&provider);
-        } else {
-            self.accept_auth_oauth_choice(&provider);
+        if self.router.auth_picker().is_api_key_row() {
+            return InputUpdate::handled_with_effects(self.accept_auth_api_key_choice(&provider));
         }
+        InputUpdate::handled_with_effects(self.accept_auth_oauth_choice(&provider))
     }
 
-    fn accept_auth_api_key_choice(&mut self, provider: &str) {
+    fn accept_auth_api_key_choice(&mut self, provider: &str) -> Vec<ShellEffect> {
         let api_key_provider = api_key_auth_provider(provider);
-        if !self.auth_picker_route.key_draft_trimmed().is_empty() {
-            self.accept_pasted_auth_api_key(provider, api_key_provider);
-            return;
+        if !self.router.auth_picker().key_draft_trimmed().is_empty() {
+            return self.accept_pasted_auth_api_key(provider, api_key_provider);
         }
         if auth_ready_for_provider(api_key_provider) {
-            self.select_api_key_model_for_provider(provider);
+            let effects = self.select_api_key_model_for_provider(provider);
             self.log(
                 "onboarding",
                 format!("{api_key_provider} API key already set; continuing"),
             );
             self.transition_after_auth_ready();
-            return;
+            return effects;
         }
         let env_var = api_key_env_var(api_key_provider);
         self.log(
             "onboarding",
             format!("paste {env_var} here, then press Enter; value stays session-only and hidden"),
         );
+        Vec::new()
     }
 
-    fn accept_pasted_auth_api_key(&mut self, provider: &str, api_key_provider: &str) {
+    fn accept_pasted_auth_api_key(
+        &mut self,
+        provider: &str,
+        api_key_provider: &str,
+    ) -> Vec<ShellEffect> {
         let env_var = api_key_env_var(api_key_provider);
-        let key = self.auth_picker_route.take_key_draft_trimmed();
-        // In-session only: this removes the relaunch wall without writing a
-        // secret to shell history, command history, config, or logs.
-        unsafe {
-            std::env::set_var(env_var, &key);
-        }
-        self.select_api_key_model_for_provider(provider);
+        let key = self.router.auth_picker_mut().take_key_draft_trimmed();
+        let mut effects = self.select_api_key_model_for_provider(provider);
         self.log(
             "onboarding",
             format!("{env_var} accepted for this session; value hidden"),
         );
         self.transition_after_auth_ready();
+        effects.push(ShellEffect::SetSessionEnv(SessionEnvVar {
+            key: env_var.to_string(),
+            value: key,
+        }));
+        effects
     }
 
-    fn accept_auth_oauth_choice(&mut self, provider: &str) {
+    fn accept_auth_oauth_choice(&mut self, provider: &str) -> Vec<ShellEffect> {
         let oauth_provider = oauth_credential_provider(provider);
         if auth_ready_for_provider(oauth_provider) {
-            self.select_oauth_model_for_provider(provider);
+            let effects = self.select_oauth_model_for_provider(provider);
             self.log(
                 "onboarding",
                 format!("{provider} OAuth already stored; continuing"),
             );
             self.transition_after_auth_ready();
-            return;
+            return effects;
         }
         self.log(
             "onboarding",
@@ -403,37 +382,33 @@ impl ShellApp {
                 "dispatching OAuth login for {provider}; complete in the browser, then re-run /onboarding"
             ),
         );
-        self.handle_auth_login_command(Some(provider.to_string()));
-        // OAuth credentials land under the storage provider key
-        // (openai → openai-codex), so check readiness there, not under the
-        // picker's display provider, or a successful login would look unmet.
-        if auth_ready_for_provider(oauth_provider) {
-            self.select_oauth_model_for_provider(provider);
-            self.transition_after_auth_ready();
-        }
+        self.reduce_picker_auth_login(provider)
     }
 
-    fn select_api_key_model_for_provider(&mut self, provider: &str) {
+    fn select_api_key_model_for_provider(&mut self, provider: &str) -> Vec<ShellEffect> {
         let Some(choice) = api_key_model_choice_for_provider(provider) else {
-            return;
+            return Vec::new();
         };
-        self.select_auth_model_choice(choice, "API key");
+        self.select_auth_model_choice(choice, "API key")
     }
 
-    fn select_oauth_model_for_provider(&mut self, provider: &str) {
+    pub(crate) fn select_oauth_model_for_provider(&mut self, provider: &str) -> Vec<ShellEffect> {
         let Some(choice) = oauth_model_choice_for_provider(provider) else {
-            return;
+            return Vec::new();
         };
-        self.select_auth_model_choice(choice, "OAuth");
+        self.select_auth_model_choice(choice, "OAuth")
     }
 
-    fn select_auth_model_choice(&mut self, choice: &ModelChoice, auth_method: &str) {
-        if self.config.model.as_deref() == Some(choice.id) {
-            return;
+    fn select_auth_model_choice(
+        &mut self,
+        choice: &ModelChoice,
+        auth_method: &str,
+    ) -> Vec<ShellEffect> {
+        if self.config().model.as_deref() == Some(choice.id) {
+            return Vec::new();
         }
-        self.config.model = Some(choice.id.to_string());
-        self.session_thinking_level = Some(choice.thinking_level.to_string());
-        self.persist_global_model_choice(choice.id, Some(choice.thinking_level));
+        self.config_mut().model = Some(choice.id.to_string());
+        self.set_session_thinking_level(Some(choice.thinking_level.to_string()));
         self.log(
             "model",
             format!(
@@ -441,10 +416,14 @@ impl ShellApp {
                 display_model_selector(choice.id)
             ),
         );
+        vec![crate::app::global_model_selection_persist_effect(
+            choice.id,
+            Some(choice.thinking_level),
+        )]
     }
 
     fn defer_auth_picker(&mut self) {
-        self.auth_picker_route.clear_key_draft();
+        self.router.auth_picker_mut().clear_key_draft();
         self.log(
             "onboarding",
             "auth deferred — set credentials and re-run /onboarding when ready",
@@ -452,18 +431,18 @@ impl ShellApp {
         self.open_workbench(WorkbenchPane::Findings);
     }
 
-    fn transition_after_auth_ready(&mut self) {
+    pub(crate) fn transition_after_auth_ready(&mut self) {
         self.open_fresh_planner_or_workbench();
     }
 
-    fn handle_planning_picker_key(&mut self, key: KeyEvent) -> bool {
+    fn handle_planning_picker_key(&mut self, key: KeyEvent) -> InputUpdate {
         if self.handle_planning_option_edit_key(key.code) {
-            return true;
+            return InputUpdate::handled();
         }
         match self.engagement.planning_picker().focus() {
             PickerFocus::List => self.handle_planning_step_key(key.code),
             PickerFocus::OptionsPane => self.handle_planning_options_key(key.code),
-            PickerFocus::Prompt => false,
+            PickerFocus::Prompt => InputUpdate::ignored(),
         }
     }
 
@@ -498,10 +477,13 @@ impl ShellApp {
         }
     }
 
-    fn handle_planning_step_key(&mut self, code: KeyCode) -> bool {
-        self.handle_planning_step_navigation_key(code)
+    fn handle_planning_step_key(&mut self, code: KeyCode) -> InputUpdate {
+        if self.handle_planning_step_navigation_key(code)
             || self.handle_planning_step_selection_key(code)
-            || self.handle_planning_step_action_key(code)
+        {
+            return InputUpdate::handled();
+        }
+        self.handle_planning_step_action_key(code)
     }
 
     fn handle_planning_step_navigation_key(&mut self, code: KeyCode) -> bool {
@@ -554,68 +536,63 @@ impl ShellApp {
         }
     }
 
-    fn handle_planning_step_action_key(&mut self, code: KeyCode) -> bool {
+    fn handle_planning_step_action_key(&mut self, code: KeyCode) -> InputUpdate {
         match code {
             KeyCode::Tab | KeyCode::BackTab | KeyCode::Char('o') => {
                 self.enter_planning_options_pane();
-                true
+                InputUpdate::handled()
             }
             KeyCode::Enter => {
                 if self.open_file_picker_for_current_planning_row() {
-                    return true;
+                    return InputUpdate::handled();
                 }
-                self.accept_planning_picker();
-                true
+                self.accept_planning_picker()
             }
-            KeyCode::Char('s') => {
-                self.skip_planning_phase();
-                true
-            }
+            KeyCode::Char('s') => InputUpdate::handled_with_effects(self.skip_planning_phase()),
             KeyCode::Esc | KeyCode::Char('q') => {
                 self.close_planning_picker();
-                true
+                InputUpdate::handled()
             }
-            _ => false,
+            _ => InputUpdate::ignored(),
         }
     }
 
-    fn handle_planning_options_key(&mut self, code: KeyCode) -> bool {
+    fn handle_planning_options_key(&mut self, code: KeyCode) -> InputUpdate {
         match code {
             KeyCode::Up | KeyCode::Char('k') => {
                 self.move_planning_option_cursor(-1);
-                true
+                InputUpdate::handled()
             }
             KeyCode::Down | KeyCode::Char('j') => {
                 self.move_planning_option_cursor(1);
-                true
+                InputUpdate::handled()
             }
             KeyCode::Enter => {
                 self.begin_planning_option_edit();
-                true
+                InputUpdate::handled()
             }
             KeyCode::Char(' ') => {
                 self.cycle_selected_planning_option();
-                true
+                InputUpdate::handled()
             }
             KeyCode::Char(ch) if phase_for_digit(ch).is_some() => {
                 if let Some(phase) = phase_for_digit(ch) {
                     self.open_phase_picker(phase);
                 }
-                true
+                InputUpdate::handled()
             }
-            KeyCode::Char('S') => {
-                self.persist_selected_planning_option_override();
-                true
-            }
+            KeyCode::Char('S') => InputUpdate::handled_with_effects(
+                self.reduce_persist_selected_planning_option_override(),
+            ),
             KeyCode::Tab
             | KeyCode::BackTab
             | KeyCode::Char('o')
             | KeyCode::Esc
             | KeyCode::Char('q') => {
                 self.leave_planning_options_pane();
-                true
+                InputUpdate::handled()
             }
-            _ => false,
+            _ => InputUpdate::ignored(),
         }
     }
 
@@ -721,9 +698,9 @@ impl ShellApp {
         self.log("planning", "cleared selection");
     }
 
-    fn accept_planning_picker(&mut self) {
+    fn accept_planning_picker(&mut self) -> InputUpdate {
         if self.open_file_picker_for_attach_only_plan() {
-            return;
+            return InputUpdate::handled();
         }
         self.drop_failed_dependency_selection();
         let plan = build_execution_plan(
@@ -732,8 +709,7 @@ impl ShellApp {
             self.engagement.planning_picker().rebuild(),
         );
         if plan.is_empty() {
-            self.explain_empty_planning_confirm();
-            return;
+            return InputUpdate::handled_with_effects(self.explain_empty_planning_confirm());
         }
         let labels = plan
             .iter()
@@ -745,19 +721,17 @@ impl ShellApp {
             format!("running {} {}: {labels}", plan.len(), step_word(plan.len())),
         );
         self.engagement.queue_plan(plan);
-        let Ok(workspace) = self.current_workspace() else {
-            self.log(
-                "error",
-                "cannot run planning queue without an active workspace",
-            );
-            self.engagement.clear_planning_queue();
-            return;
-        };
-        // A committed phase run always shows live progress — even when ad-hoc
-        // activity auto-open is disabled — so the operator can see what's
-        // running (and that the queue is waiting on ranking, if it stalls).
-        self.shell_view = ShellView::Activity;
-        self.dispatch_next_planning_task(workspace);
+        InputUpdate::handled_with_effects(vec![ShellEffect::DispatchNextPlanningTask(
+            PlanningTaskDispatch {
+                target: self.target_owned(),
+                missing_workspace_message: "cannot run planning queue without an active workspace",
+                // A committed phase run always shows live progress — even when
+                // ad-hoc activity auto-open is disabled — so the operator can
+                // see what's running (and that the queue is waiting on ranking,
+                // if it stalls).
+                success_view: Some(PlanningDispatchView::Activity),
+            },
+        )])
     }
 
     fn drop_failed_dependency_selection(&mut self) {
@@ -840,7 +814,7 @@ impl ShellApp {
     /// running, so confirming an all-cached selection used to silently advance
     /// the phase — say what happened instead, and only advance when the
     /// operator selected nothing at all (an explicit "skip this phase").
-    fn explain_empty_planning_confirm(&mut self) {
+    fn explain_empty_planning_confirm(&mut self) -> Vec<ShellEffect> {
         if self.engagement.planning_picker().selected().is_empty() {
             let phase = self
                 .engagement
@@ -849,8 +823,7 @@ impl ShellApp {
                 .unwrap_or("planning");
             self.log("phase", format!("nothing selected — skipping {phase}"));
             self.engagement.mark_current_phase_skipped();
-            self.advance_to_next_phase();
-            return;
+            return self.advance_to_next_phase();
         }
         self.log(
             "phase",
@@ -861,9 +834,10 @@ impl ShellApp {
                 task_word(self.engagement.planning_picker().selected().len())
             ),
         );
+        Vec::new()
     }
 
-    fn skip_planning_phase(&mut self) {
+    fn skip_planning_phase(&mut self) -> Vec<ShellEffect> {
         let phase = self
             .engagement
             .current_phase()
@@ -871,7 +845,7 @@ impl ShellApp {
             .unwrap_or("planning");
         self.log("phase", format!("skipped {phase}"));
         self.engagement.mark_current_phase_skipped();
-        self.advance_to_next_phase();
+        self.advance_to_next_phase()
     }
 
     fn close_planning_picker(&mut self) {
@@ -990,13 +964,13 @@ mod tests {
     #[test]
     fn selecting_openai_oauth_auth_method_selects_oauth_model() {
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.config.model = Some("openai:gpt-5.5".to_string());
+        app.config_mut().model = Some("openai:gpt-5.5".to_string());
 
         app.select_oauth_model_for_provider("openai");
 
-        assert_eq!(app.config.model.as_deref(), Some("openai-codex:gpt-5.4"));
-        assert_eq!(app.session_thinking_level.as_deref(), Some("xhigh"));
-        assert!(app.log.iter().any(|line| {
+        assert_eq!(app.config().model.as_deref(), Some("openai-codex:gpt-5.4"));
+        assert_eq!(app.session_thinking_level(), Some("xhigh"));
+        assert!(app.log_lines().iter().any(|line| {
             line.prefix == "model"
                 && line.body.contains("openai-oauth:gpt-5.4")
                 && !line.body.contains("openai-codex")
@@ -1006,11 +980,11 @@ mod tests {
     #[test]
     fn selecting_openai_api_key_auth_method_selects_api_key_model() {
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.config.model = Some("openai-codex:gpt-5.4".to_string());
+        app.config_mut().model = Some("openai-codex:gpt-5.4".to_string());
 
         app.select_api_key_model_for_provider("openai-codex");
 
-        assert_eq!(app.config.model.as_deref(), Some("openai:gpt-5.5"));
-        assert_eq!(app.session_thinking_level.as_deref(), Some("xhigh"));
+        assert_eq!(app.config().model.as_deref(), Some("openai:gpt-5.5"));
+        assert_eq!(app.session_thinking_level(), Some("xhigh"));
     }
 }

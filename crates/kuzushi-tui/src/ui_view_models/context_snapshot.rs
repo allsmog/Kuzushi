@@ -41,7 +41,7 @@ pub(crate) struct PlainContextModel {
 }
 
 pub(crate) fn context_snapshot_model(app: &ShellApp) -> ContextSnapshotModel {
-    let view = &app.context_view;
+    let view = app.domain().context_view();
     let running = context_running(app);
     let snapshot_present = view.exists;
     let state = context_snapshot_state(app);
@@ -161,17 +161,14 @@ fn context_status(app: &ShellApp, running: Option<&ContextSnapshotRunning>) -> S
                 running.tool
             )
         })
-        .unwrap_or_else(|| app.context_view.status.clone())
+        .unwrap_or_else(|| app.domain().context_view().status.clone())
 }
 
 pub(crate) fn context_snapshot_state(app: &ShellApp) -> &'static str {
-    if app.context_view.exists {
+    let view = app.domain().context_view();
+    if view.exists {
         "present"
-    } else if app
-        .context_view
-        .status
-        .starts_with("malformed context snapshot")
-    {
+    } else if view.status.starts_with("malformed context snapshot") {
         "malformed"
     } else {
         "missing"
@@ -180,7 +177,7 @@ pub(crate) fn context_snapshot_state(app: &ShellApp) -> &'static str {
 
 impl ContextSnapshotDetails {
     fn from_app(app: &ShellApp) -> Self {
-        let view = &app.context_view;
+        let view = app.domain().context_view();
         Self {
             target: view.target.clone().unwrap_or_else(|| "unknown".to_string()),
             discovery: view

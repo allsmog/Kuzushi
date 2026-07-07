@@ -4,7 +4,7 @@ use std::path::PathBuf;
 #[test]
 fn session_history_model_tails_commands_with_original_numbers() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.command_history = (1..=60).map(|number| format!("cmd-{number}")).collect();
+    app.set_command_history((1..=60).map(|number| format!("cmd-{number}")).collect());
 
     let model = session_history_model(&app, 50);
 
@@ -27,12 +27,12 @@ fn session_history_model_tails_commands_with_original_numbers() {
 #[test]
 fn session_story_model_filters_prompt_echoes_and_tails_events() {
     let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-    app.log = vec![
+    app.replace_log_for_test(vec![
         log_line(">", "scan ."),
         log_line("scan", "started"),
         log_line("tool", "semgrep"),
         log_line("finding", "sql injection"),
-    ];
+    ]);
 
     let model = session_story_model(&app, 2);
 

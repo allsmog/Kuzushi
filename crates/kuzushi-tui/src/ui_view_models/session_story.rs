@@ -26,16 +26,15 @@ pub(crate) struct SessionStoryRow {
 }
 
 pub(crate) fn session_history_model(app: &ShellApp, visible_count: usize) -> CommandHistoryModel {
-    history_model_from_commands(&app.command_history, visible_count)
+    history_model_from_commands(app.command_history(), visible_count)
 }
 
 pub(crate) fn session_story_model(app: &ShellApp, visible_count: usize) -> SessionStoryModel {
     SessionStoryModel {
         scan_row: app
-            .scan
-            .as_ref()
+            .scan()
             .map(|scan| scan_story_row(scan, app.is_scan_paused())),
-        events: story_event_rows(&app.log, visible_count),
+        events: story_event_rows(app.log_lines(), visible_count),
     }
 }
 

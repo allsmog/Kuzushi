@@ -33,7 +33,7 @@ pub(crate) fn save_quantile(db: &Path, q: &QuantileEstimator) -> Result<()> {
 }
 
 fn open_state_conn(db: &Path) -> Result<Connection> {
-    let conn = Connection::open(db)?;
+    let conn = crate::sqlite_connection::open_file(db)?;
     // The kuzushi_state table is created by the spend ledger schema; if
     // a caller uses the classifier without spend, ensure it exists.
     conn.execute_batch(

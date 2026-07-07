@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 162
 ---
- KUZUSHI › help · mode:shell · target:none · ctx:not built · model:unconfigured
+ KUZUSHI › help · mode:shell · target:none · ctx:not built · model:unconfigured · cost:$0.00
 
  -- HELP ---------------------------------------------------------------------------------------------------------------
 Input: ? opens help; ?text, /ask <question>, and ask <question> enter agent mode.
@@ -221,6 +221,16 @@ no - discard pending plan
   aliases / examples: /no, n
 scene - security-viz gallery — risk heatmap, attack path/tree, DFD
   aliases / examples: /scene, /viz, viz
+keys - show global and current-view keybindings
+  aliases / examples: /keys, keymap, /keymap
+theme - preview active theme and accessibility knobs
+  aliases / examples: /theme, themes, /themes
+update - show release/update status for this build
+  aliases / examples: /update, updates, /updates, changelog, /changelog
+boot - show launch readiness splash
+  aliases / examples: /boot, boot-splash, /boot-splash
+quit-confirm - show exit confirmation checklist without quitting
+  aliases / examples: /quit-confirm
 pwn - binary exploitation dashboard and pwn:* workflow actions
 aliases / examples: /pwn, pwn target <path>, pwn profile, pwn reverse [function], pwn auto, pwn state, pwn candidates
 <target>

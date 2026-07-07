@@ -86,11 +86,11 @@ pub(crate) fn risk_by_module(findings: &[Finding]) -> RiskByModule {
 }
 
 pub(crate) fn cached_risk_by_module(app: &ShellApp) -> RiskByModule {
-    let key = RiskByModuleCacheKey::from_findings(&app.findings);
+    let key = RiskByModuleCacheKey::from_findings(app.findings());
     if let Some(cached) = app.workbench_cache.borrow().risk_by_module(&key) {
         return cached;
     }
-    let risk = risk_by_module(&app.findings);
+    let risk = risk_by_module(app.findings());
     app.workbench_cache
         .borrow_mut()
         .cache_risk_by_module(key, risk.clone());
@@ -169,14 +169,14 @@ pub(crate) struct AttackTree {
 }
 
 pub(crate) fn attack_tree(app: &ShellApp) -> AttackTree {
-    if app.exploit_chains.is_empty() {
+    let exploit_chains = app.domain().exploit_chains();
+    if exploit_chains.is_empty() {
         return AttackTree {
             empty_hint: Some("no exploit chains yet — run `exploit-chain:scan`".to_string()),
             ..Default::default()
         };
     }
-    let chains = app
-        .exploit_chains
+    let chains = exploit_chains
         .iter()
         .take(3)
         .map(|chain| AttackChain {
@@ -191,7 +191,7 @@ pub(crate) fn attack_tree(app: &ShellApp) -> AttackTree {
         .collect();
     AttackTree {
         chains,
-        hidden_chain_count: app.exploit_chains.len().saturating_sub(3),
+        hidden_chain_count: exploit_chains.len().saturating_sub(3),
         empty_hint: None,
     }
 }
@@ -222,7 +222,7 @@ pub(crate) struct TaintFlowPath {
 }
 
 pub(crate) fn taint_flow_path(app: &ShellApp) -> TaintFlowPath {
-    let Some(flow) = app.taint_flow.as_ref() else {
+    let Some(flow) = app.domain().taint_flow() else {
         return TaintFlowPath {
             empty_hint: Some("no taint flow yet — run `taint-iris:hunt`".to_string()),
             ..Default::default()
@@ -232,10 +232,10 @@ pub(crate) fn taint_flow_path(app: &ShellApp) -> TaintFlowPath {
 }
 
 pub(crate) fn selected_taint_flow_path(app: &ShellApp) -> TaintFlowPath {
-    let Some(selected) = app.selected_finding.as_ref() else {
+    let Some(selected) = app.selected_finding().as_ref() else {
         return taint_flow_path(app);
     };
-    let Some(flow) = app.taint_flow.as_ref() else {
+    let Some(flow) = app.domain().taint_flow() else {
         return TaintFlowPath {
             empty_hint: Some(
                 "no taint flow for the selected finding yet — run `taint-iris:hunt`".to_string(),

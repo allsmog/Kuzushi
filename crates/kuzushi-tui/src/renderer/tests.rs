@@ -16,6 +16,28 @@ use crate::ui_view_models::{
 
 use super::*;
 
+fn press_key(app: &mut ShellApp, key: crossterm::event::KeyEvent) -> bool {
+    crate::app::update_and_execute_effects(
+        app,
+        crate::app::Msg::Term(crate::app::TermEvent::Key(key)),
+    )
+}
+
+fn submit_shell_line(app: &mut ShellApp, raw: &str) -> bool {
+    app.set_input(raw);
+    crate::app::update_and_execute_effects(
+        app,
+        crate::app::Msg::Term(crate::app::TermEvent::Key(crossterm::event::KeyEvent::new(
+            crossterm::event::KeyCode::Enter,
+            crossterm::event::KeyModifiers::empty(),
+        ))),
+    )
+}
+
+fn run_command(app: &mut ShellApp, command: crate::commands::ShellCommand) -> bool {
+    crate::app::update_and_execute_effects(app, crate::app::Msg::Cmd(command))
+}
+
 fn context_snapshot_fixture_path() -> std::path::PathBuf {
     kuzushi_core::context_snapshot_path("")
 }
@@ -108,9 +130,9 @@ fn planning_picker_announces_prior_state_and_plain_language_outcomes() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     let dir = tempfile::tempdir().unwrap();
-    app.target = Some(dir.path().to_path_buf());
+    app.set_target(Some(dir.path().to_path_buf()));
     app.engagement.set_phase(WorkflowPhase::Map);
-    app.findings.push(Finding::new_tool(
+    app.findings_mut().push(Finding::new_tool(
         "demo",
         "demo.rule",
         "src/lib.rs",
@@ -189,7 +211,7 @@ fn planning_picker_options_focus_marks_the_options_pane() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     let dir = tempfile::tempdir().unwrap();
-    app.target = Some(dir.path().to_path_buf());
+    app.set_target(Some(dir.path().to_path_buf()));
     app.engagement.set_phase(WorkflowPhase::Map);
     let rows = vec![planning_row_fixture(
         PlanningTaskId::BuildStrideThreatModel,
@@ -227,7 +249,7 @@ fn planning_picker_is_vertically_centered_on_tall_terminals() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     let dir = tempfile::tempdir().unwrap();
-    app.target = Some(dir.path().to_path_buf());
+    app.set_target(Some(dir.path().to_path_buf()));
     app.engagement.set_phase(WorkflowPhase::Map);
     let rows = vec![planning_row_fixture(
         PlanningTaskId::GatherRepoContext,
@@ -262,7 +284,7 @@ fn planning_picker_revisit_banner_names_cached_artifact_behavior() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     let dir = tempfile::tempdir().unwrap();
-    app.target = Some(dir.path().to_path_buf());
+    app.set_target(Some(dir.path().to_path_buf()));
     app.engagement.set_phase(WorkflowPhase::Map);
     let rows = vec![planning_row_fixture(
         PlanningTaskId::GatherRepoContext,
@@ -316,7 +338,7 @@ fn planning_picker_reuses_cached_artifact_when_rebuild_cli_is_missing() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     let dir = tempfile::tempdir().unwrap();
-    app.target = Some(dir.path().to_path_buf());
+    app.set_target(Some(dir.path().to_path_buf()));
     app.engagement.set_phase(WorkflowPhase::Map);
     let mut row = planning_row_fixture(
         PlanningTaskId::BuildCodeQlDatabase,
@@ -436,7 +458,7 @@ fn home_view_renders_latest_run_artifact_rail() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(tmp.path().to_path_buf());
+    app.set_target(Some(tmp.path().to_path_buf()));
     app.shell_view = ShellView::Home;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -561,13 +583,16 @@ fn renders_actionable_empty_states_at_80_columns() {
         let is_runs = matches!(view, ShellView::Runs);
         app.shell_view = view;
         if is_runs {
-            app.target = Some(runs_target.path().to_path_buf());
+            app.set_target(Some(runs_target.path().to_path_buf()));
         }
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
 
-        assert!(rendered.contains(expected), "missing {expected}");
+        assert!(
+            rendered.contains(expected),
+            "missing {expected} in {rendered}"
+        );
         if is_runs {
             assert!(rendered.contains(".kuzushi/v3/runs/<id>"), "{rendered}");
         }
@@ -582,7 +607,7 @@ fn renders_long_prompt_on_single_row() {
     let backend = TestBackend::new(40, 12);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.input = "scan ./a/very/long/path/that/should/not/wrap".to_string();
+    app.set_input("scan ./a/very/long/path/that/should/not/wrap");
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -644,7 +669,7 @@ fn keeps_command_log_directly_above_bottom_prompt_at_80_columns() {
         "result",
         "next action: inspect configuration and rerun scan with a narrower target",
     );
-    app.input = "run sast:scan {\"severity\":[\"high\"],\"triage\":true}".to_string();
+    app.set_input("run sast:scan {\"severity\":[\"high\"],\"triage\":true}");
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let buffer = terminal.backend().buffer();
@@ -666,8 +691,8 @@ fn renders_exit_commands_before_closing() {
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
 
-        app.submit_line(command);
-        assert!(app.should_quit, "{command} should request shell shutdown");
+        submit_shell_line(&mut app, command);
+        assert!(app.should_quit(), "{command} should request shell shutdown");
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let buffer = terminal.backend().buffer();
@@ -686,17 +711,16 @@ fn renders_exit_commands_before_closing() {
 
 #[test]
 fn replay_and_trace_surfaces_reuse_current_finding_aliases() {
-    for view in [
-        ShellView::Replay("run-1".to_string()),
-        ShellView::Trace("run-1".to_string()),
-    ] {
+    for view in [ShellView::Replay, ShellView::Trace] {
         let backend = TestBackend::new(80, 18);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
+        app.router.replay_mut().open("run-1");
+        app.router.trace_mut().open("run-1");
         let mut finding =
             Finding::new_semgrep("demo.rule", "src/app.ts", 8, None, Severity::High, "sink");
         finding.fingerprint = "aaaa1111".to_string();
-        app.findings = vec![finding];
+        *app.findings_mut() = vec![finding];
         app.shell_view = view;
 
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -713,7 +737,8 @@ fn renders_threat_view_navigation() {
     let backend = TestBackend::new(120, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Threat(ThreatView::Stride);
+    app.router.threat_mut().open(ThreatView::Stride);
+    app.shell_view = ShellView::Threat;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -750,8 +775,8 @@ fn renders_expanded_catalog_readably_on_narrow_terminal() {
     let backend = TestBackend::new(58, 32);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.handle_command(crate::commands::ShellCommand::Modules);
-    app.findings = (0..82)
+    run_command(&mut app, crate::commands::ShellCommand::Modules);
+    *app.findings_mut() = (0..82)
         .map(|index| {
             Finding::new_semgrep(
                 format!("demo.rule.{index}"),
@@ -783,7 +808,7 @@ fn expanded_catalog_uses_design_sections_without_dag_column() {
     let backend = TestBackend::new(120, 36);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.handle_command(crate::commands::ShellCommand::Modules);
+    run_command(&mut app, crate::commands::ShellCommand::Modules);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -810,7 +835,7 @@ fn catalog_next_hint_steers_through_context_then_findings() {
     );
 
     // After context exists but no findings: first-finding scan hint.
-    app.context_view.exists = true;
+    app.domain_mut().context_view_mut().exists = true;
     let hint = catalog_model(&app).collapsed.next_hint;
     assert!(
         hint.contains("First finding") || hint.contains("scan"),
@@ -819,7 +844,7 @@ fn catalog_next_hint_steers_through_context_then_findings() {
 
     // With non-critical findings: drill-in suggestion.
     let medium = Finding::new_semgrep("demo.rule", "src/a.rs", 1, None, Severity::Medium, "x");
-    app.findings = vec![medium];
+    *app.findings_mut() = vec![medium];
     let hint = catalog_model(&app).collapsed.next_hint;
     assert!(hint.contains("findings"), "got: {hint}");
     assert!(hint.contains("triage"), "got: {hint}");
@@ -828,7 +853,7 @@ fn catalog_next_hint_steers_through_context_then_findings() {
 
     // With a critical finding: open-by-alias suggestion.
     let critical = Finding::new_semgrep("demo.crit", "src/b.rs", 2, None, Severity::Critical, "y");
-    app.findings.push(critical);
+    app.findings_mut().push(critical);
     let hint = catalog_model(&app).collapsed.next_hint;
     assert!(hint.contains("open F-"), "got: {hint}");
 }
@@ -957,7 +982,7 @@ fn spinner_shows_static_glyph_when_scan_idle_or_done() {
 #[test]
 fn module_run_body_ends_with_streaming_cursor_when_scan_active() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.scan = Some(crate::app::ScanPanelState {
+    app.set_scan_panel(Some(crate::app::ScanPanelState {
         run_id: Some("run-abc".to_string()),
         target: std::path::PathBuf::from("./demo"),
         stage: "scanning".to_string(),
@@ -965,7 +990,7 @@ fn module_run_body_ends_with_streaming_cursor_when_scan_active() {
         running: true,
         abort_requested: false,
         error: None,
-    });
+    }));
     app.shell_view = ShellView::ModuleRun;
     let area = Rect::new(0, 0, 120, 30);
     let lines = module_run_lines(&app, area);
@@ -1025,7 +1050,7 @@ fn module_run_findings_preview_uses_projected_finding_rows() {
         rationale: "source and sink are linked".to_string(),
         cost_usd: 0.0,
     });
-    app.findings = vec![
+    *app.findings_mut() = vec![
         triaged,
         Finding::new_tool(
             "codeql",
@@ -1055,7 +1080,7 @@ fn recent_module_activity_uses_recon_snapshot_when_present() {
     use kuzushi_core::{ReconHost, ReconService};
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.recon_snapshot = Some(ReconSnapshot {
+    app.domain_mut().set_recon_snapshot(ReconSnapshot {
         hosts: vec![ReconHost {
             id: "h1".to_string(),
             workspace_id: "ws".to_string(),
@@ -1129,9 +1154,9 @@ fn sast_progress_bars_use_scan_progress_per_task_when_present() {
     use std::collections::BTreeMap;
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.focused_module = Some("sast".to_string());
+    app.set_focused_module(Some("sast".to_string()));
     app.shell_view = ShellView::ModuleRun;
-    app.scan = Some(crate::app::ScanPanelState {
+    app.set_scan_panel(Some(crate::app::ScanPanelState {
         run_id: Some("run-real-progress".to_string()),
         target: std::path::PathBuf::from("./demo"),
         stage: "scanning".to_string(),
@@ -1139,12 +1164,12 @@ fn sast_progress_bars_use_scan_progress_per_task_when_present() {
         running: true,
         abort_requested: false,
         error: None,
-    });
+    }));
 
     let mut per_task = BTreeMap::new();
     per_task.insert("agentic-sast".to_string(), (87usize, 120usize));
     per_task.insert("semgrep".to_string(), (612usize, 612usize));
-    app.scan_progress = Some(ScanProgress {
+    app.domain_mut().set_scan_progress(ScanProgress {
         total: 732,
         done: 699,
         current_tool: Some("semgrep".to_string()),
@@ -1252,7 +1277,8 @@ fn threats_stories_view_renders_attacker_story_cards() {
     let backend = TestBackend::new(120, 36);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Threat(ThreatView::Stories);
+    app.router.threat_mut().open(ThreatView::Stories);
+    app.shell_view = ShellView::Threat;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1271,7 +1297,8 @@ fn threats_scope_view_renders_criticality_buckets() {
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Threat(ThreatView::Scope);
+    app.router.threat_mut().open(ThreatView::Scope);
+    app.shell_view = ShellView::Threat;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1381,7 +1408,8 @@ fn threats_summary_view_is_review_first_without_fake_observations() {
     let backend = TestBackend::new(132, 36);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-    app.shell_view = ShellView::Threat(ThreatView::Summary);
+    app.router.threat_mut().open(ThreatView::Summary);
+    app.shell_view = ShellView::Threat;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1420,7 +1448,8 @@ fn threats_summary_unknown_state_does_not_invent_data() {
     let backend = TestBackend::new(120, 32);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Threat(ThreatView::Summary);
+    app.router.threat_mut().open(ThreatView::Summary);
+    app.shell_view = ShellView::Threat;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1437,7 +1466,8 @@ fn threats_stride_view_renders_design_rollup() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Threat(ThreatView::Stride);
+    app.router.threat_mut().open(ThreatView::Stride);
+    app.shell_view = ShellView::Threat;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1467,10 +1497,10 @@ fn recon_module_is_focusable_from_catalog() {
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
 
     assert!(app
-        .registry
+        .registry()
         .modules()
         .any(|module| module.metadata().id == "recon"));
-    assert!(app.registry.resolve_tool("recon:nmap").is_some());
+    assert!(app.registry().resolve_tool("recon:nmap").is_some());
 }
 
 #[test]
@@ -1478,12 +1508,13 @@ fn focused_offense_review_module_renders_recent_threat_hunt_activity() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.log.clear();
+    app.clear_log();
     app.log("offense-review", "actor 1/4 dispatched");
     app.log("offense-review", "actor 2/4 found path-traversal sink");
-    app.handle_command(crate::commands::ShellCommand::Use(
-        "offense-review".to_string(),
-    ));
+    run_command(
+        &mut app,
+        crate::commands::ShellCommand::Use("offense-review".to_string()),
+    );
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1500,12 +1531,12 @@ fn module_run_transcript_uses_growing_console_glyphs() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.log.clear();
+    app.clear_log();
     app.log(">", "/scan");
     app.log("scan", "starting ./demo");
     app.log("finding", "abc123 high dangerous sink");
     app.log("error", "scanner failed");
-    app.scan = Some(crate::app::ScanPanelState {
+    app.set_scan_panel(Some(crate::app::ScanPanelState {
         run_id: Some("run-123456".to_string()),
         target: std::path::PathBuf::from("./demo"),
         stage: "agentic-sast tracing".to_string(),
@@ -1513,14 +1544,14 @@ fn module_run_transcript_uses_growing_console_glyphs() {
         running: true,
         abort_requested: false,
         error: None,
-    });
+    }));
     app.shell_view = ShellView::ModuleRun;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
 
     assert!(rendered.contains("SCAN PROGRESS"));
-    // Spinner cycles through SPINNER_FRAMES based on `app.spinner_phase`; any frame is valid.
+    // Spinner cycles through SPINNER_FRAMES based on `app.ui().spinner_phase()`; any frame is valid.
     assert!(
         SPINNER_FRAMES.iter().any(|frame| rendered.contains(frame)),
         "expected one of the braille spinner frames in: {rendered}"
@@ -1536,7 +1567,7 @@ fn direct_tool_run_header_does_not_show_pending_scan_run() {
     let backend = TestBackend::new(96, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.focused_module = Some("context".to_string());
+    app.set_focused_module(Some("context".to_string()));
     app.shell_view = ShellView::ModuleRun;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -1554,7 +1585,7 @@ fn active_tool_run_uses_live_tool_chrome_not_scan_chrome() {
     let backend = TestBackend::new(96, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.focused_module = Some("recon".to_string());
+    app.set_focused_module(Some("recon".to_string()));
     app.set_running_tool_for_test("recon:nmap");
     app.shell_view = ShellView::ModuleRun;
 
@@ -1576,16 +1607,17 @@ fn renders_options_table_readably_at_80_columns() {
     let backend = TestBackend::new(80, 22);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.option_store.set_value(
+    app.option_store_mut().set_value(
         OptionScope::Session,
         OptionTarget::Tool("sast:scan".to_string()),
         "triage",
         serde_json::json!(true),
     );
-    app.shell_view = ShellView::Options(crate::app::OptionsView {
+    app.router.set_options(crate::app::OptionsView {
         tool_name: "sast:scan".to_string(),
         filter: crate::app::OptionsFilter::Standard,
     });
+    app.shell_view = ShellView::Options;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1623,14 +1655,14 @@ fn renders_kb_attachments_readably_at_80_columns() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.kb_view.module_id = "x-ray".to_string();
-    app.kb_view.artifacts = vec![kuzushi_core::KnownArtifact {
+    app.domain_mut().kb_view_mut().module_id = "x-ray".to_string();
+    app.domain_mut().kb_view_mut().artifacts = vec![kuzushi_core::KnownArtifact {
         module_id: "x-ray".to_string(),
         path: "x-ray/x-ray.md".to_string(),
         description: "x-ray report".to_string(),
         exists: true,
     }];
-    app.kb_view.attachments = vec![kuzushi_core::AttachmentRecord {
+    app.domain_mut().kb_view_mut().attachments = vec![kuzushi_core::AttachmentRecord {
         id: "A-123456789abc".to_string(),
         module_id: "x-ray".to_string(),
         kind: kuzushi_core::AttachmentKind::Url,
@@ -1659,19 +1691,20 @@ fn renders_context_status_readably_at_80_columns() {
     let backend = TestBackend::new(80, 22);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.context_view = crate::app::ContextSnapshotView {
-        snapshot_path: Some(context_snapshot_fixture_path()),
-        exists: true,
-        status: "snapshot present; 2 indexed file(s). Next: context regen repo".to_string(),
-        target: Some("/tmp/demo".to_string()),
-        discovery: Some("auto".to_string()),
-        files_indexed: Some(2),
-        total_files: Some(2),
-        languages: vec!["Rust".to_string()],
-        frameworks: vec!["Cargo".to_string()],
-        generated_slices: vec!["repo".to_string(), "app-model".to_string()],
-        stale_slices: Vec::new(),
-    };
+    app.domain_mut()
+        .set_context_view(crate::app::ContextSnapshotView {
+            snapshot_path: Some(context_snapshot_fixture_path()),
+            exists: true,
+            status: "snapshot present; 2 indexed file(s). Next: context regen repo".to_string(),
+            target: Some("/tmp/demo".to_string()),
+            discovery: Some("auto".to_string()),
+            files_indexed: Some(2),
+            total_files: Some(2),
+            languages: vec!["Rust".to_string()],
+            frameworks: vec!["Cargo".to_string()],
+            generated_slices: vec!["repo".to_string(), "app-model".to_string()],
+            stale_slices: Vec::new(),
+        });
     app.shell_view = ShellView::Context;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -1689,7 +1722,7 @@ fn active_context_build_view_shows_live_feedback() {
     let backend = TestBackend::new(96, 22);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.focused_module = Some("context".to_string());
+    app.set_focused_module(Some("context".to_string()));
     app.shell_view = ShellView::Context;
     app.set_running_tool_for_test("context:build");
 
@@ -1709,10 +1742,11 @@ fn context_build_view_surfaces_malformed_snapshot() {
     let backend = TestBackend::new(96, 22);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.focused_module = Some("context".to_string());
+    app.set_focused_module(Some("context".to_string()));
     app.shell_view = ShellView::Context;
-    app.context_view.snapshot_path = Some(context_snapshot_fixture_path());
-    app.context_view.status = "malformed context snapshot. Next: context build".to_string();
+    app.domain_mut().context_view_mut().snapshot_path = Some(context_snapshot_fixture_path());
+    app.domain_mut().context_view_mut().status =
+        "malformed context snapshot. Next: context build".to_string();
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -1727,7 +1761,7 @@ fn renders_workspace_status_readably_at_80_columns() {
     let backend = TestBackend::new(80, 22);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.workspace_view = crate::app::WorkspaceView {
+    app.domain_mut().set_workspace_view(crate::app::WorkspaceView {
         root: Some(std::path::PathBuf::from("/tmp/kuzushi-demo")),
         state_dir: Some(std::path::PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v3")),
         findings_db: Some(std::path::PathBuf::from(
@@ -1737,7 +1771,7 @@ fn renders_workspace_status_readably_at_80_columns() {
         last_export: Some(std::path::PathBuf::from("/tmp/findings.json")),
         status: "workspace ready; 2 finding(s). Next: workspace scope init or workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]"
             .to_string(),
-    };
+    });
     app.shell_view = ShellView::Workspace;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -1759,15 +1793,16 @@ fn workspace_view_renders_findings_rollup_bar_when_findings_exist() {
     let backend = TestBackend::new(120, 36);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.workspace_view = crate::app::WorkspaceView {
-        root: Some(std::path::PathBuf::from("/tmp/kuzushi-demo")),
-        state_dir: None,
-        findings_db: None,
-        findings_count: Some(38),
-        last_export: None,
-        status: "workspace ready".to_string(),
-    };
-    app.findings = (0..38)
+    app.domain_mut()
+        .set_workspace_view(crate::app::WorkspaceView {
+            root: Some(std::path::PathBuf::from("/tmp/kuzushi-demo")),
+            state_dir: None,
+            findings_db: None,
+            findings_count: Some(38),
+            last_export: None,
+            status: "workspace ready".to_string(),
+        });
+    *app.findings_mut() = (0..38)
         .map(|index| {
             let sev = match index % 4 {
                 0 => Severity::Critical,
@@ -1820,16 +1855,17 @@ fn workspace_view_skips_rollup_when_no_findings() {
 #[test]
 fn plain_options_table_has_no_ansi_or_box_drawing() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.option_store.set_value(
+    app.option_store_mut().set_value(
         OptionScope::Session,
         OptionTarget::Tool("sast:scan".to_string()),
         "triage",
         serde_json::json!(true),
     );
-    app.shell_view = ShellView::Options(crate::app::OptionsView {
+    app.router.set_options(crate::app::OptionsView {
         tool_name: "sast:scan".to_string(),
         filter: crate::app::OptionsFilter::Standard,
     });
+    app.shell_view = ShellView::Options;
 
     let rendered = render_plain_app(&app, 80);
 
@@ -1845,14 +1881,14 @@ fn plain_options_table_has_no_ansi_or_box_drawing() {
 #[test]
 fn plain_kb_list_has_no_ansi_or_box_drawing() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.kb_view.module_id = "x-ray".to_string();
-    app.kb_view.artifacts = vec![kuzushi_core::KnownArtifact {
+    app.domain_mut().kb_view_mut().module_id = "x-ray".to_string();
+    app.domain_mut().kb_view_mut().artifacts = vec![kuzushi_core::KnownArtifact {
         module_id: "x-ray".to_string(),
         path: "x-ray/x-ray.md".to_string(),
         description: "x-ray report".to_string(),
         exists: true,
     }];
-    app.kb_view.attachments = vec![kuzushi_core::AttachmentRecord {
+    app.domain_mut().kb_view_mut().attachments = vec![kuzushi_core::AttachmentRecord {
         id: "A-123456789abc".to_string(),
         module_id: "x-ray".to_string(),
         kind: kuzushi_core::AttachmentKind::Url,
@@ -1879,19 +1915,20 @@ fn plain_kb_list_has_no_ansi_or_box_drawing() {
 #[test]
 fn plain_context_status_has_no_ansi_or_box_drawing() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.context_view = crate::app::ContextSnapshotView {
-        snapshot_path: Some(context_snapshot_fixture_path()),
-        exists: true,
-        status: "snapshot present; 2 indexed file(s). Next: context regen repo".to_string(),
-        target: Some("/tmp/demo".to_string()),
-        discovery: Some("auto".to_string()),
-        files_indexed: Some(2),
-        total_files: Some(2),
-        languages: vec!["Rust".to_string()],
-        frameworks: vec!["Cargo".to_string()],
-        generated_slices: vec!["repo".to_string(), "app-model".to_string()],
-        stale_slices: Vec::new(),
-    };
+    app.domain_mut()
+        .set_context_view(crate::app::ContextSnapshotView {
+            snapshot_path: Some(context_snapshot_fixture_path()),
+            exists: true,
+            status: "snapshot present; 2 indexed file(s). Next: context regen repo".to_string(),
+            target: Some("/tmp/demo".to_string()),
+            discovery: Some("auto".to_string()),
+            files_indexed: Some(2),
+            total_files: Some(2),
+            languages: vec!["Rust".to_string()],
+            frameworks: vec!["Cargo".to_string()],
+            generated_slices: vec!["repo".to_string(), "app-model".to_string()],
+            stale_slices: Vec::new(),
+        });
     app.shell_view = ShellView::Context;
 
     let rendered = render_plain_app(&app, 80);
@@ -1921,7 +1958,7 @@ fn plain_context_guidance_wraps_without_truncating_next_steps() {
 #[test]
 fn plain_workspace_guidance_wraps_without_truncating_export_command() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.workspace_view = crate::app::WorkspaceView {
+    app.domain_mut().set_workspace_view(crate::app::WorkspaceView {
         root: Some(std::path::PathBuf::from("/tmp/kuzushi-demo")),
         state_dir: Some(std::path::PathBuf::from("/tmp/kuzushi-demo/.kuzushi/v3")),
         findings_db: Some(std::path::PathBuf::from(
@@ -1931,7 +1968,7 @@ fn plain_workspace_guidance_wraps_without_truncating_export_command() {
         last_export: None,
         status: "workspace ready; 2 finding(s). Next: workspace scope init or workspace export findings <path> [format] [--completeness open|complete] [--allow-empty]"
             .to_string(),
-    };
+    });
     app.shell_view = ShellView::Workspace;
 
     let rendered = render_plain_app(&app, 52);
@@ -1965,9 +2002,9 @@ fn renders_config_onboarding_without_silent_model_selection() {
     let backend = TestBackend::new(100, 28);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.config.model = None;
-    app.session_thinking_level = None;
-    app.selected_model_index = 2;
+    app.config_mut().model = None;
+    app.set_session_thinking_level(None);
+    app.router.model_catalog_mut().set_selected_index(2);
     app.shell_view = ShellView::Config;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -1990,8 +2027,8 @@ fn renders_config_onboarding_without_silent_model_selection() {
 #[test]
 fn plain_config_onboarding_uses_explicit_model_selection() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.config.model = None;
-    app.session_thinking_level = None;
+    app.config_mut().model = None;
+    app.set_session_thinking_level(None);
     app.shell_view = ShellView::Config;
 
     let rendered = render_plain_app(&app, 80);
@@ -2175,7 +2212,7 @@ fn viewport_expanded_modules_remain_navigable_at_24_rows() {
         .id
         .clone();
     app.shell_view = ShellView::Catalog;
-    app.catalog_route.expand();
+    app.router.catalog_mut().expand();
     *app.router.modules_mut().scroll_mut() = usize::MAX;
 
     let backend = TestBackend::new(110, 24);
@@ -2197,9 +2234,11 @@ fn workbench_findings_pane_windows_cursor_into_view() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Workbench;
-    app.workbench_focus = WorkbenchPane::Findings;
-    app.findings_route.set_cursor(29);
-    app.findings = (0..30)
+    app.router
+        .workbench_mut()
+        .set_focus(WorkbenchPane::Findings);
+    app.router.findings_mut().set_cursor(29);
+    *app.findings_mut() = (0..30)
         .map(|index| {
             let mut finding = Finding::new_semgrep(
                 format!("demo.rule.{index:04}"),
@@ -2229,7 +2268,7 @@ fn keybind_footer_advertises_workbench_navigation_keys_at_80_columns() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Workbench;
-    app.findings = vec![Finding::new_semgrep(
+    *app.findings_mut() = vec![Finding::new_semgrep(
         "demo.rule",
         "src/app.rs",
         1,
@@ -2253,7 +2292,7 @@ fn keybind_footer_advertises_module_run_actor_and_pause_resume_keys() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let cancel = ScanCancellation::default();
     app.set_scan_cancel_for_test(cancel.clone());
-    app.scan = Some(crate::app::ScanPanelState {
+    app.set_scan_panel(Some(crate::app::ScanPanelState {
         run_id: Some("run-1".to_string()),
         target: std::path::PathBuf::from("."),
         stage: "running".to_string(),
@@ -2261,7 +2300,7 @@ fn keybind_footer_advertises_module_run_actor_and_pause_resume_keys() {
         running: true,
         abort_requested: false,
         error: None,
-    });
+    }));
     app.shell_view = ShellView::ModuleRun;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -2271,7 +2310,7 @@ fn keybind_footer_advertises_module_run_actor_and_pause_resume_keys() {
     assert!(!running.contains("[actor 1]"));
 
     cancel.pause();
-    if let Some(scan) = &mut app.scan {
+    if let Some(scan) = app.scan_mut() {
         scan.stage = "paused".to_string();
     }
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -2294,7 +2333,7 @@ fn renders_agent_chat_mode_while_question_is_active() {
         },
         None,
     );
-    app.agent_chat = Some(crate::app::AgentChatView {
+    app.set_agent_chat(Some(crate::app::AgentChatView {
         question: "What should I run first?".to_string(),
         answer: None,
         running: true,
@@ -2306,7 +2345,7 @@ fn renders_agent_chat_mode_while_question_is_active() {
         screen_context_scope: Some("scope: F-0001 · 作 confirm · abc1234-dirty".to_string()),
         failure_context: None,
         pending_failure_context: None,
-    });
+    }));
     app.shell_view = ShellView::AgentChat;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -2333,7 +2372,7 @@ fn renders_honest_abort_requested_states() {
         None,
     );
     app.shell_view = ShellView::AgentChat;
-    app.agent_chat = Some(crate::app::AgentChatView {
+    app.set_agent_chat(Some(crate::app::AgentChatView {
         question: "What changed?".to_string(),
         answer: None,
         running: true,
@@ -2345,7 +2384,7 @@ fn renders_honest_abort_requested_states() {
         screen_context_scope: None,
         failure_context: None,
         pending_failure_context: None,
-    });
+    }));
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let agent_rendered = format!("{:?}", terminal.backend().buffer());
@@ -2356,8 +2395,8 @@ fn renders_honest_abort_requested_states() {
     let backend = TestBackend::new(96, 22);
     let mut terminal = Terminal::new(backend).unwrap();
     app.shell_view = ShellView::ModuleRun;
-    app.agent_chat = None;
-    app.scan = Some(crate::app::ScanPanelState {
+    app.clear_agent_chat();
+    app.set_scan_panel(Some(crate::app::ScanPanelState {
         run_id: Some("run-1".to_string()),
         target: std::path::PathBuf::from("."),
         stage: "abort requested".to_string(),
@@ -2365,7 +2404,7 @@ fn renders_honest_abort_requested_states() {
         running: true,
         abort_requested: true,
         error: None,
-    });
+    }));
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let scan_rendered = format!("{:?}", terminal.backend().buffer());
@@ -2379,7 +2418,7 @@ fn agent_chat_renders_failure_handoff_panel() {
     let backend = TestBackend::new(120, 34);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.agent_chat = Some(crate::app::AgentChatView {
+    app.set_agent_chat(Some(crate::app::AgentChatView {
         question: "what next?".to_string(),
         answer: None,
         running: false,
@@ -2409,7 +2448,7 @@ fn agent_chat_renders_failure_handoff_panel() {
             claims_forbidden: vec!["validated".to_string(), "verified".to_string()],
         }),
         pending_failure_context: None,
-    });
+    }));
     app.shell_view = ShellView::AgentChat;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -2427,7 +2466,7 @@ fn failure_handoff_view_renders_current_context() {
     let backend = TestBackend::new(120, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.agent_chat = Some(crate::app::AgentChatView {
+    app.set_agent_chat(Some(crate::app::AgentChatView {
         question: String::new(),
         answer: None,
         running: false,
@@ -2451,7 +2490,7 @@ fn failure_handoff_view_renders_current_context() {
             claims_forbidden: vec!["verified".to_string()],
         }),
         pending_failure_context: None,
-    });
+    }));
     app.shell_view = ShellView::FailureHandoff;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -2499,7 +2538,7 @@ fn failure_handoff_view_reads_latest_failures_artifact() {
     let backend = TestBackend::new(120, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(tmp.path().to_path_buf());
+    app.set_target(Some(tmp.path().to_path_buf()));
     app.shell_view = ShellView::FailureHandoff;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -2556,7 +2595,7 @@ fn recommend_view_renders_latest_recommendations_artifact() {
     let backend = TestBackend::new(120, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(tmp.path().to_path_buf());
+    app.set_target(Some(tmp.path().to_path_buf()));
     app.shell_view = ShellView::Recommend;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -2582,7 +2621,7 @@ fn renders_shell_module_plan_and_run_routing_modes() {
         },
         {
             let mut app = ShellApp::new(V2Config::default(), None);
-            app.focused_module = Some("sast".to_string());
+            app.set_focused_module(Some("sast".to_string()));
             app.shell_view = ShellView::Module;
             (app, "mode:module", "kuzushi/sast>")
         },
@@ -2598,7 +2637,7 @@ fn renders_shell_module_plan_and_run_routing_modes() {
         },
         {
             let mut app = ShellApp::new(V2Config::default(), None);
-            app.scan = Some(crate::app::ScanPanelState {
+            app.set_scan_panel(Some(crate::app::ScanPanelState {
                 run_id: Some("run-1".to_string()),
                 target: std::path::PathBuf::from("."),
                 stage: "running semgrep".to_string(),
@@ -2606,19 +2645,19 @@ fn renders_shell_module_plan_and_run_routing_modes() {
                 running: true,
                 abort_requested: false,
                 error: None,
-            });
+            }));
             app.shell_view = ShellView::ModuleRun;
             (app, "mode:run", "kuzushi/run>")
         },
         {
             let mut app = ShellApp::new(V2Config::default(), None);
-            app.focused_module = Some("context".to_string());
+            app.set_focused_module(Some("context".to_string()));
             app.shell_view = ShellView::ModuleRun;
             (app, "mode:module", "kuzushi/context>")
         },
         {
             let mut app = ShellApp::new(V2Config::default(), None);
-            app.focused_module = Some("context".to_string());
+            app.set_focused_module(Some("context".to_string()));
             app.set_running_tool_for_test("context:build");
             app.shell_view = ShellView::ModuleRun;
             (app, "mode:run", "kuzushi/context/run>")
@@ -2658,60 +2697,62 @@ fn renders_shell_module_plan_and_run_routing_modes() {
 #[test]
 fn renders_all_ink_parity_shell_surfaces() {
     let cases = vec![
-        (ShellView::Home, "HOME"),
-        (ShellView::Catalog, "MODULES"),
-        (ShellView::Recommend, "RECOMMEND"),
-        (ShellView::Module, "MODULE DETAIL"),
-        (ShellView::ModuleRun, "TRANSCRIPT"),
-        (ShellView::Workbench, "FINDINGS"),
-        (ShellView::Tune, "TUNE"),
-        (ShellView::Threat(ThreatView::Stories), "STORIES"),
-        (ShellView::ThreatEditor, "THREAT MODEL EDIT"),
-        (ShellView::PromptsEditor, "PROMPTS"),
-        (ShellView::ActorDetail(1), "ACTOR 1"),
-        (ShellView::Runs, "RUN TIMELINE"),
+        (ShellView::Home, "HOME", None, None),
+        (ShellView::Catalog, "MODULES", None, None),
+        (ShellView::Recommend, "RECOMMEND", None, None),
+        (ShellView::Module, "MODULE DETAIL", None, None),
+        (ShellView::ModuleRun, "TRANSCRIPT", None, None),
+        (ShellView::Workbench, "FINDINGS", None, None),
+        (ShellView::Tune, "TUNE", None, None),
         (
-            ShellView::RunDiff {
-                left: "run-left".to_string(),
-                right: "run-right".to_string(),
-            },
-            "RUN DIFF",
+            ShellView::Threat,
+            "STORIES",
+            Some(ThreatView::Stories),
+            None,
         ),
-        (ShellView::Replay("run-1".to_string()), "REPLAY"),
-        (ShellView::Trace("run-1".to_string()), "TRACE"),
-        (ShellView::Help, "HELP"),
-        (ShellView::Config, "CONFIG"),
-        (ShellView::Health, "HEALTH"),
-        (ShellView::Tools, "TOOLS"),
-        (
-            ShellView::Options(crate::app::OptionsView {
-                tool_name: "sast:scan".to_string(),
-                filter: crate::app::OptionsFilter::Standard,
-            }),
-            "OPTIONS",
-        ),
-        (ShellView::SastTasks, "SAST TASKS"),
-        (ShellView::Context, "CONTEXT"),
-        (ShellView::ProjectModel, "PROJECT MODEL"),
-        (ShellView::StrategyQueue, "STRATEGY QUEUE"),
-        (ShellView::Workspace, "WORKSPACE"),
-        (ShellView::KnowledgeBase, "KB ATTACHMENTS"),
-        (ShellView::FilePicker, "ATTACH A FILE"),
-        (ShellView::FailureHandoff, "FAILURE HANDOFF"),
-        (ShellView::AgentChat, "AGENT"),
-        (ShellView::History, "COMMAND HISTORY"),
-        (ShellView::Story, "SESSION STORY"),
-        (ShellView::Auth, "PROVIDERS"),
-        (ShellView::Cost, "BUDGETS"),
-        (ShellView::Patch("F-0001".to_string()), "PATCH"),
-        (ShellView::Pwn, "PWN TARGET"),
+        (ShellView::ThreatEditor, "THREAT MODEL EDIT", None, None),
+        (ShellView::PromptsEditor, "PROMPTS", None, None),
+        (ShellView::ActorDetail, "ACTOR 0", None, None),
+        (ShellView::Runs, "RUN TIMELINE", None, None),
+        (ShellView::RunDiff, "RUN DIFF", None, None),
+        (ShellView::Replay, "REPLAY", None, None),
+        (ShellView::Trace, "TRACE", None, None),
+        (ShellView::Help, "HELP", None, None),
+        (ShellView::Config, "CONFIG", None, None),
+        (ShellView::Health, "CURRENT PREFLIGHT", None, None),
+        (ShellView::Tools, "TOOLS", None, None),
+        (ShellView::Options, "OPTIONS", None, None),
+        (ShellView::SastTasks, "SAST TASKS", None, None),
+        (ShellView::Context, "CONTEXT", None, None),
+        (ShellView::ProjectModel, "PROJECT MODEL", None, None),
+        (ShellView::StrategyQueue, "STRATEGY QUEUE", None, None),
+        (ShellView::Workspace, "WORKSPACE", None, None),
+        (ShellView::KnowledgeBase, "KB ATTACHMENTS", None, None),
+        (ShellView::FilePicker, "ATTACH A FILE", None, None),
+        (ShellView::FailureHandoff, "FAILURE HANDOFF", None, None),
+        (ShellView::AgentChat, "AGENT", None, None),
+        (ShellView::History, "COMMAND HISTORY", None, None),
+        (ShellView::Story, "SESSION STORY", None, None),
+        (ShellView::Auth, "PROVIDERS", None, None),
+        (ShellView::Cost, "BUDGETS", None, None),
+        (ShellView::Patch, "PATCH", None, Some("F-0001")),
+        (ShellView::Pwn, "PWN TARGET", None, None),
     ];
 
-    for (view, expected) in cases {
+    for (view, expected, threat_view, patch_alias) in cases {
         let backend = TestBackend::new(110, 26);
         let mut terminal = Terminal::new(backend).unwrap();
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.focused_module = Some("semgrep".to_string());
+        app.set_focused_module(Some("semgrep".to_string()));
+        app.router.run_diff_mut().open("run-left", "run-right");
+        app.router.replay_mut().open("run-1");
+        app.router.trace_mut().open("run-1");
+        if let Some(threat_view) = threat_view {
+            app.router.threat_mut().open(threat_view);
+        }
+        if let Some(patch_alias) = patch_alias {
+            app.router.patch_mut().open(patch_alias);
+        }
         // The Workbench command center is the one box-drawing primary surface
         // (bordered panes); every other view stays line-based.
         let is_workbench = matches!(view, ShellView::Workbench);
@@ -2720,7 +2761,10 @@ fn renders_all_ink_parity_shell_surfaces() {
         terminal.draw(|frame| render_app(frame, &app)).unwrap();
         let rendered = format!("{:?}", terminal.backend().buffer());
 
-        assert!(rendered.contains(expected), "missing {expected}");
+        assert!(
+            rendered.contains(expected),
+            "missing {expected} in {rendered}"
+        );
         if !is_workbench {
             assert!(!rendered.contains("┌"), "{expected} drew a box");
         }
@@ -2733,12 +2777,13 @@ fn renders_pwn_dashboard_with_state_and_rounds() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Pwn;
-    app.pwn_view.target = Some(std::path::PathBuf::from("./chal"));
-    app.pwn_view.profile_snapshot = Some(serde_json::json!({
+    let pwn = app.pwn_view_mut();
+    pwn.target = Some(std::path::PathBuf::from("./chal"));
+    pwn.profile_snapshot = Some(serde_json::json!({
         "arch": "x86-64",
         "needed": ["libc.so.6"]
     }));
-    app.pwn_view.state_snapshot = Some(serde_json::json!({
+    pwn.state_snapshot = Some(serde_json::json!({
         "primitives": [{
             "kind": "leak",
             "confidence": 0.75,
@@ -2746,7 +2791,7 @@ fn renders_pwn_dashboard_with_state_and_rounds() {
             "remoteSafe": true
         }]
     }));
-    app.pwn_view.auto_solve_snapshot = Some(serde_json::json!({
+    pwn.auto_solve_snapshot = Some(serde_json::json!({
         "llmPlanner": {
             "iterations": [{
                 "round": 0,
@@ -2756,7 +2801,7 @@ fn renders_pwn_dashboard_with_state_and_rounds() {
             }]
         }
     }));
-    app.pwn_view.reverse_snapshots.push(serde_json::json!({
+    pwn.reverse_snapshots.push(serde_json::json!({
         "function": "main",
         "revng": {"ok": true, "output": "void main() { puts(\"hi\"); }"},
         "dangerousIo": ["puts"]
@@ -2803,10 +2848,10 @@ fn assert_strict_plain_width(rendered: &str, width: usize) {
 
 #[test]
 fn header_hides_cost_at_zero_and_compacts_at_higher_amounts() {
-    // P4-7: at session_cost_usd == 0 the header used to render
-    // `cost $0.0000` (12 chars) which pushed `model unconfigured` off
-    // the right edge of 120-column terminals. Verify it's hidden until
-    // a tool charges, and that the format compacts above $0.01.
+    // The design chrome reserves a cost chip on every screen. Keep exact zero
+    // tidy while preserving four decimals for tiny nonzero model spend, then
+    // compact larger values.
+    assert_eq!(format_session_cost(0.0), "$0.00");
     assert_eq!(format_session_cost(0.0042), "$0.0042");
     assert_eq!(format_session_cost(0.42), "$0.42");
     assert_eq!(format_session_cost(12.345), "$12.35");
@@ -2815,16 +2860,16 @@ fn header_hides_cost_at_zero_and_compacts_at_higher_amounts() {
     let backend = TestBackend::new(120, 40);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.session_cost_usd = 0.0;
+    app.session_mut().set_session_cost_usd_for_test(0.0);
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
     assert!(
-        !rendered.contains("cost $0.0000"),
-        "header still rendered zero-cost noise: {rendered}"
+        rendered.contains("cost:$0.00"),
+        "header should render zero-cost chip: {rendered}"
     );
 
-    // Once a real cost is reported we expect the cost segment back.
-    app.session_cost_usd = 0.42;
+    // Once a real cost is reported we expect the compact spend value.
+    app.session_mut().set_session_cost_usd_for_test(0.42);
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
     assert!(rendered.contains("cost:$0.42"));
@@ -2841,7 +2886,7 @@ fn module_run_error_wraps_on_word_boundaries() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::ModuleRun;
-    app.scan = Some(ScanPanelState {
+    app.set_scan_panel(Some(ScanPanelState {
         run_id: Some("abc1234".to_string()),
         target: PathBuf::from("./repo"),
         stage: "failed".to_string(),
@@ -2853,7 +2898,7 @@ fn module_run_error_wraps_on_word_boundaries() {
                  (for example `pipx install semgrep` or `brew install semgrep`)."
                 .to_string(),
         ),
-    });
+    }));
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
     assert!(rendered.contains("pipx install semgrep"));
@@ -2907,7 +2952,8 @@ fn view_status_segment_reflects_actual_view_not_focused_module() {
     app.shell_view = ShellView::Workbench;
     assert_eq!(view_status_segment(&app), "workbench");
 
-    app.shell_view = ShellView::Threat(ThreatView::Stride);
+    app.router.threat_mut().open(ThreatView::Stride);
+    app.shell_view = ShellView::Threat;
     assert_eq!(view_status_segment(&app), "threats:stride");
 
     app.shell_view = ShellView::Runs;
@@ -2918,7 +2964,7 @@ fn view_status_segment_reflects_actual_view_not_focused_module() {
 
     // Module view still surfaces the focused module so operators can
     // see which module they're driving.
-    app.focused_module = Some("semgrep".to_string());
+    app.set_focused_module(Some("semgrep".to_string()));
     app.shell_view = ShellView::Module;
     assert_eq!(view_status_segment(&app), "semgrep");
 }
@@ -3153,11 +3199,11 @@ fn module_run_renders_live_activity_in_body_and_status_strip() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::ModuleRun;
-    app.live_activity = Some(LiveActivity::new(
+    app.set_live_activity_state(Some(LiveActivity::new(
         LiveActivityPhase::Thinking,
         "triage:run",
         "asking model to triage persisted findings",
-    ));
+    )));
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3173,11 +3219,11 @@ fn module_run_renders_live_activity_in_body_and_status_strip() {
 fn plain_live_activity_has_no_ansi_or_box_drawing() {
     let mut app = ShellApp::new(V2Config::default(), None);
     let detail = format!("writes {}", threat_model_relative_path());
-    app.live_activity = Some(LiveActivity::new(
+    app.set_live_activity_state(Some(LiveActivity::new(
         LiveActivityPhase::WritingArtifact,
         "threat-model:build",
         detail,
-    ));
+    )));
 
     let rendered = render_plain_app(&app, 80);
 
@@ -3228,7 +3274,7 @@ fn runs_view_tints_status_column_per_mockup() {
     let backend = TestBackend::new(120, 22);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.scan = Some(crate::app::ScanPanelState {
+    app.set_scan_panel(Some(crate::app::ScanPanelState {
         run_id: Some("r-08e1aa".to_string()),
         target: std::path::PathBuf::from("/tmp/demo"),
         stage: "complete".to_string(),
@@ -3236,7 +3282,7 @@ fn runs_view_tints_status_column_per_mockup() {
         running: false,
         abort_requested: false,
         error: None,
-    });
+    }));
     app.shell_view = ShellView::Runs;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -3334,7 +3380,7 @@ fn runs_view_lists_past_runs_from_run_json() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(tmp.path().to_path_buf());
+    app.set_target(Some(tmp.path().to_path_buf()));
     app.shell_view = ShellView::Runs;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -3380,15 +3426,13 @@ fn run_diff_view_renders_new_and_not_seen_findings_and_revisions() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(tmp.path().to_path_buf());
-    app.findings = vec![
+    app.set_target(Some(tmp.path().to_path_buf()));
+    *app.findings_mut() = vec![
         run_diff_reviewed_finding("fi_shared", TriageVerdict::TruePositive),
         run_diff_reviewed_finding("fi_changed", TriageVerdict::FalsePositive),
     ];
-    app.shell_view = ShellView::RunDiff {
-        left: "run-left".to_string(),
-        right: "run-right".to_string(),
-    };
+    app.router.run_diff_mut().open("run-left", "run-right");
+    app.shell_view = ShellView::RunDiff;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3461,20 +3505,29 @@ fn catalog_j_k_moves_row_cursor_and_highlights_row() {
     let backend = TestBackend::new(120, 36);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.handle_command(crate::commands::ShellCommand::Modules);
+    run_command(&mut app, crate::commands::ShellCommand::Modules);
 
     // Cursor starts at 0; `j` advances it.
-    let before = app.catalog_route.cursor();
-    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
-    assert_eq!(app.catalog_route.cursor(), before + 1);
+    let before = app.router.catalog().cursor();
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.catalog().cursor(), before + 1);
 
     // `k` reverses; from row 1 back to 0.
-    app.handle_key(KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()));
-    assert_eq!(app.catalog_route.cursor(), before);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('k'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.catalog().cursor(), before);
 
     // Render after a `j` press; the catalog body should contain the
     // cursor `▌` glyph at least once.
-    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
+    );
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
     assert!(rendered.contains("▌"), "cursor glyph missing: {rendered}");
@@ -3488,12 +3541,18 @@ fn catalog_enter_runs_use_for_cursor_row() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.handle_command(crate::commands::ShellCommand::Modules);
-    app.handle_key(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()));
+    run_command(&mut app, crate::commands::ShellCommand::Modules);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('j'), KeyModifiers::empty()),
+    );
     let cursor_id = app.catalog_cursor_module_id().expect("cursor id");
-    app.handle_key(KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()));
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Enter, KeyModifiers::empty()),
+    );
     // After Enter, the focused module should be the cursor row.
-    assert_eq!(app.focused_module.as_deref(), Some(cursor_id.as_str()));
+    assert_eq!(app.focused_module(), Some(cursor_id.as_str()));
 }
 
 #[test]
@@ -3501,17 +3560,23 @@ fn catalog_g_and_uppercase_g_jump_cursor_to_bounds() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.handle_command(crate::commands::ShellCommand::Modules);
+    run_command(&mut app, crate::commands::ShellCommand::Modules);
     let total = app.catalog_module_count();
     assert!(total > 0);
 
     // G jumps to last row.
-    app.handle_key(KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()));
-    assert_eq!(app.catalog_route.cursor(), total - 1);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('G'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.catalog().cursor(), total - 1);
 
     // g jumps to first.
-    app.handle_key(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()));
-    assert_eq!(app.catalog_route.cursor(), 0);
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('g'), KeyModifiers::empty()),
+    );
+    assert_eq!(app.router.catalog().cursor(), 0);
 }
 
 #[test]
@@ -3532,7 +3597,7 @@ fn top_status_strip_shows_stage_spinner_while_scan_runs() {
     );
 
     // Running: stage segment with spinner glyph.
-    app.scan = Some(crate::app::ScanPanelState {
+    app.set_scan_panel(Some(crate::app::ScanPanelState {
         run_id: Some("r-now".to_string()),
         target: std::path::PathBuf::from("."),
         stage: "running".to_string(),
@@ -3540,7 +3605,7 @@ fn top_status_strip_shows_stage_spinner_while_scan_runs() {
         running: true,
         abort_requested: false,
         error: None,
-    });
+    }));
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let running = format!("{:?}", terminal.backend().buffer());
     assert!(running.contains("stage:"), "stage missing: {running}");
@@ -3558,9 +3623,10 @@ fn cost_view_renders_budget_bar_and_session_spend() {
     let backend = TestBackend::new(120, 26);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.session_cost_usd = 1.42;
-    app.session_budget_usd = Some(5.0);
-    app.last_tool_cost_usd = Some(0.18);
+    app.session_mut().set_session_cost_usd_for_test(1.42);
+    app.session_mut().set_session_budget_usd(Some(5.0));
+    app.session_mut()
+        .set_last_tool_cost_usd_for_test(Some(0.18));
     app.shell_view = ShellView::Cost;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -3590,7 +3656,7 @@ fn auth_view_renders_providers_model_and_spend_sections() {
         },
         None,
     );
-    app.session_cost_usd = 0.42;
+    app.session_mut().set_session_cost_usd_for_test(0.42);
     app.shell_view = ShellView::Auth;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -3611,7 +3677,7 @@ fn auth_view_renders_latest_oauth_flow_state() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Auth;
-    app.auth_login = Some(AuthLoginView {
+    app.router.auth_mut().set_login(AuthLoginView {
         provider: "openai".to_string(),
         method: "headless".to_string(),
         status: "waiting".to_string(),
@@ -3639,7 +3705,7 @@ fn auth_view_stacks_and_wraps_on_narrow_terminals() {
     // command survives.
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Auth;
-    app.auth_login = Some(AuthLoginView {
+    app.router.auth_mut().set_login(AuthLoginView {
         provider: "openai".to_string(),
         method: "browser".to_string(),
         status: "connected".to_string(),
@@ -3689,7 +3755,7 @@ fn home_view_shows_journey_rail_and_phase_chip_with_target() {
     let backend = TestBackend::new(120, 34);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(dir.path().to_path_buf());
+    app.set_target(Some(dir.path().to_path_buf()));
     app.shell_view = ShellView::Home;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -3717,7 +3783,7 @@ fn activity_view_collapses_tasks_pane_for_taskless_runs() {
     let backend = TestBackend::new(80, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.activity = Some(ActivitySession::new("tool-1"));
+    app.set_activity(Some(ActivitySession::new("tool-1")));
     app.shell_view = ShellView::Activity;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -3739,8 +3805,8 @@ fn activity_view_names_the_running_tool_everywhere_it_matters() {
     let backend = TestBackend::new(90, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.tool_running = Some("threat-model:build".to_string());
-    app.activity = Some(ActivitySession::new("tool-7b7fa744"));
+    app.set_running_tool_for_test("threat-model:build");
+    app.set_activity(Some(ActivitySession::new("tool-7b7fa744")));
     app.shell_view = ShellView::Activity;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -3771,8 +3837,8 @@ fn activity_view_renders_partial_terminal_outcome_from_run_summary() {
     let backend = TestBackend::new(140, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(temp.path().to_path_buf());
-    app.activity = Some(ActivitySession::new("run-partial-render"));
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.set_activity(Some(ActivitySession::new("run-partial-render")));
     app.shell_view = ShellView::Activity;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -3792,7 +3858,7 @@ fn target_picker_renders_candidates_with_cursor_and_hints() {
     let backend = TestBackend::new(120, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target_picker_route.open(vec![
+    app.router.target_picker_mut().open(vec![
         crate::app::TargetCandidate {
             path: std::path::PathBuf::from("/work/acme"),
             label: ".".to_string(),
@@ -3812,7 +3878,7 @@ fn target_picker_renders_candidates_with_cursor_and_hints() {
             scope: None,
         },
     ]);
-    app.target_picker_route.set_cursor(1);
+    app.router.target_picker_mut().set_cursor(1);
     app.shell_view = ShellView::TargetPicker;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -3854,8 +3920,9 @@ fn auth_picker_renders_selectable_offline_demo_row() {
     let backend = TestBackend::new(110, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::AuthMethodPicker("openai".to_string());
-    app.auth_picker_route.set_cursor(2);
+    app.router.auth_picker_mut().open("openai".to_string());
+    app.shell_view = ShellView::AuthMethodPicker;
+    app.router.auth_picker_mut().set_cursor(2);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -3871,17 +3938,16 @@ fn file_picker_renders_filter_count_and_selected_file() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::FilePicker;
-    app.file_picker_route.open(
+    app.router.file_picker_mut().open(
         vec![
             "README.md".to_string(),
             "docs/design.md".to_string(),
             "src/main.rs".to_string(),
         ],
         false,
-        &ShellView::KnowledgeBase,
     );
     for ch in "des".chars() {
-        app.file_picker_route.push_query(ch);
+        app.router.file_picker_mut().push_query(ch);
     }
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -4057,13 +4123,13 @@ fn module_detail_renders_options_when_stored_values_exist() {
     let backend = TestBackend::new(120, 36);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.option_store.set_value(
+    app.option_store_mut().set_value(
         kuzushi_core::OptionScope::Session,
         kuzushi_core::OptionTarget::Tool("sast:scan".to_string()),
         "triage",
         serde_json::json!(true),
     );
-    app.focused_module = Some("sast".to_string());
+    app.set_focused_module(Some("sast".to_string()));
     app.shell_view = ShellView::Module;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -4088,8 +4154,8 @@ fn module_detail_lists_prompt_overrides_from_disk() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(tmp.path().to_path_buf());
-    app.focused_module = Some("sast".to_string());
+    app.set_target(Some(tmp.path().to_path_buf()));
+    app.set_focused_module(Some("sast".to_string()));
     app.shell_view = ShellView::Module;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -4110,9 +4176,9 @@ fn prompts_editor_renders_selected_prompt_stack() {
     let backend = TestBackend::new(120, 32);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(tmp.path().to_path_buf());
-    app.focused_module = Some("sast".to_string());
-    app.prompts_cursor = 1;
+    app.set_target(Some(tmp.path().to_path_buf()));
+    app.set_focused_module(Some("sast".to_string()));
+    app.router.prompts_mut().set_cursor(1);
     app.shell_view = ShellView::PromptsEditor;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -4147,8 +4213,9 @@ fn trace_view_renders_steps_from_trace_jsonl() {
     let backend = TestBackend::new(120, 30);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(tmp.path().to_path_buf());
-    app.shell_view = ShellView::Trace("r-1".to_string());
+    app.set_target(Some(tmp.path().to_path_buf()));
+    app.router.trace_mut().open("r-1");
+    app.shell_view = ShellView::Trace;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -4173,8 +4240,9 @@ fn trace_view_empty_when_no_trace_jsonl_on_disk() {
     let backend = TestBackend::new(120, 22);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(tmp.path().to_path_buf());
-    app.shell_view = ShellView::Trace("r-missing".to_string());
+    app.set_target(Some(tmp.path().to_path_buf()));
+    app.router.trace_mut().open("r-missing");
+    app.shell_view = ShellView::Trace;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -4215,8 +4283,9 @@ fn render_replay_for_target(target: &std::path::Path, run_id: &str) -> String {
     let backend = TestBackend::new(140, 24);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.target = Some(target.to_path_buf());
-    app.shell_view = ShellView::Replay(run_id.to_string());
+    app.set_target(Some(target.to_path_buf()));
+    app.router.replay_mut().open(run_id);
+    app.shell_view = ShellView::Replay;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     format!("{:?}", terminal.backend().buffer())
@@ -4242,7 +4311,8 @@ fn patch_view_renders_rationale_diff_tests_and_guardrail_sections() {
             guardrail: Some("approval.patches = human-required".to_string()),
             staged_at: Some(ui_run_artifact_relative_path("r-2113", "patch.diff")),
         });
-    app.shell_view = ShellView::Patch("F-0001".to_string());
+    app.router.patch_mut().open("F-0001");
+    app.shell_view = ShellView::Patch;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -4274,7 +4344,8 @@ fn patch_view_empty_state_when_no_patch_pending() {
     let backend = TestBackend::new(120, 22);
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.shell_view = ShellView::Patch("F-0042".to_string());
+    app.router.patch_mut().open("F-0042");
+    app.shell_view = ShellView::Patch;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -4373,11 +4444,14 @@ fn confirm_keys_resolve_pending_confirm_with_remember_flag() {
         actor: None,
         remembered: false,
     });
-    app.handle_key(KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::empty()));
+    press_key(
+        &mut app,
+        KeyEvent::new(KeyCode::Char('Y'), KeyModifiers::empty()),
+    );
     assert!(app.advisory.pending_confirm.is_none());
     // The system log line records the outcome.
     assert!(app
-        .log
+        .log_lines()
         .iter()
         .any(|line| line.body.contains("allowed") && line.body.contains("remembered")));
 }
@@ -4397,7 +4471,7 @@ fn agent_chat_renders_multi_turn_history_with_bubble_per_turn() {
         },
         None,
     );
-    app.agent_chat = Some(crate::app::AgentChatView {
+    app.set_agent_chat(Some(crate::app::AgentChatView {
         question: "now what?".to_string(),
         answer: Some("scan first.".to_string()),
         running: false,
@@ -4420,7 +4494,7 @@ fn agent_chat_renders_multi_turn_history_with_bubble_per_turn() {
         screen_context_scope: None,
         failure_context: None,
         pending_failure_context: None,
-    });
+    }));
     app.shell_view = ShellView::AgentChat;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -4486,7 +4560,7 @@ fn agent_chat_renders_role_tagged_bubbles() {
         },
         None,
     );
-    app.agent_chat = Some(crate::app::AgentChatView {
+    app.set_agent_chat(Some(crate::app::AgentChatView {
         question: "What should I run first?".to_string(),
         answer: Some("Run sast:scan against the active target.".to_string()),
         running: false,
@@ -4498,7 +4572,7 @@ fn agent_chat_renders_role_tagged_bubbles() {
         screen_context_scope: None,
         failure_context: None,
         pending_failure_context: None,
-    });
+    }));
     app.shell_view = ShellView::AgentChat;
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
@@ -4596,7 +4670,7 @@ fn banner_row(buffer: &Buffer, needle: &str) -> Option<u16> {
 fn workbench_app_with_findings() -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Workbench;
-    app.findings = vec![Finding::new_semgrep(
+    *app.findings_mut() = vec![Finding::new_semgrep(
         "demo.sqli",
         "apps/api/orders.rs",
         12,
@@ -4610,25 +4684,25 @@ fn workbench_app_with_findings() -> ShellApp {
 fn workbench_app_with_long_source_rows() -> ShellApp {
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Workbench;
-    app.findings.extend(repeat_finding(
+    app.findings_mut().extend(repeat_finding(
         "demo.workflow",
         ".github/workflows/benchmark-regression.yml",
         Severity::High,
         1,
     ));
-    app.findings.extend(repeat_finding(
+    app.findings_mut().extend(repeat_finding(
         "demo.reference",
         ".github/workflows/kuzushi-reference.yml",
         Severity::High,
         4,
     ));
-    app.findings.extend(repeat_finding(
+    app.findings_mut().extend(repeat_finding(
         "demo.secret",
         "crates/kuzushi-core/src/scan/engines/secret_scan/applies_size_binary_and_severity_filters.rs",
         Severity::High,
         18,
     ));
-    app.findings.extend(repeat_finding(
+    app.findings_mut().extend(repeat_finding(
         "demo.medium",
         "src/review/moderate-risk-finding.rs",
         Severity::Medium,
@@ -4720,7 +4794,7 @@ fn workbench_top_bar_renders_compact_journey_phase_with_target() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Workbench;
-    app.target = Some(target.path().to_path_buf());
+    app.set_target(Some(target.path().to_path_buf()));
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -4816,7 +4890,9 @@ fn workbench_lines_plain_shows_top_bar_findings_and_dfd_empty_hint() {
 #[test]
 fn workbench_ship_plain_shows_report_preview_counts() {
     let mut app = workbench_app_with_findings();
-    app.workbench_page = Some(WorkbenchPage::Ship);
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Ship));
 
     let rendered = render_plain_app(&app, 110);
 
@@ -4882,10 +4958,10 @@ fn workbench_selected_finding_gets_readable_details_pane() {
     }];
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Workbench;
-    app.workbench_focus = WorkbenchPane::Details;
-    app.target = Some(temp.path().to_path_buf());
-    app.findings = vec![finding.clone()];
-    app.selected_finding = Some(finding);
+    app.router.workbench_mut().set_focus(WorkbenchPane::Details);
+    app.set_target(Some(temp.path().to_path_buf()));
+    *app.findings_mut() = vec![finding.clone()];
+    *app.selected_finding_mut() = Some(finding);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -4947,9 +5023,13 @@ fn workbench_center_renders_dfd_title_when_artifact_present() {
 
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Workbench;
-    app.target = Some(temp.path().to_path_buf());
-    app.workbench_page = Some(WorkbenchPage::Review);
-    app.workbench_center_mode = WorkbenchCenterMode::Dfd;
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    app.router
+        .workbench_mut()
+        .set_center_mode(WorkbenchCenterMode::Dfd);
 
     let rendered = render_plain_app(&app, 120);
 
@@ -4995,9 +5075,13 @@ fn workbench_frame_uses_scene_dfd_widget_when_artifact_present() {
     let mut terminal = Terminal::new(backend).unwrap();
     let mut app = ShellApp::new(V2Config::default(), None);
     app.shell_view = ShellView::Workbench;
-    app.target = Some(temp.path().to_path_buf());
-    app.workbench_page = Some(WorkbenchPage::Review);
-    app.workbench_center_mode = WorkbenchCenterMode::Dfd;
+    app.set_target(Some(temp.path().to_path_buf()));
+    app.router
+        .workbench_mut()
+        .set_page(Some(WorkbenchPage::Review));
+    app.router
+        .workbench_mut()
+        .set_center_mode(WorkbenchCenterMode::Dfd);
 
     terminal.draw(|frame| render_app(frame, &app)).unwrap();
     let rendered = format!("{:?}", terminal.backend().buffer());
@@ -5007,4 +5091,122 @@ fn workbench_frame_uses_scene_dfd_widget_when_artifact_present() {
     assert!(rendered.contains("◆ Browser"), "{rendered}");
     assert!(rendered.contains("◇ API server"), "{rendered}");
     assert!(!rendered.contains("DATA-FLOW DIAGRAM"), "{rendered}");
+}
+
+#[test]
+fn phase_three_overlay_views_render_plain_surfaces() {
+    let cases = [
+        (ShellView::BootSplash, "break the form"),
+        (ShellView::QuitConfirm, "CONFIRM SESSION EXIT"),
+        (ShellView::ThemePicker, "THEME"),
+        (ShellView::Keymap, "keymap"),
+        (ShellView::UpdateAvailable, "UPDATE"),
+    ];
+
+    for (view, marker) in cases {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.shell_view = view;
+        let rendered = render_plain_app(&app, 120);
+        assert!(
+            rendered.contains(marker),
+            "{marker} missing from {rendered}"
+        );
+        assert!(
+            rendered.contains("KUZUSHI") || rendered.contains("break the form"),
+            "{marker} missing shell identity: {rendered}"
+        );
+    }
+}
+
+#[test]
+fn phase_four_interruption_views_render_plain_surfaces() {
+    let cases = [
+        (crate::app::InterruptionView::BudgetHardStop, "BUDGET CAP"),
+        (crate::app::InterruptionView::BudgetStop, "BUDGET HARD STOP"),
+        (crate::app::InterruptionView::NoBinary, "NO BINARY"),
+        (crate::app::InterruptionView::NoModel, "NO MODEL CONFIGURED"),
+        (crate::app::InterruptionView::NoPlugin, "NO PLUGIN"),
+        (crate::app::InterruptionView::NetworkDown, "NETWORK DOWN"),
+        (crate::app::InterruptionView::RateLimited, "RATE LIMITED"),
+    ];
+
+    for (view, marker) in cases {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        app.router.interruption_mut().open(view);
+        app.shell_view = ShellView::Interruption;
+        app.advisory.budget_halt = Some(crate::app::BudgetHalt {
+            limit_usd: 2.50,
+            spent_usd: 2.75,
+        });
+        let rendered = render_plain_app(&app, 120);
+        assert!(
+            rendered.contains(marker),
+            "{marker} missing from {rendered}"
+        );
+        assert!(
+            rendered.contains("> try:"),
+            "{marker} missing CTA: {rendered}"
+        );
+    }
+}
+
+#[test]
+fn phase_five_committed_module_views_render_descriptor_details() {
+    let cases = [
+        ("agentic-sast", "agentic-sast:scan"),
+        ("codeql", "codeql:scan"),
+        ("dep-hygiene", "dep-hygiene:check"),
+        ("iac-scan", "iac-scan:scan"),
+        ("ndiff", "ndiff:fetch-cve"),
+        ("randori", "randori:pasta"),
+        ("recon", "recon:import"),
+        ("sast", "sast:scan"),
+        ("secret-scan", "secret-scan:scan"),
+        ("semgrep", "semgrep:scan"),
+        ("shinsa", "shinsa:scan"),
+        ("taint-iris-next", "taint-iris-next:dataflow-plan"),
+        ("tob", "tob:audit"),
+        ("triage", "triage:run"),
+        ("variant", "variant:hunt"),
+        ("verify", "verify:finding"),
+        ("vuln-scout", "vuln-scout:audit"),
+        ("x-ray", "x-ray:run"),
+    ];
+
+    for (module_id, expected_tool) in cases {
+        let mut app = ShellApp::new(V2Config::default(), None);
+        let hidden = app
+            .registry()
+            .all_modules()
+            .find(|module| module.metadata().id == module_id)
+            .unwrap_or_else(|| panic!("{module_id} should be registered"))
+            .is_hidden();
+        app.set_focused_module(Some(module_id.to_string()));
+        app.shell_view = ShellView::Module;
+
+        let rendered = render_plain_app(&app, 120);
+
+        assert!(
+            rendered.contains("MODULE DETAIL"),
+            "{module_id} fell back from module detail: {rendered}"
+        );
+        assert!(
+            rendered.contains(module_id),
+            "{module_id} missing from rendered module detail: {rendered}"
+        );
+        assert!(
+            rendered.contains(expected_tool),
+            "{expected_tool} missing from {module_id} module detail: {rendered}"
+        );
+        if hidden {
+            assert!(
+                rendered.contains("AVAILABILITY"),
+                "{module_id} hidden module did not explain availability: {rendered}"
+            );
+            assert!(
+                rendered.contains("deferred or gated"),
+                "{module_id} hidden module did not render the deferred/gated status: {rendered}"
+            );
+        }
+    }
 }

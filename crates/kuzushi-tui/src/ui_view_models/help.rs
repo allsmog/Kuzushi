@@ -261,7 +261,7 @@ fn quickstart_step(number: &'static str, text: impl Into<String>) -> QuickstartS
 }
 
 fn quickstart_target_step(app: &ShellApp) -> &'static str {
-    if app.target.is_some() {
+    if app.target().is_some() {
         "target                     confirm the active target before spending tools"
     } else {
         "target .                   set cwd as target, or use target <path>"

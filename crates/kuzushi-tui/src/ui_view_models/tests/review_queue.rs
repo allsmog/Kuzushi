@@ -53,8 +53,8 @@ fn review_queue_model_separates_open_and_terminal_decisions() {
     let mut open = open_finding_with_evidence();
     open.identity_id = Some("fi_0123456789abcdef0123456789abcdef".to_string());
     let done = confirmed(finding("sql-injection", Severity::Medium, 40));
-    app.selected_finding = Some(open.clone());
-    app.findings = vec![open, done];
+    *app.selected_finding_mut() = Some(open.clone());
+    *app.findings_mut() = vec![open, done];
 
     let open_model = review_queue_model(&app, ReviewQueueMode::Open);
     assert_eq!(open_model.total_count, 2);
@@ -89,7 +89,7 @@ fn review_queue_model_keeps_projected_duplicate_semantics() {
     let semgrep = finding("semgrep/cwe-89", Severity::Medium, 12);
     let systems = finding("systems/cwe-89", Severity::High, 14);
     assert_eq!(semgrep.dedup_key, systems.dedup_key);
-    app.findings = vec![semgrep, systems];
+    *app.findings_mut() = vec![semgrep, systems];
 
     let model = review_queue_model(&app, ReviewQueueMode::All);
 
@@ -101,12 +101,12 @@ fn review_queue_model_keeps_projected_duplicate_semantics() {
 #[test]
 fn review_queue_model_marks_cursor_row_when_no_finding_is_pinned() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.findings = vec![
+    *app.findings_mut() = vec![
         finding("first", Severity::High, 1),
         finding("second", Severity::Medium, 2),
     ];
-    app.findings_route.set_cursor(1);
-    app.selected_finding = None;
+    app.router.findings_mut().set_cursor(1);
+    *app.selected_finding_mut() = None;
 
     let model = review_queue_model(&app, ReviewQueueMode::All);
 
@@ -130,7 +130,7 @@ fn review_queue_model_applies_loaded_identity_review_state() {
         &identity_id,
     );
     assert!(rerun.triage.is_none());
-    app.findings = vec![reviewed, rerun];
+    *app.findings_mut() = vec![reviewed, rerun];
 
     let all_model = review_queue_model(&app, ReviewQueueMode::All);
     assert_eq!(all_model.total_count, 2);
@@ -160,8 +160,8 @@ fn review_queue_model_applies_loaded_append_only_decisions() {
     let identity_id = "fi_0123456789abcdef0123456789abcdef".to_string();
     let finding = identity_finding("semgrep/suppressed", Severity::High, 12, 1, &identity_id);
     assert!(finding.triage.is_none());
-    app.findings = vec![finding];
-    app.review_decisions = vec![ReviewDecisionRecord {
+    *app.findings_mut() = vec![finding];
+    app.set_review_decisions(vec![ReviewDecisionRecord {
         id: 3,
         finding_id: 1,
         identity_id: Some(identity_id),
@@ -173,7 +173,7 @@ fn review_queue_model_applies_loaded_append_only_decisions() {
         },
         triage_verdict: None,
         created_at: "2026-07-02T00:00:00Z".to_string(),
-    }];
+    }]);
 
     let complete_model = review_queue_model(&app, ReviewQueueMode::Complete);
     assert_eq!(complete_model.visible_count, 1);
@@ -204,7 +204,7 @@ fn review_queue_keeps_reappeared_rejected_identity_open() {
     ));
     let mut rerun = identity_finding("semgrep/cwe-79", Severity::High, 12, 2, &identity_id);
     rerun.static_proof_state = Some(StaticProofState::SourceSinkLinked);
-    app.findings = vec![reviewed, rerun];
+    *app.findings_mut() = vec![reviewed, rerun];
 
     let open_model = review_queue_model(&app, ReviewQueueMode::Open);
 
