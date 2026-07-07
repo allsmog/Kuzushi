@@ -500,6 +500,43 @@ mod tests {
         assert!(first["properties"]["kuzushiDerivedSourcePresent"].is_boolean());
         assert!(first["properties"]["kuzushiAutomatedReasoningPresent"].is_boolean());
         assert!(first["properties"]["kuzushiRawHttpBlobPresent"].is_boolean());
+        // Non-suppressed findings carry no SARIF result.suppressions array.
+        assert!(first.get("suppressions").is_none());
+    }
+
+    #[test]
+    fn suppressed_finding_emits_sarif_suppression() {
+        use crate::suppressions::{
+            evaluate_suppressions, reconcile_suppression_events, FindingRef, SuppressionOrigin,
+            SuppressionPredicate, SuppressionReason, SuppressionRule,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace = WorkspaceTarget::new(tmp.path()).unwrap();
+        seed_workspace_with_findings(&workspace, 1);
+        let store = FindingStore::open(workspace.findings_db_path()).unwrap();
+        let finding = store.list_findings(1).unwrap().into_iter().next().unwrap();
+        let rule = SuppressionRule {
+            id: "sup-sarif".to_string(),
+            predicate: SuppressionPredicate {
+                finding_id: Some(FindingRef(finding.fingerprint.clone())),
+                ..SuppressionPredicate::empty()
+            },
+            reason: SuppressionReason::FalsePositive,
+            statement: "sanitized upstream".to_string(),
+            actor: "tester".to_string(),
+            created_at_unix: 1,
+            expires_at_unix: None,
+            origin: SuppressionOrigin::File,
+        };
+        let report = evaluate_suppressions(&[finding], &[rule], None, 1000);
+        reconcile_suppression_events(&store, &report, "tester").unwrap();
+
+        let output = tmp.path().join("out.sarif");
+        export_workspace_findings(&workspace, &output, None).unwrap();
+        let document: serde_json::Value =
+            serde_json::from_str(&fs::read_to_string(&output).unwrap()).unwrap();
+        let result = &document["runs"][0]["results"][0];
+        assert_eq!(result["suppressions"][0]["kind"], "external");
     }
 
     #[test]
