@@ -48,11 +48,21 @@ pub(crate) fn update_many_and_execute_effects(
     app: &mut ShellApp,
     messages: impl IntoIterator<Item = Msg>,
 ) -> bool {
-    let mut changed = false;
-    for msg in messages {
-        changed |= update_and_execute_effects(app, msg);
-    }
+    let result = update_many(app, messages);
+    let changed = result.changed || !result.effects.is_empty();
+    EffectRuntime::execute(app, result.effects);
     changed
+}
+
+pub(crate) fn update_many(
+    app: &mut ShellApp,
+    messages: impl IntoIterator<Item = Msg>,
+) -> UpdateResult {
+    let mut batch = UpdateResult::default();
+    for msg in messages {
+        batch.merge(update(app, msg));
+    }
+    batch
 }
 
 impl UpdateResult {
@@ -68,6 +78,11 @@ impl UpdateResult {
             changed: update.handled,
             effects: update.effects,
         }
+    }
+
+    fn merge(&mut self, next: Self) {
+        self.changed |= next.changed;
+        self.effects.extend(next.effects);
     }
 }
 
@@ -161,6 +176,28 @@ mod tests {
         assert!(result.changed);
         assert_eq!(result.effects.len(), 1);
         assert!(matches!(result.effects[0], ShellEffect::Quit));
+        assert!(!app.should_quit());
+    }
+
+    #[test]
+    fn update_many_accumulates_effects_without_executing_them() {
+        let mut app = ShellApp::new(V2Config::default(), None);
+
+        let result = update_many(
+            &mut app,
+            [
+                Msg::Cmd(ShellCommand::Quit),
+                Msg::Term(TermEvent::Key(KeyEvent::new(
+                    KeyCode::Char('x'),
+                    KeyModifiers::empty(),
+                ))),
+            ],
+        );
+
+        assert!(result.changed);
+        assert_eq!(result.effects.len(), 1);
+        assert!(matches!(result.effects[0], ShellEffect::Quit));
+        assert_eq!(app.input(), "x");
         assert!(!app.should_quit());
     }
 
