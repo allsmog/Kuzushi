@@ -10,6 +10,16 @@ pub struct V2Config {
     pub runtime: RuntimeConfig,
     pub operator: OperatorConfig,
     pub phases: GuidedPhaseConfig,
+    /// Live operator autonomy posture — the always-visible authorization
+    /// ceiling the tool-dispatch gate enforces. This is an *in-process*
+    /// session field: it is `#[serde(skip)]` so it never persists to
+    /// `config.toml` and can never be steered by a scanned project's config
+    /// (mirroring the no-target-steering safety rule for `model`). It defaults
+    /// to the most-permissive `Fix`, so headless `kuzushi run`/scan callers
+    /// that never set it stay unconstrained. Interactive/CLI callers assign it
+    /// before dispatch.
+    #[serde(skip)]
+    pub autonomy: crate::modules::AutonomyPosture,
 }
 
 impl Default for V2Config {
@@ -19,6 +29,7 @@ impl Default for V2Config {
             runtime: RuntimeConfig::default(),
             operator: OperatorConfig::default(),
             phases: GuidedPhaseConfig::default(),
+            autonomy: crate::modules::AutonomyPosture::default(),
         }
     }
 }

@@ -71,6 +71,7 @@ impl ModuleRegistry {
         ctx: &ToolExecutionContext<'_>,
         runtime: Option<&dyn AgentRuntime>,
     ) -> Result<Value> {
+        enforce_autonomy_posture(name, ctx.config.autonomy)?;
         self.enforce_runtime_requirement(name, &input, runtime)?;
         let scoped_trace = scoped_tool_trace(ctx, name);
         let scoped_ctx;
@@ -106,6 +107,40 @@ impl ModuleRegistry {
             "{name} requires an agent runtime; configure a model/runtime before running it"
         )
     }
+}
+
+/// Enforce the operator autonomy posture at the one shared dispatch boundary.
+///
+/// This *only ever refuses* a tool that sits above the authorized ceiling — it
+/// never substitutes a different tool, model, or runtime. It is therefore
+/// incapable of a silent model/runtime fallback (that policy lives in
+/// `runtime/policy/no_silent_fallback.rs` and is untouched here). Below/at the
+/// ceiling the dispatch proceeds; mutating-tool approval is owned by the
+/// caller's existing confirm gate, not by this refusal.
+fn enforce_autonomy_posture(
+    name: &str,
+    posture: crate::modules::autonomy::AutonomyPosture,
+) -> Result<()> {
+    use crate::modules::autonomy::{gate, AutonomyDecision};
+    match gate(name, posture) {
+        AutonomyDecision::Refuse { needed, ceiling } => {
+            anyhow::bail!(posture_refusal_message(name, needed, ceiling))
+        }
+        AutonomyDecision::Allow | AutonomyDecision::RequireApproval => Ok(()),
+    }
+}
+
+fn posture_refusal_message(
+    name: &str,
+    needed: crate::modules::autonomy::WorkflowPhase,
+    ceiling: crate::modules::autonomy::WorkflowPhase,
+) -> String {
+    format!(
+        "{name} is a {} action but autonomy posture is capped at {}; \
+         raise posture (Ctrl+Up) to authorize",
+        needed.word(),
+        ceiling.word()
+    )
 }
 
 fn runtime_requirement_is_deferred_to_executor(name: &str) -> bool {
