@@ -2289,7 +2289,8 @@ mod tests {
         assert_manifest_has_canonical_run_artifacts(&running_manifest_artifacts);
         let context_marker =
             fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "context.json")).unwrap();
-        assert!(context_marker.contains(&format!("\"run_id\": \"{run_id}\"")));
+        assert!(context_marker.contains(&format!("\"runId\": \"{run_id}\"")));
+        assert!(!context_marker.contains("\"run_id\""));
         let placeholder_report =
             fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "report.md")).unwrap();
         assert!(placeholder_report.contains(&format!("# Kuzushi Run {run_id}")));
@@ -4477,7 +4478,8 @@ mod tests {
     }
 
     fn assert_snapshot_marker_fields_are_declared(schema: &serde_json::Value) {
-        assert_schema_declares_fields(schema, &["runId", "run_id", "status", "runStatus"]);
+        assert_schema_declares_fields(schema, &["runId", "status", "runStatus"]);
+        assert_schema_declares_no_fields(schema, &["run_id"]);
     }
 
     fn assert_canonical_artifact_schema(schema: &serde_json::Value) {

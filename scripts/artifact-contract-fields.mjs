@@ -47,7 +47,6 @@ export const reportJsonlAliasFields = [
 export const runAttackSurfaceSchemaFields = [
   "attack-surface.json",
   "runId",
-  "run_id",
   "status",
   "runStatus",
   "summary",
@@ -95,7 +94,6 @@ export const runAttackSurfaceSchemaFields = [
 export const runContextSchemaFields = [
   "context.json",
   "runId",
-  "run_id",
   "status",
   "runStatus",
   "summary",
@@ -162,7 +160,6 @@ export const runContextSchemaFields = [
 export const runRecommendationsSchemaFields = [
   "recommendations.json",
   "runId",
-  "run_id",
   "status",
   "runStatus",
   "summary",
@@ -232,7 +229,6 @@ export const runFailuresSchemaFields = [
 export const runFindingsSchemaFields = [
   "findings.json",
   "runId",
-  "run_id",
   "status",
   "runStatus",
   "summary",
@@ -273,7 +269,6 @@ export const runFindingsSchemaFields = [
 export const runProofSchemaFields = [
   "proof.json",
   "runId",
-  "run_id",
   "status",
   "runStatus",
   "summary",
@@ -349,7 +344,6 @@ export const runSummarySchemaFields = [
 export const runThreatModelSchemaFields = [
   "threat-model.json",
   "runId",
-  "run_id",
   "status",
   "runStatus",
   "summary",

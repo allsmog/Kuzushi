@@ -7,7 +7,6 @@
   "additionalProperties": true,
   "properties": {
     "runId": { "type": "string" },
-    "run_id": { "type": "string" },
     "status": { "$ref": "#/definitions/runStatus" },
     "runStatus": { "$ref": "#/definitions/runStatus" },
     "summary": {

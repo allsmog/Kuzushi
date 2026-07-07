@@ -1,6 +1,5 @@
 const snapshotMarkerShapeSpecs = [
   { path: ["properties", "runId"], type: "string" },
-  { path: ["properties", "run_id"], type: "string" },
   { path: ["properties", "status"], ref: "#/definitions/runStatus" },
   { path: ["properties", "runStatus"], ref: "#/definitions/runStatus" },
   { path: ["properties", "summary"], type: "string" },

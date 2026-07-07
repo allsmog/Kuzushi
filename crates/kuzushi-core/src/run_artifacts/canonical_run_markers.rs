@@ -48,7 +48,6 @@ fn marker_target_exists_as_file(path: &Path) -> Result<bool> {
 fn missing_snapshot(run_id: &str, status: &str, summary: &str) -> Value {
     json!({
         "runId": run_id,
-        "run_id": run_id,
         "status": "skipped",
         "runStatus": status,
         "summary": summary,

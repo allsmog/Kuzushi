@@ -223,7 +223,6 @@ const canonicalRunSchemaFileRequirements = [
 const artifactSchemaShapeRequirements = [
   "snapshotMarkerShapeSpecs",
   'properties", "runId',
-  'properties", "run_id',
   'properties", "status',
   'properties", "runStatus',
   'properties", "summary',

@@ -394,7 +394,7 @@ for (const file of [
   "schemas/run.threat-model.schema.json",
 ]) {
   requiredAliasGroupsBySchema[file] = [
-    { path: [], kind: "declared", fields: ["runId", "run_id", "status", "runStatus"] },
+    { path: [], kind: "declared", fields: ["runId", "status", "runStatus"] },
   ];
   schemaEnumSpecs[file] = [
     ...(schemaEnumSpecs[file] ?? []),
