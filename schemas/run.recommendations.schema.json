@@ -26,14 +26,8 @@
     "signals": { "type": "object" },
     "capabilities": { "$ref": "#/definitions/capabilities" },
     "availableToolCount": { "type": "integer", "minimum": 0 },
-    "available_tool_count": { "type": "integer", "minimum": 0 },
     "recommendedToolCount": { "type": "integer", "minimum": 0 },
-    "recommended_tool_count": { "type": "integer", "minimum": 0 },
     "skippedMissingTools": {
-      "type": "array",
-      "items": { "type": "string" }
-    },
-    "skipped_missing_tools": {
       "type": "array",
       "items": { "type": "string" }
     },
@@ -53,14 +47,8 @@
         "signals": { "type": "object" },
         "capabilities": { "$ref": "#/definitions/capabilities" },
         "availableToolCount": { "type": "integer", "minimum": 0 },
-        "available_tool_count": { "type": "integer", "minimum": 0 },
         "recommendedToolCount": { "type": "integer", "minimum": 0 },
-        "recommended_tool_count": { "type": "integer", "minimum": 0 },
         "skippedMissingTools": {
-          "type": "array",
-          "items": { "type": "string" }
-        },
-        "skipped_missing_tools": {
           "type": "array",
           "items": { "type": "string" }
         },
@@ -84,14 +72,8 @@
       "additionalProperties": true,
       "properties": {
         "availableToolCount": { "type": "integer", "minimum": 0 },
-        "available_tool_count": { "type": "integer", "minimum": 0 },
         "recommendedToolCount": { "type": "integer", "minimum": 0 },
-        "recommended_tool_count": { "type": "integer", "minimum": 0 },
         "skippedMissingTools": {
-          "type": "array",
-          "items": { "type": "string" }
-        },
-        "skipped_missing_tools": {
           "type": "array",
           "items": { "type": "string" }
         }
@@ -106,7 +88,6 @@
       "additionalProperties": true,
       "properties": {
         "moduleId": { "type": "string" },
-        "module_id": { "type": "string" },
         "tool": { "type": "string" },
         "priority": { "$ref": "#/definitions/priority" },
         "reason": { "type": "string" },
@@ -115,9 +96,7 @@
           "items": { "type": "string" }
         },
         "requiresRuntime": { "type": "boolean" },
-        "requires_runtime": { "type": "boolean" },
-        "nextInput": { "type": "object" },
-        "next_input": { "type": "object" }
+        "nextInput": { "type": "object" }
       }
     },
     "priority": {

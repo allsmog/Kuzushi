@@ -171,23 +171,17 @@ export const runRecommendationsSchemaFields = [
   "signals",
   "capabilities",
   "availableToolCount",
-  "available_tool_count",
   "recommendedToolCount",
-  "recommended_tool_count",
   "skippedMissingTools",
-  "skipped_missing_tools",
   "data",
   "recommendationReport",
   "recommendations",
   "moduleId",
-  "module_id",
   "tool",
   "priority",
   "reason",
   "requiresRuntime",
-  "requires_runtime",
   "nextInput",
-  "next_input",
 ];
 
 export const runEventsSchemaFields = [

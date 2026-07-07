@@ -1793,7 +1793,7 @@ fn report_summarizes_canonical_recommendation_distribution() {
 }
 
 #[test]
-fn report_summarizes_snake_case_recommendation_runtime_flag() {
+fn report_ignores_snake_case_recommendation_fields() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-recommend-snake", "modules:recommend");
     write_run_summary(temp.path(), &source).unwrap();
@@ -1818,7 +1818,7 @@ fn report_summarizes_snake_case_recommendation_runtime_flag() {
     let report = build_run_report(temp.path(), Some("run-recommend-snake")).unwrap();
 
     assert!(report.report_markdown.contains(
-        "recommendations.json: present - 2 recommendation(s), available tools=5, recommended tools=2, skipped missing=1, priority high=1, medium=1, runtime required=1, tools triage:run, semgrep"
+        "recommendations.json: present - 2 recommendation(s), priority high=1, medium=1, tools triage:run"
     ));
 }
 
@@ -1838,13 +1838,13 @@ fn report_summarizes_recommendation_report_envelope() {
                 "recommendationReport": {
                     "summary": "Prioritize scanner and runtime review.",
                     "capabilities": {
-                        "available_tool_count": 6,
-                        "recommended_tool_count": 2,
-                        "skipped_missing_tools": ["deferred:tool"]
+                        "availableToolCount": 6,
+                        "recommendedToolCount": 2,
+                        "skippedMissingTools": ["deferred:tool"]
                     },
                     "recommendations": [
-                        {"tool": "triage:run", "priority": "high", "requires_runtime": true},
-                        {"tool": "semgrep:scan", "priority": "medium", "requires_runtime": false}
+                        {"tool": "triage:run", "priority": "high", "requiresRuntime": true},
+                        {"tool": "semgrep:scan", "priority": "medium", "requiresRuntime": false}
                     ]
                 }
             }

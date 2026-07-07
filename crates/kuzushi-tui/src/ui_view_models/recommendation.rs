@@ -319,7 +319,7 @@ fn component_values(value: &serde_json::Value) -> Vec<serde_json::Value> {
 }
 
 fn component_from_value(value: serde_json::Value) -> Option<ComponentRecommendationRow> {
-    let next_input = value.get("nextInput").or_else(|| value.get("next_input"));
+    let next_input = value.get("nextInput");
     let rel_path = string_field(&value, "relPath").or_else(|| string_field(&value, "rel_path"))?;
     let tier_label = string_field(&value, "tier").unwrap_or_else(|| "low".to_string());
     let class_label = string_field(&value, "class").unwrap_or_else(|| "component".to_string());
@@ -394,7 +394,8 @@ fn recommendation_from_value(value: serde_json::Value) -> Option<RecommendationR
 }
 
 fn requires_runtime(value: &serde_json::Value) -> bool {
-    value_at(value, &["requiresRuntime", "requires_runtime"])
+    value
+        .get("requiresRuntime")
         .and_then(serde_json::Value::as_bool)
         .unwrap_or(false)
 }
@@ -414,10 +415,6 @@ fn string_field(value: &serde_json::Value, key: &str) -> Option<String> {
         .get(key)
         .and_then(serde_json::Value::as_str)
         .map(str::to_string)
-}
-
-fn value_at<'a>(value: &'a serde_json::Value, keys: &[&str]) -> Option<&'a serde_json::Value> {
-    keys.iter().find_map(|key| value.get(*key))
 }
 
 fn priority_glyph(priority: &str) -> &'static str {
@@ -584,7 +581,7 @@ mod tests {
     }
 
     #[test]
-    fn recommendation_from_value_reads_snake_case_runtime_flag() {
+    fn recommendation_from_value_ignores_snake_case_runtime_flag() {
         let row = recommendation_from_value(json!({
             "tool": "triage:run",
             "requires_runtime": true,
@@ -592,7 +589,7 @@ mod tests {
         }))
         .expect("recommendation row");
 
-        assert_eq!(row.cells[2], "yes");
+        assert_eq!(row.cells[2], "no");
         assert_eq!(row.cells[3], "1 persisted finding(s)");
     }
 

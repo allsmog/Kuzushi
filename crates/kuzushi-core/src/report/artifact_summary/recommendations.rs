@@ -45,34 +45,27 @@ fn array_count_segment(value: &Value, field: &str) -> Option<String> {
 
 fn tool_count_segments(value: &Value) -> Vec<String> {
     [
-        ("available tools", &["availableToolCount", "available_tool_count"][..]),
-        (
-            "recommended tools",
-            &["recommendedToolCount", "recommended_tool_count"][..],
-        ),
+        ("available tools", "availableToolCount"),
+        ("recommended tools", "recommendedToolCount"),
     ]
     .into_iter()
-    .filter_map(|(label, keys)| tool_count_segment(value, label, keys))
+    .filter_map(|(label, key)| tool_count_segment(value, label, key))
     .chain(skipped_missing_tools_segment(value))
     .collect()
 }
 
-fn tool_count_segment(value: &Value, label: &str, keys: &[&str]) -> Option<String> {
-    value_at(value, keys)
-        .or_else(|| nested_value_at(value, "capabilities", keys))
+fn tool_count_segment(value: &Value, label: &str, key: &str) -> Option<String> {
+    value
+        .get(key)
+        .or_else(|| value.pointer(&format!("/capabilities/{key}")))
         .and_then(Value::as_u64)
         .map(|count| format!("{label}={count}"))
 }
 
 fn skipped_missing_tools_segment(value: &Value) -> Option<String> {
-    let count = value_at(value, &["skippedMissingTools", "skipped_missing_tools"])
-        .or_else(|| {
-            nested_value_at(
-                value,
-                "capabilities",
-                &["skippedMissingTools", "skipped_missing_tools"],
-            )
-        })
+    let count = value
+        .get("skippedMissingTools")
+        .or_else(|| value.pointer("/capabilities/skippedMissingTools"))
         .and_then(Value::as_array)?
         .len();
     (count > 0).then(|| format!("skipped missing={count}"))
@@ -114,7 +107,7 @@ fn priority_segment(recommendations: &[Value]) -> Option<String> {
 fn runtime_required_segment(recommendations: &[Value]) -> Option<String> {
     let count = recommendations
         .iter()
-        .filter(|recommendation| bool_field(recommendation, &["requiresRuntime", "requires_runtime"]))
+        .filter(|recommendation| bool_field(recommendation, "requiresRuntime"))
         .count();
     (count > 0).then(|| format!("runtime required={count}"))
 }
@@ -130,7 +123,7 @@ fn reason_segment(recommendations: &[Value]) -> Option<String> {
 fn next_input_segment(recommendations: &[Value]) -> Option<String> {
     let count = recommendations
         .iter()
-        .filter(|recommendation| object_field(recommendation, &["nextInput", "next_input"]))
+        .filter(|recommendation| object_field(recommendation, "nextInput"))
         .count();
     (count > 0).then(|| format!("next inputs={count}"))
 }
@@ -145,7 +138,7 @@ fn recommended_tool_segment(recommendations: &[Value]) -> Option<String> {
 }
 
 fn recommendation_tool_label(recommendation: &Value) -> Option<&str> {
-    ["tool", "moduleId", "module_id"]
+    ["tool", "moduleId"]
         .into_iter()
         .find_map(|key| string_field(recommendation, key))
 }
@@ -208,24 +201,13 @@ fn string_field<'a>(object: &'a Value, key: &str) -> Option<&'a str> {
         .filter(|value| !value.trim().is_empty())
 }
 
-fn bool_field(object: &Value, keys: &[&str]) -> bool {
-    keys.iter()
-        .filter_map(|key| object.get(*key))
-        .find_map(Value::as_bool)
-        .unwrap_or(false)
+fn bool_field(object: &Value, key: &str) -> bool {
+    object.get(key).and_then(Value::as_bool).unwrap_or(false)
 }
 
-fn object_field(object: &Value, keys: &[&str]) -> bool {
-    keys.iter()
-        .filter_map(|key| object.get(*key))
-        .find_map(Value::as_object)
+fn object_field(object: &Value, key: &str) -> bool {
+    object
+        .get(key)
+        .and_then(Value::as_object)
         .is_some_and(|object| !object.is_empty())
-}
-
-fn value_at<'a>(object: &'a Value, keys: &[&str]) -> Option<&'a Value> {
-    keys.iter().find_map(|key| object.get(*key))
-}
-
-fn nested_value_at<'a>(object: &'a Value, parent: &str, keys: &[&str]) -> Option<&'a Value> {
-    value_at(object.get(parent)?, keys)
 }
