@@ -22,11 +22,7 @@ fn chain_summary_parts(chains: &[Value]) -> Vec<String> {
 fn chain_items(value: &Value) -> Option<&[Value]> {
     value
         .pointer("/data/chains")
-        .or_else(|| value.pointer("/data/exploitChains"))
-        .or_else(|| value.pointer("/data/exploit_chains"))
         .or_else(|| value.get("chains"))
-        .or_else(|| value.get("exploitChains"))
-        .or_else(|| value.get("exploit_chains"))
         .and_then(Value::as_array)
         .map(Vec::as_slice)
 }
@@ -34,7 +30,7 @@ fn chain_items(value: &Value) -> Option<&[Value]> {
 fn severity_summary(chains: &[Value]) -> Option<String> {
     let mut counts = BTreeMap::new();
     for chain in chains {
-        let Some(severity) = string_at(chain, &["overallSeverity", "overall_severity"]) else {
+        let Some(severity) = string_field(chain, "overallSeverity") else {
             continue;
         };
         *counts.entry(canonical_severity(severity)).or_insert(0usize) += 1;
@@ -49,7 +45,7 @@ fn severity_summary(chains: &[Value]) -> Option<String> {
 fn named_chain_summary(chains: &[Value]) -> Option<usize> {
     let count = chains
         .iter()
-        .filter(|chain| string_at(chain, &["name", "title"]).is_some())
+        .filter(|chain| string_field(chain, "name").is_some())
         .count();
     (count > 0).then_some(count)
 }
@@ -57,7 +53,7 @@ fn named_chain_summary(chains: &[Value]) -> Option<usize> {
 fn impact_summary(chains: &[Value]) -> Option<usize> {
     let count = chains
         .iter()
-        .filter(|chain| string_at(chain, &["impactDescription", "impact_description"]).is_some())
+        .filter(|chain| string_field(chain, "impactDescription").is_some())
         .count();
     (count > 0).then_some(count)
 }
@@ -73,28 +69,19 @@ fn step_summary(chains: &[Value]) -> Option<usize> {
 }
 
 fn chain_steps(chain: &Value) -> Option<&Vec<Value>> {
-    chain
-        .get("steps")
-        .or_else(|| chain.get("chainSteps"))
-        .or_else(|| chain.get("chain_steps"))
-        .and_then(Value::as_array)
+    chain.get("steps").and_then(Value::as_array)
 }
 
 fn has_step_anchor(step: &&Value) -> bool {
-    string_at(step, &["filePath", "file_path"]).is_some()
-        && number_at(step, &["startLine", "start_line"]).is_some()
+    string_field(step, "filePath").is_some() && number_field(step, "startLine").is_some()
 }
 
-fn string_at<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a str> {
-    keys.iter()
-        .filter_map(|key| value.get(*key))
-        .find_map(Value::as_str)
+fn string_field<'a>(value: &'a Value, key: &str) -> Option<&'a str> {
+    value.get(key).and_then(Value::as_str)
 }
 
-fn number_at<'a>(value: &'a Value, keys: &[&str]) -> Option<u64> {
-    keys.iter()
-        .filter_map(|key| value.get(*key))
-        .find_map(Value::as_u64)
+fn number_field(value: &Value, key: &str) -> Option<u64> {
+    value.get(key).and_then(Value::as_u64)
 }
 
 fn count_segment(label: &str, count: Option<&usize>) -> Option<String> {

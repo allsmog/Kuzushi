@@ -62,9 +62,9 @@ export const tokenChecks = [
     tokens: reportJsonlAliasFields,
   },
   {
-    label: "report result exploit-chain aliases",
+    label: "report result exploit-chain fields",
     file: "crates/kuzushi-core/src/report/artifact_summary/result.rs",
-    tokens: ["exploitChains", "exploit_chains", "chainSteps", "chain_steps"],
+    tokens: ["/data/chains", "overallSeverity", "impactDescription", "filePath", "startLine"],
   },
   {
     label: "report context snapshot envelope aliases",

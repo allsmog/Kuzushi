@@ -2525,7 +2525,7 @@ fn report_markdown_summarizes_exploit_chain_result_steps() {
 }
 
 #[test]
-fn report_markdown_summarizes_snake_case_exploit_chain_result_steps() {
+fn report_markdown_ignores_snake_case_exploit_chain_result_steps() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-chain-snake", "exploit-chain:scan");
     write_run_summary(temp.path(), &source).unwrap();
@@ -2555,13 +2555,15 @@ fn report_markdown_summarizes_snake_case_exploit_chain_result_steps() {
 
     let report = build_run_report(temp.path(), Some("run-chain-snake")).unwrap();
 
-    assert!(report.report_markdown.contains(
-        "result.json: present - 1 exploit chain(s), severity high=1, named chains 1, impact descriptions 1, 2 anchored step(s)"
-    ));
+    assert!(report
+        .report_markdown
+        .contains("result.json: present - exploit-chain complete"));
+    assert!(!report.report_markdown.contains("1 exploit chain(s)"));
+    assert!(!report.report_markdown.contains("2 anchored step(s)"));
 }
 
 #[test]
-fn report_markdown_summarizes_exploit_chain_step_aliases() {
+fn report_markdown_ignores_exploit_chain_step_aliases() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-chain-step-aliases", "exploit-chain:scan");
     write_run_summary(temp.path(), &source).unwrap();
@@ -2591,9 +2593,11 @@ fn report_markdown_summarizes_exploit_chain_step_aliases() {
 
     let report = build_run_report(temp.path(), Some("run-chain-step-aliases")).unwrap();
 
-    assert!(report.report_markdown.contains(
-        "result.json: present - 2 exploit chain(s), severity critical=1, medium=1, named chains 1, impact descriptions 1, 2 anchored step(s)"
-    ));
+    assert!(report
+        .report_markdown
+        .contains("result.json: present - 2 top-level field(s)"));
+    assert!(!report.report_markdown.contains("2 exploit chain(s)"));
+    assert!(!report.report_markdown.contains("anchored step(s)"));
 }
 
 #[test]
