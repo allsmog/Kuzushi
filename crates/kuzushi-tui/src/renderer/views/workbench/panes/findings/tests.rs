@@ -23,6 +23,8 @@ fn row_with_proof(
         proof_label: proof_label.to_string(),
         proof_marker,
         proof_tier,
+        proof_confidence: kuzushi_core::ProofConfidence::Likely,
+        proof_confidence_label: "LIKELY".to_string(),
         cwe: "CWE-89".to_string(),
         source: "semgrep".to_string(),
         evidence: "source to sink".to_string(),

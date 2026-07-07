@@ -10,6 +10,7 @@ mod from_semgrep;
 mod now_isoish;
 mod patch_status;
 mod persisted_results;
+mod proof_confidence;
 mod review_decision;
 mod static_proof_state;
 mod triage_outcome;
@@ -31,6 +32,7 @@ pub use persisted_results::{
     PatchAttempt, PatchResult, PersistedProofVerdict, PersistedSandboxBackend,
     PersistedVerification, TriageAuthor, TriageVerdict,
 };
+pub use proof_confidence::ProofConfidence;
 pub use review_decision::{ReviewDecision, ReviewDecisionRecord, ReviewDecisionVerdict};
 pub(crate) use static_proof_state::is_runtime_proof_state;
 pub use static_proof_state::{StaticProofState, StaticProofStateEvent};

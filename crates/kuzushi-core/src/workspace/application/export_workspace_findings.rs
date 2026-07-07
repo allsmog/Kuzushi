@@ -439,6 +439,7 @@ const CSV_FINDINGS_HEADER: &[&str] = &[
     "derived_source_present",
     "automated_reasoning_present",
     "static_proof_state",
+    "proof_confidence",
     "verification",
     "tool",
     "vuln_source",
@@ -549,6 +550,7 @@ fn csv_signal_fields(record: &WorkspaceFindingExportRecord) -> Vec<String> {
         record.evidence.derived_source_present.to_string(),
         record.analysis.automated_reasoning_present.to_string(),
         record.static_proof_state.clone(),
+        record.proof_confidence.clone(),
         record.verification.label.clone(),
     ]
 }

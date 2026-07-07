@@ -64,6 +64,13 @@ fn push_signals_section(
 ) {
     push_section_header(lines, "SIGNALS");
     push_detail_kv(lines, "severity", &detail.severity_label, budget);
+    push_wrapped(
+        lines,
+        &format!("confidence: {}", detail.proof_confidence_label),
+        budget,
+        "  ",
+        theme::proof_confidence_tone(detail.proof_confidence),
+    );
     push_detail_kv(lines, "lifecycle status", &detail.lifecycle_status, budget);
     push_detail_kv(lines, "evidence state", &detail.evidence_state, budget);
     push_wrapped(
@@ -488,6 +495,8 @@ mod tests {
             proof_label: "unverified".to_string(),
             proof_marker: "?",
             proof_tier: ProofTier::Suspected,
+            proof_confidence: kuzushi_core::ProofConfidence::Unverified,
+            proof_confidence_label: "unverified".to_string(),
             proof_state: "not recorded".to_string(),
             runtime_verification: "not run".to_string(),
             ..FindingDetailModel::default()

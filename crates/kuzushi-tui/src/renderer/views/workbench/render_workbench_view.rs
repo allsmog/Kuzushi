@@ -670,10 +670,9 @@ fn detail_pane_title(detail: &Option<crate::ui_view_models::FindingDetailModel>)
 fn detail_title(detail: &crate::ui_view_models::FindingDetailModel) -> String {
     let alias = detail.alias.as_deref().unwrap_or("selected");
     format!(
-        "{alias} · {} · {} {}",
+        "{alias} · {} · {}",
         detail.severity_label.to_uppercase(),
-        detail.proof_marker,
-        detail.proof_label
+        detail.proof_confidence_label
     )
 }
 

@@ -164,6 +164,9 @@ pub struct FindingListFilter {
     pub triage_state: Vec<FindingTriageStateFilter>,
     pub completeness: Vec<FindingReviewCompletenessFilter>,
     pub lifecycle_status: Vec<FindingLifecycleStatusFilter>,
+    /// Coarse proof/confidence bands. Empty = no filter. Distinct from
+    /// `lifecycle_status` (granular) and `verdict` (triage decision).
+    pub confidence: Vec<ProofConfidence>,
     pub name: Option<String>,
     pub text_terms: Vec<String>,
     pub file_path: Option<String>,
@@ -184,6 +187,7 @@ impl Default for FindingListFilter {
             triage_state: Vec::new(),
             completeness: Vec::new(),
             lifecycle_status: Vec::new(),
+            confidence: Vec::new(),
             name: None,
             text_terms: Vec::new(),
             file_path: None,

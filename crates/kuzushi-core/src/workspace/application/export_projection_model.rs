@@ -33,6 +33,11 @@ pub struct WorkspaceFindingExportRecord {
     pub analysis: WorkspaceAnalysisExportSummary,
     pub static_proof_state: String,
     pub static_proof_label: String,
+    /// Coarse proof/confidence band derived from the same state that governs
+    /// verification (`confirmed` | `likely` | `unverified` | `dismissed`). A
+    /// first-class axis distinct from `severity`, made explicit so consumers do
+    /// not have to re-derive it from the granular proof fields.
+    pub proof_confidence: String,
     pub verification: WorkspaceVerificationExportSummary,
     pub tool: String,
     pub vuln_source: String,

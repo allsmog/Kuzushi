@@ -1,6 +1,6 @@
 use crate::findings::{
     finding_lifecycle_status, proof_state_label, runtime_validation_label, Finding,
-    PersistedVerification, StaticProofState, VulnSource,
+    PersistedVerification, ProofConfidence, StaticProofState, VulnSource,
 };
 use std::collections::HashMap;
 
@@ -92,6 +92,7 @@ fn base_export_record(
         evidence: evidence_summary(&finding),
         static_proof_state: static_proof_state(&finding).to_string(),
         static_proof_label: proof_state_label(finding.static_proof_state).to_string(),
+        proof_confidence: ProofConfidence::classify(&finding).as_str().to_string(),
         verification: verification_summary(finding.verification.as_ref()),
         tool: finding.tool.clone(),
         vuln_source,

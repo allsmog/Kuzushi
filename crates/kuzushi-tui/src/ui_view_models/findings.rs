@@ -10,10 +10,10 @@ use super::{context_snapshot_state, SeverityCounts, SeverityTone};
 use crate::{ShellApp, VisibleFindingProjection, VisibleFindingsCacheKey};
 use kuzushi_core::findings::{FindingSource, ReviewDecision};
 use kuzushi_core::{
-    finding_next_action, finding_remediation_hint, finding_source_label, project_finding,
-    runtime_validation_summary, static_proof_summary, Finding, FindingListFilter,
-    FindingNextAction, FindingProjection, PersistedProofVerdict, RunSummary, RunTargetGitMetadata,
-    StaticProofState, TriageVerdict,
+    compare_findings_by_confidence, finding_next_action, finding_remediation_hint,
+    finding_source_label, project_finding, runtime_validation_summary, static_proof_summary,
+    Finding, FindingListFilter, FindingNextAction, FindingProjection, PersistedProofVerdict,
+    ProofConfidence, RunSummary, RunTargetGitMetadata, StaticProofState, TriageVerdict,
 };
 use std::collections::BTreeMap;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -88,6 +88,8 @@ pub(crate) struct FindingListRow {
     pub(crate) proof_label: String,
     pub(crate) proof_marker: &'static str,
     pub(crate) proof_tier: ProofTier,
+    pub(crate) proof_confidence: ProofConfidence,
+    pub(crate) proof_confidence_label: String,
     pub(crate) cwe: String,
     pub(crate) source: String,
     pub(crate) evidence: String,
@@ -118,6 +120,8 @@ pub(crate) struct FindingDetailModel {
     pub(crate) proof_label: String,
     pub(crate) proof_marker: &'static str,
     pub(crate) proof_tier: ProofTier,
+    pub(crate) proof_confidence: ProofConfidence,
+    pub(crate) proof_confidence_label: String,
     pub(crate) confidence: String,
     pub(crate) lifecycle_status: String,
     pub(crate) decision: String,
@@ -386,8 +390,26 @@ pub(crate) fn cached_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String
 
 pub(crate) fn visible_sorted_finding_alias_indices(app: &ShellApp) -> Vec<(String, usize)> {
     let sorted = cached_sorted_finding_alias_indices(app);
-    let component_filtered = component_filtered_finding_alias_indices(app, sorted);
+    let display_ordered = confidence_first_display_order(app, sorted);
+    let component_filtered = component_filtered_finding_alias_indices(app, display_ordered);
     active_filter_finding_alias_indices(app, component_filtered)
+}
+
+/// Re-order the severity-major aliased pairs into confidence-first *display*
+/// order (`Confirmed` before `Unverified`, severity as the tie-break). Alias
+/// strings stay attached to their findings, so `F-0001` identity — and every
+/// export/CLI ordering keyed off `sorted_finding_alias_indices` — is unchanged;
+/// only the Workbench row/cursor order moves.
+fn confidence_first_display_order(
+    app: &ShellApp,
+    mut sorted: Vec<(String, usize)>,
+) -> Vec<(String, usize)> {
+    let findings = app.findings();
+    sorted.sort_by(|a, b| match (findings.get(a.1), findings.get(b.1)) {
+        (Some(left), Some(right)) => compare_findings_by_confidence(left, right),
+        _ => std::cmp::Ordering::Equal,
+    });
+    sorted
 }
 
 fn component_filtered_finding_alias_indices(
@@ -590,12 +612,11 @@ fn severity_rank(finding: &Finding) -> u8 {
 }
 
 fn proof_rank(finding: &Finding) -> u8 {
-    match finding_proof_badge(finding).tier {
-        ProofTier::RuntimeVerified => 5,
-        ProofTier::StaticLinked => 3,
-        ProofTier::Suspected => 2,
-        ProofTier::Rejected => 1,
-    }
+    // Higher rank = stronger proof, used only to pick the representative among
+    // duplicates. Delegates to the canonical confidence classifier so the dedup
+    // representative and the confidence chip agree. `rank()` is 0=Confirmed..
+    // 3=Dismissed, so invert to keep "higher = stronger" here.
+    3u8.saturating_sub(ProofConfidence::classify(finding).rank())
 }
 
 fn merged_sources(left: &[FindingSource], right: &[FindingSource]) -> Vec<FindingSource> {
@@ -815,6 +836,8 @@ impl FindingListRow {
             proof_label: proof.label,
             proof_marker: proof.marker,
             proof_tier: proof.tier,
+            proof_confidence: ProofConfidence::classify(finding),
+            proof_confidence_label: ProofConfidence::classify(finding).label().to_string(),
             cwe: projection.cwe_label,
             source: finding_source_summary_label(finding),
             evidence: projection.evidence_preview,
@@ -1078,6 +1101,8 @@ impl FindingDetailModel {
             proof_label: proof.label,
             proof_marker: proof.marker,
             proof_tier: proof.tier,
+            proof_confidence: ProofConfidence::classify(finding),
+            proof_confidence_label: ProofConfidence::classify(finding).label().to_string(),
             proof_state: projection.proof_state,
             runtime_verification: projection.runtime_validation,
             ..Self::default()

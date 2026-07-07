@@ -12,7 +12,9 @@ pub use detail::{
     StaticProofSummary,
 };
 pub use reporting::{
-    format_finding_alias, parse_finding_alias, resolve_finding_alias, sorted_finding_alias_indices,
-    sorted_finding_aliases, stable_finding_alias, FindingLifecycleStatusFilter, FindingListFilter,
-    FindingListReport, FindingReviewCompletenessFilter, FindingVerdictFilter,
+    compare_findings_by_confidence, format_finding_alias, parse_finding_alias,
+    resolve_finding_alias, sorted_finding_alias_indices, sorted_finding_aliases,
+    sorted_finding_display_indices, stable_finding_alias, FindingLifecycleStatusFilter,
+    FindingListFilter, FindingListReport, FindingReviewCompletenessFilter, FindingSortAxis,
+    FindingVerdictFilter,
 };

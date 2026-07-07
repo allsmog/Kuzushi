@@ -15,6 +15,6 @@ pub use from_input::{
 };
 pub use output::{format_finding_alias, parse_finding_alias, FindingListReport};
 pub use sorted_finding_aliases::{
-    resolve_finding_alias, sorted_finding_alias_indices, sorted_finding_aliases,
-    stable_finding_alias,
+    compare_findings_by_confidence, resolve_finding_alias, sorted_finding_alias_indices,
+    sorted_finding_aliases, sorted_finding_display_indices, stable_finding_alias, FindingSortAxis,
 };

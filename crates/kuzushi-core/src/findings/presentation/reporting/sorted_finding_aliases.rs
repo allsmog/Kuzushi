@@ -89,6 +89,54 @@ pub(in crate::findings) fn short_id(fingerprint: &str) -> String {
     fingerprint.chars().take(8).collect()
 }
 
+/// The axis used to order findings for *display*. Alias identity (`F-0001…`) is
+/// always assigned severity-major by `sorted_finding_alias_indices` and is never
+/// affected by this — only the presentation order changes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FindingSortAxis {
+    /// Confidence first (`Confirmed` before `Unverified`), then severity. Puts a
+    /// confirmed-exploitable finding above a CVSS-high-but-unverified one.
+    ConfidenceThenSeverity,
+    /// Severity first, then confidence. The historical order.
+    SeverityThenConfidence,
+}
+
+/// Total order over findings by `(confidence, severity, fingerprint)`. Shared by
+/// the core display sort and the Workbench display funnel so both agree.
+pub fn compare_findings_by_confidence(a: &Finding, b: &Finding) -> std::cmp::Ordering {
+    ProofConfidence::classify(a)
+        .rank()
+        .cmp(&ProofConfidence::classify(b).rank())
+        .then_with(|| severity_rank(a.severity).cmp(&severity_rank(b.severity)))
+        .then_with(|| a.fingerprint.cmp(&b.fingerprint))
+}
+
+fn compare_findings_by_severity(a: &Finding, b: &Finding) -> std::cmp::Ordering {
+    severity_rank(a.severity)
+        .cmp(&severity_rank(b.severity))
+        .then_with(|| ProofConfidence::classify(a).rank().cmp(&ProofConfidence::classify(b).rank()))
+        .then_with(|| a.fingerprint.cmp(&b.fingerprint))
+}
+
+/// Findings paired with their stable severity-major aliases, re-ordered for
+/// display along `axis`. Alias strings stay attached to their findings, so
+/// `F-0001` identity is unchanged — only row order moves.
+pub fn sorted_finding_display_indices(
+    findings: &[Finding],
+    axis: FindingSortAxis,
+) -> Vec<(String, usize)> {
+    let mut aliased = sorted_finding_alias_indices(findings);
+    aliased.sort_by(|a, b| match axis {
+        FindingSortAxis::ConfidenceThenSeverity => {
+            compare_findings_by_confidence(&findings[a.1], &findings[b.1])
+        }
+        FindingSortAxis::SeverityThenConfidence => {
+            compare_findings_by_severity(&findings[a.1], &findings[b.1])
+        }
+    });
+    aliased
+}
+
 pub(in crate::findings) fn severity_rank(severity: Severity) -> u8 {
     match severity {
         Severity::Critical => 0,
@@ -102,4 +150,73 @@ pub(in crate::findings) fn severity_rank(severity: Severity) -> u8 {
 
 pub(in crate::findings) fn pad(value: &str, width: usize) -> String {
     format!("{value:<width$}")
+}
+
+#[cfg(test)]
+mod display_sort_tests {
+    use super::*;
+    use crate::findings::domain::{PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification};
+
+    fn finding(fingerprint: &str, severity: Severity, verification: Option<PersistedVerification>) -> Finding {
+        Finding {
+            fingerprint: fingerprint.to_string(),
+            severity,
+            verification,
+            ..Finding::default()
+        }
+    }
+
+    fn confirmed() -> PersistedVerification {
+        PersistedVerification {
+            proof_level: 3,
+            proof_verdict: PersistedProofVerdict::Exploited,
+            backend: PersistedSandboxBackend::Plain,
+            language: None,
+            harness_path: None,
+            crash_evidence: None,
+            duration_ms: 0,
+            cost_usd: 0.0,
+            notes: Vec::new(),
+            created_at: String::new(),
+        }
+    }
+
+    #[test]
+    fn confidence_first_puts_low_confirmed_above_critical_unverified() {
+        let findings = vec![
+            finding("crit", Severity::Critical, None),
+            finding("low", Severity::Low, Some(confirmed())),
+        ];
+        let order = sorted_finding_display_indices(&findings, FindingSortAxis::ConfidenceThenSeverity);
+        // The confirmed low finding sorts to the top under confidence-first.
+        assert_eq!(findings[order[0].1].fingerprint, "low");
+        assert_eq!(findings[order[1].1].fingerprint, "crit");
+    }
+
+    #[test]
+    fn severity_first_keeps_critical_on_top() {
+        let findings = vec![
+            finding("crit", Severity::Critical, None),
+            finding("low", Severity::Low, Some(confirmed())),
+        ];
+        let order = sorted_finding_display_indices(&findings, FindingSortAxis::SeverityThenConfidence);
+        assert_eq!(findings[order[0].1].fingerprint, "crit");
+        assert_eq!(findings[order[1].1].fingerprint, "low");
+    }
+
+    #[test]
+    fn aliases_stay_severity_major_regardless_of_display_axis() {
+        let findings = vec![
+            finding("crit", Severity::Critical, None),
+            finding("low", Severity::Low, Some(confirmed())),
+        ];
+        let display =
+            sorted_finding_display_indices(&findings, FindingSortAxis::ConfidenceThenSeverity);
+        // `crit` (index 0) keeps alias F-0001 even though it displays second.
+        let crit_alias = display
+            .iter()
+            .find(|(_, index)| findings[*index].fingerprint == "crit")
+            .map(|(alias, _)| alias.clone());
+        assert_eq!(crit_alias.as_deref(), Some("F-0001"));
+    }
 }

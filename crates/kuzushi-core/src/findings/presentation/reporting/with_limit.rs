@@ -64,6 +64,11 @@ impl FindingListFilter {
                 input,
                 &["status", "lifecycleStatus", "lifecycle_status"],
             )?)?);
+        self.confidence
+            .extend(parsed_confidence_filters(string_values_any(
+                input,
+                &["confidence", "proofConfidence", "proof_confidence"],
+            )?)?);
         Ok(())
     }
 
@@ -109,6 +114,7 @@ impl FindingListFilter {
             triage_state: Vec::new(),
             completeness: parsed_part_completeness_filters(completeness)?,
             lifecycle_status: parsed_part_lifecycle_status_filters(lifecycle_status)?,
+            confidence: Vec::new(),
             name: normalize_string(name),
             text_terms: Vec::new(),
             file_path: normalize_string(file_path),
@@ -162,6 +168,7 @@ impl FindingListFilter {
             FilterKey::Status => self
                 .lifecycle_status
                 .extend(parsed_lifecycle_status_filters(values)?),
+            FilterKey::Confidence => self.confidence.extend(parsed_confidence_filters(values)?),
             FilterKey::Source => self.vuln_source.extend(parsed_sources(values)?),
             FilterKey::File => {
                 self.file_path = merge_optional_contains(self.file_path.take(), values)
@@ -188,6 +195,7 @@ impl FindingListFilter {
             && verdict_matches(self, finding, review_decision)
             && review_completeness_matches(self, finding, review_decision)
             && lifecycle_status_matches(self, finding)
+            && confidence_matches(self, finding)
             && name_matches(self, finding)
             && text_terms_match(self, finding)
             && source_matches(self, finding)
@@ -351,6 +359,10 @@ fn lifecycle_status_matches(filter: &FindingListFilter, finding: &Finding) -> bo
             .any(|status| status.as_str() == finding_lifecycle_status(finding))
 }
 
+fn confidence_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
+    filter.confidence.is_empty() || filter.confidence.contains(&ProofConfidence::classify(finding))
+}
+
 fn name_matches(filter: &FindingListFilter, finding: &Finding) -> bool {
     match &filter.name {
         Some(name) => finding
@@ -501,6 +513,14 @@ fn parsed_lifecycle_status_filters(
         .collect()
 }
 
+fn parsed_confidence_filters(values: Vec<String>) -> Result<Vec<ProofConfidence>> {
+    values
+        .into_iter()
+        .flat_map(split_csv)
+        .map(|value| ProofConfidence::try_from(value.as_str()))
+        .collect()
+}
+
 fn parsed_sources(values: Vec<String>) -> Result<Vec<VulnSource>> {
     values
         .into_iter()
@@ -517,6 +537,7 @@ enum FilterKey {
     State,
     Completeness,
     Status,
+    Confidence,
     Source,
     File,
     Name,
@@ -535,6 +556,7 @@ impl FilterKey {
             "state" | "triage" => Ok(Self::State),
             "completeness" | "review" | "reviewstate" => Ok(Self::Completeness),
             "status" | "lifecycle" | "lifecyclestatus" => Ok(Self::Status),
+            "confidence" | "proof" | "proofstate" | "proofconfidence" => Ok(Self::Confidence),
             "source" | "channel" => Ok(Self::Source),
             "file" | "path" => Ok(Self::File),
             "name" | "title" | "q" => Ok(Self::Name),
@@ -649,5 +671,53 @@ fn parse_limit_value(value: &Value) -> Result<usize> {
             .with_context(|| "findings:list limit must be a non-negative integer")
             .map(|value| value.min(FindingListFilter::MAX_LIMIT)),
         _ => anyhow::bail!("findings:list limit must be a number"),
+    }
+}
+
+#[cfg(test)]
+mod confidence_filter_tests {
+    use super::*;
+    use crate::findings::domain::StaticProofState;
+
+    fn finding_with_state(fingerprint: &str, state: Option<StaticProofState>) -> Finding {
+        Finding {
+            fingerprint: fingerprint.to_string(),
+            static_proof_state: state,
+            ..Finding::default()
+        }
+    }
+
+    #[test]
+    fn confidence_key_parses_to_the_confidence_axis() {
+        let filter = FindingListFilter::from_filter_expression("confidence:likely").unwrap();
+        assert_eq!(filter.confidence, vec![ProofConfidence::Likely]);
+        // The `proof:` alias also targets confidence.
+        let by_proof = FindingListFilter::from_filter_expression("proof:confirmed").unwrap();
+        assert_eq!(by_proof.confidence, vec![ProofConfidence::Confirmed]);
+    }
+
+    #[test]
+    fn conf_key_still_maps_to_verdict_not_confidence() {
+        // Regression: `conf` is a pre-existing verdict alias; it must not be
+        // silently reassigned to the confidence axis.
+        let filter = FindingListFilter::from_filter_expression("conf:tp").unwrap();
+        assert!(filter.confidence.is_empty());
+        assert_eq!(filter.verdict, vec![FindingVerdictFilter::TruePositive]);
+    }
+
+    #[test]
+    fn confidence_matcher_filters_by_band() {
+        let filter = FindingListFilter::from_filter_expression("confidence:likely").unwrap();
+        let likely = finding_with_state("a", Some(StaticProofState::SourceSinkLinked));
+        let unverified = finding_with_state("b", Some(StaticProofState::SignalOnly));
+        assert!(filter.matches_with_review_decision(&likely, None));
+        assert!(!filter.matches_with_review_decision(&unverified, None));
+    }
+
+    #[test]
+    fn empty_confidence_filter_admits_everything() {
+        let filter = FindingListFilter::default();
+        let unverified = finding_with_state("b", Some(StaticProofState::SignalOnly));
+        assert!(filter.matches_with_review_decision(&unverified, None));
     }
 }
