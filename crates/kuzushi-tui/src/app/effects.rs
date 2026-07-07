@@ -566,13 +566,17 @@ impl ShellApp {
         };
         match record_review_decision_in_workspace(&workspace, &apply) {
             Ok(decision_id) => {
+                self.clear_review_decision_conflict();
                 let label = review_decision_finding_label(apply.alias.as_deref(), &apply.finding);
                 self.log_saved_review_decision(decision_id, apply.decision.verdict, &label);
                 self.review_decision_refresh_effects(&apply.finding)
             }
             Err(error) => {
-                self.log_review_decision_write_error(&apply.finding, error);
-                Vec::new()
+                if self.log_review_decision_write_error(&apply.finding, error) {
+                    self.review_decision_conflict_refresh_effects()
+                } else {
+                    Vec::new()
+                }
             }
         }
     }

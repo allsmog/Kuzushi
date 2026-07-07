@@ -3,6 +3,7 @@ use super::{
     scan_status, status_footer_findings_summary_from_counts,
     status_footer_findings_summary_with_total, view_status_segment, ShellApp,
 };
+use crate::app::ReviewMode;
 use crate::ShellView;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -59,6 +60,7 @@ fn idle_status_footer_segments(app: &ShellApp) -> Vec<String> {
 fn optional_active_chips(app: &ShellApp) -> impl Iterator<Item = String> {
     [
         journey_footer_segment(app),
+        review_conflict_footer_segment(app),
         workspace_stale_footer_segment(app),
     ]
     .into_iter()
@@ -70,6 +72,7 @@ fn optional_idle_chips(app: &ShellApp) -> impl Iterator<Item = String> {
         journey_footer_segment(app),
         scope_footer_segment(app),
         project_scope_footer_segment(app),
+        review_conflict_footer_segment(app),
         workspace_stale_footer_segment(app),
     ]
     .into_iter()
@@ -90,6 +93,14 @@ fn project_scope_footer_segment(app: &ShellApp) -> Option<String> {
 
 fn workspace_stale_footer_segment(app: &ShellApp) -> Option<String> {
     app.workspace_stale().map(|stale| stale.chip())
+}
+
+fn review_conflict_footer_segment(app: &ShellApp) -> Option<String> {
+    matches!(
+        &app.router.workbench().review().mode,
+        ReviewMode::Conflict { .. }
+    )
+    .then(|| "review:conflict".to_string())
 }
 
 fn status_footer_right_segments(app: &ShellApp, warning: bool) -> Vec<String> {

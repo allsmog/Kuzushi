@@ -4441,19 +4441,29 @@ fn review_decision_command_rejects_stale_workbench_watermark() {
             reason: "first read of this finding".to_string(),
         }),
     );
-    run_command(
-        &mut app,
-        ShellCommand::ReviewDecision(ReviewDecisionCommand::Record {
-            verdict: "suppressed".to_string(),
-            reason: "stale second read".to_string(),
-        }),
-    );
+    let effects = app
+        .reduce_command_effects(&ShellCommand::ReviewDecision(
+            ReviewDecisionCommand::Record {
+                verdict: "suppressed".to_string(),
+                reason: "stale second read".to_string(),
+            },
+        ))
+        .expect("stale review command should be effect-routed");
+    let apply = review_decision_apply_owned(effects).expect("review decision effect");
+    let followups = app.record_review_decision_effect(apply);
 
     let store = FindingStore::open(workspace.findings_db_path()).unwrap();
     assert_eq!(store.list_review_decisions(finding_id).unwrap().len(), 1);
     assert!(matches!(
         app.router.workbench_mut().review_mut().mode,
         ReviewMode::Conflict { .. }
+    ));
+    assert!(matches!(
+        &followups[..],
+        [ShellEffect::RefreshFindings(FindingsRefresh {
+            announce: false,
+            filter: None,
+        })]
     ));
 }
 

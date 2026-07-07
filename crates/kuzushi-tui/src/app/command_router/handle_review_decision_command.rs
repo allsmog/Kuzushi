@@ -125,14 +125,9 @@ impl ShellApp {
         &mut self,
         finding: &Finding,
         error: anyhow::Error,
-    ) {
+    ) -> bool {
         let message = error.to_string();
-        if message.contains("changed after read watermark") {
-            self.router.workbench_mut().review_mut().mode = ReviewMode::Conflict {
-                message: message.clone(),
-                target_fp: finding_stable_fp(finding).to_string(),
-            };
-        }
+        let conflicted = self.mark_review_decision_conflict_if_stale(finding, &message);
         self.log(
             "error",
             with_next_step(
@@ -140,6 +135,34 @@ impl ShellApp {
                 "open a persisted finding, then retry decision <verdict> <reason>",
             ),
         );
+        conflicted
+    }
+
+    fn mark_review_decision_conflict_if_stale(&mut self, finding: &Finding, message: &str) -> bool {
+        if !message.contains("changed after read watermark") {
+            return false;
+        }
+        self.router.workbench_mut().review_mut().mode = ReviewMode::Conflict {
+            message: message.to_string(),
+            target_fp: finding_stable_fp(finding).to_string(),
+        };
+        true
+    }
+
+    pub(crate) fn clear_review_decision_conflict(&mut self) {
+        if matches!(
+            &self.router.workbench().review().mode,
+            ReviewMode::Conflict { .. }
+        ) {
+            self.router.workbench_mut().review_mut().mode = ReviewMode::Browse;
+        }
+    }
+
+    pub(crate) fn review_decision_conflict_refresh_effects(&mut self) -> Vec<ShellEffect> {
+        vec![ShellEffect::RefreshFindings(FindingsRefresh {
+            announce: false,
+            filter: self.active_findings_filter().clone(),
+        })]
     }
 
     pub(crate) fn review_decision_refresh_effects(

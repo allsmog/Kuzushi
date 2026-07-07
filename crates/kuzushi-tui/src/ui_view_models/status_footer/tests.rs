@@ -1,4 +1,5 @@
 use super::*;
+use crate::app::ReviewMode;
 use crate::ScanPanelState;
 use kuzushi_core::{
     incremental_index::{ReindexPlan, WorkspaceChange},
@@ -150,6 +151,26 @@ fn status_footer_shows_workspace_stale_chip_from_watcher_changes() {
     assert_eq!(
         stale.strongest_plan(),
         ReindexPlan::FileFactsAndLocalAttackSurface
+    );
+}
+
+#[test]
+fn status_footer_shows_review_conflict_chip() {
+    let mut app = ShellApp::new(V2Config::default(), None);
+    app.router.workbench_mut().review_mut().mode = ReviewMode::Conflict {
+        message: "finding fp changed after read watermark 1 at event seq(s) 2".to_string(),
+        target_fp: "fp".to_string(),
+    };
+
+    let model = status_footer_model(&app);
+
+    assert!(
+        model
+            .left_segments
+            .iter()
+            .any(|segment| segment == "review:conflict"),
+        "expected review conflict chip, got {:?}",
+        model.left_segments
     );
 }
 
