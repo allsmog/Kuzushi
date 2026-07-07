@@ -11,8 +11,13 @@ use std::time::UNIX_EPOCH;
 
 mod change_coalescing;
 mod language;
+mod watcher;
 
 pub use change_coalescing::coalesce_changes;
+pub use watcher::{
+    classify_watcher_event, classify_watcher_events, workspace_watch_scope, WatchEvent,
+    WatchScope,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum WorkspaceChange {

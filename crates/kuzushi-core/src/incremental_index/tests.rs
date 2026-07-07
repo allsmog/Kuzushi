@@ -69,6 +69,115 @@ fn plans_source_and_policy_changes_differently() {
 }
 
 #[test]
+fn watcher_scope_includes_workspace_git_and_operator_policy_dirs() {
+    let root = Path::new("/repo");
+    let scope = workspace_watch_scope(root);
+
+    assert_eq!(scope.root, PathBuf::from("/repo"));
+    assert!(scope.roots.contains(&PathBuf::from("/repo")));
+    assert!(scope.roots.contains(&PathBuf::from("/repo/.git")));
+    assert!(scope.roots.contains(&PathBuf::from("/repo/.kuzushi/house-rules")));
+    assert!(scope.roots.contains(&PathBuf::from("/repo/.kuzushi/prompts")));
+}
+
+#[test]
+fn watcher_git_head_absorbs_ordinary_index_work() {
+    let root = Path::new("/repo");
+    let changes = classify_watcher_events(
+        root,
+        [
+            WatchEvent::Modified("/repo/.git/HEAD".into()),
+            WatchEvent::Modified("/repo/.git/index".into()),
+            WatchEvent::Modified("/repo/package.json".into()),
+            WatchEvent::Modified("/repo/pnpm-lock.yaml".into()),
+            WatchEvent::Modified("/repo/src/routes/user.rs".into()),
+        ],
+    );
+
+    assert_eq!(changes, vec![WorkspaceChange::GitHeadChanged]);
+}
+
+#[test]
+fn watcher_classifies_policy_manifest_and_source_changes() {
+    let root = Path::new("/repo");
+    let changes = classify_watcher_events(
+        root,
+        [
+            WatchEvent::Modified("/repo/.git/index".into()),
+            WatchEvent::Modified("/repo/.kuzushi/prompts/sast/triage.md".into()),
+            WatchEvent::Modified("/repo/.kuzushi/rules/sql.yml".into()),
+            WatchEvent::Modified("/repo/package.json".into()),
+            WatchEvent::Modified("/repo/pnpm-lock.yaml".into()),
+            WatchEvent::Modified("/repo/src/routes/user.rs".into()),
+        ],
+    );
+
+    assert_eq!(
+        changes,
+        vec![
+            WorkspaceChange::FileChanged("src/routes/user.rs".into()),
+            WorkspaceChange::ManifestChanged("package.json".into()),
+            WorkspaceChange::LockfileChanged("pnpm-lock.yaml".into()),
+            WorkspaceChange::GitIndexChanged,
+            WorkspaceChange::RuleSetChanged,
+            WorkspaceChange::PromptOrHouseRuleChanged,
+        ]
+    );
+}
+
+#[test]
+fn watcher_ignores_v3_state_and_coalesces_batches() {
+    let root = Path::new("/repo");
+    let changes = classify_watcher_events(
+        root,
+        [
+            WatchEvent::Modified("/repo/src/main.rs".into()),
+            WatchEvent::Modified("/repo/.kuzushi/v3/index.sqlite3".into()),
+            WatchEvent::Deleted("/repo/src/main.rs".into()),
+        ],
+    );
+
+    assert_eq!(
+        changes,
+        vec![WorkspaceChange::FileDeleted("src/main.rs".into())]
+    );
+}
+
+#[test]
+fn watcher_classifies_moves_without_leaking_ignored_paths() {
+    let root = Path::new("/repo");
+    let changes = classify_watcher_events(
+        root,
+        [
+            WatchEvent::Moved {
+                from: "/repo/src/old.rs".into(),
+                to: "/repo/src/new.rs".into(),
+            },
+            WatchEvent::Moved {
+                from: "/repo/.kuzushi/v3/tmp".into(),
+                to: "/repo/src/generated.rs".into(),
+            },
+            WatchEvent::Moved {
+                from: "/repo/src/deleted.rs".into(),
+                to: "/repo/.kuzushi/v3/deleted.rs".into(),
+            },
+        ],
+    );
+
+    assert_eq!(
+        changes,
+        vec![
+            WorkspaceChange::FileChanged("src/generated.rs".into()),
+            WorkspaceChange::FileDeleted("src/deleted.rs".into()),
+            WorkspaceChange::FileMoved {
+                from: "src/old.rs".into(),
+                to: "src/new.rs".into(),
+            },
+        ]
+    );
+}
+
+#[test]
 fn workspace_snapshot_indexes_files_through_cas_and_projection() {
     let tmp = tempfile::tempdir().unwrap();
     fs::create_dir_all(tmp.path().join("src")).unwrap();
