@@ -33,6 +33,8 @@ pub struct SandboxPolicy {
     pub fuel_limit: u64,
     pub timeout_ms: u64,
     pub max_bytes_served: u64,
+    pub max_output_bytes: u64,
+    pub max_field_bytes: u64,
     pub max_findings_returned: u32,
 }
 
@@ -49,6 +51,8 @@ impl Default for SandboxPolicy {
             fuel_limit: 10_000_000,
             timeout_ms: 5_000,
             max_bytes_served: 16 * 1024 * 1024,
+            max_output_bytes: 1024 * 1024,
+            max_field_bytes: 16 * 1024,
             max_findings_returned: 1_000,
         }
     }

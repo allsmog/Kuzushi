@@ -299,18 +299,27 @@ impl ShellApp {
             return;
         };
         let phase_tasks: BTreeSet<PlanningTaskId> = self
-            .planning_picker_route
+            .engagement
+            .planning_picker()
             .tasks()
             .iter()
             .map(|row| row.id)
             .collect();
-        for task in
-            model_recommended_in_phase(&model_tasks, self.planning_picker_route.tasks(), phase)
-        {
-            self.planning_picker_route.selected_mut().insert(task);
+        for task in model_recommended_in_phase(
+            &model_tasks,
+            self.engagement.planning_picker().tasks(),
+            phase,
+        ) {
+            self.engagement
+                .planning_picker_mut()
+                .selected_mut()
+                .insert(task);
             for dep in transitive_dependencies(task) {
                 if phase_tasks.contains(&dep) {
-                    self.planning_picker_route.selected_mut().insert(dep);
+                    self.engagement
+                        .planning_picker_mut()
+                        .selected_mut()
+                        .insert(dep);
                 }
             }
         }

@@ -3,17 +3,28 @@ use super::*;
 impl ShellApp {
     pub fn handle_command(&mut self, command: ShellCommand) {
         let previous_view = self.shell_view.clone();
+        let update = self.reduce_command_without_effect_execution(command);
+        self.execute_effects(update.effects);
+        self.discard_stashed_input_after_view_change(&previous_view);
+    }
+
+    pub(crate) fn reduce_command_message(&mut self, command: ShellCommand) -> CommandUpdate {
+        let previous_view = self.shell_view.clone();
+        let update = self.reduce_command_without_effect_execution(command);
+        self.discard_stashed_input_after_view_change(&previous_view);
+        update
+    }
+
+    fn reduce_command_without_effect_execution(&mut self, command: ShellCommand) -> CommandUpdate {
         if let Some(effects) = self.reduce_command_effects(&command) {
-            self.execute_effects(effects);
-            self.discard_stashed_input_after_view_change(&previous_view);
-            return;
+            return CommandUpdate::handled(effects);
         }
         for handler in COMMAND_HANDLERS {
             if handler(self, &command) {
-                self.discard_stashed_input_after_view_change(&previous_view);
-                return;
+                return CommandUpdate::handled(Vec::new());
             }
         }
+        CommandUpdate::unhandled()
     }
 
     pub fn submit_line(&mut self, raw: &str) {
@@ -34,7 +45,7 @@ impl ShellApp {
         if self.handle_editor_local_command(trimmed) {
             return;
         }
-        self.handle_command(parse_command(raw));
+        update_and_execute_effects(self, Msg::Cmd(parse_command(raw)));
     }
 
     /// `<group-verb> ?` lists the verb's sub-verbs inline. Editor-local so it
@@ -112,6 +123,27 @@ impl ShellApp {
     }
 }
 
+pub(crate) struct CommandUpdate {
+    pub(crate) handled: bool,
+    pub(crate) effects: Vec<ShellEffect>,
+}
+
+impl CommandUpdate {
+    fn handled(effects: Vec<ShellEffect>) -> Self {
+        Self {
+            handled: true,
+            effects,
+        }
+    }
+
+    fn unhandled() -> Self {
+        Self {
+            handled: false,
+            effects: Vec::new(),
+        }
+    }
+}
+
 pub(crate) fn handle_home_command(app: &mut ShellApp, command: &ShellCommand) -> bool {
     let ShellCommand::Home = command else {
         return false;
@@ -128,7 +160,7 @@ pub(crate) fn handle_help_command(app: &mut ShellApp, command: &ShellCommand) ->
         return false;
     };
     app.shell_view = ShellView::Help;
-    app.help_route.open(query.clone());
+    app.router.help_mut().open(query.clone());
     app.log("help", help_log_summary(query.as_deref()));
     true
 }
@@ -163,7 +195,7 @@ pub(crate) fn handle_modules_command(app: &mut ShellApp, command: &ShellCommand)
     };
     app.shell_view = ShellView::Catalog;
     app.catalog_route.expand();
-    app.modules_route.open();
+    app.router.modules_mut().open();
     let count = app.registry.modules().count();
     app.log(
         "module",
@@ -189,7 +221,7 @@ pub(crate) fn handle_tools_command(app: &mut ShellApp, command: &ShellCommand) -
         return false;
     };
     app.shell_view = ShellView::Tools;
-    app.tools_route.open(filter.clone());
+    app.router.tools_mut().open(filter.clone());
     let model = crate::ui_view_models::tools_model(app);
     let suffix = filter
         .as_ref()

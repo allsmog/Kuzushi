@@ -2179,8 +2179,53 @@ mod tests {
             .iter()
             .find(|object| object["label"] == "tool result")
             .unwrap();
+        assert_eq!(result_object["objectRef"]["kind"], "blob");
+        let report_object = objects
+            .iter()
+            .find(|object| object["label"] == "report")
+            .unwrap();
+        assert_eq!(report_object["objectRef"]["kind"], "report-markdown");
         let hash = result_object["objectRef"]["hash"].as_str().unwrap();
         assert!(cas_object_path(tmp.path(), hash).is_file());
+    }
+
+    #[test]
+    fn canonical_snapshot_artifacts_record_domain_object_kinds() {
+        let tmp = tempfile::tempdir().unwrap();
+        let run_id = "run-domain-object-kinds";
+        write_run_summary(
+            tmp.path(),
+            &RunSummary::running(run_id, "tool", Some("sast:scan".to_string()), "target")
+                .complete(),
+        )
+        .unwrap();
+
+        for (leaf, expected_kind) in [
+            ("context.json", "context-snapshot"),
+            ("attack-surface.json", "attack-surface-snapshot"),
+            ("findings.json", "finding-observation-batch"),
+            ("proof.json", "proof-snapshot"),
+            ("failures.json", "diagnostic-bundle"),
+        ] {
+            let spec = crate::artifact_contract::canonical_run_artifact_spec(leaf).unwrap();
+            write_run_artifact_json(
+                tmp.path(),
+                run_id,
+                leaf,
+                spec.label,
+                &serde_json::json!({"status": "recorded"}),
+            )
+            .unwrap();
+            let manifest: serde_json::Value = serde_json::from_str(
+                &fs::read_to_string(run_artifact_path(tmp.path(), run_id, "artifacts.json"))
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(
+                manifest_object_kind_for_path(&manifest, leaf),
+                Some(expected_kind)
+            );
+        }
     }
 
     fn cas_object_path(target: &Path, hash: &str) -> PathBuf {
@@ -2189,6 +2234,18 @@ mod tests {
             .join(&hash[0..2])
             .join(&hash[2..4])
             .join(hash)
+    }
+
+    fn manifest_object_kind_for_path<'a>(
+        manifest: &'a serde_json::Value,
+        leaf: &str,
+    ) -> Option<&'a str> {
+        manifest["objects"]
+            .as_array()?
+            .iter()
+            .find(|object| object["path"].as_str().is_some_and(|path| path.ends_with(leaf)))?
+            .pointer("/objectRef/kind")?
+            .as_str()
     }
 
     #[test]

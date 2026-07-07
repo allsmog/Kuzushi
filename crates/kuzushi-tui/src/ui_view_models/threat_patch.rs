@@ -9,8 +9,8 @@ pub(crate) struct ThreatPatchCardModel {
 }
 
 pub(crate) fn threat_patch_card_model(app: &ShellApp) -> Option<ThreatPatchCardModel> {
-    app.pending_threat_patch
-        .as_ref()
+    app.engagement
+        .pending_threat_patch()
         .map(ThreatPatchCardModel::from_patch)
 }
 

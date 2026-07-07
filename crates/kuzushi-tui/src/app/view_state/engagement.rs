@@ -1,6 +1,7 @@
 use crate::app::{
-    FailedPlanningTask, PendingPatch, PlanningOptionOverrides, PlanningRunStep, PlanningTaskId,
-    RetryAdjustment, WorkflowPhase,
+    FailedPlanningTask, PendingPatch, PendingPrereqPrompt, PlanningOptionOverrides,
+    PlanningPickerRouteState, PlanningRunStep, PlanningTaskId, PrereqChain, PrereqPlanAction,
+    PrereqStep, RetryAdjustment, ThreatPatch, WorkflowPhase,
 };
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -12,7 +13,11 @@ pub struct EngagementState {
     planning_run_queue: VecDeque<PlanningTaskId>,
     planning_expanded_queue: VecDeque<PlanningRunStep>,
     planning_running_tool: Option<String>,
+    planning_picker_route: PlanningPickerRouteState,
+    pending_chain: Option<PrereqChain>,
+    pending_prereq_prompt: Option<PendingPrereqPrompt>,
     pending_patch: Option<PendingPatch>,
+    pending_threat_patch: Option<ThreatPatch>,
     confirm_allowlist: BTreeSet<String>,
     confirm_denylist: BTreeSet<String>,
     pending_plan: Option<PlanProposal>,
@@ -196,6 +201,132 @@ impl EngagementState {
         self.planning_running_tool = None;
     }
 
+    pub(crate) fn planning_picker(&self) -> &PlanningPickerRouteState {
+        &self.planning_picker_route
+    }
+
+    pub(crate) fn planning_picker_mut(&mut self) -> &mut PlanningPickerRouteState {
+        &mut self.planning_picker_route
+    }
+
+    pub(crate) fn set_pending_chain(&mut self, chain: PrereqChain) {
+        self.pending_chain = Some(chain);
+    }
+
+    pub(crate) fn has_pending_chain(&self) -> bool {
+        self.pending_chain.is_some()
+    }
+
+    pub(crate) fn take_pending_chain(&mut self) -> Option<PrereqChain> {
+        self.pending_chain.take()
+    }
+
+    pub(crate) fn clear_pending_chain(&mut self) {
+        self.pending_chain = None;
+    }
+
+    pub(crate) fn has_pending_prereq_prompt(&self) -> bool {
+        self.pending_prereq_prompt.is_some()
+    }
+
+    pub(crate) fn pending_prereq_prompt(&self) -> Option<&PendingPrereqPrompt> {
+        self.pending_prereq_prompt.as_ref()
+    }
+
+    pub(crate) fn set_pending_prereq_prompt(&mut self, prompt: PendingPrereqPrompt) {
+        self.pending_prereq_prompt = Some(prompt);
+    }
+
+    pub(crate) fn clear_pending_prereq_prompt(&mut self) {
+        self.pending_prereq_prompt = None;
+    }
+
+    pub(crate) fn refresh_pending_prereq_prompt(&mut self) -> Option<PendingPrereqPrompt> {
+        self.pending_prereq_prompt = self.pending_chain.as_ref().map(PrereqChain::plan);
+        self.pending_prereq_prompt.clone()
+    }
+
+    pub(crate) fn clear_prereq_flow(&mut self) {
+        self.pending_chain = None;
+        self.pending_prereq_prompt = None;
+    }
+
+    pub(crate) fn clear_finished_final_tool(&mut self, tool_name: &str) -> bool {
+        let finished = self
+            .pending_chain
+            .as_ref()
+            .is_some_and(|chain| chain.final_dispatched && chain.final_tool == tool_name);
+        if finished {
+            self.pending_chain = None;
+        }
+        finished
+    }
+
+    pub(crate) fn drop_finished_prereq_step(&mut self, tool_name: &str) -> bool {
+        let Some(chain) = self.pending_chain.as_mut() else {
+            return false;
+        };
+        if chain.running_step.as_deref() != Some(tool_name) {
+            return false;
+        }
+        let _ = chain.drop_first();
+        chain.running_step = None;
+        true
+    }
+
+    pub(crate) fn next_prereq_step(&self) -> Option<PrereqStep> {
+        self.pending_chain.as_ref()?.next_step().cloned()
+    }
+
+    pub(crate) fn pending_chain_approved(&self) -> bool {
+        self.pending_chain
+            .as_ref()
+            .is_some_and(|chain| chain.approved)
+    }
+
+    pub(crate) fn mark_prereq_plan_accepted(&mut self, action: PrereqPlanAction) -> Option<String> {
+        let chain = self.pending_chain.as_mut()?;
+        chain.approved = true;
+        chain.regenerate_existing = action == PrereqPlanAction::Regenerate;
+        Some(chain.final_tool.clone())
+    }
+
+    pub(crate) fn should_reuse_prereq_step(&self, step: &PrereqStep) -> bool {
+        self.pending_chain
+            .as_ref()
+            .is_some_and(|chain| !chain.should_run_step(step))
+    }
+
+    pub(crate) fn drop_first_prereq_step(&mut self) {
+        if let Some(chain) = self.pending_chain.as_mut() {
+            let _ = chain.drop_first();
+        }
+    }
+
+    pub(crate) fn mark_prereq_step_running(
+        &mut self,
+        tool_name: &str,
+    ) -> Option<(String, Option<String>)> {
+        let chain = self.pending_chain.as_mut()?;
+        chain.running_step = Some(tool_name.to_string());
+        Some((chain.final_tool.clone(), chain.final_thinking_level.clone()))
+    }
+
+    pub(crate) fn mark_final_chain_tool_dispatched(
+        &mut self,
+    ) -> Option<(String, Value, Option<String>)> {
+        let chain = self.pending_chain.as_mut()?;
+        if chain.final_dispatched {
+            return None;
+        }
+        chain.final_dispatched = true;
+        Some((
+            chain.final_tool.clone(),
+            chain.final_input.clone(),
+            chain.final_thinking_level.clone(),
+        ))
+    }
+
     pub(crate) fn pending_patch(&self) -> Option<&PendingPatch> {
         self.pending_patch.as_ref()
     }
@@ -210,6 +341,26 @@ impl EngagementState {
 
     pub(crate) fn clear_pending_patch(&mut self) {
         self.pending_patch = None;
+    }
+
+    pub(crate) fn pending_threat_patch(&self) -> Option<&ThreatPatch> {
+        self.pending_threat_patch.as_ref()
+    }
+
+    pub(crate) fn set_pending_threat_patch(&mut self, patch: ThreatPatch) {
+        self.pending_threat_patch = Some(patch);
+    }
+
+    pub(crate) fn take_pending_threat_patch(&mut self) -> Option<ThreatPatch> {
+        self.pending_threat_patch.take()
+    }
+
+    pub(crate) fn clear_pending_threat_patch(&mut self) {
+        self.pending_threat_patch = None;
+    }
+
+    pub(crate) fn has_pending_threat_patch(&self) -> bool {
+        self.pending_threat_patch.is_some()
     }
 
     pub(crate) fn confirm_allowlist(&self) -> &BTreeSet<String> {

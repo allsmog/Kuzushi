@@ -25,7 +25,8 @@ impl ShellApp {
     }
 
     fn report_missing_planning_option_override(&mut self) {
-        self.planning_picker_route
+        self.engagement
+            .planning_picker_mut()
             .set_option_error("S promotes a this-run override; edit this option first");
     }
 
@@ -44,7 +45,7 @@ impl ShellApp {
         );
         self.clear_planning_option_override(task, &spec.name);
         self.persist_option_store(OptionScope::Global);
-        self.planning_picker_route.clear_option_error();
+        self.engagement.planning_picker_mut().clear_option_error();
         self.log_promoted_planning_option(&tool_name, spec, &value);
     }
 

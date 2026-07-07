@@ -46,12 +46,13 @@ pub fn run_wasm_plugin_invocation(invocation: WasmPluginInvocation) -> Result<Pl
     let packed_output = analyze
         .call(&mut store, ())
         .context("Wasm plugin analyze export trapped")?;
-    let stdout = read_guest_output(&mut store, &instance, packed_output)?;
-    let findings = validate_plugin_stdout(
-        &stdout,
-        &invocation.grant,
-        invocation.policy.max_findings_returned,
+    let stdout = read_guest_output(
+        &mut store,
+        &instance,
+        packed_output,
+        invocation.policy.max_output_bytes,
     )?;
+    let findings = validate_plugin_stdout(&stdout, &invocation.grant, &invocation.policy)?;
     Ok(PluginSandboxResult {
         backend: PluginSandboxBackend::Wasmtime,
         duration_ms: started.elapsed().as_millis().try_into().unwrap_or(u64::MAX),
@@ -125,11 +126,15 @@ fn read_guest_output(
     store: &mut Store<WasmHostState>,
     instance: &wasmtime::Instance,
     packed: i64,
+    max_output_bytes: u64,
 ) -> Result<String> {
     let ptr = (packed as u64 & 0xffff_ffff) as usize;
     let len = ((packed as u64) >> 32) as usize;
     if len == 0 {
         bail!("Wasm plugin returned an empty output buffer");
+    }
+    if len as u64 > max_output_bytes {
+        bail!("Wasm plugin output exceeds policy cap");
     }
     let mut bytes = vec![0; len];
     guest_memory(store, instance)?

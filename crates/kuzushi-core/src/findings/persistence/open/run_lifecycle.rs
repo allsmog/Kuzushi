@@ -17,6 +17,10 @@ impl FindingStore {
         Ok(())
     }
 
+    pub fn insert_scan_run(&self, id: &str, target: &Path, status: &str) -> Result<()> {
+        self.record_run_started(id, target, status)
+    }
+
     pub fn record_run_finished(&self, id: &str, status: &str, findings_count: usize) -> Result<()> {
         self.record_v3_run_lifecycle(RunLifecycleWrite {
             event_kind: completed_run_event_kind(status),
@@ -27,6 +31,10 @@ impl FindingStore {
             actor: "finding-store".to_string(),
         })?;
         Ok(())
+    }
+
+    pub fn complete_scan_run(&self, id: &str, status: &str, findings_count: usize) -> Result<()> {
+        self.record_run_finished(id, status, findings_count)
     }
 
     pub fn latest_run_id(&self) -> Result<Option<String>> {

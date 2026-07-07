@@ -2,7 +2,7 @@ use super::*;
 
 impl ShellApp {
     pub(super) fn handle_prereq_prompt_key(&mut self, key: KeyEvent) -> bool {
-        if self.pending_prereq_prompt.is_none() || !key.modifiers.is_empty() {
+        if !self.engagement.has_pending_prereq_prompt() || !key.modifiers.is_empty() {
             return false;
         }
         let Some(action) = prereq_prompt_action(key.code) else {

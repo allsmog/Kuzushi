@@ -3,7 +3,7 @@ mod tests {
     use super::super::application::{build_triage_outcome, parse_vuln_analysis};
     use super::super::*;
     use crate::agent_router::{AgentRole, AgentRouter, RoutedRuntime};
-    use crate::findings::{Finding, Severity, TriageOutcome, TriageVerdict};
+    use crate::findings::{Finding, FindingStore, Severity, TriageOutcome, TriageVerdict};
     use crate::runtime::{
         AgentLoopOutcome, AgentLoopStep, AgentQueryRequest, AgentQueryResponse, AgentRuntime,
         AgentToolLoopRequest, LoopHistoryEntry, ToolCall, TriageRequest,
@@ -339,9 +339,14 @@ mod tests {
     }
 
     #[test]
-    fn save_evidence_persists_rows_in_findings_evidence_table() {
+    fn record_evidence_persists_v3_audit_event() {
         let tmp = tempfile::tempdir().unwrap();
         let db = tmp.path().join("index.sqlite3");
+        let store = FindingStore::open(&db).unwrap();
+        store
+            .record_run_started("run-deep-audit", tmp.path(), "running")
+            .unwrap();
+        let finding_id = store.insert_finding("run-deep-audit", &finding()).unwrap();
         let evidence = vec![EvidenceCitation {
             file: "src/foo.c".to_string(),
             start_line: 10,
@@ -349,16 +354,18 @@ mod tests {
             note: "OOB sink".to_string(),
             kind: "sink".to_string(),
         }];
-        save_evidence(&db, 42, &evidence).unwrap();
+        record_evidence(&store, finding_id, &evidence).unwrap();
 
         let conn = rusqlite::Connection::open(&db).unwrap();
-        let count: i64 = conn
+        let row: (String, String, String) = conn
             .query_row(
-                "select count(*) from findings_evidence where finding_id = ?",
-                rusqlite::params![42],
-                |row| row.get(0),
+                "select subject, summary, payload_json from audit_events",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
-        assert_eq!(count, 1);
+        assert_eq!(row.0, "deep-audit:evidence");
+        assert!(row.1.contains("1 evidence citation"));
+        assert!(row.2.contains("OOB sink"));
     }
 }

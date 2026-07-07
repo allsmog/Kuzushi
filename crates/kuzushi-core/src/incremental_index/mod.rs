@@ -3,7 +3,7 @@ use crate::identity::hash_parts;
 use crate::storage_v3::writer_actor::{
     FileFactWrite, SnapshotWrite, StorageWriterActor, WatcherCommand, WriterCommand,
 };
-use crate::workspace::WorkspaceTarget;
+use crate::workspace::{target_git_metadata, WorkspaceTarget};
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -66,23 +66,31 @@ struct IndexedFile {
     language: Option<String>,
 }
 
+struct SnapshotMetadata {
+    workspace_root_fingerprint: String,
+    git_commit: Option<String>,
+    git_branch: Option<String>,
+    dirty_hash: Option<crate::identity::Blake3Hash>,
+}
+
 pub fn index_workspace_snapshot(workspace: &WorkspaceTarget) -> Result<IndexedWorkspaceSnapshot> {
     workspace.ensure_state_dir()?;
     let store = ContentStore::open(workspace.objects_dir())?;
     let files = collect_indexed_files(workspace.root(), &store)?;
     let tree = store.put_tree(tree_entries(&files))?;
+    let metadata = snapshot_metadata(workspace.root(), &files);
     let snapshot = store.put_snapshot(&TargetSnapshot {
         tree_hash: tree.hash.clone(),
-        workspace_root_fingerprint: workspace_root_fingerprint(workspace.root()),
-        git_commit: None,
-        git_branch: None,
-        dirty_hash: None,
+        workspace_root_fingerprint: metadata.workspace_root_fingerprint.clone(),
+        git_commit: metadata.git_commit.clone(),
+        git_branch: metadata.git_branch.clone(),
+        dirty_hash: metadata.dirty_hash.clone(),
         index_hash: None,
         config_hash: None,
         rule_set_hashes: Vec::new(),
         created_at: "snapshot-content-addressed".to_string(),
     })?;
-    commit_index_projection(workspace, &snapshot, &tree, &files)
+    commit_index_projection(workspace, &snapshot, &tree, &metadata, &files)
 }
 
 pub fn plan_for_change(change: &WorkspaceChange) -> ReindexPlan {
@@ -171,11 +179,12 @@ fn commit_index_projection(
     workspace: &WorkspaceTarget,
     snapshot: &ObjectRef,
     tree: &ObjectRef,
+    metadata: &SnapshotMetadata,
     files: &[IndexedFile],
 ) -> Result<IndexedWorkspaceSnapshot> {
     let mut commands = Vec::with_capacity(files.len() + 1);
     commands.push(WriterCommand::Watcher(WatcherCommand::SnapshotIndexed(
-        snapshot_write(workspace, snapshot, tree),
+        snapshot_write(snapshot, tree, metadata),
     )));
     commands.extend(files.iter().map(|file| {
         WriterCommand::Watcher(WatcherCommand::FileIndexed(file_write(snapshot, file)))
@@ -204,18 +213,14 @@ fn indexed_snapshot_file(file: &IndexedFile) -> IndexedSnapshotFile {
     }
 }
 
-fn snapshot_write(
-    workspace: &WorkspaceTarget,
-    snapshot: &ObjectRef,
-    tree: &ObjectRef,
-) -> SnapshotWrite {
+fn snapshot_write(snapshot: &ObjectRef, tree: &ObjectRef, metadata: &SnapshotMetadata) -> SnapshotWrite {
     SnapshotWrite {
         snapshot_hash: snapshot.hash.as_str().to_string(),
         tree_hash: tree.hash.as_str().to_string(),
-        workspace_root_fingerprint: workspace_root_fingerprint(workspace.root()),
-        git_commit: None,
-        git_branch: None,
-        dirty_hash: None,
+        workspace_root_fingerprint: metadata.workspace_root_fingerprint.clone(),
+        git_commit: metadata.git_commit.clone(),
+        git_branch: metadata.git_branch.clone(),
+        dirty_hash: metadata.dirty_hash.as_ref().map(|hash| hash.as_str().to_string()),
         index_hash: None,
         config_hash: None,
         actor: "incremental-index".to_string(),
@@ -253,6 +258,27 @@ fn workspace_root_fingerprint(root: &Path) -> String {
     hash_parts("workspace-root", &[root.to_string_lossy().as_bytes()])
         .as_str()
         .to_string()
+}
+
+fn snapshot_metadata(root: &Path, files: &[IndexedFile]) -> SnapshotMetadata {
+    let git = target_git_metadata(root);
+    SnapshotMetadata {
+        workspace_root_fingerprint: workspace_root_fingerprint(root),
+        git_commit: git.as_ref().map(|metadata| metadata.sha.clone()),
+        git_branch: git.as_ref().and_then(|metadata| metadata.branch.clone()),
+        dirty_hash: git
+            .as_ref()
+            .and_then(|metadata| metadata.dirty.then(|| dirty_files_hash(files))),
+    }
+}
+
+fn dirty_files_hash(files: &[IndexedFile]) -> crate::identity::Blake3Hash {
+    let payload = files
+        .iter()
+        .map(|file| format!("{}\0{}\0{}", file.path, file.blob.hash.as_str(), file.file_size))
+        .collect::<Vec<_>>()
+        .join("\n");
+    hash_parts("workspace-dirty-files", &[payload.as_bytes()])
 }
 
 fn workspace_relative_path(root: &Path, path: &Path) -> Result<String> {

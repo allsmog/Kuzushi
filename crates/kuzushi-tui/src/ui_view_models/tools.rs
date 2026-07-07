@@ -22,7 +22,7 @@ pub(crate) struct ToolRow {
 }
 
 pub(crate) fn tools_model(app: &ShellApp) -> ToolsModel {
-    let filter = normalized_filter(app.tools_route.filter());
+    let filter = normalized_filter(app.router.tools().filter());
     let modules = app.registry.modules().collect::<Vec<_>>();
     let groups = tool_groups(&modules, filter.as_ref());
     let visible_count = groups.iter().map(|group| group.rows.len()).sum();
@@ -33,7 +33,7 @@ pub(crate) fn tools_model(app: &ShellApp) -> ToolsModel {
             .iter()
             .map(|module| visible_tool_count(module))
             .sum(),
-        filter: app.tools_route.filter_clone(),
+        filter: app.router.tools().filter_clone(),
     }
 }
 

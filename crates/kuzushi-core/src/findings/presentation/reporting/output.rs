@@ -224,7 +224,7 @@ fn max_verdict_width(findings: &[Finding]) -> usize {
         .iter()
         .map(|finding| {
             FindingVerdictFilter::from_finding(finding)
-                .as_legacy_str()
+                .as_export_str()
                 .len()
         })
         .max()
@@ -269,7 +269,7 @@ fn finding_table_row(alias: &str, finding: &Finding, widths: FindingTableWidths)
         pad(&short_id(&finding.fingerprint), widths.fingerprint),
         pad(finding.severity.as_str(), widths.severity),
         pad(
-            FindingVerdictFilter::from_finding(finding).as_legacy_str(),
+            FindingVerdictFilter::from_finding(finding).as_export_str(),
             widths.verdict
         ),
         finding.title
