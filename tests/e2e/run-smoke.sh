@@ -7,7 +7,7 @@ REPO_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 TEST_APP_DIR="${TEST_APP_DIR:-/tmp/kuzushi-smoke-app}"
 TEST_LOG_DIR="${TEST_LOG_DIR:-/tmp/kuzushi-smoke-logs}"
 FAKE_BIN_DIR="${TEST_LOG_DIR}/bin"
-DB_PATH="${TEST_APP_DIR}/.kuzushi/v2/findings.sqlite3"
+DB_PATH="${TEST_APP_DIR}/.kuzushi/v3/index.sqlite3"
 NATIVE_EXE_NAME="$(node -p 'process.platform === "win32" ? "kuzushi.exe" : "kuzushi"')"
 DOWNLOADED_NATIVE_BIN="$(
   find "${REPO_DIR}/native" -type f -name "${NATIVE_EXE_NAME}" -print -quit 2>/dev/null || true
