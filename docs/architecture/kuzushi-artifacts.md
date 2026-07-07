@@ -100,7 +100,7 @@ camelCase trace aliases are rejected instead of normalized.
 `context.json`, covering the deterministic absence marker plus known rich
 context snapshot fields such as indexed file counts, repository context, and
 application model. The schema and report reader also accept wrapped producer
-snapshots under `context`, `contextSnapshot`, and `context_snapshot`.
+snapshots under `context` and `contextSnapshot`.
 `schemas/run.attack-surface.schema.json` is the machine-readable contract for
 `attack-surface.json`, covering the deterministic absence marker plus known
 rich attack-surface snapshot fields such as surface lists, summary counts, risk

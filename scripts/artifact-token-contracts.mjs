@@ -69,7 +69,7 @@ export const tokenChecks = [
   {
     label: "report context snapshot envelope aliases",
     file: "crates/kuzushi-core/src/report/artifact_summary/context.rs",
-    tokens: ["contextSnapshot", "context_snapshot", "/data/context", "/data/snapshot"],
+    tokens: ["contextSnapshot", "/data/context", "/data/snapshot"],
   },
   {
     label: "report findings snapshot envelope aliases",

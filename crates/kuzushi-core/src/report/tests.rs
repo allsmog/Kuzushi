@@ -754,7 +754,7 @@ fn report_summarizes_canonical_context_snapshot_shape() {
 }
 
 #[test]
-fn report_summarizes_snake_case_context_snapshot_shape() {
+fn report_ignores_snake_case_context_snapshot_fields() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-context-snake", "context:build");
     write_run_summary(temp.path(), &source).unwrap();
@@ -787,9 +787,12 @@ fn report_summarizes_snake_case_context_snapshot_shape() {
 
     let report = build_run_report(temp.path(), Some("run-context-snake")).unwrap();
 
-    assert!(report.report_markdown.contains(
-        "context.json: present - 7 file(s), file index truncated, languages Python, frameworks Django, 1 route(s), 1 outbound client(s), 1 service boundary(ies), 1 data store(s), 1 background job(s)"
-    ));
+    assert!(report
+        .report_markdown
+        .contains("context.json: present - 4 top-level field(s)"));
+    assert!(!report.report_markdown.contains("7 file(s)"));
+    assert!(!report.report_markdown.contains("languages Python"));
+    assert!(!report.report_markdown.contains("outbound client(s)"));
 }
 
 #[test]

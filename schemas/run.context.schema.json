@@ -21,28 +21,17 @@
     },
     "context": { "type": "object" },
     "contextSnapshot": { "type": "object" },
-    "context_snapshot": { "type": "object" },
     "target": { "type": "string" },
     "timestamp": { "type": "integer", "minimum": 0 },
     "discovery": { "type": "string" },
     "options": { "type": "object" },
     "filesIndexed": { "type": "integer", "minimum": 0 },
-    "files_indexed": { "type": "integer", "minimum": 0 },
     "repoContext": { "type": "object" },
-    "repo_context": { "type": "object" },
     "repositoryInventory": { "$ref": "#/definitions/repositoryInventory" },
-    "repository_inventory": { "$ref": "#/definitions/repositoryInventory" },
     "attackSurfaceMap": { "$ref": "#/definitions/attackSurfaceMap" },
-    "attack_surface_map": { "$ref": "#/definitions/attackSurfaceMap" },
     "fileIndex": { "$ref": "#/definitions/fileIndex" },
-    "file_index": { "$ref": "#/definitions/fileIndex" },
     "appModel": { "$ref": "#/definitions/appModel" },
-    "app_model": { "$ref": "#/definitions/appModel" },
     "generatedSlices": {
-      "type": "array",
-      "items": { "type": "string" }
-    },
-    "generated_slices": {
       "type": "array",
       "items": { "type": "string" }
     },
@@ -50,16 +39,8 @@
       "type": "array",
       "items": { "type": "string" }
     },
-    "stale_slices": {
-      "type": "array",
-      "items": { "type": "string" }
-    },
     "scanner": { "type": "string" },
     "filesSample": {
-      "type": "array",
-      "items": { "type": "string" }
-    },
-    "files_sample": {
       "type": "array",
       "items": { "type": "string" }
     }
@@ -78,13 +59,9 @@
           "items": { "$ref": "#/definitions/appRoute" }
         },
         "outboundClients": { "type": "array" },
-        "outbound_clients": { "type": "array" },
         "serviceBoundaries": { "type": "array" },
-        "service_boundaries": { "type": "array" },
         "dataStores": { "type": "array" },
-        "data_stores": { "type": "array" },
-        "backgroundJobs": { "type": "array" },
-        "background_jobs": { "type": "array" }
+        "backgroundJobs": { "type": "array" }
       }
     },
     "repositoryInventory": {
@@ -92,27 +69,18 @@
       "additionalProperties": true,
       "properties": {
         "rootName": { "type": "string" },
-        "root_name": { "type": "string" },
         "languages": { "type": "array" },
         "sourceFiles": { "type": "array" },
-        "source_files": { "type": "array" },
         "manifests": { "type": "array" },
         "dependencyManifests": { "type": "array" },
-        "dependency_manifests": { "type": "array" },
         "configFiles": { "type": "array" },
-        "config_files": { "type": "array" },
         "frameworks": { "type": "array" },
         "entrypoints": { "type": "array" },
         "routesControllers": {
           "type": "array",
           "items": { "$ref": "#/definitions/inventoryRoute" }
         },
-        "routes_controllers": {
-          "type": "array",
-          "items": { "$ref": "#/definitions/inventoryRoute" }
-        },
-        "generatedVendorPaths": { "type": "array" },
-        "generated_vendor_paths": { "type": "array" }
+        "generatedVendorPaths": { "type": "array" }
       }
     },
     "inventoryRoute": {
@@ -136,7 +104,6 @@
       "additionalProperties": true,
       "properties": {
         "rootName": { "type": "string" },
-        "root_name": { "type": "string" },
         "surfaces": {
           "type": "array",
           "items": { "$ref": "#/definitions/attackSurface" }
@@ -172,10 +139,8 @@
       "properties": {
         "tree": { "type": "array" },
         "totalFiles": { "type": "integer", "minimum": 0 },
-        "total_files": { "type": "integer", "minimum": 0 },
         "truncated": { "type": "boolean" },
-        "patternMatches": { "type": "object" },
-        "pattern_matches": { "type": "object" }
+        "patternMatches": { "type": "object" }
       }
     },
     "appRoute": {

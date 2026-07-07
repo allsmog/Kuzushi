@@ -113,7 +113,7 @@ const requiredAliasGroupsBySchema = {
 };
 
 const snapshotEnvelopeFieldsBySchema = {
-  "schemas/run.context.schema.json": ["context", "contextSnapshot", "context_snapshot"],
+  "schemas/run.context.schema.json": ["context", "contextSnapshot"],
   "schemas/run.findings.schema.json": ["coreFindings", "core_findings", "findings"],
   "schemas/run.proof.schema.json": ["proof", "proofs", "verification"],
   "schemas/run.recommendations.schema.json": [
