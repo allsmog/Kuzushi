@@ -2,7 +2,7 @@
 mod tests {
     use super::super::*;
     use crate::artifact_contract::{
-        CANONICAL_RUN_ARTIFACTS, OPTIONAL_RUN_ARTIFACTS, TOOL_INPUT_ARTIFACTS,
+        CANONICAL_RUN_ARTIFACTS, DERIVED_RUN_ARTIFACTS, OPTIONAL_RUN_ARTIFACTS, TOOL_INPUT_ARTIFACTS,
         TOOL_RESULT_ARTIFACTS,
     };
     use std::fs;
@@ -2115,7 +2115,9 @@ mod tests {
             ("proof.json", "proof-snapshot"),
             ("failures.json", "diagnostic-bundle"),
         ] {
-            let spec = crate::artifact_contract::canonical_run_artifact_spec(leaf).unwrap();
+            let spec = crate::artifact_contract::derived_run_artifact_spec(leaf)
+                .or_else(|| crate::artifact_contract::canonical_run_artifact_spec(leaf))
+                .unwrap();
             write_run_artifact_json(
                 tmp.path(),
                 run_id,
@@ -2285,10 +2287,7 @@ mod tests {
         assert_canonical_run_files_exist(tmp.path(), &run_id);
         let running_manifest_artifacts = load_run_artifacts(tmp.path(), &run_id).unwrap();
         assert_manifest_has_canonical_run_artifacts(&running_manifest_artifacts);
-        let context_marker =
-            fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "context.json")).unwrap();
-        assert!(context_marker.contains(&format!("\"runId\": \"{run_id}\"")));
-        assert!(!context_marker.contains("\"run_id\""));
+        assert!(!run_artifact_path(tmp.path(), &run_id, "context.json").exists());
         let placeholder_report =
             fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "report.md")).unwrap();
         assert!(placeholder_report.contains(&format!("# Kuzushi Run {run_id}")));
@@ -2315,9 +2314,7 @@ mod tests {
         assert_eq!(loaded.artifacts.len(), 1);
         let metadata = fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "run.json")).unwrap();
         assert!(metadata.contains("\"status\": \"completed\""));
-        let context_marker =
-            fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "context.json")).unwrap();
-        assert!(context_marker.contains("\"runStatus\": \"completed\""));
+        assert!(!run_artifact_path(tmp.path(), &run_id, "context.json").exists());
         let placeholder_report =
             fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "report.md")).unwrap();
         assert!(placeholder_report.contains("Status: completed"));
@@ -2332,25 +2329,21 @@ mod tests {
         let manifest_artifacts = load_run_artifacts(tmp.path(), &run_id).unwrap();
         assert_manifest_has(&manifest_artifacts, "run.json");
         assert_manifest_has_canonical_run_artifacts(&manifest_artifacts);
-        assert_manifest_has(&manifest_artifacts, "context.json");
         assert_manifest_has(&manifest_artifacts, "result.json");
         let trace = fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "trace.jsonl")).unwrap();
         assert!(trace.contains("context:build started"));
     }
 
     #[test]
-    fn write_run_summary_rejects_non_file_snapshot_marker_target() {
+    fn write_run_summary_ignores_non_file_derived_snapshot_target() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-non-file-snapshot-marker";
         fs::create_dir_all(run_artifact_path(tmp.path(), run_id, "context.json")).unwrap();
         let summary = RunSummary::running(run_id, "tool", Some("context:build".to_string()), "target");
 
-        let error = write_run_summary(tmp.path(), &summary).unwrap_err();
+        write_run_summary(tmp.path(), &summary).unwrap();
 
-        assert!(error
-            .to_string()
-            .contains("Canonical marker target is not a file"));
-        assert!(error.to_string().contains("context.json"));
+        assert!(run_artifact_path(tmp.path(), run_id, "run.json").is_file());
     }
 
     #[test]
@@ -2540,7 +2533,7 @@ mod tests {
     }
 
     #[test]
-    fn final_summary_refreshes_only_generated_absence_markers() {
+    fn final_summary_preserves_producer_owned_derived_snapshots() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = new_run_id("marker-refresh");
         let summary = RunSummary::running(
@@ -2561,18 +2554,16 @@ mod tests {
         .unwrap();
         write_run_summary(tmp.path(), &summary.complete()).unwrap();
 
-        let context_marker =
-            fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "context.json")).unwrap();
         let findings = fs::read_to_string(run_artifact_path(tmp.path(), &run_id, "findings.json"))
             .unwrap();
 
-        assert!(context_marker.contains("\"runStatus\": \"completed\""));
+        assert!(!run_artifact_path(tmp.path(), &run_id, "context.json").exists());
         assert!(findings.contains("producer-owned"));
         assert!(!findings.contains("\"runStatus\": \"completed\""));
     }
 
     #[test]
-    fn paused_summary_propagates_status_to_canonical_placeholders() {
+    fn paused_summary_propagates_status_to_durable_run_files() {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = new_run_id("paused");
         let mut summary = RunSummary::running(
@@ -2592,17 +2583,12 @@ mod tests {
         let manifest_artifacts = load_run_artifacts(tmp.path(), &run_id).unwrap();
 
         assert!(metadata.contains("\"status\": \"paused\""));
-        for leaf in [
-            "context.json",
-            "attack-surface.json",
-            "threat-model.json",
-            "recommendations.json",
-            "strategy.json",
-            "findings.json",
-            "proof.json",
-        ] {
-            let marker = fs::read_to_string(run_artifact_path(tmp.path(), &run_id, leaf)).unwrap();
-            assert!(marker.contains("\"runStatus\": \"paused\""), "{leaf}");
+        for spec in DERIVED_RUN_ARTIFACTS {
+            assert!(
+                !run_artifact_path(tmp.path(), &run_id, spec.leaf).exists(),
+                "{}",
+                spec.leaf
+            );
         }
         assert!(placeholder_report.contains("Status: paused"));
         assert_eq!(failures.status, "paused");
@@ -2616,13 +2602,6 @@ mod tests {
             "run.json",
             "events.jsonl",
             "trace.jsonl",
-            "context.json",
-            "attack-surface.json",
-            "threat-model.json",
-            "recommendations.json",
-            "strategy.json",
-            "findings.json",
-            "proof.json",
             "failures.json",
             "report.md",
             "artifacts.json",
@@ -2765,7 +2744,7 @@ mod tests {
         assert_eq!(context.failed_stage, "context:build");
         assert_eq!(context.cause, "LLM enrichment is unsupported");
         assert!(context.missing_artifacts.contains(&"trace.jsonl".to_string()));
-        assert!(context.missing_artifacts.contains(&"context.json".to_string()));
+        assert!(!context.missing_artifacts.contains(&"context.json".to_string()));
         assert!(!context
             .missing_artifacts
             .contains(&"artifacts.json".to_string()));
@@ -2871,11 +2850,11 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let run_id = "run-failed-non-file-artifact";
         let dir = run_dir(tmp.path(), run_id);
-        fs::create_dir_all(dir.join("proof.json")).unwrap();
+        fs::create_dir_all(dir.join("report.md")).unwrap();
         let declared = RunArtifact {
-            label: "proof".to_string(),
-            path: dir.join("proof.json").display().to_string(),
-            kind: "json".to_string(),
+            label: "report".to_string(),
+            path: dir.join("report.md").display().to_string(),
+            kind: "markdown".to_string(),
         };
 
         write_run_failures(
@@ -2891,9 +2870,9 @@ mod tests {
         let context = load_run_failure_context(tmp.path(), run_id)
             .unwrap()
             .expect("failure context");
-        assert!(context.missing_artifacts.contains(&"proof.json".to_string()));
+        assert!(context.missing_artifacts.contains(&"report.md".to_string()));
         assert!(context.fallback_prompt.contains("Missing artifacts:"));
-        assert!(context.fallback_prompt.contains("proof.json"));
+        assert!(context.fallback_prompt.contains("report.md"));
     }
 
     #[test]
@@ -3228,15 +3207,10 @@ mod tests {
             }),
         );
 
-        let proof_body =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
-        let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
-
-        assert_eq!(
-            proof["summary"],
-            serde_json::json!("No proof snapshot was recorded for this run.")
+        assert!(
+            !run_artifact_path(tmp.path(), run_id, "proof.json").exists(),
+            "obsolete proof aliases must not create derived proof exports"
         );
-        assert!(proof.get("countsByState").is_none());
     }
 
     #[test]
@@ -3375,16 +3349,10 @@ mod tests {
             }),
         );
 
-        let proof_body =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
-        let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
-
-        assert_eq!(
-            proof["summary"],
-            serde_json::json!("No proof snapshot was recorded for this run.")
+        assert!(
+            !run_artifact_path(tmp.path(), run_id, "proof.json").exists(),
+            "root verification aliases must not create derived proof exports"
         );
-        assert!(proof.get("verified").is_none());
-        assert!(proof.get("results").is_none());
     }
 
     #[test]
@@ -3405,16 +3373,10 @@ mod tests {
             }),
         );
 
-        let proof_body =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "proof.json")).unwrap();
-        let proof = serde_json::from_str::<serde_json::Value>(&proof_body).unwrap();
-
-        assert_eq!(
-            proof["summary"],
-            serde_json::json!("No proof snapshot was recorded for this run.")
+        assert!(
+            !run_artifact_path(tmp.path(), run_id, "proof.json").exists(),
+            "snake_case verification aliases must not create derived proof exports"
         );
-        assert!(proof.get("verified_count").is_none());
-        assert!(proof.get("verification_results").is_none());
     }
 
     #[test]
@@ -3524,16 +3486,10 @@ mod tests {
             }),
         );
 
-        let body =
-            fs::read_to_string(run_artifact_path(tmp.path(), run_id, "recommendations.json")).unwrap();
-        let report = serde_json::from_str::<serde_json::Value>(&body).unwrap();
-
-        assert_eq!(
-            report["summary"],
-            serde_json::json!("No module recommendations were recorded for this run.")
+        assert!(
+            !run_artifact_path(tmp.path(), run_id, "recommendations.json").exists(),
+            "snake_case recommendation aliases must not create derived recommendation exports"
         );
-        assert_eq!(report["status"], serde_json::json!("skipped"));
-        assert!(report.get("recommendations").is_none());
     }
 
     #[test]

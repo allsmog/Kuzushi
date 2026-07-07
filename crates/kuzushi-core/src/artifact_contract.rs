@@ -4,7 +4,7 @@ pub(crate) struct CanonicalRunArtifactSpec {
     pub(crate) kind: &'static str,
 }
 
-pub(crate) const CANONICAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 13] = [
+pub(crate) const CANONICAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 6] = [
     CanonicalRunArtifactSpec {
         leaf: "run.json",
         label: "run metadata",
@@ -20,6 +20,24 @@ pub(crate) const CANONICAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 13] = [
         label: "runtime trace",
         kind: "jsonl",
     },
+    CanonicalRunArtifactSpec {
+        leaf: "failures.json",
+        label: "failure handoff",
+        kind: "json",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "report.md",
+        label: "report",
+        kind: "markdown",
+    },
+    CanonicalRunArtifactSpec {
+        leaf: "artifacts.json",
+        label: "artifact manifest",
+        kind: "json",
+    },
+];
+
+pub(crate) const DERIVED_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 7] = [
     CanonicalRunArtifactSpec {
         leaf: "context.json",
         label: "context snapshot",
@@ -55,21 +73,6 @@ pub(crate) const CANONICAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 13] = [
         label: "proof",
         kind: "json",
     },
-    CanonicalRunArtifactSpec {
-        leaf: "failures.json",
-        label: "failure handoff",
-        kind: "json",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "report.md",
-        label: "report",
-        kind: "markdown",
-    },
-    CanonicalRunArtifactSpec {
-        leaf: "artifacts.json",
-        label: "artifact manifest",
-        kind: "json",
-    },
 ];
 
 pub(crate) const OPTIONAL_RUN_ARTIFACTS: [CanonicalRunArtifactSpec; 1] =
@@ -96,6 +99,10 @@ pub(crate) fn canonical_run_artifact_spec(leaf: &str) -> Option<&'static Canonic
     CANONICAL_RUN_ARTIFACTS
         .iter()
         .find(|spec| spec.leaf == leaf)
+}
+
+pub(crate) fn derived_run_artifact_spec(leaf: &str) -> Option<&'static CanonicalRunArtifactSpec> {
+    DERIVED_RUN_ARTIFACTS.iter().find(|spec| spec.leaf == leaf)
 }
 
 pub(crate) fn optional_run_artifact_spec(leaf: &str) -> Option<&'static CanonicalRunArtifactSpec> {

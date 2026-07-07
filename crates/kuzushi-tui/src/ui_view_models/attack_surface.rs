@@ -67,8 +67,8 @@ fn non_file_attack_surface_model() -> AttackSurfaceRiskModel {
 }
 
 fn attack_surface_artifact_leaf() -> &'static str {
-    kuzushi_core::run_artifacts::canonical_run_artifact_spec("attack-surface.json")
-        .expect("attack-surface artifact must be in shared canonical spec")
+    kuzushi_core::run_artifacts::derived_run_artifact_spec("attack-surface.json")
+        .expect("attack-surface artifact must be in shared derived spec")
         .leaf
 }
 

@@ -2078,8 +2078,8 @@ mod tests {
     }
 
     fn write_findings_snapshot(target: &Path, run_id: &str, value: serde_json::Value) {
-        let leaf = kuzushi_core::run_artifacts::canonical_run_artifact_spec("findings.json")
-            .expect("findings artifact must be in shared canonical spec")
+        let leaf = kuzushi_core::run_artifacts::derived_run_artifact_spec("findings.json")
+            .expect("findings artifact must be in shared derived spec")
             .leaf;
         std::fs::write(
             run_dir(target, run_id).join(leaf),

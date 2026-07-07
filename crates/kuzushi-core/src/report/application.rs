@@ -3,7 +3,8 @@ use super::failure_handoff::load_report_failure_handoffs;
 use super::markdown::render_report_markdown;
 use super::{CanonicalReportArtifact, RunReportBuild};
 use crate::artifact_contract::{
-    canonical_run_artifact_spec, CanonicalRunArtifactSpec, CANONICAL_RUN_ARTIFACTS,
+    canonical_run_artifact_spec, derived_run_artifact_spec, CanonicalRunArtifactSpec,
+    CANONICAL_RUN_ARTIFACTS, DERIVED_RUN_ARTIFACTS,
     OPTIONAL_RUN_ARTIFACTS,
     TOOL_INPUT_ARTIFACTS, TOOL_RESULT_ARTIFACTS,
 };
@@ -76,11 +77,41 @@ fn load_canonical_artifacts(target: &Path, run_id: &str) -> Vec<CanonicalReportA
         .into_iter()
         .map(|spec| load_canonical_artifact(&dir, spec))
         .collect::<Vec<_>>();
+    artifacts.extend(load_existing_derived_json_artifacts(&dir));
     artifacts.extend(load_canonical_text_artifacts(&dir));
     artifacts.push(generated_report_artifact(&dir));
     artifacts.extend(load_optional_json_artifacts(&dir));
     artifacts.extend(load_optional_text_artifacts(&dir));
     artifacts
+}
+
+fn load_existing_derived_json_artifacts(run_dir: &Path) -> Vec<CanonicalReportArtifact> {
+    DERIVED_RUN_ARTIFACTS
+        .iter()
+        .filter_map(|spec| load_existing_json_artifact(run_dir, spec))
+        .collect()
+}
+
+fn load_existing_json_artifact(
+    run_dir: &Path,
+    spec: &CanonicalRunArtifactSpec,
+) -> Option<CanonicalReportArtifact> {
+    let path = run_dir.join(spec.leaf);
+    match read_canonical_json_file(spec.leaf, &path) {
+        JsonArtifactRead::Present(value) => Some(CanonicalReportArtifact::present(
+            spec.leaf,
+            spec.label,
+            path.display().to_string(),
+            summarize_json_artifact(&value),
+        )),
+        JsonArtifactRead::Malformed(summary) => Some(CanonicalReportArtifact::present(
+            spec.leaf,
+            spec.label,
+            path.display().to_string(),
+            summary,
+        )),
+        JsonArtifactRead::Missing => None,
+    }
 }
 
 fn load_canonical_artifact(
@@ -345,14 +376,14 @@ fn report_json_can_be_array(file: &str) -> bool {
 }
 
 fn findings_artifact_leaf() -> &'static str {
-    canonical_run_artifact_spec("findings.json")
-        .expect("findings artifact must be in shared canonical spec")
+    derived_run_artifact_spec("findings.json")
+        .expect("findings artifact must be in shared derived spec")
         .leaf
 }
 
 fn recommendations_artifact_leaf() -> &'static str {
-    canonical_run_artifact_spec("recommendations.json")
-        .expect("recommendations artifact must be in shared canonical spec")
+    derived_run_artifact_spec("recommendations.json")
+        .expect("recommendations artifact must be in shared derived spec")
         .leaf
 }
 

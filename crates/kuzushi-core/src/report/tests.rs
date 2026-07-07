@@ -82,9 +82,7 @@ fn builds_markdown_report_from_latest_completed_non_report_run() {
     assert!(report.report_markdown.contains("# Kuzushi Run Report"));
     assert!(report.report_markdown.contains("run.json: present"));
     assert!(report.report_markdown.contains("artifacts.json: present"));
-    assert!(report
-        .report_markdown
-        .contains("context.json: present - No context snapshot was recorded for this run."));
+    assert!(!report.report_markdown.contains("context.json: present"));
     assert!(report.report_markdown.contains(
         "attack-surface.json: present - 4 surface(s), 2 high risk, max 98, tiers critical=1, high=1, medium=2, kinds file_upload_parse_path=1, http_route=3"
     ));
@@ -338,7 +336,6 @@ fn report_surfaces_non_file_json_artifacts_as_present_malformed() {
     let source = completed_summary(temp.path(), "run-non-file-json", "agentic-sast:scan");
     write_run_summary(temp.path(), &source).unwrap();
     let dir = run_dir(temp.path(), "run-non-file-json");
-    fs::remove_file(dir.join("context.json")).unwrap();
     fs::create_dir(dir.join("context.json")).unwrap();
 
     let report = build_run_report(temp.path(), Some("run-non-file-json")).unwrap();
@@ -888,11 +885,11 @@ fn report_summarizes_run_metadata_and_artifact_manifest() {
         report.report_markdown
     );
     assert!(report.report_markdown.contains(
-        "artifacts.json: present - 14 artifact(s), kinds json=11, jsonl=2, markdown=1, canonical 13"
+        "artifacts.json: present - 7 artifact(s), kinds json=4, jsonl=2, markdown=1, canonical 6"
     ));
     assert!(report
         .report_markdown
-        .contains("labels run metadata, run events, runtime trace, context snapshot"));
+        .contains("labels run metadata, run events, runtime trace, failure handoff"));
 }
 
 #[test]
@@ -2371,7 +2368,6 @@ fn tool_json_exposes_standard_envelope_and_report_markdown() {
     let temp = tempdir().unwrap();
     let source = completed_summary(temp.path(), "run-source", "dep-hygiene:check");
     write_run_summary(temp.path(), &source).unwrap();
-    fs::remove_file(run_dir(temp.path(), "run-source").join("findings.json")).unwrap();
 
     let output = build_run_report(temp.path(), Some("run-source"))
         .unwrap()
@@ -2382,7 +2378,7 @@ fn tool_json_exposes_standard_envelope_and_report_markdown() {
     assert!(output["reportMarkdown"].as_str().unwrap().contains("run-source"));
     assert_eq!(output["artifacts"][0]["label"], json!("report"));
     assert_eq!(output["data"]["sourceRunId"], json!("run-source"));
-    assert!(output["warnings"]
+    assert!(!output["warnings"]
         .as_array()
         .unwrap()
         .iter()

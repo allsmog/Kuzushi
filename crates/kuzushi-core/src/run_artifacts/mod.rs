@@ -75,6 +75,10 @@ pub fn canonical_run_artifact_specs() -> Vec<RunArtifactSpec> {
         .collect()
 }
 
+pub fn derived_run_artifact_spec(leaf: &str) -> Option<RunArtifactSpec> {
+    crate::artifact_contract::derived_run_artifact_spec(leaf).map(public_run_artifact_spec)
+}
+
 pub fn canonical_run_artifact_spec(leaf: &str) -> Option<RunArtifactSpec> {
     crate::artifact_contract::canonical_run_artifact_spec(leaf).map(public_run_artifact_spec)
 }

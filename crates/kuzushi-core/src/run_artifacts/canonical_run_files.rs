@@ -1,7 +1,7 @@
 use super::artifact_manifest::record_canonical_run_artifacts;
 use super::canonical_proof::proof_snapshot_value;
 use super::canonical_run_markers::{
-    write_empty_failures_marker, write_missing_report_marker, write_missing_snapshot_marker,
+    write_empty_failures_marker, write_missing_report_marker,
 };
 use super::canonical_recommendations::recommendations_snapshot_value;
 use super::run_dir;
@@ -9,34 +9,13 @@ use super::write_run_artifact_json;
 use super::write_run_artifact_text;
 use super::RunArtifact;
 use crate::artifact_contract::{
-    canonical_run_artifact_spec, optional_run_artifact_spec, CanonicalRunArtifactSpec,
+    canonical_run_artifact_spec, derived_run_artifact_spec, optional_run_artifact_spec,
+    CanonicalRunArtifactSpec,
 };
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-
-const JSON_SNAPSHOT_FILES: &[(&str, &str)] = &[
-    ("context.json", "No context snapshot was recorded for this run."),
-    (
-        "attack-surface.json",
-        "No attack-surface snapshot was recorded for this run.",
-    ),
-    (
-        "threat-model.json",
-        "No threat-model snapshot was recorded for this run.",
-    ),
-    (
-        "recommendations.json",
-        "No module recommendations were recorded for this run.",
-    ),
-    (
-        "strategy.json",
-        "No strategy proposals were recorded for this run.",
-    ),
-    ("findings.json", "No findings snapshot was recorded for this run."),
-    ("proof.json", "No proof snapshot was recorded for this run."),
-];
 
 pub(crate) fn ensure_canonical_run_files(
     target: &Path,
@@ -45,9 +24,6 @@ pub(crate) fn ensure_canonical_run_files(
 ) -> Result<()> {
     let dir = run_dir(target, run_id);
     fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
-    for (file_name, summary) in JSON_SNAPSHOT_FILES {
-        write_missing_snapshot_marker(dir.join(file_name), run_id, status, summary)?;
-    }
     write_empty_failures_marker(dir.join(required_artifact_spec("failures.json").leaf), run_id, status)?;
     write_json_if_missing(
         dir.join(required_artifact_spec("artifacts.json").leaf),
@@ -173,7 +149,7 @@ fn record_json_snapshot(
     let Some(value) = value_at(output, spec.pointers) else {
         return;
     };
-    let artifact_spec = required_artifact_spec(spec.leaf);
+    let artifact_spec = derived_artifact_spec(spec.leaf);
     if let Ok(artifact) =
         write_run_artifact_json(target, run_id, artifact_spec.leaf, artifact_spec.label, value)
     {
@@ -190,7 +166,7 @@ fn record_recommendations_snapshot(
     let Some(value) = recommendations_snapshot_value(output) else {
         return;
     };
-    let spec = required_artifact_spec("recommendations.json");
+    let spec = derived_artifact_spec("recommendations.json");
     if let Ok(artifact) = write_run_artifact_json(target, run_id, spec.leaf, spec.label, value) {
         artifacts.push(artifact);
     }
@@ -205,7 +181,7 @@ fn record_proof_snapshot(
     let Some(value) = proof_snapshot_value(output) else {
         return;
     };
-    let spec = required_artifact_spec("proof.json");
+    let spec = derived_artifact_spec("proof.json");
     if let Ok(artifact) = write_run_artifact_json(target, run_id, spec.leaf, spec.label, &value) {
         artifacts.push(artifact);
     }
@@ -213,6 +189,10 @@ fn record_proof_snapshot(
 
 fn required_artifact_spec(leaf: &str) -> &'static CanonicalRunArtifactSpec {
     canonical_run_artifact_spec(leaf).expect("canonical snapshot artifact must be in shared spec")
+}
+
+fn derived_artifact_spec(leaf: &str) -> &'static CanonicalRunArtifactSpec {
+    derived_run_artifact_spec(leaf).expect("derived snapshot artifact must be in shared spec")
 }
 
 fn report_artifact_spec() -> &'static CanonicalRunArtifactSpec {
