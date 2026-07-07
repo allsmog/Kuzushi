@@ -6,8 +6,8 @@
 use std::{fs, path::PathBuf};
 
 use kuzushi_core::{
-    latest_run_path, run_dir, Finding, ScanCancellation, Severity, ToolOptionStore, TriageOutcome,
-    TriageVerdict, V2Config,
+    latest_run_path, run_dir, Finding, ModuleRegistry, ScanCancellation, Severity, ToolOptionStore,
+    TriageOutcome, TriageVerdict, V2Config,
 };
 use kuzushi_tui::{
     render_plain_app, OptionsFilter, OptionsView, ShellApp, ShellCommand, ShellView, ThreatView,
@@ -34,7 +34,10 @@ fn strip_line_end_whitespace(output: &str) -> String {
 }
 
 fn fresh_app() -> ShellApp {
-    let mut app = ShellApp::new(V2Config::default(), None);
+    // Snapshot tests must not depend on optional Node plugin packages installed
+    // in the developer checkout.
+    let registry = ModuleRegistry::with_v2_builtins_without_optional_adapters();
+    let mut app = ShellApp::with_registry(V2Config::default(), None, registry);
     app.option_store = ToolOptionStore::new();
     app
 }

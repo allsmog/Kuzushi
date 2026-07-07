@@ -40,6 +40,10 @@ impl ModuleRegistry {
         Self::with_v2_builtins_for_optional_adapters(OptionalAdapterVisibility::detect())
     }
 
+    pub fn with_v2_builtins_without_optional_adapters() -> Self {
+        Self::with_v2_builtins_for_optional_adapters(OptionalAdapterVisibility::default())
+    }
+
     fn with_v2_builtins_for_optional_adapters(adapters: OptionalAdapterVisibility) -> Self {
         let mut registry = Self::default();
 
