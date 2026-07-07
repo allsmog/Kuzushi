@@ -1,4 +1,4 @@
-use super::{TerminalLoopWake, WorkerHandleRegistry};
+use super::{JobHub, TerminalLoopWake, ToolRunState, WorkerHandleRegistry};
 use kuzushi_core::ScanCancellation;
 
 #[derive(Debug, Default)]
@@ -9,6 +9,8 @@ pub(crate) struct RuntimeState {
     agent_cancel: Option<ScanCancellation>,
     plan_cancel: Option<ScanCancellation>,
     threat_cancel: Option<ScanCancellation>,
+    tool_run: ToolRunState,
+    jobs: JobHub,
 }
 
 impl RuntimeState {
@@ -55,5 +57,21 @@ impl RuntimeState {
 
     pub(crate) fn set_threat_cancel(&mut self, cancel: Option<ScanCancellation>) {
         self.threat_cancel = cancel;
+    }
+
+    pub(crate) fn tool_run(&self) -> &ToolRunState {
+        &self.tool_run
+    }
+
+    pub(crate) fn tool_run_mut(&mut self) -> &mut ToolRunState {
+        &mut self.tool_run
+    }
+
+    pub(crate) fn jobs(&self) -> &JobHub {
+        &self.jobs
+    }
+
+    pub(crate) fn jobs_mut(&mut self) -> &mut JobHub {
+        &mut self.jobs
     }
 }

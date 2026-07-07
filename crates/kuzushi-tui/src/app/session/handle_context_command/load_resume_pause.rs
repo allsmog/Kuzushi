@@ -91,42 +91,50 @@ impl ShellApp {
     }
 
     pub(crate) fn running_tool_name(&self) -> Option<&str> {
-        self.tool_run.active_name()
+        self.runtime_state.tool_run().active_name()
     }
 
     pub(crate) fn tool_abort_requested(&self) -> bool {
-        self.tool_run.abort_requested()
+        self.runtime_state.tool_run().abort_requested()
     }
 
     #[cfg(test)]
     pub(crate) fn set_running_tool_for_test(&mut self, tool_name: &str) {
-        self.tool_run
+        self.runtime_state
+            .tool_run_mut()
             .set_running_for_test(Some(tool_name.to_string()));
     }
 
     #[cfg(test)]
     pub(crate) fn clear_running_tool_for_test(&mut self) {
-        self.tool_run.set_running_for_test(None);
+        self.runtime_state.tool_run_mut().set_running_for_test(None);
     }
 
     #[cfg(test)]
     pub(crate) fn set_tool_cancel_for_test(&mut self, cancel: ScanCancellation) {
-        self.tool_run.set_cancel_for_test(Some(cancel));
+        self.runtime_state
+            .tool_run_mut()
+            .set_cancel_for_test(Some(cancel));
     }
 
     #[cfg(test)]
     pub(crate) fn set_active_tool_run_id_for_test(&mut self, run_id: &str) {
-        self.tool_run.set_run_id_for_test(Some(run_id.to_string()));
+        self.runtime_state
+            .tool_run_mut()
+            .set_run_id_for_test(Some(run_id.to_string()));
     }
 
     #[cfg(test)]
     pub(crate) fn set_tool_abort_requested_for_test(&mut self, requested: bool) {
-        self.tool_run.set_abort_requested_for_test(requested);
+        self.runtime_state
+            .tool_run_mut()
+            .set_abort_requested_for_test(requested);
     }
 
     #[cfg(test)]
     pub(crate) fn set_ambient_tool_for_test(&mut self, tool_name: &str) {
-        self.tool_run
+        self.runtime_state
+            .tool_run_mut()
             .set_ambient_for_test(Some(tool_name.to_string()));
     }
 

@@ -26,7 +26,7 @@ impl ShellApp {
         let mut inspected = 0;
         let mut messages = Vec::new();
         while inspected < JOB_DRAIN_LIMIT {
-            match self.jobs.drain_one() {
+            match self.jobs_mut().drain_one() {
                 JobDrainResult::Event(event) => {
                     messages.push(Msg::Job(event));
                 }
@@ -47,7 +47,7 @@ impl ShellApp {
         let kind = event.kind();
         let finishes_slot = self.job_event_finishes_slot(&event);
         if finishes_slot {
-            self.jobs.finish(kind);
+            self.jobs_mut().finish(kind);
         }
         let effects = self.apply_current_job_event(event);
         if finishes_slot {

@@ -20,7 +20,7 @@ impl ShellApp {
     }
 
     pub(crate) fn dispatch_agent(&mut self, dispatch: AgentDispatch) {
-        let ticket = self.jobs.start(JobKind::Agent, "agent");
+        let ticket = self.jobs_mut().start(JobKind::Agent, "agent");
         let generation = ticket.generation();
         let watchdog_cancel = ticket.cancel.clone();
         self.install_agent_dispatch_state(&dispatch, watchdog_cancel.clone());

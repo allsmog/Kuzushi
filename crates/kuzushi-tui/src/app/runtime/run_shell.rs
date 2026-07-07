@@ -116,11 +116,11 @@ pub(crate) fn terminal_shell_loop(
     let mut state = TerminalLoopState::default();
     let (input, wake) = TerminalLoopInbox::spawn_crossterm_reader();
     app.set_loop_wake(Some(wake.clone()));
-    app.jobs.set_wake(Some(wake));
+    app.jobs_mut().set_wake(Some(wake));
     while !app.should_quit() {
         terminal_shell_step(terminal, app, &mut state, &input)?;
     }
-    app.jobs.set_wake(None);
+    app.jobs_mut().set_wake(None);
     app.set_loop_wake(None);
     Ok(())
 }

@@ -70,8 +70,8 @@ impl ShellApp {
     }
 
     pub(crate) fn start_prepared_scan(&mut self, request: ScanStartRequest) {
-        let ticket = self.jobs.start(JobKind::Run, "scan");
-        let trace_budget = self.jobs.trace_budget();
+        let ticket = self.jobs_mut().start(JobKind::Run, "scan");
+        let trace_budget = self.jobs().trace_budget();
         let trace_handle = scan_trace_handle(
             &request.target_root,
             &request.run_id,

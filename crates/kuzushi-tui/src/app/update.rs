@@ -149,7 +149,7 @@ mod tests {
         assert_eq!(result.effects.len(), 1);
         assert!(matches!(result.effects[0], ShellEffect::PrepareScan(_)));
         assert!(app.scan().is_none());
-        assert!(!app.jobs.is_running(JobKind::Run));
+        assert!(!app.jobs().is_running(JobKind::Run));
     }
 
     #[test]
@@ -212,7 +212,7 @@ mod tests {
             ShellEffect::StartOfflineDemoFixtureScan
         ));
         assert!(app.scan_is_none());
-        assert!(!app.jobs.is_running(JobKind::Run));
+        assert!(!app.jobs().is_running(JobKind::Run));
     }
 
     #[test]
@@ -243,7 +243,7 @@ mod tests {
             .effects
             .iter()
             .any(|effect| matches!(effect, ShellEffect::DispatchAgent(_))));
-        assert!(!app.jobs.is_running(JobKind::Agent));
+        assert!(!app.jobs().is_running(JobKind::Agent));
     }
 
     #[test]

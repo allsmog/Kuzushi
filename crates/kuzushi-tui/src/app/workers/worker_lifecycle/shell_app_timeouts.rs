@@ -83,7 +83,7 @@ impl ShellApp {
         let Some(kind) = job_kind_for_worker(worker.label) else {
             return;
         };
-        if !self.jobs.is_current_generation(kind, worker.generation) {
+        if !self.jobs().is_current_generation(kind, worker.generation) {
             return;
         }
         match worker.label {

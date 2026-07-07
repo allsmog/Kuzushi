@@ -858,7 +858,7 @@ mod tests {
         assert_eq!(effects.len(), 1);
         assert!(matches!(effects[0], ShellEffect::PrepareScan(_)));
         assert!(app.scan_is_none());
-        assert!(!app.jobs.is_running(JobKind::Run));
+        assert!(!app.jobs().is_running(JobKind::Run));
         assert!(app
             .log_lines()
             .iter()

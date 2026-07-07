@@ -234,7 +234,7 @@ impl ShellApp {
     }
 
     fn cancel_job_or_token(&mut self, kind: JobKind, cancel: Option<ScanCancellation>) {
-        if self.jobs.cancel(kind) {
+        if self.jobs_mut().cancel(kind) {
             return;
         }
         cancel_token(cancel.as_ref());
@@ -253,10 +253,10 @@ impl ShellApp {
     }
 
     fn has_worker_channels(&self) -> bool {
-        self.jobs.is_running(JobKind::Run)
-            || self.jobs.is_running(JobKind::Agent)
-            || self.jobs.is_running(JobKind::Plan)
-            || self.jobs.is_running(JobKind::Threat)
+        self.jobs().is_running(JobKind::Run)
+            || self.jobs().is_running(JobKind::Agent)
+            || self.jobs().is_running(JobKind::Plan)
+            || self.jobs().is_running(JobKind::Threat)
     }
 
     fn armed_quit_chord_ready(&self) -> bool {
