@@ -56,6 +56,7 @@ fn dispatch_findings_command(command: Command, default_target: Option<PathBuf>) 
         decision,
         completeness,
         status,
+        confidence,
         name,
         file_path,
         vuln_source,
@@ -73,6 +74,7 @@ fn dispatch_findings_command(command: Command, default_target: Option<PathBuf>) 
         vuln_source,
         completeness,
         status,
+        confidence,
         limit,
     )?;
     findings_command(default_target, filter, json)

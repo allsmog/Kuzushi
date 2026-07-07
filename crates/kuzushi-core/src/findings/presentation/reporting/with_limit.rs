@@ -94,10 +94,12 @@ impl FindingListFilter {
             Vec::new(),
             Vec::new(),
             Vec::new(),
+            Vec::new(),
             limit,
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn from_parts_full(
         severity: Vec<String>,
         verdict: Vec<String>,
@@ -106,6 +108,7 @@ impl FindingListFilter {
         vuln_source: Vec<String>,
         completeness: Vec<String>,
         lifecycle_status: Vec<String>,
+        confidence: Vec<String>,
         limit: usize,
     ) -> Result<Self> {
         Ok(Self {
@@ -114,7 +117,7 @@ impl FindingListFilter {
             triage_state: Vec::new(),
             completeness: parsed_part_completeness_filters(completeness)?,
             lifecycle_status: parsed_part_lifecycle_status_filters(lifecycle_status)?,
-            confidence: Vec::new(),
+            confidence: parsed_confidence_filters(confidence)?,
             name: normalize_string(name),
             text_terms: Vec::new(),
             file_path: normalize_string(file_path),

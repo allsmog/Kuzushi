@@ -89,8 +89,8 @@ pub(crate) fn render_findings_block(
     let mut out = vec![
         format!("#### {heading}"),
         String::new(),
-        "| ID | Severity | CWE | Title | Location |".to_string(),
-        "|----|----------|-----|-------|----------|".to_string(),
+        "| ID | Severity | Confidence | CWE | Title | Location |".to_string(),
+        "|----|----------|------------|-----|-------|----------|".to_string(),
     ];
     for (alias, f) in rows {
         out.push(finding_table_row(alias, f, run_url));
@@ -102,9 +102,10 @@ pub(crate) fn render_findings_block(
 
 fn finding_table_row(alias: &str, finding: &Finding, run_url: Option<&str>) -> String {
     format!(
-        "| {} | {} | {} | {} | `{}` |",
+        "| {} | {} | {} | {} | {} | `{}` |",
         finding_id_cell(alias, run_url),
         severity_badge(finding.severity),
+        ProofConfidence::classify(finding).label(),
         escape_md(&finding_cwe_label(finding)),
         escape_md(&finding.title),
         finding_location(finding)
