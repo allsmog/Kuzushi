@@ -120,14 +120,3 @@ pub(crate) fn require_json_object(value: Value) -> Result<Value> {
         anyhow::bail!("structured output parse failed: expected a JSON object")
     }
 }
-
-pub(crate) fn findings_array_schema() -> Value {
-    json!({
-        "type": "object",
-        "required": ["findings"],
-        "additionalProperties": true,
-        "properties": {
-            "findings": {"type": "array", "items": {"type": "object"}}
-        }
-    })
-}
