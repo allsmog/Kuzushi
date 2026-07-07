@@ -22,7 +22,7 @@ pub(crate) fn footer_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
     // Modal pickers swallow Tab while their list/options controls own focus.
     // Once the operator explicitly focuses the prompt with `:`, Tab is command
     // completion again.
-    if app.input_mode == crate::InputMode::Prompt
+    if app.input_mode() == crate::InputMode::Prompt
         && (!app.is_picker_view() || app.picker_prompt_focused())
     {
         let tab = bind("Tab", "complete");
@@ -34,7 +34,7 @@ pub(crate) fn footer_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
 }
 
 fn push_input_mode_binding(bindings: &mut Vec<FooterKeybinding>, app: &ShellApp) {
-    let binding = match app.input_mode {
+    let binding = match app.input_mode() {
         crate::InputMode::Prompt => bind("F2", "nav mode"),
         crate::InputMode::Navigate => bind("Esc", "prompt mode"),
     };

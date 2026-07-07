@@ -39,19 +39,24 @@ pub(crate) enum CostTone {
 }
 
 pub(crate) fn cost_model(app: &ShellApp) -> CostModel {
-    let cap = app.session_budget_usd.unwrap_or(DEFAULT_SESSION_BUDGET_USD);
-    let session_text = format_session_cost(app.session_cost_usd);
-    let last_tool_text = last_tool_text(app.last_tool_cost_usd);
-    let budget_text = budget_text(app.session_budget_usd);
+    let session = app.session();
+    let cap = session
+        .session_budget_usd()
+        .unwrap_or(DEFAULT_SESSION_BUDGET_USD);
+    let session_cost = session.session_cost_usd();
+    let last_tool = session.last_tool_cost_usd();
+    let session_text = format_session_cost(session_cost);
+    let last_tool_text = last_tool_text(last_tool);
+    let budget_text = budget_text(session.session_budget_usd());
     CostModel {
-        budget_rows: cost_budget_rows(app.session_cost_usd, app.last_tool_cost_usd, cap),
+        budget_rows: cost_budget_rows(session_cost, last_tool, cap),
         spend_rows: cost_spend_rows(
             session_text.clone(),
             last_tool_text.clone(),
             budget_text.clone(),
         ),
         auth_spend_cells: [session_text, last_tool_text],
-        budget_status: budget_status(app.session_cost_usd, app.session_budget_usd),
+        budget_status: budget_status(session_cost, session.session_budget_usd()),
     }
 }
 

@@ -35,8 +35,8 @@ fn findings_model_projects_counts_rows_and_selection() {
         Severity::Medium,
         "Path traversal candidate",
     );
-    app.selected_finding = Some(high.clone());
-    app.findings = vec![high, medium];
+    *app.selected_finding_mut() = Some(high.clone());
+    *app.findings_mut() = vec![high, medium];
 
     let model = findings_model(&app);
 
@@ -77,8 +77,8 @@ fn findings_model_projects_counts_rows_and_selection() {
 #[test]
 fn findings_model_reconciliation_header_names_active_filter_expression() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.active_findings_filter = Some("decision:needs_review completeness:open".to_string());
-    app.findings = vec![Finding::new_tool(
+    app.set_active_findings_filter(Some("decision:needs_review completeness:open".to_string()));
+    *app.findings_mut() = vec![Finding::new_tool(
         "semgrep",
         "demo.review",
         "src/lib.rs",
@@ -99,7 +99,7 @@ fn findings_model_reconciliation_header_names_active_filter_expression() {
 #[test]
 fn findings_model_applies_active_filter_to_visible_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.active_findings_filter = Some("decision:confirmed completeness:complete".to_string());
+    app.set_active_findings_filter(Some("decision:confirmed completeness:complete".to_string()));
     let open = Finding::new_tool(
         "semgrep",
         "demo.open",
@@ -124,7 +124,7 @@ fn findings_model_applies_active_filter_to_visible_rows() {
         rationale: "reviewed".to_string(),
         cost_usd: 0.0,
     });
-    app.findings = vec![open, confirmed];
+    *app.findings_mut() = vec![open, confirmed];
 
     let model = findings_model(&app);
 
@@ -143,7 +143,9 @@ fn findings_model_applies_active_filter_to_visible_rows() {
 #[test]
 fn findings_model_empty_state_distinguishes_filtered_out_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.active_findings_filter = Some("decision:suppressed completeness:complete".to_string());
+    app.set_active_findings_filter(Some(
+        "decision:suppressed completeness:complete".to_string(),
+    ));
 
     let model = findings_model(&app);
 
@@ -193,7 +195,7 @@ fn findings_model_counts_reviewed_by_durable_identity() {
     rerun.identity_id = Some(identity_id);
     assert!(rerun.triage.is_none());
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.findings = vec![reviewed, rerun];
+    *app.findings_mut() = vec![reviewed, rerun];
 
     let model = findings_model(&app);
 
@@ -243,8 +245,8 @@ fn selected_finding_detail_uses_durable_identity_review_decision() {
     assert!(rerun.triage.is_none());
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.findings = vec![reviewed, rerun];
-    app.findings_route.set_cursor(1);
+    *app.findings_mut() = vec![reviewed, rerun];
+    app.router.findings_mut().set_cursor(1);
 
     let detail = selected_finding_detail_model(&app).expect("selected finding");
     let triage = detail.triage.as_ref().expect("carried review decision");
@@ -298,7 +300,7 @@ fn selected_finding_detail_includes_run_summary_provenance() {
     finding.scan_id = Some("run-detail".to_string());
 
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-    app.findings = vec![finding];
+    *app.findings_mut() = vec![finding];
 
     let detail = selected_finding_detail_model(&app).expect("selected finding");
 
@@ -352,8 +354,8 @@ fn findings_model_projects_cross_run_duplicates_by_engagement_key() {
     );
     systems.scan_id = Some("scan-b".to_string());
     assert_eq!(semgrep.dedup_key, systems.dedup_key);
-    app.selected_finding = Some(semgrep.clone());
-    app.findings = vec![semgrep, systems];
+    *app.selected_finding_mut() = Some(semgrep.clone());
+    *app.findings_mut() = vec![semgrep, systems];
 
     let model = findings_model(&app);
 
@@ -400,9 +402,9 @@ fn current_finding_for_detail_tracks_projected_cursor_not_raw_duplicate() {
         Severity::Low,
         "Information exposure CWE-200",
     );
-    app.selected_finding = Some(semgrep);
-    app.findings = vec![systems, distinct.clone()];
-    app.findings_route.set_cursor(1);
+    *app.selected_finding_mut() = Some(semgrep);
+    *app.findings_mut() = vec![systems, distinct.clone()];
+    app.router.findings_mut().set_cursor(1);
 
     let (_, finding) = current_finding_for_detail(&app).expect("projected cursor finding");
 
@@ -437,12 +439,12 @@ fn findings_model_filters_rows_to_active_component_scope() {
     kuzushi_core::save_nested_project_scopes(workspace.root(), &tree).unwrap();
 
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-    app.active_scope = Some(crate::app::TargetCandidateScope {
+    app.set_active_scope(Some(crate::app::TargetCandidateScope {
         id: scope.id,
         kind: scope.kind,
         rel_path: scope.rel_path,
-    });
-    app.findings = vec![
+    }));
+    *app.findings_mut() = vec![
         Finding::new_semgrep(
             "demo.web",
             "web/app/src/main.ts",
@@ -577,7 +579,8 @@ fn findings_model_describes_context_prereq_when_empty() {
 #[test]
 fn findings_model_surfaces_malformed_context_prereq_when_empty() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.context_view.status = "malformed context snapshot. Next: context build".to_string();
+    app.domain_mut().context_view_mut().status =
+        "malformed context snapshot. Next: context build".to_string();
 
     let model = findings_model(&app);
 
@@ -620,7 +623,7 @@ fn clean_scan_empty_state_describes_latest_zero_finding_scan() {
 #[test]
 fn findings_model_caps_module_preview_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.findings = (0..10)
+    *app.findings_mut() = (0..10)
         .map(|index| {
             Finding::new_tool(
                 "semgrep",
@@ -674,8 +677,8 @@ fn selected_finding_detail_model_bounds_evidence_and_message() {
             })
             .collect(),
     );
-    app.findings = vec![finding.clone()];
-    app.selected_finding = Some(finding);
+    *app.findings_mut() = vec![finding.clone()];
+    *app.selected_finding_mut() = Some(finding);
 
     let model = selected_finding_detail_model(&app).expect("selected finding");
 
@@ -734,7 +737,7 @@ fn selected_finding_detail_labels_observed_and_model_generated_evidence() {
             ..Default::default()
         },
     ]);
-    app.findings = vec![finding];
+    *app.findings_mut() = vec![finding];
 
     let model = selected_finding_detail_model(&app).expect("selected finding");
 
@@ -761,7 +764,7 @@ fn selected_finding_detail_uses_same_proof_badge_as_list() {
         cost_usd: 0.0,
     });
     finding.triaged_by = Some(TriageAuthor::Human);
-    app.findings = vec![finding];
+    *app.findings_mut() = vec![finding];
 
     let list = findings_model(&app);
     let detail = selected_finding_detail_model(&app).expect("selected finding");
@@ -812,7 +815,7 @@ fn selected_finding_detail_recommends_patch_for_runtime_verified_findings() {
         notes: vec![],
         created_at: "2026-01-01T00:00:00Z".to_string(),
     });
-    app.findings = vec![finding];
+    *app.findings_mut() = vec![finding];
 
     let detail = selected_finding_detail_model(&app).expect("selected finding");
 
@@ -847,9 +850,9 @@ fn selected_out_of_window_finding_drives_detail_with_notice() {
         Severity::High,
         "opened outside loaded list",
     );
-    app.findings = vec![visible];
-    app.findings_route.set_cursor(0);
-    app.selected_finding = Some(opened.clone());
+    *app.findings_mut() = vec![visible];
+    app.router.findings_mut().set_cursor(0);
+    *app.selected_finding_mut() = Some(opened.clone());
 
     let list = findings_model(&app);
     let detail = selected_finding_detail_model(&app).expect("opened detail");

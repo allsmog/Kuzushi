@@ -92,6 +92,36 @@ pub(crate) const SESSION_COMMANDS: &[ShellCommandSpec] = &[
         description: "security-viz gallery — risk heatmap, attack path/tree, DFD",
     },
     ShellCommandSpec {
+        command: "keys",
+        aliases: &["/keys", "keymap", "/keymap"],
+        category: ShellCommandCategory::Session,
+        description: "show global and current-view keybindings",
+    },
+    ShellCommandSpec {
+        command: "theme",
+        aliases: &["/theme", "themes", "/themes"],
+        category: ShellCommandCategory::Session,
+        description: "preview active theme and accessibility knobs",
+    },
+    ShellCommandSpec {
+        command: "update",
+        aliases: &["/update", "updates", "/updates", "changelog", "/changelog"],
+        category: ShellCommandCategory::Session,
+        description: "show release/update status for this build",
+    },
+    ShellCommandSpec {
+        command: "boot",
+        aliases: &["/boot", "boot-splash", "/boot-splash"],
+        category: ShellCommandCategory::Session,
+        description: "show launch readiness splash",
+    },
+    ShellCommandSpec {
+        command: "quit-confirm",
+        aliases: &["/quit-confirm"],
+        category: ShellCommandCategory::Session,
+        description: "show exit confirmation checklist without quitting",
+    },
+    ShellCommandSpec {
         command: "pwn",
         aliases: &[
             "/pwn",

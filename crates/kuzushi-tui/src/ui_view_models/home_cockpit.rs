@@ -98,7 +98,7 @@ pub fn home_cockpit_model(app: &ShellApp) -> HomeCockpitModel {
     let run = HomeRunModel::from_app(app);
     let artifacts = home_artifact_rows(&run.run_dir);
     let journey = journey_model(app);
-    let module_count = app.registry.modules().count();
+    let module_count = app.registry().modules().count();
     HomeCockpitModel {
         title: "HOME",
         attack_surface: home_attack_surface_model(&run.run_dir, &artifacts),
@@ -139,9 +139,9 @@ fn journey_next_card(journey: &JourneyModel) -> HomeNextCard {
 }
 
 fn home_findings_card(app: &ShellApp) -> HomeFindingsCard {
-    let findings = &app.findings;
+    let findings = app.findings();
     let review_index =
-        EffectiveReviewStateIndex::from_findings_and_decisions(findings, &app.review_decisions);
+        EffectiveReviewStateIndex::from_findings_and_decisions(findings, app.review_decisions());
     let reviewed = findings
         .iter()
         .filter(|finding| indexed_review_decision_complete(&review_index, finding))
@@ -175,7 +175,7 @@ fn home_top_risks(app: &ShellApp) -> Vec<HomeTopRiskRow> {
         .into_iter()
         .take(HOME_TOP_RISK_LIMIT)
         .filter_map(|(alias, finding_index)| {
-            let finding = app.findings.get(finding_index)?;
+            let finding = app.findings().get(finding_index)?;
             Some(home_top_risk_row(alias, finding, base.as_deref()))
         })
         .collect()
@@ -237,8 +237,7 @@ fn home_context_label(state: &str) -> &'static str {
 }
 
 fn target_label(app: &ShellApp) -> String {
-    app.target
-        .as_ref()
+    app.target()
         .map(|path| home_path_label(path))
         .unwrap_or_else(|| "none".to_string())
 }
@@ -418,7 +417,7 @@ struct HomeRunModel {
 
 impl HomeRunModel {
     fn from_app(app: &ShellApp) -> Self {
-        let Some(root) = app.target.as_ref() else {
+        let Some(root) = app.target_path_buf() else {
             return Self {
                 run_id: None,
                 latest_pointer_invalid: false,

@@ -51,15 +51,16 @@ fn knowledge_base_model_projects_default_store_and_supported_modules() {
 #[test]
 fn knowledge_base_model_filters_attachments_to_active_module() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.kb_view.module_id = "x-ray".to_string();
-    app.kb_view.store_path = Some(PathBuf::from("/tmp/demo/.kuzushi/v3/attachments.json"));
-    app.kb_view.artifacts = vec![KnownArtifact {
+    app.domain_mut().kb_view_mut().module_id = "x-ray".to_string();
+    app.domain_mut().kb_view_mut().store_path =
+        Some(PathBuf::from("/tmp/demo/.kuzushi/v3/attachments.json"));
+    app.domain_mut().kb_view_mut().artifacts = vec![KnownArtifact {
         module_id: "x-ray".to_string(),
         path: "crates/demo/src/lib.rs".to_string(),
         description: "Rust entrypoint".to_string(),
         exists: true,
     }];
-    app.kb_view.attachments = vec![
+    app.domain_mut().kb_view_mut().attachments = vec![
         attachment("x-ray", "a-1", AttachmentKind::Url),
         attachment("context", "a-2", AttachmentKind::Path),
     ];
@@ -111,14 +112,14 @@ fn plain_knowledge_base_model_projects_empty_sections() {
 #[test]
 fn plain_knowledge_base_model_projects_artifact_and_attachment_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.kb_view.module_id = "x-ray".to_string();
-    app.kb_view.artifacts = vec![KnownArtifact {
+    app.domain_mut().kb_view_mut().module_id = "x-ray".to_string();
+    app.domain_mut().kb_view_mut().artifacts = vec![KnownArtifact {
         module_id: "x-ray".to_string(),
         path: "crates/demo/src/lib.rs".to_string(),
         description: "Rust entrypoint".to_string(),
         exists: true,
     }];
-    app.kb_view.attachments = vec![
+    app.domain_mut().kb_view_mut().attachments = vec![
         attachment("x-ray", "a-1", AttachmentKind::Url),
         attachment("context", "a-2", AttachmentKind::Path),
     ];

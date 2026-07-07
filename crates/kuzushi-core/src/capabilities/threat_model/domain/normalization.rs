@@ -25,8 +25,9 @@ pub(in crate::capabilities::threat_model) fn normalize_impact(value: &str) -> &'
     match value.to_lowercase().as_str() {
         "critical" => "critical",
         "high" => "high",
+        "medium" => "medium",
         "low" => "low",
-        _ => "medium",
+        _ => "unknown",
     }
 }
 
@@ -65,16 +66,18 @@ pub(in crate::capabilities::threat_model) fn impact_score(impact: &str) -> f64 {
     match impact {
         "critical" => 10.0,
         "high" => 8.0,
+        "medium" => 5.0,
         "low" => 2.0,
-        _ => 5.0,
+        _ => 0.0,
     }
 }
 
 pub(in crate::capabilities::threat_model) fn likelihood_score(likelihood: &str) -> f64 {
     match likelihood {
         "high" => 8.0,
+        "medium" => 5.0,
         "low" => 2.0,
-        _ => 5.0,
+        _ => 0.0,
     }
 }
 
@@ -122,7 +125,7 @@ pub(in crate::capabilities::threat_model) fn append_top_threats(
         let impact = threat
             .get("impact")
             .and_then(Value::as_str)
-            .unwrap_or("medium");
+            .unwrap_or("unknown");
         lines.push(format!("  - [{category}] {title} (impact={impact})"));
     }
 }

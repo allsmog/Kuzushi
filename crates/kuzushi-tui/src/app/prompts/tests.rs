@@ -1,12 +1,13 @@
 #[cfg(test)]
 mod tests {
     use super::super::*;
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use kuzushi_core::V2Config;
 
     fn prompt_test_app(target: &std::path::Path) -> ShellApp {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.target = Some(target.to_path_buf());
-        app.focused_module = Some("sast".to_string());
+        app.set_target(Some(target.to_path_buf()));
+        app.set_focused_module(Some("sast".to_string()));
         app
     }
 
@@ -40,17 +41,148 @@ mod tests {
             .to_string()
     }
 
+    fn run_prompt_verb(app: &mut ShellApp, raw: &str) {
+        let effects = app.handle_prompt_verb(raw);
+        EffectRuntime::execute(app, effects);
+    }
+
+    fn run_tune_verb(app: &mut ShellApp, raw: &str) {
+        let effects = app.handle_tune_verb(raw);
+        EffectRuntime::execute(app, effects);
+    }
+
+    fn key(code: KeyCode) -> KeyEvent {
+        KeyEvent::new(code, KeyModifiers::NONE)
+    }
+
+    #[test]
+    fn prompt_set_returns_write_effect_without_touching_disk() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = prompt_test_app(temp.path());
+        let path = prompt_override_path(temp.path());
+
+        let effects = app.handle_prompt_verb("set triage \"focus on auth\"");
+
+        assert!(!path.exists());
+        match effects.as_slice() {
+            [ShellEffect::WritePromptOverride(write)] => {
+                assert_eq!(&write.path, &path);
+                assert_eq!(write.value.as_str(), "focus on auth");
+            }
+            _ => panic!("expected a prompt write effect"),
+        }
+    }
+
+    #[test]
+    fn prompt_mutate_returns_record_effect_without_touching_disk() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(temp.path()).unwrap();
+        let mut app = prompt_test_app(temp.path());
+
+        let effects = app.handle_prompt_verb("mutate triage \"focus on authz paths\"");
+
+        assert!(!kuzushi_core::prompt_mutations_path(&workspace).exists());
+        match effects.as_slice() {
+            [ShellEffect::RecordPromptMutation(record)] => {
+                assert_eq!(record.target.as_deref(), Some(temp.path()));
+                assert_eq!(record.module.as_str(), "sast");
+                assert_eq!(record.verb.as_str(), "triage");
+                assert_eq!(record.text.as_str(), "focus on authz paths");
+            }
+            _ => panic!("expected a prompt mutation record effect"),
+        }
+    }
+
+    #[test]
+    fn prompt_approve_returns_status_effect_without_touching_disk() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = kuzushi_core::WorkspaceTarget::new(temp.path()).unwrap();
+        let mut app = prompt_test_app(temp.path());
+
+        let effects = app.handle_prompt_verb("approve mutation-1 reviewed stack");
+
+        assert!(!kuzushi_core::prompt_mutations_path(&workspace).exists());
+        match effects.as_slice() {
+            [ShellEffect::UpdatePromptMutationStatus(update)] => {
+                assert_eq!(update.target.as_deref(), Some(temp.path()));
+                assert_eq!(update.id.as_str(), "mutation-1");
+                assert_eq!(update.status, kuzushi_core::PromptMutationStatus::Approved);
+                assert_eq!(update.reason.as_deref(), Some("reviewed stack"));
+            }
+            _ => panic!("expected a prompt mutation status effect"),
+        }
+    }
+
+    #[test]
+    fn tune_set_returns_write_effect_without_touching_disk() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = prompt_test_app(temp.path());
+        let path = house_rule_path(temp.path());
+
+        let effects = app.handle_tune_verb("set \"focus on auth\"");
+
+        assert!(!path.exists());
+        match effects.as_slice() {
+            [ShellEffect::WriteHouseRules(write)] => {
+                assert_eq!(&write.path, &path);
+                assert_eq!(write.value.as_str(), "focus on auth");
+            }
+            _ => panic!("expected a house-rules write effect"),
+        }
+    }
+
+    #[test]
+    fn prompts_hotkey_returns_effect_without_executing_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = prompt_test_app(temp.path());
+        app.shell_view = ShellView::PromptsEditor;
+        let path = kuzushi_core::prompt_override_path(temp.path(), "sast", "scan");
+
+        let update = app.reduce_key(key(KeyCode::Char('s')));
+
+        assert!(update.handled);
+        assert!(!path.exists());
+        assert!(!app
+            .log_lines()
+            .iter()
+            .any(|line| line.body.contains("could not read override at")));
+        match update.effects.as_slice() {
+            [ShellEffect::ShowPromptOverride(show)] => assert_eq!(&show.path, &path),
+            _ => panic!("expected a prompt show effect"),
+        }
+    }
+
+    #[test]
+    fn tune_hotkey_returns_effect_without_executing_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let mut app = prompt_test_app(temp.path());
+        app.shell_view = ShellView::Tune;
+        let path = house_rule_path(temp.path());
+
+        let update = app.reduce_key(key(KeyCode::Enter));
+
+        assert!(update.handled);
+        assert!(!app
+            .log_lines()
+            .iter()
+            .any(|line| line.body.contains("no house rules set")));
+        match update.effects.as_slice() {
+            [ShellEffect::ShowHouseRules(show)] => assert_eq!(show.path.as_ref(), Some(&path)),
+            _ => panic!("expected a house-rules show effect"),
+        }
+    }
+
     #[test]
     fn prompt_edit_seeds_override_file_and_logs_editor_command() {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
 
-        app.handle_prompt_verb("edit triage");
+        run_prompt_verb(&mut app, "edit triage");
 
         let path = prompt_override_path(temp.path());
         assert!(path.exists());
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("edit override at")));
     }
@@ -62,14 +194,14 @@ mod tests {
         let path = prompt_override_path(temp.path());
         std::fs::create_dir_all(&path).unwrap();
 
-        app.handle_prompt_verb("edit triage");
+        run_prompt_verb(&mut app, "edit triage");
 
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("could not edit unreadable override at")));
         assert!(!app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("edit override at")));
     }
@@ -81,14 +213,17 @@ mod tests {
         let path = prompt_override_path(temp.path());
         std::fs::create_dir_all(&path).unwrap();
 
-        app.handle_prompt_verb("set triage \"focus on auth\"");
+        run_prompt_verb(&mut app, "set triage \"focus on auth\"");
 
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("could not set unreadable override at")));
         assert!(path.is_dir());
-        assert!(!app.log.iter().any(|line| line.body.contains("wrote ")));
+        assert!(!app
+            .log_lines()
+            .iter()
+            .any(|line| line.body.contains("wrote ")));
     }
 
     #[test]
@@ -97,7 +232,7 @@ mod tests {
         let workspace = kuzushi_core::WorkspaceTarget::new(temp.path()).unwrap();
         let mut app = prompt_test_app(temp.path());
 
-        app.handle_prompt_verb("mutate triage \"focus on authz paths\"");
+        run_prompt_verb(&mut app, "mutate triage \"focus on authz paths\"");
 
         let mutations = kuzushi_core::load_prompt_mutations(&workspace).unwrap();
         assert_eq!(mutations.len(), 1);
@@ -109,11 +244,14 @@ mod tests {
             kuzushi_core::PromptMutationStatus::Pending
         );
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("pending for sast:triage")));
 
-        app.handle_prompt_verb(&format!("approve {} reviewed stack", mutations[0].id));
+        run_prompt_verb(
+            &mut app,
+            &format!("approve {} reviewed stack", mutations[0].id),
+        );
 
         let approved = kuzushi_core::latest_prompt_mutation(&workspace, "sast", "triage")
             .unwrap()
@@ -134,9 +272,9 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let mut app = prompt_test_app(temp.path());
 
-        app.handle_prompt_verb("list");
+        run_prompt_verb(&mut app, "list");
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("no override directory")));
 
@@ -146,11 +284,11 @@ mod tests {
         std::fs::write(dir.join("verify.md"), "verify").unwrap();
         std::fs::write(dir.join("notes.txt"), "ignored").unwrap();
 
-        app.log.clear();
-        app.handle_prompt_verb("list");
+        app.clear_log();
+        run_prompt_verb(&mut app, "list");
 
         let messages = app
-            .log
+            .log_lines()
             .iter()
             .map(|line| line.body.as_str())
             .collect::<Vec<_>>();
@@ -168,14 +306,14 @@ mod tests {
         std::fs::create_dir_all(dir.parent().unwrap()).unwrap();
         std::fs::write(&dir, "not a directory").unwrap();
 
-        app.handle_prompt_verb("list");
+        run_prompt_verb(&mut app, "list");
 
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("could not read override directory at")));
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains(&relative_prompt_override_root())));
     }
@@ -187,14 +325,14 @@ mod tests {
         let rules = house_rule_path(temp.path());
         std::fs::create_dir_all(&rules).unwrap();
 
-        app.handle_tune_verb("show");
+        run_tune_verb(&mut app, "show");
 
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("could not read house rules at")));
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains(&relative_house_rule_path())));
     }
@@ -206,13 +344,16 @@ mod tests {
         let rules = house_rule_path(temp.path());
         std::fs::create_dir_all(&rules).unwrap();
 
-        app.handle_tune_verb("reset");
+        run_tune_verb(&mut app, "reset");
 
-        assert!(app.log.iter().any(|line| line
+        assert!(app.log_lines().iter().any(|line| line
             .body
             .contains("could not reset unreadable house rules at")));
         assert!(rules.is_dir());
-        assert!(!app.log.iter().any(|line| line.body.contains("removed ")));
+        assert!(!app
+            .log_lines()
+            .iter()
+            .any(|line| line.body.contains("removed ")));
     }
 
     #[test]
@@ -222,13 +363,16 @@ mod tests {
         let rules = house_rule_path(temp.path());
         std::fs::create_dir_all(&rules).unwrap();
 
-        app.handle_tune_verb("set \"focus on auth\"");
+        run_tune_verb(&mut app, "set \"focus on auth\"");
 
-        assert!(app.log.iter().any(|line| line
+        assert!(app.log_lines().iter().any(|line| line
             .body
             .contains("could not set unreadable house rules at")));
         assert!(rules.is_dir());
-        assert!(!app.log.iter().any(|line| line.body.contains("wrote ")));
+        assert!(!app
+            .log_lines()
+            .iter()
+            .any(|line| line.body.contains("wrote ")));
     }
 
     #[test]
@@ -238,14 +382,14 @@ mod tests {
         let path = prompt_override_path(temp.path());
         std::fs::create_dir_all(&path).unwrap();
 
-        app.handle_prompt_verb("show triage");
+        run_prompt_verb(&mut app, "show triage");
 
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("could not read override at")));
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains(&relative_prompt_override_path())));
     }
@@ -257,14 +401,14 @@ mod tests {
         let path = prompt_override_path(temp.path());
         std::fs::create_dir_all(&path).unwrap();
 
-        app.handle_prompt_verb("diff triage");
+        run_prompt_verb(&mut app, "diff triage");
 
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("could not diff unreadable override at")));
         assert!(!app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("diff candidate:")));
     }
@@ -276,15 +420,15 @@ mod tests {
         let path = prompt_override_path(temp.path());
         std::fs::create_dir_all(&path).unwrap();
 
-        app.handle_prompt_verb("reset triage");
+        run_prompt_verb(&mut app, "reset triage");
 
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("could not reset unreadable override at")));
         assert!(path.is_dir());
         assert!(!app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("removed override")));
     }

@@ -2,6 +2,10 @@ use super::*;
 use crate::ui_view_models::{cost_model, CostBudgetRow, CostModel, CostTone};
 
 pub(crate) fn cost_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
+    if let Some(snapshot) = app.cost_screen_snapshot() {
+        return cost_snapshot_lines(snapshot.clone(), area.width as usize);
+    }
+
     let mut lines = context_strip(app, area);
     let model = cost_model(app);
     lines.push(blank());
@@ -10,6 +14,54 @@ pub(crate) fn cost_lines(app: &ShellApp, area: Rect) -> Vec<Line<'static>> {
     push_cost_spend_section(&mut lines, &model, area);
     push_cost_commands(&mut lines, area);
     lines
+}
+
+fn cost_snapshot_lines(snapshot: CostScreenSnapshot, width: usize) -> Vec<Line<'static>> {
+    let mut lines = vec![
+        raw(format!(
+            " KUZUSHI  target {}  ctx ✓ {}  model {}  module {}  cost {}",
+            snapshot.status.target,
+            snapshot.status.ctx,
+            snapshot.status.model,
+            snapshot.status.module,
+            snapshot.status.cost
+        )),
+        raw("─".repeat(width)),
+        blank(),
+    ];
+    lines.extend(snapshot.body_rows.into_iter().map(raw));
+    lines.push(blank());
+    lines.push(raw("─".repeat(width)));
+    lines.push(raw(cost_footer_stage_line(width, &snapshot.footer)));
+    lines.push(raw(cost_footer_keybind_line(&snapshot.footer)));
+    lines.push(raw(cost_prompt_line(&snapshot.footer)));
+    lines
+}
+
+fn cost_footer_stage_line(width: usize, footer: &CostScreenFooter) -> String {
+    let left = format!(" stage {} · routing direct", footer.stage);
+    let right = format!("Ctrl+C quit · findings {}", footer.findings);
+    let gap = width
+        .saturating_sub(left.chars().count() + right.chars().count())
+        .saturating_sub(1);
+    format!("{left}{}{right}", " ".repeat(gap))
+}
+
+fn cost_footer_keybind_line(footer: &CostScreenFooter) -> String {
+    let body = footer
+        .keybinds
+        .iter()
+        .map(|(key, label)| format!("{key} {label}"))
+        .collect::<Vec<_>>()
+        .join("   ");
+    format!(" {body}")
+}
+
+fn cost_prompt_line(footer: &CostScreenFooter) -> String {
+    match footer.prompt_module.as_deref() {
+        Some(module) => format!(" kuzushi ({module})>"),
+        None => " kuzushi>".to_string(),
+    }
 }
 
 fn push_cost_budget_section(lines: &mut Vec<Line<'static>>, model: &CostModel, area: Rect) {
@@ -36,6 +88,10 @@ fn push_cost_commands(lines: &mut Vec<Line<'static>>, area: Rect) {
     lines.push(muted(
         "Per-tool spend ledger appears once Rust tools report `costUsd` (scanner-only work may stay $0).",
     ));
+}
+
+fn raw(value: impl Into<String>) -> Line<'static> {
+    Line::raw(value.into())
 }
 
 pub(crate) fn cost_budget_bar(row: &CostBudgetRow) -> Line<'static> {

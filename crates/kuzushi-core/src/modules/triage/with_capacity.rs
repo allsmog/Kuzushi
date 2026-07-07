@@ -82,6 +82,23 @@ impl TriageRunStats {
         }));
     }
 
+    pub(in crate::modules) fn record_cached_outcome(
+        &mut self,
+        finding: Finding,
+        outcome: TriageOutcome,
+    ) {
+        self.record_verdict(outcome.verdict);
+        self.results.push(json!({
+            "fingerprint": finding.fingerprint,
+            "stage": "haiku",
+            "verdict": outcome.verdict.as_str(),
+            "confidence": outcome.confidence,
+            "rationale": outcome.rationale,
+            "costUsd": 0.0,
+            "cached": true,
+        }));
+    }
+
     pub(in crate::modules) fn record_verdict(&mut self, verdict: TriageVerdict) {
         match verdict {
             TriageVerdict::TruePositive => self.tp += 1,
@@ -119,8 +136,8 @@ pub(in crate::modules) fn triage_one_finding(
         return Ok(());
     }
 
-    let outcome = match call_triage_runtime(runtime, config, input, &finding) {
-        Ok(outcome) => outcome,
+    let runtime_outcome = match call_triage_runtime(runtime, config, input, &finding) {
+        Ok(runtime_outcome) => runtime_outcome,
         Err(error) if is_cancelled_runtime_error(&error) => {
             return Err(error).context("triage:run cancelled");
         }
@@ -129,7 +146,7 @@ pub(in crate::modules) fn triage_one_finding(
             return Ok(());
         }
     };
-    persist_triage_outcome(store, stats, finding, outcome);
+    persist_triage_outcome(store, stats, finding, runtime_outcome);
     Ok(())
 }
 

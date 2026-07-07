@@ -42,7 +42,7 @@ fn report_preview_model_uses_export_projection_metadata() {
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
     let mut open = finding("path-traversal", Severity::High, 20);
     open.identity_id = Some("fi_0123456789abcdef0123456789abcdef".to_string());
-    app.findings = vec![
+    *app.findings_mut() = vec![
         open,
         confirmed(finding("sql-injection", Severity::Medium, 40)),
     ];
@@ -81,7 +81,7 @@ fn report_preview_model_uses_export_projection_metadata() {
 #[test]
 fn report_preview_open_mode_includes_only_open_decisions() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.findings = vec![
+    *app.findings_mut() = vec![
         finding("path-traversal", Severity::High, 20),
         confirmed(finding("sql-injection", Severity::Medium, 40)),
     ];
@@ -114,7 +114,7 @@ fn report_preview_open_mode_uses_identity_review_state() {
     assert!(rerun.triage.is_none());
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.findings = vec![human_confirmed(reviewed, 0.87), rerun];
+    *app.findings_mut() = vec![human_confirmed(reviewed, 0.87), rerun];
 
     let model = report_preview_model(&app, WorkspaceExportFormat::Json, ReviewQueueMode::Open);
 
@@ -135,8 +135,8 @@ fn report_preview_counts_deferred_decision_as_terminal() {
     finding.identity_id = Some(identity_id.clone());
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.findings = vec![finding];
-    app.review_decisions = vec![ReviewDecisionRecord {
+    *app.findings_mut() = vec![finding];
+    app.set_review_decisions(vec![ReviewDecisionRecord {
         id: 9,
         finding_id: 1,
         identity_id: Some(identity_id),
@@ -148,7 +148,7 @@ fn report_preview_counts_deferred_decision_as_terminal() {
         },
         triage_verdict: None,
         created_at: "2026-07-03T00:00:00Z".to_string(),
-    }];
+    }]);
 
     let all_model = report_preview_model(&app, WorkspaceExportFormat::Json, ReviewQueueMode::All);
     assert_eq!(all_model.counts.total_findings, 1);
@@ -179,8 +179,8 @@ fn report_preview_keeps_reappeared_rejected_identity_open() {
     rerun.static_proof_state = Some(StaticProofState::SourceSinkLinked);
 
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.findings = vec![reviewed, rerun];
-    app.review_decisions = vec![ReviewDecisionRecord {
+    *app.findings_mut() = vec![reviewed, rerun];
+    app.set_review_decisions(vec![ReviewDecisionRecord {
         id: 10,
         finding_id: 1,
         identity_id: Some(identity_id),
@@ -192,7 +192,7 @@ fn report_preview_keeps_reappeared_rejected_identity_open() {
         },
         triage_verdict: Some(TriageVerdict::FalsePositive),
         created_at: "2026-07-03T00:00:00Z".to_string(),
-    }];
+    }]);
 
     let open_model = report_preview_model(&app, WorkspaceExportFormat::Json, ReviewQueueMode::Open);
 
@@ -222,7 +222,7 @@ fn report_preview_rows_come_from_export_projection() {
         confidence: 91,
         ..Default::default()
     });
-    app.findings = vec![finding];
+    *app.findings_mut() = vec![finding];
 
     let model = report_preview_model(&app, WorkspaceExportFormat::Json, ReviewQueueMode::All);
 
@@ -256,7 +256,7 @@ fn report_preview_rows_include_run_summary_provenance() {
     let mut finding = human_confirmed(finding("sql-injection", Severity::High, 40), 0.87);
     finding.scan_id = Some("run-preview".to_string());
     let mut app = ShellApp::new(V2Config::default(), Some(&workspace));
-    app.findings = vec![finding];
+    *app.findings_mut() = vec![finding];
 
     let model = report_preview_model(&app, WorkspaceExportFormat::Json, ReviewQueueMode::All);
 

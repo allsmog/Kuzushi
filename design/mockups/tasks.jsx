@@ -32,7 +32,7 @@ function TasksView() {
     window.logLine('in','15:03:00',[m(' /tasks')], W, 'l1'),
     window.blankRow(W, 'b1'),
     window.row([T('  '), m('module '), p('sast'), m('  ·  task mode '), [' auto ', 'c-accent'],
-               m('  ·  scope '), p('workspace'), m('  ·  triage '), [' on ', 'c-success')], W, 'h1'),
+               m('  ·  scope '), p('workspace'), m('  ·  triage '), [' on ', 'c-success']], W, 'h1'),
     window.blankRow(W, 'b2'),
     window.sectionHeader('SELECTION · 6 visible · 4 active', W, 's1'),
     wrap(task(false,'allow','semgrep',           'auto', '2.4s',   'pattern-based SAST · always cheap'), 'a'),

@@ -5,10 +5,9 @@ use kuzushi_core::workspace::{
 };
 
 pub(super) fn project_model_document_rows(app: &ShellApp) -> Option<Vec<ProjectModelRow>> {
-    let target = app.target.as_ref()?;
+    let target = app.target_path_buf()?;
     let scope_id = app
-        .active_scope
-        .as_ref()
+        .active_scope()
         .map(|scope| scope.id.as_str())
         .unwrap_or(ROOT_SCOPE_ID);
     let revision = app

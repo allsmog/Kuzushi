@@ -23,7 +23,7 @@ impl ShellApp {
     /// at shell startup and again whenever a planning task completes so
     /// the operator sees the plan refresh in real time.
     pub(crate) fn log_mcp_attachment_plan(&mut self) {
-        let Some(target) = self.target.as_deref() else {
+        let Some(target) = self.target() else {
             return;
         };
         let plan = kuzushi_core::mcp_attachment_plan_for_target(target);
@@ -37,9 +37,11 @@ impl ShellApp {
     }
 
     pub(crate) fn open_model_picker(&mut self) {
-        let visible = visible_model_choices(self.config.model.as_deref());
-        self.model_picker_route
-            .open(preferred_model_choice_index(&self.config), visible.len());
+        let visible = visible_model_choices(self.config().model.as_deref());
+        let selected_index = preferred_model_choice_index(self.config());
+        self.router
+            .model_picker_mut()
+            .open(selected_index, visible.len());
         self.shell_view = ShellView::ModelPicker;
         self.log(
             "onboarding",
@@ -48,12 +50,12 @@ impl ShellApp {
     }
 
     pub(crate) fn open_auth_method_picker(&mut self, provider: String) {
-        self.auth_picker_route.open();
+        self.router.auth_picker_mut().open(provider.clone());
         self.log(
             "onboarding",
             format!("{provider} supports multiple auth methods — paste an API key or pick OAuth"),
         );
-        self.shell_view = ShellView::AuthMethodPicker(provider);
+        self.shell_view = ShellView::AuthMethodPicker;
     }
 
     /// Open the launch picker at the first phase (組 KUMI-KATA · map).
@@ -70,7 +72,8 @@ impl ShellApp {
     /// and test apps keep their targetless default.
     pub(crate) fn open_target_picker(&mut self) {
         let cwd = std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."));
-        self.target_picker_route
+        self.router
+            .target_picker_mut()
             .open(crate::app::discover_target_candidates(&cwd));
         self.shell_view = ShellView::TargetPicker;
         self.log(
@@ -115,7 +118,7 @@ impl ShellApp {
 
     fn phase_blocked_by_config(&mut self, phase: crate::app::WorkflowPhase) -> bool {
         let Some(stop_after) = self
-            .config
+            .config()
             .phases
             .stop_after
             .map(guided_phase_to_workflow_phase)
@@ -169,7 +172,7 @@ impl ShellApp {
         rows: &[PlanningTaskRow],
         selected: &mut BTreeSet<PlanningTaskId>,
     ) {
-        if self.config.model.is_some() {
+        if self.config().model.is_some() {
             return;
         }
         let model_backed: BTreeSet<PlanningTaskId> = rows
@@ -196,7 +199,7 @@ impl ShellApp {
     }
 
     fn phase_target_root(&self) -> std::path::PathBuf {
-        self.target.clone().unwrap_or_else(|| {
+        self.target_owned().unwrap_or_else(|| {
             std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
         })
     }
@@ -218,11 +221,11 @@ impl ShellApp {
         // test that constructs a bare `ShellApp` for unrelated
         // assertions. Onboarding only auto-opens when the operator
         // launched the shell with a real workspace.
-        if self.target.is_none() {
+        if self.target().is_none() {
             return InitialOnboardingPhase::Catalog;
         }
         let provider = self
-            .config
+            .config()
             .model
             .as_deref()
             .and_then(|model| model.split(':').next());
@@ -231,8 +234,8 @@ impl ShellApp {
             .unwrap_or(false);
         let auth_ready = provider.map(auth_ready_for_provider).unwrap_or(false);
         initial_onboarding_phase_for(
-            &self.config,
-            self.target.as_deref(),
+            self.config(),
+            self.target(),
             auth_ready,
             has_multiple_auth,
             self.workspace_is_fresh_for_auto_planner(),
@@ -248,17 +251,21 @@ impl ShellApp {
     }
 
     pub(crate) fn apply_ready_default_model_after_target_activation(&mut self) {
-        let Some(index) = ready_default_model_choice_index(self.config.model.as_deref()) else {
+        let Some(index) = ready_default_model_choice_index(self.config().model.as_deref()) else {
             return;
         };
         let Some(choice) = model_choices().get(index) else {
             return;
         };
-        self.config.model = Some(choice.id.to_string());
-        self.session_thinking_level = Some(choice.thinking_level.to_string());
-        self.selected_model_index = preferred_model_choice_index(&self.config);
-        self.model_picker_route
-            .open(self.selected_model_index, model_choices().len());
+        self.config_mut().model = Some(choice.id.to_string());
+        self.set_session_thinking_level(Some(choice.thinking_level.to_string()));
+        let selected_model_index = preferred_model_choice_index(self.config());
+        self.router
+            .model_catalog_mut()
+            .set_selected_index(selected_model_index);
+        self.router
+            .model_picker_mut()
+            .open(selected_model_index, model_choices().len());
         self.log(
             "model",
             format!(
@@ -269,7 +276,7 @@ impl ShellApp {
     }
 
     fn workspace_is_fresh_for_auto_planner(&self) -> bool {
-        let Some(target) = self.target.as_deref() else {
+        let Some(target) = self.target() else {
             return false;
         };
         !workspace_has_persisted_findings_for_startup(target)

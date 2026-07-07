@@ -1,7 +1,7 @@
 use super::projection_audit::project_audit_event;
 use super::projection_finding_lifecycle::project_finding_lifecycle_status;
 use super::projection_observations::project_finding_observation;
-use super::projection_payload::{payload_f64, payload_str, require_payload_str};
+use super::projection_payload::{payload_str, require_payload_f64, require_payload_str};
 use self::inventory::{
     project_attack_surface_indexed, project_file_deleted, project_file_indexed,
     project_snapshot_indexed,
@@ -52,7 +52,7 @@ fn project_finding_rekeyed(tx: &Transaction<'_>, event: &EventEnvelope) -> Resul
             new_fp,
             event.event_hash.as_str(),
             payload_str(&event.payload, "method").unwrap_or("unknown"),
-            payload_f64(&event.payload, "confidence").unwrap_or(0.0),
+            require_payload_f64(&event.payload, "confidence")?,
         ],
     )?;
     tx.execute(

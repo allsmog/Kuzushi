@@ -217,8 +217,8 @@ mod tests {
             "full-mode-multi",
             "full-mode-multi/cwe-78",
             "src/foo.c",
-            43, // same 8-line bucket as 42
-            Some(45),
+            42,
+            Some(42),
             Severity::High,
             "exec with attacker-controlled argv, CWE-78",
         );
@@ -241,6 +241,49 @@ mod tests {
         assert!(row.tool.contains("semgrep"));
         assert!(row.tool.contains("full-mode-multi"));
         assert_eq!(row.dedup_key, semgrep.dedup_key);
+    }
+
+    #[test]
+    fn insert_findings_batches_projection_and_v3_observations() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let run = "run-batch";
+        store
+            .record_run_started(run, Path::new("/tmp"), "running")
+            .unwrap();
+
+        let findings = vec![
+            Finding::new_tool(
+                "semgrep",
+                "rule-a",
+                "src/a.c",
+                10,
+                Some(10),
+                Severity::Medium,
+                "first issue",
+            ),
+            Finding::new_tool(
+                "codeql",
+                "rule-b",
+                "src/b.c",
+                20,
+                Some(21),
+                Severity::High,
+                "second issue",
+            ),
+        ];
+
+        let ids = store.insert_findings(run, &findings).unwrap();
+
+        assert_eq!(ids.len(), 2);
+        let listed = store.list_findings(10).unwrap();
+        assert_eq!(listed.len(), 2);
+        let observation_count: i64 = store
+            .conn
+            .query_row("select count(*) from finding_observations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(observation_count, 2);
     }
 
     #[test]
@@ -336,8 +379,8 @@ mod tests {
             "semgrep",
             "rule",
             "src/foo.c",
-            43, // same bucket as 42 (both in 40..47)
-            Some(47),
+            42,
+            Some(42),
             Severity::Low,
             "weakish suspicion CWE-787",
         );
@@ -348,6 +391,42 @@ mod tests {
         // Tool list still merges even when severity didn't change.
         assert!(listed[0].tool.contains("semgrep"));
         assert!(listed[0].tool.contains("full-mode-multi"));
+    }
+
+    #[test]
+    fn same_bucket_dedup_does_not_merge_different_source_signatures() {
+        let store = FindingStore::open_in_memory().unwrap();
+        let run = "run-dedup-near-miss";
+        store
+            .record_run_started(run, std::path::Path::new("/tmp"), "running")
+            .unwrap();
+
+        let first = Finding::new_tool(
+            "semgrep",
+            "rule/cwe-89",
+            "src/db.rs",
+            40,
+            Some(40),
+            Severity::High,
+            "first SQL sink, CWE-89",
+        );
+        let second = Finding::new_tool(
+            "codeql",
+            "query/cwe-89",
+            "src/db.rs",
+            43,
+            Some(43),
+            Severity::High,
+            "second SQL sink, CWE-89",
+        );
+        assert_eq!(first.dedup_key, second.dedup_key);
+        assert_ne!(first.source_signature, second.source_signature);
+
+        let first_id = store.insert_finding(run, &first).unwrap();
+        let second_id = store.insert_finding(run, &second).unwrap();
+
+        assert_ne!(first_id, second_id);
+        assert_eq!(store.list_findings_for_scan_id(run).unwrap().len(), 2);
     }
 
     #[test]
@@ -374,8 +453,8 @@ mod tests {
             "systems-hunt",
             "systems/cwe-78",
             "src/foo.c",
-            43,
-            Some(43),
+            42,
+            Some(42),
             Severity::High,
             "exec reaches shell with attacker input, CWE-78",
         );
@@ -439,6 +518,13 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
         let log_path = temp.path().join(".kuzushi/v3/log");
+        let source_path = temp.path().join("src/app.rs");
+        std::fs::create_dir_all(source_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &source_path,
+            "fn search(term: &str) {\n    let sql = format!(\"select * from users where name = {}\", term);\n    db.query(&sql);\n}\n",
+        )
+        .unwrap();
         let store = FindingStore::open(&db_path).unwrap();
         let run_id = "run-v3-observation";
         store
@@ -449,8 +535,8 @@ mod tests {
             "semgrep",
             "rules.cwe-89",
             "src/app.rs",
-            42,
-            Some(42),
+            2,
+            Some(2),
             Severity::High,
             "SQL injection reaches query builder, CWE-89",
         );
@@ -463,32 +549,67 @@ mod tests {
 
         let log = crate::event_log::EventLog::open(&log_path).unwrap();
         let events = log.read_all().unwrap();
-        assert_eq!(events.len(), 2);
+        assert_eq!(events.len(), 4);
         assert_eq!(
             events[0].event_kind,
             crate::event_log::EventKind::RunStarted
         );
         assert_eq!(
             events[1].event_kind,
+            crate::event_log::EventKind::SnapshotIndexed
+        );
+        assert_eq!(
+            events[2].event_kind,
+            crate::event_log::EventKind::FileIndexed
+        );
+        assert_eq!(
+            events[3].event_kind,
             crate::event_log::EventKind::FindingObserved
         );
-        assert_eq!(events[1].payload["stableFp"].as_str(), Some(stable_fp));
+        assert_eq!(events[3].payload["stableFp"].as_str(), Some(stable_fp));
+        assert_eq!(
+            events[3].payload["displayPath"].as_str(),
+            Some("src/app.rs")
+        );
+        assert_eq!(events[3].payload["byteStart"].as_u64(), Some(24));
+        assert_eq!(events[3].payload["byteEnd"].as_u64(), Some(91));
+        let blob_hash = events[3].payload["blobHash"].as_str().unwrap();
+        assert!(temp
+            .path()
+            .join(".kuzushi/v3/objects/blake3")
+            .join(&blob_hash[0..2])
+            .join(&blob_hash[2..4])
+            .join(blob_hash)
+            .is_file());
 
         let conn = rusqlite::Connection::open(db_path).unwrap();
-        let observation_count: i64 = conn
+        let observation: (i64, String, i64, i64) = conn
             .query_row(
-                "select count(*) from finding_observations where stable_fp = ?1",
+                "select count(*), blob_hash, byte_start, byte_end from finding_observations where stable_fp = ?1",
                 rusqlite::params![stable_fp],
-                |row| row.get(0),
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        let indexed_file: (String, i64, String) = conn
+            .query_row(
+                "select blob_hash, file_size, language from indexed_files where path = 'src/app.rs'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
             )
             .unwrap();
         let applied_seq: String = conn
-            .query_row("select value from meta where key = 'applied_seq'", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "select value from meta where key = 'applied_seq'",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
-        assert_eq!(observation_count, 1);
-        assert_eq!(applied_seq, "2");
+        assert_eq!(observation, (1, blob_hash.to_string(), 24, 91));
+        assert_eq!(
+            indexed_file,
+            (blob_hash.to_string(), 114, "Rust".to_string())
+        );
+        assert_eq!(applied_seq, "4");
     }
 
     #[test]
@@ -541,7 +662,10 @@ mod tests {
             events[2].event_kind,
             crate::event_log::EventKind::VerificationRecorded
         );
-        assert_eq!(events[2].payload["stableFp"].as_str(), Some(stable_fp.as_str()));
+        assert_eq!(
+            events[2].payload["stableFp"].as_str(),
+            Some(stable_fp.as_str())
+        );
 
         let conn = rusqlite::Connection::open(db_path).unwrap();
         let projected: (String, i64, String) = conn
@@ -560,6 +684,61 @@ mod tests {
             )
             .unwrap();
         assert_eq!(old_table_count, 0);
+    }
+
+    #[test]
+    fn file_backed_save_triage_records_v3_event_and_projection() {
+        let temp = tempfile::tempdir().unwrap();
+        let db_path = temp.path().join(".kuzushi/v3/index.sqlite3");
+        let log_path = temp.path().join(".kuzushi/v3/log");
+        let store = FindingStore::open(&db_path).unwrap();
+        let run_id = "run-v3-triage";
+        store
+            .record_run_started(run_id, Path::new("/tmp/repo"), "running")
+            .unwrap();
+        let finding = Finding::new_tool(
+            "triage-test",
+            "rules.cwe-89",
+            "src/app.rs",
+            42,
+            Some(42),
+            Severity::High,
+            "SQL injection reaches query builder",
+        );
+        let finding_id = store.insert_finding(run_id, &finding).unwrap();
+
+        store
+            .save_triage_with_author(
+                finding_id,
+                &TriageOutcome {
+                    verdict: TriageVerdict::TruePositive,
+                    confidence: 0.95,
+                    rationale: "operator confirmed source-to-sink evidence".to_string(),
+                    ..Default::default()
+                },
+                TriageAuthor::Human,
+            )
+            .unwrap();
+
+        let stored = store.list_findings_for_scan_id(run_id).unwrap();
+        assert_eq!(
+            stored[0].triage.as_ref().map(|triage| triage.verdict),
+            Some(TriageVerdict::TruePositive)
+        );
+        assert_eq!(stored[0].triaged_by, Some(TriageAuthor::Human));
+        let latest = store
+            .latest_review_decision(finding_id)
+            .unwrap()
+            .expect("review decision");
+        assert_eq!(latest.decision.verdict, ReviewDecisionVerdict::Confirmed);
+
+        let events = crate::event_log::EventLog::open(&log_path)
+            .unwrap()
+            .read_all()
+            .unwrap();
+        assert_eq!(events.len(), 3);
+        assert_eq!(events[2].event_kind, crate::event_log::EventKind::TriageDecided);
+        assert_eq!(events[2].payload["updatesFindingTriage"].as_bool(), Some(true));
     }
 
     #[test]
@@ -618,7 +797,10 @@ mod tests {
             events[2].event_kind,
             crate::event_log::EventKind::PatchAttemptRecorded
         );
-        assert_eq!(events[2].payload["stableFp"].as_str(), Some(stable_fp.as_str()));
+        assert_eq!(
+            events[2].payload["stableFp"].as_str(),
+            Some(stable_fp.as_str())
+        );
 
         let conn = rusqlite::Connection::open(db_path).unwrap();
         let projected: (String, String, String) = conn
@@ -631,20 +813,22 @@ mod tests {
         assert_eq!(projected.0, stable_fp);
         assert_eq!(projected.1, "patch-run-v3");
         assert!(projected.2.len() >= 4);
-        assert!(
-            temp.path()
-                .join(".kuzushi/v3/objects/blake3")
-                .join(&projected.2[0..2])
-                .join(&projected.2[2..4])
-                .join(&projected.2)
-                .is_file()
-        );
+        assert!(temp
+            .path()
+            .join(".kuzushi/v3/objects/blake3")
+            .join(&projected.2[0..2])
+            .join(&projected.2[2..4])
+            .join(&projected.2)
+            .is_file());
         let read_back = store
             .get_patch_results_for_finding(&finding.fingerprint)
             .unwrap();
         assert_eq!(read_back.len(), 1);
         assert_eq!(read_back[0].status, PatchStatus::Verified);
-        assert_eq!(read_back[0].diff.as_deref(), Some("diff --git a/src/app.rs b/src/app.rs\n"));
+        assert_eq!(
+            read_back[0].diff.as_deref(),
+            Some("diff --git a/src/app.rs b/src/app.rs\n")
+        );
         let old_table_count: i64 = conn
             .query_row(
                 "select count(*) from sqlite_master where type = 'table' and name = 'patch_results'",
@@ -2610,5 +2794,4 @@ mod tests {
         );
         assert_eq!(one.fingerprint, other_line.fingerprint);
     }
-
 }

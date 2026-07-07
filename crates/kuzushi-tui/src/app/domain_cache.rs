@@ -1,0 +1,228 @@
+use super::{
+    ActivitySession, ContextSnapshotView, ExploitChain, ExploitChainDetail, KnowledgeBaseView,
+    LiveActivity, PwnView, ReconSnapshot, TaintFlowSnapshot, WorkspaceView,
+};
+use kuzushi_core::{
+    findings::ReviewDecisionRecord, AgenticSastReport, CarliniThreatHuntReport, Finding,
+    ProgramScope, ScanProgress,
+};
+
+#[derive(Debug, Clone)]
+pub struct DomainCache {
+    context_view: ContextSnapshotView,
+    workspace_view: WorkspaceView,
+    kb_view: KnowledgeBaseView,
+    pwn_view: PwnView,
+    activity: Option<ActivitySession>,
+    live_activity: Option<LiveActivity>,
+    recon_snapshot: Option<ReconSnapshot>,
+    carlini_snapshot: Option<CarliniThreatHuntReport>,
+    agentic_sast_snapshot: Option<AgenticSastReport>,
+    scan_progress: Option<ScanProgress>,
+    chain_aliases: Vec<ExploitChain>,
+    exploit_chains: Vec<ExploitChainDetail>,
+    taint_flow: Option<TaintFlowSnapshot>,
+    program_scope: Option<ProgramScope>,
+    findings: Vec<Finding>,
+    findings_total: usize,
+    review_decisions: Vec<ReviewDecisionRecord>,
+}
+
+impl DomainCache {
+    pub(crate) fn new(
+        context_view: ContextSnapshotView,
+        workspace_view: WorkspaceView,
+        kb_view: KnowledgeBaseView,
+    ) -> Self {
+        Self {
+            context_view,
+            workspace_view,
+            kb_view,
+            pwn_view: PwnView::default(),
+            activity: None,
+            live_activity: None,
+            recon_snapshot: None,
+            carlini_snapshot: None,
+            agentic_sast_snapshot: None,
+            scan_progress: None,
+            chain_aliases: Vec::new(),
+            exploit_chains: Vec::new(),
+            taint_flow: None,
+            program_scope: None,
+            findings: Vec::new(),
+            findings_total: 0,
+            review_decisions: Vec::new(),
+        }
+    }
+
+    pub(crate) fn context_view(&self) -> &ContextSnapshotView {
+        &self.context_view
+    }
+
+    #[cfg(test)]
+    pub(crate) fn context_view_mut(&mut self) -> &mut ContextSnapshotView {
+        &mut self.context_view
+    }
+
+    pub(crate) fn set_context_view(&mut self, context_view: ContextSnapshotView) {
+        self.context_view = context_view;
+    }
+
+    pub(crate) fn workspace_view(&self) -> &WorkspaceView {
+        &self.workspace_view
+    }
+
+    pub(crate) fn set_workspace_view(&mut self, workspace_view: WorkspaceView) {
+        self.workspace_view = workspace_view;
+    }
+
+    pub(crate) fn kb_view(&self) -> &KnowledgeBaseView {
+        &self.kb_view
+    }
+
+    #[cfg(test)]
+    pub(crate) fn kb_view_mut(&mut self) -> &mut KnowledgeBaseView {
+        &mut self.kb_view
+    }
+
+    pub(crate) fn set_kb_view(&mut self, kb_view: KnowledgeBaseView) {
+        self.kb_view = kb_view;
+    }
+
+    pub(crate) fn pwn_view(&self) -> &PwnView {
+        &self.pwn_view
+    }
+
+    pub(crate) fn pwn_view_mut(&mut self) -> &mut PwnView {
+        &mut self.pwn_view
+    }
+
+    pub(crate) fn activity(&self) -> Option<&ActivitySession> {
+        self.activity.as_ref()
+    }
+
+    pub(crate) fn activity_mut(&mut self) -> Option<&mut ActivitySession> {
+        self.activity.as_mut()
+    }
+
+    pub(crate) fn activity_or_insert_with<F>(&mut self, create: F) -> &mut ActivitySession
+    where
+        F: FnOnce() -> ActivitySession,
+    {
+        self.activity.get_or_insert_with(create)
+    }
+
+    pub(crate) fn set_activity(&mut self, activity: Option<ActivitySession>) {
+        self.activity = activity;
+    }
+
+    pub(crate) fn live_activity(&self) -> Option<&LiveActivity> {
+        self.live_activity.as_ref()
+    }
+
+    pub(crate) fn set_live_activity(&mut self, activity: Option<LiveActivity>) {
+        self.live_activity = activity;
+    }
+
+    pub(crate) fn recon_snapshot(&self) -> Option<&ReconSnapshot> {
+        self.recon_snapshot.as_ref()
+    }
+
+    pub(crate) fn set_recon_snapshot(&mut self, snapshot: ReconSnapshot) {
+        self.recon_snapshot = Some(snapshot);
+    }
+
+    pub(crate) fn carlini_snapshot(&self) -> Option<&CarliniThreatHuntReport> {
+        self.carlini_snapshot.as_ref()
+    }
+
+    pub(crate) fn set_carlini_snapshot(&mut self, snapshot: CarliniThreatHuntReport) {
+        self.carlini_snapshot = Some(snapshot);
+    }
+
+    pub(crate) fn agentic_sast_snapshot(&self) -> Option<&AgenticSastReport> {
+        self.agentic_sast_snapshot.as_ref()
+    }
+
+    pub(crate) fn set_agentic_sast_snapshot(&mut self, snapshot: AgenticSastReport) {
+        self.agentic_sast_snapshot = Some(snapshot);
+    }
+
+    pub(crate) fn scan_progress(&self) -> Option<&ScanProgress> {
+        self.scan_progress.as_ref()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_scan_progress(&mut self, progress: ScanProgress) {
+        self.scan_progress = Some(progress);
+    }
+
+    pub(crate) fn exploit_chains(&self) -> &[ExploitChainDetail] {
+        &self.exploit_chains
+    }
+
+    pub(crate) fn chain_aliases(&self) -> &[ExploitChain] {
+        &self.chain_aliases
+    }
+
+    pub(crate) fn set_chain_aliases(&mut self, aliases: Vec<ExploitChain>) {
+        self.chain_aliases = aliases;
+    }
+
+    pub(crate) fn has_exploit_chains(&self) -> bool {
+        !self.exploit_chains.is_empty()
+    }
+
+    pub(crate) fn set_exploit_chains(&mut self, chains: Vec<ExploitChainDetail>) {
+        self.exploit_chains = chains;
+    }
+
+    pub(crate) fn taint_flow(&self) -> Option<&TaintFlowSnapshot> {
+        self.taint_flow.as_ref()
+    }
+
+    pub(crate) fn set_taint_flow(&mut self, flow: Option<TaintFlowSnapshot>) {
+        self.taint_flow = flow;
+    }
+
+    pub(crate) fn program_scope(&self) -> Option<&ProgramScope> {
+        self.program_scope.as_ref()
+    }
+
+    pub(crate) fn set_program_scope(&mut self, scope: Option<ProgramScope>) {
+        self.program_scope = scope;
+    }
+
+    pub(crate) fn findings(&self) -> &[Finding] {
+        &self.findings
+    }
+
+    pub(crate) fn findings_total_count(&self) -> usize {
+        self.findings_total.max(self.findings.len())
+    }
+
+    pub(crate) fn findings_are_partial(&self) -> bool {
+        self.findings_total_count() > self.findings.len()
+    }
+
+    pub(crate) fn findings_mut(&mut self) -> &mut Vec<Finding> {
+        &mut self.findings
+    }
+
+    pub(crate) fn set_findings(&mut self, findings: Vec<Finding>) {
+        self.findings_total = findings.len();
+        self.findings = findings;
+    }
+
+    pub(crate) fn set_findings_total_count(&mut self, total: usize) {
+        self.findings_total = total.max(self.findings.len());
+    }
+
+    pub(crate) fn review_decisions(&self) -> &[ReviewDecisionRecord] {
+        &self.review_decisions
+    }
+
+    pub(crate) fn set_review_decisions(&mut self, decisions: Vec<ReviewDecisionRecord>) {
+        self.review_decisions = decisions;
+    }
+}

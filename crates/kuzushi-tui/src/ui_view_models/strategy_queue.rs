@@ -385,7 +385,7 @@ struct StrategyQueueSource {
 
 impl StrategyQueueSource {
     fn from_app(app: &ShellApp) -> Self {
-        let Some(target) = app.target.as_deref() else {
+        let Some(target) = app.target() else {
             return Self {
                 workspace: None,
                 scope_label: "no target selected".to_string(),

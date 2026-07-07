@@ -1,16 +1,21 @@
 use super::*;
 
 impl ShellApp {
-    pub(crate) fn apply_agent_event(&mut self, event: AgentEvent) {
-        let state = AgentEventState::from_chat(self.agent_chat.as_ref());
+    pub(crate) fn apply_agent_event(&mut self, event: AgentEvent) -> Vec<ShellEffect> {
+        let state = AgentEventState::from_chat(self.agent_chat());
         match event {
             AgentEvent::Answered { text, audit } => self.apply_agent_answer(text, audit, state),
             AgentEvent::Failed { error, audit } => self.apply_agent_failure(error, audit, state),
         }
     }
 
-    fn apply_agent_answer(&mut self, text: String, audit: AgentCallAudit, state: AgentEventState) {
-        if let Some(agent) = &mut self.agent_chat {
+    fn apply_agent_answer(
+        &mut self,
+        text: String,
+        audit: AgentCallAudit,
+        state: AgentEventState,
+    ) -> Vec<ShellEffect> {
+        if let Some(agent) = self.agent_chat_mut() {
             agent.running = false;
             agent.abort_requested = false;
             if state.abort_requested {
@@ -27,12 +32,12 @@ impl ShellApp {
                 "agent",
                 "LangGraph response arrived after abort request; ignored",
             );
-            self.set_paused_activity("agent", "response ignored after abort request");
-            return;
+            self.set_refused_activity("agent", "response ignored after abort request");
+            return Vec::new();
         }
         self.log("answer", text.clone());
         self.set_completed_activity("agent", "answer received");
-        self.write_agent_trace_success(&text, &audit, &state);
+        self.agent_success_record(&text, audit, state)
     }
 
     fn apply_agent_failure(
@@ -40,8 +45,8 @@ impl ShellApp {
         error: String,
         audit: AgentCallAudit,
         state: AgentEventState,
-    ) {
-        if let Some(agent) = &mut self.agent_chat {
+    ) -> Vec<ShellEffect> {
+        if let Some(agent) = self.agent_chat_mut() {
             agent.running = false;
             agent.abort_requested = false;
             agent.answer = None;
@@ -53,12 +58,12 @@ impl ShellApp {
                 "agent",
                 format!("LangGraph ended after abort request: {error}"),
             );
-            self.set_paused_activity("agent", "worker ended after abort request");
-            return;
+            self.set_refused_activity("agent", "worker ended after abort request");
+            return Vec::new();
         }
         self.set_error_notice("ask", error.clone());
         self.set_refused_activity("agent", "model request failed");
-        self.write_agent_trace_failure(&error, &audit, &state);
+        self.agent_failure_record(error, audit, state)
     }
 
     fn record_agent_cost(&mut self, cost_usd: Option<f64>) {
@@ -67,76 +72,112 @@ impl ShellApp {
         }
     }
 
-    fn write_agent_trace_success(
+    fn agent_success_record(
         &self,
         text: &str,
-        audit: &AgentCallAudit,
-        state: &AgentEventState,
-    ) {
-        let Some(rid) = &state.run_id else {
-            return;
+        audit: AgentCallAudit,
+        state: AgentEventState,
+    ) -> Vec<ShellEffect> {
+        let Some(run_id) = state.run_id else {
+            return Vec::new();
         };
-        append_llm_trace_step(
-            self.target.as_deref(),
-            rid,
-            2,
-            "llm",
-            &format!("answer ({} chars)", text.chars().count()),
-            state.latency_ms,
-            audit,
-        );
-        self.write_agent_run_summary(rid, "complete");
-        append_run_status_event(
-            self.target.as_deref(),
-            rid,
-            "agent:ask",
-            "completed",
-            "agent:ask completed",
-        );
-    }
-
-    fn write_agent_trace_failure(
-        &self,
-        error: &str,
-        audit: &AgentCallAudit,
-        state: &AgentEventState,
-    ) {
-        let Some(rid) = &state.run_id else {
-            return;
-        };
-        append_llm_trace_step(
-            self.target.as_deref(),
-            rid,
-            2,
-            "refused",
-            &short_label(error, 80),
-            state.latency_ms,
-            audit,
-        );
-        self.write_agent_run_summary(rid, "failed");
-        append_run_status_event(
-            self.target.as_deref(),
-            rid,
-            "agent:ask",
-            "failed",
-            "agent:ask failed",
-        );
-        write_run_failure_handoff(self.target.as_deref(), rid, "agent:ask", "failed", error);
-    }
-
-    fn write_agent_run_summary(&self, run_id: &str, status: &str) {
-        write_run_summary(
-            self.target.as_deref(),
+        vec![ShellEffect::RecordAgentRun(AgentRunRecord {
+            target: self.target_owned(),
             run_id,
-            status,
-            None,
-            self.target
-                .as_ref()
-                .map(|p| p.display().to_string())
-                .as_deref()
-                .unwrap_or("."),
-        );
+            latency_ms: state.latency_ms,
+            audit,
+            outcome: AgentRunOutcome::Complete {
+                answer_chars: text.chars().count(),
+            },
+        })]
     }
+
+    fn agent_failure_record(
+        &self,
+        error: String,
+        audit: AgentCallAudit,
+        state: AgentEventState,
+    ) -> Vec<ShellEffect> {
+        let Some(run_id) = state.run_id else {
+            return Vec::new();
+        };
+        vec![ShellEffect::RecordAgentRun(AgentRunRecord {
+            target: self.target_owned(),
+            run_id,
+            latency_ms: state.latency_ms,
+            audit,
+            outcome: AgentRunOutcome::Failed { error },
+        })]
+    }
+
+    pub(crate) fn record_agent_run_effect(&self, record: AgentRunRecord) {
+        match &record.outcome {
+            AgentRunOutcome::Complete { answer_chars } => {
+                record_agent_trace_success(&record, *answer_chars);
+            }
+            AgentRunOutcome::Failed { error } => {
+                record_agent_trace_failure(&record, error);
+            }
+        }
+    }
+}
+
+fn record_agent_trace_success(record: &AgentRunRecord, answer_chars: usize) {
+    append_llm_trace_step(
+        record.target.as_deref(),
+        &record.run_id,
+        "llm",
+        &format!("answer ({answer_chars} chars)"),
+        record.latency_ms,
+        &record.audit,
+    );
+    write_agent_run_summary(record.target.as_deref(), &record.run_id, "complete");
+    append_run_status_event(
+        record.target.as_deref(),
+        &record.run_id,
+        "agent:ask",
+        "completed",
+        "agent:ask completed",
+    );
+}
+
+fn record_agent_trace_failure(record: &AgentRunRecord, error: &str) {
+    append_llm_trace_step(
+        record.target.as_deref(),
+        &record.run_id,
+        "refused",
+        &short_label(error, 80),
+        record.latency_ms,
+        &record.audit,
+    );
+    write_agent_run_summary(record.target.as_deref(), &record.run_id, "failed");
+    append_run_status_event(
+        record.target.as_deref(),
+        &record.run_id,
+        "agent:ask",
+        "failed",
+        "agent:ask failed",
+    );
+    write_run_failure_handoff(
+        record.target.as_deref(),
+        &record.run_id,
+        "agent:ask",
+        "failed",
+        error,
+    );
+}
+
+fn write_agent_run_summary(target: Option<&std::path::Path>, run_id: &str, status: &str) {
+    write_run_summary(
+        target,
+        run_id,
+        status,
+        None,
+        target
+            .map(|p| p.display().to_string())
+            .as_deref()
+            .unwrap_or("."),
+    );
 }
 
 struct AgentEventState {

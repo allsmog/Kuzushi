@@ -5,7 +5,11 @@
 //! doesn't end the journey — the workspace always *is* somewhere.
 
 use crate::app::{PlanningTaskId, WorkflowPhase};
+use crate::ui_view_models::review_state::{
+    indexed_review_decision_complete, EffectiveReviewStateIndex,
+};
 use crate::ShellApp;
+use kuzushi_core::findings::ReviewDecisionVerdict;
 use kuzushi_core::{Finding, TriageVerdict};
 use std::collections::BTreeSet;
 
@@ -119,12 +123,16 @@ impl JourneyProgress {
 /// there is no engagement to walk. A live walker phase can be highlighted, but
 /// previous phases only become `Done` when workspace evidence proves progress.
 pub fn journey_model(app: &ShellApp) -> Option<JourneyModel> {
-    let target = app.target.as_deref()?;
+    let target = app.target()?;
+    let findings = app.findings();
+    let review_index =
+        EffectiveReviewStateIndex::from_findings_and_decisions(findings, app.review_decisions());
     let progress = journey_progress_from_parts(
         app.workbench_cache
             .borrow_mut()
             .map_artifacts_built(Some(target)),
-        &app.findings,
+        findings,
+        &review_index,
     );
     let derived_current = progress.current_phase();
     let current = app.engagement.current_phase().unwrap_or(derived_current);
@@ -144,28 +152,29 @@ pub fn journey_model(app: &ShellApp) -> Option<JourneyModel> {
     })
 }
 
-fn journey_progress_from_parts(map_artifacts_built: bool, findings: &[Finding]) -> JourneyProgress {
+fn journey_progress_from_parts(
+    map_artifacts_built: bool,
+    findings: &[Finding],
+    review_index: &EffectiveReviewStateIndex,
+) -> JourneyProgress {
     JourneyProgress {
         map_artifacts_built,
         finding_total: findings.len(),
-        reviewed_findings: findings.iter().filter(|f| is_reviewed_finding(f)).count(),
-        confirmed_findings: findings.iter().filter(|f| is_confirmed(f)).count(),
+        reviewed_findings: findings
+            .iter()
+            .filter(|finding| indexed_review_decision_complete(review_index, finding))
+            .count(),
+        confirmed_findings: findings
+            .iter()
+            .filter(|finding| indexed_confirmed_finding(review_index, finding))
+            .count(),
     }
 }
 
-pub(crate) fn is_reviewed_finding(finding: &Finding) -> bool {
-    finding.verification.is_some()
-        || finding.triage.as_ref().is_some_and(|triage| {
-            matches!(
-                triage.verdict,
-                TriageVerdict::TruePositive
-                    | TriageVerdict::FalsePositive
-                    | TriageVerdict::ByDesign
-            )
-        })
-}
-
-fn is_confirmed(finding: &Finding) -> bool {
+fn indexed_confirmed_finding(review_index: &EffectiveReviewStateIndex, finding: &Finding) -> bool {
+    if let Some(decision) = review_index.effective_decision_for(finding) {
+        return decision.verdict() == ReviewDecisionVerdict::Confirmed;
+    }
     finding.verification.is_some()
         || finding
             .triage
@@ -322,6 +331,11 @@ mod tests {
         }
     }
 
+    fn progress_from_findings(map: bool, findings: &[Finding]) -> JourneyProgress {
+        let review_index = EffectiveReviewStateIndex::from_findings_and_decisions(findings, &[]);
+        journey_progress_from_parts(map, findings, &review_index)
+    }
+
     #[test]
     fn fresh_workspace_is_in_map() {
         assert_eq!(progress(false, 0, 0, 0).current_phase(), WorkflowPhase::Map);
@@ -366,7 +380,7 @@ mod tests {
             cost_usd: 0.0,
         });
 
-        let progress = journey_progress_from_parts(true, &[finding]);
+        let progress = progress_from_findings(true, &[finding]);
 
         assert_eq!(progress.reviewed_findings, 0);
         assert_eq!(progress.confirmed_findings, 0);
@@ -393,11 +407,47 @@ mod tests {
             cost_usd: 0.0,
         });
 
-        let progress = journey_progress_from_parts(true, &[finding]);
+        let progress = progress_from_findings(true, &[finding]);
 
         assert_eq!(progress.reviewed_findings, 1);
         assert_eq!(progress.confirmed_findings, 0);
         assert_eq!(progress.current_phase(), WorkflowPhase::Fix);
+    }
+
+    #[test]
+    fn verified_without_review_still_counts_as_needing_review() {
+        use kuzushi_core::findings::{
+            PersistedProofVerdict, PersistedSandboxBackend, PersistedVerification,
+        };
+        use kuzushi_core::Severity;
+
+        let mut finding = Finding::new_tool(
+            "demo",
+            "demo.rule",
+            "src/lib.rs",
+            7,
+            None,
+            Severity::Medium,
+            "verified but not reviewed",
+        );
+        finding.verification = Some(PersistedVerification {
+            proof_level: 2,
+            proof_verdict: PersistedProofVerdict::Exploited,
+            backend: PersistedSandboxBackend::Plain,
+            language: Some("rust".to_string()),
+            harness_path: None,
+            crash_evidence: Some("reproduced".to_string()),
+            duration_ms: 42,
+            cost_usd: 0.0,
+            notes: Vec::new(),
+            created_at: "2026-07-02T00:00:00Z".to_string(),
+        });
+
+        let progress = progress_from_findings(true, &[finding]);
+
+        assert_eq!(progress.reviewed_findings, 0);
+        assert_eq!(progress.confirmed_findings, 1);
+        assert_eq!(progress.current_phase(), WorkflowPhase::Confirm);
     }
 
     #[test]

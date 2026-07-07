@@ -142,7 +142,9 @@ fn step_from_bridge_response(response: NextStepBridgeResponse) -> Result<AgentLo
     match response.step.as_deref() {
         Some("tool_call") => tool_call_step(response),
         Some("final") => Ok(AgentLoopStep::Final {
-            text: response.text.unwrap_or_default(),
+            text: response
+                .text
+                .context("next-step: final step missing text")?,
             structured: response.structured,
             cost_usd: response.cost_usd,
         }),

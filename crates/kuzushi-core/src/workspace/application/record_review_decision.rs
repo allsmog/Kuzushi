@@ -47,6 +47,7 @@ pub fn record_user_review_decision_for_finding_at_watermark(
             rationale: decision.rationale.clone(),
             confidence_millis: (decision.confidence.clamp(0.0, 1.0) * 1000.0).round() as u16,
             read_watermark,
+            updates_finding_triage: false,
         })),
     )?;
     Ok(receipt

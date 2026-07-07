@@ -85,7 +85,6 @@ impl BackgroundToolWorkerLaunch {
         };
         app.attach_background_tool_run(
             &start.run,
-            start.ticket.generation(),
             start.ticket.cancel.clone(),
             &start.tool_name,
             status,

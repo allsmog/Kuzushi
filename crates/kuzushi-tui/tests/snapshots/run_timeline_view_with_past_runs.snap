@@ -2,7 +2,7 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 0
 ---
- KUZUSHI › run-timeline · mode:shell · target:./runs · phase:組 map 1/4 · ctx:not built · model:unconfigured
+KUZUSHI mode:shell · view:run-timeline · phase:組 map 1/4 · target:./runs · model:unconfigured · ctx:not built ·...
 
  -- RUN TIMELINE -------------------------------------------------------------------------------------------------------
 runId           status        findings   revision       target

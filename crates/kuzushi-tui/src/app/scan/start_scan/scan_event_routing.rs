@@ -2,7 +2,7 @@ use super::*;
 use kuzushi_core::RunTraceStep;
 
 impl ShellApp {
-    pub(crate) fn apply_scan_event(&mut self, event: ScanEvent) {
+    pub(crate) fn apply_scan_event(&mut self, event: ScanEvent) -> Vec<ShellEffect> {
         match event {
             ScanEvent::Stage(stage) => self.apply_scan_stage(stage),
             ScanEvent::Finished {
@@ -14,13 +14,14 @@ impl ShellApp {
         }
     }
 
-    pub(crate) fn apply_scan_stage(&mut self, stage: String) {
-        if let Some(scan) = &mut self.scan {
+    pub(crate) fn apply_scan_stage(&mut self, stage: String) -> Vec<ShellEffect> {
+        let effects = self.scan_stage_trace_effect(&stage);
+        if let Some(scan) = self.scan_mut() {
             scan.stage = stage.clone();
         }
-        self.append_scan_stage_trace(&stage);
         self.bridge_scan_stage_to_activity(&stage);
         self.log("scan", stage);
+        effects
     }
 
     /// Convert a free-form scan stage string (e.g. "running semgrep",
@@ -30,23 +31,29 @@ impl ShellApp {
     /// scan because the scan worker emits ScanEvents on its own channel
     /// rather than RunTraceSteps via the broadcast sink.
     fn bridge_scan_stage_to_activity(&mut self, stage: &str) {
-        let Some(session) = self.activity.as_mut() else {
+        let Some(session) = self.activity_mut() else {
             return;
         };
         bridge_stage_into_activity_session(session, stage);
     }
 
-    pub(crate) fn append_scan_stage_trace(&self, stage: &str) {
-        let Some(run_id) = self.scan.as_ref().and_then(|scan| scan.run_id.as_ref()) else {
-            return;
+    fn scan_stage_trace_effect(&self, stage: &str) -> Vec<ShellEffect> {
+        let Some(run_id) = self.scan().and_then(|scan| scan.run_id.clone()) else {
+            return Vec::new();
         };
-        let step_index = self.log.iter().filter(|line| line.prefix == "scan").count() + 1;
-        append_trace_step(
-            self.target.as_deref(),
+        vec![ShellEffect::RecordScanStageTrace(ScanStageTraceRecord {
+            target: self.target_owned(),
             run_id,
-            step_index,
+            stage: stage.to_string(),
+        })]
+    }
+
+    pub(crate) fn record_scan_stage_trace_effect(&self, record: ScanStageTraceRecord) {
+        append_trace_step(
+            record.target.as_deref(),
+            &record.run_id,
             "tool",
-            &short_label(stage, 80),
+            &short_label(&record.stage, 80),
             None,
             None,
         );

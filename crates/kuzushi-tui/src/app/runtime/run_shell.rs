@@ -55,18 +55,33 @@ pub(crate) fn run_terminal_shell(
 ) -> Result<()> {
     let mut terminal = setup_terminal()?;
     let mut app = ShellApp::with_registry(config, target, registry);
-    open_start_view(&mut app);
+    if let Ok((columns, rows)) = crossterm::terminal::size() {
+        apply_initial_terminal_size(&mut app, columns, rows);
+    }
+    apply_launch_start_view(&mut app);
     // Bare interactive launch (no --target): open the target picker so the
     // front door lands in the same guided journey as `shell --target .`.
     // Done here (not in construction) so headless/test apps keep their
     // targetless default, and the explicit-target rule stays intact — the
     // operator picks, nothing silently falls back to cwd.
-    if app.target.is_none() && !crate::app::skip_onboarding_env() {
-        app.open_target_picker();
+    if app.target().is_none() && !crate::app::skip_onboarding_env() {
+        apply_launch_target_picker(&mut app);
     }
     let result = terminal_shell_loop(&mut terminal, &mut app);
     let _ = restore_terminal(&mut terminal);
     result
+}
+
+pub(crate) fn apply_initial_terminal_size(app: &mut ShellApp, columns: u16, rows: u16) -> bool {
+    update_and_execute_effects(app, Msg::Term(TermEvent::Resize { columns, rows }))
+}
+
+pub(crate) fn apply_launch_start_view(app: &mut ShellApp) -> bool {
+    update_and_execute_effects(app, Msg::Cmd(ShellCommand::LaunchStartView))
+}
+
+pub(crate) fn apply_launch_target_picker(app: &mut ShellApp) -> bool {
+    update_and_execute_effects(app, Msg::Cmd(ShellCommand::LaunchTargetPicker))
 }
 
 pub(crate) fn open_start_view(app: &mut ShellApp) {
@@ -76,7 +91,7 @@ pub(crate) fn open_start_view(app: &mut ShellApp) {
     if matches!(
         app.shell_view,
         ShellView::ModelPicker
-            | ShellView::AuthMethodPicker(_)
+            | ShellView::AuthMethodPicker
             | ShellView::PlanningPicker
             | ShellView::TargetPicker
     ) {
@@ -87,8 +102,11 @@ pub(crate) fn open_start_view(app: &mut ShellApp) {
     // onboarding/target/model pickers above still take precedence — nothing
     // here clobbers a first-run gate.
     app.shell_view = ShellView::Workbench;
-    app.workbench_focus = WorkbenchPane::Findings;
-    app.workbench_center_mode = app.default_workbench_center_mode(WorkbenchPane::Findings);
+    let center_mode = app.default_workbench_center_mode(WorkbenchPane::Findings);
+    app.router
+        .workbench_mut()
+        .set_focus(WorkbenchPane::Findings);
+    app.router.workbench_mut().set_center_mode(center_mode);
 }
 
 pub(crate) fn terminal_shell_loop(
@@ -97,13 +115,13 @@ pub(crate) fn terminal_shell_loop(
 ) -> Result<()> {
     let mut state = TerminalLoopState::default();
     let (input, wake) = TerminalLoopInbox::spawn_crossterm_reader();
-    app.loop_wake = Some(wake.clone());
+    app.set_loop_wake(Some(wake.clone()));
     app.jobs.set_wake(Some(wake));
-    while !app.should_quit {
+    while !app.should_quit() {
         terminal_shell_step(terminal, app, &mut state, &input)?;
     }
     app.jobs.set_wake(None);
-    app.loop_wake = None;
+    app.set_loop_wake(None);
     Ok(())
 }
 

@@ -1,11 +1,6 @@
 use super::*;
 
 impl ShellApp {
-    pub fn start_planner(&mut self, goal: &str) {
-        let effects = self.reduce_planner_start(goal);
-        self.execute_effects(effects);
-    }
-
     pub(crate) fn reduce_planner_start(&mut self, goal: &str) -> Vec<ShellEffect> {
         self.prepare_planner_start(goal)
             .map(|start| vec![ShellEffect::StartPlanner(start)])
@@ -13,14 +8,12 @@ impl ShellApp {
     }
 
     pub(crate) fn dispatch_planner(&mut self, start: PlannerStart) {
-        let (tx, rx) = mpsc::channel();
-        let cancel = ScanCancellation::default();
-        let generation = self.next_worker_generation();
-        self.plan_generation = Some(generation);
-        self.plan_rx = Some(rx);
-        self.plan_cancel = Some(cancel.clone());
-        self.planner_running = true;
-        self.plan_abort_requested = false;
+        let ticket = self.jobs.start(JobKind::Plan, "planner");
+        let generation = ticket.generation();
+        let cancel = ticket.cancel.clone();
+        self.set_plan_cancel(Some(cancel.clone()));
+        self.set_planner_running(true);
+        self.set_plan_abort_requested(false);
         self.log("plan", format!("planning: {}", start.goal));
         self.set_live_activity(LiveActivity::new(
             LiveActivityPhase::Thinking,
@@ -28,29 +21,18 @@ impl ShellApp {
             "asking model for a structured proposal",
         ));
 
-        let failure_tx = tx.clone();
-        let wake = self.loop_wake.clone();
         let watchdog_cancel = cancel.clone();
-        let handle = spawn_panic_safe_worker(
-            "planner",
-            failure_tx,
-            generation,
-            wake.clone(),
-            move || {
-                planner_worker(
-                    start.config,
-                    start.model,
-                    start.thinking_level,
-                    start.cwd,
-                    start.goal,
-                    tx,
-                    generation,
-                    cancel,
-                    wake,
-                )
-            },
-            |error| PlanEvent::Failed { error },
-        );
+        let handle = spawn_job_worker("planner", ticket, move |sink, cancel| {
+            planner_worker(
+                start.config,
+                start.model,
+                start.thinking_level,
+                start.cwd,
+                start.goal,
+                sink,
+                cancel,
+            )
+        });
         self.register_worker_handle_with_watchdog("planner", generation, handle, watchdog_cancel);
     }
 
@@ -58,9 +40,9 @@ impl ShellApp {
         let goal = self.accept_planner_goal(goal)?;
         let model = self.planner_model()?;
         Some(PlannerStart {
-            config: self.config.clone(),
+            config: self.config().clone(),
             model,
-            thinking_level: self.session_thinking_level.clone(),
+            thinking_level: self.session_thinking_level_owned(),
             cwd: self.planner_cwd(),
             goal,
         })
@@ -80,7 +62,7 @@ impl ShellApp {
     }
 
     fn reject_planner_busy_states(&mut self) -> Option<()> {
-        if self.planner_running {
+        if self.planner_running() {
             self.log("plan", "planner already running; wait for the proposal");
             return None;
         }
@@ -92,7 +74,7 @@ impl ShellApp {
     }
 
     fn planner_model(&mut self) -> Option<String> {
-        let Some(model) = self.config.model.clone() else {
+        let Some(model) = self.config().model.clone() else {
             self.log(
                 "error",
                 "/plan requires an explicit model. Next: model, then choose a LangGraph provider/model",
@@ -109,8 +91,7 @@ impl ShellApp {
     }
 
     fn planner_cwd(&self) -> PathBuf {
-        self.target
-            .clone()
+        self.target_owned()
             .or_else(|| std::env::current_dir().ok())
             .unwrap_or_else(|| PathBuf::from("."))
     }

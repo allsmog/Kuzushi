@@ -8,6 +8,40 @@ pub(in crate::app) use super::*;
 use crate::commands::ShellCommand;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use std::time::Instant;
+
+#[derive(Default)]
+pub(crate) struct InputUpdate {
+    pub(crate) handled: bool,
+    pub(crate) effects: Vec<ShellEffect>,
+}
+
+impl InputUpdate {
+    pub(crate) fn handled() -> Self {
+        Self {
+            handled: true,
+            effects: Vec::new(),
+        }
+    }
+
+    pub(crate) fn ignored() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn handled_if(handled: bool) -> Self {
+        if handled {
+            Self::handled()
+        } else {
+            Self::ignored()
+        }
+    }
+
+    pub(crate) fn handled_with_effects(effects: Vec<ShellEffect>) -> Self {
+        Self {
+            handled: true,
+            effects,
+        }
+    }
+}
 mod back_navigation;
 mod budget_guard;
 mod confirmation_keys;

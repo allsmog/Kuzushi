@@ -2,14 +2,14 @@ use super::hub::StampedShellEvent;
 use super::*;
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::mpsc::Sender;
+use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
 use std::thread::JoinHandle;
 
 pub(crate) struct JobTicket {
     kind: JobKind,
     generation: WorkerGeneration,
-    tx: Sender<StampedShellEvent>,
+    tx: SyncSender<StampedShellEvent>,
     label: String,
     pub(crate) cancel: ScanCancellation,
     wake: Option<TerminalLoopWake>,
@@ -21,7 +21,7 @@ pub(crate) struct JobTicket {
 pub(crate) struct JobEventSink {
     kind: JobKind,
     generation: WorkerGeneration,
-    tx: Sender<StampedShellEvent>,
+    tx: SyncSender<StampedShellEvent>,
     wake: Option<TerminalLoopWake>,
     terminal_sent: Arc<AtomicBool>,
 }
@@ -31,7 +31,7 @@ impl JobTicket {
         kind: JobKind,
         generation: WorkerGeneration,
         label: String,
-        tx: Sender<StampedShellEvent>,
+        tx: SyncSender<StampedShellEvent>,
         cancel: ScanCancellation,
         wake: Option<TerminalLoopWake>,
     ) -> Self {
@@ -105,14 +105,16 @@ impl JobEventSink {
 
     fn send_unchecked(&self, event: ShellEvent) -> bool {
         let terminal = event.is_terminal();
-        let sent = self
-            .tx
-            .send(StampedShellEvent {
-                kind: self.kind,
-                generation: self.generation,
-                event,
-            })
-            .is_ok();
+        let stamped = StampedShellEvent {
+            kind: self.kind,
+            generation: self.generation,
+            event,
+        };
+        let sent = if terminal {
+            self.tx.send(stamped).is_ok()
+        } else {
+            self.tx.try_send(stamped).is_ok()
+        };
         if sent {
             if terminal {
                 self.terminal_sent.store(true, Ordering::Release);
@@ -127,7 +129,7 @@ struct PanicGuard {
     kind: JobKind,
     generation: WorkerGeneration,
     label: String,
-    tx: Sender<StampedShellEvent>,
+    tx: SyncSender<StampedShellEvent>,
     wake: Option<TerminalLoopWake>,
     terminal_sent: Arc<AtomicBool>,
     armed: bool,
@@ -138,7 +140,7 @@ impl PanicGuard {
         kind: JobKind,
         generation: WorkerGeneration,
         label: String,
-        tx: Sender<StampedShellEvent>,
+        tx: SyncSender<StampedShellEvent>,
         wake: Option<TerminalLoopWake>,
         terminal_sent: Arc<AtomicBool>,
     ) -> Self {
@@ -219,4 +221,10 @@ fn panic_payload_text(payload: &(dyn Any + Send)) -> String {
         return message.clone();
     }
     "non-string panic payload".to_string()
+}
+
+fn notify_terminal_loop(wake: &Option<TerminalLoopWake>) {
+    if let Some(wake) = wake {
+        wake.notify();
+    }
 }

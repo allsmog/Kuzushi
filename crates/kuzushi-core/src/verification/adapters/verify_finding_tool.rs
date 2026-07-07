@@ -49,9 +49,9 @@ pub(crate) fn run_verify_finding_tool(request: VerifyFindingToolRequest<'_>) -> 
             &input,
         )?);
     }
-    let result = super::verify_consensus::combine_verify_passes(passes);
+    let result = super::verify_consensus::combine_verify_passes(passes)?;
 
-    Ok(verify_finding_response(result))
+    verify_finding_response(result)
 }
 
 fn verify_finding_model(input: &Value, configured_model: Option<&str>) -> Result<String> {
@@ -143,11 +143,8 @@ fn require_verify_finding_runtime(runtime: Option<&dyn AgentRuntime>) -> Result<
     )
 }
 
-fn verify_finding_response(result: Value) -> Value {
-    let exploitable = result
-        .get("exploitable")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
+fn verify_finding_response(result: Value) -> Result<Value> {
+    let exploitable = required_result_bool(&result, "exploitable")?;
     let verdict = if exploitable {
         "VULNERABLE"
     } else {
@@ -166,12 +163,12 @@ fn verify_finding_response(result: Value) -> Value {
     }
     lines.push("      cost=$0.0000".to_string());
     let summary = format!("verify:finding complete ({verdict})");
-    let proof = verification_proof_snapshot(&result);
-    let data = verification_response_data(result, &proof, &summary);
+    let proof = verification_proof_snapshot(&result)?;
+    let data = verification_response_data(result, &proof, &summary)?;
     let mut response =
         crate::module_result::completed_output_result(summary, lines.join("\n"), data);
     add_verification_response_metadata(&mut response, proof);
-    response
+    Ok(response)
 }
 
 fn add_verification_response_metadata(response: &mut Value, proof: Value) {
@@ -181,24 +178,57 @@ fn add_verification_response_metadata(response: &mut Value, proof: Value) {
     }
 }
 
-fn verification_response_data(result: Value, proof: &Value, summary: &str) -> Value {
-    let mut data = result.as_object().cloned().unwrap_or_default();
+fn verification_response_data(result: Value, proof: &Value, summary: &str) -> Result<Value> {
+    let mut data = result
+        .as_object()
+        .cloned()
+        .context("normalized verification result must be an object")?;
     data.insert("summary".to_string(), json!(summary));
     data.insert("proof".to_string(), proof.clone());
     data.insert("verification".to_string(), result);
-    Value::Object(data)
+    Ok(Value::Object(data))
 }
 
-fn verification_proof_snapshot(result: &Value) -> Value {
-    json!({
+fn verification_proof_snapshot(result: &Value) -> Result<Value> {
+    Ok(json!({
         "kind": "llm-exploitability-review",
         "empirical": false,
-        "fingerprint": result.get("fingerprint").cloned().unwrap_or(Value::Null),
-        "exploitable": result.get("exploitable").cloned().unwrap_or(json!(false)),
-        "proofLevel": result.get("proofLevel").cloned().unwrap_or(json!(1)),
-        "proofVerdict": result.get("proofVerdict").cloned().unwrap_or(json!("not_reproduced")),
-        "confidence": result.get("confidence").cloned().unwrap_or(json!(0.0)),
+        "fingerprint": required_result_field(result, "fingerprint")?,
+        "exploitable": required_result_field(result, "exploitable")?,
+        "proofLevel": required_result_field(result, "proofLevel")?,
+        "proofVerdict": required_result_field(result, "proofVerdict")?,
+        "confidence": required_result_field(result, "confidence")?,
+    }))
+}
+
+fn required_result_field(result: &Value, key: &str) -> Result<Value> {
+    result
+        .get(key)
+        .cloned()
+        .with_context(|| format!("normalized verification result missing `{key}`"))
+}
+
+fn required_result_bool(result: &Value, key: &str) -> Result<bool> {
+    let value = result
+        .get(key)
+        .with_context(|| format!("normalized verification result missing boolean `{key}`"))?;
+    value.as_bool().with_context(|| {
+        format!(
+            "normalized verification result field `{key}` must be boolean, got {}",
+            value_type_name(value)
+        )
     })
+}
+
+fn value_type_name(value: &Value) -> &'static str {
+    match value {
+        Value::Null => "null",
+        Value::Bool(_) => "boolean",
+        Value::Number(_) => "number",
+        Value::String(_) => "string",
+        Value::Array(_) => "array",
+        Value::Object(_) => "object",
+    }
 }
 
 #[cfg(test)]
@@ -213,13 +243,39 @@ mod tests {
             "confidence": 0.7,
             "proofLevel": 2,
             "proofVerdict": "not_reproduced"
-        }));
+        }))
+        .unwrap();
 
         assert_eq!(response["status"], json!("completed"));
         assert_eq!(response["proof"]["empirical"], json!(false));
         assert_eq!(response["data"]["proof"]["fingerprint"], json!("fp-1"));
         assert_eq!(response["data"]["exploitable"], json!(true));
         assert!(response["artifacts"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn verify_response_rejects_missing_proof_fields_instead_of_defaulting() {
+        let error = verify_finding_response(json!({
+            "fingerprint": "fp-1",
+            "exploitable": false,
+            "confidence": 0.2
+        }))
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("missing `proofLevel`"));
+    }
+
+    #[test]
+    fn verify_response_rejects_missing_exploitable_instead_of_defaulting() {
+        let error = verify_finding_response(json!({
+            "fingerprint": "fp-1",
+            "confidence": 0.7
+        }))
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("missing boolean `exploitable`"));
     }
 
     #[test]

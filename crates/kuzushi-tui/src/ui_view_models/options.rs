@@ -64,10 +64,10 @@ pub(crate) struct PlainOptionRow {
 }
 
 pub(crate) fn options_model(app: &ShellApp, view: &OptionsView) -> OptionsModel {
-    let Some(tool) = app.registry.resolve_tool(&view.tool_name) else {
+    let Some(tool) = app.registry().resolve_tool(&view.tool_name) else {
         return options_model_body(view, unknown_tool_body());
     };
-    let stored = app.option_store.effective_stored_values(&tool.name);
+    let stored = app.option_store().effective_stored_values(&tool.name);
     let mut rows = tool
         .options
         .iter()

@@ -15,6 +15,15 @@ impl<'a> LikelyVulnClassifier<'a> {
 
     /// Score a finding via the cheap classifier model.
     pub fn score(&self, finding: &Finding, cwd: &Path) -> Result<Score> {
+        let response = self.query_classifier(finding, cwd)?;
+        let parsed_score = parsed_classifier_score(&response);
+        let parsed_response = parsed_score.is_some();
+        let raw = parsed_score.unwrap_or_else(neutral_classifier_score);
+        self.observe_parsed_score(parsed_response, raw);
+        Ok(raw)
+    }
+
+    fn query_classifier(&self, finding: &Finding, cwd: &Path) -> Result<AgentQueryResponse> {
         let model = self
             .runtime
             .resolve_model_for_role(AgentRole::ClassifierGate, 0, None)?;
@@ -24,43 +33,21 @@ impl<'a> LikelyVulnClassifier<'a> {
             CLASSIFIER_SYSTEM_PROMPT,
             render_prompt(finding),
         );
-        let response = self
-            .runtime
+        self.runtime
             .query_blocking(request)
-            .context("classifier gate query failed")?;
+            .context("classifier gate query failed")
+    }
 
-        // Parse score from structured field, or extract from text.
-        let parsed = response
-            .structured
-            .as_ref()
-            .and_then(|v| serde_json::from_value::<ClassifierResponse>(v.clone()).ok())
-            .or_else(|| try_loose_parse(&response.text));
-        let raw = parsed
-            .map(|p| {
-                let s = if p.score > 0.0 {
-                    p.score
-                } else if p.likely {
-                    0.85
-                } else {
-                    0.15
-                };
-                s.clamp(0.0, 1.0)
-            })
-            .unwrap_or_else(|| {
-                // Conservative fallback: if we can't parse, score in the
-                // middle so the gate doesn't reject a real bug just because
-                // the model burped.
-                0.5
-            });
-
-        // Update quantile and persist if configured.
-        let mut q = self.quantile.lock().expect("quantile mutex poisoned");
-        q.observe(raw);
+    fn observe_parsed_score(&self, parsed_response: bool, raw: Score) {
+        if !parsed_response {
+            return;
+        }
+        let mut quantile = self.quantile.lock().expect("quantile mutex poisoned");
+        quantile.observe(raw);
         if let Some(ref db) = self.cfg.state_db {
             // Best-effort: a persistence failure must not block the scan.
-            let _ = save_quantile(db, &q);
+            let _ = save_quantile(db, &quantile);
         }
-        Ok(raw)
     }
 
     /// Whether a score graduates to the deep auditor.
@@ -71,6 +58,11 @@ impl<'a> LikelyVulnClassifier<'a> {
         } else {
             score >= q.estimate()
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn observed_score_count_for_test(&self) -> usize {
+        self.quantile.lock().expect("quantile mutex poisoned").count
     }
 
     /// Build a [`TriageOutcome`] for a finding the gate has rejected.
@@ -102,4 +94,31 @@ impl<'a> LikelyVulnClassifier<'a> {
     pub fn samples_seen(&self) -> usize {
         self.quantile.lock().unwrap().count
     }
+}
+
+fn parsed_classifier_score(response: &AgentQueryResponse) -> Option<Score> {
+    let parsed = response
+        .structured
+        .as_ref()
+        .and_then(|v| serde_json::from_value::<ClassifierResponse>(v.clone()).ok())
+        .or_else(|| try_loose_parse(&response.text))?;
+    Some(classifier_response_score(parsed))
+}
+
+fn classifier_response_score(response: ClassifierResponse) -> Score {
+    let score = if response.score > 0.0 {
+        response.score
+    } else if response.likely {
+        0.85
+    } else {
+        0.15
+    };
+    score.clamp(0.0, 1.0)
+}
+
+fn neutral_classifier_score() -> Score {
+    eprintln!("classifier gate response was unparseable; using neutral score without training quantile");
+    // Conservative fallback: if we can't parse, score in the middle so the
+    // gate doesn't reject a real bug just because the model burped.
+    0.5
 }

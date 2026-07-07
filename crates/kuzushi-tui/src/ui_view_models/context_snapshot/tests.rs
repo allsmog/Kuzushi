@@ -18,19 +18,20 @@ fn context_snapshot_relative_path_uses_core_context_path() {
 #[test]
 fn context_snapshot_model_projects_present_snapshot() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.context_view = crate::app::ContextSnapshotView {
-        snapshot_path: Some(context_snapshot_fixture_path()),
-        exists: true,
-        status: "snapshot present; 2 indexed file(s)".to_string(),
-        target: Some("/tmp/demo".to_string()),
-        discovery: Some("auto".to_string()),
-        files_indexed: Some(2),
-        total_files: Some(3),
-        languages: vec!["Rust".to_string()],
-        frameworks: vec!["Cargo".to_string()],
-        generated_slices: vec!["repo".to_string(), "app-model".to_string()],
-        stale_slices: Vec::new(),
-    };
+    app.domain_mut()
+        .set_context_view(crate::app::ContextSnapshotView {
+            snapshot_path: Some(context_snapshot_fixture_path()),
+            exists: true,
+            status: "snapshot present; 2 indexed file(s)".to_string(),
+            target: Some("/tmp/demo".to_string()),
+            discovery: Some("auto".to_string()),
+            files_indexed: Some(2),
+            total_files: Some(3),
+            languages: vec!["Rust".to_string()],
+            frameworks: vec!["Cargo".to_string()],
+            generated_slices: vec!["repo".to_string(), "app-model".to_string()],
+            stale_slices: Vec::new(),
+        });
 
     let model = context_snapshot_model(&app);
 
@@ -88,8 +89,9 @@ fn plain_context_model_projects_missing_snapshot_rows() {
 #[test]
 fn plain_context_model_projects_malformed_snapshot_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.context_view.snapshot_path = Some(context_snapshot_fixture_path());
-    app.context_view.status = "malformed context snapshot. Next: context build".to_string();
+    app.domain_mut().context_view_mut().snapshot_path = Some(context_snapshot_fixture_path());
+    app.domain_mut().context_view_mut().status =
+        "malformed context snapshot. Next: context build".to_string();
 
     let model = plain_context_model(&app);
 
@@ -106,8 +108,8 @@ fn plain_context_model_projects_malformed_snapshot_rows() {
 #[test]
 fn plain_context_model_projects_non_file_snapshot_rows() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.context_view.snapshot_path = Some(context_snapshot_fixture_path());
-    app.context_view.status =
+    app.domain_mut().context_view_mut().snapshot_path = Some(context_snapshot_fixture_path());
+    app.domain_mut().context_view_mut().status =
         "malformed context snapshot (not a file). Next: context build".to_string();
 
     let model = plain_context_model(&app);
@@ -125,19 +127,20 @@ fn plain_context_model_projects_non_file_snapshot_rows() {
 #[test]
 fn plain_context_model_projects_present_snapshot_details() {
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.context_view = crate::app::ContextSnapshotView {
-        snapshot_path: Some(context_snapshot_fixture_path()),
-        exists: true,
-        status: "snapshot present; 2 indexed file(s)".to_string(),
-        target: Some("/tmp/demo".to_string()),
-        discovery: Some("auto".to_string()),
-        files_indexed: Some(2),
-        total_files: Some(3),
-        languages: vec!["Rust".to_string()],
-        frameworks: vec!["Cargo".to_string()],
-        generated_slices: vec!["repo".to_string(), "app-model".to_string()],
-        stale_slices: Vec::new(),
-    };
+    app.domain_mut()
+        .set_context_view(crate::app::ContextSnapshotView {
+            snapshot_path: Some(context_snapshot_fixture_path()),
+            exists: true,
+            status: "snapshot present; 2 indexed file(s)".to_string(),
+            target: Some("/tmp/demo".to_string()),
+            discovery: Some("auto".to_string()),
+            files_indexed: Some(2),
+            total_files: Some(3),
+            languages: vec!["Rust".to_string()],
+            frameworks: vec!["Cargo".to_string()],
+            generated_slices: vec!["repo".to_string(), "app-model".to_string()],
+            stale_slices: Vec::new(),
+        });
 
     let model = plain_context_model(&app);
 

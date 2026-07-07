@@ -6,22 +6,21 @@ impl ShellApp {
         steps: Vec<PrereqStep>,
         final_tool: String,
         final_input: serde_json::Value,
-        workspace: WorkspaceTarget,
+        _workspace: WorkspaceTarget,
         thinking_level: Option<String>,
-    ) {
+    ) -> Vec<ShellEffect> {
         let chain = PrereqChain::new(steps, final_tool, final_input, thinking_level);
         self.engagement.set_pending_chain(chain);
-        self.present_or_auto_accept_prereq_plan(workspace);
+        self.present_or_auto_accept_prereq_plan()
     }
 
-    pub(crate) fn present_or_auto_accept_prereq_plan(&mut self, workspace: WorkspaceTarget) {
-        if self.trusted_workflow_auto_accept {
+    pub(crate) fn present_or_auto_accept_prereq_plan(&mut self) -> Vec<ShellEffect> {
+        if self.session().trusted_workflow_auto_accept() {
             self.log(
                 "system",
                 "trusted workflow auto-accepted prerequisite plan via operator config",
             );
-            self.accept_prereq_plan(PrereqPlanAction::Approve, workspace);
-            return;
+            return self.accept_prereq_plan(PrereqPlanAction::Approve);
         }
         if let Some(plan) = self.engagement.refresh_pending_prereq_prompt() {
             let message = prereq_plan_log_line(&plan);
@@ -31,33 +30,25 @@ impl ShellApp {
                 "prerequisite plan waiting for approve/reuse/regenerate/cancel",
             );
         }
+        Vec::new()
     }
 
-    pub(crate) fn resolve_prereq_plan(&mut self, action: PrereqPlanAction) {
-        let Ok(workspace) = self.current_workspace() else {
-            self.engagement.clear_prereq_flow();
-            self.log(
-                "error",
-                "cannot resolve prerequisites without an active workspace",
-            );
-            return;
-        };
+    pub(crate) fn resolve_prereq_plan(&mut self, action: PrereqPlanAction) -> Vec<ShellEffect> {
         match action {
-            PrereqPlanAction::Cancel => self.cancel_prereq_plan(),
+            PrereqPlanAction::Cancel => {
+                self.cancel_prereq_plan();
+                Vec::new()
+            }
             PrereqPlanAction::Approve | PrereqPlanAction::Reuse | PrereqPlanAction::Regenerate => {
-                self.accept_prereq_plan(action, workspace);
+                self.accept_prereq_plan(action)
             }
         }
     }
 
-    pub(crate) fn accept_prereq_plan(
-        &mut self,
-        action: PrereqPlanAction,
-        workspace: WorkspaceTarget,
-    ) {
+    pub(crate) fn accept_prereq_plan(&mut self, action: PrereqPlanAction) -> Vec<ShellEffect> {
         self.engagement.clear_pending_prereq_prompt();
         let Some(final_tool) = self.engagement.mark_prereq_plan_accepted(action) else {
-            return;
+            return Vec::new();
         };
         self.log(
             "system",
@@ -66,7 +57,7 @@ impl ShellApp {
                 action.label()
             ),
         );
-        self.advance_chain(workspace);
+        self.prereq_chain_advance_effect()
     }
 
     pub(crate) fn cancel_prereq_plan(&mut self) {
@@ -108,24 +99,14 @@ impl ShellApp {
         }
     }
 
-    pub(crate) fn advance_chain_after_tool(&mut self, tool_name: &str) {
+    pub(crate) fn advance_chain_after_tool(&mut self, tool_name: &str) -> Vec<ShellEffect> {
         if self.engagement.clear_finished_final_tool(tool_name) {
-            return;
+            return Vec::new();
         }
         if !self.engagement.drop_finished_prereq_step(tool_name) {
-            return;
+            return Vec::new();
         }
-        self.advance_chain_from_current_workspace();
-    }
-
-    fn advance_chain_from_current_workspace(&mut self) {
-        match self.current_workspace() {
-            Ok(workspace) => self.advance_chain(workspace),
-            Err(error) => {
-                self.log("error", error.to_string());
-                self.engagement.clear_pending_chain();
-            }
-        }
+        self.prereq_chain_advance_effect()
     }
 
     pub(crate) fn abort_pending_chain(&mut self, tool_name: &str) {
@@ -233,13 +214,23 @@ impl ShellApp {
         workspace: &WorkspaceTarget,
     ) -> anyhow::Result<serde_json::Value> {
         let ctx = ToolExecutionContext {
-            config: &self.config,
+            config: self.config(),
             workspace: Some(workspace),
             findings_store: None,
             trace: None,
         };
-        self.registry
-            .prepare_tool_input_for_dispatch(tool_name, serde_json::json!({}), &ctx, None)
+        self.registry().prepare_tool_input_for_dispatch(
+            tool_name,
+            serde_json::json!({}),
+            &ctx,
+            None,
+        )
+    }
+
+    fn prereq_chain_advance_effect(&self) -> Vec<ShellEffect> {
+        vec![ShellEffect::AdvancePrereqChain(PrereqChainAdvance {
+            target: self.target_owned(),
+        })]
     }
 }
 

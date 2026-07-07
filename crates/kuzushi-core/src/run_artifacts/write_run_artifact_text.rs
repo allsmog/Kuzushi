@@ -16,7 +16,7 @@ pub(crate) fn write_run_artifact_text(
     fs::create_dir_all(&dir).with_context(|| format!("Could not create {}", dir.display()))?;
     let path = dir.join(leaf);
     let body = body_with_trailing_newline(body);
-    fs::write(&path, &body)
+    crate::fs_atomic::write_atomic(&path, &body)
         .with_context(|| format!("Could not write {}", path.display()))?;
     let label = label.into();
     let kind = kind.into();

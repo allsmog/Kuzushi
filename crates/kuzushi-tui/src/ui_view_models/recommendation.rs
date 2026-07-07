@@ -81,7 +81,7 @@ pub(crate) fn recommendation_model(app: &ShellApp) -> RecommendationModel {
         summary: report.as_ref().and_then(|view| view.summary.clone()),
         report_headers: RECOMMENDATION_REPORT_HEADERS,
         report_commands,
-        empty_state: recommendation_empty_state(recommender_running(app), app.target.is_some()),
+        empty_state: recommendation_empty_state(recommender_running(app), app.target().is_some()),
         components,
         rows: report.map(|view| view.rows).unwrap_or_default(),
     }
@@ -95,7 +95,7 @@ pub(crate) fn recommendation_components(app: &ShellApp) -> Vec<ComponentRecommen
 }
 
 pub(crate) fn recommendation_artifact_needs_refresh(app: &ShellApp) -> bool {
-    if app.target.is_none() || recommender_running(app) {
+    if app.target().is_none() || recommender_running(app) {
         return false;
     }
     let source = RecommendationSource::from_app(app);
@@ -108,7 +108,7 @@ pub(crate) fn recommendation_artifact_needs_refresh(app: &ShellApp) -> bool {
 /// True while the deterministic recommender is in flight, so the view can show
 /// a "ranking…" state instead of inviting the operator to (re-)run it.
 fn recommender_running(app: &ShellApp) -> bool {
-    app.tool_running.as_deref() == Some("module-recommender:recommend")
+    app.running_tool_name() == Some("module-recommender:recommend")
 }
 
 fn recommendation_detail_rows(
@@ -446,7 +446,7 @@ struct RecommendationSource {
 
 impl RecommendationSource {
     fn from_app(app: &ShellApp) -> Self {
-        let root = app.target.as_deref().unwrap_or_else(|| Path::new("."));
+        let root = app.target().unwrap_or_else(|| Path::new("."));
         let latest = recommendation_latest_run_id(root);
         let run_dir = latest
             .run_id
@@ -695,7 +695,7 @@ mod tests {
         )
         .unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let model = recommendation_model(&app);
 
@@ -717,7 +717,7 @@ mod tests {
         write_latest_run(temp.path(), "run-bad-rec");
         fs::write(run_dir.join(recommendations_artifact_leaf()), "{not-json").unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let model = recommendation_model(&app);
 
@@ -739,7 +739,7 @@ mod tests {
         write_latest_run(temp.path(), "run-unreadable-rec");
         fs::create_dir(run_dir.join(recommendations_artifact_leaf())).unwrap();
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let model = recommendation_model(&app);
 
@@ -759,7 +759,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         create_invalid_latest_pointer(temp.path());
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let model = recommendation_model(&app);
 
@@ -776,7 +776,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         write_blank_latest_pointer(temp.path());
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let model = recommendation_model(&app);
 
@@ -815,7 +815,7 @@ mod tests {
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
         assert!(!recommendation_artifact_needs_refresh(&app));
 
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
         assert!(recommendation_artifact_needs_refresh(&app));
 
         let run_dir = test_run_dir(temp.path(), "run-rec");
@@ -835,7 +835,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         write_component_recommendation_artifact(temp.path());
         let mut app = ShellApp::new(kuzushi_core::V2Config::default(), None);
-        app.target = Some(temp.path().to_path_buf());
+        app.set_target(Some(temp.path().to_path_buf()));
 
         let model = recommendation_model(&app);
 

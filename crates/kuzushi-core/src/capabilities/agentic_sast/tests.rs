@@ -199,6 +199,33 @@ mod tests {
     }
 
     #[test]
+    fn non_whitebox_model_static_confirmation_is_downgraded() {
+        let temp = tempdir().unwrap();
+        fs::create_dir(temp.path().join("src")).unwrap();
+        fs::write(temp.path().join("src/routes.ts"), "db.query(req.query.q);\n").unwrap();
+        let raw = json!({
+            "findings": [{
+                "ruleId": "agentic/self-confirmed",
+                "title": "Request input reaches SQL query",
+                "staticProofState": "statically_confirmed",
+                "severity": "high",
+                "source": {
+                    "filePath": "src/routes.ts",
+                    "startLine": 1
+                }
+            }]
+        });
+
+        let findings = normalize_agentic_sast_findings(raw, temp.path(), 5, false).unwrap();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(
+            findings[0].static_proof_state,
+            Some(StaticProofState::NeedsRuntimeEvidence)
+        );
+    }
+
+    #[test]
     fn run_agentic_sast_report_preserves_query_cost() {
         let temp = tempdir().unwrap();
         fs::create_dir(temp.path().join("src")).unwrap();

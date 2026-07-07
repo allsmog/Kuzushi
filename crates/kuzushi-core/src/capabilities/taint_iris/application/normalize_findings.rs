@@ -5,72 +5,110 @@ pub(crate) fn normalize_taint_iris_findings(
     target: &Path,
     max_findings: usize,
 ) -> Result<Vec<Finding>> {
-    let findings_value = match raw {
-        Value::Object(object) => object
-            .get("findings")
-            .cloned()
-            .unwrap_or_else(|| Value::Array(Vec::new())),
-        Value::Array(items) => Value::Array(items),
-        _ => anyhow::bail!("taint-iris output parse failed: expected an object or findings array"),
-    };
-    let Value::Array(items) = findings_value else {
-        anyhow::bail!("taint-iris output parse failed: findings must be an array");
-    };
-
+    let items = taint_findings_items(raw)?;
     let mut findings = Vec::new();
     for item in items.into_iter().take(max_findings) {
         let Value::Object(object) = item else {
             continue;
         };
-        let cwe = read_object_string(&object, &["cwe", "CWE"]).unwrap_or_else(|| "CWE".to_string());
-        let rule_id = read_object_string(&object, &["ruleId", "rule_id"])
-            .unwrap_or_else(|| format!("taint-iris/{}", sanitize_rule_segment(&cwe)));
-        let file_path = normalize_reported_file_path(
-            read_object_string(&object, &["filePath", "file_path"])
-                .unwrap_or_else(|| "unknown".to_string()),
-            target,
-        );
-        let start_line = read_object_u64(&object, &["startLine", "start_line"])
-            .filter(|value| *value > 0)
-            .unwrap_or(1) as u32;
-        let severity = agentic_severity(
-            read_object_string(&object, &["severity"])
-                .as_deref()
-                .unwrap_or("medium"),
-        );
-        let title = read_object_string(&object, &["title"]).unwrap_or_else(|| rule_id.clone());
-        let detail = read_object_string(&object, &["message"]).unwrap_or_else(|| title.clone());
-        let mut message = format!("{title}\n\n{detail}\nCWE: {cwe}");
-        if let Some(trace) = read_object_string(&object, &["sourceSinkTrace", "source_sink_trace"])
-        {
-            message.push_str("\nSource-to-sink trace: ");
-            message.push_str(trace.trim());
-        }
-        if let Some(confidence) = read_object_string(&object, &["confidence"]) {
-            message.push_str("\nConfidence: ");
-            message.push_str(confidence.trim());
-        }
-        if let Some(preconditions) =
-            read_object_string(&object, &["exploitPreconditions", "exploit_preconditions"])
-        {
-            message.push_str("\nExploit preconditions: ");
-            message.push_str(preconditions.trim());
-        }
-        if let Some(path_summary) = summarize_taint_path(&object) {
-            message.push_str("\nTaint path:\n");
-            message.push_str(&path_summary);
-        }
-        findings.push(Finding::new_tool(
-            "taint-iris",
-            rule_id,
-            file_path,
-            start_line,
-            None,
-            severity,
-            message,
-        ));
+        findings.push(taint_finding_from_object(object, target));
     }
     Ok(findings)
+}
+
+fn taint_findings_items(raw: Value) -> Result<Vec<Value>> {
+    match raw {
+        Value::Object(object) => taint_findings_items_from_object(object),
+        Value::Array(items) => Ok(items),
+        _ => anyhow::bail!("taint-iris output parse failed: expected an object or findings array"),
+    }
+}
+
+fn taint_findings_items_from_object(object: Map<String, Value>) -> Result<Vec<Value>> {
+    let Some(findings) = object.get("findings") else {
+        anyhow::bail!("taint-iris output parse failed: object missing findings array");
+    };
+    let Value::Array(items) = findings.clone() else {
+        anyhow::bail!("taint-iris output parse failed: findings must be an array");
+    };
+    Ok(items)
+}
+
+fn taint_finding_from_object(object: Map<String, Value>, target: &Path) -> Finding {
+    let cwe = read_object_string(&object, &["cwe", "CWE"]).unwrap_or_else(|| "CWE".to_string());
+    let rule_id = read_object_string(&object, &["ruleId", "rule_id"])
+        .unwrap_or_else(|| format!("taint-iris/{}", sanitize_rule_segment(&cwe)));
+    let file_path = taint_file_path(&object, target);
+    let start_line = taint_start_line(&object);
+    let severity = agentic_severity(
+        read_object_string(&object, &["severity"])
+            .as_deref()
+            .unwrap_or(""),
+    );
+    let message = taint_message(&object, &rule_id, &cwe);
+    Finding::new_tool(
+        "taint-iris",
+        rule_id,
+        file_path,
+        start_line,
+        None,
+        severity,
+        message,
+    )
+}
+
+fn taint_file_path(object: &Map<String, Value>, target: &Path) -> String {
+    normalize_reported_file_path(
+        read_object_string(object, &["filePath", "file_path"])
+            .unwrap_or_else(|| "unknown".to_string()),
+        target,
+    )
+}
+
+fn taint_start_line(object: &Map<String, Value>) -> u32 {
+    read_object_u64(object, &["startLine", "start_line"])
+        .filter(|value| *value > 0)
+        .unwrap_or(1) as u32
+}
+
+fn taint_message(object: &Map<String, Value>, rule_id: &str, cwe: &str) -> String {
+    let title = read_object_string(object, &["title"]).unwrap_or_else(|| rule_id.to_string());
+    let detail = read_object_string(object, &["message"]).unwrap_or_else(|| title.clone());
+    let mut message = format!("{title}\n\n{detail}\nCWE: {cwe}");
+    append_taint_string_field(
+        &mut message,
+        object,
+        &["sourceSinkTrace", "source_sink_trace"],
+        "\nSource-to-sink trace: ",
+    );
+    append_taint_string_field(&mut message, object, &["confidence"], "\nConfidence: ");
+    append_taint_string_field(
+        &mut message,
+        object,
+        &["exploitPreconditions", "exploit_preconditions"],
+        "\nExploit preconditions: ",
+    );
+    append_taint_path_summary(&mut message, object);
+    message
+}
+
+fn append_taint_string_field(
+    message: &mut String,
+    object: &Map<String, Value>,
+    keys: &[&str],
+    prefix: &str,
+) {
+    if let Some(value) = read_object_string(object, keys) {
+        message.push_str(prefix);
+        message.push_str(value.trim());
+    }
+}
+
+fn append_taint_path_summary(message: &mut String, object: &Map<String, Value>) {
+    if let Some(path_summary) = summarize_taint_path(object) {
+        message.push_str("\nTaint path:\n");
+        message.push_str(&path_summary);
+    }
 }
 
 /// Extract structured source→sink flows from the raw taint-iris output, parallel

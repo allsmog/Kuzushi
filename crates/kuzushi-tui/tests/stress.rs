@@ -33,7 +33,7 @@ fn ten_thousand_log_calls_stay_inside_the_500_line_cap_without_panicking() {
         );
     }
     let elapsed_ms = start.elapsed().as_millis();
-    assert_eq!(app.log.len(), TRANSCRIPT_CAP);
+    assert_eq!(app.log_len(), TRANSCRIPT_CAP);
     assert!(
         elapsed_ms < STRESS_BUDGET_MS,
         "10k log calls took {elapsed_ms}ms (budget {STRESS_BUDGET_MS}ms)"
@@ -59,7 +59,7 @@ fn logs_view_scroll_keys_clamp_safely_under_load() {
         app.scroll_up(1);
     }
     app.scroll_to_top();
-    assert_eq!(app.log.len(), TRANSCRIPT_CAP);
+    assert_eq!(app.log_len(), TRANSCRIPT_CAP);
     assert!(render_plain_app(&app, RENDER_WIDTH).contains("LOGS"));
 }
 
@@ -74,21 +74,23 @@ fn one_thousand_findings_render_findings_view_without_panic() {
     store
         .insert_scan_run("stress-run", std::path::Path::new("/tmp"), "completed")
         .unwrap();
-    for index in 0..LARGE_FINDING_COUNT {
-        let severity = severity_cycle(index);
-        let finding = Finding::new_tool(
-            "stress",
-            &format!("stress/rule-{index}"),
-            "src/lib.rs",
-            (index as u32) + 1,
-            Some((index as u32) + 4),
-            severity,
-            &format!("stress entry {index}: arbitrary message body"),
-        );
-        store
-            .insert_finding("stress-run", &finding)
-            .expect("insert succeeds");
-    }
+    let seeded_findings = (0..LARGE_FINDING_COUNT)
+        .map(|index| {
+            let severity = severity_cycle(index);
+            Finding::new_tool(
+                "stress",
+                &format!("stress/rule-{index}"),
+                "src/lib.rs",
+                (index as u32) + 1,
+                Some((index as u32) + 4),
+                severity,
+                &format!("stress entry {index}: arbitrary message body"),
+            )
+        })
+        .collect::<Vec<_>>();
+    store
+        .insert_findings("stress-run", &seeded_findings)
+        .expect("batch insert succeeds");
     let findings = store
         .list_findings(LARGE_FINDING_COUNT)
         .expect("list succeeds");
@@ -105,7 +107,7 @@ fn one_thousand_findings_render_findings_view_without_panic() {
         "list must not exceed requested limit"
     );
     let mut app = ShellApp::new(V2Config::default(), None);
-    app.findings = findings;
+    app.set_findings(findings);
     app.shell_view = ShellView::Workbench;
 
     let rendered = render_plain_app(&app, RENDER_WIDTH);

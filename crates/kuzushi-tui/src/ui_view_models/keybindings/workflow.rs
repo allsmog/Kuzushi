@@ -3,7 +3,7 @@ use crate::{ShellApp, ShellView};
 
 pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
     match app.shell_view {
-        ShellView::Threat(_) => Some(threat_keybindings(app)),
+        ShellView::Threat => Some(threat_keybindings(app)),
         ShellView::ModuleRun => Some(module_run_keybindings(app)),
         ShellView::PromptsEditor => Some(prompts_editor_keybindings(app)),
         ShellView::AgentChat => Some(agent_chat_keybindings(app)),

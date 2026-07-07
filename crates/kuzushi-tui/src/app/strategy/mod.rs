@@ -3,33 +3,82 @@ use super::*;
 impl ShellApp {
     pub(crate) fn open_strategy_queue(&mut self) {
         self.shell_view = ShellView::StrategyQueue;
-        self.scroll_offset = 0;
+        self.router.default_scroll_mut().reset();
     }
 
-    pub(crate) fn apply_strategy_command(&mut self, command: &StrategyCommand) {
+    pub(crate) fn reduce_strategy_command(
+        &mut self,
+        command: &StrategyCommand,
+    ) -> Vec<ShellEffect> {
+        self.open_strategy_queue();
         match command {
-            StrategyCommand::Show => self.log("strategy", "showing strategy queue"),
-            StrategyCommand::Approve(id) => self.update_strategy_proposal_status(
+            StrategyCommand::Show => {
+                self.log("strategy", "showing strategy queue");
+                Vec::new()
+            }
+            StrategyCommand::Approve(id) => self.strategy_status_update_effects(
                 id,
                 kuzushi_core::StrategyProposalStatus::Approved,
                 "approved",
             ),
-            StrategyCommand::Reject(id) => self.update_strategy_proposal_status(
+            StrategyCommand::Reject(id) => self.strategy_status_update_effects(
                 id,
                 kuzushi_core::StrategyProposalStatus::Rejected,
                 "rejected",
             ),
-            StrategyCommand::Fire => self.fire_next_approved_strategy(),
+            StrategyCommand::Fire => self.strategy_fire_effects(),
             StrategyCommand::Correct {
                 id,
                 to_strategy,
                 reason,
                 scope,
-            } => {
-                self.record_strategy_correction_command(id, to_strategy, reason.as_deref(), *scope)
+            } => self.strategy_correction_effects(id, to_strategy, reason, *scope),
+            StrategyCommand::Unsupported(raw) => {
+                self.log_unknown_strategy_command(raw);
+                Vec::new()
             }
-            StrategyCommand::Unsupported(raw) => self.log_unknown_strategy_command(raw),
         }
+    }
+
+    fn strategy_status_update_effects(
+        &self,
+        id: &str,
+        status: kuzushi_core::StrategyProposalStatus,
+        label: &'static str,
+    ) -> Vec<ShellEffect> {
+        vec![ShellEffect::UpdateStrategyProposalStatus(
+            StrategyProposalStatusUpdate {
+                target: self.target_owned(),
+                id: id.to_string(),
+                status,
+                label,
+            },
+        )]
+    }
+
+    fn strategy_fire_effects(&self) -> Vec<ShellEffect> {
+        vec![ShellEffect::FireNextApprovedStrategy(StrategyFireNext {
+            target: self.target_owned(),
+        })]
+    }
+
+    fn strategy_correction_effects(
+        &self,
+        id: &str,
+        to_strategy: &str,
+        reason: &Option<String>,
+        scope: StrategyCorrectionCommandScope,
+    ) -> Vec<ShellEffect> {
+        vec![ShellEffect::RecordStrategyCorrection(
+            StrategyCorrectionRecord {
+                target: self.target_owned(),
+                id: id.to_string(),
+                to_strategy: to_strategy.to_string(),
+                reason: reason.clone(),
+                scope,
+                active_run_id: self.active_strategy_run_id(),
+            },
+        )]
     }
 
     fn log_unknown_strategy_command(&mut self, raw: &str) {
@@ -41,20 +90,23 @@ impl ShellApp {
         );
     }
 
-    fn fire_next_approved_strategy(&mut self) {
-        let Some(workspace) = self.strategy_workspace("running") else {
-            return;
+    pub(super) fn fire_next_approved_strategy_effect(
+        &mut self,
+        fire: StrategyFireNext,
+    ) -> Vec<ShellEffect> {
+        let Some(workspace) = self.strategy_workspace_from_target(fire.target, "running") else {
+            return Vec::new();
         };
         let Some((mut proposals, index, proposal)) = self.next_strategy_to_run(&workspace) else {
-            return;
+            return Vec::new();
         };
         if self.strategy_exceeds_budget(&proposal) {
-            return;
+            return Vec::new();
         }
         if !self.mark_strategy_running(&workspace, &mut proposals, index) {
-            return;
+            return Vec::new();
         }
-        self.run_strategy_proposal(proposal);
+        self.reduce_strategy_proposal_run(proposal)
     }
 
     fn next_strategy_to_run(
@@ -113,17 +165,20 @@ impl ShellApp {
         true
     }
 
-    fn run_strategy_proposal(&mut self, proposal: kuzushi_core::StrategyProposal) {
+    fn reduce_strategy_proposal_run(
+        &mut self,
+        proposal: kuzushi_core::StrategyProposal,
+    ) -> Vec<ShellEffect> {
         let tool = proposal.tool.clone().expect("runnable strategy has a tool");
         self.log("strategy", format!("firing {} via {tool}", proposal.id));
-        self.run_tool(
+        self.reduce_run_tool(
             Some(tool),
             proposal.next_input.map(|input| input.to_string()),
-        );
+        )
     }
 
     fn strategy_exceeds_budget(&mut self, proposal: &kuzushi_core::StrategyProposal) -> bool {
-        let Some(cap) = self.session_budget_usd else {
+        let Some(cap) = self.session().session_budget_usd() else {
             return false;
         };
         let estimated = proposal
@@ -131,7 +186,7 @@ impl ShellApp {
             .or(proposal.expected_cost_usd)
             .unwrap_or(0.0)
             .max(0.0);
-        let remaining = (cap - self.session_cost_usd).max(0.0);
+        let remaining = self.session().remaining_budget_usd().unwrap_or(cap);
         if estimated <= remaining {
             return false;
         }
@@ -145,53 +200,74 @@ impl ShellApp {
         true
     }
 
-    fn update_strategy_proposal_status(
+    pub(super) fn update_strategy_proposal_status_effect(
         &mut self,
-        id: &str,
-        status: kuzushi_core::StrategyProposalStatus,
-        label: &str,
-    ) {
-        let Some(workspace) = self.strategy_workspace("updating") else {
-            return;
+        update: StrategyProposalStatusUpdate,
+    ) -> Vec<ShellEffect> {
+        let Some(workspace) = self.strategy_workspace_from_target(update.target, "updating") else {
+            return Vec::new();
         };
-        match kuzushi_core::set_strategy_proposal_status(&workspace, id, status) {
+        match kuzushi_core::set_strategy_proposal_status(&workspace, &update.id, update.status) {
             Ok(true) => {
                 self.workbench_cache
                     .borrow_mut()
                     .invalidate_strategy_queue();
-                self.log("strategy", format!("{label} {id}"));
+                self.log("strategy", format!("{} {}", update.label, update.id));
             }
-            Ok(false) => self.log("strategy", format!("no strategy proposal named {id}")),
-            Err(error) => self.log("strategy", format!("could not update {id}: {error}")),
+            Ok(false) => self.log(
+                "strategy",
+                format!("no strategy proposal named {}", update.id),
+            ),
+            Err(error) => self.log(
+                "strategy",
+                format!("could not update {}: {error}", update.id),
+            ),
         }
+        Vec::new()
     }
 
-    fn record_strategy_correction_command(
+    pub(super) fn record_strategy_correction_effect(
         &mut self,
-        id: &str,
-        to_strategy: &str,
-        reason: Option<&str>,
-        scope: StrategyCorrectionCommandScope,
-    ) {
-        let Some(workspace) = self.strategy_workspace("correcting") else {
-            return;
+        record: StrategyCorrectionRecord,
+    ) -> Vec<ShellEffect> {
+        let StrategyCorrectionRecord {
+            target,
+            id,
+            to_strategy,
+            reason,
+            scope,
+            active_run_id,
+        } = record;
+        let Some(workspace) = self.strategy_workspace_from_target(target, "correcting") else {
+            return Vec::new();
         };
-        let Some(proposal) = self.strategy_proposal(&workspace, id) else {
-            return;
+        let Some(proposal) = self.strategy_proposal(&workspace, &id) else {
+            return Vec::new();
         };
-        let correction = self.strategy_correction(&proposal, to_strategy, reason, scope);
-        self.record_strategy_correction_result(&workspace, id, &correction);
+        let correction = self.strategy_correction(
+            &proposal,
+            &to_strategy,
+            reason.as_deref(),
+            scope,
+            active_run_id,
+        );
+        self.record_strategy_correction_result(&workspace, &id, &correction);
+        Vec::new()
     }
 
-    fn strategy_workspace(&mut self, action: &str) -> Option<kuzushi_core::WorkspaceTarget> {
-        let Some(target) = self.target.as_deref() else {
+    fn strategy_workspace_from_target(
+        &mut self,
+        target: Option<std::path::PathBuf>,
+        action: &str,
+    ) -> Option<kuzushi_core::WorkspaceTarget> {
+        let Some(target) = target else {
             self.log(
                 "strategy",
                 format!("select a target before {action} the strategy queue"),
             );
             return None;
         };
-        match kuzushi_core::WorkspaceTarget::new(target) {
+        match kuzushi_core::WorkspaceTarget::new(&target) {
             Ok(workspace) => Some(workspace),
             Err(error) => {
                 self.log("strategy", format!("target unavailable: {error}"));
@@ -228,6 +304,7 @@ impl ShellApp {
         to_strategy: &str,
         reason: Option<&str>,
         scope: StrategyCorrectionCommandScope,
+        active_run_id: Option<String>,
     ) -> kuzushi_core::StrategyCorrection {
         let correction_scope = strategy_correction_scope(scope);
         kuzushi_core::StrategyCorrection::new_at(
@@ -237,25 +314,10 @@ impl ShellApp {
             proposal.effective_strategy().to_string(),
             to_strategy.trim().to_string(),
             correction_scope,
-            self.strategy_correction_run_id(proposal, correction_scope),
+            strategy_correction_run_id(proposal, correction_scope, active_run_id),
             strategy_correction_reason(reason),
             "operator",
         )
-    }
-
-    fn strategy_correction_run_id(
-        &self,
-        proposal: &kuzushi_core::StrategyProposal,
-        scope: kuzushi_core::StrategyCorrectionScope,
-    ) -> Option<String> {
-        (scope == kuzushi_core::StrategyCorrectionScope::Run)
-            .then(|| {
-                proposal
-                    .source_run_id
-                    .clone()
-                    .or_else(|| self.active_strategy_run_id())
-            })
-            .flatten()
     }
 
     fn record_strategy_correction_result(
@@ -288,14 +350,10 @@ impl ShellApp {
     }
 
     fn active_strategy_run_id(&self) -> Option<String> {
-        self.tool_run_id
-            .clone()
-            .or_else(|| self.scan.as_ref().and_then(|scan| scan.run_id.clone()))
-            .or_else(|| {
-                self.activity
-                    .as_ref()
-                    .map(|activity| activity.run_id.clone())
-            })
+        self.active_tool_run_id()
+            .map(str::to_string)
+            .or_else(|| self.scan().and_then(|scan| scan.run_id.clone()))
+            .or_else(|| self.activity().map(|activity| activity.run_id.clone()))
     }
 }
 
@@ -314,6 +372,16 @@ fn strategy_correction_reason(reason: Option<&str>) -> &str {
     reason
         .filter(|value| !value.trim().is_empty())
         .unwrap_or("operator correction from Strategy Queue")
+}
+
+fn strategy_correction_run_id(
+    proposal: &kuzushi_core::StrategyProposal,
+    scope: kuzushi_core::StrategyCorrectionScope,
+    active_run_id: Option<String>,
+) -> Option<String> {
+    (scope == kuzushi_core::StrategyCorrectionScope::Run)
+        .then(|| proposal.source_run_id.clone().or(active_run_id))
+        .flatten()
 }
 
 fn approved_runnable_strategy(proposal: &kuzushi_core::StrategyProposal) -> bool {

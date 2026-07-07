@@ -6,10 +6,8 @@ pub(crate) fn threat_regen_worker(
     thinking_level: Option<String>,
     cwd: PathBuf,
     existing: serde_json::Value,
-    tx: Sender<StampedEvent<ThreatPatchEvent>>,
-    generation: WorkerGeneration,
+    sink: JobEventSink,
     cancel: ScanCancellation,
-    wake: Option<TerminalLoopWake>,
 ) {
     let event = match run_threat_regen_worker(config, model, thinking_level, cwd, existing, cancel)
     {
@@ -18,8 +16,7 @@ pub(crate) fn threat_regen_worker(
             error: error.to_string(),
         },
     };
-    let _ = tx.send(StampedEvent::new(generation, event));
-    notify_terminal_loop(&wake);
+    sink.send(ShellEvent::Threat(event));
 }
 
 pub(crate) fn run_threat_regen_worker(
@@ -58,10 +55,8 @@ pub(crate) fn threat_ask_worker(
     cwd: PathBuf,
     existing: serde_json::Value,
     question: String,
-    tx: Sender<StampedEvent<ThreatPatchEvent>>,
-    generation: WorkerGeneration,
+    sink: JobEventSink,
     cancel: ScanCancellation,
-    wake: Option<TerminalLoopWake>,
 ) {
     let event = match run_threat_ask_worker(
         config,
@@ -77,8 +72,7 @@ pub(crate) fn threat_ask_worker(
             error: error.to_string(),
         },
     };
-    let _ = tx.send(StampedEvent::new(generation, event));
-    notify_terminal_loop(&wake);
+    sink.send(ShellEvent::Threat(event));
 }
 
 pub(crate) fn run_threat_ask_worker(

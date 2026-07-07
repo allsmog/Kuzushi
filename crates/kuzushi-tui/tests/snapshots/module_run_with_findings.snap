@@ -2,9 +2,9 @@
 source: crates/kuzushi-tui/tests/snapshots.rs
 assertion_line: 239
 ---
- KUZUSHI › run · mode:run · target:none · ctx:not built · model:unconfigured · stage:* searching
+ KUZUSHI › run · mode:run · target:none · ctx:not built · model:unconfigured · stage:* searching · cost:$0.00
 
-* ./acme-checkout · running: agentic-sast tracing · 1 finding · run run-abc1
+* ./acme-checkout · running: agentic-sast tracing · findings pending · run run-abc1
 
  -- SCAN PROGRESS ------------------------------------------------------------------------------------------------------
 + context:build           ready

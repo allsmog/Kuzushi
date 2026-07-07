@@ -28,7 +28,7 @@ pub(crate) fn render_scene_view(frame: &mut Frame<'_>, area: Rect, app: &ShellAp
         .constraints([Constraint::Length(3), Constraint::Min(0)])
         .split(area);
     frame.render_widget(Paragraph::new(gallery_header_lines(app)), outer[0]);
-    match app.scene_page {
+    match app.router.scene().page() {
         VizPage::Dfd => frame.render_widget(
             DfdDiagram {
                 model: dfd_model(app),
@@ -56,7 +56,7 @@ fn render_terrain_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
     if cols == 0 || rows == 0 {
         return;
     }
-    if app.findings.is_empty() {
+    if app.findings().is_empty() {
         frame.render_widget(
             Paragraph::new(Line::from(vec![Span::styled(
                 "no risk surface yet — run `scan` to populate findings.",
@@ -78,8 +78,8 @@ fn render_terrain_body(frame: &mut Frame<'_>, area: Rect, app: &ShellApp) {
 
 fn scene_camera(app: &ShellApp) -> Camera {
     Camera {
-        yaw: app.scene_spin,
-        pitch: app.scene_pitch,
+        yaw: app.router.scene().yaw(),
+        pitch: app.router.scene().pitch(),
         distance: CAM_DISTANCE,
     }
 }

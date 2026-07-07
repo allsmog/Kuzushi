@@ -14,38 +14,41 @@ mod tests {
     #[test]
     fn apply_threat_patch_event_records_proposal_answer_failure_and_abort() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.threat_worker_running = true;
+        app.set_threat_worker_running(true);
         app.apply_threat_patch_event(ThreatPatchEvent::Proposed(ThreatPatch {
             goal: "regen".to_string(),
             summary: "summary".to_string(),
             patch: serde_json::json!({"summary": "updated"}),
             unsupported: vec!["manual review".to_string()],
         }));
-        assert!(!app.threat_worker_running);
+        assert!(!app.threat_worker_running());
         assert!(app.engagement.has_pending_threat_patch());
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("patch proposed")));
 
         app.apply_threat_patch_event(ThreatPatchEvent::Answer {
             text: "answer text".to_string(),
         });
-        assert!(app.log.iter().any(|line| line.body == "answer text"));
+        assert!(app
+            .log_lines()
+            .iter()
+            .any(|line| line.body == "answer text"));
 
         app.apply_threat_patch_event(ThreatPatchEvent::Failed {
             error: "boom".to_string(),
         });
         assert!(app
-            .log
+            .log_lines()
             .iter()
             .any(|line| line.body.contains("threats worker failed: boom")));
 
-        app.threat_abort_requested = true;
+        app.set_threat_abort_requested(true);
         app.apply_threat_patch_event(ThreatPatchEvent::Answer {
             text: "discarded".to_string(),
         });
-        assert!(!app.threat_abort_requested);
-        assert!(!app.log.iter().any(|line| line.body == "discarded"));
+        assert!(!app.threat_abort_requested());
+        assert!(!app.log_lines().iter().any(|line| line.body == "discarded"));
     }
 }

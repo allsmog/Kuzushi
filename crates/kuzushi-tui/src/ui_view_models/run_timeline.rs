@@ -57,7 +57,7 @@ impl PastRun {
 }
 
 pub(crate) fn run_timeline_model(app: &ShellApp, past_limit: usize) -> RunTimelineModel {
-    let active = app.scan.as_ref().map(active_scan_row);
+    let active = app.scan().map(active_scan_row);
     let active_run_id = active.as_ref().map(|row| row.cells[RUN_ID_CELL].clone());
     let mut rows = active.into_iter().collect::<Vec<_>>();
     rows.extend(past_run_rows(app, past_limit, active_run_id.as_deref()));
@@ -76,11 +76,19 @@ fn active_scan_row(scan: &ScanPanelState) -> RunTimelineRow {
                 .map(short_id)
                 .unwrap_or_else(pending_id),
             scan_status(scan),
-            scan.findings_count.to_string(),
+            active_scan_findings_label(scan),
             active_scan_revision_label(scan),
             scan.target.display().to_string(),
         ],
         tone: active_scan_status(scan),
+    }
+}
+
+fn active_scan_findings_label(scan: &ScanPanelState) -> String {
+    if scan.running {
+        "—".to_string()
+    } else {
+        scan.findings_count.to_string()
     }
 }
 
@@ -149,7 +157,7 @@ fn finding_count_label(findings: Option<u64>) -> String {
 }
 
 fn runs_root(app: &ShellApp) -> PathBuf {
-    ui_runs_root(app.target.as_deref())
+    ui_runs_root(app.target())
 }
 
 fn collect_past_runs(runs_root: &Path) -> Vec<PastRun> {

@@ -34,16 +34,22 @@ impl ModelPickerRouteState {
 pub struct AuthPickerRouteState {
     cursor: usize,
     focus: PickerFocus,
+    provider: String,
     key_draft: String,
 }
 
 impl AuthPickerRouteState {
     const METHOD_COUNT: usize = 3;
 
-    pub(crate) fn open(&mut self) {
+    pub(crate) fn open(&mut self, provider: String) {
         self.cursor = 0;
         self.focus = PickerFocus::List;
+        self.provider = provider;
         self.key_draft.clear();
+    }
+
+    pub(crate) fn provider(&self) -> &str {
+        &self.provider
     }
 
     pub(crate) fn cursor(&self) -> usize {
