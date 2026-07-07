@@ -38,7 +38,7 @@ impl<'a> RunbookRuntime<'a> {
         self.manifest
     }
 
-    /// Emit a manifest-validated step. Runbooks are implemented as Rust code;
+    /// Emit a manifest-checked step. Runbooks are implemented as Rust code;
     /// the manifest provides stable labels for Activity and snapshot tests.
     pub fn enter_step(&self, step_id: &str) -> Result<Option<usize>> {
         self.manifest.assert_step(step_id)?;

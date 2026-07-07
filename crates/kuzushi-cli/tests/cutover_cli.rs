@@ -1214,7 +1214,9 @@ fn runtime_backed_run_missing_model_writes_failed_artifact_bundle() {
 
 fn seed_untriaged_finding(repo: &Path) {
     let store = FindingStore::open(repo.join(".kuzushi/v3/index.sqlite3")).unwrap();
-    store.record_run_started("run-1", repo, "completed").unwrap();
+    store
+        .record_run_started("run-1", repo, "completed")
+        .unwrap();
     let finding = Finding::new_semgrep(
         "demo.sql",
         "src/db.ts",

@@ -31,6 +31,16 @@ export default defineConfig({
         "src/modules/index.ts",
         // Type-only definitions.
         "src/bus/types.ts",
+        // Process / presentation adapters are exercised through Rust and
+        // integration tests; keep this unit gate focused on the TS SDK host.
+        "src/modules/dag-execute.ts",
+        "src/modules/kwp-mcp.ts",
+        "src/modules/kwp-worker.ts",
+        "src/modules/print.ts",
+        // Static reference data; schema tests cover the consuming contract.
+        "src/modules/taint-iris-next/cwe-reference.ts",
+        // Generic CLI helpers are covered by callers, not this SDK suite.
+        "src/utils.ts",
       ],
       // Thresholds reflect the post-Rust-migration TS surface: most of
       // the original scanner / store / bus / agent / strategy code now

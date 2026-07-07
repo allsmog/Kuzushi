@@ -550,7 +550,7 @@ first-run, discoverability. Headless behavior must be scriptable and CI-safe.
 
 ### FR-C8 doctor + preflight validate model↔backend before any API call     `OPEN`
 - **Behavior:** an incompatible model/backend pair (e.g. `anthropic:` model +
-  codex/openai backend) is rejected up front by `doctor` and by a pre-run preflight
+  OpenAI-backed runtime) is rejected up front by `doctor` and by a pre-run preflight
   with an actionable message — before the first API call — consistent with the
   no-silent-fallback policy (this is a hard error, not a fallback).
 - **Current violation:** `validate_model_api_key_env` checks syntax/provider-set/
@@ -598,7 +598,7 @@ regress.
 | 8 | `y`/`n` parse unconditionally → silent no-op | CONFIRMED | `shell_command_specs/mod.rs:95-100`, `apply_or_discard.rs:66-72` | FR-A1.3 |
 | 9 | Truecolor-only palette, no downsample | CONFIRMED | `theme/mod.rs:12-28` | FR-A3.1 |
 | 10 | No unicode-width; 1-cell-per-char | CONFIRMED | `renderer/shared/text/mod.rs:22,211` | FR-A3.2 |
-| 11 | Model↔backend not validated up front | CONFIRMED | `no_silent_fallback.rs:12-17`, `doctor/checks.rs:281` | FR-C8 |
+| 11 | Model↔backend not checked up front | CONFIRMED | `no_silent_fallback.rs:12-17`, `doctor/checks.rs:281` | FR-C8 |
 | 12 | Module-recommender inert on first-run | CONFIRMED | `recommendation.rs:60-106` | FR-C9 |
 | 13 | `--target` 3 shapes + blank per-subcmd help | CHANGED | `cli/mod.rs:11-13`, `subcommands.rs:59-95` | FR-C1 |
 | 14 | ~19 blank `--help` args (16 in `runs`) | CHANGED | `subcommands.rs:50-106`, `command.rs:16,163` | FR-C3 |

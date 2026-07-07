@@ -171,7 +171,10 @@ fn collect_attrs(
         let attr = attr.context("nmap XML attribute decode failed")?;
         let key = String::from_utf8_lossy(attr.key.as_ref()).to_string();
         let value = attr
-            .decode_and_unescape_value(quick_xml::reader::Reader::from_str("").decoder())
+            .decoded_and_normalized_value(
+                quick_xml::XmlVersion::Implicit1_0,
+                quick_xml::reader::Reader::from_str("").decoder(),
+            )
             .context("nmap XML attribute unescape failed")?
             .into_owned();
         attrs.insert(key, value);

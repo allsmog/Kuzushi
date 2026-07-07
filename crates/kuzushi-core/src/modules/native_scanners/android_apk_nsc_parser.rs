@@ -1,6 +1,6 @@
 use super::*;
 
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::events::{BytesStart, BytesText, Event};
 use quick_xml::Reader;
 use std::fs;
 use std::path::Path;
@@ -43,7 +43,7 @@ pub(in crate::modules) fn parse_network_security_bytes(
                 state.on_open(&start)?;
                 state.on_close(local_name(&start).as_str());
             }
-            Event::Text(text) => state.on_text(&text.unescape()?),
+            Event::Text(text) => state.on_text(&decoded_text(&text)?),
             Event::End(end) => state.on_close(&end_local_name(&end)),
             Event::Eof => break,
             _ => {}
@@ -51,6 +51,11 @@ pub(in crate::modules) fn parse_network_security_bytes(
         buffer.clear();
     }
     Ok(state.finish())
+}
+
+fn decoded_text(event: &BytesText<'_>) -> Result<String> {
+    let decoded = event.decode()?;
+    Ok(quick_xml::escape::unescape(decoded.as_ref())?.into_owned())
 }
 
 fn end_local_name(element: &quick_xml::events::BytesEnd<'_>) -> String {

@@ -29,7 +29,7 @@ libc.workspace = true
 # quick-xml parses Burp Suite XML exports (M2 §2.3) and nmap XML
 # (M2 §2.2) into the canonical Finding/Recon shapes — no external
 # binary, sub-ms on typical PoC traffic dumps.
-quick-xml = "0.36"
+quick-xml = "0.41"
 # Regex powers the per-target source/sink discovery sweep
 # (`source_sink_discovery::run`) which scans the source tree for
 # language-specific entry-point markers and privesc/RCE primitives

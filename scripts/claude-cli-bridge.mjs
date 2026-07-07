@@ -180,7 +180,9 @@ function spawnClaudeOnce(args, cwd, prompt) {
 }
 
 function lastJsonObject(raw) {
-  const lines = String(raw ?? "").split(/\r?\n/).filter((line) => line.trim().length > 0);
+  const lines = String(raw ?? "")
+    .split(/\r?\n/)
+    .filter((line) => line.trim().length > 0);
   for (let index = lines.length - 1; index >= 0; index -= 1) {
     const line = lines[index].trim();
     if (!line.startsWith("{")) continue;

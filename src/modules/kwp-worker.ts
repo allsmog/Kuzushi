@@ -1,6 +1,17 @@
 import { createInterface } from "node:readline";
-import type { CopilotModule, ExecutionContext, ModuleContext, ModuleTool, ToolResult } from "./types.js";
-import type { KwpMcpExecutionContext, McpCallOptions, McpCallResult, McpHandle } from "./kwp-mcp.js";
+import type {
+  KwpMcpExecutionContext,
+  McpCallOptions,
+  McpCallResult,
+  McpHandle,
+} from "./kwp-mcp.js";
+import type {
+  CopilotModule,
+  ExecutionContext,
+  ModuleContext,
+  ModuleTool,
+  ToolResult,
+} from "./types.js";
 
 export const KWP_VERSION = "0.1.0";
 
@@ -10,17 +21,40 @@ export interface KwpWorkerOptions {
 }
 
 export interface KwpFsHandle {
-  read(scope: KwpFsScope, path: string, opts?: { offset?: number; length?: number }): Promise<Uint8Array>;
-  write(scope: KwpFsScope, path: string, data: Uint8Array | string, opts?: { append?: boolean }): Promise<number>;
-  list(scope: KwpFsScope, path: string): Promise<Array<{ name: string; kind: "file" | "dir"; size: number }>>;
-  stat(scope: KwpFsScope, path: string): Promise<{ kind: "file" | "dir"; size: number; mtime: number }>;
+  read(
+    scope: KwpFsScope,
+    path: string,
+    opts?: { offset?: number; length?: number },
+  ): Promise<Uint8Array>;
+  write(
+    scope: KwpFsScope,
+    path: string,
+    data: Uint8Array | string,
+    opts?: { append?: boolean },
+  ): Promise<number>;
+  list(
+    scope: KwpFsScope,
+    path: string,
+  ): Promise<Array<{ name: string; kind: "file" | "dir"; size: number }>>;
+  stat(
+    scope: KwpFsScope,
+    path: string,
+  ): Promise<{ kind: "file" | "dir"; size: number; mtime: number }>;
   remove(scope: KwpFsScope, path: string): Promise<void>;
 }
 
 export type KwpFsScope = "workspace" | "moduleData" | "input";
 
 export interface KwpNetHandle {
-  fetch(url: string, init?: { method?: string; headers?: Record<string, string>; body?: Uint8Array | string; timeoutMs?: number }): Promise<KwpBrokeredResponse>;
+  fetch(
+    url: string,
+    init?: {
+      method?: string;
+      headers?: Record<string, string>;
+      body?: Uint8Array | string;
+      timeoutMs?: number;
+    },
+  ): Promise<KwpBrokeredResponse>;
 }
 
 export interface KwpRuntimeHandle {
@@ -69,7 +103,13 @@ export interface KwpFuzzRunRequest {
   engine: string;
   target: { language: string; projectPath: string; harnessPath: string };
   inputs?: Record<string, string>;
-  limits?: { deadlineMs?: number; cpuSeconds?: number; memoryBytes?: number; artifactBytes?: number; maxCrashes?: number };
+  limits?: {
+    deadlineMs?: number;
+    cpuSeconds?: number;
+    memoryBytes?: number;
+    artifactBytes?: number;
+    maxCrashes?: number;
+  };
   sandbox?: { network?: boolean; readOnlySource?: boolean };
 }
 
@@ -102,7 +142,10 @@ interface LiveInvocation {
   settled: boolean;
 }
 
-export async function runWorker(module: CopilotModule, options: KwpWorkerOptions = {}): Promise<void> {
+export async function runWorker(
+  module: CopilotModule,
+  options: KwpWorkerOptions = {},
+): Promise<void> {
   const mode = options.mode ?? (process.env.KWP_WORKER_MODE === "probe" ? "probe" : "serve");
   const connection = options.connection ?? new StdioJsonRpcConnection();
   await new KwpWorkerHarness(module, connection).serve(mode);
@@ -114,7 +157,10 @@ export class KwpWorkerHarness {
   private live = new Map<string, LiveInvocation>();
   private done = false;
 
-  constructor(private readonly module: CopilotModule, private readonly connection: JsonRpcConnection) {}
+  constructor(
+    private readonly module: CopilotModule,
+    private readonly connection: JsonRpcConnection,
+  ) {}
 
   async serve(mode: "serve" | "probe"): Promise<void> {
     this.connection.onInbound((message) => this.dispatch(mode, message));
@@ -140,7 +186,8 @@ export class KwpWorkerHarness {
         this.connection.reply(message.id, {});
         break;
       case "tools/call":
-        if (mode === "probe") this.connection.replyError(message.id, -32601, "tools/call is disabled in probe mode");
+        if (mode === "probe")
+          this.connection.replyError(message.id, -32601, "tools/call is disabled in probe mode");
         else void this.toolCall(message.id, message.params);
         break;
       case "shutdown":
@@ -152,7 +199,11 @@ export class KwpWorkerHarness {
   }
 
   private async initialize(id: RpcId, params: unknown): Promise<void> {
-    const p = params as { grant?: unknown; limits?: { maxConcurrentInvocations?: number }; _kuzushi?: { grant?: unknown; limits?: { maxConcurrentInvocations?: number } } };
+    const p = params as {
+      grant?: unknown;
+      limits?: { maxConcurrentInvocations?: number };
+      _kuzushi?: { grant?: unknown; limits?: { maxConcurrentInvocations?: number } };
+    };
     this.grant = new KwpGrantView(p._kuzushi?.grant ?? p.grant ?? {});
     this.limits = p._kuzushi?.limits ?? p.limits ?? {};
     for (const topic of this.module.events?.produces ?? []) {
@@ -178,7 +229,10 @@ export class KwpWorkerHarness {
 
   private async moduleInit(id: RpcId, params: unknown): Promise<void> {
     try {
-      await this.module.init?.((params as { config?: Record<string, unknown> })?.config ?? {}, this.moduleContext({}));
+      await this.module.init?.(
+        (params as { config?: Record<string, unknown> })?.config ?? {},
+        this.moduleContext({}),
+      );
       this.connection.reply(id, {});
     } catch (error) {
       this.connection.replyError(id, -32037, messageOf(error));
@@ -186,7 +240,11 @@ export class KwpWorkerHarness {
   }
 
   private async toolCall(id: RpcId, params: unknown): Promise<void> {
-    const p = params as { name: string; arguments?: unknown; _kuzushi?: { invocationId: string; runId: string; epoch: number } };
+    const p = params as {
+      name: string;
+      arguments?: unknown;
+      _kuzushi?: { invocationId: string; runId: string; epoch: number };
+    };
     const tool = this.module.tools.find((candidate) => candidate.name === p.name);
     if (!tool) {
       this.connection.replyError(id, -32602, `unknown tool ${p.name}`);
@@ -212,7 +270,11 @@ export class KwpWorkerHarness {
       this.connection.reply(id, {
         ok: false,
         output: "",
-        error: { kind: error instanceof KwpDenied ? "denied" : live.abort.signal.aborted ? "timeout" : "fatal", message: messageOf(error) },
+        error: {
+          kind:
+            error instanceof KwpDenied ? "denied" : live.abort.signal.aborted ? "timeout" : "fatal",
+          message: messageOf(error),
+        },
       });
     } finally {
       live.settled = true;
@@ -221,7 +283,9 @@ export class KwpWorkerHarness {
   }
 
   private cancel(params: unknown): void {
-    const invocationId = (params as { invocationId?: string; requestId?: string }).invocationId ?? (params as { requestId?: string }).requestId;
+    const invocationId =
+      (params as { invocationId?: string; requestId?: string }).invocationId ??
+      (params as { requestId?: string }).requestId;
     if (!invocationId) return;
     const live = this.live.get(invocationId);
     if (!live) return;
@@ -252,20 +316,47 @@ export class KwpWorkerHarness {
       invocationId: live.invocationId,
       runId: live.runId,
       signal: live.abort.signal,
-      runtime: { query: (query: unknown) => request("kuzushi/runtime/query", query as Record<string, unknown>) } as unknown as ExecutionContext["runtime"],
-      bus: { publish: (topic: string, payload?: unknown) => request("kuzushi/bus/publish", { topic, payload }) } as unknown as ExecutionContext["bus"],
+      runtime: {
+        query: (query: unknown) =>
+          request("kuzushi/runtime/query", query as Record<string, unknown>),
+      } as unknown as ExecutionContext["runtime"],
+      bus: {
+        publish: (topic: string, payload?: unknown) =>
+          request("kuzushi/bus/publish", { topic, payload }),
+      } as unknown as ExecutionContext["bus"],
       config: {} as unknown as ExecutionContext["config"],
       fs: this.fsHandle(request),
       net: this.netHandle(request),
-      kwpRuntime: { query: (query: KwpRuntimeQuery) => request("kuzushi/runtime/query", query as unknown as Record<string, unknown>) as Promise<KwpRuntimeCompletion> },
-      kwpBus: { publish: (topic: string, payload: unknown) => request("kuzushi/bus/publish", { topic, payload }).then(() => undefined) },
+      kwpRuntime: {
+        query: (query: KwpRuntimeQuery) =>
+          request(
+            "kuzushi/runtime/query",
+            query as unknown as Record<string, unknown>,
+          ) as Promise<KwpRuntimeCompletion>,
+      },
+      kwpBus: {
+        publish: (topic: string, payload: unknown) =>
+          request("kuzushi/bus/publish", { topic, payload }).then(() => undefined),
+      },
       mcp: this.mcpHandle(request),
-      fuzz: { run: (fuzz: KwpFuzzRunRequest) => request("kuzushi/fuzz/run", fuzz as unknown as Record<string, unknown>) as Promise<KwpFuzzRunResult> },
+      fuzz: {
+        run: (fuzz: KwpFuzzRunRequest) =>
+          request(
+            "kuzushi/fuzz/run",
+            fuzz as unknown as Record<string, unknown>,
+          ) as Promise<KwpFuzzRunResult>,
+      },
       reportActivity: (message: string, meta?: unknown) => {
-        if (!live.settled) this.connection.notify("kuzushi/activity", { invocationId: live.invocationId, message, meta });
+        if (!live.settled)
+          this.connection.notify("kuzushi/activity", {
+            invocationId: live.invocationId,
+            message,
+            meta,
+          });
       },
       reportOutput: (chunk: string) => {
-        if (!live.settled) this.connection.notify("kuzushi/output", { invocationId: live.invocationId, chunk });
+        if (!live.settled)
+          this.connection.notify("kuzushi/output", { invocationId: live.invocationId, chunk });
       },
     } satisfies Partial<KwpWorkerExecutionContext>;
     return ctx as unknown as ExecutionContext;
@@ -273,39 +364,101 @@ export class KwpWorkerHarness {
 
   private moduleContext(config: Record<string, unknown>): ModuleContext {
     return {
-      runtime: { query: async () => { throw new KwpDenied(-32030, "runtime", "runtime is unavailable outside an invocation"); } },
-      bus: { publish: async () => {}, subscribe: () => () => {}, unsubscribe: () => {}, waitFor: async () => undefined, close: () => {} },
+      runtime: {
+        query: async () => {
+          throw new KwpDenied(-32030, "runtime", "runtime is unavailable outside an invocation");
+        },
+      },
+      bus: {
+        publish: async () => {},
+        subscribe: () => () => {},
+        unsubscribe: () => {},
+        waitFor: async () => undefined,
+        close: () => {},
+      },
       config: config as never,
       dataDir: ".",
     } as unknown as ModuleContext;
   }
 
-  private fsHandle(request: (method: string, params: Record<string, unknown>) => Promise<unknown>): KwpFsHandle {
+  private fsHandle(
+    request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
+  ): KwpFsHandle {
     return {
-      read: async (scope, path, opts) => decodeBase64((await request("kuzushi/fs/read", { scope, path, ...opts })) as { data: string }),
-      write: async (scope, path, data, opts) => ((await request("kuzushi/fs/write", { scope, path, data: encodeBase64(data), ...opts })) as { bytesWritten: number }).bytesWritten,
-      list: async (scope, path) => ((await request("kuzushi/fs/list", { scope, path })) as { entries: Array<{ name: string; kind: "file" | "dir"; size: number }> }).entries,
-      stat: async (scope, path) => (await request("kuzushi/fs/stat", { scope, path })) as { kind: "file" | "dir"; size: number; mtime: number },
+      read: async (scope, path, opts) =>
+        decodeBase64(
+          (await request("kuzushi/fs/read", { scope, path, ...opts })) as { data: string },
+        ),
+      write: async (scope, path, data, opts) =>
+        (
+          (await request("kuzushi/fs/write", {
+            scope,
+            path,
+            data: encodeBase64(data),
+            ...opts,
+          })) as { bytesWritten: number }
+        ).bytesWritten,
+      list: async (scope, path) =>
+        (
+          (await request("kuzushi/fs/list", { scope, path })) as {
+            entries: Array<{ name: string; kind: "file" | "dir"; size: number }>;
+          }
+        ).entries,
+      stat: async (scope, path) =>
+        (await request("kuzushi/fs/stat", { scope, path })) as {
+          kind: "file" | "dir";
+          size: number;
+          mtime: number;
+        },
       remove: async (scope, path) => void (await request("kuzushi/fs/remove", { scope, path })),
     };
   }
 
-  private netHandle(request: (method: string, params: Record<string, unknown>) => Promise<unknown>): KwpNetHandle {
+  private netHandle(
+    request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
+  ): KwpNetHandle {
     return {
       fetch: async (url, init) => {
-        const result = (await request("kuzushi/net/fetch", { url, ...init, body: init?.body ? encodeBase64(init.body) : undefined })) as { status: number; headers: Record<string, string>; body?: string; artifactPath?: string };
-        return { status: result.status, headers: result.headers, body: async () => decodeBase64({ data: result.body ?? "" }), artifactPath: result.artifactPath };
+        const result = (await request("kuzushi/net/fetch", {
+          url,
+          ...init,
+          body: init?.body ? encodeBase64(init.body) : undefined,
+        })) as {
+          status: number;
+          headers: Record<string, string>;
+          body?: string;
+          artifactPath?: string;
+        };
+        return {
+          status: result.status,
+          headers: result.headers,
+          body: async () => decodeBase64({ data: result.body ?? "" }),
+          artifactPath: result.artifactPath,
+        };
       },
     };
   }
 
-  private mcpHandle(request: (method: string, params: Record<string, unknown>) => Promise<unknown>): McpHandle {
+  private mcpHandle(
+    request: (method: string, params: Record<string, unknown>) => Promise<unknown>,
+  ): McpHandle {
     return {
       has: (alias) => this.grant.hasMcp(alias),
       grantedAliases: () => this.grant.mcpAliases(),
-      call: async <TStructured>(alias: string, tool: string, arguments_: Record<string, unknown>, options?: McpCallOptions) => {
-        if (!this.grant.hasMcp(alias)) throw new KwpDenied(-32031, "mcp", `MCP alias ${alias} is not granted`);
-        return (await request("kuzushi/mcp/call", { alias, tool, arguments: arguments_, limits: options?.limits })) as McpCallResult<TStructured>;
+      call: async <TStructured>(
+        alias: string,
+        tool: string,
+        arguments_: Record<string, unknown>,
+        options?: McpCallOptions,
+      ) => {
+        if (!this.grant.hasMcp(alias))
+          throw new KwpDenied(-32031, "mcp", `MCP alias ${alias} is not granted`);
+        return (await request("kuzushi/mcp/call", {
+          alias,
+          tool,
+          arguments: arguments_,
+          limits: options?.limits,
+        })) as McpCallResult<TStructured>;
       },
     };
   }
@@ -324,17 +477,24 @@ class KwpGrantView {
 
   mcpAliases(): string[] {
     const mcp = (this.grant as { mcp?: Array<{ alias?: string }> })?.mcp ?? [];
-    return mcp.map((entry) => entry.alias).filter((alias): alias is string => typeof alias === "string");
+    return mcp
+      .map((entry) => entry.alias)
+      .filter((alias): alias is string => typeof alias === "string");
   }
 
   private patterns(key: "bus", subkey: "produce" | "consume"): string[] {
-    const values = (this.grant as { bus?: { produce?: string[]; consume?: string[] } })?.[key]?.[subkey] ?? [];
+    const values =
+      (this.grant as { bus?: { produce?: string[]; consume?: string[] } })?.[key]?.[subkey] ?? [];
     return values.filter((value): value is string => typeof value === "string");
   }
 }
 
 class KwpDenied extends Error {
-  constructor(readonly code: number, readonly capability: string, message: string) {
+  constructor(
+    readonly code: number,
+    readonly capability: string,
+    message: string,
+  ) {
     super(message);
     this.name = "KwpDenied";
   }
@@ -346,7 +506,9 @@ class StdioJsonRpcConnection implements JsonRpcConnection {
   private pending = new Map<RpcId, { resolve(value: unknown): void; reject(error: Error): void }>();
 
   constructor() {
-    createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) => this.receive(line));
+    createInterface({ input: process.stdin, crlfDelay: Infinity }).on("line", (line) =>
+      this.receive(line),
+    );
   }
 
   onInbound(handler: (message: RpcInbound) => void): void {
@@ -377,17 +539,32 @@ class StdioJsonRpcConnection implements JsonRpcConnection {
   }
 
   private receive(line: string): void {
-    const message = JSON.parse(line) as { id?: RpcId; method?: string; params?: unknown; result?: unknown; error?: { code: number; message: string } };
+    const message = JSON.parse(line) as {
+      id?: RpcId;
+      method?: string;
+      params?: unknown;
+      result?: unknown;
+      error?: { code: number; message: string };
+    };
     if (message.id !== undefined && ("result" in message || "error" in message)) {
       const pending = this.pending.get(message.id);
       if (!pending) return;
       this.pending.delete(message.id);
-      if (message.error) pending.reject(Object.assign(new Error(message.error.message), { code: message.error.code }));
+      if (message.error)
+        pending.reject(
+          Object.assign(new Error(message.error.message), { code: message.error.code }),
+        );
       else pending.resolve(message.result);
       return;
     }
     if (!message.method) return;
-    if (message.id !== undefined) this.handler?.({ kind: "request", id: message.id, method: message.method, params: message.params });
+    if (message.id !== undefined)
+      this.handler?.({
+        kind: "request",
+        id: message.id,
+        method: message.method,
+        params: message.params,
+      });
     else this.handler?.({ kind: "notification", method: message.method, params: message.params });
   }
 
@@ -415,7 +592,9 @@ function normalizeToolResult(result: ToolResult): ToolResult {
 }
 
 function encodeBase64(data: Uint8Array | string): string {
-  return Buffer.from(typeof data === "string" ? new TextEncoder().encode(data) : data).toString("base64");
+  return Buffer.from(typeof data === "string" ? new TextEncoder().encode(data) : data).toString(
+    "base64",
+  );
 }
 
 function decodeBase64(response: { data?: string }): Uint8Array {

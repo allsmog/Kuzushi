@@ -3,6 +3,7 @@ use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 impl ShellApp {
+    #[cfg(test)]
     pub(crate) fn register_worker_handle(
         &mut self,
         label: &'static str,

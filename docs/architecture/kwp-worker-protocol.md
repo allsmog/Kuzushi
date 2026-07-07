@@ -4,7 +4,7 @@ Status: draft for implementation review.
 
 KWP is the JSON-RPC boundary between the trusted Kuzushi host and untrusted module workers. It is the contract used by future uploaded modules, dynamic JavaScript modules, WASM shims, and container-backed scanners.
 
-The protocol is intentionally small: process isolation is the security boundary; every privileged effect is brokered by the host; the registry is a catalog of validated descriptors, not a security boundary.
+The protocol is intentionally small: process isolation is the security boundary; every privileged effect is brokered by the host; the registry is a catalog of host-checked descriptors, not a security boundary.
 
 Normative keywords (`MUST`, `SHOULD`, `MAY`) follow RFC 2119.
 
@@ -42,7 +42,7 @@ Responsibilities:
 - `TrustVerifier`: resolves a specifier, hashes the bundle, verifies signatures and lockfile approval, then returns a `VerifiedModule`.
 - `Supervisor`: owns spawn, handshake, worker reuse, dispatch, deadlines, cancellation, epochs, recycle, and kill.
 - `CapabilityBroker`: the only place grants are enforced, effects are metered, and audit records are emitted.
-- `ModuleRegistry`: stores validated module and tool descriptors. It does not own trust, process lifecycle, or capability policy.
+- `ModuleRegistry`: stores host-checked module and tool descriptors. It does not own trust, process lifecycle, or capability policy.
 
 ## 3. Transport
 
@@ -198,7 +198,7 @@ In probe mode:
 
 `CopilotModule.init?/ready?/dispose?` map to protocol methods:
 
-- `kuzushi/module/init` receives host-validated config.
+- `kuzushi/module/init` receives host-checked config.
 - `kuzushi/module/ready` fires after the host is ready to route invocations.
 - `shutdown` calls `dispose?()`, flushes logs, replies, and exits 0.
 

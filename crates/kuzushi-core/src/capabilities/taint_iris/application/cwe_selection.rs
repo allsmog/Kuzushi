@@ -1,25 +1,5 @@
 use super::*;
 
-pub(crate) fn taint_iris_report(
-    target: &Path,
-    cwes: Vec<TaintCweSelection>,
-    findings: Vec<Finding>,
-    flows: Vec<TaintFlow>,
-    persisted: Option<TaintIrisPersistedRun>,
-    degradation: Option<Value>,
-) -> TaintIrisReport {
-    TaintIrisReport {
-        target: target.display().to_string(),
-        count: findings.len(),
-        cwes,
-        findings,
-        flows,
-        persisted,
-        cost_usd: 0.0,
-        degradation,
-    }
-}
-
 pub(crate) fn run_taint_cwe_select_value(
     input: &Value,
     target: &Path,

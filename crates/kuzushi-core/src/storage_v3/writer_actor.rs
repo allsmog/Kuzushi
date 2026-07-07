@@ -256,6 +256,7 @@ impl StorageWriter {
         })
     }
 
+    #[cfg(test)]
     fn current_watermark(&self) -> Result<u64> {
         Ok(self.projection.meta()?.applied_seq)
     }

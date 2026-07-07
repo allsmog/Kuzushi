@@ -29,13 +29,4 @@ impl FindingStore {
             _ => anyhow::bail!("finding reference {reference:?} is ambiguous"),
         }
     }
-
-    pub(crate) fn attach_latest_verification(&self, finding: Option<&mut Finding>) -> Result<()> {
-        if let Some(finding) = finding {
-            if let Some(id) = finding.id {
-                finding.verification = self.get_latest_verification(id)?;
-            }
-        }
-        Ok(())
-    }
 }

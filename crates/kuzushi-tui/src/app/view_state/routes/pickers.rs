@@ -50,6 +50,7 @@ impl AuthPickerRouteState {
         self.cursor
     }
 
+    #[cfg(test)]
     pub(crate) fn set_cursor(&mut self, cursor: usize) {
         self.cursor = cursor.min(Self::METHOD_COUNT.saturating_sub(1));
     }
@@ -127,6 +128,7 @@ impl TargetPickerRouteState {
         &self.candidates
     }
 
+    #[cfg(test)]
     pub(crate) fn set_cursor(&mut self, cursor: usize) {
         self.cursor = cursor.min(self.candidates.len().saturating_sub(1));
     }
@@ -203,6 +205,7 @@ impl PlanningPickerRouteState {
         self.cursor
     }
 
+    #[cfg(test)]
     pub(crate) fn set_cursor(&mut self, cursor: usize) {
         self.cursor = cursor;
         self.clamp_cursor();
@@ -267,6 +270,7 @@ impl PlanningPickerRouteState {
         self.option_error = None;
     }
 
+    #[cfg(test)]
     fn clamp_cursor(&mut self) {
         self.cursor = self.cursor.min(self.tasks.len().saturating_sub(1));
     }

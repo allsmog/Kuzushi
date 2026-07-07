@@ -76,6 +76,8 @@ spine; do it first among the engine phases.
 
 ### 2.2 Prompts-as-files
 
+Historical cannon reference:
+
 - cannon: `resolve_prompt_path(name, target_dir, variant)` searches `target/prompt_overrides/<name>.md` → `prompts/variants/<variant>/<name>.md` → `prompts/<name>.md` (`src/prompts.rs:31`); `load_prompt` stamps sha256[..16] of the raw template (`prompts.rs:62`).
 - Kuzushi: effectively **1-level** — `prompt_file_default_for_tool` is a static 4-arm match (`triage:run`, `verify:finding`, `taint-iris:hunt`, `carlini-threat-hunt:run`) reading one project file (`builtins/with_v2_builtins/execution.rs:119`); SAST has a richer 2-source override (`application/sast_scan/prompt_overrides.rs:3`). Path helper `prompt_override_path(target, module, verb)` already exists (`options/prompt_paths.rs:14`).
 - **Gap/port:** generalize the static match into a **data table**, give the loaders an **ordered search path** (`project override → variant → packaged base`), and add the **sha256 provenance** stamp (fold into run-reproducibility metadata, `run_artifacts/run_reproducibility_metadata.rs`). The `<module>/<verb>.md` convention and `prompt_override_path` are reusable as-is. There's an existing `PromptMutation` approval ledger (`prompt_stack/mod.rs`) to integrate with, not fight.

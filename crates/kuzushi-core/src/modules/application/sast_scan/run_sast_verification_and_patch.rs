@@ -238,7 +238,6 @@ mod tests {
             native: None,
             agentic: None,
             carlini: None,
-            taint_iris: None,
             taint_iris_next: None,
             systems_hunt: None,
         };

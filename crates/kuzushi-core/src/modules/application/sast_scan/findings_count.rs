@@ -5,7 +5,6 @@ impl SastPipelineReports {
         self.native.as_ref().map_or(0, |run| run.findings_count)
             + self.agentic.as_ref().map_or(0, |report| report.count)
             + self.carlini.as_ref().map_or(0, |report| report.count)
-            + self.taint_iris.as_ref().map_or(0, |report| report.count)
             + self
                 .taint_iris_next
                 .as_ref()
@@ -17,7 +16,6 @@ impl SastPipelineReports {
         self.native_run_id()
             .or_else(|| self.agentic_run_id())
             .or_else(|| self.carlini_run_id())
-            .or_else(|| self.taint_iris_run_id())
             .or_else(|| self.taint_iris_next_run_id())
             .or_else(|| self.systems_hunt_run_id())
             .context("sast:scan completed without a persisted run id")
@@ -29,7 +27,6 @@ impl SastPipelineReports {
             native: self.native_run_id(),
             agentic: self.agentic_run_id(),
             carlini: self.carlini_run_id(),
-            taint_iris: self.taint_iris_run_id(),
             taint_iris_next: self.taint_iris_next_run_id(),
             systems_hunt: self.systems_hunt_run_id(),
         }
@@ -48,13 +45,6 @@ impl SastPipelineReports {
 
     pub(in crate::modules) fn carlini_run_id(&self) -> Option<String> {
         self.carlini
-            .as_ref()
-            .and_then(|report| report.persisted.as_ref())
-            .map(|persisted| persisted.run_id.clone())
-    }
-
-    pub(in crate::modules) fn taint_iris_run_id(&self) -> Option<String> {
-        self.taint_iris
             .as_ref()
             .and_then(|report| report.persisted.as_ref())
             .map(|persisted| persisted.run_id.clone())
@@ -92,7 +82,6 @@ pub(in crate::modules) fn run_sast_pipeline_reports(
         native: selected.run_native(workspace, store, options)?,
         agentic: None,
         carlini: None,
-        taint_iris: None,
         taint_iris_next: None,
         systems_hunt: None,
         engine_ids: selected.engine_ids.clone(),
@@ -113,7 +102,6 @@ pub(in crate::modules) struct SastTaskSelection {
     pub(in crate::modules) scanners: Vec<Box<dyn ScanEngine>>,
     pub(in crate::modules) run_agentic: bool,
     pub(in crate::modules) run_carlini: bool,
-    pub(in crate::modules) run_taint_iris: bool,
     pub(in crate::modules) run_taint_iris_next: bool,
     pub(in crate::modules) run_systems_hunt: bool,
     pub(in crate::modules) engine_ids: Vec<&'static str>,

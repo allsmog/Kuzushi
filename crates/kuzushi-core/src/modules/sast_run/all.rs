@@ -6,7 +6,6 @@ pub(in crate::modules) struct SastRunIds {
     pub(in crate::modules) native: Option<String>,
     pub(in crate::modules) agentic: Option<String>,
     pub(in crate::modules) carlini: Option<String>,
-    pub(in crate::modules) taint_iris: Option<String>,
     pub(in crate::modules) taint_iris_next: Option<String>,
     pub(in crate::modules) systems_hunt: Option<String>,
 }
@@ -17,7 +16,6 @@ impl SastRunIds {
             self.native.as_deref(),
             self.agentic.as_deref(),
             self.carlini.as_deref(),
-            self.taint_iris.as_deref(),
             self.taint_iris_next.as_deref(),
             self.systems_hunt.as_deref(),
         ]

@@ -289,8 +289,8 @@ phase) or by a steer key. It is the interactive equivalent of the headless flags
 
 - **Model tiers** route per role — cheap models for triage/dedup/classify, deep
   models for verify/patch/PoV. Each pick flows through the layered option store
-  and is validated against the runtime here (no `anthropic:` model on a codex
-  backend passing silently). No silent fallback: an incompatible pick is rejected
+  and is validated against the runtime here (no `anthropic:` model on an
+  incompatible backend passing silently). No silent fallback: an incompatible pick is rejected
   in the gate with the reason.
 - **Strategy** is the composed recipe = the sweep's variant axis (`deep = pattern
   + iris-taint + review×2 + invariant`); picking it expands into the sweep matrix.

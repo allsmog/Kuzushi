@@ -32,8 +32,6 @@ export type {
   WorkspaceServiceStore,
   WorkspaceVulnStore,
 } from "./host-handles.js";
-export type { PrintLevel, PrintOptions, PrintSink } from "./print.js";
-export { createArraySink, createPrintSink, stripAnsi } from "./print.js";
 // KWP MCP composition types — modules use these when refining ExecutionContext
 // for host-mounted MCP aliases such as `symcc`.
 export type {
@@ -64,6 +62,8 @@ export type {
   KwpWorkerOptions,
 } from "./kwp-worker.js";
 export { KWP_VERSION, KwpWorkerHarness, runWorker } from "./kwp-worker.js";
+export type { PrintLevel, PrintOptions, PrintSink } from "./print.js";
+export { createArraySink, createPrintSink, stripAnsi } from "./print.js";
 // Registry + specifier parsing — re-export so third parties can do static
 // analysis of their own module specifiers without importing deep paths.
 export { ModuleRegistry, parseModuleSpecifier } from "./registry.js";
