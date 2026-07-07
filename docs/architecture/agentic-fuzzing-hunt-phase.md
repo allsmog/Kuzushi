@@ -408,7 +408,7 @@ The worker performs a final triage pass:
 - Is there a plausible exploit or impact story?
 - Is there a clear reproduction command?
 
-The worker may ask `kuzushi/runtime/query` for summary/impact language, but the finding structure is validated host-side.
+The worker may ask `kuzushi/runtime/query` for summary/impact language, but the finding structure is checked host-side.
 
 Finding fields:
 

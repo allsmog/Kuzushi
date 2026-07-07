@@ -31,17 +31,6 @@ pub enum ArtifactState {
     Action,
 }
 
-impl ArtifactState {
-    pub fn label(self) -> &'static str {
-        match self {
-            ArtifactState::Cached => "cached",
-            ArtifactState::Invalid => "invalid",
-            ArtifactState::Missing => "missing",
-            ArtifactState::Action => "action",
-        }
-    }
-}
-
 impl PlanningTaskRow {
     pub fn for_task(task: PlanningTaskId, target: &Path) -> Self {
         let required_cli = task.required_cli();
@@ -74,6 +63,7 @@ impl PlanningTaskRow {
         }
     }
 
+    #[cfg(test)]
     /// Whether this row should be pre-checked when the picker first opens.
     /// An artifact-building row is pre-checked when its artifact is missing or
     /// invalid AND its required CLI is available. Action rows are opt-in here
@@ -87,6 +77,7 @@ impl PlanningTaskRow {
             && !forced_off_by_default(self.id)
     }
 
+    #[cfg(test)]
     /// One-line hint shown next to the row (cost + missing dep info). When the
     /// required CLI is absent the row can't run at all, so the blocker IS the
     /// hint — prefixing it with cost info only pushed the actionable part past
@@ -111,6 +102,7 @@ impl PlanningTaskRow {
     }
 }
 
+#[cfg(test)]
 /// PASTA is opt-in even when its artifact is missing — STRIDE is the
 /// default methodology and we don't want to spend two LLM passes by
 /// default.

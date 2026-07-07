@@ -428,7 +428,7 @@ pr-review = diff-scope + review + reachability-vote      <span class="c"># Full 
       <div class="reqgroup">
         <div class="gh"><span>8.7 · Model tiering &amp; cost</span><span class="gs">exists → surface</span></div>
         <div class="r"><span class="rid">R21</span><div class="rt"><b>Per-role/tier map + presets.</b> Cheap models for dedup/classify/easy-triage, strong for root-cause/patch/PoV; same-role fallback on error.<span class="ac">a weak↔best preset switch; cost per role accounted.</span></div></div>
-        <div class="r"><span class="rid">R22</span><div class="rt"><b>Cost-per-confirmed surfaced; budget per-call.</b><span class="ac">the run shows $/confirmed; a codex-backend run (<code>cost_usd 0.0</code>) still halts via call-count/token fallback.</span></div></div>
+        <div class="r"><span class="rid">R22</span><div class="rt"><b>Cost-per-confirmed surfaced; budget per-call.</b><span class="ac">the run shows $/confirmed; a zero-cost backend run (<code>cost_usd 0.0</code>) still halts via call-count/token fallback.</span></div></div>
         <div class="r"><span class="rid">R23</span><div class="rt"><b>No duplicate triage; prompt caching.</b><span class="ac">repeat runs over unchanged context show cache hits; no re-triage of duplicates.</span></div></div>
       </div>
       <div class="reqgroup">

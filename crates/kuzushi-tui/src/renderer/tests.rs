@@ -4649,7 +4649,7 @@ fn repeat_finding<'a>(
             path,
             12,
             Some(14),
-            severity.clone(),
+            severity,
             "long source row render regression",
         )
     })

@@ -645,7 +645,6 @@ const artifactManifestContractRequirements = [
   "workspace state path consumer must use workspace_models_path",
   "CodeQL scanner must use workspace_codeql_db_path",
   "CodeQL binary cache lookup must use cached_codeql_binary_path",
-  "taint-iris CodeQL prompt resolver",
   "taint-iris-next CodeQL build must use workspace_codeql_db_path",
   "taint-iris-next CodeQL dataflow",
   "static evidence store must use workspace_static_evidence_db_path",

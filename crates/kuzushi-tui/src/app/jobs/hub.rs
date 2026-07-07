@@ -12,8 +12,11 @@ pub(super) struct StampedShellEvent {
 #[derive(Debug)]
 struct JobSlot {
     generation: WorkerGeneration,
+    #[cfg(test)]
     cancel: ScanCancellation,
+    #[cfg(test)]
     label: String,
+    #[cfg(test)]
     cancel_requested: bool,
 }
 
@@ -54,8 +57,11 @@ impl JobHub {
             kind,
             JobSlot {
                 generation,
+                #[cfg(test)]
                 cancel: cancel.clone(),
+                #[cfg(test)]
                 label: label.clone(),
+                #[cfg(test)]
                 cancel_requested: false,
             },
         );
@@ -73,16 +79,19 @@ impl JobHub {
         self.slots.contains_key(&kind)
     }
 
+    #[cfg(test)]
     pub(crate) fn running_label(&self, kind: JobKind) -> Option<&str> {
         self.slots.get(&kind).map(|slot| slot.label.as_str())
     }
 
+    #[cfg(test)]
     pub(crate) fn cancel_requested(&self, kind: JobKind) -> bool {
         self.slots
             .get(&kind)
             .is_some_and(|slot| slot.cancel_requested)
     }
 
+    #[cfg(test)]
     pub(crate) fn cancel(&mut self, kind: JobKind) -> bool {
         let Some(slot) = self.slots.get_mut(&kind) else {
             return false;

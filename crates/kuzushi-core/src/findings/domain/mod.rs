@@ -17,9 +17,7 @@ pub use extract_cwe::extract_cwe;
 pub use finding_identity::{
     compute_finding_identity_id, finding_identity_alias, FindingIdentityMatchTier,
 };
-pub(crate) use finding_identity::{
-    finding_identity_key_for_finding, finding_identity_key_for_input, FindingIdentityInput,
-};
+pub(crate) use finding_identity::finding_identity_key_for_finding;
 pub use finding_record::{
     compute_dedup_key, compute_root_cause_key, compute_source_signature, normalize_cwe, Finding,
     FindingEvidence, FindingSource,

@@ -277,10 +277,9 @@ pub(crate) use transcript::{
 pub(crate) use view_status::view_status_segment;
 pub(crate) use viz_data::{
     attack_tree, cached_findings_heatmap, cached_findings_heatmap_with_selection,
-    cached_risk_by_module, dfd_model, findings_heatmap, findings_heatmap_with_selection,
-    risk_by_module, selected_taint_flow_path, taint_flow_path, AttackChain, AttackTree,
-    DfdFlowModel, DfdKind, DfdModel, DfdNodeModel, FindingsHeatmap, ModuleRisk, RiskByModule,
-    TaintFlowPath, TaintStageModel,
+    cached_risk_by_module, dfd_model, risk_by_module, selected_taint_flow_path, taint_flow_path,
+    AttackChain, AttackTree, DfdFlowModel, DfdKind, DfdModel, DfdNodeModel, FindingsHeatmap,
+    ModuleRisk, RiskByModule, TaintFlowPath, TaintStageModel,
 };
 pub(crate) use workbench::{
     active_review_queue_mode, active_workbench_page, workbench_export_command,

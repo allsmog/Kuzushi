@@ -23,7 +23,7 @@ pub(in crate::modules) fn wasm_plugin_module() -> BuiltinModule {
         "Run a capability-scoped Wasm analyzer against the indexed source snapshot.",
         vec![tool_with_options(
             TOOL_NAME,
-            "Run a Wasm analyzer and commit validated findings through the v3 writer.",
+            "Run a Wasm analyzer and commit host-checked findings through the v3 writer.",
             wasm_plugin_options(),
         )],
         vec![dag(TOOL_NAME, "findings", &["context:build"])],

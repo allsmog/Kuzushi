@@ -56,6 +56,7 @@ impl JobTicket {
         }
     }
 
+    #[cfg(test)]
     pub(crate) fn kind(&self) -> JobKind {
         self.kind
     }
@@ -64,6 +65,7 @@ impl JobTicket {
         self.generation
     }
 
+    #[cfg(test)]
     pub(crate) fn label(&self) -> &str {
         &self.label
     }

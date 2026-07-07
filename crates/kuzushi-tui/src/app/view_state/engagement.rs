@@ -213,6 +213,7 @@ impl EngagementState {
         self.pending_chain = Some(chain);
     }
 
+    #[cfg(test)]
     pub(crate) fn has_pending_chain(&self) -> bool {
         self.pending_chain.is_some()
     }
@@ -233,6 +234,7 @@ impl EngagementState {
         self.pending_prereq_prompt.as_ref()
     }
 
+    #[cfg(test)]
     pub(crate) fn set_pending_prereq_prompt(&mut self, prompt: PendingPrereqPrompt) {
         self.pending_prereq_prompt = Some(prompt);
     }
@@ -367,6 +369,7 @@ impl EngagementState {
         &self.confirm_allowlist
     }
 
+    #[cfg(test)]
     pub(crate) fn confirm_denylist(&self) -> &BTreeSet<String> {
         &self.confirm_denylist
     }

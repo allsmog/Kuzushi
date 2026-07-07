@@ -6,13 +6,12 @@ impl SastTaskSelection {
             native_tasks,
             run_agentic,
             run_carlini,
-            run_taint_iris,
             run_taint_iris_next,
             run_systems_hunt,
         ) = split_agentic_sast_tasks(tasks);
         let scanners = selected_native_scanners(
             &native_tasks,
-            run_agentic || run_carlini || run_taint_iris || run_taint_iris_next || run_systems_hunt,
+            run_agentic || run_carlini || run_taint_iris_next || run_systems_hunt,
         )?;
         let engine_ids = scanners
             .iter()
@@ -22,7 +21,6 @@ impl SastTaskSelection {
             scanners,
             run_agentic,
             run_carlini,
-            run_taint_iris,
             run_taint_iris_next,
             run_systems_hunt,
             engine_ids,
@@ -39,7 +37,6 @@ impl SastTaskSelection {
     pub(in crate::modules) fn has_agentic_task(&self) -> bool {
         self.run_agentic
             || self.run_carlini
-            || self.run_taint_iris
             || self.run_taint_iris_next
             || self.run_systems_hunt
     }
@@ -92,7 +89,6 @@ pub(in crate::modules) fn fill_agentic_reports(
     };
     fill_agentic_sast_report(reports, selected, &dispatch)?;
     fill_offense_review_report(reports, selected, &dispatch)?;
-    fill_taint_iris_report(reports, selected, &dispatch)?;
     fill_taint_iris_next_report(reports, selected, &dispatch)?;
     fill_systems_hunt_report(reports, selected, &dispatch)
 }
@@ -117,18 +113,6 @@ fn fill_offense_review_report(
     if selected.run_carlini {
         reports.engine_ids.push("offense-review");
         reports.carlini = Some(dispatch.report_from_data("offense-review:threat-hunt")?);
-    }
-    Ok(())
-}
-
-fn fill_taint_iris_report(
-    reports: &mut SastPipelineReports,
-    selected: &SastTaskSelection,
-    dispatch: &SastSubtoolDispatch<'_>,
-) -> Result<()> {
-    if selected.run_taint_iris {
-        reports.engine_ids.push("taint-iris");
-        reports.taint_iris = Some(dispatch.report_from_data("taint-iris:hunt")?);
     }
     Ok(())
 }

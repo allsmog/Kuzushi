@@ -1,7 +1,7 @@
 use crate::findings::{Finding, FindingEvidence, FindingStore, Severity};
 use crate::workspace::{load_program_scope, ProgramScope, WorkspaceTarget};
 use anyhow::{Context, Result};
-use quick_xml::events::Event;
+use quick_xml::events::{BytesText, Event};
 use quick_xml::reader::Reader;
 use std::path::Path;
 use uuid::Uuid;
@@ -101,7 +101,7 @@ fn parse_burp_items(xml: &str) -> Result<Vec<BurpItem>> {
             Ok(Event::Text(event)) => state
                 .current_field
                 .text
-                .push_str(&event.unescape().context("Burp XML text decode failed")?),
+                .push_str(&decoded_text(&event)?),
             Ok(Event::CData(event)) => state
                 .current_field
                 .text
@@ -116,6 +116,13 @@ fn parse_burp_items(xml: &str) -> Result<Vec<BurpItem>> {
         }
     }
     Ok(state.items)
+}
+
+fn decoded_text(event: &BytesText<'_>) -> Result<String> {
+    let decoded = event.decode().context("Burp XML text decode failed")?;
+    Ok(quick_xml::escape::unescape(decoded.as_ref())
+        .context("Burp XML text entity decode failed")?
+        .into_owned())
 }
 
 #[derive(Default)]

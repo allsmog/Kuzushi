@@ -86,7 +86,7 @@ fn next_step_bridge_request(
 ) -> NextStepBridgeRequest {
     let credential = runtime
         .credential_for_model(&request.model)
-        .expect("model credential was validated before building bridge request");
+        .expect("model credential was checked before building bridge request");
     NextStepBridgeRequest {
         protocol_version: LANGGRAPH_BRIDGE_PROTOCOL_VERSION,
         envelope_type: "next-step",

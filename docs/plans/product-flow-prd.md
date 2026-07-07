@@ -521,7 +521,7 @@ compose parts and control non-determinism. Keep the honest phase *derivation*
   on error. *Accept:* a role map + a weak↔best preset switch; cost per role
   accounted.
 - **[R22] Cost-per-confirmed surfaced; budget per-call.** *Accept:* the run shows
-  $/confirmed-finding; a codex-backend run (reports `cost_usd 0.0`) still halts at
+  $/confirmed-finding; a zero-cost backend run (reports `cost_usd 0.0`) still halts at
   the cap via a call-count/token fallback.
 - **[R23] No duplicate triage; prompt caching.** *Accept:* repeat runs over
   unchanged context show cache hits; large invariant context moves to the prompt
@@ -551,7 +551,7 @@ compose parts and control non-determinism. Keep the honest phase *derivation*
   and every empty state; the model picker offers an offline choice; typed
   `target` runs the same onboarding as the picker. *Accept:* no key + no network →
   a finding via `demo` in ~60s.
-- **[R30] Model↔runtime validated up front + export survives the reframe.**
+- **[R30] Model↔runtime checked up front + export survives the reframe.**
   Incompatible pairs rejected at pick time; `export-findings` reachable from
   Report with the format honored. *Accept:* `doctor`/picker fail-loud pre-spend;
   the markdown bundle is reachable via the friendly verb.

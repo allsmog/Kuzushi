@@ -1370,7 +1370,11 @@ mod tests {
 
         assert_eq!(error, KwpError::denied("mcp"));
         assert!(effects.mcp_sessions.lock().await.is_empty());
-        assert_eq!(effects.audit.lock().await[0].decision, AuditDecision::Deny);
+        let audit = effects.audit.lock().await;
+        assert!(
+            audit.is_empty(),
+            "denied MCP requests must not reach the host audit log"
+        );
     }
 
     #[tokio::test]

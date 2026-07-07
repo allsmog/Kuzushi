@@ -8,6 +8,7 @@ pub(crate) struct WorkerHandleRegistry {
 }
 
 impl WorkerHandleRegistry {
+    #[cfg(test)]
     pub(crate) fn register(
         &mut self,
         label: &'static str,

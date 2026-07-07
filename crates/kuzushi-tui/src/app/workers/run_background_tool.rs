@@ -44,7 +44,7 @@ fn background_agent_runtime(
     thinking_level: Option<String>,
     cancel: ScanCancellation,
 ) -> Result<Option<LangGraphRuntime>> {
-    if !tool_wants_runtime(tool_name, input, config) {
+    if !wants_background_runtime(config, tool_name, input) {
         return Ok(None);
     }
     Ok(Some(
@@ -52,6 +52,13 @@ fn background_agent_runtime(
             .with_thinking_level(thinking_level)
             .with_cancellation(cancel),
     ))
+}
+
+fn wants_background_runtime(config: &V2Config, tool_name: &str, input: &serde_json::Value) -> bool {
+    if tool_needs_runtime(tool_name, input) {
+        return true;
+    }
+    tool_wants_runtime(tool_name, input, config)
 }
 
 fn background_current_dir() -> PathBuf {

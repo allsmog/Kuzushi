@@ -108,10 +108,12 @@ pub(crate) struct FindingsHeatmap {
     pub selected_module: Option<String>,
 }
 
+#[cfg(test)]
 pub(crate) fn findings_heatmap(findings: &[Finding]) -> FindingsHeatmap {
     findings_heatmap_with_selection(findings, None)
 }
 
+#[cfg(test)]
 pub(crate) fn findings_heatmap_with_selection(
     findings: &[Finding],
     selected: Option<&Finding>,

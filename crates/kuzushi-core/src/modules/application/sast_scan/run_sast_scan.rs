@@ -267,7 +267,6 @@ fn sast_scan_data(parts: SastScanResultParts<'_>) -> Value {
         "engines": parts.reports.engine_ids.clone(),
         "agentic": parts.reports.agentic.as_ref().map(|report| json!(report)),
         "carliniThreatHunt": parts.reports.carlini.as_ref().map(|report| json!(report)),
-        "taintIris": parts.reports.taint_iris.as_ref().map(|report| json!(report)),
         "taintIrisNext": parts.reports.taint_iris_next.as_ref().map(|report| json!(report)),
         "systemsHunt": parts.reports.systems_hunt.as_ref().map(|report| json!(report)),
         "staticRanking": parts.whitebox_artifacts.static_ranking,
@@ -291,11 +290,6 @@ fn sast_cost_usd(reports: &SastPipelineReports, post_processing: &SastPostProces
         .unwrap_or(0.0)
         + reports
             .carlini
-            .as_ref()
-            .map(|report| report.cost_usd)
-            .unwrap_or(0.0)
-        + reports
-            .taint_iris
             .as_ref()
             .map(|report| report.cost_usd)
             .unwrap_or(0.0)
@@ -333,7 +327,6 @@ fn sast_run_ids_json(run_ids: SastRunIds) -> Value {
         "native": run_ids.native,
         "agentic": run_ids.agentic,
         "carlini": run_ids.carlini,
-        "taintIris": run_ids.taint_iris,
         "taintIrisNext": run_ids.taint_iris_next,
         "systemsHunt": run_ids.systems_hunt,
     })

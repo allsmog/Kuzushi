@@ -528,8 +528,6 @@ const workspaceStateRequiredHelpersByFile = {
       message: "CodeQL binary cache helper must derive from workspace_state_root",
     },
   ],
-  "crates/kuzushi-core/src/capabilities/taint_iris/application/prompts.rs":
-    codeqlDbResolverHelperRequirements("taint-iris CodeQL prompt resolver"),
   "crates/kuzushi-core/src/capabilities/taint_iris_next/application/codeql_build.rs": [
     {
       needle: "workspace_codeql_db_path(",

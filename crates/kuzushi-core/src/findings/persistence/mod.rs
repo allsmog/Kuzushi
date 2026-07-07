@@ -1,7 +1,7 @@
 use super::domain::*;
 use super::presentation::{FindingListFilter, FindingListReport};
 use anyhow::{Context, Result};
-use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
+use rusqlite::{params, Connection, OptionalExtension};
 use std::path::{Path, PathBuf};
 
 mod finding_store;

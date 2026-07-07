@@ -1,9 +1,7 @@
 use super::*;
 
 mod report;
-mod run_options;
 mod tool_contract;
 
-pub(crate) use report::*;
-pub(crate) use run_options::TaintIrisInput;
-pub(crate) use tool_contract::*;
+pub(crate) use report::TaintCweSelection;
+pub(crate) use tool_contract::TAINT_CWE_SELECT_SYSTEM_PROMPT;
