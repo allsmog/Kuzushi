@@ -87,11 +87,11 @@ pub(crate) fn risk_by_module(findings: &[Finding]) -> RiskByModule {
 
 pub(crate) fn cached_risk_by_module(app: &ShellApp) -> RiskByModule {
     let key = RiskByModuleCacheKey::from_findings(app.findings());
-    if let Some(cached) = app.workbench_cache.borrow().risk_by_module(&key) {
+    if let Some(cached) = app.workbench_cache().borrow().risk_by_module(&key) {
         return cached;
     }
     let risk = risk_by_module(app.findings());
-    app.workbench_cache
+    app.workbench_cache()
         .borrow_mut()
         .cache_risk_by_module(key, risk.clone());
     risk

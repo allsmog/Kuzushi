@@ -129,7 +129,7 @@ fn threat_model_root(app: &ShellApp) -> PathBuf {
 
 fn read_threat_model_artifact(app: &ShellApp) -> ThreatModelArtifact {
     let path = threat_model_artifact_path(&threat_model_root(app));
-    match app.workbench_cache.borrow_mut().json_file(&path) {
+    match app.workbench_cache().borrow_mut().json_file(&path) {
         JsonFileState::Present(value) if value.is_object() => ThreatModelArtifact::Present(value),
         JsonFileState::Present(_) | JsonFileState::Malformed | JsonFileState::Unreadable => {
             ThreatModelArtifact::Malformed

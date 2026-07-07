@@ -567,7 +567,9 @@ impl ShellApp {
     }
 
     fn open_next_phase_picker(&mut self) {
-        self.workbench_cache.borrow_mut().invalidate_map_artifacts();
+        self.workbench_cache()
+            .borrow_mut()
+            .invalidate_map_artifacts();
         let Some(journey) = crate::ui_view_models::journey_model(self) else {
             self.log(
                 "journey",
@@ -586,7 +588,9 @@ impl ShellApp {
             );
             return;
         }
-        self.workbench_cache.borrow_mut().invalidate_map_artifacts();
+        self.workbench_cache()
+            .borrow_mut()
+            .invalidate_map_artifacts();
         self.open_phase_picker(phase);
     }
 

@@ -128,7 +128,7 @@ pub fn journey_model(app: &ShellApp) -> Option<JourneyModel> {
     let review_index =
         EffectiveReviewStateIndex::from_findings_and_decisions(findings, app.review_decisions());
     let progress = journey_progress_from_parts(
-        app.workbench_cache
+        app.workbench_cache()
             .borrow_mut()
             .map_artifacts_built(Some(target)),
         findings,

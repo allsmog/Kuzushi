@@ -14,7 +14,9 @@ impl ShellApp {
     }
 
     pub(crate) fn finalize_guided_scan_open_effect(&mut self) {
-        self.workbench_cache.borrow_mut().invalidate_map_artifacts();
+        self.workbench_cache()
+            .borrow_mut()
+            .invalidate_map_artifacts();
         let Some(journey) = crate::ui_view_models::journey_model(self) else {
             self.log(
                 "journey",

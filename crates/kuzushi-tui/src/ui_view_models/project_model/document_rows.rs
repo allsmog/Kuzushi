@@ -11,7 +11,7 @@ pub(super) fn project_model_document_rows(app: &ShellApp) -> Option<Vec<ProjectM
         .map(|scope| scope.id.as_str())
         .unwrap_or(ROOT_SCOPE_ID);
     let revision = app
-        .workbench_cache
+        .workbench_cache()
         .borrow_mut()
         .git_metadata(Some(target.as_path()))
         .map(|git| git.sha);

@@ -194,7 +194,7 @@ impl ShellApp {
         previous_sha: &str,
         current_sha: &str,
     ) -> Vec<ShellEffect> {
-        *self.workbench_cache.borrow_mut() = WorkbenchCache::default();
+        *self.workbench_cache().borrow_mut() = WorkbenchCache::default();
         self.refresh_target_scope_after_revision_switch(target);
         self.log_target_revision_switch(previous_sha, current_sha);
         target_revision_refresh_effects()
@@ -278,7 +278,7 @@ impl ShellApp {
     ) -> Option<TargetCandidateScope> {
         let target = target?;
         let state = self
-            .workbench_cache
+            .workbench_cache()
             .borrow_mut()
             .project_scope_tree(Some(target))?;
         component_scope_from_state(&state, raw)
@@ -290,7 +290,7 @@ impl ShellApp {
     ) -> Option<kuzushi_core::NestedProjectScopeTree> {
         match kuzushi_core::discover_and_save_nested_project_scopes(root) {
             Ok(tree) => {
-                self.workbench_cache
+                self.workbench_cache()
                     .borrow_mut()
                     .cache_persisted_project_scope_tree(root, tree.clone());
                 let nested_count = tree.scopes.len().saturating_sub(1);

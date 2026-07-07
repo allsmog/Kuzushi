@@ -105,13 +105,7 @@ impl FindingStore {
         if decision.rationale.trim().is_empty() {
             anyhow::bail!("review decision reason cannot be empty");
         }
-        self.append_review_decision(
-            finding_id,
-            decision,
-            decision.verdict.to_triage_verdict(),
-            &now_isoish(),
-            false,
-        )
+        self.append_review_decision(finding_id, decision, false)
     }
 
     pub(in crate::findings::persistence::open) fn append_review_decision_from_triage(
@@ -119,34 +113,18 @@ impl FindingStore {
         finding_id: i64,
         triage: &TriageOutcome,
         author: TriageAuthor,
-        created_at: &str,
     ) -> Result<i64> {
         let decision = ReviewDecision::from_triage(triage, Some(author));
-        self.append_review_decision(finding_id, &decision, Some(triage.verdict), created_at, true)
+        self.append_review_decision(finding_id, &decision, true)
     }
 
     fn append_review_decision(
         &self,
         finding_id: i64,
         decision: &ReviewDecision,
-        triage_verdict: Option<TriageVerdict>,
-        created_at: &str,
         updates_finding_triage: bool,
     ) -> Result<i64> {
-        if self.v3_storage_paths().is_some() {
-            return self.append_review_decision_event(
-                finding_id,
-                decision,
-                updates_finding_triage,
-            );
-        }
-        self.append_review_decision_projection_direct(
-            finding_id,
-            decision,
-            triage_verdict,
-            created_at,
-            updates_finding_triage,
-        )
+        self.append_review_decision_event(finding_id, decision, updates_finding_triage)
     }
 
     fn append_review_decision_event(
@@ -184,83 +162,10 @@ impl FindingStore {
             .unwrap_or(receipt.committed_seq as i64))
     }
 
-    fn append_review_decision_projection_direct(
-        &self,
-        finding_id: i64,
-        decision: &ReviewDecision,
-        triage_verdict: Option<TriageVerdict>,
-        created_at: &str,
-        updates_finding_triage: bool,
-    ) -> Result<i64> {
-        let triage_verdict = triage_verdict.map(TriageVerdict::as_str);
-        self.conn.execute(
-            r#"
-            insert into review_decisions(
-              finding_id, identity_id, decision_verdict, triage_verdict, confidence,
-              rationale, author, created_at
-            )
-            values (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-            "#,
-            params![
-                finding_id,
-                self.identity_id_for_finding(finding_id)?,
-                decision.verdict.as_str(),
-                triage_verdict,
-                decision.confidence,
-                decision.rationale.as_str(),
-                decision.author.as_str(),
-                created_at,
-            ],
-        )?;
-        let decision_id = self.conn.last_insert_rowid();
-        if updates_finding_triage {
-            self.apply_triage_projection_direct(finding_id, decision, triage_verdict)?;
-        }
-        Ok(decision_id)
-    }
-
     fn identity_id_for_finding(&self, finding_id: i64) -> Result<Option<String>> {
         Ok(self
             .v3_finding_by_projected_id(finding_id)?
             .and_then(|finding| finding.identity_id))
-    }
-
-    fn apply_triage_projection_direct(
-        &self,
-        finding_id: i64,
-        decision: &ReviewDecision,
-        triage_verdict: Option<&str>,
-    ) -> Result<()> {
-        let Some(triage_verdict) = triage_verdict else {
-            return Ok(());
-        };
-        self.conn.execute(
-            r#"
-            update finding_observations
-               set finding_json = json_set(
-                     finding_json,
-                     '$.triage',
-                     json_object(
-                       'verdict', ?2,
-                       'confidence', ?3,
-                       'rationale', ?4,
-                       'cost_usd', 0.0
-                     ),
-                     '$.triaged_by',
-                     ?5
-                   )
-             where finding_json is not null
-               and json_extract(finding_json, '$.id') = ?1
-            "#,
-            params![
-                finding_id,
-                triage_verdict,
-                decision.confidence,
-                decision.rationale.as_str(),
-                decision.author.as_str(),
-            ],
-        )?;
-        Ok(())
     }
 }
 

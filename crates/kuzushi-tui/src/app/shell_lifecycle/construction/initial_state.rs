@@ -6,7 +6,6 @@ macro_rules! shell_app_initial_state {
             .set_selected_index($selected_model_index);
         Self {
             editor: EditorState::default(),
-            log: LogState::default(),
             shell_view: ShellView::Catalog,
             session: SessionState::new(
                 $config,
@@ -27,7 +26,6 @@ macro_rules! shell_app_initial_state {
                 },
                 crate::app::TaskDurationStore::load(($target).map(|target| target.root())),
             ),
-            workbench_cache: std::cell::RefCell::new(WorkbenchCache::default()),
             engagement: EngagementState::default(),
             router,
             ui: UiPrefs::new(

@@ -86,7 +86,7 @@ fn project_scope_label(app: &ShellApp) -> String {
 }
 
 fn project_revision_label(app: &ShellApp) -> String {
-    app.workbench_cache
+    app.workbench_cache()
         .borrow_mut()
         .git_metadata(app.target())
         .map(|git| {
@@ -107,7 +107,7 @@ fn scope_tree_row(app: &ShellApp) -> ProjectModelRow {
         };
     };
     match app
-        .workbench_cache
+        .workbench_cache()
         .borrow_mut()
         .project_scope_tree(app.target())
     {

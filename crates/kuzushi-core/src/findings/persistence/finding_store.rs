@@ -19,4 +19,5 @@ pub struct FindingStore {
     pub(crate) conn: Connection,
     pub(crate) db_path: Option<std::path::PathBuf>,
     pub(crate) event_log_dir: Option<std::path::PathBuf>,
+    pub(crate) _ephemeral_dir: Option<tempfile::TempDir>,
 }

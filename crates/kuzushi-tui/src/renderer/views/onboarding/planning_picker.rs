@@ -157,7 +157,7 @@ fn prior_state_banner(app: &ShellApp) -> Line<'static> {
     let last_activity = latest_cached_modified(app.engagement.planning_picker().tasks())
         .and_then(|then| format_relative_age(SystemTime::now(), then));
     let map_artifacts_built = app
-        .workbench_cache
+        .workbench_cache()
         .borrow_mut()
         .map_artifacts_built(app.target());
     match workspace_history(
