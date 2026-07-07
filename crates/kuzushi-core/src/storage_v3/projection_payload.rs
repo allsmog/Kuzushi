@@ -5,7 +5,6 @@ pub(super) fn stable_fp_from_payload(payload: &Value) -> Option<&str> {
     payload
         .get("stableFp")
         .or_else(|| payload.get("oldFp"))
-        .or_else(|| payload.get("stable_fp"))
         .and_then(Value::as_str)
 }
 

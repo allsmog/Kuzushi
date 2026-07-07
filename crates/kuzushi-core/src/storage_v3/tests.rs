@@ -10,15 +10,6 @@ fn projection_starts_at_zero_watermark() {
 }
 
 #[test]
-fn projection_watermark_updates_through_meta() {
-    let db = ProjectionDb::open_in_memory().unwrap();
-
-    db.set_applied_seq(42).unwrap();
-
-    assert_eq!(db.meta().unwrap().applied_seq, 42);
-}
-
-#[test]
 fn event_projection_commits_event_and_watermark_together() {
     let db = ProjectionDb::open_in_memory().unwrap();
     let tmp = tempfile::tempdir().unwrap();
@@ -188,12 +179,18 @@ fn stable_finding_reads_reject_stale_projection_when_required() {
 fn stable_finding_reads_wait_for_projection_watermark() {
     let tmp = tempfile::tempdir().unwrap();
     let db_path = tmp.path().join("index.sqlite3");
+    let log_dir = tmp.path().join("log");
     let reader = ProjectionDb::open(&db_path).unwrap();
     let writer_path = db_path.clone();
+    let writer_log_dir = log_dir.clone();
     let writer = std::thread::spawn(move || {
+        let log = EventLog::open(writer_log_dir).unwrap();
+        let first = append_snapshot_event(&log);
+        let second = append_file_event(&log);
         let writer = ProjectionDb::open(writer_path).unwrap();
         std::thread::sleep(std::time::Duration::from_millis(25));
-        writer.set_applied_seq(2).unwrap();
+        writer.apply_event(&first).unwrap();
+        writer.apply_event(&second).unwrap();
     });
 
     let read = reader

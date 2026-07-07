@@ -146,17 +146,7 @@ impl ProjectionDb {
         })
     }
 
-    pub fn set_applied_seq(&self, applied_seq: u64) -> Result<()> {
-        let tx = self
-            .conn
-            .unchecked_transaction()
-            .context("Could not open projection watermark transaction")?;
-        set_meta_u64(&tx, "applied_seq", applied_seq)?;
-        tx.commit()
-            .context("Could not commit projection watermark transaction")
-    }
-
-    pub fn apply_event(&self, event: &EventEnvelope) -> Result<ProjectionApplyReceipt> {
+    fn apply_event(&self, event: &EventEnvelope) -> Result<ProjectionApplyReceipt> {
         let tx = self
             .conn
             .unchecked_transaction()
