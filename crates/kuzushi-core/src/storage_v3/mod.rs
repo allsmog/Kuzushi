@@ -132,7 +132,8 @@ impl ProjectionDb {
         Ok(Self { conn })
     }
 
-    pub fn open_in_memory() -> Result<Self> {
+    #[cfg(test)]
+    fn open_in_memory() -> Result<Self> {
         let conn = Connection::open_in_memory().context("Could not open in-memory v3 projection")?;
         configure_projection_connection(&conn)?;
         create_projection_schema(&conn)?;
@@ -159,7 +160,7 @@ impl ProjectionDb {
         Ok(receipt)
     }
 
-    pub fn reset_for_rebuild(&self) -> Result<ProjectionMeta> {
+    fn reset_for_rebuild(&self) -> Result<ProjectionMeta> {
         let tx = self
             .conn
             .unchecked_transaction()
