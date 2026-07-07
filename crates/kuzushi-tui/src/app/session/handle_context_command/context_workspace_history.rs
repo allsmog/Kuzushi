@@ -34,7 +34,7 @@ impl ShellApp {
     }
 
     fn show_unsupported_workspace_command(&mut self, raw: &str) {
-        self.shell_view = ShellView::Workspace;
+        self.set_shell_view(ShellView::Workspace);
         self.log(
             "error",
             format!(
@@ -44,7 +44,7 @@ impl ShellApp {
     }
 
     pub(crate) fn show_history(&mut self) {
-        self.shell_view = ShellView::History;
+        self.set_shell_view(ShellView::History);
         self.router.history_mut().open();
         let count = self.command_history().len();
         self.log(
@@ -63,7 +63,7 @@ impl ShellApp {
         *self.selected_finding_mut() = None;
         self.clear_agent_chat();
         self.set_agent_cancel(None);
-        self.shell_view = ShellView::Catalog;
+        self.set_shell_view(ShellView::Catalog);
         self.log(
             "system",
             "Conversation cleared. Command history retained. Next: history or help",

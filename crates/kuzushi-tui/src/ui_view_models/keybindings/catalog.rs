@@ -2,7 +2,7 @@ use super::{bind, FooterKeybinding};
 use crate::{ShellApp, ShellView};
 
 pub(super) fn keybindings(app: &ShellApp) -> Option<Vec<FooterKeybinding>> {
-    match app.shell_view {
+    match app.shell_view() {
         ShellView::Home => Some(home_keybindings()),
         ShellView::Catalog if !app.router.catalog().is_expanded() => {
             Some(collapsed_catalog_keybindings())

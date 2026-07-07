@@ -50,7 +50,7 @@ fn idle_keybindings(app: &ShellApp) -> Vec<FooterKeybinding> {
         .or_else(|| workspace::keybindings(app))
         .or_else(|| system::keybindings(app))
         .unwrap_or_else(default_keybindings);
-    if matches!(app.shell_view, crate::ShellView::PlanningPicker) {
+    if matches!(app.shell_view(), crate::ShellView::PlanningPicker) {
         return bindings;
     }
     push_unique_binding(&mut bindings, bind("workbench", "command center"));

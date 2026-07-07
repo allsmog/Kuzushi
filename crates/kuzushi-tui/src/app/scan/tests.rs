@@ -57,7 +57,7 @@ mod tests {
 
         EffectRuntime::execute(&mut app, effects);
 
-        assert_eq!(app.shell_view, ShellView::PlanningPicker);
+        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
         assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
         assert!(app.target().is_some());
         assert!(app.scan_is_none());
@@ -82,7 +82,7 @@ mod tests {
 
         EffectRuntime::execute(&mut app, effects);
 
-        assert_eq!(app.shell_view, ShellView::PlanningPicker);
+        assert_eq!(app.shell_view(), ShellView::PlanningPicker);
         assert_eq!(app.engagement.current_phase(), Some(WorkflowPhase::Map));
         assert_eq!(app.target(), Some(workspace.root()));
         assert!(app.scan_is_none());
@@ -96,7 +96,7 @@ mod tests {
 
         assert!(effects.is_empty());
 
-        assert_eq!(app.shell_view, ShellView::Catalog);
+        assert_eq!(app.shell_view(), ShellView::Catalog);
         assert!(app.target().is_none());
         assert!(app.scan_is_none());
         assert!(app

@@ -2,7 +2,7 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn show_model_catalog(&mut self) {
-        self.shell_view = ShellView::Config;
+        self.set_shell_view(ShellView::Config);
         self.sync_selected_model_index();
         self.log_model_catalog_status();
         self.log_model_catalog_choices();
@@ -67,7 +67,7 @@ impl ShellApp {
         };
         self.config_mut().model = Some(choice.id.to_string());
         self.set_session_thinking_level(Some(choice.thinking_level.to_string()));
-        self.shell_view = ShellView::Config;
+        self.set_shell_view(ShellView::Config);
         self.log(
             "model",
             format!(

@@ -6,7 +6,7 @@ impl ShellApp {
     }
 
     pub(crate) fn reduce_command_message(&mut self, command: ShellCommand) -> CommandUpdate {
-        let previous_view = self.shell_view.clone();
+        let previous_view = self.shell_view().clone();
         let update = self.reduce_command_without_effect_execution(command);
         self.discard_stashed_input_after_view_change(&previous_view);
         update
@@ -76,7 +76,7 @@ impl ShellApp {
     }
 
     fn handle_prompt_editor_local_command(&mut self, trimmed: &str) -> Option<Vec<ShellEffect>> {
-        if !matches!(self.shell_view, ShellView::PromptsEditor)
+        if !matches!(self.shell_view(), ShellView::PromptsEditor)
             || trimmed.starts_with('/')
             || !self.is_bare_prompt_verb(trimmed)
         {
@@ -86,7 +86,7 @@ impl ShellApp {
     }
 
     fn handle_tune_local_command(&mut self, trimmed: &str) -> Option<Vec<ShellEffect>> {
-        if !matches!(self.shell_view, ShellView::Tune)
+        if !matches!(self.shell_view(), ShellView::Tune)
             || trimmed.starts_with('/')
             || !self.is_bare_tune_verb(trimmed)
         {
@@ -106,7 +106,7 @@ impl ShellApp {
     }
 
     fn discard_stashed_input_after_view_change(&mut self, previous_view: &ShellView) {
-        if &self.shell_view != previous_view {
+        if &self.shell_view() != previous_view {
             self.set_last_cleared_input(None);
         }
     }

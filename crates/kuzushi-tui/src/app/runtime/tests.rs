@@ -32,7 +32,7 @@ mod tests {
         assert_eq!(app.input(), "abcd");
 
         assert!(apply_terminal_event(&mut app, Event::Resize(120, 40)));
-        app.shell_view = ShellView::Workbench;
+        app.set_shell_view(ShellView::Workbench);
         app.router.workbench_mut().set_focus(WorkbenchPane::Details);
         assert!(apply_terminal_event(
             &mut app,
@@ -59,22 +59,22 @@ mod tests {
     #[test]
     fn launch_start_view_is_applied_through_command_update() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.shell_view = ShellView::Catalog;
+        app.set_shell_view(ShellView::Catalog);
 
         assert!(apply_launch_start_view(&mut app));
 
-        assert_eq!(app.shell_view, ShellView::Workbench);
+        assert_eq!(app.shell_view(), ShellView::Workbench);
         assert_eq!(app.router.workbench().focus(), WorkbenchPane::Findings);
     }
 
     #[test]
     fn launch_start_view_preserves_onboarding_picker_through_command_update() {
         let mut app = ShellApp::new(V2Config::default(), None);
-        app.shell_view = ShellView::ModelPicker;
+        app.set_shell_view(ShellView::ModelPicker);
 
         assert!(apply_launch_start_view(&mut app));
 
-        assert_eq!(app.shell_view, ShellView::ModelPicker);
+        assert_eq!(app.shell_view(), ShellView::ModelPicker);
     }
 
     #[test]
@@ -83,7 +83,7 @@ mod tests {
 
         assert!(apply_launch_target_picker(&mut app));
 
-        assert_eq!(app.shell_view, ShellView::TargetPicker);
+        assert_eq!(app.shell_view(), ShellView::TargetPicker);
         assert!(!app.router.target_picker().candidates().is_empty());
     }
 

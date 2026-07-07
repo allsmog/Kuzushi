@@ -11,7 +11,7 @@ impl ShellApp {
     /// The implicit options target when none is named: the open Options view,
     /// else the focused module's tool, else the SAST umbrella, else any tool.
     fn default_options_tool(&self) -> Result<String> {
-        if matches!(self.shell_view, ShellView::Options) {
+        if matches!(self.shell_view(), ShellView::Options) {
             let tool_name = &self.router.options().tool_name;
             if !tool_name.is_empty() {
                 return Ok(tool_name.clone());
@@ -55,7 +55,7 @@ impl ShellApp {
     }
 
     pub(crate) fn current_options_filter(&self) -> OptionsFilter {
-        if matches!(self.shell_view, ShellView::Options) {
+        if matches!(self.shell_view(), ShellView::Options) {
             self.router.options().filter
         } else {
             OptionsFilter::Standard

@@ -6,7 +6,6 @@ macro_rules! shell_app_initial_state {
             .set_selected_index($selected_model_index);
         Self {
             editor: EditorState::default(),
-            shell_view: ShellView::Catalog,
             session: SessionState::new(
                 $config,
                 $registry,

@@ -41,7 +41,7 @@ impl ShellApp {
         raw: &str,
     ) -> Option<InputUpdate> {
         if !raw.is_empty()
-            || !matches!(self.shell_view, ShellView::Catalog)
+            || !matches!(self.shell_view(), ShellView::Catalog)
             || !self.router.catalog().is_expanded()
         {
             return None;
@@ -105,7 +105,7 @@ impl ShellApp {
     }
 
     fn capture_auth_key_paste(&mut self, text: &str) -> bool {
-        if !matches!(self.shell_view, ShellView::AuthMethodPicker)
+        if !matches!(self.shell_view(), ShellView::AuthMethodPicker)
             || !self.router.auth_picker().is_api_key_row()
         {
             return false;
@@ -127,7 +127,7 @@ impl ShellApp {
     /// The wheel moves the FINDINGS cursor only when the Workbench has that
     /// pane focused and there are findings; everywhere else it scrolls lines.
     fn mouse_scrolls_findings(&self) -> bool {
-        matches!(self.shell_view, ShellView::Workbench)
+        matches!(self.shell_view(), ShellView::Workbench)
             && self.router.workbench().focus() == crate::app::WorkbenchPane::Findings
             && !self.findings().is_empty()
     }
@@ -182,7 +182,7 @@ impl ShellApp {
     }
 
     fn workbench_pane_for_mouse(&self, column: u16, row: u16) -> Option<crate::app::WorkbenchPane> {
-        if !matches!(self.shell_view, ShellView::Workbench) {
+        if !matches!(self.shell_view(), ShellView::Workbench) {
             return None;
         }
         let viewport = self.viewport();
@@ -190,7 +190,7 @@ impl ShellApp {
     }
 
     fn activity_pane_for_mouse(&self, column: u16, row: u16) -> Option<crate::app::PaneFocus> {
-        if !matches!(self.shell_view, ShellView::Activity) {
+        if !matches!(self.shell_view(), ShellView::Activity) {
             return None;
         }
         let session = self.activity()?;

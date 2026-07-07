@@ -3,7 +3,7 @@ use std::path::Path;
 
 impl ShellApp {
     pub fn show_quickstart(&mut self) {
-        self.shell_view = ShellView::Quickstart;
+        self.set_shell_view(ShellView::Quickstart);
         // Two log lines (not eight) for the operator-facing transcript.
         // The full guide is rendered in the Quickstart view, which gets the
         // full body area instead of the 2-row transcript strip.
@@ -18,7 +18,7 @@ impl ShellApp {
     /// 2-row transcript strip only shows the latest lines; this view paints
     /// the entire buffer and is scrollable via `j`/`k`/`g`/`G`/`PgUp`/`PgDn`.
     pub fn show_logs(&mut self) {
-        self.shell_view = ShellView::Logs;
+        self.set_shell_view(ShellView::Logs);
         self.router.logs_mut().set_scroll(usize::MAX); // start tailing
     }
 
@@ -117,9 +117,9 @@ impl ShellApp {
             );
         }
         if activation.source == TargetActivationSource::Picker
-            && self.shell_view == ShellView::TargetPicker
+            && self.shell_view() == ShellView::TargetPicker
         {
-            self.shell_view = ShellView::Workbench;
+            self.set_shell_view(ShellView::Workbench);
             self.router
                 .workbench_mut()
                 .set_focus(WorkbenchPane::Findings);
@@ -310,17 +310,17 @@ impl ShellApp {
     }
 
     pub(crate) fn show_story(&mut self) {
-        if matches!(self.shell_view, ShellView::Story) {
+        if matches!(self.shell_view(), ShellView::Story) {
             return;
         }
         self.router
             .navigation_mut()
-            .push_overlay_origin(self.shell_view.clone());
-        self.shell_view = ShellView::Story;
+            .push_overlay_origin(self.shell_view().clone());
+        self.set_shell_view(ShellView::Story);
     }
 
     pub fn toggle_story_overlay(&mut self) {
-        if matches!(self.shell_view, ShellView::Story) {
+        if matches!(self.shell_view(), ShellView::Story) {
             self.go_back();
         } else {
             self.show_story();

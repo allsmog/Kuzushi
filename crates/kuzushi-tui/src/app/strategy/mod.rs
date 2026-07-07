@@ -2,7 +2,7 @@ use super::*;
 
 impl ShellApp {
     pub(crate) fn open_strategy_queue(&mut self) {
-        self.shell_view = ShellView::StrategyQueue;
+        self.set_shell_view(ShellView::StrategyQueue);
         self.router.default_scroll_mut().reset();
     }
 

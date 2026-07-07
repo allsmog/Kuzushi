@@ -52,7 +52,7 @@ impl ShellApp {
         key: KeyEvent,
         modifiers: KeyModifierState,
     ) -> InputUpdate {
-        if !modifiers.plain || !matches!(self.shell_view, ShellView::Config) {
+        if !modifiers.plain || !matches!(self.shell_view(), ShellView::Config) {
             return InputUpdate::ignored();
         }
         match key.code {
@@ -76,7 +76,7 @@ impl ShellApp {
         key: KeyEvent,
         modifiers: KeyModifierState,
     ) -> bool {
-        if !modifiers.plain || !matches!(self.shell_view, ShellView::Scene) {
+        if !modifiers.plain || !matches!(self.shell_view(), ShellView::Scene) {
             return false;
         }
         // Gallery hotkeys yield to the prompt the moment the operator starts

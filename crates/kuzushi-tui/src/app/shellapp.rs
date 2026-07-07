@@ -3,7 +3,6 @@ use super::*;
 #[derive(Debug)]
 pub struct ShellApp {
     pub(crate) editor: EditorState,
-    pub shell_view: ShellView,
     pub(crate) session: SessionState,
     pub(crate) domain: DomainCache,
     /// Engagement-scoped planning runtime state: current phase, queued steps,
@@ -19,6 +18,18 @@ pub struct ShellApp {
 }
 
 impl ShellApp {
+    pub(crate) fn shell_view(&self) -> ShellView {
+        self.router.current()
+    }
+
+    pub(crate) fn shell_view_ref(&self) -> &ShellView {
+        self.router.current_ref()
+    }
+
+    pub(crate) fn set_shell_view(&mut self, view: ShellView) {
+        self.router.set_current(view);
+    }
+
     pub(crate) fn editor(&self) -> &EditorState {
         &self.editor
     }
@@ -164,49 +175,49 @@ impl ShellApp {
     #[doc(hidden)]
     pub fn open_options_for_test(&mut self, options: OptionsView) {
         self.router.set_options(options);
-        self.shell_view = ShellView::Options;
+        self.set_shell_view(ShellView::Options);
     }
 
     #[doc(hidden)]
     pub fn open_auth_method_picker_for_test(&mut self, provider: impl Into<String>) {
         self.router.auth_picker_mut().open(provider.into());
-        self.shell_view = ShellView::AuthMethodPicker;
+        self.set_shell_view(ShellView::AuthMethodPicker);
     }
 
     #[doc(hidden)]
     pub fn open_threat_view_for_test(&mut self, view: ThreatView) {
         self.router.threat_mut().open(view);
-        self.shell_view = ShellView::Threat;
+        self.set_shell_view(ShellView::Threat);
     }
 
     #[doc(hidden)]
     pub fn open_patch_for_test(&mut self, alias: impl Into<String>) {
         self.router.patch_mut().open(alias);
-        self.shell_view = ShellView::Patch;
+        self.set_shell_view(ShellView::Patch);
     }
 
     #[doc(hidden)]
     pub fn open_run_diff_for_test(&mut self, left: impl Into<String>, right: impl Into<String>) {
         self.router.run_diff_mut().open(left, right);
-        self.shell_view = ShellView::RunDiff;
+        self.set_shell_view(ShellView::RunDiff);
     }
 
     #[doc(hidden)]
     pub fn open_replay_for_test(&mut self, run_id: impl Into<String>) {
         self.router.replay_mut().open(run_id);
-        self.shell_view = ShellView::Replay;
+        self.set_shell_view(ShellView::Replay);
     }
 
     #[doc(hidden)]
     pub fn open_trace_for_test(&mut self, run_id: impl Into<String>) {
         self.router.trace_mut().open(run_id);
-        self.shell_view = ShellView::Trace;
+        self.set_shell_view(ShellView::Trace);
     }
 
     #[doc(hidden)]
     pub fn open_interruption_for_test(&mut self, view: InterruptionView) {
         self.router.interruption_mut().open(view);
-        self.shell_view = ShellView::Interruption;
+        self.set_shell_view(ShellView::Interruption);
     }
 
     #[doc(hidden)]

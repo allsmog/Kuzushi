@@ -52,20 +52,20 @@ pub(crate) fn routing_mode_segment(app: &ShellApp) -> String {
 }
 
 pub(crate) fn uses_activity_frame(app: &ShellApp) -> bool {
-    matches!(app.shell_view, ShellView::Activity)
+    matches!(app.shell_view(), ShellView::Activity)
 }
 
 /// The Workbench command center owns the full body region with a frame-level
 /// multi-pane split (SOURCE / CENTER / FINDINGS+DETAILS), like Activity and the
 /// scene gallery. The shared line path is used only for plain/non-TTY output.
 pub(crate) fn uses_workbench_frame(app: &ShellApp) -> bool {
-    matches!(app.shell_view, ShellView::Workbench)
+    matches!(app.shell_view(), ShellView::Workbench)
 }
 
 /// Frame-level gallery pages (3D terrain + the Canvas graph/tree diagrams) own
 /// the full body region. Attack-path and heatmap use the shared line path.
 pub(crate) fn uses_scene_frame(app: &ShellApp) -> bool {
-    matches!(app.shell_view, ShellView::Scene) && app.router.scene().page().is_frame_rendered()
+    matches!(app.shell_view(), ShellView::Scene) && app.router.scene().page().is_frame_rendered()
 }
 
 pub(crate) fn plain_render_mode(app: &ShellApp) -> PlainRenderMode<'_> {
@@ -79,7 +79,7 @@ pub(crate) fn plain_render_mode(app: &ShellApp) -> PlainRenderMode<'_> {
         return PlainRenderMode::InteractiveOnly(model);
     }
 
-    match &app.shell_view {
+    match &app.shell_view() {
         ShellView::Options => PlainRenderMode::Options(app.router.options()),
         ShellView::SastTasks => PlainRenderMode::SastTasks,
         ShellView::Context => PlainRenderMode::Context,
@@ -99,7 +99,7 @@ pub(crate) fn plain_render_mode(app: &ShellApp) -> PlainRenderMode<'_> {
 }
 
 fn interactive_only_plain_model(app: &ShellApp) -> Option<PlainInteractiveOnlyModel> {
-    match &app.shell_view {
+    match &app.shell_view() {
         ShellView::ModelPicker => Some(PlainInteractiveOnlyModel {
             title: "MODEL PICKER",
             next: "This picker needs an interactive terminal. Use `model <id>` or `config` in plain mode.".to_string(),
@@ -149,7 +149,7 @@ pub(crate) fn has_run_activity(app: &ShellApp) -> bool {
 }
 
 fn has_agent_activity(app: &ShellApp) -> bool {
-    matches!(app.shell_view, ShellView::AgentChat)
+    matches!(app.shell_view(), ShellView::AgentChat)
         || app.agent_chat().is_some_and(|agent| agent.running)
 }
 
