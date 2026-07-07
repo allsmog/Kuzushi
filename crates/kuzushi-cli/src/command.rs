@@ -78,6 +78,11 @@ pub(crate) enum Command {
         /// Filter by lifecycle status, e.g. candidate, seen, runtime_verified, verified_static.
         #[arg(long, value_delimiter = ',')]
         status: Vec<String>,
+        /// Filter by triage-lifecycle state: open, reviewing, confirmed, to_fix,
+        /// dismissed, fixed, removed (or legacy untriaged/triaged).
+        /// Comma- or repeat-separated.
+        #[arg(long, value_delimiter = ',')]
+        state: Vec<String>,
         /// Filter by finding alias or rule name.
         #[arg(long)]
         name: Option<String>,

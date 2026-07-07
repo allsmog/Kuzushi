@@ -121,6 +121,14 @@ impl FindingListFilter {
         })
     }
 
+    /// Adds triage-lifecycle state constraints from raw CLI/tool strings
+    /// (e.g. `dismissed`, `fixed`, `open`). Compiles into the same
+    /// `triage_state` filter used by the `state:` expression and tool option.
+    pub fn with_triage_states(mut self, states: Vec<String>) -> Result<Self> {
+        self.triage_state.extend(parsed_triage_states(states)?);
+        Ok(self)
+    }
+
     pub fn from_filter_expression(expression: &str) -> Result<Self> {
         let mut filter = Self::default();
         filter.apply_filter_expression(expression)?;
